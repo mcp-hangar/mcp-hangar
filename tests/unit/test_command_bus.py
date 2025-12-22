@@ -55,9 +55,7 @@ class TestCommands:
 
     def test_invoke_tool_command_default_timeout(self):
         """Test InvokeToolCommand default timeout."""
-        cmd = InvokeToolCommand(
-            provider_id="test-provider", tool_name="add", arguments={}
-        )
+        cmd = InvokeToolCommand(provider_id="test-provider", tool_name="add", arguments={})
 
         assert cmd.timeout == 30.0
 

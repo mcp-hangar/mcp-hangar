@@ -127,10 +127,7 @@ class Sanitizer:
         Returns:
             List of sanitized arguments
         """
-        return [
-            self.sanitize_command_argument(arg, allow_spaces=allow_spaces)
-            for arg in command
-        ]
+        return [self.sanitize_command_argument(arg, allow_spaces=allow_spaces) for arg in command]
 
     def sanitize_environment_value(
         self,
@@ -306,10 +303,7 @@ class Sanitizer:
             result = re.sub(r"[\x00-\x08\x0b\x0c\x0e-\x1f\x7f-\x9f]", "", result)
             return result
         elif isinstance(value, dict):
-            return {
-                self.sanitize_for_json(k): self.sanitize_for_json(v)
-                for k, v in value.items()
-            }
+            return {self.sanitize_for_json(k): self.sanitize_for_json(v) for k, v in value.items()}
         elif isinstance(value, list):
             return [self.sanitize_for_json(item) for item in value]
         elif isinstance(value, (int, float, bool, type(None))):
@@ -368,9 +362,7 @@ def sanitize_command_argument(
     allow_quotes: bool = False,
 ) -> str:
     """Sanitize a command argument using default sanitizer."""
-    return _default_sanitizer.sanitize_command_argument(
-        argument, allow_spaces, allow_quotes
-    )
+    return _default_sanitizer.sanitize_command_argument(argument, allow_spaces, allow_quotes)
 
 
 def sanitize_environment_value(

@@ -9,9 +9,7 @@ import time
 import pytest
 
 # Skip all tests in this file for now - FastMCP requires different stdio handling
-pytestmark = pytest.mark.skip(
-    reason="FastMCP registry server requires async/await handling - TBD"
-)
+pytestmark = pytest.mark.skip(reason="FastMCP registry server requires async/await handling - TBD")
 
 
 class MCPClient:
@@ -125,9 +123,7 @@ def test_registry_initialize(registry_server):
 def test_registry_list_providers(registry_server):
     """Test registry_list tool."""
     # Initialize first
-    registry_server.call(
-        "initialize", {"client": "test", "protocol_version": "2024-11-05"}
-    )
+    registry_server.call("initialize", {"client": "test", "protocol_version": "2024-11-05"})
 
     # Get tool list to verify registry_list exists
     tools_resp = registry_server.call("tools/list", {})
@@ -152,9 +148,7 @@ def test_registry_list_providers(registry_server):
 def test_registry_start_provider(registry_server):
     """Test registry_start tool."""
     # Initialize
-    registry_server.call(
-        "initialize", {"client": "test", "protocol_version": "2024-11-05"}
-    )
+    registry_server.call("initialize", {"client": "test", "protocol_version": "2024-11-05"})
 
     # Start provider
     response = registry_server.call(
@@ -174,9 +168,7 @@ def test_registry_start_provider(registry_server):
 def test_registry_tools_discovery(registry_server):
     """Test registry_tools tool."""
     # Initialize
-    registry_server.call(
-        "initialize", {"client": "test", "protocol_version": "2024-11-05"}
-    )
+    registry_server.call("initialize", {"client": "test", "protocol_version": "2024-11-05"})
 
     # Get tools from provider
     response = registry_server.call(
@@ -203,9 +195,7 @@ def test_registry_tools_discovery(registry_server):
 def test_registry_invoke_tool(registry_server):
     """Test registry_invoke tool."""
     # Initialize
-    registry_server.call(
-        "initialize", {"client": "test", "protocol_version": "2024-11-05"}
-    )
+    registry_server.call("initialize", {"client": "test", "protocol_version": "2024-11-05"})
 
     # Invoke tool on provider
     response = registry_server.call(
@@ -229,9 +219,7 @@ def test_registry_invoke_tool(registry_server):
 def test_registry_stop_provider(registry_server):
     """Test registry_stop tool."""
     # Initialize
-    registry_server.call(
-        "initialize", {"client": "test", "protocol_version": "2024-11-05"}
-    )
+    registry_server.call("initialize", {"client": "test", "protocol_version": "2024-11-05"})
 
     # Start provider first
     registry_server.call(
@@ -264,14 +252,10 @@ def test_registry_stop_provider(registry_server):
 def test_registry_full_workflow(registry_server):
     """Test complete workflow: list → start → invoke → stop."""
     # Initialize
-    registry_server.call(
-        "initialize", {"client": "test", "protocol_version": "2024-11-05"}
-    )
+    registry_server.call("initialize", {"client": "test", "protocol_version": "2024-11-05"})
 
     # 1. List providers
-    list_resp = registry_server.call(
-        "tools/call", {"name": "registry_list", "arguments": {}}
-    )
+    list_resp = registry_server.call("tools/call", {"name": "registry_list", "arguments": {}})
     assert "result" in list_resp
 
     # 2. Start provider
@@ -309,9 +293,7 @@ def test_registry_full_workflow(registry_server):
 def test_registry_unknown_provider_error(registry_server):
     """Test error handling for unknown provider."""
     # Initialize
-    registry_server.call(
-        "initialize", {"client": "test", "protocol_version": "2024-11-05"}
-    )
+    registry_server.call("initialize", {"client": "test", "protocol_version": "2024-11-05"})
 
     # Try to start unknown provider
     response = registry_server.call(
@@ -321,17 +303,13 @@ def test_registry_unknown_provider_error(registry_server):
     )
 
     # Should return an error
-    assert "error" in response or (
-        "result" in response and "error" in str(response["result"])
-    )
+    assert "error" in response or ("result" in response and "error" in str(response["result"]))
 
 
 def test_registry_concurrent_invocations(registry_server):
     """Test concurrent invocations through registry."""
     # Initialize
-    registry_server.call(
-        "initialize", {"client": "test", "protocol_version": "2024-11-05"}
-    )
+    registry_server.call("initialize", {"client": "test", "protocol_version": "2024-11-05"})
 
     # Start provider
     registry_server.call(

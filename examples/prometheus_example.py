@@ -7,7 +7,7 @@ import sys
 
 sys.path.insert(0, str(Path(__file__).parent.parent))
 
-from mcp_hangar.domain.model import Provider
+from mcp_hangar.domain.model import Provider  # noqa: E402
 
 logging.basicConfig(level=logging.INFO, format="%(levelname)s: %(message)s")
 
@@ -27,9 +27,7 @@ def main():
         "provider_id": "prometheus",
         "mode": "container",
         "image": "ghcr.io/pab1it0/prometheus-mcp-server:latest",
-        "env": {
-            "PROMETHEUS_URL": "http://localhost:9090"  # Change to your Prometheus URL
-        },
+        "env": {"PROMETHEUS_URL": "http://localhost:9090"},  # Change to your Prometheus URL
         "network": "bridge",  # Needs network to connect to Prometheus
         "resources": {"memory": "256m", "cpu": "0.5"},
         "idle_ttl_s": 600,

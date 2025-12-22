@@ -20,18 +20,14 @@ def repository():
 @pytest.fixture
 def mock_provider():
     """Create a mock provider manager."""
-    spec = ProviderSpec(
-        provider_id="test-provider", mode="subprocess", command=["echo", "test"]
-    )
+    spec = ProviderSpec(provider_id="test-provider", mode="subprocess", command=["echo", "test"])
     return Mock(spec=spec)
 
 
 @pytest.fixture
 def mock_provider_2():
     """Create a second mock provider manager."""
-    spec = ProviderSpec(
-        provider_id="test-provider-2", mode="subprocess", command=["echo", "test2"]
-    )
+    spec = ProviderSpec(provider_id="test-provider-2", mode="subprocess", command=["echo", "test2"])
     return Mock(spec=spec)
 
 

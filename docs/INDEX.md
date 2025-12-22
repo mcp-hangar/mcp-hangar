@@ -20,6 +20,7 @@ New to MCP Hangar? Follow these steps:
 
 - [Docker Support](DOCKER_SUPPORT.md) - Container configuration, security, and runtime options
 - [Pre-built Images](PREBUILT_IMAGES.md) - Using existing Docker/Podman images without Dockerfiles
+- [Provider Groups](PROVIDER_GROUPS.md) - Load balancing and high availability with provider groups
 - [Testing Guide](guides/TESTING.md) - Development testing, CI/CD, and troubleshooting
 
 ## API

@@ -76,9 +76,7 @@ class TestLogAlertSink:
             details={},
         )
 
-        with patch(
-            "mcp_hangar.application.event_handlers.alert_handler.logger"
-        ) as mock_logger:
+        with patch("mcp_hangar.application.event_handlers.alert_handler.logger") as mock_logger:
             sink.send(alert)
             mock_logger.critical.assert_called()
 
@@ -94,9 +92,7 @@ class TestLogAlertSink:
             details={},
         )
 
-        with patch(
-            "mcp_hangar.application.event_handlers.alert_handler.logger"
-        ) as mock_logger:
+        with patch("mcp_hangar.application.event_handlers.alert_handler.logger") as mock_logger:
             sink.send(alert)
             mock_logger.warning.assert_called()
 
@@ -112,9 +108,7 @@ class TestLogAlertSink:
             details={},
         )
 
-        with patch(
-            "mcp_hangar.application.event_handlers.alert_handler.logger"
-        ) as mock_logger:
+        with patch("mcp_hangar.application.event_handlers.alert_handler.logger") as mock_logger:
             sink.send(alert)
             mock_logger.info.assert_called()
 

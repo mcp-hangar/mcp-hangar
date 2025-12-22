@@ -107,12 +107,8 @@ class TestInMemoryAuditStore:
         """Test querying all records."""
         store = InMemoryAuditStore()
 
-        record1 = AuditRecord(
-            "evt-1", "ProviderStarted", datetime.now(timezone.utc), "p1", {}
-        )
-        record2 = AuditRecord(
-            "evt-2", "ProviderStopped", datetime.now(timezone.utc), "p1", {}
-        )
+        record1 = AuditRecord("evt-1", "ProviderStarted", datetime.now(timezone.utc), "p1", {})
+        record2 = AuditRecord("evt-2", "ProviderStopped", datetime.now(timezone.utc), "p1", {})
 
         store.record(record1)
         store.record(record2)
@@ -126,15 +122,9 @@ class TestInMemoryAuditStore:
         """Test querying records by provider ID."""
         store = InMemoryAuditStore()
 
-        store.record(
-            AuditRecord("e1", "ProviderStarted", datetime.now(timezone.utc), "p1", {})
-        )
-        store.record(
-            AuditRecord("e2", "ProviderStarted", datetime.now(timezone.utc), "p2", {})
-        )
-        store.record(
-            AuditRecord("e3", "ProviderStopped", datetime.now(timezone.utc), "p1", {})
-        )
+        store.record(AuditRecord("e1", "ProviderStarted", datetime.now(timezone.utc), "p1", {}))
+        store.record(AuditRecord("e2", "ProviderStarted", datetime.now(timezone.utc), "p2", {}))
+        store.record(AuditRecord("e3", "ProviderStopped", datetime.now(timezone.utc), "p1", {}))
 
         p1_records = store.query(provider_id="p1")
         p2_records = store.query(provider_id="p2")
@@ -146,15 +136,9 @@ class TestInMemoryAuditStore:
         """Test querying records by event type."""
         store = InMemoryAuditStore()
 
-        store.record(
-            AuditRecord("e1", "ProviderStarted", datetime.now(timezone.utc), "p1", {})
-        )
-        store.record(
-            AuditRecord("e2", "ProviderStarted", datetime.now(timezone.utc), "p2", {})
-        )
-        store.record(
-            AuditRecord("e3", "ProviderStopped", datetime.now(timezone.utc), "p1", {})
-        )
+        store.record(AuditRecord("e1", "ProviderStarted", datetime.now(timezone.utc), "p1", {}))
+        store.record(AuditRecord("e2", "ProviderStarted", datetime.now(timezone.utc), "p2", {}))
+        store.record(AuditRecord("e3", "ProviderStopped", datetime.now(timezone.utc), "p1", {}))
 
         started_records = store.query(event_type="ProviderStarted")
         stopped_records = store.query(event_type="ProviderStopped")
@@ -167,9 +151,7 @@ class TestInMemoryAuditStore:
         store = InMemoryAuditStore()
 
         for i in range(10):
-            store.record(
-                AuditRecord(f"e{i}", "Event", datetime.now(timezone.utc), "p1", {})
-            )
+            store.record(AuditRecord(f"e{i}", "Event", datetime.now(timezone.utc), "p1", {}))
 
         records = store.query(limit=5)
 
@@ -191,9 +173,7 @@ class TestInMemoryAuditStore:
         store = InMemoryAuditStore(max_records=3)
 
         for i in range(5):
-            store.record(
-                AuditRecord(f"e{i}", "Event", datetime.now(timezone.utc), "p1", {})
-            )
+            store.record(AuditRecord(f"e{i}", "Event", datetime.now(timezone.utc), "p1", {}))
 
         # Should only keep last 3 records
         assert store.count == 3
@@ -299,9 +279,7 @@ class TestAuditEventHandler:
         store = InMemoryAuditStore()
         handler = AuditEventHandler(store=store)
 
-        event = ProviderStateChanged(
-            provider_id="test", old_state="cold", new_state="ready"
-        )
+        event = ProviderStateChanged(provider_id="test", old_state="cold", new_state="ready")
 
         handler.handle(event)
 
@@ -500,9 +478,7 @@ class TestAuditEventHandler:
     def test_exclude_event_types_filter(self):
         """Test filtering by excluded event types."""
         store = InMemoryAuditStore()
-        handler = AuditEventHandler(
-            store=store, exclude_event_types=["HealthCheckPassed"]
-        )
+        handler = AuditEventHandler(store=store, exclude_event_types=["HealthCheckPassed"])
 
         handler.handle(ProviderStarted("p1", "subprocess", 1, 100.0))
         handler.handle(HealthCheckPassed("p1", 50.0))  # Should be excluded

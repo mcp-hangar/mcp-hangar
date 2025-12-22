@@ -10,10 +10,7 @@ from mcp_hangar.domain.events import (
     ToolInvocationCompleted,
     ToolInvocationFailed,
 )
-from mcp_hangar.domain.model.event_sourced_provider import (
-    EventSourcedProvider,
-    ProviderSnapshot,
-)
+from mcp_hangar.domain.model.event_sourced_provider import EventSourcedProvider, ProviderSnapshot
 from mcp_hangar.domain.model.provider import ProviderState
 
 

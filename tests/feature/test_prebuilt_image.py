@@ -20,7 +20,7 @@ import pytest
 # Add registry to path
 sys.path.insert(0, str(Path(__file__).parent))
 
-from mcp_hangar.domain.model import Provider
+from mcp_hangar.domain.model import Provider  # noqa: E402
 
 logging.basicConfig(level=logging.INFO, format="%(levelname)s: %(message)s")
 logger = logging.getLogger(__name__)
@@ -114,9 +114,7 @@ def test_prebuilt_image() -> None:
                     content = result.get("content", [{}])[0]
                     if "text" in content:
                         text = content["text"]
-                        print(
-                            f"   Result: {text[:200]}{'...' if len(text) > 200 else ''}"
-                        )
+                        print(f"   Result: {text[:200]}{'...' if len(text) > 200 else ''}")
             except Exception as e:
                 # Tool invocation may fail but provider started successfully
                 print(f"   ⚠️  Tool invocation failed: {e}")

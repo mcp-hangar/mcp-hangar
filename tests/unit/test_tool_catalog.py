@@ -199,9 +199,7 @@ class TestToolCatalog:
         schema = ToolSchema(name="old", description="Old", input_schema={})
         catalog = ToolCatalog({"old": schema})
 
-        catalog.update_from_list(
-            [{"name": "new", "description": "New", "inputSchema": {}}]
-        )
+        catalog.update_from_list([{"name": "new", "description": "New", "inputSchema": {}}])
 
         assert catalog.has("old") is False
         assert catalog.has("new") is True

@@ -27,4 +27,3 @@ ENV MEMORY_FILE_PATH=/app/data/memory.jsonl
 # when volume is mounted from host (works with both rootless podman and docker)
 
 ENTRYPOINT ["mcp-server-memory"]
-

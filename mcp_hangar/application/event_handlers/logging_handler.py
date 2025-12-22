@@ -43,9 +43,7 @@ class LoggingEventHandler:
             event: The domain event to log
         """
         # Different events get different log levels
-        if isinstance(
-            event, (ProviderDegraded, ToolInvocationFailed, HealthCheckFailed)
-        ):
+        if isinstance(event, (ProviderDegraded, ToolInvocationFailed, HealthCheckFailed)):
             level = logging.WARNING
         elif isinstance(event, (ProviderStarted, ProviderStopped)):
             level = logging.INFO

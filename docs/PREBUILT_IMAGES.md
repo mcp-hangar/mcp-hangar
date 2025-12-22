@@ -61,23 +61,23 @@ providers:
   my_provider:
     mode: container
     image: ghcr.io/org/mcp-server:latest
-    
+
     env:
       API_KEY: "${API_KEY}"
       DATABASE_URL: "postgresql://localhost/db"
-    
+
     volumes:
       - "./data:/app/data:rw"
       - "${HOME}/.config:/config:ro"
-    
+
     resources:
       memory: 512m
       cpu: "1.0"
-    
+
     network: bridge  # none, bridge, host
     read_only: false
     user: "current"
-    
+
     idle_ttl_s: 600
     health_check_interval_s: 60
     max_consecutive_failures: 3

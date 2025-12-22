@@ -69,9 +69,7 @@ class ProviderNotFoundError(ProviderError):
 class ProviderStartError(ProviderError):
     """Raised when a provider fails to start."""
 
-    def __init__(
-        self, provider_id: str, reason: str, details: Optional[Dict[str, Any]] = None
-    ):
+    def __init__(self, provider_id: str, reason: str, details: Optional[Dict[str, Any]] = None):
         super().__init__(
             message=f"Failed to start provider: {reason}",
             provider_id=provider_id,
@@ -169,9 +167,7 @@ class ToolNotFoundError(ToolError):
 class ToolInvocationError(ToolError):
     """Raised when a tool invocation fails."""
 
-    def __init__(
-        self, provider_id: str, message: str, details: Optional[Dict[str, Any]] = None
-    ):
+    def __init__(self, provider_id: str, message: str, details: Optional[Dict[str, Any]] = None):
         super().__init__(
             message=message,
             provider_id=provider_id,
@@ -224,9 +220,7 @@ class ClientNotConnectedError(ClientError):
 class ClientTimeoutError(ClientError):
     """Raised when a client operation times out."""
 
-    def __init__(
-        self, provider_id: str = "", timeout: float = 0, operation: str = "call"
-    ):
+    def __init__(self, provider_id: str = "", timeout: float = 0, operation: str = "call"):
         super().__init__(
             message=f"Client operation timed out after {timeout}s",
             provider_id=provider_id,
@@ -267,9 +261,7 @@ class ConfigurationError(MCPError):
     """Raised when configuration is invalid."""
 
     def __init__(self, message: str, details: Optional[Dict[str, Any]] = None):
-        super().__init__(
-            message=message, operation="configuration", details=details or {}
-        )
+        super().__init__(message=message, operation="configuration", details=details or {})
 
 
 # --- Rate Limiting Exceptions ---

@@ -1,12 +1,6 @@
 """Event handlers for reacting to domain events."""
 
-from .alert_handler import (
-    Alert,
-    AlertEventHandler,
-    AlertSink,
-    CallbackAlertSink,
-    LogAlertSink,
-)
+from .alert_handler import Alert, AlertEventHandler, AlertSink, CallbackAlertSink, LogAlertSink
 from .audit_handler import (
     AuditEventHandler,
     AuditRecord,

@@ -13,4 +13,3 @@ RUN useradd -m -u 1000 mcp
 USER mcp
 
 ENTRYPOINT ["python", "/app/mock_provider.py"]
-

@@ -6,9 +6,7 @@ from mcp_hangar.models import ProviderSpec, ProviderState
 from mcp_hangar.provider_manager import ProviderManager
 
 # Skip all tests in this file for now - FastMCP requires different stdio handling
-pytestmark = pytest.mark.skip(
-    reason="FastMCP provider requires async/await handling - TBD"
-)
+pytestmark = pytest.mark.skip(reason="FastMCP provider requires async/await handling - TBD")
 
 
 def test_real_provider_lifecycle():
@@ -270,9 +268,7 @@ def test_real_provider_mixed_operations():
     result1 = mgr.invoke_tool("add", {"a": 10, "b": 5}, timeout=10.0)
     assert result1["result"] == 15
 
-    result2 = mgr.invoke_tool(
-        "multiply", {"a": result1["result"], "b": 3}, timeout=10.0
-    )
+    result2 = mgr.invoke_tool("multiply", {"a": result1["result"], "b": 3}, timeout=10.0)
     assert result2["result"] == 45
 
     result3 = mgr.invoke_tool("power", {"base": 5, "exponent": 2}, timeout=10.0)

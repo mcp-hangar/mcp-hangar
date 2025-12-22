@@ -72,9 +72,7 @@ def create_fastmcp_server():
         return _registry_stop(provider=provider)
 
     @mcp.tool()
-    def registry_invoke(
-        provider: str, tool: str, arguments: dict, timeout: float = 30.0
-    ) -> dict:
+    def registry_invoke(provider: str, tool: str, arguments: dict, timeout: float = 30.0) -> dict:
         """Invoke a tool on a provider.
 
         Args:
@@ -85,9 +83,7 @@ def create_fastmcp_server():
         """
         if _registry_invoke is None:
             return {"error": "Registry not initialized"}
-        return _registry_invoke(
-            provider=provider, tool=tool, arguments=arguments, timeout=timeout
-        )
+        return _registry_invoke(provider=provider, tool=tool, arguments=arguments, timeout=timeout)
 
     @mcp.tool()
     def registry_tools(provider: str) -> dict:

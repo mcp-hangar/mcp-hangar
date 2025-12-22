@@ -1,8 +1,6 @@
 """Tests for Provider Recovery and Failover Sagas."""
 
-from mcp_hangar.application.sagas.provider_failover_saga import (
-    ProviderFailoverSaga,
-)
+from mcp_hangar.application.sagas.provider_failover_saga import ProviderFailoverSaga
 from mcp_hangar.application.sagas.provider_recovery_saga import ProviderRecoverySaga
 from mcp_hangar.domain.events import (
     HealthCheckFailed,
@@ -10,10 +8,7 @@ from mcp_hangar.domain.events import (
     ProviderStarted,
     ProviderStopped,
 )
-from mcp_hangar.infrastructure.command_bus import (
-    StartProviderCommand,
-    StopProviderCommand,
-)
+from mcp_hangar.infrastructure.command_bus import StartProviderCommand, StopProviderCommand
 
 
 class TestProviderRecoverySaga:
@@ -196,9 +191,7 @@ class TestProviderFailoverSaga:
         """Test configuring failover with custom options."""
         saga = ProviderFailoverSaga()
 
-        saga.configure_failover(
-            "primary", "backup", auto_failback=False, failback_delay_s=60.0
-        )
+        saga.configure_failover("primary", "backup", auto_failback=False, failback_delay_s=60.0)
 
         config = saga.get_failover_config("primary")
         assert config.auto_failback is False
@@ -292,8 +285,7 @@ class TestProviderFailoverSaga:
 
         # Should stop backup
         assert any(
-            isinstance(c, StopProviderCommand) and c.provider_id == "backup"
-            for c in commands
+            isinstance(c, StopProviderCommand) and c.provider_id == "backup" for c in commands
         )
 
         # Failover should be cleared
@@ -350,8 +342,7 @@ class TestProviderFailoverSaga:
         commands = saga.force_failback("primary")
 
         assert any(
-            isinstance(c, StopProviderCommand) and c.provider_id == "backup"
-            for c in commands
+            isinstance(c, StopProviderCommand) and c.provider_id == "backup" for c in commands
         )
 
     def test_cancel_failover(self):

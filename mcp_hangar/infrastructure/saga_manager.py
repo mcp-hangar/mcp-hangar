@@ -227,9 +227,7 @@ class SagaManager:
                 return True
             return False
 
-    def start_saga(
-        self, saga: Saga, initial_data: Optional[Dict[str, Any]] = None
-    ) -> SagaContext:
+    def start_saga(self, saga: Saga, initial_data: Optional[Dict[str, Any]] = None) -> SagaContext:
         """
         Start a new saga instance.
 
@@ -331,9 +329,7 @@ class SagaManager:
                     step.compensated = True
                     logger.debug(f"Saga {saga_id} step '{step.name}' compensated")
                 except Exception as e:
-                    logger.error(
-                        f"Saga {saga_id} compensation for '{step.name}' failed: {e}"
-                    )
+                    logger.error(f"Saga {saga_id} compensation for '{step.name}' failed: {e}")
                     # Continue compensating other steps
 
         context.state = SagaState.COMPENSATED
@@ -373,9 +369,7 @@ class SagaManager:
     def get_active_sagas(self) -> List[SagaContext]:
         """Get all active saga contexts."""
         with self._lock:
-            return [
-                saga.context for saga in self._active_sagas.values() if saga.context
-            ]
+            return [saga.context for saga in self._active_sagas.values() if saga.context]
 
     def get_saga_history(self, limit: int = 20) -> List[SagaContext]:
         """Get recent saga history."""

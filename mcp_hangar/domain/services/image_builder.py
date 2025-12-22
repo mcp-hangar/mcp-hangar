@@ -63,29 +63,60 @@ class ImageBuilder:
             preference: "auto", "podman", or "docker"
 
         Returns:
-            Detected runtime name
+            Detected runtime name (full path if needed)
 
         Raises:
             ProviderStartError: If no runtime found
         """
+        runtime_path = self._find_runtime(preference)
+        if runtime_path:
+            return runtime_path
+
         if preference != "auto":
-            if shutil.which(preference):
-                return preference
             raise ProviderStartError(
                 provider_id="image_builder",
                 reason=f"Container runtime '{preference}' not found in PATH",
             )
 
-        # Auto-detect: prefer podman (rootless, more secure)
-        if shutil.which("podman"):
-            return "podman"
-        if shutil.which("docker"):
-            return "docker"
-
         raise ProviderStartError(
             provider_id="image_builder",
             reason="No container runtime found. Install podman or docker.",
         )
+
+    def _find_runtime(self, preference: str) -> Optional[str]:
+        """
+        Find container runtime executable.
+
+        Checks standard paths in addition to PATH, which helps when
+        running from environments with restricted PATH (e.g., Claude Desktop on macOS).
+        """
+        # Standard paths where container runtimes are installed
+        extra_paths = [
+            "/opt/podman/bin",  # macOS Podman installer
+            "/usr/local/bin",
+            "/opt/homebrew/bin",  # Homebrew on Apple Silicon
+            "/usr/bin",
+        ]
+
+        runtimes_to_check = []
+        if preference == "auto":
+            runtimes_to_check = ["podman", "docker"]  # Prefer podman
+        else:
+            runtimes_to_check = [preference]
+
+        for runtime in runtimes_to_check:
+            # First check PATH
+            path = shutil.which(runtime)
+            if path:
+                return path
+
+            # Check extra paths
+            for extra_path in extra_paths:
+                full_path = os.path.join(extra_path, runtime)
+                if os.path.isfile(full_path) and os.access(full_path, os.X_OK):
+                    return full_path
+
+        return None
 
     def _resolve_path(self, path: str) -> Path:
         """Resolve a path relative to base_path."""
@@ -234,9 +265,7 @@ class ImageBuilder:
                 reason="Image build timed out after 10 minutes",
             )
         except Exception as e:
-            raise ProviderStartError(
-                provider_id="image_builder", reason=f"Image build failed: {e}"
-            )
+            raise ProviderStartError(provider_id="image_builder", reason=f"Image build failed: {e}")
 
     def build_if_needed(self, config: BuildConfig) -> str:
         """
@@ -276,9 +305,7 @@ class ImageBuilder:
 _builder_instance: Optional[ImageBuilder] = None
 
 
-def get_image_builder(
-    runtime: str = "auto", base_path: Optional[str] = None
-) -> ImageBuilder:
+def get_image_builder(runtime: str = "auto", base_path: Optional[str] = None) -> ImageBuilder:
     """
     Get or create the ImageBuilder singleton.
 

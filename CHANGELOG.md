@@ -7,6 +7,18 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Added
+- **Provider Groups**: Load balancing and high availability for multiple providers
+  - Group multiple providers of the same type into a single logical unit
+  - Five load balancing strategies: `round_robin`, `weighted_round_robin`, `least_connections`, `random`, `priority`
+  - Automatic member health tracking with configurable thresholds
+  - Group-level circuit breaker for cascading failure protection
+  - Automatic retry on failure with different member selection
+  - New tools: `registry_group_list`, `registry_group_rebalance`
+  - Transparent API - existing tools work seamlessly with groups
+  - Domain events for group lifecycle: `GroupCreated`, `GroupMemberAdded`, `GroupStateChanged`, etc.
+  - Comprehensive documentation in `docs/PROVIDER_GROUPS.md`
+
 ## [0.1.0] - 2025-12-16
 
 ### Added

@@ -68,9 +68,7 @@ def test_registry_with_memory() -> None:
         response = proc.stdout.readline()
         assert response, "no response from mcp_hangar on initialize"
         init_resp = json.loads(response)
-        assert (
-            "error" not in init_resp
-        ), f"registry initialize error: {init_resp.get('error')}"
+        assert "error" not in init_resp, f"registry initialize error: {init_resp.get('error')}"
         assert "result" in init_resp, f"registry initialize missing result: {init_resp}"
         print("   ✅ Registry initialized")
 
@@ -104,9 +102,7 @@ def test_registry_with_memory() -> None:
         assert response, "no response from mcp_hangar on create_entities"
         result = json.loads(response)
 
-        assert (
-            "error" not in result
-        ), f"registry_invoke returned error: {result.get('error')}"
+        assert "error" not in result, f"registry_invoke returned error: {result.get('error')}"
         content = result.get("result", {}).get("content", [])
         assert content, f"registry_invoke missing content: {result}"
 

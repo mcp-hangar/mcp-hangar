@@ -13,4 +13,3 @@ RUN npm install -g @kazuph/mcp-fetch
 USER node
 
 ENTRYPOINT ["mcp-fetch"]
-

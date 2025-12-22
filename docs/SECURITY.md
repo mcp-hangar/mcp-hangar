@@ -175,7 +175,7 @@ providers:
       - -m
       - examples.provider_math.server
     idle_ttl_s: 180
-    
+
   docker_provider:
     mode: docker
     image: ghcr.io/myorg/mcp-provider:v1.0

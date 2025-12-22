@@ -32,8 +32,8 @@ Describe the tests you ran to verify your changes:
 
 ### Test Configuration
 
-- **OS**: 
-- **Python version**: 
+- **OS**:
+- **Python version**:
 
 ## Checklist
 

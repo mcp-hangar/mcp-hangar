@@ -19,4 +19,3 @@ RUN mkdir -p /data && chmod 755 /data
 # Default entrypoint - /data is the allowed directory
 ENTRYPOINT ["mcp-server-filesystem"]
 CMD ["/data"]
-

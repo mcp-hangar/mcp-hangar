@@ -121,9 +121,7 @@ class AlertEventHandler:
     def _handle_degraded(self, event: ProviderDegraded) -> None:
         """Handle provider degraded event."""
         level = (
-            "critical"
-            if event.consecutive_failures >= self._degradation_threshold
-            else "warning"
+            "critical" if event.consecutive_failures >= self._degradation_threshold else "warning"
         )
 
         alert = Alert(

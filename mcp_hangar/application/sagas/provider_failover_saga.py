@@ -5,17 +5,8 @@ import logging
 import time
 from typing import Dict, List, Optional, Set, Type
 
-from ...domain.events import (
-    DomainEvent,
-    ProviderDegraded,
-    ProviderStarted,
-    ProviderStopped,
-)
-from ...infrastructure.command_bus import (
-    Command,
-    StartProviderCommand,
-    StopProviderCommand,
-)
+from ...domain.events import DomainEvent, ProviderDegraded, ProviderStarted, ProviderStopped
+from ...infrastructure.command_bus import Command, StartProviderCommand, StopProviderCommand
 from ...infrastructure.saga_manager import EventTriggeredSaga
 
 logger = logging.getLogger(__name__)
@@ -138,9 +129,7 @@ class ProviderFailoverSaga(EventTriggeredSaga):
 
         # Check if this provider is a backup currently serving
         if provider_id in self._active_backups:
-            logger.warning(
-                f"Backup provider {provider_id} degraded - no further failover"
-            )
+            logger.warning(f"Backup provider {provider_id} degraded - no further failover")
             return []
 
         # Check if this provider has a backup configured
@@ -240,9 +229,7 @@ class ProviderFailoverSaga(EventTriggeredSaga):
         logger.info(f"Executing failback: {state.backup_id} -> {primary_id}")
 
         # Stop the backup (primary is already running)
-        commands.append(
-            StopProviderCommand(provider_id=state.backup_id, reason="failback")
-        )
+        commands.append(StopProviderCommand(provider_id=state.backup_id, reason="failback"))
 
         # Clean up failover state
         del self._active_failovers[primary_id]

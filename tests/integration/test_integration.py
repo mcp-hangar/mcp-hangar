@@ -243,9 +243,7 @@ def test_multiple_providers_isolation():
     # Invoke on different providers
     result0 = providers["math0"].invoke_tool("add", {"a": 1, "b": 1}, timeout=5.0)
     result1 = providers["math1"].invoke_tool("multiply", {"a": 2, "b": 3}, timeout=5.0)
-    result2 = providers["math2"].invoke_tool(
-        "power", {"base": 2, "exponent": 3}, timeout=5.0
-    )
+    result2 = providers["math2"].invoke_tool("power", {"base": 2, "exponent": 3}, timeout=5.0)
 
     assert result0["result"] == 2
     assert result1["result"] == 6

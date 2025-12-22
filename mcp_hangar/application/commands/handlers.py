@@ -17,12 +17,7 @@ from ...infrastructure.command_bus import (
     StopProviderCommand,
 )
 from ...infrastructure.event_bus import EventBus
-from ...metrics import (
-    observe_tool_call,
-    record_error,
-    record_provider_start,
-    record_provider_stop,
-)
+from ...metrics import observe_tool_call, record_error, record_provider_start, record_provider_stop
 
 logger = logging.getLogger(__name__)
 
@@ -113,9 +108,7 @@ class InvokeToolHandler(BaseProviderHandler):
         success = False
 
         try:
-            result = provider.invoke_tool(
-                command.tool_name, command.arguments, command.timeout
-            )
+            result = provider.invoke_tool(command.tool_name, command.arguments, command.timeout)
             success = True
             return result
 
@@ -182,12 +175,8 @@ def register_all_handlers(
         repository: Provider repository
         event_bus: Event bus for publishing events
     """
-    command_bus.register(
-        StartProviderCommand, StartProviderHandler(repository, event_bus)
-    )
-    command_bus.register(
-        StopProviderCommand, StopProviderHandler(repository, event_bus)
-    )
+    command_bus.register(StartProviderCommand, StartProviderHandler(repository, event_bus))
+    command_bus.register(StopProviderCommand, StopProviderHandler(repository, event_bus))
     command_bus.register(InvokeToolCommand, InvokeToolHandler(repository, event_bus))
     command_bus.register(HealthCheckCommand, HealthCheckHandler(repository, event_bus))
     command_bus.register(

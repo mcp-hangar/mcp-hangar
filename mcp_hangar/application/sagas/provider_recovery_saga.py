@@ -11,11 +11,7 @@ from ...domain.events import (
     ProviderStarted,
     ProviderStopped,
 )
-from ...infrastructure.command_bus import (
-    Command,
-    StartProviderCommand,
-    StopProviderCommand,
-)
+from ...infrastructure.command_bus import Command, StartProviderCommand, StopProviderCommand
 from ...infrastructure.saga_manager import EventTriggeredSaga
 
 logger = logging.getLogger(__name__)
@@ -103,11 +99,7 @@ class ProviderRecoverySaga(EventTriggeredSaga):
                 f"stopping recovery"
             )
             # Stop the provider permanently
-            return [
-                StopProviderCommand(
-                    provider_id=provider_id, reason="max_retries_exceeded"
-                )
-            ]
+            return [StopProviderCommand(provider_id=provider_id, reason="max_retries_exceeded")]
 
         # Calculate backoff
         backoff = self._calculate_backoff(state["retries"])
@@ -140,8 +132,7 @@ class ProviderRecoverySaga(EventTriggeredSaga):
             }
             if old_retries > 0:
                 logger.info(
-                    f"Provider {provider_id} recovered successfully after "
-                    f"{old_retries} retries"
+                    f"Provider {provider_id} recovered successfully after " f"{old_retries} retries"
                 )
 
         return []
@@ -172,9 +163,7 @@ class ProviderRecoverySaga(EventTriggeredSaga):
 
     def _calculate_backoff(self, retry_count: int) -> float:
         """Calculate backoff duration for a retry count."""
-        backoff = self._initial_backoff_s * (
-            self._backoff_multiplier ** (retry_count - 1)
-        )
+        backoff = self._initial_backoff_s * (self._backoff_multiplier ** (retry_count - 1))
         return min(backoff, self._max_backoff_s)
 
     def get_retry_state(self, provider_id: str) -> Optional[Dict]:

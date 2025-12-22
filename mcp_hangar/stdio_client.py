@@ -64,9 +64,7 @@ class StdioClient:
                 try:
                     msg = json.loads(line)
                 except json.JSONDecodeError as e:
-                    logger.error(
-                        f"stdio_client: malformed JSON: {line[:100]}, error={e}"
-                    )
+                    logger.error(f"stdio_client: malformed JSON: {line[:100]}, error={e}")
                     continue
 
                 msg_id = msg.get("id")
@@ -100,9 +98,7 @@ class StdioClient:
                 pending.result_queue.put({"error": {"code": -1, "message": error_msg}})
             self.pending.clear()
 
-    def call(
-        self, method: str, params: Dict[str, Any], timeout: float = 15.0
-    ) -> Dict[str, Any]:
+    def call(self, method: str, params: Dict[str, Any], timeout: float = 15.0) -> Dict[str, Any]:
         """
         Synchronous RPC call with explicit timeout.
 

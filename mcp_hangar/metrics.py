@@ -202,9 +202,7 @@ class Histogram:
                 for bucket in self.buckets:
                     cumulative += bucket_values.get(bucket, 0)
                     le = "+Inf" if bucket == float("inf") else str(bucket)
-                    buckets.append(
-                        MetricSample(value=cumulative, labels={**base_labels, "le": le})
-                    )
+                    buckets.append(MetricSample(value=cumulative, labels={**base_labels, "le": le}))
                 sums.append(MetricSample(value=self._sums[key], labels=base_labels))
                 counts.append(MetricSample(value=self._counts[key], labels=base_labels))
 

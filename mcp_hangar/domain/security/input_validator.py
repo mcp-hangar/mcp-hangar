@@ -360,9 +360,7 @@ class InputValidator:
     ) -> None:
         """Recursively validate argument structure."""
         if depth > max_depth:
-            result.add_error(
-                path, f"Arguments exceed maximum nesting depth ({max_depth})"
-            )
+            result.add_error(path, f"Arguments exceed maximum nesting depth ({max_depth})")
             return
 
         if isinstance(obj, dict):
@@ -413,9 +411,7 @@ class InputValidator:
             return result
 
         if not isinstance(timeout, (int, float)):
-            result.add_error(
-                "timeout", "Timeout must be a number", type(timeout).__name__
-            )
+            result.add_error("timeout", "Timeout must be a number", type(timeout).__name__)
             return result
 
         if timeout < self.MIN_TIMEOUT:
@@ -449,9 +445,7 @@ class InputValidator:
             return result
 
         if not isinstance(command, list):
-            result.add_error(
-                "command", "Command must be a list of strings", type(command).__name__
-            )
+            result.add_error("command", "Command must be a list of strings", type(command).__name__)
             return result
 
         if not command:
@@ -511,9 +505,7 @@ class InputValidator:
 
             # Check for absolute paths if not allowed
             if not self.allow_absolute_paths and executable.startswith("/"):
-                result.add_warning(
-                    "command[0]", "Using absolute paths is discouraged", executable
-                )
+                result.add_warning("command[0]", "Using absolute paths is discouraged", executable)
 
         return result
 
@@ -533,9 +525,7 @@ class InputValidator:
             return result
 
         if not isinstance(image, str):
-            result.add_error(
-                "image", "Docker image must be a string", type(image).__name__
-            )
+            result.add_error("image", "Docker image must be a string", type(image).__name__)
             return result
 
         if not image:

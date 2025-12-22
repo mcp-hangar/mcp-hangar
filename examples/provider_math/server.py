@@ -1,7 +1,6 @@
 """Simple math provider for testing the MCP registry."""
 
 from mcp.server.fastmcp import FastMCP
-from mcp.server.stdio import stdio_server
 
 mcp = FastMCP("math-provider")
 
@@ -88,7 +87,7 @@ def power(base: float, exponent: float) -> dict:
 
 def main():
     """Run the math provider server."""
-    stdio_server(mcp)
+    mcp.run()
 
 
 if __name__ == "__main__":
