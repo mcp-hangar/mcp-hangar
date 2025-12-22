@@ -9,7 +9,7 @@ import sys
 # Add registry to path
 sys.path.insert(0, str(Path(__file__).parent))
 
-from mcp_hangar.domain.model import Provider
+from mcp_hangar.domain.model import Provider  # noqa: E402
 
 logging.basicConfig(level=logging.INFO, format="%(levelname)s: %(message)s")
 logger = logging.getLogger(__name__)
@@ -68,9 +68,7 @@ def test_memory_container() -> None:
                     {
                         "name": "test-calculation",
                         "entityType": "calculation",
-                        "observations": [
-                            "Testing memory persistence in container mode"
-                        ],
+                        "observations": ["Testing memory persistence in container mode"],
                     }
                 ]
             },

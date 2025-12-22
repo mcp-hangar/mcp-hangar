@@ -10,14 +10,14 @@ repos:
     hooks:
       - id: black
         language_version: python3.11
-        args: ['--line-length=100']
+        args: ['--line-length=120']
 
   # isort - Import sorting
   - repo: https://github.com/pycqa/isort
     rev: 5.13.2
     hooks:
       - id: isort
-        args: ['--profile', 'black', '--line-length', '100']
+        args: ['--profile', 'black', '--line-length', '120']
 
   # Ruff - Fast Python linter
   - repo: https://github.com/charliermarsh/ruff-pre-commit

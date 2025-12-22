@@ -89,9 +89,7 @@ class SupportsProviderLifecycle(Protocol):
 class SupportsToolInvocation(Protocol):
     """Commands-side tool invocation surface required by command handlers."""
 
-    def invoke_tool(
-        self, tool_name: str, arguments: Dict[str, Any], timeout: float = 30.0
-    ) -> Dict[str, Any]:
+    def invoke_tool(self, tool_name: str, arguments: Dict[str, Any], timeout: float = 30.0) -> Dict[str, Any]:
         """Invoke a tool on the provider."""
         ...
 

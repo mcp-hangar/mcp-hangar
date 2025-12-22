@@ -13,10 +13,8 @@ import pytest
 
 sys.path.insert(0, str(Path(__file__).parent))
 
-from mcp_hangar.application.queries import (
-    register_all_handlers as register_query_handlers,
-)
-from mcp_hangar.server import (
+from mcp_hangar.application.queries import register_all_handlers as register_query_handlers  # noqa: E402
+from mcp_hangar.server import (  # noqa: E402
     load_config,
     load_config_from_file,
     PROVIDER_REPOSITORY,
@@ -54,11 +52,7 @@ def test_descriptions() -> None:
     for provider_id, spec in provider_config.items():
         description = spec.get("description")
         if description:
-            desc_preview = (
-                description.strip()[:60] + "..."
-                if len(description.strip()) > 60
-                else description.strip()
-            )
+            desc_preview = description.strip()[:60] + "..." if len(description.strip()) > 60 else description.strip()
             print(f"   ✅ {provider_id:20s} {desc_preview}")
         else:
             print(f"   ❌ {provider_id:20s} Missing description!")
@@ -85,24 +79,18 @@ def test_descriptions() -> None:
 
             if description:
                 has_description += 1
-                desc_preview = (
-                    description[:50] + "..." if len(description) > 50 else description
-                )
+                desc_preview = description[:50] + "..." if len(description) > 50 else description
                 print(f"   ✅ {provider_id:20s} {desc_preview}")
             else:
                 no_description.append(provider_id)
                 print(f"   ❌ {provider_id:20s} No description in response")
 
         print("\n📊 Summary:")
-        print(
-            f"   Providers with descriptions: {has_description}/{len(providers_list)}"
-        )
+        print(f"   Providers with descriptions: {has_description}/{len(providers_list)}")
 
         if no_description:
             print(f"   ❌ Missing descriptions: {no_description}")
-            assert (
-                False
-            ), f"Missing descriptions in registry_list response: {no_description}"
+            assert False, f"Missing descriptions in registry_list response: {no_description}"
 
         print("\n✅ All providers have descriptions!")
 

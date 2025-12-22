@@ -7,7 +7,7 @@ import sys
 
 sys.path.insert(0, str(Path(__file__).parent.parent))
 
-from mcp_hangar.domain.model import Provider
+from mcp_hangar.domain.model import Provider  # noqa: E402
 
 logging.basicConfig(level=logging.INFO, format="%(levelname)s: %(message)s")
 
@@ -27,9 +27,7 @@ def main():
         "provider_id": "prometheus",
         "mode": "container",
         "image": "ghcr.io/pab1it0/prometheus-mcp-server:latest",
-        "env": {
-            "PROMETHEUS_URL": "http://localhost:9090"  # Change to your Prometheus URL
-        },
+        "env": {"PROMETHEUS_URL": "http://localhost:9090"},  # Change to your Prometheus URL
         "network": "bridge",  # Needs network to connect to Prometheus
         "resources": {"memory": "256m", "cpu": "0.5"},
         "idle_ttl_s": 600,
@@ -57,11 +55,7 @@ def main():
         for i, tool in enumerate(tools, 1):
             print(f"   {i}. {tool.name}")
             if tool.description:
-                desc = (
-                    tool.description[:70] + "..."
-                    if len(tool.description) > 70
-                    else tool.description
-                )
+                desc = tool.description[:70] + "..." if len(tool.description) > 70 else tool.description
                 print(f"      {desc}")
 
         print("\n" + "=" * 70)
@@ -79,9 +73,7 @@ def main():
         print(f"\n❌ Error: {e}")
         print("\nTroubleshooting:")
         print("  1. Make sure Prometheus is running at the configured URL")
-        print(
-            "  2. Check if the image is accessible: podman pull ghcr.io/pab1it0/prometheus-mcp-server:latest"
-        )
+        print("  2. Check if the image is accessible: podman pull ghcr.io/pab1it0/prometheus-mcp-server:latest")
         print("  3. Verify network connectivity")
         return 1
 

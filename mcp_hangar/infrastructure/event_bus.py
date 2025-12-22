@@ -29,15 +29,11 @@ class EventBus:
     """
 
     def __init__(self):
-        self._handlers: Dict[Type[DomainEvent], List[Callable[[DomainEvent], None]]] = (
-            {}
-        )
+        self._handlers: Dict[Type[DomainEvent], List[Callable[[DomainEvent], None]]] = {}
         self._lock = threading.Lock()
         self._error_handlers: List[Callable[[Exception, DomainEvent], None]] = []
 
-    def subscribe(
-        self, event_type: Type[DomainEvent], handler: Callable[[DomainEvent], None]
-    ) -> None:
+    def subscribe(self, event_type: Type[DomainEvent], handler: Callable[[DomainEvent], None]) -> None:
         """
         Subscribe to a specific event type.
 
@@ -66,9 +62,7 @@ class EventBus:
 
         logger.debug("Subscribed handler to all events")
 
-    def unsubscribe(
-        self, event_type: Type[DomainEvent], handler: Callable[[DomainEvent], None]
-    ) -> None:
+    def unsubscribe(self, event_type: Type[DomainEvent], handler: Callable[[DomainEvent], None]) -> None:
         """
         Unsubscribe a handler from an event type.
 
@@ -98,9 +92,7 @@ class EventBus:
             all_handlers = self._handlers.get(DomainEvent, [])
             handlers = specific_handlers + all_handlers
 
-        logger.debug(
-            f"Publishing {event.__class__.__name__} to {len(handlers)} handlers"
-        )
+        logger.debug(f"Publishing {event.__class__.__name__} to {len(handlers)} handlers")
 
         # Call handlers outside the lock
         for handler in handlers:

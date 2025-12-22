@@ -379,9 +379,7 @@ class EventSourcedProvider(Provider):
         """Number of events applied to this aggregate."""
         return self._events_applied
 
-    def replay_to_version(
-        self, target_version: int, events: List[DomainEvent]
-    ) -> "EventSourcedProvider":
+    def replay_to_version(self, target_version: int, events: List[DomainEvent]) -> "EventSourcedProvider":
         """
         Create a new provider at a specific version (time travel).
 

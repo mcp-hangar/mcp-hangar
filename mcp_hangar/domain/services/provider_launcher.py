@@ -212,9 +212,7 @@ class SubprocessLauncher(ProviderLauncher):
                 details={"errors": [e.to_dict() for e in result.errors]},
             )
 
-    def _prepare_env(
-        self, provider_env: Optional[Dict[str, str]] = None
-    ) -> Dict[str, str]:
+    def _prepare_env(self, provider_env: Optional[Dict[str, str]] = None) -> Dict[str, str]:
         """
         Prepare secure environment for subprocess.
 
@@ -297,9 +295,7 @@ class SubprocessLauncher(ProviderLauncher):
                 resolved_command[0] = resolved
 
         # Log launch (without sensitive data)
-        safe_command = [
-            c[:50] + "..." if len(c) > 50 else c for c in resolved_command[:5]
-        ]
+        safe_command = [c[:50] + "..." if len(c) > 50 else c for c in resolved_command[:5]]
         logger.info(f"Launching subprocess: {safe_command}")
 
         try:
@@ -509,9 +505,7 @@ class DockerLauncher(ProviderLauncher):
             result = self._validator.validate_environment_variables(env)
             if not result.valid:
                 errors = "; ".join(e.message for e in result.errors)
-                raise ValidationError(
-                    message=f"Environment validation failed: {errors}", field="env"
-                )
+                raise ValidationError(message=f"Environment validation failed: {errors}", field="env")
 
         # Build secure command
         cmd = self._build_docker_command(image, env)
@@ -646,29 +640,60 @@ class ContainerLauncher(ProviderLauncher):
             preference: "auto", "podman", or "docker"
 
         Returns:
-            Runtime command name
+            Runtime command name (full path if needed)
 
         Raises:
             ProviderStartError: If no runtime found
         """
+        runtime_path = self._find_runtime(preference)
+        if runtime_path:
+            return runtime_path
+
         if preference != "auto":
-            if shutil.which(preference):
-                return preference
             raise ProviderStartError(
                 provider_id="container_launcher",
                 reason=f"Container runtime '{preference}' not found in PATH",
             )
 
-        # Auto-detect: prefer podman (rootless, more secure)
-        if shutil.which("podman"):
-            return "podman"
-        if shutil.which("docker"):
-            return "docker"
-
         raise ProviderStartError(
             provider_id="container_launcher",
             reason="No container runtime found. Install podman or docker.",
         )
+
+    def _find_runtime(self, preference: str) -> Optional[str]:
+        """
+        Find container runtime executable.
+
+        Checks standard paths in addition to PATH, which helps when
+        running from environments with restricted PATH (e.g., Claude Desktop on macOS).
+        """
+        # Standard paths where container runtimes are installed
+        extra_paths = [
+            "/opt/podman/bin",  # macOS Podman installer
+            "/usr/local/bin",
+            "/opt/homebrew/bin",  # Homebrew on Apple Silicon
+            "/usr/bin",
+        ]
+
+        runtimes_to_check = []
+        if preference == "auto":
+            runtimes_to_check = ["podman", "docker"]  # Prefer podman
+        else:
+            runtimes_to_check = [preference]
+
+        for runtime in runtimes_to_check:
+            # First check PATH
+            path = shutil.which(runtime)
+            if path:
+                return path
+
+            # Check extra paths
+            for extra_path in extra_paths:
+                full_path = os.path.join(extra_path, runtime)
+                if os.path.isfile(full_path) and os.access(full_path, os.X_OK):
+                    return full_path
+
+        return None
 
     def _validate_image(self, image: str) -> None:
         """Validate container image name."""
@@ -676,16 +701,12 @@ class ContainerLauncher(ProviderLauncher):
 
         if not result.valid:
             errors = "; ".join(e.message for e in result.errors)
-            raise ValidationError(
-                message=f"Image validation failed: {errors}", field="image", value=image
-            )
+            raise ValidationError(message=f"Image validation failed: {errors}", field="image", value=image)
 
         # Check blocked images
         image_name = image.split(":")[0].split("/")[-1]
         if image_name in self._blocked_images:
-            raise ValidationError(
-                message=f"Image '{image_name}' is blocked", field="image", value=image
-            )
+            raise ValidationError(message=f"Image '{image_name}' is blocked", field="image", value=image)
 
         # Check registry whitelist
         if self._allowed_registries:
@@ -817,9 +838,7 @@ class ContainerLauncher(ProviderLauncher):
                         os.makedirs(host_path, mode=0o755, exist_ok=True)
                         logger.info(f"Created volume directory: {host_path}")
                     except OSError as e:
-                        logger.warning(
-                            f"Could not create volume directory {host_path}: {e}"
-                        )
+                        logger.warning(f"Could not create volume directory {host_path}: {e}")
 
                 # CI helper: optionally relax permissions on writable bind mounts so
                 # container processes can write (GitHub Actions runners can mount
@@ -839,13 +858,9 @@ class ContainerLauncher(ProviderLauncher):
                             # 0o777 is intentionally permissive for CI stability; do not
                             # enable this in production environments.
                             os.chmod(host_path, 0o777)
-                            logger.info(
-                                f"Relaxed volume permissions (chmod 777): {host_path}"
-                            )
+                            logger.info(f"Relaxed volume permissions (chmod 777): {host_path}")
                     except OSError as e:
-                        logger.warning(
-                            f"Could not relax volume permissions for {host_path}: {e}"
-                        )
+                        logger.warning(f"Could not relax volume permissions for {host_path}: {e}")
 
                 cmd.extend(["-v", f"{host_path}:{container_path}:{mode}"])
             else:
@@ -909,9 +924,7 @@ class ContainerLauncher(ProviderLauncher):
             result = self._validator.validate_environment_variables(env)
             if not result.valid:
                 errors = "; ".join(e.message for e in result.errors)
-                raise ValidationError(
-                    message=f"Environment validation failed: {errors}", field="env"
-                )
+                raise ValidationError(message=f"Environment validation failed: {errors}", field="env")
 
         # Build config
         config = ContainerConfig(
@@ -933,9 +946,11 @@ class ContainerLauncher(ProviderLauncher):
         logger.debug(f"Container command: {' '.join(cmd[:10])}...")
 
         try:
-            inherit_stderr = os.getenv(
-                "MCP_CONTAINER_INHERIT_STDERR", ""
-            ).strip().lower() in {"1", "true", "yes"}
+            inherit_stderr = os.getenv("MCP_CONTAINER_INHERIT_STDERR", "").strip().lower() in {
+                "1",
+                "true",
+                "yes",
+            }
 
             process = subprocess.Popen(
                 cmd,
@@ -981,3 +996,33 @@ class ContainerLauncher(ProviderLauncher):
             network=config.network,
             read_only=config.read_only,
         )
+
+
+# --- Factory Function ---
+
+
+def get_launcher(mode: str) -> ProviderLauncher:
+    """
+    Factory function to get the appropriate launcher for a mode.
+
+    Args:
+        mode: Provider mode (subprocess, docker, container, podman)
+
+    Returns:
+        Appropriate launcher instance
+
+    Raises:
+        ValueError: If mode is not supported
+    """
+    launchers = {
+        "subprocess": SubprocessLauncher,
+        "docker": DockerLauncher,
+        "container": lambda: ContainerLauncher(runtime="auto"),
+        "podman": lambda: ContainerLauncher(runtime="podman"),
+    }
+
+    launcher_factory = launchers.get(mode)
+    if not launcher_factory:
+        raise ValueError(f"unsupported_mode: {mode}")
+
+    return launcher_factory() if callable(launcher_factory) else launcher_factory

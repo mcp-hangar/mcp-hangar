@@ -80,9 +80,7 @@ class EventStore(ABC):
     """Abstract interface for event storage."""
 
     @abstractmethod
-    def append(
-        self, stream_id: str, events: List[DomainEvent], expected_version: int
-    ) -> int:
+    def append(self, stream_id: str, events: List[DomainEvent], expected_version: int) -> int:
         """
         Append events to a stream with optimistic concurrency.
 
@@ -100,9 +98,7 @@ class EventStore(ABC):
         pass
 
     @abstractmethod
-    def load(
-        self, stream_id: str, from_version: int = 0, to_version: Optional[int] = None
-    ) -> List[StoredEvent]:
+    def load(self, stream_id: str, from_version: int = 0, to_version: Optional[int] = None) -> List[StoredEvent]:
         """
         Load events from a stream.
 
@@ -145,9 +141,7 @@ class InMemoryEventStore(EventStore):
         self._lock = threading.RLock()
         self._subscribers: List[Callable[[StoredEvent], None]] = []
 
-    def append(
-        self, stream_id: str, events: List[DomainEvent], expected_version: int
-    ) -> int:
+    def append(self, stream_id: str, events: List[DomainEvent], expected_version: int) -> int:
         """Append events with optimistic concurrency."""
         with self._lock:
             current_version = self.get_version(stream_id)
@@ -182,9 +176,7 @@ class InMemoryEventStore(EventStore):
 
             return new_version
 
-    def load(
-        self, stream_id: str, from_version: int = 0, to_version: Optional[int] = None
-    ) -> List[StoredEvent]:
+    def load(self, stream_id: str, from_version: int = 0, to_version: Optional[int] = None) -> List[StoredEvent]:
         """Load events from a stream."""
         with self._lock:
             if stream_id not in self._streams:
@@ -252,9 +244,7 @@ class FileEventStore(EventStore):
         safe_id = stream_id.replace("/", "_").replace("\\", "_")
         return self._storage_path / f"{safe_id}.jsonl"
 
-    def append(
-        self, stream_id: str, events: List[DomainEvent], expected_version: int
-    ) -> int:
+    def append(self, stream_id: str, events: List[DomainEvent], expected_version: int) -> int:
         """Append events with optimistic concurrency."""
         with self._lock:
             current_version = self.get_version(stream_id)
@@ -285,19 +275,14 @@ class FileEventStore(EventStore):
 
             return new_version
 
-    def load(
-        self, stream_id: str, from_version: int = 0, to_version: Optional[int] = None
-    ) -> List[StoredEvent]:
+    def load(self, stream_id: str, from_version: int = 0, to_version: Optional[int] = None) -> List[StoredEvent]:
         """Load events from a stream."""
         with self._lock:
             # Check cache first
             if stream_id in self._cache:
                 cached = self._cache[stream_id]
                 return [
-                    e
-                    for e in cached
-                    if e.version >= from_version
-                    and (to_version is None or e.version <= to_version)
+                    e for e in cached if e.version >= from_version and (to_version is None or e.version <= to_version)
                 ]
 
             # Load from file
@@ -360,9 +345,7 @@ class EventStoreSnapshot:
         safe_id = stream_id.replace("/", "_").replace("\\", "_")
         return self._storage_path / f"{safe_id}.snapshot.json"
 
-    def save_snapshot(
-        self, stream_id: str, version: int, state: Dict[str, Any]
-    ) -> None:
+    def save_snapshot(self, stream_id: str, version: int, state: Dict[str, Any]) -> None:
         """Save a snapshot of aggregate state."""
         with self._lock:
             snapshot = {

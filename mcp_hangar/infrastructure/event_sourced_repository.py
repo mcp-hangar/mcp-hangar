@@ -203,9 +203,7 @@ class EventSourcedProviderRepository(IProviderRepository):
                 snapshot_version = snapshot_data["version"]
 
         # Load events (from snapshot version or beginning)
-        events = self._event_store.load(
-            stream_id=provider_id, from_version=snapshot_version + 1
-        )
+        events = self._event_store.load(stream_id=provider_id, from_version=snapshot_version + 1)
 
         # Convert stored events to domain events
         domain_events = self._hydrate_events(events)
@@ -268,9 +266,7 @@ class EventSourcedProviderRepository(IProviderRepository):
             if event_class:
                 # Extract event data (remove event_type from data dict)
                 event_data = {
-                    k: v
-                    for k, v in stored.data.items()
-                    if k not in ("event_type", "event_id", "occurred_at")
+                    k: v for k, v in stored.data.items() if k not in ("event_type", "event_id", "occurred_at")
                 }
 
                 try:
@@ -294,13 +290,9 @@ class EventSourcedProviderRepository(IProviderRepository):
                 "endpoint": getattr(provider, "_endpoint", None),
                 "env": getattr(provider, "_env", {}),
                 "idle_ttl_s": getattr(provider, "_idle_ttl_s", 300),
-                "health_check_interval_s": getattr(
-                    provider, "_health_check_interval_s", 60
-                ),
+                "health_check_interval_s": getattr(provider, "_health_check_interval_s", 60),
                 "max_consecutive_failures": (
-                    getattr(provider._health, "_max_consecutive_failures", 3)
-                    if hasattr(provider, "_health")
-                    else 3
+                    getattr(provider._health, "_max_consecutive_failures", 3) if hasattr(provider, "_health") else 3
                 ),
             }
             self._config_store.save(provider_id, config)
@@ -324,23 +316,16 @@ class EventSourcedProviderRepository(IProviderRepository):
         snapshot = provider.create_snapshot()
         version = self._event_store.get_version(provider.provider_id)
 
-        self._snapshot_store.save_snapshot(
-            stream_id=provider.provider_id, version=version, state=snapshot.to_dict()
-        )
+        self._snapshot_store.save_snapshot(stream_id=provider.provider_id, version=version, state=snapshot.to_dict())
 
-        logger.debug(
-            f"Created snapshot for provider {provider.provider_id} at version {version}"
-        )
+        logger.debug(f"Created snapshot for provider {provider.provider_id} at version {version}")
 
     def exists(self, provider_id: str) -> bool:
         """Check if provider exists."""
         with self._lock:
             if provider_id in self._cache:
                 return True
-            return (
-                self._event_store.stream_exists(provider_id)
-                or self._config_store.load(provider_id) is not None
-            )
+            return self._event_store.stream_exists(provider_id) or self._config_store.load(provider_id) is not None
 
     def remove(self, provider_id: str) -> bool:
         """
@@ -412,9 +397,7 @@ class EventSourcedProviderRepository(IProviderRepository):
         """
         return self._event_store.load(provider_id)
 
-    def replay_provider(
-        self, provider_id: str, to_version: int
-    ) -> Optional[EventSourcedProvider]:
+    def replay_provider(self, provider_id: str, to_version: int) -> Optional[EventSourcedProvider]:
         """
         Replay provider to a specific version (time travel).
 
@@ -429,9 +412,7 @@ class EventSourcedProviderRepository(IProviderRepository):
         if not config:
             return None
 
-        events = self._event_store.load(
-            provider_id, from_version=0, to_version=to_version
-        )
+        events = self._event_store.load(provider_id, from_version=0, to_version=to_version)
         domain_events = self._hydrate_events(events)
 
         return EventSourcedProvider.from_events(

@@ -36,12 +36,7 @@ from mcp_hangar.domain.security.input_validator import (
     validate_timeout,
     validate_tool_name,
 )
-from mcp_hangar.domain.security.rate_limiter import (
-    InMemoryRateLimiter,
-    RateLimitConfig,
-    RateLimitResult,
-    TokenBucket,
-)
+from mcp_hangar.domain.security.rate_limiter import InMemoryRateLimiter, RateLimitConfig, RateLimitResult, TokenBucket
 from mcp_hangar.domain.security.sanitizer import (
     sanitize_command_argument,
     sanitize_environment_value,
@@ -209,9 +204,7 @@ class TestInputValidator:
         for cmd in injection_attempts:
             result = validate_command(cmd)
             # Should either reject the command or flag dangerous patterns
-            assert (
-                not result.valid or len(result.warnings) > 0
-            ), f"Expected {cmd} to be flagged"
+            assert not result.valid or len(result.warnings) > 0, f"Expected {cmd} to be flagged"
 
     def test_blocked_commands(self):
         """Test that dangerous commands are blocked."""
@@ -490,9 +483,7 @@ class TestSecretsManagement:
             "debug_mode",
         ]
         for key in normal_keys:
-            assert not is_sensitive_key(
-                key
-            ), f"'{key}' should not be flagged as sensitive"
+            assert not is_sensitive_key(key), f"'{key}' should not be flagged as sensitive"
 
     def test_mask_sensitive_value(self):
         """Test masking of sensitive values."""

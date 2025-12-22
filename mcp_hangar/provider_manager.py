@@ -109,9 +109,7 @@ class ProviderManager:
             self._publish_events()
             self._sync_state_to_conn()
 
-    def invoke_tool(
-        self, tool_name: str, arguments: Dict[str, Any], timeout: float = 30.0
-    ) -> Dict[str, Any]:
+    def invoke_tool(self, tool_name: str, arguments: Dict[str, Any], timeout: float = 30.0) -> Dict[str, Any]:
         """
         Invoke a tool with proper error handling and health tracking.
 

@@ -64,9 +64,7 @@ class StdioClient:
                 try:
                     msg = json.loads(line)
                 except json.JSONDecodeError as e:
-                    logger.error(
-                        f"stdio_client: malformed JSON: {line[:100]}, error={e}"
-                    )
+                    logger.error(f"stdio_client: malformed JSON: {line[:100]}, error={e}")
                     continue
 
                 msg_id = msg.get("id")
@@ -79,9 +77,7 @@ class StdioClient:
                     if pending:
                         pending.result_queue.put(msg)
                     else:
-                        logger.warning(
-                            f"stdio_client: received response for unknown request: {msg_id}"
-                        )
+                        logger.warning(f"stdio_client: received response for unknown request: {msg_id}")
                 else:
                     # Unsolicited notification - log and ignore
                     logger.debug(f"stdio_client: unsolicited notification: {msg}")
@@ -100,9 +96,7 @@ class StdioClient:
                 pending.result_queue.put({"error": {"code": -1, "message": error_msg}})
             self.pending.clear()
 
-    def call(
-        self, method: str, params: Dict[str, Any], timeout: float = 15.0
-    ) -> Dict[str, Any]:
+    def call(self, method: str, params: Dict[str, Any], timeout: float = 15.0) -> Dict[str, Any]:
         """
         Synchronous RPC call with explicit timeout.
 
@@ -124,9 +118,7 @@ class StdioClient:
         request_id = str(uuid.uuid4())
         result_queue = Queue(maxsize=1)
 
-        pending = PendingRequest(
-            request_id=request_id, result_queue=result_queue, started_at=time.time()
-        )
+        pending = PendingRequest(request_id=request_id, result_queue=result_queue, started_at=time.time())
 
         with self.pending_lock:
             self.pending[request_id] = pending

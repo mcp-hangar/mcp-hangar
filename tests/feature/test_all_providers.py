@@ -10,7 +10,7 @@ import time
 # Add registry to path
 sys.path.insert(0, str(Path(__file__).parent))
 
-from mcp_hangar.domain.model import Provider
+from mcp_hangar.domain.model import Provider  # noqa: E402
 
 logging.basicConfig(level=logging.INFO, format="%(levelname)s: %(message)s")
 logger = logging.getLogger(__name__)
@@ -24,18 +24,16 @@ def _run_provider_check(
     expected_success: bool = True,
 ) -> None:
     """Generic provider check helper (not a pytest test)."""
-    print(f"\n{'='*70}")
+    print(f"\n{'=' * 70}")
     print(f"🧪 Testing {name.upper()} Provider")
-    print(f"{'='*70}")
+    print(f"{'=' * 70}")
 
     # Create provider
     provider = Provider(provider_id=name, **config)
 
     print(f"\n📦 Provider: {provider.provider_id}")
     print(f"   Mode: {provider._mode}")
-    print(
-        f"   Image: {provider._image if provider._image else 'building from Dockerfile'}"
-    )
+    print(f"   Image: {provider._image if provider._image else 'building from Dockerfile'}")
     print(f"   Network: {provider._network}")
     print(f"   Read-only: {provider._read_only}")
 
@@ -45,9 +43,7 @@ def _run_provider_check(
         start_time = time.time()
         provider.ensure_ready()
         elapsed = time.time() - start_time
-        print(
-            f"   ✅ Provider started in {elapsed:.2f}s! State: {provider.state.value}"
-        )
+        print(f"   ✅ Provider started in {elapsed:.2f}s! State: {provider.state.value}")
 
         # List tools
         print("\n🔍 Discovering tools...")
@@ -55,11 +51,7 @@ def _run_provider_check(
         tool_list = list(tools)
         print(f"   ✅ Found {len(tool_list)} tools:")
         for tool in tool_list[:8]:
-            desc = (
-                tool.description[:60]
-                if len(tool.description) > 60
-                else tool.description
-            )
+            desc = tool.description[:60] if len(tool.description) > 60 else tool.description
             print(f"      - {tool.name}: {desc}...")
         if len(tool_list) > 8:
             print(f"      ... and {len(tool_list) - 8} more")
@@ -92,9 +84,9 @@ def _run_provider_check(
                     print("   ❌ Expected error but got success")
                     assert False, f"{name} expected error but got success"
 
-        print(f"\n{'='*70}")
+        print(f"\n{'=' * 70}")
         print(f"✅ {name.upper()} provider test PASSED!")
-        print(f"{'='*70}")
+        print(f"{'=' * 70}")
 
     except Exception:
         # Keep verbose output for debugging in CI

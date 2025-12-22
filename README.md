@@ -12,6 +12,7 @@ A production-grade registry for managing Model Context Protocol (MCP) providers 
 - **Multiple Transport Modes**: Stdio (default) and HTTP with Streamable HTTP support
 - **Container Support**: Docker and Podman with auto-detection
 - **Pre-Built Images**: Use any Docker/Podman image directly
+- **Provider Groups**: Load balancing and high availability with multiple strategies
 - **Thread-Safe**: All operations protected with proper locking
 - **Health Monitoring**: Active health checks with circuit breaker pattern
 - **Garbage Collection**: Automatic shutdown of idle providers

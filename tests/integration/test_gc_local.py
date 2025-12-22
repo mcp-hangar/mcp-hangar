@@ -78,7 +78,7 @@ def main():
 
     for i in range(8):
         time.sleep(1)
-        print(f"   [{i+1}s] State: {manager.state}")
+        print(f"   [{i + 1}s] State: {manager.state}")
         if manager.state.value == "cold":
             print("   ✅ Provider was shut down by GC!")
             break

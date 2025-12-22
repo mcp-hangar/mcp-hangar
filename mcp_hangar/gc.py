@@ -5,18 +5,9 @@ import threading
 import time
 from typing import Any, Literal, Optional
 
-from .domain.contracts.provider_runtime import (
-    normalize_state_to_str,
-    ProviderMapping,
-    ProviderRuntime,
-)
+from .domain.contracts.provider_runtime import normalize_state_to_str, ProviderMapping, ProviderRuntime
 from .infrastructure.event_bus import get_event_bus
-from .metrics import (
-    observe_health_check,
-    record_error,
-    record_gc_cycle,
-    record_provider_stop,
-)
+from .metrics import observe_health_check, record_error, record_gc_cycle, record_provider_stop
 
 logger = logging.getLogger(__name__)
 
@@ -53,9 +44,7 @@ class BackgroundWorker:
         self.interval_s = interval_s
         self.task = task
         self._event_bus = event_bus or get_event_bus()
-        self.thread = threading.Thread(
-            target=self._loop, daemon=True, name=f"worker-{task}"
-        )
+        self.thread = threading.Thread(target=self._loop, daemon=True, name=f"worker-{task}")
         self.running = False
 
     def start(self):
@@ -66,9 +55,7 @@ class BackgroundWorker:
 
         self.running = True
         self.thread.start()
-        logger.info(
-            f"background_worker_started: task={self.task}, interval={self.interval_s}s"
-        )
+        logger.info(f"background_worker_started: task={self.task}, interval={self.interval_s}s")
 
     def stop(self):
         """Stop the background worker thread."""
@@ -116,9 +103,7 @@ class BackgroundWorker:
                         is_healthy = provider.health_check()
                         hc_duration = time.perf_counter() - hc_start
 
-                        consecutive = int(
-                            getattr(provider.health, "consecutive_failures", 0)
-                        )
+                        consecutive = int(getattr(provider.health, "consecutive_failures", 0))
 
                         observe_health_check(
                             provider=provider_id,
@@ -129,9 +114,7 @@ class BackgroundWorker:
                         )
 
                         if not is_healthy and not is_cold:
-                            logger.warning(
-                                f"health_check_unhealthy: provider={provider_id}"
-                            )
+                            logger.warning(f"health_check_unhealthy: provider={provider_id}")
 
                     # Publish any collected events
                     self._publish_events(provider)
@@ -139,8 +122,7 @@ class BackgroundWorker:
                 except Exception as e:
                     record_error("gc", type(e).__name__)
                     logger.error(
-                        f"background_task_failed: provider={provider_id}, "
-                        f"task={self.task}, error={e}",
+                        f"background_task_failed: provider={provider_id}, " f"task={self.task}, error={e}",
                         exc_info=True,
                     )
 

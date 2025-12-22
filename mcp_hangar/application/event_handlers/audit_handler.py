@@ -29,9 +29,7 @@ class AuditRecord:
             "event_id": self.event_id,
             "event_type": self.event_type,
             "occurred_at": (
-                self.occurred_at.isoformat()
-                if isinstance(self.occurred_at, datetime)
-                else str(self.occurred_at)
+                self.occurred_at.isoformat() if isinstance(self.occurred_at, datetime) else str(self.occurred_at)
             ),
             "provider_id": self.provider_id,
             "data": self.data,
@@ -201,6 +199,4 @@ class AuditEventHandler:
         limit: int = 100,
     ) -> List[AuditRecord]:
         """Query audit records."""
-        return self._store.query(
-            provider_id=provider_id, event_type=event_type, since=since, limit=limit
-        )
+        return self._store.query(provider_id=provider_id, event_type=event_type, since=since, limit=limit)

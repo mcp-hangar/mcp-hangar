@@ -183,7 +183,7 @@ class StdioClient:
         request_id = uuid4()
         queue = Queue(maxsize=1)
         pending[request_id] = PendingRequest(request_id, queue, time.time())
-        
+
         write({"id": request_id, "method": method, ...})
         response = queue.get(timeout=timeout)
         return response

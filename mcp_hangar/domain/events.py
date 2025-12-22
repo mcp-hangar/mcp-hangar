@@ -162,3 +162,8 @@ class ProviderIdleDetected(DomainEvent):
 
     def __post_init__(self):
         super().__init__()
+
+
+# Provider Group Events are defined in mcp_hangar.domain.model.provider_group
+# to avoid circular imports. Re-export them here for convenience.
+# Import at runtime only when needed.

@@ -118,9 +118,7 @@ def test_concurrent_stress_multiple_providers():
         mgr = providers[provider_idx]
         for req_idx in range(requests_per_thread):
             try:
-                result = mgr.invoke_tool(
-                    "add", {"a": thread_idx, "b": req_idx}, timeout=15.0
-                )
+                result = mgr.invoke_tool("add", {"a": thread_idx, "b": req_idx}, timeout=15.0)
                 results.append(result)
             except Exception as e:
                 errors.append((provider_idx, thread_idx, req_idx, e))

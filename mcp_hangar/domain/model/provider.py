@@ -217,9 +217,7 @@ class Provider(AggregateRoot):
             return
 
         if new_state not in VALID_TRANSITIONS.get(self._state, set()):
-            raise InvalidStateTransitionError(
-                self.provider_id, str(self._state.value), str(new_state.value)
-            )
+            raise InvalidStateTransitionError(self.provider_id, str(self._state.value), str(new_state.value))
 
         old_state = self._state
         self._state = new_state
@@ -292,204 +290,182 @@ class Provider(AggregateRoot):
         """
         Start provider process (must hold lock).
 
-        Handles subprocess, docker, container (with podman/docker auto-detect), and future modes.
+        Handles subprocess, docker, container modes.
         """
-        from ..services.image_builder import BuildConfig, get_image_builder
-        from ..services.provider_launcher import (
-            ContainerLauncher,
-            DockerLauncher,
-            SubprocessLauncher,
-        )
-
         start_time = time.time()
         self._transition_to(ProviderState.INITIALIZING)
 
-        # Track cold start in progress
-        try:
-            record_cold_start, cold_start_begin, cold_start_end = _get_metrics()
-            cold_start_begin(self.provider_id)
-        except Exception:
-            record_cold_start = cold_start_begin = cold_start_end = None
+        cold_start_tracker = self._begin_cold_start_tracking()
 
         try:
-            # Spawn process based on mode
-            if self._mode == "subprocess":
-                launcher = SubprocessLauncher()
-                client = launcher.launch(self._command, self._env)
-
-            elif self._mode == "docker":
-                # Legacy docker mode (without volumes/build)
-                launcher = DockerLauncher()
-                client = launcher.launch(self._image, self._env)
-
-            elif self._mode in ("container", "podman"):
-                # New unified container mode with full features
-                runtime = "podman" if self._mode == "podman" else "auto"
-
-                # Build image if dockerfile specified
-                image = self._image
-                if self._build and self._build.get("dockerfile"):
-                    builder = get_image_builder(runtime=runtime)
-                    build_config = BuildConfig(
-                        dockerfile=self._build["dockerfile"],
-                        context=self._build.get("context", "."),
-                        tag=self._build.get("tag"),
-                    )
-                    image = builder.build_if_needed(build_config)
-                    logger.info(f"Built image for {self.provider_id}: {image}")
-
-                if not image:
-                    raise ProviderStartError(
-                        self.provider_id,
-                        "Container mode requires 'image' or 'build.dockerfile'",
-                    )
-
-                # Launch container with full config
-                launcher = ContainerLauncher(runtime=runtime)
-                client = launcher.launch(
-                    image=image,
-                    volumes=self._volumes,
-                    env=self._env,
-                    memory_limit=self._resources.get("memory", "512m"),
-                    cpu_limit=self._resources.get("cpu", "1.0"),
-                    network=self._network,
-                    read_only=self._read_only,
-                    user=self._user,
-                )
-
-                # Debug aid for CI failures: log the fully expanded container command
-                # and (if available) the container runtime stderr when the process dies early.
-                try:
-                    if getattr(client, "process", None) is not None:
-                        cmd = getattr(client.process, "args", None)
-                        if isinstance(cmd, (list, tuple)) and cmd:
-                            logger.info(
-                                f"container_run_cmd: {' '.join(str(x) for x in cmd)}"
-                            )
-                except Exception as e:
-                    logger.debug(f"container_run_cmd_log_failed: {e}")
-
-            else:
-                raise ValueError(f"unsupported_mode: {self._mode}")
-
-            # Initialize MCP handshake
-            init_resp = client.call(
-                "initialize",
-                {
-                    "protocolVersion": "2024-11-05",
-                    "capabilities": {},
-                    "clientInfo": {"name": "mcp-registry", "version": "1.0.0"},
-                },
-                timeout=10.0,
-            )
-
-            if "error" in init_resp:
-                error_msg = init_resp["error"].get("message", "unknown")
-
-                # If the provider died before responding, try to surface container stderr
-                # (useful in CI where "reader_died" hides the real docker/podman error).
-                if error_msg == "reader_died":
-                    try:
-                        if getattr(client, "process", None) is not None:
-                            proc = client.process
-                            # Capture any remaining stderr output if it was piped
-                            if getattr(proc, "stderr", None) is not None:
-                                try:
-                                    try:
-                                        err_bytes = proc.stderr.read()
-                                    except Exception:
-                                        err_bytes = None
-                                    if err_bytes:
-                                        err_text = (
-                                            err_bytes
-                                            if isinstance(err_bytes, str)
-                                            else err_bytes.decode(errors="replace")
-                                        )
-                                        err_text = err_text.strip()
-                                        if err_text:
-                                            logger.error(
-                                                f"provider_container_stderr: {err_text}"
-                                            )
-                                except Exception as e:
-                                    logger.debug(
-                                        f"provider_container_stderr_read_failed: {e}"
-                                    )
-
-                            # Also log exit code if available
-                            try:
-                                rc = proc.poll()
-                                logger.error(f"provider_process_exit_code: {rc}")
-                            except Exception as e:
-                                logger.debug(f"provider_process_poll_failed: {e}")
-                    except Exception as e:
-                        logger.debug(f"provider_container_debug_failed: {e}")
-
-                raise ProviderStartError(self.provider_id, f"init_failed: {error_msg}")
-
-            # Discover tools
-            tools_resp = client.call("tools/list", {}, timeout=10.0)
-            if "error" in tools_resp:
-                error_msg = tools_resp["error"].get("message", "unknown")
-                raise ProviderStartError(
-                    self.provider_id, f"tools_list_failed: {error_msg}"
-                )
-
-            tool_list = tools_resp.get("result", {}).get("tools", [])
-            self._tools.update_from_list(tool_list)
-
-            # Success - transition to READY
-            self._client = client
-            self._meta = {
-                "init_result": init_resp.get("result", {}),
-                "tools_count": self._tools.count(),
-                "started_at": time.time(),
-            }
-            self._transition_to(ProviderState.READY)
-            self._health.record_success()
-            self._last_used = time.time()
-
-            # Record cold start duration (critical UX metric)
-            cold_start_duration = time.time() - start_time
-            if record_cold_start and cold_start_end:
-                try:
-                    record_cold_start(self.provider_id, cold_start_duration, self._mode)
-                    cold_start_end(self.provider_id)
-                except Exception as e:
-                    logger.debug(f"Failed to record cold start metric: {e}")
-
-            # Record event
-            startup_duration_ms = cold_start_duration * 1000
-            self._record_event(
-                ProviderStarted(
-                    provider_id=self.provider_id,
-                    mode=self._mode,
-                    tools_count=self._tools.count(),
-                    startup_duration_ms=startup_duration_ms,
-                )
-            )
-
-            logger.info(
-                f"provider_started: {self.provider_id}, mode={self._mode}, tools={self._tools.count()}, cold_start={cold_start_duration:.2f}s"
-            )
+            client = self._create_client()
+            self._perform_mcp_handshake(client)
+            self._finalize_start(client, start_time)
+            self._end_cold_start_tracking(cold_start_tracker, start_time)
 
         except ProviderStartError:
-            # Clear cold start in-progress on failure
-            if cold_start_end:
-                try:
-                    cold_start_end(self.provider_id)
-                except Exception:
-                    pass
+            self._end_cold_start_tracking(cold_start_tracker, None)
             self._handle_start_failure(None)
             raise
         except Exception as e:
-            # Clear cold start in-progress on failure
-            if cold_start_end:
-                try:
-                    cold_start_end(self.provider_id)
-                except Exception:
-                    pass
+            self._end_cold_start_tracking(cold_start_tracker, None)
             self._handle_start_failure(e)
             raise ProviderStartError(self.provider_id, str(e)) from e
+
+    def _begin_cold_start_tracking(self) -> Optional[tuple]:
+        """Begin tracking cold start metrics."""
+        try:
+            record_cold_start, cold_start_begin, cold_start_end = _get_metrics()
+            cold_start_begin(self.provider_id)
+            return (record_cold_start, cold_start_end)
+        except Exception:
+            return None
+
+    def _end_cold_start_tracking(self, tracker: Optional[tuple], start_time: Optional[float]) -> None:
+        """End cold start tracking and record metrics."""
+        if not tracker:
+            return
+        record_cold_start, cold_start_end = tracker
+        try:
+            if start_time:
+                duration = time.time() - start_time
+                record_cold_start(self.provider_id, duration, self._mode)
+            cold_start_end(self.provider_id)
+        except Exception:
+            pass
+
+    def _create_client(self) -> Any:
+        """Create and return the appropriate client based on mode."""
+        from ..services.provider_launcher import get_launcher
+
+        launcher = get_launcher(self._mode)
+        config = self._get_launch_config()
+        return launcher.launch(**config)
+
+    def _get_launch_config(self) -> Dict[str, Any]:
+        """Get launch configuration for the current mode."""
+        if self._mode == "subprocess":
+            return {"command": self._command, "env": self._env}
+
+        if self._mode == "docker":
+            return {"image": self._image, "env": self._env}
+
+        if self._mode in ("container", "podman"):
+            return {
+                "image": self._get_container_image(),
+                "volumes": self._volumes,
+                "env": self._env,
+                "memory_limit": self._resources.get("memory", "512m"),
+                "cpu_limit": self._resources.get("cpu", "1.0"),
+                "network": self._network,
+                "read_only": self._read_only,
+                "user": self._user,
+            }
+
+        raise ValueError(f"unsupported_mode: {self._mode}")
+
+    def _get_container_image(self) -> str:
+        """Get or build container image."""
+        from ..services.image_builder import BuildConfig, get_image_builder
+
+        if self._build and self._build.get("dockerfile"):
+            runtime = "podman" if self._mode == "podman" else "auto"
+            builder = get_image_builder(runtime=runtime)
+            build_config = BuildConfig(
+                dockerfile=self._build["dockerfile"],
+                context=self._build.get("context", "."),
+                tag=self._build.get("tag"),
+            )
+            image = builder.build_if_needed(build_config)
+            logger.info(f"Built image for {self.provider_id}: {image}")
+            return image
+
+        if not self._image:
+            raise ProviderStartError(
+                self.provider_id,
+                "Container mode requires 'image' or 'build.dockerfile'",
+            )
+        return self._image
+
+    def _perform_mcp_handshake(self, client: Any) -> None:
+        """Perform MCP initialize and tools/list handshake."""
+        # Initialize
+        init_resp = client.call(
+            "initialize",
+            {
+                "protocolVersion": "2024-11-05",
+                "capabilities": {},
+                "clientInfo": {"name": "mcp-registry", "version": "1.0.0"},
+            },
+            timeout=10.0,
+        )
+
+        if "error" in init_resp:
+            error_msg = init_resp["error"].get("message", "unknown")
+            self._log_client_error(client, error_msg)
+            raise ProviderStartError(self.provider_id, f"init_failed: {error_msg}")
+
+        # Discover tools
+        tools_resp = client.call("tools/list", {}, timeout=10.0)
+        if "error" in tools_resp:
+            error_msg = tools_resp["error"].get("message", "unknown")
+            raise ProviderStartError(self.provider_id, f"tools_list_failed: {error_msg}")
+
+        tool_list = tools_resp.get("result", {}).get("tools", [])
+        self._tools.update_from_list(tool_list)
+
+    def _log_client_error(self, client: Any, error_msg: str) -> None:
+        """Log detailed error info for debugging (especially in CI)."""
+        if error_msg != "reader_died":
+            return
+
+        proc = getattr(client, "process", None)
+        if not proc:
+            return
+
+        # Try to capture stderr
+        stderr = getattr(proc, "stderr", None)
+        if stderr:
+            try:
+                err_bytes = stderr.read()
+                if err_bytes:
+                    err_text = (err_bytes if isinstance(err_bytes, str) else err_bytes.decode(errors="replace")).strip()
+                    if err_text:
+                        logger.error(f"provider_container_stderr: {err_text}")
+            except Exception:
+                pass
+
+        # Log exit code
+        try:
+            rc = proc.poll()
+            if rc is not None:
+                logger.error(f"provider_process_exit_code: {rc}")
+        except Exception:
+            pass
+
+    def _finalize_start(self, client: Any, start_time: float) -> None:
+        """Finalize successful provider start."""
+        self._client = client
+        self._meta = {
+            "init_result": {},
+            "tools_count": self._tools.count(),
+            "started_at": time.time(),
+        }
+        self._transition_to(ProviderState.READY)
+        self._health.record_success()
+        self._last_used = time.time()
+
+        startup_duration_ms = (time.time() - start_time) * 1000
+        self._record_event(
+            ProviderStarted(
+                provider_id=self.provider_id,
+                mode=self._mode,
+                tools_count=self._tools.count(),
+                startup_duration_ms=startup_duration_ms,
+            )
+        )
+
+        logger.info(f"provider_started: {self.provider_id}, mode={self._mode}, " f"tools={self._tools.count()}")
 
     def _handle_start_failure(self, error: Optional[Exception]) -> None:
         """Handle start failure (must hold lock)."""
@@ -511,10 +487,7 @@ class Provider(AggregateRoot):
             self._state = ProviderState.DEGRADED
             self._increment_version()
 
-            logger.warning(
-                f"provider_degraded: {self.provider_id}, "
-                f"failures={self._health.consecutive_failures}"
-            )
+            logger.warning(f"provider_degraded: {self.provider_id}, " f"failures={self._health.consecutive_failures}")
 
             self._record_event(
                 ProviderDegraded(
@@ -530,9 +503,7 @@ class Provider(AggregateRoot):
 
         logger.error(f"provider_start_failed: {self.provider_id}, error={error_str}")
 
-    def invoke_tool(
-        self, tool_name: str, arguments: Dict[str, Any], timeout: float = 30.0
-    ) -> Dict[str, Any]:
+    def invoke_tool(self, tool_name: str, arguments: Dict[str, Any], timeout: float = 30.0) -> Dict[str, Any]:
         """
         Invoke a tool on this provider.
 
@@ -622,10 +593,7 @@ class Provider(AggregateRoot):
                     )
                 )
 
-                logger.debug(
-                    f"tool_invoked: {correlation_id}, "
-                    f"provider={self.provider_id}, tool={tool_name}"
-                )
+                logger.debug(f"tool_invoked: {correlation_id}, " f"provider={self.provider_id}, tool={tool_name}")
 
                 return result
 
@@ -693,11 +661,7 @@ class Provider(AggregateRoot):
                 duration_ms = (time.time() - start_time) * 1000
                 self._health.record_success()
 
-                self._record_event(
-                    HealthCheckPassed(
-                        provider_id=self.provider_id, duration_ms=duration_ms
-                    )
-                )
+                self._record_event(HealthCheckPassed(provider_id=self.provider_id, duration_ms=duration_ms))
 
                 return True
 
@@ -718,9 +682,7 @@ class Provider(AggregateRoot):
                     self._state = ProviderState.DEGRADED
                     self._increment_version()
 
-                    logger.warning(
-                        f"provider_degraded_by_health_check: {self.provider_id}"
-                    )
+                    logger.warning(f"provider_degraded_by_health_check: {self.provider_id}")
 
                     self._record_event(
                         ProviderDegraded(
@@ -753,9 +715,7 @@ class Provider(AggregateRoot):
                     )
                 )
 
-                logger.info(
-                    f"provider_idle_shutdown: {self.provider_id}, idle={idle_time:.1f}s"
-                )
+                logger.info(f"provider_idle_shutdown: {self.provider_id}, idle={idle_time:.1f}s")
                 self._shutdown_internal(reason="idle")
                 return True
 

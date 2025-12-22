@@ -59,9 +59,7 @@ class HealthStatus(Enum):
         return self.value
 
     @classmethod
-    def from_state(
-        cls, state: ProviderState, consecutive_failures: int = 0
-    ) -> "HealthStatus":
+    def from_state(cls, state: ProviderState, consecutive_failures: int = 0) -> "HealthStatus":
         """Derive health status from provider state and failures."""
         if state == ProviderState.READY:
             if consecutive_failures == 0:
@@ -81,9 +79,40 @@ class ProviderMode(Enum):
     SUBPROCESS = "subprocess"
     DOCKER = "docker"
     REMOTE = "remote"
+    GROUP = "group"  # Provider group with load balancing
 
     def __str__(self) -> str:
         return self.value
+
+
+class LoadBalancerStrategy(Enum):
+    """Load balancing strategy for provider groups."""
+
+    ROUND_ROBIN = "round_robin"
+    WEIGHTED_ROUND_ROBIN = "weighted_round_robin"
+    LEAST_CONNECTIONS = "least_connections"
+    RANDOM = "random"
+    PRIORITY = "priority"  # Always prefer lowest priority member
+
+    def __str__(self) -> str:
+        return self.value
+
+
+class GroupState(Enum):
+    """Provider group lifecycle states."""
+
+    INACTIVE = "inactive"  # No members started
+    PARTIAL = "partial"  # Some members healthy, below min_healthy
+    HEALTHY = "healthy"  # >= min_healthy members ready
+    DEGRADED = "degraded"  # Circuit breaker tripped
+
+    def __str__(self) -> str:
+        return self.value
+
+    @property
+    def can_accept_requests(self) -> bool:
+        """Check if group can accept tool invocation requests."""
+        return self in (GroupState.HEALTHY, GroupState.PARTIAL)
 
 
 # --- Identity Value Objects ---
@@ -107,9 +136,7 @@ class ProviderId:
         if len(value) > self._MAX_LENGTH:
             raise ValueError(f"ProviderId cannot exceed {self._MAX_LENGTH} characters")
         if not self._VALID_PATTERN.match(value):
-            raise ValueError(
-                "ProviderId must contain only alphanumeric characters, hyphens, and underscores"
-            )
+            raise ValueError("ProviderId must contain only alphanumeric characters, hyphens, and underscores")
         self._value = value
 
     @property
@@ -151,9 +178,7 @@ class ToolName:
         if len(value) > self._MAX_LENGTH:
             raise ValueError(f"ToolName cannot exceed {self._MAX_LENGTH} characters")
         if not self._VALID_PATTERN.match(value):
-            raise ValueError(
-                "ToolName must contain only alphanumeric characters, hyphens, underscores, and dots"
-            )
+            raise ValueError("ToolName must contain only alphanumeric characters, hyphens, underscores, and dots")
         self._value = value
 
     @property
@@ -514,9 +539,7 @@ class ProviderConfig:
         try:
             object.__setattr__(self, "mode", ProviderMode(mode))
         except ValueError:
-            raise ValueError(
-                f"Invalid provider mode: {mode}. Must be one of: subprocess, docker, remote"
-            )
+            raise ValueError(f"Invalid provider mode: {mode}. Must be one of: subprocess, docker, remote")
 
         # Validate mode-specific configuration
         resolved_mode = ProviderMode(mode)
@@ -541,15 +564,11 @@ class ProviderConfig:
             object.__setattr__(self, "endpoint", Endpoint(endpoint))
 
         # Environment variables
-        object.__setattr__(
-            self, "env", EnvironmentVariables(env) if env else EnvironmentVariables()
-        )
+        object.__setattr__(self, "env", EnvironmentVariables(env) if env else EnvironmentVariables())
 
         # Timing configuration
         object.__setattr__(self, "idle_ttl", IdleTTL(idle_ttl_s))
-        object.__setattr__(
-            self, "health_check_interval", HealthCheckInterval(health_check_interval_s)
-        )
+        object.__setattr__(self, "health_check_interval", HealthCheckInterval(health_check_interval_s))
         object.__setattr__(
             self,
             "max_consecutive_failures",
@@ -608,9 +627,7 @@ class ToolArguments:
         try:
             size = len(json.dumps(arguments))
             if size > self.MAX_SIZE_BYTES:
-                raise ValueError(
-                    f"Tool arguments exceed maximum size ({size} > {self.MAX_SIZE_BYTES} bytes)"
-                )
+                raise ValueError(f"Tool arguments exceed maximum size ({size} > {self.MAX_SIZE_BYTES} bytes)")
         except (TypeError, ValueError) as e:
             if "size" not in str(e):
                 raise ValueError(f"Tool arguments must be JSON-serializable: {e}")
@@ -619,9 +636,7 @@ class ToolArguments:
     def _validate_structure(self, obj: Any, depth: int = 0) -> None:
         """Validate argument structure and depth."""
         if depth > self.MAX_DEPTH:
-            raise ValueError(
-                f"Tool arguments exceed maximum nesting depth ({self.MAX_DEPTH})"
-            )
+            raise ValueError(f"Tool arguments exceed maximum nesting depth ({self.MAX_DEPTH})")
 
         if isinstance(obj, dict):
             for key, value in obj.items():
@@ -649,3 +664,153 @@ class ToolArguments:
 
     def get(self, key: str, default: Any = None) -> Any:
         return self._arguments.get(key, default)
+
+
+# --- Group-related Value Objects ---
+
+
+class GroupId:
+    """Unique identifier for a provider group.
+
+    Rules:
+    - Same rules as ProviderId
+    - Non-empty string
+    - Alphanumeric, hyphens, underscores only
+    - Max 64 characters
+    """
+
+    _VALID_PATTERN = re.compile(r"^[a-zA-Z0-9_-]+$")
+    _MAX_LENGTH = 64
+
+    def __init__(self, value: str):
+        if not value:
+            raise ValueError("GroupId cannot be empty")
+        if len(value) > self._MAX_LENGTH:
+            raise ValueError(f"GroupId cannot exceed {self._MAX_LENGTH} characters")
+        if not self._VALID_PATTERN.match(value):
+            raise ValueError("GroupId must contain only alphanumeric characters, hyphens, and underscores")
+        self._value = value
+
+    @property
+    def value(self) -> str:
+        return self._value
+
+    def __str__(self) -> str:
+        return self._value
+
+    def __repr__(self) -> str:
+        return f"GroupId('{self._value}')"
+
+    def __eq__(self, other) -> bool:
+        if isinstance(other, str):
+            return self._value == other
+        if not isinstance(other, GroupId):
+            return False
+        return self._value == other._value
+
+    def __hash__(self) -> int:
+        return hash(self._value)
+
+
+class MemberWeight:
+    """Weight for a group member in weighted load balancing.
+
+    Rules:
+    - Positive integer (>= 1)
+    - Max value: 100
+    - Higher weight = more traffic
+    """
+
+    MIN_WEIGHT = 1
+    MAX_WEIGHT = 100
+
+    def __init__(self, value: int = 1):
+        if not isinstance(value, int):
+            raise ValueError("MemberWeight must be an integer")
+        if value < self.MIN_WEIGHT:
+            raise ValueError(f"MemberWeight must be at least {self.MIN_WEIGHT}")
+        if value > self.MAX_WEIGHT:
+            raise ValueError(f"MemberWeight cannot exceed {self.MAX_WEIGHT}")
+        self._value = value
+
+    @property
+    def value(self) -> int:
+        return self._value
+
+    def __int__(self) -> int:
+        return self._value
+
+    def __str__(self) -> str:
+        return str(self._value)
+
+    def __repr__(self) -> str:
+        return f"MemberWeight({self._value})"
+
+    def __eq__(self, other) -> bool:
+        if isinstance(other, int):
+            return self._value == other
+        if not isinstance(other, MemberWeight):
+            return False
+        return self._value == other._value
+
+    def __hash__(self) -> int:
+        return hash(self._value)
+
+    def __lt__(self, other) -> bool:
+        if isinstance(other, int):
+            return self._value < other
+        if isinstance(other, MemberWeight):
+            return self._value < other._value
+        return NotImplemented
+
+
+class MemberPriority:
+    """Priority for a group member in priority-based selection.
+
+    Rules:
+    - Positive integer (>= 1)
+    - Lower value = higher priority (1 is highest)
+    - Max value: 100
+    """
+
+    MIN_PRIORITY = 1
+    MAX_PRIORITY = 100
+
+    def __init__(self, value: int = 1):
+        if not isinstance(value, int):
+            raise ValueError("MemberPriority must be an integer")
+        if value < self.MIN_PRIORITY:
+            raise ValueError(f"MemberPriority must be at least {self.MIN_PRIORITY}")
+        if value > self.MAX_PRIORITY:
+            raise ValueError(f"MemberPriority cannot exceed {self.MAX_PRIORITY}")
+        self._value = value
+
+    @property
+    def value(self) -> int:
+        return self._value
+
+    def __int__(self) -> int:
+        return self._value
+
+    def __str__(self) -> str:
+        return str(self._value)
+
+    def __repr__(self) -> str:
+        return f"MemberPriority({self._value})"
+
+    def __eq__(self, other) -> bool:
+        if isinstance(other, int):
+            return self._value == other
+        if not isinstance(other, MemberPriority):
+            return False
+        return self._value == other._value
+
+    def __hash__(self) -> int:
+        return hash(self._value)
+
+    def __lt__(self, other) -> bool:
+        if isinstance(other, int):
+            return self._value < other
+        if isinstance(other, MemberPriority):
+            return self._value < other._value
+        return NotImplemented

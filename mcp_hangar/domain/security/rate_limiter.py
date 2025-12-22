@@ -147,11 +147,7 @@ class TokenBucket:
         with self._lock:
             self._refill()
             available = int(self.tokens)
-            time_to_full = (
-                (self.capacity - self.tokens) / self.rate
-                if self.tokens < self.capacity
-                else 0
-            )
+            time_to_full = (self.capacity - self.tokens) / self.rate if self.tokens < self.capacity else 0
             return available, time_to_full
 
     def reset(self) -> None:
@@ -249,11 +245,7 @@ class InMemoryRateLimiter(RateLimiter):
 
         # Remove buckets not used in the last cleanup interval
         cutoff = now - self.cleanup_interval
-        keys_to_remove = [
-            key
-            for key, last_used in self._bucket_last_used.items()
-            if last_used < cutoff
-        ]
+        keys_to_remove = [key for key, last_used in self._bucket_last_used.items() if last_used < cutoff]
 
         for key in keys_to_remove:
             self._buckets.pop(key, None)
@@ -268,9 +260,7 @@ class InMemoryRateLimiter(RateLimiter):
             allowed=available > 0,
             remaining=available,
             reset_at=time.time() + time_to_full,
-            retry_after=(
-                None if available > 0 else 1.0 / self.config.requests_per_second
-            ),
+            retry_after=(None if available > 0 else 1.0 / self.config.requests_per_second),
             limit=self.config.burst_size,
         )
 

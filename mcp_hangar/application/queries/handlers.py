@@ -16,13 +16,7 @@ from ...infrastructure.query_bus import (
     QueryBus,
     QueryHandler,
 )
-from ..read_models import (
-    HealthInfo,
-    ProviderDetails,
-    ProviderSummary,
-    SystemMetrics,
-    ToolInfo,
-)
+from ..read_models import HealthInfo, ProviderDetails, ProviderSummary, SystemMetrics, ToolInfo
 
 logger = logging.getLogger(__name__)
 
@@ -201,9 +195,7 @@ class GetSystemMetricsHandler(BaseQueryHandler):
 
         # Calculate overall success rate
         if total_invocations > 0:
-            overall_success_rate = (
-                total_invocations - total_failures
-            ) / total_invocations
+            overall_success_rate = (total_invocations - total_failures) / total_invocations
         else:
             overall_success_rate = 1.0
 

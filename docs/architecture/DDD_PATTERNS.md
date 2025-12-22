@@ -74,13 +74,13 @@ The `Provider` class manages MCP provider lifecycle.
 class Provider(AggregateRoot):
     def ensure_ready(self) -> None:
         """Ensure provider is ready, starting if necessary."""
-        
+
     def invoke_tool(self, tool_name: str, arguments: dict, timeout: float) -> dict:
         """Invoke a tool with proper error handling."""
-        
+
     def health_check(self) -> bool:
         """Perform active health check."""
-        
+
     def shutdown(self) -> None:
         """Gracefully shutdown the provider."""
 ```
@@ -185,10 +185,10 @@ Interface in `mcp_hangar/domain/repository.py`:
 class IProviderRepository(ABC):
     @abstractmethod
     def get(self, provider_id: str) -> Optional[Provider]: ...
-    
+
     @abstractmethod
     def add(self, provider_id: str, provider: Provider) -> None: ...
-    
+
     @abstractmethod
     def get_all(self) -> Dict[str, Provider]: ...
 ```

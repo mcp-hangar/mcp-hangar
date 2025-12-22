@@ -99,9 +99,7 @@ class SecurityEvent:
         """Generate event ID if not provided."""
         if not self.event_id:
             # Generate deterministic ID from content
-            content = (
-                f"{self.event_type.value}:{self.timestamp.isoformat()}:{self.message}"
-            )
+            content = f"{self.event_type.value}:{self.timestamp.isoformat()}:{self.message}"
             self.event_id = hashlib.sha256(content.encode()).hexdigest()[:16]
 
     def to_dict(self) -> Dict[str, Any]:
@@ -430,9 +428,7 @@ class SecurityEventHandler:
 
             # Clean old entries
             cutoff = now - self.TIME_WINDOW_S
-            self._failure_counts[provider_id] = [
-                t for t in self._failure_counts[provider_id] if t > cutoff
-            ]
+            self._failure_counts[provider_id] = [t for t in self._failure_counts[provider_id] if t > cutoff]
 
     def _check_anomalies(self, event: DomainEvent) -> None:
         """Check for anomalous patterns across events."""
