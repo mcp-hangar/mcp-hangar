@@ -5,6 +5,7 @@ import threading
 from mcp_hangar.domain.events import ProviderStopped
 from mcp_hangar.domain.model import Provider, ProviderState
 from mcp_hangar.domain.model.provider import VALID_TRANSITIONS
+from mcp_hangar.domain.value_objects import ProviderMode
 
 
 class TestProviderInitialization:
@@ -19,7 +20,7 @@ class TestProviderInitialization:
         )
 
         assert provider.provider_id == "test-provider"
-        assert provider.mode == "subprocess"
+        assert provider.mode == ProviderMode.SUBPROCESS
         assert provider.state == ProviderState.COLD
 
     def test_create_docker_provider(self):
@@ -27,7 +28,7 @@ class TestProviderInitialization:
         provider = Provider(provider_id="docker-provider", mode="docker", image="test:latest")
 
         assert provider.provider_id == "docker-provider"
-        assert provider.mode == "docker"
+        assert provider.mode == ProviderMode.DOCKER
 
     def test_provider_initial_state(self):
         """Test provider initial state."""
@@ -61,8 +62,8 @@ class TestProviderInitialization:
             max_consecutive_failures=5,
         )
 
-        assert provider._idle_ttl_s == 600
-        assert provider._health_check_interval_s == 120
+        assert provider._idle_ttl.seconds == 600
+        assert provider._health_check_interval.seconds == 120
         assert provider.health.max_consecutive_failures == 5
 
 

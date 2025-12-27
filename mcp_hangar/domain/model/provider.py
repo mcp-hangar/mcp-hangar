@@ -17,6 +17,7 @@ from ..events import (
     ToolInvocationFailed,
     ToolInvocationRequested,
 )
+from ..contracts.metrics_publisher import IMetricsPublisher, NullMetricsPublisher
 from ..exceptions import (
     CannotStartProviderError,
     InvalidStateTransitionError,
@@ -24,17 +25,17 @@ from ..exceptions import (
     ToolInvocationError,
     ToolNotFoundError,
 )
-from ..value_objects import CorrelationId, ProviderId, ProviderState
+from ..value_objects import (
+    CorrelationId,
+    HealthCheckInterval,
+    IdleTTL,
+    ProviderId,
+    ProviderMode,
+    ProviderState,
+)
 from .aggregate import AggregateRoot
 from .health_tracker import HealthTracker
 from .tool_catalog import ToolCatalog, ToolSchema
-
-
-# Metrics imports (lazy to avoid circular imports)
-def _get_metrics():
-    from ...metrics import cold_start_begin, cold_start_end, record_cold_start
-
-    return record_cold_start, cold_start_begin, cold_start_end
 
 
 logger = logging.getLogger(__name__)
@@ -74,13 +75,13 @@ class Provider(AggregateRoot):
     def __init__(
         self,
         provider_id: str,
-        mode: str,
+        mode: str | ProviderMode,  # Accept both string and enum
         command: Optional[List[str]] = None,
         image: Optional[str] = None,
         endpoint: Optional[str] = None,
         env: Optional[Dict[str, str]] = None,
-        idle_ttl_s: int = 300,
-        health_check_interval_s: int = 60,
+        idle_ttl_s: int | IdleTTL = 300,  # Accept both int and value object
+        health_check_interval_s: int | HealthCheckInterval = 60,  # Accept both int and value object
         max_consecutive_failures: int = 3,
         # Container-specific options
         volumes: Optional[List[str]] = None,
@@ -90,21 +91,40 @@ class Provider(AggregateRoot):
         read_only: bool = True,
         user: Optional[str] = None,  # UID:GID or username
         description: Optional[str] = None,  # Description/preprompt for AI models
+        # Dependencies
+        metrics_publisher: Optional[IMetricsPublisher] = None,
     ):
         super().__init__()
 
         # Identity
         self._id = ProviderId(provider_id)
-        self._mode = mode
+
+        # Mode - normalize to ProviderMode enum
+        if isinstance(mode, ProviderMode):
+            self._mode = mode
+        else:
+            # Convert string to ProviderMode enum for consistency
+            self._mode = ProviderMode(mode)
+
         self._description = description
 
-        # Configuration
+        # Configuration - normalize to value objects
         self._command = command
         self._image = image
         self._endpoint = endpoint
         self._env = env or {}
-        self._idle_ttl_s = idle_ttl_s
-        self._health_check_interval_s = health_check_interval_s
+
+        # Idle TTL - normalize to value object
+        if isinstance(idle_ttl_s, IdleTTL):
+            self._idle_ttl = idle_ttl_s
+        else:
+            self._idle_ttl = IdleTTL(idle_ttl_s)
+
+        # Health check interval - normalize to value object
+        if isinstance(health_check_interval_s, HealthCheckInterval):
+            self._health_check_interval = health_check_interval_s
+        else:
+            self._health_check_interval = HealthCheckInterval(health_check_interval_s)
 
         # Container-specific configuration
         self._volumes = volumes or []
@@ -113,6 +133,9 @@ class Provider(AggregateRoot):
         self._network = network
         self._read_only = read_only
         self._user = user
+
+        # Dependencies (Dependency Inversion Principle)
+        self._metrics_publisher = metrics_publisher or NullMetricsPublisher()
 
         # State
         self._state = ProviderState.COLD
@@ -138,9 +161,14 @@ class Provider(AggregateRoot):
         return str(self._id)
 
     @property
-    def mode(self) -> str:
-        """Provider mode (subprocess, docker, remote)."""
+    def mode(self) -> ProviderMode:
+        """Provider mode enum."""
         return self._mode
+
+    @property
+    def mode_str(self) -> str:
+        """Provider mode as string (for backward compatibility)."""
+        return self._mode.value
 
     @property
     def description(self) -> Optional[str]:
@@ -191,7 +219,7 @@ class Provider(AggregateRoot):
                 return False
             if self._last_used == 0:
                 return False
-            return self.idle_time > self._idle_ttl_s
+            return self.idle_time > self._idle_ttl.seconds
 
     @property
     def meta(self) -> Dict[str, Any]:
@@ -295,42 +323,40 @@ class Provider(AggregateRoot):
         start_time = time.time()
         self._transition_to(ProviderState.INITIALIZING)
 
-        cold_start_tracker = self._begin_cold_start_tracking()
+        cold_start_time = self._begin_cold_start_tracking()
 
         try:
             client = self._create_client()
             self._perform_mcp_handshake(client)
             self._finalize_start(client, start_time)
-            self._end_cold_start_tracking(cold_start_tracker, start_time)
+            self._end_cold_start_tracking(cold_start_time, success=True)
 
         except ProviderStartError:
-            self._end_cold_start_tracking(cold_start_tracker, None)
+            self._end_cold_start_tracking(cold_start_time, success=False)
             self._handle_start_failure(None)
             raise
         except Exception as e:
-            self._end_cold_start_tracking(cold_start_tracker, None)
+            self._end_cold_start_tracking(cold_start_time, success=False)
             self._handle_start_failure(e)
             raise ProviderStartError(self.provider_id, str(e)) from e
 
-    def _begin_cold_start_tracking(self) -> Optional[tuple]:
-        """Begin tracking cold start metrics."""
+    def _begin_cold_start_tracking(self) -> Optional[float]:
+        """Begin tracking cold start metrics. Returns start timestamp."""
         try:
-            record_cold_start, cold_start_begin, cold_start_end = _get_metrics()
-            cold_start_begin(self.provider_id)
-            return (record_cold_start, cold_start_end)
+            self._metrics_publisher.begin_cold_start(self.provider_id)
+            return time.time()
         except Exception:
             return None
 
-    def _end_cold_start_tracking(self, tracker: Optional[tuple], start_time: Optional[float]) -> None:
+    def _end_cold_start_tracking(self, start_time: Optional[float], success: bool) -> None:
         """End cold start tracking and record metrics."""
-        if not tracker:
+        if start_time is None:
             return
-        record_cold_start, cold_start_end = tracker
         try:
-            if start_time:
+            if success:
                 duration = time.time() - start_time
-                record_cold_start(self.provider_id, duration, self._mode)
-            cold_start_end(self.provider_id)
+                self._metrics_publisher.record_cold_start(self.provider_id, duration, self._mode.value)
+            self._metrics_publisher.end_cold_start(self.provider_id)
         except Exception:
             pass
 
@@ -338,19 +364,19 @@ class Provider(AggregateRoot):
         """Create and return the appropriate client based on mode."""
         from ..services.provider_launcher import get_launcher
 
-        launcher = get_launcher(self._mode)
+        launcher = get_launcher(self._mode.value)
         config = self._get_launch_config()
         return launcher.launch(**config)
 
     def _get_launch_config(self) -> Dict[str, Any]:
         """Get launch configuration for the current mode."""
-        if self._mode == "subprocess":
+        if self._mode == ProviderMode.SUBPROCESS:
             return {"command": self._command, "env": self._env}
 
-        if self._mode == "docker":
+        if self._mode == ProviderMode.DOCKER:
             return {"image": self._image, "env": self._env}
 
-        if self._mode in ("container", "podman"):
+        if self._mode.value in ("container", "podman"):
             return {
                 "image": self._get_container_image(),
                 "volumes": self._volumes,
@@ -362,14 +388,14 @@ class Provider(AggregateRoot):
                 "user": self._user,
             }
 
-        raise ValueError(f"unsupported_mode: {self._mode}")
+        raise ValueError(f"unsupported_mode: {self._mode.value}")
 
     def _get_container_image(self) -> str:
         """Get or build container image."""
         from ..services.image_builder import BuildConfig, get_image_builder
 
         if self._build and self._build.get("dockerfile"):
-            runtime = "podman" if self._mode == "podman" else "auto"
+            runtime = "podman" if self._mode.value == "podman" else "auto"
             builder = get_image_builder(runtime=runtime)
             build_config = BuildConfig(
                 dockerfile=self._build["dockerfile"],
@@ -459,13 +485,13 @@ class Provider(AggregateRoot):
         self._record_event(
             ProviderStarted(
                 provider_id=self.provider_id,
-                mode=self._mode,
+                mode=self._mode.value,
                 tools_count=self._tools.count(),
                 startup_duration_ms=startup_duration_ms,
             )
         )
 
-        logger.info(f"provider_started: {self.provider_id}, mode={self._mode}, " f"tools={self._tools.count()}")
+        logger.info(f"provider_started: {self.provider_id}, mode={self._mode.value}, tools={self._tools.count()}")
 
     def _handle_start_failure(self, error: Optional[Exception]) -> None:
         """Handle start failure (must hold lock)."""
@@ -706,7 +732,7 @@ class Provider(AggregateRoot):
                 return False
 
             idle_time = time.time() - self._last_used
-            if idle_time > self._idle_ttl_s:
+            if idle_time > self._idle_ttl.seconds:
                 self._record_event(
                     ProviderIdleDetected(
                         provider_id=self.provider_id,
@@ -761,7 +787,7 @@ class Provider(AggregateRoot):
                 "provider": self.provider_id,
                 "state": self._state.value,
                 "alive": self._client is not None and self._client.is_alive(),
-                "mode": self._mode,
+                "mode": self._mode.value,
                 "image_or_command": self._image or self._command,
                 "tools_cached": self._tools.list_names(),
                 "health": self._health.to_dict(),

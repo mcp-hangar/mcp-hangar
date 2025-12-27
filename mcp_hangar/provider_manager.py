@@ -12,9 +12,21 @@ from typing import Any, Dict
 from .domain.model import Provider
 from .domain.value_objects import ProviderState
 from .infrastructure.event_bus import get_event_bus
+from .infrastructure.metrics_publisher import PrometheusMetricsPublisher
 from .models import ProviderConnection, ProviderSpec, ToolSchema
 
 logger = logging.getLogger(__name__)
+
+# Shared metrics publisher instance
+_metrics_publisher = None
+
+
+def _get_metrics_publisher():
+    """Get or create the shared metrics publisher."""
+    global _metrics_publisher
+    if _metrics_publisher is None:
+        _metrics_publisher = PrometheusMetricsPublisher()
+    return _metrics_publisher
 
 
 class ProviderManager:
@@ -45,6 +57,7 @@ class ProviderManager:
             idle_ttl_s=spec.idle_ttl_s,
             health_check_interval_s=spec.health_check_interval_s,
             max_consecutive_failures=spec.max_consecutive_failures,
+            metrics_publisher=_get_metrics_publisher(),
         )
         self._event_bus = event_bus or get_event_bus()
 

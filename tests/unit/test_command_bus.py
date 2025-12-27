@@ -4,17 +4,15 @@ from unittest.mock import Mock
 
 import pytest
 
-from mcp_hangar.infrastructure.command_bus import (
+from mcp_hangar.application.commands import (
     Command,
-    CommandBus,
-    CommandHandler,
-    get_command_bus,
     HealthCheckCommand,
     InvokeToolCommand,
     ShutdownIdleProvidersCommand,
     StartProviderCommand,
     StopProviderCommand,
 )
+from mcp_hangar.infrastructure.command_bus import CommandBus, CommandHandler, get_command_bus
 
 
 class TestCommands:

@@ -7,6 +7,7 @@
 
 A production-grade registry for managing Model Context Protocol (MCP) providers with hot-loading, health monitoring, and automatic garbage collection.
 
+
 ## Features
 
 - **Multiple Transport Modes**: Stdio (default) and HTTP with Streamable HTTP support

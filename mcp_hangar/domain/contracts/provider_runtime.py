@@ -17,7 +17,7 @@ Notes:
 
 from __future__ import annotations
 
-from typing import Any, Dict, Iterable, Protocol, runtime_checkable
+from typing import Any, Dict, Iterable, List, Protocol, runtime_checkable
 
 from ..events import DomainEvent
 
@@ -91,6 +91,10 @@ class SupportsToolInvocation(Protocol):
 
     def invoke_tool(self, tool_name: str, arguments: Dict[str, Any], timeout: float = 30.0) -> Dict[str, Any]:
         """Invoke a tool on the provider."""
+        ...
+
+    def get_tool_names(self) -> List[str]:
+        """Get list of available tool names."""
         ...
 
 

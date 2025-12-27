@@ -32,7 +32,7 @@ from .domain.security.input_validator import (
 )
 from .domain.security.sanitizer import sanitize_log_message
 from .gc import BackgroundWorker
-from .infrastructure.command_bus import InvokeToolCommand, StartProviderCommand, StopProviderCommand
+from .application.commands import InvokeToolCommand, StartProviderCommand, StopProviderCommand
 from .infrastructure.query_bus import GetProviderQuery, GetProviderToolsQuery, ListProvidersQuery
 from .infrastructure.saga_manager import get_saga_manager
 

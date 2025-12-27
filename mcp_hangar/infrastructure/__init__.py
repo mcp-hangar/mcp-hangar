@@ -7,20 +7,12 @@ This package provides infrastructure components for:
 - Event Store: Append-only event persistence
 - Event Sourced Repository: Provider persistence via event sourcing
 - Saga Manager: Long-running business process orchestration
+
+Note: Command classes (StartProviderCommand, etc.) have been moved to
+application.commands to maintain proper layer separation.
 """
 
-from .command_bus import (
-    Command,
-    CommandBus,
-    CommandHandler,
-    get_command_bus,
-    HealthCheckCommand,
-    InvokeToolCommand,
-    reset_command_bus,
-    ShutdownIdleProvidersCommand,
-    StartProviderCommand,
-    StopProviderCommand,
-)
+from .command_bus import CommandBus, CommandHandler, get_command_bus, reset_command_bus
 from .event_bus import EventBus, EventHandler, get_event_bus, reset_event_bus
 from .event_sourced_repository import EventSourcedProviderRepository, ProviderConfigStore
 from .event_store import (
@@ -47,14 +39,8 @@ from .saga_manager import get_saga_manager, Saga, SagaContext, SagaManager, Saga
 
 __all__ = [
     # Command Bus
-    "Command",
     "CommandBus",
     "CommandHandler",
-    "StartProviderCommand",
-    "StopProviderCommand",
-    "InvokeToolCommand",
-    "HealthCheckCommand",
-    "ShutdownIdleProvidersCommand",
     "get_command_bus",
     "reset_command_bus",
     # Event Bus

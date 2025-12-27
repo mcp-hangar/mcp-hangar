@@ -12,6 +12,7 @@ that may not flow through the standard invoke path.
 import logging
 from typing import Callable, Dict, List, Optional, Type, TYPE_CHECKING
 
+from ..commands import Command
 from ...domain.events import (
     DomainEvent,
     HealthCheckFailed,
@@ -20,7 +21,6 @@ from ...domain.events import (
     ProviderStarted,
     ProviderStopped,
 )
-from ...infrastructure.command_bus import Command
 from ...infrastructure.saga_manager import EventTriggeredSaga
 
 if TYPE_CHECKING:

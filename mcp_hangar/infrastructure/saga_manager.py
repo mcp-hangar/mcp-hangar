@@ -10,12 +10,15 @@ from enum import Enum
 import logging
 import threading
 import time
-from typing import Any, Dict, List, Optional, Type
+from typing import TYPE_CHECKING, Any, Dict, List, Optional, Type
 import uuid
 
 from ..domain.events import DomainEvent
-from .command_bus import Command, CommandBus, get_command_bus
+from .command_bus import CommandBus, get_command_bus
 from .event_bus import EventBus, get_event_bus
+
+if TYPE_CHECKING:
+    from ..application.commands import Command
 
 logger = logging.getLogger(__name__)
 
@@ -36,8 +39,8 @@ class SagaStep:
     """A single step in a saga."""
 
     name: str
-    command: Optional[Command] = None
-    compensation_command: Optional[Command] = None
+    command: Optional["Command"] = None
+    compensation_command: Optional["Command"] = None
     completed: bool = False
     compensated: bool = False
     error: Optional[str] = None
@@ -98,8 +101,8 @@ class Saga(ABC):
     def add_step(
         self,
         name: str,
-        command: Optional[Command] = None,
-        compensation_command: Optional[Command] = None,
+        command: Optional["Command"] = None,
+        compensation_command: Optional["Command"] = None,
     ) -> None:
         """Add a step to the saga."""
         self._steps.append(
@@ -162,7 +165,7 @@ class EventTriggeredSaga(ABC):
         pass
 
     @abstractmethod
-    def handle(self, event: DomainEvent) -> List[Command]:
+    def handle(self, event: DomainEvent) -> List["Command"]:
         """
         Handle a domain event and return commands to execute.
 

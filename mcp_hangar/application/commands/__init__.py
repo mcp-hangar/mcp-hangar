@@ -1,5 +1,13 @@
 """Command handlers for CQRS."""
 
+from .commands import (
+    Command,
+    HealthCheckCommand,
+    InvokeToolCommand,
+    ShutdownIdleProvidersCommand,
+    StartProviderCommand,
+    StopProviderCommand,
+)
 from .handlers import (
     HealthCheckHandler,
     InvokeToolHandler,
@@ -10,6 +18,14 @@ from .handlers import (
 )
 
 __all__ = [
+    # Commands
+    "Command",
+    "StartProviderCommand",
+    "StopProviderCommand",
+    "InvokeToolCommand",
+    "HealthCheckCommand",
+    "ShutdownIdleProvidersCommand",
+    # Handlers
     "StartProviderHandler",
     "StopProviderHandler",
     "InvokeToolHandler",

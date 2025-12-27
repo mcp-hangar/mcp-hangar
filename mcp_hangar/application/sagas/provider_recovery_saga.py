@@ -4,8 +4,8 @@ import logging
 import time
 from typing import Dict, List, Optional, Type
 
+from ..commands import Command, StartProviderCommand, StopProviderCommand
 from ...domain.events import DomainEvent, HealthCheckFailed, ProviderDegraded, ProviderStarted, ProviderStopped
-from ...infrastructure.command_bus import Command, StartProviderCommand, StopProviderCommand
 from ...infrastructure.saga_manager import EventTriggeredSaga
 
 logger = logging.getLogger(__name__)
