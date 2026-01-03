@@ -38,6 +38,7 @@ jobs:
 
           cd ../../
           docker build -f docker/Dockerfile.memory -t mcp-memory:latest .
+          docker build -f docker/Dockerfile.filesystem -t mcp-filesystem:latest .
 
       - name: Run fast tests
         env:
@@ -54,7 +55,16 @@ jobs:
           MCP_CI_RELAX_VOLUME_PERMS: "true"
           MCP_CONTAINER_INHERIT_STDERR: "true"
         run: |
-          python -m pytest tests/integration/test_registry_server.py tests/integration/test_real_provider.py -v --tb=short --color=yes
+          python -m pytest tests/integration/ -v --tb=short --color=yes -m "not slow"
+
+      - name: Run slow integration tests (container-based)
+        if: matrix.python-version == '3.11'
+        env:
+          MCP_CONTAINER_RUNTIME: docker
+          MCP_CI_RELAX_VOLUME_PERMS: "true"
+          MCP_CONTAINER_INHERIT_STDERR: "true"
+        run: |
+          python -m pytest tests/integration/ -v --tb=short --color=yes -m slow
 
       - name: Run stress tests
         if: matrix.python-version == '3.11' && github.event_name == 'pull_request'
