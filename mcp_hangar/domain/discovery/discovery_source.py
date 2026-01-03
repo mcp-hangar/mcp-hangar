@@ -20,6 +20,7 @@ class DiscoveryMode(Enum):
     AUTHORITATIVE: Can add AND remove providers based on what's discovered.
                    Use for dynamic environments like K8s where pods come and go.
     """
+
     ADDITIVE = "additive"
     AUTHORITATIVE = "authoritative"
 
@@ -137,11 +138,7 @@ class DiscoverySource(ABC):
         if handler:
             await handler(provider_name)
 
-    async def on_provider_changed(
-        self,
-        old: DiscoveredProvider,
-        new: DiscoveredProvider
-    ) -> None:
+    async def on_provider_changed(self, old: DiscoveredProvider, new: DiscoveredProvider) -> None:
         """Hook called when provider config changes (fingerprint mismatch).
 
         Args:
@@ -193,4 +190,3 @@ class DiscoverySource(ABC):
 
     def __repr__(self) -> str:
         return f"{self.__class__.__name__}(source_type={self.source_type!r}, mode={self.mode!r})"
-

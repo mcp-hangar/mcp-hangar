@@ -36,6 +36,7 @@ logger = logging.getLogger(__name__)
 try:
     import docker
     from docker.errors import DockerException
+
     DOCKER_AVAILABLE = True
 except ImportError:
     DOCKER_AVAILABLE = False
@@ -79,6 +80,7 @@ def find_container_socket() -> Optional[str]:
 
         # macOS: Search in /var/folders for Podman socket
         import glob
+
         for pattern in [
             "/var/folders/*/*/T/podman/podman-machine-default-api.sock",
             "/var/folders/*/*/T/podman/podman-machine-default.sock",
@@ -125,9 +127,7 @@ class DockerDiscoverySource(DiscoverySource):
         super().__init__(mode)
 
         if not DOCKER_AVAILABLE:
-            raise ImportError(
-                "docker package required. Install with: pip install docker"
-            )
+            raise ImportError("docker package required. Install with: pip install docker")
 
         self._socket_path = socket_path
         self._default_ttl = default_ttl
@@ -160,10 +160,7 @@ class DockerDiscoverySource(DiscoverySource):
 
         try:
             # Get all containers with MCP label (including stopped)
-            containers = self._client.containers.list(
-                all=True,
-                filters={"label": f"{self.LABEL_PREFIX}enabled=true"}
-            )
+            containers = self._client.containers.list(all=True, filters={"label": f"{self.LABEL_PREFIX}enabled=true"})
 
             for container in containers:
                 provider = self._parse_container(container)
@@ -192,7 +189,7 @@ class DockerDiscoverySource(DiscoverySource):
         read_only = read_only_str in ("true", "1", "yes")
 
         # Image info
-        image_tags = getattr(container.image, 'tags', []) or []
+        image_tags = getattr(container.image, "tags", []) or []
         image = image_tags[0] if image_tags else container.image.id[:12]
 
         # Build connection info based on mode

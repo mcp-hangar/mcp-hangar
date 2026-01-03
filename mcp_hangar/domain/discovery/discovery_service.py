@@ -30,6 +30,7 @@ class DiscoveryCycleResult:
         duration_ms: Duration of the cycle in milliseconds
         source_results: Results per source
     """
+
     discovered_count: int = 0
     registered_count: int = 0
     updated_count: int = 0
@@ -49,7 +50,7 @@ class DiscoveryCycleResult:
             "quarantined_count": self.quarantined_count,
             "error_count": self.error_count,
             "duration_ms": self.duration_ms,
-            "source_results": self.source_results
+            "source_results": self.source_results,
         }
 
 
@@ -66,6 +67,7 @@ class SourceStatus:
         providers_count: Number of providers from this source
         error_message: Last error message (if any)
     """
+
     source_type: str
     mode: DiscoveryMode
     is_healthy: bool
@@ -83,7 +85,7 @@ class SourceStatus:
             "is_enabled": self.is_enabled,
             "last_discovery": self.last_discovery.isoformat() if self.last_discovery else None,
             "providers_count": self.providers_count,
-            "error_message": self.error_message
+            "error_message": self.error_message,
         }
 
 
@@ -102,11 +104,7 @@ class DiscoveryService:
         - Manage pending and quarantined providers
     """
 
-    def __init__(
-        self,
-        conflict_resolver: Optional[ConflictResolver] = None,
-        auto_register: bool = True
-    ):
+    def __init__(self, conflict_resolver: Optional[ConflictResolver] = None, auto_register: bool = True):
         """Initialize discovery service.
 
         Args:
@@ -142,10 +140,7 @@ class DiscoveryService:
         self._sources[source_type] = source
         self._providers_by_source[source_type] = set()
         self._source_status[source_type] = SourceStatus(
-            source_type=source_type,
-            mode=source.mode,
-            is_healthy=False,
-            is_enabled=source.is_enabled
+            source_type=source_type, mode=source.mode, is_healthy=False, is_enabled=source.is_enabled
         )
 
         logger.info(f"Registered discovery source: {source_type} (mode={source.mode})")
@@ -198,6 +193,7 @@ class DiscoveryService:
             DiscoveryCycleResult with cycle statistics
         """
         import time
+
         start_time = time.perf_counter()
 
         result = DiscoveryCycleResult()
@@ -407,4 +403,3 @@ class DiscoveryService:
                 await source.stop()
             except Exception as e:
                 logger.error(f"Failed to stop source {source.source_type}: {e}")
-

@@ -21,6 +21,7 @@ def _get_kubernetes_source():
     if _kubernetes_source is None:
         try:
             from .kubernetes_source import KubernetesDiscoverySource
+
             _kubernetes_source = KubernetesDiscoverySource
         except ImportError:
             _kubernetes_source = None
@@ -33,6 +34,7 @@ def _get_docker_source():
     if _docker_source is None:
         try:
             from .docker_source import DockerDiscoverySource
+
             _docker_source = DockerDiscoverySource
         except ImportError:
             _docker_source = None
@@ -45,6 +47,7 @@ def _get_filesystem_source():
     if _filesystem_source is None:
         try:
             from .filesystem_source import FilesystemDiscoverySource
+
             _filesystem_source = FilesystemDiscoverySource
         except ImportError:
             _filesystem_source = None
@@ -57,6 +60,7 @@ def _get_entrypoint_source():
     if _entrypoint_source is None:
         try:
             from .entrypoint_source import EntrypointDiscoverySource
+
             _entrypoint_source = EntrypointDiscoverySource
         except ImportError:
             _entrypoint_source = None
@@ -77,32 +81,25 @@ def __getattr__(name: str):
         cls = _get_kubernetes_source()
         if cls is None:
             raise ImportError(
-                "KubernetesDiscoverySource requires 'kubernetes' package. "
-                "Install with: pip install kubernetes"
+                "KubernetesDiscoverySource requires 'kubernetes' package. " "Install with: pip install kubernetes"
             )
         return cls
     elif name == "DockerDiscoverySource":
         cls = _get_docker_source()
         if cls is None:
-            raise ImportError(
-                "DockerDiscoverySource requires 'docker' package. "
-                "Install with: pip install docker"
-            )
+            raise ImportError("DockerDiscoverySource requires 'docker' package. " "Install with: pip install docker")
         return cls
     elif name == "FilesystemDiscoverySource":
         cls = _get_filesystem_source()
         if cls is None:
             raise ImportError(
-                "FilesystemDiscoverySource requires 'pyyaml' package. "
-                "Install with: pip install pyyaml"
+                "FilesystemDiscoverySource requires 'pyyaml' package. " "Install with: pip install pyyaml"
             )
         return cls
     elif name == "EntrypointDiscoverySource":
         cls = _get_entrypoint_source()
         if cls is None:
-            raise ImportError(
-                "EntrypointDiscoverySource requires 'importlib-metadata' package"
-            )
+            raise ImportError("EntrypointDiscoverySource requires 'importlib-metadata' package")
         return cls
     raise AttributeError(f"module {__name__!r} has no attribute {name!r}")
 
@@ -113,4 +110,3 @@ __all__ = [
     "FilesystemDiscoverySource",
     "EntrypointDiscoverySource",
 ]
-

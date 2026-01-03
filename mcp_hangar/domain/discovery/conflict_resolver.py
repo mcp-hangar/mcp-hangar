@@ -20,13 +20,13 @@ logger = logging.getLogger(__name__)
 class ConflictResolution(Enum):
     """Resolution outcome for discovered providers."""
 
-    STATIC_WINS = "static_wins"      # Static config takes precedence
+    STATIC_WINS = "static_wins"  # Static config takes precedence
     DISCOVERY_WINS = "discovery_wins"  # Never used, but defined for clarity
     SOURCE_PRIORITY = "source_priority"  # Higher priority source wins
-    REGISTERED = "registered"        # New provider registered
-    REJECTED = "rejected"            # Provider rejected
-    UNCHANGED = "unchanged"          # Provider unchanged, just update last_seen
-    UPDATED = "updated"              # Provider config changed, updating
+    REGISTERED = "registered"  # New provider registered
+    REJECTED = "rejected"  # Provider rejected
+    UNCHANGED = "unchanged"  # Provider unchanged, just update last_seen
+    UPDATED = "updated"  # Provider config changed, updating
 
     def __str__(self) -> str:
         return self.value
@@ -41,6 +41,7 @@ class ConflictResult:
         winner: The provider that won (if any)
         reason: Human-readable explanation
     """
+
     resolution: ConflictResolution
     winner: Optional[DiscoveredProvider]
     reason: str
@@ -51,7 +52,7 @@ class ConflictResult:
         return self.resolution in (
             ConflictResolution.REGISTERED,
             ConflictResolution.UPDATED,
-            ConflictResolution.SOURCE_PRIORITY
+            ConflictResolution.SOURCE_PRIORITY,
         )
 
     @property
@@ -60,7 +61,7 @@ class ConflictResult:
         return self.resolution in (
             ConflictResolution.UNCHANGED,
             ConflictResolution.REGISTERED,
-            ConflictResolution.UPDATED
+            ConflictResolution.UPDATED,
         )
 
 
@@ -83,11 +84,11 @@ class ConflictResolver:
 
     # Source priority (lower number = higher priority)
     SOURCE_PRIORITY: Dict[str, int] = {
-        "static": 0,      # Always wins
+        "static": 0,  # Always wins
         "kubernetes": 1,
         "docker": 2,
         "filesystem": 3,
-        "entrypoint": 4
+        "entrypoint": 4,
     }
 
     def __init__(self, static_providers: Optional[Set[str]] = None):
@@ -131,21 +132,18 @@ class ConflictResolver:
                 f"Static wins. Discovery from {provider.source_type} ignored."
             )
             return ConflictResult(
-                resolution=ConflictResolution.STATIC_WINS,
-                winner=None,
-                reason="Static configuration takes precedence"
+                resolution=ConflictResolution.STATIC_WINS, winner=None, reason="Static configuration takes precedence"
             )
 
         # Rule 2: Check existing registered providers
         existing = self._registered.get(provider.name)
         if existing:
             # Same source, same fingerprint = no change
-            if (existing.source_type == provider.source_type and
-                existing.fingerprint == provider.fingerprint):
+            if existing.source_type == provider.source_type and existing.fingerprint == provider.fingerprint:
                 return ConflictResult(
                     resolution=ConflictResolution.UNCHANGED,
                     winner=provider.with_updated_seen_time(),
-                    reason="Provider unchanged, updating last_seen"
+                    reason="Provider unchanged, updating last_seen",
                 )
 
             # Same source, different fingerprint = config changed
@@ -155,9 +153,7 @@ class ConflictResolver:
                     f"(fingerprint {existing.fingerprint} -> {provider.fingerprint})"
                 )
                 return ConflictResult(
-                    resolution=ConflictResolution.UPDATED,
-                    winner=provider,
-                    reason="Provider configuration updated"
+                    resolution=ConflictResolution.UPDATED, winner=provider, reason="Provider configuration updated"
                 )
 
             # Different source = check priority
@@ -172,7 +168,7 @@ class ConflictResolver:
                 return ConflictResult(
                     resolution=ConflictResolution.SOURCE_PRIORITY,
                     winner=provider,
-                    reason=f"{provider.source_type} has higher priority than {existing.source_type}"
+                    reason=f"{provider.source_type} has higher priority than {existing.source_type}",
                 )
             else:
                 logger.debug(
@@ -182,15 +178,13 @@ class ConflictResolver:
                 return ConflictResult(
                     resolution=ConflictResolution.REJECTED,
                     winner=None,
-                    reason=f"Existing source {existing.source_type} has higher priority"
+                    reason=f"Existing source {existing.source_type} has higher priority",
                 )
 
         # No conflict - new provider
         logger.info(f"New provider discovered: {provider.name} from {provider.source_type}")
         return ConflictResult(
-            resolution=ConflictResolution.REGISTERED,
-            winner=provider,
-            reason="New provider registered"
+            resolution=ConflictResolution.REGISTERED, winner=provider, reason="New provider registered"
         )
 
     def register(self, provider: DiscoveredProvider) -> None:
@@ -265,4 +259,3 @@ class ConflictResolver:
             Priority number (lower = higher priority)
         """
         return self.SOURCE_PRIORITY.get(source_type, 99)
-

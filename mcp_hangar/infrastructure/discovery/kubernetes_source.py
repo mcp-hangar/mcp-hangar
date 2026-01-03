@@ -26,6 +26,7 @@ logger = logging.getLogger(__name__)
 try:
     from kubernetes import client, config
     from kubernetes.client.rest import ApiException
+
     KUBERNETES_AVAILABLE = True
 except ImportError:
     KUBERNETES_AVAILABLE = False
@@ -54,7 +55,7 @@ class KubernetesDiscoverySource(DiscoverySource):
         label_selector: Optional[str] = None,
         in_cluster: bool = True,
         kubeconfig_path: Optional[str] = None,
-        default_ttl: int = 90
+        default_ttl: int = 90,
     ):
         """Initialize Kubernetes discovery source.
 
@@ -70,8 +71,7 @@ class KubernetesDiscoverySource(DiscoverySource):
 
         if not KUBERNETES_AVAILABLE:
             raise ImportError(
-                "kubernetes package is required for KubernetesDiscoverySource. "
-                "Install with: pip install kubernetes"
+                "kubernetes package is required for KubernetesDiscoverySource. " "Install with: pip install kubernetes"
             )
 
         self.namespaces = namespaces or []
@@ -121,10 +121,7 @@ class KubernetesDiscoverySource(DiscoverySource):
 
         for namespace in namespaces:
             try:
-                pods = self._v1.list_namespaced_pod(
-                    namespace=namespace,
-                    label_selector=self.label_selector
-                )
+                pods = self._v1.list_namespaced_pod(namespace=namespace, label_selector=self.label_selector)
 
                 for pod in pods.items:
                     provider = self._parse_pod(pod, namespace)
@@ -158,17 +155,11 @@ class KubernetesDiscoverySource(DiscoverySource):
             return None
 
         # Extract provider config
-        name = annotations.get(
-            f"{self.ANNOTATION_PREFIX}name",
-            pod.metadata.name
-        )
+        name = annotations.get(f"{self.ANNOTATION_PREFIX}name", pod.metadata.name)
         mode = annotations.get(f"{self.ANNOTATION_PREFIX}mode", "http")
         port = annotations.get(f"{self.ANNOTATION_PREFIX}port", "8080")
         group = annotations.get(f"{self.ANNOTATION_PREFIX}group")
-        health_path = annotations.get(
-            f"{self.ANNOTATION_PREFIX}health-path",
-            "/health"
-        )
+        health_path = annotations.get(f"{self.ANNOTATION_PREFIX}health-path", "/health")
         ttl = int(annotations.get(f"{self.ANNOTATION_PREFIX}ttl", str(self.default_ttl)))
 
         # Get pod IP
@@ -184,11 +175,7 @@ class KubernetesDiscoverySource(DiscoverySource):
             return None
 
         # Build connection info
-        connection_info = {
-            "host": pod_ip,
-            "port": int(port),
-            "health_path": health_path
-        }
+        connection_info = {"host": pod_ip, "port": int(port), "health_path": health_path}
 
         # Handle subprocess mode
         if mode == "subprocess" or mode == "stdio":
@@ -202,12 +189,9 @@ class KubernetesDiscoverySource(DiscoverySource):
             "pod_uid": pod.metadata.uid,
             "group": group,
             "labels": pod.metadata.labels or {},
-            "annotations": {
-                k: v for k, v in annotations.items()
-                if k.startswith(self.ANNOTATION_PREFIX)
-            },
+            "annotations": {k: v for k, v in annotations.items() if k.startswith(self.ANNOTATION_PREFIX)},
             "node_name": pod.spec.node_name if pod.spec else None,
-            "phase": phase
+            "phase": phase,
         }
 
         return DiscoveredProvider.create(
@@ -216,7 +200,7 @@ class KubernetesDiscoverySource(DiscoverySource):
             mode=mode,
             connection_info=connection_info,
             metadata=metadata,
-            ttl_seconds=ttl
+            ttl_seconds=ttl,
         )
 
     async def health_check(self) -> bool:
@@ -256,4 +240,3 @@ class KubernetesDiscoverySource(DiscoverySource):
         self._initialized = False
         self._v1 = None
         logger.info("Kubernetes discovery source stopped")
-

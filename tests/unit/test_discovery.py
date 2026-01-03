@@ -22,7 +22,7 @@ class TestDiscoveredProvider:
             source_type="docker",
             mode="http",
             connection_info={"host": "localhost", "port": 8080},
-            metadata={"env": "test"}
+            metadata={"env": "test"},
         )
 
         assert provider.name == "test-provider"
@@ -53,11 +53,7 @@ class TestDiscoveredProvider:
         """Test TTL expiration check."""
         # Create provider with 1 second TTL
         provider = DiscoveredProvider.create(
-            name="test",
-            source_type="docker",
-            mode="http",
-            connection_info={},
-            ttl_seconds=1
+            name="test", source_type="docker", mode="http", connection_info={}, ttl_seconds=1
         )
 
         assert not provider.is_expired()
@@ -73,7 +69,7 @@ class TestDiscoveredProvider:
             fingerprint="abc123",
             discovered_at=old_time,
             last_seen_at=old_time,
-            ttl_seconds=1
+            ttl_seconds=1,
         )
 
         assert expired_provider.is_expired()
@@ -90,7 +86,7 @@ class TestDiscoveredProvider:
             fingerprint="abc123",
             discovered_at=old_time,
             last_seen_at=old_time,
-            ttl_seconds=90
+            ttl_seconds=90,
         )
 
         updated = provider.with_updated_seen_time()
@@ -138,7 +134,7 @@ class TestDiscoveredProvider:
             source_type="kubernetes",
             mode="sse",
             connection_info={"host": "10.0.0.1", "port": 8080},
-            metadata={"namespace": "default"}
+            metadata={"namespace": "default"},
         )
 
         data = provider.to_dict()
@@ -441,4 +437,3 @@ class TestDiscoveryMode:
 
 if __name__ == "__main__":
     pytest.main([__file__, "-v"])
-

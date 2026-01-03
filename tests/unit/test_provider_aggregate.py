@@ -413,4 +413,3 @@ class TestProviderPredefinedTools:
         assert provider.has_tools is False
         assert provider.tools_predefined is False  # Empty list = no predefined tools
         assert provider.tools.count() == 0
-

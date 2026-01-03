@@ -48,7 +48,7 @@ class DiscoveredProvider:
         mode: str,
         connection_info: Dict[str, Any],
         metadata: Optional[Dict[str, Any]] = None,
-        ttl_seconds: int = 90
+        ttl_seconds: int = 90,
     ) -> "DiscoveredProvider":
         """Factory method with automatic fingerprinting.
 
@@ -64,10 +64,7 @@ class DiscoveredProvider:
             New DiscoveredProvider instance with computed fingerprint
         """
         metadata = metadata or {}
-        fingerprint_data = json.dumps(
-            {"connection_info": connection_info, "metadata": metadata},
-            sort_keys=True
-        )
+        fingerprint_data = json.dumps({"connection_info": connection_info, "metadata": metadata}, sort_keys=True)
         fingerprint = hashlib.sha256(fingerprint_data.encode()).hexdigest()[:16]
         now = datetime.now(timezone.utc)
 
@@ -80,7 +77,7 @@ class DiscoveredProvider:
             fingerprint=fingerprint,
             discovered_at=now,
             last_seen_at=now,
-            ttl_seconds=ttl_seconds
+            ttl_seconds=ttl_seconds,
         )
 
     def is_expired(self) -> bool:
@@ -115,7 +112,7 @@ class DiscoveredProvider:
             fingerprint=self.fingerprint,
             discovered_at=self.discovered_at,
             last_seen_at=datetime.now(timezone.utc),
-            ttl_seconds=self.ttl_seconds
+            ttl_seconds=self.ttl_seconds,
         )
 
     def has_changed(self, other: "DiscoveredProvider") -> bool:
@@ -145,7 +142,7 @@ class DiscoveredProvider:
             "discovered_at": self.discovered_at.isoformat(),
             "last_seen_at": self.last_seen_at.isoformat(),
             "ttl_seconds": self.ttl_seconds,
-            "is_expired": self.is_expired()
+            "is_expired": self.is_expired(),
         }
 
     @classmethod
@@ -175,7 +172,7 @@ class DiscoveredProvider:
             fingerprint=data["fingerprint"],
             discovered_at=discovered_at,
             last_seen_at=last_seen_at,
-            ttl_seconds=data.get("ttl_seconds", 90)
+            ttl_seconds=data.get("ttl_seconds", 90),
         )
 
     def __str__(self) -> str:
@@ -186,4 +183,3 @@ class DiscoveredProvider:
             f"DiscoveredProvider(name={self.name!r}, source_type={self.source_type!r}, "
             f"mode={self.mode!r}, fingerprint={self.fingerprint!r})"
         )
-

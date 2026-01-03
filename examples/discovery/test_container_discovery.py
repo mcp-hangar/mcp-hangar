@@ -118,7 +118,7 @@ async def test_container_mode(runner: ContainerTestRunner):
             "mcp.hangar.name": "test-container-provider",
             "mcp.hangar.mode": "container",
         },
-        command=["sleep", "10"]
+        command=["sleep", "10"],
     )
 
     if not success:
@@ -160,7 +160,7 @@ async def test_http_mode(runner: ContainerTestRunner):
             "mcp.hangar.mode": "http",
             "mcp.hangar.port": "8080",
         },
-        command=["python", "-m", "http.server", "8080"]
+        command=["python", "-m", "http.server", "8080"],
     )
 
     if not success:
@@ -209,7 +209,7 @@ async def test_custom_labels(runner: ContainerTestRunner):
             "mcp.hangar.volumes": "/data:/data,/config:/config",
             "mcp.hangar.ttl": "120",
         },
-        command=["sleep", "10"]
+        command=["sleep", "10"],
     )
 
     if not success:
@@ -231,10 +231,10 @@ async def test_custom_labels(runner: ContainerTestRunner):
         print(f"      TTL: {p.ttl_seconds}s")
 
         return (
-            p.metadata.get("group") == "test-group" and
-            p.connection_info.get("command") == ["python", "-m", "myapp"] and
-            p.connection_info.get("volumes") == ["/data:/data", "/config:/config"] and
-            p.ttl_seconds == 120
+            p.metadata.get("group") == "test-group"
+            and p.connection_info.get("command") == ["python", "-m", "myapp"]
+            and p.connection_info.get("volumes") == ["/data:/data", "/config:/config"]
+            and p.ttl_seconds == 120
         )
     return False
 
@@ -254,7 +254,7 @@ async def test_stopped_container(runner: ContainerTestRunner):
             "mcp.hangar.name": "test-stopped-provider",
             "mcp.hangar.mode": "container",
         },
-        command=["echo", "done"]  # Exits immediately
+        command=["echo", "done"],  # Exits immediately
     )
 
     if not success:
@@ -308,8 +308,7 @@ async def test_no_label_ignored(runner: ContainerTestRunner):
 async def main():
     parser = argparse.ArgumentParser(description="Container Discovery Tests")
     parser.add_argument("--socket", "-s", help="Socket path")
-    parser.add_argument("--runtime", "-r", default="podman",
-                       choices=["podman", "docker"], help="Container runtime")
+    parser.add_argument("--runtime", "-r", default="podman", choices=["podman", "docker"], help="Container runtime")
     parser.add_argument("--test", "-t", help="Run specific test")
     args = parser.parse_args()
 
@@ -370,4 +369,3 @@ async def main():
 if __name__ == "__main__":
     success = asyncio.run(main())
     sys.exit(0 if success else 1)
-

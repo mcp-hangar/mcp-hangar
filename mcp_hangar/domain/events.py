@@ -260,4 +260,3 @@ class DiscoverySourceHealthChanged(DomainEvent):
 
     def __post_init__(self):
         super().__init__()
-

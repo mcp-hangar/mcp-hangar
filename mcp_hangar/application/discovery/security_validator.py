@@ -24,6 +24,7 @@ logger = logging.getLogger(__name__)
 # Optional aiohttp dependency
 try:
     import aiohttp
+
     AIOHTTP_AVAILABLE = True
 except ImportError:
     AIOHTTP_AVAILABLE = False
@@ -59,6 +60,7 @@ class ValidationReport:
         details: Additional details (URLs, errors, etc.)
         duration_ms: Validation duration in milliseconds
     """
+
     result: ValidationResult
     provider: DiscoveredProvider
     reason: str
@@ -76,7 +78,7 @@ class ValidationReport:
             "provider_name": self.provider.name,
             "reason": self.reason,
             "details": self.details,
-            "duration_ms": self.duration_ms
+            "duration_ms": self.duration_ms,
         }
 
 
@@ -94,6 +96,7 @@ class SecurityConfig:
         health_check_timeout_s: Health check timeout in seconds
         quarantine_on_failure: Whether to quarantine failed providers
     """
+
     allowed_namespaces: Set[str] = field(default_factory=set)
     denied_namespaces: Set[str] = field(default_factory=lambda: {"kube-system", "default"})
     require_health_check: bool = True
@@ -114,7 +117,7 @@ class SecurityConfig:
             max_providers_per_source=data.get("max_providers_per_source", 100),
             max_registration_rate=data.get("max_registration_rate", 10),
             health_check_timeout_s=data.get("health_check_timeout_s", 5.0),
-            quarantine_on_failure=data.get("quarantine_on_failure", True)
+            quarantine_on_failure=data.get("quarantine_on_failure", True),
         )
 
 
@@ -199,7 +202,7 @@ class SecurityValidator:
             result=ValidationResult.PASSED,
             provider=provider,
             reason="All validation checks passed",
-            duration_ms=duration_ms
+            duration_ms=duration_ms,
         )
 
     def _validate_source(self, provider: DiscoveredProvider) -> Optional[ValidationReport]:
@@ -221,7 +224,7 @@ class SecurityValidator:
                     result=ValidationResult.FAILED_SOURCE,
                     provider=provider,
                     reason=f"Namespace '{namespace}' is in denied list",
-                    details={"namespace": namespace, "denied_namespaces": list(self.config.denied_namespaces)}
+                    details={"namespace": namespace, "denied_namespaces": list(self.config.denied_namespaces)},
                 )
 
             # If allowed list is specified, check it
@@ -230,7 +233,7 @@ class SecurityValidator:
                     result=ValidationResult.FAILED_SOURCE,
                     provider=provider,
                     reason=f"Namespace '{namespace}' is not in allowed list",
-                    details={"namespace": namespace, "allowed_namespaces": list(self.config.allowed_namespaces)}
+                    details={"namespace": namespace, "allowed_namespaces": list(self.config.allowed_namespaces)},
                 )
 
         return None
@@ -253,10 +256,7 @@ class SecurityValidator:
             self._registration_counts[source] = []
 
         # Clean old entries
-        self._registration_counts[source] = [
-            t for t in self._registration_counts[source]
-            if now - t < window
-        ]
+        self._registration_counts[source] = [t for t in self._registration_counts[source] if now - t < window]
 
         # Check rate
         if len(self._registration_counts[source]) >= self.config.max_registration_rate:
@@ -268,8 +268,8 @@ class SecurityValidator:
                     "source": source,
                     "current_rate": len(self._registration_counts[source]),
                     "max_rate": self.config.max_registration_rate,
-                    "window_seconds": window
-                }
+                    "window_seconds": window,
+                },
             )
 
         # Record this registration attempt
@@ -296,8 +296,8 @@ class SecurityValidator:
                 details={
                     "source": source,
                     "current_count": current_count,
-                    "max_count": self.config.max_providers_per_source
-                }
+                    "max_count": self.config.max_providers_per_source,
+                },
             )
 
         return None
@@ -328,7 +328,7 @@ class SecurityValidator:
                 result=ValidationResult.FAILED_HEALTH,
                 provider=provider,
                 reason="Missing host or port in connection_info",
-                details={"connection_info": provider.connection_info}
+                details={"connection_info": provider.connection_info},
             )
 
         url = f"http://{host}:{port}{health_path}"
@@ -343,7 +343,7 @@ class SecurityValidator:
                             result=ValidationResult.FAILED_HEALTH,
                             provider=provider,
                             reason=f"Health check returned status {response.status}",
-                            details={"url": url, "status": response.status}
+                            details={"url": url, "status": response.status},
                         )
 
         except asyncio.TimeoutError:
@@ -351,14 +351,14 @@ class SecurityValidator:
                 result=ValidationResult.FAILED_HEALTH,
                 provider=provider,
                 reason="Health check timed out",
-                details={"url": url, "timeout": self.config.health_check_timeout_s}
+                details={"url": url, "timeout": self.config.health_check_timeout_s},
             )
         except Exception as e:
             return ValidationReport(
                 result=ValidationResult.FAILED_HEALTH,
                 provider=provider,
                 reason=f"Health check failed: {e}",
-                details={"url": url, "error": str(e)}
+                details={"url": url, "error": str(e)},
             )
 
         return None
@@ -404,4 +404,3 @@ class SecurityValidator:
     def reset_provider_counts(self) -> None:
         """Reset all provider counts."""
         self._provider_counts.clear()
-
