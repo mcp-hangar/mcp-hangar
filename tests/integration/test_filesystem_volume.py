@@ -24,7 +24,7 @@ def test_filesystem_volume():
     print(f"Volumes: {volumes}")
 
     client = launcher.launch(
-        image="localhost/mcp-filesystem:latest", volumes=volumes, read_only=False, network="none", memory_limit="256m"
+        image="mcp-filesystem:latest", volumes=volumes, read_only=False, network="none", memory_limit="256m"
     )
     print("Container started!")
 

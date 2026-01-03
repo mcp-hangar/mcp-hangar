@@ -25,7 +25,7 @@ def test_memory_volume():
     print(f"Volumes: {volumes}")
 
     client = launcher.launch(
-        image="localhost/mcp-memory:latest", volumes=volumes, read_only=False, network="none", memory_limit="256m"
+        image="mcp-memory:latest", volumes=volumes, read_only=False, network="none", memory_limit="256m"
     )
     print("Container started!")
 
