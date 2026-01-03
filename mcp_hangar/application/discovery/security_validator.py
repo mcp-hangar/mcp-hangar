@@ -10,12 +10,12 @@ Validation Pipeline:
     4. Schema Validation - Does it implement MCP correctly?
 """
 
+import asyncio
 from dataclasses import dataclass, field
 from enum import Enum
-from typing import Any, Dict, List, Optional, Set
-import asyncio
-import time
 import logging
+import time
+from typing import Any, Dict, List, Optional, Set
 
 from mcp_hangar.domain.discovery.discovered_provider import DiscoveredProvider
 

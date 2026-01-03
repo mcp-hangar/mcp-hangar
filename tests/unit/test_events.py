@@ -1,7 +1,14 @@
 """Tests for domain events and event bus."""
 
-from mcp_hangar.application.event_handlers import LoggingEventHandler, MetricsEventHandler
-from mcp_hangar.domain.events import ProviderStarted, ProviderStopped, ToolInvocationCompleted
+from mcp_hangar.application.event_handlers import (
+    LoggingEventHandler,
+    MetricsEventHandler,
+)
+from mcp_hangar.domain.events import (
+    ProviderStarted,
+    ProviderStopped,
+    ToolInvocationCompleted,
+)
 from mcp_hangar.infrastructure.event_bus import EventBus, get_event_bus, reset_event_bus
 
 

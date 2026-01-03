@@ -1,15 +1,16 @@
 """Unit tests for Provider Discovery components."""
 
-import pytest
-from datetime import datetime, timezone, timedelta
+from datetime import datetime, timedelta, timezone
 
-from mcp_hangar.domain.discovery.discovered_provider import DiscoveredProvider
-from mcp_hangar.domain.discovery.discovery_source import DiscoveryMode, DiscoverySource
+import pytest
+
 from mcp_hangar.domain.discovery.conflict_resolver import (
-    ConflictResolver,
     ConflictResolution,
+    ConflictResolver,
 )
+from mcp_hangar.domain.discovery.discovered_provider import DiscoveredProvider
 from mcp_hangar.domain.discovery.discovery_service import DiscoveryService
+from mcp_hangar.domain.discovery.discovery_source import DiscoveryMode, DiscoverySource
 
 
 class TestDiscoveredProvider:

@@ -3,7 +3,12 @@
 from mcp_hangar.application.commands import StartProviderCommand, StopProviderCommand
 from mcp_hangar.application.sagas.provider_failover_saga import ProviderFailoverSaga
 from mcp_hangar.application.sagas.provider_recovery_saga import ProviderRecoverySaga
-from mcp_hangar.domain.events import HealthCheckFailed, ProviderDegraded, ProviderStarted, ProviderStopped
+from mcp_hangar.domain.events import (
+    HealthCheckFailed,
+    ProviderDegraded,
+    ProviderStarted,
+    ProviderStopped,
+)
 
 
 class TestProviderRecoverySaga:

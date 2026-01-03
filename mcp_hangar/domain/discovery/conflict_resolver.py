@@ -9,8 +9,8 @@ This ensures explicit operator intent is never overridden by automated discovery
 
 from dataclasses import dataclass
 from enum import Enum
-from typing import Dict, Optional, Set
 import logging
+from typing import Dict, Optional, Set
 
 from .discovered_provider import DiscoveredProvider
 

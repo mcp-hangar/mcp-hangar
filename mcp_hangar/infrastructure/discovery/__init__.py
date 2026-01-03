@@ -69,10 +69,10 @@ def _get_entrypoint_source():
 
 # For type checking and IDE support
 if TYPE_CHECKING:
-    from .kubernetes_source import KubernetesDiscoverySource
     from .docker_source import DockerDiscoverySource
-    from .filesystem_source import FilesystemDiscoverySource
     from .entrypoint_source import EntrypointDiscoverySource
+    from .filesystem_source import FilesystemDiscoverySource
+    from .kubernetes_source import KubernetesDiscoverySource
 
 
 def __getattr__(name: str):

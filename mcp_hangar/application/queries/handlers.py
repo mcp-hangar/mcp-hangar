@@ -16,7 +16,13 @@ from ...infrastructure.query_bus import (
     QueryBus,
     QueryHandler,
 )
-from ..read_models import HealthInfo, ProviderDetails, ProviderSummary, SystemMetrics, ToolInfo
+from ..read_models import (
+    HealthInfo,
+    ProviderDetails,
+    ProviderSummary,
+    SystemMetrics,
+    ToolInfo,
+)
 
 logger = logging.getLogger(__name__)
 

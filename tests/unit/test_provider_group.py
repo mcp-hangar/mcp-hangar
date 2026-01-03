@@ -4,8 +4,17 @@ from unittest.mock import MagicMock
 
 import pytest
 
-from mcp_hangar.domain.model.provider_group import GroupCircuitOpened, GroupCreated, GroupMemberAdded, ProviderGroup
-from mcp_hangar.domain.value_objects import GroupState, LoadBalancerStrategy, ProviderState
+from mcp_hangar.domain.model.provider_group import (
+    GroupCircuitOpened,
+    GroupCreated,
+    GroupMemberAdded,
+    ProviderGroup,
+)
+from mcp_hangar.domain.value_objects import (
+    GroupState,
+    LoadBalancerStrategy,
+    ProviderState,
+)
 
 
 def create_mock_provider(provider_id: str, state: ProviderState = ProviderState.READY):

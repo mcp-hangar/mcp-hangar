@@ -4,23 +4,26 @@ Main coordination component for provider discovery.
 Manages discovery sources, validation, and integration with the registry.
 """
 
+import asyncio
 from dataclasses import dataclass, field
 from datetime import datetime, timezone
-from typing import Any, Callable, Dict, List, Optional, Set, Awaitable
-import asyncio
 import logging
+from typing import Any, Awaitable, Callable, Dict, List, Optional, Set
 
-from mcp_hangar.domain.discovery.discovered_provider import DiscoveredProvider
-from mcp_hangar.domain.discovery.discovery_source import DiscoverySource
-from mcp_hangar.domain.discovery.discovery_service import DiscoveryService, DiscoveryCycleResult
 from mcp_hangar.domain.discovery.conflict_resolver import ConflictResolver
-
-from .security_validator import SecurityValidator, SecurityConfig
-from .lifecycle_manager import DiscoveryLifecycleManager
-from .discovery_metrics import get_discovery_metrics
+from mcp_hangar.domain.discovery.discovered_provider import DiscoveredProvider
+from mcp_hangar.domain.discovery.discovery_service import (
+    DiscoveryCycleResult,
+    DiscoveryService,
+)
+from mcp_hangar.domain.discovery.discovery_source import DiscoverySource
 
 # Import main metrics for unified observability
 from mcp_hangar import metrics as main_metrics
+
+from .discovery_metrics import get_discovery_metrics
+from .lifecycle_manager import DiscoveryLifecycleManager
+from .security_validator import SecurityConfig, SecurityValidator
 
 logger = logging.getLogger(__name__)
 

@@ -111,7 +111,11 @@ async def run_conflict_resolver():
     """Test ConflictResolver."""
     print_header("Test 2: Conflict Resolver")
 
-    from mcp_hangar.domain.discovery import ConflictResolution, ConflictResolver, DiscoveredProvider
+    from mcp_hangar.domain.discovery import (
+        ConflictResolution,
+        ConflictResolver,
+        DiscoveredProvider,
+    )
 
     # Test static always wins
     resolver = ConflictResolver(static_providers={"my-static-provider"})
@@ -224,7 +228,12 @@ async def run_discovery_service():
     """Test DiscoveryService."""
     print_header("Test 4: Discovery Service")
 
-    from mcp_hangar.domain.discovery import DiscoveredProvider, DiscoveryMode, DiscoveryService, DiscoverySource
+    from mcp_hangar.domain.discovery import (
+        DiscoveredProvider,
+        DiscoveryMode,
+        DiscoveryService,
+        DiscoverySource,
+    )
 
     # Create mock source
     class MockSource(DiscoverySource):
@@ -336,7 +345,11 @@ async def run_security_validator():
     """Test SecurityValidator."""
     print_header("Test 6: Security Validator")
 
-    from mcp_hangar.application.discovery import SecurityConfig, SecurityValidator, ValidationResult
+    from mcp_hangar.application.discovery import (
+        SecurityConfig,
+        SecurityValidator,
+        ValidationResult,
+    )
     from mcp_hangar.domain.discovery import DiscoveredProvider
 
     # Create validator with namespace restrictions

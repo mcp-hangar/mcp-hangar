@@ -21,11 +21,11 @@ Label Reference:
     mcp.hangar.volumes: "/data:/data"    # Optional - additional volumes
 """
 
-from typing import List, Optional
 import logging
 import os
-import platform
 from pathlib import Path
+import platform
+from typing import List, Optional
 
 from mcp_hangar.domain.discovery.discovered_provider import DiscoveredProvider
 from mcp_hangar.domain.discovery.discovery_source import DiscoveryMode, DiscoverySource

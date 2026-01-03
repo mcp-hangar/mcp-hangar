@@ -14,8 +14,8 @@ Example Pod Annotations:
     mcp.hangar.io/health-path: "/health"
 """
 
-from typing import List, Optional
 import logging
+from typing import List, Optional
 
 from mcp_hangar.domain.discovery.discovered_provider import DiscoveredProvider
 from mcp_hangar.domain.discovery.discovery_source import DiscoveryMode, DiscoverySource

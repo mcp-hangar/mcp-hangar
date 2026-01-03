@@ -45,7 +45,13 @@ from .domain.value_objects import (
 )
 
 # Legacy imports - for backward compatibility
-from .models import InvocationContext, ProviderConnection, ProviderHealth, ProviderSpec, ToolSchema
+from .models import (
+    InvocationContext,
+    ProviderConnection,
+    ProviderHealth,
+    ProviderSpec,
+    ToolSchema,
+)
 from .provider_manager import ProviderManager
 from .stdio_client import StdioClient
 

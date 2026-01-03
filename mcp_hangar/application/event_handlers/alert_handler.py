@@ -6,7 +6,13 @@ from datetime import datetime, timezone
 import logging
 from typing import Any, Callable, Dict, List, Optional
 
-from ...domain.events import DomainEvent, HealthCheckFailed, ProviderDegraded, ProviderStopped, ToolInvocationFailed
+from ...domain.events import (
+    DomainEvent,
+    HealthCheckFailed,
+    ProviderDegraded,
+    ProviderStopped,
+    ToolInvocationFailed,
+)
 
 logger = logging.getLogger(__name__)
 

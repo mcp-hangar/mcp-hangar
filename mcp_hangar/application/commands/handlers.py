@@ -9,7 +9,12 @@ from ...domain.exceptions import ProviderNotFoundError
 from ...domain.repository import IProviderRepository
 from ...infrastructure.command_bus import CommandBus, CommandHandler
 from ...infrastructure.event_bus import EventBus
-from ...metrics import observe_tool_call, record_error, record_provider_start, record_provider_stop
+from ...metrics import (
+    observe_tool_call,
+    record_error,
+    record_provider_start,
+    record_provider_stop,
+)
 from .commands import (
     HealthCheckCommand,
     InvokeToolCommand,

@@ -18,9 +18,9 @@ Usage:
 
 import argparse
 import asyncio
+from pathlib import Path
 import subprocess
 import sys
-from pathlib import Path
 
 # Add project root
 sys.path.insert(0, str(Path(__file__).parent.parent.parent))

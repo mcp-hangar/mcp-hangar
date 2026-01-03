@@ -5,9 +5,9 @@ Tracks discovery cycles, registrations, conflicts, and validation times.
 """
 
 from functools import wraps
+import logging
 import time
 from typing import Callable
-import logging
 
 logger = logging.getLogger(__name__)
 

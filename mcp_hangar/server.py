@@ -17,7 +17,12 @@ from .application.commands import (
     StopProviderCommand,
 )
 from .application.discovery import DiscoveryConfig, DiscoveryOrchestrator
-from .application.event_handlers import AlertEventHandler, AuditEventHandler, LoggingEventHandler, MetricsEventHandler
+from .application.event_handlers import (
+    AlertEventHandler,
+    AuditEventHandler,
+    LoggingEventHandler,
+    MetricsEventHandler,
+)
 from .application.mcp.tooling import (
     chain_validators,
     key_global,
@@ -38,7 +43,11 @@ from .domain.security.input_validator import (
 )
 from .domain.security.sanitizer import sanitize_log_message
 from .gc import BackgroundWorker
-from .infrastructure.query_bus import GetProviderQuery, GetProviderToolsQuery, ListProvidersQuery
+from .infrastructure.query_bus import (
+    GetProviderQuery,
+    GetProviderToolsQuery,
+    ListProvidersQuery,
+)
 from .infrastructure.saga_manager import get_saga_manager
 
 

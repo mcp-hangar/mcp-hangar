@@ -1,7 +1,13 @@
 """Domain model - Aggregates and entities."""
 
 # Re-export ProviderState from value_objects for convenience
-from ..value_objects import GroupState, LoadBalancerStrategy, MemberPriority, MemberWeight, ProviderState
+from ..value_objects import (
+    GroupState,
+    LoadBalancerStrategy,
+    MemberPriority,
+    MemberWeight,
+    ProviderState,
+)
 from .aggregate import AggregateRoot
 from .circuit_breaker import CircuitBreaker, CircuitBreakerConfig, CircuitState
 from .event_sourced_provider import EventSourcedProvider, ProviderSnapshot
