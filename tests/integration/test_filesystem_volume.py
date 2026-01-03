@@ -2,10 +2,14 @@
 """Test filesystem volume persistence."""
 from pathlib import Path
 import sys
+
+import pytest
+
 sys.path.insert(0, str(Path(__file__).parent.parent.parent))
 
 from mcp_hangar.domain.services.provider_launcher import ContainerLauncher
 
+@pytest.mark.slow
 def test_filesystem_volume():
     data_dir = Path('./data/filesystem').absolute()
     data_dir.mkdir(parents=True, exist_ok=True)
