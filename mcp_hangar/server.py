@@ -3,34 +3,27 @@
 import json
 import logging
 import os
-import sys
 from pathlib import Path
+import sys
 from typing import Any, Dict, List, Optional
 
-import yaml
 from mcp.server.fastmcp import FastMCP
+import yaml
 
 from .application.commands import (
     InvokeToolCommand,
+    register_all_handlers as register_command_handlers,
     StartProviderCommand,
     StopProviderCommand,
 )
-from .application.commands import (
-    register_all_handlers as register_command_handlers,
-)
 from .application.discovery import DiscoveryConfig, DiscoveryOrchestrator
-from .application.event_handlers import (
-    AlertEventHandler,
-    AuditEventHandler,
-    LoggingEventHandler,
-    MetricsEventHandler,
-)
+from .application.event_handlers import AlertEventHandler, AuditEventHandler, LoggingEventHandler, MetricsEventHandler
 from .application.mcp.tooling import (
-    ToolErrorPayload,
     chain_validators,
     key_global,
     key_registry_invoke,
     mcp_tool_wrapper,
+    ToolErrorPayload,
 )
 from .application.queries import register_all_handlers as register_query_handlers
 from .application.sagas import GroupRebalanceSaga
@@ -45,11 +38,7 @@ from .domain.security.input_validator import (
 )
 from .domain.security.sanitizer import sanitize_log_message
 from .gc import BackgroundWorker
-from .infrastructure.query_bus import (
-    GetProviderQuery,
-    GetProviderToolsQuery,
-    ListProvidersQuery,
-)
+from .infrastructure.query_bus import GetProviderQuery, GetProviderToolsQuery, ListProvidersQuery
 from .infrastructure.saga_manager import get_saga_manager
 
 
@@ -652,11 +641,13 @@ def registry_discover() -> dict:
         return {"error": "Discovery not configured. Enable discovery in config.yaml"}
 
     import asyncio
+
     try:
         loop = asyncio.get_event_loop()
         if loop.is_running():
             # If we're in an async context, create a new task
             import concurrent.futures
+
             with concurrent.futures.ThreadPoolExecutor() as executor:
                 future = executor.submit(asyncio.run, _DISCOVERY_ORCHESTRATOR.trigger_discovery())
                 result = future.result(timeout=60)
@@ -764,10 +755,12 @@ def registry_approve(provider: str) -> dict:
         return {"error": "Discovery not configured. Enable discovery in config.yaml"}
 
     import asyncio
+
     try:
         loop = asyncio.get_event_loop()
         if loop.is_running():
             import concurrent.futures
+
             with concurrent.futures.ThreadPoolExecutor() as executor:
                 future = executor.submit(asyncio.run, _DISCOVERY_ORCHESTRATOR.approve_provider(provider))
                 result = future.result(timeout=60)
@@ -802,10 +795,12 @@ def registry_sources() -> dict:
         return {"error": "Discovery not configured. Enable discovery in config.yaml"}
 
     import asyncio
+
     try:
         loop = asyncio.get_event_loop()
         if loop.is_running():
             import concurrent.futures
+
             with concurrent.futures.ThreadPoolExecutor() as executor:
                 future = executor.submit(asyncio.run, _DISCOVERY_ORCHESTRATOR.get_sources_status())
                 sources = future.result(timeout=30)
@@ -857,7 +852,7 @@ def registry_metrics(format: str = "summary") -> dict:
         pid = provider.provider_id
         result["providers"][pid] = {
             "state": str(provider.state),
-            "mode": provider._mode.value if hasattr(provider, '_mode') else "unknown",
+            "mode": provider._mode.value if hasattr(provider, "_mode") else "unknown",
             "tools_count": len(provider.tools) if provider.tools else 0,
             "invocations": 0,
             "errors": 0,
@@ -869,7 +864,7 @@ def registry_metrics(format: str = "summary") -> dict:
         try:
             # Get samples based on collector type
             samples = []
-            if hasattr(collector, 'collect'):
+            if hasattr(collector, "collect"):
                 collected = collector.collect()
                 # Handle different return types
                 if isinstance(collected, list):
@@ -879,12 +874,12 @@ def registry_metrics(format: str = "summary") -> dict:
                     for item in collected:
                         if isinstance(item, list):
                             samples.extend(item)
-                        elif hasattr(item, 'labels'):
+                        elif hasattr(item, "labels"):
                             samples.append(item)
 
             for sample in samples:
                 # Skip if not a proper sample
-                if not hasattr(sample, 'labels') or not hasattr(sample, 'value'):
+                if not hasattr(sample, "labels") or not hasattr(sample, "value"):
                     continue
 
                 labels = sample.labels or {}
@@ -924,9 +919,8 @@ def registry_metrics(format: str = "summary") -> dict:
                 if "error" in name.lower():
                     error_type = labels.get("error_type", labels.get("type", name))
                     result["errors"][error_type] = result["errors"].get(error_type, 0) + int(value)
-        except Exception as e:
+        except Exception:
             # Skip problematic collectors
-            logger.debug(f"Skipping collector {name}: {e}")
             continue
 
     # Group metrics
@@ -954,12 +948,11 @@ def registry_metrics(format: str = "summary") -> dict:
     # Summary format - just the important stuff
     return {
         "summary": result["summary"],
-        "providers": {k: {"state": v["state"], "invocations": v["invocations"]}
-                      for k, v in result["providers"].items()},
+        "providers": {
+            k: {"state": v["state"], "invocations": v["invocations"]} for k, v in result["providers"].items()
+        },
         "groups": result["groups"],
-        "top_tools": dict(sorted(result["tool_calls"].items(),
-                                  key=lambda x: x[1].get("count", 0),
-                                  reverse=True)[:10]),
+        "top_tools": dict(sorted(result["tool_calls"].items(), key=lambda x: x[1].get("count", 0), reverse=True)[:10]),
         "discovery": result["discovery"],
     }
 
@@ -1134,12 +1127,14 @@ def _load_provider_config(provider_id: str, spec_dict: Dict[str, Any], logger: l
     if tools_config:
         tools = []
         for tool_spec in tools_config:
-            tools.append({
-                "name": tool_spec.get("name"),
-                "description": tool_spec.get("description", ""),
-                "inputSchema": tool_spec.get("inputSchema", tool_spec.get("input_schema", {})),
-                "outputSchema": tool_spec.get("outputSchema", tool_spec.get("output_schema")),
-            })
+            tools.append(
+                {
+                    "name": tool_spec.get("name"),
+                    "description": tool_spec.get("description", ""),
+                    "inputSchema": tool_spec.get("inputSchema", tool_spec.get("input_schema", {})),
+                    "outputSchema": tool_spec.get("outputSchema", tool_spec.get("output_schema")),
+                }
+            )
 
     provider = Provider(
         provider_id=provider_id,
@@ -1268,10 +1263,7 @@ async def _init_discovery(config: Dict[str, Any], logger: logging.Logger) -> Non
     orchestrator_config = DiscoveryConfig.from_dict(discovery_config)
 
     # Create orchestrator
-    _DISCOVERY_ORCHESTRATOR = DiscoveryOrchestrator(
-        config=orchestrator_config,
-        static_providers=static_providers
-    )
+    _DISCOVERY_ORCHESTRATOR = DiscoveryOrchestrator(config=orchestrator_config, static_providers=static_providers)
 
     # Register discovery sources based on config
     sources_config = discovery_config.get("sources", [])
@@ -1290,8 +1282,6 @@ async def _init_discovery(config: Dict[str, Any], logger: logging.Logger) -> Non
     async def on_register(provider):
         """Callback when discovery wants to register a provider."""
         try:
-            # Create Provider from discovered info
-            from .domain.discovery import DiscoveredProvider
 
             conn_info = provider.connection_info
             mode = provider.mode
@@ -1419,6 +1409,7 @@ def _create_discovery_source(source_type: str, config: Dict[str, Any], logger: l
 
     if source_type == "kubernetes":
         from .infrastructure.discovery import KubernetesDiscoverySource
+
         return KubernetesDiscoverySource(
             mode=mode,
             namespaces=config.get("namespaces"),
@@ -1427,12 +1418,14 @@ def _create_discovery_source(source_type: str, config: Dict[str, Any], logger: l
         )
     elif source_type == "docker":
         from .infrastructure.discovery import DockerDiscoverySource
+
         return DockerDiscoverySource(
             mode=mode,
             socket_path=config.get("socket_path"),
         )
     elif source_type == "filesystem":
         from .infrastructure.discovery import FilesystemDiscoverySource
+
         # Resolve relative paths against current working directory
         path = config.get("path", "/etc/mcp-hangar/providers.d/")
         resolved_path = Path(path)
@@ -1447,6 +1440,7 @@ def _create_discovery_source(source_type: str, config: Dict[str, Any], logger: l
         )
     elif source_type == "entrypoint":
         from .infrastructure.discovery import EntrypointDiscoverySource
+
         return EntrypointDiscoverySource(
             mode=mode,
             group=config.get("group", "mcp.providers"),
@@ -1582,6 +1576,7 @@ def main():
 
     # Initialize discovery if enabled
     import asyncio
+
     try:
         asyncio.get_event_loop().run_until_complete(_init_discovery(full_config, logger))
     except RuntimeError:

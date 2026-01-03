@@ -7,6 +7,8 @@ from pathlib import Path
 import sys
 import time
 
+import pytest
+
 # Add registry to path
 sys.path.insert(0, str(Path(__file__).parent))
 
@@ -105,6 +107,7 @@ def _run_provider_check(
             print(f"   ⚠️  Error stopping provider: {e}")
 
 
+@pytest.mark.slow
 def test_filesystem():
     """Test filesystem provider with read-only home mount."""
     # Create a test file in home directory
@@ -146,6 +149,7 @@ def test_filesystem():
     return None
 
 
+@pytest.mark.slow
 def test_memory():
     """Test memory provider with write access."""
     # Ensure data directory exists
@@ -176,6 +180,7 @@ def test_memory():
     _run_provider_check("memory", config, "create_entities", test_args)
 
 
+@pytest.mark.slow
 def test_fetch():
     """Test fetch provider with network access."""
     config = {
@@ -193,6 +198,7 @@ def test_fetch():
     _run_provider_check("fetch", config, "imageFetch", test_args)
 
 
+@pytest.mark.slow
 def test_math():
     """Test math provider (Python-based)."""
     config = {

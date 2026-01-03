@@ -10,8 +10,8 @@ Example pyproject.toml:
     my_provider = "my_package.mcp_server:create_server"
 """
 
-from typing import Any, Dict, List, Optional
 import logging
+from typing import Any, Dict, List, Optional
 
 from mcp_hangar.domain.discovery.discovered_provider import DiscoveredProvider
 from mcp_hangar.domain.discovery.discovery_source import DiscoveryMode, DiscoverySource
@@ -21,10 +21,12 @@ logger = logging.getLogger(__name__)
 # Import metadata handling
 try:
     from importlib.metadata import entry_points, EntryPoint
+
     METADATA_AVAILABLE = True
 except ImportError:
     try:
         from importlib_metadata import entry_points, EntryPoint
+
         METADATA_AVAILABLE = True
     except ImportError:
         METADATA_AVAILABLE = False
@@ -59,12 +61,7 @@ class EntrypointDiscoverySource(DiscoverySource):
 
     DEFAULT_GROUP = "mcp.providers"
 
-    def __init__(
-        self,
-        group: str = DEFAULT_GROUP,
-        mode: DiscoveryMode = DiscoveryMode.ADDITIVE,
-        default_ttl: int = 90
-    ):
+    def __init__(self, group: str = DEFAULT_GROUP, mode: DiscoveryMode = DiscoveryMode.ADDITIVE, default_ttl: int = 90):
         """Initialize entrypoint discovery source.
 
         Args:
@@ -156,11 +153,7 @@ class EntrypointDiscoverySource(DiscoverySource):
             logger.error(f"Error loading entry point {ep.name}: {e}")
             return None
 
-    def _build_provider(
-        self,
-        ep: EntryPoint,
-        config: Optional[Dict[str, Any]]
-    ) -> DiscoveredProvider:
+    def _build_provider(self, ep: EntryPoint, config: Optional[Dict[str, Any]]) -> DiscoveredProvider:
         """Build provider from entry point and optional config.
 
         Args:
@@ -208,7 +201,7 @@ class EntrypointDiscoverySource(DiscoverySource):
             "entrypoint_name": ep.name,
             "entrypoint_value": ep.value,
             "entrypoint_group": self.group,
-            **config.get("metadata", {})
+            **config.get("metadata", {}),
         }
 
         # Add package info if available
@@ -224,7 +217,7 @@ class EntrypointDiscoverySource(DiscoverySource):
             mode=mode,
             connection_info=connection_info,
             metadata=metadata,
-            ttl_seconds=ttl
+            ttl_seconds=ttl,
         )
 
     async def health_check(self) -> bool:
@@ -235,7 +228,7 @@ class EntrypointDiscoverySource(DiscoverySource):
         """
         try:
             # Just check that we can access entry_points
-            eps = entry_points()
+            entry_points()
             return True
         except Exception as e:
             logger.warning(f"Entrypoint health check failed: {e}")
@@ -248,4 +241,3 @@ class EntrypointDiscoverySource(DiscoverySource):
     async def stop(self) -> None:
         """Stop the entrypoint discovery source."""
         logger.info("Entrypoint discovery source stopped")
-

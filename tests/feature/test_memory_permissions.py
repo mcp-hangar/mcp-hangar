@@ -6,6 +6,8 @@ import logging
 from pathlib import Path
 import sys
 
+import pytest
+
 # Add registry to path
 sys.path.insert(0, str(Path(__file__).parent))
 
@@ -15,6 +17,7 @@ logging.basicConfig(level=logging.INFO, format="%(levelname)s: %(message)s")
 logger = logging.getLogger(__name__)
 
 
+@pytest.mark.slow
 def test_memory_container() -> None:
     """Test memory provider in container mode with volume mount."""
 

@@ -24,10 +24,10 @@ Example Provider File:
       version: "1.2.0"
 """
 
+import asyncio
+import logging
 from pathlib import Path
 from typing import Any, Dict, List, Optional
-import logging
-import asyncio
 
 from mcp_hangar.domain.discovery.discovered_provider import DiscoveredProvider
 from mcp_hangar.domain.discovery.discovery_source import DiscoveryMode, DiscoverySource
@@ -37,14 +37,16 @@ logger = logging.getLogger(__name__)
 # Optional dependencies
 try:
     import yaml
+
     YAML_AVAILABLE = True
 except ImportError:
     YAML_AVAILABLE = False
     logger.debug("PyYAML package not installed, FilesystemDiscoverySource unavailable")
 
 try:
+    from watchdog.events import FileSystemEventHandler
     from watchdog.observers import Observer
-    from watchdog.events import FileSystemEventHandler, FileModifiedEvent, FileCreatedEvent, FileDeletedEvent
+
     WATCHDOG_AVAILABLE = True
 except ImportError:
     WATCHDOG_AVAILABLE = False
@@ -81,7 +83,7 @@ class FilesystemDiscoverySource(DiscoverySource):
         pattern: str = DEFAULT_PATTERN,
         mode: DiscoveryMode = DiscoveryMode.ADDITIVE,
         watch: bool = True,
-        default_ttl: int = 90
+        default_ttl: int = 90,
     ):
         """Initialize filesystem discovery source.
 
@@ -96,8 +98,7 @@ class FilesystemDiscoverySource(DiscoverySource):
 
         if not YAML_AVAILABLE:
             raise ImportError(
-                "PyYAML package is required for FilesystemDiscoverySource. "
-                "Install with: pip install pyyaml"
+                "PyYAML package is required for FilesystemDiscoverySource. " "Install with: pip install pyyaml"
             )
 
         self.path = Path(path or self.DEFAULT_PATH)
@@ -202,11 +203,7 @@ class FilesystemDiscoverySource(DiscoverySource):
         connection_info = self._parse_connection(connection, mode)
 
         # Parse metadata
-        metadata = {
-            "file_path": str(file_path),
-            "file_name": file_path.name,
-            **data.get("metadata", {})
-        }
+        metadata = {"file_path": str(file_path), "file_name": file_path.name, **data.get("metadata", {})}
 
         return DiscoveredProvider.create(
             name=name,
@@ -214,7 +211,7 @@ class FilesystemDiscoverySource(DiscoverySource):
             mode=mode,
             connection_info=connection_info,
             metadata=metadata,
-            ttl_seconds=ttl
+            ttl_seconds=ttl,
         )
 
     def _parse_connection(self, connection: Dict[str, Any], mode: str) -> Dict[str, Any]:
@@ -273,7 +270,7 @@ class FilesystemDiscoverySource(DiscoverySource):
     async def start(self) -> None:
         """Start the filesystem discovery source and file watcher."""
         if not self.watch or not WATCHDOG_AVAILABLE:
-            logger.info(f"Filesystem discovery source started (watching disabled)")
+            logger.info("Filesystem discovery source started (watching disabled)")
             return
 
         if not self.path.exists():
@@ -283,11 +280,7 @@ class FilesystemDiscoverySource(DiscoverySource):
         try:
             self._event_handler = _FileChangeHandler(self)
             self._observer = Observer()
-            self._observer.schedule(
-                self._event_handler,
-                str(self.path),
-                recursive=False
-            )
+            self._observer.schedule(self._event_handler, str(self.path), recursive=False)
             self._observer.start()
             logger.info(f"Filesystem discovery source started (watching {self.path})")
         except Exception as e:
@@ -314,7 +307,7 @@ class FilesystemDiscoverySource(DiscoverySource):
             file_path: Changed file path
             event_type: Type of change (created, modified, deleted)
         """
-        if not file_path.suffix in (".yaml", ".yml"):
+        if file_path.suffix not in (".yaml", ".yml"):
             return
 
         if event_type == "deleted":
@@ -341,6 +334,7 @@ class FilesystemDiscoverySource(DiscoverySource):
 
 # Only define _FileChangeHandler when watchdog is available
 if WATCHDOG_AVAILABLE:
+
     class _FileChangeHandler(FileSystemEventHandler):
         """Watchdog event handler for file changes."""
 
@@ -366,21 +360,15 @@ if WATCHDOG_AVAILABLE:
 
         def on_created(self, event):
             if not event.is_directory:
-                self._schedule_async(
-                    self.source._handle_file_change(Path(event.src_path), "created")
-                )
+                self._schedule_async(self.source._handle_file_change(Path(event.src_path), "created"))
 
         def on_modified(self, event):
             if not event.is_directory:
-                self._schedule_async(
-                    self.source._handle_file_change(Path(event.src_path), "modified")
-                )
+                self._schedule_async(self.source._handle_file_change(Path(event.src_path), "modified"))
 
         def on_deleted(self, event):
             if not event.is_directory:
-                self._schedule_async(
-                    self.source._handle_file_change(Path(event.src_path), "deleted")
-                )
+                self._schedule_async(self.source._handle_file_change(Path(event.src_path), "deleted"))
 
     # Make handler available when watchdog is installed
     FileChangeHandler = _FileChangeHandler
@@ -388,4 +376,3 @@ else:
     # Stub for when watchdog is not available
     _FileChangeHandler = None
     FileChangeHandler = None
-

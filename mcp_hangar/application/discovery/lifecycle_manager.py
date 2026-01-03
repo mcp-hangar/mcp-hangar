@@ -4,10 +4,10 @@ Manages the lifecycle of discovered providers including TTL tracking,
 quarantine management, and graceful deregistration.
 """
 
-from datetime import datetime, timezone
-from typing import Dict, List, Optional, Set, Callable, Awaitable
 import asyncio
+from datetime import datetime, timezone
 import logging
+from typing import Awaitable, Callable, Dict, List, Optional, Set
 
 from mcp_hangar.domain.discovery.discovered_provider import DiscoveredProvider
 
@@ -40,7 +40,7 @@ class DiscoveryLifecycleManager:
         default_ttl: int = 90,
         check_interval: int = 10,
         drain_timeout: int = 30,
-        on_deregister: Optional[RegistryCallback] = None
+        on_deregister: Optional[RegistryCallback] = None,
     ):
         """Initialize lifecycle manager.
 
@@ -110,14 +110,12 @@ class DiscoveryLifecycleManager:
             List of expired provider names
         """
         expired = []
-        now = datetime.now(timezone.utc)
 
         for name, provider in list(self._providers.items()):
             if provider.is_expired():
                 expired.append(name)
                 logger.info(
-                    f"Provider '{name}' expired (last seen: {provider.last_seen_at}). "
-                    f"Starting deregistration."
+                    f"Provider '{name}' expired (last seen: {provider.last_seen_at}). " f"Starting deregistration."
                 )
                 await self._deregister(name, "ttl_expired")
 
@@ -286,11 +284,7 @@ class DiscoveryLifecycleManager:
         Returns:
             Dictionary with counts
         """
-        return {
-            "active": len(self._providers),
-            "quarantined": len(self._quarantine),
-            "draining": len(self._draining)
-        }
+        return {"active": len(self._providers), "quarantined": len(self._quarantine), "draining": len(self._draining)}
 
     def get_expiring_soon(self, threshold_seconds: int = 30) -> List[DiscoveredProvider]:
         """Get providers expiring soon.
@@ -316,4 +310,3 @@ class DiscoveryLifecycleManager:
                 expiring.append(provider)
 
         return expiring
-

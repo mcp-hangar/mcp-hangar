@@ -14,8 +14,8 @@ Requirements:
 """
 
 import asyncio
-import sys
 from pathlib import Path
+import sys
 
 # Add project root to path
 project_root = Path(__file__).parent.parent.parent
@@ -49,13 +49,13 @@ async def run_discovered_provider_value_object():
         source_type="docker",
         mode="http",
         connection_info={"host": "localhost", "port": 8080},
-        metadata={"env": "test"}
+        metadata={"env": "test"},
     )
 
     print_result(
         "Create provider with fingerprint",
         provider.fingerprint is not None and len(provider.fingerprint) == 16,
-        f"fingerprint={provider.fingerprint}"
+        f"fingerprint={provider.fingerprint}",
     )
 
     # Test fingerprint changes with config
@@ -69,11 +69,11 @@ async def run_discovered_provider_value_object():
     print_result(
         "Fingerprint changes with config",
         provider.fingerprint != provider2.fingerprint,
-        f"old={provider.fingerprint}, new={provider2.fingerprint}"
+        f"old={provider.fingerprint}, new={provider2.fingerprint}",
     )
 
     # Test TTL expiration
-    from datetime import datetime, timezone, timedelta
+    from datetime import datetime, timedelta, timezone
 
     old_time = datetime.now(timezone.utc) - timedelta(seconds=100)
     expired_provider = DiscoveredProvider(
@@ -85,13 +85,13 @@ async def run_discovered_provider_value_object():
         fingerprint="abc123",
         discovered_at=old_time,
         last_seen_at=old_time,
-        ttl_seconds=90
+        ttl_seconds=90,
     )
 
     print_result(
         "TTL expiration detection",
         expired_provider.is_expired(),
-        f"ttl={expired_provider.ttl_seconds}s, expired={expired_provider.is_expired()}"
+        f"ttl={expired_provider.ttl_seconds}s, expired={expired_provider.is_expired()}",
     )
 
     # Test serialization
@@ -101,7 +101,7 @@ async def run_discovered_provider_value_object():
     print_result(
         "Serialization round-trip",
         restored.fingerprint == provider.fingerprint,
-        f"original={provider.name}, restored={restored.name}"
+        f"original={provider.name}, restored={restored.name}",
     )
 
     return True
@@ -111,7 +111,7 @@ async def run_conflict_resolver():
     """Test ConflictResolver."""
     print_header("Test 2: Conflict Resolver")
 
-    from mcp_hangar.domain.discovery import ConflictResolver, ConflictResolution, DiscoveredProvider
+    from mcp_hangar.domain.discovery import ConflictResolution, ConflictResolver, DiscoveredProvider
 
     # Test static always wins
     resolver = ConflictResolver(static_providers={"my-static-provider"})
@@ -128,7 +128,7 @@ async def run_conflict_resolver():
     print_result(
         "Static config wins over discovery",
         result.resolution == ConflictResolution.STATIC_WINS,
-        f"resolution={result.resolution.value}"
+        f"resolution={result.resolution.value}",
     )
 
     # Test new provider registered
@@ -145,7 +145,7 @@ async def run_conflict_resolver():
     print_result(
         "New provider gets registered",
         result2.resolution == ConflictResolution.REGISTERED,
-        f"resolution={result2.resolution.value}"
+        f"resolution={result2.resolution.value}",
     )
 
     # Test source priority
@@ -173,7 +173,7 @@ async def run_conflict_resolver():
     print_result(
         "Higher priority source wins",
         result3.resolution == ConflictResolution.SOURCE_PRIORITY,
-        f"kubernetes > filesystem: {result3.resolution.value}"
+        f"kubernetes > filesystem: {result3.resolution.value}",
     )
 
     return True
@@ -188,45 +188,30 @@ async def run_filesystem_discovery_source():
     # Check if example files exist
     examples_path = project_root / "examples" / "discovery"
 
-    print_result(
-        "Example discovery files exist",
-        examples_path.exists(),
-        f"path={examples_path}"
-    )
+    print_result("Example discovery files exist", examples_path.exists(), f"path={examples_path}")
 
     if not examples_path.exists():
         print("  ⚠️  Skipping filesystem tests - no example files")
         return False
 
     # Create source
-    source = FilesystemDiscoverySource(
-        path=str(examples_path),
-        watch=False
-    )
+    source = FilesystemDiscoverySource(path=str(examples_path), watch=False)
 
     print_result(
         "FilesystemDiscoverySource created",
         source.source_type == "filesystem",
-        f"type={source.source_type}, mode={source.mode}"
+        f"type={source.source_type}, mode={source.mode}",
     )
 
     # Test health check
     healthy = await source.health_check()
 
-    print_result(
-        "Health check passes",
-        healthy,
-        f"healthy={healthy}"
-    )
+    print_result("Health check passes", healthy, f"healthy={healthy}")
 
     # Test discovery
     providers = await source.discover()
 
-    print_result(
-        "Discovers providers from YAML files",
-        len(providers) >= 2,
-        f"found {len(providers)} providers"
-    )
+    print_result("Discovers providers from YAML files", len(providers) >= 2, f"found {len(providers)} providers")
 
     # List discovered providers
     for p in providers:
@@ -239,7 +224,7 @@ async def run_discovery_service():
     """Test DiscoveryService."""
     print_header("Test 4: Discovery Service")
 
-    from mcp_hangar.domain.discovery import DiscoveryService, DiscoverySource, DiscoveredProvider, DiscoveryMode
+    from mcp_hangar.domain.discovery import DiscoveredProvider, DiscoveryMode, DiscoveryService, DiscoverySource
 
     # Create mock source
     class MockSource(DiscoverySource):
@@ -279,7 +264,7 @@ async def run_discovery_service():
     print_result(
         "Source registered",
         service.get_source("mock") is not None,
-        f"sources={[s.source_type for s in service.get_all_sources()]}"
+        f"sources={[s.source_type for s in service.get_all_sources()]}",
     )
 
     # Run discovery cycle
@@ -288,17 +273,13 @@ async def run_discovery_service():
     print_result(
         "Discovery cycle completes",
         result.discovered_count == 2,
-        f"discovered={result.discovered_count}, registered={result.registered_count}"
+        f"discovered={result.discovered_count}, registered={result.registered_count}",
     )
 
     # Check registered providers
     registered = service.get_registered_providers()
 
-    print_result(
-        "Providers are registered",
-        len(registered) == 2,
-        f"registered providers: {list(registered.keys())}"
-    )
+    print_result("Providers are registered", len(registered) == 2, f"registered providers: {list(registered.keys())}")
 
     return True
 
@@ -307,8 +288,8 @@ async def run_discovery_orchestrator():
     """Test DiscoveryOrchestrator."""
     print_header("Test 5: Discovery Orchestrator")
 
-    from mcp_hangar.application.discovery import DiscoveryOrchestrator, DiscoveryConfig
-    from mcp_hangar.domain.discovery import DiscoverySource, DiscoveredProvider, DiscoveryMode
+    from mcp_hangar.application.discovery import DiscoveryConfig, DiscoveryOrchestrator
+    from mcp_hangar.domain.discovery import DiscoveredProvider, DiscoverySource
 
     # Create mock source
     class MockSource(DiscoverySource):
@@ -330,42 +311,23 @@ async def run_discovery_orchestrator():
             return True
 
     # Create orchestrator
-    config = DiscoveryConfig(
-        enabled=True,
-        refresh_interval_s=30,
-        auto_register=True
-    )
+    config = DiscoveryConfig(enabled=True, refresh_interval_s=30, auto_register=True)
 
-    orchestrator = DiscoveryOrchestrator(
-        config=config,
-        static_providers={"static-provider"}
-    )
+    orchestrator = DiscoveryOrchestrator(config=config, static_providers={"static-provider"})
 
     orchestrator.add_source(MockSource())
 
-    print_result(
-        "Orchestrator created with source",
-        True,
-        f"sources={orchestrator.get_stats()['sources_count']}"
-    )
+    print_result("Orchestrator created with source", True, f"sources={orchestrator.get_stats()['sources_count']}")
 
     # Run discovery
     result = await orchestrator.trigger_discovery()
 
-    print_result(
-        "Discovery triggered successfully",
-        result.get("discovered_count", 0) >= 0,
-        f"result={result}"
-    )
+    print_result("Discovery triggered successfully", result.get("discovered_count", 0) >= 0, f"result={result}")
 
     # Check sources status
     sources = await orchestrator.get_sources_status()
 
-    print_result(
-        "Source status available",
-        len(sources) == 1,
-        f"sources={[s['source_type'] for s in sources]}"
-    )
+    print_result("Source status available", len(sources) == 1, f"sources={[s['source_type'] for s in sources]}")
 
     return True
 
@@ -374,7 +336,7 @@ async def run_security_validator():
     """Test SecurityValidator."""
     print_header("Test 6: Security Validator")
 
-    from mcp_hangar.application.discovery import SecurityValidator, SecurityConfig, ValidationResult
+    from mcp_hangar.application.discovery import SecurityConfig, SecurityValidator, ValidationResult
     from mcp_hangar.domain.discovery import DiscoveredProvider
 
     # Create validator with namespace restrictions
@@ -382,7 +344,7 @@ async def run_security_validator():
         allowed_namespaces={"mcp-providers"},
         denied_namespaces={"kube-system", "default"},
         require_health_check=False,  # Skip for non-HTTP providers
-        max_registration_rate=10
+        max_registration_rate=10,
     )
 
     validator = SecurityValidator(config)
@@ -393,15 +355,13 @@ async def run_security_validator():
         source_type="kubernetes",
         mode="subprocess",
         connection_info={},
-        metadata={"namespace": "mcp-providers"}
+        metadata={"namespace": "mcp-providers"},
     )
 
     result = await validator.validate(valid_provider)
 
     print_result(
-        "Valid provider passes validation",
-        result.result == ValidationResult.PASSED,
-        f"result={result.result.value}"
+        "Valid provider passes validation", result.result == ValidationResult.PASSED, f"result={result.result.value}"
     )
 
     # Test denied namespace
@@ -410,7 +370,7 @@ async def run_security_validator():
         source_type="kubernetes",
         mode="subprocess",
         connection_info={},
-        metadata={"namespace": "kube-system"}
+        metadata={"namespace": "kube-system"},
     )
 
     result2 = await validator.validate(denied_provider)
@@ -418,7 +378,7 @@ async def run_security_validator():
     print_result(
         "Denied namespace fails validation",
         result2.result == ValidationResult.FAILED_SOURCE,
-        f"result={result2.result.value}, reason={result2.reason}"
+        f"result={result2.result.value}, reason={result2.reason}",
     )
 
     return True
@@ -430,12 +390,8 @@ async def run_lifecycle_manager():
 
     from mcp_hangar.application.discovery import DiscoveryLifecycleManager
     from mcp_hangar.domain.discovery import DiscoveredProvider
-    from datetime import datetime, timezone, timedelta
 
-    manager = DiscoveryLifecycleManager(
-        default_ttl=90,
-        check_interval=10
-    )
+    manager = DiscoveryLifecycleManager(default_ttl=90, check_interval=10)
 
     # Add provider
     provider = DiscoveredProvider.create(
@@ -450,7 +406,7 @@ async def run_lifecycle_manager():
     print_result(
         "Provider added to lifecycle tracking",
         manager.get_provider("lifecycle-test") is not None,
-        f"stats={manager.get_stats()}"
+        f"stats={manager.get_stats()}",
     )
 
     # Test quarantine
@@ -458,19 +414,13 @@ async def run_lifecycle_manager():
 
     quarantined = manager.get_quarantined()
 
-    print_result(
-        "Provider quarantined",
-        "lifecycle-test" in quarantined,
-        f"quarantined={list(quarantined.keys())}"
-    )
+    print_result("Provider quarantined", "lifecycle-test" in quarantined, f"quarantined={list(quarantined.keys())}")
 
     # Test approval
     approved = manager.approve("lifecycle-test")
 
     print_result(
-        "Provider approved from quarantine",
-        approved is not None,
-        f"approved={approved.name if approved else None}"
+        "Provider approved from quarantine", approved is not None, f"approved={approved.name if approved else None}"
     )
 
     return True
@@ -480,7 +430,7 @@ async def run_full_integration():
     """Test full integration with filesystem source."""
     print_header("Test 8: Full Integration Test")
 
-    from mcp_hangar.application.discovery import DiscoveryOrchestrator, DiscoveryConfig
+    from mcp_hangar.application.discovery import DiscoveryConfig, DiscoveryOrchestrator
     from mcp_hangar.infrastructure.discovery import FilesystemDiscoverySource
 
     examples_path = project_root / "examples" / "discovery"
@@ -490,19 +440,12 @@ async def run_full_integration():
         return False
 
     # Create orchestrator with filesystem source
-    config = DiscoveryConfig(
-        enabled=True,
-        refresh_interval_s=30,
-        auto_register=True
-    )
+    config = DiscoveryConfig(enabled=True, refresh_interval_s=30, auto_register=True)
 
     orchestrator = DiscoveryOrchestrator(config=config)
 
     # Add filesystem source
-    fs_source = FilesystemDiscoverySource(
-        path=str(examples_path),
-        watch=False
-    )
+    fs_source = FilesystemDiscoverySource(path=str(examples_path), watch=False)
     orchestrator.add_source(fs_source)
 
     # Run discovery
@@ -511,7 +454,7 @@ async def run_full_integration():
     print_result(
         "Full discovery cycle",
         result.get("discovered_count", 0) >= 2,
-        f"discovered={result.get('discovered_count')}, registered={result.get('registered_count')}"
+        f"discovered={result.get('discovered_count')}, registered={result.get('registered_count')}",
     )
 
     # Check sources
@@ -521,35 +464,27 @@ async def run_full_integration():
     print_result(
         "Filesystem source healthy",
         fs_source_status and fs_source_status.get("is_healthy"),
-        f"status={fs_source_status}"
+        f"status={fs_source_status}",
     )
 
     # Check pending (should be empty with auto_register=True)
     pending = orchestrator.get_pending_providers()
 
-    print_result(
-        "No pending providers (auto_register=True)",
-        len(pending) == 0,
-        f"pending={len(pending)}"
-    )
+    print_result("No pending providers (auto_register=True)", len(pending) == 0, f"pending={len(pending)}")
 
     # Check quarantine (should be empty for valid providers)
     quarantined = orchestrator.get_quarantined()
 
-    print_result(
-        "No quarantined providers",
-        len(quarantined) == 0,
-        f"quarantined={len(quarantined)}"
-    )
+    print_result("No quarantined providers", len(quarantined) == 0, f"quarantined={len(quarantined)}")
 
     return True
 
 
 async def main():
     """Run all tests."""
-    print("\n" + "="*60)
+    print("\n" + "=" * 60)
     print("  MCP Hangar Discovery Feature - Integration Tests")
-    print("="*60)
+    print("=" * 60)
 
     tests = [
         ("DiscoveredProvider Value Object", run_discovered_provider_value_object),
@@ -571,6 +506,7 @@ async def main():
             results.append((name, False, str(e)))
             print(f"\n❌ ERROR in {name}: {e}")
             import traceback
+
             traceback.print_exc()
 
     # Summary
@@ -593,4 +529,3 @@ async def main():
 if __name__ == "__main__":
     success = asyncio.run(main())
     sys.exit(0 if success else 1)
-
