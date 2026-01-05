@@ -4,9 +4,7 @@ import asyncio
 
 import pytest
 
-from mcp_hangar.domain.contracts.persistence import (
-    ProviderConfigSnapshot,
-)
+from mcp_hangar.domain.contracts.persistence import ProviderConfigSnapshot
 from mcp_hangar.infrastructure.persistence import (
     Database,
     DatabaseConfig,
@@ -173,32 +171,24 @@ class TestSQLiteProviderConfigRepository:
         assert result.env == config_snapshot.env
 
     @pytest.mark.asyncio
-    async def test_get_nonexistent(
-        self, database: Database, repo: SQLiteProviderConfigRepository
-    ):
+    async def test_get_nonexistent(self, database: Database, repo: SQLiteProviderConfigRepository):
         """Test getting non-existent configuration returns None."""
         await database.initialize()
         result = await repo.get("nonexistent")
         assert result is None
 
     @pytest.mark.asyncio
-    async def test_get_all_enabled_only(
-        self, database: Database, repo: SQLiteProviderConfigRepository
-    ):
+    async def test_get_all_enabled_only(self, database: Database, repo: SQLiteProviderConfigRepository):
         """Test get_all returns only enabled configurations."""
         await database.initialize()
-        enabled_config = ProviderConfigSnapshot(
-            provider_id="enabled-provider", mode="subprocess", enabled=True
-        )
+        enabled_config = ProviderConfigSnapshot(provider_id="enabled-provider", mode="subprocess", enabled=True)
         await repo.save(enabled_config)
 
         # Delete (soft delete)
         await repo.delete("enabled-provider")
 
         # Re-add another
-        new_config = ProviderConfigSnapshot(
-            provider_id="new-provider", mode="subprocess", enabled=True
-        )
+        new_config = ProviderConfigSnapshot(provider_id="new-provider", mode="subprocess", enabled=True)
         await repo.save(new_config)
 
         all_configs = await repo.get_all()

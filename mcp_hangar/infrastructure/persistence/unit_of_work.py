@@ -10,12 +10,7 @@ from typing import Any, Dict, List, Optional
 
 import aiosqlite
 
-from ...domain.contracts.persistence import (
-    AuditAction,
-    AuditEntry,
-    PersistenceError,
-    ProviderConfigSnapshot,
-)
+from ...domain.contracts.persistence import AuditAction, AuditEntry, PersistenceError, ProviderConfigSnapshot
 from ...logging_config import get_logger
 from .database import Database
 
@@ -50,7 +45,7 @@ class TransactionalProviderConfigRepository:
         if row is None:
             await self._conn.execute(
                 """
-                INSERT INTO provider_configs 
+                INSERT INTO provider_configs
                 (provider_id, mode, config_json, enabled, version, created_at, updated_at)
                 VALUES (?, ?, ?, ?, 1, ?, ?)
                 """,
@@ -66,8 +61,8 @@ class TransactionalProviderConfigRepository:
         else:
             await self._conn.execute(
                 """
-                UPDATE provider_configs 
-                SET mode = ?, config_json = ?, enabled = ?, 
+                UPDATE provider_configs
+                SET mode = ?, config_json = ?, enabled = ?,
                     version = version + 1, updated_at = ?
                 WHERE provider_id = ?
                 """,
@@ -96,9 +91,7 @@ class TransactionalProviderConfigRepository:
 
     async def get_all(self) -> List[ProviderConfigSnapshot]:
         """Retrieve all provider configurations within transaction."""
-        cursor = await self._conn.execute(
-            "SELECT config_json FROM provider_configs WHERE enabled = 1"
-        )
+        cursor = await self._conn.execute("SELECT config_json FROM provider_configs WHERE enabled = 1")
         rows = await cursor.fetchall()
 
         configs = []
@@ -115,7 +108,7 @@ class TransactionalProviderConfigRepository:
         """Delete provider configuration within transaction."""
         result = await self._conn.execute(
             """
-            UPDATE provider_configs 
+            UPDATE provider_configs
             SET enabled = 0, updated_at = ?
             WHERE provider_id = ? AND enabled = 1
             """,
@@ -151,7 +144,7 @@ class TransactionalAuditRepository:
         """Append audit entry within transaction."""
         await self._conn.execute(
             """
-            INSERT INTO audit_log 
+            INSERT INTO audit_log
             (entity_id, entity_type, action, actor, timestamp,
              old_state_json, new_state_json, metadata_json, correlation_id)
             VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
@@ -302,9 +295,7 @@ class SQLiteUnitOfWork:
         )
 
         # Configure connection
-        await self._conn.execute(
-            f"PRAGMA busy_timeout = {self._db.config.busy_timeout_ms}"
-        )
+        await self._conn.execute(f"PRAGMA busy_timeout = {self._db.config.busy_timeout_ms}")
         await self._conn.execute("PRAGMA foreign_keys = ON")
 
         # Create transactional repositories

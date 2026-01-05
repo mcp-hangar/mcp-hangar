@@ -3,6 +3,9 @@
 # Goal: Keep linting strict across the codebase while allowing a small number of
 # intentional patterns used for backwards-compatibility / legacy APIs.
 
+# Match line length with black/isort configuration
+line-length = 120
+
 # Use ruff's default ruleset selection as invoked in CI (ruff check ...).
 # We only configure targeted per-file ignores here.
 

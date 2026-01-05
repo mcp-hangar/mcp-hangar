@@ -100,8 +100,7 @@ def create_runtime(
     rate_limiter = get_rate_limiter(rate_limit_config)
 
     input_validator = InputValidator(
-        allow_absolute_paths=env.get("MCP_ALLOW_ABSOLUTE_PATHS", "false").lower()
-        == "true",
+        allow_absolute_paths=env.get("MCP_ALLOW_ABSOLUTE_PATHS", "false").lower() == "true",
     )
 
     security_handler = get_security_handler()

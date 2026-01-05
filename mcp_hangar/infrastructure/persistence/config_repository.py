@@ -8,11 +8,7 @@ import json
 import threading
 from typing import Dict, List, Optional
 
-from ...domain.contracts.persistence import (
-    ConcurrentModificationError,
-    PersistenceError,
-    ProviderConfigSnapshot,
-)
+from ...domain.contracts.persistence import ConcurrentModificationError, PersistenceError, ProviderConfigSnapshot
 from ...logging_config import get_logger
 from .database import Database
 
@@ -47,9 +43,7 @@ class InMemoryProviderConfigRepository:
                         "updated_at": now,
                     }
                 )
-                self._versions[config.provider_id] = (
-                    self._versions.get(config.provider_id, 0) + 1
-                )
+                self._versions[config.provider_id] = self._versions.get(config.provider_id, 0) + 1
             else:
                 # Create new
                 new_config = ProviderConfigSnapshot(
@@ -136,7 +130,7 @@ class SQLiteProviderConfigRepository:
                     # Insert new config
                     await conn.execute(
                         """
-                        INSERT INTO provider_configs 
+                        INSERT INTO provider_configs
                         (provider_id, mode, config_json, enabled, version, created_at, updated_at)
                         VALUES (?, ?, ?, ?, 1, ?, ?)
                         """,
@@ -149,9 +143,7 @@ class SQLiteProviderConfigRepository:
                             now,
                         ),
                     )
-                    logger.debug(
-                        f"Inserted new config for provider: {config.provider_id}"
-                    )
+                    logger.debug(f"Inserted new config for provider: {config.provider_id}")
                 else:
                     # Update existing config with version increment
                     current_version = row[0]
@@ -159,8 +151,8 @@ class SQLiteProviderConfigRepository:
 
                     result = await conn.execute(
                         """
-                        UPDATE provider_configs 
-                        SET mode = ?, config_json = ?, enabled = ?, 
+                        UPDATE provider_configs
+                        SET mode = ?, config_json = ?, enabled = ?,
                             version = ?, updated_at = ?
                         WHERE provider_id = ? AND version = ?
                         """,
@@ -228,9 +220,7 @@ class SQLiteProviderConfigRepository:
         """
         try:
             async with self._db.connection() as conn:
-                cursor = await conn.execute(
-                    "SELECT config_json FROM provider_configs WHERE enabled = 1"
-                )
+                cursor = await conn.execute("SELECT config_json FROM provider_configs WHERE enabled = 1")
                 rows = await cursor.fetchall()
 
                 configs = []
@@ -262,7 +252,7 @@ class SQLiteProviderConfigRepository:
                 # Soft delete - mark as disabled
                 result = await conn.execute(
                     """
-                    UPDATE provider_configs 
+                    UPDATE provider_configs
                     SET enabled = 0, updated_at = ?
                     WHERE provider_id = ? AND enabled = 1
                     """,
@@ -329,9 +319,7 @@ class SQLiteProviderConfigRepository:
             logger.error(f"Failed to check provider existence: {e}")
             raise PersistenceError(f"Failed to check provider existence: {e}") from e
 
-    async def get_with_version(
-        self, provider_id: str
-    ) -> Optional[tuple[ProviderConfigSnapshot, int]]:
+    async def get_with_version(self, provider_id: str) -> Optional[tuple[ProviderConfigSnapshot, int]]:
         """Get configuration with its version for optimistic locking.
 
         Args:
@@ -356,9 +344,7 @@ class SQLiteProviderConfigRepository:
 
         except Exception as e:
             logger.error(f"Failed to get provider config with version: {e}")
-            raise PersistenceError(
-                f"Failed to get provider config with version: {e}"
-            ) from e
+            raise PersistenceError(f"Failed to get provider config with version: {e}") from e
 
     async def update_last_started(self, provider_id: str) -> None:
         """Update the last_started_at timestamp.
@@ -370,7 +356,7 @@ class SQLiteProviderConfigRepository:
             async with self._db.transaction() as conn:
                 await conn.execute(
                     """
-                    UPDATE provider_configs 
+                    UPDATE provider_configs
                     SET last_started_at = ?, updated_at = ?
                     WHERE provider_id = ?
                     """,
@@ -385,9 +371,7 @@ class SQLiteProviderConfigRepository:
             logger.error(f"Failed to update last_started_at: {e}")
             # Non-critical operation, don't raise
 
-    async def update_failure_count(
-        self, provider_id: str, consecutive_failures: int
-    ) -> None:
+    async def update_failure_count(self, provider_id: str, consecutive_failures: int) -> None:
         """Update the consecutive failure count.
 
         Args:
@@ -398,7 +382,7 @@ class SQLiteProviderConfigRepository:
             async with self._db.transaction() as conn:
                 await conn.execute(
                     """
-                    UPDATE provider_configs 
+                    UPDATE provider_configs
                     SET consecutive_failures = ?, updated_at = ?
                     WHERE provider_id = ?
                     """,

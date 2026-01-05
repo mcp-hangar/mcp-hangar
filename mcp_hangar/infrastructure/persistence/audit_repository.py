@@ -9,11 +9,7 @@ import json
 import threading
 from typing import List, Optional
 
-from ...domain.contracts.persistence import (
-    AuditAction,
-    AuditEntry,
-    PersistenceError,
-)
+from ...domain.contracts.persistence import AuditAction, AuditEntry, PersistenceError
 from ...logging_config import get_logger
 from .database import Database
 
@@ -46,10 +42,7 @@ class InMemoryAuditRepository:
             if len(self._entries) > self._max_entries:
                 self._entries = self._entries[-self._max_entries :]
 
-            logger.debug(
-                f"Audit: {entry.action.value} on {entry.entity_type}/{entry.entity_id} "
-                f"by {entry.actor}"
-            )
+            logger.debug(f"Audit: {entry.action.value} on {entry.entity_type}/{entry.entity_id} " f"by {entry.actor}")
 
     async def get_by_entity(
         self,
@@ -63,8 +56,7 @@ class InMemoryAuditRepository:
             filtered = [
                 e
                 for e in self._entries
-                if e.entity_id == entity_id
-                and (entity_type is None or e.entity_type == entity_type)
+                if e.entity_id == entity_id and (entity_type is None or e.entity_type == entity_type)
             ]
             # Return newest first
             filtered.sort(key=lambda e: e.timestamp, reverse=True)
@@ -131,7 +123,7 @@ class SQLiteAuditRepository:
             async with self._db.transaction() as conn:
                 await conn.execute(
                     """
-                    INSERT INTO audit_log 
+                    INSERT INTO audit_log
                     (entity_id, entity_type, action, actor, timestamp,
                      old_state_json, new_state_json, metadata_json, correlation_id)
                     VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
@@ -149,10 +141,7 @@ class SQLiteAuditRepository:
                     ),
                 )
 
-            logger.debug(
-                f"Audit: {entry.action.value} on {entry.entity_type}/{entry.entity_id} "
-                f"by {entry.actor}"
-            )
+            logger.debug(f"Audit: {entry.action.value} on {entry.entity_type}/{entry.entity_id} " f"by {entry.actor}")
 
         except Exception as e:
             logger.error(f"Failed to append audit entry: {e}")
@@ -257,9 +246,7 @@ class SQLiteAuditRepository:
 
         except Exception as e:
             logger.error(f"Failed to get audit entries by time range: {e}")
-            raise PersistenceError(
-                f"Failed to get audit entries by time range: {e}"
-            ) from e
+            raise PersistenceError(f"Failed to get audit entries by time range: {e}") from e
 
     async def get_by_correlation_id(self, correlation_id: str) -> List[AuditEntry]:
         """Get all audit entries for a correlation ID.
@@ -288,13 +275,9 @@ class SQLiteAuditRepository:
 
         except Exception as e:
             logger.error(f"Failed to get audit entries by correlation: {e}")
-            raise PersistenceError(
-                f"Failed to get audit entries by correlation: {e}"
-            ) from e
+            raise PersistenceError(f"Failed to get audit entries by correlation: {e}") from e
 
-    async def count_by_entity(
-        self, entity_id: str, entity_type: Optional[str] = None
-    ) -> int:
+    async def count_by_entity(self, entity_id: str, entity_type: Optional[str] = None) -> int:
         """Count audit entries for an entity.
 
         Args:

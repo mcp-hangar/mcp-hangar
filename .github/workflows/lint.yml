@@ -26,11 +26,11 @@ jobs:
 
       - name: Check formatting with black
         run: |
-          black --check --diff --line-length=120 mcp_hangar/ tests/ examples/
+          black --check --diff mcp_hangar/ tests/ examples/
 
       - name: Check imports with isort
         run: |
-          isort --check-only --diff --line-length 120 --profile black mcp_hangar/ tests/ examples/
+          isort --check-only --diff mcp_hangar/ tests/ examples/
 
       - name: Lint with ruff
         run: |
