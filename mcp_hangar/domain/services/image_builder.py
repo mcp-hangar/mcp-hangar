@@ -2,13 +2,13 @@
 
 from dataclasses import dataclass
 import hashlib
-from ...logging_config import get_logger
 import os
 from pathlib import Path
 import shutil
 import subprocess
 from typing import Optional
 
+from ...logging_config import get_logger
 from ..exceptions import ProviderStartError
 
 logger = get_logger(__name__)

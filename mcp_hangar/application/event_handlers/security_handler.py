@@ -17,7 +17,6 @@ from enum import Enum
 import hashlib
 import json
 import logging
-from ...logging_config import get_logger
 import threading
 import time
 from typing import Any, Dict, List, Optional
@@ -31,6 +30,7 @@ from ...domain.events import (
     ToolInvocationCompleted,
     ToolInvocationFailed,
 )
+from ...logging_config import get_logger
 
 logger = get_logger(__name__)
 

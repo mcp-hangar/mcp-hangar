@@ -25,9 +25,9 @@ Usage:
 
 from __future__ import annotations
 
-import uuid
 from contextvars import ContextVar
 from typing import Any
+import uuid
 
 import structlog
 
@@ -176,4 +176,3 @@ class RequestContextManager:
 
     async def __aexit__(self, exc_type: Any, exc_val: Any, exc_tb: Any) -> None:
         self.__exit__(exc_type, exc_val, exc_tb)
-

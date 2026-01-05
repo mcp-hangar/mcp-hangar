@@ -1,6 +1,5 @@
 """Provider Recovery Saga - automatically recover degraded providers."""
 
-from ...logging_config import get_logger
 import time
 from typing import Dict, List, Optional, Type
 
@@ -12,6 +11,7 @@ from ...domain.events import (
     ProviderStopped,
 )
 from ...infrastructure.saga_manager import EventTriggeredSaga
+from ...logging_config import get_logger
 from ..commands import Command, StartProviderCommand, StopProviderCommand
 
 logger = get_logger(__name__)

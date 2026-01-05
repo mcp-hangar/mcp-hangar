@@ -6,10 +6,11 @@ quarantine management, and graceful deregistration.
 
 import asyncio
 from datetime import datetime, timezone
-from ...logging_config import get_logger
 from typing import Awaitable, Callable, Dict, List, Optional, Set
 
 from mcp_hangar.domain.discovery.discovered_provider import DiscoveredProvider
+
+from ...logging_config import get_logger
 
 logger = get_logger(__name__)
 

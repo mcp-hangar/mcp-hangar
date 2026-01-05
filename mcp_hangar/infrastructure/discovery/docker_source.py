@@ -21,7 +21,6 @@ Label Reference:
     mcp.hangar.volumes: "/data:/data"    # Optional - additional volumes
 """
 
-from ...logging_config import get_logger
 import os
 from pathlib import Path
 import platform
@@ -29,6 +28,8 @@ from typing import List, Optional
 
 from mcp_hangar.domain.discovery.discovered_provider import DiscoveredProvider
 from mcp_hangar.domain.discovery.discovery_source import DiscoveryMode, DiscoverySource
+
+from ...logging_config import get_logger
 
 logger = get_logger(__name__)
 

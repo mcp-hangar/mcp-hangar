@@ -6,9 +6,9 @@ and applies business rules for registration and lifecycle management.
 
 from dataclasses import dataclass, field
 from datetime import datetime, timezone
-from ...logging_config import get_logger
 from typing import Dict, List, Optional, Set
 
+from ...logging_config import get_logger
 from .conflict_resolver import ConflictResolution, ConflictResolver
 from .discovered_provider import DiscoveredProvider
 from .discovery_source import DiscoveryMode, DiscoverySource

@@ -24,17 +24,13 @@ import structlog
 from structlog.types import Processor
 
 
-def _add_service_context(
-    logger: logging.Logger, method_name: str, event_dict: dict[str, Any]
-) -> dict[str, Any]:
+def _add_service_context(logger: logging.Logger, method_name: str, event_dict: dict[str, Any]) -> dict[str, Any]:
     """Add service-level context to all log entries."""
     event_dict.setdefault("service", "mcp-hangar")
     return event_dict
 
 
-def _sanitize_sensitive_data(
-    logger: logging.Logger, method_name: str, event_dict: dict[str, Any]
-) -> dict[str, Any]:
+def _sanitize_sensitive_data(logger: logging.Logger, method_name: str, event_dict: dict[str, Any]) -> dict[str, Any]:
     """Redact sensitive fields from log output."""
     sensitive_keys = {"password", "secret", "token", "api_key", "authorization", "credential"}
 
@@ -42,10 +38,7 @@ def _sanitize_sensitive_data(
         if depth > 5:  # Prevent infinite recursion
             return obj
         if isinstance(obj, dict):
-            return {
-                k: "[REDACTED]" if k.lower() in sensitive_keys else redact(v, depth + 1)
-                for k, v in obj.items()
-            }
+            return {k: "[REDACTED]" if k.lower() in sensitive_keys else redact(v, depth + 1) for k, v in obj.items()}
         if isinstance(obj, list):
             return [redact(item, depth + 1) for item in obj]
         return obj
@@ -53,9 +46,7 @@ def _sanitize_sensitive_data(
     return redact(event_dict)
 
 
-def _drop_color_message_key(
-    logger: logging.Logger, method_name: str, event_dict: dict[str, Any]
-) -> dict[str, Any]:
+def _drop_color_message_key(logger: logging.Logger, method_name: str, event_dict: dict[str, Any]) -> dict[str, Any]:
     """Remove the color_message key that uvicorn adds."""
     event_dict.pop("color_message", None)
     return event_dict
@@ -106,7 +97,8 @@ def setup_logging(
 
     # Configure structlog
     structlog.configure(
-        processors=list(shared_processors) + [
+        processors=list(shared_processors)
+        + [
             structlog.stdlib.ProcessorFormatter.wrap_for_formatter,
         ],
         logger_factory=structlog.stdlib.LoggerFactory(),
@@ -137,6 +129,7 @@ def setup_logging(
     if log_file:
         try:
             from pathlib import Path
+
             Path(log_file).parent.mkdir(parents=True, exist_ok=True)
 
             file_handler = logging.FileHandler(log_file, mode="a", encoding="utf-8")
@@ -207,4 +200,3 @@ def error(event: str, **kwargs: Any) -> None:
 def exception(event: str, **kwargs: Any) -> None:
     """Log an exception with traceback."""
     get_logger().exception(event, **kwargs)
-

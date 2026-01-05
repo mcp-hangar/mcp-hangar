@@ -9,9 +9,9 @@ This ensures explicit operator intent is never overridden by automated discovery
 
 from dataclasses import dataclass
 from enum import Enum
-from ...logging_config import get_logger
 from typing import Dict, Optional, Set
 
+from ...logging_config import get_logger
 from .discovered_provider import DiscoveredProvider
 
 logger = get_logger(__name__)

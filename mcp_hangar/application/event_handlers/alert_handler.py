@@ -3,7 +3,6 @@
 from abc import ABC, abstractmethod
 from dataclasses import dataclass, field
 from datetime import datetime, timezone
-from ...logging_config import get_logger
 from typing import Any, Callable, Dict, List, Optional
 
 from ...domain.events import (
@@ -13,6 +12,7 @@ from ...domain.events import (
     ProviderStopped,
     ToolInvocationFailed,
 )
+from ...logging_config import get_logger
 
 logger = get_logger(__name__)
 

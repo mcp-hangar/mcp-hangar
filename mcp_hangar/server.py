@@ -48,7 +48,6 @@ from .infrastructure.query_bus import (
 from .infrastructure.saga_manager import get_saga_manager
 from .logging_config import get_logger, setup_logging
 
-
 # Module logger
 logger = get_logger(__name__)
 
@@ -1310,7 +1309,9 @@ async def _init_discovery(config: Dict[str, Any], log: Any) -> None:
                         # Podman rootless needs 777 permissions on host dirs
                         memory_dir.chmod(0o777)
                         volumes.append(f"{memory_dir}:/app/data:rw")
-                        logger.info("auto_added_memory_volume", provider_name=provider.name, volume=f"{memory_dir}:/app/data")
+                        logger.info(
+                            "auto_added_memory_volume", provider_name=provider.name, volume=f"{memory_dir}:/app/data"
+                        )
 
                     elif "filesystem" in provider_name_lower:
                         # Filesystem provider needs access to data directory
@@ -1318,7 +1319,9 @@ async def _init_discovery(config: Dict[str, Any], log: Any) -> None:
                         fs_dir.mkdir(parents=True, exist_ok=True)
                         fs_dir.chmod(0o777)
                         volumes.append(f"{fs_dir}:/data:rw")
-                        logger.info("auto_added_filesystem_volume", provider_name=provider.name, volume=f"{fs_dir}:/data")
+                        logger.info(
+                            "auto_added_filesystem_volume", provider_name=provider.name, volume=f"{fs_dir}:/data"
+                        )
 
                 if volumes:
                     provider_kwargs["volumes"] = volumes
@@ -1373,7 +1376,7 @@ async def _init_discovery(config: Dict[str, Any], log: Any) -> None:
     await _DISCOVERY_ORCHESTRATOR.start()
 
     stats = _DISCOVERY_ORCHESTRATOR.get_stats()
-    logger.info("discovery_started", sources_count=stats['sources_count'])
+    logger.info("discovery_started", sources_count=stats["sources_count"])
 
 
 def _create_discovery_source(source_type: str, config: Dict[str, Any]):

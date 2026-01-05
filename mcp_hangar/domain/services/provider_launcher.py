@@ -28,7 +28,6 @@ import sys
 from typing import Dict, List, Optional, Set
 
 from ...logging_config import get_logger
-
 from ...stdio_client import StdioClient
 from ..exceptions import ProviderStartError, ValidationError
 from ..security.input_validator import InputValidator

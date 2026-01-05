@@ -10,11 +10,12 @@ Example pyproject.toml:
     my_provider = "my_package.mcp_server:create_server"
 """
 
-from ...logging_config import get_logger
 from typing import Any, Dict, List, Optional
 
 from mcp_hangar.domain.discovery.discovered_provider import DiscoveredProvider
 from mcp_hangar.domain.discovery.discovery_source import DiscoveryMode, DiscoverySource
+
+from ...logging_config import get_logger
 
 logger = get_logger(__name__)
 

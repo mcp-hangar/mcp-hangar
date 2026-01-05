@@ -1,10 +1,10 @@
 """Event Sourced Provider aggregate - provider that rebuilds state from events."""
 
 from dataclasses import dataclass
-from ...logging_config import get_logger
 import threading
 from typing import Any, Dict, List, Optional
 
+from ...logging_config import get_logger
 from ..events import (
     DomainEvent,
     HealthCheckFailed,

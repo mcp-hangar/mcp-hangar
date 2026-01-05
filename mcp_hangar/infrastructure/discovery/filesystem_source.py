@@ -25,12 +25,13 @@ Example Provider File:
 """
 
 import asyncio
-from ...logging_config import get_logger
 from pathlib import Path
 from typing import Any, Dict, List, Optional
 
 from mcp_hangar.domain.discovery.discovered_provider import DiscoveredProvider
 from mcp_hangar.domain.discovery.discovery_source import DiscoveryMode, DiscoverySource
+
+from ...logging_config import get_logger
 
 logger = get_logger(__name__)
 

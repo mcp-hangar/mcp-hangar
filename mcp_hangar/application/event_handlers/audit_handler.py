@@ -5,10 +5,10 @@ from dataclasses import dataclass, field
 from datetime import datetime, timezone
 import json
 import logging
-from ...logging_config import get_logger
 from typing import Any, Dict, List, Optional
 
 from ...domain.events import DomainEvent
+from ...logging_config import get_logger
 
 logger = get_logger(__name__)
 

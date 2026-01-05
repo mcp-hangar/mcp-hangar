@@ -8,19 +8,19 @@ import sys
 import pytest
 import structlog
 
-from mcp_hangar.logging_config import (
-    get_logger,
-    setup_logging,
-    _sanitize_sensitive_data,
-    _add_service_context,
-)
 from mcp_hangar.context import (
     bind_request_context,
     clear_request_context,
     generate_request_id,
     get_request_id,
-    update_request_context,
     RequestContextManager,
+    update_request_context,
+)
+from mcp_hangar.logging_config import (
+    _add_service_context,
+    _sanitize_sensitive_data,
+    get_logger,
+    setup_logging,
 )
 
 
@@ -267,4 +267,3 @@ class TestLoggerIntegration:
 
         assert second_log["request_id"] == "req-2"
         assert "server" not in second_log
-

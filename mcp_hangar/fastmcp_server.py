@@ -380,5 +380,6 @@ def run_fastmcp_server():
 
 if __name__ == "__main__":
     from .logging_config import setup_logging
+
     setup_logging(level="INFO", json_format=False)
     run_fastmcp_server()
