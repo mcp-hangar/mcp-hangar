@@ -1,7 +1,5 @@
 """Tests for server tools - health module helper functions."""
 
-import pytest
-
 from mcp_hangar.server.tools.health import (
     _collect_samples_from_collector,
     _process_discovery_metric,
@@ -221,4 +219,3 @@ class TestProcessMetricSample:
         _process_metric_sample(sample, result)
 
         assert "test.my_tool" in result["tool_calls"]
-

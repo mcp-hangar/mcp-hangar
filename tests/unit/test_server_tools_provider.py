@@ -4,10 +4,9 @@ import pytest
 
 from mcp_hangar.server.context import get_context, reset_context
 from mcp_hangar.server.tools.provider import (
+    _invoke_on_provider,
     DEFAULT_GROUP_RETRY_ATTEMPTS,
     DEFAULT_TIMEOUT_SECONDS,
-    _get_tools_for_provider,
-    _invoke_on_provider,
 )
 
 
@@ -74,4 +73,3 @@ class TestInvokeOnProvider:
         assert "tool" in params
         assert "arguments" in params
         assert "timeout" in params
-

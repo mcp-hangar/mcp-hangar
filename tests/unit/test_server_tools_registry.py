@@ -85,4 +85,3 @@ class TestRegistryList:
 
         assert result["providers"] == []
         assert result["groups"] == []
-

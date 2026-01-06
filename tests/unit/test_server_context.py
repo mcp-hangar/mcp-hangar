@@ -4,13 +4,13 @@ import pytest
 
 from mcp_hangar.server.context import (
     ApplicationContext,
+    get_context,
     ICommandBus,
     IEventBus,
+    init_context,
     IQueryBus,
     IRateLimiter,
     ISecurityHandler,
-    get_context,
-    init_context,
     reset_context,
 )
 
@@ -156,4 +156,3 @@ class TestApplicationContext:
         """Context group_rebalance_saga should default to None."""
         ctx = get_context()
         assert ctx.group_rebalance_saga is None
-

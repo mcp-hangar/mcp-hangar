@@ -2,7 +2,7 @@
 
 import pytest
 
-from mcp_hangar.server.context import get_context, reset_context
+from mcp_hangar.server.context import reset_context
 from mcp_hangar.server.validation import (
     check_rate_limit,
     tool_error_hook,
@@ -12,7 +12,6 @@ from mcp_hangar.server.validation import (
     validate_timeout_input,
     validate_tool_name_input,
 )
-from mcp_hangar.domain.exceptions import RateLimitExceeded
 
 
 class TestToolErrorMapper:
@@ -212,4 +211,3 @@ class TestCheckRateLimit:
     def test_rate_limit_with_global_key(self):
         """Rate limit should work with global key."""
         check_rate_limit("global")
-
