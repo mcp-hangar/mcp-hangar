@@ -11,7 +11,7 @@ from __future__ import annotations
 
 from dataclasses import dataclass
 import os
-from typing import Optional
+from typing import Any, Optional, Protocol, runtime_checkable
 
 from ..application.event_handlers import get_security_handler
 from ..domain.repository import InMemoryProviderRepository, IProviderRepository
@@ -30,6 +30,72 @@ from ..infrastructure.persistence import (
 )
 from ..infrastructure.query_bus import get_query_bus, QueryBus
 
+# =============================================================================
+# Protocol Interfaces for Runtime Dependencies
+# =============================================================================
+
+
+@runtime_checkable
+class IRateLimiter(Protocol):
+    """Interface for rate limiter."""
+
+    def consume(self, key: str) -> Any:
+        """Check rate limit for a key."""
+        ...
+
+    def get_stats(self) -> dict[str, Any]:
+        """Get rate limiter statistics."""
+        ...
+
+
+@runtime_checkable
+class ISecurityHandler(Protocol):
+    """Interface for security event handler."""
+
+    def handle(self, event: Any) -> None:
+        """Handle a security event."""
+        ...
+
+    def log_rate_limit_exceeded(self, limit: int, window_seconds: int) -> None:
+        """Log rate limit exceeded."""
+        ...
+
+    def log_validation_failed(
+        self,
+        field: str,
+        message: str,
+        provider_id: Optional[str] = None,
+        value: Optional[str] = None,
+    ) -> None:
+        """Log validation failure."""
+        ...
+
+
+@runtime_checkable
+class IConfigRepository(Protocol):
+    """Interface for provider config repository."""
+
+    async def save(self, config: Any) -> None:
+        """Save a configuration."""
+        ...
+
+    async def get(self, provider_id: str) -> Optional[Any]:
+        """Get configuration by provider ID."""
+        ...
+
+    async def get_all(self) -> list[Any]:
+        """Get all configurations."""
+        ...
+
+
+@runtime_checkable
+class IAuditRepository(Protocol):
+    """Interface for audit repository."""
+
+    async def append(self, entry: Any) -> None:
+        """Append an audit entry."""
+        ...
+
 
 @dataclass(frozen=True)
 class PersistenceConfig:
@@ -43,7 +109,10 @@ class PersistenceConfig:
 
 @dataclass(frozen=True)
 class Runtime:
-    """Container for runtime dependencies."""
+    """Container for runtime dependencies.
+
+    Uses Protocol interfaces for type safety while maintaining flexibility.
+    """
 
     repository: IProviderRepository
     event_bus: EventBus
@@ -51,16 +120,16 @@ class Runtime:
     query_bus: QueryBus
 
     rate_limit_config: RateLimitConfig
-    rate_limiter: object  # keeping loose to avoid importing rate limiter protocol/type
+    rate_limiter: IRateLimiter
 
     input_validator: InputValidator
-    security_handler: object  # keeping loose to avoid importing handler type
+    security_handler: ISecurityHandler
 
     # Persistence components (optional)
     persistence_config: Optional[PersistenceConfig] = None
     database: Optional[Database] = None
-    config_repository: Optional[object] = None  # IProviderConfigRepository
-    audit_repository: Optional[object] = None  # IAuditRepository
+    config_repository: Optional[IConfigRepository] = None
+    audit_repository: Optional[IAuditRepository] = None
     recovery_service: Optional[RecoveryService] = None
 
 
