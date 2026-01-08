@@ -13,6 +13,7 @@ from ...domain.contracts.persistence import (
     AuditEntry,
     IAuditRepository,
 )
+from ...infrastructure.async_executor import submit_async
 from ...logging_config import get_logger
 from .audit_handler import AuditRecord, AuditStore
 
@@ -24,6 +25,9 @@ class PersistentAuditStore(AuditStore):
 
     Bridges the synchronous AuditEventHandler with the
     async IAuditRepository for persistent storage.
+
+    Uses AsyncExecutor for efficient background persistence
+    without blocking the main thread.
     """
 
     def __init__(self, repository: IAuditRepository):
@@ -33,38 +37,23 @@ class PersistentAuditStore(AuditStore):
             repository: Async audit repository for persistence
         """
         self._repo = repository
-        self._loop: Optional[asyncio.AbstractEventLoop] = None
-
-    def _get_loop(self) -> asyncio.AbstractEventLoop:
-        """Get or create event loop for async operations."""
-        try:
-            return asyncio.get_running_loop()
-        except RuntimeError:
-            # No running loop - create one
-            if self._loop is None:
-                self._loop = asyncio.new_event_loop()
-            return self._loop
 
     def record(self, audit_record: AuditRecord) -> None:
-        """Store an audit record.
+        """Store an audit record asynchronously.
 
-        Converts AuditRecord to AuditEntry and persists asynchronously.
+        Converts AuditRecord to AuditEntry and persists using
+        background executor.
 
         Args:
             audit_record: Record to store
         """
         entry = self._record_to_entry(audit_record)
 
-        try:
-            loop = self._get_loop()
-            if loop.is_running():
-                # Schedule as task if loop is running
-                asyncio.create_task(self._async_record(entry))
-            else:
-                # Run synchronously if no loop
-                loop.run_until_complete(self._async_record(entry))
-        except Exception as e:
-            logger.error(f"Failed to persist audit record: {e}")
+        submit_async(
+            self._async_record(entry),
+            on_error=lambda e: logger.error(f"Failed to persist audit record: {e}")
+        )
+
 
     async def _async_record(self, entry: AuditEntry) -> None:
         """Async record method."""
@@ -92,8 +81,6 @@ class PersistentAuditStore(AuditStore):
             List of audit records
         """
         try:
-            loop = self._get_loop()
-
             if provider_id:
                 coro = self._repo.get_by_entity(
                     entity_id=provider_id,
@@ -116,12 +103,15 @@ class PersistentAuditStore(AuditStore):
                     limit=limit,
                 )
 
-            if loop.is_running():
-                # Can't run sync from async context
+            # Check if we're in an async context
+            try:
+                asyncio.get_running_loop()
+                # We're in async context - can't run sync query
                 logger.warning("Cannot query audit in async context synchronously")
                 return []
-            else:
-                entries = loop.run_until_complete(coro)
+            except RuntimeError:
+                # Not in async context - safe to use asyncio.run()
+                entries = asyncio.run(coro)
                 return [self._entry_to_record(e) for e in entries]
 
         except Exception as e:

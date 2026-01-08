@@ -11,6 +11,7 @@ You have access to a powerful set of tools. Use them freely - they start automat
 - **Be proactive** - if a task needs computation, memory, or file access - just do it
 - **Chain operations** - one tool's output can feed into another
 - **Build knowledge** - use memory to track results, create relationships, document your work
+- **Use `registry_invoke_stream`** - for long operations, get real-time progress updates
 
 ---
 
@@ -21,12 +22,77 @@ Always begin by exploring what's available:
 ```
 registry_list()                        # See all tools and their status
 registry_tools(provider="math")        # Get detailed schema for a tool
+registry_status()                      # Quick status dashboard
 registry_discover()                    # Refresh and find new tools
 ```
 
 Tools come in two flavors:
 - **Static**: `math`, `filesystem`, `memory`, `fetch` - always available
 - **Discovered**: `math-discovered`, `memory-discovered`, etc. - auto-detected from containers
+
+---
+
+## 🚀 Invoke Variants - Choose Your Style
+
+| Tool | Use Case |
+|------|----------|
+| `registry_invoke` | Simple invocation, basic errors |
+| `registry_invoke_ex` | **Recommended** - auto-retry, rich errors, progress in response |
+| `registry_invoke_stream` | Real-time progress notifications during execution |
+
+### Basic Invoke
+```
+registry_invoke(provider="math", tool="add", arguments={"a": 1, "b": 2})
+```
+
+### Extended Invoke (Recommended)
+```
+# Automatic retry on transient failures + progress tracking + tracing
+registry_invoke_ex(
+  provider="sqlite", 
+  tool="query", 
+  arguments={"sql": "SELECT * FROM users"},
+  max_retries=3,
+  correlation_id="my-trace-001"  # Optional: for distributed tracing
+)
+
+# Success response includes:
+# - result: the actual result
+# - _retry_metadata: {
+#     "correlation_id": "my-trace-001",
+#     "attempts": 1, 
+#     "total_time_ms": 234.5, 
+#     "retries": []
+#   }
+# - _progress: [{"stage": "ready", "message": "...", "elapsed_ms": 0.1}, ...]
+
+# Error response includes enriched metadata:
+# - isError: true
+# - _retry_metadata: {
+#     "correlation_id": "my-trace-001",
+#     "attempts": 1,
+#     "final_error_reason": "permanent: validation_error",
+#     "recovery_hints": ["Check arguments: divisor cannot be zero"]
+#   }
+```
+
+### Streaming Invoke (Real-Time Progress)
+```
+# See progress WHILE the operation runs
+registry_invoke_stream(
+  provider="sqlite",
+  tool="query", 
+  arguments={"sql": "SELECT * FROM large_table"},
+  correlation_id="stream-trace-001"
+)
+
+# You'll see progress updates like:
+# [1/5] [cold_start] Provider is cold, launching...
+# [2/5] [launching] Starting container...
+# [3/5] [ready] Provider ready
+# [4/5] [executing] Calling tool 'query'...
+# [5/5] [complete] Operation completed in 1234ms
+```
 
 ---
 
@@ -145,14 +211,35 @@ registry_invoke(provider="fetch", tool="fetch", arguments={
 | Command | Description |
 |---------|-------------|
 | `registry_list()` | Show all tools and their status (cold/ready) |
+| `registry_status()` | **NEW** Quick status dashboard with health overview |
 | `registry_tools(provider="math")` | Get parameter schema |
 | `registry_health()` | System health overview |
+| `registry_warm("math,sqlite")` | **NEW** Pre-start providers to avoid cold start latency |
 | `registry_metrics()` | Get detailed metrics and statistics |
 | `registry_metrics(format="detailed")` | Full metrics breakdown |
 | `registry_discover()` | Refresh discovered tools |
 | `registry_details(provider="math-cluster")` | Deep dive into groups |
-| `registry_start(provider="math")` | Pre-warm a tool |
-| `registry_stop(provider="math")` | Stop a running tool |
+| `registry_start(provider="math")` | Start a specific provider |
+| `registry_stop(provider="math")` | Stop a running provider |
+
+### Status Dashboard
+
+```
+registry_status()
+
+# Output:
+# ╭─────────────────────────────────────────────────╮
+# │ MCP-Hangar Status                               │
+# ├─────────────────────────────────────────────────┤
+# │ ✅ math         ready    last: 2s ago           │
+# │ ✅ sqlite       ready    last: 15s ago          │
+# │ ⏸️  fetch        cold     Will start on request │
+# │ 🔄 memory       starting                        │
+# │ ❌ filesystem   error                           │
+# ├─────────────────────────────────────────────────┤
+# │ Health: 2/5 providers healthy                   │
+# ╰─────────────────────────────────────────────────╯
+```
 
 ---
 
@@ -219,14 +306,54 @@ registry_invoke(provider="memory", tool="create_entities", arguments={
 
 ---
 
+## ⚠️ Error Handling
+
+Errors are now **human-readable** with recovery hints:
+
+```
+# Example error output:
+ProviderProtocolError: SQLite provider returned invalid response
+  ↳ Provider: sqlite
+  ↳ Operation: query
+  ↳ Details: Expected JSON object, received plain text
+
+💡 Recovery steps:
+  1. Retry the operation (often transient)
+  2. Check provider logs: registry_details('sqlite')
+  3. If persistent, file bug report
+```
+
+### Automatic Retry
+
+Use `registry_invoke_ex` for automatic retry on transient failures:
+
+```
+# Will automatically retry up to 3 times on:
+# - Network errors
+# - Timeout
+# - Malformed JSON responses
+# - Provider crashes (auto-restart)
+
+registry_invoke_ex(
+  provider="fetch",
+  tool="fetch",
+  arguments={"url": "https://api.example.com/data"},
+  max_retries=3
+)
+```
+
+---
+
 ## ⚡ Tips & Best Practices
 
 - **Start with `registry_list()`** - discover what's available before diving in
 - **Tools auto-start** - no setup needed, just invoke
+- **Use `registry_invoke_ex`** - automatic retry + progress tracking
+- **Want real-time progress?** → `registry_invoke_stream` shows updates during execution
 - **Unsure about arguments?** → `registry_tools(provider="name")` shows the schema
 - **Use groups for reliability** - `math-cluster` > `math` for production
-- **Got an error?** → Read the message, check arguments, try again
-- **Be bold** - experiment freely, errors are informative
+- **Got an error?** → Read the recovery hints, they tell you what to do
+- **Pre-warm providers** → `registry_warm("math,sqlite")` before heavy use
+- **Check status** → `registry_status()` for quick health overview
 - **Document as you go** - use memory to track your work
 - **Chain everything** - math → file → memory creates powerful workflows
-- **Check health** - `registry_health()` gives you the full picture

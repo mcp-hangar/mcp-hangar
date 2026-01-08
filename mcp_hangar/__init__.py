@@ -44,6 +44,39 @@ from .domain.value_objects import (
     ToolName,
 )
 
+# UX Improvements - Rich errors, retry, progress
+from .errors import (
+    HangarError,
+    TransientError,
+    ProviderProtocolError,
+    ProviderCrashError,
+    NetworkError,
+    ConfigurationError as HangarConfigurationError,
+    ProviderNotFoundError as HangarProviderNotFoundError,
+    ToolNotFoundError as HangarToolNotFoundError,
+    TimeoutError as HangarTimeoutError,
+    RateLimitError,
+    ProviderDegradedError as HangarProviderDegradedError,
+    map_exception_to_hangar_error,
+    is_retryable,
+)
+from .retry import (
+    RetryPolicy,
+    BackoffStrategy,
+    RetryResult,
+    get_retry_policy,
+    get_retry_store,
+    with_retry,
+)
+from .progress import (
+    ProgressStage,
+    ProgressEvent,
+    ProgressTracker,
+    ProgressCallback,
+    create_progress_tracker,
+    get_stage_message,
+)
+
 # Legacy imports - for backward compatibility
 from .models import (
     InvocationContext,
@@ -86,6 +119,34 @@ __all__ = [
     "ValidationError",
     "ConfigurationError",
     "RateLimitExceeded",
+    # UX - Rich Errors
+    "HangarError",
+    "TransientError",
+    "ProviderProtocolError",
+    "ProviderCrashError",
+    "NetworkError",
+    "HangarConfigurationError",
+    "HangarProviderNotFoundError",
+    "HangarToolNotFoundError",
+    "HangarTimeoutError",
+    "RateLimitError",
+    "HangarProviderDegradedError",
+    "map_exception_to_hangar_error",
+    "is_retryable",
+    # UX - Retry
+    "RetryPolicy",
+    "BackoffStrategy",
+    "RetryResult",
+    "get_retry_policy",
+    "get_retry_store",
+    "with_retry",
+    # UX - Progress
+    "ProgressStage",
+    "ProgressEvent",
+    "ProgressTracker",
+    "ProgressCallback",
+    "create_progress_tracker",
+    "get_stage_message",
     # Legacy - for backward compatibility
     "ProviderSpec",
     "ToolSchema",

@@ -29,6 +29,7 @@ from ..domain.model import Provider
 from ..gc import BackgroundWorker
 from ..infrastructure.saga_manager import get_saga_manager
 from ..logging_config import get_logger, setup_logging
+from ..retry import get_retry_store
 from .config import load_config, load_config_from_file, load_configuration
 from .context import get_context, init_context
 from .state import (
@@ -77,6 +78,7 @@ def _parse_args():
     parser.add_argument("--host", type=str, default=None, help="HTTP server host (default: 0.0.0.0)")
     parser.add_argument("--port", type=int, default=None, help="HTTP server port (default: 8000)")
     parser.add_argument("--config", type=str, default=None, help="Path to config.yaml file")
+    parser.add_argument("--log-file", type=str, default=None, help="Path to log file for server output")
     return parser.parse_args()
 
 
@@ -109,9 +111,14 @@ def _init_event_handlers() -> None:
 
     runtime.event_bus.subscribe_to_all(runtime.security_handler.handle)
 
+    # Knowledge base handler (PostgreSQL persistence)
+    from ..application.event_handlers.knowledge_base_handler import KnowledgeBaseEventHandler
+    kb_handler = KnowledgeBaseEventHandler()
+    runtime.event_bus.subscribe_to_all(kb_handler.handle)
+
     logger.info(
         "event_handlers_registered",
-        handlers=["logging", "metrics", "alert", "audit", "security"],
+        handlers=["logging", "metrics", "alert", "audit", "security", "knowledge_base"],
     )
 
 
@@ -132,6 +139,44 @@ def _init_saga() -> None:
     saga_manager = get_saga_manager()
     saga_manager.register_event_saga(saga)
     logger.info("group_rebalance_saga_registered")
+
+
+def _init_retry_config(config: Dict[str, Any]) -> None:
+    """Initialize retry configuration from config.yaml."""
+    retry_store = get_retry_store()
+    retry_store.load_from_config(config)
+    logger.info("retry_config_loaded")
+
+
+def _init_knowledge_base(config: Dict[str, Any]) -> None:
+    """Initialize knowledge base from config.yaml.
+
+    Supports multiple drivers (postgres, sqlite, memory) with auto-detection.
+    """
+    from ..infrastructure.knowledge_base import (
+        init_knowledge_base,
+        KnowledgeBaseConfig,
+    )
+
+    kb_config_dict = config.get("knowledge_base", {})
+    kb_config = KnowledgeBaseConfig.from_dict(kb_config_dict)
+
+    if not kb_config.enabled:
+        logger.info("knowledge_base_disabled")
+        return
+
+    # Initialize asynchronously
+    async def init():
+        kb = await init_knowledge_base(kb_config)
+        if kb:
+            # Verify health
+            healthy = await kb.is_healthy()
+            if healthy:
+                logger.info("knowledge_base_health_ok")
+            else:
+                logger.warning("knowledge_base_health_check_failed")
+
+    asyncio.run(init())
 
 
 async def _init_discovery(config: Dict[str, Any]) -> None:
@@ -343,20 +388,45 @@ def _register_all_tools() -> None:
 def _run_http_server(http_host: str, http_port: int) -> None:
     """Run HTTP server mode using FastMCP.
 
-    In HTTP mode, we use FastMCP's built-in HTTP handling.
-    The MCP tools are already registered via _register_all_tools().
-    """
-    logger.info("starting_http_server", host=http_host, port=http_port)
+    In HTTP mode, we use FastMCP's streamable HTTP transport for /mcp endpoint.
+    This is compatible with LM Studio and other MCP HTTP clients.
 
+    Endpoints:
+    - /mcp: Streamable HTTP MCP endpoint (POST/GET)
+    """
     import uvicorn
 
-    # FastMCP provides an ASGI app
-    uvicorn.run(
-        mcp.sse_app(),
+    logger.info("starting_http_server", host=http_host, port=http_port)
+
+    # Update FastMCP settings for HTTP mode
+    mcp.settings.host = http_host
+    mcp.settings.port = http_port
+
+    # Get the Starlette app from FastMCP
+    starlette_app = mcp.streamable_http_app()
+
+    # Configure uvicorn with log_config=None to disable default uvicorn logging
+    # Our structlog configuration will handle all logging uniformly
+    config = uvicorn.Config(
+        starlette_app,
         host=http_host,
         port=http_port,
-        log_level="info",
+        log_config=None,  # Disable uvicorn's default logging
+        access_log=False,  # Disable access logs (we'll handle them via structlog if needed)
     )
+
+    async def run_server():
+        server = uvicorn.Server(config)
+        logger.info("http_server_started", host=http_host, port=http_port, endpoint="/mcp")
+        await server.serve()
+        logger.info("http_server_stopped")
+
+    try:
+        asyncio.run(run_server())
+    except KeyboardInterrupt:
+        logger.info("http_server_shutdown", reason="keyboard_interrupt")
+    except asyncio.CancelledError:
+        logger.info("http_server_shutdown", reason="cancelled")
 
 
 def _run_stdio_server() -> None:
@@ -383,7 +453,7 @@ def main():
 
     # Load config first to get logging settings
     log_level = "INFO"
-    log_file = None
+    log_file = getattr(args, "log_file", None)  # From command line --log-file
     json_format = os.getenv("MCP_JSON_LOGS", "false").lower() == "true"
 
     if config_path and Path(config_path).exists():
@@ -391,13 +461,15 @@ def main():
             full_config = load_config_from_file(config_path)
             logging_config = full_config.get("logging", {})
             log_level = logging_config.get("level", "INFO").upper()
-            log_file = logging_config.get("file")
+            # Command line --log-file takes precedence over config file
+            if not log_file:
+                log_file = logging_config.get("file")
             json_format = logging_config.get("json_format", json_format)
         except Exception:
             pass
 
     setup_logging(level=log_level, json_format=json_format, log_file=log_file)
-    logger.info("mcp_registry_starting", mode="http" if http_mode else "stdio")
+    logger.info("mcp_registry_starting", mode="http" if http_mode else "stdio", log_file=log_file)
 
     _ensure_data_dir()
 
@@ -418,6 +490,8 @@ def main():
 
     # Load configuration and register tools
     full_config = load_configuration(config_path)
+    _init_retry_config(full_config)
+    _init_knowledge_base(full_config)
     _register_all_tools()
     _start_background_workers()
 
