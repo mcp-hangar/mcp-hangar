@@ -113,7 +113,7 @@ registry_list()
 registry_tools(provider="sqlite")
 
 # Invoke tool (starts container, executes)
-registry_invoke(provider="sqlite", tool="execute", 
+registry_invoke(provider="sqlite", tool="execute",
                 arguments={"sql": "CREATE TABLE users (id INTEGER PRIMARY KEY)"})
 
 registry_invoke(provider="sqlite", tool="query",
@@ -189,6 +189,7 @@ uv run pytest tests/ -v -m "not slow"
 
 - [Container Guide](docs/guides/CONTAINERS.md)
 - [Discovery](docs/guides/DISCOVERY.md)
+- [Observability](docs/guides/OBSERVABILITY.md) - Metrics, tracing, health checks
 - [UX Improvements](docs/guides/UX_IMPROVEMENTS.md) - Retry, progress, rich errors
 - [Architecture](docs/architecture/OVERVIEW.md)
 - [Testing](docs/guides/TESTING.md)
@@ -197,4 +198,3 @@ uv run pytest tests/ -v -m "not slow"
 ## License
 
 MIT
-

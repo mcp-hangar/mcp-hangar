@@ -8,6 +8,15 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 ## [Unreleased]
 
 ### Added
+- **Observability Module**: Comprehensive monitoring and tracing support
+  - OpenTelemetry distributed tracing with OTLP/Jaeger export
+  - Extended Prometheus metrics (circuit breaker, retry, queue depth, SLIs)
+  - Kubernetes-compatible health endpoints (`/health/live`, `/health/ready`, `/health/startup`)
+  - Pre-built Grafana dashboard for overview metrics
+  - Prometheus alert rules (critical and warning)
+  - Alertmanager configuration template
+  - Documentation at `docs/guides/OBSERVABILITY.md`
+
 - **Provider Groups**: Load balancing and high availability for multiple providers
   - Group multiple providers of the same type into a single logical unit
   - Five load balancing strategies: `round_robin`, `weighted_round_robin`, `least_connections`, `random`, `priority`

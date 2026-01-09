@@ -22,8 +22,13 @@ mcp_hangar/
 │   ├── commands/     # CQRS commands
 │   ├── queries/      # CQRS queries
 │   └── sagas/
-├── infrastructure/   # Infrastructure
-├── server.py         # FastMCP server
+├── infrastructure/   # Infrastructure adapters
+├── server/           # MCP server module
+│   ├── __init__.py   # Main entry point
+│   ├── config.py     # Configuration loading
+│   ├── state.py      # Global state management
+│   └── tools/        # MCP tool implementations
+├── observability/    # Metrics, tracing, health
 ├── stdio_client.py   # JSON-RPC client
 └── gc.py             # Background workers
 ```
@@ -47,15 +52,15 @@ ruff check mcp_hangar/ tests/ --fix
 
 ### Type Hints
 
-Required for all new code:
+Required for all new code. Use Python 3.10+ built-in generics:
 
 ```python
 def invoke_tool(
     self,
     tool_name: str,
-    arguments: Dict[str, Any],
-    timeout: float = 30.0
-) -> Dict[str, Any]:
+    arguments: dict[str, Any],
+    timeout: float = 30.0,
+) -> dict[str, Any]:
     ...
 ```
 
@@ -140,4 +145,3 @@ logger.info(f"provider_started: {provider_id}, mode={mode}")
 ## License
 
 MIT
-

@@ -37,7 +37,7 @@ Please include the following information in your report:
 
 ## Security Features
 
-This project implements multiple security layers. For detailed information, see [docs/SECURITY.md](docs/SECURITY.md).
+This project implements multiple security layers:
 
 ### Key Security Features
 
