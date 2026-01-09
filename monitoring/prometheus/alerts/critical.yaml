@@ -1,0 +1,71 @@
+# MCP Hangar Critical Alerts
+# These alerts should page on-call engineers immediately
+
+groups:
+  - name: mcp-hangar-critical
+    rules:
+      # All providers are down
+      - alert: MCPHangarAllProvidersDown
+        expr: sum(mcp_registry_provider_state{state="ready"}) == 0 and sum(mcp_registry_provider_state) > 0
+        for: 1m
+        labels:
+          severity: critical
+          team: platform
+        annotations:
+          summary: "All MCP providers are down"
+          description: "No providers are in ready state. Total providers: {{ $value }}"
+          runbook_url: "https://docs.mcp-hangar.io/runbooks/all-providers-down"
+
+      # High error rate
+      - alert: MCPHangarHighErrorRate
+        expr: |
+          (
+            rate(mcp_registry_errors_total[5m]) /
+            (rate(mcp_registry_tool_calls_total[5m]) + 0.001)
+          ) > 0.1
+        for: 2m
+        labels:
+          severity: critical
+          team: platform
+        annotations:
+          summary: "MCP Hangar error rate > 10%"
+          description: "Error rate is {{ $value | humanizePercentage }} over the last 5 minutes"
+          runbook_url: "https://docs.mcp-hangar.io/runbooks/high-error-rate"
+
+      # Circuit breaker open
+      - alert: MCPHangarCircuitBreakerOpen
+        expr: mcp_registry_circuit_breaker_state{state="open"} == 1
+        for: 0m
+        labels:
+          severity: critical
+          team: platform
+        annotations:
+          summary: "Circuit breaker open for provider {{ $labels.provider }}"
+          description: "Provider {{ $labels.provider }} has tripped its circuit breaker"
+          runbook_url: "https://docs.mcp-hangar.io/runbooks/circuit-breaker"
+
+      # Process not responding
+      - alert: MCPHangarNotResponding
+        expr: up{job="mcp-hangar"} == 0
+        for: 1m
+        labels:
+          severity: critical
+          team: platform
+        annotations:
+          summary: "MCP Hangar is not responding"
+          description: "Prometheus cannot scrape MCP Hangar metrics"
+          runbook_url: "https://docs.mcp-hangar.io/runbooks/not-responding"
+
+      # Startup failure
+      - alert: MCPHangarStartupFailed
+        expr: |
+          mcp_registry_provider_state{state="dead"} == 1
+          and on(provider) increase(mcp_registry_cold_starts_total[5m]) > 3
+        for: 2m
+        labels:
+          severity: critical
+          team: platform
+        annotations:
+          summary: "Provider {{ $labels.provider }} repeatedly failing to start"
+          description: "Provider has failed to start multiple times in the last 5 minutes"
+          runbook_url: "https://docs.mcp-hangar.io/runbooks/startup-failure"

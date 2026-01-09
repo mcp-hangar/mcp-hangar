@@ -1,0 +1,81 @@
+# Alertmanager configuration
+# Customize receivers for your environment
+
+global:
+  resolve_timeout: 5m
+  # SMTP settings for email alerts (uncomment and configure)
+  # smtp_smarthost: 'smtp.example.com:587'
+  # smtp_from: 'alertmanager@example.com'
+  # smtp_auth_username: 'alertmanager@example.com'
+  # smtp_auth_password: 'password'
+
+# Route tree
+route:
+  group_by: ['alertname', 'severity']
+  group_wait: 30s
+  group_interval: 5m
+  repeat_interval: 4h
+  receiver: 'default-receiver'
+
+  routes:
+    # Critical alerts - immediate notification
+    - match:
+        severity: critical
+      receiver: 'critical-receiver'
+      group_wait: 10s
+      repeat_interval: 1h
+
+    # Warning alerts - normal notification
+    - match:
+        severity: warning
+      receiver: 'warning-receiver'
+      group_wait: 1m
+      repeat_interval: 4h
+
+# Inhibition rules
+inhibit_rules:
+  # If all providers are down, inhibit individual provider alerts
+  - source_match:
+      alertname: MCPHangarAllProvidersDown
+    target_match_re:
+      alertname: MCPHangarProviderDegraded|MCPHangarHighConsecutiveFailures
+    equal: ['team']
+
+# Receivers
+receivers:
+  - name: 'default-receiver'
+    # Add your notification channels here
+    # webhook_configs:
+    #   - url: 'http://your-webhook-endpoint'
+
+  - name: 'critical-receiver'
+    # PagerDuty example (uncomment and configure)
+    # pagerduty_configs:
+    #   - service_key: 'your-service-key'
+    #     severity: critical
+
+    # Slack example (uncomment and configure)
+    # slack_configs:
+    #   - api_url: 'https://hooks.slack.com/services/YOUR/WEBHOOK/URL'
+    #     channel: '#alerts-critical'
+    #     title: '🚨 CRITICAL: {{ .CommonAnnotations.summary }}'
+    #     text: '{{ .CommonAnnotations.description }}'
+    #     send_resolved: true
+
+  - name: 'warning-receiver'
+    # Slack example for warnings
+    # slack_configs:
+    #   - api_url: 'https://hooks.slack.com/services/YOUR/WEBHOOK/URL'
+    #     channel: '#alerts-warning'
+    #     title: '⚠️ WARNING: {{ .CommonAnnotations.summary }}'
+    #     text: '{{ .CommonAnnotations.description }}'
+    #     send_resolved: true
+
+    # Email example (uncomment and configure)
+    # email_configs:
+    #   - to: 'team@example.com'
+    #     headers:
+    #       Subject: '[MCP-Hangar] {{ .CommonAnnotations.summary }}'
+
+# Templates
+templates: []

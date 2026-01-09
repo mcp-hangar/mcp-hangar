@@ -1,0 +1,137 @@
+# MCP Hangar Warning Alerts
+# These alerts should notify via Slack/email but not page
+
+groups:
+  - name: mcp-hangar-warning
+    rules:
+      # Provider degraded
+      - alert: MCPHangarProviderDegraded
+        expr: mcp_registry_provider_state{state="degraded"} == 1
+        for: 5m
+        labels:
+          severity: warning
+          team: platform
+        annotations:
+          summary: "Provider {{ $labels.provider }} is degraded"
+          description: "Provider {{ $labels.provider }} has been in degraded state for 5 minutes"
+          runbook_url: "https://docs.mcp-hangar.io/runbooks/provider-degraded"
+
+      # High latency P95
+      - alert: MCPHangarHighLatencyP95
+        expr: |
+          histogram_quantile(0.95,
+            rate(mcp_registry_tool_call_duration_seconds_bucket[5m])
+          ) > 5
+        for: 5m
+        labels:
+          severity: warning
+          team: platform
+        annotations:
+          summary: "MCP Hangar P95 latency > 5s"
+          description: "95th percentile latency is {{ $value | humanizeDuration }}"
+          runbook_url: "https://docs.mcp-hangar.io/runbooks/high-latency"
+
+      # Frequent cold starts
+      - alert: MCPHangarFrequentColdStarts
+        expr: rate(mcp_registry_cold_starts_total[15m]) > 0.1
+        for: 10m
+        labels:
+          severity: warning
+          team: platform
+        annotations:
+          summary: "Frequent cold starts detected"
+          description: "Cold start rate is {{ $value | humanize }}/s - consider increasing idle TTL"
+          runbook_url: "https://docs.mcp-hangar.io/runbooks/frequent-cold-starts"
+
+      # Discovery source unhealthy
+      - alert: MCPHangarDiscoverySourceUnhealthy
+        expr: mcp_registry_discovery_sources_healthy == 0
+        for: 5m
+        labels:
+          severity: warning
+          team: platform
+        annotations:
+          summary: "Discovery source {{ $labels.source_type }} is unhealthy"
+          description: "Discovery source has been unhealthy for 5 minutes"
+          runbook_url: "https://docs.mcp-hangar.io/runbooks/discovery-unhealthy"
+
+      # High consecutive failures
+      - alert: MCPHangarHighConsecutiveFailures
+        expr: mcp_registry_health_check_consecutive_failures > 2
+        for: 2m
+        labels:
+          severity: warning
+          team: platform
+        annotations:
+          summary: "Provider {{ $labels.provider }} has consecutive health failures"
+          description: "{{ $value }} consecutive health check failures"
+          runbook_url: "https://docs.mcp-hangar.io/runbooks/health-failures"
+
+      # Rate limiting active
+      - alert: MCPHangarRateLimitingActive
+        expr: rate(mcp_registry_rate_limit_hits_total[5m]) > 1
+        for: 5m
+        labels:
+          severity: warning
+          team: platform
+        annotations:
+          summary: "Rate limiting is active on {{ $labels.endpoint }}"
+          description: "{{ $value | humanize }} requests/s are being rate limited"
+          runbook_url: "https://docs.mcp-hangar.io/runbooks/rate-limiting"
+
+      # Low availability
+      - alert: MCPHangarLowAvailability
+        expr: |
+          (
+            sum(mcp_registry_provider_state{state="ready"}) /
+            sum(mcp_registry_provider_state)
+          ) < 0.8
+        for: 5m
+        labels:
+          severity: warning
+          team: platform
+        annotations:
+          summary: "MCP Hangar availability below 80%"
+          description: "Only {{ $value | humanizePercentage }} of providers are ready"
+          runbook_url: "https://docs.mcp-hangar.io/runbooks/low-availability"
+
+      # Memory usage high
+      - alert: MCPHangarHighMemoryUsage
+        expr: |
+          process_resident_memory_bytes{job="mcp-hangar"} /
+          (1024 * 1024 * 1024) > 2
+        for: 10m
+        labels:
+          severity: warning
+          team: platform
+        annotations:
+          summary: "MCP Hangar memory usage > 2GB"
+          description: "Current memory usage: {{ $value | humanize1024 }}B"
+          runbook_url: "https://docs.mcp-hangar.io/runbooks/high-memory"
+
+      # GC taking too long
+      - alert: MCPHangarSlowGC
+        expr: |
+          histogram_quantile(0.95,
+            rate(mcp_registry_gc_cycle_duration_seconds_bucket[5m])
+          ) > 0.5
+        for: 5m
+        labels:
+          severity: warning
+          team: platform
+        annotations:
+          summary: "MCP Hangar GC cycles are slow"
+          description: "P95 GC duration is {{ $value | humanizeDuration }}"
+          runbook_url: "https://docs.mcp-hangar.io/runbooks/slow-gc"
+
+      # Retry exhaustion
+      - alert: MCPHangarRetryExhaustion
+        expr: rate(mcp_registry_retry_exhausted_total[5m]) > 0.1
+        for: 5m
+        labels:
+          severity: warning
+          team: platform
+        annotations:
+          summary: "High retry exhaustion rate for {{ $labels.provider }}"
+          description: "Retries exhausted {{ $value | humanize }}/s for {{ $labels.tool }}"
+          runbook_url: "https://docs.mcp-hangar.io/runbooks/retry-exhaustion"
