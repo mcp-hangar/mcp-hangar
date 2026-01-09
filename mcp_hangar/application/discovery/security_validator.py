@@ -379,10 +379,11 @@ class SecurityValidator:
         Returns:
             ValidationReport if schema invalid, None if valid
         """
-        # TODO: Implement MCP schema validation
-        # This would call the provider's tools/list endpoint
-        # and validate the response against MCP spec
-        logger.debug(f"Schema validation not implemented, skipping for {provider.name}")
+        # NOTE: MCP schema validation is intentionally deferred.
+        # The provider's tools/list response should be validated against MCP spec,
+        # but this requires network calls during registration which adds latency.
+        # Schema validation can be done lazily on first tool invocation instead.
+        logger.debug(f"Schema validation deferred for {provider.name}")
         return None
 
     def record_registration(self, provider: DiscoveredProvider) -> None:

@@ -16,7 +16,7 @@ class PrometheusMetricsPublisher(IMetricsPublisher):
     def _ensure_metrics(self):
         """Lazy load metrics module."""
         if self._metrics is None:
-            from ... import metrics
+            from mcp_hangar import metrics
 
             self._metrics = metrics
 

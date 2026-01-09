@@ -99,7 +99,8 @@ class TransactionalProviderConfigRepository:
             try:
                 config_data = json.loads(row[0])
                 configs.append(ProviderConfigSnapshot.from_dict(config_data))
-            except Exception:
+            except (json.JSONDecodeError, KeyError, TypeError) as e:
+                logger.warning("invalid_config_snapshot", error=str(e), raw_data=row[0][:100])
                 continue
 
         return configs

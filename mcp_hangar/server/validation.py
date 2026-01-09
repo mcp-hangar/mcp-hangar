@@ -46,6 +46,10 @@ def tool_error_hook(exc: Exception, context: dict) -> None:
     """Best-effort hook for logging/security telemetry on tool failures.
 
     Gets security handler from application context (DIP).
+
+    Args:
+        exc: The exception that occurred.
+        context: Additional context dict with provider_id, tool, etc.
     """
     try:
         ctx = get_context()
@@ -55,7 +59,8 @@ def tool_error_hook(exc: Exception, context: dict) -> None:
             provider_id=context.get("provider_id"),
             value=context.get("provider_id"),
         )
-    except Exception:
+    except (RuntimeError, AttributeError, TypeError):
+        # Context not initialized or handler missing - skip silently
         pass
 
 

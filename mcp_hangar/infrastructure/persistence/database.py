@@ -114,7 +114,8 @@ class Database:
             try:
                 yield conn
                 await conn.commit()
-            except Exception:
+            except (aiosqlite.Error, ValueError, TypeError) as e:
+                logger.debug("transaction_rollback", error=str(e))
                 await conn.rollback()
                 raise
 

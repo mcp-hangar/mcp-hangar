@@ -10,8 +10,11 @@ from mcp.server.fastmcp import FastMCP
 
 from ... import metrics as m
 from ...application.mcp.tooling import key_global, mcp_tool_wrapper
+from ...logging_config import get_logger
 from ..context import get_context
 from ..validation import check_rate_limit, tool_error_hook, tool_error_mapper
+
+logger = get_logger(__name__)
 
 # =============================================================================
 # Metrics Processing Helpers
@@ -19,7 +22,14 @@ from ..validation import check_rate_limit, tool_error_hook, tool_error_mapper
 
 
 def _collect_samples_from_collector(collector: Any) -> List[Any]:
-    """Extract samples from a metrics collector."""
+    """Extract metric samples from a Prometheus collector.
+
+    Args:
+        collector: Prometheus metric collector instance.
+
+    Returns:
+        List of metric samples extracted from the collector.
+    """
     if not hasattr(collector, "collect"):
         return []
 
@@ -42,7 +52,14 @@ def _collect_samples_from_collector(collector: Any) -> List[Any]:
 def _process_tool_calls_metric(
     name: str, labels: Dict[str, str], value: float, tool_calls: Dict[str, Dict[str, int]]
 ) -> None:
-    """Process tool_calls metric sample."""
+    """Process tool_calls metric sample and update aggregation dict.
+
+    Args:
+        name: Metric name.
+        labels: Metric labels dict.
+        value: Metric value.
+        tool_calls: Dict to accumulate tool call counts.
+    """
     if "tool_calls" not in name:
         return
 
@@ -62,7 +79,14 @@ def _process_tool_calls_metric(
 def _process_invocations_metric(
     name: str, labels: Dict[str, str], value: float, providers: Dict[str, Dict[str, Any]]
 ) -> None:
-    """Process invocations metric sample."""
+    """Process invocations metric sample and update provider stats.
+
+    Args:
+        name: Metric name.
+        labels: Metric labels dict.
+        value: Metric value.
+        providers: Dict to accumulate provider invocation counts.
+    """
     if "invocations" not in name or "provider" not in labels:
         return
 
@@ -74,7 +98,14 @@ def _process_invocations_metric(
 def _process_discovery_metric(
     name: str, labels: Dict[str, str], value: float, discovery: Dict[str, Dict[str, Any]]
 ) -> None:
-    """Process discovery metric sample."""
+    """Process discovery metric sample and update discovery stats.
+
+    Args:
+        name: Metric name.
+        labels: Metric labels dict.
+        value: Metric value.
+        discovery: Dict to accumulate discovery statistics.
+    """
     if "discovery" not in name:
         return
 
@@ -93,7 +124,14 @@ def _process_discovery_metric(
 
 
 def _process_error_metric(name: str, labels: Dict[str, str], value: float, errors: Dict[str, int]) -> None:
-    """Process error metric sample."""
+    """Process error metric sample and update error counts.
+
+    Args:
+        name: Metric name.
+        labels: Metric labels dict.
+        value: Metric value.
+        errors: Dict to accumulate error counts by type.
+    """
     if "error" not in name.lower():
         return
 
@@ -102,7 +140,14 @@ def _process_error_metric(name: str, labels: Dict[str, str], value: float, error
 
 
 def _process_metric_sample(sample: Any, result: Dict[str, Any]) -> None:
-    """Process a single metric sample and update result dict."""
+    """Process a single metric sample and update result dict.
+
+    Routes the sample to appropriate processor based on metric name.
+
+    Args:
+        sample: Metric sample with labels and value attributes.
+        result: Result dict to update with processed metrics.
+    """
     if not hasattr(sample, "labels") or not hasattr(sample, "value"):
         return
 
@@ -231,7 +276,9 @@ def register_health_tools(mcp: FastMCP) -> None:
                     if not hasattr(sample, "name"):
                         sample.name = name
                     _process_metric_sample(sample, result)
-            except Exception:
+            except (AttributeError, TypeError, ValueError) as e:
+                # Skip malformed collectors gracefully
+                logger.debug("metrics_collector_error", collector=name, error=str(e))
                 continue
 
         # Group metrics

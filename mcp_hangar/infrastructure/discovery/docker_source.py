@@ -257,13 +257,22 @@ class DockerDiscoverySource(DiscoverySource):
         return None
 
     async def health_check(self) -> bool:
-        """Check if container runtime is accessible."""
+        """Check if container runtime is accessible.
+
+        Returns:
+            True if Docker/Podman is accessible, False otherwise.
+        """
         try:
             self._ensure_client()
             self._client.ping()
             return True
-        except Exception as e:
+        except (OSError, ConnectionError, RuntimeError, TimeoutError) as e:
             logger.warning(f"Container runtime health check failed: {e}")
+            return False
+        except Exception as e:
+            # Docker client can raise various exceptions depending on version
+            # Log and return False for any connection-related failure
+            logger.warning(f"Container runtime health check failed: {type(e).__name__}: {e}")
             return False
 
     async def start(self) -> None:

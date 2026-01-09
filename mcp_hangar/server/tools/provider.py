@@ -14,19 +14,10 @@ from mcp.server.fastmcp import Context, FastMCP
 from ...application.commands import InvokeToolCommand, StartProviderCommand
 from ...application.mcp.tooling import chain_validators, key_registry_invoke, mcp_tool_wrapper
 from ...domain.model import ProviderGroup
-from ...errors import (
-    map_exception_to_hangar_error,
-    ProviderNotFoundError as HangarProviderNotFoundError,
-)
+from ...errors import map_exception_to_hangar_error, ProviderNotFoundError as HangarProviderNotFoundError
 from ...infrastructure.async_executor import submit_async
 from ...infrastructure.query_bus import GetProviderQuery, GetProviderToolsQuery
-from ...progress import (
-    create_progress_tracker,
-    get_stage_message,
-    ProgressCallback,
-    ProgressStage,
-    ProgressTracker,
-)
+from ...progress import create_progress_tracker, get_stage_message, ProgressCallback, ProgressStage, ProgressTracker
 from ...retry import get_retry_policy, retry_sync, RetryPolicy
 from ..context import get_context
 from ..validation import (
@@ -726,8 +717,8 @@ def register_provider_tools(mcp: FastMCP) -> None:
                 if loop.is_running():
                     task = asyncio.create_task(send_mcp_notification())
                     pending_notifications.append(task)
-            except Exception:
-                pass  # Best effort for MCP notifications
+            except RuntimeError:
+                pass  # No event loop - skip MCP notifications
 
         # Create progress tracker
         start_time = time.time()

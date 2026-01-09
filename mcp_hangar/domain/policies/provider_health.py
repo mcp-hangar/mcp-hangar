@@ -31,20 +31,34 @@ from ..value_objects import HealthStatus, ProviderState
 
 
 class _HealthView(Protocol):
-    """Minimal health-tracker view required by the policy."""
+    """Minimal health-tracker view required by the policy.
+
+    Defines the interface for accessing health metrics from any
+    health-tracker-like object.
+    """
 
     @property
-    def consecutive_failures(self) -> int: ...
+    def consecutive_failures(self) -> int:
+        """Get the count of consecutive failures."""
+        ...
 
 
 class _ProviderView(Protocol):
-    """Minimal provider view required by the policy."""
+    """Minimal provider view required by the policy.
+
+    Defines the interface for accessing provider state and health
+    from any provider-like object.
+    """
 
     @property
-    def state(self) -> ProviderState: ...
+    def state(self) -> ProviderState:
+        """Get the current provider state."""
+        ...
 
     @property
-    def health(self) -> _HealthView: ...
+    def health(self) -> _HealthView:
+        """Get the health tracker view."""
+        ...
 
 
 def _normalize_state(state: Any) -> ProviderState:

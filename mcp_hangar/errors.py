@@ -23,7 +23,7 @@ See docs/guides/UX_IMPROVEMENTS.md for usage examples.
 """
 
 from dataclasses import dataclass, field
-from typing import Any, Dict, List, Optional
+from typing import Any, Callable, Dict, List, Optional
 
 
 @dataclass
@@ -398,6 +398,216 @@ class ProviderDegradedError(HangarError):
 # =============================================================================
 
 
+def _matches_keywords(text: str, keywords: list[str]) -> bool:
+    """Check if text contains any of the keywords (case-insensitive)."""
+    text_lower = text.lower()
+    return any(kw in text_lower for kw in keywords)
+
+
+def _create_json_error(exc: Exception, provider: str, operation: str, context: dict) -> HangarError:
+    """Create error for JSON parsing failures."""
+    exc_str = str(exc)
+    preview = exc_str[:100] if len(exc_str) > 100 else exc_str
+    return ProviderProtocolError(
+        message=f"{provider or 'Provider'} returned invalid response",
+        provider=provider,
+        operation=operation,
+        technical_details=f"JSON parse error: {exc_str}",
+        raw_response=preview,
+        original_exception=exc,
+        context=context,
+    )
+
+
+def _create_timeout_error(exc: Exception, provider: str, operation: str, context: dict) -> HangarError:
+    """Create error for timeout failures."""
+    timeout = context.get("timeout", 30.0)
+    return TimeoutError(
+        message=f"Operation timed out after {timeout}s",
+        provider=provider,
+        operation=operation,
+        technical_details=str(exc),
+        timeout_seconds=timeout,
+        original_exception=exc,
+        context=context,
+    )
+
+
+def _create_network_error(exc: Exception, provider: str, operation: str, context: dict) -> HangarError:
+    """Create error for network failures."""
+    return NetworkError(
+        message=f"Unable to reach {provider or 'provider'}",
+        provider=provider,
+        operation=operation,
+        technical_details=str(exc),
+        original_exception=exc,
+        context=context,
+    )
+
+
+def _create_crash_error(exc: Exception, provider: str, operation: str, context: dict) -> HangarError:
+    """Create error for process crashes."""
+    exit_code = context.get("exit_code")
+    signal_name = None
+    if exit_code and exit_code < 0:
+        import signal as sig
+
+        try:
+            signal_name = sig.Signals(-exit_code).name
+        except (ValueError, AttributeError):
+            pass
+
+    return ProviderCrashError(
+        message=f"{provider or 'Provider'} terminated unexpectedly",
+        provider=provider,
+        operation=operation,
+        technical_details=str(exc),
+        exit_code=exit_code,
+        signal_name=signal_name,
+        original_exception=exc,
+        context=context,
+    )
+
+
+def _create_rate_limit_error(exc: Exception, provider: str, operation: str, context: dict) -> HangarError:
+    """Create error for rate limit failures."""
+    return RateLimitError(
+        message="Too many requests",
+        provider=provider,
+        operation=operation,
+        technical_details=str(exc),
+        original_exception=exc,
+        context=context,
+    )
+
+
+def _create_provider_not_found_error(exc: Exception, provider: str, operation: str, context: dict) -> HangarError:
+    """Create error for provider not found."""
+    return ProviderNotFoundError(
+        message=f"Provider '{provider}' not found",
+        provider=provider,
+        operation=operation,
+        technical_details=str(exc),
+        original_exception=exc,
+        context=context,
+    )
+
+
+def _create_tool_not_found_error(exc: Exception, provider: str, operation: str, context: dict) -> HangarError:
+    """Create error for tool not found."""
+    tool_name = context.get("tool_name", "")
+    return ToolNotFoundError(
+        message=f"Tool '{tool_name}' not found on provider '{provider}'",
+        provider=provider,
+        operation=operation,
+        tool_name=tool_name,
+        technical_details=str(exc),
+        original_exception=exc,
+        context=context,
+    )
+
+
+def _create_client_error(exc: Exception, provider: str, operation: str, context: dict) -> HangarError:
+    """Create error for client communication failures."""
+    exc_str = str(exc)
+    if _matches_keywords(exc_str, ["malformed", "json"]):
+        return TransientError(
+            message=f"Communication error with {provider or 'provider'}",
+            provider=provider,
+            operation=operation,
+            technical_details=exc_str,
+            recovery_hints=[
+                "This is usually a transient error",
+                "Retry the operation",
+                f"Check provider status: registry_details('{provider}')",
+            ],
+            original_exception=exc,
+            context=context,
+        )
+
+    return HangarError(
+        message=f"Client error: {exc_str}",
+        provider=provider,
+        operation=operation,
+        technical_details=exc_str,
+        recovery_hints=[
+            "Check provider status",
+            "Restart the provider if needed",
+        ],
+        original_exception=exc,
+        context=context,
+    )
+
+
+def _create_generic_error(exc: Exception, provider: str, operation: str, context: dict) -> HangarError:
+    """Create generic error as fallback."""
+    exc_str = str(exc)
+    exc_type = type(exc).__name__
+    return HangarError(
+        message=f"Operation failed: {exc_str}",
+        provider=provider,
+        operation=operation,
+        technical_details=f"{exc_type}: {exc_str}",
+        recovery_hints=[
+            "Check the logs for more details",
+            f"Provider status: registry_details('{provider}')" if provider else "Check provider configuration",
+        ],
+        original_exception=exc,
+        context=context,
+    )
+
+
+# Error detection rules: (keywords to match, detector function, creator function)
+_ERROR_MATCHERS: list[tuple[list[str], Callable, Callable]] = [
+    # JSON errors - check type name and message
+    (
+        ["json"],
+        lambda exc_type, exc_str: "JSONDecodeError" in exc_type or "json" in exc_str.lower(),
+        _create_json_error,
+    ),
+    # Timeout errors
+    (
+        ["timeout"],
+        lambda exc_type, exc_str: "timeout" in exc_str.lower() or "TimeoutError" in exc_type,
+        _create_timeout_error,
+    ),
+    # Network errors
+    (
+        ["connection", "network", "dns", "eai_again", "econnrefused"],
+        lambda exc_type, exc_str: _matches_keywords(
+            exc_str, ["connection", "network", "dns", "eai_again", "econnrefused"]
+        ),
+        _create_network_error,
+    ),
+    # Crash errors
+    (
+        ["exit code", "sigkill", "terminated", "process died"],
+        lambda exc_type, exc_str: _matches_keywords(exc_str, ["exit code", "sigkill", "terminated", "process died"]),
+        _create_crash_error,
+    ),
+    # Rate limit
+    (["rate limit"], lambda exc_type, exc_str: "rate limit" in exc_str.lower(), _create_rate_limit_error),
+    # Provider not found
+    (
+        ["not found", "provider"],
+        lambda exc_type, exc_str: "not found" in exc_str.lower() and "provider" in exc_str.lower(),
+        _create_provider_not_found_error,
+    ),
+    # Tool not found
+    (
+        ["not found", "tool"],
+        lambda exc_type, exc_str: "not found" in exc_str.lower() and "tool" in exc_str.lower(),
+        _create_tool_not_found_error,
+    ),
+    # Client errors
+    (
+        ["client"],
+        lambda exc_type, exc_str: "client" in exc_str.lower() or "ClientError" in exc_type,
+        _create_client_error,
+    ),
+]
+
+
 def map_exception_to_hangar_error(
     exc: Exception,
     provider: str = "",
@@ -411,161 +621,30 @@ def map_exception_to_hangar_error(
     recovery hints.
 
     Args:
-        exc: The original exception
-        provider: Provider ID if known
-        operation: Operation being performed
-        context: Additional context data
+        exc: The original exception.
+        provider: Provider ID if known.
+        operation: Operation being performed.
+        context: Additional context data.
 
     Returns:
-        A HangarError subclass appropriate for the exception type
+        A HangarError subclass appropriate for the exception type.
     """
     context = context or {}
 
-    # Already a HangarError
+    # Already a HangarError - return as-is
     if isinstance(exc, HangarError):
         return exc
 
     exc_str = str(exc)
     exc_type = type(exc).__name__
 
-    # JSON decode errors -> ProviderProtocolError
-    if "JSONDecodeError" in exc_type or "json" in exc_str.lower():
-        preview = exc_str[:100] if len(exc_str) > 100 else exc_str
-        return ProviderProtocolError(
-            message=f"{provider or 'Provider'} returned invalid response",
-            provider=provider,
-            operation=operation,
-            technical_details=f"JSON parse error: {exc_str}",
-            raw_response=preview,
-            original_exception=exc,
-            context=context,
-        )
-
-    # Timeout errors
-    if "timeout" in exc_str.lower() or "TimeoutError" in exc_type:
-        timeout = context.get("timeout", 30.0)
-        return TimeoutError(
-            message=f"Operation timed out after {timeout}s",
-            provider=provider,
-            operation=operation,
-            technical_details=exc_str,
-            timeout_seconds=timeout,
-            original_exception=exc,
-            context=context,
-        )
-
-    # Connection/network errors
-    if any(kw in exc_str.lower() for kw in ["connection", "network", "dns", "eai_again", "econnrefused"]):
-        return NetworkError(
-            message=f"Unable to reach {provider or 'provider'}",
-            provider=provider,
-            operation=operation,
-            technical_details=exc_str,
-            original_exception=exc,
-            context=context,
-        )
-
-    # Process exit/crash errors
-    if any(kw in exc_str.lower() for kw in ["exit code", "sigkill", "terminated", "process died"]):
-        exit_code = context.get("exit_code")
-        signal_name = None
-        if exit_code and exit_code < 0:
-            import signal as sig
-
-            try:
-                signal_name = sig.Signals(-exit_code).name
-            except (ValueError, AttributeError):
-                pass
-
-        return ProviderCrashError(
-            message=f"{provider or 'Provider'} terminated unexpectedly",
-            provider=provider,
-            operation=operation,
-            technical_details=exc_str,
-            exit_code=exit_code,
-            signal_name=signal_name,
-            original_exception=exc,
-            context=context,
-        )
-
-    # Rate limit errors
-    if "rate limit" in exc_str.lower():
-        return RateLimitError(
-            message="Too many requests",
-            provider=provider,
-            operation=operation,
-            technical_details=exc_str,
-            original_exception=exc,
-            context=context,
-        )
-
-    # Provider not found
-    if "not found" in exc_str.lower() and "provider" in exc_str.lower():
-        return ProviderNotFoundError(
-            message=f"Provider '{provider}' not found",
-            provider=provider,
-            operation=operation,
-            technical_details=exc_str,
-            original_exception=exc,
-            context=context,
-        )
-
-    # Tool not found
-    if "not found" in exc_str.lower() and "tool" in exc_str.lower():
-        tool_name = context.get("tool_name", "")
-        return ToolNotFoundError(
-            message=f"Tool '{tool_name}' not found on provider '{provider}'",
-            provider=provider,
-            operation=operation,
-            tool_name=tool_name,
-            technical_details=exc_str,
-            original_exception=exc,
-            context=context,
-        )
-
-    # Client errors (malformed, closed, etc.)
-    if "client" in exc_str.lower() or "ClientError" in exc_type:
-        if "malformed" in exc_str.lower() or "json" in exc_str.lower():
-            return TransientError(
-                message=f"Communication error with {provider or 'provider'}",
-                provider=provider,
-                operation=operation,
-                technical_details=exc_str,
-                recovery_hints=[
-                    "This is usually a transient error",
-                    "Retry the operation",
-                    f"Check provider status: registry_details('{provider}')",
-                ],
-                original_exception=exc,
-                context=context,
-            )
-
-        return HangarError(
-            message=f"Client error: {exc_str}",
-            provider=provider,
-            operation=operation,
-            technical_details=exc_str,
-            recovery_hints=[
-                "Check provider status",
-                "Restart the provider if needed",
-            ],
-            original_exception=exc,
-            context=context,
-        )
+    # Try each matcher in order
+    for _, detector, creator in _ERROR_MATCHERS:
+        if detector(exc_type, exc_str):
+            return creator(exc, provider, operation, context)
 
     # Default: wrap as generic HangarError
-    return HangarError(
-        message=f"Operation failed: {exc_str}",
-        provider=provider,
-        operation=operation,
-        technical_details=f"{exc_type}: {exc_str}",
-        recovery_hints=[
-            "Check the logs for more details",
-            f"Provider status: registry_details('{provider}')" if provider else "Check provider configuration",
-        ],
-        original_exception=exc,
-        context=context,
-    )
+    return _create_generic_error(exc, provider, operation, context)
 
 
 def is_retryable(error: Exception) -> bool:

@@ -9,13 +9,7 @@ from typing import Any, Optional
 import aiosqlite
 
 from ...logging_config import get_logger
-from .contracts import (
-    AuditEntry,
-    IKnowledgeBase,
-    KnowledgeBaseConfig,
-    MetricEntry,
-    ProviderStateEntry,
-)
+from .contracts import AuditEntry, IKnowledgeBase, KnowledgeBaseConfig, MetricEntry, ProviderStateEntry
 
 logger = get_logger(__name__)
 
@@ -42,9 +36,9 @@ CREATE TABLE IF NOT EXISTS tool_cache (
     UNIQUE(provider, tool, arguments_hash)
 );
 
-CREATE INDEX IF NOT EXISTS idx_tool_cache_lookup 
+CREATE INDEX IF NOT EXISTS idx_tool_cache_lookup
     ON tool_cache(provider, tool, arguments_hash);
-CREATE INDEX IF NOT EXISTS idx_tool_cache_expires 
+CREATE INDEX IF NOT EXISTS idx_tool_cache_expires
     ON tool_cache(expires_at);
 
 CREATE TABLE IF NOT EXISTS audit_log (
@@ -61,9 +55,9 @@ CREATE TABLE IF NOT EXISTS audit_log (
     correlation_id TEXT
 );
 
-CREATE INDEX IF NOT EXISTS idx_audit_log_timestamp 
+CREATE INDEX IF NOT EXISTS idx_audit_log_timestamp
     ON audit_log(timestamp DESC);
-CREATE INDEX IF NOT EXISTS idx_audit_log_provider 
+CREATE INDEX IF NOT EXISTS idx_audit_log_provider
     ON audit_log(provider, timestamp DESC);
 
 CREATE TABLE IF NOT EXISTS provider_state_history (
@@ -75,7 +69,7 @@ CREATE TABLE IF NOT EXISTS provider_state_history (
     reason TEXT
 );
 
-CREATE INDEX IF NOT EXISTS idx_provider_state_provider 
+CREATE INDEX IF NOT EXISTS idx_provider_state_provider
     ON provider_state_history(provider_id, timestamp DESC);
 
 CREATE TABLE IF NOT EXISTS provider_metrics (
@@ -87,7 +81,7 @@ CREATE TABLE IF NOT EXISTS provider_metrics (
     labels TEXT DEFAULT '{}'
 );
 
-CREATE INDEX IF NOT EXISTS idx_provider_metrics_lookup 
+CREATE INDEX IF NOT EXISTS idx_provider_metrics_lookup
     ON provider_metrics(provider_id, metric_name, timestamp DESC);
 """,
     },
@@ -140,7 +134,8 @@ class SQLiteKnowledgeBase(IKnowledgeBase):
             async with db.execute("SELECT MAX(version) FROM schema_migrations") as cursor:
                 row = await cursor.fetchone()
                 current_version = row[0] if row and row[0] else 0
-        except Exception:
+        except (aiosqlite.OperationalError, aiosqlite.DatabaseError):
+            # Table doesn't exist yet - this is first run
             current_version = 0
 
         for migration in MIGRATIONS:
@@ -179,7 +174,8 @@ class SQLiteKnowledgeBase(IKnowledgeBase):
                 async with db.execute("SELECT 1") as cursor:
                     await cursor.fetchone()
             return True
-        except Exception:
+        except (aiosqlite.Error, OSError) as e:
+            logger.debug("sqlite_health_check_failed", error=str(e))
             return False
 
     def _hash_arguments(self, arguments: dict) -> str:
@@ -231,7 +227,7 @@ class SQLiteKnowledgeBase(IKnowledgeBase):
                     INSERT INTO tool_cache (provider, tool, arguments_hash, result, expires_at)
                     VALUES (?, ?, ?, ?, ?)
                     ON CONFLICT (provider, tool, arguments_hash)
-                    DO UPDATE SET result = excluded.result, 
+                    DO UPDATE SET result = excluded.result,
                                   expires_at = excluded.expires_at,
                                   created_at = datetime('now')
                     """,

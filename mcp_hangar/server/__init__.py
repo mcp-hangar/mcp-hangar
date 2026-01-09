@@ -18,6 +18,7 @@ from pathlib import Path
 from typing import Any, Dict
 
 from mcp.server.fastmcp import FastMCP
+import yaml
 
 from ..application.commands import register_all_handlers as register_command_handlers
 from ..application.discovery import DiscoveryConfig, DiscoveryOrchestrator
@@ -154,10 +155,7 @@ def _init_knowledge_base(config: Dict[str, Any]) -> None:
 
     Supports multiple drivers (postgres, sqlite, memory) with auto-detection.
     """
-    from ..infrastructure.knowledge_base import (
-        init_knowledge_base,
-        KnowledgeBaseConfig,
-    )
+    from ..infrastructure.knowledge_base import init_knowledge_base, KnowledgeBaseConfig
 
     kb_config_dict = config.get("knowledge_base", {})
     kb_config = KnowledgeBaseConfig.from_dict(kb_config_dict)
@@ -466,8 +464,9 @@ def main():
             if not log_file:
                 log_file = logging_config.get("file")
             json_format = logging_config.get("json_format", json_format)
-        except Exception:
-            pass
+        except (FileNotFoundError, yaml.YAMLError, ValueError, OSError) as e:
+            # Config loading failed - use defaults, log will be set up shortly
+            logger.debug("config_preload_failed", error=str(e))
 
     setup_logging(level=log_level, json_format=json_format, log_file=log_file)
     logger.info("mcp_registry_starting", mode="http" if http_mode else "stdio", log_file=log_file)

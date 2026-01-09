@@ -10,7 +10,6 @@ Creates required tables for:
 """
 
 import asyncio
-from datetime import datetime
 import sys
 
 # SQL migrations in order
@@ -39,9 +38,9 @@ CREATE TABLE IF NOT EXISTS tool_cache (
     UNIQUE(provider, tool, arguments_hash)
 );
 
-CREATE INDEX IF NOT EXISTS idx_tool_cache_lookup 
+CREATE INDEX IF NOT EXISTS idx_tool_cache_lookup
     ON tool_cache(provider, tool, arguments_hash);
-CREATE INDEX IF NOT EXISTS idx_tool_cache_expires 
+CREATE INDEX IF NOT EXISTS idx_tool_cache_expires
     ON tool_cache(expires_at);
 
 -- Audit log
@@ -59,11 +58,11 @@ CREATE TABLE IF NOT EXISTS audit_log (
     correlation_id TEXT
 );
 
-CREATE INDEX IF NOT EXISTS idx_audit_log_timestamp 
+CREATE INDEX IF NOT EXISTS idx_audit_log_timestamp
     ON audit_log(timestamp DESC);
-CREATE INDEX IF NOT EXISTS idx_audit_log_provider 
+CREATE INDEX IF NOT EXISTS idx_audit_log_provider
     ON audit_log(provider, timestamp DESC);
-CREATE INDEX IF NOT EXISTS idx_audit_log_correlation 
+CREATE INDEX IF NOT EXISTS idx_audit_log_correlation
     ON audit_log(correlation_id);
 
 -- Provider state history
@@ -76,7 +75,7 @@ CREATE TABLE IF NOT EXISTS provider_state_history (
     reason TEXT
 );
 
-CREATE INDEX IF NOT EXISTS idx_provider_state_provider 
+CREATE INDEX IF NOT EXISTS idx_provider_state_provider
     ON provider_state_history(provider_id, timestamp DESC);
 
 -- Knowledge entities (for memory provider sync)
@@ -89,9 +88,9 @@ CREATE TABLE IF NOT EXISTS knowledge_entities (
     updated_at TIMESTAMPTZ DEFAULT NOW()
 );
 
-CREATE INDEX IF NOT EXISTS idx_knowledge_entities_name 
+CREATE INDEX IF NOT EXISTS idx_knowledge_entities_name
     ON knowledge_entities(name);
-CREATE INDEX IF NOT EXISTS idx_knowledge_entities_type 
+CREATE INDEX IF NOT EXISTS idx_knowledge_entities_type
     ON knowledge_entities(entity_type);
 
 -- Knowledge relations
@@ -104,9 +103,9 @@ CREATE TABLE IF NOT EXISTS knowledge_relations (
     UNIQUE(from_entity, to_entity, relation_type)
 );
 
-CREATE INDEX IF NOT EXISTS idx_knowledge_relations_from 
+CREATE INDEX IF NOT EXISTS idx_knowledge_relations_from
     ON knowledge_relations(from_entity);
-CREATE INDEX IF NOT EXISTS idx_knowledge_relations_to 
+CREATE INDEX IF NOT EXISTS idx_knowledge_relations_to
     ON knowledge_relations(to_entity);
 """,
     },
@@ -125,7 +124,7 @@ CREATE TABLE IF NOT EXISTS provider_metrics (
     labels JSONB DEFAULT '{}'
 );
 
-CREATE INDEX IF NOT EXISTS idx_provider_metrics_lookup 
+CREATE INDEX IF NOT EXISTS idx_provider_metrics_lookup
     ON provider_metrics(provider_id, metric_name, timestamp DESC);
 
 -- Cleanup old cache entries (function)
@@ -146,9 +145,7 @@ $$ LANGUAGE plpgsql;
 async def get_current_version(conn) -> int:
     """Get current schema version."""
     try:
-        result = await conn.fetchval(
-            "SELECT MAX(version) FROM schema_migrations"
-        )
+        result = await conn.fetchval("SELECT MAX(version) FROM schema_migrations")
         return result or 0
     except Exception:
         return 0
@@ -217,6 +214,7 @@ async def check_connection(dsn: str) -> bool:
     """Check if database is reachable."""
     try:
         import asyncpg
+
         conn = await asyncpg.connect(dsn, timeout=5)
         await conn.close()
         return True
@@ -257,4 +255,3 @@ def main():
 
 if __name__ == "__main__":
     main()
-

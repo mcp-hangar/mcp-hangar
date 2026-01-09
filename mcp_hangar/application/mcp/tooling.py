@@ -23,6 +23,10 @@ from dataclasses import dataclass
 from functools import wraps
 from typing import Any, Callable, Dict, Optional, TypeVar
 
+from ...logging_config import get_logger
+
+logger = get_logger(__name__)
+
 F = TypeVar("F", bound=Callable[..., Any])
 
 
@@ -107,9 +111,14 @@ def mcp_tool_wrapper(
                                 "kwargs_keys": list(kwargs.keys()),
                             },
                         )
-                    except Exception:
+                    except (TypeError, ValueError, RuntimeError) as hook_err:
                         # Never let the error hook override the original failure.
-                        pass
+                        # Log but don't propagate hook errors.
+                        logger.debug(
+                            "error_hook_failed",
+                            tool=tool_name,
+                            hook_error=str(hook_err),
+                        )
 
                 payload = mapper(exc)
                 # Return a stable, tool-friendly dict. MCP will surface this as tool error.

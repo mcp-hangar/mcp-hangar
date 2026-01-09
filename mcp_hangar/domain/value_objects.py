@@ -19,12 +19,21 @@ import uuid
 class ProviderState(Enum):
     """Provider lifecycle states.
 
+    Represents the finite state machine for provider lifecycle management.
+
     State machine transitions:
-    - COLD -> INITIALIZING (on start)
-    - INITIALIZING -> READY (on success) | DEAD (on failure) | DEGRADED (on max failures)
-    - READY -> COLD (on shutdown) | DEAD (on client death) | DEGRADED (on health failures)
-    - DEGRADED -> INITIALIZING (on retry) | COLD (on shutdown)
-    - DEAD -> INITIALIZING (on retry) | DEGRADED (on max failures)
+        - COLD -> INITIALIZING (on start)
+        - INITIALIZING -> READY (on success) | DEAD (on failure) | DEGRADED (on max failures)
+        - READY -> COLD (on shutdown) | DEAD (on client death) | DEGRADED (on health failures)
+        - DEGRADED -> INITIALIZING (on retry) | COLD (on shutdown)
+        - DEAD -> INITIALIZING (on retry) | DEGRADED (on max failures)
+
+    Attributes:
+        COLD: Provider is not running, no resources allocated.
+        INITIALIZING: Provider is starting up, handshake in progress.
+        READY: Provider is running and accepting requests.
+        DEGRADED: Provider has failures but may recover after backoff.
+        DEAD: Provider has failed fatally and requires manual intervention or retry.
     """
 
     COLD = "cold"
@@ -34,21 +43,39 @@ class ProviderState(Enum):
     DEAD = "dead"
 
     def __str__(self) -> str:
+        """Return the string representation of the state."""
         return self.value
 
     @property
     def can_accept_requests(self) -> bool:
-        """Check if provider can accept tool invocation requests."""
+        """Check if provider can accept tool invocation requests.
+
+        Returns:
+            True if provider is in READY state, False otherwise.
+        """
         return self == ProviderState.READY
 
     @property
     def can_start(self) -> bool:
-        """Check if provider can be started from this state."""
+        """Check if provider can be started from this state.
+
+        Returns:
+            True if provider can transition to INITIALIZING, False otherwise.
+        """
         return self in (ProviderState.COLD, ProviderState.DEAD, ProviderState.DEGRADED)
 
 
 class HealthStatus(Enum):
-    """Health status for providers."""
+    """Health status for providers.
+
+    Represents the externally visible health classification of a provider.
+
+    Attributes:
+        HEALTHY: Provider is fully operational with no recent failures.
+        DEGRADED: Provider is operational but has experienced recent failures.
+        UNHEALTHY: Provider is not operational or has exceeded failure threshold.
+        UNKNOWN: Provider health cannot be determined (e.g., not started).
+    """
 
     HEALTHY = "healthy"
     DEGRADED = "degraded"
@@ -56,11 +83,24 @@ class HealthStatus(Enum):
     UNKNOWN = "unknown"
 
     def __str__(self) -> str:
+        """Return the string representation of the status."""
         return self.value
 
     @classmethod
     def from_state(cls, state: ProviderState, consecutive_failures: int = 0) -> "HealthStatus":
-        """Derive health status from provider state and failures."""
+        """Derive health status from provider state and failure count.
+
+        Args:
+            state: The current provider state.
+            consecutive_failures: Number of consecutive failures (default: 0).
+
+        Returns:
+            The derived HealthStatus based on state and failures.
+
+        Example:
+            >>> HealthStatus.from_state(ProviderState.READY, 0)
+            <HealthStatus.HEALTHY: 'healthy'>
+        """
         if state == ProviderState.READY:
             if consecutive_failures == 0:
                 return cls.HEALTHY
@@ -130,16 +170,35 @@ class GroupState(Enum):
 class ProviderId:
     """Unique identifier for a provider.
 
-    Rules:
+    Validates and encapsulates provider identity with strict rules:
     - Non-empty string
     - Alphanumeric, hyphens, underscores only
     - Max 64 characters
+
+    Attributes:
+        value: The validated provider identifier string.
+
+    Raises:
+        ValueError: If the provided value violates validation rules.
+
+    Example:
+        >>> provider_id = ProviderId("my-provider-1")
+        >>> str(provider_id)
+        'my-provider-1'
     """
 
     _VALID_PATTERN = re.compile(r"^[a-zA-Z0-9_-]+$")
     _MAX_LENGTH = 64
 
     def __init__(self, value: str):
+        """Initialize ProviderId with validation.
+
+        Args:
+            value: The provider identifier string to validate.
+
+        Raises:
+            ValueError: If value is empty, too long, or contains invalid characters.
+        """
         if not value:
             raise ValueError("ProviderId cannot be empty")
         if len(value) > self._MAX_LENGTH:
@@ -150,6 +209,7 @@ class ProviderId:
 
     @property
     def value(self) -> str:
+        """Get the raw identifier string."""
         return self._value
 
     def __str__(self) -> str:
@@ -172,16 +232,35 @@ class ProviderId:
 class ToolName:
     """Name of a tool provided by a provider.
 
-    Rules:
+    Validates tool names with the following rules:
     - Non-empty string
     - Alphanumeric, hyphens, underscores, dots allowed (for namespaced tools)
     - Max 128 characters
+
+    Attributes:
+        value: The validated tool name string.
+
+    Raises:
+        ValueError: If the provided value violates validation rules.
+
+    Example:
+        >>> tool = ToolName("math.add")
+        >>> str(tool)
+        'math.add'
     """
 
     _VALID_PATTERN = re.compile(r"^[a-zA-Z0-9_.\-]+$")
     _MAX_LENGTH = 128
 
     def __init__(self, value: str):
+        """Initialize ToolName with validation.
+
+        Args:
+            value: The tool name string to validate.
+
+        Raises:
+            ValueError: If value is empty, too long, or contains invalid characters.
+        """
         if not value:
             raise ValueError("ToolName cannot be empty")
         if len(value) > self._MAX_LENGTH:
@@ -192,6 +271,7 @@ class ToolName:
 
     @property
     def value(self) -> str:
+        """Get the raw tool name string."""
         return self._value
 
     def __str__(self) -> str:

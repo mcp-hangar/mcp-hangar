@@ -127,7 +127,7 @@ class ProgressTracker:
         tracker.complete(result)
         # In another:
         for event in tracker:
-            print(event)
+            logger.info("progress_event", event=event.to_dict())
     """
 
     def __init__(
@@ -283,8 +283,8 @@ class ProgressTracker:
         if self._callback:
             try:
                 self._callback(ProgressStage.FAILED.value, event.message, elapsed)
-            except Exception:
-                pass
+            except (TypeError, ValueError, RuntimeError) as e:
+                logger.debug("progress_callback_error", stage="failed", error=str(e))
 
         logger.debug(
             "progress_failed",

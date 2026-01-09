@@ -24,13 +24,13 @@ import structlog
 from structlog.types import Processor
 
 
-def _add_service_context(logger: logging.Logger, method_name: str, event_dict: dict[str, Any]) -> dict[str, Any]:
+def _add_service_context(_logger: logging.Logger, _method_name: str, event_dict: dict[str, Any]) -> dict[str, Any]:
     """Add service-level context to all log entries."""
     event_dict.setdefault("service", "mcp-hangar")
     return event_dict
 
 
-def _sanitize_sensitive_data(logger: logging.Logger, method_name: str, event_dict: dict[str, Any]) -> dict[str, Any]:
+def _sanitize_sensitive_data(_logger: logging.Logger, _method_name: str, event_dict: dict[str, Any]) -> dict[str, Any]:
     """Redact sensitive fields from log output."""
     sensitive_keys = {
         "password",
@@ -53,7 +53,7 @@ def _sanitize_sensitive_data(logger: logging.Logger, method_name: str, event_dic
     return redact(event_dict)
 
 
-def _drop_color_message_key(logger: logging.Logger, method_name: str, event_dict: dict[str, Any]) -> dict[str, Any]:
+def _drop_color_message_key(_logger: logging.Logger, _method_name: str, event_dict: dict[str, Any]) -> dict[str, Any]:
     """Remove the color_message key that uvicorn adds."""
     event_dict.pop("color_message", None)
     return event_dict

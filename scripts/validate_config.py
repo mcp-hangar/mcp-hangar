@@ -103,9 +103,9 @@ def validate_yaml_syntax(path: Path) -> tuple[dict | None, str | None]:
 def validate_provider(name: str, config: dict[str, Any], result: ValidationResult, check_env: bool) -> None:
     """Validate a single provider configuration."""
     # Check required fields
-    for field in REQUIRED_PROVIDER_FIELDS:
-        if field not in config:
-            result.add_error(f"Provider '{name}': missing required field '{field}'")
+    for required_field in REQUIRED_PROVIDER_FIELDS:
+        if required_field not in config:
+            result.add_error(f"Provider '{name}': missing required field '{required_field}'")
 
     mode = config.get("mode")
     if mode and mode not in VALID_MODES:
@@ -121,12 +121,14 @@ def validate_provider(name: str, config: dict[str, Any], result: ValidationResul
         volumes = config.get("volumes", [])
         for vol in volumes:
             if not isinstance(vol, str) or ":" not in vol:
-                result.add_warning(f"Provider '{name}': invalid volume format '{vol}' (expected 'host:container[:mode]')")
+                result.add_warning(
+                    f"Provider '{name}': invalid volume format '{vol}' (expected 'host:container[:mode]')"
+                )
 
     elif mode == "subprocess":
-        for field in REQUIRED_SUBPROCESS_FIELDS:
-            if field not in config:
-                result.add_error(f"Provider '{name}': subprocess mode requires '{field}'")
+        for subprocess_field in REQUIRED_SUBPROCESS_FIELDS:
+            if subprocess_field not in config:
+                result.add_error(f"Provider '{name}': subprocess mode requires '{subprocess_field}'")
 
         command = config.get("command")
         if command and not isinstance(command, list):
@@ -306,4 +308,3 @@ Examples:
 
 if __name__ == "__main__":
     sys.exit(main())
-

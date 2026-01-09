@@ -90,16 +90,17 @@ class AsyncExecutor:
                 if on_success:
                     try:
                         on_success(result)
-                    except Exception as e:
+                    except (TypeError, ValueError, RuntimeError) as e:
                         logger.debug("async_executor_callback_error", error=str(e))
-            except Exception as e:
+            except (asyncio.CancelledError, asyncio.TimeoutError, ValueError, RuntimeError, OSError) as e:
+                # Handle expected async/runtime errors
                 if on_error:
                     try:
                         on_error(e)
-                    except Exception:
-                        pass
+                    except (TypeError, ValueError, RuntimeError) as callback_err:
+                        logger.debug("async_executor_error_callback_failed", error=str(callback_err))
                 else:
-                    logger.debug("async_executor_error", error=str(e))
+                    logger.debug("async_executor_error", error_type=type(e).__name__, error=str(e))
 
         self._executor.submit(run_coro)
 

@@ -9,12 +9,7 @@ from ...domain.repository import IProviderRepository
 from ...infrastructure.command_bus import CommandBus, CommandHandler
 from ...infrastructure.event_bus import EventBus
 from ...logging_config import get_logger
-from ...metrics import (
-    observe_tool_call,
-    record_error,
-    record_provider_start,
-    record_provider_stop,
-)
+from ...metrics import observe_tool_call, record_error, record_provider_start, record_provider_stop
 from .commands import (
     HealthCheckCommand,
     InvokeToolCommand,
@@ -45,8 +40,13 @@ class BaseProviderHandler(CommandHandler):
         for event in provider.collect_events():
             try:
                 self._event_bus.publish(event)
-            except Exception:
-                logger.error("Failed to publish event", exc_info=True)
+            except (RuntimeError, ValueError, TypeError) as e:
+                logger.error(
+                    "event_publish_failed",
+                    event_type=type(event).__name__,
+                    error=str(e),
+                    exc_info=True,
+                )
 
 
 class StartProviderHandler(BaseProviderHandler):

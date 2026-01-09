@@ -439,8 +439,8 @@ def retry_sync(
                 if on_retry:
                     try:
                         on_retry(attempt + 1, e, delay)
-                    except Exception:
-                        pass
+                    except (TypeError, ValueError, RuntimeError) as callback_err:
+                        logger.debug("retry_callback_error", error=str(callback_err))
 
                 time.sleep(delay)
 
