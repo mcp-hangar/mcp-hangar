@@ -7,6 +7,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.1.1] - 2026-01-12
+
 ### Added
 - **Observability Module**: Comprehensive monitoring and tracing support
   - OpenTelemetry distributed tracing with OTLP/Jaeger export
