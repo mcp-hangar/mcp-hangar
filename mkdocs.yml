@@ -1,0 +1,94 @@
+# MkDocs configuration for MCP Hangar documentation
+# Deployed automatically to GitHub Pages on push to main
+
+site_name: MCP Hangar
+site_description: Production-grade hot-load registry for MCP providers
+site_url: https://mapyr.github.io/mcp-hangar
+repo_url: https://github.com/mapyr/mcp-hangar
+repo_name: mapyr/mcp-hangar
+edit_uri: edit/main/docs/
+
+theme:
+  name: material
+  palette:
+    # Light mode
+    - media: "(prefers-color-scheme: light)"
+      scheme: default
+      primary: indigo
+      accent: indigo
+      toggle:
+        icon: material/brightness-7
+        name: Switch to dark mode
+    # Dark mode
+    - media: "(prefers-color-scheme: dark)"
+      scheme: slate
+      primary: indigo
+      accent: indigo
+      toggle:
+        icon: material/brightness-4
+        name: Switch to light mode
+  features:
+    - navigation.instant
+    - navigation.tracking
+    - navigation.sections
+    - navigation.expand
+    - navigation.top
+    - search.highlight
+    - search.share
+    - content.code.copy
+    - content.action.edit
+  icon:
+    repo: fontawesome/brands/github
+
+plugins:
+  - search
+  - mkdocstrings:
+      handlers:
+        python:
+          options:
+            show_source: true
+            show_root_heading: true
+  - git-revision-date-localized:
+      enable_creation_date: true
+
+markdown_extensions:
+  - pymdownx.highlight:
+      anchor_linenums: true
+  - pymdownx.inlinehilite
+  - pymdownx.snippets
+  - pymdownx.superfences
+  - pymdownx.tabbed:
+      alternate_style: true
+  - admonition
+  - pymdownx.details
+  - tables
+  - toc:
+      permalink: true
+
+nav:
+  - Home: index.md
+  - Getting Started:
+      - Installation: getting-started/installation.md
+      - Quick Start: getting-started/quickstart.md
+  - Architecture:
+      - Overview: architecture/OVERVIEW.md
+  - Guides:
+      - Testing: guides/TESTING.md
+      - Containers: guides/CONTAINERS.md
+      - Discovery: guides/DISCOVERY.md
+      - Observability: guides/OBSERVABILITY.md
+      - UX Improvements: guides/UX_IMPROVEMENTS.md
+  - Development:
+      - Contributing: development/CONTRIBUTING.md
+      - Release Process: runbooks/RELEASE.md
+  - Reference:
+      - Changelog: changelog.md
+      - Security: security.md
+      - Code of Conduct: code-of-conduct.md
+
+extra:
+  social:
+    - icon: fontawesome/brands/github
+      link: https://github.com/mapyr/mcp-hangar
+    - icon: fontawesome/brands/python
+      link: https://pypi.org/project/mcp-hangar/

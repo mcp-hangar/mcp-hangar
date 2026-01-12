@@ -139,7 +139,7 @@ raise ProviderStartError(
 
 **Logging:**
 ```python
-logger.info(f"provider_started: {provider_id}, mode={mode}")
+logger.info("provider_started: %s, mode=%s", provider_id, mode)
 ```
 
 ## Releasing
@@ -262,3 +262,13 @@ git cherry-pick <commit-hash>
 ## License
 
 MIT
+
+## Code of Conduct
+
+Please read our [Code of Conduct](../code-of-conduct.md) before contributing.
+
+## First Contribution?
+
+Look for issues labeled [`good first issue`](https://github.com/mapyr/mcp-hangar/labels/good%20first%20issue).
+
+Questions? Open a [Discussion](https://github.com/mapyr/mcp-hangar/discussions).
