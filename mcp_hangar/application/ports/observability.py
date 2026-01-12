@@ -13,9 +13,9 @@ Example usage:
         span.end_error(e)
 """
 
-import logging
 from abc import ABC, abstractmethod
 from dataclasses import dataclass, field
+import logging
 from typing import Any
 
 logger = logging.getLogger(__name__)

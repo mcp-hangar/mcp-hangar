@@ -8,8 +8,8 @@ Deprecated imports (use domain layer instead):
 - MCPError, ProviderStartError, etc. -> from mcp_hangar.domain.exceptions import ...
 """
 
-import threading
 from dataclasses import dataclass, field
+import threading
 from typing import Any, Dict, Literal
 
 # Re-export all exceptions from the canonical location for backward compatibility

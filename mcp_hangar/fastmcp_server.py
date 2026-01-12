@@ -247,10 +247,10 @@ def setup_fastmcp_server(
 def run_fastmcp_server():
     """Run the FastMCP HTTP server."""
 
-    import uvicorn
     from starlette.applications import Starlette
     from starlette.responses import JSONResponse, PlainTextResponse
     from starlette.routing import Route
+    import uvicorn
 
     from .metrics import get_metrics, init_metrics, update_provider_state
 

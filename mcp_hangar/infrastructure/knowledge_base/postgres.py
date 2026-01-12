@@ -1,8 +1,8 @@
 """PostgreSQL implementation of IKnowledgeBase."""
 
+from datetime import datetime, timedelta, timezone
 import hashlib
 import json
-from datetime import datetime, timedelta, timezone
 from typing import Any, Optional
 
 from ...logging_config import get_logger

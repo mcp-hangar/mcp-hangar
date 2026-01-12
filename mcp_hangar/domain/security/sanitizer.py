@@ -10,8 +10,8 @@ Provides sanitization utilities for:
 
 import html
 import re
-import unicodedata
 from typing import Any, Dict, List, Optional
+import unicodedata
 
 # Characters that could enable injection attacks
 SHELL_METACHARACTERS = set(";&|`$(){}[]<>!#*?~\n\r\t\0\\'\"")

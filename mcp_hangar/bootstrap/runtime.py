@@ -9,15 +9,15 @@ without starting any background threads.
 
 from __future__ import annotations
 
-import os
 from dataclasses import dataclass
+import os
 from typing import Any, Optional, Protocol, runtime_checkable
 
 from ..application.event_handlers import get_security_handler
 from ..application.ports.observability import NullObservabilityAdapter, ObservabilityPort
 from ..domain.repository import InMemoryProviderRepository, IProviderRepository
 from ..domain.security.input_validator import InputValidator
-from ..domain.security.rate_limiter import RateLimitConfig, get_rate_limiter
+from ..domain.security.rate_limiter import get_rate_limiter, RateLimitConfig
 from ..infrastructure.command_bus import CommandBus, get_command_bus
 from ..infrastructure.event_bus import EventBus, get_event_bus
 from ..infrastructure.persistence import (
@@ -29,7 +29,7 @@ from ..infrastructure.persistence import (
     SQLiteAuditRepository,
     SQLiteProviderConfigRepository,
 )
-from ..infrastructure.query_bus import QueryBus, get_query_bus
+from ..infrastructure.query_bus import get_query_bus, QueryBus
 
 # =============================================================================
 # Protocol Interfaces for Runtime Dependencies

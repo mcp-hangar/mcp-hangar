@@ -19,7 +19,7 @@ class TestMetricsFormat:
 
     def test_counter_and_gauge_exported(self) -> None:
         """Counter and Gauge metrics are exported in Prometheus format."""
-        from mcp_hangar.metrics import REGISTRY, Counter, Gauge
+        from mcp_hangar.metrics import Counter, Gauge, REGISTRY
 
         test_counter = Counter(
             name="test_prom_requests_total",
@@ -43,7 +43,7 @@ class TestMetricsFormat:
 
     def test_histogram_buckets_exported(self) -> None:
         """Histogram buckets are correctly exported."""
-        from mcp_hangar.metrics import REGISTRY, Histogram
+        from mcp_hangar.metrics import Histogram, REGISTRY
 
         test_histogram = Histogram(
             name="test_prom_latency_seconds",

@@ -9,10 +9,10 @@ States:
 - HALF_OPEN: Testing if service recovered (not implemented - we auto-reset)
 """
 
-import threading
-import time
 from dataclasses import dataclass
 from enum import Enum
+import threading
+import time
 from typing import Optional
 
 

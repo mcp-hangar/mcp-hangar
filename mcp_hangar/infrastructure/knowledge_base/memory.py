@@ -1,9 +1,9 @@
 """In-memory implementation of IKnowledgeBase for testing."""
 
-import hashlib
-import json
 from collections import defaultdict
 from datetime import datetime, timedelta, timezone
+import hashlib
+import json
 from typing import Any, Optional
 
 from ...logging_config import get_logger

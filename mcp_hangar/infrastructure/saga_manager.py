@@ -4,13 +4,13 @@ Sagas coordinate long-running business processes that span multiple aggregates
 or services. They react to domain events and emit commands.
 """
 
-import threading
-import time
-import uuid
 from abc import ABC, abstractmethod
 from dataclasses import dataclass, field
 from enum import Enum
-from typing import TYPE_CHECKING, Any, Dict, List, Optional, Type
+import threading
+import time
+from typing import Any, Dict, List, Optional, Type, TYPE_CHECKING
+import uuid
 
 from ..domain.events import DomainEvent
 from ..logging_config import get_logger

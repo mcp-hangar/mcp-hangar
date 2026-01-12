@@ -5,9 +5,9 @@ import time
 from typing import Any, Literal, Optional
 
 from .domain.contracts.provider_runtime import (
+    normalize_state_to_str,
     ProviderMapping,
     ProviderRuntime,
-    normalize_state_to_str,
 )
 from .infrastructure.event_bus import get_event_bus
 from .logging_config import get_logger

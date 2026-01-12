@@ -1,7 +1,7 @@
 """Health tracking entity for providers."""
 
-import time
 from dataclasses import dataclass, field
+import time
 from typing import Optional
 
 

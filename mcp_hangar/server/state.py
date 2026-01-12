@@ -18,7 +18,7 @@ Example migration:
     ctx.command_bus.send(command)
 """
 
-from typing import TYPE_CHECKING, Dict, Optional
+from typing import Dict, Optional, TYPE_CHECKING
 
 from ..application.discovery import DiscoveryOrchestrator
 from ..application.sagas import GroupRebalanceSaga

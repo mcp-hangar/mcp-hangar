@@ -5,6 +5,8 @@ import json
 from mcp_hangar.errors import (
     ConfigurationError,
     HangarError,
+    is_retryable,
+    map_exception_to_hangar_error,
     NetworkError,
     ProviderCrashError,
     ProviderDegradedError,
@@ -14,8 +16,6 @@ from mcp_hangar.errors import (
     TimeoutError,
     ToolNotFoundError,
     TransientError,
-    is_retryable,
-    map_exception_to_hangar_error,
 )
 
 
@@ -573,8 +573,7 @@ class TestErrorClassifier:
 
     def test_classify_hangar_timeout_error(self):
         """Test classifying HangarError TimeoutError."""
-        from mcp_hangar.errors import ErrorClassifier
-        from mcp_hangar.errors import TimeoutError as HangarTimeout
+        from mcp_hangar.errors import ErrorClassifier, TimeoutError as HangarTimeout
 
         error = HangarTimeout(
             message="Operation timed out",

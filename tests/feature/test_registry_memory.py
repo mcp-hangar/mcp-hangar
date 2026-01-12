@@ -8,10 +8,10 @@ This is a pytest test file.
 """
 
 import json
+from pathlib import Path
 import subprocess
 import sys
 import time
-from pathlib import Path
 
 import pytest
 

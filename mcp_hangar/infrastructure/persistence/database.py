@@ -5,10 +5,10 @@ migrations, and health checking.
 """
 
 import asyncio
-import threading
 from contextlib import asynccontextmanager
 from dataclasses import dataclass
 from pathlib import Path
+import threading
 from typing import Any, AsyncIterator, Dict, List, Optional, Tuple
 
 import aiosqlite

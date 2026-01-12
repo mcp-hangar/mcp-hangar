@@ -6,14 +6,14 @@ Tests cover initialization functions, discovery, and main entry point logic.
 from unittest.mock import MagicMock, patch
 
 from mcp_hangar.server import (
-    GC_WORKER_INTERVAL_SECONDS,
-    HEALTH_CHECK_INTERVAL_SECONDS,
     _auto_add_volumes,
     _create_discovery_source,
     _ensure_data_dir,
     _parse_args,
     _register_all_tools,
     _start_background_workers,
+    GC_WORKER_INTERVAL_SECONDS,
+    HEALTH_CHECK_INTERVAL_SECONDS,
 )
 
 

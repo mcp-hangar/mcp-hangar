@@ -1,13 +1,13 @@
 """Thread-safe stdio client with proper message correlation."""
 
+from dataclasses import dataclass
 import json
+from queue import Empty, Queue
 import subprocess
 import threading
 import time
-import uuid
-from dataclasses import dataclass
-from queue import Empty, Queue
 from typing import Any, Dict
+import uuid
 
 from .domain.exceptions import ClientError
 from .logging_config import get_logger

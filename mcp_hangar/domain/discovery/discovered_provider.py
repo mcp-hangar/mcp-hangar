@@ -4,10 +4,10 @@ Value object representing a discovered provider with fingerprinting
 and TTL-based lifecycle tracking.
 """
 
-import hashlib
-import json
 from dataclasses import dataclass
 from datetime import datetime, timezone
+import hashlib
+import json
 from typing import Any, Dict, Optional
 
 

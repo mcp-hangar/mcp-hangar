@@ -3,12 +3,12 @@
 import pytest
 
 from mcp_hangar.server.state import (
-    GROUPS,
-    PROVIDERS,
-    ProviderDict,
     get_discovery_orchestrator,
     get_group_rebalance_saga,
     get_runtime,
+    GROUPS,
+    ProviderDict,
+    PROVIDERS,
     set_discovery_orchestrator,
     set_group_rebalance_saga,
 )

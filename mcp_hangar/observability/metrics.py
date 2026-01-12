@@ -11,13 +11,13 @@ These metrics complement mcp_hangar.metrics with observability-specific
 measurements useful for dashboards and alerting.
 """
 
-import threading
 from dataclasses import dataclass
 from enum import Enum
+import threading
 from typing import Optional
 
 from mcp_hangar.logging_config import get_logger
-from mcp_hangar.metrics import REGISTRY, Counter, Gauge, Histogram
+from mcp_hangar.metrics import Counter, Gauge, Histogram, REGISTRY
 
 logger = get_logger(__name__)
 

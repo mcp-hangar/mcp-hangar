@@ -1,8 +1,8 @@
 #!/usr/bin/env python3
 """Test volumes with containers."""
 
-import sys
 from pathlib import Path
+import sys
 
 import pytest
 

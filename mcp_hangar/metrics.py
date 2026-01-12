@@ -7,12 +7,12 @@ Production-grade metrics following Prometheus/OpenMetrics best practices:
 - Standard histogram buckets for different use cases
 """
 
-import platform
-import threading
-import time
 from collections import defaultdict
 from dataclasses import dataclass, field
 from functools import wraps
+import platform
+import threading
+import time
 from typing import Dict, List, Optional
 
 # =============================================================================

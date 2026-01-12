@@ -23,12 +23,12 @@ Note:
     pip install mcp-hangar[observability]
 """
 
+from dataclasses import dataclass
 import logging
 import threading
 import time
-import uuid
-from dataclasses import dataclass
 from typing import Any
+import uuid
 
 from ...application.ports.observability import (
     ObservabilityPort,

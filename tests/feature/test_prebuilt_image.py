@@ -11,9 +11,9 @@ The test is designed to be skipped gracefully if:
 """
 
 import logging
+from pathlib import Path
 import subprocess
 import sys
-from pathlib import Path
 
 import pytest
 

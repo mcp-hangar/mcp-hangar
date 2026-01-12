@@ -6,7 +6,7 @@ on low-level modules, both depend on abstractions.
 """
 
 from dataclasses import dataclass, field
-from typing import TYPE_CHECKING, Any, Dict, Optional, Protocol, runtime_checkable
+from typing import Any, Dict, Optional, Protocol, runtime_checkable, TYPE_CHECKING
 
 if TYPE_CHECKING:
     from ..application.discovery import DiscoveryOrchestrator

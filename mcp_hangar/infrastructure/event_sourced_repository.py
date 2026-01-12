@@ -11,7 +11,7 @@ from ..domain.model.event_sourced_provider import EventSourcedProvider, Provider
 from ..domain.repository import IProviderRepository, ProviderLike
 from ..logging_config import get_logger
 from .event_bus import EventBus, get_event_bus
-from .event_store import EventStore, EventStoreSnapshot, StoredEvent, get_event_store
+from .event_store import EventStore, EventStoreSnapshot, get_event_store, StoredEvent
 
 logger = get_logger(__name__)
 

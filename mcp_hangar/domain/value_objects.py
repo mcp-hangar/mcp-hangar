@@ -6,12 +6,12 @@ business rules and prevent invalid states. They replace primitive obsession
 with strongly-typed domain concepts.
 """
 
-import re
-import uuid
 from dataclasses import dataclass
 from enum import Enum
+import re
 from typing import Any, Dict, List, Optional
 from urllib.parse import urlparse
+import uuid
 
 # --- Enums ---
 

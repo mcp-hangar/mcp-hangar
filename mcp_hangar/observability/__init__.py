@@ -17,8 +17,8 @@ Usage:
         # ... do work
 """
 
-from mcp_hangar.observability.health import HealthCheck, HealthEndpoint, HealthStatus, get_health_endpoint
-from mcp_hangar.observability.metrics import CircuitState, ObservabilityMetrics, get_observability_metrics
+from mcp_hangar.observability.health import get_health_endpoint, HealthCheck, HealthEndpoint, HealthStatus
+from mcp_hangar.observability.metrics import CircuitState, get_observability_metrics, ObservabilityMetrics
 from mcp_hangar.observability.tracing import (
     extract_trace_context,
     get_current_span_id,

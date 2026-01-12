@@ -1,8 +1,8 @@
 """Metrics event handler - collects metrics from domain events."""
 
-import time
 from collections import defaultdict
 from dataclasses import dataclass, field
+import time
 from typing import Dict, List
 
 from mcp_hangar.domain.events import (

@@ -19,15 +19,15 @@ from .metrics_handler import MetricsEventHandler
 from .security_handler import (
     CallbackSecuritySink,
     CompositeSecuritySink,
+    get_security_handler,
     InMemorySecuritySink,
     LogSecuritySink,
+    reset_security_handler,
     SecurityEvent,
     SecurityEventHandler,
     SecurityEventSink,
     SecurityEventType,
     SecuritySeverity,
-    get_security_handler,
-    reset_security_handler,
 )
 
 __all__ = [

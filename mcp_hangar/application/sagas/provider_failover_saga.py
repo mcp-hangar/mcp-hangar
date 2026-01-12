@@ -1,7 +1,7 @@
 """Provider Failover Saga - failover to backup providers on failure."""
 
-import time
 from dataclasses import dataclass
+import time
 from typing import Dict, List, Optional, Set, Type
 
 from ...domain.events import (

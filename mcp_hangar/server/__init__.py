@@ -17,8 +17,8 @@ import os
 from pathlib import Path
 from typing import Any, Dict
 
-import yaml
 from mcp.server.fastmcp import FastMCP
+import yaml
 
 from ..application.commands import register_all_handlers as register_command_handlers
 from ..application.discovery import DiscoveryConfig, DiscoveryOrchestrator
@@ -36,12 +36,12 @@ from .context import get_context, init_context
 from .state import (
     COMMAND_BUS,
     EVENT_BUS,
+    get_discovery_orchestrator,
+    get_runtime,
     GROUPS,
     PROVIDER_REPOSITORY,
     PROVIDERS,
     QUERY_BUS,
-    get_discovery_orchestrator,
-    get_runtime,
     set_discovery_orchestrator,
     set_group_rebalance_saga,
 )
@@ -155,7 +155,7 @@ def _init_knowledge_base(config: Dict[str, Any]) -> None:
 
     Supports multiple drivers (postgres, sqlite, memory) with auto-detection.
     """
-    from ..infrastructure.knowledge_base import KnowledgeBaseConfig, init_knowledge_base
+    from ..infrastructure.knowledge_base import init_knowledge_base, KnowledgeBaseConfig
 
     kb_config_dict = config.get("knowledge_base", {})
     kb_config = KnowledgeBaseConfig.from_dict(kb_config_dict)

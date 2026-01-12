@@ -4,10 +4,10 @@ This module implements various load balancing strategies for distributing
 requests across group members.
 """
 
+from abc import ABC, abstractmethod
 import random
 import threading
-from abc import ABC, abstractmethod
-from typing import TYPE_CHECKING, List, Optional
+from typing import List, Optional, TYPE_CHECKING
 
 from ..value_objects import LoadBalancerStrategy
 

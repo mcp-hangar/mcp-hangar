@@ -3,11 +3,11 @@
 Events capture important business occurrences and allow decoupled reactions.
 """
 
-import time
-import uuid
 from abc import ABC
 from dataclasses import dataclass, field
+import time
 from typing import Any, Dict
+import uuid
 
 
 class DomainEvent(ABC):

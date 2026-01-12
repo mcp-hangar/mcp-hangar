@@ -4,9 +4,9 @@ Provides both in-memory and SQLite implementations of IAuditRepository.
 Audit logs are append-only for integrity.
 """
 
+from datetime import datetime
 import json
 import threading
-from datetime import datetime
 from typing import List, Optional
 
 from ...domain.contracts.persistence import AuditAction, AuditEntry, PersistenceError

@@ -5,9 +5,9 @@ applied across different contexts without coupling to specific aggregates.
 """
 
 from .provider_health import (
-    ProviderHealthClassification,
     classify_provider_health,
     classify_provider_health_from_provider,
+    ProviderHealthClassification,
     to_health_status_string,
 )
 

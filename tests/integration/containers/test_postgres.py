@@ -50,14 +50,16 @@ class TestPostgresProviderConfigPersistence:
             conn = await asyncpg.connect(dsn)
 
             # Setup table
-            await conn.execute("""
+            await conn.execute(
+                """
                 CREATE TABLE IF NOT EXISTS provider_configs (
                     id SERIAL PRIMARY KEY,
                     provider_id TEXT UNIQUE NOT NULL,
                     config JSONB NOT NULL,
                     created_at TIMESTAMP DEFAULT NOW()
                 )
-            """)
+            """
+            )
 
             # Create
             await conn.execute(
@@ -109,12 +111,14 @@ class TestPostgresProviderConfigPersistence:
             import asyncpg
 
             conn = await asyncpg.connect(dsn)
-            await conn.execute("""
+            await conn.execute(
+                """
                 CREATE TABLE IF NOT EXISTS test_counter (
                     id INTEGER PRIMARY KEY,
                     value INTEGER DEFAULT 0
                 )
-            """)
+            """
+            )
             await conn.execute("INSERT INTO test_counter (id, value) VALUES (1, 0) ON CONFLICT DO NOTHING")
             await conn.close()
 
@@ -146,14 +150,15 @@ class TestPostgresAuditLog:
         dsn = postgres_container["dsn"]
 
         try:
-            import json
             from datetime import datetime, timedelta
+            import json
 
             import asyncpg
 
             conn = await asyncpg.connect(dsn)
 
-            await conn.execute("""
+            await conn.execute(
+                """
                 CREATE TABLE IF NOT EXISTS audit_log (
                     id SERIAL PRIMARY KEY,
                     event_type TEXT NOT NULL,
@@ -161,7 +166,8 @@ class TestPostgresAuditLog:
                     details JSONB,
                     created_at TIMESTAMP DEFAULT NOW()
                 )
-            """)
+            """
+            )
 
             # Insert audit entry
             await conn.execute(

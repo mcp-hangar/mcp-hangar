@@ -11,10 +11,10 @@ from .commands import (
 from .handlers import (
     HealthCheckHandler,
     InvokeToolHandler,
+    register_all_handlers,
     ShutdownIdleProvidersHandler,
     StartProviderHandler,
     StopProviderHandler,
-    register_all_handlers,
 )
 
 __all__ = [

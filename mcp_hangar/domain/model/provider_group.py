@@ -4,9 +4,9 @@ A ProviderGroup is an aggregate root that manages multiple Provider instances
 as a single logical unit with automatic load balancing and failover.
 """
 
+from dataclasses import dataclass
 import threading
 import time
-from dataclasses import dataclass
 from typing import Any, Dict, List, Optional
 
 from ...logging_config import get_logger

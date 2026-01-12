@@ -24,9 +24,9 @@ Example:
         do_work()
 """
 
-import os
 from contextlib import contextmanager
 from functools import wraps
+import os
 from typing import Any, Callable, Dict, Optional, TypeVar
 
 from mcp_hangar.logging_config import get_logger
@@ -42,12 +42,12 @@ _initialized = False
 
 # Check if OpenTelemetry is available
 try:
-    from opentelemetry import trace
-    from opentelemetry.sdk.resources import SERVICE_NAME, Resource
-    from opentelemetry.sdk.trace import TracerProvider
+    from opentelemetry.sdk.resources import Resource, SERVICE_NAME
     from opentelemetry.sdk.trace.export import BatchSpanProcessor, ConsoleSpanExporter
-    from opentelemetry.trace import Span, Status, StatusCode, Tracer
+    from opentelemetry.sdk.trace import TracerProvider
+    from opentelemetry import trace
     from opentelemetry.trace.propagation.tracecontext import TraceContextTextMapPropagator
+    from opentelemetry.trace import Span, Status, StatusCode, Tracer
 
     OTEL_AVAILABLE = True
 except ImportError:

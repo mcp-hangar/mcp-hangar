@@ -20,7 +20,7 @@ from ..logging_config import get_logger
 
 # Backward compatibility - config populates these collections
 # which are then shared with ApplicationContext
-from .state import GROUPS, PROVIDERS, get_group_rebalance_saga
+from .state import get_group_rebalance_saga, GROUPS, PROVIDERS
 
 logger = get_logger(__name__)
 

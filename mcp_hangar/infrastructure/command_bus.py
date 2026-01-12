@@ -9,7 +9,7 @@ proper layer separation (infrastructure should not define business commands).
 """
 
 from abc import ABC, abstractmethod
-from typing import TYPE_CHECKING, Any, Dict, Optional, Type
+from typing import Any, Dict, Optional, Type, TYPE_CHECKING
 
 from mcp_hangar.logging_config import get_logger
 

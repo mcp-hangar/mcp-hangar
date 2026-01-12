@@ -7,11 +7,11 @@ import pytest
 import structlog
 
 from mcp_hangar.context import (
-    RequestContextManager,
     bind_request_context,
     clear_request_context,
     generate_request_id,
     get_request_id,
+    RequestContextManager,
     update_request_context,
 )
 from mcp_hangar.logging_config import (

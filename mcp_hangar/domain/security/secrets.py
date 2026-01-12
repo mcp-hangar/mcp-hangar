@@ -8,9 +8,9 @@ Provides secure handling of sensitive data:
 - Redaction utilities
 """
 
+from dataclasses import dataclass, field
 import os
 import re
-from dataclasses import dataclass, field
 from typing import Any, Dict, FrozenSet, List, Optional, Pattern, Set
 
 # Patterns that indicate a key might contain sensitive data

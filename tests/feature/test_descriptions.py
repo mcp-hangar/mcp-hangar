@@ -6,8 +6,8 @@ If the file is missing, the test should be skipped (not failed).
 """
 
 import json
-import sys
 from pathlib import Path
+import sys
 
 import pytest
 
@@ -17,11 +17,11 @@ from mcp_hangar.application.queries import (  # noqa: E402
     register_all_handlers as register_query_handlers,
 )
 from mcp_hangar.server import (  # noqa: E402
+    load_config,
+    load_config_from_file,
     PROVIDER_REPOSITORY,
     PROVIDERS,
     QUERY_BUS,
-    load_config,
-    load_config_from_file,
     registry_list,
 )
 

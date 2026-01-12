@@ -7,13 +7,13 @@ import time
 import pytest
 
 from mcp_hangar.progress import (
+    create_progress_tracker,
     EventType,
+    get_stage_message,
     ProgressEvent,
     ProgressOperation,
     ProgressStage,
     ProgressTracker,
-    create_progress_tracker,
-    get_stage_message,
 )
 
 

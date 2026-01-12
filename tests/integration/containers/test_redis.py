@@ -206,8 +206,8 @@ class TestRedisProviderState:
     ) -> None:
         """Provider state and history is stored correctly."""
         redis = skip_if_no_redis()
-        import json
         from datetime import datetime
+        import json
 
         client = redis.from_url(redis_container["url"])
 

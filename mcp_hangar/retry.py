@@ -25,9 +25,9 @@ See docs/guides/UX_IMPROVEMENTS.md for more examples.
 """
 
 import asyncio
-import time
 from dataclasses import dataclass, field
 from enum import Enum
+import time
 from typing import Any, Callable, Dict, List, Optional, TypeVar
 
 from .errors import is_retryable
