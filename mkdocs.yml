@@ -77,7 +77,6 @@ nav:
       - Containers: guides/CONTAINERS.md
       - Discovery: guides/DISCOVERY.md
       - Observability: guides/OBSERVABILITY.md
-      - UX Improvements: guides/UX_IMPROVEMENTS.md
   - Development:
       - Contributing: development/CONTRIBUTING.md
       - Release Process: runbooks/RELEASE.md
