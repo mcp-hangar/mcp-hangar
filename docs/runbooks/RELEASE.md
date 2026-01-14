@@ -48,7 +48,7 @@ uv run pre-commit run --all-files
 After version tag is pushed, the Release workflow triggers automatically:
 
 1. **Validate** — Checks tag matches pyproject.toml
-2. **Test** — Runs full test matrix (Python 3.10-3.13)
+2. **Test** — Runs full test matrix (Python 3.11-3.14)
 3. **Publish PyPI** — Builds and uploads to PyPI
 4. **Publish Docker** — Builds multi-arch images, pushes to GHCR
 5. **Create Release** — Creates GitHub Release with changelog

@@ -52,7 +52,7 @@ ruff check mcp_hangar/ tests/ --fix
 
 ### Type Hints
 
-Required for all new code. Use Python 3.10+ built-in generics:
+Required for all new code. Use Python 3.11+ built-in generics:
 
 ```python
 def invoke_tool(
@@ -149,7 +149,7 @@ logger.info("provider_started: %s, mode=%s", provider_id, mode)
 MCP Hangar uses automated CI/CD for releases. The process ensures quality through:
 
 1. **Version Validation** — Tag must match `pyproject.toml` version
-2. **Full Test Suite** — All tests across Python 3.10-3.13
+2. **Full Test Suite** — All tests across Python 3.11-3.14
 3. **Security Scanning** — Dependency audit and container scanning
 4. **Artifact Publishing** — PyPI package and Docker images
 

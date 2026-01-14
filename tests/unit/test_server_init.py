@@ -1,8 +1,10 @@
-"""Tests for server/__init__.py module.
+"""Tests for server/__init__.py module - backward compatibility.
 
 Tests cover initialization functions, discovery, and main entry point logic.
+These tests verify backward compatibility after the refactoring.
 """
 
+import os
 from unittest.mock import MagicMock, patch
 
 from mcp_hangar.server import (
@@ -10,123 +12,130 @@ from mcp_hangar.server import (
     _create_discovery_source,
     _ensure_data_dir,
     _parse_args,
-    _register_all_tools,
-    _start_background_workers,
     GC_WORKER_INTERVAL_SECONDS,
     HEALTH_CHECK_INTERVAL_SECONDS,
 )
 
 
 class TestParseArgs:
-    """Tests for _parse_args function."""
+    """Tests for _parse_args function (backward compatibility)."""
 
     def test_default_values(self):
-        """Should return default values when no args provided."""
-        with patch("sys.argv", ["mcp-hangar"]):
-            args = _parse_args()
+        """Should return CLIConfig with default values when no args provided."""
+        with patch.dict(os.environ, {}, clear=True):
+            config = _parse_args([])
 
-        assert args.http is False
-        assert args.host is None
-        assert args.port is None
-        assert args.config is None
-        assert args.log_file is None
+        assert config.http_mode is False
+        assert config.http_host == "0.0.0.0"
+        assert config.http_port == 8000
+        assert config.config_path is None
+        assert config.log_file is None
 
     def test_http_flag(self):
         """Should parse --http flag."""
-        with patch("sys.argv", ["mcp-hangar", "--http"]):
-            args = _parse_args()
+        with patch.dict(os.environ, {}, clear=True):
+            config = _parse_args(["--http"])
 
-        assert args.http is True
+        assert config.http_mode is True
 
     def test_host_option(self):
         """Should parse --host option."""
-        with patch("sys.argv", ["mcp-hangar", "--host", "127.0.0.1"]):
-            args = _parse_args()
+        with patch.dict(os.environ, {}, clear=True):
+            config = _parse_args(["--host", "127.0.0.1"])
 
-        assert args.host == "127.0.0.1"
+        assert config.http_host == "127.0.0.1"
 
     def test_port_option(self):
         """Should parse --port option."""
-        with patch("sys.argv", ["mcp-hangar", "--port", "9000"]):
-            args = _parse_args()
+        with patch.dict(os.environ, {}, clear=True):
+            config = _parse_args(["--port", "9000"])
 
-        assert args.port == 9000
+        assert config.http_port == 9000
 
     def test_config_option(self):
         """Should parse --config option."""
-        with patch("sys.argv", ["mcp-hangar", "--config", "/path/to/config.yaml"]):
-            args = _parse_args()
+        with patch.dict(os.environ, {}, clear=True):
+            config = _parse_args(["--config", "/path/to/config.yaml"])
 
-        assert args.config == "/path/to/config.yaml"
+        assert config.config_path == "/path/to/config.yaml"
 
     def test_log_file_option(self):
         """Should parse --log-file option."""
-        with patch("sys.argv", ["mcp-hangar", "--log-file", "/var/log/mcp.log"]):
-            args = _parse_args()
+        with patch.dict(os.environ, {}, clear=True):
+            config = _parse_args(["--log-file", "/var/log/mcp.log"])
 
-        assert args.log_file == "/var/log/mcp.log"
+        assert config.log_file == "/var/log/mcp.log"
 
     def test_all_options_combined(self):
         """Should parse all options together."""
-        with patch(
-            "sys.argv",
-            [
-                "mcp-hangar",
-                "--http",
-                "--host",
-                "0.0.0.0",
-                "--port",
-                "8080",
-                "--config",
-                "custom.yaml",
-                "--log-file",
-                "server.log",
-            ],
-        ):
-            args = _parse_args()
+        with patch.dict(os.environ, {}, clear=True):
+            config = _parse_args(
+                [
+                    "--http",
+                    "--host",
+                    "0.0.0.0",
+                    "--port",
+                    "8080",
+                    "--config",
+                    "custom.yaml",
+                    "--log-file",
+                    "server.log",
+                ]
+            )
 
-        assert args.http is True
-        assert args.host == "0.0.0.0"
-        assert args.port == 8080
-        assert args.config == "custom.yaml"
-        assert args.log_file == "server.log"
+        assert config.http_mode is True
+        assert config.http_host == "0.0.0.0"
+        assert config.http_port == 8080
+        assert config.config_path == "custom.yaml"
+        assert config.log_file == "server.log"
 
 
 class TestEnsureDataDir:
     """Tests for _ensure_data_dir function."""
 
-    def test_creates_data_dir_when_missing(self, tmp_path):
+    def test_creates_data_dir_when_missing(self, tmp_path, monkeypatch):
         """Should create data directory when it doesn't exist."""
-        with patch("mcp_hangar.server.Path") as mock_path:
-            mock_data_dir = MagicMock()
-            mock_data_dir.exists.return_value = False
-            mock_path.return_value = mock_data_dir
+        monkeypatch.chdir(tmp_path)
 
-            _ensure_data_dir()
+        _ensure_data_dir()
 
-            mock_data_dir.mkdir.assert_called_once_with(mode=0o755, parents=True, exist_ok=True)
+        data_dir = tmp_path / "data"
+        assert data_dir.exists()
+        assert data_dir.is_dir()
 
-    def test_does_not_create_when_exists(self, tmp_path):
-        """Should not create directory when it already exists."""
-        with patch("mcp_hangar.server.Path") as mock_path:
-            mock_data_dir = MagicMock()
-            mock_data_dir.exists.return_value = True
-            mock_path.return_value = mock_data_dir
+    def test_does_not_create_when_exists(self, tmp_path, monkeypatch):
+        """Should not fail when directory already exists."""
+        monkeypatch.chdir(tmp_path)
+        data_dir = tmp_path / "data"
+        data_dir.mkdir()
 
-            _ensure_data_dir()
+        # Should not raise
+        _ensure_data_dir()
 
-            mock_data_dir.mkdir.assert_not_called()
+        assert data_dir.exists()
 
-    def test_handles_oserror_gracefully(self):
+    def test_handles_oserror_gracefully(self, tmp_path, monkeypatch):
         """Should handle OSError gracefully."""
-        with patch("mcp_hangar.server.Path") as mock_path:
-            mock_data_dir = MagicMock()
-            mock_data_dir.exists.return_value = False
-            mock_data_dir.mkdir.side_effect = OSError("Permission denied")
-            mock_path.return_value = mock_data_dir
+        import sys
 
+        import mcp_hangar.server.bootstrap  # noqa: F401
+
+        bootstrap_mod = sys.modules["mcp_hangar.server.bootstrap"]
+        monkeypatch.chdir(tmp_path)
+
+        original_path = bootstrap_mod.Path
+
+        mock_data_dir = MagicMock()
+        mock_data_dir.exists.return_value = False
+        mock_data_dir.mkdir.side_effect = OSError("Permission denied")
+        mock_path = MagicMock(return_value=mock_data_dir)
+        bootstrap_mod.Path = mock_path
+
+        try:
             # Should not raise
-            _ensure_data_dir()
+            bootstrap_mod._ensure_data_dir()
+        finally:
+            bootstrap_mod.Path = original_path
 
 
 class TestCreateDiscoverySource:
@@ -202,33 +211,23 @@ class TestCreateDiscoverySource:
 class TestAutoAddVolumes:
     """Tests for _auto_add_volumes function."""
 
-    def test_memory_provider_gets_memory_volume(self, tmp_path):
+    def test_memory_provider_gets_memory_volume(self, tmp_path, monkeypatch):
         """Should add memory volume for memory providers."""
-        with patch("mcp_hangar.server.Path") as mock_path:
-            mock_abs = MagicMock()
-            mock_abs.__truediv__ = lambda self, x: MagicMock(
-                mkdir=MagicMock(), chmod=MagicMock(), __str__=lambda s: f"/data/{x}"
-            )
-            mock_path.return_value.absolute.return_value = mock_abs
+        monkeypatch.chdir(tmp_path)
 
-            result = _auto_add_volumes("mcp-memory-provider")
+        result = _auto_add_volumes("mcp-memory-provider")
 
-            assert len(result) == 1
-            assert "/app/data:rw" in result[0]
+        assert len(result) == 1
+        assert "/app/data:rw" in result[0]
 
-    def test_filesystem_provider_gets_filesystem_volume(self, tmp_path):
+    def test_filesystem_provider_gets_filesystem_volume(self, tmp_path, monkeypatch):
         """Should add filesystem volume for filesystem providers."""
-        with patch("mcp_hangar.server.Path") as mock_path:
-            mock_abs = MagicMock()
-            mock_abs.__truediv__ = lambda self, x: MagicMock(
-                mkdir=MagicMock(), chmod=MagicMock(), __str__=lambda s: f"/data/{x}"
-            )
-            mock_path.return_value.absolute.return_value = mock_abs
+        monkeypatch.chdir(tmp_path)
 
-            result = _auto_add_volumes("mcp-filesystem-server")
+        result = _auto_add_volumes("mcp-filesystem-server")
 
-            assert len(result) == 1
-            assert "/data:rw" in result[0]
+        assert len(result) == 1
+        assert "/data:rw" in result[0]
 
     def test_unknown_provider_gets_no_volumes(self):
         """Should return empty list for unknown providers."""
@@ -236,18 +235,13 @@ class TestAutoAddVolumes:
 
         assert result == []
 
-    def test_case_insensitive_matching(self, tmp_path):
+    def test_case_insensitive_matching(self, tmp_path, monkeypatch):
         """Should match provider names case-insensitively."""
-        with patch("mcp_hangar.server.Path") as mock_path:
-            mock_abs = MagicMock()
-            mock_abs.__truediv__ = lambda self, x: MagicMock(
-                mkdir=MagicMock(), chmod=MagicMock(), __str__=lambda s: f"/data/{x}"
-            )
-            mock_path.return_value.absolute.return_value = mock_abs
+        monkeypatch.chdir(tmp_path)
 
-            result = _auto_add_volumes("MCP-MEMORY-Provider")
+        result = _auto_add_volumes("MCP-MEMORY-Provider")
 
-            assert len(result) == 1
+        assert len(result) == 1
 
 
 class TestConstants:
@@ -275,30 +269,64 @@ class TestStartBackgroundWorkers:
 
     def test_starts_gc_worker(self):
         """Should start GC background worker."""
-        with patch("mcp_hangar.server.BackgroundWorker") as mock_worker_class:
-            with patch("mcp_hangar.server.PROVIDERS", {}):
-                mock_worker = MagicMock()
-                mock_worker_class.return_value = mock_worker
+        import sys
 
-                _start_background_workers()
+        import mcp_hangar.server.bootstrap  # noqa: F401
 
-                # Should be called twice (GC and health check)
-                assert mock_worker_class.call_count == 2
-                assert mock_worker.start.call_count == 2
+        bootstrap_mod = sys.modules["mcp_hangar.server.bootstrap"]
+
+        original_providers = bootstrap_mod.PROVIDERS
+        original_worker = bootstrap_mod.BackgroundWorker
+
+        mock_worker_class = MagicMock()
+        mock_worker = MagicMock()
+        mock_worker_class.return_value = mock_worker
+
+        bootstrap_mod.PROVIDERS = {}
+        bootstrap_mod.BackgroundWorker = mock_worker_class
+
+        try:
+            # Call through module to pick up patches
+            workers = bootstrap_mod._create_background_workers()
+            for worker in workers:
+                worker.start()
+
+            # Should be called twice (GC and health check)
+            assert mock_worker_class.call_count == 2
+            assert mock_worker.start.call_count == 2
+        finally:
+            bootstrap_mod.PROVIDERS = original_providers
+            bootstrap_mod.BackgroundWorker = original_worker
 
     def test_passes_correct_interval_to_gc_worker(self):
         """Should pass correct interval to GC worker."""
-        with patch("mcp_hangar.server.BackgroundWorker") as mock_worker_class:
-            with patch("mcp_hangar.server.PROVIDERS", {}):
-                mock_worker = MagicMock()
-                mock_worker_class.return_value = mock_worker
+        import sys
 
-                _start_background_workers()
+        import mcp_hangar.server.bootstrap  # noqa: F401
 
-                # First call should be GC worker
-                first_call = mock_worker_class.call_args_list[0]
-                assert first_call.kwargs["interval_s"] == GC_WORKER_INTERVAL_SECONDS
-                assert first_call.kwargs["task"] == "gc"
+        bootstrap_mod = sys.modules["mcp_hangar.server.bootstrap"]
+
+        original_providers = bootstrap_mod.PROVIDERS
+        original_worker = bootstrap_mod.BackgroundWorker
+
+        mock_worker_class = MagicMock()
+        mock_worker = MagicMock()
+        mock_worker_class.return_value = mock_worker
+
+        bootstrap_mod.PROVIDERS = {}
+        bootstrap_mod.BackgroundWorker = mock_worker_class
+
+        try:
+            # Call through module to pick up patches
+            bootstrap_mod._create_background_workers()
+
+            # First call should be GC worker
+            first_call = mock_worker_class.call_args_list[0]
+            assert first_call.kwargs["interval_s"] == GC_WORKER_INTERVAL_SECONDS
+            assert first_call.kwargs["task"] == "gc"
+        finally:
+            bootstrap_mod.PROVIDERS = original_providers
+            bootstrap_mod.BackgroundWorker = original_worker
 
 
 class TestRegisterAllTools:
@@ -306,16 +334,45 @@ class TestRegisterAllTools:
 
     def test_registers_all_tool_groups(self):
         """Should register all tool groups."""
-        with patch("mcp_hangar.server.register_registry_tools") as mock_registry:
-            with patch("mcp_hangar.server.register_provider_tools") as mock_provider:
-                with patch("mcp_hangar.server.register_health_tools") as mock_health:
-                    with patch("mcp_hangar.server.register_discovery_tools") as mock_discovery:
-                        with patch("mcp_hangar.server.register_group_tools") as mock_group:
-                            with patch("mcp_hangar.server.mcp") as mock_mcp:
-                                _register_all_tools()
+        import sys
 
-                                mock_registry.assert_called_once_with(mock_mcp)
-                                mock_provider.assert_called_once_with(mock_mcp)
-                                mock_health.assert_called_once_with(mock_mcp)
-                                mock_discovery.assert_called_once_with(mock_mcp)
-                                mock_group.assert_called_once_with(mock_mcp)
+        import mcp_hangar.server.bootstrap  # noqa: F401
+
+        bootstrap_mod = sys.modules["mcp_hangar.server.bootstrap"]
+        mock_mcp = MagicMock()
+
+        # Store originals
+        originals = {
+            "register_registry_tools": getattr(bootstrap_mod, "register_registry_tools", None),
+            "register_provider_tools": getattr(bootstrap_mod, "register_provider_tools", None),
+            "register_health_tools": getattr(bootstrap_mod, "register_health_tools", None),
+            "register_discovery_tools": getattr(bootstrap_mod, "register_discovery_tools", None),
+            "register_group_tools": getattr(bootstrap_mod, "register_group_tools", None),
+        }
+
+        # Create mocks
+        mocks = {
+            "register_registry_tools": MagicMock(),
+            "register_provider_tools": MagicMock(),
+            "register_health_tools": MagicMock(),
+            "register_discovery_tools": MagicMock(),
+            "register_group_tools": MagicMock(),
+        }
+
+        # Apply mocks
+        for name, mock in mocks.items():
+            setattr(bootstrap_mod, name, mock)
+
+        try:
+            bootstrap_mod._register_all_tools(mock_mcp)
+
+            mocks["register_registry_tools"].assert_called_once_with(mock_mcp)
+            mocks["register_provider_tools"].assert_called_once_with(mock_mcp)
+            mocks["register_health_tools"].assert_called_once_with(mock_mcp)
+            mocks["register_discovery_tools"].assert_called_once_with(mock_mcp)
+            mocks["register_group_tools"].assert_called_once_with(mock_mcp)
+        finally:
+            # Restore originals
+            for name, original in originals.items():
+                if original is not None:
+                    setattr(bootstrap_mod, name, original)

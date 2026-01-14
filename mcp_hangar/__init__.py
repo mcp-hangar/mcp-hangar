@@ -61,14 +61,8 @@ from .errors import (
     TransientError,
 )
 
-# Legacy imports - for backward compatibility
-from .models import (
-    InvocationContext,
-    ProviderConnection,
-    ProviderHealth,
-    ProviderSpec,
-    ToolSchema,
-)
+# Legacy imports - for backward compatibility (re-exports from domain)
+from .models import ToolSchema
 from .progress import (
     create_progress_tracker,
     get_stage_message,
@@ -77,7 +71,6 @@ from .progress import (
     ProgressStage,
     ProgressTracker,
 )
-from .provider_manager import ProviderManager
 from .retry import (
     BackoffStrategy,
     get_retry_policy,
@@ -148,11 +141,6 @@ __all__ = [
     "create_progress_tracker",
     "get_stage_message",
     # Legacy - for backward compatibility
-    "ProviderSpec",
     "ToolSchema",
-    "InvocationContext",
-    "ProviderHealth",
-    "ProviderConnection",
-    "ProviderManager",
     "StdioClient",
 ]

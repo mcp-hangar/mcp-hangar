@@ -7,7 +7,7 @@ name = "mcp-hangar"
 version = "0.1.2"
 description = "Production-grade hot-load registry for MCP providers"
 readme = "README.md"
-requires-python = ">=3.10"
+requires-python = ">=3.11"
 authors = [
     { name = "MCP Registry Contributors" }
 ]
@@ -24,8 +24,8 @@ dependencies = [
 ]
 
 [project.urls]
-Homepage = "https://mcp-hangar.io"
-Documentation = "https://mcp-hangar.io/docs"
+Homepage = "https://github.com/mapyr/mcp-hangar"
+Documentation = "https://mapyr.github.io/mcp-hangar/"
 Repository = "https://github.com/mapyr/mcp-hangar"
 Changelog = "https://github.com/mapyr/mcp-hangar/blob/main/CHANGELOG.md"
 

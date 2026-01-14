@@ -1,201 +1,296 @@
 # MCP Hangar
 
 [![Tests](https://github.com/mapyr/mcp-hangar/actions/workflows/test.yml/badge.svg)](https://github.com/mapyr/mcp-hangar/actions/workflows/test.yml)
-[![Python 3.10+](https://img.shields.io/badge/python-3.10+-blue.svg)](https://www.python.org/downloads/)
+[![PyPI](https://img.shields.io/pypi/v/mcp-hangar)](https://pypi.org/project/mcp-hangar/)
+[![Python 3.11+](https://img.shields.io/badge/python-3.11+-blue.svg)](https://www.python.org/downloads/)
 [![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](https://opensource.org/licenses/MIT)
 [![Documentation](https://img.shields.io/badge/docs-GitHub%20Pages-blue)](https://mapyr.github.io/mcp-hangar/)
 
-Production-grade MCP provider registry with lazy loading, health monitoring, and container support.
+**Production-grade MCP infrastructure with auto-discovery, observability, and resilience patterns.**
 
-## Features
+## Overview
 
-- **Lazy Loading** — Providers start only when invoked, tools visible immediately
-- **Container Support** — Docker/Podman with auto-detection
-- **Provider Groups** — Load balancing with multiple strategies
-- **Health Monitoring** — Circuit breaker pattern with automatic recovery
-- **Auto-Discovery** — Detect providers from Docker labels, K8s annotations, filesystem
-- **Automatic Retry** — Built-in retry with exponential backoff for transient failures
-- **Real-Time Progress** — See operation progress while waiting (`registry_invoke_stream`)
-- **Rich Errors** — Human-readable errors with recovery hints
+MCP Hangar is a lifecycle management platform for Model Context Protocol providers, built for platform teams running MCP at scale. It replaces ad-hoc provider management with a unified control plane featuring auto-discovery from Kubernetes, Docker, and filesystem sources; circuit breakers and saga-based recovery for resilience; and first-class observability through Langfuse, OpenTelemetry, and Prometheus. The architecture follows Domain-Driven Design with CQRS and Event Sourcing, providing full audit trails for compliance-heavy environments.
+
+## Why MCP Hangar?
+
+| Challenge | Without MCP Hangar | With MCP Hangar |
+|-----------|-------------------|-----------------|
+| **Provider lifecycle** | Manual start/stop, no health monitoring | State machine with circuit breaker, health checks, automatic GC |
+| **Observability** | None or DIY | Built-in Langfuse, OpenTelemetry, Prometheus metrics |
+| **Dynamic environments** | Restart required for new providers | Auto-discovery from K8s, Docker, filesystem, entrypoints |
+| **Failure handling** | Cascading failures | Circuit breaker, saga-based recovery and failover |
+| **Audit & compliance** | None | Event sourcing with full audit trail |
+| **Cold start latency** | Wait for provider startup | Predefined tools visible immediately, lazy loading |
+| **Multi-provider routing** | Manual coordination | Load balancing with weighted round-robin, priority, least connections |
+
+## Key Features
+
+<details>
+<summary><strong>🔄 Lifecycle Management</strong></summary>
+
+Provider lifecycle follows a strict state machine:
+
+```
+COLD → INITIALIZING → READY ⇄ DEGRADED → DEAD
+```
+
+- **Lazy loading** — Providers start on first invocation, not at boot
+- **Predefined tools** — Tool schemas visible before provider starts (no cold start for discovery)
+- **Automatic GC** — Idle providers shutdown after configurable TTL
+- **Graceful shutdown** — Clean termination with timeout enforcement
+
+</details>
+
+<details>
+<summary><strong>🔍 Auto-Discovery</strong></summary>
+
+Automatically detect and register providers from multiple sources:
+
+| Source | Configuration |
+|--------|---------------|
+| **Kubernetes** | Pod annotations (`mcp.hangar.io/*`) with namespace filtering |
+| **Docker/Podman** | Container labels (`mcp.hangar.*`) |
+| **Filesystem** | YAML configs with file watching |
+| **Python entrypoints** | `mcp.providers` entry point group |
+
+Discovery modes:
+- `additive` — Only adds providers, never removes (safe for static environments)
+- `authoritative` — Adds and removes (for dynamic environments like K8s)
+
+Conflict resolution: Static config > Kubernetes > Docker > Filesystem > Entrypoints
+
+</details>
+
+<details>
+<summary><strong>📊 Observability</strong></summary>
+
+Full observability stack for production operations:
+
+**Langfuse Integration**
+- End-to-end LLM tracing from prompt to provider response
+- Cost attribution per provider, tool, user, or session
+- Quality scoring and automated evals
+
+**OpenTelemetry**
+- Distributed tracing with context propagation
+- OTLP export to Jaeger, Zipkin, or any collector
+
+**Prometheus Metrics**
+- Tool invocation latency and error rates
+- Provider state transitions and cold starts
+- Circuit breaker state and trip counts
+- Health check results
+
+**Health Endpoints**
+- `/health` — Liveness check
+- `/ready` — Readiness check (K8s compatible)
+- `/metrics` — Prometheus scrape endpoint
+
+</details>
+
+<details>
+<summary><strong>🛡️ Resilience</strong></summary>
+
+Production-grade failure handling:
+
+**Circuit Breaker**
+- Opens after configurable failure threshold
+- Auto-reset after timeout period
+- Prevents cascading failures to healthy providers
+
+**Saga-Based Recovery**
+- `ProviderRecoverySaga` — Automatic restart with exponential backoff
+- `ProviderFailoverSaga` — Failover to backup providers with auto-failback
+- `GroupRebalanceSaga` — Rebalance traffic when members change
+
+**Health Monitoring**
+- Configurable check intervals
+- Consecutive failure thresholds
+- Automatic state transitions (READY → DEGRADED)
+
+</details>
+
+<details>
+<summary><strong>🔒 Security</strong></summary>
+
+Enterprise security controls:
+
+- **Rate limiting** — Per-provider request limits
+- **Input validation** — Schema validation before provider invocation
+- **Secrets management** — Environment variable injection, never in config files
+- **Container isolation** — Read-only filesystems, resource limits, network policies
+- **Discovery security** — Namespace filtering, max providers per source, quarantine on failure
+
+</details>
+
+<details>
+<summary><strong>🏗️ Architecture</strong></summary>
+
+Domain-Driven Design with clean layer separation:
+
+```
+domain/         Core business logic, state machines, events, value objects
+application/    Use cases, commands, queries, sagas
+infrastructure/ Adapters for containers, subprocess, persistence, event bus
+server/         MCP protocol handlers and validation
+bootstrap/      Runtime initialization and dependency injection
+```
+
+- **CQRS** — Separate command and query paths
+- **Event Sourcing** — All state changes emit domain events
+- **Port/Adapter** — Extensible infrastructure layer
+- **Thread-safe** — Lock hierarchy for concurrent access
+
+</details>
 
 ## Quick Start
 
+**Install:**
 ```bash
-uv pip install .
-python -m mcp_hangar.server --config config.yaml
+pip install mcp-hangar
 ```
 
-### Claude Desktop
-
-```json
-{
-  "mcpServers": {
-    "mcp-hangar": {
-      "command": "python",
-      "args": ["-m", "mcp_hangar.server", "--config", "/path/to/config.yaml"],
-      "cwd": "/path/to/mcp-hangar"
-    }
-  }
-}
-```
-
-### HTTP Mode (LM Studio)
-
-```bash
-python -m mcp_hangar.server --http
-# Server at http://localhost:8000/mcp
-```
-
-## Configuration
-
+**Configure (`config.yaml`):**
 ```yaml
 providers:
-  # Subprocess
   math:
     mode: subprocess
-    command: [python, -m, examples.provider_math.server]
-    idle_ttl_s: 180
-    tools:
-      - name: add
-        description: "Add two numbers"
-        inputSchema:
-          type: object
-          properties:
-            a: { type: number }
-            b: { type: number }
-          required: [a, b]
-
-  # Container
+    command: [python, -m, my_math_server]
+    idle_ttl_s: 300
+    
   sqlite:
     mode: container
-    image: localhost/mcp-sqlite:latest
+    image: ghcr.io/modelcontextprotocol/server-sqlite:latest
     volumes:
-      - "/absolute/path/to/data:/data:rw"  # Must be absolute
-    network: bridge
-    idle_ttl_s: 300
+      - "/data/sqlite:/data:rw"
 ```
 
-> **Note**: Use absolute paths for volume mounts. Relative paths fail when MCP clients start the server from different directories.
-
-### Building Container Images
-
+**Run:**
 ```bash
-podman build -t localhost/mcp-sqlite -f docker/Dockerfile.sqlite .
-podman build -t localhost/mcp-memory -f docker/Dockerfile.memory .
-podman build -t localhost/mcp-filesystem -f docker/Dockerfile.filesystem .
-podman build -t localhost/mcp-fetch -f docker/Dockerfile.fetch .
+# Stdio mode (Claude Desktop, Cursor, etc.)
+mcp-hangar --config config.yaml
 
-mkdir -p data/sqlite data/memory data/filesystem
+# HTTP mode (LM Studio, web clients)
+mcp-hangar --config config.yaml --http
+```
+
+## Architecture Overview
+
+```
+┌─────────────────────────────────────────────────────────────────┐
+│                        MCP Hangar                               │
+│  ┌──────────────────────────────────────────────────────────┐  │
+│  │                    FastMCP Server                         │  │
+│  │              (Stdio or HTTP transport)                    │  │
+│  └──────────────────────────┬───────────────────────────────┘  │
+│                             │                                   │
+│  ┌──────────────────────────▼───────────────────────────────┐  │
+│  │                  Provider Manager                         │  │
+│  │    ┌─────────┐  ┌─────────┐  ┌─────────┐                 │  │
+│  │    │ State   │  │ Health  │  │ Circuit │                 │  │
+│  │    │ Machine │  │ Tracker │  │ Breaker │                 │  │
+│  │    └─────────┘  └─────────┘  └─────────┘                 │  │
+│  └──────────────────────────┬───────────────────────────────┘  │
+│                             │                                   │
+│  ┌──────────────────────────▼───────────────────────────────┐  │
+│  │                    Providers                              │  │
+│  │  ┌───────────┐  ┌───────────┐  ┌───────────┐             │  │
+│  │  │ Subprocess│  │  Docker   │  │  Remote   │             │  │
+│  │  └───────────┘  └───────────┘  └───────────┘             │  │
+│  └──────────────────────────────────────────────────────────┘  │
+│                                                                 │
+│  Background: [GC Worker] [Health Worker] [Discovery Worker]    │
+└─────────────────────────────────────────────────────────────────┘
 ```
 
 ## Registry Tools
 
-| Tool                     | Description                       |
-|--------------------------|-----------------------------------|
-| `registry_list`          | List providers                    |
-| `registry_start`         | Start provider                    |
-| `registry_stop`          | Stop provider                     |
-| `registry_invoke`        | Invoke tool                       |
-| `registry_invoke_ex`     | Invoke with retry & progress      |
-| `registry_invoke_stream` | Invoke with real-time progress ⭐ |
-| `registry_tools`         | Get tool schemas                  |
-| `registry_details`       | Provider details                  |
-| `registry_health`        | Health status                     |
-| `registry_status`        | Status dashboard                  |
-| `registry_warm`          | Pre-start providers               |
+| Tool | Description |
+|------|-------------|
+| `registry_list` | List all providers with state, health status, and available tools |
+| `registry_start` | Explicitly start a provider |
+| `registry_stop` | Stop a running provider |
+| `registry_invoke` | Invoke a tool on a provider (auto-starts if needed) |
+| `registry_invoke_ex` | Invoke with retry, correlation ID, and metadata |
+| `registry_invoke_stream` | Invoke with real-time progress notifications |
+| `registry_tools` | Get tool schemas for a provider |
+| `registry_health` | Get health status and metrics |
+| `registry_status` | Dashboard view of all providers |
+| `registry_discover` | Trigger discovery cycle |
+| `registry_sources` | List discovery sources with status |
+| `registry_warm` | Pre-start providers to avoid cold start latency |
 
-### Examples
+## Configuration Reference
 
-```python
-# List providers (containers stay OFF)
-registry_list()
+| Option | Description | Default |
+|--------|-------------|---------|
+| `mode` | Provider mode: `subprocess`, `container`, `docker`, `remote`, `group` | required |
+| `command` | Command for subprocess providers | — |
+| `image` | Container image for container providers | — |
+| `idle_ttl_s` | Seconds before idle provider shutdown | `300` |
+| `health_check_interval_s` | Health check frequency in seconds | `60` |
+| `max_consecutive_failures` | Failures before transition to DEGRADED | `3` |
+| `tools` | Predefined tool schemas (visible before start) | — |
+| `volumes` | Container volume mounts | — |
+| `network` | Container network mode | `none` |
+| `read_only` | Container read-only filesystem | `true` |
 
-# Get tools (container still OFF)
-registry_tools(provider="sqlite")
-
-# Invoke tool (starts container, executes)
-registry_invoke(provider="sqlite", tool="execute",
-                arguments={"sql": "CREATE TABLE users (id INTEGER PRIMARY KEY)"})
-
-registry_invoke(provider="sqlite", tool="query",
-                arguments={"sql": "SELECT * FROM users"})
-
-# With automatic retry and correlation_id (recommended for production)
-registry_invoke_ex(provider="sqlite", tool="query",
-                   arguments={"sql": "SELECT * FROM users"},
-                   max_retries=3,
-                   correlation_id="my-trace-001")
-# Returns: _retry_metadata with correlation_id, attempts, retries
-# On error: includes final_error_reason and recovery_hints
-
-# With real-time progress notifications (model sees progress!)
-registry_invoke_stream(provider="sqlite", tool="query",
-                       arguments={"sql": "SELECT * FROM large_table"},
-                       correlation_id="stream-trace-001")
-# Progress: [1/5] [cold_start] Provider is cold, launching...
-# Progress: [2/5] [launching] Starting subprocess provider...
-# Progress: [3/5] [ready] Provider ready
-# Progress: [4/5] [executing] Calling tool 'query'...
-# Progress: [5/5] [complete] Operation completed in 234ms
-
-# Status dashboard
-registry_status()
-# ✅ math    ready   last: 2s ago
-# ⏸️  sqlite  cold    Will start on request
-
-# Pre-warm providers to avoid cold start latency
-registry_warm("math,sqlite")
-```
-
-## Provider Groups
+## Observability Setup
 
 ```yaml
-providers:
-  math-cluster:
-    mode: group
-    strategy: weighted_round_robin
-    min_healthy: 2
-    members:
-      - id: math-1
-        weight: 3
-        mode: subprocess
-        command: [python, -m, examples.provider_math.server]
-      - id: math-2
-        weight: 1
-        mode: subprocess
-        command: [python, -m, examples.provider_math.server]
+observability:
+  langfuse:
+    enabled: true
+    public_key: ${LANGFUSE_PUBLIC_KEY}
+    secret_key: ${LANGFUSE_SECRET_KEY}
+    host: https://cloud.langfuse.com
+    
+  tracing:
+    enabled: true
+    otlp_endpoint: http://localhost:4317
+    
+  metrics:
+    enabled: true
+    endpoint: /metrics
 ```
 
-Strategies: `round_robin`, `weighted_round_robin`, `random`, `priority`, `least_connections`
+**Environment Variables:**
+| Variable | Description |
+|----------|-------------|
+| `LANGFUSE_PUBLIC_KEY` | Langfuse public key |
+| `LANGFUSE_SECRET_KEY` | Langfuse secret key |
+| `OTEL_EXPORTER_OTLP_ENDPOINT` | OpenTelemetry collector endpoint |
+| `MCP_TRACING_ENABLED` | Enable/disable tracing (`true`/`false`) |
 
-## Environment Variables
+**Endpoints:**
+- `/metrics` — Prometheus metrics
+- `/health` — Liveness probe
+- `/ready` — Readiness probe
 
-| Variable | Default | Description |
-|----------|---------|-------------|
-| `MCP_CONFIG` | `config.yaml` | Config file path |
-| `MCP_HTTP_PORT` | `8000` | HTTP server port |
-| `MCP_RATE_LIMIT_RPS` | `10` | Rate limit |
-| `MCP_CONTAINER_RUNTIME` | auto | Force `podman` or `docker` |
+## Documentation
 
-## Development
+📖 **[Full Documentation](https://mapyr.github.io/mcp-hangar/)**
+
+- [Installation](https://mapyr.github.io/mcp-hangar/getting-started/installation/)
+- [Quick Start](https://mapyr.github.io/mcp-hangar/getting-started/quickstart/)
+- [Container Guide](https://mapyr.github.io/mcp-hangar/guides/CONTAINERS/)
+- [Auto-Discovery](https://mapyr.github.io/mcp-hangar/guides/DISCOVERY/)
+- [Observability](https://mapyr.github.io/mcp-hangar/guides/OBSERVABILITY/)
+- [Architecture](https://mapyr.github.io/mcp-hangar/architecture/OVERVIEW/)
+
+## Contributing
+
+See [Contributing Guide](https://mapyr.github.io/mcp-hangar/development/CONTRIBUTING/) for development setup, testing requirements, and code style.
 
 ```bash
 git clone https://github.com/mapyr/mcp-hangar.git
 cd mcp-hangar
 uv sync --extra dev
-uv run pytest tests/ -v -m "not slow"
+uv run pytest tests/ -v
 ```
-
-## Documentation
-
-- [Container Guide](docs/guides/CONTAINERS.md)
-- [Discovery](docs/guides/DISCOVERY.md)
-- [Observability](docs/guides/OBSERVABILITY.md) - Metrics, tracing, health checks
-- [UX Improvements](docs/guides/UX_IMPROVEMENTS.md) - Retry, progress, rich errors
-- [Architecture](docs/architecture/OVERVIEW.md)
-- [Testing](docs/guides/TESTING.md)
-- [Contributing](docs/development/CONTRIBUTING.md)
 
 ## License
 
-MIT
+MIT License — see [LICENSE](LICENSE) for details.
+

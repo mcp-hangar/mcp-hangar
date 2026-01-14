@@ -4,11 +4,16 @@ These tests verify the Langfuse adapter without requiring the actual
 Langfuse SDK, using mocks for the external dependency.
 """
 
+import sys
 import threading
 import time
 from unittest.mock import MagicMock, patch
 
 import pytest
+
+# Skip entire module on Python 3.14+ due to Langfuse's Pydantic v1 incompatibility
+if sys.version_info >= (3, 14):
+    pytest.skip("Langfuse uses Pydantic v1 which is incompatible with Python 3.14+", allow_module_level=True)
 
 from mcp_hangar.application.ports.observability import (
     NullSpanHandle,

@@ -7,8 +7,7 @@ from unittest.mock import Mock
 import pytest
 
 from mcp_hangar.domain import InMemoryProviderRepository, IProviderRepository
-from mcp_hangar.models import ProviderSpec
-from mcp_hangar.provider_manager import ProviderManager
+from mcp_hangar.domain.model import Provider
 
 
 @pytest.fixture
@@ -19,16 +18,18 @@ def repository():
 
 @pytest.fixture
 def mock_provider():
-    """Create a mock provider manager."""
-    spec = ProviderSpec(provider_id="test-provider", mode="subprocess", command=["echo", "test"])
-    return Mock(spec=spec)
+    """Create a mock provider."""
+    mock = Mock()
+    mock.provider_id = "test-provider"
+    return mock
 
 
 @pytest.fixture
 def mock_provider_2():
-    """Create a second mock provider manager."""
-    spec = ProviderSpec(provider_id="test-provider-2", mode="subprocess", command=["echo", "test2"])
-    return Mock(spec=spec)
+    """Create a second mock provider."""
+    mock = Mock()
+    mock.provider_id = "test-provider-2"
+    return mock
 
 
 # Basic Operations Tests
@@ -359,38 +360,36 @@ def test_clear_during_concurrent_access(repository):
     assert repository.count() == 0
 
 
-# Integration with Real ProviderManager
+# Integration with Real Provider
 
 
-def test_with_real_provider_manager():
-    """Test repository with real ProviderManager instances."""
+def test_with_real_provider():
+    """Test repository with real Provider instances."""
     repository = InMemoryProviderRepository()
 
-    spec1 = ProviderSpec(
+    provider1 = Provider(
         provider_id="math-provider",
         mode="subprocess",
         command=["python", "-m", "math_provider"],
     )
-    manager1 = ProviderManager(spec1)
 
-    spec2 = ProviderSpec(
+    provider2 = Provider(
         provider_id="weather-provider",
         mode="subprocess",
         command=["python", "-m", "weather_provider"],
     )
-    manager2 = ProviderManager(spec2)
 
     # Add providers
-    repository.add("math-provider", manager1)
-    repository.add("weather-provider", manager2)
+    repository.add("math-provider", provider1)
+    repository.add("weather-provider", provider2)
 
     # Verify storage
     assert repository.count() == 2
-    assert repository.get("math-provider") == manager1
-    assert repository.get("weather-provider") == manager2
+    assert repository.get("math-provider") == provider1
+    assert repository.get("weather-provider") == provider2
 
     # Verify retrieval
     all_providers = repository.get_all()
     assert len(all_providers) == 2
-    assert all_providers["math-provider"].conn.spec.provider_id == "math-provider"
-    assert all_providers["weather-provider"].conn.spec.provider_id == "weather-provider"
+    assert all_providers["math-provider"].provider_id == "math-provider"
+    assert all_providers["weather-provider"].provider_id == "weather-provider"

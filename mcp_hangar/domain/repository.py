@@ -9,7 +9,7 @@ from abc import ABC, abstractmethod
 import threading
 from typing import Any, Dict, List, Optional
 
-# Type alias for provider-like objects (Provider or ProviderManager)
+# Type alias for provider-like objects (Provider aggregate)
 ProviderLike = Any
 
 
@@ -20,7 +20,7 @@ class IProviderRepository(ABC):
     allowing different implementations (in-memory, database, etc.) without
     changing business logic.
 
-    Can store either Provider aggregates or ProviderManager instances.
+    Stores Provider aggregates.
 
     Thread-safety is guaranteed by implementations.
     """
@@ -31,7 +31,7 @@ class IProviderRepository(ABC):
 
         Args:
             provider_id: Unique provider identifier
-            provider: Provider or ProviderManager instance to store
+            provider: Provider aggregate instance to store
 
         Raises:
             ValueError: If provider_id is empty or invalid
@@ -46,7 +46,7 @@ class IProviderRepository(ABC):
             provider_id: Provider identifier to look up
 
         Returns:
-            Provider/ProviderManager if found, None otherwise
+            Provider if found, None otherwise
         """
         pass
 
@@ -79,7 +79,7 @@ class IProviderRepository(ABC):
         """Get all providers as a dictionary.
 
         Returns:
-            Dictionary mapping provider_id -> Provider/ProviderManager
+            Dictionary mapping provider_id -> Provider
             Returns a copy to prevent external modifications
         """
         pass
@@ -117,7 +117,7 @@ class InMemoryProviderRepository(IProviderRepository):
     This implementation stores providers in a dictionary with thread-safe
     access using a read-write lock pattern.
 
-    Can store either Provider aggregates or ProviderManager instances.
+    Stores Provider aggregates.
 
     Thread Safety:
     - All operations are protected by a lock
@@ -135,7 +135,7 @@ class InMemoryProviderRepository(IProviderRepository):
 
         Args:
             provider_id: Unique provider identifier
-            provider: Provider or ProviderManager instance to store
+            provider: Provider aggregate instance to store
 
         Raises:
             ValueError: If provider_id is empty
@@ -153,7 +153,7 @@ class InMemoryProviderRepository(IProviderRepository):
             provider_id: Provider identifier to look up
 
         Returns:
-            Provider/ProviderManager if found, None otherwise
+            Provider if found, None otherwise
         """
         with self._lock:
             return self._providers.get(provider_id)
@@ -189,7 +189,7 @@ class InMemoryProviderRepository(IProviderRepository):
         """Get all providers as a dictionary.
 
         Returns:
-            Dictionary mapping provider_id -> Provider/ProviderManager
+            Dictionary mapping provider_id -> Provider
             Returns a copy to prevent external modifications
         """
         with self._lock:

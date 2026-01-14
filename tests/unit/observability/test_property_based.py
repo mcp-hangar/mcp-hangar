@@ -4,6 +4,8 @@ These tests use property-based testing to discover edge cases
 that might not be covered by example-based tests.
 """
 
+import sys
+
 from hypothesis import given, HealthCheck, settings, strategies as st
 import pytest
 
@@ -190,6 +192,9 @@ class TestNullObservabilityAdapterProperties:
         )
 
 
+@pytest.mark.skipif(
+    sys.version_info >= (3, 14), reason="Langfuse uses Pydantic v1 which is incompatible with Python 3.14+"
+)
 class TestLangfuseConfigProperties:
     """Property-based tests for LangfuseConfig validation."""
 

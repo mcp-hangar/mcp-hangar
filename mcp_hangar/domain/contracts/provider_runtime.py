@@ -7,8 +7,7 @@ concrete implementations.
 Why:
 - Avoids duck-typing via hasattr(...)
 - Makes the expected interface explicit and type-checkable
-- Supports both the domain `Provider` aggregate and backward-compatibility
-  wrappers (e.g. ProviderManager) as long as they conform
+- Supports the domain `Provider` aggregate and any compatible implementations
 
 Notes:
 - Protocols are for typing only; they don't enforce runtime inheritance.
@@ -115,9 +114,8 @@ class ProviderRuntime(
     - GC/health workers
     - CQRS command handlers
 
-    including:
+    Primary implementation:
     - domain aggregate: `mcp_hangar.domain.model.Provider`
-    - legacy wrapper: `registry.ProviderManager`
     """
 
     # No additional members beyond the composed protocols.

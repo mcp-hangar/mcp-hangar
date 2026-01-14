@@ -86,7 +86,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - Network isolation options (none, bridge, host)
 - Example math provider for testing
 - Comprehensive test suite (unit, integration, feature, performance tests)
-- GitHub Actions CI/CD for linting and testing (Python 3.10-3.13)
+- GitHub Actions CI/CD for linting and testing (Python 3.11-3.14)
 - Pre-commit hooks for code quality (black, isort, ruff)
 - Docker and docker-compose support for containerized deployment
 - Extensive documentation:
