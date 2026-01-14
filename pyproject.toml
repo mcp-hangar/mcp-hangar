@@ -24,8 +24,8 @@ dependencies = [
 ]
 
 [project.urls]
-Homepage = "https://mcp-hangar.io"
-Documentation = "https://mcp-hangar.io/docs"
+Homepage = "https://github.com/mapyr/mcp-hangar"
+Documentation = "https://mapyr.github.io/mcp-hangar/"
 Repository = "https://github.com/mapyr/mcp-hangar"
 Changelog = "https://github.com/mapyr/mcp-hangar/blob/main/CHANGELOG.md"
 
