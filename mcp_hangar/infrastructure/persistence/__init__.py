@@ -10,16 +10,24 @@ from .config_repository import (
     SQLiteProviderConfigRepository,
 )
 from .database import Database, DatabaseConfig
+from .event_serializer import EventSerializationError, EventSerializer, register_event_type
+from .in_memory_event_store import InMemoryEventStore
 from .recovery_service import RecoveryService
+from .sqlite_event_store import SQLiteEventStore
 from .unit_of_work import SQLiteUnitOfWork
 
 __all__ = [
     "Database",
     "DatabaseConfig",
+    "EventSerializationError",
+    "EventSerializer",
     "InMemoryAuditRepository",
+    "InMemoryEventStore",
     "InMemoryProviderConfigRepository",
     "RecoveryService",
+    "register_event_type",
     "SQLiteAuditRepository",
+    "SQLiteEventStore",
     "SQLiteProviderConfigRepository",
     "SQLiteUnitOfWork",
 ]

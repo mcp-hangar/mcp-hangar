@@ -1,11 +1,13 @@
 """Event bus for publish/subscribe pattern.
 
 The event bus allows decoupled communication between components via domain events.
+Supports optional event persistence via IEventStore.
 """
 
 import threading
 from typing import Callable, Dict, List, Type
 
+from mcp_hangar.domain.contracts.event_store import IEventStore, NullEventStore
 from mcp_hangar.domain.events import DomainEvent
 from mcp_hangar.logging_config import get_logger
 
@@ -26,12 +28,34 @@ class EventBus:
 
     Supports multiple subscribers per event type.
     Handlers are called synchronously in order of subscription.
+    Optionally persists events via IEventStore before publishing.
     """
 
-    def __init__(self):
+    def __init__(self, event_store: IEventStore | None = None):
+        """Initialize event bus.
+
+        Args:
+            event_store: Optional event store for persistence.
+                If None, events are not persisted.
+        """
         self._handlers: Dict[Type[DomainEvent], List[Callable[[DomainEvent], None]]] = {}
         self._lock = threading.Lock()
         self._error_handlers: List[Callable[[Exception, DomainEvent], None]] = []
+        self._event_store = event_store or NullEventStore()
+
+    @property
+    def event_store(self) -> IEventStore:
+        """Get the event store instance."""
+        return self._event_store
+
+    def set_event_store(self, event_store: IEventStore) -> None:
+        """Set the event store (for late binding during bootstrap).
+
+        Args:
+            event_store: Event store implementation.
+        """
+        self._event_store = event_store
+        logger.info("event_store_configured", store_type=type(event_store).__name__)
 
     def subscribe(self, event_type: Type[DomainEvent], handler: Callable[[DomainEvent], None]) -> None:
         """
@@ -82,6 +106,9 @@ class EventBus:
         If a handler fails, the exception is logged and remaining handlers
         are still called.
 
+        Note: This method does NOT persist events. Use publish_to_stream()
+        for event persistence.
+
         Args:
             event: The domain event to publish
         """
@@ -118,6 +145,74 @@ class EventBus:
                             event_type=event.__class__.__name__,
                             error=str(eh),
                         )
+
+    def publish_to_stream(
+        self,
+        stream_id: str,
+        events: list[DomainEvent],
+        expected_version: int = -1,
+    ) -> int:
+        """
+        Persist events to a stream and then publish to handlers.
+
+        This method provides full Event Sourcing support:
+        1. Persists events to the event store (with optimistic concurrency)
+        2. Publishes events to subscribed handlers
+
+        Args:
+            stream_id: Stream identifier (e.g., "provider:math")
+            events: List of events to persist and publish
+            expected_version: Expected stream version for concurrency check.
+                Use -1 for new streams.
+
+        Returns:
+            New stream version after append.
+
+        Raises:
+            ConcurrencyError: If version mismatch in event store.
+        """
+        if not events:
+            return expected_version
+
+        # Persist first (fail fast if concurrency error)
+        new_version = self._event_store.append(stream_id, events, expected_version)
+
+        logger.debug(
+            "events_persisted",
+            stream_id=stream_id,
+            events_count=len(events),
+            new_version=new_version,
+        )
+
+        # Then publish to handlers
+        for event in events:
+            self.publish(event)
+
+        return new_version
+
+    def publish_aggregate_events(
+        self,
+        aggregate_type: str,
+        aggregate_id: str,
+        events: list[DomainEvent],
+        expected_version: int = -1,
+    ) -> int:
+        """
+        Convenience method for publishing aggregate events.
+
+        Constructs stream_id from aggregate type and ID.
+
+        Args:
+            aggregate_type: Type of aggregate (e.g., "provider", "provider_group")
+            aggregate_id: Unique identifier of the aggregate
+            events: Events collected from aggregate
+            expected_version: Expected version for concurrency
+
+        Returns:
+            New stream version.
+        """
+        stream_id = f"{aggregate_type}:{aggregate_id}"
+        return self.publish_to_stream(stream_id, events, expected_version)
 
     def on_error(self, handler: Callable[[Exception, DomainEvent], None]) -> None:
         """

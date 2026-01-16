@@ -6,13 +6,14 @@ application components. It is the composition root of the application.
 The bootstrap process:
 1. Load configuration
 2. Initialize runtime (event bus, command bus, query bus)
-3. Register event handlers
-4. Register CQRS handlers
-5. Initialize sagas
-6. Load providers from config
-7. Initialize discovery (if enabled)
-8. Create MCP server with tools
-9. Create background workers (DO NOT START)
+3. Initialize event store (for event sourcing)
+4. Register event handlers
+5. Register CQRS handlers
+6. Initialize sagas
+7. Load providers from config
+8. Initialize discovery (if enabled)
+9. Create MCP server with tools
+10. Create background workers (DO NOT START)
 
 Key principle: Bootstrap returns a fully configured but NOT running application.
 Starting is handled by the lifecycle module.
@@ -35,9 +36,11 @@ from ..application.event_handlers import (
 )
 from ..application.queries import register_all_handlers as register_query_handlers
 from ..application.sagas import GroupRebalanceSaga
+from ..domain.contracts.event_store import NullEventStore
 from ..domain.discovery import DiscoveryMode
 from ..domain.model import Provider
 from ..gc import BackgroundWorker
+from ..infrastructure.persistence import SQLiteEventStore
 from ..infrastructure.saga_manager import get_saga_manager
 from ..logging_config import get_logger
 from ..retry import get_retry_store
@@ -153,16 +156,17 @@ def bootstrap(config_path: Optional[str] = None) -> ApplicationContext:
     Initializes all components in correct order:
     1. Ensure data directory exists
     2. Initialize runtime (event bus, command bus, query bus)
-    3. Initialize application context
-    4. Register event handlers
-    5. Register CQRS handlers
-    6. Initialize sagas
-    7. Load configuration and providers
-    8. Initialize retry configuration
-    9. Initialize knowledge base (if enabled)
-    10. Create MCP server with tools
-    11. Create background workers (DO NOT START)
-    12. Initialize discovery (if enabled, DO NOT START)
+    3. Initialize event store (for event sourcing)
+    4. Initialize application context
+    5. Register event handlers
+    6. Register CQRS handlers
+    7. Initialize sagas
+    8. Load configuration and providers
+    9. Initialize retry configuration
+    10. Initialize knowledge base (if enabled)
+    11. Create MCP server with tools
+    12. Create background workers (DO NOT START)
+    13. Initialize discovery (if enabled, DO NOT START)
 
     Args:
         config_path: Optional path to config.yaml
@@ -179,6 +183,12 @@ def bootstrap(config_path: Optional[str] = None) -> ApplicationContext:
     runtime = get_runtime()
     init_context(runtime)
 
+    # Load configuration early (needed for event store config)
+    full_config = load_configuration(config_path)
+
+    # Initialize event store for event sourcing
+    _init_event_store(runtime, full_config)
+
     # Initialize event handlers
     _init_event_handlers(runtime)
 
@@ -193,9 +203,6 @@ def bootstrap(config_path: Optional[str] = None) -> ApplicationContext:
         rate_limit_rps=runtime.rate_limit_config.requests_per_second,
         burst_size=runtime.rate_limit_config.burst_size,
     )
-
-    # Load configuration and register providers
-    full_config = load_configuration(config_path)
 
     # Initialize retry configuration
     _init_retry_config(full_config)
@@ -249,6 +256,54 @@ def _ensure_data_dir() -> None:
             logger.info("data_directory_created", path=str(data_dir.absolute()))
         except OSError as e:
             logger.warning("data_directory_creation_failed", error=str(e))
+
+
+def _init_event_store(runtime: "Runtime", config: Dict[str, Any]) -> None:
+    """Initialize event store for event sourcing.
+
+    Configures the event store based on config.yaml settings.
+    Defaults to SQLite if not specified.
+
+    Config example:
+        event_store:
+            enabled: true
+            driver: sqlite  # or "memory"
+            path: data/events.db
+
+    Args:
+        runtime: Runtime instance with event bus.
+        config: Full configuration dictionary.
+    """
+    event_store_config = config.get("event_store", {})
+    enabled = event_store_config.get("enabled", True)
+
+    if not enabled:
+        logger.info("event_store_disabled")
+        runtime.event_bus.set_event_store(NullEventStore())
+        return
+
+    driver = event_store_config.get("driver", "sqlite")
+
+    if driver == "memory":
+        from ..infrastructure.persistence import InMemoryEventStore
+
+        event_store = InMemoryEventStore()
+        logger.info("event_store_initialized", driver="memory")
+    elif driver == "sqlite":
+        db_path = event_store_config.get("path", "data/events.db")
+        # Ensure directory exists
+        Path(db_path).parent.mkdir(parents=True, exist_ok=True)
+        event_store = SQLiteEventStore(db_path)
+        logger.info("event_store_initialized", driver="sqlite", path=db_path)
+    else:
+        logger.warning(
+            "unknown_event_store_driver",
+            driver=driver,
+            fallback="sqlite",
+        )
+        event_store = SQLiteEventStore("data/events.db")
+
+    runtime.event_bus.set_event_store(event_store)
 
 
 def _init_event_handlers(runtime: "Runtime") -> None:
