@@ -271,4 +271,3 @@ docker buildx build --platform linux/amd64,linux/arm64 \
 | Date | Change | Author |
 |------|--------|--------|
 | 2026-01-12 | Initial runbook creation | CI/CD Setup |
-

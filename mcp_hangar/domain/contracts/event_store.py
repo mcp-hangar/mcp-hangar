@@ -28,9 +28,7 @@ class ConcurrencyError(Exception):
         self.stream_id = stream_id
         self.expected = expected
         self.actual = actual
-        super().__init__(
-            f"Concurrency conflict on stream '{stream_id}': " f"expected version {expected}, actual {actual}"
-        )
+        super().__init__(f"Concurrency conflict on stream '{stream_id}': expected version {expected}, actual {actual}")
 
 
 class StreamNotFoundError(Exception):

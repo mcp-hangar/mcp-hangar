@@ -158,7 +158,7 @@ data:
       enabled: true
       refresh_interval_s: 30
       auto_register: true
-      
+
       sources:
         - type: kubernetes
           mode: authoritative
@@ -166,13 +166,12 @@ data:
             - mcp-providers
           label_selector: "app.kubernetes.io/component=mcp-provider"
           in_cluster: true
-      
+
       security:
         max_providers_per_source: 100
         require_health_check: true
         quarantine_on_failure: true
-        
+
         denied_namespaces:
           - kube-system
           - default
-

@@ -164,4 +164,3 @@ Or set `MCP_CI_RELAX_VOLUME_PERMS=true`.
 |----------|---------|-------------|
 | `MCP_CONTAINER_RUNTIME` | auto | Force `podman` or `docker` |
 | `MCP_CI_RELAX_VOLUME_PERMS` | `false` | Chmod 777 on volumes (CI) |
-

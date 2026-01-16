@@ -2,9 +2,7 @@
 
 import pytest
 
-from mcp_hangar.domain.contracts.persistence import (
-    ProviderConfigSnapshot,
-)
+from mcp_hangar.domain.contracts.persistence import ProviderConfigSnapshot
 from mcp_hangar.domain.repository import InMemoryProviderRepository
 from mcp_hangar.infrastructure.persistence import (
     Database,

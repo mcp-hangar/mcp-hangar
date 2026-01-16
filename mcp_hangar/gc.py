@@ -4,19 +4,10 @@ import threading
 import time
 from typing import Any, Literal, Optional
 
-from .domain.contracts.provider_runtime import (
-    normalize_state_to_str,
-    ProviderMapping,
-    ProviderRuntime,
-)
+from .domain.contracts.provider_runtime import normalize_state_to_str, ProviderMapping, ProviderRuntime
 from .infrastructure.event_bus import get_event_bus
 from .logging_config import get_logger
-from .metrics import (
-    observe_health_check,
-    record_error,
-    record_gc_cycle,
-    record_provider_stop,
-)
+from .metrics import observe_health_check, record_error, record_gc_cycle, record_provider_stop
 
 logger = get_logger(__name__)
 

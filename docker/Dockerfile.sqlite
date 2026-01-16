@@ -17,4 +17,3 @@ RUN mkdir -p /data && chmod 777 /data
 ENV SQLITE_DB_PATH=/data/database.db
 
 ENTRYPOINT ["mcp-server-sqlite"]
-

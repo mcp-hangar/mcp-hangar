@@ -8,11 +8,7 @@ import asyncio
 from datetime import datetime, timezone
 from typing import List, Optional
 
-from ...domain.contracts.persistence import (
-    AuditAction,
-    AuditEntry,
-    IAuditRepository,
-)
+from ...domain.contracts.persistence import AuditAction, AuditEntry, IAuditRepository
 from ...infrastructure.async_executor import submit_async
 from ...logging_config import get_logger
 from .audit_handler import AuditRecord, AuditStore

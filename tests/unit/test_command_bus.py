@@ -12,11 +12,7 @@ from mcp_hangar.application.commands import (
     StartProviderCommand,
     StopProviderCommand,
 )
-from mcp_hangar.infrastructure.command_bus import (
-    CommandBus,
-    CommandHandler,
-    get_command_bus,
-)
+from mcp_hangar.infrastructure.command_bus import CommandBus, CommandHandler, get_command_bus
 
 
 class TestCommands:

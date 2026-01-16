@@ -4,6 +4,7 @@ Handles conversion of domain events to/from JSON for storage in event store.
 """
 
 from datetime import datetime
+import inspect
 import json
 from typing import Any
 
@@ -29,8 +30,9 @@ from mcp_hangar.domain.events import (
 )
 from mcp_hangar.logging_config import get_logger
 
-logger = get_logger(__name__)
+from .event_upcaster import UpcasterChain
 
+logger = get_logger(__name__)
 
 # Registry of event types for deserialization
 EVENT_TYPE_MAP: dict[str, type[DomainEvent]] = {
@@ -57,6 +59,43 @@ EVENT_TYPE_MAP: dict[str, type[DomainEvent]] = {
     "DiscoverySourceHealthChanged": DiscoverySourceHealthChanged,
 }
 
+EVENT_VERSION_MAP: dict[str, int] = {
+    # Provider Lifecycle
+    "ProviderStarted": 1,
+    "ProviderStopped": 1,
+    "ProviderDegraded": 1,
+    "ProviderStateChanged": 1,
+    "ProviderIdleDetected": 1,
+    # Tool Invocation
+    "ToolInvocationRequested": 1,
+    "ToolInvocationCompleted": 1,
+    "ToolInvocationFailed": 1,
+    # Health Check
+    "HealthCheckPassed": 1,
+    "HealthCheckFailed": 1,
+    # Discovery
+    "ProviderDiscovered": 1,
+    "ProviderDiscoveryLost": 1,
+    "ProviderDiscoveryConfigChanged": 1,
+    "ProviderQuarantined": 1,
+    "ProviderApproved": 1,
+    "DiscoveryCycleCompleted": 1,
+    "DiscoverySourceHealthChanged": 1,
+}
+
+
+def get_current_version(event_type: str) -> int:
+    """Get current schema version for an event type.
+
+    Args:
+        event_type: Domain event type name.
+
+    Returns:
+        Current schema version. Defaults to 1.
+    """
+
+    return EVENT_VERSION_MAP.get(event_type, 1)
+
 
 class EventSerializationError(Exception):
     """Raised when event serialization or deserialization fails."""
@@ -71,6 +110,16 @@ class EventSerializer:
 
     Thread-safe: stateless, can be shared across threads.
     """
+
+    def __init__(self, upcaster_chain: UpcasterChain | None = None) -> None:
+        """Create an EventSerializer.
+
+        Args:
+            upcaster_chain: Optional upcaster chain used during deserialization.
+                If not provided, an empty chain is used.
+        """
+
+        self._upcaster_chain = upcaster_chain or UpcasterChain()
 
     def serialize(self, event: DomainEvent) -> tuple[str, str]:
         """Serialize a domain event to (event_type, json_data).
@@ -87,7 +136,8 @@ class EventSerializer:
         event_type = type(event).__name__
 
         try:
-            data = self._to_dict(event)
+            version = get_current_version(event_type)
+            data = {"_version": version, **self._to_dict(event)}
             json_data = json.dumps(data, default=self._json_encoder, ensure_ascii=False)
             return event_type, json_data
         except Exception as e:
@@ -120,6 +170,21 @@ class EventSerializer:
 
         try:
             payload = json.loads(data)
+
+            version = payload.pop("_version", 1)
+            current_version = get_current_version(event_type)
+
+            if version < current_version:
+                version, payload = self._upcaster_chain.upcast(
+                    event_type,
+                    version,
+                    payload,
+                    current_version=current_version,
+                )
+
+            # Ensure we don't pass version through to dataclass ctor
+            payload.pop("_version", None)
+
             return self._from_dict(event_class, payload)
         except json.JSONDecodeError as e:
             raise EventSerializationError(event_type, f"Invalid JSON: {e}") from e
@@ -145,10 +210,11 @@ class EventSerializer:
         event_id = data.pop("event_id", None)
         occurred_at = data.pop("occurred_at", None)
 
-        # Create instance with remaining data
-        # Note: dataclass __post_init__ will call DomainEvent.__init__
-        # which sets new event_id and occurred_at
-        instance = cls(**data)
+        ctor_kwargs = self._filter_constructor_kwargs(cls, data)
+
+        # Create instance with remaining data.
+        # Event dataclasses have different constructor signatures; we instantiate dynamically from payload.
+        instance = cls(**ctor_kwargs)  # type: ignore[call-arg]
 
         # Restore original values if present
         if event_id is not None:
@@ -157,6 +223,38 @@ class EventSerializer:
             instance.occurred_at = occurred_at
 
         return instance
+
+    def _filter_constructor_kwargs(self, cls: type[DomainEvent], data: dict[str, Any]) -> dict[str, Any]:
+        """Filter payload keys to those accepted by the event constructor.
+
+        This allows forward-compatible payloads with extra fields introduced in newer schema versions.
+
+        Args:
+            cls: Event class.
+            data: Payload dict.
+
+        Returns:
+            Dict containing only keys that are valid __init__ parameters.
+        """
+
+        try:
+            sig = inspect.signature(cls)
+        except (TypeError, ValueError):
+            # Fallback: best-effort passthrough.
+            return data
+
+        params = list(sig.parameters.values())
+        accepted: set[str] = {
+            p.name
+            for p in params
+            if p.kind in (inspect.Parameter.POSITIONAL_OR_KEYWORD, inspect.Parameter.KEYWORD_ONLY)
+        }
+
+        # If constructor takes **kwargs, avoid filtering.
+        if any(p.kind == inspect.Parameter.VAR_KEYWORD for p in params):
+            return data
+
+        return {k: v for k, v in data.items() if k in accepted}
 
     def _json_encoder(self, obj: Any) -> Any:
         """Custom JSON encoder for non-standard types."""

@@ -2,11 +2,7 @@
 
 from typing import List
 
-from mcp_hangar.application.commands import (
-    Command,
-    StartProviderCommand,
-    StopProviderCommand,
-)
+from mcp_hangar.application.commands import Command, StartProviderCommand, StopProviderCommand
 from mcp_hangar.domain.events import DomainEvent, ProviderDegraded, ProviderStarted
 from mcp_hangar.infrastructure.command_bus import CommandBus, CommandHandler
 from mcp_hangar.infrastructure.event_bus import EventBus

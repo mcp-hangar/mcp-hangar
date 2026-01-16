@@ -1,7 +1,7 @@
 # ADR-001: Langfuse Integration for LLM Observability
 
-**Status:** Accepted  
-**Date:** 2026-01-12  
+**Status:** Accepted
+**Date:** 2026-01-12
 **Authors:** MCP Hangar Team
 
 ## Context
@@ -111,4 +111,3 @@ result = traced_service.invoke_tool(
 - [MCP Protocol Specification](https://modelcontextprotocol.io/specification)
 - [ObservabilityPort Implementation](/mcp_hangar/application/ports/observability.py)
 - [LangfuseAdapter Implementation](/mcp_hangar/infrastructure/observability/langfuse_adapter.py)
-

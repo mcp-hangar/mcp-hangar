@@ -11,10 +11,7 @@ from typing import Any, Awaitable, Callable, Dict, List, Optional, Set
 
 from mcp_hangar.domain.discovery.conflict_resolver import ConflictResolver
 from mcp_hangar.domain.discovery.discovered_provider import DiscoveredProvider
-from mcp_hangar.domain.discovery.discovery_service import (
-    DiscoveryCycleResult,
-    DiscoveryService,
-)
+from mcp_hangar.domain.discovery.discovery_service import DiscoveryCycleResult, DiscoveryService
 from mcp_hangar.domain.discovery.discovery_source import DiscoverySource
 from mcp_hangar.logging_config import get_logger
 

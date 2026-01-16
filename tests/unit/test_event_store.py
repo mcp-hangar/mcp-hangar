@@ -4,11 +4,7 @@ import tempfile
 
 import pytest
 
-from mcp_hangar.domain.events import (
-    ProviderStarted,
-    ProviderStateChanged,
-    ProviderStopped,
-)
+from mcp_hangar.domain.events import ProviderStarted, ProviderStateChanged, ProviderStopped
 from mcp_hangar.infrastructure.event_store import (
     ConcurrencyError,
     EventStoreSnapshot,

@@ -49,8 +49,8 @@ registry_invoke(provider="math", tool="add", arguments={"a": 1, "b": 2})
 ```
 # Automatic retry on transient failures + progress tracking + tracing
 registry_invoke_ex(
-  provider="sqlite", 
-  tool="query", 
+  provider="sqlite",
+  tool="query",
   arguments={"sql": "SELECT * FROM users"},
   max_retries=3,
   correlation_id="my-trace-001"  # Optional: for distributed tracing
@@ -60,8 +60,8 @@ registry_invoke_ex(
 # - result: the actual result
 # - _retry_metadata: {
 #     "correlation_id": "my-trace-001",
-#     "attempts": 1, 
-#     "total_time_ms": 234.5, 
+#     "attempts": 1,
+#     "total_time_ms": 234.5,
 #     "retries": []
 #   }
 # - _progress: [{"stage": "ready", "message": "...", "elapsed_ms": 0.1}, ...]
@@ -81,7 +81,7 @@ registry_invoke_ex(
 # See progress WHILE the operation runs
 registry_invoke_stream(
   provider="sqlite",
-  tool="query", 
+  tool="query",
   arguments={"sql": "SELECT * FROM large_table"},
   correlation_id="stream-trace-001"
 )
@@ -152,7 +152,7 @@ registry_invoke(provider="filesystem", tool="move_file", arguments={"source": "/
 
 Build persistent knowledge that survives conversations:
 
-> **💾 Stateful Provider**: Memory data is automatically persisted to `./data/memory/`. 
+> **💾 Stateful Provider**: Memory data is automatically persisted to `./data/memory/`.
 > Your knowledge graph survives restarts and is available across sessions.
 
 ```
@@ -183,7 +183,7 @@ registry_invoke(provider="memory", tool="create_relations", arguments={
 registry_invoke(provider="memory", tool="delete_entities", arguments={"entityNames": ["OldProject"]})
 ```
 
-**Use cases**: 
+**Use cases**:
 - Track test results and findings
 - Build documentation as you work
 - Create relationship maps between concepts

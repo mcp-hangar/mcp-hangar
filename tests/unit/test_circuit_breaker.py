@@ -2,11 +2,7 @@
 
 import time
 
-from mcp_hangar.domain.model.circuit_breaker import (
-    CircuitBreaker,
-    CircuitBreakerConfig,
-    CircuitState,
-)
+from mcp_hangar.domain.model.circuit_breaker import CircuitBreaker, CircuitBreakerConfig, CircuitState
 
 
 class TestCircuitBreakerConfig:

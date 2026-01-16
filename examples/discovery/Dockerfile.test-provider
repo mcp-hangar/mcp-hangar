@@ -62,4 +62,3 @@ EOF
 
 # Default command - run MCP server via stdio
 CMD ["python", "/app/server.py"]
-

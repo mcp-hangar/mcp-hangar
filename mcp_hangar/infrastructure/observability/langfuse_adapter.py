@@ -30,11 +30,7 @@ import time
 from typing import Any
 import uuid
 
-from ...application.ports.observability import (
-    ObservabilityPort,
-    SpanHandle,
-    TraceContext,
-)
+from ...application.ports.observability import ObservabilityPort, SpanHandle, TraceContext
 
 logger = logging.getLogger(__name__)
 

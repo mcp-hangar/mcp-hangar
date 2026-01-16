@@ -11,14 +11,7 @@ from typing import Any, Dict, List, Optional
 
 from ...logging_config import get_logger
 from ..events import DomainEvent
-from ..value_objects import (
-    GroupId,
-    GroupState,
-    LoadBalancerStrategy,
-    MemberPriority,
-    MemberWeight,
-    ProviderState,
-)
+from ..value_objects import GroupId, GroupState, LoadBalancerStrategy, MemberPriority, MemberWeight, ProviderState
 from .aggregate import AggregateRoot
 from .circuit_breaker import CircuitBreaker, CircuitBreakerConfig
 from .load_balancer import LoadBalancer

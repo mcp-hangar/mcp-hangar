@@ -22,27 +22,21 @@ class TestDockerDiscoverySource:
 
     def test_source_type(self, mock_docker_client):
         """Test source_type property."""
-        from mcp_hangar.infrastructure.discovery.docker_source import (
-            DockerDiscoverySource,
-        )
+        from mcp_hangar.infrastructure.discovery.docker_source import DockerDiscoverySource
 
         source = DockerDiscoverySource()
         assert source.source_type == "docker"
 
     def test_default_mode_is_additive(self, mock_docker_client):
         """Test default mode is additive (safe)."""
-        from mcp_hangar.infrastructure.discovery.docker_source import (
-            DockerDiscoverySource,
-        )
+        from mcp_hangar.infrastructure.discovery.docker_source import DockerDiscoverySource
 
         source = DockerDiscoverySource()
         assert source.mode == DiscoveryMode.ADDITIVE
 
     def test_custom_socket_path(self, mock_docker_client):
         """Test custom socket path."""
-        from mcp_hangar.infrastructure.discovery.docker_source import (
-            DockerDiscoverySource,
-        )
+        from mcp_hangar.infrastructure.discovery.docker_source import DockerDiscoverySource
 
         source = DockerDiscoverySource(socket_path="/var/run/podman/podman.sock")
         assert source._socket_path == "/var/run/podman/podman.sock"
@@ -50,9 +44,7 @@ class TestDockerDiscoverySource:
     @pytest.mark.asyncio
     async def test_discover_empty(self, mock_docker_client):
         """Test discovery with no containers."""
-        from mcp_hangar.infrastructure.discovery.docker_source import (
-            DockerDiscoverySource,
-        )
+        from mcp_hangar.infrastructure.discovery.docker_source import DockerDiscoverySource
 
         mock_docker_client.containers.list.return_value = []
 
@@ -64,9 +56,7 @@ class TestDockerDiscoverySource:
     @pytest.mark.asyncio
     async def test_discover_labeled_container(self, mock_docker_client):
         """Test discovery of container with MCP labels."""
-        from mcp_hangar.infrastructure.discovery.docker_source import (
-            DockerDiscoverySource,
-        )
+        from mcp_hangar.infrastructure.discovery.docker_source import DockerDiscoverySource
 
         # Create mock container with proper return values (not MagicMock)
         mock_container = MagicMock()
@@ -100,9 +90,7 @@ class TestDockerDiscoverySource:
     @pytest.mark.asyncio
     async def test_discover_skips_disabled(self, mock_docker_client):
         """Test discovery skips containers without enabled label."""
-        from mcp_hangar.infrastructure.discovery.docker_source import (
-            DockerDiscoverySource,
-        )
+        from mcp_hangar.infrastructure.discovery.docker_source import DockerDiscoverySource
 
         mock_container = MagicMock()
         mock_container.name = "test-container"
@@ -122,9 +110,7 @@ class TestDockerDiscoverySource:
     @pytest.mark.asyncio
     async def test_health_check_success(self, mock_docker_client):
         """Test health check when Docker is accessible."""
-        from mcp_hangar.infrastructure.discovery.docker_source import (
-            DockerDiscoverySource,
-        )
+        from mcp_hangar.infrastructure.discovery.docker_source import DockerDiscoverySource
 
         mock_docker_client.ping.return_value = True
 
@@ -136,9 +122,7 @@ class TestDockerDiscoverySource:
     @pytest.mark.asyncio
     async def test_health_check_failure(self, mock_docker_client):
         """Test health check when Docker is not accessible."""
-        from mcp_hangar.infrastructure.discovery.docker_source import (
-            DockerDiscoverySource,
-        )
+        from mcp_hangar.infrastructure.discovery.docker_source import DockerDiscoverySource
 
         mock_docker_client.ping.side_effect = Exception("Connection refused")
 
@@ -166,36 +150,28 @@ class TestKubernetesDiscoverySource:
 
     def test_source_type(self, mock_k8s_client):
         """Test source_type property."""
-        from mcp_hangar.infrastructure.discovery.kubernetes_source import (
-            KubernetesDiscoverySource,
-        )
+        from mcp_hangar.infrastructure.discovery.kubernetes_source import KubernetesDiscoverySource
 
         source = KubernetesDiscoverySource(in_cluster=False)
         assert source.source_type == "kubernetes"
 
     def test_default_mode_is_authoritative(self, mock_k8s_client):
         """Test default mode is authoritative for K8s."""
-        from mcp_hangar.infrastructure.discovery.kubernetes_source import (
-            KubernetesDiscoverySource,
-        )
+        from mcp_hangar.infrastructure.discovery.kubernetes_source import KubernetesDiscoverySource
 
         source = KubernetesDiscoverySource(in_cluster=False)
         assert source.mode == DiscoveryMode.AUTHORITATIVE
 
     def test_namespace_filtering(self, mock_k8s_client):
         """Test namespace filtering configuration."""
-        from mcp_hangar.infrastructure.discovery.kubernetes_source import (
-            KubernetesDiscoverySource,
-        )
+        from mcp_hangar.infrastructure.discovery.kubernetes_source import KubernetesDiscoverySource
 
         source = KubernetesDiscoverySource(namespaces=["mcp-providers", "production"], in_cluster=False)
         assert source.namespaces == ["mcp-providers", "production"]
 
     def test_label_selector(self, mock_k8s_client):
         """Test label selector configuration."""
-        from mcp_hangar.infrastructure.discovery.kubernetes_source import (
-            KubernetesDiscoverySource,
-        )
+        from mcp_hangar.infrastructure.discovery.kubernetes_source import KubernetesDiscoverySource
 
         source = KubernetesDiscoverySource(label_selector="app.kubernetes.io/component=mcp-provider", in_cluster=False)
         assert source.label_selector == "app.kubernetes.io/component=mcp-provider"
@@ -203,9 +179,7 @@ class TestKubernetesDiscoverySource:
     @pytest.mark.asyncio
     async def test_discover_empty(self, mock_k8s_client):
         """Test discovery with no pods."""
-        from mcp_hangar.infrastructure.discovery.kubernetes_source import (
-            KubernetesDiscoverySource,
-        )
+        from mcp_hangar.infrastructure.discovery.kubernetes_source import KubernetesDiscoverySource
 
         mock_v1, _ = mock_k8s_client
         mock_pods = MagicMock()
@@ -222,9 +196,7 @@ class TestKubernetesDiscoverySource:
     @pytest.mark.skip(reason="Mock setup complex - discovery logic tested in integration tests")
     async def test_discover_annotated_pod(self, mock_k8s_client):
         """Test discovery of pod with MCP annotations."""
-        from mcp_hangar.infrastructure.discovery.kubernetes_source import (
-            KubernetesDiscoverySource,
-        )
+        from mcp_hangar.infrastructure.discovery.kubernetes_source import KubernetesDiscoverySource
 
         mock_v1, _ = mock_k8s_client
 
@@ -260,9 +232,7 @@ class TestKubernetesDiscoverySource:
     @pytest.mark.asyncio
     async def test_discover_skips_disabled(self, mock_k8s_client):
         """Test discovery skips pods without enabled annotation."""
-        from mcp_hangar.infrastructure.discovery.kubernetes_source import (
-            KubernetesDiscoverySource,
-        )
+        from mcp_hangar.infrastructure.discovery.kubernetes_source import KubernetesDiscoverySource
 
         mock_v1, _ = mock_k8s_client
 
@@ -284,9 +254,7 @@ class TestKubernetesDiscoverySource:
     @pytest.mark.asyncio
     async def test_discover_skips_pod_without_ip(self, mock_k8s_client):
         """Test discovery skips pods without IP (not ready)."""
-        from mcp_hangar.infrastructure.discovery.kubernetes_source import (
-            KubernetesDiscoverySource,
-        )
+        from mcp_hangar.infrastructure.discovery.kubernetes_source import KubernetesDiscoverySource
 
         mock_v1, _ = mock_k8s_client
 
@@ -311,9 +279,7 @@ class TestKubernetesDiscoverySource:
     @pytest.mark.asyncio
     async def test_health_check_success(self, mock_k8s_client):
         """Test health check when K8s API is accessible."""
-        from mcp_hangar.infrastructure.discovery.kubernetes_source import (
-            KubernetesDiscoverySource,
-        )
+        from mcp_hangar.infrastructure.discovery.kubernetes_source import KubernetesDiscoverySource
 
         mock_v1, _ = mock_k8s_client
         mock_v1.get_api_resources.return_value = MagicMock()
@@ -326,9 +292,7 @@ class TestKubernetesDiscoverySource:
     @pytest.mark.asyncio
     async def test_health_check_failure(self, mock_k8s_client):
         """Test health check when K8s API is not accessible."""
-        from mcp_hangar.infrastructure.discovery.kubernetes_source import (
-            KubernetesDiscoverySource,
-        )
+        from mcp_hangar.infrastructure.discovery.kubernetes_source import KubernetesDiscoverySource
 
         mock_v1, _ = mock_k8s_client
         mock_v1.get_api_resources.side_effect = Exception("API unavailable")
@@ -344,11 +308,7 @@ class TestDiscoveryMetricsIntegration:
 
     def test_discovery_cycle_metrics(self):
         """Test metrics are recorded for discovery cycle."""
-        from mcp_hangar.metrics import (
-            get_metrics,
-            record_discovery_cycle,
-            update_discovery_source,
-        )
+        from mcp_hangar.metrics import get_metrics, record_discovery_cycle, update_discovery_source
 
         # Record some discovery activity
         update_discovery_source("docker", "additive", True, 3)
@@ -361,11 +321,7 @@ class TestDiscoveryMetricsIntegration:
 
     def test_kubernetes_specific_metrics(self):
         """Test Kubernetes-specific metrics."""
-        from mcp_hangar.metrics import (
-            get_metrics,
-            record_discovery_deregistration,
-            record_discovery_quarantine,
-        )
+        from mcp_hangar.metrics import get_metrics, record_discovery_deregistration, record_discovery_quarantine
 
         # Record K8s-specific events
         record_discovery_deregistration("kubernetes", "ttl_expired")

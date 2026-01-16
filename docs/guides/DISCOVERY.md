@@ -9,7 +9,7 @@ discovery:
   enabled: true
   refresh_interval_s: 30
   auto_register: true
-  
+
   sources:
     - type: docker
       mode: additive
@@ -162,4 +162,3 @@ discovery:
 | `mcp_hangar_discovery_registrations_total` | New registrations |
 | `mcp_hangar_discovery_errors_total` | Errors by source |
 | `mcp_hangar_discovery_latency_seconds` | Cycle duration |
-

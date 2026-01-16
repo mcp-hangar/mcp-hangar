@@ -13,9 +13,7 @@ import pytest
 
 sys.path.insert(0, str(Path(__file__).parent))
 
-from mcp_hangar.application.queries import (  # noqa: E402
-    register_all_handlers as register_query_handlers,
-)
+from mcp_hangar.application.queries import register_all_handlers as register_query_handlers  # noqa: E402
 from mcp_hangar.server import (  # noqa: E402
     load_config,
     load_config_from_file,

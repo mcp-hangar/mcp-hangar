@@ -84,7 +84,7 @@ import pytest
 def test_database_operations(postgres_container):
     """Test with real PostgreSQL database."""
     dsn = postgres_container["dsn"]
-    
+
     import asyncpg
     conn = await asyncpg.connect(dsn)
     result = await conn.fetchval("SELECT 1")
@@ -103,12 +103,12 @@ def test_langfuse_tracing(langfuse_config, langfuse_container, http_client):
     from mcp_hangar.infrastructure.observability.langfuse_adapter import (
         LangfuseObservabilityAdapter,
     )
-    
+
     adapter = LangfuseObservabilityAdapter(langfuse_config)
     span = adapter.start_tool_span("test", "tool", {"arg": 1})
     span.end_success({"result": "ok"})
     adapter.flush()
-    
+
     # Query Langfuse API
     response = http_client.get(
         f"{langfuse_container['url']}/api/public/traces",
@@ -228,4 +228,3 @@ providers:
 ```bash
 pytest tests/ -v --timeout=60
 ```
-

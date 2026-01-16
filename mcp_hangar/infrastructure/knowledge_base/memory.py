@@ -7,13 +7,7 @@ import json
 from typing import Any, Optional
 
 from ...logging_config import get_logger
-from .contracts import (
-    AuditEntry,
-    IKnowledgeBase,
-    KnowledgeBaseConfig,
-    MetricEntry,
-    ProviderStateEntry,
-)
+from .contracts import AuditEntry, IKnowledgeBase, KnowledgeBaseConfig, MetricEntry, ProviderStateEntry
 
 logger = get_logger(__name__)
 

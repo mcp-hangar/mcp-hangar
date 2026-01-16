@@ -193,7 +193,7 @@ class TestPostgresAuditLog:
             # Query by time range
             rows = await conn.fetch(
                 """
-                SELECT * FROM audit_log 
+                SELECT * FROM audit_log
                 WHERE created_at > $1
                 ORDER BY created_at DESC
             """,

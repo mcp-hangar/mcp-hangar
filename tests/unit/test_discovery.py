@@ -4,10 +4,7 @@ from datetime import datetime, timedelta, timezone
 
 import pytest
 
-from mcp_hangar.domain.discovery.conflict_resolver import (
-    ConflictResolution,
-    ConflictResolver,
-)
+from mcp_hangar.domain.discovery.conflict_resolver import ConflictResolution, ConflictResolver
 from mcp_hangar.domain.discovery.discovered_provider import DiscoveredProvider
 from mcp_hangar.domain.discovery.discovery_service import DiscoveryService
 from mcp_hangar.domain.discovery.discovery_source import DiscoveryMode, DiscoverySource

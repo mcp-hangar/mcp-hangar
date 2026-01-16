@@ -8,9 +8,7 @@ from unittest.mock import MagicMock
 
 import pytest
 
-from mcp_hangar.application.ports.observability import (
-    NullObservabilityAdapter,
-)
+from mcp_hangar.application.ports.observability import NullObservabilityAdapter
 from mcp_hangar.application.services.traced_provider_service import TracedProviderService
 
 

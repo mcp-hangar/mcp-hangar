@@ -9,11 +9,7 @@ import sys
 from hypothesis import given, HealthCheck, settings, strategies as st
 import pytest
 
-from mcp_hangar.application.ports.observability import (
-    NullObservabilityAdapter,
-    NullSpanHandle,
-    TraceContext,
-)
+from mcp_hangar.application.ports.observability import NullObservabilityAdapter, NullSpanHandle, TraceContext
 
 
 class TestTraceContextProperties:

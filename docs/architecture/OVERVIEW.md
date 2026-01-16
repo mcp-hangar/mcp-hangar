@@ -122,7 +122,7 @@ class StdioClient:
         request_id = uuid4()
         queue = Queue(maxsize=1)
         pending[request_id] = PendingRequest(queue)
-        
+
         write({"id": request_id, "method": method, ...})
         return queue.get(timeout=timeout)
 
@@ -162,4 +162,3 @@ with lock:
 **Recommended TTL:**
 - Subprocess: 180-300s
 - Container: 300-600s
-

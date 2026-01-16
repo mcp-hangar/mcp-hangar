@@ -16,4 +16,3 @@ metadata:
   version: "2.1.0"
   environment: development
   description: Remote HTTP MCP provider
-

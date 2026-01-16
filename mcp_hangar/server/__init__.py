@@ -40,15 +40,7 @@ from .bootstrap import (  # Internal functions exported for backward compatibili
 from .cli import CLIConfig, parse_args
 from .config import load_config, load_config_from_file, load_configuration
 from .lifecycle import run_server, ServerLifecycle
-from .state import (
-    COMMAND_BUS,
-    EVENT_BUS,
-    get_runtime,
-    GROUPS,
-    PROVIDER_REPOSITORY,
-    PROVIDERS,
-    QUERY_BUS,
-)
+from .state import COMMAND_BUS, EVENT_BUS, get_runtime, GROUPS, PROVIDER_REPOSITORY, PROVIDERS, QUERY_BUS
 from .tools import registry_list
 
 # Backward compatibility: expose _parse_args as alias

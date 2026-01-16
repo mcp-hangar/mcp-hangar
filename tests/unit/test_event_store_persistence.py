@@ -8,20 +8,9 @@ import threading
 
 import pytest
 
-from mcp_hangar.domain.contracts.event_store import (
-    ConcurrencyError,
-    NullEventStore,
-)
-from mcp_hangar.domain.events import (
-    ProviderStarted,
-    ProviderStateChanged,
-    ProviderStopped,
-    ToolInvocationCompleted,
-)
-from mcp_hangar.infrastructure.persistence import (
-    InMemoryEventStore,
-    SQLiteEventStore,
-)
+from mcp_hangar.domain.contracts.event_store import ConcurrencyError, NullEventStore
+from mcp_hangar.domain.events import ProviderStarted, ProviderStateChanged, ProviderStopped, ToolInvocationCompleted
+from mcp_hangar.infrastructure.persistence import InMemoryEventStore, SQLiteEventStore
 
 
 class TestNullEventStore:

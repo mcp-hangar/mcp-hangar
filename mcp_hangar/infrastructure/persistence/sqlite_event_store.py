@@ -35,15 +35,16 @@ class SQLiteEventStore(IEventStore):
     - streams: Track stream versions for concurrency control
     """
 
-    def __init__(self, db_path: str | Path = ":memory:"):
+    def __init__(self, db_path: str | Path = ":memory:", *, serializer: EventSerializer | None = None):
         """Initialize SQLite event store.
 
         Args:
             db_path: Path to SQLite database file.
                 Use ":memory:" for in-memory store (testing).
+            serializer: Optional EventSerializer instance. Allows injecting an upcaster-aware serializer.
         """
         self._db_path = str(db_path)
-        self._serializer = EventSerializer()
+        self._serializer = serializer or EventSerializer()
         self._lock = threading.Lock()
         self._is_memory = self._db_path == ":memory:"
 
@@ -87,15 +88,15 @@ class SQLiteEventStore(IEventStore):
                     created_at TEXT NOT NULL,
                     UNIQUE(stream_id, stream_version)
                 );
-                
+
                 -- Index for efficient stream reads
-                CREATE INDEX IF NOT EXISTS idx_events_stream 
+                CREATE INDEX IF NOT EXISTS idx_events_stream
                 ON events(stream_id, stream_version);
-                
+
                 -- Index for global reads (projections)
                 CREATE INDEX IF NOT EXISTS idx_events_global
                 ON events(global_position);
-                
+
                 -- Stream version tracking for optimistic concurrency
                 CREATE TABLE IF NOT EXISTS streams (
                     stream_id TEXT PRIMARY KEY,
@@ -166,7 +167,7 @@ class SQLiteEventStore(IEventStore):
 
                     cursor.execute(
                         """
-                        INSERT INTO events 
+                        INSERT INTO events
                         (stream_id, stream_version, event_type, data, created_at)
                         VALUES (?, ?, ?, ?, ?)
                         """,
@@ -277,7 +278,7 @@ class SQLiteEventStore(IEventStore):
         try:
             cursor = conn.execute(
                 """
-                SELECT global_position, stream_id, event_type, data 
+                SELECT global_position, stream_id, event_type, data
                 FROM events
                 WHERE global_position > ?
                 ORDER BY global_position ASC

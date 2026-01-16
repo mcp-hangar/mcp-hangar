@@ -28,12 +28,7 @@ from mcp.server.fastmcp import FastMCP
 
 from ..application.commands import register_all_handlers as register_command_handlers
 from ..application.discovery import DiscoveryConfig, DiscoveryOrchestrator
-from ..application.event_handlers import (
-    AlertEventHandler,
-    AuditEventHandler,
-    LoggingEventHandler,
-    MetricsEventHandler,
-)
+from ..application.event_handlers import AlertEventHandler, AuditEventHandler, LoggingEventHandler, MetricsEventHandler
 from ..application.queries import register_all_handlers as register_query_handlers
 from ..application.sagas import GroupRebalanceSaga
 from ..domain.contracts.event_store import NullEventStore

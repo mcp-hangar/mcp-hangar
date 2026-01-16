@@ -30,9 +30,7 @@ class TestLangfuseTraceCreation:
         langfuse_container: dict,
     ) -> None:
         """Traces are created and visible in Langfuse API."""
-        from mcp_hangar.infrastructure.observability.langfuse_adapter import (
-            LangfuseObservabilityAdapter,
-        )
+        from mcp_hangar.infrastructure.observability.langfuse_adapter import LangfuseObservabilityAdapter
 
         adapter = LangfuseObservabilityAdapter(langfuse_config)
 
@@ -66,9 +64,7 @@ class TestLangfuseTraceCreation:
         langfuse_config,
     ) -> None:
         """Error traces are recorded without raising exceptions."""
-        from mcp_hangar.infrastructure.observability.langfuse_adapter import (
-            LangfuseObservabilityAdapter,
-        )
+        from mcp_hangar.infrastructure.observability.langfuse_adapter import LangfuseObservabilityAdapter
 
         adapter = LangfuseObservabilityAdapter(langfuse_config)
 
@@ -89,9 +85,7 @@ class TestLangfuseTraceCreation:
     ) -> None:
         """Trace context is properly propagated."""
         from mcp_hangar.application.ports.observability import TraceContext
-        from mcp_hangar.infrastructure.observability.langfuse_adapter import (
-            LangfuseObservabilityAdapter,
-        )
+        from mcp_hangar.infrastructure.observability.langfuse_adapter import LangfuseObservabilityAdapter
 
         adapter = LangfuseObservabilityAdapter(langfuse_config)
 
@@ -121,9 +115,7 @@ class TestLangfuseScoreAndHealthRecording:
         langfuse_config,
     ) -> None:
         """Multiple scores can be recorded on traces."""
-        from mcp_hangar.infrastructure.observability.langfuse_adapter import (
-            LangfuseObservabilityAdapter,
-        )
+        from mcp_hangar.infrastructure.observability.langfuse_adapter import LangfuseObservabilityAdapter
 
         adapter = LangfuseObservabilityAdapter(langfuse_config)
 
@@ -141,9 +133,7 @@ class TestLangfuseScoreAndHealthRecording:
         langfuse_config,
     ) -> None:
         """Health checks are recorded as standalone traces."""
-        from mcp_hangar.infrastructure.observability.langfuse_adapter import (
-            LangfuseObservabilityAdapter,
-        )
+        from mcp_hangar.infrastructure.observability.langfuse_adapter import LangfuseObservabilityAdapter
 
         adapter = LangfuseObservabilityAdapter(langfuse_config)
 
@@ -175,9 +165,7 @@ class TestLangfuseHighVolume:
         """High volume concurrent trace creation is thread-safe."""
         import threading
 
-        from mcp_hangar.infrastructure.observability.langfuse_adapter import (
-            LangfuseObservabilityAdapter,
-        )
+        from mcp_hangar.infrastructure.observability.langfuse_adapter import LangfuseObservabilityAdapter
 
         adapter = LangfuseObservabilityAdapter(langfuse_config)
         errors: list[Exception] = []

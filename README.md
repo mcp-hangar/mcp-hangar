@@ -158,7 +158,7 @@ providers:
     mode: subprocess
     command: [python, -m, my_math_server]
     idle_ttl_s: 300
-    
+
   sqlite:
     mode: container
     image: ghcr.io/modelcontextprotocol/server-sqlite:latest
@@ -245,11 +245,11 @@ observability:
     public_key: ${LANGFUSE_PUBLIC_KEY}
     secret_key: ${LANGFUSE_SECRET_KEY}
     host: https://cloud.langfuse.com
-    
+
   tracing:
     enabled: true
     otlp_endpoint: http://localhost:4317
-    
+
   metrics:
     enabled: true
     endpoint: /metrics
@@ -293,4 +293,3 @@ uv run pytest tests/ -v
 ## License
 
 MIT License — see [LICENSE](LICENSE) for details.
-

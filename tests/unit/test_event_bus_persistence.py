@@ -3,11 +3,7 @@
 import pytest
 
 from mcp_hangar.domain.contracts.event_store import ConcurrencyError
-from mcp_hangar.domain.events import (
-    DomainEvent,
-    ProviderStarted,
-    ProviderStateChanged,
-)
+from mcp_hangar.domain.events import DomainEvent, ProviderStarted, ProviderStateChanged
 from mcp_hangar.infrastructure.event_bus import EventBus
 from mcp_hangar.infrastructure.persistence import InMemoryEventStore
 

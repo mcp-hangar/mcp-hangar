@@ -4,12 +4,7 @@ from dataclasses import dataclass
 import time
 from typing import Dict, List, Optional, Set, Type
 
-from ...domain.events import (
-    DomainEvent,
-    ProviderDegraded,
-    ProviderStarted,
-    ProviderStopped,
-)
+from ...domain.events import DomainEvent, ProviderDegraded, ProviderStarted, ProviderStopped
 from ...infrastructure.saga_manager import EventTriggeredSaga
 from ...logging_config import get_logger
 from ..commands import Command, StartProviderCommand, StopProviderCommand
