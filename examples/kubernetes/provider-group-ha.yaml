@@ -1,0 +1,90 @@
+# Provider Group for High Availability
+# =====================================
+# This example shows how to group providers for load balancing and failover
+
+apiVersion: mcp-hangar.io/v1alpha1
+kind: MCPProviderGroup
+metadata:
+  name: database-tools-ha
+  namespace: mcp-providers
+spec:
+  # Select providers by labels
+  selector:
+    matchLabels:
+      mcp-hangar.io/category: database
+
+  # Load balancing strategy
+  strategy: LeastConnections
+
+  # Failover configuration
+  failover:
+    enabled: true
+    maxRetries: 2
+    retryDelay: "500ms"
+    retryOn:
+      - timeout
+      - connection_error
+      - server_error
+
+  # Health requirements for the group
+  healthPolicy:
+    # At least 50% of providers must be healthy
+    minHealthyPercentage: 50
+    # Mark provider unhealthy after 3 failures
+    unhealthyThreshold: 3
+
+---
+# Multiple providers that form the HA group
+
+apiVersion: mcp-hangar.io/v1alpha1
+kind: MCPProvider
+metadata:
+  name: sqlite-primary
+  namespace: mcp-providers
+  labels:
+    mcp-hangar.io/category: database
+    mcp-hangar.io/role: primary
+spec:
+  mode: container
+  image: ghcr.io/modelcontextprotocol/mcp-sqlite:latest
+  replicas: 1
+  resources:
+    requests:
+      memory: "256Mi"
+      cpu: "200m"
+
+---
+apiVersion: mcp-hangar.io/v1alpha1
+kind: MCPProvider
+metadata:
+  name: sqlite-replica-1
+  namespace: mcp-providers
+  labels:
+    mcp-hangar.io/category: database
+    mcp-hangar.io/role: replica
+spec:
+  mode: container
+  image: ghcr.io/modelcontextprotocol/mcp-sqlite:latest
+  replicas: 1
+  resources:
+    requests:
+      memory: "256Mi"
+      cpu: "200m"
+
+---
+apiVersion: mcp-hangar.io/v1alpha1
+kind: MCPProvider
+metadata:
+  name: sqlite-replica-2
+  namespace: mcp-providers
+  labels:
+    mcp-hangar.io/category: database
+    mcp-hangar.io/role: replica
+spec:
+  mode: container
+  image: ghcr.io/modelcontextprotocol/mcp-sqlite:latest
+  replicas: 1
+  resources:
+    requests:
+      memory: "256Mi"
+      cpu: "200m"

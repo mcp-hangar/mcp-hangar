@@ -4,6 +4,8 @@ This module defines contracts (abstract interfaces) that the domain layer
 depends on. Implementations are provided by the infrastructure layer.
 """
 
+from .authentication import ApiKeyMetadata, AuthRequest, IApiKeyStore, IAuthenticator, ITokenValidator
+from .authorization import AuthorizationRequest, AuthorizationResult, IAuthorizer, IPolicyEngine, IRoleStore
 from .event_store import ConcurrencyError, IEventStore, NullEventStore, StreamNotFoundError
 from .metrics_publisher import IMetricsPublisher
 from .persistence import (
@@ -21,20 +23,35 @@ from .persistence import (
 from .provider_runtime import ProviderRuntime
 
 __all__ = [
+    # Authentication contracts
+    "ApiKeyMetadata",
+    "AuthRequest",
+    "IApiKeyStore",
+    "IAuthenticator",
+    "ITokenValidator",
+    # Authorization contracts
+    "AuthorizationRequest",
+    "AuthorizationResult",
+    "IAuthorizer",
+    "IPolicyEngine",
+    "IRoleStore",
+    # Event store
+    "ConcurrencyError",
+    "IEventStore",
+    "NullEventStore",
+    "StreamNotFoundError",
+    # Metrics
+    "IMetricsPublisher",
+    # Persistence
     "AuditAction",
     "AuditEntry",
-    "ConcurrencyError",
     "ConcurrentModificationError",
     "ConfigurationNotFoundError",
     "IAuditRepository",
-    "IEventStore",
-    "IMetricsPublisher",
     "IProviderConfigRepository",
     "IRecoveryService",
     "IUnitOfWork",
-    "NullEventStore",
     "PersistenceError",
     "ProviderConfigSnapshot",
     "ProviderRuntime",
-    "StreamNotFoundError",
 ]

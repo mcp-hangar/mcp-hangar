@@ -124,8 +124,86 @@ class ServerLifecycle:
         mcp_server.settings.host = host
         mcp_server.settings.port = port
 
-        # Get the Starlette app from FastMCP
-        starlette_app = mcp_server.streamable_http_app()
+        # Get the MCP app from FastMCP
+        mcp_app = mcp_server.streamable_http_app()
+
+        # Create auxiliary routes for /metrics, /health, /ready
+        import time
+
+        from starlette.applications import Starlette
+        from starlette.responses import JSONResponse, PlainTextResponse
+        from starlette.routing import Route
+
+        from ..metrics import get_metrics
+        from ..server.state import PROVIDERS
+
+        _start_time = time.time()
+        _startup_complete = False
+
+        def liveness_endpoint(request):
+            """Liveness check - is the process alive?"""
+            return JSONResponse({"status": "healthy"})
+
+        def readiness_endpoint(request):
+            """Readiness check - can we handle traffic?"""
+            ready_count = sum(1 for p in PROVIDERS.values() if p.state.value == "ready")
+            total_count = len(PROVIDERS)
+            is_ready = ready_count > 0 or total_count == 0
+            return JSONResponse(
+                {
+                    "status": "healthy" if is_ready else "unhealthy",
+                    "ready_providers": ready_count,
+                    "total_providers": total_count,
+                },
+                status_code=200 if is_ready else 503,
+            )
+
+        def startup_endpoint(request):
+            """Startup check - has initialization completed?"""
+            nonlocal _startup_complete
+            # Mark startup complete after first check (bootstrap is done by this point)
+            _startup_complete = True
+            uptime = time.time() - _start_time
+            return JSONResponse(
+                {
+                    "status": "healthy",
+                    "startup_complete": _startup_complete,
+                    "uptime_seconds": round(uptime, 2),
+                }
+            )
+
+        def metrics_endpoint(request):
+            """Prometheus metrics endpoint."""
+            return PlainTextResponse(
+                get_metrics(),
+                media_type="text/plain; version=0.0.4; charset=utf-8",
+            )
+
+        routes = [
+            Route("/health/live", liveness_endpoint, methods=["GET"]),
+            Route("/health/ready", readiness_endpoint, methods=["GET"]),
+            Route("/health/startup", startup_endpoint, methods=["GET"]),
+            Route("/metrics", metrics_endpoint, methods=["GET"]),
+        ]
+
+        aux_app = Starlette(routes=routes)
+
+        async def combined_app(scope, receive, send):
+            """Combined ASGI app that routes to metrics/health or MCP."""
+            if scope["type"] == "http":
+                path = scope.get("path", "")
+                if path.startswith("/health/") or path == "/metrics":
+                    await aux_app(scope, receive, send)
+                    return
+            await mcp_app(scope, receive, send)
+
+        # Apply authentication middleware if enabled
+        auth_components = self._context.auth_components
+        if auth_components and auth_components.enabled:
+            starlette_app = self._create_auth_app(combined_app, auth_components)
+            logger.info("http_auth_enabled")
+        else:
+            starlette_app = combined_app
 
         # Configure uvicorn with log_config=None to disable default uvicorn logging
         # Our structlog configuration will handle all logging uniformly
@@ -178,6 +256,95 @@ class ServerLifecycle:
         self._running = False
 
         logger.info("server_lifecycle_shutdown_complete")
+
+    def _create_auth_app(self, inner_app, auth_components):
+        """Create auth-enabled ASGI app wrapper.
+
+        Args:
+            inner_app: The inner ASGI app to wrap.
+            auth_components: Auth components with middleware.
+
+        Returns:
+            ASGI app with authentication.
+        """
+        from starlette.responses import JSONResponse
+
+        from ..domain.contracts.authentication import AuthRequest
+        from ..domain.exceptions import AccessDeniedError, AuthenticationError
+
+        # Paths to skip authentication (health checks, metrics)
+        skip_paths = frozenset(["/health/live", "/health/ready", "/health/startup", "/metrics"])
+        # Default trusted proxies (should be configured in production)
+        trusted_proxies = frozenset(["127.0.0.1", "::1"])
+
+        async def auth_app(scope, receive, send):
+            """ASGI app with authentication middleware."""
+            if scope["type"] != "http":
+                await inner_app(scope, receive, send)
+                return
+
+            path = scope.get("path", "")
+
+            # Skip auth for health/metrics endpoints
+            if path in skip_paths or path.startswith("/health/"):
+                await inner_app(scope, receive, send)
+                return
+
+            # Build headers dict from scope
+            headers = {}
+            for key, value in scope.get("headers", []):
+                headers[key.decode("latin-1").lower()] = value.decode("latin-1")
+
+            # Get client IP
+            client = scope.get("client")
+            source_ip = client[0] if client else "unknown"
+
+            # Trust X-Forwarded-For only from trusted proxies
+            if source_ip in trusted_proxies:
+                forwarded_for = headers.get("x-forwarded-for")
+                if forwarded_for:
+                    source_ip = forwarded_for.split(",")[0].strip()
+
+            # Create auth request
+            auth_request = AuthRequest(
+                headers=headers,
+                source_ip=source_ip,
+                method=scope.get("method", ""),
+                path=path,
+            )
+
+            try:
+                # Authenticate
+                auth_context = auth_components.authn_middleware.authenticate(auth_request)
+
+                # Store auth context in scope for downstream handlers
+                scope["auth"] = auth_context
+
+                # Pass to inner app
+                await inner_app(scope, receive, send)
+
+            except AuthenticationError as e:
+                response = JSONResponse(
+                    status_code=401,
+                    content={
+                        "error": "authentication_failed",
+                        "message": e.message,
+                    },
+                    headers={"WWW-Authenticate": "Bearer, ApiKey"},
+                )
+                await response(scope, receive, send)
+
+            except AccessDeniedError as e:
+                response = JSONResponse(
+                    status_code=403,
+                    content={
+                        "error": "access_denied",
+                        "message": str(e),
+                    },
+                )
+                await response(scope, receive, send)
+
+        return auth_app
 
 
 def _setup_signal_handlers(lifecycle: ServerLifecycle) -> None:

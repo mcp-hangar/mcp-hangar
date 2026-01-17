@@ -1,0 +1,335 @@
+apiVersion: apiextensions.k8s.io/v1
+kind: CustomResourceDefinition
+metadata:
+  name: mcpdiscoverysources.mcp-hangar.io
+  annotations:
+    controller-gen.kubebuilder.io/version: v0.14.0
+  labels:
+    app.kubernetes.io/name: mcp-hangar-operator
+    app.kubernetes.io/part-of: mcp-hangar
+spec:
+  group: mcp-hangar.io
+  names:
+    kind: MCPDiscoverySource
+    listKind: MCPDiscoverySourceList
+    plural: mcpdiscoverysources
+    singular: mcpdiscoverysource
+    shortNames:
+      - mcpds
+      - discoverysource
+    categories:
+      - mcp
+      - all
+  scope: Namespaced
+  versions:
+    - name: v1alpha1
+      served: true
+      storage: true
+      subresources:
+        status: {}
+      additionalPrinterColumns:
+        - name: Type
+          type: string
+          jsonPath: .spec.type
+        - name: Mode
+          type: string
+          jsonPath: .spec.mode
+        - name: Discovered
+          type: integer
+          jsonPath: .status.discoveredCount
+        - name: Last Sync
+          type: date
+          jsonPath: .status.lastSyncTime
+        - name: Age
+          type: date
+          jsonPath: .metadata.creationTimestamp
+      schema:
+        openAPIV3Schema:
+          type: object
+          description: MCPDiscoverySource defines automatic provider discovery
+          required:
+            - spec
+          properties:
+            apiVersion:
+              type: string
+            kind:
+              type: string
+            metadata:
+              type: object
+            spec:
+              type: object
+              description: MCPDiscoverySourceSpec defines discovery settings
+              required:
+                - type
+              properties:
+                # === Discovery Type ===
+                type:
+                  type: string
+                  enum:
+                    - Namespace
+                    - ConfigMap
+                    - Annotations
+                    - ServiceDiscovery
+                  description: |
+                    Discovery source type:
+                    - Namespace: Scan namespaces with specific labels
+                    - ConfigMap: Read provider configs from ConfigMaps
+                    - Annotations: Discover from Pod annotations
+                    - ServiceDiscovery: Discover from K8s Services
+
+                # === Operation Mode ===
+                mode:
+                  type: string
+                  enum:
+                    - Additive
+                    - Authoritative
+                  default: Additive
+                  description: |
+                    Discovery mode:
+                    - Additive: Only add new providers
+                    - Authoritative: Add and remove (sync with source)
+
+                # === Refresh Settings ===
+                refreshInterval:
+                  type: string
+                  default: "1m"
+                  pattern: "^[0-9]+(s|m|h)$"
+                  description: How often to rescan for changes
+
+                paused:
+                  type: boolean
+                  default: false
+                  description: Pause discovery (for maintenance)
+
+                # === Namespace Discovery ===
+                namespaceSelector:
+                  type: object
+                  description: Select namespaces to scan (for Namespace type)
+                  properties:
+                    matchLabels:
+                      type: object
+                      additionalProperties:
+                        type: string
+                    matchExpressions:
+                      type: array
+                      items:
+                        type: object
+                        properties:
+                          key:
+                            type: string
+                          operator:
+                            type: string
+                            enum: [In, NotIn, Exists, DoesNotExist]
+                          values:
+                            type: array
+                            items:
+                              type: string
+                    excludeNamespaces:
+                      type: array
+                      items:
+                        type: string
+                      description: Namespaces to exclude
+                      default:
+                        - kube-system
+                        - kube-public
+                        - kube-node-lease
+
+                # === ConfigMap Discovery ===
+                configMapRef:
+                  type: object
+                  description: ConfigMap containing provider definitions
+                  properties:
+                    name:
+                      type: string
+                      description: ConfigMap name
+                    namespace:
+                      type: string
+                      description: ConfigMap namespace (defaults to same namespace)
+                    key:
+                      type: string
+                      default: "providers.yaml"
+                      description: Key containing provider definitions
+
+                # === Annotation Discovery ===
+                annotations:
+                  type: object
+                  description: Settings for annotation-based discovery
+                  properties:
+                    podSelector:
+                      type: object
+                      additionalProperties:
+                        type: string
+                      description: Label selector for Pods to scan
+                    serviceSelector:
+                      type: object
+                      additionalProperties:
+                        type: string
+                      description: Label selector for Services to scan
+                    annotationPrefix:
+                      type: string
+                      default: "mcp-hangar.io"
+                      description: Annotation prefix to look for
+                    requiredAnnotations:
+                      type: array
+                      items:
+                        type: string
+                      description: Required annotations for discovery
+                      default:
+                        - "mcp-hangar.io/provider"
+
+                # === Service Discovery ===
+                serviceDiscovery:
+                  type: object
+                  description: Settings for service-based discovery
+                  properties:
+                    selector:
+                      type: object
+                      additionalProperties:
+                        type: string
+                      description: Label selector for Services
+                    portName:
+                      type: string
+                      default: "mcp"
+                      description: Port name to use for MCP endpoint
+                    protocol:
+                      type: string
+                      enum: [http, https]
+                      default: http
+
+                # === Provider Template ===
+                providerTemplate:
+                  type: object
+                  x-kubernetes-preserve-unknown-fields: true
+                  description: |
+                    Default settings applied to discovered providers.
+                    Merged with discovered config (discovered takes precedence).
+                  properties:
+                    spec:
+                      type: object
+                      x-kubernetes-preserve-unknown-fields: true
+                      description: Default MCPProvider spec
+                    metadata:
+                      type: object
+                      properties:
+                        labels:
+                          type: object
+                          additionalProperties:
+                            type: string
+                        annotations:
+                          type: object
+                          additionalProperties:
+                            type: string
+
+                # === Filters ===
+                filters:
+                  type: object
+                  description: Filters for discovered providers
+                  properties:
+                    includePatterns:
+                      type: array
+                      items:
+                        type: string
+                      description: Regex patterns - only include matching names
+                    excludePatterns:
+                      type: array
+                      items:
+                        type: string
+                      description: Regex patterns - exclude matching names
+                    maxProviders:
+                      type: integer
+                      minimum: 1
+                      description: Maximum providers to discover
+
+                # === Ownership ===
+                ownership:
+                  type: object
+                  description: Ownership settings for created providers
+                  properties:
+                    controller:
+                      type: boolean
+                      default: true
+                      description: Set controller owner reference
+                    blockDeletion:
+                      type: boolean
+                      default: false
+                      description: Block deletion of source until providers removed
+
+            status:
+              type: object
+              description: MCPDiscoverySourceStatus shows discovery state
+              properties:
+                discoveredCount:
+                  type: integer
+                  description: Number of discovered providers
+
+                managedCount:
+                  type: integer
+                  description: Number of managed MCPProvider resources
+
+                lastSyncTime:
+                  type: string
+                  format: date-time
+                  description: Last successful sync time
+
+                lastSyncDuration:
+                  type: string
+                  description: Duration of last sync
+
+                lastSyncError:
+                  type: string
+                  description: Error from last sync (if any)
+
+                nextSyncTime:
+                  type: string
+                  format: date-time
+                  description: Scheduled next sync time
+
+                discoveredProviders:
+                  type: array
+                  description: Details of discovered providers
+                  items:
+                    type: object
+                    properties:
+                      name:
+                        type: string
+                        description: Provider name
+                      source:
+                        type: string
+                        description: Where it was discovered
+                      discoveredAt:
+                        type: string
+                        format: date-time
+                      managed:
+                        type: boolean
+                        description: Whether MCPProvider was created
+                      error:
+                        type: string
+                        description: Error creating provider (if any)
+
+                observedGeneration:
+                  type: integer
+                  format: int64
+
+                conditions:
+                  type: array
+                  items:
+                    type: object
+                    required:
+                      - type
+                      - status
+                    properties:
+                      type:
+                        type: string
+                      status:
+                        type: string
+                        enum:
+                          - "True"
+                          - "False"
+                          - "Unknown"
+                      lastTransitionTime:
+                        type: string
+                        format: date-time
+                      reason:
+                        type: string
+                      message:
+                        type: string

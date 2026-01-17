@@ -1,0 +1,76 @@
+# Basic SQLite Provider
+# =====================
+# This example shows a basic MCP provider running SQLite tools
+
+apiVersion: mcp-hangar.io/v1alpha1
+kind: MCPProvider
+metadata:
+  name: sqlite-tools
+  namespace: mcp-providers
+  labels:
+    app.kubernetes.io/name: sqlite-tools
+    mcp-hangar.io/category: database
+spec:
+  mode: container
+  image: ghcr.io/modelcontextprotocol/mcp-sqlite:latest
+
+  # Start with 1 replica (always running)
+  replicas: 1
+
+  # Stop after 10 minutes of inactivity
+  idleTTL: "10m"
+
+  # Allow up to 60 seconds for startup
+  startupTimeout: "60s"
+
+  # Resource limits
+  resources:
+    requests:
+      memory: "128Mi"
+      cpu: "100m"
+    limits:
+      memory: "512Mi"
+      cpu: "500m"
+
+  # Environment variables
+  env:
+    - name: SQLITE_DB_PATH
+      value: /data/database.db
+
+  # Mount a PVC for data persistence
+  volumes:
+    - name: data
+      mountPath: /data
+      persistentVolumeClaim:
+        claimName: sqlite-data
+
+  # Health checks
+  healthCheck:
+    enabled: true
+    interval: "30s"
+    timeout: "5s"
+    failureThreshold: 3
+
+  # Security hardening
+  securityContext:
+    runAsNonRoot: true
+    runAsUser: 65534
+    readOnlyRootFilesystem: true
+    allowPrivilegeEscalation: false
+    capabilities:
+      drop:
+        - ALL
+
+---
+# PVC for SQLite data
+apiVersion: v1
+kind: PersistentVolumeClaim
+metadata:
+  name: sqlite-data
+  namespace: mcp-providers
+spec:
+  accessModes:
+    - ReadWriteOnce
+  resources:
+    requests:
+      storage: 1Gi

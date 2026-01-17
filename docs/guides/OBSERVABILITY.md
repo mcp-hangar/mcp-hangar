@@ -479,6 +479,12 @@ services:
       start_period: 40s
 ```
 
+> **Note**: If curl is not available in your image, use Python:
+> ```yaml
+> healthcheck:
+>   test: ["CMD", "python", "-c", "import urllib.request; urllib.request.urlopen('http://localhost:8000/health/ready', timeout=5)"]
+> ```
+
 ### Custom Health Checks
 
 Register application-specific health checks:

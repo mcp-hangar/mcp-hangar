@@ -126,6 +126,17 @@ class IEventStore(ABC):
             Current version number, or -1 if stream doesn't exist.
         """
 
+    @abstractmethod
+    def list_streams(self, prefix: str = "") -> list[str]:
+        """List all stream IDs, optionally filtered by prefix.
+
+        Args:
+            prefix: Optional prefix to filter streams.
+
+        Returns:
+            List of stream IDs matching the prefix.
+        """
+
 
 class NullEventStore(IEventStore):
     """Null object implementation - discards all events.
@@ -161,3 +172,7 @@ class NullEventStore(IEventStore):
     def get_stream_version(self, stream_id: str) -> int:
         """Return -1 (stream doesn't exist)."""
         return -1
+
+    def list_streams(self, prefix: str = "") -> list[str]:
+        """Return empty list (no streams)."""
+        return []

@@ -1,0 +1,39 @@
+# Remote Provider
+# ===============
+# This example shows how to connect to an external MCP endpoint
+
+apiVersion: mcp-hangar.io/v1alpha1
+kind: MCPProvider
+metadata:
+  name: external-llm-tools
+  namespace: mcp-providers
+  labels:
+    app.kubernetes.io/name: external-llm-tools
+    mcp-hangar.io/category: ai
+spec:
+  # Remote mode - connects to external endpoint
+  mode: remote
+
+  # External endpoint URL
+  endpoint: https://llm-tools.internal.company.com/mcp
+
+  # Health checks for remote endpoint
+  healthCheck:
+    enabled: true
+    interval: "1m"
+    timeout: "10s"
+    failureThreshold: 3
+
+  # Circuit breaker for network failures
+  circuitBreaker:
+    enabled: true
+    failureThreshold: 3
+    resetTimeout: "1m"
+    halfOpenRequests: 2
+
+  # Tool filtering
+  tools:
+    # Deny list specific tools
+    denyList:
+      - dangerous_operation
+      - admin_reset

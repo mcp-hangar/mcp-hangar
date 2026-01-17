@@ -226,3 +226,16 @@ __marimo__/
 # MCP Memory data
 data/
 site/
+logs/
+
+# macOS
+.DS_Store
+*.DS_Store
+
+# Operator build artifacts
+operator/bin/
+
+# Coverage reports (already in htmlcov but just to be safe)
+htmlcov/
+.coverage
+coverage.xml

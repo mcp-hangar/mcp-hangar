@@ -7,6 +7,83 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.2.0] - 2026-01-18
+
+### Added
+
+#### Authentication & Authorization (TASK-001)
+- **API Key Authentication**: Secure API key-based authentication
+  - API key generation with `mcp_` prefix for easy identification
+  - Key hashing with SHA-256 for secure storage
+  - Key expiration and revocation support
+  - In-memory and PostgreSQL key stores
+
+- **JWT/OIDC Authentication**: Enterprise SSO integration
+  - JWKS-based token validation
+  - OIDC discovery support
+  - Configurable claim mappings (subject, groups, tenant)
+  - Tested with Keycloak integration
+
+- **Role-Based Access Control (RBAC)**: Granular permissions
+  - Built-in roles: admin, provider-admin, developer, viewer, auditor
+  - Permission-based authorization (provider:*, tool:invoke, etc.)
+  - Group-based role assignment
+  - Tenant/scope isolation support
+
+- **Event-Sourced Auth Storage**: Full audit trail
+  - API key lifecycle events (created, used, revoked)
+  - Role assignment events
+  - PostgreSQL persistence with CQRS pattern
+
+- **CLI Commands**: Key management
+  - `mcp-hangar auth create-key` - Create API keys
+  - `mcp-hangar auth list-keys` - List keys for principal
+  - `mcp-hangar auth revoke-key` - Revoke API key
+  - `mcp-hangar auth assign-role` - Assign roles
+
+#### Kubernetes Operator (TASK-002)
+- **MCPProvider CRD**: Declarative provider management
+  - Container and remote provider modes
+  - Configurable health checks and circuit breaker
+  - Resource limits and security contexts
+  - Environment variables from Secrets/ConfigMaps
+  - Volume mounts (Secret, ConfigMap, PVC)
+
+- **MCPProviderGroup CRD**: High availability
+  - Label selector-based provider grouping
+  - Load balancing strategies (RoundRobin, LeastConnections, Random, Failover)
+  - Configurable failover with retries
+  - Health policy enforcement
+
+- **MCPDiscoverySource CRD**: Auto-discovery
+  - Namespace-based discovery
+  - ConfigMap-based discovery
+  - Additive and Authoritative modes
+  - Provider templates for defaults
+
+- **Operator Features**:
+  - State machine reconciliation (Cold → Initializing → Ready → Degraded → Dead)
+  - Prometheus metrics for monitoring
+  - Leader election for HA
+  - Helm chart for deployment
+
+### Changed
+- **Domain**: Changed API group from `mcp.hangar.io` to `mcp-hangar.io`
+- **Config**: Volume paths changed from absolute to relative in examples
+- **Documentation**: Added comprehensive Kubernetes and Authentication guides
+
+### Security
+- All auth features are opt-in (disabled by default)
+- Secure defaults for pod security contexts
+- No hardcoded credentials in production code
+- Testcontainers-based security testing
+
+### Documentation
+- New guide: `docs/guides/KUBERNETES.md` - Complete K8s integration guide
+- New guide: `docs/guides/AUTHENTICATION.md` - Auth configuration guide
+- Security audit: `docs/security/AUTH_SECURITY_AUDIT.md`
+- Updated mkdocs navigation
+
 ## [0.1.4] - 2026-01-16
 
 ### Added

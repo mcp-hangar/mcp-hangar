@@ -1,0 +1,218 @@
+# MCP-Hangar Operator Configuration
+# ===================================
+
+# Replica count for operator deployment
+replicaCount: 1
+
+# Operator image configuration
+image:
+  repository: ghcr.io/mapyr/mcp-hangar-operator
+  pullPolicy: IfNotPresent
+  # Overrides the image tag (defaults to chart appVersion)
+  tag: ""
+
+# Image pull secrets for private registries
+imagePullSecrets: []
+
+# Override chart name
+nameOverride: ""
+fullnameOverride: ""
+
+# ServiceAccount configuration
+serviceAccount:
+  # Create a service account
+  create: true
+  # Annotations for the service account
+  annotations: {}
+  # Name override (generated if empty)
+  name: ""
+
+# Pod annotations
+podAnnotations: {}
+
+# Pod labels
+podLabels: {}
+
+# Pod security context
+podSecurityContext:
+  runAsNonRoot: true
+  runAsUser: 65534
+  fsGroup: 65534
+  seccompProfile:
+    type: RuntimeDefault
+
+# Container security context
+securityContext:
+  allowPrivilegeEscalation: false
+  readOnlyRootFilesystem: true
+  runAsNonRoot: true
+  runAsUser: 65534
+  capabilities:
+    drop:
+      - ALL
+  seccompProfile:
+    type: RuntimeDefault
+
+# =============================================================================
+# Operator Configuration
+# =============================================================================
+operator:
+  # Log level (debug, info, warn, error)
+  logLevel: info
+
+  # Metrics configuration
+  metrics:
+    # Enable metrics endpoint
+    enabled: true
+    # Metrics bind port
+    port: 8080
+
+  # Health probe configuration
+  health:
+    # Health probe bind port
+    port: 8081
+
+  # Leader election for HA
+  leaderElection:
+    # Enable leader election
+    enabled: true
+    # Namespace for leader election lease (defaults to release namespace)
+    namespace: ""
+
+  # Reconciliation settings
+  reconcile:
+    # Requeue interval for ready providers
+    readyRequeueInterval: "5m"
+    # Requeue interval for errored providers
+    errorRequeueInterval: "10s"
+    # Maximum concurrent reconciles per controller
+    maxConcurrentReconciles: 10
+
+# =============================================================================
+# MCP-Hangar Core Connection
+# =============================================================================
+hangar:
+  # URL of MCP-Hangar core service
+  # Set to empty to run without Hangar core integration
+  url: ""
+  # Example: "http://mcp-hangar.mcp-system.svc.cluster.local:8080"
+
+  # API key for authentication
+  apiKey: ""
+
+  # Reference existing secret for API key
+  existingSecret: ""
+  # Key in the secret containing the API key
+  secretKey: "api-key"
+
+# =============================================================================
+# Resource Limits
+# =============================================================================
+resources:
+  limits:
+    cpu: 500m
+    memory: 256Mi
+  requests:
+    cpu: 100m
+    memory: 128Mi
+
+# =============================================================================
+# Scheduling
+# =============================================================================
+
+# Node selector
+nodeSelector: {}
+
+# Tolerations
+tolerations: []
+
+# Affinity rules
+affinity: {}
+
+# Priority class
+priorityClassName: ""
+
+# Topology spread constraints
+topologySpreadConstraints: []
+
+# =============================================================================
+# CRD Management
+# =============================================================================
+crds:
+  # Install CRDs
+  install: true
+  # Keep CRDs on helm uninstall
+  keep: true
+  # CRD conversion webhook (for future use)
+  conversion:
+    enabled: false
+
+# =============================================================================
+# RBAC Configuration
+# =============================================================================
+rbac:
+  # Create RBAC resources
+  create: true
+  # Additional rules for ClusterRole
+  additionalRules: []
+  # Example:
+  # - apiGroups: [""]
+  #   resources: ["persistentvolumeclaims"]
+  #   verbs: ["get", "list", "watch"]
+
+# =============================================================================
+# Monitoring
+# =============================================================================
+
+# ServiceMonitor for Prometheus Operator
+serviceMonitor:
+  # Enable ServiceMonitor
+  enabled: false
+  # Namespace (defaults to release namespace)
+  namespace: ""
+  # Scrape interval
+  interval: 30s
+  # Scrape timeout
+  scrapeTimeout: 10s
+  # Additional labels
+  labels: {}
+  # Metric relabeling
+  metricRelabelings: []
+  # Target relabeling
+  relabelings: []
+
+# PrometheusRule for alerting
+prometheusRule:
+  # Enable PrometheusRule
+  enabled: false
+  # Namespace (defaults to release namespace)
+  namespace: ""
+  # Additional labels
+  labels: {}
+  # Alert rules
+  rules: []
+  # Example rules are generated if empty and enabled
+
+# =============================================================================
+# Network Policies
+# =============================================================================
+networkPolicy:
+  # Enable network policies
+  enabled: false
+  # Allow ingress from monitoring namespace
+  allowMonitoring: true
+  # Additional ingress rules
+  additionalIngress: []
+  # Additional egress rules
+  additionalEgress: []
+
+# =============================================================================
+# Pod Disruption Budget
+# =============================================================================
+podDisruptionBudget:
+  # Enable PDB
+  enabled: false
+  # Minimum available pods
+  minAvailable: 1
+  # Maximum unavailable pods (alternative to minAvailable)
+  # maxUnavailable: 1

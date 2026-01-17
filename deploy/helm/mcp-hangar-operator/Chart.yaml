@@ -1,0 +1,28 @@
+apiVersion: v2
+name: mcp-hangar-operator
+description: Kubernetes Operator for MCP-Hangar provider lifecycle management
+type: application
+version: 0.2.0
+appVersion: "0.2.0"
+kubeVersion: ">=1.25.0-0"
+
+home: https://github.com/mapyr/mcp-hangar
+sources:
+  - https://github.com/mapyr/mcp-hangar
+
+maintainers:
+  - name: MCP-Hangar Contributors
+    url: https://github.com/mapyr/mcp-hangar
+
+keywords:
+  - mcp
+  - model-context-protocol
+  - ai
+  - llm
+  - operator
+  - kubernetes
+  - tools
+
+annotations:
+  category: AI/ML
+  licenses: MIT

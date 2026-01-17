@@ -80,12 +80,15 @@ nav:
       - Containers: guides/CONTAINERS.md
       - Discovery: guides/DISCOVERY.md
       - Observability: guides/OBSERVABILITY.md
+      - Authentication: guides/AUTHENTICATION.md
+      - Kubernetes: guides/KUBERNETES.md
   - Development:
       - Contributing: development/CONTRIBUTING.md
       - Release Process: runbooks/RELEASE.md
   - Reference:
       - Changelog: changelog.md
       - Security: security.md
+      - Auth Security Audit: security/AUTH_SECURITY_AUDIT.md
       - Code of Conduct: code-of-conduct.md
 
 extra:

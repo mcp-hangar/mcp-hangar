@@ -1,0 +1,88 @@
+# Discovery Source
+# ================
+# This example shows automatic provider discovery from namespaces
+
+apiVersion: mcp-hangar.io/v1alpha1
+kind: MCPDiscoverySource
+metadata:
+  name: team-providers
+  namespace: mcp-system
+spec:
+  # Discover from namespaces with specific labels
+  type: Namespace
+
+  # Authoritative mode - sync (add + remove)
+  mode: Authoritative
+
+  # Rescan every 5 minutes
+  refreshInterval: "5m"
+
+  # Select namespaces
+  namespaceSelector:
+    matchLabels:
+      mcp-hangar.io/enabled: "true"
+    excludeNamespaces:
+      - kube-system
+      - kube-public
+      - kube-node-lease
+
+  # Default settings for discovered providers
+  providerTemplate:
+    metadata:
+      labels:
+        discovered-by: team-providers
+    spec:
+      idleTTL: "5m"
+      resources:
+        requests:
+          memory: "64Mi"
+          cpu: "50m"
+        limits:
+          memory: "256Mi"
+          cpu: "250m"
+      securityContext:
+        runAsNonRoot: true
+        readOnlyRootFilesystem: true
+
+  # Filter discovered providers
+  filters:
+    # Only include providers matching these patterns
+    includePatterns:
+      - "^mcp-.*"
+    # Exclude test providers
+    excludePatterns:
+      - ".*-test$"
+      - ".*-dev$"
+    # Limit to 50 providers
+    maxProviders: 50
+
+  # Ownership settings
+  ownership:
+    controller: true
+    blockDeletion: false
+
+---
+# Example namespace with MCP enabled
+apiVersion: v1
+kind: Namespace
+metadata:
+  name: team-alpha
+  labels:
+    mcp-hangar.io/enabled: "true"
+    team: alpha
+
+---
+# ConfigMap in the team namespace defining providers
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: mcp-providers
+  namespace: team-alpha
+data:
+  providers.yaml: |
+    providers:
+      - name: mcp-team-alpha-tools
+        image: ghcr.io/team-alpha/mcp-tools:latest
+        env:
+          - name: TEAM
+            value: alpha

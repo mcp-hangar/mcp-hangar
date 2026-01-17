@@ -66,10 +66,10 @@ apiVersion: v1
 kind: Pod
 metadata:
   annotations:
-    mcp.hangar.io/enabled: "true"
-    mcp.hangar.io/name: "data-processor"
-    mcp.hangar.io/mode: "http"
-    mcp.hangar.io/port: "8080"
+    mcp-hangar.io/enabled: "true"
+    mcp-hangar.io/name: "data-processor"
+    mcp-hangar.io/mode: "http"
+    mcp-hangar.io/port: "8080"
 ```
 
 ### Filesystem

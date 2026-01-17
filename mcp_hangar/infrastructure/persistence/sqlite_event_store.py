@@ -361,3 +361,26 @@ class SQLiteEventStore(IEventStore):
         finally:
             if not self._is_memory:
                 conn.close()
+
+    def list_streams(self, prefix: str = "") -> list[str]:
+        """List all stream IDs, optionally filtered by prefix.
+
+        Args:
+            prefix: Optional prefix to filter streams.
+
+        Returns:
+            List of stream IDs matching the prefix.
+        """
+        conn = self._connect()
+        try:
+            if prefix:
+                cursor = conn.execute(
+                    "SELECT stream_id FROM streams WHERE stream_id LIKE ? ORDER BY stream_id",
+                    (f"{prefix}%",),
+                )
+            else:
+                cursor = conn.execute("SELECT stream_id FROM streams ORDER BY stream_id")
+            return [row["stream_id"] for row in cursor.fetchall()]
+        finally:
+            if not self._is_memory:
+                conn.close()

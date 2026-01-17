@@ -1,0 +1,149 @@
+{{- if .Values.rbac.create -}}
+apiVersion: rbac.authorization.k8s.io/v1
+kind: ClusterRole
+metadata:
+  name: {{ include "mcp-hangar-operator.fullname" . }}
+  labels:
+    {{- include "mcp-hangar-operator.labels" . | nindent 4 }}
+rules:
+  # ==========================================================================
+  # MCP CRDs
+  # ==========================================================================
+  - apiGroups:
+      - mcp-hangar.io
+    resources:
+      - mcpproviders
+      - mcpprovidergroups
+      - mcpdiscoverysources
+    verbs:
+      - create
+      - delete
+      - get
+      - list
+      - patch
+      - update
+      - watch
+
+  - apiGroups:
+      - mcp-hangar.io
+    resources:
+      - mcpproviders/status
+      - mcpprovidergroups/status
+      - mcpdiscoverysources/status
+    verbs:
+      - get
+      - patch
+      - update
+
+  - apiGroups:
+      - mcp-hangar.io
+    resources:
+      - mcpproviders/finalizers
+      - mcpprovidergroups/finalizers
+      - mcpdiscoverysources/finalizers
+    verbs:
+      - update
+
+  # ==========================================================================
+  # Pod Management
+  # ==========================================================================
+  - apiGroups:
+      - ""
+    resources:
+      - pods
+    verbs:
+      - create
+      - delete
+      - get
+      - list
+      - patch
+      - update
+      - watch
+
+  - apiGroups:
+      - ""
+    resources:
+      - pods/status
+    verbs:
+      - get
+
+  # ==========================================================================
+  # Secrets and ConfigMaps (read-only for env vars)
+  # ==========================================================================
+  - apiGroups:
+      - ""
+    resources:
+      - secrets
+      - configmaps
+    verbs:
+      - get
+      - list
+      - watch
+
+  # ==========================================================================
+  # ServiceAccounts (read-only)
+  # ==========================================================================
+  - apiGroups:
+      - ""
+    resources:
+      - serviceaccounts
+    verbs:
+      - get
+      - list
+      - watch
+
+  # ==========================================================================
+  # Services (for discovery)
+  # ==========================================================================
+  - apiGroups:
+      - ""
+    resources:
+      - services
+    verbs:
+      - get
+      - list
+      - watch
+
+  # ==========================================================================
+  # Namespaces (for namespace discovery)
+  # ==========================================================================
+  - apiGroups:
+      - ""
+    resources:
+      - namespaces
+    verbs:
+      - get
+      - list
+      - watch
+
+  # ==========================================================================
+  # Events (for recording events)
+  # ==========================================================================
+  - apiGroups:
+      - ""
+    resources:
+      - events
+    verbs:
+      - create
+      - patch
+
+  # ==========================================================================
+  # Leader Election
+  # ==========================================================================
+  - apiGroups:
+      - coordination.k8s.io
+    resources:
+      - leases
+    verbs:
+      - create
+      - get
+      - list
+      - update
+
+  {{- with .Values.rbac.additionalRules }}
+  # ==========================================================================
+  # Additional Custom Rules
+  # ==========================================================================
+  {{- toYaml . | nindent 2 }}
+  {{- end }}
+{{- end }}

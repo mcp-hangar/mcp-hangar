@@ -1,0 +1,54 @@
+# Docker Compose for MCP-Hangar + Keycloak Integration Test
+# This setup allows testing OIDC/JWT authentication with Keycloak
+
+version: '3.8'
+
+services:
+  # Keycloak Identity Provider
+  keycloak:
+    image: quay.io/keycloak/keycloak:24.0
+    container_name: mcp-keycloak
+    command: start-dev --import-realm
+    environment:
+      KEYCLOAK_ADMIN: admin
+      KEYCLOAK_ADMIN_PASSWORD: admin
+      KC_HTTP_PORT: 8080
+    ports:
+      - "8080:8080"
+    volumes:
+      - ./keycloak/realm-export.json:/opt/keycloak/data/import/realm-export.json:ro
+    healthcheck:
+      test: ["CMD-SHELL", "exec 3<>/dev/tcp/127.0.0.1/8080"]
+      interval: 10s
+      timeout: 5s
+      retries: 10
+      start_period: 30s
+
+  # MCP-Hangar with auth enabled
+  mcp-hangar:
+    build:
+      context: ../..
+      dockerfile: Dockerfile
+    container_name: mcp-hangar-auth
+    environment:
+      MCP_MODE: http
+      MCP_HTTP_HOST: 0.0.0.0
+      MCP_HTTP_PORT: 9000
+      MCP_CONFIG: /app/config.yaml
+      MCP_LOG_LEVEL: DEBUG
+    ports:
+      - "9000:9000"
+    volumes:
+      - ./config.yaml:/app/config.yaml:ro
+    depends_on:
+      keycloak:
+        condition: service_healthy
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:9000/health/live"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+
+networks:
+  default:
+    name: mcp-auth-test

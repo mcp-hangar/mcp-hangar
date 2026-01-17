@@ -21,6 +21,19 @@ from .input_validator import (
     ValidationResult,
 )
 from .rate_limiter import InMemoryRateLimiter, RateLimitConfig, RateLimiter, RateLimitResult
+from .roles import (
+    BUILTIN_ROLES,
+    get_builtin_role,
+    get_permission,
+    list_builtin_roles,
+    list_permissions,
+    PERMISSIONS,
+    ROLE_ADMIN,
+    ROLE_AUDITOR,
+    ROLE_DEVELOPER,
+    ROLE_PROVIDER_ADMIN,
+    ROLE_VIEWER,
+)
 from .sanitizer import (
     sanitize_command_argument,
     sanitize_environment_value,
@@ -57,4 +70,16 @@ __all__ = [
     "SecureEnvironment",
     "is_sensitive_key",
     "mask_sensitive_value",
+    # Roles & Permissions
+    "BUILTIN_ROLES",
+    "PERMISSIONS",
+    "ROLE_ADMIN",
+    "ROLE_DEVELOPER",
+    "ROLE_PROVIDER_ADMIN",
+    "ROLE_VIEWER",
+    "ROLE_AUDITOR",
+    "get_builtin_role",
+    "get_permission",
+    "list_builtin_roles",
+    "list_permissions",
 ]

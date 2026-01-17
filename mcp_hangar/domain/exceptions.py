@@ -279,3 +279,247 @@ class RateLimitExceeded(MCPError):
         )
         self.limit = limit
         self.window_seconds = window_seconds
+
+
+# --- Authentication Exceptions ---
+
+
+class AuthenticationError(MCPError):
+    """Base class for authentication errors.
+
+    All authentication-related failures inherit from this class,
+    enabling unified handling of auth errors.
+    """
+
+    def __init__(
+        self,
+        message: str,
+        auth_method: str = "",
+        details: Optional[Dict[str, Any]] = None,
+    ):
+        super().__init__(
+            message=message,
+            operation="authentication",
+            details={"auth_method": auth_method, **(details or {})},
+        )
+        self.auth_method = auth_method
+
+
+class InvalidCredentialsError(AuthenticationError):
+    """Credentials are invalid or malformed.
+
+    Raised when:
+    - API key format is invalid
+    - JWT signature verification fails
+    - Token is malformed
+    - Unknown API key
+    """
+
+    def __init__(
+        self,
+        message: str = "Invalid credentials",
+        auth_method: str = "",
+        details: Optional[Dict[str, Any]] = None,
+    ):
+        super().__init__(
+            message=message,
+            auth_method=auth_method,
+            details=details,
+        )
+
+
+class ExpiredCredentialsError(AuthenticationError):
+    """Credentials have expired.
+
+    Raised when:
+    - JWT exp claim is in the past
+    - API key has passed its expiration date
+    """
+
+    def __init__(
+        self,
+        message: str = "Credentials have expired",
+        auth_method: str = "",
+        expired_at: Optional[float] = None,
+    ):
+        super().__init__(
+            message=message,
+            auth_method=auth_method,
+            details={"expired_at": expired_at} if expired_at else None,
+        )
+        self.expired_at = expired_at
+
+
+class RevokedCredentialsError(AuthenticationError):
+    """Credentials have been revoked.
+
+    Raised when:
+    - API key has been explicitly revoked
+    - JWT is on a revocation list
+    """
+
+    def __init__(
+        self,
+        message: str = "Credentials have been revoked",
+        auth_method: str = "",
+        revoked_at: Optional[float] = None,
+    ):
+        super().__init__(
+            message=message,
+            auth_method=auth_method,
+            details={"revoked_at": revoked_at} if revoked_at else None,
+        )
+        self.revoked_at = revoked_at
+
+
+class MissingCredentialsError(AuthenticationError):
+    """No credentials provided when authentication is required.
+
+    Raised when:
+    - No Authorization header present
+    - No API key header present
+    - Authentication is required but allow_anonymous is False
+    """
+
+    def __init__(
+        self,
+        message: str = "No credentials provided",
+        expected_methods: Optional[list[str]] = None,
+    ):
+        super().__init__(
+            message=message,
+            auth_method="none",
+            details={"expected_methods": expected_methods} if expected_methods else None,
+        )
+        self.expected_methods = expected_methods or []
+
+
+class RateLimitExceededError(AuthenticationError):
+    """Rate limit exceeded for authentication attempts.
+
+    Raised when:
+    - Too many failed authentication attempts from an IP
+    - IP is temporarily locked out
+    """
+
+    def __init__(
+        self,
+        message: str = "Rate limit exceeded",
+        retry_after: Optional[float] = None,
+    ):
+        super().__init__(
+            message=message,
+            auth_method="rate_limit",
+            details={"retry_after": retry_after} if retry_after else None,
+        )
+        self.retry_after = retry_after
+
+
+# --- Authorization Exceptions ---
+
+
+class AuthorizationError(MCPError):
+    """Base class for authorization errors.
+
+    All authorization-related failures inherit from this class.
+    """
+
+    def __init__(
+        self,
+        message: str,
+        principal_id: str = "",
+        action: str = "",
+        resource: str = "",
+        details: Optional[Dict[str, Any]] = None,
+    ):
+        super().__init__(
+            message=message,
+            operation="authorization",
+            details={
+                "principal_id": principal_id,
+                "action": action,
+                "resource": resource,
+                **(details or {}),
+            },
+        )
+        self.principal_id = principal_id
+        self.action = action
+        self.resource = resource
+
+
+class AccessDeniedError(AuthorizationError):
+    """Principal does not have permission for the requested action.
+
+    The most common authorization error - principal is authenticated
+    but lacks the necessary permissions.
+    """
+
+    def __init__(
+        self,
+        principal_id: str,
+        action: str,
+        resource: str,
+        reason: str = "",
+    ):
+        message = f"Access denied: {principal_id} cannot {action} on {resource}"
+        if reason:
+            message = f"{message} ({reason})"
+        super().__init__(
+            message=message,
+            principal_id=principal_id,
+            action=action,
+            resource=resource,
+            details={"reason": reason} if reason else None,
+        )
+        self.reason = reason
+
+
+class InsufficientScopeError(AuthorizationError):
+    """Token does not have required scope.
+
+    Raised when JWT token scopes don't include the required scope
+    for the requested operation.
+    """
+
+    def __init__(
+        self,
+        principal_id: str,
+        required_scope: str,
+        available_scopes: list[str] | None = None,
+    ):
+        super().__init__(
+            message=f"Insufficient scope: required '{required_scope}'",
+            principal_id=principal_id,
+            action="scope_check",
+            resource=required_scope,
+            details={"available_scopes": available_scopes} if available_scopes else None,
+        )
+        self.required_scope = required_scope
+        self.available_scopes = available_scopes or []
+
+
+class TenantAccessDeniedError(AuthorizationError):
+    """Principal cannot access resources in the specified tenant.
+
+    Raised when a principal attempts to access resources in a tenant
+    they don't belong to.
+    """
+
+    def __init__(
+        self,
+        principal_id: str,
+        principal_tenant: str | None,
+        resource_tenant: str,
+    ):
+        super().__init__(
+            message=f"Access denied: cannot access tenant '{resource_tenant}'",
+            principal_id=principal_id,
+            action="tenant_access",
+            resource=resource_tenant,
+            details={
+                "principal_tenant": principal_tenant,
+                "resource_tenant": resource_tenant,
+            },
+        )
+        self.principal_tenant = principal_tenant
+        self.resource_tenant = resource_tenant

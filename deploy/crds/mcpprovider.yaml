@@ -1,0 +1,585 @@
+apiVersion: apiextensions.k8s.io/v1
+kind: CustomResourceDefinition
+metadata:
+  name: mcpproviders.mcp-hangar.io
+  annotations:
+    controller-gen.kubebuilder.io/version: v0.14.0
+  labels:
+    app.kubernetes.io/name: mcp-hangar-operator
+    app.kubernetes.io/part-of: mcp-hangar
+spec:
+  group: mcp-hangar.io
+  names:
+    kind: MCPProvider
+    listKind: MCPProviderList
+    plural: mcpproviders
+    singular: mcpprovider
+    shortNames:
+      - mcpp
+      - provider
+    categories:
+      - mcp
+      - all
+  scope: Namespaced
+  versions:
+    - name: v1alpha1
+      served: true
+      storage: true
+      subresources:
+        status: {}
+        scale:
+          specReplicasPath: .spec.replicas
+          statusReplicasPath: .status.replicas
+      additionalPrinterColumns:
+        - name: Mode
+          type: string
+          jsonPath: .spec.mode
+        - name: State
+          type: string
+          jsonPath: .status.state
+        - name: Tools
+          type: integer
+          jsonPath: .status.toolsCount
+        - name: Ready
+          type: string
+          jsonPath: .status.conditions[?(@.type=="Ready")].status
+        - name: Age
+          type: date
+          jsonPath: .metadata.creationTimestamp
+      schema:
+        openAPIV3Schema:
+          type: object
+          description: MCPProvider defines an MCP tool provider managed by MCP-Hangar
+          required:
+            - spec
+          properties:
+            apiVersion:
+              type: string
+              description: APIVersion defines the versioned schema
+            kind:
+              type: string
+              description: Kind is the resource type
+            metadata:
+              type: object
+            spec:
+              type: object
+              description: MCPProviderSpec defines the desired state
+              required:
+                - mode
+              properties:
+                # === Execution Mode ===
+                mode:
+                  type: string
+                  enum:
+                    - container
+                    - remote
+                  description: |
+                    Provider execution mode.
+                    - container: Run as a Kubernetes Pod
+                    - remote: Connect to external HTTP endpoint
+
+                # === Container Mode Settings ===
+                image:
+                  type: string
+                  description: Container image for the provider (required for container mode)
+                  example: "ghcr.io/modelcontextprotocol/mcp-sqlite:latest"
+
+                command:
+                  type: array
+                  items:
+                    type: string
+                  description: Override container entrypoint
+
+                args:
+                  type: array
+                  items:
+                    type: string
+                  description: Arguments to the entrypoint
+
+                workingDir:
+                  type: string
+                  description: Container working directory
+
+                # === Remote Mode Settings ===
+                endpoint:
+                  type: string
+                  description: HTTP endpoint for remote provider (required for remote mode)
+                  example: "https://mcp-tools.internal.company.com/mcp"
+
+                # === Lifecycle ===
+                replicas:
+                  type: integer
+                  default: 1
+                  minimum: 0
+                  maximum: 10
+                  description: |
+                    Number of provider replicas.
+                    Set to 0 for cold start (provider starts on first request).
+
+                idleTTL:
+                  type: string
+                  default: "5m"
+                  pattern: "^[0-9]+(s|m|h)$"
+                  description: Duration before idle provider is stopped (e.g., 5m, 1h)
+
+                startupTimeout:
+                  type: string
+                  default: "30s"
+                  pattern: "^[0-9]+(s|m|h)$"
+                  description: Maximum time to wait for provider startup
+
+                shutdownGracePeriod:
+                  type: string
+                  default: "30s"
+                  pattern: "^[0-9]+(s|m|h)$"
+                  description: Grace period for graceful shutdown
+
+                # === Health Check ===
+                healthCheck:
+                  type: object
+                  description: Health check configuration
+                  properties:
+                    enabled:
+                      type: boolean
+                      default: true
+                      description: Enable health checks
+                    interval:
+                      type: string
+                      default: "30s"
+                      pattern: "^[0-9]+(s|m|h)$"
+                      description: Interval between health checks
+                    timeout:
+                      type: string
+                      default: "5s"
+                      pattern: "^[0-9]+(s|m|h)$"
+                      description: Timeout for each health check
+                    failureThreshold:
+                      type: integer
+                      default: 3
+                      minimum: 1
+                      maximum: 10
+                      description: Failures before marking unhealthy
+                    successThreshold:
+                      type: integer
+                      default: 1
+                      minimum: 1
+                      maximum: 10
+                      description: Successes before marking healthy
+
+                # === Resources ===
+                resources:
+                  type: object
+                  description: Resource requirements
+                  properties:
+                    requests:
+                      type: object
+                      properties:
+                        cpu:
+                          type: string
+                          pattern: "^[0-9]+(m|[0-9]*)$"
+                          example: "100m"
+                        memory:
+                          type: string
+                          pattern: "^[0-9]+(Ki|Mi|Gi)$"
+                          example: "128Mi"
+                    limits:
+                      type: object
+                      properties:
+                        cpu:
+                          type: string
+                          pattern: "^[0-9]+(m|[0-9]*)$"
+                          example: "500m"
+                        memory:
+                          type: string
+                          pattern: "^[0-9]+(Ki|Mi|Gi)$"
+                          example: "512Mi"
+
+                # === Environment ===
+                env:
+                  type: array
+                  description: Environment variables
+                  items:
+                    type: object
+                    required:
+                      - name
+                    properties:
+                      name:
+                        type: string
+                        description: Environment variable name
+                      value:
+                        type: string
+                        description: Literal value
+                      valueFrom:
+                        type: object
+                        description: Value from Secret or ConfigMap
+                        properties:
+                          secretKeyRef:
+                            type: object
+                            properties:
+                              name:
+                                type: string
+                                description: Secret name
+                              key:
+                                type: string
+                                description: Key within Secret
+                              optional:
+                                type: boolean
+                                default: false
+                          configMapKeyRef:
+                            type: object
+                            properties:
+                              name:
+                                type: string
+                                description: ConfigMap name
+                              key:
+                                type: string
+                                description: Key within ConfigMap
+                              optional:
+                                type: boolean
+                                default: false
+
+                # === Volumes ===
+                volumes:
+                  type: array
+                  description: Volume mounts
+                  items:
+                    type: object
+                    required:
+                      - name
+                      - mountPath
+                    properties:
+                      name:
+                        type: string
+                        description: Volume name
+                      mountPath:
+                        type: string
+                        description: Path within container
+                      subPath:
+                        type: string
+                        description: Sub-path within volume
+                      readOnly:
+                        type: boolean
+                        default: false
+                      secret:
+                        type: object
+                        properties:
+                          secretName:
+                            type: string
+                          items:
+                            type: array
+                            items:
+                              type: object
+                              properties:
+                                key:
+                                  type: string
+                                path:
+                                  type: string
+                      configMap:
+                        type: object
+                        properties:
+                          name:
+                            type: string
+                          items:
+                            type: array
+                            items:
+                              type: object
+                              properties:
+                                key:
+                                  type: string
+                                path:
+                                  type: string
+                      persistentVolumeClaim:
+                        type: object
+                        properties:
+                          claimName:
+                            type: string
+                      emptyDir:
+                        type: object
+                        properties:
+                          medium:
+                            type: string
+                            enum: ["", "Memory"]
+                          sizeLimit:
+                            type: string
+
+                # === Security ===
+                securityContext:
+                  type: object
+                  description: Pod security context
+                  properties:
+                    runAsNonRoot:
+                      type: boolean
+                      default: true
+                    runAsUser:
+                      type: integer
+                      format: int64
+                    runAsGroup:
+                      type: integer
+                      format: int64
+                    fsGroup:
+                      type: integer
+                      format: int64
+                    readOnlyRootFilesystem:
+                      type: boolean
+                      default: true
+                    allowPrivilegeEscalation:
+                      type: boolean
+                      default: false
+                    capabilities:
+                      type: object
+                      properties:
+                        add:
+                          type: array
+                          items:
+                            type: string
+                        drop:
+                          type: array
+                          items:
+                            type: string
+                          default:
+                            - ALL
+                    seccompProfile:
+                      type: object
+                      properties:
+                        type:
+                          type: string
+                          enum:
+                            - RuntimeDefault
+                            - Unconfined
+                            - Localhost
+                          default: RuntimeDefault
+
+                serviceAccountName:
+                  type: string
+                  description: ServiceAccount for the provider pod
+
+                imagePullSecrets:
+                  type: array
+                  items:
+                    type: object
+                    properties:
+                      name:
+                        type: string
+
+                # === Scheduling ===
+                nodeSelector:
+                  type: object
+                  additionalProperties:
+                    type: string
+                  description: Node selector labels
+
+                tolerations:
+                  type: array
+                  items:
+                    type: object
+                    properties:
+                      key:
+                        type: string
+                      operator:
+                        type: string
+                        enum: [Exists, Equal]
+                      value:
+                        type: string
+                      effect:
+                        type: string
+                        enum: [NoSchedule, PreferNoSchedule, NoExecute]
+                      tolerationSeconds:
+                        type: integer
+                        format: int64
+
+                affinity:
+                  type: object
+                  x-kubernetes-preserve-unknown-fields: true
+                  description: Pod affinity rules
+
+                priorityClassName:
+                  type: string
+                  description: Priority class for scheduling
+
+                # === Tool Configuration ===
+                tools:
+                  type: object
+                  description: Tool exposure configuration
+                  properties:
+                    allowList:
+                      type: array
+                      items:
+                        type: string
+                      description: Only expose these tools (empty = all)
+                    denyList:
+                      type: array
+                      items:
+                        type: string
+                      description: Never expose these tools
+                    rateLimit:
+                      type: object
+                      description: Per-tool rate limiting
+                      properties:
+                        requestsPerMinute:
+                          type: integer
+                          minimum: 1
+                          maximum: 10000
+                        burstSize:
+                          type: integer
+                          minimum: 1
+                          maximum: 1000
+
+                # === Circuit Breaker ===
+                circuitBreaker:
+                  type: object
+                  description: Circuit breaker configuration
+                  properties:
+                    enabled:
+                      type: boolean
+                      default: true
+                    failureThreshold:
+                      type: integer
+                      default: 5
+                      minimum: 1
+                    successThreshold:
+                      type: integer
+                      default: 2
+                      minimum: 1
+                    resetTimeout:
+                      type: string
+                      default: "30s"
+                      pattern: "^[0-9]+(s|m|h)$"
+                    halfOpenRequests:
+                      type: integer
+                      default: 3
+                      minimum: 1
+
+                # === Observability ===
+                observability:
+                  type: object
+                  description: Observability settings
+                  properties:
+                    tracing:
+                      type: object
+                      properties:
+                        enabled:
+                          type: boolean
+                          default: false
+                        samplingRate:
+                          type: number
+                          minimum: 0
+                          maximum: 1
+                          default: 0.1
+                    metrics:
+                      type: object
+                      properties:
+                        enabled:
+                          type: boolean
+                          default: true
+                        port:
+                          type: integer
+                          default: 9090
+
+            status:
+              type: object
+              description: MCPProviderStatus defines the observed state
+              properties:
+                state:
+                  type: string
+                  enum:
+                    - Cold
+                    - Initializing
+                    - Ready
+                    - Degraded
+                    - Dead
+                  description: Current provider state
+
+                phase:
+                  type: string
+                  enum:
+                    - Pending
+                    - Running
+                    - Succeeded
+                    - Failed
+                    - Unknown
+                  description: Overall phase
+
+                replicas:
+                  type: integer
+                  description: Desired replicas
+
+                readyReplicas:
+                  type: integer
+                  description: Number of ready replicas
+
+                availableReplicas:
+                  type: integer
+                  description: Number of available replicas
+
+                toolsCount:
+                  type: integer
+                  description: Number of exposed tools
+
+                tools:
+                  type: array
+                  items:
+                    type: string
+                  description: List of tool names
+
+                endpoint:
+                  type: string
+                  description: Internal endpoint URL
+
+                lastStartedAt:
+                  type: string
+                  format: date-time
+                  description: Last startup time
+
+                lastStoppedAt:
+                  type: string
+                  format: date-time
+                  description: Last shutdown time
+
+                lastHealthCheck:
+                  type: string
+                  format: date-time
+                  description: Last successful health check
+
+                consecutiveFailures:
+                  type: integer
+                  description: Consecutive health check failures
+
+                observedGeneration:
+                  type: integer
+                  format: int64
+                  description: Generation observed by controller
+
+                podName:
+                  type: string
+                  description: Name of the managed Pod
+
+                conditions:
+                  type: array
+                  description: Status conditions
+                  items:
+                    type: object
+                    required:
+                      - type
+                      - status
+                    properties:
+                      type:
+                        type: string
+                        description: Condition type
+                      status:
+                        type: string
+                        enum:
+                          - "True"
+                          - "False"
+                          - "Unknown"
+                      lastTransitionTime:
+                        type: string
+                        format: date-time
+                      reason:
+                        type: string
+                        description: Machine-readable reason
+                      message:
+                        type: string
+                        description: Human-readable message
+                      observedGeneration:
+                        type: integer
+                        format: int64

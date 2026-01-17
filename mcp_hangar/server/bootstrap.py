@@ -39,6 +39,8 @@ from ..infrastructure.persistence import SQLiteEventStore
 from ..infrastructure.saga_manager import get_saga_manager
 from ..logging_config import get_logger
 from ..retry import get_retry_store
+from .auth_bootstrap import AuthComponents, bootstrap_auth
+from .auth_config import parse_auth_config
 from .config import load_configuration
 from .context import get_context, init_context
 from .state import (
@@ -97,6 +99,9 @@ class ApplicationContext:
 
     discovery_orchestrator: Optional[DiscoveryOrchestrator] = None
     """Discovery orchestrator if enabled - not started."""
+
+    auth_components: Optional[AuthComponents] = None
+    """Authentication and authorization components."""
 
     config: Dict[str, Any] = field(default_factory=dict)
     """Full configuration dictionary."""
@@ -199,6 +204,13 @@ def bootstrap(config_path: Optional[str] = None) -> ApplicationContext:
         burst_size=runtime.rate_limit_config.burst_size,
     )
 
+    # Initialize authentication and authorization
+    auth_config = parse_auth_config(full_config.get("auth"))
+    auth_components = bootstrap_auth(
+        config=auth_config,
+        event_publisher=lambda event: runtime.event_bus.publish(event),
+    )
+
     # Initialize retry configuration
     _init_retry_config(full_config)
 
@@ -226,6 +238,7 @@ def bootstrap(config_path: Optional[str] = None) -> ApplicationContext:
         providers=provider_ids,
         groups=group_ids,
         discovery_enabled=discovery_orchestrator is not None,
+        auth_enabled=auth_components.enabled,
     )
 
     return ApplicationContext(
@@ -233,6 +246,7 @@ def bootstrap(config_path: Optional[str] = None) -> ApplicationContext:
         mcp_server=mcp_server,
         background_workers=workers,
         discovery_orchestrator=discovery_orchestrator,
+        auth_components=auth_components,
         config=full_config,
     )
 

@@ -141,3 +141,10 @@ class InMemoryEventStore(IEventStore):
         """Get total stream count."""
         with self._lock:
             return len(self._streams)
+
+    def list_streams(self, prefix: str = "") -> list[str]:
+        """List all stream IDs, optionally filtered by prefix."""
+        with self._lock:
+            if prefix:
+                return [sid for sid in self._streams.keys() if sid.startswith(prefix)]
+            return list(self._streams.keys())

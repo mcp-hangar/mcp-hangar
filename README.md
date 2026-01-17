@@ -83,8 +83,9 @@ Full observability stack for production operations:
 - Health check results
 
 **Health Endpoints**
-- `/health` — Liveness check
-- `/ready` — Readiness check (K8s compatible)
+- `/health/live` — Liveness check
+- `/health/ready` — Readiness check (K8s compatible)
+- `/health/startup` — Startup check
 - `/metrics` — Prometheus scrape endpoint
 
 </details>
@@ -265,8 +266,9 @@ observability:
 
 **Endpoints:**
 - `/metrics` — Prometheus metrics
-- `/health` — Liveness probe
-- `/ready` — Readiness probe
+- `/health/live` — Liveness probe
+- `/health/ready` — Readiness probe
+- `/health/startup` — Startup probe
 
 ## Documentation
 

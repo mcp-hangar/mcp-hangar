@@ -1,0 +1,290 @@
+{{- if .Values.crds.install }}
+
+apiVersion: apiextensions.k8s.io/v1
+kind: CustomResourceDefinition
+metadata:
+  name: mcpprovidergroups.mcp-hangar.io
+  annotations:
+    controller-gen.kubebuilder.io/version: v0.14.0
+  labels:
+    app.kubernetes.io/name: mcp-hangar-operator
+    app.kubernetes.io/part-of: mcp-hangar
+spec:
+  group: mcp-hangar.io
+  names:
+    kind: MCPProviderGroup
+    listKind: MCPProviderGroupList
+    plural: mcpprovidergroups
+    singular: mcpprovidergroup
+    shortNames:
+      - mcppg
+      - providergroup
+    categories:
+      - mcp
+      - all
+  scope: Namespaced
+  versions:
+    - name: v1alpha1
+      served: true
+      storage: true
+      subresources:
+        status: {}
+      additionalPrinterColumns:
+        - name: Strategy
+          type: string
+          jsonPath: .spec.strategy
+        - name: Providers
+          type: integer
+          jsonPath: .status.providerCount
+        - name: Ready
+          type: integer
+          jsonPath: .status.readyCount
+        - name: Degraded
+          type: integer
+          jsonPath: .status.degradedCount
+        - name: Age
+          type: date
+          jsonPath: .metadata.creationTimestamp
+      schema:
+        openAPIV3Schema:
+          type: object
+          description: MCPProviderGroup defines a group of providers with load balancing
+          required:
+            - spec
+          properties:
+            apiVersion:
+              type: string
+            kind:
+              type: string
+            metadata:
+              type: object
+            spec:
+              type: object
+              description: MCPProviderGroupSpec defines the desired state
+              required:
+                - selector
+              properties:
+                # === Provider Selection ===
+                selector:
+                  type: object
+                  description: Label selector for MCPProviders
+                  properties:
+                    matchLabels:
+                      type: object
+                      additionalProperties:
+                        type: string
+                      description: Labels to match exactly
+                    matchExpressions:
+                      type: array
+                      description: Label selector requirements
+                      items:
+                        type: object
+                        required:
+                          - key
+                          - operator
+                        properties:
+                          key:
+                            type: string
+                            description: Label key
+                          operator:
+                            type: string
+                            enum:
+                              - In
+                              - NotIn
+                              - Exists
+                              - DoesNotExist
+                            description: Operator for matching
+                          values:
+                            type: array
+                            items:
+                              type: string
+                            description: Values for In/NotIn operators
+
+                # === Load Balancing ===
+                strategy:
+                  type: string
+                  enum:
+                    - RoundRobin
+                    - LeastConnections
+                    - Random
+                    - Weighted
+                    - Failover
+                  default: RoundRobin
+                  description: |
+                    Load balancing strategy:
+                    - RoundRobin: Distribute requests evenly
+                    - LeastConnections: Send to least busy provider
+                    - Random: Random selection
+                    - Weighted: Use provider weights
+                    - Failover: Primary with fallbacks
+
+                # === Failover Configuration ===
+                failover:
+                  type: object
+                  description: Failover behavior configuration
+                  properties:
+                    enabled:
+                      type: boolean
+                      default: true
+                      description: Enable automatic failover
+                    maxRetries:
+                      type: integer
+                      default: 2
+                      minimum: 0
+                      maximum: 10
+                      description: Max retry attempts on failure
+                    retryDelay:
+                      type: string
+                      default: "1s"
+                      pattern: "^[0-9]+(ms|s)$"
+                      description: Delay between retries
+                    retryOn:
+                      type: array
+                      items:
+                        type: string
+                        enum:
+                          - timeout
+                          - connection_error
+                          - server_error
+                          - circuit_open
+                      default:
+                        - timeout
+                        - connection_error
+                      description: Conditions triggering retry
+
+                # === Health Policy ===
+                healthPolicy:
+                  type: object
+                  description: Group health requirements
+                  properties:
+                    minHealthyPercentage:
+                      type: integer
+                      default: 50
+                      minimum: 0
+                      maximum: 100
+                      description: Minimum healthy providers percentage
+                    minHealthyCount:
+                      type: integer
+                      minimum: 0
+                      description: Minimum healthy provider count (overrides percentage)
+                    unhealthyThreshold:
+                      type: integer
+                      default: 3
+                      minimum: 1
+                      description: Consecutive failures before marking unhealthy
+
+                # === Session Affinity ===
+                sessionAffinity:
+                  type: object
+                  description: Session affinity configuration
+                  properties:
+                    enabled:
+                      type: boolean
+                      default: false
+                    type:
+                      type: string
+                      enum:
+                        - ClientIP
+                        - Header
+                      default: ClientIP
+                    header:
+                      type: string
+                      description: Header name for Header affinity type
+                    ttl:
+                      type: string
+                      default: "10m"
+                      pattern: "^[0-9]+(s|m|h)$"
+                      description: Session TTL
+
+                # === Circuit Breaker (Group Level) ===
+                circuitBreaker:
+                  type: object
+                  description: Group-level circuit breaker
+                  properties:
+                    enabled:
+                      type: boolean
+                      default: false
+                      description: Enable group circuit breaker
+                    failureThreshold:
+                      type: integer
+                      default: 10
+                    resetTimeout:
+                      type: string
+                      default: "1m"
+
+            status:
+              type: object
+              description: MCPProviderGroupStatus defines observed state
+              properties:
+                providerCount:
+                  type: integer
+                  description: Total providers in group
+
+                readyCount:
+                  type: integer
+                  description: Ready providers
+
+                degradedCount:
+                  type: integer
+                  description: Degraded providers
+
+                coldCount:
+                  type: integer
+                  description: Cold (stopped) providers
+
+                deadCount:
+                  type: integer
+                  description: Dead providers
+
+                activeStrategy:
+                  type: string
+                  description: Currently active strategy
+
+                providers:
+                  type: array
+                  description: Provider member details
+                  items:
+                    type: object
+                    properties:
+                      name:
+                        type: string
+                      namespace:
+                        type: string
+                      state:
+                        type: string
+                      weight:
+                        type: integer
+                      activeConnections:
+                        type: integer
+                      lastHealthCheck:
+                        type: string
+                        format: date-time
+
+                observedGeneration:
+                  type: integer
+                  format: int64
+
+                conditions:
+                  type: array
+                  items:
+                    type: object
+                    required:
+                      - type
+                      - status
+                    properties:
+                      type:
+                        type: string
+                      status:
+                        type: string
+                        enum:
+                          - "True"
+                          - "False"
+                          - "Unknown"
+                      lastTransitionTime:
+                        type: string
+                        format: date-time
+                      reason:
+                        type: string
+                      message:
+                        type: string
+{{- end }}

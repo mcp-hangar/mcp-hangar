@@ -35,11 +35,14 @@ Usage:
 """
 
 from dataclasses import dataclass
-from typing import Any, Dict, Optional, Protocol
+from typing import Any, Dict, Optional, Protocol, TYPE_CHECKING
 
 from mcp.server.fastmcp import FastMCP
 
 from .logging_config import get_logger
+
+if TYPE_CHECKING:
+    from .server.auth_bootstrap import AuthComponents
 
 logger = get_logger(__name__)
 
@@ -218,6 +221,9 @@ class ServerConfig:
         streamable_http_path: Path for MCP streamable HTTP endpoint.
         sse_path: Path for SSE endpoint.
         message_path: Path for message endpoint.
+        auth_enabled: Whether authentication is enabled (opt-in, default False).
+        auth_skip_paths: Paths to skip authentication (health, metrics, etc.).
+        trusted_proxies: Set of trusted proxy IPs for X-Forwarded-For.
     """
 
     host: str = "0.0.0.0"
@@ -225,6 +231,10 @@ class ServerConfig:
     streamable_http_path: str = "/mcp"
     sse_path: str = "/sse"
     message_path: str = "/messages/"
+    # Auth configuration (opt-in)
+    auth_enabled: bool = False
+    auth_skip_paths: tuple[str, ...] = ("/health", "/ready", "/_ready", "/metrics")
+    trusted_proxies: frozenset[str] = frozenset(["127.0.0.1", "::1"])
 
 
 # =============================================================================
@@ -244,11 +254,20 @@ class MCPServerFactory:
         mcp = factory.create_server()
         app = factory.create_asgi_app()
 
+        # With authentication (opt-in)
+        factory = MCPServerFactory(
+            registry_functions,
+            auth_components=auth_components,
+            config=ServerConfig(auth_enabled=True),
+        )
+        app = factory.create_asgi_app()
+
         # Or use the builder pattern
         factory = (MCPServerFactory.builder()
             .with_registry(list_fn, start_fn, ...)
             .with_discovery(discover_fn, ...)
-            .with_config(host="0.0.0.0", port=9000)
+            .with_auth(auth_components)
+            .with_config(host="0.0.0.0", port=9000, auth_enabled=True)
             .build())
     """
 
@@ -256,15 +275,18 @@ class MCPServerFactory:
         self,
         registry: RegistryFunctions,
         config: Optional[ServerConfig] = None,
+        auth_components: Optional["AuthComponents"] = None,
     ):
         """Initialize factory with dependencies.
 
         Args:
             registry: Registry function implementations.
             config: Server configuration (uses defaults if None).
+            auth_components: Optional auth components for authentication/authorization.
         """
         self._registry = registry
         self._config = config or ServerConfig()
+        self._auth_components = auth_components
         self._mcp: Optional[FastMCP] = None
 
     @classmethod
@@ -328,6 +350,9 @@ class MCPServerFactory:
         - /metrics: Prometheus metrics
         - /mcp: MCP streamable HTTP endpoint (and related paths)
 
+        If auth is enabled (config.auth_enabled=True and auth_components provided),
+        the auth middleware will be applied to protect MCP endpoints.
+
         Returns:
             Combined ASGI app callable.
         """
@@ -339,6 +364,15 @@ class MCPServerFactory:
 
         mcp = self.create_server()
         mcp_app = mcp.streamable_http_app()
+
+        # Log if auth is configured (actual wrapping happens in _create_auth_combined_app)
+        if self._config.auth_enabled and self._auth_components:
+
+            logger.info(
+                "auth_middleware_enabled",
+                skip_paths=self._config.auth_skip_paths,
+                trusted_proxies=list(self._config.trusted_proxies),
+            )
 
         # Health endpoint (liveness)
         async def health_endpoint(request):
@@ -372,16 +406,114 @@ class MCPServerFactory:
 
         aux_app = Starlette(routes=routes)
 
-        async def combined_app(scope, receive, send):
-            """Combined ASGI app that routes to metrics/health or MCP."""
-            if scope["type"] == "http":
-                path = scope.get("path", "")
-                if path in ("/health", "/ready", "/metrics"):
-                    await aux_app(scope, receive, send)
-                    return
-            await mcp_app(scope, receive, send)
+        # Create auth-aware combined app
+        if self._config.auth_enabled and self._auth_components:
+            combined_app = self._create_auth_combined_app(aux_app, mcp_app)
+        else:
+
+            async def combined_app(scope, receive, send):
+                """Combined ASGI app that routes to metrics/health or MCP."""
+                if scope["type"] == "http":
+                    path = scope.get("path", "")
+                    if path in ("/health", "/ready", "/metrics"):
+                        await aux_app(scope, receive, send)
+                        return
+                await mcp_app(scope, receive, send)
 
         return combined_app
+
+    def _create_auth_combined_app(self, aux_app, mcp_app):
+        """Create auth-enabled combined ASGI app.
+
+        This wraps the MCP app with authentication middleware while
+        keeping health/metrics endpoints unprotected.
+
+        Args:
+            aux_app: Starlette app for health/metrics endpoints.
+            mcp_app: FastMCP ASGI app.
+
+        Returns:
+            Combined ASGI app with auth middleware.
+        """
+        from starlette.responses import JSONResponse
+
+        from .domain.contracts.authentication import AuthRequest
+        from .domain.exceptions import AccessDeniedError, AuthenticationError
+
+        auth_components = self._auth_components
+        skip_paths = set(self._config.auth_skip_paths)
+        trusted_proxies = self._config.trusted_proxies
+
+        async def auth_combined_app(scope, receive, send):
+            """Combined ASGI app with authentication for MCP endpoints."""
+            if scope["type"] != "http":
+                # Non-HTTP (e.g., lifespan) - pass through
+                await mcp_app(scope, receive, send)
+                return
+
+            path = scope.get("path", "")
+
+            # Skip auth for health/metrics endpoints
+            if path in skip_paths:
+                await aux_app(scope, receive, send)
+                return
+
+            # For MCP endpoints, apply authentication
+            # Build headers dict from scope
+            headers = {}
+            for key, value in scope.get("headers", []):
+                headers[key.decode("latin-1").lower()] = value.decode("latin-1")
+
+            # Get client IP
+            client = scope.get("client")
+            source_ip = client[0] if client else "unknown"
+
+            # Trust X-Forwarded-For only from trusted proxies
+            if source_ip in trusted_proxies:
+                forwarded_for = headers.get("x-forwarded-for")
+                if forwarded_for:
+                    source_ip = forwarded_for.split(",")[0].strip()
+
+            # Create auth request
+            auth_request = AuthRequest(
+                headers=headers,
+                source_ip=source_ip,
+                method=scope.get("method", ""),
+                path=path,
+            )
+
+            try:
+                # Authenticate
+                auth_context = auth_components.authn_middleware.authenticate(auth_request)
+
+                # Store auth context in scope for downstream handlers
+                scope["auth"] = auth_context
+
+                # Pass to MCP app
+                await mcp_app(scope, receive, send)
+
+            except AuthenticationError as e:
+                response = JSONResponse(
+                    status_code=401,
+                    content={
+                        "error": "authentication_failed",
+                        "message": e.message,
+                    },
+                    headers={"WWW-Authenticate": "Bearer, ApiKey"},
+                )
+                await response(scope, receive, send)
+
+            except AccessDeniedError as e:
+                response = JSONResponse(
+                    status_code=403,
+                    content={
+                        "error": "access_denied",
+                        "message": str(e),
+                    },
+                )
+                await response(scope, receive, send)
+
+        return auth_combined_app
 
     def _register_core_tools(self, mcp: FastMCP) -> None:
         """Register core registry tools.
@@ -625,6 +757,7 @@ class MCPServerFactoryBuilder:
         self._metrics_fn: Optional[RegistryMetricsFn] = None
 
         self._config: Optional[ServerConfig] = None
+        self._auth_components: Optional["AuthComponents"] = None
 
     def with_registry(
         self,
@@ -696,6 +829,9 @@ class MCPServerFactoryBuilder:
         streamable_http_path: str = "/mcp",
         sse_path: str = "/sse",
         message_path: str = "/messages/",
+        auth_enabled: bool = False,
+        auth_skip_paths: tuple[str, ...] = ("/health", "/ready", "/_ready", "/metrics"),
+        trusted_proxies: frozenset[str] = frozenset(["127.0.0.1", "::1"]),
     ) -> "MCPServerFactoryBuilder":
         """Set server configuration.
 
@@ -705,6 +841,9 @@ class MCPServerFactoryBuilder:
             streamable_http_path: Path for MCP streamable HTTP endpoint.
             sse_path: Path for SSE endpoint.
             message_path: Path for message endpoint.
+            auth_enabled: Whether to enable authentication (default: False).
+            auth_skip_paths: Paths to skip authentication.
+            trusted_proxies: Trusted proxy IPs for X-Forwarded-For.
 
         Returns:
             Self for chaining.
@@ -715,7 +854,29 @@ class MCPServerFactoryBuilder:
             streamable_http_path=streamable_http_path,
             sse_path=sse_path,
             message_path=message_path,
+            auth_enabled=auth_enabled,
+            auth_skip_paths=auth_skip_paths,
+            trusted_proxies=trusted_proxies,
         )
+        return self
+
+    def with_auth(
+        self,
+        auth_components: "AuthComponents",
+    ) -> "MCPServerFactoryBuilder":
+        """Set authentication components.
+
+        Args:
+            auth_components: Auth components from bootstrap_auth().
+
+        Returns:
+            Self for chaining.
+
+        Note:
+            You also need to set auth_enabled=True in with_config() for
+            authentication to be active.
+        """
+        self._auth_components = auth_components
         return self
 
     def build(self) -> MCPServerFactory:
@@ -756,7 +917,7 @@ class MCPServerFactoryBuilder:
             metrics=self._metrics_fn,
         )
 
-        return MCPServerFactory(registry, self._config)
+        return MCPServerFactory(registry, self._config, self._auth_components)
 
 
 # =============================================================================

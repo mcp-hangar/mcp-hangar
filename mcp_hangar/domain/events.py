@@ -260,3 +260,174 @@ class DiscoverySourceHealthChanged(DomainEvent):
 
     def __post_init__(self):
         super().__init__()
+
+
+# Authentication & Authorization Events
+
+
+@dataclass
+class AuthenticationSucceeded(DomainEvent):
+    """Published when a principal successfully authenticates.
+
+    Attributes:
+        principal_id: The authenticated principal's identifier.
+        principal_type: Type of principal (user, service_account, system).
+        auth_method: Authentication method used (api_key, jwt, mtls).
+        source_ip: IP address of the request origin.
+        tenant_id: Optional tenant identifier if multi-tenancy is enabled.
+    """
+
+    principal_id: str
+    principal_type: str
+    auth_method: str
+    source_ip: str
+    tenant_id: str | None = None
+
+    def __post_init__(self):
+        super().__init__()
+
+
+@dataclass
+class AuthenticationFailed(DomainEvent):
+    """Published when authentication fails.
+
+    Attributes:
+        auth_method: Authentication method that was attempted.
+        source_ip: IP address of the request origin.
+        reason: Reason for failure (invalid_token, expired, revoked, unknown_key).
+        attempted_principal_id: Optional principal ID if it could be extracted.
+    """
+
+    auth_method: str
+    source_ip: str
+    reason: str
+    attempted_principal_id: str | None = None
+
+    def __post_init__(self):
+        super().__init__()
+
+
+@dataclass
+class AuthorizationDenied(DomainEvent):
+    """Published when an authorized principal is denied access.
+
+    Attributes:
+        principal_id: The principal who was denied.
+        action: The action that was attempted.
+        resource_type: Type of resource being accessed.
+        resource_id: Specific resource identifier.
+        reason: Why access was denied.
+    """
+
+    principal_id: str
+    action: str
+    resource_type: str
+    resource_id: str
+    reason: str
+
+    def __post_init__(self):
+        super().__init__()
+
+
+@dataclass
+class AuthorizationGranted(DomainEvent):
+    """Published when authorization is granted (for audit trail).
+
+    Attributes:
+        principal_id: The principal who was granted access.
+        action: The action that was authorized.
+        resource_type: Type of resource being accessed.
+        resource_id: Specific resource identifier.
+        granted_by_role: Role that granted the permission.
+    """
+
+    principal_id: str
+    action: str
+    resource_type: str
+    resource_id: str
+    granted_by_role: str
+
+    def __post_init__(self):
+        super().__init__()
+
+
+@dataclass
+class RoleAssigned(DomainEvent):
+    """Published when a role is assigned to a principal.
+
+    Attributes:
+        principal_id: Principal receiving the role.
+        role_name: Name of the role being assigned.
+        scope: Scope of the assignment (global, tenant:X, namespace:Y).
+        assigned_by: Principal who made the assignment.
+    """
+
+    principal_id: str
+    role_name: str
+    scope: str
+    assigned_by: str
+
+    def __post_init__(self):
+        super().__init__()
+
+
+@dataclass
+class RoleRevoked(DomainEvent):
+    """Published when a role is revoked from a principal.
+
+    Attributes:
+        principal_id: Principal losing the role.
+        role_name: Name of the role being revoked.
+        scope: Scope from which the role is being revoked.
+        revoked_by: Principal who made the revocation.
+    """
+
+    principal_id: str
+    role_name: str
+    scope: str
+    revoked_by: str
+
+    def __post_init__(self):
+        super().__init__()
+
+
+@dataclass
+class ApiKeyCreated(DomainEvent):
+    """Published when a new API key is created.
+
+    Attributes:
+        key_id: Unique identifier of the key (not the key itself).
+        principal_id: Principal the key authenticates as.
+        key_name: Human-readable name for the key.
+        expires_at: Optional expiration timestamp.
+        created_by: Principal who created the key.
+    """
+
+    key_id: str
+    principal_id: str
+    key_name: str
+    expires_at: float | None
+    created_by: str
+
+    def __post_init__(self):
+        super().__init__()
+
+
+@dataclass
+class ApiKeyRevoked(DomainEvent):
+    """Published when an API key is revoked.
+
+    Attributes:
+        key_id: Unique identifier of the revoked key.
+        principal_id: Principal the key belonged to.
+        revoked_by: Principal who revoked the key.
+        reason: Optional reason for revocation.
+    """
+
+    key_id: str
+    principal_id: str
+    revoked_by: str
+    reason: str = ""
+
+    def __post_init__(self):
+        super().__init__()
