@@ -9,7 +9,7 @@ proper layer separation (infrastructure should not define business commands).
 """
 
 from abc import ABC, abstractmethod
-from typing import TYPE_CHECKING, Any, Optional
+from typing import TYPE_CHECKING, Any
 
 from mcp_hangar.logging_config import get_logger
 
@@ -95,7 +95,7 @@ class CommandBus:
 
 
 # Global command bus instance
-_command_bus: Optional[CommandBus] = None
+_command_bus: CommandBus | None = None
 
 
 def get_command_bus() -> CommandBus:

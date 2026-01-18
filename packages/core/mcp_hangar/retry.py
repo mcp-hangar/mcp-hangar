@@ -29,7 +29,7 @@ import time
 from collections.abc import Callable
 from dataclasses import dataclass, field
 from enum import Enum
-from typing import Any, Optional, TypeVar
+from typing import Any, TypeVar
 
 from .errors import is_retryable
 from .logging_config import get_logger
@@ -140,7 +140,7 @@ class RetryResult:
 
     success: bool
     result: Any = None
-    final_error: Optional[Exception] = None
+    final_error: Exception | None = None
     attempts: list[RetryAttempt] = field(default_factory=list)
     total_time_s: float = 0.0
 
@@ -241,7 +241,7 @@ async def retry_async(
     policy: RetryPolicy,
     provider: str = "",
     operation_name: str = "",
-    on_retry: Optional[Callable[[int, Exception, float], None]] = None,
+    on_retry: Callable[[int, Exception, float], None] | None = None,
 ) -> RetryResult:
     """Execute an async operation with retry logic.
 
@@ -257,7 +257,7 @@ async def retry_async(
     """
     start_time = time.time()
     attempts: list[RetryAttempt] = []
-    last_error: Optional[Exception] = None
+    last_error: Exception | None = None
 
     for attempt in range(policy.max_attempts):
         try:
@@ -361,7 +361,7 @@ def retry_sync(
     policy: RetryPolicy,
     provider: str = "",
     operation_name: str = "",
-    on_retry: Optional[Callable[[int, Exception, float], None]] = None,
+    on_retry: Callable[[int, Exception, float], None] | None = None,
 ) -> RetryResult:
     """Execute a sync operation with retry logic.
 
@@ -377,7 +377,7 @@ def retry_sync(
     """
     start_time = time.time()
     attempts: list[RetryAttempt] = []
-    last_error: Optional[Exception] = None
+    last_error: Exception | None = None
 
     for attempt in range(policy.max_attempts):
         try:
@@ -561,7 +561,7 @@ def get_retry_policy(provider_id: str) -> RetryPolicy:
 
 
 def with_retry(
-    policy: Optional[RetryPolicy] = None,
+    policy: RetryPolicy | None = None,
     provider: str = "",
     operation: str = "",
 ):

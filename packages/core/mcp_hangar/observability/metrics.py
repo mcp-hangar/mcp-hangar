@@ -249,8 +249,8 @@ class ObservabilityMetrics:
     def update_provider_resources(
         self,
         provider: str,
-        memory_bytes: Optional[int] = None,
-        cpu_percent: Optional[float] = None,
+        memory_bytes: int | None = None,
+        cpu_percent: float | None = None,
     ) -> None:
         """Update provider resource metrics.
 
@@ -297,7 +297,7 @@ class ObservabilityMetrics:
 
 
 # Singleton accessor
-_metrics_instance: Optional[ObservabilityMetrics] = None
+_metrics_instance: ObservabilityMetrics | None = None
 
 
 def get_observability_metrics() -> ObservabilityMetrics:

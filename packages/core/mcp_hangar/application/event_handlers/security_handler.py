@@ -19,7 +19,7 @@ from abc import ABC, abstractmethod
 from dataclasses import dataclass, field
 from datetime import UTC, datetime
 from enum import Enum
-from typing import Any, Optional
+from typing import Any
 
 from ...domain.events import (
     DomainEvent,
@@ -84,17 +84,17 @@ class SecurityEvent:
     timestamp: datetime = field(default_factory=lambda: datetime.now(UTC))
 
     # Context
-    provider_id: Optional[str] = None
-    tool_name: Optional[str] = None
-    source_ip: Optional[str] = None
-    user_id: Optional[str] = None
+    provider_id: str | None = None
+    tool_name: str | None = None
+    source_ip: str | None = None
+    user_id: str | None = None
 
     # Details
     details: dict[str, Any] = field(default_factory=dict)
 
     # Tracking
     event_id: str = field(default_factory=lambda: "")
-    correlation_id: Optional[str] = None
+    correlation_id: str | None = None
 
     def __post_init__(self):
         """Generate event ID if not provided."""
@@ -173,10 +173,10 @@ class InMemorySecuritySink(SecurityEventSink):
 
     def query(
         self,
-        event_type: Optional[SecurityEventType] = None,
-        severity: Optional[SecuritySeverity] = None,
-        provider_id: Optional[str] = None,
-        since: Optional[datetime] = None,
+        event_type: SecurityEventType | None = None,
+        severity: SecuritySeverity | None = None,
+        provider_id: str | None = None,
+        since: datetime | None = None,
         limit: int = 100,
     ) -> list[SecurityEvent]:
         """Query stored security events."""
@@ -275,7 +275,7 @@ class SecurityEventHandler:
 
     def __init__(
         self,
-        sink: Optional[SecurityEventSink] = None,
+        sink: SecurityEventSink | None = None,
         enable_anomaly_detection: bool = True,
     ):
         """
@@ -465,10 +465,10 @@ class SecurityEventHandler:
 
     def log_rate_limit_exceeded(
         self,
-        provider_id: Optional[str] = None,
+        provider_id: str | None = None,
         limit: int = 0,
         window_seconds: int = 0,
-        source_ip: Optional[str] = None,
+        source_ip: str | None = None,
     ) -> None:
         """Log a rate limit violation."""
         self._emit(
@@ -489,8 +489,8 @@ class SecurityEventHandler:
         self,
         field: str,
         message: str,
-        provider_id: Optional[str] = None,
-        value: Optional[str] = None,
+        provider_id: str | None = None,
+        value: str | None = None,
     ) -> None:
         """Log a validation failure."""
         # Determine severity based on field
@@ -517,8 +517,8 @@ class SecurityEventHandler:
         self,
         field: str,
         pattern: str,
-        provider_id: Optional[str] = None,
-        source_ip: Optional[str] = None,
+        provider_id: str | None = None,
+        source_ip: str | None = None,
     ) -> None:
         """Log a potential injection attempt."""
         self._emit(
@@ -538,7 +538,7 @@ class SecurityEventHandler:
     def log_suspicious_command(
         self,
         command: list[str],
-        provider_id: Optional[str] = None,
+        provider_id: str | None = None,
         reason: str = "",
     ) -> None:
         """Log a suspicious command execution attempt."""
@@ -561,9 +561,9 @@ class SecurityEventHandler:
     def log_config_change(
         self,
         change_type: str,
-        provider_id: Optional[str] = None,
-        user_id: Optional[str] = None,
-        details: Optional[dict[str, Any]] = None,
+        provider_id: str | None = None,
+        user_id: str | None = None,
+        details: dict[str, Any] | None = None,
     ) -> None:
         """Log a configuration change."""
         self._emit(
@@ -585,11 +585,11 @@ class SecurityEventHandler:
 
 # --- Global security handler instance ---
 
-_security_handler: Optional[SecurityEventHandler] = None
+_security_handler: SecurityEventHandler | None = None
 
 
 def get_security_handler(
-    sink: Optional[SecurityEventSink] = None,
+    sink: SecurityEventSink | None = None,
 ) -> SecurityEventHandler:
     """Get or create the global security handler instance."""
     global _security_handler

@@ -49,7 +49,7 @@ class AsyncExecutor:
             max_workers: Maximum number of concurrent background threads
         """
         self._max_workers = max_workers
-        self._executor: Optional[ThreadPoolExecutor] = None
+        self._executor: ThreadPoolExecutor | None = None
         self._started = False
 
     @classmethod
@@ -70,8 +70,8 @@ class AsyncExecutor:
     def submit(
         self,
         coro: Coroutine[Any, Any, Any],
-        on_success: Optional[Callable[[Any], None]] = None,
-        on_error: Optional[Callable[[Exception], None]] = None,
+        on_success: Callable[[Any], None] | None = None,
+        on_error: Callable[[Exception], None] | None = None,
     ) -> None:
         """Submit an async coroutine for background execution.
 
@@ -93,7 +93,7 @@ class AsyncExecutor:
                         on_success(result)
                     except (TypeError, ValueError, RuntimeError) as e:
                         logger.debug("async_executor_callback_error", error=str(e))
-            except (asyncio.CancelledError, asyncio.TimeoutError, ValueError, RuntimeError, OSError) as e:
+            except (TimeoutError, asyncio.CancelledError, ValueError, RuntimeError, OSError) as e:
                 # Handle expected async/runtime errors
                 if on_error:
                     try:
@@ -123,7 +123,7 @@ async_executor = AsyncExecutor.get_instance()
 
 def submit_async(
     coro: Coroutine[Any, Any, Any],
-    on_error: Optional[Callable[[Exception], None]] = None,
+    on_error: Callable[[Exception], None] | None = None,
 ) -> None:
     """Convenience function to submit an async operation.
 

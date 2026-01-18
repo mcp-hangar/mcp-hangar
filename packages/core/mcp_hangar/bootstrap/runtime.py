@@ -11,7 +11,7 @@ from __future__ import annotations
 
 import os
 from dataclasses import dataclass
-from typing import Any, Optional, Protocol, runtime_checkable
+from typing import Any, Protocol, runtime_checkable
 
 from ..application.event_handlers import get_security_handler
 from ..application.ports.observability import NullObservabilityAdapter, ObservabilityPort
@@ -65,8 +65,8 @@ class ISecurityHandler(Protocol):
         self,
         field: str,
         message: str,
-        provider_id: Optional[str] = None,
-        value: Optional[str] = None,
+        provider_id: str | None = None,
+        value: str | None = None,
     ) -> None:
         """Log validation failure."""
         ...
@@ -80,7 +80,7 @@ class IConfigRepository(Protocol):
         """Save a configuration."""
         ...
 
-    async def get(self, provider_id: str) -> Optional[Any]:
+    async def get(self, provider_id: str) -> Any | None:
         """Get configuration by provider ID."""
         ...
 
@@ -152,26 +152,26 @@ class Runtime:
     security_handler: ISecurityHandler
 
     # Persistence components (optional)
-    persistence_config: Optional[PersistenceConfig] = None
-    database: Optional[Database] = None
-    config_repository: Optional[IConfigRepository] = None
-    audit_repository: Optional[IAuditRepository] = None
-    recovery_service: Optional[RecoveryService] = None
+    persistence_config: PersistenceConfig | None = None
+    database: Database | None = None
+    config_repository: IConfigRepository | None = None
+    audit_repository: IAuditRepository | None = None
+    recovery_service: RecoveryService | None = None
 
     # Observability components (optional)
-    observability_config: Optional[ObservabilityConfig] = None
-    observability: Optional[ObservabilityPort] = None
+    observability_config: ObservabilityConfig | None = None
+    observability: ObservabilityPort | None = None
 
 
 def create_runtime(
     *,
-    repository: Optional[IProviderRepository] = None,
-    event_bus: Optional[EventBus] = None,
-    command_bus: Optional[CommandBus] = None,
-    query_bus: Optional[QueryBus] = None,
-    persistence_config: Optional[PersistenceConfig] = None,
-    observability_config: Optional[ObservabilityConfig] = None,
-    env: Optional[dict[str, str]] = None,
+    repository: IProviderRepository | None = None,
+    event_bus: EventBus | None = None,
+    command_bus: CommandBus | None = None,
+    query_bus: QueryBus | None = None,
+    persistence_config: PersistenceConfig | None = None,
+    observability_config: ObservabilityConfig | None = None,
+    env: dict[str, str] | None = None,
 ) -> Runtime:
     """Create runtime dependencies explicitly.
 

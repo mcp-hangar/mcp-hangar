@@ -6,7 +6,6 @@ persistent IAuditRepository implementation.
 
 import asyncio
 from datetime import UTC, datetime
-from typing import Optional
 
 from ...domain.contracts.persistence import AuditAction, AuditEntry, IAuditRepository
 from ...infrastructure.async_executor import submit_async
@@ -56,9 +55,9 @@ class PersistentAuditStore(AuditStore):
 
     def query(
         self,
-        provider_id: Optional[str] = None,
-        event_type: Optional[str] = None,
-        since: Optional[datetime] = None,
+        provider_id: str | None = None,
+        event_type: str | None = None,
+        since: datetime | None = None,
         limit: int = 100,
     ) -> list[AuditRecord]:
         """Query audit records.
@@ -191,8 +190,8 @@ class PersistentAuditStore(AuditStore):
 
 def create_persistent_audit_handler(
     repository: IAuditRepository,
-    include_event_types: Optional[list[str]] = None,
-    exclude_event_types: Optional[list[str]] = None,
+    include_event_types: list[str] | None = None,
+    exclude_event_types: list[str] | None = None,
 ):
     """Create AuditEventHandler with persistent storage.
 

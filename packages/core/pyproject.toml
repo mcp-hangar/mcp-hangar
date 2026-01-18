@@ -72,6 +72,26 @@ target-version = "py311"
 
 [tool.ruff.lint]
 select = ["E", "F", "I", "N", "W", "UP", "B", "C4", "SIM"]
+ignore = [
+    "B007",   # Loop control variable not used - often intentional
+    "B011",   # assert False - acceptable in tests
+    "B017",   # pytest.raises(Exception) - acceptable in tests
+    "B024",   # Abstract class without abstract methods - acceptable pattern
+    "B027",   # Empty method in ABC without abstract decorator - intentional hooks
+    "B904",   # raise ... from err - not always needed
+    "C401",   # Unnecessary generator - preference
+    "C416",   # Unnecessary list comprehension - preference
+    "N806",   # Variable in function should be lowercase - Mock classes ok
+    "N818",   # Exception name without Error suffix - existing API
+    "SIM102", # Nested if statements - readability preference
+    "SIM103", # Return condition directly - readability preference
+    "SIM105", # contextlib.suppress - explicit try/except more readable
+    "SIM108", # Ternary operator - readability preference
+    "SIM110", # any() instead of for loop - readability preference
+    "SIM117", # Nested with statements - readability preference
+    "SIM118", # key in dict - minor style
+    "UP038",  # isinstance union - requires Python 3.10+
+]
 
 [tool.mypy]
 python_version = "3.11"

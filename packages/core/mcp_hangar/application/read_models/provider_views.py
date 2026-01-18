@@ -5,7 +5,7 @@ They are immutable and contain only the data needed for display.
 """
 
 from dataclasses import dataclass, field
-from typing import Any, Optional
+from typing import Any
 
 
 @dataclass(frozen=True)
@@ -15,7 +15,7 @@ class ToolInfo:
     name: str
     description: str
     input_schema: dict[str, Any]
-    output_schema: Optional[dict[str, Any]] = None
+    output_schema: dict[str, Any] | None = None
 
     def to_dict(self) -> dict[str, Any]:
         """Convert to dictionary."""
@@ -38,8 +38,8 @@ class HealthInfo:
     total_failures: int
     success_rate: float
     can_retry: bool
-    last_success_ago: Optional[float] = None  # seconds since last success
-    last_failure_ago: Optional[float] = None  # seconds since last failure
+    last_success_ago: float | None = None  # seconds since last success
+    last_failure_ago: float | None = None  # seconds since last failure
 
     def to_dict(self) -> dict[str, Any]:
         """Convert to dictionary."""
@@ -67,7 +67,7 @@ class ProviderSummary:
     is_alive: bool
     tools_count: int
     health_status: str  # healthy, degraded, unhealthy
-    description: Optional[str] = None
+    description: str | None = None
     tools_predefined: bool = False  # True if tools were defined in config (no startup needed)
 
     def to_dict(self) -> dict[str, Any]:

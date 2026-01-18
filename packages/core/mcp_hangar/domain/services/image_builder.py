@@ -6,7 +6,6 @@ import shutil
 import subprocess
 from dataclasses import dataclass
 from pathlib import Path
-from typing import Optional
 
 from ...logging_config import get_logger
 from ..exceptions import ProviderStartError
@@ -20,8 +19,8 @@ class BuildConfig:
 
     dockerfile: str
     context: str = "."
-    tag: Optional[str] = None
-    build_args: Optional[dict] = None
+    tag: str | None = None
+    build_args: dict | None = None
 
 
 class ImageBuilder:
@@ -35,7 +34,7 @@ class ImageBuilder:
     - Generate deterministic tags based on Dockerfile hash
     """
 
-    def __init__(self, runtime: str = "auto", base_path: Optional[str] = None):
+    def __init__(self, runtime: str = "auto", base_path: str | None = None):
         """
         Initialize image builder.
 
@@ -83,7 +82,7 @@ class ImageBuilder:
             reason="No container runtime found. Install podman or docker.",
         )
 
-    def _find_runtime(self, preference: str) -> Optional[str]:
+    def _find_runtime(self, preference: str) -> str | None:
         """
         Find container runtime executable.
 
@@ -300,10 +299,10 @@ class ImageBuilder:
 
 
 # Singleton instance
-_builder_instance: Optional[ImageBuilder] = None
+_builder_instance: ImageBuilder | None = None
 
 
-def get_image_builder(runtime: str = "auto", base_path: Optional[str] = None) -> ImageBuilder:
+def get_image_builder(runtime: str = "auto", base_path: str | None = None) -> ImageBuilder:
     """
     Get or create the ImageBuilder singleton.
 

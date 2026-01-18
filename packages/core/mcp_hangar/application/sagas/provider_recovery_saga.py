@@ -1,7 +1,6 @@
 """Provider Recovery Saga - automatically recover degraded providers."""
 
 import time
-from typing import Optional
 
 from ...domain.events import DomainEvent, HealthCheckFailed, ProviderDegraded, ProviderStarted, ProviderStopped
 from ...infrastructure.saga_manager import EventTriggeredSaga
@@ -155,7 +154,7 @@ class ProviderRecoverySaga(EventTriggeredSaga):
         backoff = self._initial_backoff_s * (self._backoff_multiplier ** (retry_count - 1))
         return min(backoff, self._max_backoff_s)
 
-    def get_retry_state(self, provider_id: str) -> Optional[dict]:
+    def get_retry_state(self, provider_id: str) -> dict | None:
         """Get retry state for a provider (for monitoring)."""
         return self._retry_state.get(provider_id)
 

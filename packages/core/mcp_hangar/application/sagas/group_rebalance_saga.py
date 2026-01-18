@@ -44,8 +44,8 @@ class GroupRebalanceSaga(EventTriggeredSaga):
 
     def __init__(
         self,
-        group_lookup: Optional[Callable[[str], Optional[str]]] = None,
-        groups: Optional[dict[str, "ProviderGroup"]] = None,
+        group_lookup: Callable[[str], str | None] | None = None,
+        groups: dict[str, "ProviderGroup"] | None = None,
     ):
         """
         Initialize the saga.
@@ -82,7 +82,7 @@ class GroupRebalanceSaga(EventTriggeredSaga):
         """Unregister a member from the mapping."""
         self._member_to_group.pop(member_id, None)
 
-    def _get_group_id(self, member_id: str) -> Optional[str]:
+    def _get_group_id(self, member_id: str) -> str | None:
         """Get the group ID for a member."""
         group_id = self._member_to_group.get(member_id)
         if group_id:

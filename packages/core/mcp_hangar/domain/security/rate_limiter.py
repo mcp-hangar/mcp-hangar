@@ -10,7 +10,6 @@ import time
 from abc import ABC, abstractmethod
 from dataclasses import dataclass
 from enum import Enum
-from typing import Optional
 
 
 class RateLimitScope(Enum):
@@ -52,7 +51,7 @@ class RateLimitResult:
     allowed: bool
     remaining: int  # Remaining requests in window
     reset_at: float  # When the limit resets (timestamp)
-    retry_after: Optional[float] = None  # Seconds until request would be allowed
+    retry_after: float | None = None  # Seconds until request would be allowed
     limit: int = 0  # The configured limit
 
     def to_dict(self) -> dict[str, any]:
@@ -91,7 +90,7 @@ class TokenBucket:
         self,
         rate: float,
         capacity: int,
-        initial_tokens: Optional[int] = None,
+        initial_tokens: int | None = None,
     ):
         """
         Initialize token bucket.
@@ -203,7 +202,7 @@ class InMemoryRateLimiter(RateLimiter):
 
     def __init__(
         self,
-        config: Optional[RateLimitConfig] = None,
+        config: RateLimitConfig | None = None,
         cleanup_interval: float = 60.0,
     ):
         """
@@ -370,10 +369,10 @@ class CompositeRateLimiter(RateLimiter):
 
 # --- Global rate limiter instance ---
 
-_global_limiter: Optional[InMemoryRateLimiter] = None
+_global_limiter: InMemoryRateLimiter | None = None
 
 
-def get_rate_limiter(config: Optional[RateLimitConfig] = None) -> InMemoryRateLimiter:
+def get_rate_limiter(config: RateLimitConfig | None = None) -> InMemoryRateLimiter:
     """Get or create the global rate limiter instance."""
     global _global_limiter
     if _global_limiter is None:

@@ -4,7 +4,7 @@ import hashlib
 import json
 from datetime import UTC, datetime, timedelta
 from pathlib import Path
-from typing import Any, Optional
+from typing import Any
 
 import aiosqlite
 
@@ -170,9 +170,8 @@ class SQLiteKnowledgeBase(IKnowledgeBase):
     async def is_healthy(self) -> bool:
         """Check if database is accessible."""
         try:
-            async with aiosqlite.connect(self._db_path) as db:
-                async with db.execute("SELECT 1") as cursor:
-                    await cursor.fetchone()
+            async with aiosqlite.connect(self._db_path) as db, db.execute("SELECT 1") as cursor:
+                await cursor.fetchone()
             return True
         except (aiosqlite.Error, OSError) as e:
             logger.debug("sqlite_health_check_failed", error=str(e))
@@ -185,25 +184,27 @@ class SQLiteKnowledgeBase(IKnowledgeBase):
 
     # === Cache Operations ===
 
-    async def cache_get(self, provider: str, tool: str, arguments: dict) -> Optional[dict]:
+    async def cache_get(self, provider: str, tool: str, arguments: dict) -> dict | None:
         args_hash = self._hash_arguments(arguments)
         now = datetime.now(UTC).isoformat()
 
         try:
-            async with aiosqlite.connect(self._db_path) as db:
-                async with db.execute(
+            async with (
+                aiosqlite.connect(self._db_path) as db,
+                db.execute(
                     """
                     SELECT result FROM tool_cache
                     WHERE provider = ? AND tool = ? AND arguments_hash = ?
                       AND expires_at > ?
                     """,
                     (provider, tool, args_hash, now),
-                ) as cursor:
-                    row = await cursor.fetchone()
-                    if row:
-                        logger.debug("cache_hit", provider=provider, tool=tool)
-                        return json.loads(row[0])
-                    return None
+                ) as cursor,
+            ):
+                row = await cursor.fetchone()
+                if row:
+                    logger.debug("cache_hit", provider=provider, tool=tool)
+                    return json.loads(row[0])
+                return None
         except Exception as e:
             logger.warning("cache_get_failed", error=str(e))
             return None
@@ -214,7 +215,7 @@ class SQLiteKnowledgeBase(IKnowledgeBase):
         tool: str,
         arguments: dict,
         result: Any,
-        ttl_s: Optional[int] = None,
+        ttl_s: int | None = None,
     ) -> bool:
         args_hash = self._hash_arguments(arguments)
         ttl = ttl_s or self._config.cache_ttl_s
@@ -239,7 +240,7 @@ class SQLiteKnowledgeBase(IKnowledgeBase):
             logger.warning("cache_set_failed", error=str(e))
             return False
 
-    async def cache_invalidate(self, provider: Optional[str] = None, tool: Optional[str] = None) -> int:
+    async def cache_invalidate(self, provider: str | None = None, tool: str | None = None) -> int:
         try:
             async with aiosqlite.connect(self._db_path) as db:
                 if provider and tool:
@@ -302,10 +303,10 @@ class SQLiteKnowledgeBase(IKnowledgeBase):
 
     async def audit_query(
         self,
-        provider: Optional[str] = None,
-        tool: Optional[str] = None,
-        success: Optional[bool] = None,
-        since: Optional[datetime] = None,
+        provider: str | None = None,
+        tool: str | None = None,
+        success: bool | None = None,
+        since: datetime | None = None,
         limit: int = 100,
     ) -> list[AuditEntry]:
         try:
@@ -328,8 +329,9 @@ class SQLiteKnowledgeBase(IKnowledgeBase):
             where_clause = " AND ".join(conditions) if conditions else "1=1"
             params.append(limit)
 
-            async with aiosqlite.connect(self._db_path) as db:
-                async with db.execute(
+            async with (
+                aiosqlite.connect(self._db_path) as db,
+                db.execute(
                     f"""
                     SELECT event_type, provider, tool, arguments, result_summary,
                            duration_ms, success, error_message, correlation_id, timestamp
@@ -339,24 +341,25 @@ class SQLiteKnowledgeBase(IKnowledgeBase):
                     LIMIT ?
                     """,
                     params,
-                ) as cursor:
-                    rows = await cursor.fetchall()
+                ) as cursor,
+            ):
+                rows = await cursor.fetchall()
 
-                    return [
-                        AuditEntry(
-                            event_type=row[0],
-                            provider=row[1],
-                            tool=row[2],
-                            arguments=json.loads(row[3]) if row[3] else None,
-                            result_summary=row[4],
-                            duration_ms=row[5],
-                            success=bool(row[6]),
-                            error_message=row[7],
-                            correlation_id=row[8],
-                            timestamp=datetime.fromisoformat(row[9]) if row[9] else None,
-                        )
-                        for row in rows
-                    ]
+                return [
+                    AuditEntry(
+                        event_type=row[0],
+                        provider=row[1],
+                        tool=row[2],
+                        arguments=json.loads(row[3]) if row[3] else None,
+                        result_summary=row[4],
+                        duration_ms=row[5],
+                        success=bool(row[6]),
+                        error_message=row[7],
+                        correlation_id=row[8],
+                        timestamp=datetime.fromisoformat(row[9]) if row[9] else None,
+                    )
+                    for row in rows
+                ]
         except Exception as e:
             logger.warning("audit_query_failed", error=str(e))
             return []
@@ -365,8 +368,9 @@ class SQLiteKnowledgeBase(IKnowledgeBase):
         since = (datetime.now(UTC) - timedelta(hours=hours)).isoformat()
 
         try:
-            async with aiosqlite.connect(self._db_path) as db:
-                async with db.execute(
+            async with (
+                aiosqlite.connect(self._db_path) as db,
+                db.execute(
                     """
                     SELECT
                         COUNT(*) as total,
@@ -379,18 +383,19 @@ class SQLiteKnowledgeBase(IKnowledgeBase):
                     WHERE timestamp > ?
                     """,
                     (since,),
-                ) as cursor:
-                    row = await cursor.fetchone()
-                    if row:
-                        return {
-                            "total": row[0] or 0,
-                            "success_count": row[1] or 0,
-                            "error_count": row[2] or 0,
-                            "providers": row[3] or 0,
-                            "tools": row[4] or 0,
-                            "avg_duration_ms": row[5],
-                        }
-                    return {}
+                ) as cursor,
+            ):
+                row = await cursor.fetchone()
+                if row:
+                    return {
+                        "total": row[0] or 0,
+                        "success_count": row[1] or 0,
+                        "error_count": row[2] or 0,
+                        "providers": row[3] or 0,
+                        "tools": row[4] or 0,
+                        "avg_duration_ms": row[5],
+                    }
+                return {}
         except Exception as e:
             logger.warning("audit_stats_failed", error=str(e))
             return {}
@@ -416,8 +421,9 @@ class SQLiteKnowledgeBase(IKnowledgeBase):
 
     async def get_state_history(self, provider_id: str, limit: int = 100) -> list[ProviderStateEntry]:
         try:
-            async with aiosqlite.connect(self._db_path) as db:
-                async with db.execute(
+            async with (
+                aiosqlite.connect(self._db_path) as db,
+                db.execute(
                     """
                     SELECT provider_id, old_state, new_state, reason, timestamp
                     FROM provider_state_history
@@ -426,18 +432,19 @@ class SQLiteKnowledgeBase(IKnowledgeBase):
                     LIMIT ?
                     """,
                     (provider_id, limit),
-                ) as cursor:
-                    rows = await cursor.fetchall()
-                    return [
-                        ProviderStateEntry(
-                            provider_id=row[0],
-                            old_state=row[1],
-                            new_state=row[2],
-                            reason=row[3],
-                            timestamp=datetime.fromisoformat(row[4]) if row[4] else None,
-                        )
-                        for row in rows
-                    ]
+                ) as cursor,
+            ):
+                rows = await cursor.fetchall()
+                return [
+                    ProviderStateEntry(
+                        provider_id=row[0],
+                        old_state=row[1],
+                        new_state=row[2],
+                        reason=row[3],
+                        timestamp=datetime.fromisoformat(row[4]) if row[4] else None,
+                    )
+                    for row in rows
+                ]
         except Exception as e:
             logger.warning("get_state_history_failed", error=str(e))
             return []
@@ -469,8 +476,8 @@ class SQLiteKnowledgeBase(IKnowledgeBase):
     async def get_metrics(
         self,
         provider_id: str,
-        metric_name: Optional[str] = None,
-        since: Optional[datetime] = None,
+        metric_name: str | None = None,
+        since: datetime | None = None,
         limit: int = 100,
     ) -> list[MetricEntry]:
         try:
@@ -486,8 +493,9 @@ class SQLiteKnowledgeBase(IKnowledgeBase):
 
             params.append(limit)
 
-            async with aiosqlite.connect(self._db_path) as db:
-                async with db.execute(
+            async with (
+                aiosqlite.connect(self._db_path) as db,
+                db.execute(
                     f"""
                     SELECT provider_id, metric_name, metric_value, labels, timestamp
                     FROM provider_metrics
@@ -496,18 +504,19 @@ class SQLiteKnowledgeBase(IKnowledgeBase):
                     LIMIT ?
                     """,
                     params,
-                ) as cursor:
-                    rows = await cursor.fetchall()
-                    return [
-                        MetricEntry(
-                            provider_id=row[0],
-                            metric_name=row[1],
-                            metric_value=row[2],
-                            labels=json.loads(row[3]) if row[3] else None,
-                            timestamp=datetime.fromisoformat(row[4]) if row[4] else None,
-                        )
-                        for row in rows
-                    ]
+                ) as cursor,
+            ):
+                rows = await cursor.fetchall()
+                return [
+                    MetricEntry(
+                        provider_id=row[0],
+                        metric_name=row[1],
+                        metric_value=row[2],
+                        labels=json.loads(row[3]) if row[3] else None,
+                        timestamp=datetime.fromisoformat(row[4]) if row[4] else None,
+                    )
+                    for row in rows
+                ]
         except Exception as e:
             logger.warning("get_metrics_failed", error=str(e))
             return []

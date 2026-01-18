@@ -1,7 +1,7 @@
 """Tool catalog value object for providers."""
 
 from dataclasses import dataclass
-from typing import Any, Optional
+from typing import Any
 
 
 @dataclass(frozen=True)
@@ -15,7 +15,7 @@ class ToolSchema:
     name: str
     description: str
     input_schema: dict[str, Any]
-    output_schema: Optional[dict[str, Any]] = None
+    output_schema: dict[str, Any] | None = None
 
     def to_dict(self) -> dict:
         """Convert to dictionary representation."""
@@ -37,14 +37,14 @@ class ToolCatalog:
     discovered or refreshed. Thread safety is handled by the aggregate.
     """
 
-    def __init__(self, tools: Optional[dict[str, ToolSchema]] = None):
+    def __init__(self, tools: dict[str, ToolSchema] | None = None):
         self._tools: dict[str, ToolSchema] = dict(tools or {})
 
     def has(self, tool_name: str) -> bool:
         """Check if a tool exists in the catalog."""
         return tool_name in self._tools
 
-    def get(self, tool_name: str) -> Optional[ToolSchema]:
+    def get(self, tool_name: str) -> ToolSchema | None:
         """Get a tool schema by name."""
         return self._tools.get(tool_name)
 

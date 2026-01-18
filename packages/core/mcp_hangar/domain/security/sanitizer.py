@@ -11,7 +11,7 @@ Provides sanitization utilities for:
 import html
 import re
 import unicodedata
-from typing import Any, Optional
+from typing import Any
 
 # Characters that could enable injection attacks
 SHELL_METACHARACTERS = set(";&|`$(){}[]<>!#*?~\n\r\t\0\\'\"")
@@ -235,7 +235,7 @@ class Sanitizer:
     def sanitize_log_message(
         self,
         message: str,
-        max_length: Optional[int] = None,
+        max_length: int | None = None,
     ) -> str:
         """
         Sanitize a message for safe logging.
@@ -372,7 +372,7 @@ def sanitize_environment_value(
 
 def sanitize_log_message(
     message: str,
-    max_length: Optional[int] = None,
+    max_length: int | None = None,
 ) -> str:
     """Sanitize a log message using default sanitizer."""
     return _default_sanitizer.sanitize_log_message(message, max_length)

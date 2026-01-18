@@ -8,7 +8,7 @@ import hashlib
 import json
 from dataclasses import dataclass
 from datetime import UTC, datetime
-from typing import Any, Optional
+from typing import Any
 
 
 @dataclass(frozen=True)
@@ -47,7 +47,7 @@ class DiscoveredProvider:
         source_type: str,
         mode: str,
         connection_info: dict[str, Any],
-        metadata: Optional[dict[str, Any]] = None,
+        metadata: dict[str, Any] | None = None,
         ttl_seconds: int = 90,
     ) -> "DiscoveredProvider":
         """Factory method with automatic fingerprinting.

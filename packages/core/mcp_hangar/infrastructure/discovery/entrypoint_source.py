@@ -10,7 +10,7 @@ Example pyproject.toml:
     my_provider = "my_package.mcp_server:create_server"
 """
 
-from typing import Any, Optional
+from typing import Any
 
 from mcp_hangar.domain.discovery.discovered_provider import DiscoveredProvider
 from mcp_hangar.domain.discovery.discovery_source import DiscoveryMode, DiscoverySource
@@ -129,7 +129,7 @@ class EntrypointDiscoverySource(DiscoverySource):
         logger.debug(f"Entrypoint discovery found {len(providers)} providers")
         return providers
 
-    async def _load_entrypoint(self, ep: EntryPoint) -> Optional[DiscoveredProvider]:
+    async def _load_entrypoint(self, ep: EntryPoint) -> DiscoveredProvider | None:
         """Load and parse an entry point.
 
         Args:
@@ -159,7 +159,7 @@ class EntrypointDiscoverySource(DiscoverySource):
             logger.error(f"Error loading entry point {ep.name}: {e}")
             return None
 
-    def _build_provider(self, ep: EntryPoint, config: Optional[dict[str, Any]]) -> DiscoveredProvider:
+    def _build_provider(self, ep: EntryPoint, config: dict[str, Any] | None) -> DiscoveredProvider:
         """Build provider from entry point and optional config.
 
         Args:

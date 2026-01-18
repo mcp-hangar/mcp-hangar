@@ -18,7 +18,7 @@ Example migration:
     ctx.command_bus.send(command)
 """
 
-from typing import TYPE_CHECKING, Optional
+from typing import TYPE_CHECKING
 
 from ..application.discovery import DiscoveryOrchestrator
 from ..application.sagas import GroupRebalanceSaga
@@ -86,8 +86,8 @@ PROVIDERS = ProviderDict(PROVIDER_REPOSITORY)
 GROUPS: dict[str, ProviderGroup] = {}
 
 # Saga and discovery instances (initialized in main())
-_GROUP_REBALANCE_SAGA: Optional[GroupRebalanceSaga] = None
-_DISCOVERY_ORCHESTRATOR: Optional[DiscoveryOrchestrator] = None
+_GROUP_REBALANCE_SAGA: GroupRebalanceSaga | None = None
+_DISCOVERY_ORCHESTRATOR: DiscoveryOrchestrator | None = None
 
 
 def get_runtime():
@@ -95,23 +95,23 @@ def get_runtime():
     return _RUNTIME
 
 
-def set_discovery_orchestrator(orchestrator: Optional[DiscoveryOrchestrator]) -> None:
+def set_discovery_orchestrator(orchestrator: DiscoveryOrchestrator | None) -> None:
     """Set the discovery orchestrator instance."""
     global _DISCOVERY_ORCHESTRATOR
     _DISCOVERY_ORCHESTRATOR = orchestrator
 
 
-def get_discovery_orchestrator() -> Optional[DiscoveryOrchestrator]:
+def get_discovery_orchestrator() -> DiscoveryOrchestrator | None:
     """Get the discovery orchestrator instance."""
     return _DISCOVERY_ORCHESTRATOR
 
 
-def set_group_rebalance_saga(saga: Optional[GroupRebalanceSaga]) -> None:
+def set_group_rebalance_saga(saga: GroupRebalanceSaga | None) -> None:
     """Set the group rebalance saga instance."""
     global _GROUP_REBALANCE_SAGA
     _GROUP_REBALANCE_SAGA = saga
 
 
-def get_group_rebalance_saga() -> Optional[GroupRebalanceSaga]:
+def get_group_rebalance_saga() -> GroupRebalanceSaga | None:
     """Get the group rebalance saga instance."""
     return _GROUP_REBALANCE_SAGA

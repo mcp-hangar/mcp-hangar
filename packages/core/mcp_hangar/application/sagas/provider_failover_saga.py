@@ -2,7 +2,6 @@
 
 import time
 from dataclasses import dataclass
-from typing import Optional
 
 from ...domain.events import DomainEvent, ProviderDegraded, ProviderStarted, ProviderStopped
 from ...infrastructure.saga_manager import EventTriggeredSaga
@@ -29,7 +28,7 @@ class FailoverState:
     primary_id: str
     backup_id: str
     failed_at: float
-    backup_started_at: Optional[float] = None
+    backup_started_at: float | None = None
     is_active: bool = True
 
 
@@ -239,7 +238,7 @@ class ProviderFailoverSaga(EventTriggeredSaga):
         """Get all active failovers."""
         return dict(self._active_failovers)
 
-    def get_failover_config(self, primary_id: str) -> Optional[FailoverConfig]:
+    def get_failover_config(self, primary_id: str) -> FailoverConfig | None:
         """Get failover configuration for a provider."""
         return self._failover_configs.get(primary_id)
 

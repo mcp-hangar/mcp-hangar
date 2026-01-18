@@ -26,7 +26,7 @@ Example Provider File:
 
 import asyncio
 from pathlib import Path
-from typing import Any, Optional
+from typing import Any
 
 from mcp_hangar.domain.discovery.discovered_provider import DiscoveredProvider
 from mcp_hangar.domain.discovery.discovery_source import DiscoveryMode, DiscoverySource
@@ -80,7 +80,7 @@ class FilesystemDiscoverySource(DiscoverySource):
 
     def __init__(
         self,
-        path: Optional[str] = None,
+        path: str | None = None,
         pattern: str = DEFAULT_PATTERN,
         mode: DiscoveryMode = DiscoveryMode.ADDITIVE,
         watch: bool = True,
@@ -107,8 +107,8 @@ class FilesystemDiscoverySource(DiscoverySource):
         self.watch = watch and WATCHDOG_AVAILABLE
         self.default_ttl = default_ttl
 
-        self._observer: Optional[Observer] = None
-        self._event_handler: Optional[FileSystemEventHandler] = None
+        self._observer: Observer | None = None
+        self._event_handler: FileSystemEventHandler | None = None
         self._cached_providers: dict[str, DiscoveredProvider] = {}
 
     @property
@@ -155,7 +155,7 @@ class FilesystemDiscoverySource(DiscoverySource):
         logger.debug(f"Filesystem discovery found {len(providers)} providers")
         return providers
 
-    def _parse_file(self, file_path: Path) -> Optional[DiscoveredProvider]:
+    def _parse_file(self, file_path: Path) -> DiscoveredProvider | None:
         """Parse YAML file into DiscoveredProvider.
 
         Args:
@@ -345,7 +345,7 @@ if WATCHDOG_AVAILABLE:
 
         def __init__(self, source: FilesystemDiscoverySource):
             self.source = source
-            self._loop: Optional[asyncio.AbstractEventLoop] = None
+            self._loop: asyncio.AbstractEventLoop | None = None
 
         def _get_loop(self) -> asyncio.AbstractEventLoop:
             if self._loop is None or self._loop.is_closed():

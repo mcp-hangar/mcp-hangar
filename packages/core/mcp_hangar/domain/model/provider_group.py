@@ -7,7 +7,7 @@ as a single logical unit with automatic load balancing and failover.
 import threading
 import time
 from dataclasses import dataclass
-from typing import Any, Optional
+from typing import Any
 
 from ...logging_config import get_logger
 from ..events import DomainEvent
@@ -157,7 +157,7 @@ class ProviderGroup(AggregateRoot):
         healthy_threshold: int = 1,
         circuit_failure_threshold: int = 10,
         circuit_reset_timeout_s: float = 60.0,
-        description: Optional[str] = None,
+        description: str | None = None,
     ):
         """
         Initialize a provider group.
@@ -218,7 +218,7 @@ class ProviderGroup(AggregateRoot):
         return self._id.value
 
     @property
-    def description(self) -> Optional[str]:
+    def description(self) -> str | None:
         """Get group description."""
         return self._description
 
@@ -339,7 +339,7 @@ class ProviderGroup(AggregateRoot):
                 return True
             return False
 
-    def get_member(self, member_id: str) -> Optional[GroupMember]:
+    def get_member(self, member_id: str) -> GroupMember | None:
         """Get a member by ID."""
         with self._lock:
             return self._members.get(member_id)
@@ -375,7 +375,7 @@ class ProviderGroup(AggregateRoot):
 
     # --- Load Balancing ---
 
-    def select_member(self) -> Optional[Provider]:
+    def select_member(self) -> Provider | None:
         """
         Select a member for the next request using load balancer.
 

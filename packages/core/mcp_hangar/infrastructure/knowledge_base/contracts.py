@@ -8,7 +8,7 @@ from abc import ABC, abstractmethod
 from dataclasses import dataclass
 from datetime import datetime
 from enum import Enum
-from typing import Any, Optional
+from typing import Any
 
 
 class KnowledgeBaseDriver(Enum):
@@ -61,15 +61,15 @@ class AuditEntry:
     """Audit log entry."""
 
     event_type: str
-    provider: Optional[str] = None
-    tool: Optional[str] = None
-    arguments: Optional[dict] = None
-    result_summary: Optional[str] = None
-    duration_ms: Optional[int] = None
+    provider: str | None = None
+    tool: str | None = None
+    arguments: dict | None = None
+    result_summary: str | None = None
+    duration_ms: int | None = None
     success: bool = True
-    error_message: Optional[str] = None
-    correlation_id: Optional[str] = None
-    timestamp: Optional[datetime] = None
+    error_message: str | None = None
+    correlation_id: str | None = None
+    timestamp: datetime | None = None
 
 
 @dataclass
@@ -77,10 +77,10 @@ class ProviderStateEntry:
     """Provider state history entry."""
 
     provider_id: str
-    old_state: Optional[str]
+    old_state: str | None
     new_state: str
-    reason: Optional[str] = None
-    timestamp: Optional[datetime] = None
+    reason: str | None = None
+    timestamp: datetime | None = None
 
 
 @dataclass
@@ -90,8 +90,8 @@ class MetricEntry:
     provider_id: str
     metric_name: str
     metric_value: float
-    labels: Optional[dict] = None
-    timestamp: Optional[datetime] = None
+    labels: dict | None = None
+    timestamp: datetime | None = None
 
 
 class IKnowledgeBase(ABC):
@@ -121,7 +121,7 @@ class IKnowledgeBase(ABC):
     # === Cache Operations ===
 
     @abstractmethod
-    async def cache_get(self, provider: str, tool: str, arguments: dict) -> Optional[dict]:
+    async def cache_get(self, provider: str, tool: str, arguments: dict) -> dict | None:
         """Get cached tool result. Returns None if not found or expired."""
         pass
 
@@ -132,13 +132,13 @@ class IKnowledgeBase(ABC):
         tool: str,
         arguments: dict,
         result: Any,
-        ttl_s: Optional[int] = None,
+        ttl_s: int | None = None,
     ) -> bool:
         """Cache tool result. Returns True if successful."""
         pass
 
     @abstractmethod
-    async def cache_invalidate(self, provider: Optional[str] = None, tool: Optional[str] = None) -> int:
+    async def cache_invalidate(self, provider: str | None = None, tool: str | None = None) -> int:
         """Invalidate cache entries. Returns count of invalidated entries."""
         pass
 
@@ -157,10 +157,10 @@ class IKnowledgeBase(ABC):
     @abstractmethod
     async def audit_query(
         self,
-        provider: Optional[str] = None,
-        tool: Optional[str] = None,
-        success: Optional[bool] = None,
-        since: Optional[datetime] = None,
+        provider: str | None = None,
+        tool: str | None = None,
+        success: bool | None = None,
+        since: datetime | None = None,
         limit: int = 100,
     ) -> list[AuditEntry]:
         """Query audit log entries."""
@@ -194,8 +194,8 @@ class IKnowledgeBase(ABC):
     async def get_metrics(
         self,
         provider_id: str,
-        metric_name: Optional[str] = None,
-        since: Optional[datetime] = None,
+        metric_name: str | None = None,
+        since: datetime | None = None,
         limit: int = 100,
     ) -> list[MetricEntry]:
         """Get provider metrics."""

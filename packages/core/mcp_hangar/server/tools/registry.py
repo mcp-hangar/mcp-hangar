@@ -5,7 +5,6 @@ Separates commands (write) from queries (read) following CQRS.
 """
 
 import time
-from typing import Optional
 
 from mcp.server.fastmcp import FastMCP
 
@@ -19,7 +18,7 @@ from ..validation import check_rate_limit, tool_error_hook, tool_error_mapper, v
 _server_start_time: float = time.time()
 
 
-def registry_list(state_filter: Optional[str] = None) -> dict:
+def registry_list(state_filter: str | None = None) -> dict:
     """
     List all providers and groups with status and metadata.
 
@@ -63,7 +62,7 @@ def register_registry_tools(mcp: FastMCP) -> None:
         error_mapper=lambda exc: tool_error_mapper(exc),
         on_error=tool_error_hook,
     )
-    def _registry_list(state_filter: Optional[str] = None) -> dict:
+    def _registry_list(state_filter: str | None = None) -> dict:
         return registry_list(state_filter)
 
     @mcp.tool(name="registry_start")

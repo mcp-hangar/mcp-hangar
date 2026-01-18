@@ -8,11 +8,12 @@ Provides secure handling of sensitive data:
 - Redaction utilities
 """
 
+import builtins
 import os
 import re
 from dataclasses import dataclass, field
 from re import Pattern
-from typing import Any, Optional, Set
+from typing import Any
 
 # Patterns that indicate a key might contain sensitive data
 SENSITIVE_KEY_PATTERNS: list[Pattern] = [
@@ -247,8 +248,8 @@ class SecureEnvironment:
 
     def __init__(
         self,
-        env: Optional[dict[str, str]] = None,
-        mask_config: Optional[SecretsMask] = None,
+        env: dict[str, str] | None = None,
+        mask_config: SecretsMask | None = None,
     ):
         """
         Initialize secure environment.
@@ -264,9 +265,9 @@ class SecureEnvironment:
     def get(
         self,
         key: str,
-        default: Optional[str] = None,
+        default: str | None = None,
         required: bool = False,
-    ) -> Optional[str]:
+    ) -> str | None:
         """
         Get an environment variable value.
 
@@ -294,8 +295,8 @@ class SecureEnvironment:
     def get_masked(
         self,
         key: str,
-        default: Optional[str] = None,
-    ) -> Optional[str]:
+        default: str | None = None,
+    ) -> str | None:
         """
         Get an environment variable value, masked if sensitive.
 
@@ -352,8 +353,8 @@ class SecureEnvironment:
     def to_subprocess_env(
         self,
         include_parent: bool = True,
-        whitelist: Optional[Set[str]] = None,
-        blacklist: Optional[Set[str]] = None,
+        whitelist: builtins.set[str] | None = None,
+        blacklist: builtins.set[str] | None = None,
     ) -> dict[str, str]:
         """
         Prepare environment for subprocess execution.
@@ -399,7 +400,7 @@ class SecureEnvironment:
         return missing
 
     @property
-    def accessed_keys(self) -> Set[str]:
+    def accessed_keys(self) -> builtins.set[str]:
         """Get the set of keys that have been accessed."""
         return self._accessed_keys.copy()
 
@@ -418,7 +419,7 @@ class SecureEnvironment:
 
 def redact_secrets_in_string(
     text: str,
-    patterns: Optional[list[Pattern]] = None,
+    patterns: list[Pattern] | None = None,
     replacement: str = "[REDACTED]",
 ) -> str:
     """
@@ -464,8 +465,8 @@ def redact_secrets_in_string(
 
 
 def create_secure_env_for_provider(
-    base_env: Optional[dict[str, str]] = None,
-    provider_env: Optional[dict[str, str]] = None,
+    base_env: dict[str, str] | None = None,
+    provider_env: dict[str, str] | None = None,
     inherit_parent: bool = True,
     sensitive_key_filter: bool = True,
 ) -> SecureEnvironment:

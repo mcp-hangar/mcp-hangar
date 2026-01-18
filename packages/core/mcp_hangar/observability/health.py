@@ -14,7 +14,7 @@ import time
 from collections.abc import Callable
 from dataclasses import dataclass, field
 from enum import Enum
-from typing import Any, Optional
+from typing import Any
 
 from mcp_hangar.logging_config import get_logger
 
@@ -100,7 +100,7 @@ class HealthCheck:
                     duration_ms=duration_ms,
                 )
 
-        except asyncio.TimeoutError:
+        except TimeoutError:
             duration_ms = (time.perf_counter() - start) * 1000
             status = HealthStatus.UNHEALTHY if self.critical else HealthStatus.DEGRADED
             return HealthCheckResult(
@@ -363,7 +363,7 @@ class HealthEndpoint:
         except (ImportError, AttributeError):
             return "unknown"
 
-    def get_last_result(self, name: str) -> Optional[HealthCheckResult]:
+    def get_last_result(self, name: str) -> HealthCheckResult | None:
         """Get the last result for a specific check.
 
         Args:
@@ -377,7 +377,7 @@ class HealthEndpoint:
 
 
 # Global singleton
-_health_endpoint: Optional[HealthEndpoint] = None
+_health_endpoint: HealthEndpoint | None = None
 
 
 def get_health_endpoint() -> HealthEndpoint:

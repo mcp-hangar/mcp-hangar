@@ -28,7 +28,7 @@ import os
 from collections.abc import Callable
 from contextlib import contextmanager
 from functools import wraps
-from typing import Any, Optional, TypeVar
+from typing import Any, TypeVar
 
 from mcp_hangar.logging_config import get_logger
 
@@ -88,7 +88,7 @@ class NoOpSpan:
     def record_exception(self, exception: Exception) -> None:
         pass
 
-    def add_event(self, name: str, attributes: Optional[dict] = None) -> None:
+    def add_event(self, name: str, attributes: dict | None = None) -> None:
         pass
 
     def __enter__(self) -> "NoOpSpan":
@@ -120,8 +120,8 @@ def is_tracing_enabled() -> bool:
 
 def init_tracing(
     service_name: str = "mcp-hangar",
-    otlp_endpoint: Optional[str] = None,
-    jaeger_host: Optional[str] = None,
+    otlp_endpoint: str | None = None,
+    jaeger_host: str | None = None,
     jaeger_port: int = 6831,
     console_export: bool = False,
 ) -> bool:
@@ -310,8 +310,8 @@ def trace_tool_invocation(
 @contextmanager
 def trace_span(
     name: str,
-    attributes: Optional[dict[str, Any]] = None,
-    kind: Optional[str] = None,
+    attributes: dict[str, Any] | None = None,
+    kind: str | None = None,
 ):
     """Context manager for creating trace spans.
 
@@ -384,7 +384,7 @@ def extract_trace_context(carrier: dict[str, str]) -> Any:
     return propagator.extract(carrier)
 
 
-def get_current_trace_id() -> Optional[str]:
+def get_current_trace_id() -> str | None:
     """Get current trace ID as hex string.
 
     Returns:
@@ -404,7 +404,7 @@ def get_current_trace_id() -> Optional[str]:
     return format(ctx.trace_id, "032x")
 
 
-def get_current_span_id() -> Optional[str]:
+def get_current_span_id() -> str | None:
     """Get current span ID as hex string.
 
     Returns:

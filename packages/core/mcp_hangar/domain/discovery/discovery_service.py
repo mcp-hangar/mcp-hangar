@@ -6,7 +6,6 @@ and applies business rules for registration and lifecycle management.
 
 from dataclasses import dataclass, field
 from datetime import UTC, datetime
-from typing import Optional
 
 from ...logging_config import get_logger
 from .conflict_resolver import ConflictResolution, ConflictResolver
@@ -72,9 +71,9 @@ class SourceStatus:
     mode: DiscoveryMode
     is_healthy: bool
     is_enabled: bool
-    last_discovery: Optional[datetime] = None
+    last_discovery: datetime | None = None
     providers_count: int = 0
-    error_message: Optional[str] = None
+    error_message: str | None = None
 
     def to_dict(self) -> dict:
         """Convert to dictionary for serialization."""
@@ -106,7 +105,7 @@ class DiscoveryService:
 
     def __init__(
         self,
-        conflict_resolver: Optional[ConflictResolver] = None,
+        conflict_resolver: ConflictResolver | None = None,
         auto_register: bool = True,
     ):
         """Initialize discovery service.
@@ -152,7 +151,7 @@ class DiscoveryService:
 
         logger.info(f"Registered discovery source: {source_type} (mode={source.mode})")
 
-    def unregister_source(self, source_type: str) -> Optional[DiscoverySource]:
+    def unregister_source(self, source_type: str) -> DiscoverySource | None:
         """Unregister a discovery source.
 
         Args:
@@ -168,7 +167,7 @@ class DiscoveryService:
             logger.info(f"Unregistered discovery source: {source_type}")
         return source
 
-    def get_source(self, source_type: str) -> Optional[DiscoverySource]:
+    def get_source(self, source_type: str) -> DiscoverySource | None:
         """Get a registered source by type.
 
         Args:
@@ -329,7 +328,7 @@ class DiscoveryService:
         """
         return list(self._pending.values())
 
-    def approve_pending(self, name: str) -> Optional[DiscoveredProvider]:
+    def approve_pending(self, name: str) -> DiscoveredProvider | None:
         """Approve a pending provider for registration.
 
         Args:
@@ -354,7 +353,7 @@ class DiscoveryService:
         self._quarantine[provider.name] = (provider, reason)
         logger.warning(f"Quarantined provider '{provider.name}': {reason}")
 
-    def approve_quarantined(self, name: str) -> Optional[DiscoveredProvider]:
+    def approve_quarantined(self, name: str) -> DiscoveredProvider | None:
         """Approve a quarantined provider for registration.
 
         Args:

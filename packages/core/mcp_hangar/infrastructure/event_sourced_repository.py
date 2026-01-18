@@ -4,7 +4,7 @@ Stores providers by persisting their domain events and rebuilding state on load.
 """
 
 import threading
-from typing import Any, Optional
+from typing import Any
 
 from ..domain.events import DomainEvent
 from ..domain.model.event_sourced_provider import EventSourcedProvider, ProviderSnapshot
@@ -28,7 +28,7 @@ class ProviderConfigStore:
         with self._lock:
             self._configs[provider_id] = dict(config)
 
-    def load(self, provider_id: str) -> Optional[dict[str, Any]]:
+    def load(self, provider_id: str) -> dict[str, Any] | None:
         """Load provider configuration."""
         with self._lock:
             if provider_id in self._configs:
@@ -70,9 +70,9 @@ class EventSourcedProviderRepository(IProviderRepository):
 
     def __init__(
         self,
-        event_store: Optional[EventStore] = None,
-        event_bus: Optional[EventBus] = None,
-        snapshot_store: Optional[EventStoreSnapshot] = None,
+        event_store: EventStore | None = None,
+        event_bus: EventBus | None = None,
+        snapshot_store: EventStoreSnapshot | None = None,
         snapshot_interval: int = 50,
     ):
         """
@@ -154,7 +154,7 @@ class EventSourcedProviderRepository(IProviderRepository):
             # Update cache
             self._cache[provider_id] = provider
 
-    def get(self, provider_id: str) -> Optional[ProviderLike]:
+    def get(self, provider_id: str) -> ProviderLike | None:
         """
         Load a provider by rebuilding from events.
 
@@ -180,7 +180,7 @@ class EventSourcedProviderRepository(IProviderRepository):
 
             return provider
 
-    def _load_from_events(self, provider_id: str) -> Optional[EventSourcedProvider]:
+    def _load_from_events(self, provider_id: str) -> EventSourcedProvider | None:
         """Load provider from event store."""
         # Load configuration
         config = self._config_store.load(provider_id)
@@ -380,7 +380,7 @@ class EventSourcedProviderRepository(IProviderRepository):
             self._config_store.clear()
             # Note: Event store is not cleared as events are immutable
 
-    def invalidate_cache(self, provider_id: Optional[str] = None) -> None:
+    def invalidate_cache(self, provider_id: str | None = None) -> None:
         """Invalidate cache to force reload from event store."""
         with self._lock:
             if provider_id:
@@ -396,7 +396,7 @@ class EventSourcedProviderRepository(IProviderRepository):
         """
         return self._event_store.load(provider_id)
 
-    def replay_provider(self, provider_id: str, to_version: int) -> Optional[EventSourcedProvider]:
+    def replay_provider(self, provider_id: str, to_version: int) -> EventSourcedProvider | None:
         """
         Replay provider to a specific version (time travel).
 
@@ -426,7 +426,7 @@ class EventSourcedProviderRepository(IProviderRepository):
 
 
 # Singleton instance
-_event_sourced_repository: Optional[EventSourcedProviderRepository] = None
+_event_sourced_repository: EventSourcedProviderRepository | None = None
 
 
 def get_event_sourced_repository() -> EventSourcedProviderRepository:

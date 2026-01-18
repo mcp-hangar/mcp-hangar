@@ -103,7 +103,7 @@ class AuthenticationMiddleware:
                     retry_after=rate_result.retry_after,
                 )
                 raise RateLimitExceededError(
-                    message=f"Too many authentication attempts. Try again in {int(rate_result.retry_after or 0)} seconds.",
+                    message=f"Too many auth attempts. Retry in {int(rate_result.retry_after or 0)}s.",
                     retry_after=rate_result.retry_after,
                 )
 

@@ -24,7 +24,7 @@ See docs/guides/UX_IMPROVEMENTS.md for usage examples.
 
 from collections.abc import Callable
 from dataclasses import dataclass, field
-from typing import Any, Optional
+from typing import Any
 
 
 @dataclass
@@ -56,13 +56,13 @@ class HangarError(Exception):
     """Technical error details for debugging."""
 
     # Debugging
-    related_logs: Optional[str] = None
+    related_logs: str | None = None
     """Path to relevant log entries (e.g., '/logs/mcp-hangar.log:580')."""
 
-    issue_url: Optional[str] = None
+    issue_url: str | None = None
     """Link to known issue or documentation."""
 
-    original_exception: Optional[Exception] = None
+    original_exception: Exception | None = None
     """The original exception that caused this error."""
 
     context: dict[str, Any] = field(default_factory=dict)
@@ -140,7 +140,7 @@ class ProviderProtocolError(HangarError):
     such as malformed JSON or unexpected data format.
     """
 
-    raw_response: Optional[str] = None
+    raw_response: str | None = None
     """Preview of the invalid response (truncated for safety)."""
 
     def __post_init__(self):
@@ -161,13 +161,13 @@ class ProviderCrashError(HangarError):
     either due to an internal error, resource limits, or idle timeout.
     """
 
-    exit_code: Optional[int] = None
+    exit_code: int | None = None
     """Process exit code if available."""
 
-    signal_name: Optional[str] = None
+    signal_name: str | None = None
     """Signal name if killed by signal (e.g., SIGKILL)."""
 
-    idle_duration_s: Optional[float] = None
+    idle_duration_s: float | None = None
     """How long the provider was idle before shutdown (if applicable)."""
 
     def __post_init__(self):
@@ -194,10 +194,10 @@ class NetworkError(HangarError):
     due to DNS issues, firewall rules, or network outages.
     """
 
-    hostname: Optional[str] = None
+    hostname: str | None = None
     """The hostname that was unreachable."""
 
-    error_code: Optional[str] = None
+    error_code: str | None = None
     """Network error code (e.g., EAI_AGAIN for DNS)."""
 
     def __post_init__(self):
@@ -220,10 +220,10 @@ class ConfigurationError(HangarError):
     missing required settings, or invalid values.
     """
 
-    config_path: Optional[str] = None
+    config_path: str | None = None
     """Path to the configuration file."""
 
-    field_name: Optional[str] = None
+    field_name: str | None = None
     """Name of the problematic configuration field."""
 
     def __post_init__(self):
@@ -262,7 +262,7 @@ class ProviderNotFoundError(HangarError):
             self.recovery_hints = hints
         super().__post_init__()
 
-    def _find_similar(self) -> Optional[str]:
+    def _find_similar(self) -> str | None:
         """Find similar provider name for 'did you mean' suggestion."""
         if not self.provider or not self.available_providers:
             return None
@@ -308,7 +308,7 @@ class ToolNotFoundError(HangarError):
             self.recovery_hints = hints
         super().__post_init__()
 
-    def _find_similar(self) -> Optional[str]:
+    def _find_similar(self) -> str | None:
         """Find similar tool name for 'did you mean' suggestion."""
         if not self.tool_name or not self.available_tools:
             return None
@@ -613,7 +613,7 @@ def map_exception_to_hangar_error(
     exc: Exception,
     provider: str = "",
     operation: str = "",
-    context: Optional[dict[str, Any]] = None,
+    context: dict[str, Any] | None = None,
 ) -> HangarError:
     """Map a low-level exception to a rich HangarError.
 

@@ -3,7 +3,7 @@
 import hashlib
 import json
 from datetime import UTC, datetime, timedelta
-from typing import Any, Optional
+from typing import Any
 
 from ...logging_config import get_logger
 from .contracts import AuditEntry, IKnowledgeBase, KnowledgeBaseConfig, MetricEntry, ProviderStateEntry
@@ -196,7 +196,7 @@ class PostgresKnowledgeBase(IKnowledgeBase):
 
     # === Cache Operations ===
 
-    async def cache_get(self, provider: str, tool: str, arguments: dict) -> Optional[dict]:
+    async def cache_get(self, provider: str, tool: str, arguments: dict) -> dict | None:
         if not self._pool:
             return None
 
@@ -228,7 +228,7 @@ class PostgresKnowledgeBase(IKnowledgeBase):
         tool: str,
         arguments: dict,
         result: Any,
-        ttl_s: Optional[int] = None,
+        ttl_s: int | None = None,
     ) -> bool:
         if not self._pool:
             return False
@@ -257,7 +257,7 @@ class PostgresKnowledgeBase(IKnowledgeBase):
             logger.warning("cache_set_failed", error=str(e))
             return False
 
-    async def cache_invalidate(self, provider: Optional[str] = None, tool: Optional[str] = None) -> int:
+    async def cache_invalidate(self, provider: str | None = None, tool: str | None = None) -> int:
         if not self._pool:
             return 0
 
@@ -324,10 +324,10 @@ class PostgresKnowledgeBase(IKnowledgeBase):
 
     async def audit_query(
         self,
-        provider: Optional[str] = None,
-        tool: Optional[str] = None,
-        success: Optional[bool] = None,
-        since: Optional[datetime] = None,
+        provider: str | None = None,
+        tool: str | None = None,
+        success: bool | None = None,
+        since: datetime | None = None,
         limit: int = 100,
     ) -> list[AuditEntry]:
         if not self._pool:
@@ -496,8 +496,8 @@ class PostgresKnowledgeBase(IKnowledgeBase):
     async def get_metrics(
         self,
         provider_id: str,
-        metric_name: Optional[str] = None,
-        since: Optional[datetime] = None,
+        metric_name: str | None = None,
+        since: datetime | None = None,
         limit: int = 100,
     ) -> list[MetricEntry]:
         if not self._pool:

@@ -2,7 +2,7 @@
 
 import threading
 import time
-from typing import Any, Literal, Optional
+from typing import Any, Literal
 
 from .domain.contracts.provider_runtime import ProviderMapping, ProviderRuntime, normalize_state_to_str
 from .infrastructure.event_bus import get_event_bus
@@ -29,7 +29,7 @@ class BackgroundWorker:
         providers: ProviderMapping,
         interval_s: int = 10,
         task: Literal["gc", "health_check"] = "gc",
-        event_bus: Optional[Any] = None,
+        event_bus: Any | None = None,
     ):
         """
         Initialize background worker.

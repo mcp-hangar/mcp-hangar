@@ -6,7 +6,7 @@ ensuring atomic commits or rollbacks.
 
 import json
 from datetime import UTC, datetime
-from typing import Any, Optional
+from typing import Any
 
 import aiosqlite
 
@@ -75,7 +75,7 @@ class TransactionalProviderConfigRepository:
                 ),
             )
 
-    async def get(self, provider_id: str) -> Optional[ProviderConfigSnapshot]:
+    async def get(self, provider_id: str) -> ProviderConfigSnapshot | None:
         """Retrieve provider configuration within transaction."""
         cursor = await self._conn.execute(
             "SELECT config_json FROM provider_configs WHERE provider_id = ?",
@@ -166,7 +166,7 @@ class TransactionalAuditRepository:
     async def get_by_entity(
         self,
         entity_id: str,
-        entity_type: Optional[str] = None,
+        entity_type: str | None = None,
         limit: int = 100,
         offset: int = 0,
     ) -> list[AuditEntry]:
@@ -203,8 +203,8 @@ class TransactionalAuditRepository:
         self,
         start: datetime,
         end: datetime,
-        entity_type: Optional[str] = None,
-        action: Optional[AuditAction] = None,
+        entity_type: str | None = None,
+        action: AuditAction | None = None,
         limit: int = 1000,
     ) -> list[AuditEntry]:
         """Get audit entries by time range within transaction."""
@@ -282,9 +282,9 @@ class SQLiteUnitOfWork:
             database: Database instance for connections
         """
         self._db = database
-        self._conn: Optional[aiosqlite.Connection] = None
-        self._providers: Optional[TransactionalProviderConfigRepository] = None
-        self._audit: Optional[TransactionalAuditRepository] = None
+        self._conn: aiosqlite.Connection | None = None
+        self._providers: TransactionalProviderConfigRepository | None = None
+        self._audit: TransactionalAuditRepository | None = None
         self._committed = False
 
     async def __aenter__(self) -> "SQLiteUnitOfWork":
@@ -369,7 +369,7 @@ class InMemoryUnitOfWork:
         """
         self._providers = providers
         self._audit = audit
-        self._snapshot: Optional[dict[str, Any]] = None
+        self._snapshot: dict[str, Any] | None = None
 
     async def __aenter__(self) -> "InMemoryUnitOfWork":
         """Begin transaction by taking snapshot."""

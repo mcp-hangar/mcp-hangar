@@ -43,7 +43,7 @@ class SagaStep:
     compensation_command: Optional["Command"] = None
     completed: bool = False
     compensated: bool = False
-    error: Optional[str] = None
+    error: str | None = None
 
 
 @dataclass
@@ -56,7 +56,7 @@ class SagaContext:
     data: dict[str, Any] = field(default_factory=dict)
     state: SagaState = SagaState.NOT_STARTED
     current_step: int = 0
-    error: Optional[str] = None
+    error: str | None = None
 
     def to_dict(self) -> dict[str, Any]:
         """Convert to dictionary."""
@@ -81,7 +81,7 @@ class Saga(ABC):
 
     def __init__(self):
         self._steps: list[SagaStep] = []
-        self._context: Optional[SagaContext] = None
+        self._context: SagaContext | None = None
 
     @property
     @abstractmethod
@@ -119,7 +119,7 @@ class Saga(ABC):
         return list(self._steps)
 
     @property
-    def context(self) -> Optional[SagaContext]:
+    def context(self) -> SagaContext | None:
         """Get saga context."""
         return self._context
 
@@ -195,8 +195,8 @@ class SagaManager:
 
     def __init__(
         self,
-        command_bus: Optional[CommandBus] = None,
-        event_bus: Optional[EventBus] = None,
+        command_bus: CommandBus | None = None,
+        event_bus: EventBus | None = None,
     ):
         self._command_bus = command_bus or get_command_bus()
         self._event_bus = event_bus or get_event_bus()
@@ -230,7 +230,7 @@ class SagaManager:
                 return True
             return False
 
-    def start_saga(self, saga: Saga, initial_data: Optional[dict[str, Any]] = None) -> SagaContext:
+    def start_saga(self, saga: Saga, initial_data: dict[str, Any] | None = None) -> SagaContext:
         """
         Start a new saga instance.
 
@@ -377,14 +377,14 @@ class SagaManager:
         with self._lock:
             return list(reversed(self._saga_history[-limit:]))
 
-    def get_saga(self, saga_id: str) -> Optional[Saga]:
+    def get_saga(self, saga_id: str) -> Saga | None:
         """Get an active saga by ID."""
         with self._lock:
             return self._active_sagas.get(saga_id)
 
 
 # Singleton instance
-_saga_manager: Optional[SagaManager] = None
+_saga_manager: SagaManager | None = None
 
 
 def get_saga_manager() -> SagaManager:

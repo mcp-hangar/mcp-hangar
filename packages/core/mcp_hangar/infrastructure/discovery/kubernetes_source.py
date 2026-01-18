@@ -14,8 +14,6 @@ Example Pod Annotations:
     mcp-hangar.io/health-path: "/health"
 """
 
-from typing import Optional
-
 from mcp_hangar.domain.discovery.discovered_provider import DiscoveredProvider
 from mcp_hangar.domain.discovery.discovery_source import DiscoveryMode, DiscoverySource
 
@@ -52,10 +50,10 @@ class KubernetesDiscoverySource(DiscoverySource):
     def __init__(
         self,
         mode: DiscoveryMode = DiscoveryMode.AUTHORITATIVE,
-        namespaces: Optional[list[str]] = None,
-        label_selector: Optional[str] = None,
+        namespaces: list[str] | None = None,
+        label_selector: str | None = None,
         in_cluster: bool = True,
-        kubeconfig_path: Optional[str] = None,
+        kubeconfig_path: str | None = None,
         default_ttl: int = 90,
     ):
         """Initialize Kubernetes discovery source.
@@ -81,7 +79,7 @@ class KubernetesDiscoverySource(DiscoverySource):
         self.kubeconfig_path = kubeconfig_path
         self.default_ttl = default_ttl
 
-        self._v1: Optional[client.CoreV1Api] = None
+        self._v1: client.CoreV1Api | None = None
         self._initialized = False
 
     def _ensure_initialized(self) -> None:
@@ -138,7 +136,7 @@ class KubernetesDiscoverySource(DiscoverySource):
         logger.debug(f"Kubernetes discovery found {len(providers)} providers")
         return providers
 
-    def _parse_pod(self, pod, namespace: str) -> Optional[DiscoveredProvider]:
+    def _parse_pod(self, pod, namespace: str) -> DiscoveredProvider | None:
         """Parse pod annotations into DiscoveredProvider.
 
         Args:

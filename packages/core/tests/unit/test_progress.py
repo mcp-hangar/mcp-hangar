@@ -193,10 +193,9 @@ class TestProgressOperation:
         """Test that exception triggers fail()."""
         tracker = None
 
-        with pytest.raises(ValueError):
-            with ProgressOperation("test", "op") as t:
-                tracker = t
-                raise ValueError("Test error")
+        with pytest.raises(ValueError), ProgressOperation("test", "op") as t:
+            tracker = t
+            raise ValueError("Test error")
 
         assert tracker._completed is True
         assert tracker._error is not None

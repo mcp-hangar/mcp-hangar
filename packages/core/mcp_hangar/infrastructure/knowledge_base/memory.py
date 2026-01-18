@@ -4,7 +4,7 @@ import hashlib
 import json
 from collections import defaultdict
 from datetime import UTC, datetime, timedelta
-from typing import Any, Optional
+from typing import Any
 
 from ...logging_config import get_logger
 from .contracts import AuditEntry, IKnowledgeBase, KnowledgeBaseConfig, MetricEntry, ProviderStateEntry
@@ -48,7 +48,7 @@ class MemoryKnowledgeBase(IKnowledgeBase):
 
     # === Cache Operations ===
 
-    async def cache_get(self, provider: str, tool: str, arguments: dict) -> Optional[dict]:
+    async def cache_get(self, provider: str, tool: str, arguments: dict) -> dict | None:
         key = self._cache_key(provider, tool, arguments)
         if key in self._cache:
             result, expires_at = self._cache[key]
@@ -65,7 +65,7 @@ class MemoryKnowledgeBase(IKnowledgeBase):
         tool: str,
         arguments: dict,
         result: Any,
-        ttl_s: Optional[int] = None,
+        ttl_s: int | None = None,
     ) -> bool:
         key = self._cache_key(provider, tool, arguments)
         ttl = ttl_s or self._config.cache_ttl_s
@@ -73,7 +73,7 @@ class MemoryKnowledgeBase(IKnowledgeBase):
         self._cache[key] = (result, expires_at)
         return True
 
-    async def cache_invalidate(self, provider: Optional[str] = None, tool: Optional[str] = None) -> int:
+    async def cache_invalidate(self, provider: str | None = None, tool: str | None = None) -> int:
         if not provider and not tool:
             count = len(self._cache)
             self._cache.clear()
@@ -102,10 +102,10 @@ class MemoryKnowledgeBase(IKnowledgeBase):
 
     async def audit_query(
         self,
-        provider: Optional[str] = None,
-        tool: Optional[str] = None,
-        success: Optional[bool] = None,
-        since: Optional[datetime] = None,
+        provider: str | None = None,
+        tool: str | None = None,
+        success: bool | None = None,
+        since: datetime | None = None,
         limit: int = 100,
     ) -> list[AuditEntry]:
         results = []
@@ -159,8 +159,8 @@ class MemoryKnowledgeBase(IKnowledgeBase):
     async def get_metrics(
         self,
         provider_id: str,
-        metric_name: Optional[str] = None,
-        since: Optional[datetime] = None,
+        metric_name: str | None = None,
+        since: datetime | None = None,
         limit: int = 100,
     ) -> list[MetricEntry]:
         metrics = self._metrics.get(provider_id, [])

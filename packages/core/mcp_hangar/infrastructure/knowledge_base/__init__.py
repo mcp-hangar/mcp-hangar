@@ -30,8 +30,6 @@ Usage:
     await kb.cache_set("math", "add", {"a": 1}, {"result": 2})
 """
 
-from typing import Optional
-
 from ...logging_config import get_logger
 from .contracts import (
     AuditEntry,
@@ -45,11 +43,11 @@ from .contracts import (
 logger = get_logger(__name__)
 
 # Global instance
-_instance: Optional[IKnowledgeBase] = None
-_config: Optional[KnowledgeBaseConfig] = None
+_instance: IKnowledgeBase | None = None
+_config: KnowledgeBaseConfig | None = None
 
 
-def get_knowledge_base() -> Optional[IKnowledgeBase]:
+def get_knowledge_base() -> IKnowledgeBase | None:
     """Get the global knowledge base instance.
 
     Returns None if not initialized or disabled.
@@ -57,7 +55,7 @@ def get_knowledge_base() -> Optional[IKnowledgeBase]:
     return _instance
 
 
-def get_config() -> Optional[KnowledgeBaseConfig]:
+def get_config() -> KnowledgeBaseConfig | None:
     """Get current knowledge base configuration."""
     return _config
 
@@ -67,7 +65,7 @@ def is_available() -> bool:
     return _instance is not None
 
 
-async def init_knowledge_base(config: KnowledgeBaseConfig) -> Optional[IKnowledgeBase]:
+async def init_knowledge_base(config: KnowledgeBaseConfig) -> IKnowledgeBase | None:
     """Initialize knowledge base from configuration.
 
     Creates appropriate driver based on config and runs migrations.
@@ -147,14 +145,14 @@ async def close_knowledge_base() -> None:
 
 async def audit_log(
     event_type: str,
-    provider: Optional[str] = None,
-    tool: Optional[str] = None,
-    arguments: Optional[dict] = None,
-    result_summary: Optional[str] = None,
-    duration_ms: Optional[int] = None,
+    provider: str | None = None,
+    tool: str | None = None,
+    arguments: dict | None = None,
+    result_summary: str | None = None,
+    duration_ms: int | None = None,
     success: bool = True,
-    error_message: Optional[str] = None,
-    correlation_id: Optional[str] = None,
+    error_message: str | None = None,
+    correlation_id: str | None = None,
 ) -> bool:
     """Log audit entry using global instance."""
     if not _instance:
@@ -177,9 +175,9 @@ async def audit_log(
 
 async def record_state_change(
     provider_id: str,
-    old_state: Optional[str],
+    old_state: str | None,
     new_state: str,
-    reason: Optional[str] = None,
+    reason: str | None = None,
 ) -> bool:
     """Record provider state change using global instance."""
     if not _instance:
@@ -199,7 +197,7 @@ async def record_metric(
     provider_id: str,
     metric_name: str,
     metric_value: float,
-    labels: Optional[dict] = None,
+    labels: dict | None = None,
 ) -> bool:
     """Record provider metric using global instance."""
     if not _instance:
@@ -215,7 +213,7 @@ async def record_metric(
     )
 
 
-async def cache_get(provider: str, tool: str, arguments: dict) -> Optional[dict]:
+async def cache_get(provider: str, tool: str, arguments: dict) -> dict | None:
     """Get cached result using global instance."""
     if not _instance:
         return None
@@ -227,7 +225,7 @@ async def cache_set(
     tool: str,
     arguments: dict,
     result: dict,
-    ttl_s: Optional[int] = None,
+    ttl_s: int | None = None,
 ) -> bool:
     """Set cached result using global instance."""
     if not _instance:

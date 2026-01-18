@@ -1,5 +1,6 @@
 """Tests for UX improvements: errors, retry, and progress modules."""
 
+import builtins
 import json
 
 from mcp_hangar.errors import (
@@ -432,9 +433,8 @@ class TestMapExceptionToHangarError:
 
     def test_socket_timeout_mapping(self):
         """Test socket timeout is mapped to TimeoutError."""
-        import socket
 
-        original = socket.timeout("timed out")
+        original = builtins.TimeoutError("timed out")
         result = map_exception_to_hangar_error(original, provider="test", operation="invoke")
         assert isinstance(result, TimeoutError)
 

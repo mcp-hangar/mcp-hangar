@@ -10,7 +10,7 @@ import re
 import uuid
 from dataclasses import dataclass
 from enum import Enum
-from typing import Any, Optional
+from typing import Any
 from urllib.parse import urlparse
 
 # --- Authentication & Authorization Value Objects ---
@@ -535,7 +535,7 @@ class CorrelationId:
 
     value: str
 
-    def __init__(self, value: Optional[str] = None):
+    def __init__(self, value: str | None = None):
         if value is None:
             # Generate new UUID
             value = str(uuid.uuid4())
@@ -686,7 +686,7 @@ class EnvironmentVariables:
 
     variables: dict[str, str]
 
-    def __init__(self, variables: Optional[dict[str, str]] = None):
+    def __init__(self, variables: dict[str, str] | None = None):
         vars_dict = variables or {}
 
         # Validate keys
@@ -699,7 +699,7 @@ class EnvironmentVariables:
         # Create immutable copy
         object.__setattr__(self, "variables", dict(vars_dict))
 
-    def get(self, key: str, default: Optional[str] = None) -> Optional[str]:
+    def get(self, key: str, default: str | None = None) -> str | None:
         """Get environment variable value."""
         return self.variables.get(key, default)
 
@@ -834,10 +834,10 @@ class ProviderConfig:
 
     provider_id: ProviderId
     mode: ProviderMode
-    command: Optional[CommandLine] = None
-    image: Optional[DockerImage] = None
-    endpoint: Optional[Endpoint] = None
-    env: Optional[EnvironmentVariables] = None
+    command: CommandLine | None = None
+    image: DockerImage | None = None
+    endpoint: Endpoint | None = None
+    env: EnvironmentVariables | None = None
     idle_ttl: IdleTTL = None
     health_check_interval: HealthCheckInterval = None
     max_consecutive_failures: MaxConsecutiveFailures = None
@@ -846,10 +846,10 @@ class ProviderConfig:
         self,
         provider_id: str,
         mode: str,
-        command: Optional[list[str]] = None,
-        image: Optional[str] = None,
-        endpoint: Optional[str] = None,
-        env: Optional[dict[str, str]] = None,
+        command: list[str] | None = None,
+        image: str | None = None,
+        endpoint: str | None = None,
+        env: dict[str, str] | None = None,
         idle_ttl_s: int = 300,
         health_check_interval_s: int = 60,
         max_consecutive_failures: int = 3,

@@ -24,7 +24,6 @@ Label Reference:
 import os
 import platform
 from pathlib import Path
-from typing import Optional
 
 from mcp_hangar.domain.discovery.discovered_provider import DiscoveredProvider
 from mcp_hangar.domain.discovery.discovery_source import DiscoveryMode, DiscoverySource
@@ -54,7 +53,7 @@ SOCKET_PATHS = {
 }
 
 
-def find_container_socket() -> Optional[str]:
+def find_container_socket() -> str | None:
     """Find Docker or Podman socket.
 
     Returns:
@@ -115,7 +114,7 @@ class DockerDiscoverySource(DiscoverySource):
     def __init__(
         self,
         mode: DiscoveryMode = DiscoveryMode.ADDITIVE,
-        socket_path: Optional[str] = None,
+        socket_path: str | None = None,
         default_ttl: int = 90,
     ):
         """Initialize discovery source.
@@ -132,7 +131,7 @@ class DockerDiscoverySource(DiscoverySource):
 
         self._socket_path = socket_path
         self._default_ttl = default_ttl
-        self._client: Optional[docker.DockerClient] = None
+        self._client: docker.DockerClient | None = None
 
     def _ensure_client(self) -> None:
         """Ensure Docker client is connected."""
@@ -177,7 +176,7 @@ class DockerDiscoverySource(DiscoverySource):
 
         return providers
 
-    def _parse_container(self, container) -> Optional[DiscoveredProvider]:
+    def _parse_container(self, container) -> DiscoveredProvider | None:
         """Parse container into DiscoveredProvider."""
         labels = container.labels or {}
 
@@ -245,7 +244,7 @@ class DockerDiscoverySource(DiscoverySource):
             ttl_seconds=int(labels.get(f"{self.LABEL_PREFIX}ttl", self._default_ttl)),
         )
 
-    def _get_container_ip(self, container) -> Optional[str]:
+    def _get_container_ip(self, container) -> str | None:
         """Get container IP address from any network."""
         try:
             networks = container.attrs.get("NetworkSettings", {}).get("Networks", {})

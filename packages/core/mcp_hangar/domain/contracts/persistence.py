@@ -10,7 +10,7 @@ not the other way around.
 from dataclasses import dataclass, field
 from datetime import datetime
 from enum import Enum
-from typing import Any, Optional, Protocol
+from typing import Any, Protocol
 
 
 class AuditAction(Enum):
@@ -39,10 +39,10 @@ class AuditEntry:
     action: AuditAction
     timestamp: datetime
     actor: str  # who performed the action (system, user, etc.)
-    old_state: Optional[dict[str, Any]] = None
-    new_state: Optional[dict[str, Any]] = None
+    old_state: dict[str, Any] | None = None
+    new_state: dict[str, Any] | None = None
     metadata: dict[str, Any] = field(default_factory=dict)
-    correlation_id: Optional[str] = None
+    correlation_id: str | None = None
 
     def to_dict(self) -> dict[str, Any]:
         """Serialize to dictionary for storage."""
@@ -84,24 +84,24 @@ class ProviderConfigSnapshot:
 
     provider_id: str
     mode: str
-    command: Optional[list[str]] = None
-    image: Optional[str] = None
-    endpoint: Optional[str] = None
+    command: list[str] | None = None
+    image: str | None = None
+    endpoint: str | None = None
     env: dict[str, str] = field(default_factory=dict)
     idle_ttl_s: int = 300
     health_check_interval_s: int = 60
     max_consecutive_failures: int = 3
-    description: Optional[str] = None
+    description: str | None = None
     volumes: list[str] = field(default_factory=list)
-    build: Optional[dict[str, str]] = None
+    build: dict[str, str] | None = None
     resources: dict[str, str] = field(default_factory=dict)
     network: str = "none"
     read_only: bool = True
-    user: Optional[str] = None
-    tools: Optional[list[dict[str, Any]]] = None
+    user: str | None = None
+    tools: list[dict[str, Any]] | None = None
     enabled: bool = True
-    created_at: Optional[datetime] = None
-    updated_at: Optional[datetime] = None
+    created_at: datetime | None = None
+    updated_at: datetime | None = None
 
     def to_dict(self) -> dict[str, Any]:
         """Serialize to dictionary for storage."""
@@ -178,7 +178,7 @@ class IProviderConfigRepository(Protocol):
         """
         ...
 
-    async def get(self, provider_id: str) -> Optional[ProviderConfigSnapshot]:
+    async def get(self, provider_id: str) -> ProviderConfigSnapshot | None:
         """Retrieve provider configuration by ID.
 
         Args:
@@ -243,7 +243,7 @@ class IAuditRepository(Protocol):
     async def get_by_entity(
         self,
         entity_id: str,
-        entity_type: Optional[str] = None,
+        entity_type: str | None = None,
         limit: int = 100,
         offset: int = 0,
     ) -> list[AuditEntry]:
@@ -264,8 +264,8 @@ class IAuditRepository(Protocol):
         self,
         start: datetime,
         end: datetime,
-        entity_type: Optional[str] = None,
-        action: Optional[AuditAction] = None,
+        entity_type: str | None = None,
+        action: AuditAction | None = None,
         limit: int = 1000,
     ) -> list[AuditEntry]:
         """Get audit entries within a time range.

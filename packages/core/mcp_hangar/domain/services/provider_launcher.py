@@ -25,7 +25,6 @@ import subprocess
 import sys
 from abc import ABC, abstractmethod
 from dataclasses import dataclass, field
-from typing import Optional
 
 from ...logging_config import get_logger
 from ...stdio_client import StdioClient
@@ -106,13 +105,13 @@ class SubprocessLauncher(ProviderLauncher):
 
     def __init__(
         self,
-        allowed_commands: Optional[set[str]] = None,
-        blocked_commands: Optional[set[str]] = None,
+        allowed_commands: set[str] | None = None,
+        blocked_commands: set[str] | None = None,
         allow_absolute_paths: bool = True,
         inherit_env: bool = True,
         filter_sensitive_env: bool = True,
-        env_whitelist: Optional[set[str]] = None,
-        env_blacklist: Optional[set[str]] = None,
+        env_whitelist: set[str] | None = None,
+        env_blacklist: set[str] | None = None,
     ):
         """
         Initialize subprocess launcher with security configuration.
@@ -190,7 +189,7 @@ class SubprocessLauncher(ProviderLauncher):
                             value=executable,
                         )
 
-    def _validate_env(self, env: Optional[dict[str, str]]) -> None:
+    def _validate_env(self, env: dict[str, str] | None) -> None:
         """
         Validate environment variables.
 
@@ -210,7 +209,7 @@ class SubprocessLauncher(ProviderLauncher):
                 details={"errors": [e.to_dict() for e in result.errors]},
             )
 
-    def _prepare_env(self, provider_env: Optional[dict[str, str]] = None) -> dict[str, str]:
+    def _prepare_env(self, provider_env: dict[str, str] | None = None) -> dict[str, str]:
         """
         Prepare secure environment for subprocess.
 
@@ -252,7 +251,7 @@ class SubprocessLauncher(ProviderLauncher):
     def launch(
         self,
         command: list[str],
-        env: Optional[dict[str, str]] = None,
+        env: dict[str, str] | None = None,
     ) -> StdioClient:
         """
         Launch a subprocess provider with security validation.
@@ -351,14 +350,14 @@ class DockerLauncher(ProviderLauncher):
 
     def __init__(
         self,
-        allowed_registries: Optional[set[str]] = None,
-        blocked_images: Optional[set[str]] = None,
+        allowed_registries: set[str] | None = None,
+        blocked_images: set[str] | None = None,
         enable_network: bool = False,
         memory_limit: str = "512m",
         cpu_limit: str = "1.0",
         read_only: bool = True,
         drop_capabilities: bool = True,
-        runtime: Optional[str] = None,  # "docker", "podman", or None for auto-detect
+        runtime: str | None = None,  # "docker", "podman", or None for auto-detect
     ):
         """
         Initialize Docker launcher with security configuration.
@@ -447,7 +446,7 @@ class DockerLauncher(ProviderLauncher):
     def _build_docker_command(
         self,
         image: str,
-        env: Optional[dict[str, str]] = None,
+        env: dict[str, str] | None = None,
     ) -> list[str]:
         """
         Build secure Docker/Podman run command.
@@ -496,7 +495,7 @@ class DockerLauncher(ProviderLauncher):
     def launch(
         self,
         image: str,
-        env: Optional[dict[str, str]] = None,
+        env: dict[str, str] | None = None,
     ) -> StdioClient:
         """
         Launch a Docker provider with security validation.
@@ -568,7 +567,7 @@ class ContainerConfig:
     network: str = "none"  # none, bridge, host
     read_only: bool = True
     drop_capabilities: bool = False  # Disabled: causes issues with native modules (e.g., better-sqlite3)
-    user: Optional[str] = None  # Run as specific user
+    user: str | None = None  # Run as specific user
 
 
 class ContainerLauncher(ProviderLauncher):
@@ -613,9 +612,9 @@ class ContainerLauncher(ProviderLauncher):
     def __init__(
         self,
         runtime: str = "auto",
-        allowed_registries: Optional[set[str]] = None,
-        blocked_images: Optional[set[str]] = None,
-        allowed_mount_paths: Optional[set[str]] = None,
+        allowed_registries: set[str] | None = None,
+        blocked_images: set[str] | None = None,
+        allowed_mount_paths: set[str] | None = None,
     ):
         """
         Initialize container launcher.
@@ -678,7 +677,7 @@ class ContainerLauncher(ProviderLauncher):
             reason="No container runtime found. Install podman or docker.",
         )
 
-    def _find_runtime(self, preference: str) -> Optional[str]:
+    def _find_runtime(self, preference: str) -> str | None:
         """
         Find container runtime executable.
 
@@ -897,13 +896,13 @@ class ContainerLauncher(ProviderLauncher):
     def launch(
         self,
         image: str,
-        volumes: Optional[list[str]] = None,
-        env: Optional[dict[str, str]] = None,
+        volumes: list[str] | None = None,
+        env: dict[str, str] | None = None,
         memory_limit: str = "512m",
         cpu_limit: str = "1.0",
         network: str = "none",
         read_only: bool = True,
-        user: Optional[str] = None,
+        user: str | None = None,
     ) -> StdioClient:
         """
         Launch a container provider.

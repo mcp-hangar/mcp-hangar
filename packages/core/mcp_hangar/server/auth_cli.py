@@ -19,7 +19,6 @@ Usage:
 import argparse
 import sys
 from datetime import UTC, datetime, timedelta
-from typing import Optional
 
 from ..domain.security.roles import list_builtin_roles
 from ..infrastructure.auth.api_key_authenticator import InMemoryApiKeyStore
@@ -190,7 +189,7 @@ def _handle_create_key(args, key_store: InMemoryApiKeyStore, role_store: InMemor
     tenant_id = args.tenant
 
     # Calculate expiration
-    expires_at: Optional[datetime] = None
+    expires_at: datetime | None = None
     if expires_days:
         expires_at = datetime.now(UTC) + timedelta(days=expires_days)
 

@@ -5,7 +5,7 @@ provider lifecycle events and operations.
 """
 
 from datetime import datetime
-from typing import Any, Optional
+from typing import Any
 
 from ..contracts.persistence import AuditAction, AuditEntry, IAuditRepository
 from ..events import (
@@ -40,7 +40,7 @@ class AuditService:
         provider_id: str,
         config: dict[str, Any],
         actor: str = "system",
-        correlation_id: Optional[str] = None,
+        correlation_id: str | None = None,
     ) -> None:
         """Record provider creation audit entry.
 
@@ -68,7 +68,7 @@ class AuditService:
         old_config: dict[str, Any],
         new_config: dict[str, Any],
         actor: str = "system",
-        correlation_id: Optional[str] = None,
+        correlation_id: str | None = None,
     ) -> None:
         """Record provider configuration update.
 
@@ -97,7 +97,7 @@ class AuditService:
         provider_id: str,
         config: dict[str, Any],
         actor: str = "system",
-        correlation_id: Optional[str] = None,
+        correlation_id: str | None = None,
     ) -> None:
         """Record provider deletion.
 
@@ -126,7 +126,7 @@ class AuditService:
         tools_count: int,
         startup_duration_ms: float,
         actor: str = "system",
-        correlation_id: Optional[str] = None,
+        correlation_id: str | None = None,
     ) -> None:
         """Record provider start event.
 
@@ -162,7 +162,7 @@ class AuditService:
         provider_id: str,
         reason: str,
         actor: str = "system",
-        correlation_id: Optional[str] = None,
+        correlation_id: str | None = None,
     ) -> None:
         """Record provider stop event.
 
@@ -193,7 +193,7 @@ class AuditService:
         total_failures: int,
         reason: str,
         actor: str = "system",
-        correlation_id: Optional[str] = None,
+        correlation_id: str | None = None,
     ) -> None:
         """Record provider degradation event.
 
@@ -228,7 +228,7 @@ class AuditService:
         old_state: str,
         new_state: str,
         actor: str = "system",
-        correlation_id: Optional[str] = None,
+        correlation_id: str | None = None,
     ) -> None:
         """Record provider state transition.
 
@@ -260,9 +260,9 @@ class AuditService:
         result: Any,
         duration_ms: float,
         success: bool,
-        error: Optional[str] = None,
+        error: str | None = None,
         actor: str = "user",
-        correlation_id: Optional[str] = None,
+        correlation_id: str | None = None,
     ) -> None:
         """Record tool invocation for accountability.
 

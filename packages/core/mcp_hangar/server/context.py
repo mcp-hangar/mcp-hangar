@@ -92,8 +92,8 @@ class ISecurityHandler(Protocol):
         self,
         field: str,
         message: str,
-        provider_id: Optional[str] = None,
-        value: Optional[str] = None,
+        provider_id: str | None = None,
+        value: str | None = None,
     ) -> None:
         """Log validation failure."""
         ...
@@ -171,7 +171,7 @@ class ApplicationContext:
 
 
 # Singleton context - initialized lazily or explicitly
-_context: Optional[ApplicationContext] = None
+_context: ApplicationContext | None = None
 
 
 def get_context() -> ApplicationContext:

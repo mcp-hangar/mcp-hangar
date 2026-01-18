@@ -2,7 +2,7 @@
 
 import threading
 import time
-from typing import Any, Optional
+from typing import Any
 
 from ...logging_config import get_logger
 from ..contracts.metrics_publisher import IMetricsPublisher, NullMetricsPublisher
@@ -68,25 +68,25 @@ class Provider(AggregateRoot):
         self,
         provider_id: str,
         mode: str | ProviderMode,  # Accept both string and enum
-        command: Optional[list[str]] = None,
-        image: Optional[str] = None,
-        endpoint: Optional[str] = None,
-        env: Optional[dict[str, str]] = None,
+        command: list[str] | None = None,
+        image: str | None = None,
+        endpoint: str | None = None,
+        env: dict[str, str] | None = None,
         idle_ttl_s: int | IdleTTL = 300,  # Accept both int and value object
         health_check_interval_s: int | HealthCheckInterval = 60,  # Accept both int and value object
         max_consecutive_failures: int = 3,
         # Container-specific options
-        volumes: Optional[list[str]] = None,
-        build: Optional[dict[str, str]] = None,
-        resources: Optional[dict[str, str]] = None,
+        volumes: list[str] | None = None,
+        build: dict[str, str] | None = None,
+        resources: dict[str, str] | None = None,
         network: str = "none",
         read_only: bool = True,
-        user: Optional[str] = None,  # UID:GID or username
-        description: Optional[str] = None,  # Description/preprompt for AI models
+        user: str | None = None,  # UID:GID or username
+        description: str | None = None,  # Description/preprompt for AI models
         # Pre-defined tools (allows visibility before provider starts)
-        tools: Optional[list[dict[str, Any]]] = None,
+        tools: list[dict[str, Any]] | None = None,
         # Dependencies
-        metrics_publisher: Optional[IMetricsPublisher] = None,
+        metrics_publisher: IMetricsPublisher | None = None,
     ):
         super().__init__()
 
@@ -131,7 +131,7 @@ class Provider(AggregateRoot):
         self._state = ProviderState.COLD
         self._health = HealthTracker(max_consecutive_failures=max_consecutive_failures)
         self._tools = ToolCatalog()
-        self._client: Optional[Any] = None  # StdioClient
+        self._client: Any | None = None  # StdioClient
         self._meta: dict[str, Any] = {}
         self._last_used: float = 0.0
 
@@ -167,7 +167,7 @@ class Provider(AggregateRoot):
         return self._mode.value
 
     @property
-    def description(self) -> Optional[str]:
+    def description(self) -> str | None:
         """Provider description for AI models."""
         return self._description
 
@@ -346,7 +346,7 @@ class Provider(AggregateRoot):
             self._handle_start_failure(e)
             raise ProviderStartError(self.provider_id, str(e)) from e
 
-    def _begin_cold_start_tracking(self) -> Optional[float]:
+    def _begin_cold_start_tracking(self) -> float | None:
         """Begin tracking cold start metrics. Returns start timestamp."""
         try:
             self._metrics_publisher.begin_cold_start(self.provider_id)
@@ -354,7 +354,7 @@ class Provider(AggregateRoot):
         except Exception:
             return None
 
-    def _end_cold_start_tracking(self, start_time: Optional[float], success: bool) -> None:
+    def _end_cold_start_tracking(self, start_time: float | None, success: bool) -> None:
         """End cold start tracking and record metrics."""
         if start_time is None:
             return
@@ -508,7 +508,7 @@ class Provider(AggregateRoot):
 
         logger.info(f"provider_started: {self.provider_id}, mode={self._mode.value}, tools={self._tools.count()}")
 
-    def _handle_start_failure(self, error: Optional[Exception]) -> None:
+    def _handle_start_failure(self, error: Exception | None) -> None:
         """Handle start failure (must hold lock)."""
         # Clean up client if partially started
         if self._client:

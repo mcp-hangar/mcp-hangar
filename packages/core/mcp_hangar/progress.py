@@ -28,7 +28,7 @@ import time
 from collections.abc import AsyncIterator, Callable, Iterator
 from dataclasses import dataclass, field
 from enum import Enum
-from typing import Any, Optional
+from typing import Any
 
 from .logging_config import get_logger
 
@@ -86,7 +86,7 @@ class ProgressEvent:
 
     # For result/error events
     data: Any = None
-    exception: Optional[Exception] = None
+    exception: Exception | None = None
 
     def to_dict(self) -> dict[str, Any]:
         """Convert to dictionary for serialization."""
@@ -133,7 +133,7 @@ class ProgressTracker:
 
     def __init__(
         self,
-        callback: Optional[ProgressCallback] = None,
+        callback: ProgressCallback | None = None,
         provider: str = "",
         operation: str = "",
     ):
@@ -151,7 +151,7 @@ class ProgressTracker:
         self._events: list[ProgressEvent] = []
         self._completed = False
         self._result: Any = None
-        self._error: Optional[Exception] = None
+        self._error: Exception | None = None
 
         # For iterator support
         self._event_queue: asyncio.Queue = asyncio.Queue()
@@ -168,7 +168,7 @@ class ProgressTracker:
         self,
         stage: ProgressStage,
         message: str,
-        details: Optional[dict[str, Any]] = None,
+        details: dict[str, Any] | None = None,
     ) -> None:
         """Report a progress update.
 
@@ -322,7 +322,7 @@ class ProgressTracker:
                 yield event
                 if event.type in (EventType.RESULT, EventType.ERROR):
                     return
-            except asyncio.TimeoutError:
+            except TimeoutError:
                 if self._completed:
                     return
 
@@ -351,7 +351,7 @@ class ProgressOperation:
         self,
         provider: str,
         operation: str,
-        callback: Optional[ProgressCallback] = None,
+        callback: ProgressCallback | None = None,
     ):
         self.provider = provider
         self.operation = operation
@@ -502,7 +502,7 @@ class ProgressEventHandler:
 
 
 # Global progress event handler instance
-_progress_handler: Optional[ProgressEventHandler] = None
+_progress_handler: ProgressEventHandler | None = None
 
 
 def get_progress_handler() -> ProgressEventHandler:
@@ -516,8 +516,8 @@ def get_progress_handler() -> ProgressEventHandler:
 def create_progress_tracker(
     provider: str = "",
     operation: str = "",
-    callback: Optional[ProgressCallback] = None,
-    correlation_id: Optional[str] = None,
+    callback: ProgressCallback | None = None,
+    correlation_id: str | None = None,
 ) -> ProgressTracker:
     """Create a progress tracker with optional event bus integration.
 

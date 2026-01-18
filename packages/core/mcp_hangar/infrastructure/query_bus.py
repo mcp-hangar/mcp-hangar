@@ -7,7 +7,7 @@ Each query has exactly one handler that returns data.
 
 from abc import ABC, abstractmethod
 from dataclasses import dataclass
-from typing import Any, Optional
+from typing import Any
 
 from mcp_hangar.logging_config import get_logger
 
@@ -29,7 +29,7 @@ class Query(ABC):
 class ListProvidersQuery(Query):
     """Query to list all providers."""
 
-    state_filter: Optional[str] = None  # Filter by state (cold, ready, degraded, etc.)
+    state_filter: str | None = None  # Filter by state (cold, ready, degraded, etc.)
 
 
 @dataclass(frozen=True)
@@ -136,7 +136,7 @@ class QueryBus:
 
 
 # Global query bus instance
-_query_bus: Optional[QueryBus] = None
+_query_bus: QueryBus | None = None
 
 
 def get_query_bus() -> QueryBus:

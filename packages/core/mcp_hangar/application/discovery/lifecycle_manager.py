@@ -7,7 +7,6 @@ quarantine management, and graceful deregistration.
 import asyncio
 from collections.abc import Awaitable, Callable
 from datetime import UTC, datetime
-from typing import Optional
 
 from mcp_hangar.domain.discovery.discovered_provider import DiscoveredProvider
 
@@ -42,7 +41,7 @@ class DiscoveryLifecycleManager:
         default_ttl: int = 90,
         check_interval: int = 10,
         drain_timeout: int = 30,
-        on_deregister: Optional[RegistryCallback] = None,
+        on_deregister: RegistryCallback | None = None,
     ):
         """Initialize lifecycle manager.
 
@@ -68,7 +67,7 @@ class DiscoveryLifecycleManager:
 
         # Lifecycle task
         self._running = False
-        self._lifecycle_task: Optional[asyncio.Task] = None
+        self._lifecycle_task: asyncio.Task | None = None
 
     async def start(self) -> None:
         """Start lifecycle management loop."""
@@ -156,7 +155,7 @@ class DiscoveryLifecycleManager:
         self._providers[provider.name] = provider
         logger.debug(f"Added provider to lifecycle tracking: {provider.name}")
 
-    def update_seen(self, name: str) -> Optional[DiscoveredProvider]:
+    def update_seen(self, name: str) -> DiscoveredProvider | None:
         """Update last_seen for a provider.
 
         Args:
@@ -181,7 +180,7 @@ class DiscoveryLifecycleManager:
         self._providers[provider.name] = provider
         logger.debug(f"Updated provider in lifecycle tracking: {provider.name}")
 
-    def remove_provider(self, name: str) -> Optional[DiscoveredProvider]:
+    def remove_provider(self, name: str) -> DiscoveredProvider | None:
         """Remove provider from tracking.
 
         Args:
@@ -192,7 +191,7 @@ class DiscoveryLifecycleManager:
         """
         return self._providers.pop(name, None)
 
-    def get_provider(self, name: str) -> Optional[DiscoveredProvider]:
+    def get_provider(self, name: str) -> DiscoveredProvider | None:
         """Get a tracked provider.
 
         Args:
@@ -225,7 +224,7 @@ class DiscoveryLifecycleManager:
         self._providers.pop(provider.name, None)
         logger.warning(f"Provider '{provider.name}' quarantined: {reason}")
 
-    def approve(self, name: str) -> Optional[DiscoveredProvider]:
+    def approve(self, name: str) -> DiscoveredProvider | None:
         """Approve quarantined provider for registration.
 
         Args:
@@ -242,7 +241,7 @@ class DiscoveryLifecycleManager:
             return provider
         return None
 
-    def reject(self, name: str) -> Optional[DiscoveredProvider]:
+    def reject(self, name: str) -> DiscoveredProvider | None:
         """Reject and remove quarantined provider.
 
         Args:

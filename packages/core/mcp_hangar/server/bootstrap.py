@@ -22,7 +22,7 @@ Starting is handled by the lifecycle module.
 import asyncio
 from dataclasses import dataclass, field
 from pathlib import Path
-from typing import TYPE_CHECKING, Any, Optional
+from typing import TYPE_CHECKING, Any
 
 from mcp.server.fastmcp import FastMCP
 
@@ -97,10 +97,10 @@ class ApplicationContext:
     background_workers: list[BackgroundWorker] = field(default_factory=list)
     """Background workers (GC, health check) - not started."""
 
-    discovery_orchestrator: Optional[DiscoveryOrchestrator] = None
+    discovery_orchestrator: DiscoveryOrchestrator | None = None
     """Discovery orchestrator if enabled - not started."""
 
-    auth_components: Optional[AuthComponents] = None
+    auth_components: AuthComponents | None = None
     """Authentication and authorization components."""
 
     config: dict[str, Any] = field(default_factory=dict)
@@ -150,7 +150,7 @@ class ApplicationContext:
 # =============================================================================
 
 
-def bootstrap(config_path: Optional[str] = None) -> ApplicationContext:
+def bootstrap(config_path: str | None = None) -> ApplicationContext:
     """Bootstrap the application.
 
     Initializes all components in correct order:
@@ -452,7 +452,7 @@ def _create_background_workers() -> list[BackgroundWorker]:
 # =============================================================================
 
 
-def _create_discovery_orchestrator(config: dict[str, Any]) -> Optional[DiscoveryOrchestrator]:
+def _create_discovery_orchestrator(config: dict[str, Any]) -> DiscoveryOrchestrator | None:
     """Create discovery orchestrator from config (not started).
 
     Args:

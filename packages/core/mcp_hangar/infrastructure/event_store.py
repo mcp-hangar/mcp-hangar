@@ -10,7 +10,7 @@ from abc import ABC, abstractmethod
 from collections.abc import Callable
 from dataclasses import dataclass, field
 from pathlib import Path
-from typing import Any, Optional
+from typing import Any
 
 from ..domain.events import DomainEvent
 from ..logging_config import get_logger
@@ -99,7 +99,7 @@ class EventStore(ABC):
         pass
 
     @abstractmethod
-    def load(self, stream_id: str, from_version: int = 0, to_version: Optional[int] = None) -> list[StoredEvent]:
+    def load(self, stream_id: str, from_version: int = 0, to_version: int | None = None) -> list[StoredEvent]:
         """
         Load events from a stream.
 
@@ -177,7 +177,7 @@ class InMemoryEventStore(EventStore):
 
             return new_version
 
-    def load(self, stream_id: str, from_version: int = 0, to_version: Optional[int] = None) -> list[StoredEvent]:
+    def load(self, stream_id: str, from_version: int = 0, to_version: int | None = None) -> list[StoredEvent]:
         """Load events from a stream."""
         with self._lock:
             if stream_id not in self._streams:
@@ -276,7 +276,7 @@ class FileEventStore(EventStore):
 
             return new_version
 
-    def load(self, stream_id: str, from_version: int = 0, to_version: Optional[int] = None) -> list[StoredEvent]:
+    def load(self, stream_id: str, from_version: int = 0, to_version: int | None = None) -> list[StoredEvent]:
         """Load events from a stream."""
         with self._lock:
             # Check cache first
@@ -358,7 +358,7 @@ class EventStoreSnapshot:
             with open(self._snapshot_file(stream_id), "w") as f:
                 json.dump(snapshot, f)
 
-    def load_snapshot(self, stream_id: str) -> Optional[dict[str, Any]]:
+    def load_snapshot(self, stream_id: str) -> dict[str, Any] | None:
         """Load the latest snapshot for a stream."""
         with self._lock:
             snapshot_file = self._snapshot_file(stream_id)
@@ -380,7 +380,7 @@ class EventStoreSnapshot:
 
 
 # Singleton instance
-_event_store: Optional[EventStore] = None
+_event_store: EventStore | None = None
 
 
 def get_event_store() -> EventStore:

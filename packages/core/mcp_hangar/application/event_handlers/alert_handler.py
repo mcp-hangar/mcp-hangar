@@ -4,7 +4,7 @@ from abc import ABC, abstractmethod
 from collections.abc import Callable
 from dataclasses import dataclass, field
 from datetime import UTC, datetime
-from typing import Any, Optional
+from typing import Any
 
 from ...domain.events import DomainEvent, HealthCheckFailed, ProviderDegraded, ProviderStopped, ToolInvocationFailed
 from ...logging_config import get_logger
@@ -84,7 +84,7 @@ class AlertEventHandler:
 
     def __init__(
         self,
-        sinks: Optional[list[AlertSink]] = None,
+        sinks: list[AlertSink] | None = None,
         degradation_threshold: int = 3,
         health_failure_threshold: int = 3,
     ):

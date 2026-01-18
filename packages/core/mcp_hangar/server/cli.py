@@ -14,7 +14,6 @@ Usage:
 import argparse
 import os
 from dataclasses import dataclass
-from typing import Optional
 
 
 @dataclass(frozen=True)
@@ -34,10 +33,10 @@ class CLIConfig:
     http_port: int
     """Port to bind HTTP server to."""
 
-    config_path: Optional[str]
+    config_path: str | None
     """Path to config.yaml file."""
 
-    log_file: Optional[str]
+    log_file: str | None
     """Path to log file for server output."""
 
     log_level: str
@@ -47,7 +46,7 @@ class CLIConfig:
     """Whether to format logs as JSON."""
 
 
-def parse_args(args: Optional[list[str]] = None) -> CLIConfig:
+def parse_args(args: list[str] | None = None) -> CLIConfig:
     """Parse command line arguments.
 
     Resolves values in this order (later overrides earlier):

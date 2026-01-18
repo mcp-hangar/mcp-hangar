@@ -7,7 +7,7 @@ Separates commands (write) from queries (read) following CQRS.
 import asyncio
 import time
 import uuid
-from typing import Any, Optional
+from typing import Any
 
 from mcp.server.fastmcp import Context, FastMCP
 
@@ -87,9 +87,9 @@ def _submit_audit_log(
     arguments: dict[str, Any],
     elapsed_ms: float,
     success: bool,
-    result_summary: Optional[str] = None,
-    error_message: Optional[str] = None,
-    correlation_id: Optional[str] = None,
+    result_summary: str | None = None,
+    error_message: str | None = None,
+    correlation_id: str | None = None,
 ) -> None:
     """Submit audit log entry to knowledge base asynchronously.
 
@@ -180,7 +180,7 @@ def _invoke_on_provider(
     tool: str,
     arguments: dict,
     timeout: float,
-    progress: Optional[ProgressTracker] = None,
+    progress: ProgressTracker | None = None,
 ) -> dict[str, Any]:
     """Invoke tool on a single provider."""
     ctx = get_context()
@@ -222,7 +222,7 @@ def _invoke_on_group(
     tool: str,
     arguments: dict,
     timeout: float,
-    progress: Optional[ProgressTracker] = None,
+    progress: ProgressTracker | None = None,
 ) -> dict[str, Any]:
     """Invoke a tool on a provider group with load balancing."""
     ctx = get_context()
@@ -244,10 +244,10 @@ def _invoke_with_retry(
     arguments: dict,
     timeout: float,
     max_attempts: int = DEFAULT_GROUP_RETRY_ATTEMPTS,
-    progress: Optional[ProgressTracker] = None,
+    progress: ProgressTracker | None = None,
 ) -> dict[str, Any]:
     """Invoke tool with retry on different group members."""
-    first_error: Optional[Exception] = None
+    first_error: Exception | None = None
     tried_members: set = set()
 
     for attempt in range(max_attempts):
@@ -341,7 +341,7 @@ def register_provider_tools(mcp: FastMCP) -> None:
     def registry_invoke(
         provider: str,
         tool: str,
-        arguments: Optional[dict] = None,
+        arguments: dict | None = None,
         timeout: float = DEFAULT_TIMEOUT_SECONDS,
     ) -> dict:
         """
@@ -381,10 +381,10 @@ def register_provider_tools(mcp: FastMCP) -> None:
         tool: str,
         arguments: dict[str, Any],
         timeout: float,
-        retry_policy: Optional[RetryPolicy] = None,
-        progress_callback: Optional[ProgressCallback] = None,
+        retry_policy: RetryPolicy | None = None,
+        progress_callback: ProgressCallback | None = None,
         include_progress: bool = True,
-        correlation_id: Optional[str] = None,
+        correlation_id: str | None = None,
     ) -> dict[str, Any]:
         """Internal implementation of invoke with retry and progress.
 
@@ -577,11 +577,11 @@ def register_provider_tools(mcp: FastMCP) -> None:
     def registry_invoke_ex(
         provider: str,
         tool: str,
-        arguments: Optional[dict] = None,
+        arguments: dict | None = None,
         timeout: float = DEFAULT_TIMEOUT_SECONDS,
         max_retries: int = 3,
         retry_on_error: bool = True,
-        correlation_id: Optional[str] = None,
+        correlation_id: str | None = None,
     ) -> dict:
         """
         Invoke a tool with automatic retry on transient failures.
@@ -633,10 +633,10 @@ def register_provider_tools(mcp: FastMCP) -> None:
         provider: str,
         tool: str,
         ctx: Context,
-        arguments: Optional[dict] = None,
+        arguments: dict | None = None,
         timeout: float = DEFAULT_TIMEOUT_SECONDS,
         max_retries: int = 3,
-        correlation_id: Optional[str] = None,
+        correlation_id: str | None = None,
     ) -> dict:
         """
         Invoke a tool with real-time progress notifications.
@@ -879,7 +879,7 @@ def register_provider_tools(mcp: FastMCP) -> None:
         error_mapper=tool_error_mapper,
         on_error=lambda exc, ctx_dict: tool_error_hook(exc, ctx_dict),
     )
-    def registry_warm(providers: Optional[str] = None) -> dict:
+    def registry_warm(providers: str | None = None) -> dict:
         """
         Pre-start (warm up) providers to avoid cold start latency.
 

@@ -487,9 +487,8 @@ class TestBackwardCompatibility:
 
         mod._compat_factory = None
 
-        with pytest.raises(RuntimeError, match="setup_fastmcp_server"):
-            with pytest.warns(DeprecationWarning):
-                create_fastmcp_server()
+        with pytest.raises(RuntimeError, match="setup_fastmcp_server"), pytest.warns(DeprecationWarning):
+            create_fastmcp_server()
 
     def test_create_after_setup_works(self, mock_registry):
         """create_fastmcp_server() works after setup."""

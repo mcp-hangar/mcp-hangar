@@ -22,7 +22,7 @@ from __future__ import annotations
 from collections.abc import Callable
 from dataclasses import dataclass
 from functools import wraps
-from typing import Any, Optional, TypeVar
+from typing import Any, TypeVar
 
 from ...logging_config import get_logger
 
@@ -64,9 +64,9 @@ def mcp_tool_wrapper(
     tool_name: str,
     rate_limit_key: Callable[..., str],
     check_rate_limit: Callable[[str], None],
-    validate: Optional[Callable[..., None]] = None,
-    error_mapper: Optional[Callable[[Exception], ToolErrorPayload]] = None,
-    on_error: Optional[Callable[[Exception, dict[str, Any]], None]] = None,
+    validate: Callable[..., None] | None = None,
+    error_mapper: Callable[[Exception], ToolErrorPayload] | None = None,
+    on_error: Callable[[Exception, dict[str, Any]], None] | None = None,
 ) -> Callable[[F], F]:
     """Decorator to standardize MCP tool behavior.
 

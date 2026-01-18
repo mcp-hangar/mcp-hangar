@@ -138,15 +138,17 @@ class TestKubernetesDiscoverySource:
     @pytest.fixture
     def mock_k8s_client(self):
         """Create a mock Kubernetes client."""
-        with patch(
-            "mcp_hangar.infrastructure.discovery.kubernetes_source.KUBERNETES_AVAILABLE",
-            True,
+        with (
+            patch(
+                "mcp_hangar.infrastructure.discovery.kubernetes_source.KUBERNETES_AVAILABLE",
+                True,
+            ),
+            patch("mcp_hangar.infrastructure.discovery.kubernetes_source.config") as mock_config,
         ):
-            with patch("mcp_hangar.infrastructure.discovery.kubernetes_source.config") as mock_config:
-                with patch("mcp_hangar.infrastructure.discovery.kubernetes_source.client") as mock_client:
-                    mock_v1 = MagicMock()
-                    mock_client.CoreV1Api.return_value = mock_v1
-                    yield mock_v1, mock_config
+            with patch("mcp_hangar.infrastructure.discovery.kubernetes_source.client") as mock_client:
+                mock_v1 = MagicMock()
+                mock_client.CoreV1Api.return_value = mock_v1
+                yield mock_v1, mock_config
 
     def test_source_type(self, mock_k8s_client):
         """Test source_type property."""

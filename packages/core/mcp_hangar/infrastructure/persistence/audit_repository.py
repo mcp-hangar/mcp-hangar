@@ -7,7 +7,6 @@ Audit logs are append-only for integrity.
 import json
 import threading
 from datetime import datetime
-from typing import Optional
 
 from ...domain.contracts.persistence import AuditAction, AuditEntry, PersistenceError
 from ...logging_config import get_logger
@@ -47,7 +46,7 @@ class InMemoryAuditRepository:
     async def get_by_entity(
         self,
         entity_id: str,
-        entity_type: Optional[str] = None,
+        entity_type: str | None = None,
         limit: int = 100,
         offset: int = 0,
     ) -> list[AuditEntry]:
@@ -66,8 +65,8 @@ class InMemoryAuditRepository:
         self,
         start: datetime,
         end: datetime,
-        entity_type: Optional[str] = None,
-        action: Optional[AuditAction] = None,
+        entity_type: str | None = None,
+        action: AuditAction | None = None,
         limit: int = 1000,
     ) -> list[AuditEntry]:
         """Get audit entries within a time range."""
@@ -150,7 +149,7 @@ class SQLiteAuditRepository:
     async def get_by_entity(
         self,
         entity_id: str,
-        entity_type: Optional[str] = None,
+        entity_type: str | None = None,
         limit: int = 100,
         offset: int = 0,
     ) -> list[AuditEntry]:
@@ -203,8 +202,8 @@ class SQLiteAuditRepository:
         self,
         start: datetime,
         end: datetime,
-        entity_type: Optional[str] = None,
-        action: Optional[AuditAction] = None,
+        entity_type: str | None = None,
+        action: AuditAction | None = None,
         limit: int = 1000,
     ) -> list[AuditEntry]:
         """Get audit entries within a time range.
@@ -277,7 +276,7 @@ class SQLiteAuditRepository:
             logger.error(f"Failed to get audit entries by correlation: {e}")
             raise PersistenceError(f"Failed to get audit entries by correlation: {e}") from e
 
-    async def count_by_entity(self, entity_id: str, entity_type: Optional[str] = None) -> int:
+    async def count_by_entity(self, entity_id: str, entity_type: str | None = None) -> int:
         """Count audit entries for an entity.
 
         Args:

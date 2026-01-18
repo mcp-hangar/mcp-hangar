@@ -8,7 +8,7 @@ Validation happens early to prevent invalid data from propagating through the sy
 import re
 from dataclasses import dataclass, field
 from enum import Enum
-from typing import Any, Optional
+from typing import Any
 
 
 class ValidationSeverity(Enum):
@@ -26,7 +26,7 @@ class ValidationIssue:
     field: str
     message: str
     severity: ValidationSeverity = ValidationSeverity.ERROR
-    value: Optional[Any] = None
+    value: Any | None = None
 
     def to_dict(self) -> dict[str, Any]:
         """Convert to dictionary."""
@@ -169,8 +169,8 @@ class InputValidator:
     def __init__(
         self,
         allow_absolute_paths: bool = False,
-        allowed_commands: Optional[list[str]] = None,
-        blocked_commands: Optional[list[str]] = None,
+        allowed_commands: list[str] | None = None,
+        blocked_commands: list[str] | None = None,
     ):
         """
         Initialize validator with configuration.
@@ -240,7 +240,7 @@ class InputValidator:
         if not PROVIDER_ID_PATTERN.match(provider_id):
             result.add_error(
                 "provider_id",
-                "Provider ID must start with a letter and contain only alphanumeric characters, hyphens, and underscores",
+                "Provider ID must start with letter, contain only alphanums, hyphens, underscores",
                 provider_id,
             )
 
@@ -291,7 +291,7 @@ class InputValidator:
         if not TOOL_NAME_PATTERN.match(tool_name):
             result.add_error(
                 "tool_name",
-                "Tool name must start with a letter and contain only alphanumeric characters, underscores, dots, and slashes",
+                "Tool name must start with letter, contain only alphanums, underscores, dots, slashes",
                 tool_name,
             )
 
@@ -308,8 +308,8 @@ class InputValidator:
     def validate_arguments(
         self,
         arguments: Any,
-        max_size: Optional[int] = None,
-        max_depth: Optional[int] = None,
+        max_size: int | None = None,
+        max_depth: int | None = None,
     ) -> ValidationResult:
         """
         Validate tool arguments.
@@ -628,13 +628,13 @@ class InputValidator:
 
     def validate_all(
         self,
-        provider_id: Optional[str] = None,
-        tool_name: Optional[str] = None,
-        arguments: Optional[dict[str, Any]] = None,
-        timeout: Optional[float] = None,
-        command: Optional[list[str]] = None,
-        image: Optional[str] = None,
-        env: Optional[dict[str, str]] = None,
+        provider_id: str | None = None,
+        tool_name: str | None = None,
+        arguments: dict[str, Any] | None = None,
+        timeout: float | None = None,
+        command: list[str] | None = None,
+        image: str | None = None,
+        env: dict[str, str] | None = None,
     ) -> ValidationResult:
         """
         Validate multiple inputs at once.
@@ -683,9 +683,7 @@ def validate_tool_name(tool_name: Any) -> ValidationResult:
     return _default_validator.validate_tool_name(tool_name)
 
 
-def validate_arguments(
-    arguments: Any, max_size: Optional[int] = None, max_depth: Optional[int] = None
-) -> ValidationResult:
+def validate_arguments(arguments: Any, max_size: int | None = None, max_depth: int | None = None) -> ValidationResult:
     """Validate tool arguments using default validator."""
     return _default_validator.validate_arguments(arguments, max_size, max_depth)
 

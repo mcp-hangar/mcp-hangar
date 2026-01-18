@@ -13,7 +13,6 @@ import time
 from collections import defaultdict
 from dataclasses import dataclass, field
 from functools import wraps
-from typing import Optional
 
 # =============================================================================
 # Core Metric Types
@@ -63,7 +62,10 @@ class Counter:
     def collect(self) -> list[MetricSample]:
         """Collect all samples."""
         with self._lock:
-            return [MetricSample(value=v, labels=dict(zip(self.label_names, k, strict=False))) for k, v in self._values.items()]
+            return [
+                MetricSample(value=v, labels=dict(zip(self.label_names, k, strict=False)))
+                for k, v in self._values.items()
+            ]
 
 
 class Gauge:
@@ -112,7 +114,10 @@ class Gauge:
     def collect(self) -> list[MetricSample]:
         """Collect all samples."""
         with self._lock:
-            return [MetricSample(value=v, labels=dict(zip(self.label_names, k, strict=False))) for k, v in self._values.items()]
+            return [
+                MetricSample(value=v, labels=dict(zip(self.label_names, k, strict=False)))
+                for k, v in self._values.items()
+            ]
 
 
 class Histogram:
@@ -154,7 +159,7 @@ class Histogram:
         self.label_names = labels or []
         self.buckets = tuple(sorted(buckets or self.DEFAULT_BUCKETS)) + (float("inf"),)
         self._lock = threading.Lock()
-        self._buckets: dict[tuple, dict[float, int]] = defaultdict(lambda: {b: 0 for b in self.buckets})
+        self._buckets: dict[tuple, dict[float, int]] = defaultdict(lambda: dict.fromkeys(self.buckets, 0))
         self._sums: dict[tuple, float] = defaultdict(float)
         self._counts: dict[tuple, int] = defaultdict(int)
 
@@ -318,7 +323,7 @@ class _Timer:
     def __init__(self, histogram: Histogram, labels: dict):
         self._histogram = histogram
         self._labels = labels
-        self._start: Optional[float] = None
+        self._start: float | None = None
 
     def __enter__(self) -> "_Timer":
         self._start = time.perf_counter()

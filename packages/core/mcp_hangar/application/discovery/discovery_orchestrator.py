@@ -8,7 +8,7 @@ import asyncio
 from collections.abc import Awaitable, Callable
 from dataclasses import dataclass, field
 from datetime import UTC, datetime
-from typing import Any, Optional
+from typing import Any
 
 # Import main metrics for unified observability
 from mcp_hangar import metrics as main_metrics
@@ -103,8 +103,8 @@ class DiscoveryOrchestrator:
 
     def __init__(
         self,
-        config: Optional[DiscoveryConfig] = None,
-        static_providers: Optional[set[str]] = None,
+        config: DiscoveryConfig | None = None,
+        static_providers: set[str] | None = None,
     ):
         """Initialize discovery orchestrator.
 
@@ -129,13 +129,13 @@ class DiscoveryOrchestrator:
         self._metrics = get_discovery_metrics()
 
         # Callbacks for registry integration
-        self.on_register: Optional[RegistrationCallback] = None
-        self.on_deregister: Optional[DeregistrationCallback] = None
+        self.on_register: RegistrationCallback | None = None
+        self.on_deregister: DeregistrationCallback | None = None
 
         # Discovery loop state
         self._running = False
-        self._discovery_task: Optional[asyncio.Task] = None
-        self._last_cycle: Optional[datetime] = None
+        self._discovery_task: asyncio.Task | None = None
+        self._last_cycle: datetime | None = None
 
     def add_source(self, source: DiscoverySource) -> None:
         """Add a discovery source.
@@ -146,7 +146,7 @@ class DiscoveryOrchestrator:
         self._discovery_service.register_source(source)
         logger.info(f"Added discovery source: {source.source_type}")
 
-    def remove_source(self, source_type: str) -> Optional[DiscoverySource]:
+    def remove_source(self, source_type: str) -> DiscoverySource | None:
         """Remove a discovery source.
 
         Args:

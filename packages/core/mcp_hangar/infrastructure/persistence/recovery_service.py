@@ -6,7 +6,7 @@ restoring system state after restart.
 
 from dataclasses import dataclass, field
 from datetime import UTC, datetime
-from typing import Any, Optional
+from typing import Any
 
 from ...domain.contracts.persistence import AuditAction, AuditEntry, ProviderConfigSnapshot
 from ...domain.model import Provider
@@ -30,8 +30,8 @@ class RecoveryResult:
     failed_ids: list[str] = field(default_factory=list)
     errors: dict[str, str] = field(default_factory=dict)
     duration_ms: float = 0.0
-    started_at: Optional[datetime] = None
-    completed_at: Optional[datetime] = None
+    started_at: datetime | None = None
+    completed_at: datetime | None = None
 
 
 class RecoveryService:
@@ -45,8 +45,8 @@ class RecoveryService:
         self,
         database: Database,
         provider_repository: IProviderRepository,
-        config_repository: Optional[SQLiteProviderConfigRepository] = None,
-        audit_repository: Optional[SQLiteAuditRepository] = None,
+        config_repository: SQLiteProviderConfigRepository | None = None,
+        audit_repository: SQLiteAuditRepository | None = None,
         auto_start: bool = False,
     ):
         """Initialize recovery service.
@@ -63,7 +63,7 @@ class RecoveryService:
         self._config_repo = config_repository or SQLiteProviderConfigRepository(database)
         self._audit_repo = audit_repository or SQLiteAuditRepository(database)
         self._auto_start = auto_start
-        self._last_recovery: Optional[RecoveryResult] = None
+        self._last_recovery: RecoveryResult | None = None
 
     async def recover_providers(self) -> list[str]:
         """Recover all provider configurations from storage.

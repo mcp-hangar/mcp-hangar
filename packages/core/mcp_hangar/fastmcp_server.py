@@ -55,7 +55,7 @@ logger = get_logger(__name__)
 class RegistryListFn(Protocol):
     """Protocol for registry_list function."""
 
-    def __call__(self, state_filter: Optional[str] = None) -> dict[str, Any]:
+    def __call__(self, state_filter: str | None = None) -> dict[str, Any]:
         """List all providers with status and metadata."""
         ...
 
@@ -203,12 +203,12 @@ class RegistryFunctions:
     health: RegistryHealthFn
 
     # Discovery (optional)
-    discover: Optional[RegistryDiscoverFn] = None
-    discovered: Optional[RegistryDiscoveredFn] = None
-    quarantine: Optional[RegistryQuarantineFn] = None
-    approve: Optional[RegistryApproveFn] = None
-    sources: Optional[RegistrySourcesFn] = None
-    metrics: Optional[RegistryMetricsFn] = None
+    discover: RegistryDiscoverFn | None = None
+    discovered: RegistryDiscoveredFn | None = None
+    quarantine: RegistryQuarantineFn | None = None
+    approve: RegistryApproveFn | None = None
+    sources: RegistrySourcesFn | None = None
+    metrics: RegistryMetricsFn | None = None
 
 
 @dataclass(frozen=True)
@@ -274,7 +274,7 @@ class MCPServerFactory:
     def __init__(
         self,
         registry: RegistryFunctions,
-        config: Optional[ServerConfig] = None,
+        config: ServerConfig | None = None,
         auth_components: Optional["AuthComponents"] = None,
     ):
         """Initialize factory with dependencies.
@@ -287,7 +287,7 @@ class MCPServerFactory:
         self._registry = registry
         self._config = config or ServerConfig()
         self._auth_components = auth_components
-        self._mcp: Optional[FastMCP] = None
+        self._mcp: FastMCP | None = None
 
     @classmethod
     def builder(cls) -> "MCPServerFactoryBuilder":
@@ -554,7 +554,7 @@ class MCPServerFactory:
         def registry_invoke(
             provider: str,
             tool: str,
-            arguments: Optional[dict] = None,
+            arguments: dict | None = None,
             timeout: float = 30.0,
         ) -> dict:
             """Invoke a tool on a provider.
@@ -741,23 +741,23 @@ class MCPServerFactoryBuilder:
 
     def __init__(self):
         """Initialize builder with empty state."""
-        self._list_fn: Optional[RegistryListFn] = None
-        self._start_fn: Optional[RegistryStartFn] = None
-        self._stop_fn: Optional[RegistryStopFn] = None
-        self._invoke_fn: Optional[RegistryInvokeFn] = None
-        self._tools_fn: Optional[RegistryToolsFn] = None
-        self._details_fn: Optional[RegistryDetailsFn] = None
-        self._health_fn: Optional[RegistryHealthFn] = None
+        self._list_fn: RegistryListFn | None = None
+        self._start_fn: RegistryStartFn | None = None
+        self._stop_fn: RegistryStopFn | None = None
+        self._invoke_fn: RegistryInvokeFn | None = None
+        self._tools_fn: RegistryToolsFn | None = None
+        self._details_fn: RegistryDetailsFn | None = None
+        self._health_fn: RegistryHealthFn | None = None
 
-        self._discover_fn: Optional[RegistryDiscoverFn] = None
-        self._discovered_fn: Optional[RegistryDiscoveredFn] = None
-        self._quarantine_fn: Optional[RegistryQuarantineFn] = None
-        self._approve_fn: Optional[RegistryApproveFn] = None
-        self._sources_fn: Optional[RegistrySourcesFn] = None
-        self._metrics_fn: Optional[RegistryMetricsFn] = None
+        self._discover_fn: RegistryDiscoverFn | None = None
+        self._discovered_fn: RegistryDiscoveredFn | None = None
+        self._quarantine_fn: RegistryQuarantineFn | None = None
+        self._approve_fn: RegistryApproveFn | None = None
+        self._sources_fn: RegistrySourcesFn | None = None
+        self._metrics_fn: RegistryMetricsFn | None = None
 
-        self._config: Optional[ServerConfig] = None
-        self._auth_components: Optional["AuthComponents"] = None
+        self._config: ServerConfig | None = None
+        self._auth_components: AuthComponents | None = None
 
     def with_registry(
         self,
@@ -794,12 +794,12 @@ class MCPServerFactoryBuilder:
 
     def with_discovery(
         self,
-        discover_fn: Optional[RegistryDiscoverFn] = None,
-        discovered_fn: Optional[RegistryDiscoveredFn] = None,
-        quarantine_fn: Optional[RegistryQuarantineFn] = None,
-        approve_fn: Optional[RegistryApproveFn] = None,
-        sources_fn: Optional[RegistrySourcesFn] = None,
-        metrics_fn: Optional[RegistryMetricsFn] = None,
+        discover_fn: RegistryDiscoverFn | None = None,
+        discovered_fn: RegistryDiscoveredFn | None = None,
+        quarantine_fn: RegistryQuarantineFn | None = None,
+        approve_fn: RegistryApproveFn | None = None,
+        sources_fn: RegistrySourcesFn | None = None,
+        metrics_fn: RegistryMetricsFn | None = None,
     ) -> "MCPServerFactoryBuilder":
         """Set discovery functions (all optional).
 
@@ -925,7 +925,7 @@ class MCPServerFactoryBuilder:
 # DEPRECATED: Will be removed in v0.3.0
 # =============================================================================
 
-_compat_factory: Optional[MCPServerFactory] = None
+_compat_factory: MCPServerFactory | None = None
 
 
 def setup_fastmcp_server(

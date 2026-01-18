@@ -10,7 +10,7 @@ shared with ApplicationContext.
 
 import os
 from pathlib import Path
-from typing import Any, Optional
+from typing import Any
 
 import yaml
 
@@ -197,7 +197,7 @@ def _load_group_config(group_id: str, spec_dict: dict[str, Any]) -> None:
     )
 
 
-def load_configuration(config_path: Optional[str] = None) -> dict[str, Any]:
+def load_configuration(config_path: str | None = None) -> dict[str, Any]:
     """Load provider configuration from file or use defaults.
 
     Returns:

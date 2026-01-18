@@ -13,7 +13,6 @@ import threading
 import time
 from dataclasses import dataclass
 from enum import Enum
-from typing import Optional
 
 
 class CircuitState(Enum):
@@ -43,7 +42,7 @@ class CircuitBreaker:
     resets after a timeout period.
     """
 
-    def __init__(self, config: Optional[CircuitBreakerConfig] = None):
+    def __init__(self, config: CircuitBreakerConfig | None = None):
         """
         Initialize circuit breaker.
 
@@ -53,7 +52,7 @@ class CircuitBreaker:
         self._config = config or CircuitBreakerConfig()
         self._state = CircuitState.CLOSED
         self._failure_count = 0
-        self._opened_at: Optional[float] = None
+        self._opened_at: float | None = None
         self._lock = threading.Lock()
 
     @property

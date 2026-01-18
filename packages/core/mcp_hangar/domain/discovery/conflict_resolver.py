@@ -9,7 +9,6 @@ This ensures explicit operator intent is never overridden by automated discovery
 
 from dataclasses import dataclass
 from enum import Enum
-from typing import Optional
 
 from ...logging_config import get_logger
 from .discovered_provider import DiscoveredProvider
@@ -43,7 +42,7 @@ class ConflictResult:
     """
 
     resolution: ConflictResolution
-    winner: Optional[DiscoveredProvider]
+    winner: DiscoveredProvider | None
     reason: str
 
     @property
@@ -91,7 +90,7 @@ class ConflictResolver:
         "entrypoint": 4,
     }
 
-    def __init__(self, static_providers: Optional[set[str]] = None):
+    def __init__(self, static_providers: set[str] | None = None):
         """Initialize conflict resolver.
 
         Args:
@@ -211,7 +210,7 @@ class ConflictResolver:
         self._registered[provider.name] = provider
         logger.debug(f"Updated provider: {provider.name}")
 
-    def deregister(self, name: str) -> Optional[DiscoveredProvider]:
+    def deregister(self, name: str) -> DiscoveredProvider | None:
         """Remove provider from registry.
 
         Args:
@@ -225,7 +224,7 @@ class ConflictResolver:
             logger.info(f"Deregistered provider: {name}")
         return provider
 
-    def get_registered(self, name: str) -> Optional[DiscoveredProvider]:
+    def get_registered(self, name: str) -> DiscoveredProvider | None:
         """Get a registered provider by name.
 
         Args:

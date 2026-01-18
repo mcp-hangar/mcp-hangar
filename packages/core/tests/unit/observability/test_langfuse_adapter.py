@@ -108,15 +108,17 @@ class TestLangfuseAdapter:
             secret_key="sk-test",
         )
 
-        with patch.dict("sys.modules", {"langfuse": None}):
-            with patch(
+        with (
+            patch.dict("sys.modules", {"langfuse": None}),
+            patch(
                 "mcp_hangar.infrastructure.observability.langfuse_adapter._langfuse_available",
                 False,
-            ):
-                with pytest.raises(ImportError) as exc_info:
-                    LangfuseAdapter(config)
+            ),
+        ):
+            with pytest.raises(ImportError) as exc_info:
+                LangfuseAdapter(config)
 
-                assert "Langfuse package not installed" in str(exc_info.value)
+            assert "Langfuse package not installed" in str(exc_info.value)
 
     def test_raises_value_error_on_invalid_config(self) -> None:
         """Adapter raises ValueError on invalid config when SDK is available."""

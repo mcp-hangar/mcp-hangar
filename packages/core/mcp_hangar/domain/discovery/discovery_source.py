@@ -7,7 +7,7 @@ Implementations include Kubernetes, Docker, Filesystem, and Python entrypoints.
 from abc import ABC, abstractmethod
 from collections.abc import Callable, Coroutine
 from enum import Enum
-from typing import Any, Optional
+from typing import Any
 
 from .discovered_provider import DiscoveredProvider
 
@@ -159,7 +159,7 @@ class DiscoverySource(ABC):
         """
         self._event_handlers[event] = handler
 
-    def unregister_handler(self, event: str) -> Optional[EventHandler]:
+    def unregister_handler(self, event: str) -> EventHandler | None:
         """Unregister event handler.
 
         Args:

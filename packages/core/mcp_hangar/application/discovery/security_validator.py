@@ -10,11 +10,10 @@ Validation Pipeline:
     4. Schema Validation - Does it implement MCP correctly?
 """
 
-import asyncio
 import time
 from dataclasses import dataclass, field
 from enum import Enum
-from typing import Any, Optional
+from typing import Any
 
 from mcp_hangar.domain.discovery.discovered_provider import DiscoveredProvider
 
@@ -65,7 +64,7 @@ class ValidationReport:
     result: ValidationResult
     provider: DiscoveredProvider
     reason: str
-    details: Optional[dict[str, Any]] = None
+    details: dict[str, Any] | None = None
     duration_ms: float = 0.0
 
     @property
@@ -140,7 +139,7 @@ class SecurityValidator:
             # Quarantine or reject
     """
 
-    def __init__(self, config: Optional[SecurityConfig] = None):
+    def __init__(self, config: SecurityConfig | None = None):
         """Initialize security validator.
 
         Args:
@@ -206,7 +205,7 @@ class SecurityValidator:
             duration_ms=duration_ms,
         )
 
-    def _validate_source(self, provider: DiscoveredProvider) -> Optional[ValidationReport]:
+    def _validate_source(self, provider: DiscoveredProvider) -> ValidationReport | None:
         """Validate source is trusted.
 
         Args:
@@ -245,7 +244,7 @@ class SecurityValidator:
 
         return None
 
-    def _check_rate_limit(self, provider: DiscoveredProvider) -> Optional[ValidationReport]:
+    def _check_rate_limit(self, provider: DiscoveredProvider) -> ValidationReport | None:
         """Check registration rate limit.
 
         Args:
@@ -283,7 +282,7 @@ class SecurityValidator:
         self._registration_counts[source].append(now)
         return None
 
-    def _check_provider_count(self, provider: DiscoveredProvider) -> Optional[ValidationReport]:
+    def _check_provider_count(self, provider: DiscoveredProvider) -> ValidationReport | None:
         """Check provider count per source.
 
         Args:
@@ -309,7 +308,7 @@ class SecurityValidator:
 
         return None
 
-    async def _validate_health(self, provider: DiscoveredProvider) -> Optional[ValidationReport]:
+    async def _validate_health(self, provider: DiscoveredProvider) -> ValidationReport | None:
         """Validate provider health endpoint.
 
         Args:
@@ -343,17 +342,16 @@ class SecurityValidator:
         try:
             timeout = aiohttp.ClientTimeout(total=self.config.health_check_timeout_s)
 
-            async with aiohttp.ClientSession(timeout=timeout) as session:
-                async with session.get(url) as response:
-                    if response.status != 200:
-                        return ValidationReport(
-                            result=ValidationResult.FAILED_HEALTH,
-                            provider=provider,
-                            reason=f"Health check returned status {response.status}",
-                            details={"url": url, "status": response.status},
-                        )
+            async with aiohttp.ClientSession(timeout=timeout) as session, session.get(url) as response:
+                if response.status != 200:
+                    return ValidationReport(
+                        result=ValidationResult.FAILED_HEALTH,
+                        provider=provider,
+                        reason=f"Health check returned status {response.status}",
+                        details={"url": url, "status": response.status},
+                    )
 
-        except asyncio.TimeoutError:
+        except TimeoutError:
             return ValidationReport(
                 result=ValidationResult.FAILED_HEALTH,
                 provider=provider,
@@ -370,7 +368,7 @@ class SecurityValidator:
 
         return None
 
-    async def _validate_schema(self, provider: DiscoveredProvider) -> Optional[ValidationReport]:
+    async def _validate_schema(self, provider: DiscoveredProvider) -> ValidationReport | None:
         """Validate MCP tools schema.
 
         Args:

@@ -6,7 +6,6 @@ Provides both in-memory and SQLite implementations of IProviderConfigRepository.
 import json
 import threading
 from datetime import UTC, datetime
-from typing import Optional
 
 from ...domain.contracts.persistence import ConcurrentModificationError, PersistenceError, ProviderConfigSnapshot
 from ...logging_config import get_logger
@@ -58,7 +57,7 @@ class InMemoryProviderConfigRepository:
             self._configs[config.provider_id] = new_config
             logger.debug(f"Saved config for provider: {config.provider_id}")
 
-    async def get(self, provider_id: str) -> Optional[ProviderConfigSnapshot]:
+    async def get(self, provider_id: str) -> ProviderConfigSnapshot | None:
         """Retrieve provider configuration by ID."""
         with self._lock:
             return self._configs.get(provider_id)
@@ -185,7 +184,7 @@ class SQLiteProviderConfigRepository:
             logger.error(f"Failed to save provider config: {e}")
             raise PersistenceError(f"Failed to save provider config: {e}") from e
 
-    async def get(self, provider_id: str) -> Optional[ProviderConfigSnapshot]:
+    async def get(self, provider_id: str) -> ProviderConfigSnapshot | None:
         """Retrieve provider configuration by ID.
 
         Args:
@@ -319,7 +318,7 @@ class SQLiteProviderConfigRepository:
             logger.error(f"Failed to check provider existence: {e}")
             raise PersistenceError(f"Failed to check provider existence: {e}") from e
 
-    async def get_with_version(self, provider_id: str) -> Optional[tuple[ProviderConfigSnapshot, int]]:
+    async def get_with_version(self, provider_id: str) -> tuple[ProviderConfigSnapshot, int] | None:
         """Get configuration with its version for optimistic locking.
 
         Args:

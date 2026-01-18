@@ -2,7 +2,6 @@
 
 import time
 from dataclasses import dataclass, field
-from typing import Optional
 
 
 @dataclass
@@ -31,8 +30,8 @@ class HealthTracker:
 
     max_consecutive_failures: int = 3
     _consecutive_failures: int = field(default=0, init=False)
-    _last_success_at: Optional[float] = field(default=None, init=False)
-    _last_failure_at: Optional[float] = field(default=None, init=False)
+    _last_success_at: float | None = field(default=None, init=False)
+    _last_failure_at: float | None = field(default=None, init=False)
     _total_invocations: int = field(default=0, init=False)
     _total_failures: int = field(default=0, init=False)
 
@@ -46,7 +45,7 @@ class HealthTracker:
         return self._consecutive_failures
 
     @property
-    def last_success_at(self) -> Optional[float]:
+    def last_success_at(self) -> float | None:
         """Get the timestamp of last successful operation.
 
         Returns:
@@ -55,7 +54,7 @@ class HealthTracker:
         return self._last_success_at
 
     @property
-    def last_failure_at(self) -> Optional[float]:
+    def last_failure_at(self) -> float | None:
         """Get the timestamp of last failed operation.
 
         Returns:

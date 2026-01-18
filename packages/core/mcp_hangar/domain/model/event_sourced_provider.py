@@ -2,7 +2,7 @@
 
 import threading
 from dataclasses import dataclass
-from typing import Any, Optional
+from typing import Any
 
 from ...logging_config import get_logger
 from ..events import (
@@ -34,9 +34,9 @@ class ProviderSnapshot:
     mode: str
     state: str
     version: int
-    command: Optional[list[str]]
-    image: Optional[str]
-    endpoint: Optional[str]
+    command: list[str] | None
+    image: str | None
+    endpoint: str | None
     env: dict[str, str]
     idle_ttl_s: int
     health_check_interval_s: int
@@ -44,8 +44,8 @@ class ProviderSnapshot:
     consecutive_failures: int
     total_failures: int
     total_invocations: int
-    last_success_at: Optional[float]
-    last_failure_at: Optional[float]
+    last_success_at: float | None
+    last_failure_at: float | None
     tool_names: list[str]
     last_used: float
     meta: dict[str, Any]
@@ -115,10 +115,10 @@ class EventSourcedProvider(Provider):
         self,
         provider_id: str,
         mode: str,
-        command: Optional[list[str]] = None,
-        image: Optional[str] = None,
-        endpoint: Optional[str] = None,
-        env: Optional[dict[str, str]] = None,
+        command: list[str] | None = None,
+        image: str | None = None,
+        endpoint: str | None = None,
+        env: dict[str, str] | None = None,
         idle_ttl_s: int = 300,
         health_check_interval_s: int = 60,
         max_consecutive_failures: int = 3,
@@ -145,7 +145,7 @@ class EventSourcedProvider(Provider):
         self._state = ProviderState.COLD
         self._health = HealthTracker(max_consecutive_failures=max_consecutive_failures)
         self._tools = ToolCatalog()
-        self._client: Optional[Any] = None
+        self._client: Any | None = None
         self._meta: dict[str, Any] = {}
         self._last_used: float = 0.0
 
@@ -161,10 +161,10 @@ class EventSourcedProvider(Provider):
         provider_id: str,
         mode: str,
         events: list[DomainEvent],
-        command: Optional[list[str]] = None,
-        image: Optional[str] = None,
-        endpoint: Optional[str] = None,
-        env: Optional[dict[str, str]] = None,
+        command: list[str] | None = None,
+        image: str | None = None,
+        endpoint: str | None = None,
+        env: dict[str, str] | None = None,
         idle_ttl_s: int = 300,
         health_check_interval_s: int = 60,
         max_consecutive_failures: int = 3,
@@ -206,7 +206,7 @@ class EventSourcedProvider(Provider):
 
     @classmethod
     def from_snapshot(
-        cls, snapshot: ProviderSnapshot, events: Optional[list[DomainEvent]] = None
+        cls, snapshot: ProviderSnapshot, events: list[DomainEvent] | None = None
     ) -> "EventSourcedProvider":
         """
         Create a provider from snapshot and subsequent events.

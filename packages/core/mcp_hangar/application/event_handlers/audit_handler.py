@@ -5,7 +5,7 @@ import logging
 from abc import ABC, abstractmethod
 from dataclasses import dataclass, field
 from datetime import UTC, datetime
-from typing import Any, Optional
+from typing import Any
 
 from ...domain.events import DomainEvent
 from ...logging_config import get_logger
@@ -20,7 +20,7 @@ class AuditRecord:
     event_id: str
     event_type: str
     occurred_at: datetime
-    provider_id: Optional[str]
+    provider_id: str | None
     data: dict[str, Any]
     recorded_at: datetime = field(default_factory=lambda: datetime.now(UTC))
 
@@ -53,9 +53,9 @@ class AuditStore(ABC):
     @abstractmethod
     def query(
         self,
-        provider_id: Optional[str] = None,
-        event_type: Optional[str] = None,
-        since: Optional[datetime] = None,
+        provider_id: str | None = None,
+        event_type: str | None = None,
+        since: datetime | None = None,
         limit: int = 100,
     ) -> list[AuditRecord]:
         """Query audit records."""
@@ -78,9 +78,9 @@ class InMemoryAuditStore(AuditStore):
 
     def query(
         self,
-        provider_id: Optional[str] = None,
-        event_type: Optional[str] = None,
-        since: Optional[datetime] = None,
+        provider_id: str | None = None,
+        event_type: str | None = None,
+        since: datetime | None = None,
         limit: int = 100,
     ) -> list[AuditRecord]:
         """Query audit records with optional filters."""
@@ -123,9 +123,9 @@ class LogAuditStore(AuditStore):
 
     def query(
         self,
-        provider_id: Optional[str] = None,
-        event_type: Optional[str] = None,
-        since: Optional[datetime] = None,
+        provider_id: str | None = None,
+        event_type: str | None = None,
+        since: datetime | None = None,
         limit: int = 100,
     ) -> list[AuditRecord]:
         """Query is not supported for log store."""
@@ -144,9 +144,9 @@ class AuditEventHandler:
 
     def __init__(
         self,
-        store: Optional[AuditStore] = None,
-        include_event_types: Optional[list[str]] = None,
-        exclude_event_types: Optional[list[str]] = None,
+        store: AuditStore | None = None,
+        include_event_types: list[str] | None = None,
+        exclude_event_types: list[str] | None = None,
     ):
         """
         Initialize the audit handler.
@@ -194,9 +194,9 @@ class AuditEventHandler:
 
     def query(
         self,
-        provider_id: Optional[str] = None,
-        event_type: Optional[str] = None,
-        since: Optional[datetime] = None,
+        provider_id: str | None = None,
+        event_type: str | None = None,
+        since: datetime | None = None,
         limit: int = 100,
     ) -> list[AuditRecord]:
         """Query audit records."""

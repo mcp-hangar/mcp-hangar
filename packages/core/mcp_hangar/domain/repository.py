@@ -7,7 +7,7 @@ allowing the persistence mechanism to change without affecting business code.
 
 import threading
 from abc import ABC, abstractmethod
-from typing import Any, Optional
+from typing import Any
 
 # Type alias for provider-like objects (Provider aggregate)
 ProviderLike = Any
@@ -39,7 +39,7 @@ class IProviderRepository(ABC):
         pass
 
     @abstractmethod
-    def get(self, provider_id: str) -> Optional[ProviderLike]:
+    def get(self, provider_id: str) -> ProviderLike | None:
         """Retrieve a provider by ID.
 
         Args:
@@ -146,7 +146,7 @@ class InMemoryProviderRepository(IProviderRepository):
         with self._lock:
             self._providers[provider_id] = provider
 
-    def get(self, provider_id: str) -> Optional[ProviderLike]:
+    def get(self, provider_id: str) -> ProviderLike | None:
         """Retrieve a provider by ID.
 
         Args:

@@ -10,7 +10,7 @@ from collections.abc import AsyncIterator
 from contextlib import asynccontextmanager
 from dataclasses import dataclass
 from pathlib import Path
-from typing import Any, Optional
+from typing import Any
 
 import aiosqlite
 
@@ -34,7 +34,7 @@ class DatabaseConfig:
 
     path: str = "data/mcp_hangar.db"
     timeout: float = 30.0
-    isolation_level: Optional[str] = "DEFERRED"
+    isolation_level: str | None = "DEFERRED"
     check_same_thread: bool = False
     enable_wal: bool = True
     busy_timeout_ms: int = 5000
@@ -55,7 +55,7 @@ class Database:
     - Thread-safe connection pool
     """
 
-    def __init__(self, config: Optional[DatabaseConfig] = None):
+    def __init__(self, config: DatabaseConfig | None = None):
         """Initialize database with configuration.
 
         Args:
@@ -285,11 +285,11 @@ MIGRATIONS: list[tuple[str, str]] = [
 
 
 # Singleton database instance
-_database: Optional[Database] = None
+_database: Database | None = None
 _database_lock = threading.Lock()
 
 
-def get_database(config: Optional[DatabaseConfig] = None) -> Database:
+def get_database(config: DatabaseConfig | None = None) -> Database:
     """Get or create the global database instance.
 
     Args:
@@ -318,7 +318,7 @@ def set_database(database: Database) -> None:
         _database = database
 
 
-async def initialize_database(config: Optional[DatabaseConfig] = None) -> Database:
+async def initialize_database(config: DatabaseConfig | None = None) -> Database:
     """Initialize and return the database.
 
     Convenience function that gets the database and initializes it.

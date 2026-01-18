@@ -5,7 +5,7 @@ All domain-specific exceptions should be defined here.
 These exceptions carry context and can be serialized to structured error responses.
 """
 
-from typing import Any, Optional
+from typing import Any
 
 
 class MCPError(Exception):
@@ -19,7 +19,7 @@ class MCPError(Exception):
         message: str,
         provider_id: str = "",
         operation: str = "",
-        details: Optional[dict[str, Any]] = None,
+        details: dict[str, Any] | None = None,
     ):
         super().__init__(message)
         self.message = message
@@ -69,7 +69,7 @@ class ProviderNotFoundError(ProviderError):
 class ProviderStartError(ProviderError):
     """Raised when a provider fails to start."""
 
-    def __init__(self, provider_id: str, reason: str, details: Optional[dict[str, Any]] = None):
+    def __init__(self, provider_id: str, reason: str, details: dict[str, Any] | None = None):
         super().__init__(
             message=f"Failed to start provider: {reason}",
             provider_id=provider_id,
@@ -167,7 +167,7 @@ class ToolNotFoundError(ToolError):
 class ToolInvocationError(ToolError):
     """Raised when a tool invocation fails."""
 
-    def __init__(self, provider_id: str, message: str, details: Optional[dict[str, Any]] = None):
+    def __init__(self, provider_id: str, message: str, details: dict[str, Any] | None = None):
         super().__init__(
             message=message,
             provider_id=provider_id,
@@ -200,7 +200,7 @@ class ClientError(MCPError):
         self,
         message: str,
         provider_id: str = "",
-        details: Optional[dict[str, Any]] = None,
+        details: dict[str, Any] | None = None,
     ):
         super().__init__(
             message=message,
@@ -240,7 +240,7 @@ class ValidationError(MCPError):
         message: str,
         field: str = "",
         value: Any = None,
-        details: Optional[dict[str, Any]] = None,
+        details: dict[str, Any] | None = None,
     ):
         base_details = {"field": field}
         if value is not None:
@@ -260,7 +260,7 @@ class ValidationError(MCPError):
 class ConfigurationError(MCPError):
     """Raised when configuration is invalid."""
 
-    def __init__(self, message: str, details: Optional[dict[str, Any]] = None):
+    def __init__(self, message: str, details: dict[str, Any] | None = None):
         super().__init__(message=message, operation="configuration", details=details or {})
 
 
@@ -295,7 +295,7 @@ class AuthenticationError(MCPError):
         self,
         message: str,
         auth_method: str = "",
-        details: Optional[dict[str, Any]] = None,
+        details: dict[str, Any] | None = None,
     ):
         super().__init__(
             message=message,
@@ -319,7 +319,7 @@ class InvalidCredentialsError(AuthenticationError):
         self,
         message: str = "Invalid credentials",
         auth_method: str = "",
-        details: Optional[dict[str, Any]] = None,
+        details: dict[str, Any] | None = None,
     ):
         super().__init__(
             message=message,
@@ -340,7 +340,7 @@ class ExpiredCredentialsError(AuthenticationError):
         self,
         message: str = "Credentials have expired",
         auth_method: str = "",
-        expired_at: Optional[float] = None,
+        expired_at: float | None = None,
     ):
         super().__init__(
             message=message,
@@ -362,7 +362,7 @@ class RevokedCredentialsError(AuthenticationError):
         self,
         message: str = "Credentials have been revoked",
         auth_method: str = "",
-        revoked_at: Optional[float] = None,
+        revoked_at: float | None = None,
     ):
         super().__init__(
             message=message,
@@ -384,7 +384,7 @@ class MissingCredentialsError(AuthenticationError):
     def __init__(
         self,
         message: str = "No credentials provided",
-        expected_methods: Optional[list[str]] = None,
+        expected_methods: list[str] | None = None,
     ):
         super().__init__(
             message=message,
@@ -405,7 +405,7 @@ class RateLimitExceededError(AuthenticationError):
     def __init__(
         self,
         message: str = "Rate limit exceeded",
-        retry_after: Optional[float] = None,
+        retry_after: float | None = None,
     ):
         super().__init__(
             message=message,
@@ -430,7 +430,7 @@ class AuthorizationError(MCPError):
         principal_id: str = "",
         action: str = "",
         resource: str = "",
-        details: Optional[dict[str, Any]] = None,
+        details: dict[str, Any] | None = None,
     ):
         super().__init__(
             message=message,
