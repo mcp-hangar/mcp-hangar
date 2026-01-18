@@ -10,7 +10,18 @@ Deprecated imports (use domain layer instead):
 """
 
 # Re-export all exceptions from the canonical location for backward compatibility
+from .domain.exceptions import MCPError, ProviderNotFoundError, ProviderStartError
 
 # Re-export ToolSchema from the canonical location
+from .domain.model import ToolSchema
 
 # Re-export ProviderState from the canonical location
+from .domain.value_objects import ProviderState
+
+__all__ = [
+    "MCPError",
+    "ProviderStartError",
+    "ProviderNotFoundError",
+    "ToolSchema",
+    "ProviderState",
+]
