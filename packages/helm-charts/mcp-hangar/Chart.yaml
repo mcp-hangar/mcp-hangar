@@ -1,0 +1,17 @@
+apiVersion: v2
+name: mcp-hangar
+description: Production-grade infrastructure for Model Context Protocol
+type: application
+version: 0.2.0
+appVersion: "0.2.0"
+home: https://mcp-hangar.io
+sources:
+  - https://github.com/mapyr/mcp-hangar
+maintainers:
+  - name: mapyr
+    email: marcin@mcp-hangar.io
+keywords:
+  - mcp
+  - model-context-protocol
+  - ai
+  - llm

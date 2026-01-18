@@ -1,0 +1,18 @@
+{{- if .Values.configMap.create }}
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: {{ include "mcp-hangar.fullname" . }}
+  labels:
+    {{- include "mcp-hangar.labels" . | nindent 4 }}
+data:
+  config.yaml: |
+    logging:
+      level: {{ .Values.config.logLevel }}
+      json_format: {{ .Values.config.jsonLogs }}
+
+    {{- if .Values.providers }}
+    providers:
+      {{- toYaml .Values.providers | nindent 6 }}
+    {{- end }}
+{{- end }}

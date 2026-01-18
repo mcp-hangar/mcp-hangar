@@ -33,7 +33,7 @@ jobs:
 
       - name: Run pip-audit
         run: |
-          pip install -e .
+          pip install -e packages/core/
           pip-audit --strict --desc on
 
       - name: Run safety check

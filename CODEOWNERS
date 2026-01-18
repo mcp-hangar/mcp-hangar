@@ -1,0 +1,25 @@
+# MCP-Hangar Code Owners
+# https://docs.github.com/en/repositories/managing-your-repositorys-settings-and-features/customizing-your-repository/about-code-owners
+
+# Default - all files
+* @mapyr
+
+# Core Python package
+packages/core/ @mapyr
+
+# Kubernetes Operator (Go)
+packages/operator/ @mapyr
+
+# Helm Charts
+packages/helm-charts/ @mapyr
+
+# CI/CD - requires review for workflow changes
+.github/ @mapyr
+
+# Documentation
+docs/ @mapyr
+mkdocs.yml @mapyr
+
+# Security-sensitive
+packages/core/mcp_hangar/domain/security/ @mapyr
+packages/core/mcp_hangar/infrastructure/auth/ @mapyr

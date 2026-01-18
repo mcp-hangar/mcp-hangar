@@ -58,7 +58,7 @@ jobs:
         id: version
         run: |
           # Extract current version from pyproject.toml
-          CURRENT=$(grep -E '^version = "' pyproject.toml | sed 's/version = "\(.*\)"/\1/')
+          CURRENT=$(grep -E '^version = "' packages/core/pyproject.toml | sed 's/version = "\(.*\)"/\1/')
           echo "current=${CURRENT}" >> $GITHUB_OUTPUT
 
           # Parse semver components
@@ -96,10 +96,10 @@ jobs:
       - name: Update pyproject.toml
         if: ${{ github.event.inputs.dry_run != 'true' }}
         run: |
-          sed -i 's/^version = ".*"/version = "${{ steps.version.outputs.new }}"/' pyproject.toml
+          sed -i 's/^version = ".*"/version = "${{ steps.version.outputs.new }}"/' packages/core/pyproject.toml
 
-          echo "Updated pyproject.toml:"
-          grep -E '^version = "' pyproject.toml
+          echo "Updated packages/core/pyproject.toml:"
+          grep -E '^version = "' packages/core/pyproject.toml
 
       - name: Update CHANGELOG.md
         if: ${{ github.event.inputs.dry_run != 'true' }}
@@ -117,7 +117,7 @@ jobs:
       - name: Commit and tag
         if: ${{ github.event.inputs.dry_run != 'true' }}
         run: |
-          git add pyproject.toml CHANGELOG.md
+          git add packages/core/pyproject.toml CHANGELOG.md
           git commit -m "chore: bump version to ${{ steps.version.outputs.new }}"
           git tag -a "${{ steps.version.outputs.tag }}" -m "Release ${{ steps.version.outputs.tag }}"
 

@@ -1,0 +1,98 @@
+name: CI - Helm Charts
+
+on:
+  push:
+    branches: [main]
+    paths:
+      - 'packages/helm-charts/**'
+      - '.github/workflows/ci-helm.yml'
+  pull_request:
+    paths:
+      - 'packages/helm-charts/**'
+      - '.github/workflows/ci-helm.yml'
+
+jobs:
+  lint:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Set up Helm
+        uses: azure/setup-helm@v3
+        with:
+          version: v3.14.0
+
+      - name: Lint mcp-hangar
+        run: helm lint packages/helm-charts/mcp-hangar
+
+      - name: Lint mcp-hangar-operator
+        run: helm lint packages/helm-charts/mcp-hangar-operator
+
+  template:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Set up Helm
+        uses: azure/setup-helm@v3
+        with:
+          version: v3.14.0
+
+      - name: Template mcp-hangar
+        run: helm template mcp-hangar packages/helm-charts/mcp-hangar
+
+      - name: Template mcp-hangar-operator
+        run: helm template mcp-hangar-operator packages/helm-charts/mcp-hangar-operator
+
+  kubeval:
+    runs-on: ubuntu-latest
+    needs: [template]
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Set up Helm
+        uses: azure/setup-helm@v3
+        with:
+          version: v3.14.0
+
+      - name: Install kubeval
+        run: |
+          wget https://github.com/instrumenta/kubeval/releases/latest/download/kubeval-linux-amd64.tar.gz
+          tar xf kubeval-linux-amd64.tar.gz
+          sudo mv kubeval /usr/local/bin/
+
+      - name: Validate mcp-hangar
+        run: |
+          helm template mcp-hangar packages/helm-charts/mcp-hangar | kubeval --strict
+
+      - name: Validate mcp-hangar-operator
+        run: |
+          helm template mcp-hangar-operator packages/helm-charts/mcp-hangar-operator \
+            --skip-crds | kubeval --strict
+
+  package:
+    runs-on: ubuntu-latest
+    needs: [lint, kubeval]
+    if: github.event_name == 'push' && github.ref == 'refs/heads/main'
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Set up Helm
+        uses: azure/setup-helm@v3
+        with:
+          version: v3.14.0
+
+      - name: Login to GHCR
+        run: |
+          echo "${{ secrets.GITHUB_TOKEN }}" | helm registry login ghcr.io -u ${{ github.actor }} --password-stdin
+
+      - name: Package and push mcp-hangar
+        run: |
+          helm package packages/helm-charts/mcp-hangar
+          helm push mcp-hangar-*.tgz oci://ghcr.io/mapyr/charts
+
+      - name: Package and push mcp-hangar-operator
+        run: |
+          helm package packages/helm-charts/mcp-hangar-operator
+          helm push mcp-hangar-operator-*.tgz oci://ghcr.io/mapyr/charts

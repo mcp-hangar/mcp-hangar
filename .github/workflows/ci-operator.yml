@@ -1,0 +1,119 @@
+name: CI - Operator
+
+on:
+  push:
+    branches: [main]
+    paths:
+      - 'packages/operator/**'
+      - '.github/workflows/ci-operator.yml'
+  pull_request:
+    paths:
+      - 'packages/operator/**'
+      - '.github/workflows/ci-operator.yml'
+
+defaults:
+  run:
+    working-directory: packages/operator
+
+jobs:
+  lint:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Set up Go
+        uses: actions/setup-go@v5
+        with:
+          go-version: '1.22'
+          cache-dependency-path: packages/operator/go.sum
+
+      - name: golangci-lint
+        uses: golangci/golangci-lint-action@v4
+        with:
+          working-directory: packages/operator
+          version: v1.55
+
+  test:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Set up Go
+        uses: actions/setup-go@v5
+        with:
+          go-version: '1.22'
+          cache-dependency-path: packages/operator/go.sum
+
+      - name: Run tests
+        run: make test
+
+      - name: Upload coverage
+        uses: codecov/codecov-action@v4
+        with:
+          files: packages/operator/coverage.out
+          flags: operator
+          fail_ci_if_error: false
+
+  build:
+    runs-on: ubuntu-latest
+    needs: [lint, test]
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Set up Go
+        uses: actions/setup-go@v5
+        with:
+          go-version: '1.22'
+          cache-dependency-path: packages/operator/go.sum
+
+      - name: Build
+        run: make build
+
+  docker:
+    runs-on: ubuntu-latest
+    needs: [lint, test]
+    if: github.event_name == 'push' && github.ref == 'refs/heads/main'
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Set up Docker Buildx
+        uses: docker/setup-buildx-action@v3
+
+      - name: Login to GHCR
+        uses: docker/login-action@v3
+        with:
+          registry: ghcr.io
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Build and push
+        uses: docker/build-push-action@v5
+        with:
+          context: packages/operator
+          push: true
+          tags: |
+            ghcr.io/mapyr/mcp-hangar-operator:latest
+            ghcr.io/mapyr/mcp-hangar-operator:${{ github.sha }}
+          cache-from: type=gha
+          cache-to: type=gha,mode=max
+
+  generate-crds:
+    runs-on: ubuntu-latest
+    needs: [lint]
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Set up Go
+        uses: actions/setup-go@v5
+        with:
+          go-version: '1.22'
+          cache-dependency-path: packages/operator/go.sum
+
+      - name: Generate manifests
+        run: make manifests
+
+      - name: Check for changes
+        run: |
+          git diff --exit-code config/crd/bases/ || \
+            (echo "CRDs out of sync. Run 'make manifests' and commit." && exit 1)

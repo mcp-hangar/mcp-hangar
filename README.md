@@ -1,6 +1,7 @@
 # MCP Hangar
 
-[![Tests](https://github.com/mapyr/mcp-hangar/actions/workflows/test.yml/badge.svg)](https://github.com/mapyr/mcp-hangar/actions/workflows/test.yml)
+[![CI - Core](https://github.com/mapyr/mcp-hangar/actions/workflows/ci-core.yml/badge.svg)](https://github.com/mapyr/mcp-hangar/actions/workflows/ci-core.yml)
+[![CI - Operator](https://github.com/mapyr/mcp-hangar/actions/workflows/ci-operator.yml/badge.svg)](https://github.com/mapyr/mcp-hangar/actions/workflows/ci-operator.yml)
 [![PyPI](https://img.shields.io/pypi/v/mcp-hangar)](https://pypi.org/project/mcp-hangar/)
 [![Python 3.11+](https://img.shields.io/badge/python-3.11+-blue.svg)](https://www.python.org/downloads/)
 [![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](https://opensource.org/licenses/MIT)
@@ -49,7 +50,7 @@ Automatically detect and register providers from multiple sources:
 
 | Source | Configuration |
 |--------|---------------|
-| **Kubernetes** | Pod annotations (`mcp.hangar.io/*`) with namespace filtering |
+| **Kubernetes** | Pod annotations (`mcp-hangar.io/*`) with namespace filtering |
 | **Docker/Podman** | Container labels (`mcp.hangar.*`) |
 | **Filesystem** | YAML configs with file watching |
 | **Python entrypoints** | `mcp.providers` entry point group |
@@ -288,8 +289,38 @@ See [Contributing Guide](https://mapyr.github.io/mcp-hangar/development/CONTRIBU
 ```bash
 git clone https://github.com/mapyr/mcp-hangar.git
 cd mcp-hangar
-uv sync --extra dev
-uv run pytest tests/ -v
+
+# Setup Python core
+cd packages/core
+pip install -e ".[dev]"
+pytest
+
+# Or use root Makefile
+cd ../..
+make setup
+make test
+```
+
+## Project Structure
+
+```
+mcp-hangar/
+├── packages/
+│   ├── core/                # Python package (PyPI: mcp-hangar)
+│   │   ├── mcp_hangar/
+│   │   ├── tests/
+│   │   └── pyproject.toml
+│   ├── operator/            # Kubernetes operator (Go)
+│   │   ├── api/
+│   │   ├── cmd/
+│   │   └── go.mod
+│   └── helm-charts/         # Helm charts
+│       ├── mcp-hangar/
+│       └── mcp-hangar-operator/
+├── docs/                    # MkDocs documentation
+├── examples/                # Quick starts & demos
+├── monitoring/              # Grafana, Prometheus configs
+└── Makefile                 # Root orchestration
 ```
 
 ## License

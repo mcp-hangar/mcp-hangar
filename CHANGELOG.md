@@ -68,7 +68,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   - Helm chart for deployment
 
 ### Changed
-- **Domain**: Changed API group from `mcp.hangar.io` to `mcp-hangar.io`
+- **Domain**: Changed API group from `mcp.hangar.io` to `mcp-hangar.io` for consistency
 - **Config**: Volume paths changed from absolute to relative in examples
 - **Documentation**: Added comprehensive Kubernetes and Authentication guides
 

@@ -17,6 +17,10 @@ mcp-config.json
 # Data directories (user-specific, may contain sensitive data)
 data/
 
+# Monorepo build artifacts
+packages/core/dist/
+packages/operator/bin/
+
 *.py[codz]
 *$py.class
 
