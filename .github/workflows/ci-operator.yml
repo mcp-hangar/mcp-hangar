@@ -28,10 +28,11 @@ jobs:
           cache-dependency-path: packages/operator/go.sum
 
       - name: golangci-lint
-        uses: golangci/golangci-lint-action@v4
+        uses: golangci/golangci-lint-action@v6
         with:
           working-directory: packages/operator
-          version: v1.55
+          version: v1.61
+          args: --timeout=5m
 
   test:
     runs-on: ubuntu-latest
