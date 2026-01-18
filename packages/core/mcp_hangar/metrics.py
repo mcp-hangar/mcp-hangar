@@ -7,12 +7,12 @@ Production-grade metrics following Prometheus/OpenMetrics best practices:
 - Standard histogram buckets for different use cases
 """
 
-import platform
-import threading
-import time
 from collections import defaultdict
 from dataclasses import dataclass, field
 from functools import wraps
+import platform
+import threading
+import time
 
 # =============================================================================
 # Core Metric Types
@@ -607,7 +607,7 @@ MESSAGES_SENT_TOTAL = Counter(
 MESSAGES_RECEIVED_TOTAL = Counter(
     name="mcp_registry_messages_received",
     description="Total number of JSON-RPC messages received",
-    labels=["provider", "type"],  # type: response, notification, error
+    labels=["provider", "type"],  # values: response, notification, error
 )
 
 MESSAGE_SIZE_BYTES = Histogram(
