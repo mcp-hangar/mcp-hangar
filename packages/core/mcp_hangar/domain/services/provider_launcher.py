@@ -300,7 +300,7 @@ class SubprocessLauncher(ProviderLauncher):
                 resolved_command,
                 stdin=subprocess.PIPE,
                 stdout=subprocess.PIPE,
-                stderr=subprocess.DEVNULL,  # or pipe to file for debugging
+                stderr=subprocess.PIPE,  # Capture stderr for error diagnostics
                 text=True,
                 env=process_env,
                 bufsize=1,  # Line buffered
