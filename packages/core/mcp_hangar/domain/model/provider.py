@@ -767,6 +767,10 @@ class Provider(AggregateRoot):
         with self._lock:
             self._shutdown_internal(reason="shutdown")
 
+    def stop(self) -> None:
+        """Stop the provider. Alias for shutdown(). Thread-safe."""
+        self.shutdown()
+
     def _shutdown_internal(self, reason: str = "shutdown") -> None:
         """Shutdown implementation (must hold lock)."""
         if self._client:
