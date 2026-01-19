@@ -2,14 +2,31 @@
 
 See [docs/development/CONTRIBUTING.md](docs/development/CONTRIBUTING.md) for the full contributing guide.
 
+## Monorepo Structure
+
+MCP Hangar is a monorepo containing multiple packages:
+
+| Package | Language | Location |
+|---------|----------|----------|
+| Core | Python | `packages/core/` |
+| Kubernetes Operator | Go | `packages/operator/` |
+| Helm Charts | YAML | `packages/helm-charts/` |
+
 ## Quick Start
 
 ```bash
 git clone https://github.com/mapyr/mcp-hangar.git
 cd mcp-hangar
-uv sync --extra dev
-uv run pre-commit install
-uv run pytest tests/ -v -m "not slow"
+
+# Python core development
+cd packages/core
+pip install -e ".[dev]"
+pytest
+
+# Or use root Makefile
+cd ../..
+make setup
+make test
 ```
 
 ## Code of Conduct

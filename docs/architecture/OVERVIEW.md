@@ -4,6 +4,14 @@
 
 MCP Hangar manages MCP providers with explicit lifecycle, health monitoring, and automatic cleanup.
 
+MCP Hangar is organized as a monorepo:
+
+| Package | Description | Location |
+|---------|-------------|----------|
+| **Core** | Python library (PyPI: `mcp-hangar`) | `packages/core/` |
+| **Kubernetes Operator** | Go-based K8s operator | `packages/operator/` |
+| **Helm Charts** | Deployment charts | `packages/helm-charts/` |
+
 **Key concepts:**
 - **Providers** — Subprocesses or containers exposing tools via JSON-RPC
 - **State machine** — COLD → INITIALIZING → READY → DEGRADED → DEAD

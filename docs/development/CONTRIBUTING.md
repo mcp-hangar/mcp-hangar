@@ -5,14 +5,45 @@
 ```bash
 git clone https://github.com/mapyr/mcp-hangar.git
 cd mcp-hangar
-uv sync --extra dev
-uv run pre-commit install
+
+# Python core development
+cd packages/core
+pip install -e ".[dev]"
+
+# Or use root Makefile
+cd ../..
+make setup
 ```
 
-## Project Structure
+## Monorepo Structure
+
+MCP Hangar is a monorepo with multiple packages:
 
 ```
-mcp_hangar/
+mcp-hangar/
+├── packages/
+│   ├── core/                # Python package (PyPI: mcp-hangar)
+│   │   ├── mcp_hangar/      # Main Python code
+│   │   ├── tests/           # Python tests
+│   │   └── pyproject.toml   # Python package config
+│   ├── operator/            # Kubernetes operator (Go)
+│   │   ├── api/             # CRD definitions
+│   │   ├── cmd/             # Main entrypoints
+│   │   ├── internal/        # Controller logic
+│   │   └── go.mod           # Go module config
+│   └── helm-charts/         # Helm charts
+│       ├── mcp-hangar/      # Core Helm chart
+│       └── mcp-hangar-operator/  # Operator Helm chart
+├── docs/                    # MkDocs documentation
+├── examples/                # Quick starts & demos
+├── monitoring/              # Grafana, Prometheus configs
+└── Makefile                 # Root orchestration
+```
+
+## Python Core Structure
+
+```
+packages/core/mcp_hangar/
 ├── domain/           # DDD domain layer
 │   ├── model/        # Aggregates, entities
 │   ├── services/     # Domain services
@@ -36,9 +67,10 @@ mcp_hangar/
 ## Code Style
 
 ```bash
-black mcp_hangar/ tests/
-isort mcp_hangar/ tests/
-ruff check mcp_hangar/ tests/ --fix
+cd packages/core
+ruff check mcp_hangar tests --fix
+ruff format mcp_hangar tests
+mypy mcp_hangar
 ```
 
 ### Conventions
@@ -67,8 +99,12 @@ def invoke_tool(
 ## Testing
 
 ```bash
-uv run pytest tests/ -v -m "not slow"
-uv run pytest tests/ --cov=mcp_hangar --cov-report=html
+cd packages/core
+pytest -v -m "not slow"
+pytest --cov=mcp_hangar --cov-report=html
+
+# Or from root
+make test
 ```
 
 Target: >80% coverage on new code.
@@ -94,8 +130,9 @@ def test_tool_invocation():
 3. Add tests
 4. Run checks:
    ```bash
-   uv run pytest tests/ -v -m "not slow"
-   uv run pre-commit run --all-files
+   cd packages/core
+   pytest -v -m "not slow"
+   pre-commit run --all-files
    ```
 5. Update docs if needed
 
@@ -174,8 +211,9 @@ The workflow will:
 #### Option 2: Manual
 
 ```bash
-# 1. Update version in pyproject.toml
-sed -i 's/version = ".*"/version = "1.2.0"/' pyproject.toml
+# 1. Update version in packages/core/pyproject.toml
+cd packages/core
+sed -i '' 's/version = ".*"/version = "1.2.0"/' pyproject.toml
 
 # 2. Update CHANGELOG.md - move Unreleased items to new version section
 
@@ -211,8 +249,8 @@ pip install --index-url https://test.pypi.org/simple/ mcp-hangar==1.0.0rc1
 
 Before releasing, ensure:
 
-- [ ] All tests pass locally: `uv run pytest tests/ -v`
-- [ ] Linting passes: `uv run pre-commit run --all-files`
+- [ ] All tests pass locally: `cd packages/core && pytest -v`
+- [ ] Linting passes: `pre-commit run --all-files`
 - [ ] CHANGELOG.md is updated with all notable changes
 - [ ] Documentation is updated for new features
 - [ ] Breaking changes are clearly documented

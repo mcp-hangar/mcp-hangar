@@ -2,6 +2,8 @@
 
 Kubernetes Operator for managing MCP (Model Context Protocol) providers as native Kubernetes resources.
 
+> **Note**: This is part of the [MCP Hangar monorepo](https://github.com/mapyr/mcp-hangar). For Python core package, see `packages/core/`. For Helm charts, see `packages/helm-charts/`.
+
 ## Features
 
 - **MCPProvider CRD**: Declarative management of MCP tool providers
