@@ -179,22 +179,20 @@ python -m mcp_hangar.server
 ### Test via Python
 
 ```python
-from mcp_hangar.provider_manager import ProviderManager
-from mcp_hangar.models import ProviderSpec
+from mcp_hangar.domain.model import Provider
 
-spec = ProviderSpec(
+provider = Provider(
     provider_id="test",
     mode="subprocess",
     command=["python", "tests/mock_provider.py"]
 )
 
-mgr = ProviderManager(spec)
-mgr.ensure_ready()
+provider.ensure_ready()
 
-result = mgr.invoke_tool("add", {"a": 5, "b": 3})
+result = provider.invoke_tool("add", {"a": 5, "b": 3})
 print(result)  # {"result": 8}
 
-mgr.shutdown()
+provider.shutdown()
 ```
 
 ### Test Provider Directly

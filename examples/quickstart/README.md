@@ -59,6 +59,6 @@ docker compose down -v
 
 ## Next Steps
 
-- [Full Documentation](https://docs.mcp-hangar.io)
-- [Kubernetes Guide](https://docs.mcp-hangar.io/guides/kubernetes)
-- [Provider Development](https://docs.mcp-hangar.io/guides/providers)
+- [Full Documentation](https://mapyr.github.io/mcp-hangar/)
+- [Kubernetes Guide](https://mapyr.github.io/mcp-hangar/guides/KUBERNETES/)
+- [Container Providers](https://mapyr.github.io/mcp-hangar/guides/CONTAINERS/)

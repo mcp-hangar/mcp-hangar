@@ -15,10 +15,10 @@ Usage:
 """
 
 import argparse
-from dataclasses import dataclass, field
 import os
-from pathlib import Path
 import sys
+from dataclasses import dataclass, field
+from pathlib import Path
 from typing import Any
 
 import yaml
@@ -32,9 +32,11 @@ PROVIDER_ENV_REQUIREMENTS: dict[str, list[str]] = {
     "sentry": ["SENTRY_AUTH_TOKEN", "SENTRY_ORG", "SENTRY_PROJECT"],
 }
 
-VALID_MODES = {"container", "subprocess", "http", "sse"}
+VALID_MODES = {"container", "subprocess", "http", "sse", "group"}
 
 REQUIRED_PROVIDER_FIELDS = {"mode"}
+
+REQUIRED_GROUP_FIELDS = {"members"}
 
 REQUIRED_CONTAINER_FIELDS = {"image"}
 REQUIRED_SUBPROCESS_FIELDS = {"command"}
@@ -89,7 +91,7 @@ class ValidationResult:
 def validate_yaml_syntax(path: Path) -> tuple[dict | None, str | None]:
     """Validate YAML syntax and load config."""
     try:
-        with open(path, "r", encoding="utf-8") as f:
+        with open(path, encoding="utf-8") as f:
             config = yaml.safe_load(f)
         return config, None
     except yaml.YAMLError as e:
@@ -138,6 +140,37 @@ def validate_provider(name: str, config: dict[str, Any], result: ValidationResul
         for field in REQUIRED_HTTP_FIELDS:
             if field not in config:
                 result.add_error(f"Provider '{name}': http mode requires '{field}'")
+
+    elif mode == "group":
+        for field in REQUIRED_GROUP_FIELDS:
+            if field not in config:
+                result.add_error(f"Provider '{name}': group mode requires '{field}'")
+
+        members = config.get("members", [])
+        if not isinstance(members, list):
+            result.add_error(f"Provider '{name}': 'members' must be a list")
+        elif len(members) < 1:
+            result.add_error(f"Provider '{name}': group must have at least 1 member")
+        else:
+            for i, member in enumerate(members):
+                if not isinstance(member, dict):
+                    result.add_error(f"Provider '{name}': member[{i}] must be an object")
+                    continue
+                if "id" not in member:
+                    result.add_error(f"Provider '{name}': member[{i}] missing 'id'")
+                member_mode = member.get("mode")
+                if member_mode and member_mode not in {"subprocess", "container", "http", "sse"}:
+                    result.add_error(
+                        f"Provider '{name}': member '{member.get('id', i)}' has invalid mode '{member_mode}'"
+                    )
+
+        # Validate strategy
+        valid_strategies = {"round_robin", "random", "weighted_round_robin", "priority", "least_connections"}
+        strategy = config.get("strategy")
+        if strategy and strategy not in valid_strategies:
+            result.add_warning(
+                f"Provider '{name}': unknown strategy '{strategy}' (valid: {', '.join(valid_strategies)})"
+            )
 
     # Check environment variables
     if check_env and name in PROVIDER_ENV_REQUIREMENTS:
@@ -206,7 +239,7 @@ def validate_knowledge_base_config(config: dict[str, Any], result: ValidationRes
             result.add_error("knowledge_base.pool_size must be a positive integer")
 
         cache_ttl = kb.get("cache_ttl_s")
-        if cache_ttl is not None and (not isinstance(cache_ttl, (int, float)) or cache_ttl < 0):
+        if cache_ttl is not None and (not isinstance(cache_ttl, int | float) or cache_ttl < 0):
             result.add_error("knowledge_base.cache_ttl_s must be a non-negative number")
 
         result.add_info("Knowledge base: enabled (PostgreSQL)")
