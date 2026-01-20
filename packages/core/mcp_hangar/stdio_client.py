@@ -42,6 +42,7 @@ class StdioClient:
         self.pending_lock = threading.Lock()
         self.reader_thread = threading.Thread(target=self._reader_loop, daemon=True)
         self.closed = False
+        self._last_stderr: str | None = None
         self.reader_thread.start()
 
     def _reader_loop(self):
@@ -56,7 +57,8 @@ class StdioClient:
                 if not line:
                     # EOF reached, process died
                     logger.warning("stdio_client_eof_on_stdout")
-                    self._capture_process_stderr()
+                    stderr_msg = self._capture_process_stderr()
+                    self._last_stderr = stderr_msg
                     break
 
                 line = line.strip()
@@ -91,8 +93,9 @@ class StdioClient:
         # Clean up on exit
         self._cleanup_pending("reader_died")
 
-    def _capture_process_stderr(self) -> None:
-        """Capture and log stderr from the process for debugging."""
+    def _capture_process_stderr(self) -> str | None:
+        """Capture and log stderr from the process for debugging. Returns stderr text."""
+        stderr_text = None
         try:
             # Log exit code
             rc = self.process.poll()
@@ -114,16 +117,26 @@ class StdioClient:
                             if len(err_text) > 2000:
                                 err_text = err_text[:2000] + "... (truncated)"
                             logger.error("stdio_client_process_stderr", stderr=err_text)
+                            stderr_text = err_text
                 except Exception as read_err:
                     logger.debug("stdio_client_stderr_read_failed", error=str(read_err))
         except Exception as e:
             logger.debug("stdio_client_capture_error", error=str(e))
+        return stderr_text
 
     def _cleanup_pending(self, error_msg: str):
         """Clean up all pending requests on shutdown or error."""
+        # Include stderr in error message if available
+        full_error = error_msg
+        if self._last_stderr:
+            # Extract first meaningful line from stderr for error message
+            first_line = self._last_stderr.split("\n")[0].strip()
+            if first_line:
+                full_error = f"{error_msg}: {first_line}"
+
         with self.pending_lock:
             for pending in self.pending.values():
-                pending.result_queue.put({"error": {"code": -1, "message": error_msg}})
+                pending.result_queue.put({"error": {"code": -1, "message": full_error}})
             self.pending.clear()
 
     def call(self, method: str, params: dict[str, Any], timeout: float = 15.0) -> dict[str, Any]:

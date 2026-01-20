@@ -337,9 +337,9 @@ class Provider(AggregateRoot):
             self._finalize_start(client, start_time)
             self._end_cold_start_tracking(cold_start_time, success=True)
 
-        except ProviderStartError:
+        except ProviderStartError as e:
             self._end_cold_start_tracking(cold_start_time, success=False)
-            self._handle_start_failure(None)
+            self._handle_start_failure(e)
             raise
         except Exception as e:
             self._end_cold_start_tracking(cold_start_time, success=False)
@@ -456,25 +456,10 @@ class Provider(AggregateRoot):
         self._tools.update_from_list(tool_list)
 
     def _log_client_error(self, client: Any, error_msg: str) -> None:
-        """Log detailed error info for debugging (especially in CI)."""
-        if error_msg != "reader_died":
-            return
-
+        """Log detailed error info including stderr and exit code for debugging."""
         proc = getattr(client, "process", None)
         if not proc:
             return
-
-        # Try to capture stderr
-        stderr = getattr(proc, "stderr", None)
-        if stderr:
-            try:
-                err_bytes = stderr.read()
-                if err_bytes:
-                    err_text = (err_bytes if isinstance(err_bytes, str) else err_bytes.decode(errors="replace")).strip()
-                    if err_text:
-                        logger.error(f"provider_container_stderr: {err_text}")
-            except Exception:
-                pass
 
         # Log exit code
         try:
@@ -483,6 +468,24 @@ class Provider(AggregateRoot):
                 logger.error(f"provider_process_exit_code: {rc}")
         except Exception:
             pass
+
+        # Try to capture stderr (may already be captured by StdioClient)
+        last_stderr = getattr(client, "_last_stderr", None)
+        if last_stderr:
+            logger.error(f"provider_stderr: {last_stderr}")
+            return
+
+        # Fallback: try to read stderr directly
+        stderr = getattr(proc, "stderr", None)
+        if stderr:
+            try:
+                err_bytes = stderr.read()
+                if err_bytes:
+                    err_text = (err_bytes if isinstance(err_bytes, str) else err_bytes.decode(errors="replace")).strip()
+                    if err_text:
+                        logger.error(f"provider_stderr: {err_text}")
+            except Exception:
+                pass
 
     def _finalize_start(self, client: Any, start_time: float) -> None:
         """Finalize successful provider start."""

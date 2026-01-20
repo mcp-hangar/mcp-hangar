@@ -7,6 +7,14 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.2.3] - 2026-01-20
+
+### Fixed
+
+- **Core**: Improved error diagnostics for provider startup failures - stderr from container/subprocess is now included in error messages instead of generic "unknown error"
+- **Core**: `StdioClient` now captures and propagates stderr to error messages when process dies
+- **Core**: `Provider._handle_start_failure()` now receives actual exception instead of None
+
 ## [0.2.2] - 2026-01-19
 
 ### Fixed
