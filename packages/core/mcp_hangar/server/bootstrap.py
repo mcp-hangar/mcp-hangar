@@ -41,7 +41,7 @@ from ..logging_config import get_logger
 from ..retry import get_retry_store
 from .auth_bootstrap import AuthComponents, bootstrap_auth
 from .auth_config import parse_auth_config
-from .config import load_configuration
+from .config import load_config, load_configuration
 from .context import get_context, init_context
 from .state import (
     get_runtime,
@@ -106,6 +106,11 @@ class ApplicationContext:
     config: dict[str, Any] = field(default_factory=dict)
     """Full configuration dictionary."""
 
+    @property
+    def providers(self) -> dict[str, Any]:
+        """Get providers dictionary for easy access."""
+        return PROVIDERS
+
     def shutdown(self) -> None:
         """Graceful shutdown of all components.
 
@@ -150,7 +155,10 @@ class ApplicationContext:
 # =============================================================================
 
 
-def bootstrap(config_path: str | None = None) -> ApplicationContext:
+def bootstrap(
+    config_path: str | None = None,
+    config_dict: dict[str, Any] | None = None,
+) -> ApplicationContext:
     """Bootstrap the application.
 
     Initializes all components in correct order:
@@ -170,11 +178,12 @@ def bootstrap(config_path: str | None = None) -> ApplicationContext:
 
     Args:
         config_path: Optional path to config.yaml
+        config_dict: Optional configuration dictionary (takes precedence over config_path)
 
     Returns:
         Fully initialized ApplicationContext (components not started)
     """
-    logger.info("bootstrap_start", config_path=config_path)
+    logger.info("bootstrap_start", config_path=config_path, has_config_dict=config_dict is not None)
 
     # Ensure data directory exists
     _ensure_data_dir()
@@ -184,7 +193,16 @@ def bootstrap(config_path: str | None = None) -> ApplicationContext:
     init_context(runtime)
 
     # Load configuration early (needed for event store config)
-    full_config = load_configuration(config_path)
+    if config_dict is not None:
+        # Use provided config dict, merge with defaults
+        full_config = load_configuration(None)
+        full_config.update(config_dict)
+        # Load providers from config_dict
+        providers_config = config_dict.get("providers", {})
+        if providers_config:
+            load_config(providers_config)
+    else:
+        full_config = load_configuration(config_path)
 
     # Initialize event store for event sourcing
     _init_event_store(runtime, full_config)
@@ -300,17 +318,31 @@ def _init_event_store(runtime: "Runtime", config: dict[str, Any]) -> None:
         logger.info("event_store_initialized", driver="memory")
     elif driver == "sqlite":
         db_path = event_store_config.get("path", "data/events.db")
-        # Ensure directory exists
-        Path(db_path).parent.mkdir(parents=True, exist_ok=True)
-        event_store = SQLiteEventStore(db_path)
-        logger.info("event_store_initialized", driver="sqlite", path=db_path)
+        # Ensure directory exists - fallback to in-memory if read-only
+        try:
+            Path(db_path).parent.mkdir(parents=True, exist_ok=True)
+            event_store = SQLiteEventStore(db_path)
+            logger.info("event_store_initialized", driver="sqlite", path=db_path)
+        except OSError as e:
+            # Read-only filesystem or permission denied - use in-memory store
+            logger.warning(
+                "event_store_sqlite_fallback_to_memory",
+                error=str(e),
+                path=db_path,
+            )
+            from ..infrastructure.persistence import InMemoryEventStore
+
+            event_store = InMemoryEventStore()
+            logger.info("event_store_initialized", driver="memory", reason="sqlite_unavailable")
     else:
         logger.warning(
             "unknown_event_store_driver",
             driver=driver,
-            fallback="sqlite",
+            fallback="memory",
         )
-        event_store = SQLiteEventStore("data/events.db")
+        from ..infrastructure.persistence import InMemoryEventStore
+
+        event_store = InMemoryEventStore()
 
     runtime.event_bus.set_event_store(event_store)
 
@@ -691,26 +723,33 @@ def _auto_add_volumes(provider_name: str) -> list:
     provider_name_lower = provider_name.lower()
     data_base = Path("./data").absolute()
 
-    if "memory" in provider_name_lower:
-        memory_dir = data_base / "memory"
-        memory_dir.mkdir(parents=True, exist_ok=True)
-        memory_dir.chmod(0o777)
-        volumes.append(f"{memory_dir}:/app/data:rw")
-        logger.info(
-            "auto_added_memory_volume",
-            provider_name=provider_name,
-            volume=f"{memory_dir}:/app/data",
-        )
+    try:
+        if "memory" in provider_name_lower:
+            memory_dir = data_base / "memory"
+            memory_dir.mkdir(parents=True, exist_ok=True)
+            memory_dir.chmod(0o777)
+            volumes.append(f"{memory_dir}:/app/data:rw")
+            logger.info(
+                "auto_added_memory_volume",
+                provider_name=provider_name,
+                volume=f"{memory_dir}:/app/data",
+            )
 
-    elif "filesystem" in provider_name_lower:
-        fs_dir = data_base / "filesystem"
-        fs_dir.mkdir(parents=True, exist_ok=True)
-        fs_dir.chmod(0o777)
-        volumes.append(f"{fs_dir}:/data:rw")
-        logger.info(
-            "auto_added_filesystem_volume",
+        elif "filesystem" in provider_name_lower:
+            fs_dir = data_base / "filesystem"
+            fs_dir.mkdir(parents=True, exist_ok=True)
+            fs_dir.chmod(0o777)
+            volumes.append(f"{fs_dir}:/data:rw")
+            logger.info(
+                "auto_added_filesystem_volume",
+                provider_name=provider_name,
+                volume=f"{fs_dir}:/data",
+            )
+    except OSError as e:
+        logger.warning(
+            "auto_volume_creation_failed",
             provider_name=provider_name,
-            volume=f"{fs_dir}:/data",
+            error=str(e),
         )
 
     return volumes

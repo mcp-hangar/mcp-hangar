@@ -8,12 +8,12 @@ from collections.abc import Callable
 from dataclasses import dataclass, field
 import json
 from pathlib import Path
-import threading
 import time
 from typing import Any
 
 from ..domain.events import DomainEvent
 from ..logging_config import get_logger
+from .lock_hierarchy import LockLevel, TrackedLock
 
 logger = get_logger(__name__)
 
@@ -139,11 +139,17 @@ class InMemoryEventStore(EventStore):
 
     def __init__(self):
         self._streams: dict[str, list[StoredEvent]] = {}
-        self._lock = threading.RLock()
+        # Lock hierarchy level: EVENT_STORE (30)
+        # Safe to acquire after: PROVIDER, EVENT_BUS
+        # Safe to acquire before: SAGA_MANAGER, STDIO_CLIENT
+        # Note: Reentrant because internal methods like get_version() are called under lock
+        self._lock = TrackedLock(LockLevel.EVENT_STORE, "InMemoryEventStore", reentrant=True)
         self._subscribers: list[Callable[[StoredEvent], None]] = []
 
     def append(self, stream_id: str, events: list[DomainEvent], expected_version: int) -> int:
         """Append events with optimistic concurrency."""
+        stored_events: list[StoredEvent] = []
+
         with self._lock:
             current_version = self.get_version(stream_id)
 
@@ -167,15 +173,20 @@ class InMemoryEventStore(EventStore):
                     data=event.to_dict(),
                 )
                 stream.append(stored)
+                stored_events.append(stored)
 
-                # Notify subscribers
-                for subscriber in self._subscribers:
-                    try:
-                        subscriber(stored)
-                    except Exception as e:
-                        logger.error(f"Event subscriber error: {e}")
+            # Copy subscribers list under lock
+            subscribers = list(self._subscribers)
 
-            return new_version
+        # Notify subscribers OUTSIDE lock to avoid blocking/deadlocks
+        for stored in stored_events:
+            for subscriber in subscribers:
+                try:
+                    subscriber(stored)
+                except Exception as e:
+                    logger.error(f"Event subscriber error: {e}")
+
+        return new_version
 
     def load(self, stream_id: str, from_version: int = 0, to_version: int | None = None) -> list[StoredEvent]:
         """Load events from a stream."""
@@ -236,7 +247,11 @@ class FileEventStore(EventStore):
     def __init__(self, storage_path: str):
         self._storage_path = Path(storage_path)
         self._storage_path.mkdir(parents=True, exist_ok=True)
-        self._lock = threading.RLock()
+        # Lock hierarchy level: EVENT_STORE (30)
+        # Safe to acquire after: PROVIDER, EVENT_BUS
+        # Safe to acquire before: SAGA_MANAGER, STDIO_CLIENT
+        # Note: Reentrant because internal methods like load() are called under lock
+        self._lock = TrackedLock(LockLevel.EVENT_STORE, "FileEventStore", reentrant=True)
         self._cache: dict[str, list[StoredEvent]] = {}
 
     def _stream_file(self, stream_id: str) -> Path:
@@ -339,7 +354,10 @@ class EventStoreSnapshot:
         self._storage_path = Path(storage_path)
         self._storage_path.mkdir(parents=True, exist_ok=True)
         self._snapshot_interval = snapshot_interval
-        self._lock = threading.RLock()
+        # Lock hierarchy level: EVENT_STORE (30)
+        # Safe to acquire after: PROVIDER, EVENT_BUS
+        # Safe to acquire before: SAGA_MANAGER, STDIO_CLIENT
+        self._lock = TrackedLock(LockLevel.EVENT_STORE, "EventStoreSnapshot")
 
     def _snapshot_file(self, stream_id: str) -> Path:
         """Get file path for a snapshot."""

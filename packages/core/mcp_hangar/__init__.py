@@ -1,17 +1,31 @@
-"""MCP Registry - Hot-load provider management.
+"""MCP Hangar - Production-grade MCP provider management.
 
 This package provides a production-grade registry for managing MCP (Model Context Protocol)
 providers with hot-loading, health monitoring, and automatic garbage collection.
 
-New code should use:
-- Provider aggregate from mcp_hangar.domain.model
-- Domain exceptions from mcp_hangar.domain.exceptions
-- Value objects from mcp_hangar.domain.value_objects
+Quick Start (recommended):
+    from mcp_hangar import Hangar, SyncHangar
 
-Legacy imports are maintained for backward compatibility.
+    # Async usage
+    async with Hangar.from_config("config.yaml") as hangar:
+        result = await hangar.invoke("math", "add", {"a": 1, "b": 2})
+
+    # Sync usage
+    with SyncHangar.from_config("config.yaml") as hangar:
+        result = hangar.invoke("math", "add", {"a": 1, "b": 2})
+
+    # Programmatic configuration
+    from mcp_hangar import HangarConfig
+    config = HangarConfig().add_provider("math", command=["python", "-m", "math"]).build()
+    hangar = Hangar.from_builder(config)
+
+For advanced usage, see:
+- Provider aggregate: mcp_hangar.domain.model
+- Domain exceptions: mcp_hangar.domain.exceptions
+- Value objects: mcp_hangar.domain.value_objects
 """
 
-# Domain layer - preferred imports for new code
+# Domain layer - for advanced usage
 from .domain.exceptions import (
     CannotStartProviderError,
     ClientError,
@@ -61,6 +75,9 @@ from .errors import (
     TransientError,
 )
 
+# High-level Facade API (recommended for most users)
+from .facade import Hangar, HangarConfig, HangarConfigData, HealthSummary, ProviderInfo, SyncHangar
+
 # Legacy imports - for backward compatibility (re-exports from domain)
 from .models import ToolSchema
 from .progress import (
@@ -75,7 +92,14 @@ from .retry import BackoffStrategy, get_retry_policy, get_retry_store, RetryPoli
 from .stdio_client import StdioClient
 
 __all__ = [
-    # Domain - Provider aggregate (preferred)
+    # High-level Facade API (recommended)
+    "Hangar",
+    "SyncHangar",
+    "HangarConfig",
+    "HangarConfigData",
+    "ProviderInfo",
+    "HealthSummary",
+    # Domain - Provider aggregate
     "Provider",
     # Domain - Value Objects
     "ProviderId",

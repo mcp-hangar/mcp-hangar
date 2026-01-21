@@ -7,6 +7,7 @@ This package provides infrastructure components for:
 - Event Store: Append-only event persistence
 - Event Sourced Repository: Provider persistence via event sourcing
 - Saga Manager: Long-running business process orchestration
+- Lock Hierarchy: Thread safety with deadlock prevention
 
 Note: Command classes (StartProviderCommand, etc.) have been moved to
 application.commands to maintain proper layer separation.
@@ -22,6 +23,14 @@ from .event_store import (
     get_event_store,
     InMemoryEventStore,
     StoredEvent,
+)
+from .lock_hierarchy import (
+    clear_thread_locks,
+    get_current_thread_locks,
+    LockLevel,
+    LockOrderViolation,
+    TrackedLock,
+    TrackedRLock,
 )
 from .query_bus import (
     get_query_bus,
@@ -69,6 +78,13 @@ __all__ = [
     # Event Sourced Repository
     "EventSourcedProviderRepository",
     "ProviderConfigStore",
+    # Lock Hierarchy
+    "LockLevel",
+    "LockOrderViolation",
+    "TrackedLock",
+    "TrackedRLock",
+    "get_current_thread_locks",
+    "clear_thread_locks",
     # Saga
     "Saga",
     "SagaManager",

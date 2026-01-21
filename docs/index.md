@@ -5,7 +5,7 @@
 [![PyPI](https://img.shields.io/pypi/v/mcp-hangar)](https://pypi.org/project/mcp-hangar/)
 [![Python 3.11+](https://img.shields.io/badge/python-3.11+-blue.svg)](https://www.python.org/downloads/)
 [![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](https://opensource.org/licenses/MIT)
-[![Documentation](https://img.shields.io/badge/docs-GitHub%20Pages-blue)](https://mapyr.github.io/mcp-hangar/)
+[![Documentation](https://img.shields.io/badge/docs-mcp--hangar.io-blue)](https://mcp-hangar.io)
 
 Production-grade MCP provider registry with lazy loading, health monitoring, and container support.
 
@@ -34,13 +34,19 @@ MCP Hangar is a monorepo containing multiple packages:
 ## Quick Start
 
 ```bash
+# Quick install
+curl -sSL https://get.mcp-hangar.io | bash
+
+# Or via pip
 pip install mcp-hangar
+
+# Run
 mcp-hangar --config config.yaml
 ```
 
 ## Documentation
 
-📖 **[Full Documentation](https://mapyr.github.io/mcp-hangar/)**
+📖 **[Full Documentation](https://mcp-hangar.io)**
 
 - [Installation](https://mapyr.github.io/mcp-hangar/getting-started/installation/)
 - [Quick Start Guide](https://mapyr.github.io/mcp-hangar/getting-started/quickstart/)

@@ -729,6 +729,53 @@ DISCOVERY_LAST_CYCLE_TIMESTAMP = Gauge(
     labels=["source_type"],
 )
 
+# -----------------------------------------------------------------------------
+# HTTP Transport Metrics (for remote providers)
+# -----------------------------------------------------------------------------
+
+HTTP_REQUESTS_TOTAL = Counter(
+    name="mcp_registry_http_requests",
+    description="Total number of HTTP requests to remote providers",
+    labels=["provider", "method", "status_code"],
+)
+
+HTTP_REQUEST_DURATION_SECONDS = Histogram(
+    name="mcp_registry_http_request_duration_seconds",
+    description="Duration of HTTP requests to remote providers in seconds",
+    labels=["provider", "method"],
+    buckets=Histogram.LATENCY_BUCKETS,
+)
+
+HTTP_ERRORS_TOTAL = Counter(
+    name="mcp_registry_http_errors",
+    description="Total number of HTTP errors by type",
+    labels=["provider", "error_type"],  # error_type: connection_refused, timeout, auth_failed, ssl_error
+)
+
+HTTP_RETRIES_TOTAL = Counter(
+    name="mcp_registry_http_retries",
+    description="Total number of HTTP request retries",
+    labels=["provider", "retry_reason"],  # retry_reason: 502, 503, 504, connection_error
+)
+
+HTTP_CONNECTION_POOL_SIZE = Gauge(
+    name="mcp_registry_http_connection_pool_size",
+    description="Current number of connections in HTTP connection pool",
+    labels=["provider"],
+)
+
+HTTP_SSE_STREAMS_ACTIVE = Gauge(
+    name="mcp_registry_http_sse_streams_active",
+    description="Number of active SSE streams to remote providers",
+    labels=["provider"],
+)
+
+HTTP_SSE_EVENTS_TOTAL = Counter(
+    name="mcp_registry_http_sse_events",
+    description="Total number of SSE events received from remote providers",
+    labels=["provider", "event_type"],  # event_type: message, notification, error
+)
+
 
 # =============================================================================
 # Register All Metrics
@@ -778,6 +825,14 @@ def _register_all_metrics():
         DISCOVERY_QUARANTINE_TOTAL,
         DISCOVERY_ERRORS_TOTAL,
         DISCOVERY_LAST_CYCLE_TIMESTAMP,
+        # HTTP transport metrics
+        HTTP_REQUESTS_TOTAL,
+        HTTP_REQUEST_DURATION_SECONDS,
+        HTTP_ERRORS_TOTAL,
+        HTTP_RETRIES_TOTAL,
+        HTTP_CONNECTION_POOL_SIZE,
+        HTTP_SSE_STREAMS_ACTIVE,
+        HTTP_SSE_EVENTS_TOTAL,
     ]
     for metric in metrics:
         REGISTRY.register(metric)

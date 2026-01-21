@@ -7,6 +7,37 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.3.0] - 2026-01-21
+
+### Added
+
+- **Facade API**: New high-level `Hangar` class for simplified provider management
+  - Async-first API with `await hangar.invoke()`, `await hangar.health()`
+  - Sync wrapper `SyncHangar` for simple scripting use cases
+  - Context manager support: `async with Hangar.from_config(...) as hangar:`
+- **HangarConfig Builder**: Programmatic configuration with fluent API
+  - `.add_provider()` for subprocess, docker, and remote providers
+  - `.enable_discovery()` for Docker/Kubernetes/filesystem auto-discovery
+  - Type-safe validation at build time
+- **Quick Install Script**: `curl -sSL https://get.mcp-hangar.io | bash`
+
+### Improved
+
+- **Infrastructure**: Thread-safe lock hierarchy with `HierarchicalLockManager`
+  - Deadlock prevention via strict acquisition ordering
+  - Lock timeout support with configurable defaults
+  - Context manager API for safe lock management
+- **Test Coverage**: +77 new unit tests
+  - Facade tests (49 tests)
+  - Knowledge base memory backend tests (28 tests)
+  - Auth middleware tests (30 tests)
+- **Documentation**: All links updated to `mcp-hangar.io`
+
+### Changed
+
+- **Breaking**: `bootstrap()` now accepts optional `config_dict` parameter for programmatic config
+- **Dependencies**: Updated minimum Python version requirement clarified as 3.11+
+
 ## [0.2.3] - 2026-01-20
 
 ### Fixed
@@ -232,7 +263,12 @@ The following items are documented technical debt introduced to enable CI:
 - Rate limiting to prevent denial of service
 - Audit logging for security-relevant events
 
-[Unreleased]: https://github.com/mapyr/mcp-hangar/compare/v0.1.2...HEAD
+[Unreleased]: https://github.com/mapyr/mcp-hangar/compare/v0.3.0...HEAD
+[0.3.0]: https://github.com/mapyr/mcp-hangar/compare/v0.2.3...v0.3.0
+[0.2.3]: https://github.com/mapyr/mcp-hangar/compare/v0.2.2...v0.2.3
+[0.2.2]: https://github.com/mapyr/mcp-hangar/compare/v0.2.1...v0.2.2
+[0.2.1]: https://github.com/mapyr/mcp-hangar/compare/v0.2.0...v0.2.1
+[0.2.0]: https://github.com/mapyr/mcp-hangar/compare/v0.1.2...v0.2.0
 [0.1.2]: https://github.com/mapyr/mcp-hangar/compare/v0.1.1...v0.1.2
 [0.1.1]: https://github.com/mapyr/mcp-hangar/compare/v0.1.0...v0.1.1
 [0.1.0]: https://github.com/mapyr/mcp-hangar/releases/tag/v0.1.0

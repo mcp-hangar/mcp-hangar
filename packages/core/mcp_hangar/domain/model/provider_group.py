@@ -7,7 +7,7 @@ as a single logical unit with automatic load balancing and failover.
 from dataclasses import dataclass
 import threading
 import time
-from typing import Any
+from typing import Any, TYPE_CHECKING
 
 from ...logging_config import get_logger
 from ..events import DomainEvent
@@ -16,6 +16,9 @@ from .aggregate import AggregateRoot
 from .circuit_breaker import CircuitBreaker, CircuitBreakerConfig
 from .load_balancer import LoadBalancer
 from .provider import Provider
+
+if TYPE_CHECKING:
+    from ...infrastructure.lock_hierarchy import TrackedLock
 
 logger = get_logger(__name__)
 
@@ -200,7 +203,10 @@ class ProviderGroup(AggregateRoot):
         )
 
         # Threading
-        self._lock = threading.RLock()
+        # Lock hierarchy level: PROVIDER_GROUP (11)
+        # Safe to acquire after: PROVIDER (but avoid holding both)
+        # Safe to acquire before: EVENT_BUS, EVENT_STORE, STDIO_CLIENT
+        self._lock = self._create_lock(group_id)
 
         self._record_event(
             GroupCreated(
@@ -209,6 +215,16 @@ class ProviderGroup(AggregateRoot):
                 min_healthy=min_healthy,
             )
         )
+
+    @staticmethod
+    def _create_lock(group_id: str) -> "TrackedLock | threading.RLock":
+        """Create lock with hierarchy tracking."""
+        try:
+            from ...infrastructure.lock_hierarchy import LockLevel, TrackedLock
+
+            return TrackedLock(LockLevel.PROVIDER_GROUP, f"ProviderGroup:{group_id}")
+        except ImportError:
+            return threading.RLock()
 
     # --- Properties ---
 

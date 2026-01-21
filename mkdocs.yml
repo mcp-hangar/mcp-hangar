@@ -3,7 +3,7 @@
 
 site_name: MCP Hangar
 site_description: Production-grade hot-load registry for MCP providers
-site_url: https://mapyr.github.io/mcp-hangar
+site_url: https://mcp-hangar.io
 repo_url: https://github.com/mapyr/mcp-hangar
 repo_name: mapyr/mcp-hangar
 edit_uri: edit/main/docs/

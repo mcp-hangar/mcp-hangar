@@ -5,6 +5,14 @@
 - Python 3.11 or higher
 - Docker or Podman (for container providers)
 
+## Quick Install (Recommended)
+
+```bash
+curl -sSL https://get.mcp-hangar.io | bash
+```
+
+This will install the latest version of MCP Hangar and set up your environment.
+
 ## Install from PyPI
 
 ```bash

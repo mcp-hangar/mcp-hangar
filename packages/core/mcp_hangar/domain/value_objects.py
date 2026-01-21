@@ -822,6 +822,190 @@ class TimeoutSeconds:
         return f"{self.seconds}s"
 
 
+# --- HTTP Transport Value Objects ---
+
+
+class HttpAuthType(Enum):
+    """Authentication type for HTTP providers.
+
+    Attributes:
+        NONE: No authentication required.
+        API_KEY: API key sent in a header.
+        BEARER: Bearer token authentication.
+        BASIC: HTTP Basic authentication.
+    """
+
+    NONE = "none"
+    API_KEY = "api_key"
+    BEARER = "bearer"
+    BASIC = "basic"
+
+    def __str__(self) -> str:
+        return self.value
+
+    @classmethod
+    def normalize(cls, value: "str | HttpAuthType | None") -> "HttpAuthType":
+        """Normalize auth type value to HttpAuthType enum."""
+        if value is None:
+            return cls.NONE
+        if isinstance(value, cls):
+            return value
+        return cls(value)
+
+
+@dataclass(frozen=True)
+class HttpAuthConfig:
+    """Authentication configuration for HTTP providers.
+
+    Immutable value object containing auth credentials.
+    Secrets should be passed via environment variable interpolation.
+
+    Attributes:
+        auth_type: Type of authentication to use.
+        api_key: API key for api_key auth (header value).
+        api_key_header: Header name for API key (default: X-API-Key).
+        bearer_token: Bearer token for bearer auth.
+        basic_username: Username for basic auth.
+        basic_password: Password for basic auth.
+    """
+
+    auth_type: HttpAuthType = HttpAuthType.NONE
+    api_key: str | None = None
+    api_key_header: str = "X-API-Key"
+    bearer_token: str | None = None
+    basic_username: str | None = None
+    basic_password: str | None = None
+
+    def __post_init__(self) -> None:
+        """Validate auth configuration."""
+        if self.auth_type == HttpAuthType.API_KEY and not self.api_key:
+            raise ValueError("api_key is required for api_key auth type")
+        if self.auth_type == HttpAuthType.BEARER and not self.bearer_token:
+            raise ValueError("bearer_token is required for bearer auth type")
+        if self.auth_type == HttpAuthType.BASIC:
+            if not self.basic_username or not self.basic_password:
+                raise ValueError("basic_username and basic_password are required for basic auth type")
+
+    def get_headers(self) -> dict[str, str]:
+        """Get authentication headers for HTTP requests.
+
+        Returns:
+            Dictionary of headers to add to requests.
+        """
+        if self.auth_type == HttpAuthType.NONE:
+            return {}
+
+        if self.auth_type == HttpAuthType.API_KEY:
+            return {self.api_key_header: self.api_key}
+
+        if self.auth_type == HttpAuthType.BEARER:
+            return {"Authorization": f"Bearer {self.bearer_token}"}
+
+        if self.auth_type == HttpAuthType.BASIC:
+            import base64
+
+            credentials = f"{self.basic_username}:{self.basic_password}"
+            encoded = base64.b64encode(credentials.encode()).decode()
+            return {"Authorization": f"Basic {encoded}"}
+
+        return {}
+
+    @classmethod
+    def from_dict(cls, config: dict[str, Any] | None) -> "HttpAuthConfig":
+        """Create from dictionary configuration.
+
+        Args:
+            config: Dictionary with auth configuration or None for no auth.
+
+        Returns:
+            HttpAuthConfig instance.
+        """
+        if not config:
+            return cls()
+
+        auth_type = HttpAuthType.normalize(config.get("type"))
+
+        return cls(
+            auth_type=auth_type,
+            api_key=config.get("api_key"),
+            api_key_header=config.get("api_key_header", "X-API-Key"),
+            bearer_token=config.get("bearer_token"),
+            basic_username=config.get("username"),
+            basic_password=config.get("password"),
+        )
+
+
+@dataclass(frozen=True)
+class HttpTlsConfig:
+    """TLS configuration for HTTPS connections.
+
+    Attributes:
+        verify_ssl: Whether to verify SSL certificates.
+        ca_cert_path: Path to custom CA certificate file.
+    """
+
+    verify_ssl: bool = True
+    ca_cert_path: str | None = None
+
+    @classmethod
+    def from_dict(cls, config: dict[str, Any] | None) -> "HttpTlsConfig":
+        """Create from dictionary configuration."""
+        if not config:
+            return cls()
+
+        return cls(
+            verify_ssl=config.get("verify_ssl", True),
+            ca_cert_path=config.get("ca_cert_path"),
+        )
+
+
+@dataclass(frozen=True)
+class HttpTransportConfig:
+    """Complete HTTP transport configuration for remote providers.
+
+    Attributes:
+        connect_timeout: Connection timeout in seconds.
+        read_timeout: Read timeout in seconds.
+        max_retries: Maximum number of retry attempts.
+        retry_backoff_factor: Exponential backoff factor for retries.
+        keep_alive: Whether to use HTTP keep-alive.
+        extra_headers: Additional headers to include in all requests.
+    """
+
+    connect_timeout: float = 10.0
+    read_timeout: float = 30.0
+    max_retries: int = 3
+    retry_backoff_factor: float = 0.5
+    keep_alive: bool = True
+    extra_headers: dict[str, str] | None = None
+
+    def __post_init__(self) -> None:
+        """Validate transport configuration."""
+        if self.connect_timeout <= 0:
+            raise ValueError("connect_timeout must be positive")
+        if self.read_timeout <= 0:
+            raise ValueError("read_timeout must be positive")
+        if self.max_retries < 0:
+            raise ValueError("max_retries cannot be negative")
+        if self.retry_backoff_factor < 0:
+            raise ValueError("retry_backoff_factor cannot be negative")
+
+    @classmethod
+    def from_dict(cls, config: dict[str, Any] | None) -> "HttpTransportConfig":
+        """Create from dictionary configuration."""
+        if not config:
+            return cls()
+
+        return cls(
+            connect_timeout=config.get("connect_timeout", 10.0),
+            read_timeout=config.get("read_timeout", 30.0),
+            max_retries=config.get("max_retries", 3),
+            retry_backoff_factor=config.get("retry_backoff_factor", 0.5),
+            keep_alive=config.get("keep_alive", True),
+            extra_headers=config.get("headers"),
+        )
+
+
 # --- Provider Configuration ---
 
 

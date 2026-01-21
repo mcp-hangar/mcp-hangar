@@ -7,7 +7,6 @@ or services. They react to domain events and emit commands.
 from abc import ABC, abstractmethod
 from dataclasses import dataclass, field
 from enum import Enum
-import threading
 import time
 from typing import Any, Optional, TYPE_CHECKING
 import uuid
@@ -16,6 +15,7 @@ from ..domain.events import DomainEvent
 from ..logging_config import get_logger
 from .command_bus import CommandBus, get_command_bus
 from .event_bus import EventBus, get_event_bus
+from .lock_hierarchy import LockLevel, TrackedLock
 
 if TYPE_CHECKING:
     from ..application.commands import Command
@@ -211,7 +211,11 @@ class SagaManager:
         self._saga_history: list[SagaContext] = []
         self._max_history = 100
 
-        self._lock = threading.RLock()
+        # Lock hierarchy level: SAGA_MANAGER (40)
+        # Safe to acquire after: PROVIDER, EVENT_BUS, EVENT_STORE
+        # Safe to acquire before: STDIO_CLIENT
+        # Note: Command execution happens OUTSIDE this lock
+        self._lock = TrackedLock(LockLevel.SAGA_MANAGER, "SagaManager")
 
         # Subscribe to all events for event-triggered sagas
         self._event_bus.subscribe_to_all(self._handle_event)

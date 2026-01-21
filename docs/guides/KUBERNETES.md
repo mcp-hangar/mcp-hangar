@@ -492,4 +492,4 @@ kubectl logs -n mcp-system deployment/mcp-hangar-operator -f
 
 ## Examples
 
-See [examples/kubernetes/](https://github.com/mapyr/mcp-hangar/tree/main/examples/kubernetes) for complete examples.
+See [examples/kubernetes/](https://mcp-hangar.io/examples/kubernetes/) for complete examples.

@@ -11,6 +11,10 @@ from mcp_hangar.domain.value_objects import (
     Endpoint,
     EnvironmentVariables,
     HealthCheckInterval,
+    HttpAuthConfig,
+    HttpAuthType,
+    HttpTlsConfig,
+    HttpTransportConfig,
     IdleTTL,
     MaxConsecutiveFailures,
     ProviderId,
@@ -452,3 +456,228 @@ def test_timeout_seconds_too_large():
     """Test that timeout exceeding 1 hour raises ValueError."""
     with pytest.raises(ValueError, match="cannot exceed 3600"):
         TimeoutSeconds(3601)
+
+
+# HttpAuthType Tests
+
+
+def test_http_auth_type_values():
+    """Test HttpAuthType enum values."""
+    assert HttpAuthType.NONE.value == "none"
+    assert HttpAuthType.API_KEY.value == "api_key"
+    assert HttpAuthType.BEARER.value == "bearer"
+    assert HttpAuthType.BASIC.value == "basic"
+
+
+def test_http_auth_type_normalize():
+    """Test HttpAuthType normalization."""
+    assert HttpAuthType.normalize("api_key") == HttpAuthType.API_KEY
+    assert HttpAuthType.normalize("bearer") == HttpAuthType.BEARER
+    assert HttpAuthType.normalize(None) == HttpAuthType.NONE
+    assert HttpAuthType.normalize(HttpAuthType.BASIC) == HttpAuthType.BASIC
+
+
+# HttpAuthConfig Tests
+
+
+def test_http_auth_config_no_auth():
+    """Test HttpAuthConfig with no auth."""
+    auth = HttpAuthConfig()
+    assert auth.auth_type == HttpAuthType.NONE
+    assert auth.get_headers() == {}
+
+
+def test_http_auth_config_api_key():
+    """Test HttpAuthConfig with API key."""
+    auth = HttpAuthConfig(
+        auth_type=HttpAuthType.API_KEY,
+        api_key="secret-key",
+        api_key_header="X-API-Key",
+    )
+    headers = auth.get_headers()
+    assert headers == {"X-API-Key": "secret-key"}
+
+
+def test_http_auth_config_api_key_custom_header():
+    """Test HttpAuthConfig with custom API key header."""
+    auth = HttpAuthConfig(
+        auth_type=HttpAuthType.API_KEY,
+        api_key="my-key",
+        api_key_header="Authorization-Key",
+    )
+    headers = auth.get_headers()
+    assert headers == {"Authorization-Key": "my-key"}
+
+
+def test_http_auth_config_bearer():
+    """Test HttpAuthConfig with bearer token."""
+    auth = HttpAuthConfig(
+        auth_type=HttpAuthType.BEARER,
+        bearer_token="jwt-token",
+    )
+    headers = auth.get_headers()
+    assert headers == {"Authorization": "Bearer jwt-token"}
+
+
+def test_http_auth_config_basic():
+    """Test HttpAuthConfig with basic auth."""
+    auth = HttpAuthConfig(
+        auth_type=HttpAuthType.BASIC,
+        basic_username="user",
+        basic_password="pass",
+    )
+    headers = auth.get_headers()
+    # user:pass base64 encoded
+    assert headers == {"Authorization": "Basic dXNlcjpwYXNz"}
+
+
+def test_http_auth_config_api_key_required():
+    """Test HttpAuthConfig requires api_key for API_KEY type."""
+    with pytest.raises(ValueError, match="api_key is required"):
+        HttpAuthConfig(auth_type=HttpAuthType.API_KEY)
+
+
+def test_http_auth_config_bearer_token_required():
+    """Test HttpAuthConfig requires bearer_token for BEARER type."""
+    with pytest.raises(ValueError, match="bearer_token is required"):
+        HttpAuthConfig(auth_type=HttpAuthType.BEARER)
+
+
+def test_http_auth_config_basic_credentials_required():
+    """Test HttpAuthConfig requires both username and password for BASIC type."""
+    with pytest.raises(ValueError, match="basic_username and basic_password"):
+        HttpAuthConfig(auth_type=HttpAuthType.BASIC, basic_username="user")
+
+    with pytest.raises(ValueError, match="basic_username and basic_password"):
+        HttpAuthConfig(auth_type=HttpAuthType.BASIC, basic_password="pass")
+
+
+def test_http_auth_config_from_dict_none():
+    """Test HttpAuthConfig.from_dict with None."""
+    auth = HttpAuthConfig.from_dict(None)
+    assert auth.auth_type == HttpAuthType.NONE
+
+
+def test_http_auth_config_from_dict_bearer():
+    """Test HttpAuthConfig.from_dict with bearer config."""
+    auth = HttpAuthConfig.from_dict(
+        {
+            "type": "bearer",
+            "bearer_token": "my-token",
+        }
+    )
+    assert auth.auth_type == HttpAuthType.BEARER
+    assert auth.bearer_token == "my-token"
+
+
+def test_http_auth_config_from_dict_basic():
+    """Test HttpAuthConfig.from_dict with basic auth config."""
+    auth = HttpAuthConfig.from_dict(
+        {
+            "type": "basic",
+            "username": "admin",
+            "password": "secret",
+        }
+    )
+    assert auth.auth_type == HttpAuthType.BASIC
+    assert auth.basic_username == "admin"
+    assert auth.basic_password == "secret"
+
+
+# HttpTlsConfig Tests
+
+
+def test_http_tls_config_defaults():
+    """Test HttpTlsConfig defaults."""
+    tls = HttpTlsConfig()
+    assert tls.verify_ssl is True
+    assert tls.ca_cert_path is None
+
+
+def test_http_tls_config_custom():
+    """Test HttpTlsConfig with custom values."""
+    tls = HttpTlsConfig(verify_ssl=False, ca_cert_path="/path/to/ca.pem")
+    assert tls.verify_ssl is False
+    assert tls.ca_cert_path == "/path/to/ca.pem"
+
+
+def test_http_tls_config_from_dict():
+    """Test HttpTlsConfig.from_dict."""
+    tls = HttpTlsConfig.from_dict(
+        {
+            "verify_ssl": False,
+            "ca_cert_path": "/custom/ca.pem",
+        }
+    )
+    assert tls.verify_ssl is False
+    assert tls.ca_cert_path == "/custom/ca.pem"
+
+
+def test_http_tls_config_from_dict_none():
+    """Test HttpTlsConfig.from_dict with None."""
+    tls = HttpTlsConfig.from_dict(None)
+    assert tls.verify_ssl is True
+
+
+# HttpTransportConfig Tests
+
+
+def test_http_transport_config_defaults():
+    """Test HttpTransportConfig defaults."""
+    config = HttpTransportConfig()
+    assert config.connect_timeout == 10.0
+    assert config.read_timeout == 30.0
+    assert config.max_retries == 3
+    assert config.retry_backoff_factor == 0.5
+    assert config.keep_alive is True
+
+
+def test_http_transport_config_custom():
+    """Test HttpTransportConfig with custom values."""
+    config = HttpTransportConfig(
+        connect_timeout=5.0,
+        read_timeout=60.0,
+        max_retries=5,
+        retry_backoff_factor=1.0,
+        keep_alive=False,
+        extra_headers={"X-Custom": "value"},
+    )
+    assert config.connect_timeout == 5.0
+    assert config.read_timeout == 60.0
+    assert config.max_retries == 5
+    assert config.extra_headers == {"X-Custom": "value"}
+
+
+def test_http_transport_config_validation():
+    """Test HttpTransportConfig validation."""
+    with pytest.raises(ValueError, match="connect_timeout must be positive"):
+        HttpTransportConfig(connect_timeout=0)
+
+    with pytest.raises(ValueError, match="read_timeout must be positive"):
+        HttpTransportConfig(read_timeout=-1)
+
+    with pytest.raises(ValueError, match="max_retries cannot be negative"):
+        HttpTransportConfig(max_retries=-1)
+
+
+def test_http_transport_config_from_dict():
+    """Test HttpTransportConfig.from_dict."""
+    config = HttpTransportConfig.from_dict(
+        {
+            "connect_timeout": 15.0,
+            "read_timeout": 45.0,
+            "max_retries": 10,
+            "headers": {"Authorization": "Bearer token"},
+        }
+    )
+    assert config.connect_timeout == 15.0
+    assert config.read_timeout == 45.0
+    assert config.max_retries == 10
+    assert config.extra_headers == {"Authorization": "Bearer token"}
+
+
+def test_http_transport_config_from_dict_none():
+    """Test HttpTransportConfig.from_dict with None returns defaults."""
+    config = HttpTransportConfig.from_dict(None)
+    assert config.connect_timeout == 10.0
+    assert config.max_retries == 3

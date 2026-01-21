@@ -7,7 +7,10 @@ allowing the persistence mechanism to change without affecting business code.
 
 from abc import ABC, abstractmethod
 import threading
-from typing import Any
+from typing import Any, TYPE_CHECKING
+
+if TYPE_CHECKING:
+    from ..infrastructure.lock_hierarchy import TrackedLock
 
 # Type alias for provider-like objects (Provider aggregate)
 ProviderLike = Any
@@ -128,7 +131,20 @@ class InMemoryProviderRepository(IProviderRepository):
     def __init__(self):
         """Initialize empty in-memory repository."""
         self._providers: dict[str, ProviderLike] = {}
-        self._lock = threading.RLock()
+        # Lock hierarchy level: REPOSITORY (31)
+        # Safe to acquire after: PROVIDER, PROVIDER_GROUP, EVENT_BUS
+        # Safe to acquire before: SAGA_MANAGER, STDIO_CLIENT
+        self._lock = self._create_lock()
+
+    @staticmethod
+    def _create_lock() -> "TrackedLock | threading.RLock":
+        """Create lock with hierarchy tracking."""
+        try:
+            from ..infrastructure.lock_hierarchy import LockLevel, TrackedLock
+
+            return TrackedLock(LockLevel.REPOSITORY, "InMemoryProviderRepository")
+        except ImportError:
+            return threading.RLock()
 
     def add(self, provider_id: str, provider: ProviderLike) -> None:
         """Add or update a provider in the repository.

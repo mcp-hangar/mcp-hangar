@@ -2,9 +2,12 @@
 
 import threading
 import time
-from typing import Any
+from typing import Any, TYPE_CHECKING
 
 from ...logging_config import get_logger
+
+if TYPE_CHECKING:
+    from ...infrastructure.lock_hierarchy import TrackedLock
 from ..contracts.metrics_publisher import IMetricsPublisher, NullMetricsPublisher
 from ..events import (
     HealthCheckFailed,
@@ -85,6 +88,10 @@ class Provider(AggregateRoot):
         description: str | None = None,  # Description/preprompt for AI models
         # Pre-defined tools (allows visibility before provider starts)
         tools: list[dict[str, Any]] | None = None,
+        # HTTP transport options (for remote mode)
+        auth: dict[str, Any] | None = None,  # Authentication config
+        tls: dict[str, Any] | None = None,  # TLS config
+        http: dict[str, Any] | None = None,  # HTTP transport config
         # Dependencies
         metrics_publisher: IMetricsPublisher | None = None,
     ):
@@ -124,6 +131,11 @@ class Provider(AggregateRoot):
         self._read_only = read_only
         self._user = user
 
+        # HTTP transport configuration (for remote mode)
+        self._auth_config = auth
+        self._tls_config = tls
+        self._http_config = http
+
         # Dependencies (Dependency Inversion Principle)
         self._metrics_publisher = metrics_publisher or NullMetricsPublisher()
 
@@ -131,7 +143,7 @@ class Provider(AggregateRoot):
         self._state = ProviderState.COLD
         self._health = HealthTracker(max_consecutive_failures=max_consecutive_failures)
         self._tools = ToolCatalog()
-        self._client: Any | None = None  # StdioClient
+        self._client: Any | None = None  # StdioClient or HttpClient
         self._meta: dict[str, Any] = {}
         self._last_used: float = 0.0
 
@@ -142,7 +154,26 @@ class Provider(AggregateRoot):
             self._tools_predefined = True
 
         # Thread safety
-        self._lock = threading.RLock()
+        # Lock hierarchy level: PROVIDER (10)
+        # Safe to acquire after: (none - this is top level for domain)
+        # Safe to acquire before: EVENT_BUS, EVENT_STORE, STDIO_CLIENT
+        # I/O rule: Copy client reference under lock, do I/O outside lock
+        self._lock = self._create_lock(provider_id)
+
+    @staticmethod
+    def _create_lock(provider_id: str) -> "TrackedLock | threading.RLock":
+        """Create lock with hierarchy tracking.
+
+        Uses runtime import to avoid circular dependency between
+        domain and infrastructure layers.
+        """
+        try:
+            from ...infrastructure.lock_hierarchy import LockLevel, TrackedLock
+
+            return TrackedLock(LockLevel.PROVIDER, f"Provider:{provider_id}")
+        except ImportError:
+            # Fallback for testing or isolated domain usage
+            return threading.RLock()
 
     # --- Properties ---
 
@@ -234,7 +265,7 @@ class Provider(AggregateRoot):
             return dict(self._meta)
 
     @property
-    def lock(self) -> threading.RLock:
+    def lock(self) -> "TrackedLock | threading.RLock":
         """Get the internal lock (for backward compatibility)."""
         return self._lock
 
@@ -403,6 +434,14 @@ class Provider(AggregateRoot):
                 "user": self._user,
             }
 
+        if self._mode == ProviderMode.REMOTE:
+            return {
+                "endpoint": self._endpoint,
+                "auth_config": self._auth_config,
+                "tls_config": self._tls_config,
+                "http_config": self._http_config,
+            }
+
         raise ValueError(f"unsupported_mode: {self._mode.value}")
 
     def _get_container_image(self) -> str:
@@ -553,6 +592,9 @@ class Provider(AggregateRoot):
 
         Thread-safe. Ensures provider is ready before invocation.
 
+        Note: This method follows the "copy reference under lock, I/O outside lock"
+        pattern to avoid blocking other operations during tool invocation.
+
         Args:
             tool_name: Name of the tool to invoke
             arguments: Tool arguments
@@ -568,6 +610,7 @@ class Provider(AggregateRoot):
         """
         correlation_id = str(CorrelationId())
 
+        # Phase 1: Validation and state update under lock
         with self._lock:
             # Ensure ready
             self.ensure_ready()
@@ -582,6 +625,10 @@ class Provider(AggregateRoot):
 
             self._health._total_invocations += 1
 
+            # Copy client reference - safe because client is stable once READY
+            # Any state transition that invalidates client must acquire this lock first
+            client = self._client
+
             # Record start event
             self._record_event(
                 ToolInvocationRequested(
@@ -592,58 +639,23 @@ class Provider(AggregateRoot):
                 )
             )
 
-            start_time = time.time()
+        # Phase 2: I/O outside lock (allows concurrent reads on provider state)
+        start_time = time.time()
+        response = None
+        invocation_error = None
 
-            try:
-                response = self._client.call(
-                    "tools/call",
-                    {"name": tool_name, "arguments": arguments},
-                    timeout=timeout,
-                )
+        try:
+            response = client.call(
+                "tools/call",
+                {"name": tool_name, "arguments": arguments},
+                timeout=timeout,
+            )
+        except Exception as e:
+            invocation_error = e
 
-                if "error" in response:
-                    error_msg = response["error"].get("message", "unknown")
-                    self._health.record_invocation_failure()
-
-                    self._record_event(
-                        ToolInvocationFailed(
-                            provider_id=self.provider_id,
-                            tool_name=tool_name,
-                            correlation_id=correlation_id,
-                            error_message=error_msg,
-                            error_type=str(response["error"].get("code", "unknown")),
-                        )
-                    )
-
-                    raise ToolInvocationError(
-                        self.provider_id,
-                        f"tool_error: {error_msg}",
-                        {"tool_name": tool_name, "correlation_id": correlation_id},
-                    )
-
-                # Success
-                duration_ms = (time.time() - start_time) * 1000
-                self._health.record_success()
-                self._last_used = time.time()
-
-                result = response.get("result", {})
-                self._record_event(
-                    ToolInvocationCompleted(
-                        provider_id=self.provider_id,
-                        tool_name=tool_name,
-                        correlation_id=correlation_id,
-                        duration_ms=duration_ms,
-                        result_size_bytes=len(str(result)),
-                    )
-                )
-
-                logger.debug(f"tool_invoked: {correlation_id}, provider={self.provider_id}, tool={tool_name}")
-
-                return result
-
-            except ToolInvocationError:
-                raise
-            except Exception as e:
+        # Phase 3: Update state based on result (under lock)
+        with self._lock:
+            if invocation_error is not None:
                 self._health.record_failure()
 
                 self._record_event(
@@ -651,21 +663,61 @@ class Provider(AggregateRoot):
                         provider_id=self.provider_id,
                         tool_name=tool_name,
                         correlation_id=correlation_id,
-                        error_message=str(e),
-                        error_type=type(e).__name__,
+                        error_message=str(invocation_error),
+                        error_type=type(invocation_error).__name__,
                     )
                 )
 
                 logger.error(
                     f"tool_invocation_failed: {correlation_id}, "
-                    f"provider={self.provider_id}, tool={tool_name}, error={e}"
+                    f"provider={self.provider_id}, tool={tool_name}, error={invocation_error}"
                 )
 
                 raise ToolInvocationError(
                     self.provider_id,
-                    str(e),
+                    str(invocation_error),
                     {"tool_name": tool_name, "correlation_id": correlation_id},
-                ) from e
+                ) from invocation_error
+
+            if "error" in response:
+                error_msg = response["error"].get("message", "unknown")
+                self._health.record_invocation_failure()
+
+                self._record_event(
+                    ToolInvocationFailed(
+                        provider_id=self.provider_id,
+                        tool_name=tool_name,
+                        correlation_id=correlation_id,
+                        error_message=error_msg,
+                        error_type=str(response["error"].get("code", "unknown")),
+                    )
+                )
+
+                raise ToolInvocationError(
+                    self.provider_id,
+                    f"tool_error: {error_msg}",
+                    {"tool_name": tool_name, "correlation_id": correlation_id},
+                )
+
+            # Success
+            duration_ms = (time.time() - start_time) * 1000
+            self._health.record_success()
+            self._last_used = time.time()
+
+            result = response.get("result", {})
+            self._record_event(
+                ToolInvocationCompleted(
+                    provider_id=self.provider_id,
+                    tool_name=tool_name,
+                    correlation_id=correlation_id,
+                    duration_ms=duration_ms,
+                    result_size_bytes=len(str(result)),
+                )
+            )
+
+            logger.debug(f"tool_invoked: {correlation_id}, provider={self.provider_id}, tool={tool_name}")
+
+            return result
 
     def _refresh_tools(self) -> None:
         """Refresh tool catalog from provider (must hold lock)."""
@@ -685,7 +737,10 @@ class Provider(AggregateRoot):
         Perform active health check.
 
         Thread-safe. Returns True if healthy.
+
+        Note: Follows "copy reference under lock, I/O outside lock" pattern.
         """
+        # Phase 1: Check state and get client reference under lock
         with self._lock:
             if self._state != ProviderState.READY:
                 return False
@@ -695,32 +750,39 @@ class Provider(AggregateRoot):
                 self._increment_version()
                 return False
 
-            try:
-                start_time = time.time()
-                response = self._client.call("tools/list", {}, timeout=5.0)
+            # Copy client reference for I/O outside lock
+            client = self._client
 
-                if "error" in response:
-                    raise Exception(response["error"].get("message", "unknown"))
+        # Phase 2: Perform health check I/O outside lock
+        start_time = time.time()
+        check_error = None
+        response = None
 
-                duration_ms = (time.time() - start_time) * 1000
-                self._health.record_success()
+        try:
+            response = client.call("tools/list", {}, timeout=5.0)
+            if "error" in response:
+                check_error = Exception(response["error"].get("message", "unknown"))
+        except Exception as e:
+            check_error = e
 
-                self._record_event(HealthCheckPassed(provider_id=self.provider_id, duration_ms=duration_ms))
+        # Phase 3: Update state based on result under lock
+        with self._lock:
+            # Re-check state in case it changed during I/O
+            if self._state != ProviderState.READY:
+                return False
 
-                return True
-
-            except Exception as e:
+            if check_error is not None:
                 self._health.record_failure()
 
                 self._record_event(
                     HealthCheckFailed(
                         provider_id=self.provider_id,
                         consecutive_failures=self._health.consecutive_failures,
-                        error_message=str(e),
+                        error_message=str(check_error),
                     )
                 )
 
-                logger.warning(f"health_check_failed: {self.provider_id}, error={e}")
+                logger.warning(f"health_check_failed: {self.provider_id}, error={check_error}")
 
                 if self._health.should_degrade():
                     self._state = ProviderState.DEGRADED
@@ -738,6 +800,14 @@ class Provider(AggregateRoot):
                     )
 
                 return False
+
+            # Success
+            duration_ms = (time.time() - start_time) * 1000
+            self._health.record_success()
+
+            self._record_event(HealthCheckPassed(provider_id=self.provider_id, duration_ms=duration_ms))
+
+            return True
 
     def maybe_shutdown_idle(self) -> bool:
         """

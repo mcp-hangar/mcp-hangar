@@ -10,6 +10,7 @@ shared with ApplicationContext.
 
 import os
 from pathlib import Path
+import re
 from typing import Any
 
 import yaml
@@ -23,6 +24,53 @@ from ..logging_config import get_logger
 from .state import get_group_rebalance_saga, GROUPS, PROVIDERS
 
 logger = get_logger(__name__)
+
+
+# Environment variable pattern: ${VAR_NAME} or ${VAR_NAME:-default}
+_ENV_VAR_PATTERN = re.compile(r"\$\{([A-Za-z_][A-Za-z0-9_]*)(?::-([^}]*))?\}")
+
+
+def _interpolate_env_vars(config: dict[str, Any]) -> dict[str, Any]:
+    """
+    Recursively interpolate environment variables in configuration values.
+
+    Supports patterns:
+    - ${VAR_NAME} - Replace with environment variable value
+    - ${VAR_NAME:-default} - Replace with value or default if not set
+
+    Args:
+        config: Configuration dictionary with potential env var references.
+
+    Returns:
+        New dictionary with environment variables interpolated.
+    """
+
+    def interpolate_value(value: Any) -> Any:
+        if isinstance(value, str):
+
+            def replace_env_var(match: re.Match) -> str:
+                var_name = match.group(1)
+                default = match.group(2)
+                env_value = os.environ.get(var_name)
+                if env_value is not None:
+                    return env_value
+                if default is not None:
+                    return default
+                logger.warning(
+                    "env_var_not_found",
+                    var_name=var_name,
+                    using_empty=True,
+                )
+                return ""
+
+            return _ENV_VAR_PATTERN.sub(replace_env_var, value)
+        elif isinstance(value, dict):
+            return {k: interpolate_value(v) for k, v in value.items()}
+        elif isinstance(value, list):
+            return [interpolate_value(item) for item in value]
+        return value
+
+    return interpolate_value(config)
 
 
 def load_config_from_file(config_path: str) -> dict[str, Any]:
@@ -140,6 +188,12 @@ def _load_provider_config(provider_id: str, spec_dict: dict[str, Any]) -> Provid
                 }
             )
 
+    # Process auth configuration for remote providers
+    auth_config = spec_dict.get("auth")
+    if auth_config:
+        # Interpolate environment variables in secrets
+        auth_config = _interpolate_env_vars(auth_config)
+
     provider = Provider(
         provider_id=provider_id,
         mode=spec_dict.get("mode", "subprocess"),
@@ -158,6 +212,10 @@ def _load_provider_config(provider_id: str, spec_dict: dict[str, Any]) -> Provid
         user=user,
         description=spec_dict.get("description"),
         tools=tools,
+        # HTTP transport configuration
+        auth=auth_config,
+        tls=spec_dict.get("tls"),
+        http=spec_dict.get("http"),
     )
     PROVIDERS[provider_id] = provider
     logger.debug(

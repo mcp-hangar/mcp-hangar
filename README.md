@@ -150,6 +150,10 @@ bootstrap/      Runtime initialization and dependency injection
 
 **Install:**
 ```bash
+# Quick install (recommended)
+curl -sSL https://get.mcp-hangar.io | bash
+
+# Or via pip
 pip install mcp-hangar
 ```
 
@@ -276,18 +280,18 @@ observability:
 
 ## Documentation
 
-📖 **[Full Documentation](https://mapyr.github.io/mcp-hangar/)**
+📖 **[Full Documentation](https://mcp-hangar.io)**
 
-- [Installation](https://mapyr.github.io/mcp-hangar/getting-started/installation/)
-- [Quick Start](https://mapyr.github.io/mcp-hangar/getting-started/quickstart/)
-- [Container Guide](https://mapyr.github.io/mcp-hangar/guides/CONTAINERS/)
-- [Auto-Discovery](https://mapyr.github.io/mcp-hangar/guides/DISCOVERY/)
-- [Observability](https://mapyr.github.io/mcp-hangar/guides/OBSERVABILITY/)
-- [Architecture](https://mapyr.github.io/mcp-hangar/architecture/OVERVIEW/)
+- [Installation](https://mcp-hangar.io/getting-started/installation/)
+- [Quick Start](https://mcp-hangar.io/getting-started/quickstart/)
+- [Container Guide](https://mcp-hangar.io/guides/CONTAINERS/)
+- [Auto-Discovery](https://mcp-hangar.io/guides/DISCOVERY/)
+- [Observability](https://mcp-hangar.io/guides/OBSERVABILITY/)
+- [Architecture](https://mcp-hangar.io/architecture/OVERVIEW/)
 
 ## Contributing
 
-See [Contributing Guide](https://mapyr.github.io/mcp-hangar/development/CONTRIBUTING/) for development setup, testing requirements, and code style.
+See [Contributing Guide](https://mcp-hangar.io/development/CONTRIBUTING/) for development setup, testing requirements, and code style.
 
 ```bash
 git clone https://github.com/mapyr/mcp-hangar.git

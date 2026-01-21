@@ -9,6 +9,7 @@ import threading
 
 from mcp_hangar.domain.contracts.event_store import IEventStore, NullEventStore
 from mcp_hangar.domain.events import DomainEvent
+from mcp_hangar.infrastructure.lock_hierarchy import LockLevel, TrackedLock
 from mcp_hangar.logging_config import get_logger
 
 logger = get_logger(__name__)
@@ -39,7 +40,11 @@ class EventBus:
                 If None, events are not persisted.
         """
         self._handlers: dict[type[DomainEvent], list[Callable[[DomainEvent], None]]] = {}
-        self._lock = threading.Lock()
+        # Lock hierarchy level: EVENT_BUS (20)
+        # Safe to acquire after: PROVIDER, PROVIDER_GROUP
+        # Safe to acquire before: EVENT_STORE, REPOSITORY, STDIO_CLIENT
+        # Note: Handlers are called OUTSIDE this lock to avoid blocking
+        self._lock = TrackedLock(LockLevel.EVENT_BUS, "EventBus", reentrant=False)
         self._error_handlers: list[Callable[[Exception, DomainEvent], None]] = []
         self._event_store = event_store or NullEventStore()
 

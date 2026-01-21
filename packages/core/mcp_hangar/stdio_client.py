@@ -6,11 +6,14 @@ from queue import Empty, Queue
 import subprocess
 import threading
 import time
-from typing import Any
+from typing import Any, TYPE_CHECKING
 import uuid
 
 from .domain.exceptions import ClientError
 from .logging_config import get_logger
+
+if TYPE_CHECKING:
+    from .infrastructure.lock_hierarchy import TrackedLock
 
 logger = get_logger(__name__)
 
@@ -39,11 +42,25 @@ class StdioClient:
         """
         self.process = popen
         self.pending: dict[str, PendingRequest] = {}
-        self.pending_lock = threading.Lock()
+        # Lock hierarchy level: STDIO_CLIENT (50)
+        # Safe to acquire after: PROVIDER, EVENT_BUS, EVENT_STORE
+        # Safe to acquire before: (none - this is lowest level)
+        # This lock protects the pending requests map only, not I/O
+        self.pending_lock = self._create_lock(popen.pid)
         self.reader_thread = threading.Thread(target=self._reader_loop, daemon=True)
         self.closed = False
         self._last_stderr: str | None = None
         self.reader_thread.start()
+
+    @staticmethod
+    def _create_lock(pid: int) -> "TrackedLock | threading.Lock":
+        """Create lock with hierarchy tracking."""
+        try:
+            from .infrastructure.lock_hierarchy import LockLevel, TrackedLock
+
+            return TrackedLock(LockLevel.STDIO_CLIENT, f"StdioClient:{pid}", reentrant=False)
+        except ImportError:
+            return threading.Lock()
 
     def _reader_loop(self):
         """
