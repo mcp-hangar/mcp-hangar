@@ -470,6 +470,8 @@ class Provider(AggregateRoot):
     def _perform_mcp_handshake(self, client: Any) -> None:
         """Perform MCP initialize and tools/list handshake."""
         # Initialize
+        # Note: timeout is handled by the client's configuration
+        # (StdioClient: 15s default, HttpClient: configured read_timeout)
         init_resp = client.call(
             "initialize",
             {
@@ -477,7 +479,6 @@ class Provider(AggregateRoot):
                 "capabilities": {},
                 "clientInfo": {"name": "mcp-registry", "version": "1.0.0"},
             },
-            timeout=10.0,
         )
 
         if "error" in init_resp:
@@ -486,7 +487,7 @@ class Provider(AggregateRoot):
             raise ProviderStartError(self.provider_id, f"init_failed: {error_msg}")
 
         # Discover tools
-        tools_resp = client.call("tools/list", {}, timeout=10.0)
+        tools_resp = client.call("tools/list", {})
         if "error" in tools_resp:
             error_msg = tools_resp["error"].get("message", "unknown")
             raise ProviderStartError(self.provider_id, f"tools_list_failed: {error_msg}")

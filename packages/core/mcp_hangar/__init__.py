@@ -25,6 +25,14 @@ For advanced usage, see:
 - Value objects: mcp_hangar.domain.value_objects
 """
 
+from importlib.metadata import PackageNotFoundError, version
+
+try:
+    __version__ = version("mcp-hangar")
+except PackageNotFoundError:
+    # Package not installed (e.g., running from source)
+    __version__ = "0.0.0.dev"
+
 # Domain layer - for advanced usage
 from .domain.exceptions import (
     CannotStartProviderError,

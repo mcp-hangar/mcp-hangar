@@ -263,7 +263,7 @@ class HttpClient:
         self,
         method: str,
         params: dict[str, Any],
-        timeout: float = 30.0,
+        timeout: float | None = None,
     ) -> dict[str, Any]:
         """
         Synchronous RPC call over HTTP.
@@ -271,7 +271,7 @@ class HttpClient:
         Args:
             method: JSON-RPC method name
             params: Method parameters
-            timeout: Request timeout in seconds
+            timeout: Request timeout in seconds. If None, uses configured read_timeout.
 
         Returns:
             Response dictionary with either 'result' or 'error' key
@@ -280,6 +280,9 @@ class HttpClient:
             ClientError: If the client is closed or request fails
             TimeoutError: If the request times out
         """
+        # Use configured timeout if not explicitly specified
+        if timeout is None:
+            timeout = self._http_config.read_timeout
         if self._closed:
             raise ClientError("client_closed")
 
