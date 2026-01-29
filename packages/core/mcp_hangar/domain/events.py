@@ -603,3 +603,55 @@ class CostReportGenerated(DomainEvent):
 
     def __post_init__(self):
         super().__init__()
+
+
+# =============================================================================
+# Batch Invocation Events
+# =============================================================================
+
+
+@dataclass
+class BatchInvocationRequested(DomainEvent):
+    """Published when a batch invocation is requested."""
+
+    batch_id: str
+    call_count: int
+    providers: list[str]
+    max_concurrency: int
+    timeout: float
+    fail_fast: bool
+
+    def __post_init__(self):
+        super().__init__()
+
+
+@dataclass
+class BatchInvocationCompleted(DomainEvent):
+    """Published when a batch invocation completes."""
+
+    batch_id: str
+    total: int
+    succeeded: int
+    failed: int
+    elapsed_ms: float
+    cancelled: int = 0
+
+    def __post_init__(self):
+        super().__init__()
+
+
+@dataclass
+class BatchCallCompleted(DomainEvent):
+    """Published when a single call within a batch completes."""
+
+    batch_id: str
+    call_id: str
+    call_index: int
+    provider_id: str
+    tool_name: str
+    success: bool
+    elapsed_ms: float
+    error_type: str | None = None
+
+    def __post_init__(self):
+        super().__init__()

@@ -52,6 +52,7 @@ from .state import (
     set_group_rebalance_saga,
 )
 from .tools import (
+    register_batch_tools,
     register_discovery_tools,
     register_group_tools,
     register_hangar_tools,
@@ -454,6 +455,7 @@ def _register_all_tools(mcp_server: FastMCP) -> None:
     register_health_tools(mcp_server)
     register_discovery_tools(mcp_server)
     register_group_tools(mcp_server)
+    register_batch_tools(mcp_server)
     logger.info("mcp_tools_registered")
 
 

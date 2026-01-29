@@ -7,6 +7,45 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.5.0] - 2026-01-29
+
+### Added
+
+- **Batch Invocations**: New `hangar_batch()` tool for parallel tool execution
+  - Execute multiple tool invocations in a single API call
+  - Configurable concurrency (1-20 parallel workers)
+  - Single-flight pattern for cold starts (one provider starts once, not N times)
+  - Partial success handling (continue on error by default)
+  - Fail-fast mode (abort on first error)
+  - Per-call and global timeout support
+  - Circuit breaker integration (CB OPEN = instant error)
+  - Response truncation for oversized payloads (10MB per call, 50MB total)
+  - Eager validation before execution
+  - Full observability (batch_id, call_id, Prometheus metrics)
+
+- **SingleFlight Pattern**: New `SingleFlight` class in `infrastructure/single_flight.py`
+  - Ensures a function executes only once for a given key
+  - Thread-safe implementation with result caching option
+  - Used for cold start deduplication in batch operations
+
+- **Domain Events**: New batch-related domain events
+  - `BatchInvocationRequested` - When batch starts
+  - `BatchInvocationCompleted` - When batch finishes
+  - `BatchCallCompleted` - Per-call completion
+
+- **Prometheus Metrics**: New batch metrics
+  - `mcp_hangar_batch_calls_total{result}` - Total batch invocations
+  - `mcp_hangar_batch_size_histogram` - Calls per batch distribution
+  - `mcp_hangar_batch_duration_seconds` - Batch execution time
+  - `mcp_hangar_batch_concurrency_gauge` - Current parallel executions
+  - `mcp_hangar_batch_truncations_total{reason}` - Response truncations
+  - `mcp_hangar_batch_circuit_breaker_rejections_total{provider}` - CB rejections
+  - `mcp_hangar_batch_cancellations_total{reason}` - Batch cancellations
+
+### Documentation
+
+- New guide: `docs/guides/BATCH_INVOCATIONS.md`
+
 ## [0.4.0] - 2026-01-29
 
 ### Changed

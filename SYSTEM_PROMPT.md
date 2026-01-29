@@ -39,10 +39,42 @@ Tools come in two flavors:
 | `hangar_invoke` | Simple invocation, basic errors |
 | `hangar_invoke_ex` | **Recommended** - auto-retry, rich errors, progress in response |
 | `hangar_invoke_stream` | Real-time progress notifications during execution |
+| `hangar_batch` | **Parallel execution** - multiple calls at once |
 
 ### Basic Invoke
 ```
 hangar_invoke(provider="math", tool="add", arguments={"a": 1, "b": 2})
+```
+
+### Batch Invoke (Parallel Execution)
+```
+# Execute multiple calls in parallel - much faster than sequential
+hangar_batch(calls=[
+    {"provider": "math", "tool": "add", "arguments": {"a": 1, "b": 2}},
+    {"provider": "math", "tool": "multiply", "arguments": {"a": 3, "b": 4}},
+    {"provider": "fetch", "tool": "get", "arguments": {"url": "https://api.github.com"}},
+])
+
+# Response:
+# {
+#   "batch_id": "...",
+#   "success": true,
+#   "total": 3,
+#   "succeeded": 3,
+#   "failed": 0,
+#   "elapsed_ms": 234.5,
+#   "results": [
+#     {"index": 0, "call_id": "...", "success": true, "result": {"sum": 3}},
+#     {"index": 1, "call_id": "...", "success": true, "result": {"product": 12}},
+#     {"index": 2, "call_id": "...", "success": true, "result": {...}}
+#   ]
+# }
+
+# With fail-fast (abort on first error)
+hangar_batch(calls=[...], fail_fast=True)
+
+# With custom concurrency and timeout
+hangar_batch(calls=[...], max_concurrency=5, timeout=30.0)
 ```
 
 ### Extended Invoke (Recommended)

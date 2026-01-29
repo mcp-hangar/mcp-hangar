@@ -776,6 +776,56 @@ HTTP_SSE_EVENTS_TOTAL = Counter(
     labels=["provider", "event_type"],  # event_type: message, notification, error
 )
 
+# -----------------------------------------------------------------------------
+# Batch Invocation Metrics
+# -----------------------------------------------------------------------------
+
+BATCH_CALLS_TOTAL = Counter(
+    name="mcp_hangar_batch_calls",
+    description="Total number of batch invocations",
+    labels=["result"],  # result: success, partial, failure, validation_error
+)
+
+BATCH_VALIDATION_FAILURES_TOTAL = Counter(
+    name="mcp_hangar_batch_validation_failures",
+    description="Total number of batch validation failures",
+)
+
+BATCH_SIZE_HISTOGRAM = Histogram(
+    name="mcp_hangar_batch_size",
+    description="Distribution of batch sizes (number of calls per batch)",
+    buckets=(1, 2, 5, 10, 20, 50, 100),
+)
+
+BATCH_DURATION_SECONDS = Histogram(
+    name="mcp_hangar_batch_duration_seconds",
+    description="Duration of batch invocations in seconds",
+    buckets=(0.1, 0.25, 0.5, 1.0, 2.5, 5.0, 10.0, 30.0, 60.0, 120.0, 300.0),
+)
+
+BATCH_CONCURRENCY_GAUGE = Gauge(
+    name="mcp_hangar_batch_concurrency",
+    description="Current number of parallel batch executions",
+)
+
+BATCH_TRUNCATIONS_TOTAL = Counter(
+    name="mcp_hangar_batch_truncations",
+    description="Total number of response truncations in batches",
+    labels=["reason"],  # reason: per_call, total_size
+)
+
+BATCH_CIRCUIT_BREAKER_REJECTIONS_TOTAL = Counter(
+    name="mcp_hangar_batch_circuit_breaker_rejections",
+    description="Total calls rejected due to circuit breaker in batches",
+    labels=["provider"],
+)
+
+BATCH_CANCELLATIONS_TOTAL = Counter(
+    name="mcp_hangar_batch_cancellations",
+    description="Total number of batch cancellations",
+    labels=["reason"],  # reason: timeout, fail_fast
+)
+
 
 # =============================================================================
 # Register All Metrics
@@ -833,6 +883,15 @@ def _register_all_metrics():
         HTTP_CONNECTION_POOL_SIZE,
         HTTP_SSE_STREAMS_ACTIVE,
         HTTP_SSE_EVENTS_TOTAL,
+        # Batch invocation metrics
+        BATCH_CALLS_TOTAL,
+        BATCH_VALIDATION_FAILURES_TOTAL,
+        BATCH_SIZE_HISTOGRAM,
+        BATCH_DURATION_SECONDS,
+        BATCH_CONCURRENCY_GAUGE,
+        BATCH_TRUNCATIONS_TOTAL,
+        BATCH_CIRCUIT_BREAKER_REJECTIONS_TOTAL,
+        BATCH_CANCELLATIONS_TOTAL,
     ]
     for metric in metrics:
         REGISTRY.register(metric)
