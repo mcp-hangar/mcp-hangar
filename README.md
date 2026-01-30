@@ -148,38 +148,33 @@ bootstrap/      Runtime initialization and dependency injection
 
 ## Quick Start
 
-**Install:**
-```bash
-# Quick install (recommended)
-curl -sSL https://get.mcp-hangar.io | bash
+Get started in under 5 minutes:
 
-# Or via pip
+```bash
 pip install mcp-hangar
+mcp-hangar init
 ```
 
-**Configure (`config.yaml`):**
-```yaml
-providers:
-  math:
-    mode: subprocess
-    command: [python, -m, my_math_server]
-    idle_ttl_s: 300
+That's it! The wizard will:
+- Detect your Claude Desktop installation
+- Let you pick which MCP providers to enable
+- Configure everything automatically
+- Update Claude Desktop to use MCP Hangar
 
-  sqlite:
-    mode: container
-    image: ghcr.io/modelcontextprotocol/server-sqlite:latest
-    volumes:
-      - "/data/sqlite:/data:rw"
-```
+After restarting Claude Desktop, you're ready to go.
 
-**Run:**
+**Adding more providers:**
 ```bash
-# Stdio mode (Claude Desktop, Cursor, etc.)
-mcp-hangar --config config.yaml
-
-# HTTP mode (LM Studio, web clients)
-mcp-hangar --config config.yaml --http
+mcp-hangar add github    # Add GitHub integration
+mcp-hangar add sqlite    # Add database access
 ```
+
+**Check provider health:**
+```bash
+mcp-hangar status
+```
+
+For manual configuration or advanced setups, see [Configuration Guide](https://docs.mcp-hangar.io/configuration).
 
 ## Architecture Overview
 
@@ -242,7 +237,8 @@ mcp-hangar --config config.yaml --http
 | `max_consecutive_failures` | Failures before transition to DEGRADED | `3` |
 | `tools` | Predefined tool schemas (visible before start) | — |
 | `volumes` | Container volume mounts | — |
-| `network` | Container network mode | `none` |
+| `network` | Container network mode: `none`, `bridge`, `host` | `none` |
+| `network_mode` | Alias for `network` (Docker Compose compatibility) | `none` |
 | `read_only` | Container read-only filesystem | `true` |
 
 ## Observability Setup

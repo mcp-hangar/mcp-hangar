@@ -124,7 +124,7 @@ class PersistentAuditStore(AuditStore):
         # Handle timestamp
         if isinstance(record.occurred_at, datetime):
             timestamp = record.occurred_at
-        elif isinstance(record.occurred_at, (int, float)):
+        elif isinstance(record.occurred_at, int | float):
             timestamp = datetime.fromtimestamp(record.occurred_at, tz=UTC)
         else:
             timestamp = datetime.now(UTC)

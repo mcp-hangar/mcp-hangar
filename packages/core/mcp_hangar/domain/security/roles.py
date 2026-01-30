@@ -22,6 +22,10 @@ PERMISSION_PROVIDER_DELETE = Permission("provider", "delete")
 PERMISSION_PROVIDER_LIST = Permission("provider", "list")
 PERMISSION_PROVIDER_START = Permission("provider", "start")
 PERMISSION_PROVIDER_STOP = Permission("provider", "stop")
+PERMISSION_PROVIDER_LOAD = Permission("provider", "load")
+PERMISSION_PROVIDER_LOAD_VERIFIED = Permission("provider", "load", "verified")
+PERMISSION_PROVIDER_LOAD_ANY = Permission("provider", "load", "any")
+PERMISSION_PROVIDER_UNLOAD = Permission("provider", "unload")
 
 # Tool invocation permissions
 PERMISSION_TOOL_INVOKE = Permission("tool", "invoke")
@@ -62,6 +66,10 @@ PERMISSIONS: dict[str, Permission] = {
     "provider:list": PERMISSION_PROVIDER_LIST,
     "provider:start": PERMISSION_PROVIDER_START,
     "provider:stop": PERMISSION_PROVIDER_STOP,
+    "provider:load": PERMISSION_PROVIDER_LOAD,
+    "provider:load:verified": PERMISSION_PROVIDER_LOAD_VERIFIED,
+    "provider:load:any": PERMISSION_PROVIDER_LOAD_ANY,
+    "provider:unload": PERMISSION_PROVIDER_UNLOAD,
     # Tool
     "tool:invoke": PERMISSION_TOOL_INVOKE,
     "tool:list": PERMISSION_TOOL_LIST,
@@ -109,6 +117,10 @@ ROLE_PROVIDER_ADMIN = Role(
             PERMISSION_PROVIDER_LIST,
             PERMISSION_PROVIDER_START,
             PERMISSION_PROVIDER_STOP,
+            PERMISSION_PROVIDER_LOAD,
+            PERMISSION_PROVIDER_LOAD_VERIFIED,
+            PERMISSION_PROVIDER_LOAD_ANY,
+            PERMISSION_PROVIDER_UNLOAD,
             PERMISSION_TOOL_INVOKE,
             PERMISSION_TOOL_LIST,
             PERMISSION_METRICS_READ,
@@ -132,6 +144,9 @@ ROLE_DEVELOPER = Role(
             PERMISSION_PROVIDER_READ,
             PERMISSION_PROVIDER_LIST,
             PERMISSION_PROVIDER_START,  # Can start providers on-demand
+            PERMISSION_PROVIDER_LOAD,
+            PERMISSION_PROVIDER_LOAD_VERIFIED,  # Can load verified providers
+            PERMISSION_PROVIDER_UNLOAD,
             PERMISSION_TOOL_INVOKE,
             PERMISSION_TOOL_LIST,
             PERMISSION_GROUP_READ,

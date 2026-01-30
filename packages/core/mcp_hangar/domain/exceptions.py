@@ -661,3 +661,185 @@ class CatalogItemNotDeployableError(MCPError):
             details={"item_id": item_id, "reason": reason},
         )
         self.item_id = item_id
+
+
+# --- Registry Exceptions ---
+
+
+class RegistryError(MCPError):
+    """Base exception for registry-related errors."""
+
+    def __init__(
+        self,
+        message: str,
+        details: dict[str, Any] | None = None,
+    ):
+        super().__init__(
+            message=message,
+            operation="registry",
+            details=details or {},
+        )
+
+
+class RegistryConnectionError(RegistryError):
+    """Failed to connect to the registry."""
+
+    def __init__(self, url: str, reason: str):
+        super().__init__(
+            message=f"Failed to connect to registry: {reason}",
+            details={"url": url, "reason": reason},
+        )
+        self.url = url
+        self.reason = reason
+
+
+class RegistryServerNotFoundError(RegistryError):
+    """Server not found in the registry."""
+
+    def __init__(self, server_id: str):
+        super().__init__(
+            message=f"Server not found in registry: {server_id}",
+            details={"server_id": server_id},
+        )
+        self.server_id = server_id
+
+
+class RegistryAmbiguousSearchError(RegistryError):
+    """Multiple servers match the search query."""
+
+    def __init__(self, query: str, matches: list[str]):
+        super().__init__(
+            message=f"Ambiguous search '{query}': found {len(matches)} matches",
+            details={"query": query, "matches": matches},
+        )
+        self.query = query
+        self.matches = matches
+
+
+# --- Installation Exceptions ---
+
+
+class InstallationError(MCPError):
+    """Base exception for package installation errors."""
+
+    def __init__(
+        self,
+        message: str,
+        package: str = "",
+        details: dict[str, Any] | None = None,
+    ):
+        super().__init__(
+            message=message,
+            operation="installation",
+            details={"package": package, **(details or {})},
+        )
+        self.package = package
+
+
+class RuntimeNotAvailableError(InstallationError):
+    """Required runtime (npx, uvx, docker) is not available."""
+
+    def __init__(self, runtime: str, suggestion: str | None = None):
+        message = f"Runtime not available: {runtime}"
+        if suggestion:
+            message = f"{message}. {suggestion}"
+        super().__init__(
+            message=message,
+            details={"runtime": runtime, "suggestion": suggestion},
+        )
+        self.runtime = runtime
+        self.suggestion = suggestion
+
+
+class PackageInstallationError(InstallationError):
+    """Package installation failed."""
+
+    def __init__(
+        self,
+        package: str,
+        reason: str,
+        stderr: str | None = None,
+        exit_code: int | None = None,
+    ):
+        details: dict[str, Any] = {"reason": reason}
+        if stderr:
+            details["stderr"] = stderr[:2000] if len(stderr) > 2000 else stderr
+        if exit_code is not None:
+            details["exit_code"] = exit_code
+
+        super().__init__(
+            message=f"Failed to install package '{package}': {reason}",
+            package=package,
+            details=details,
+        )
+        self.reason = reason
+        self.stderr = stderr
+        self.exit_code = exit_code
+
+
+class PackageVerificationError(InstallationError):
+    """Package verification (SHA256) failed."""
+
+    def __init__(self, package: str, expected_hash: str, actual_hash: str):
+        super().__init__(
+            message="Package verification failed: hash mismatch",
+            package=package,
+            details={
+                "expected_hash": expected_hash,
+                "actual_hash": actual_hash,
+            },
+        )
+        self.expected_hash = expected_hash
+        self.actual_hash = actual_hash
+
+
+class MissingSecretsError(MCPError):
+    """Required secrets are not available."""
+
+    def __init__(self, provider_name: str, missing: list[str], instructions: str | None = None):
+        super().__init__(
+            message=f"Missing required secrets for '{provider_name}': {', '.join(missing)}",
+            operation="secrets",
+            details={
+                "provider_name": provider_name,
+                "missing": missing,
+                "instructions": instructions,
+            },
+        )
+        self.provider_name = provider_name
+        self.missing = missing
+        self.instructions = instructions
+
+
+class UnverifiedProviderError(MCPError):
+    """Attempted to load an unverified provider without explicit flag."""
+
+    def __init__(self, provider_name: str):
+        super().__init__(
+            message=f"Provider '{provider_name}' is not verified. Use force_unverified=True to load.",
+            operation="load",
+            details={"provider_name": provider_name},
+        )
+        self.provider_name = provider_name
+
+
+class ProviderAlreadyLoadedError(MCPError):
+    """Provider is already loaded."""
+
+    def __init__(self, provider_id: str):
+        super().__init__(
+            message=f"Provider '{provider_id}' is already loaded",
+            provider_id=provider_id,
+            operation="load",
+        )
+
+
+class ProviderNotHotLoadedError(MCPError):
+    """Cannot unload a provider that was not hot-loaded."""
+
+    def __init__(self, provider_id: str):
+        super().__init__(
+            message=f"Provider '{provider_id}' was not hot-loaded and cannot be unloaded",
+            provider_id=provider_id,
+            operation="unload",
+        )

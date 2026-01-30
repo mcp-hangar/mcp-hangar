@@ -803,6 +803,34 @@ class TestSecureProviderLauncher:
         assert "--cap-drop" in cmd
         assert "ALL" in cmd
 
+    @pytest.mark.parametrize(
+        "network_mode,expected_flag",
+        [
+            ("none", "none"),
+            ("bridge", "bridge"),
+            ("host", "host"),
+        ],
+    )
+    def test_container_launcher_network_modes(self, network_mode, expected_flag):
+        """Test ContainerLauncher correctly sets network modes."""
+        from unittest.mock import patch
+
+        from mcp_hangar.domain.services.provider_launcher import ContainerConfig, ContainerLauncher
+
+        with patch.object(ContainerLauncher, "_detect_runtime", return_value="docker"):
+            launcher = ContainerLauncher(runtime="docker")
+
+        config = ContainerConfig(
+            image="test:latest",
+            network=network_mode,
+        )
+
+        cmd = launcher._build_command(config)
+
+        assert "--network" in cmd
+        network_idx = cmd.index("--network")
+        assert cmd[network_idx + 1] == expected_flag
+
 
 class TestDangerousPatterns:
     """Test that dangerous patterns are properly detected."""

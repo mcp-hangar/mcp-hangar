@@ -1,13 +1,15 @@
-# Batch Invocations
+# Tool Invocations with hangar_call
 
-Execute multiple tool invocations in parallel with a single API call.
+Execute one or more tool invocations with a single unified API.
 
 ## Overview
 
-The `hangar_batch()` tool allows you to execute multiple tool invocations concurrently, significantly reducing latency when you need results from multiple tools or providers.
+The `hangar_call()` tool is the unified API for all tool invocations. Whether you need a single call or parallel batch execution, the format is consistent.
 
 **Key benefits:**
-- **Parallel execution** - Calls run concurrently instead of sequentially
+- **Unified API** - One function for single calls and batches
+- **Parallel execution** - Multiple calls run concurrently
+- **Automatic retry** - Built-in retry with exponential backoff
 - **Single-flight cold starts** - Multiple calls to the same COLD provider trigger only one startup
 - **Partial success handling** - Failed calls don't block successful ones
 - **Fail-fast mode** - Optionally abort on first error
@@ -15,32 +17,44 @@ The `hangar_batch()` tool allows you to execute multiple tool invocations concur
 
 ## Basic Usage
 
-```python
-# Sequential (slow) - 3 calls take sum of all durations
-result1 = hangar_invoke(provider="math", tool="add", arguments={"a": 1, "b": 2})
-result2 = hangar_invoke(provider="math", tool="multiply", arguments={"a": 3, "b": 4})
-result3 = hangar_invoke(provider="fetch", tool="get", arguments={"url": "https://api.example.com"})
-# Total time: t1 + t2 + t3 = ~3s
+### Single Invocation
 
-# Parallel (fast) - 3 calls take max of all durations
-results = hangar_batch(calls=[
+```python
+# Simple call
+hangar_call(calls=[
+    {"provider": "math", "tool": "add", "arguments": {"a": 1, "b": 2}}
+])
+
+# With retry for reliability
+hangar_call(
+    calls=[{"provider": "math", "tool": "add", "arguments": {"a": 1, "b": 2}}],
+    max_retries=3
+)
+```
+
+### Batch Invocation (Parallel)
+
+```python
+# Execute multiple calls in parallel - much faster than sequential
+hangar_call(calls=[
     {"provider": "math", "tool": "add", "arguments": {"a": 1, "b": 2}},
     {"provider": "math", "tool": "multiply", "arguments": {"a": 3, "b": 4}},
     {"provider": "fetch", "tool": "get", "arguments": {"url": "https://api.example.com"}},
 ])
-# Total time: max(t1, t2, t3) = ~1s
+# Total time: max(t1, t2, t3) instead of t1 + t2 + t3
 ```
 
 ## API Reference
 
-### hangar_batch
+### hangar_call
 
 ```python
-hangar_batch(
+hangar_call(
     calls: list[dict],           # List of invocations to execute
     max_concurrency: int = 10,   # Max parallel invocations (1-20)
     timeout: float = 60.0,       # Global timeout in seconds (1-300)
     fail_fast: bool = False,     # Abort on first error
+    max_retries: int = 1,        # Retry attempts per call (1-10)
 ) -> dict
 ```
 
@@ -52,6 +66,7 @@ hangar_batch(
 | `max_concurrency` | `int` | 10 | Maximum parallel workers (1-20) |
 | `timeout` | `float` | 60.0 | Global timeout for entire batch (1-300s) |
 | `fail_fast` | `bool` | False | If True, abort remaining calls on first error |
+| `max_retries` | `int` | 1 | Retry attempts per call (1-10, default 1 = no retry) |
 
 **Call specification:**
 
@@ -82,7 +97,12 @@ Each item in `calls` must be a dictionary with:
             "result": {"sum": 3},            # Tool result if success
             "error": None,                   # Error message if failed
             "error_type": None,              # Error classification
-            "elapsed_ms": 45.2               # Individual call duration
+            "elapsed_ms": 45.2,              # Individual call duration
+            "retry_metadata": {              # Present if max_retries > 1
+                "attempts": 2,
+                "retries": ["TimeoutError"],
+                "total_time_ms": 1234.5
+            }
         },
         # ... more results
     ]
@@ -91,12 +111,37 @@ Each item in `calls` must be a dictionary with:
 
 ## Examples
 
+### With Automatic Retry
+
+```python
+# Retry on transient failures (recommended for unreliable providers)
+hangar_call(
+    calls=[
+        {"provider": "fetch", "tool": "get", "arguments": {"url": "https://api.example.com"}}
+    ],
+    max_retries=3
+)
+
+# Response includes retry metadata:
+{
+    "results": [{
+        "success": True,
+        "result": {...},
+        "retry_metadata": {
+            "attempts": 2,           # Succeeded on 2nd attempt
+            "retries": ["TimeoutError"],  # 1st attempt failed with timeout
+            "total_time_ms": 1500.0
+        }
+    }]
+}
+```
+
 ### Mixed Providers (Parallel Cold Starts)
 
 When calling multiple COLD providers, they start in parallel:
 
 ```python
-hangar_batch(calls=[
+hangar_call(calls=[
     {"provider": "math", "tool": "add", "arguments": {"a": 1, "b": 2}},
     {"provider": "sqlite", "tool": "query", "arguments": {"sql": "SELECT 1"}},
     {"provider": "fetch", "tool": "get", "arguments": {"url": "https://api.github.com"}},
@@ -109,7 +154,7 @@ hangar_batch(calls=[
 Stop processing on first error:
 
 ```python
-results = hangar_batch(
+results = hangar_call(
     calls=[
         {"provider": "math", "tool": "add", "arguments": {"a": 1, "b": 2}},
         {"provider": "nonexistent", "tool": "foo", "arguments": {}},  # Will fail
@@ -125,7 +170,7 @@ results = hangar_batch(
 Different timeouts for different calls:
 
 ```python
-hangar_batch(calls=[
+hangar_call(calls=[
     {"provider": "fetch", "tool": "get", "arguments": {"url": "..."}, "timeout": 5.0},
     {"provider": "ml", "tool": "predict", "arguments": {...}, "timeout": 30.0},
 ], timeout=60.0)
@@ -137,7 +182,7 @@ hangar_batch(calls=[
 If a provider's circuit breaker is OPEN, calls to it fail immediately:
 
 ```python
-results = hangar_batch(calls=[
+results = hangar_call(calls=[
     {"provider": "math", "tool": "add", "arguments": {"a": 1, "b": 2}},
     {"provider": "unhealthy_provider", "tool": "foo", "arguments": {}},  # CB OPEN
 ])
@@ -183,11 +228,20 @@ When multiple calls target the same COLD provider, the provider starts exactly o
 
 ```python
 # 5 calls to COLD "math" provider = 1 startup, then 5 parallel tool calls
-hangar_batch(calls=[
+hangar_call(calls=[
     {"provider": "math", "tool": "add", "arguments": {"a": i, "b": 1}}
     for i in range(5)
 ])
 ```
+
+### Retry Behavior
+
+When `max_retries > 1`:
+
+- Retries use exponential backoff
+- Only transient errors trigger retry (timeout, network errors, malformed JSON)
+- Permanent errors (validation, provider not found) do not retry
+- Each call retries independently within the batch
 
 ### Timeout Resolution
 
@@ -226,6 +280,7 @@ Truncated responses have `truncated: true` flag:
 | Max calls per batch | 100 | Validation error |
 | Max concurrency | 20 | Clamped to limit |
 | Max timeout | 300s | Clamped to limit |
+| Max retries | 10 | Clamped to limit |
 | Max response per call | 10MB | Truncated |
 | Max total response | 50MB | Truncated |
 
@@ -257,16 +312,27 @@ batch:
   max_total_response_size_bytes: 52428800  # 50MB total
 ```
 
+## Migration from Previous API
+
+If you were using the previous tools, here's how to migrate:
+
+| Old API | New API |
+|---------|---------|
+| `registry_invoke(provider, tool, arguments)` | `hangar_call(calls=[{"provider": ..., "tool": ..., "arguments": ...}])` |
+| `registry_invoke_ex(..., max_retries=5)` | `hangar_call(calls=[...], max_retries=5)` |
+| `registry_invoke_stream(...)` | `hangar_call(calls=[...])` (progress logged internally) |
+| `hangar_batch(calls=[...])` | `hangar_call(calls=[...])` |
+
 ## Best Practices
 
-1. **Group related calls** - Batch calls that can run independently
-2. **Set appropriate timeouts** - Use per-call timeouts for varying workloads
-3. **Monitor metrics** - Watch `batch_duration_seconds` and `batch_size_histogram`
-4. **Handle partial failures** - Check `succeeded` and `failed` counts
-5. **Use fail-fast sparingly** - Only when all-or-nothing is required
+1. **Use retry for external calls** - Set `max_retries=3` for fetch, database, and network operations
+2. **Group related calls** - Batch calls that can run independently
+3. **Set appropriate timeouts** - Use per-call timeouts for varying workloads
+4. **Monitor metrics** - Watch `batch_duration_seconds` and `batch_size_histogram`
+5. **Handle partial failures** - Check `succeeded` and `failed` counts
+6. **Use fail-fast sparingly** - Only when all-or-nothing is required
 
 ## Limitations
 
 - **No dependency ordering** - Calls are independent; use sequential calls if you need result of A as input to B
-- **No retry within batch** - Failed calls are not automatically retried
 - **No streaming** - Results are returned when all calls complete

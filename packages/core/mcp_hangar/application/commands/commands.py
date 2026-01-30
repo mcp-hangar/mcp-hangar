@@ -57,3 +57,20 @@ class ShutdownIdleProvidersCommand(Command):
     """Command to shutdown all idle providers."""
 
     pass
+
+
+@dataclass(frozen=True)
+class LoadProviderCommand(Command):
+    """Command to load a provider from the registry at runtime."""
+
+    name: str
+    force_unverified: bool = False
+    user_id: str | None = None
+
+
+@dataclass(frozen=True)
+class UnloadProviderCommand(Command):
+    """Command to unload a hot-loaded provider."""
+
+    provider_id: str
+    user_id: str | None = None

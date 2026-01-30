@@ -79,19 +79,23 @@ def test_registry_with_memory() -> None:
             "id": 2,
             "method": "tools/call",
             "params": {
-                "name": "registry_invoke",
+                "name": "hangar_call",
                 "arguments": {
-                    "provider": "memory",
-                    "tool": "create_entities",
-                    "arguments": {
-                        "entities": [
-                            {
-                                "name": "integration-test",
-                                "entityType": "test",
-                                "observations": ["Registry memory test successful"],
-                            }
-                        ]
-                    },
+                    "calls": [
+                        {
+                            "provider": "memory",
+                            "tool": "create_entities",
+                            "arguments": {
+                                "entities": [
+                                    {
+                                        "name": "integration-test",
+                                        "entityType": "test",
+                                        "observations": ["Registry memory test successful"],
+                                    }
+                                ]
+                            },
+                        }
+                    ],
                 },
             },
         }
@@ -102,9 +106,9 @@ def test_registry_with_memory() -> None:
         assert response, "no response from mcp_hangar on create_entities"
         result = json.loads(response)
 
-        assert "error" not in result, f"registry_invoke returned error: {result.get('error')}"
+        assert "error" not in result, f"hangar_call returned error: {result.get('error')}"
         content = result.get("result", {}).get("content", [])
-        assert content, f"registry_invoke missing content: {result}"
+        assert content, f"hangar_call missing content: {result}"
 
         if "text" in content[0]:
             data = json.loads(content[0]["text"])
@@ -119,11 +123,15 @@ def test_registry_with_memory() -> None:
             "id": 3,
             "method": "tools/call",
             "params": {
-                "name": "registry_invoke",
+                "name": "hangar_call",
                 "arguments": {
-                    "provider": "memory",
-                    "tool": "read_graph",
-                    "arguments": {},
+                    "calls": [
+                        {
+                            "provider": "memory",
+                            "tool": "read_graph",
+                            "arguments": {},
+                        }
+                    ],
                 },
             },
         }

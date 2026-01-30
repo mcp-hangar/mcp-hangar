@@ -9,6 +9,7 @@ from dataclasses import dataclass, field
 from typing import Any, Optional, Protocol, runtime_checkable, TYPE_CHECKING
 
 if TYPE_CHECKING:
+    from ..application.commands.load_handlers import LoadProviderHandler, UnloadProviderHandler
     from ..application.discovery import DiscoveryOrchestrator
     from ..application.sagas import GroupRebalanceSaga
     from ..bootstrap.runtime import Runtime
@@ -122,6 +123,8 @@ class ApplicationContext:
     groups: dict[str, "ProviderGroup"] = field(default_factory=dict)
     discovery_orchestrator: Optional["DiscoveryOrchestrator"] = None
     group_rebalance_saga: Optional["GroupRebalanceSaga"] = None
+    load_provider_handler: Optional["LoadProviderHandler"] = None
+    unload_provider_handler: Optional["UnloadProviderHandler"] = None
 
     @property
     def repository(self) -> "IProviderRepository":
@@ -154,12 +157,35 @@ class ApplicationContext:
         return self.runtime.security_handler
 
     def get_provider(self, provider_id: str) -> Optional["Provider"]:
-        """Get a provider by ID."""
-        return self.runtime.repository.get(provider_id)
+        """Get a provider by ID.
+
+        Checks both static repository and runtime (hot-loaded) providers.
+        """
+        # First check static repository
+        provider = self.runtime.repository.get(provider_id)
+        if provider is not None:
+            return provider
+
+        # Then check runtime (hot-loaded) providers
+        from .state import get_runtime_providers
+
+        runtime_store = get_runtime_providers()
+        return runtime_store.get_provider(provider_id)
 
     def provider_exists(self, provider_id: str) -> bool:
-        """Check if a provider exists."""
-        return self.runtime.repository.exists(provider_id)
+        """Check if a provider exists.
+
+        Checks both static repository and runtime (hot-loaded) providers.
+        """
+        # First check static repository
+        if self.runtime.repository.exists(provider_id):
+            return True
+
+        # Then check runtime (hot-loaded) providers
+        from .state import get_runtime_providers
+
+        runtime_store = get_runtime_providers()
+        return runtime_store.exists(provider_id)
 
     def get_group(self, group_id: str) -> Optional["ProviderGroup"]:
         """Get a group by ID."""

@@ -27,11 +27,24 @@ class BaseQueryHandler(QueryHandler):
         self._repository = repository
 
     def _get_provider(self, provider_id: str):
-        """Get provider or raise ProviderNotFoundError."""
+        """Get provider or raise ProviderNotFoundError.
+
+        Checks both static repository and runtime (hot-loaded) providers.
+        """
+        # First check static repository
         provider = self._repository.get(provider_id)
-        if provider is None:
-            raise ProviderNotFoundError(provider_id)
-        return provider
+        if provider is not None:
+            return provider
+
+        # Then check runtime (hot-loaded) providers
+        from ...server.state import get_runtime_providers
+
+        runtime_store = get_runtime_providers()
+        provider = runtime_store.get_provider(provider_id)
+        if provider is not None:
+            return provider
+
+        raise ProviderNotFoundError(provider_id)
 
     def _get_health_status(self, provider) -> str:
         """Determine health status string.

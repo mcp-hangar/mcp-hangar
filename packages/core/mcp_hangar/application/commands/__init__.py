@@ -21,9 +21,11 @@ from .commands import (
     Command,
     HealthCheckCommand,
     InvokeToolCommand,
+    LoadProviderCommand,
     ShutdownIdleProvidersCommand,
     StartProviderCommand,
     StopProviderCommand,
+    UnloadProviderCommand,
 )
 from .handlers import (
     HealthCheckHandler,
@@ -33,6 +35,7 @@ from .handlers import (
     StartProviderHandler,
     StopProviderHandler,
 )
+from .load_handlers import LoadProviderHandler, LoadResult, UnloadProviderHandler
 
 __all__ = [
     # Commands
@@ -42,6 +45,8 @@ __all__ = [
     "InvokeToolCommand",
     "HealthCheckCommand",
     "ShutdownIdleProvidersCommand",
+    "LoadProviderCommand",
+    "UnloadProviderCommand",
     # Auth Commands
     "CreateApiKeyCommand",
     "RevokeApiKeyCommand",
@@ -56,6 +61,10 @@ __all__ = [
     "HealthCheckHandler",
     "ShutdownIdleProvidersHandler",
     "register_all_handlers",
+    # Load Handlers
+    "LoadProviderHandler",
+    "UnloadProviderHandler",
+    "LoadResult",
     # Auth Handlers
     "CreateApiKeyHandler",
     "RevokeApiKeyHandler",

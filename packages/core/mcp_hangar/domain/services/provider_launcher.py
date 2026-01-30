@@ -807,7 +807,8 @@ class ContainerLauncher(ProviderLauncher):
             cmd.extend(["--network", "none"])
         elif config.network == "bridge":
             cmd.extend(["--network", "bridge"])
-        # host network is not added (default for most operations)
+        elif config.network == "host":
+            cmd.extend(["--network", "host"])
 
         # Resource limits
         if config.memory_limit:

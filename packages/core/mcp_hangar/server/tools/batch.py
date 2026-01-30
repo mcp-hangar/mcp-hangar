@@ -13,7 +13,7 @@ Features:
 - Circuit breaker integration
 
 Example:
-    hangar_batch(calls=[
+    hangar_call(calls=[
         {"provider": "math", "tool": "add", "arguments": {"a": 1, "b": 2}},
         {"provider": "math", "tool": "multiply", "arguments": {"a": 3, "b": 4}},
     ])
@@ -43,8 +43,9 @@ from ...metrics import (
     BATCH_TRUNCATIONS_TOTAL,
     BATCH_VALIDATION_FAILURES_TOTAL,
 )
+from ...retry import retry_sync, RetryPolicy, RetryResult
 from ..context import get_context
-from ..state import GROUPS, PROVIDERS
+from ..state import GROUPS
 
 logger = get_logger(__name__)
 
@@ -65,6 +66,10 @@ MAX_TOTAL_RESPONSE_SIZE_BYTES = 50 * 1024 * 1024  # 50MB total
 # =============================================================================
 
 
+DEFAULT_MAX_RETRIES = 3
+"""Default number of retry attempts per call."""
+
+
 @dataclass
 class CallSpec:
     """Specification for a single call within a batch."""
@@ -75,6 +80,24 @@ class CallSpec:
     tool: str
     arguments: dict[str, Any]
     timeout: float | None = None
+    max_retries: int = 1  # Default: no retries (single attempt)
+
+
+@dataclass
+class RetryMetadata:
+    """Metadata about retry attempts for a call."""
+
+    attempts: int
+    retries: list[str]  # List of error types from retries
+    total_time_ms: float
+
+    def to_dict(self) -> dict[str, Any]:
+        """Convert to dictionary for response."""
+        return {
+            "attempts": self.attempts,
+            "retries": self.retries,
+            "total_time_ms": round(self.total_time_ms, 2),
+        }
 
 
 @dataclass
@@ -91,6 +114,7 @@ class CallResult:
     truncated: bool = False
     truncated_reason: str | None = None
     original_size_bytes: int | None = None
+    retry_metadata: RetryMetadata | None = None
 
 
 @dataclass
@@ -201,8 +225,11 @@ def _validate_batch(
             errors.append(ValidationError(index=i, field="arguments", message="arguments must be a dictionary"))
             continue
 
-        # Provider exists (check both providers and groups)
-        provider_obj = PROVIDERS.get(provider) or GROUPS.get(provider)
+        # Provider exists (check both providers and groups via context)
+        ctx = get_context()
+        provider_obj = ctx.get_provider(provider)
+        if not provider_obj:
+            provider_obj = GROUPS.get(provider)
         if not provider_obj:
             errors.append(
                 ValidationError(
@@ -217,7 +244,7 @@ def _validate_batch(
         # Note: For COLD providers without predefined tools, we skip tool validation
         # as tools will be discovered on start
         if hasattr(provider_obj, "has_tools") and provider_obj.has_tools:
-            tool_schema = provider_obj.tools.get_tool(tool)
+            tool_schema = provider_obj.tools.get(tool)
             if not tool_schema:
                 errors.append(
                     ValidationError(
@@ -461,6 +488,7 @@ class BatchExecutor:
         - Single-flight cold starts
         - Circuit breaker checks
         - Response truncation
+        - Retry with exponential backoff
 
         Args:
             call: Call specification.
@@ -485,158 +513,216 @@ class BatchExecutor:
                 elapsed_ms=0.0,
             )
 
-        try:
-            # Calculate effective timeout
-            elapsed = time.perf_counter() - batch_start_time
-            remaining_global = global_timeout - elapsed
-            if remaining_global <= 0:
+        # Calculate effective timeout
+        elapsed = time.perf_counter() - batch_start_time
+        remaining_global = global_timeout - elapsed
+        if remaining_global <= 0:
+            return CallResult(
+                index=call.index,
+                call_id=call.call_id,
+                success=False,
+                error="Global timeout exceeded",
+                error_type="TimeoutError",
+                elapsed_ms=0.0,
+            )
+
+        effective_timeout = remaining_global
+        if call.timeout is not None:
+            effective_timeout = min(call.timeout, remaining_global)
+
+        # Get provider (or group)
+        provider_obj = ctx.get_provider(call.provider)
+        is_group = False
+        if not provider_obj:
+            group_obj = GROUPS.get(call.provider)
+            if group_obj:
+                is_group = True
+            elif not ctx.provider_exists(call.provider):
                 return CallResult(
                     index=call.index,
                     call_id=call.call_id,
                     success=False,
-                    error="Global timeout exceeded",
-                    error_type="TimeoutError",
-                    elapsed_ms=0.0,
-                )
-
-            effective_timeout = remaining_global
-            if call.timeout is not None:
-                effective_timeout = min(call.timeout, remaining_global)
-
-            # Get provider (or group)
-            provider_obj = PROVIDERS.get(call.provider)
-            is_group = False
-            if not provider_obj:
-                group_obj = GROUPS.get(call.provider)
-                if group_obj:
-                    is_group = True
-                else:
-                    return CallResult(
-                        index=call.index,
-                        call_id=call.call_id,
-                        success=False,
-                        error=f"Provider '{call.provider}' not found",
-                        error_type="ProviderNotFoundError",
-                        elapsed_ms=(time.perf_counter() - call_start) * 1000,
-                    )
-
-            # Check circuit breaker (for non-group providers)
-            if not is_group and provider_obj:
-                if hasattr(provider_obj, "health") and provider_obj.health.circuit_breaker_open:
-                    BATCH_CIRCUIT_BREAKER_REJECTIONS_TOTAL.inc(provider=call.provider)
-                    return CallResult(
-                        index=call.index,
-                        call_id=call.call_id,
-                        success=False,
-                        error="Circuit breaker open",
-                        error_type="CircuitBreakerOpen",
-                        elapsed_ms=(time.perf_counter() - call_start) * 1000,
-                    )
-
-            # Single-flight cold start (only for non-group providers)
-            if not is_group and provider_obj and provider_obj.state.value == "cold":
-                try:
-                    self._single_flight.do(
-                        call.provider,
-                        lambda: ctx.command_bus.send(StartProviderCommand(provider_id=call.provider)),
-                    )
-                except Exception as e:
-                    return CallResult(
-                        index=call.index,
-                        call_id=call.call_id,
-                        success=False,
-                        error=f"Failed to start provider: {e}",
-                        error_type="ProviderStartError",
-                        elapsed_ms=(time.perf_counter() - call_start) * 1000,
-                    )
-
-            # Check cancellation after cold start
-            if cancel_event.is_set():
-                return CallResult(
-                    index=call.index,
-                    call_id=call.call_id,
-                    success=False,
-                    error="Cancelled after cold start",
-                    error_type="CancellationError",
+                    error=f"Provider '{call.provider}' not found",
+                    error_type="ProviderNotFoundError",
                     elapsed_ms=(time.perf_counter() - call_start) * 1000,
                 )
 
-            # Execute tool invocation
+        # Check circuit breaker / health degradation (for non-group providers)
+        # HealthTracker tracks consecutive failures and determines if provider should be degraded
+        if not is_group and provider_obj:
+            if hasattr(provider_obj, "health") and provider_obj.health.should_degrade():
+                BATCH_CIRCUIT_BREAKER_REJECTIONS_TOTAL.inc(provider=call.provider)
+                return CallResult(
+                    index=call.index,
+                    call_id=call.call_id,
+                    success=False,
+                    error="Circuit breaker open (too many consecutive failures)",
+                    error_type="CircuitBreakerOpen",
+                    elapsed_ms=(time.perf_counter() - call_start) * 1000,
+                )
+
+        # Single-flight cold start (only for non-group providers)
+        if not is_group and provider_obj and provider_obj.state.value == "cold":
+            try:
+                self._single_flight.do(
+                    call.provider,
+                    lambda: ctx.command_bus.send(StartProviderCommand(provider_id=call.provider)),
+                )
+            except Exception as e:
+                return CallResult(
+                    index=call.index,
+                    call_id=call.call_id,
+                    success=False,
+                    error=f"Failed to start provider: {e}",
+                    error_type="ProviderStartError",
+                    elapsed_ms=(time.perf_counter() - call_start) * 1000,
+                )
+
+        # Check cancellation after cold start
+        if cancel_event.is_set():
+            return CallResult(
+                index=call.index,
+                call_id=call.call_id,
+                success=False,
+                error="Cancelled after cold start",
+                error_type="CancellationError",
+                elapsed_ms=(time.perf_counter() - call_start) * 1000,
+            )
+
+        # Define the invocation operation for retry
+        def do_invoke() -> dict[str, Any]:
             command = InvokeToolCommand(
                 provider_id=call.provider,
                 tool_name=call.tool,
                 arguments=call.arguments,
                 timeout=effective_timeout,
             )
-            result = ctx.command_bus.send(command)
+            return ctx.command_bus.send(command)
 
-            elapsed_ms = (time.perf_counter() - call_start) * 1000
+        # Execute with retry if max_retries > 1
+        retry_result: RetryResult | None = None
+        if call.max_retries > 1:
+            policy = RetryPolicy(max_attempts=call.max_retries)
+            retry_result = retry_sync(
+                operation=do_invoke,
+                policy=policy,
+                provider=call.provider,
+                operation_name=call.tool,
+            )
+            if retry_result.success:
+                result = retry_result.result
+            else:
+                # All retries exhausted
+                elapsed_ms = (time.perf_counter() - call_start) * 1000
+                error_type = type(retry_result.final_error).__name__ if retry_result.final_error else "UnknownError"
+                error_msg = str(retry_result.final_error) if retry_result.final_error else "Unknown error"
 
-            # Check response size and truncate if needed
-            truncated = False
-            truncated_reason = None
-            original_size = None
-
-            result_json = json.dumps(result)
-            result_size = len(result_json.encode("utf-8"))
-
-            if result_size > MAX_RESPONSE_SIZE_BYTES:
-                truncated = True
-                truncated_reason = "response_size_exceeded"
-                original_size = result_size
-                result = None
-                BATCH_TRUNCATIONS_TOTAL.inc(reason="per_call")
-                logger.warning(
-                    "batch_call_truncated",
+                logger.debug(
+                    "batch_call_failed",
                     call_id=call.call_id,
                     provider=call.provider,
                     tool=call.tool,
-                    size_bytes=result_size,
-                    limit_bytes=MAX_RESPONSE_SIZE_BYTES,
+                    error=error_msg,
+                    error_type=error_type,
+                    elapsed_ms=round(elapsed_ms, 2),
+                    retry_attempts=retry_result.attempt_count,
                 )
 
-            logger.debug(
-                "batch_call_completed",
+                return CallResult(
+                    index=call.index,
+                    call_id=call.call_id,
+                    success=False,
+                    error=error_msg,
+                    error_type=error_type,
+                    elapsed_ms=elapsed_ms,
+                    retry_metadata=RetryMetadata(
+                        attempts=retry_result.attempt_count,
+                        retries=[a.error_type for a in retry_result.attempts],
+                        total_time_ms=retry_result.total_time_s * 1000,
+                    ),
+                )
+        else:
+            # No retry - direct execution
+            try:
+                result = do_invoke()
+            except Exception as e:
+                elapsed_ms = (time.perf_counter() - call_start) * 1000
+                error_type = type(e).__name__
+
+                logger.debug(
+                    "batch_call_failed",
+                    call_id=call.call_id,
+                    provider=call.provider,
+                    tool=call.tool,
+                    error=str(e),
+                    error_type=error_type,
+                    elapsed_ms=round(elapsed_ms, 2),
+                )
+
+                return CallResult(
+                    index=call.index,
+                    call_id=call.call_id,
+                    success=False,
+                    error=str(e),
+                    error_type=error_type,
+                    elapsed_ms=elapsed_ms,
+                )
+
+        elapsed_ms = (time.perf_counter() - call_start) * 1000
+
+        # Check response size and truncate if needed
+        truncated = False
+        truncated_reason = None
+        original_size = None
+
+        result_json = json.dumps(result)
+        result_size = len(result_json.encode("utf-8"))
+
+        if result_size > MAX_RESPONSE_SIZE_BYTES:
+            truncated = True
+            truncated_reason = "response_size_exceeded"
+            original_size = result_size
+            result = None
+            BATCH_TRUNCATIONS_TOTAL.inc(reason="per_call")
+            logger.warning(
+                "batch_call_truncated",
                 call_id=call.call_id,
                 provider=call.provider,
                 tool=call.tool,
-                success=True,
-                elapsed_ms=round(elapsed_ms, 2),
+                size_bytes=result_size,
+                limit_bytes=MAX_RESPONSE_SIZE_BYTES,
             )
 
-            return CallResult(
-                index=call.index,
-                call_id=call.call_id,
-                success=True,
-                result=result,
-                elapsed_ms=elapsed_ms,
-                truncated=truncated,
-                truncated_reason=truncated_reason,
-                original_size_bytes=original_size,
+        logger.debug(
+            "batch_call_completed",
+            call_id=call.call_id,
+            provider=call.provider,
+            tool=call.tool,
+            success=True,
+            elapsed_ms=round(elapsed_ms, 2),
+            retry_attempts=retry_result.attempt_count if retry_result else 1,
+        )
+
+        # Build retry metadata if retries were used
+        retry_meta = None
+        if retry_result:
+            retry_meta = RetryMetadata(
+                attempts=retry_result.attempt_count,
+                retries=[a.error_type for a in retry_result.attempts],
+                total_time_ms=retry_result.total_time_s * 1000,
             )
 
-        except Exception as e:
-            elapsed_ms = (time.perf_counter() - call_start) * 1000
-            error_type = type(e).__name__
-
-            logger.debug(
-                "batch_call_failed",
-                call_id=call.call_id,
-                provider=call.provider,
-                tool=call.tool,
-                error=str(e),
-                error_type=error_type,
-                elapsed_ms=round(elapsed_ms, 2),
-            )
-
-            return CallResult(
-                index=call.index,
-                call_id=call.call_id,
-                success=False,
-                error=str(e),
-                error_type=error_type,
-                elapsed_ms=elapsed_ms,
-            )
+        return CallResult(
+            index=call.index,
+            call_id=call.call_id,
+            success=True,
+            result=result,
+            elapsed_ms=elapsed_ms,
+            truncated=truncated,
+            truncated_reason=truncated_reason,
+            original_size_bytes=original_size,
+            retry_metadata=retry_meta,
+        )
 
 
 # Global executor instance
@@ -648,21 +734,57 @@ _executor = BatchExecutor()
 # =============================================================================
 
 
-def hangar_batch(
+def _format_result_dict(r: CallResult) -> dict[str, Any]:
+    """Format a CallResult as a dictionary for API response.
+
+    Args:
+        r: The CallResult to format.
+
+    Returns:
+        Dictionary with result fields.
+    """
+    result_dict: dict[str, Any] = {
+        "index": r.index,
+        "call_id": r.call_id,
+        "success": r.success,
+        "result": r.result,
+        "error": r.error,
+        "error_type": r.error_type,
+        "elapsed_ms": round(r.elapsed_ms, 2),
+    }
+
+    if r.truncated:
+        result_dict["truncated"] = r.truncated
+    if r.truncated_reason:
+        result_dict["truncated_reason"] = r.truncated_reason
+    if r.original_size_bytes is not None:
+        result_dict["original_size_bytes"] = r.original_size_bytes
+    if r.retry_metadata:
+        result_dict["retry_metadata"] = r.retry_metadata.to_dict()
+
+    return result_dict
+
+
+def hangar_call(
     calls: list[dict[str, Any]],
     max_concurrency: int = DEFAULT_MAX_CONCURRENCY,
     timeout: float = DEFAULT_TIMEOUT,
     fail_fast: bool = False,
+    max_retries: int = 1,
 ) -> dict[str, Any]:
-    """Execute multiple tool invocations in parallel.
+    """Unified tool invocation API for MCP Hangar.
 
-    Executes a batch of tool invocations with configurable concurrency and
-    timeout. Calls are independent (no dependency ordering) and executed
-    in parallel using a thread pool.
+    Execute one or more tool invocations with optional retry, configurable
+    concurrency, and timeout handling. This is the single entry point for
+    all tool invocations.
+
+    For a single invocation, pass a 1-element list. The response format is
+    always consistent regardless of batch size.
 
     Features:
     - Parallel execution with configurable concurrency
     - Single-flight cold starts (one provider starts once, not N times)
+    - Automatic retry with exponential backoff
     - Partial success handling (default: continue on error)
     - Fail-fast mode (abort on first error)
     - Response truncation for oversized payloads
@@ -677,49 +799,74 @@ def hangar_batch(
         max_concurrency: Maximum parallel workers (1-20, default 10)
         timeout: Global timeout for entire batch (1-300s, default 60)
         fail_fast: If True, abort remaining calls on first error
+        max_retries: Maximum retry attempts per call (1-10, default 1 = no retry)
 
     Returns:
-        BatchResult dict with:
+        Result dict with:
         - batch_id: UUID for tracing
         - success: True if all calls succeeded
         - total: Total number of calls
         - succeeded: Number of successful calls
         - failed: Number of failed calls
-        - elapsed_ms: Total batch execution time
-        - results: List of per-call results
+        - elapsed_ms: Total execution time
+        - results: List of per-call results, each containing:
+            - index: Call index in original list
+            - call_id: UUID for this call
+            - success: True if call succeeded
+            - result: Tool result (if success)
+            - error: Error message (if failure)
+            - error_type: Exception type (if failure)
+            - elapsed_ms: Call execution time
+            - retry_metadata: Retry info (if retries were used)
 
     Examples:
-        # Simple batch
-        hangar_batch(calls=[
+        # Single invocation
+        hangar_call(calls=[
+            {"provider": "math", "tool": "add", "arguments": {"a": 1, "b": 2}}
+        ])
+
+        # Single invocation with retry
+        hangar_call(
+            calls=[{"provider": "math", "tool": "add", "arguments": {"a": 1, "b": 2}}],
+            max_retries=3
+        )
+
+        # Batch invocation
+        hangar_call(calls=[
             {"provider": "math", "tool": "add", "arguments": {"a": 1, "b": 2}},
             {"provider": "math", "tool": "multiply", "arguments": {"a": 3, "b": 4}},
         ])
 
-        # With fail-fast
-        hangar_batch(
+        # With fail-fast and retry
+        hangar_call(
             calls=[...],
             fail_fast=True,
+            max_retries=5
         )
 
         # With per-call timeout
-        hangar_batch(calls=[
+        hangar_call(calls=[
             {"provider": "fetch", "tool": "get", "arguments": {"url": "..."}, "timeout": 5.0},
         ], timeout=60.0)
     """
     batch_id = str(uuid.uuid4())
 
+    # Clamp max_retries to valid range
+    max_retries = max(1, min(max_retries, 10))
+
     logger.info(
-        "batch_requested",
+        "hangar_call_requested",
         batch_id=batch_id,
         call_count=len(calls),
         max_concurrency=max_concurrency,
         timeout=timeout,
         fail_fast=fail_fast,
+        max_retries=max_retries,
     )
 
     # Handle empty batch
     if not calls:
-        logger.debug("batch_empty", batch_id=batch_id)
+        logger.debug("hangar_call_empty", batch_id=batch_id)
         return {
             "batch_id": batch_id,
             "success": True,
@@ -740,7 +887,7 @@ def hangar_batch(
         BATCH_VALIDATION_FAILURES_TOTAL.inc()
         BATCH_CALLS_TOTAL.inc(result="validation_error")
         logger.warning(
-            "batch_validation_failed",
+            "hangar_call_validation_failed",
             batch_id=batch_id,
             error_count=len(validation_errors),
         )
@@ -753,7 +900,7 @@ def hangar_batch(
             ],
         }
 
-    # Build call specs
+    # Build call specs with retry configuration
     call_specs = [
         CallSpec(
             index=i,
@@ -762,6 +909,7 @@ def hangar_batch(
             tool=call["tool"],
             arguments=call["arguments"],
             timeout=call.get("timeout"),
+            max_retries=max_retries,
         )
         for i, call in enumerate(calls)
     ]
@@ -783,21 +931,7 @@ def hangar_batch(
         "succeeded": result.succeeded,
         "failed": result.failed,
         "elapsed_ms": round(result.elapsed_ms, 2),
-        "results": [
-            {
-                "index": r.index,
-                "call_id": r.call_id,
-                "success": r.success,
-                "result": r.result,
-                "error": r.error,
-                "error_type": r.error_type,
-                "elapsed_ms": round(r.elapsed_ms, 2),
-                **({"truncated": r.truncated} if r.truncated else {}),
-                **({"truncated_reason": r.truncated_reason} if r.truncated_reason else {}),
-                **({"original_size_bytes": r.original_size_bytes} if r.original_size_bytes else {}),
-            }
-            for r in result.results
-        ],
+        "results": [_format_result_dict(r) for r in result.results],
     }
 
 
@@ -807,10 +941,12 @@ def hangar_batch(
 
 
 def register_batch_tools(mcp: FastMCP) -> None:
-    """Register batch invocation tools with the MCP server.
+    """Register invocation tools with the MCP server.
+
+    Registers hangar_call as the unified invocation tool.
 
     Args:
         mcp: FastMCP server instance.
     """
-    mcp.tool()(hangar_batch)
-    logger.info("batch_tools_registered")
+    mcp.tool()(hangar_call)
+    logger.info("hangar_call_tool_registered")

@@ -7,6 +7,7 @@ depends on. Implementations are provided by the infrastructure layer.
 from .authentication import ApiKeyMetadata, AuthRequest, IApiKeyStore, IAuthenticator, ITokenValidator
 from .authorization import AuthorizationRequest, AuthorizationResult, IAuthorizer, IPolicyEngine, IRoleStore
 from .event_store import ConcurrencyError, IEventStore, NullEventStore, StreamNotFoundError
+from .installer import InstalledPackage, IPackageInstaller
 from .metrics_publisher import IMetricsPublisher
 from .persistence import (
     AuditAction,
@@ -21,6 +22,7 @@ from .persistence import (
     ProviderConfigSnapshot,
 )
 from .provider_runtime import ProviderRuntime
+from .registry import IRegistryClient, PackageInfo, ServerDetails, ServerSummary, TransportInfo
 
 __all__ = [
     # Authentication contracts
@@ -40,6 +42,9 @@ __all__ = [
     "IEventStore",
     "NullEventStore",
     "StreamNotFoundError",
+    # Installer contracts
+    "IPackageInstaller",
+    "InstalledPackage",
     # Metrics
     "IMetricsPublisher",
     # Persistence
@@ -54,4 +59,10 @@ __all__ = [
     "PersistenceError",
     "ProviderConfigSnapshot",
     "ProviderRuntime",
+    # Registry contracts
+    "IRegistryClient",
+    "PackageInfo",
+    "ServerDetails",
+    "ServerSummary",
+    "TransportInfo",
 ]
