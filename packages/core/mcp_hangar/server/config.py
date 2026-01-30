@@ -207,7 +207,7 @@ def _load_provider_config(provider_id: str, spec_dict: dict[str, Any]) -> Provid
         volumes=spec_dict.get("volumes", []),
         build=spec_dict.get("build"),
         resources=spec_dict.get("resources", {"memory": "512m", "cpu": "1.0"}),
-        network=spec_dict.get("network", "none"),
+        network=spec_dict.get("network") or spec_dict.get("network_mode", "none"),
         read_only=spec_dict.get("read_only", True),
         user=user,
         description=spec_dict.get("description"),

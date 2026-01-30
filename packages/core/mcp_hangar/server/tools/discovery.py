@@ -3,9 +3,6 @@
 Uses ApplicationContext for dependency injection (DIP).
 """
 
-import asyncio
-import concurrent.futures
-
 from mcp.server.fastmcp import FastMCP
 
 from ...application.mcp.tooling import key_global, mcp_tool_wrapper
@@ -25,7 +22,7 @@ def register_discovery_tools(mcp: FastMCP) -> None:
         error_mapper=lambda exc: tool_error_mapper(exc),
         on_error=tool_error_hook,
     )
-    def registry_discover() -> dict:
+    async def registry_discover() -> dict:
         """
         Trigger immediate discovery cycle across all configured sources.
 
@@ -36,17 +33,7 @@ def register_discovery_tools(mcp: FastMCP) -> None:
         if orchestrator is None:
             return {"error": "Discovery not configured. Enable discovery in config.yaml"}
 
-        try:
-            loop = asyncio.get_event_loop()
-            if loop.is_running():
-                with concurrent.futures.ThreadPoolExecutor() as executor:
-                    future = executor.submit(asyncio.run, orchestrator.trigger_discovery())
-                    result = future.result(timeout=60)
-            else:
-                result = loop.run_until_complete(orchestrator.trigger_discovery())
-        except RuntimeError:
-            result = asyncio.run(orchestrator.trigger_discovery())
-
+        result = await orchestrator.trigger_discovery()
         return result
 
     @mcp.tool(name="registry_discovered")
@@ -125,7 +112,7 @@ def register_discovery_tools(mcp: FastMCP) -> None:
         error_mapper=lambda exc: tool_error_mapper(exc),
         on_error=lambda exc, ctx: tool_error_hook(exc, ctx),
     )
-    def registry_approve(provider: str) -> dict:
+    async def registry_approve(provider: str) -> dict:
         """
         Approve a quarantined provider for registration.
 
@@ -139,17 +126,7 @@ def register_discovery_tools(mcp: FastMCP) -> None:
         if orchestrator is None:
             return {"error": "Discovery not configured. Enable discovery in config.yaml"}
 
-        try:
-            loop = asyncio.get_event_loop()
-            if loop.is_running():
-                with concurrent.futures.ThreadPoolExecutor() as executor:
-                    future = executor.submit(asyncio.run, orchestrator.approve_provider(provider))
-                    result = future.result(timeout=60)
-            else:
-                result = loop.run_until_complete(orchestrator.approve_provider(provider))
-        except RuntimeError:
-            result = asyncio.run(orchestrator.approve_provider(provider))
-
+        result = await orchestrator.approve_provider(provider)
         return result
 
     @mcp.tool(name="registry_sources")
@@ -161,7 +138,7 @@ def register_discovery_tools(mcp: FastMCP) -> None:
         error_mapper=lambda exc: tool_error_mapper(exc),
         on_error=tool_error_hook,
     )
-    def registry_sources() -> dict:
+    async def registry_sources() -> dict:
         """
         List configured discovery sources with health status.
 
@@ -172,15 +149,5 @@ def register_discovery_tools(mcp: FastMCP) -> None:
         if orchestrator is None:
             return {"error": "Discovery not configured. Enable discovery in config.yaml"}
 
-        try:
-            loop = asyncio.get_event_loop()
-            if loop.is_running():
-                with concurrent.futures.ThreadPoolExecutor() as executor:
-                    future = executor.submit(asyncio.run, orchestrator.get_sources_status())
-                    sources = future.result(timeout=30)
-            else:
-                sources = loop.run_until_complete(orchestrator.get_sources_status())
-        except RuntimeError:
-            sources = asyncio.run(orchestrator.get_sources_status())
-
+        sources = await orchestrator.get_sources_status()
         return {"sources": sources}

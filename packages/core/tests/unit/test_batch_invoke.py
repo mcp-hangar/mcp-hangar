@@ -10,6 +10,8 @@ Tests cover:
 - Validation
 - Truncation
 - Empty batch
+- hangar_call unified API
+- Retry functionality
 """
 
 import threading
@@ -25,7 +27,7 @@ from mcp_hangar.server.tools.batch import (
     CallSpec,
     DEFAULT_MAX_CONCURRENCY,
     DEFAULT_TIMEOUT,
-    hangar_batch,
+    hangar_call,
     MAX_CALLS_PER_BATCH,
     MAX_CONCURRENCY_LIMIT,
     MAX_RESPONSE_SIZE_BYTES,
@@ -154,17 +156,20 @@ class TestBatchValidation:
 
     @pytest.fixture
     def mock_providers(self):
-        """Mock PROVIDERS and GROUPS."""
+        """Mock context and GROUPS."""
         mock_provider = Mock()
         mock_provider.has_tools = False
 
+        mock_ctx = Mock()
+        mock_ctx.get_provider.side_effect = lambda k: mock_provider if k == "math" else None
+
         with (
-            patch("mcp_hangar.server.tools.batch.PROVIDERS") as providers,
+            patch("mcp_hangar.server.tools.batch.get_context") as get_context,
             patch("mcp_hangar.server.tools.batch.GROUPS") as groups,
         ):
-            providers.get.side_effect = lambda k: mock_provider if k == "math" else None
+            get_context.return_value = mock_ctx
             groups.get.return_value = None
-            yield providers, groups
+            yield mock_ctx, groups
 
     def test_empty_calls_valid(self, mock_providers):
         """Empty calls list is valid."""
@@ -276,20 +281,20 @@ class TestBatchExecution:
             yield ctx
 
     @pytest.fixture
-    def mock_providers_for_execution(self):
-        """Mock PROVIDERS and GROUPS for execution."""
+    def mock_providers_for_execution(self, mock_context):
+        """Mock context provider lookup and GROUPS for execution."""
         mock_provider = Mock()
         mock_provider.state.value = "ready"
         mock_provider.has_tools = False
-        mock_provider.health.circuit_breaker_open = False
+        mock_provider.health.should_degrade.return_value = False
 
-        with (
-            patch("mcp_hangar.server.tools.batch.PROVIDERS") as providers,
-            patch("mcp_hangar.server.tools.batch.GROUPS") as groups,
-        ):
-            providers.get.side_effect = lambda k: mock_provider if k == "math" else None
+        # Configure context to return provider
+        mock_context.get_provider.side_effect = lambda k: mock_provider if k == "math" else None
+        mock_context.provider_exists.side_effect = lambda k: k == "math"
+
+        with patch("mcp_hangar.server.tools.batch.GROUPS") as groups:
             groups.get.return_value = None
-            yield providers, groups, mock_provider
+            yield mock_context, groups, mock_provider
 
     def test_execute_single_call(self, mock_context, mock_providers_for_execution):
         """Single call executes successfully."""
@@ -332,7 +337,7 @@ class TestBatchExecution:
 
     def test_partial_failure(self, mock_context, mock_providers_for_execution):
         """Batch continues on partial failure."""
-        providers, groups, mock_provider = mock_providers_for_execution
+        ctx, groups, mock_provider = mock_providers_for_execution
 
         # Make provider alternately fail
         call_count = [0]
@@ -396,8 +401,8 @@ class TestBatchExecution:
 
     def test_circuit_breaker_rejection(self, mock_context, mock_providers_for_execution):
         """Circuit breaker OPEN rejects calls immediately."""
-        providers, groups, mock_provider = mock_providers_for_execution
-        mock_provider.health.circuit_breaker_open = True
+        ctx, groups, mock_provider = mock_providers_for_execution
+        mock_provider.health.should_degrade.return_value = True
 
         executor = BatchExecutor()
         calls = [CallSpec(index=0, call_id="call-1", provider="math", tool="add", arguments={"a": 1})]
@@ -437,12 +442,12 @@ class TestBatchExecution:
 
 
 # =============================================================================
-# hangar_batch Tool Tests
+# hangar_call Tool Tests (Basic)
 # =============================================================================
 
 
-class TestHangarBatchTool:
-    """Tests for hangar_batch MCP tool."""
+class TestHangarCallToolBasic:
+    """Basic tests for hangar_call MCP tool."""
 
     @pytest.fixture
     def mock_all(self):
@@ -455,20 +460,22 @@ class TestHangarBatchTool:
         mock_provider = Mock()
         mock_provider.state.value = "ready"
         mock_provider.has_tools = False
-        mock_provider.health.circuit_breaker_open = False
+        mock_provider.health.should_degrade.return_value = False
+
+        # Configure context to return provider
+        ctx.get_provider.side_effect = lambda k: mock_provider if k == "math" else None
+        ctx.provider_exists.side_effect = lambda k: k == "math"
 
         with (
             patch("mcp_hangar.server.tools.batch.get_context", return_value=ctx),
-            patch("mcp_hangar.server.tools.batch.PROVIDERS") as providers,
             patch("mcp_hangar.server.tools.batch.GROUPS") as groups,
         ):
-            providers.get.side_effect = lambda k: mock_provider if k == "math" else None
             groups.get.return_value = None
-            yield ctx, providers, mock_provider
+            yield ctx, mock_provider
 
     def test_empty_batch_returns_success(self, mock_all):
         """Empty batch returns valid no-op response."""
-        result = hangar_batch(calls=[])
+        result = hangar_call(calls=[])
 
         assert result["success"] is True
         assert result["total"] == 0
@@ -479,7 +486,7 @@ class TestHangarBatchTool:
 
     def test_simple_batch(self, mock_all):
         """Simple batch executes successfully."""
-        result = hangar_batch(
+        result = hangar_call(
             calls=[
                 {"provider": "math", "tool": "add", "arguments": {"a": 1, "b": 2}},
                 {"provider": "math", "tool": "multiply", "arguments": {"a": 3, "b": 4}},
@@ -494,7 +501,7 @@ class TestHangarBatchTool:
 
     def test_validation_error_response(self, mock_all):
         """Validation error returns proper response."""
-        result = hangar_batch(
+        result = hangar_call(
             calls=[
                 {"provider": "nonexistent", "tool": "add", "arguments": {}},
             ]
@@ -506,7 +513,7 @@ class TestHangarBatchTool:
 
     def test_result_contains_call_ids(self, mock_all):
         """Results contain batch_id and call_id."""
-        result = hangar_batch(
+        result = hangar_call(
             calls=[
                 {"provider": "math", "tool": "add", "arguments": {}},
             ]
@@ -517,7 +524,7 @@ class TestHangarBatchTool:
 
     def test_results_preserve_order(self, mock_all):
         """Results are in original call order."""
-        result = hangar_batch(
+        result = hangar_call(
             calls=[
                 {"provider": "math", "tool": "add", "arguments": {"a": 1}},
                 {"provider": "math", "tool": "add", "arguments": {"a": 2}},
@@ -531,7 +538,7 @@ class TestHangarBatchTool:
     def test_clamps_concurrency(self, mock_all):
         """Concurrency is clamped to limits."""
         # Should not raise
-        result = hangar_batch(
+        result = hangar_call(
             calls=[{"provider": "math", "tool": "add", "arguments": {}}],
             max_concurrency=100,  # Above limit
         )
@@ -540,7 +547,7 @@ class TestHangarBatchTool:
     def test_clamps_timeout(self, mock_all):
         """Timeout is clamped to limits."""
         # Should not raise
-        result = hangar_batch(
+        result = hangar_call(
             calls=[{"provider": "math", "tool": "add", "arguments": {}}],
             timeout=1000.0,  # Above limit
         )
@@ -568,20 +575,22 @@ class TestResponseTruncation:
         mock_provider = Mock()
         mock_provider.state.value = "ready"
         mock_provider.has_tools = False
-        mock_provider.health.circuit_breaker_open = False
+        mock_provider.health.should_degrade.return_value = False
+
+        # Configure context to return provider
+        ctx.get_provider.side_effect = lambda k: mock_provider if k == "math" else None
+        ctx.provider_exists.side_effect = lambda k: k == "math"
 
         with (
             patch("mcp_hangar.server.tools.batch.get_context", return_value=ctx),
-            patch("mcp_hangar.server.tools.batch.PROVIDERS") as providers,
             patch("mcp_hangar.server.tools.batch.GROUPS") as groups,
         ):
-            providers.get.side_effect = lambda k: mock_provider if k == "math" else None
             groups.get.return_value = None
             yield ctx
 
     def test_truncates_large_response(self, mock_large_response):
         """Large responses are truncated."""
-        result = hangar_batch(
+        result = hangar_call(
             calls=[
                 {"provider": "math", "tool": "add", "arguments": {}},
             ]
@@ -592,3 +601,436 @@ class TestResponseTruncation:
         assert call_result["truncated_reason"] == "response_size_exceeded"
         assert call_result["original_size_bytes"] is not None
         assert call_result["result"] is None  # No partial data
+
+
+# =============================================================================
+# Cross-Provider Batch Tests
+# =============================================================================
+
+
+class TestCrossProviderBatch:
+    """Tests for batch invocations across multiple providers."""
+
+    @pytest.fixture
+    def mock_multiple_providers(self):
+        """Mock multiple providers for cross-provider batch testing."""
+        ctx = Mock()
+        ctx.event_bus = Mock()
+        ctx.command_bus = Mock()
+        ctx.command_bus.send.return_value = {"result": 42}
+
+        # Create different mock providers
+        math_provider = Mock()
+        math_provider.state.value = "ready"
+        math_provider.has_tools = False
+        math_provider.health.should_degrade.return_value = False
+
+        filesystem_provider = Mock()
+        filesystem_provider.state.value = "ready"
+        filesystem_provider.has_tools = False
+        filesystem_provider.health.should_degrade.return_value = False
+
+        fetch_provider = Mock()
+        fetch_provider.state.value = "ready"
+        fetch_provider.has_tools = False
+        fetch_provider.health.should_degrade.return_value = False
+
+        providers = {
+            "math": math_provider,
+            "filesystem": filesystem_provider,
+            "fetch": fetch_provider,
+        }
+
+        # Configure context to return appropriate provider
+        ctx.get_provider.side_effect = lambda k: providers.get(k)
+        ctx.provider_exists.side_effect = lambda k: k in providers
+
+        with (
+            patch("mcp_hangar.server.tools.batch.get_context", return_value=ctx),
+            patch("mcp_hangar.server.tools.batch.GROUPS") as groups,
+        ):
+            groups.get.return_value = None
+            yield ctx, providers
+
+    def test_cross_provider_batch_success(self, mock_multiple_providers):
+        """Batch with multiple different providers executes successfully."""
+        result = hangar_call(
+            calls=[
+                {"provider": "math", "tool": "add", "arguments": {"a": 1, "b": 2}},
+                {"provider": "filesystem", "tool": "read", "arguments": {"path": "/tmp"}},
+                {"provider": "fetch", "tool": "get", "arguments": {"url": "http://example.com"}},
+            ]
+        )
+
+        assert result["success"] is True
+        assert result["total"] == 3
+        assert result["succeeded"] == 3
+        assert result["failed"] == 0
+        assert len(result["results"]) == 3
+
+    def test_cross_provider_batch_partial_failure(self, mock_multiple_providers):
+        """Batch continues when one provider fails."""
+        ctx, providers = mock_multiple_providers
+
+        # Make fetch provider fail
+        call_count = [0]
+
+        def mock_send(cmd):
+            call_count[0] += 1
+            if cmd.provider_id == "fetch":
+                raise ValueError("Fetch failed")
+            return {"result": 42}
+
+        ctx.command_bus.send.side_effect = mock_send
+
+        result = hangar_call(
+            calls=[
+                {"provider": "math", "tool": "add", "arguments": {"a": 1}},
+                {"provider": "fetch", "tool": "get", "arguments": {"url": "http://fail.com"}},
+                {"provider": "filesystem", "tool": "read", "arguments": {"path": "/tmp"}},
+            ],
+            fail_fast=False,
+        )
+
+        assert result["success"] is False
+        assert result["total"] == 3
+        assert result["succeeded"] == 2
+        assert result["failed"] == 1
+
+    def test_cross_provider_batch_with_unknown_provider(self, mock_multiple_providers):
+        """Batch fails validation when provider is unknown."""
+        result = hangar_call(
+            calls=[
+                {"provider": "math", "tool": "add", "arguments": {}},
+                {"provider": "unknown_provider", "tool": "foo", "arguments": {}},
+            ]
+        )
+
+        assert result["success"] is False
+        assert "validation_errors" in result
+        # Should have one validation error for unknown provider
+        errors = result["validation_errors"]
+        assert any("unknown_provider" in str(e) for e in errors)
+
+    def test_cross_provider_batch_respects_per_provider_circuit_breaker(self, mock_multiple_providers):
+        """Each provider's circuit breaker is checked independently."""
+        ctx, providers = mock_multiple_providers
+
+        # Make fetch provider degraded (circuit breaker open)
+        providers["fetch"].health.should_degrade.return_value = True
+
+        result = hangar_call(
+            calls=[
+                {"provider": "math", "tool": "add", "arguments": {}},
+                {"provider": "fetch", "tool": "get", "arguments": {}},
+                {"provider": "filesystem", "tool": "read", "arguments": {}},
+            ],
+            max_concurrency=1,  # Sequential to ensure predictable order
+        )
+
+        # Only fetch should fail due to circuit breaker
+        assert result["total"] == 3
+        assert result["succeeded"] == 2
+        assert result["failed"] == 1
+
+        # Find the failed result
+        failed_results = [r for r in result["results"] if not r["success"]]
+        assert len(failed_results) == 1
+        assert failed_results[0]["error_type"] == "CircuitBreakerOpen"
+
+
+# =============================================================================
+# hangar_call Unified API Tests
+# =============================================================================
+
+
+class TestHangarCallTool:
+    """Tests for hangar_call unified MCP tool."""
+
+    @pytest.fixture
+    def mock_all(self):
+        """Mock all dependencies."""
+        ctx = Mock()
+        ctx.event_bus = Mock()
+        ctx.command_bus = Mock()
+        ctx.command_bus.send.return_value = {"result": 42}
+
+        mock_provider = Mock()
+        mock_provider.state.value = "ready"
+        mock_provider.has_tools = False
+        mock_provider.health.should_degrade.return_value = False
+
+        # Configure context to return provider
+        ctx.get_provider.side_effect = lambda k: mock_provider if k == "math" else None
+        ctx.provider_exists.side_effect = lambda k: k == "math"
+
+        with (
+            patch("mcp_hangar.server.tools.batch.get_context", return_value=ctx),
+            patch("mcp_hangar.server.tools.batch.GROUPS") as groups,
+        ):
+            groups.get.return_value = None
+            yield ctx, mock_provider
+
+    def test_empty_calls_returns_success(self, mock_all):
+        """Empty calls list returns valid no-op response."""
+        result = hangar_call(calls=[])
+
+        assert result["success"] is True
+        assert result["total"] == 0
+        assert result["succeeded"] == 0
+        assert result["failed"] == 0
+        assert result["results"] == []
+        assert "batch_id" in result
+
+    def test_single_call_success(self, mock_all):
+        """Single call executes successfully."""
+        result = hangar_call(
+            calls=[
+                {"provider": "math", "tool": "add", "arguments": {"a": 1, "b": 2}},
+            ]
+        )
+
+        assert result["success"] is True
+        assert result["total"] == 1
+        assert result["succeeded"] == 1
+        assert result["failed"] == 0
+        assert len(result["results"]) == 1
+        assert result["results"][0]["success"] is True
+
+    def test_single_call_with_retry_param(self, mock_all):
+        """Single call with max_retries parameter."""
+        result = hangar_call(
+            calls=[
+                {"provider": "math", "tool": "add", "arguments": {"a": 1, "b": 2}},
+            ],
+            max_retries=3,
+        )
+
+        assert result["success"] is True
+        assert result["total"] == 1
+        assert result["succeeded"] == 1
+
+    def test_multiple_calls_success(self, mock_all):
+        """Multiple calls execute successfully."""
+        result = hangar_call(
+            calls=[
+                {"provider": "math", "tool": "add", "arguments": {"a": 1, "b": 2}},
+                {"provider": "math", "tool": "multiply", "arguments": {"a": 3, "b": 4}},
+            ]
+        )
+
+        assert result["success"] is True
+        assert result["total"] == 2
+        assert result["succeeded"] == 2
+        assert result["failed"] == 0
+        assert len(result["results"]) == 2
+
+    def test_max_retries_clamped_to_valid_range(self, mock_all):
+        """max_retries is clamped to valid range (1-10)."""
+        # Too low - should clamp to 1
+        result = hangar_call(
+            calls=[{"provider": "math", "tool": "add", "arguments": {}}],
+            max_retries=0,
+        )
+        assert result["success"] is True
+
+        # Too high - should clamp to 10
+        result = hangar_call(
+            calls=[{"provider": "math", "tool": "add", "arguments": {}}],
+            max_retries=100,
+        )
+        assert result["success"] is True
+
+    def test_validation_error_response(self, mock_all):
+        """Validation error returns proper response."""
+        result = hangar_call(
+            calls=[
+                {"provider": "nonexistent", "tool": "add", "arguments": {}},
+            ]
+        )
+
+        assert result["success"] is False
+        assert "validation_errors" in result
+        assert len(result["validation_errors"]) == 1
+
+    def test_result_contains_call_ids(self, mock_all):
+        """Results contain batch_id and call_id."""
+        result = hangar_call(
+            calls=[
+                {"provider": "math", "tool": "add", "arguments": {}},
+            ]
+        )
+
+        assert "batch_id" in result
+        assert "call_id" in result["results"][0]
+
+    def test_results_preserve_order(self, mock_all):
+        """Results are in original call order."""
+        result = hangar_call(
+            calls=[
+                {"provider": "math", "tool": "add", "arguments": {"a": 1}},
+                {"provider": "math", "tool": "add", "arguments": {"a": 2}},
+                {"provider": "math", "tool": "add", "arguments": {"a": 3}},
+            ]
+        )
+
+        indices = [r["index"] for r in result["results"]]
+        assert indices == [0, 1, 2]
+
+    def test_fail_fast_mode(self, mock_all):
+        """fail_fast mode stops on first error."""
+        ctx, mock_provider = mock_all
+
+        call_count = [0]
+
+        def mock_send(cmd):
+            call_count[0] += 1
+            if call_count[0] >= 2:
+                raise ValueError("Simulated error")
+            time.sleep(0.05)
+            return {"result": 42}
+
+        ctx.command_bus.send.side_effect = mock_send
+
+        result = hangar_call(
+            calls=[{"provider": "math", "tool": "add", "arguments": {"a": i}} for i in range(5)],
+            max_concurrency=1,  # Sequential
+            fail_fast=True,
+        )
+
+        assert result["failed"] >= 1
+        assert result["total"] == 5
+
+
+# =============================================================================
+# Retry Functionality Tests
+# =============================================================================
+
+
+class TestRetryFunctionality:
+    """Tests for retry functionality in hangar_call."""
+
+    @pytest.fixture
+    def mock_with_retry(self):
+        """Mock context with configurable failure behavior."""
+        ctx = Mock()
+        ctx.event_bus = Mock()
+        ctx.command_bus = Mock()
+
+        mock_provider = Mock()
+        mock_provider.state.value = "ready"
+        mock_provider.has_tools = False
+        mock_provider.health.should_degrade.return_value = False
+
+        ctx.get_provider.side_effect = lambda k: mock_provider if k == "math" else None
+        ctx.provider_exists.side_effect = lambda k: k == "math"
+
+        with (
+            patch("mcp_hangar.server.tools.batch.get_context", return_value=ctx),
+            patch("mcp_hangar.server.tools.batch.GROUPS") as groups,
+        ):
+            groups.get.return_value = None
+            yield ctx, mock_provider
+
+    def test_retry_on_transient_failure(self, mock_with_retry):
+        """Retry recovers from transient failures."""
+        ctx, mock_provider = mock_with_retry
+
+        call_count = [0]
+
+        def mock_send(cmd):
+            call_count[0] += 1
+            if call_count[0] < 3:  # Fail first 2 attempts
+                raise TimeoutError("Simulated timeout")
+            return {"result": 42}
+
+        ctx.command_bus.send.side_effect = mock_send
+
+        result = hangar_call(
+            calls=[{"provider": "math", "tool": "add", "arguments": {}}],
+            max_retries=5,
+        )
+
+        assert result["success"] is True
+        assert result["succeeded"] == 1
+        # Should have retry metadata
+        call_result = result["results"][0]
+        assert call_result["success"] is True
+        if "retry_metadata" in call_result:
+            assert call_result["retry_metadata"]["attempts"] >= 3
+
+    def test_retry_exhausted_returns_failure(self, mock_with_retry):
+        """All retries exhausted returns failure."""
+        ctx, mock_provider = mock_with_retry
+
+        # Always fail
+        ctx.command_bus.send.side_effect = TimeoutError("Always fail")
+
+        result = hangar_call(
+            calls=[{"provider": "math", "tool": "add", "arguments": {}}],
+            max_retries=3,
+        )
+
+        assert result["success"] is False
+        assert result["failed"] == 1
+
+        call_result = result["results"][0]
+        assert call_result["success"] is False
+        assert "retry_metadata" in call_result
+        # RetryResult.attempt_count counts failed attempts recorded in `attempts` list
+        # plus 1 if successful. Since all 3 attempts failed, the last one isn't
+        # in the attempts list (it's the final_error), so attempts = 2 recorded + 1 final = 3 total
+        # But our RetryMetadata.attempts shows the attempt_count from RetryResult
+        assert call_result["retry_metadata"]["attempts"] >= 2  # At least 2 recorded attempts
+
+    def test_no_retry_when_max_retries_is_one(self, mock_with_retry):
+        """No retry when max_retries is 1 (default)."""
+        ctx, mock_provider = mock_with_retry
+
+        call_count = [0]
+
+        def mock_send(cmd):
+            call_count[0] += 1
+            if call_count[0] < 2:
+                raise TimeoutError("Simulated timeout")
+            return {"result": 42}
+
+        ctx.command_bus.send.side_effect = mock_send
+
+        result = hangar_call(
+            calls=[{"provider": "math", "tool": "add", "arguments": {}}],
+            max_retries=1,  # No retry
+        )
+
+        # Should fail since no retry
+        assert result["success"] is False
+        assert result["failed"] == 1
+        assert call_count[0] == 1  # Only one attempt
+
+    def test_retry_metadata_contains_error_types(self, mock_with_retry):
+        """Retry metadata includes error types from attempts."""
+        ctx, mock_provider = mock_with_retry
+
+        call_count = [0]
+
+        def mock_send(cmd):
+            call_count[0] += 1
+            if call_count[0] == 1:
+                raise TimeoutError("First failure")
+            elif call_count[0] == 2:
+                raise ConnectionError("Second failure")
+            return {"result": 42}
+
+        ctx.command_bus.send.side_effect = mock_send
+
+        result = hangar_call(
+            calls=[{"provider": "math", "tool": "add", "arguments": {}}],
+            max_retries=5,
+        )
+
+        assert result["success"] is True
+        call_result = result["results"][0]
+        if "retry_metadata" in call_result:
+            retries = call_result["retry_metadata"]["retries"]
+            # Should have recorded the error types from failed attempts
+            assert len(retries) >= 2

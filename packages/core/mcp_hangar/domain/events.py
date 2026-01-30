@@ -655,3 +655,60 @@ class BatchCallCompleted(DomainEvent):
 
     def __post_init__(self):
         super().__init__()
+
+
+# =============================================================================
+# Hot Load Events
+# =============================================================================
+
+
+@dataclass
+class ProviderLoadAttempted(DomainEvent):
+    """Published when a provider load is attempted."""
+
+    provider_name: str
+    user_id: str | None
+
+    def __post_init__(self):
+        super().__init__()
+
+
+@dataclass
+class ProviderHotLoaded(DomainEvent):
+    """Published when a provider is successfully hot-loaded from the registry."""
+
+    provider_id: str
+    provider_name: str
+    source: str
+    verified: bool
+    user_id: str | None
+    tools_count: int
+    load_duration_ms: float
+
+    def __post_init__(self):
+        super().__init__()
+
+
+@dataclass
+class ProviderLoadFailed(DomainEvent):
+    """Published when a provider load fails."""
+
+    provider_name: str
+    reason: str
+    user_id: str | None
+    error_type: str | None = None
+
+    def __post_init__(self):
+        super().__init__()
+
+
+@dataclass
+class ProviderHotUnloaded(DomainEvent):
+    """Published when a hot-loaded provider is unloaded."""
+
+    provider_id: str
+    user_id: str | None
+    lifetime_seconds: float
+
+    def __post_init__(self):
+        super().__init__()

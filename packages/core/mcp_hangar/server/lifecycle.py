@@ -21,9 +21,9 @@ import yaml
 
 from ..logging_config import get_logger, setup_logging
 from .bootstrap import ApplicationContext, bootstrap
-from .cli import CLIConfig
+from .cli_legacy import CLIConfig
 from .config import load_config_from_file
-from .state import get_discovery_orchestrator
+from .state import get_discovery_orchestrator, get_runtime_providers
 
 if TYPE_CHECKING:
     pass
@@ -239,9 +239,10 @@ class ServerLifecycle:
         """Graceful shutdown of all components.
 
         Stops:
+        - Runtime (hot-loaded) providers
         - Background workers
         - Discovery orchestrator
-        - All providers
+        - All configured providers
 
         This method is safe to call multiple times.
         """
@@ -252,10 +253,46 @@ class ServerLifecycle:
         self._shutdown_requested = True
         logger.info("server_lifecycle_shutdown_start")
 
+        self._cleanup_runtime_providers()
+
         self._context.shutdown()
         self._running = False
 
         logger.info("server_lifecycle_shutdown_complete")
+
+    def _cleanup_runtime_providers(self) -> None:
+        """Cleanup all hot-loaded runtime providers."""
+        runtime_store = get_runtime_providers()
+        if runtime_store.count() == 0:
+            return
+
+        logger.info(
+            "cleaning_up_runtime_providers",
+            count=runtime_store.count(),
+        )
+
+        for provider, metadata in runtime_store.list_all():
+            try:
+                provider.shutdown()
+            except Exception as e:
+                logger.warning(
+                    "runtime_provider_shutdown_error",
+                    provider_id=str(provider.provider_id),
+                    error=str(e),
+                )
+
+            if metadata.cleanup:
+                try:
+                    metadata.cleanup()
+                except Exception as e:
+                    logger.warning(
+                        "runtime_provider_cleanup_error",
+                        provider_id=str(provider.provider_id),
+                        error=str(e),
+                    )
+
+        runtime_store.clear()
+        logger.info("runtime_providers_cleaned_up")
 
     def _create_auth_app(self, inner_app, auth_components):
         """Create auth-enabled ASGI app wrapper.

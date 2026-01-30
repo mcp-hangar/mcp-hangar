@@ -24,6 +24,7 @@ from ..application.discovery import DiscoveryOrchestrator
 from ..application.sagas import GroupRebalanceSaga
 from ..bootstrap.runtime import create_runtime
 from ..domain.model import ProviderGroup
+from ..infrastructure.runtime_store import RuntimeProviderStore
 from ..logging_config import get_logger
 
 if TYPE_CHECKING:
@@ -85,6 +86,9 @@ PROVIDERS = ProviderDict(PROVIDER_REPOSITORY)
 # Provider Groups storage
 GROUPS: dict[str, ProviderGroup] = {}
 
+# Runtime (hot-loaded) providers storage
+RUNTIME_PROVIDERS: RuntimeProviderStore = RuntimeProviderStore()
+
 # Saga and discovery instances (initialized in main())
 _GROUP_REBALANCE_SAGA: GroupRebalanceSaga | None = None
 _DISCOVERY_ORCHESTRATOR: DiscoveryOrchestrator | None = None
@@ -115,3 +119,8 @@ def set_group_rebalance_saga(saga: GroupRebalanceSaga | None) -> None:
 def get_group_rebalance_saga() -> GroupRebalanceSaga | None:
     """Get the group rebalance saga instance."""
     return _GROUP_REBALANCE_SAGA
+
+
+def get_runtime_providers() -> RuntimeProviderStore:
+    """Get the runtime providers store."""
+    return RUNTIME_PROVIDERS

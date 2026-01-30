@@ -1,110 +1,138 @@
 # Quick Start
 
-## Basic Usage
+Get MCP Hangar running with Claude Desktop in under 5 minutes.
 
-### 1. Create Configuration
+## Prerequisites
 
-Create a `config.yaml` file:
+- Python 3.11 or later
+- Claude Desktop installed ([download](https://claude.ai/download))
+- Node.js (for MCP provider packages)
+
+## Installation
+
+```bash
+pip install mcp-hangar
+```
+
+## Interactive Setup
+
+Run the setup wizard:
+
+```bash
+mcp-hangar init
+```
+
+The wizard will:
+
+1. **Detect Claude Desktop** - finds your Claude Desktop config automatically
+2. **Select providers** - choose which MCP providers to enable (file access, web requests, memory, etc.)
+3. **Configure** - collect any required API keys or paths
+4. **Update Claude Desktop** - automatically configure Claude to use MCP Hangar
+
+**Restart Claude Desktop** after the wizard completes.
+
+## Verify It Works
+
+Check that your providers are configured:
+
+```bash
+mcp-hangar status
+```
+
+You should see your configured providers listed (they'll show as COLD until first use).
+
+## Adding More Providers
+
+Add providers anytime with:
+
+```bash
+mcp-hangar add github     # GitHub integration (needs token)
+mcp-hangar add sqlite     # SQLite database access
+mcp-hangar add postgres   # PostgreSQL access
+```
+
+## Available Bundles
+
+Use bundles to quickly configure common setups:
+
+| Bundle | Providers | Use Case |
+|--------|-----------|----------|
+| `starter` | filesystem, fetch, memory | General everyday use |
+| `developer` | starter + github, git | Software development |
+| `data` | starter + sqlite, postgres | Data analysis |
+
+```bash
+# Start fresh with a bundle
+mcp-hangar init --bundle=developer
+```
+
+## Manual Configuration
+
+If you prefer manual setup or need advanced configuration:
+
+### 1. Create config file
+
+Create `~/.config/mcp-hangar/config.yaml`:
 
 ```yaml
 providers:
-  # Subprocess provider
-  math:
+  filesystem:
     mode: subprocess
-    command: [python, -m, examples.provider_math.server]
-    idle_ttl_s: 180
-    tools:
-      - name: add
-        description: "Add two numbers"
-        inputSchema:
-          type: object
-          properties:
-            a: { type: number }
-            b: { type: number }
-          required: [a, b]
+    command: [npx, -y, "@anthropic/mcp-server-filesystem"]
+    args: [/Users/your-username/Documents]
+    idle_ttl_s: 300
 
-  # Container provider
-  sqlite:
-    mode: container
-    image: localhost/mcp-sqlite:latest
-    volumes:
-      - "/absolute/path/to/data:/data:rw"
-    network: bridge
+  fetch:
+    mode: subprocess
+    command: [npx, -y, "@anthropic/mcp-server-fetch"]
     idle_ttl_s: 300
 ```
 
-!!! warning "Volume Paths"
-    Always use absolute paths for volume mounts. Relative paths fail when MCP clients start the server from different directories.
+### 2. Update Claude Desktop config
 
-### 2. Start the Server
-
-```bash
-# Stdio mode (for Claude Desktop, etc.)
-mcp-hangar --config config.yaml
-
-# HTTP mode (for LM Studio, web clients)
-mcp-hangar --config config.yaml --http
-# Server at http://localhost:8000/mcp
-```
-
-### 3. Configure Claude Desktop
-
-Add to your Claude Desktop configuration:
+Add to your Claude Desktop config (`~/Library/Application Support/Claude/claude_desktop_config.json` on macOS):
 
 ```json
 {
   "mcpServers": {
     "mcp-hangar": {
       "command": "mcp-hangar",
-      "args": ["--config", "/path/to/config.yaml"]
+      "args": ["serve", "--config", "/Users/your-username/.config/mcp-hangar/config.yaml"]
     }
   }
 }
 ```
 
-## Registry Tools
+### 3. Restart Claude Desktop
 
-Once connected, you have access to these tools:
+## Troubleshooting
 
-| Tool | Description |
-|------|-------------|
-| `hangar_list` | List all providers and their status |
-| `hangar_start` | Manually start a provider |
-| `hangar_stop` | Stop a running provider |
-| `hangar_invoke` | Invoke a tool on a provider |
-| `hangar_invoke_ex` | Invoke with retry and rich metadata |
-| `hangar_tools` | Get available tools for a provider |
-| `hangar_details` | Get detailed info about a provider |
-| `hangar_health` | Check provider health |
-| `registry_status` | Dashboard view of all providers |
+### Claude Desktop not found
 
-## Example Workflow
+If the wizard can't find Claude Desktop:
 
-```python
-# 1. List available providers (containers stay OFF)
-hangar_list()
-# → math: cold, sqlite: cold
-
-# 2. Check available tools (still cold)
-hangar_tools(provider="sqlite")
-# → [execute, query, ...]
-
-# 3. Invoke a tool (auto-starts provider)
-hangar_invoke(
-    provider="sqlite",
-    tool="execute",
-    arguments={"sql": "CREATE TABLE users (id INTEGER PRIMARY KEY, name TEXT)"}
-)
-# Provider starts → executes → returns result
-
-# 4. Check status
-registry_status()
-# → ✅ sqlite  ready   last: 2s ago
-# → ⏸️  math    cold    Will start on request
+```bash
+mcp-hangar init --claude-config /path/to/claude_desktop_config.json
 ```
+
+### Provider won't start
+
+Check the provider status for errors:
+
+```bash
+mcp-hangar status provider-name
+```
+
+### Permission denied
+
+Make sure you have write access to the config directories:
+
+- MCP Hangar config: `~/.config/mcp-hangar/`
+- Claude Desktop config: `~/Library/Application Support/Claude/` (macOS)
 
 ## Next Steps
 
-- [Container Guide](../guides/CONTAINERS.md) — Setting up container providers
-- [Observability](../guides/OBSERVABILITY.md) — Metrics and monitoring
-- [Architecture](../architecture/OVERVIEW.md) — Understanding the design
+- [Configuration Reference](../guides/CONFIGURATION.md) - All config options
+- [Container Providers](../guides/CONTAINERS.md) - Using Docker/Podman providers
+- [Observability](../guides/OBSERVABILITY.md) - Metrics and monitoring
+- [Architecture](../architecture/OVERVIEW.md) - Understanding the design

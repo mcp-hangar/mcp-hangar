@@ -429,7 +429,7 @@ class TestMapExceptionToHangarError:
         original = Exception("ClientError: malformed JSON response")
         result = map_exception_to_hangar_error(original, provider="test", operation="invoke")
         # JSON-related errors map to ProviderProtocolError, which is retryable
-        assert isinstance(result, (ProviderProtocolError, TransientError))
+        assert isinstance(result, ProviderProtocolError | TransientError)
 
     def test_socket_timeout_mapping(self):
         """Test socket timeout is mapped to TimeoutError."""

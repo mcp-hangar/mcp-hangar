@@ -21,6 +21,7 @@ from .input_validator import (
     ValidationResult,
 )
 from .rate_limiter import InMemoryRateLimiter, RateLimitConfig, RateLimiter, RateLimitResult
+from .redactor import OutputRedactor, RedactionPattern
 from .roles import (
     BUILTIN_ROLES,
     get_builtin_role,
@@ -70,6 +71,9 @@ __all__ = [
     "SecureEnvironment",
     "is_sensitive_key",
     "mask_sensitive_value",
+    # Redaction
+    "OutputRedactor",
+    "RedactionPattern",
     # Roles & Permissions
     "BUILTIN_ROLES",
     "PERMISSIONS",

@@ -29,6 +29,10 @@ dependencies = [
     "pyyaml>=6.0",
     "docker>=7.1.0",
     "aiosqlite>=0.19.0",
+    # CLI dependencies for interactive 5-minute experience
+    "typer>=0.12.0",
+    "rich>=13.0.0",
+    "questionary>=2.0.0",
 ]
 
 [project.optional-dependencies]
@@ -52,7 +56,7 @@ postgres = [
 ]
 
 [project.scripts]
-mcp-hangar = "mcp_hangar.server:main"
+mcp-hangar = "mcp_hangar.server.cli:cli_main"
 
 [project.urls]
 Homepage = "https://mcp-hangar.io"

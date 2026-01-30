@@ -37,7 +37,7 @@ from .bootstrap import (  # Internal functions exported for backward compatibili
     GC_WORKER_INTERVAL_SECONDS,
     HEALTH_CHECK_INTERVAL_SECONDS,
 )
-from .cli import CLIConfig, parse_args
+from .cli_legacy import CLIConfig, parse_args
 from .config import load_config, load_config_from_file, load_configuration
 from .lifecycle import run_server, ServerLifecycle
 from .state import COMMAND_BUS, EVENT_BUS, get_runtime, GROUPS, PROVIDER_REPOSITORY, PROVIDERS, QUERY_BUS
@@ -62,10 +62,30 @@ def _start_background_workers() -> None:
 def main():
     """CLI entry point for the registry server.
 
-    Parses command line arguments and runs the server.
+    This is the legacy entry point that uses argparse.
+    The new recommended entry point is cli_main() which uses typer
+    and provides subcommands (init, status, add, remove, serve).
+
+    For backward compatibility, this function still works and defaults
+    to server mode.
     """
     cli_config = parse_args()
     run_server(cli_config)
+
+
+def cli_main():
+    """New CLI entry point with subcommands.
+
+    This is the recommended entry point that provides:
+    - mcp-hangar init: Interactive setup wizard
+    - mcp-hangar status: Provider health dashboard
+    - mcp-hangar add: Add providers from registry
+    - mcp-hangar remove: Remove providers
+    - mcp-hangar serve: Start the MCP server (default)
+    """
+    from .cli import cli_main as _cli_main
+
+    _cli_main()
 
 
 # FastMCP server instance for backward compatibility
@@ -76,6 +96,7 @@ mcp = FastMCP("mcp-hangar")
 __all__ = [
     # Entry points
     "main",
+    "cli_main",
     "run_server",
     # Bootstrap
     "bootstrap",

@@ -13,12 +13,12 @@ The decorator is meant to be applied to functions already registered via
 Design notes:
 - The decorator takes callables for rate limiting, validation, and error mapping.
 - It keeps the wrapped function signature compatible with MCP tool calling.
-- There is no async support here (current tools are sync). If you add async tools,
-  we can extend this with an async-aware wrapper.
+- Supports both sync and async tool functions.
 """
 
 from __future__ import annotations
 
+import asyncio
 from collections.abc import Callable
 from dataclasses import dataclass
 from functools import wraps
@@ -87,45 +87,84 @@ def mcp_tool_wrapper(
     mapper = error_mapper or _default_error_mapper
 
     def decorator(func: F) -> F:
-        @wraps(func)
-        def wrapped(*args: Any, **kwargs: Any) -> Any:
-            # Rate limit first (cheapest check) to reduce abuse surface.
-            key = rate_limit_key(*args, **kwargs)
-            check_rate_limit(key)
+        is_async = asyncio.iscoroutinefunction(func)
 
-            # Validate inputs if provided.
-            if validate is not None:
-                validate(*args, **kwargs)
+        if is_async:
 
-            try:
-                return func(*args, **kwargs)
-            except Exception as exc:
-                # Optional error hook (e.g. security auditing).
-                if on_error is not None:
-                    try:
-                        on_error(
-                            exc,
-                            {
-                                "tool": tool_name,
-                                "rate_limit_key": key,
-                                "args_count": len(args),
-                                "kwargs_keys": list(kwargs.keys()),
-                            },
-                        )
-                    except (TypeError, ValueError, RuntimeError) as hook_err:
-                        # Never let the error hook override the original failure.
-                        # Log but don't propagate hook errors.
-                        logger.debug(
-                            "error_hook_failed",
-                            tool=tool_name,
-                            hook_error=str(hook_err),
-                        )
+            @wraps(func)
+            async def async_wrapped(*args: Any, **kwargs: Any) -> Any:
+                # Rate limit first (cheapest check) to reduce abuse surface.
+                key = rate_limit_key(*args, **kwargs)
+                check_rate_limit(key)
 
-                payload = mapper(exc)
-                # Return a stable, tool-friendly dict. MCP will surface this as tool error.
-                return payload.to_dict()
+                # Validate inputs if provided.
+                if validate is not None:
+                    validate(*args, **kwargs)
 
-        return wrapped  # type: ignore[misc]
+                try:
+                    return await func(*args, **kwargs)
+                except Exception as exc:
+                    # Optional error hook (e.g. security auditing).
+                    if on_error is not None:
+                        try:
+                            on_error(
+                                exc,
+                                {
+                                    "tool": tool_name,
+                                    "rate_limit_key": key,
+                                    "args_count": len(args),
+                                    "kwargs_keys": list(kwargs.keys()),
+                                },
+                            )
+                        except (TypeError, ValueError, RuntimeError) as hook_err:
+                            logger.debug(
+                                "error_hook_failed",
+                                tool=tool_name,
+                                hook_error=str(hook_err),
+                            )
+
+                    payload = mapper(exc)
+                    return payload.to_dict()
+
+            return async_wrapped  # type: ignore[return-value]
+        else:
+
+            @wraps(func)
+            def sync_wrapped(*args: Any, **kwargs: Any) -> Any:
+                # Rate limit first (cheapest check) to reduce abuse surface.
+                key = rate_limit_key(*args, **kwargs)
+                check_rate_limit(key)
+
+                # Validate inputs if provided.
+                if validate is not None:
+                    validate(*args, **kwargs)
+
+                try:
+                    return func(*args, **kwargs)
+                except Exception as exc:
+                    # Optional error hook (e.g. security auditing).
+                    if on_error is not None:
+                        try:
+                            on_error(
+                                exc,
+                                {
+                                    "tool": tool_name,
+                                    "rate_limit_key": key,
+                                    "args_count": len(args),
+                                    "kwargs_keys": list(kwargs.keys()),
+                                },
+                            )
+                        except (TypeError, ValueError, RuntimeError) as hook_err:
+                            logger.debug(
+                                "error_hook_failed",
+                                tool=tool_name,
+                                hook_error=str(hook_err),
+                            )
+
+                    payload = mapper(exc)
+                    return payload.to_dict()
+
+            return sync_wrapped  # type: ignore[return-value]
 
     return decorator
 
@@ -140,10 +179,10 @@ def key_per_provider(provider: str, *_: Any, **__: Any) -> str:
     return f"provider:{provider}"
 
 
-def key_registry_invoke(provider: str, tool: str, *_: Any, **__: Any) -> str:
+def key_hangar_call(provider: str, tool: str, *_: Any, **__: Any) -> str:
     """Rate limit key specialized for tool invocation (per provider)."""
     # Keep it coarse by default to avoid key explosion; include tool name if desired.
-    return f"registry_invoke:{provider}"
+    return f"hangar_call:{provider}"
 
 
 def chain_validators(*validators: Callable[..., None]) -> Callable[..., None]:

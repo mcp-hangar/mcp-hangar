@@ -40,10 +40,27 @@ providers:
 | `image` | Container image | required |
 | `volumes` | Mount points (`host:container:mode`) | `[]` |
 | `env` | Environment variables | `{}` |
-| `network` | `none`, `bridge`, `host` | `none` |
+| `network` | Network mode: `none`, `bridge`, `host` | `none` |
+| `network_mode` | Alias for `network` (Docker Compose compatibility) | `none` |
 | `read_only` | Read-only root filesystem | `true` |
 | `resources.memory` | Memory limit | `512m` |
 | `resources.cpu` | CPU limit | `1.0` |
+
+#### Network Modes
+
+- **`none`** (default): No network access. Most secure, use for providers that don't need external connectivity.
+- **`bridge`**: Isolated bridge network. Container can reach external services but is isolated from host network.
+- **`host`**: Share host network namespace. Required when provider needs to connect to services on localhost or has complex networking requirements.
+
+```yaml
+# Provider that needs to connect to local Prometheus/VictoriaMetrics
+prometheus:
+  mode: docker
+  image: ghcr.io/pab1it0/prometheus-mcp-server:latest
+  network_mode: host  # or network: host
+  env:
+    PROMETHEUS_URL: "https://victoriametrics.example.com"
+```
 
 ### Custom Build
 
@@ -73,11 +90,11 @@ sqlite:
 Tools: `query`, `execute`, `list-tables`, `describe-table`, `create-table`
 
 ```python
-registry_invoke(provider="sqlite", tool="execute",
-                arguments={"sql": "CREATE TABLE users (id INTEGER PRIMARY KEY, name TEXT)"})
+hangar_call(calls=[{"provider": "sqlite", "tool": "execute",
+                    "arguments": {"sql": "CREATE TABLE users (id INTEGER PRIMARY KEY, name TEXT)"}}])
 
-registry_invoke(provider="sqlite", tool="query",
-                arguments={"sql": "SELECT * FROM users"})
+hangar_call(calls=[{"provider": "sqlite", "tool": "query",
+                    "arguments": {"sql": "SELECT * FROM users"}}])
 ```
 
 ### Memory (Knowledge Graph)
@@ -93,10 +110,10 @@ memory:
 Tools: `create_entities`, `create_relations`, `search_nodes`, `read_graph`
 
 ```python
-registry_invoke(provider="memory", tool="create_entities",
-                arguments={"entities": [
-                    {"name": "Alice", "entityType": "Person", "observations": ["Engineer"]}
-                ]})
+hangar_call(calls=[{"provider": "memory", "tool": "create_entities",
+                    "arguments": {"entities": [
+                        {"name": "Alice", "entityType": "Person", "observations": ["Engineer"]}
+                    ]}}])
 ```
 
 ### Filesystem
@@ -123,8 +140,8 @@ fetch:
 Tools: `fetch`
 
 ```python
-registry_invoke(provider="fetch", tool="fetch",
-                arguments={"url": "https://api.example.com/data"})
+hangar_call(calls=[{"provider": "fetch", "tool": "fetch",
+                    "arguments": {"url": "https://api.example.com/data"}}])
 ```
 
 ## Troubleshooting
