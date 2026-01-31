@@ -13,7 +13,7 @@ from mcp.server.fastmcp import FastMCP
 
 from ...application.commands import StartProviderCommand
 from ...application.mcp.tooling import mcp_tool_wrapper
-from ...infrastructure.query_bus import GetProviderQuery, GetProviderToolsQuery
+from ...application.queries import GetProviderQuery, GetProviderToolsQuery
 from ..context import get_context
 from ..validation import check_rate_limit, tool_error_hook, tool_error_mapper, validate_provider_id_input
 

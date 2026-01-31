@@ -48,14 +48,12 @@ try:
     from opentelemetry.sdk.trace import TracerProvider
     from opentelemetry import trace
     from opentelemetry.trace.propagation.tracecontext import TraceContextTextMapPropagator
-    from opentelemetry.trace import Span, Status, StatusCode, Tracer
+    from opentelemetry.trace import Status, StatusCode
 
     OTEL_AVAILABLE = True
 except ImportError:
     OTEL_AVAILABLE = False
     trace = None
-    Tracer = None
-    Span = None
 
 # Try to import OTLP exporter
 try:

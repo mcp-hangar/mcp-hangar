@@ -284,10 +284,13 @@ class ConfigurationError(HangarError):
 
 
 @dataclass
-class ProviderNotFoundError(HangarError):
-    """Provider not found in registry.
+class RichProviderNotFoundError(HangarError):
+    """Provider not found in registry (rich UX version).
 
     The specified provider ID doesn't exist in the configuration.
+    Use this for user-facing error messages with recovery hints.
+
+    For domain logic, use mcp_hangar.domain.exceptions.ProviderNotFoundError.
     """
 
     available_providers: list[str] = field(default_factory=list)
@@ -327,11 +330,18 @@ class ProviderNotFoundError(HangarError):
         return best_match
 
 
+# Backward compatibility alias
+ProviderNotFoundError = RichProviderNotFoundError
+
+
 @dataclass
-class ToolNotFoundError(HangarError):
-    """Tool not found in provider's catalog.
+class RichToolNotFoundError(HangarError):
+    """Tool not found in provider's catalog (rich UX version).
 
     The specified tool doesn't exist on this provider.
+    Use this for user-facing error messages with recovery hints.
+
+    For domain logic, use mcp_hangar.domain.exceptions.ToolNotFoundError.
     """
 
     tool_name: str = ""
@@ -362,6 +372,10 @@ class ToolNotFoundError(HangarError):
             if target in name.lower() or name.lower() in target:
                 return name
         return None
+
+
+# Backward compatibility alias
+ToolNotFoundError = RichToolNotFoundError
 
 
 @dataclass
@@ -884,7 +898,7 @@ def _create_rate_limit_error(exc: Exception, provider: str, operation: str, cont
 
 def _create_provider_not_found_error(exc: Exception, provider: str, operation: str, context: dict) -> HangarError:
     """Create error for provider not found."""
-    return ProviderNotFoundError(
+    return RichProviderNotFoundError(
         message=f"Provider '{provider}' not found",
         provider=provider,
         operation=operation,
@@ -897,7 +911,7 @@ def _create_provider_not_found_error(exc: Exception, provider: str, operation: s
 def _create_tool_not_found_error(exc: Exception, provider: str, operation: str, context: dict) -> HangarError:
     """Create error for tool not found."""
     tool_name = context.get("tool_name", "")
-    return ToolNotFoundError(
+    return RichToolNotFoundError(
         message=f"Tool '{tool_name}' not found on provider '{provider}'",
         provider=provider,
         operation=operation,

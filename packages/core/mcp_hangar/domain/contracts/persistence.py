@@ -296,66 +296,6 @@ class IAuditRepository(Protocol):
         ...
 
 
-class IUnitOfWork(Protocol):
-    """Unit of Work pattern for transactional consistency.
-
-    Manages transactions across multiple repositories,
-    ensuring atomic commits or rollbacks.
-    """
-
-    async def __aenter__(self) -> "IUnitOfWork":
-        """Begin transaction."""
-        ...
-
-    async def __aexit__(self, exc_type, exc_val, exc_tb) -> None:
-        """End transaction - commit on success, rollback on exception."""
-        ...
-
-    async def commit(self) -> None:
-        """Explicitly commit the transaction."""
-        ...
-
-    async def rollback(self) -> None:
-        """Explicitly rollback the transaction."""
-        ...
-
-    @property
-    def providers(self) -> IProviderConfigRepository:
-        """Access provider config repository within transaction."""
-        ...
-
-    @property
-    def audit(self) -> IAuditRepository:
-        """Access audit repository within transaction."""
-        ...
-
-
-class IRecoveryService(Protocol):
-    """Service protocol for system recovery on startup.
-
-    Responsible for restoring system state from persistent storage.
-    """
-
-    async def recover_providers(self) -> list[str]:
-        """Recover all provider configurations from storage.
-
-        Loads saved configurations and registers them with
-        the provider repository.
-
-        Returns:
-            List of recovered provider IDs
-        """
-        ...
-
-    async def get_recovery_status(self) -> dict[str, Any]:
-        """Get status of last recovery operation.
-
-        Returns:
-            Dictionary with recovery metrics and status
-        """
-        ...
-
-
 class PersistenceError(Exception):
     """Base exception for persistence operations."""
 

@@ -11,10 +11,8 @@ These metrics complement mcp_hangar.metrics with observability-specific
 measurements useful for dashboards and alerting.
 """
 
-from dataclasses import dataclass
 from enum import Enum
 import threading
-from typing import Optional
 
 from mcp_hangar.logging_config import get_logger
 from mcp_hangar.metrics import Counter, Gauge, Histogram, REGISTRY
@@ -30,17 +28,6 @@ class CircuitState(Enum):
     HALF_OPEN = "half_open"  # Testing if recovered
 
 
-@dataclass
-class ColdStartTiming:
-    """Detailed timing for cold start phases."""
-
-    total_ms: float = 0.0
-    process_spawn_ms: float = 0.0
-    connection_ms: float = 0.0
-    tool_discovery_ms: float = 0.0
-    first_health_check_ms: float = 0.0
-
-
 class ObservabilityMetrics:
     """Extended metrics for observability dashboards and alerts.
 
@@ -48,7 +35,7 @@ class ObservabilityMetrics:
     the base metrics module.
     """
 
-    _instance: Optional["ObservabilityMetrics"] = None
+    _instance: "ObservabilityMetrics | None" = None
     _lock = threading.Lock()
 
     def __new__(cls) -> "ObservabilityMetrics":

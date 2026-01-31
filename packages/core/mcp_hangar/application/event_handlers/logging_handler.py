@@ -54,16 +54,3 @@ class LoggingEventHandler:
             logger.debug("domain_event", event_type=event_type, **event_data)
         else:
             logger.info("domain_event", event_type=event_type, **event_data)
-
-    def _format_event(self, event: DomainEvent) -> str:
-        """
-        Format an event for logging (deprecated - kept for compatibility).
-
-        Args:
-            event: The event to format
-
-        Returns:
-            Formatted log message
-        """
-        event_type = event.__class__.__name__
-        return f"[EVENT:{event_type}] {event.to_dict()}"

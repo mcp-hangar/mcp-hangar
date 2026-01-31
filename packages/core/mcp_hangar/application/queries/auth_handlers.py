@@ -9,7 +9,6 @@ from typing import Any
 from ...domain.contracts.authentication import IApiKeyStore
 from ...domain.contracts.authorization import IRoleStore
 from ...domain.security.roles import BUILTIN_ROLES
-from ...infrastructure.query_bus import QueryHandler
 from ...logging_config import get_logger
 from .auth_queries import (
     CheckPermissionQuery,
@@ -19,6 +18,7 @@ from .auth_queries import (
     GetRolesForPrincipalQuery,
     ListBuiltinRolesQuery,
 )
+from .queries import QueryHandler
 
 logger = get_logger(__name__)
 

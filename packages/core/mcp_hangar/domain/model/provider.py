@@ -28,6 +28,7 @@ from ..exceptions import (
     ToolInvocationError,
     ToolNotFoundError,
 )
+from ..services.error_diagnostics import collect_startup_diagnostics
 from ..value_objects import CorrelationId, HealthCheckInterval, IdleTTL, ProviderId, ProviderMode, ProviderState
 from .aggregate import AggregateRoot
 from .health_tracker import HealthTracker
@@ -557,128 +558,11 @@ class Provider(AggregateRoot):
                 pass
 
     def _collect_startup_diagnostics(self, client: Any) -> dict[str, Any]:
+        """Collect diagnostic information from a failed client/process.
+
+        Delegates to domain service for actual collection logic.
         """
-        Collect diagnostic information from a failed client/process.
-
-        Returns dict with:
-        - stderr: captured stderr output (if available)
-        - exit_code: process exit code (if available)
-        - suggestion: actionable suggestion based on error patterns
-        """
-        diagnostics: dict[str, Any] = {
-            "stderr": None,
-            "exit_code": None,
-            "suggestion": None,
-        }
-
-        proc = getattr(client, "process", None)
-        if not proc:
-            return diagnostics
-
-        # Get exit code
-        try:
-            rc = proc.poll()
-            if rc is not None:
-                diagnostics["exit_code"] = rc
-        except Exception:
-            pass
-
-        # Get stderr - prefer already captured by StdioClient
-        last_stderr = getattr(client, "_last_stderr", None)
-        if last_stderr:
-            diagnostics["stderr"] = last_stderr
-        else:
-            # Fallback: try to read stderr directly
-            stderr = getattr(proc, "stderr", None)
-            if stderr:
-                try:
-                    err_bytes = stderr.read()
-                    if err_bytes:
-                        err_text = (
-                            err_bytes if isinstance(err_bytes, str) else err_bytes.decode(errors="replace")
-                        ).strip()
-                        if err_text:
-                            diagnostics["stderr"] = err_text
-                except Exception:
-                    pass
-
-        # Generate suggestion based on error patterns
-        diagnostics["suggestion"] = self._get_suggestion_for_error(
-            diagnostics.get("stderr"),
-            diagnostics.get("exit_code"),
-        )
-
-        return diagnostics
-
-    def _get_suggestion_for_error(
-        self,
-        stderr: str | None,
-        exit_code: int | None,
-    ) -> str | None:
-        """
-        Generate actionable suggestion based on error patterns.
-
-        Analyzes stderr content and exit codes to provide helpful guidance.
-        """
-        if not stderr and exit_code is None:
-            return None
-
-        stderr_lower = (stderr or "").lower()
-
-        # Common Python errors
-        if "modulenotfounderror" in stderr_lower or "no module named" in stderr_lower:
-            return "Install missing Python dependencies. Check your virtual environment is activated."
-
-        if "importerror" in stderr_lower:
-            return "Check that all required packages are installed and import paths are correct."
-
-        if "syntaxerror" in stderr_lower:
-            return "Fix the syntax error in the provider code before starting."
-
-        if "permissionerror" in stderr_lower or "permission denied" in stderr_lower:
-            return "Check file permissions. Ensure the provider script is executable."
-
-        if "filenotfounderror" in stderr_lower or "no such file or directory" in stderr_lower:
-            return "Check that all referenced files and paths exist."
-
-        # Connection/network errors
-        if "connectionrefused" in stderr_lower or "connection refused" in stderr_lower:
-            return "The target service is not running or not accepting connections."
-
-        if "timeout" in stderr_lower:
-            return "The operation timed out. Check network connectivity and service availability."
-
-        # Docker/container errors
-        if "docker" in stderr_lower or "container" in stderr_lower or "podman" in stderr_lower:
-            if "not found" in stderr_lower:
-                return "Ensure Docker/Podman is installed and running. Check that the image exists."
-            if "permission" in stderr_lower:
-                return "Check Docker/Podman permissions. You may need to add your user to the docker group."
-
-        # Memory/resource errors
-        if "out of memory" in stderr_lower or "memoryerror" in stderr_lower:
-            return "The provider ran out of memory. Consider increasing memory limits."
-
-        # MCP protocol errors
-        if "jsonrpc" in stderr_lower or "json-rpc" in stderr_lower:
-            return "MCP protocol error. Check that the provider implements the MCP protocol correctly."
-
-        # Exit code based suggestions
-        if exit_code is not None:
-            if exit_code == 1:
-                return "General error. Check the provider logs for more details."
-            if exit_code == 2:
-                return "Command line usage error. Verify the provider command and arguments."
-            if exit_code == 126:
-                return "Command not executable. Check file permissions (chmod +x)."
-            if exit_code == 127:
-                return "Command not found. Check that the command exists and PATH is correct."
-            if exit_code == 137:
-                return "Process was killed (OOM or SIGKILL). Consider increasing memory limits."
-            if exit_code == 139:
-                return "Segmentation fault. This indicates a bug in the provider code."
-
-        return None
+        return collect_startup_diagnostics(client)
 
     def _finalize_start(self, client: Any, start_time: float) -> None:
         """Finalize successful provider start."""

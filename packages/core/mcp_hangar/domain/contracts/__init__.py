@@ -16,8 +16,6 @@ from .persistence import (
     ConfigurationNotFoundError,
     IAuditRepository,
     IProviderConfigRepository,
-    IRecoveryService,
-    IUnitOfWork,
     PersistenceError,
     ProviderConfigSnapshot,
 )
@@ -54,8 +52,6 @@ __all__ = [
     "ConfigurationNotFoundError",
     "IAuditRepository",
     "IProviderConfigRepository",
-    "IRecoveryService",
-    "IUnitOfWork",
     "PersistenceError",
     "ProviderConfigSnapshot",
     "ProviderRuntime",

@@ -5,68 +5,22 @@ Queries represent requests for data without side effects.
 Each query has exactly one handler that returns data.
 """
 
-from abc import ABC, abstractmethod
-from dataclasses import dataclass
 from typing import Any
 
 from mcp_hangar.logging_config import get_logger
 
+# Re-export query classes from canonical location for backward compatibility
+from ..application.queries.queries import (  # noqa: F401
+    GetProviderHealthQuery,
+    GetProviderQuery,
+    GetProviderToolsQuery,
+    GetSystemMetricsQuery,
+    ListProvidersQuery,
+    Query,
+    QueryHandler,
+)
+
 logger = get_logger(__name__)
-
-
-@dataclass(frozen=True)
-class Query(ABC):
-    """Base class for all queries.
-
-    Queries are immutable and represent a request for data.
-    They should be named as questions (GetProvider, ListProviders).
-    """
-
-    pass
-
-
-@dataclass(frozen=True)
-class ListProvidersQuery(Query):
-    """Query to list all providers."""
-
-    state_filter: str | None = None  # Filter by state (cold, ready, degraded, etc.)
-
-
-@dataclass(frozen=True)
-class GetProviderQuery(Query):
-    """Query to get a specific provider's details."""
-
-    provider_id: str
-
-
-@dataclass(frozen=True)
-class GetProviderToolsQuery(Query):
-    """Query to get tools for a specific provider."""
-
-    provider_id: str
-
-
-@dataclass(frozen=True)
-class GetProviderHealthQuery(Query):
-    """Query to get health status of a provider."""
-
-    provider_id: str
-
-
-@dataclass(frozen=True)
-class GetSystemMetricsQuery(Query):
-    """Query to get overall system metrics."""
-
-    pass
-
-
-class QueryHandler(ABC):
-    """Base class for query handlers."""
-
-    @abstractmethod
-    def handle(self, query: Query) -> Any:
-        """Handle the query and return result."""
-        pass
 
 
 class QueryBus:

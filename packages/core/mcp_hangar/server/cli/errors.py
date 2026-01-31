@@ -67,8 +67,12 @@ class ClaudeDesktopNotFoundError(CLIError):
         )
 
 
-class ProviderNotFoundError(CLIError):
-    """Raised when a provider is not found."""
+class CLIProviderNotFoundError(CLIError):
+    """Raised when a provider is not found (CLI-specific).
+
+    For domain logic, use mcp_hangar.domain.exceptions.ProviderNotFoundError.
+    For rich UX errors, use mcp_hangar.errors.RichProviderNotFoundError.
+    """
 
     def __init__(self, provider_name: str, similar: list[str] | None = None):
         suggestions = [
@@ -86,8 +90,15 @@ class ProviderNotFoundError(CLIError):
         )
 
 
-class ProviderStartError(CLIError):
-    """Raised when a provider fails to start."""
+# Backward compatibility alias
+ProviderNotFoundError = CLIProviderNotFoundError
+
+
+class CLIProviderStartError(CLIError):
+    """Raised when a provider fails to start (CLI-specific).
+
+    For domain logic, use mcp_hangar.domain.exceptions.ProviderStartError.
+    """
 
     def __init__(self, provider_name: str, error: str):
         super().__init__(
@@ -102,8 +113,15 @@ class ProviderStartError(CLIError):
         )
 
 
-class NetworkError(CLIError):
-    """Raised when a network operation fails."""
+# Backward compatibility alias
+ProviderStartError = CLIProviderStartError
+
+
+class CLINetworkError(CLIError):
+    """Raised when a network operation fails (CLI-specific).
+
+    For rich UX errors, use mcp_hangar.errors.NetworkError.
+    """
 
     def __init__(self, operation: str, url: str, error: str):
         super().__init__(
@@ -116,6 +134,10 @@ class NetworkError(CLIError):
             ],
             exit_code=2,
         )
+
+
+# Backward compatibility alias
+NetworkError = CLINetworkError
 
 
 class InvalidConfigError(CLIError):
@@ -199,6 +221,11 @@ __all__ = [
     "CLIError",
     "ConfigNotFoundError",
     "ClaudeDesktopNotFoundError",
+    # New explicit names
+    "CLIProviderNotFoundError",
+    "CLIProviderStartError",
+    "CLINetworkError",
+    # Backward compatibility aliases
     "ProviderNotFoundError",
     "ProviderStartError",
     "NetworkError",

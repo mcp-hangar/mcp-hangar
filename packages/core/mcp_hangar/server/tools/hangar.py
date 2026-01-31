@@ -15,6 +15,7 @@ from ...application.commands import (
     UnloadProviderCommand,
 )
 from ...application.mcp.tooling import key_global, mcp_tool_wrapper
+from ...application.queries import ListProvidersQuery
 from ...domain.exceptions import (
     MissingSecretsError,
     ProviderNotHotLoadedError,
@@ -22,7 +23,6 @@ from ...domain.exceptions import (
     RegistryServerNotFoundError,
     UnverifiedProviderError,
 )
-from ...infrastructure.query_bus import ListProvidersQuery
 from ..context import get_context
 from ..validation import check_rate_limit, tool_error_hook, tool_error_mapper, validate_provider_id_input
 

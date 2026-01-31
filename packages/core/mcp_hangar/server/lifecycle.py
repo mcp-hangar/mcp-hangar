@@ -391,7 +391,7 @@ def _setup_signal_handlers(lifecycle: ServerLifecycle) -> None:
         lifecycle: ServerLifecycle instance to shutdown on signal.
     """
 
-    def handler(signum, frame):
+    def handler(signum, _frame):
         sig_name = signal.Signals(signum).name
         logger.info("shutdown_signal_received", signal=sig_name)
         lifecycle.shutdown()

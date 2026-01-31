@@ -1,6 +1,6 @@
 [project]
 name = "mcp-hangar"
-version = "0.6.0"
+version = "0.6.1"
 description = "Production-grade infrastructure for Model Context Protocol"
 readme = "README.md"
 license = {text = "MIT"}
@@ -155,3 +155,8 @@ ignore_missing_imports = true
 testpaths = ["tests"]
 asyncio_mode = "auto"
 addopts = "-v --cov=mcp_hangar --cov-report=term-missing"
+
+[dependency-groups]
+dev = [
+    "vulture>=2.14",
+]

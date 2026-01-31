@@ -67,6 +67,7 @@ from .domain.value_objects import (
 )
 
 # UX Improvements - Rich errors, retry, progress
+# New explicit names with Rich prefix; Backward compat aliases (deprecated)
 from .errors import (
     ConfigurationError as HangarConfigurationError,
     create_argument_tool_error,
@@ -83,7 +84,9 @@ from .errors import (
     ProviderNotFoundError as HangarProviderNotFoundError,
     ProviderProtocolError,
     RateLimitError,
+    RichProviderNotFoundError,
     RichToolInvocationError,
+    RichToolNotFoundError,
     TimeoutError as HangarTimeoutError,
     ToolNotFoundError as HangarToolNotFoundError,
     TransientError,
@@ -143,20 +146,23 @@ __all__ = [
     "ValidationError",
     "ConfigurationError",
     "RateLimitExceeded",
-    # UX - Rich Errors
+    # UX - Rich Errors (with explicit Rich prefix)
     "ErrorCategory",
     "HangarError",
+    "RichProviderNotFoundError",
+    "RichToolNotFoundError",
     "RichToolInvocationError",
     "TransientError",
     "ProviderProtocolError",
     "ProviderCrashError",
     "NetworkError",
     "HangarConfigurationError",
-    "HangarProviderNotFoundError",
-    "HangarToolNotFoundError",
     "HangarTimeoutError",
     "RateLimitError",
     "HangarProviderDegradedError",
+    # UX - Rich Errors (backward compatibility aliases)
+    "HangarProviderNotFoundError",
+    "HangarToolNotFoundError",
     "map_exception_to_hangar_error",
     "is_retryable",
     "create_timeout_tool_error",
