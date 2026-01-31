@@ -7,7 +7,7 @@ import pytest
 
 from mcp_hangar.domain.exceptions import ConfigurationError, ProviderNotFoundError
 from mcp_hangar.domain.value_objects import ProviderMode, ProviderState
-from mcp_hangar.facade import Hangar, HangarConfig, HealthSummary, ProviderInfo, ProviderSpec, SyncHangar
+from mcp_hangar.facade import Hangar, HangarConfig, HealthSummary, ProviderInfo, SyncHangar
 
 # --- HangarConfig Builder Tests ---
 
@@ -20,27 +20,27 @@ class TestHangarConfig:
         config = HangarConfig().add_provider("math", command=["python", "-m", "math_server"]).build()
 
         assert "math" in config.providers
-        spec = config.providers["math"]
-        assert spec.mode == ProviderMode.SUBPROCESS
-        assert spec.command == ["python", "-m", "math_server"]
+        provider = config.providers["math"]
+        assert provider["mode"] == "subprocess"
+        assert provider["command"] == ["python", "-m", "math_server"]
 
     def test_add_docker_provider(self):
         """Should add docker provider with image."""
         config = HangarConfig().add_provider("fetch", mode="docker", image="mcp/fetch:latest").build()
 
         assert "fetch" in config.providers
-        spec = config.providers["fetch"]
-        assert spec.mode == ProviderMode.DOCKER
-        assert spec.image == "mcp/fetch:latest"
+        provider = config.providers["fetch"]
+        assert provider["mode"] == "docker"
+        assert provider["image"] == "mcp/fetch:latest"
 
     def test_add_remote_provider(self):
         """Should add remote provider with URL."""
         config = HangarConfig().add_provider("api", mode="remote", url="http://localhost:8080").build()
 
         assert "api" in config.providers
-        spec = config.providers["api"]
-        assert spec.mode == ProviderMode.REMOTE
-        assert spec.url == "http://localhost:8080"
+        provider = config.providers["api"]
+        assert provider["mode"] == "remote"
+        assert provider["url"] == "http://localhost:8080"
 
     def test_add_provider_with_env(self):
         """Should add provider with environment variables."""
@@ -54,15 +54,15 @@ class TestHangarConfig:
             .build()
         )
 
-        spec = config.providers["math"]
-        assert spec.env == {"DEBUG": "true", "LOG_LEVEL": "debug"}
+        provider = config.providers["math"]
+        assert provider["env"] == {"DEBUG": "true", "LOG_LEVEL": "debug"}
 
     def test_add_provider_with_custom_idle_ttl(self):
         """Should add provider with custom idle TTL."""
         config = HangarConfig().add_provider("math", command=["python"], idle_ttl_s=600).build()
 
-        spec = config.providers["math"]
-        assert spec.idle_ttl_s == 600
+        provider = config.providers["math"]
+        assert provider["idle_ttl_s"] == 600
 
     def test_add_multiple_providers(self):
         """Should add multiple providers."""
@@ -80,11 +80,11 @@ class TestHangarConfig:
         assert "api" in config.providers
 
     def test_mode_normalization(self):
-        """Should accept container as valid mode (alias for docker-like)."""
+        """Should accept container as valid mode (treated as docker-like)."""
         config = HangarConfig().add_provider("fetch", mode="container", image="mcp/fetch").build()
 
-        # container is accepted as a valid mode
-        assert config.providers["fetch"].mode in (ProviderMode.DOCKER, ProviderMode.CONTAINER)
+        # container is accepted and stored as-is (alias for docker behavior)
+        assert config.providers["fetch"]["mode"] == "container"
 
     def test_empty_name_raises_error(self):
         """Should raise ConfigurationError for empty provider name."""
@@ -457,50 +457,3 @@ class TestSyncHangarWithMockedContext:
         health = sync_hangar_with_context.health()
 
         assert health.total_count == 1
-
-
-# --- ProviderSpec Tests ---
-
-
-class TestProviderSpec:
-    """Tests for ProviderSpec."""
-
-    def test_to_dict_subprocess(self):
-        """Should convert subprocess spec to dict."""
-        spec = ProviderSpec(
-            name="math",
-            mode=ProviderMode.SUBPROCESS,
-            command=["python", "-m", "math"],
-            idle_ttl_s=300,
-        )
-        result = spec.to_dict()
-
-        assert result["mode"] == "subprocess"
-        assert result["command"] == ["python", "-m", "math"]
-        assert result["idle_ttl_s"] == 300
-
-    def test_to_dict_docker(self):
-        """Should convert docker spec to dict."""
-        spec = ProviderSpec(
-            name="fetch",
-            mode=ProviderMode.DOCKER,
-            image="mcp/fetch:latest",
-            idle_ttl_s=300,
-        )
-        result = spec.to_dict()
-
-        assert result["mode"] == "docker"
-        assert result["image"] == "mcp/fetch:latest"
-
-    def test_to_dict_with_env(self):
-        """Should include env in dict."""
-        spec = ProviderSpec(
-            name="math",
-            mode=ProviderMode.SUBPROCESS,
-            command=["python"],
-            env={"DEBUG": "true"},
-            idle_ttl_s=300,
-        )
-        result = spec.to_dict()
-
-        assert result["env"] == {"DEBUG": "true"}

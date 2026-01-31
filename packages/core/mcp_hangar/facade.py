@@ -48,38 +48,6 @@ logger = get_logger(__name__)
 
 
 @dataclass
-class ProviderSpec:
-    """Specification for a single provider.
-
-    Internal use - created via HangarConfig.add_provider().
-    """
-
-    name: str
-    mode: ProviderMode
-    command: list[str] | None = None
-    image: str | None = None
-    url: str | None = None
-    env: dict[str, str] = field(default_factory=dict)
-    idle_ttl_s: int = 300
-
-    def to_dict(self) -> dict[str, Any]:
-        """Convert to config dict format."""
-        result: dict[str, Any] = {
-            "mode": self.mode.value,
-            "idle_ttl_s": self.idle_ttl_s,
-        }
-        if self.command:
-            result["command"] = self.command
-        if self.image:
-            result["image"] = self.image
-        if self.url:
-            result["url"] = self.url
-        if self.env:
-            result["env"] = self.env
-        return result
-
-
-@dataclass
 class DiscoverySpec:
     """Specification for discovery settings."""
 
@@ -92,7 +60,7 @@ class DiscoverySpec:
 class HangarConfigData:
     """Internal configuration data structure."""
 
-    providers: dict[str, ProviderSpec] = field(default_factory=dict)
+    providers: dict[str, dict[str, Any]] = field(default_factory=dict)
     discovery: DiscoverySpec = field(default_factory=DiscoverySpec)
     gc_interval_s: int = 30
     health_check_interval_s: int = 10
@@ -164,15 +132,20 @@ class HangarConfig:
         if normalized_mode == ProviderMode.REMOTE and not url:
             raise ConfigurationError(f"Provider '{name}': url is required for remote mode")
 
-        self._data.providers[name] = ProviderSpec(
-            name=name,
-            mode=normalized_mode,
-            command=command,
-            image=image,
-            url=url,
-            env=env or {},
-            idle_ttl_s=idle_ttl_s,
-        )
+        provider_config: dict[str, Any] = {
+            "mode": normalized_mode.value,
+            "idle_ttl_s": idle_ttl_s,
+        }
+        if command:
+            provider_config["command"] = command
+        if image:
+            provider_config["image"] = image
+        if url:
+            provider_config["url"] = url
+        if env:
+            provider_config["env"] = env
+
+        self._data.providers[name] = provider_config
         return self
 
     def enable_discovery(
@@ -244,7 +217,7 @@ class HangarConfig:
             Dictionary that can be passed to bootstrap or saved as YAML.
         """
         result: dict[str, Any] = {
-            "providers": {name: spec.to_dict() for name, spec in self._data.providers.items()},
+            "providers": dict(self._data.providers),
         }
 
         # Add discovery if enabled
