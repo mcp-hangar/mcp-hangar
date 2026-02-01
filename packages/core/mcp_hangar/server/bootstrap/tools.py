@@ -12,6 +12,7 @@ from ..tools import (
     register_load_tools,
     register_provider_tools,
 )
+from ..tools.continuation import register_continuation_tools
 
 logger = get_logger(__name__)
 
@@ -29,4 +30,5 @@ def register_all_tools(mcp_server: FastMCP) -> None:
     register_discovery_tools(mcp_server)
     register_group_tools(mcp_server)
     register_batch_tools(mcp_server)
+    register_continuation_tools(mcp_server)
     logger.info("mcp_tools_registered")

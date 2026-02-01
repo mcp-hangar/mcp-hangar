@@ -51,6 +51,9 @@ from .provider import (
 # Security - Authentication & Authorization
 from .security import Permission, Principal, PrincipalId, PrincipalType, Role
 
+# Truncation
+from .truncation import ContinuationId, TruncationConfig
+
 __all__ = [
     # Security
     "PrincipalType",
@@ -91,4 +94,7 @@ __all__ = [
     "NamespaceId",
     "CatalogItemId",
     "ResourceScope",
+    # Truncation
+    "TruncationConfig",
+    "ContinuationId",
 ]

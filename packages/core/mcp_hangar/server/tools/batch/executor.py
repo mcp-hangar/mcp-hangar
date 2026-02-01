@@ -43,6 +43,24 @@ class BatchExecutor:
         self._active_batches = 0
         self._active_lock = threading.Lock()
 
+    def _apply_batch_truncation(self, batch_id: str, results: list[CallResult]) -> list[CallResult]:
+        """Apply batch-level truncation if enabled and needed.
+
+        Args:
+            batch_id: The batch identifier.
+            results: List of call results to potentially truncate.
+
+        Returns:
+            List of results, potentially with some truncated.
+        """
+        from ...bootstrap.truncation import get_truncation_manager
+
+        truncation_manager = get_truncation_manager()
+        if truncation_manager is None:
+            return results
+
+        return truncation_manager.process_batch(batch_id, results)
+
     def execute(
         self,
         batch_id: str,
@@ -218,6 +236,10 @@ class BatchExecutor:
                 elapsed_ms=round(elapsed_ms, 2),
             )
 
+            # Apply batch-level truncation if enabled
+            final_results = [r for r in results if r is not None]
+            final_results = self._apply_batch_truncation(batch_id, final_results)
+
             return BatchResult(
                 batch_id=batch_id,
                 success=success,
@@ -225,7 +247,7 @@ class BatchExecutor:
                 succeeded=succeeded,
                 failed=failed,
                 elapsed_ms=elapsed_ms,
-                results=[r for r in results if r is not None],
+                results=final_results,
                 cancelled=cancelled,
             )
 
@@ -509,6 +531,8 @@ def format_result_dict(r: CallResult) -> dict[str, Any]:
         result_dict["truncated_reason"] = r.truncated_reason
     if r.original_size_bytes is not None:
         result_dict["original_size_bytes"] = r.original_size_bytes
+    if r.continuation_id:
+        result_dict["continuation_id"] = r.continuation_id
     if r.retry_metadata:
         result_dict["retry_metadata"] = r.retry_metadata.to_dict()
 

@@ -43,6 +43,7 @@ from .hot_loading import init_hot_loading
 from .knowledge_base import init_knowledge_base
 from .retry_config import init_retry_config
 from .tools import register_all_tools
+from .truncation import init_truncation
 from .workers import create_background_workers, GC_WORKER_INTERVAL_SECONDS, HEALTH_CHECK_INTERVAL_SECONDS
 
 if TYPE_CHECKING:
@@ -218,6 +219,9 @@ def bootstrap(
     # Initialize knowledge base
     init_knowledge_base(full_config)
 
+    # Initialize truncation system
+    init_truncation(full_config)
+
     # Initialize hot-loading components
     load_handler, unload_handler = init_hot_loading(runtime, full_config)
 
@@ -271,6 +275,7 @@ _init_cqrs = init_cqrs
 _init_saga = init_saga
 _init_retry_config = init_retry_config
 _init_knowledge_base = init_knowledge_base
+_init_truncation = init_truncation
 _init_hot_loading = init_hot_loading
 _register_all_tools = register_all_tools
 _create_background_workers = create_background_workers
@@ -290,6 +295,7 @@ __all__ = [
     "init_knowledge_base",
     "init_retry_config",
     "init_saga",
+    "init_truncation",
     "create_background_workers",
     "create_discovery_orchestrator",
     "register_all_tools",
@@ -301,6 +307,7 @@ __all__ = [
     "_init_knowledge_base",
     "_init_retry_config",
     "_init_saga",
+    "_init_truncation",
     "_create_background_workers",
     "_create_discovery_orchestrator",
     "_register_all_tools",

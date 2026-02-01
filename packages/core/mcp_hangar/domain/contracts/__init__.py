@@ -21,6 +21,7 @@ from .persistence import (
 )
 from .provider_runtime import ProviderRuntime
 from .registry import IRegistryClient, PackageInfo, ServerDetails, ServerSummary, TransportInfo
+from .response_cache import CacheRetrievalResult, IResponseCache, NullResponseCache
 
 __all__ = [
     # Authentication contracts
@@ -61,4 +62,8 @@ __all__ = [
     "ServerDetails",
     "ServerSummary",
     "TransportInfo",
+    # Response cache contracts
+    "CacheRetrievalResult",
+    "IResponseCache",
+    "NullResponseCache",
 ]

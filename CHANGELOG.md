@@ -7,6 +7,41 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.6.3] - 2026-02-01
+
+### Added
+
+- **Response Truncation System**: Smart truncation for batch responses exceeding context limits
+  - Configurable maximum batch response size (default ~900KB, safely under Claude's 1MB limit)
+  - Proportional budget allocation across batch results based on original size
+  - Smart JSON truncation preserving structure (dicts keep keys, lists truncate from end)
+  - Line boundary awareness for text truncation
+  - Full response caching with continuation IDs for later retrieval
+  - Memory cache (LRU with TTL) and Redis cache backends
+  - New MCP tools:
+    - `hangar_fetch_continuation` - Retrieve full/remaining content from truncated response
+    - `hangar_delete_continuation` - Manually delete cached continuation
+  - New value objects: `TruncationConfig`, `ContinuationId`
+  - New domain contract: `IResponseCache` with `MemoryResponseCache` and `RedisResponseCache` implementations
+  - Opt-in via configuration (disabled by default)
+
+### Configuration
+
+New `truncation` section in config.yaml:
+
+```yaml
+truncation:
+  enabled: true                      # Opt-in, default false
+  max_batch_size_bytes: 950000       # ~950KB (under 1MB limit)
+  min_per_response_bytes: 10000      # 10KB minimum per response
+  cache_ttl_s: 300                   # 5 minutes
+  cache_driver: memory               # memory | redis
+  redis_url: redis://localhost:6379  # Required if redis
+  max_cache_entries: 10000
+  preserve_json_structure: true
+  truncate_on_line_boundary: true
+```
+
 ## [0.6.2] - 2026-01-31
 
 ### Changed
@@ -547,7 +582,12 @@ The following items are documented technical debt introduced to enable CI:
 - Rate limiting to prevent denial of service
 - Audit logging for security-relevant events
 
-[Unreleased]: https://github.com/mapyr/mcp-hangar/compare/v0.3.1...HEAD
+[Unreleased]: https://github.com/mapyr/mcp-hangar/compare/v0.6.3...HEAD
+[0.6.3]: https://github.com/mapyr/mcp-hangar/compare/v0.6.2...v0.6.3
+[0.6.2]: https://github.com/mapyr/mcp-hangar/compare/v0.6.0...v0.6.2
+[0.6.0]: https://github.com/mapyr/mcp-hangar/compare/v0.5.0...v0.6.0
+[0.5.0]: https://github.com/mapyr/mcp-hangar/compare/v0.4.0...v0.5.0
+[0.4.0]: https://github.com/mapyr/mcp-hangar/compare/v0.3.1...v0.4.0
 [0.3.1]: https://github.com/mapyr/mcp-hangar/compare/v0.3.0...v0.3.1
 [0.3.0]: https://github.com/mapyr/mcp-hangar/compare/v0.2.3...v0.3.0
 [0.2.3]: https://github.com/mapyr/mcp-hangar/compare/v0.2.2...v0.2.3

@@ -73,6 +73,7 @@ class CallResult:
     truncated_reason: str | None = None
     original_size_bytes: int | None = None
     retry_metadata: RetryMetadata | None = None
+    continuation_id: str | None = None  # For fetching full response when truncated
 
 
 @dataclass
