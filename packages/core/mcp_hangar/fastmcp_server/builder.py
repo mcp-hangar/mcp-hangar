@@ -60,7 +60,7 @@ class MCPServerFactoryBuilder:
         self._metrics_fn: HangarMetricsFn | None = None
 
         self._config: ServerConfig | None = None
-        self._auth_components: "AuthComponents | None" = None
+        self._auth_components: AuthComponents | None = None
 
     def with_hangar(
         self,
