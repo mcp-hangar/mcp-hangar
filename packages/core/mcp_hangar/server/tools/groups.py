@@ -23,13 +23,34 @@ def register_group_tools(mcp: FastMCP) -> None:
         on_error=tool_error_hook,
     )
     def hangar_group_list() -> dict:
-        """
-        List all provider groups with detailed status.
+        """List all provider groups with per-member details.
 
-        This is a QUERY operation - read only.
+        Use this instead of hangar_list when you need member-level information:
+        rotation status, weights, and individual member states.
+
+        hangar_list returns group summaries (healthy_count, total_count).
+        hangar_group_list returns full member breakdown.
 
         Returns:
-            Dictionary with 'groups' key containing list of group info
+            - groups: List of groups with member details
+
+        Example:
+            hangar_group_list()
+            # Returns:
+            # {
+            #   "groups": [{
+            #     "group_id": "llm-group",
+            #     "state": "ready",
+            #     "strategy": "round_robin",
+            #     "healthy_count": 2,
+            #     "total_count": 3,
+            #     "members": [
+            #       {"id": "llm-1", "state": "ready", "in_rotation": true, "weight": 1},
+            #       {"id": "llm-2", "state": "ready", "in_rotation": true, "weight": 2},
+            #       {"id": "llm-3", "state": "degraded", "in_rotation": false, "weight": 1}
+            #     ]
+            #   }]
+            # }
         """
         ctx = get_context()
         return {"groups": [group.to_status_dict() for group in ctx.groups.values()]}
@@ -44,19 +65,28 @@ def register_group_tools(mcp: FastMCP) -> None:
         on_error=lambda exc, ctx_dict: tool_error_hook(exc, ctx_dict),
     )
     def hangar_group_rebalance(group: str) -> dict:
-        """
-        Manually trigger rebalancing for a group.
+        """Force rebalancing for a group.
 
-        This is a COMMAND operation - it changes state.
+        Re-checks all members and updates rotation: recovered members rejoin,
+        failed members are removed. Rebalancing happens automatically on
+        health failures, but use this after manual intervention.
 
         Args:
-            group: Group ID to rebalance
+            group: Group ID to rebalance.
 
         Returns:
-            Dictionary with group status after rebalancing
+            Returns an error if group ID is unknown.
 
-        Raises:
-            ValueError: If group ID is unknown
+        Example:
+            hangar_group_rebalance("llm-group")
+            # Returns:
+            # {
+            #   "group_id": "llm-group",
+            #   "state": "ready",
+            #   "healthy_count": 2,
+            #   "total_members": 3,
+            #   "members_in_rotation": ["llm-1", "llm-2"]
+            # }
         """
         ctx = get_context()
 

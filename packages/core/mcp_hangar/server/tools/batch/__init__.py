@@ -57,82 +57,56 @@ def hangar_call(
     fail_fast: bool = False,
     max_retries: int = 1,
 ) -> dict[str, Any]:
-    """Unified tool invocation API for MCP Hangar.
+    """Invoke tools on MCP providers.
 
-    Execute one or more tool invocations with optional retry, configurable
-    concurrency, and timeout handling. This is the single entry point for
-    all tool invocations.
-
-    For a single invocation, pass a 1-element list. The response format is
-    always consistent regardless of batch size.
-
-    Features:
-    - Parallel execution with configurable concurrency
-    - Single-flight cold starts (one provider starts once, not N times)
-    - Automatic retry with exponential backoff
-    - Partial success handling (default: continue on error)
-    - Fail-fast mode (abort on first error)
-    - Response truncation for oversized payloads
-    - Circuit breaker integration
+    The single entry point for all tool invocations. Supports single calls,
+    batch execution, retries, and timeouts. Cold providers auto-start.
 
     Args:
-        calls: List of invocations to execute. Each call must have:
-            - provider: str - Provider ID (required)
-            - tool: str - Tool name (required)
-            - arguments: dict - Tool arguments (required)
-            - timeout: float - Per-call timeout in seconds (optional)
-        max_concurrency: Maximum parallel workers (1-20, default 10)
-        timeout: Global timeout for entire batch (1-300s, default 60)
-        fail_fast: If True, abort remaining calls on first error
-        max_retries: Maximum retry attempts per call (1-10, default 1 = no retry)
+        calls: List of invocations. Each call requires:
+            - provider: Provider ID or Group ID (routes to healthy member)
+            - tool: Tool name (use hangar_tools to discover available tools)
+            - arguments: Tool arguments as dict
+            - timeout: (optional) Per-call timeout in seconds
+        max_concurrency: Parallel workers, 1-20 (default: 10)
+        timeout: Batch timeout in seconds, 1-300 (default: 60)
+        fail_fast: Stop on first error (default: false, continues all calls)
+        max_retries: Retry attempts per call, 1-10 (default: 1 = no retry)
 
     Returns:
-        Result dict with:
         - batch_id: UUID for tracing
-        - success: True if all calls succeeded
-        - total: Total number of calls
-        - succeeded: Number of successful calls
-        - failed: Number of failed calls
-        - elapsed_ms: Total execution time
-        - results: List of per-call results, each containing:
-            - index: Call index in original list
-            - call_id: UUID for this call
-            - success: True if call succeeded
-            - result: Tool result (if success)
-            - error: Error message (if failure)
-            - error_type: Exception type (if failure)
-            - elapsed_ms: Call execution time
-            - retry_metadata: Retry info (if retries were used)
+        - success: true if ALL calls succeeded
+        - total/succeeded/failed: Call counts
+        - elapsed_ms: Total time
+        - results: Per-call results with index, success, result/error
+            If a result is truncated due to size, it will have:
+            {"truncated": true, "continuation_id": "cont_..."}
+            Use hangar_fetch_continuation with that ID to get the full response.
 
-    Examples:
-        # Single invocation
-        hangar_call(calls=[
-            {"provider": "math", "tool": "add", "arguments": {"a": 1, "b": 2}}
-        ])
+    Example:
+        # Single call
+        hangar_call(calls=[{"provider": "math", "tool": "add", "arguments": {"a": 1, "b": 2}}])
+        # Returns:
+        # {
+        #   "batch_id": "...",
+        #   "success": true,
+        #   "total": 1, "succeeded": 1, "failed": 0,
+        #   "elapsed_ms": 45.2,
+        #   "results": [{"index": 0, "success": true, "result": 3, "elapsed_ms": 42.1}]
+        # }
 
-        # Single invocation with retry
+        # Call via group (auto-routes to healthy member)
+        hangar_call(calls=[{"provider": "llm-group", "tool": "complete", "arguments": {"prompt": "Hi"}}])
+
+        # Batch with retry
         hangar_call(
-            calls=[{"provider": "math", "tool": "add", "arguments": {"a": 1, "b": 2}}],
+            calls=[
+                {"provider": "math", "tool": "add", "arguments": {"a": 1, "b": 2}},
+                {"provider": "math", "tool": "divide", "arguments": {"a": 10, "b": 0}}
+            ],
             max_retries=3
         )
-
-        # Batch invocation
-        hangar_call(calls=[
-            {"provider": "math", "tool": "add", "arguments": {"a": 1, "b": 2}},
-            {"provider": "math", "tool": "multiply", "arguments": {"a": 3, "b": 4}},
-        ])
-
-        # With fail-fast and retry
-        hangar_call(
-            calls=[...],
-            fail_fast=True,
-            max_retries=5
-        )
-
-        # With per-call timeout
-        hangar_call(calls=[
-            {"provider": "fetch", "tool": "get", "arguments": {"url": "..."}, "timeout": 5.0},
-        ], timeout=60.0)
+        # Returns: {"success": false, "succeeded": 1, "failed": 1, "results": [...]}
     """
     batch_id = str(uuid.uuid4())
 

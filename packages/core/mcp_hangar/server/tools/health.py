@@ -174,13 +174,25 @@ def register_health_tools(mcp: FastMCP) -> None:
         on_error=tool_error_hook,
     )
     def hangar_health() -> dict:
-        """
-        Get registry health status including security metrics.
+        """Get registry health status including security metrics.
 
-        This is a QUERY operation - read only.
+        For detailed metrics, use hangar_metrics instead.
 
         Returns:
-            Dictionary with health information
+            - status: "healthy" (always, currently)
+            - providers: {total, by_state}
+            - groups: {total, by_state, total_members, healthy_members}
+            - security: {rate_limiting: {active_buckets, config}}
+
+        Example:
+            hangar_health()
+            # Returns:
+            # {
+            #   "status": "healthy",
+            #   "providers": {"total": 3, "by_state": {"ready": 2, "cold": 1}},
+            #   "groups": {"total": 1, "by_state": {"ready": 1}, "total_members": 3, "healthy_members": 2},
+            #   "security": {"rate_limiting": {"active_buckets": 5, "config": {...}}}
+            # }
         """
         ctx = get_context()
         rate_limit_stats = ctx.rate_limiter.get_stats()
@@ -229,16 +241,26 @@ def register_health_tools(mcp: FastMCP) -> None:
         on_error=tool_error_hook,
     )
     def hangar_metrics(format: str = "json") -> dict:
-        """
-        Get detailed metrics for all providers, groups, and system components.
+        """Get detailed metrics for providers, groups, and system components.
 
-        This is a QUERY operation - read only.
+        For a quick health check, use hangar_health instead.
 
         Args:
-            format: Output format - 'json' (structured) or 'prometheus' (raw text)
+            format: "json" (default) or "prometheus".
+                Use "json" unless the user explicitly requests Prometheus format.
 
         Returns:
-            Dictionary with comprehensive metrics
+            For json: {providers, groups, tool_calls, discovery, errors, summary}
+            For prometheus: {metrics: "raw exposition format text"}
+
+        Example:
+            hangar_metrics()
+            # Returns:
+            # {
+            #   "providers": {"math": {"state": "ready", "invocations": 42, "errors": 0}},
+            #   "tool_calls": {"math.add": {"count": 30, "errors": 0}},
+            #   "summary": {"total_tool_calls": 42, "total_errors": 0}
+            # }
         """
         ctx = get_context()
 

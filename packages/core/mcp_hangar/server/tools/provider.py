@@ -95,19 +95,41 @@ def register_provider_tools(mcp: FastMCP) -> None:
         on_error=lambda exc, ctx: tool_error_hook(exc, ctx),
     )
     def hangar_tools(provider: str) -> dict:
-        """
-        Get detailed tool schemas for a provider.
+        """Get tool schemas for a provider.
 
-        This is a QUERY operation with potential side-effect (starting provider).
+        Returns JSON Schema definitions for all tools. Use this to discover
+        available tools and their parameters before calling hangar_call.
+
+        Note: If the provider is COLD, this will start it to discover tools.
 
         Args:
-            provider: Provider ID
+            provider: Provider ID or Group ID. For groups, selects a healthy member.
 
         Returns:
-            Dictionary with provider ID and list of tool schemas
+            Returns an error if provider or group ID is unknown.
 
-        Raises:
-            ValueError: If provider ID is unknown or invalid
+        Example:
+            hangar_tools("math")
+            # Returns:
+            # {
+            #   "provider": "math",
+            #   "state": "ready",
+            #   "predefined": false,
+            #   "tools": [
+            #     {
+            #       "name": "add",
+            #       "description": "Add two numbers",
+            #       "inputSchema": {
+            #         "type": "object",
+            #         "properties": {"a": {"type": "number"}, "b": {"type": "number"}},
+            #         "required": ["a", "b"]
+            #       }
+            #     }
+            #   ]
+            # }
+
+            hangar_tools("llm-group")
+            # Returns tools from a healthy group member, with "group": true
         """
         ctx = get_context()
 
@@ -129,19 +151,25 @@ def register_provider_tools(mcp: FastMCP) -> None:
         on_error=lambda exc, ctx: tool_error_hook(exc, ctx),
     )
     def hangar_details(provider: str) -> dict:
-        """
-        Get detailed information about a provider or group.
+        """Get configuration and runtime info for a provider or group.
 
-        This is a QUERY operation - no side effects.
+        Does not start the provider or modify any state.
 
         Args:
-            provider: Provider ID or Group ID
+            provider: Provider ID or Group ID.
 
         Returns:
-            Dictionary with full provider/group details
+            For providers: {provider, state, mode, alive, tools, health, idle_time, meta}
+            For groups: {group_id, state, strategy, members, healthy_count, total_count}
+            Returns an error if unknown.
 
-        Raises:
-            ValueError: If provider ID is unknown or invalid
+        Example:
+            hangar_details("math")
+            # Returns: {"provider": "math", "state": "ready", "mode": "subprocess",
+            #           "alive": true, "tools": [...], "health": {...}, "idle_time": 0.0}
+
+            hangar_details("llm-group")
+            # Returns: {"group_id": "llm-group", "members": [...], "healthy_count": 2}
         """
         ctx = get_context()
 
@@ -164,25 +192,25 @@ def register_provider_tools(mcp: FastMCP) -> None:
         on_error=lambda exc, ctx_dict: tool_error_hook(exc, ctx_dict),
     )
     def hangar_warm(providers: str | None = None) -> dict:
-        """
-        Pre-start (warm up) providers to avoid cold start latency.
-
-        Starts the specified providers in advance so they're ready
-        when you need them. This eliminates cold start delays.
+        """Pre-start providers to avoid cold start latency on first hangar_call.
 
         Args:
-            providers: Comma-separated list of provider IDs to warm up.
-                      If empty, warms all providers.
+            providers: Comma-separated provider IDs (e.g., "math,sqlite").
+                Omit or pass null to warm ALL configured providers.
+                Groups are skipped (use hangar_start for groups).
 
         Returns:
-            Dictionary with status for each provider:
-            - warmed: List of successfully started providers
-            - already_warm: List of providers that were already running
-            - failed: List of providers that failed to start
+            - warmed: Provider IDs that were started
+            - already_warm: Provider IDs that were already running
+            - failed: List of {id, error} for providers that failed
+            - summary: Human-readable summary
 
         Example:
-            hangar_warm("math,sqlite")  # Warm specific providers
-            hangar_warm()               # Warm all providers
+            hangar_warm("math,sqlite")
+            # Returns: {"warmed": ["math"], "already_warm": ["sqlite"], "failed": [], "summary": "Warmed 1..."}
+
+            hangar_warm()
+            # Warms all configured providers
         """
         ctx = get_context()
 

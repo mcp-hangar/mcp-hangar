@@ -23,11 +23,28 @@ def register_discovery_tools(mcp: FastMCP) -> None:
         on_error=tool_error_hook,
     )
     async def hangar_discover() -> dict:
-        """
-        Trigger immediate discovery cycle across all configured sources.
+        """Trigger immediate discovery scan (not to be confused with hangar_discovered).
+
+        Scans all enabled sources (Kubernetes, Docker, filesystem, entrypoints)
+        for new providers. Use after deploying new providers.
+
+        Note: This TRIGGERS a scan. To LIST pending providers, use hangar_discovered.
 
         Returns:
-            Dictionary with discovery statistics
+            Discovery cycle results, or error if discovery not configured.
+
+        Example:
+            hangar_discover()
+            # Returns:
+            # {
+            #   "cycle_id": "...",
+            #   "sources_scanned": 3,
+            #   "providers_discovered": 2,
+            #   "providers_updated": 0,
+            #   "providers_removed": 0,
+            #   "duration_ms": 142,
+            #   "errors": []
+            # }
         """
         orchestrator = get_context().discovery_orchestrator
         if orchestrator is None:
@@ -46,11 +63,24 @@ def register_discovery_tools(mcp: FastMCP) -> None:
         on_error=tool_error_hook,
     )
     def hangar_discovered() -> dict:
-        """
-        List all discovered providers pending registration.
+        """List providers pending registration (not to be confused with hangar_discover).
+
+        Shows providers found by discovery awaiting approval. Use hangar_approve
+        to register them.
+
+        Note: This LISTS pending providers. To TRIGGER a scan, use hangar_discover.
 
         Returns:
-            Dictionary with 'pending' key containing list of pending providers
+            Pending providers list, or error if discovery not configured.
+
+        Example:
+            hangar_discovered()
+            # Returns:
+            # {
+            #   "pending": [
+            #     {"name": "new-provider", "source": "kubernetes", "mode": "remote", "discovered_at": "..."}
+            #   ]
+            # }
         """
         orchestrator = get_context().discovery_orchestrator
         if orchestrator is None:
@@ -80,11 +110,23 @@ def register_discovery_tools(mcp: FastMCP) -> None:
         on_error=tool_error_hook,
     )
     def hangar_quarantine() -> dict:
-        """
-        List quarantined providers with failure reasons.
+        """List quarantined providers with failure reasons.
+
+        Quarantined providers failed validation or health checks.
+        Use hangar_approve to restore them.
 
         Returns:
-            Dictionary with 'quarantined' key containing list of quarantined providers
+            Quarantined providers list, or error if discovery not configured.
+
+        Example:
+            hangar_quarantine()
+            # Returns:
+            # {
+            #   "quarantined": [
+            #     {"name": "broken-provider", "source": "docker",
+            #      "reason": "health_check_failed", "quarantine_time": "..."}
+            #   ]
+            # }
         """
         orchestrator = get_context().discovery_orchestrator
         if orchestrator is None:
@@ -113,14 +155,23 @@ def register_discovery_tools(mcp: FastMCP) -> None:
         on_error=lambda exc, ctx: tool_error_hook(exc, ctx),
     )
     async def hangar_approve(provider: str) -> dict:
-        """
-        Approve a quarantined provider for registration.
+        """Approve a pending or quarantined provider for registration.
+
+        Registers the provider so it becomes available for hangar_call.
+        Use hangar_discovered or hangar_quarantine to find providers to approve.
 
         Args:
-            provider: Name of the quarantined provider to approve
+            provider: Provider name from pending or quarantine list.
 
         Returns:
-            Dictionary with approval result
+            Approval result, or error if not found/discovery not configured.
+
+        Example:
+            hangar_approve("my-new-provider")
+            # Returns: {"approved": true, "provider_id": "my-new-provider", "state": "cold"}
+
+            hangar_approve("unknown")
+            # Returns: {"approved": false, "error": "provider_not_found"}
         """
         orchestrator = get_context().discovery_orchestrator
         if orchestrator is None:
@@ -139,11 +190,24 @@ def register_discovery_tools(mcp: FastMCP) -> None:
         on_error=tool_error_hook,
     )
     async def hangar_sources() -> dict:
-        """
-        List configured discovery sources with health status.
+        """List discovery sources with health status.
+
+        Shows status of Kubernetes, Docker, filesystem, and entrypoint scanners.
+        Use to diagnose why providers are not being discovered.
 
         Returns:
-            Dictionary with 'sources' key containing list of source status
+            Source status list, or error if discovery not configured.
+
+        Example:
+            hangar_sources()
+            # Returns:
+            # {
+            #   "sources": [
+            #     {"type": "kubernetes", "enabled": true, "healthy": true, "last_scan": "...", "providers_found": 5},
+            #     {"type": "docker", "enabled": true, "healthy": false, "last_error": "socket not found"},
+            #     {"type": "filesystem", "enabled": false}
+            #   ]
+            # }
         """
         orchestrator = get_context().discovery_orchestrator
         if orchestrator is None:
