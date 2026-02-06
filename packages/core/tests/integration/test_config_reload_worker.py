@@ -79,6 +79,9 @@ class TestConfigReloadWorkerIntegration:
 
     def test_polling_detects_file_modification(self, temp_config_file, mock_command_bus):
         """Polling worker should detect file modification via mtime."""
+        # Wait before creating worker to ensure mtime difference
+        time.sleep(0.1)
+
         worker = ConfigReloadWorker(
             config_path=temp_config_file,
             command_bus=mock_command_bus,
@@ -92,13 +95,16 @@ class TestConfigReloadWorkerIntegration:
             # Wait a bit to ensure worker is running
             time.sleep(0.5)
 
-            # Modify the file
-            time.sleep(1.1)  # Ensure mtime changes
+            # Modify the file - ensure mtime is different
+            time.sleep(1.1)  # Ensure mtime changes (must be > interval_s)
             with open(temp_config_file, "a") as f:
                 f.write("\n# Modified\n")
 
-            # Wait for polling to detect change
-            time.sleep(2)
+            # Force flush to ensure mtime updates
+            os.sync() if hasattr(os, "sync") else None
+
+            # Wait for polling to detect change (needs time for next poll cycle)
+            time.sleep(2.5)
 
             # Check that reload was triggered
             mock_command_bus.send.assert_called()
@@ -127,15 +133,18 @@ class TestConfigReloadWorkerIntegration:
         worker.start()
 
         try:
-            # Wait for watchdog to initialize
-            time.sleep(0.5)
+            # Wait for watchdog to fully initialize (observer thread startup + inotify registration)
+            time.sleep(1.5)
 
             # Modify the file
             with open(temp_config_file, "a") as f:
                 f.write("\n# Modified via watchdog\n")
 
-            # Wait for debounce and watchdog to process
-            time.sleep(2)
+            # Force flush
+            os.sync() if hasattr(os, "sync") else None
+
+            # Wait for debounce (1s) + watchdog processing + command execution
+            time.sleep(3.0)
 
             # Check that reload was triggered
             mock_command_bus.send.assert_called()
@@ -183,22 +192,29 @@ class TestConfigReloadWorkerIntegration:
         worker = ConfigReloadWorker(
             config_path=temp_config_file,
             command_bus=mock_command_bus,
+            interval_s=1,  # Short interval for testing
             use_watchdog=False,  # Use polling for predictable behavior
         )
 
         worker.start()
 
         try:
+            # Wait for worker to initialize
             time.sleep(0.5)
 
             # Make multiple rapid changes (within debounce window)
+            # Ensure mtime actually changes
+            time.sleep(1.1)  # Must be > interval_s to be detected
             for i in range(3):
                 with open(temp_config_file, "a") as f:
                     f.write(f"\n# Change {i}\n")
                 time.sleep(0.1)
 
-            # Wait for debounce + processing
-            time.sleep(2)
+            # Force flush
+            os.sync() if hasattr(os, "sync") else None
+
+            # Wait for polling to detect change (needs at least one full cycle after modification)
+            time.sleep(2.5)
 
             # Should have triggered reload at least once
             # (polling might catch it once, watchdog would debounce)

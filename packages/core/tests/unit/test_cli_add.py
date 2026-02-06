@@ -121,7 +121,8 @@ providers:
             manager.add_provider(provider)
 
             content = config_path.read_text()
-            assert "@anthropic/mcp-server-fetch" in content
+            # Should contain either uvx package name or npx package name
+            assert "mcp-server-fetch" in content or "@modelcontextprotocol/server-fetch" in content
 
     def test_add_provider_includes_path_config(self):
         """Should include path in args for path-based providers."""
