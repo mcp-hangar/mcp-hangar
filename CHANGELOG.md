@@ -7,6 +7,17 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.6.7] - 2026-02-06
+
+### Fixed
+
+- **ConfigReloadWorker tests**: Fixed timing issues in integration tests
+  - `test_watchdog_detects_file_modification`: Increased watchdog initialization time and debounce wait
+  - `test_multiple_rapid_changes_debounced_in_watchdog`: Added explicit polling interval configuration
+  - `test_polling_detects_file_modification`: Ensured sufficient mtime difference for detection
+- **CLI add provider test**: Fixed assertion to accept both uvx and npx package names
+  - Test now correctly validates `mcp-server-fetch` (uvx) or `@modelcontextprotocol/server-fetch` (npx)
+
 ## [0.6.6] - 2026-02-06
 
 ### Added
