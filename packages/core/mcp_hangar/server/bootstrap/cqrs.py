@@ -16,13 +16,14 @@ if TYPE_CHECKING:
 logger = get_logger(__name__)
 
 
-def init_cqrs(runtime: "Runtime") -> None:
+def init_cqrs(runtime: "Runtime", current_config_path: str | None = None) -> None:
     """Register command and query handlers.
 
     Args:
         runtime: Runtime instance with command and query buses.
+        current_config_path: Current configuration file path for reload handler.
     """
-    register_command_handlers(runtime.command_bus, PROVIDER_REPOSITORY, runtime.event_bus)
+    register_command_handlers(runtime.command_bus, PROVIDER_REPOSITORY, runtime.event_bus, current_config_path)
     register_query_handlers(runtime.query_bus, PROVIDER_REPOSITORY)
     logger.info("cqrs_handlers_registered")
 

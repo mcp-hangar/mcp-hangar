@@ -385,20 +385,49 @@ class ServerLifecycle:
 
 
 def _setup_signal_handlers(lifecycle: ServerLifecycle) -> None:
-    """Setup graceful shutdown on SIGTERM/SIGINT.
+    """Setup graceful shutdown on SIGTERM/SIGINT and reload on SIGHUP.
 
     Args:
         lifecycle: ServerLifecycle instance to shutdown on signal.
     """
 
-    def handler(signum, _frame):
+    def shutdown_handler(signum, _frame):
         sig_name = signal.Signals(signum).name
         logger.info("shutdown_signal_received", signal=sig_name)
         lifecycle.shutdown()
         sys.exit(0)
 
-    signal.signal(signal.SIGTERM, handler)
-    signal.signal(signal.SIGINT, handler)
+    def reload_handler(signum, _frame):
+        """Handle SIGHUP for configuration reload."""
+        sig_name = signal.Signals(signum).name
+        logger.info("reload_signal_received", signal=sig_name)
+
+        try:
+            from ..application.commands.commands import ReloadConfigurationCommand
+
+            command = ReloadConfigurationCommand(
+                graceful=True,
+                requested_by="sighup",
+            )
+
+            # Access command bus from lifecycle context
+            result = lifecycle._context.runtime.command_bus.send(command)
+            logger.info("config_reload_completed_via_signal", result=result)
+
+        except Exception as e:
+            logger.error(
+                "config_reload_failed_via_signal",
+                error=str(e),
+                error_type=type(e).__name__,
+            )
+
+    signal.signal(signal.SIGTERM, shutdown_handler)
+    signal.signal(signal.SIGINT, shutdown_handler)
+
+    # SIGHUP is not available on Windows
+    if hasattr(signal, "SIGHUP"):
+        signal.signal(signal.SIGHUP, reload_handler)
+        logger.debug("sighup_handler_registered")
 
 
 def _setup_logging_from_config(cli_config: CLIConfig) -> None:

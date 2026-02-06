@@ -33,15 +33,32 @@ MCP Hangar is a monorepo containing multiple packages:
 
 ## Quick Start
 
-```bash
-# Quick install
-curl -sSL https://get.mcp-hangar.io | bash
+**30 seconds to working MCP providers:**
 
-# Or via pip
+```bash
+curl -sSL https://get.mcp-hangar.io | bash && mcp-hangar init -y && mcp-hangar serve
+```
+
+That's it. Filesystem, fetch, and memory providers are now available to Claude.
+
+!!! info "What just happened?"
+    **Install** - Downloaded and installed `mcp-hangar` via pip/uv.
+    **Init** - Created config with starter providers, updated Claude Desktop.
+    **Serve** - Started the MCP server (stdio mode).
+    The `init -y` flag uses sensible defaults: detects runtimes (uvx preferred),
+    configures starter bundle (filesystem, fetch, memory), updates Claude Desktop.
+
+### Manual Installation
+
+```bash
+# Install
 pip install mcp-hangar
 
-# Run
-mcp-hangar --config config.yaml
+# Interactive setup wizard
+mcp-hangar init
+
+# Start server
+mcp-hangar serve
 ```
 
 ## Documentation

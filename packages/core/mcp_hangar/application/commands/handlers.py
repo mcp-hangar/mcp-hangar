@@ -181,7 +181,12 @@ class ShutdownIdleProvidersHandler(BaseProviderHandler):
         return shutdown_ids
 
 
-def register_all_handlers(command_bus: CommandBus, repository: IProviderRepository, event_bus: EventBus) -> None:
+def register_all_handlers(
+    command_bus: CommandBus,
+    repository: IProviderRepository,
+    event_bus: EventBus,
+    current_config_path: str | None = None,
+) -> None:
     """
     Register all command handlers with the command bus.
 
@@ -189,7 +194,11 @@ def register_all_handlers(command_bus: CommandBus, repository: IProviderReposito
         command_bus: The command bus to register handlers with
         repository: Provider repository
         event_bus: Event bus for publishing events
+        current_config_path: Current configuration file path for reload handler
     """
+    from .commands import ReloadConfigurationCommand
+    from .reload_handler import ReloadConfigurationHandler
+
     command_bus.register(StartProviderCommand, StartProviderHandler(repository, event_bus))
     command_bus.register(StopProviderCommand, StopProviderHandler(repository, event_bus))
     command_bus.register(InvokeToolCommand, InvokeToolHandler(repository, event_bus))
@@ -197,6 +206,10 @@ def register_all_handlers(command_bus: CommandBus, repository: IProviderReposito
     command_bus.register(
         ShutdownIdleProvidersCommand,
         ShutdownIdleProvidersHandler(repository, event_bus),
+    )
+    command_bus.register(
+        ReloadConfigurationCommand,
+        ReloadConfigurationHandler(repository, event_bus, current_config_path),
     )
 
     logger.info("command_handlers_registered")

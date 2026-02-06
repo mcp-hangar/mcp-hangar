@@ -207,7 +207,7 @@ def bootstrap(
     init_event_handlers(runtime)
 
     # Initialize CQRS
-    init_cqrs(runtime)
+    init_cqrs(runtime, config_path)
 
     # Initialize saga
     init_saga()
@@ -243,6 +243,21 @@ def bootstrap(
 
     # Create background workers (not started)
     workers = create_background_workers()
+
+    # Add config reload worker if enabled
+    reload_config = full_config.get("config_reload", {})
+    if reload_config.get("enabled", True):  # Enabled by default
+        from ...gc import ConfigReloadWorker
+
+        config_reload_worker = ConfigReloadWorker(
+            config_path=config_path,
+            command_bus=runtime.command_bus,
+            interval_s=reload_config.get("interval_s", 5),
+            use_watchdog=reload_config.get("use_watchdog", True),
+        )
+        # ConfigReloadWorker has .start() and .stop() compatible with BackgroundWorker
+        workers.append(config_reload_worker)  # type: ignore[arg-type]
+        logger.info("config_reload_worker_created")
 
     # Initialize discovery (not started)
     discovery_orchestrator = None

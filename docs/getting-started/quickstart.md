@@ -1,33 +1,41 @@
 # Quick Start
 
-Get MCP Hangar running with Claude Desktop in under 5 minutes.
+Get MCP Hangar running with Claude Desktop in under 30 seconds.
+
+## One-Liner Install
+
+```bash
+curl -sSL https://get.mcp-hangar.io | bash && mcp-hangar init -y && mcp-hangar serve
+```
+
+That's it. Restart Claude Desktop and you have:
+
+- **filesystem** - Read and write local files
+- **fetch** - Make HTTP requests
+- **memory** - Persistent key-value storage
 
 ## Prerequisites
 
 - Python 3.11 or later
 - Claude Desktop installed ([download](https://claude.ai/download))
-- Node.js (for MCP provider packages)
-
-## Installation
-
-```bash
-pip install mcp-hangar
-```
+- uvx or npx (for MCP provider packages)
 
 ## Interactive Setup
 
-Run the setup wizard:
+Prefer a guided experience? Use the wizard:
 
 ```bash
+pip install mcp-hangar
 mcp-hangar init
 ```
 
 The wizard will:
 
-1. **Detect Claude Desktop** - finds your Claude Desktop config automatically
-2. **Select providers** - choose which MCP providers to enable (file access, web requests, memory, etc.)
-3. **Configure** - collect any required API keys or paths
-4. **Update Claude Desktop** - automatically configure Claude to use MCP Hangar
+1. **Detect runtimes** - finds uvx, npx, docker in your PATH
+2. **Detect Claude Desktop** - finds your Claude Desktop config automatically
+3. **Select providers** - choose which MCP providers to enable
+4. **Test providers** - verify each provider starts correctly
+5. **Update Claude Desktop** - automatically configure Claude to use MCP Hangar
 
 **Restart Claude Desktop** after the wizard completes.
 

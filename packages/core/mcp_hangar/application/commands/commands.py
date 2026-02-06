@@ -74,3 +74,12 @@ class UnloadProviderCommand(Command):
 
     provider_id: str
     user_id: str | None = None
+
+
+@dataclass(frozen=True)
+class ReloadConfigurationCommand(Command):
+    """Command to reload configuration from file."""
+
+    config_path: str | None = None
+    graceful: bool = True
+    requested_by: str = "manual"

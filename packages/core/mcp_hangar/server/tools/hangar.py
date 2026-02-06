@@ -10,6 +10,7 @@ from mcp.server.fastmcp import FastMCP
 
 from ...application.commands import (
     LoadProviderCommand,
+    ReloadConfigurationCommand,
     StartProviderCommand,
     StopProviderCommand,
     UnloadProviderCommand,
@@ -638,3 +639,90 @@ def register_load_tools(mcp: FastMCP) -> None:
                 "provider": provider,
                 "message": f"Provider '{provider}' was not hot-loaded. Use hangar_stop for configured providers.",
             }
+
+    @mcp.tool(name="hangar_reload_config")
+    @mcp_tool_wrapper(
+        tool_name="hangar_reload_config",
+        rate_limit_key=key_global,
+        check_rate_limit=lambda key: check_rate_limit("hangar_reload_config"),
+        validate=None,
+        error_mapper=lambda exc: tool_error_mapper(exc),
+        on_error=tool_error_hook,
+    )
+    def _hangar_reload_config(graceful: bool = True) -> dict:
+        """Reload configuration from file and apply changes.
+
+        CHOOSE THIS when: you modified config.yaml and want to apply changes without restarting.
+        NOTE: Preserves unchanged providers (no restart), only affects added/removed/updated.
+
+        Side effects: Stops/starts providers based on configuration changes.
+
+        Args:
+            graceful: bool - If True, wait for idle state before stopping (default: true)
+
+        Returns:
+            {
+                status: "success"|"failed",
+                message: str,
+                providers_added: [str],
+                providers_removed: [str],
+                providers_updated: [str],
+                providers_unchanged: [str],
+                duration_ms: float
+            }
+
+        Example:
+            hangar_reload_config()
+            # {"status": "success", "message": "Configuration reloaded successfully",
+            #  "providers_added": ["new-provider"], "providers_removed": [],
+            #  "providers_updated": ["modified-provider"], "providers_unchanged": ["stable-provider"],
+            #  "duration_ms": 123.45}
+
+            hangar_reload_config(graceful=false)
+            # Immediate reload without waiting for idle state
+        """
+        return hangar_reload_config(graceful)
+
+
+def hangar_reload_config(graceful: bool = True) -> dict:
+    """
+    Reload configuration from file and apply changes to running providers.
+
+    This is a COMMAND operation that:
+    - Adds new providers from config
+    - Removes deleted providers
+    - Restarts providers with modified configuration
+    - Preserves unchanged providers (no restart)
+
+    Args:
+        graceful: If True, wait for idle state before stopping providers.
+                  If False, immediately stop providers.
+
+    Returns:
+        Dictionary with reload status and statistics
+    """
+    ctx = get_context()
+
+    command = ReloadConfigurationCommand(
+        graceful=graceful,
+        requested_by="tool",
+    )
+
+    try:
+        result = ctx.runtime.command_bus.send(command)
+        return {
+            "status": "success",
+            "message": "Configuration reloaded successfully",
+            "providers_added": result.get("providers_added", []),
+            "providers_removed": result.get("providers_removed", []),
+            "providers_updated": result.get("providers_updated", []),
+            "providers_unchanged": result.get("providers_unchanged", []),
+            "duration_ms": result.get("duration_ms", 0),
+        }
+
+    except Exception as e:
+        return {
+            "status": "failed",
+            "message": f"Configuration reload failed: {str(e)}",
+            "error_type": type(e).__name__,
+        }

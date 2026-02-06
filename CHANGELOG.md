@@ -7,6 +7,79 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Added
+
+- **Hot-Reload Configuration**: Live configuration reloading without process restart
+  - Automatic file watching via watchdog (inotify/fsevents) with polling fallback
+  - SIGHUP signal handler for Unix-style reload
+  - New MCP tool `hangar_reload_config` for interactive reload from AI assistant
+  - Intelligent diff: only restarts providers with changed configuration
+  - Unchanged providers preserve their state and active connections
+  - Atomic reload: invalid configuration is rejected, current config preserved
+  - New domain events: `ConfigurationReloadRequested`, `ConfigurationReloaded`, `ConfigurationReloadFailed`
+  - New command: `ReloadConfigurationCommand` with CQRS handler
+  - Background worker `ConfigReloadWorker` for automatic file monitoring
+  - Configurable via `config_reload` section in config.yaml
+
+- **Init Dependency Detection**: `mcp-hangar init` now detects available runtimes before offering providers
+  - Step 0 checks for `npx`, `uvx`, `docker`, `podman` in PATH
+  - Providers filtered by available dependencies (npx-based providers hidden when Node.js not installed)
+  - Clear error message with install instructions when no runtimes found
+  - Unavailable providers shown grayed out with "(requires npx)" hint
+  - Bundles automatically filtered to only include installable providers
+  - New module: `dependency_detector.py` with `DependencyStatus`, `detect_dependencies()`
+
+- **Init Smoke Test**: `mcp-hangar init` now tests providers after configuration
+  - Step 5 starts each provider and waits for READY state (max 10s total)
+  - Shows green checkmark per provider on success: `OK filesystem ready (1234ms)`
+  - Shows detailed error with actionable suggestion on failure
+  - Summary shows pass/fail count before "Restart Claude Desktop" prompt
+  - Skip with `--skip-test` flag if needed
+  - New module: `smoke_test.py` with `run_smoke_test()`, `SmokeTestResult`
+
+- **Init Existing Config Handling**: `mcp-hangar init` now handles existing configuration safely
+  - Interactive mode prompts with three options: Merge, Backup & Overwrite, Abort
+  - Merge: Adds new providers while preserving existing ones (no overwrites)
+  - Backup & Overwrite: Creates timestamped backup, then replaces with new config
+  - Abort: Cancels init, preserves existing configuration unchanged
+  - Non-interactive mode (`-y`): Always creates backup then overwrites
+  - `--reset` flag: Overwrites without backup or prompt
+  - Never silently overwrites existing configuration
+  - New method: `ConfigFileManager.merge_providers()` for safe merging
+
+- **Init uvx Support (Dual-Stack)**: `mcp-hangar init` now supports uvx as alternative to npx
+  - Providers with Python equivalents can now run via uvx when Node.js not available
+  - Runtime priority: uvx > npx (dogfooding - MCP Hangar is Python-based)
+  - Mapping: `npx @modelcontextprotocol/server-fetch` -> `uvx mcp-server-fetch`
+  - All starter providers (filesystem, fetch, memory) have uvx packages
+  - Config generates appropriate command based on detected runtimes
+  - Provider unavailable only if NO suitable runtime available
+  - puppeteer remains npx-only (no Python equivalent)
+  - New fields in `ProviderDefinition`: `uvx_package`, `get_preferred_runtime()`, `get_command_package()`
+
+- **One-Liner Quick Start**: Zero-interaction installation and setup
+  - New install script at `scripts/install.sh` (hosted at get.mcp-hangar.io)
+  - Full happy path: `curl -sSL https://get.mcp-hangar.io | bash && mcp-hangar init -y && mcp-hangar serve`
+  - Auto-detects uv/pip, installs package, verifies installation
+  - `init -y` uses starter bundle with detected runtime (uvx preferred)
+  - Works on clean Mac/Linux with Python 3.11+ and uvx or npx
+  - Updated README with prominent quick start section
+
+### Configuration
+
+New `config_reload` section in config.yaml:
+
+```yaml
+config_reload:
+  enabled: true       # default: true
+  use_watchdog: true  # default: true, falls back to polling
+  interval_s: 5       # polling interval when watchdog unavailable
+```
+
+### Documentation
+
+- New reference documentation: `docs/reference/hot-reload.md`
+
 ## [0.6.5] - 2026-02-03
 
 ### Added

@@ -712,3 +712,47 @@ class ProviderHotUnloaded(DomainEvent):
 
     def __post_init__(self):
         super().__init__()
+
+
+# Configuration Reload Events
+
+
+@dataclass
+class ConfigurationReloadRequested(DomainEvent):
+    """Published when configuration reload is requested."""
+
+    config_path: str
+    requested_by: str  # "sighup", "tool", "file_watcher"
+    force: bool = False
+
+    def __post_init__(self):
+        super().__init__()
+
+
+@dataclass
+class ConfigurationReloaded(DomainEvent):
+    """Published when configuration is successfully reloaded."""
+
+    config_path: str
+    providers_added: list[str]
+    providers_removed: list[str]
+    providers_updated: list[str]
+    providers_unchanged: list[str]
+    reload_duration_ms: float
+    requested_by: str
+
+    def __post_init__(self):
+        super().__init__()
+
+
+@dataclass
+class ConfigurationReloadFailed(DomainEvent):
+    """Published when configuration reload fails."""
+
+    config_path: str
+    reason: str
+    error_type: str
+    requested_by: str
+
+    def __post_init__(self):
+        super().__init__()

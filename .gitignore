@@ -243,3 +243,4 @@ operator/bin/
 htmlcov/
 .coverage
 coverage.xml
+.data/
