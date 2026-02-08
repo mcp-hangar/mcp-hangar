@@ -4,12 +4,12 @@ Sagas coordinate long-running business processes that span multiple aggregates
 or services. They react to domain events and emit commands.
 """
 
+import time
+import uuid
 from abc import ABC, abstractmethod
 from dataclasses import dataclass, field
 from enum import Enum
-import time
-from typing import Any, Optional, TYPE_CHECKING
-import uuid
+from typing import TYPE_CHECKING, Any, Optional
 
 from ..domain.events import DomainEvent
 from ..logging_config import get_logger
@@ -231,8 +231,10 @@ class SagaManager:
         with self._lock:
             if saga_type in self._event_sagas:
                 del self._event_sagas[saga_type]
-                return True
-            return False
+                found = True
+            else:
+                found = False
+        return found
 
     def start_saga(self, saga: Saga, initial_data: dict[str, Any] | None = None) -> SagaContext:
         """
@@ -374,17 +376,20 @@ class SagaManager:
     def get_active_sagas(self) -> list[SagaContext]:
         """Get all active saga contexts."""
         with self._lock:
-            return [saga.context for saga in self._active_sagas.values() if saga.context]
+            result = [saga.context for saga in self._active_sagas.values() if saga.context]
+        return result
 
     def get_saga_history(self, limit: int = 20) -> list[SagaContext]:
         """Get recent saga history."""
         with self._lock:
-            return list(reversed(self._saga_history[-limit:]))
+            result = list(reversed(self._saga_history[-limit:]))
+        return result
 
     def get_saga(self, saga_id: str) -> Saga | None:
         """Get an active saga by ID."""
         with self._lock:
-            return self._active_sagas.get(saga_id)
+            result = self._active_sagas.get(saga_id)
+        return result
 
 
 # Singleton instance

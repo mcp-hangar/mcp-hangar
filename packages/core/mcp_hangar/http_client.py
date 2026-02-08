@@ -11,15 +11,15 @@ Thread-safe HTTP client with:
 Follows the same interface as StdioClient for consistency.
 """
 
-from dataclasses import dataclass, field
-from enum import Enum
 import json
-from queue import Queue
 import ssl
 import threading
 import time
-from typing import Any
 import uuid
+from dataclasses import dataclass, field
+from enum import Enum
+from queue import Queue
+from typing import Any
 
 import httpx
 
@@ -85,6 +85,7 @@ class AuthConfig:
             return {}
 
         if self.auth_type == AuthType.API_KEY:
+            assert self.api_key is not None
             return {self.api_key_header: self.api_key}
 
         if self.auth_type == AuthType.BEARER:
@@ -603,9 +604,8 @@ class HttpClient:
     def __enter__(self) -> "HttpClient":
         return self
 
-    def __exit__(self, exc_type: Any, exc_val: Any, exc_tb: Any) -> bool:
+    def __exit__(self, exc_type: Any, exc_val: Any, exc_tb: Any) -> None:
         self.close()
-        return False
 
     @property
     def endpoint(self) -> str:

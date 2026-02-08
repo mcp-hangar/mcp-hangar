@@ -12,9 +12,9 @@ Contains:
 - HTTP transport configuration classes
 """
 
+import re
 from dataclasses import dataclass
 from enum import Enum
-import re
 from typing import Any
 from urllib.parse import urlparse
 
@@ -352,6 +352,7 @@ class HttpAuthConfig:
             return {}
 
         if self.auth_type == HttpAuthType.API_KEY:
+            assert self.api_key is not None
             return {self.api_key_header: self.api_key}
 
         if self.auth_type == HttpAuthType.BEARER:

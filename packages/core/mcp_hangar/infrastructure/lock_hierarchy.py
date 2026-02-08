@@ -19,8 +19,8 @@ Example INVALID (would deadlock):
     StdioClient.pending_lock (50) -> Provider._lock (10)  # WRONG!
 """
 
-from enum import IntEnum
 import threading
+from enum import IntEnum
 from typing import Any
 
 from ..logging_config import get_logger
@@ -210,10 +210,9 @@ class TrackedLock:
         self.acquire()
         return self
 
-    def __exit__(self, exc_type: Any, exc_val: Any, exc_tb: Any) -> bool:
+    def __exit__(self, exc_type: Any, exc_val: Any, exc_tb: Any) -> None:
         """Context manager exit - release lock."""
         self.release()
-        return False
 
     def locked(self) -> bool:
         """Check if lock is currently held."""

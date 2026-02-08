@@ -3,12 +3,12 @@
 Provides append-only storage of domain events with optimistic concurrency control.
 """
 
+import json
+import time
 from abc import ABC, abstractmethod
 from collections.abc import Callable
 from dataclasses import dataclass, field
-import json
 from pathlib import Path
-import time
 from typing import Any
 
 from ..domain.events import DomainEvent
@@ -289,7 +289,7 @@ class FileEventStore(EventStore):
                     f.write(json.dumps(stored.to_dict()) + "\n")
                     self._cache[stream_id].append(stored)
 
-            return new_version
+        return new_version
 
     def load(self, stream_id: str, from_version: int = 0, to_version: int | None = None) -> list[StoredEvent]:
         """Load events from a stream."""
@@ -306,7 +306,7 @@ class FileEventStore(EventStore):
             if not stream_file.exists():
                 return []
 
-            events = []
+            events: list[StoredEvent] = []
             with open(stream_file) as f:
                 for line in f:
                     if line.strip():
@@ -319,7 +319,7 @@ class FileEventStore(EventStore):
             # Cache for future reads
             self._cache[stream_id] = events
 
-            return events
+        return events
 
     def get_version(self, stream_id: str) -> int:
         """Get current version of a stream."""
@@ -333,7 +333,7 @@ class FileEventStore(EventStore):
             for file in self._storage_path.glob("*.jsonl"):
                 stream_id = file.stem.replace("_", "/")
                 stream_ids.append(stream_id)
-            return stream_ids
+        return stream_ids
 
     def stream_exists(self, stream_id: str) -> bool:
         """Check if stream exists."""
@@ -384,7 +384,8 @@ class EventStoreSnapshot:
                 return None
 
             with open(snapshot_file) as f:
-                return json.load(f)
+                data: dict[str, Any] = json.load(f)
+        return data
 
     def should_snapshot(self, events_since_snapshot: int) -> bool:
         """Determine if a snapshot should be taken."""
