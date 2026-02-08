@@ -53,11 +53,11 @@ See docs/guides/UX_IMPROVEMENTS.md for more examples.
 
 from collections.abc import Callable
 from dataclasses import dataclass, field
-from enum import Enum
+from enum import StrEnum
 from typing import Any
 
 
-class ErrorCategory(str, Enum):
+class ErrorCategory(StrEnum):
     """Kategoria bledu dla lepszej diagnostyki.
 
     Attributes:

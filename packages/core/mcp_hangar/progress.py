@@ -25,7 +25,7 @@ See docs/guides/UX_IMPROVEMENTS.md for more examples.
 import asyncio
 from collections.abc import AsyncIterator, Callable, Iterator
 from dataclasses import dataclass, field
-from enum import Enum
+from enum import StrEnum
 import threading
 import time
 from typing import Any
@@ -35,7 +35,7 @@ from .logging_config import get_logger
 logger = get_logger(__name__)
 
 
-class ProgressStage(str, Enum):
+class ProgressStage(StrEnum):
     """Stages of operation progress."""
 
     # Pre-execution stages
@@ -56,7 +56,7 @@ class ProgressStage(str, Enum):
     RETRYING = "retrying"
 
 
-class EventType(str, Enum):
+class EventType(StrEnum):
     """Types of events in the stream."""
 
     PROGRESS = "progress"

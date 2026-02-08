@@ -27,7 +27,7 @@ See docs/guides/UX_IMPROVEMENTS.md for more examples.
 import asyncio
 from collections.abc import Callable
 from dataclasses import dataclass, field
-from enum import Enum
+from enum import StrEnum
 import time
 from typing import Any, TypeVar
 
@@ -39,7 +39,7 @@ logger = get_logger(__name__)
 T = TypeVar("T")
 
 
-class BackoffStrategy(str, Enum):
+class BackoffStrategy(StrEnum):
     """Backoff strategy for retries."""
 
     EXPONENTIAL = "exponential"
