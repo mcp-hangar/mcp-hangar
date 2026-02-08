@@ -26,38 +26,14 @@ import threading
 import time
 
 from ....logging_config import get_logger
-from ....metrics import Counter, Gauge, Histogram
+from ....metrics import (
+    BATCH_CONCURRENCY_QUEUED_TOTAL,
+    BATCH_CONCURRENCY_WAIT_SECONDS,
+    BATCH_INFLIGHT_CALLS,
+    BATCH_INFLIGHT_CALLS_PER_PROVIDER,
+)
 
 logger = get_logger(__name__)
-
-
-# ---------------------------------------------------------------------------
-# Concurrency metrics
-# ---------------------------------------------------------------------------
-
-BATCH_INFLIGHT_CALLS = Gauge(
-    name="mcp_hangar_batch_inflight_calls",
-    description="Number of MCP tool calls currently in flight (global)",
-)
-
-BATCH_INFLIGHT_CALLS_PER_PROVIDER = Gauge(
-    name="mcp_hangar_batch_inflight_calls_per_provider",
-    description="Number of MCP tool calls currently in flight per provider",
-    labels=["provider"],
-)
-
-BATCH_CONCURRENCY_WAIT_SECONDS = Histogram(
-    name="mcp_hangar_batch_concurrency_wait_seconds",
-    description="Time spent waiting for a concurrency slot",
-    labels=["provider"],
-    buckets=(0.001, 0.005, 0.01, 0.025, 0.05, 0.1, 0.25, 0.5, 1.0, 2.5, 5.0),
-)
-
-BATCH_CONCURRENCY_QUEUED_TOTAL = Counter(
-    name="mcp_hangar_batch_concurrency_queued",
-    description="Total calls that had to wait for a concurrency slot",
-    labels=["provider"],
-)
 
 # Default limits
 DEFAULT_GLOBAL_CONCURRENCY = 50

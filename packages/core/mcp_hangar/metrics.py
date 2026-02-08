@@ -826,6 +826,34 @@ BATCH_CANCELLATIONS_TOTAL = Counter(
     labels=["reason"],  # reason: timeout, fail_fast
 )
 
+# -----------------------------------------------------------------------------
+# Batch Concurrency Metrics
+# -----------------------------------------------------------------------------
+
+BATCH_INFLIGHT_CALLS = Gauge(
+    name="mcp_hangar_batch_inflight_calls",
+    description="Number of MCP tool calls currently in flight (global)",
+)
+
+BATCH_INFLIGHT_CALLS_PER_PROVIDER = Gauge(
+    name="mcp_hangar_batch_inflight_calls_per_provider",
+    description="Number of MCP tool calls currently in flight per provider",
+    labels=["provider"],
+)
+
+BATCH_CONCURRENCY_WAIT_SECONDS = Histogram(
+    name="mcp_hangar_batch_concurrency_wait_seconds",
+    description="Time spent waiting for a concurrency slot",
+    labels=["provider"],
+    buckets=(0.001, 0.005, 0.01, 0.025, 0.05, 0.1, 0.25, 0.5, 1.0, 2.5, 5.0),
+)
+
+BATCH_CONCURRENCY_QUEUED_TOTAL = Counter(
+    name="mcp_hangar_batch_concurrency_queued",
+    description="Total calls that had to wait for a concurrency slot",
+    labels=["provider"],
+)
+
 
 # =============================================================================
 # Register All Metrics
@@ -894,22 +922,15 @@ def _register_all_metrics():
         BATCH_CANCELLATIONS_TOTAL,
     ]
 
-    # Concurrency metrics are defined in server/tools/batch/concurrency.py
-    # and registered here for inclusion in /metrics output.
-    from .server.tools.batch.concurrency import (
-        BATCH_CONCURRENCY_QUEUED_TOTAL,
-        BATCH_CONCURRENCY_WAIT_SECONDS,
-        BATCH_INFLIGHT_CALLS,
-        BATCH_INFLIGHT_CALLS_PER_PROVIDER,
+    # Concurrency metrics (defined above alongside other batch metrics)
+    metrics.extend(
+        [
+            BATCH_INFLIGHT_CALLS,
+            BATCH_INFLIGHT_CALLS_PER_PROVIDER,
+            BATCH_CONCURRENCY_WAIT_SECONDS,
+            BATCH_CONCURRENCY_QUEUED_TOTAL,
+        ]
     )
-
-    concurrency_metrics = [
-        BATCH_INFLIGHT_CALLS,
-        BATCH_INFLIGHT_CALLS_PER_PROVIDER,
-        BATCH_CONCURRENCY_WAIT_SECONDS,
-        BATCH_CONCURRENCY_QUEUED_TOTAL,
-    ]
-    metrics.extend(concurrency_metrics)
     for metric in metrics:
         REGISTRY.register(metric)
 
