@@ -70,41 +70,60 @@ from .domain.value_objects import (
 # New explicit names with Rich prefix; Backward compat aliases (deprecated)
 from .errors import (
     ConfigurationError as HangarConfigurationError,
-    create_argument_tool_error,
-    create_crash_tool_error,
-    create_provider_error,
-    create_timeout_tool_error,
+)
+from .errors import (
     ErrorCategory,
     HangarError,
-    is_retryable,
-    map_exception_to_hangar_error,
     NetworkError,
     ProviderCrashError,
-    ProviderDegradedError as HangarProviderDegradedError,
-    ProviderNotFoundError as HangarProviderNotFoundError,
     ProviderProtocolError,
     RateLimitError,
     RichProviderNotFoundError,
     RichToolInvocationError,
     RichToolNotFoundError,
-    TimeoutError as HangarTimeoutError,
-    ToolNotFoundError as HangarToolNotFoundError,
     TransientError,
+    create_argument_tool_error,
+    create_crash_tool_error,
+    create_provider_error,
+    create_timeout_tool_error,
+    is_retryable,
+    map_exception_to_hangar_error,
+)
+from .errors import (
+    ProviderDegradedError as HangarProviderDegradedError,
+)
+from .errors import (
+    ProviderNotFoundError as HangarProviderNotFoundError,
+)
+from .errors import (
+    TimeoutError as HangarTimeoutError,
+)
+from .errors import (
+    ToolNotFoundError as HangarToolNotFoundError,
 )
 
 # High-level Facade API (recommended for most users)
-from .facade import Hangar, HangarConfig, HangarConfigData, HealthSummary, ProviderInfo, SyncHangar
+from .facade import (
+    FACADE_DEFAULT_CONCURRENCY,
+    FACADE_MAX_CONCURRENCY,
+    Hangar,
+    HangarConfig,
+    HangarConfigData,
+    HealthSummary,
+    ProviderInfo,
+    SyncHangar,
+)
 
 # Legacy imports - for backward compatibility
 from .progress import (
-    create_progress_tracker,
-    get_stage_message,
     ProgressCallback,
     ProgressEvent,
     ProgressStage,
     ProgressTracker,
+    create_progress_tracker,
+    get_stage_message,
 )
-from .retry import BackoffStrategy, get_retry_policy, get_retry_store, RetryPolicy, RetryResult, with_retry
+from .retry import BackoffStrategy, RetryPolicy, RetryResult, get_retry_policy, get_retry_store, with_retry
 from .stdio_client import StdioClient
 
 __all__ = [
@@ -115,6 +134,8 @@ __all__ = [
     "HangarConfigData",
     "ProviderInfo",
     "HealthSummary",
+    "FACADE_DEFAULT_CONCURRENCY",
+    "FACADE_MAX_CONCURRENCY",
     # Domain - Provider aggregate
     "Provider",
     # Domain - Value Objects

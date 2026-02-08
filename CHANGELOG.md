@@ -11,6 +11,10 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Added
 
+- **Facade `max_concurrency` config**: `HangarConfig.max_concurrency(n)` configures maximum parallel
+  tool invocations through `Hangar.invoke()`. Default: 20, range: 1-100.
+  - Also exposed in `HangarConfigData.max_concurrency` and `to_dict()` output
+  - Constants `FACADE_DEFAULT_CONCURRENCY` (20) and `FACADE_MAX_CONCURRENCY` (100) exported from `facade` module
 - **Two-level concurrency model**: New `ConcurrencyManager` with global and per-provider semaphores
   - Global semaphore limits total in-flight calls across all providers and batches (default: 50)
   - Per-provider semaphores limit concurrent calls to each individual provider (default: 10)
@@ -37,6 +41,11 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Fixed
 
+- **Facade hardcoded concurrency limit**: `Hangar.invoke()` was hardcoded to 4 concurrent threads
+  (`ThreadPoolExecutor(max_workers=4)`), causing parallel calls to execute in sequential waves of 4.
+  Default increased to 20 and made configurable via `HangarConfig.max_concurrency()`. This masked the
+  true parallelism benefits of the MCP provider architecture (e.g., 20 parallel 100ms calls took ~520ms
+  instead of ~110ms).
 - **Import ordering**: Fixed isort violations in `scripts/validate_config.py` and `examples/discovery/test_container_discovery.py`
 - **E402 violations**: Moved mid-file imports to top of file in `examples/auth-keycloak/test_keycloak_integration.py`
 - **B007 violation**: Renamed unused loop variable in `examples/auth-keycloak/test_oidc_local.py`

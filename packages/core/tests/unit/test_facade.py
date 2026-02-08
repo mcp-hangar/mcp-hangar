@@ -7,7 +7,15 @@ import pytest
 
 from mcp_hangar.domain.exceptions import ConfigurationError, ProviderNotFoundError
 from mcp_hangar.domain.value_objects import ProviderMode, ProviderState
-from mcp_hangar.facade import Hangar, HangarConfig, HealthSummary, ProviderInfo, SyncHangar
+from mcp_hangar.facade import (
+    FACADE_DEFAULT_CONCURRENCY,
+    FACADE_MAX_CONCURRENCY,
+    Hangar,
+    HangarConfig,
+    HealthSummary,
+    ProviderInfo,
+    SyncHangar,
+)
 
 # --- HangarConfig Builder Tests ---
 
@@ -116,6 +124,72 @@ class TestHangarConfig:
             config.add_provider("another", command=["python"])
 
 
+class TestHangarConfigMaxConcurrency:
+    """Tests for HangarConfig max_concurrency setting."""
+
+    def test_default_max_concurrency(self):
+        """Default max_concurrency should be FACADE_DEFAULT_CONCURRENCY (20)."""
+        config = HangarConfig().add_provider("math", command=["python"]).build()
+
+        assert config.max_concurrency == FACADE_DEFAULT_CONCURRENCY
+        assert config.max_concurrency == 20
+
+    def test_set_max_concurrency(self):
+        """Should set max_concurrency via builder method."""
+        config = HangarConfig().max_concurrency(50).add_provider("math", command=["python"]).build()
+
+        assert config.max_concurrency == 50
+
+    def test_max_concurrency_minimum_valid(self):
+        """Should accept max_concurrency of 1."""
+        config = HangarConfig().max_concurrency(1).build()
+
+        assert config.max_concurrency == 1
+
+    def test_max_concurrency_maximum_valid(self):
+        """Should accept max_concurrency at upper bound."""
+        config = HangarConfig().max_concurrency(FACADE_MAX_CONCURRENCY).build()
+
+        assert config.max_concurrency == FACADE_MAX_CONCURRENCY
+
+    def test_max_concurrency_zero_raises_error(self):
+        """Should raise ValueError for max_concurrency of 0."""
+        with pytest.raises(ValueError, match="max_concurrency must be between 1 and"):
+            HangarConfig().max_concurrency(0)
+
+    def test_max_concurrency_negative_raises_error(self):
+        """Should raise ValueError for negative max_concurrency."""
+        with pytest.raises(ValueError, match="max_concurrency must be between 1 and"):
+            HangarConfig().max_concurrency(-1)
+
+    def test_max_concurrency_exceeds_upper_bound_raises_error(self):
+        """Should raise ValueError for max_concurrency above upper bound."""
+        with pytest.raises(ValueError, match="max_concurrency must be between 1 and"):
+            HangarConfig().max_concurrency(FACADE_MAX_CONCURRENCY + 1)
+
+    def test_max_concurrency_cannot_set_after_build(self):
+        """Should raise ConfigurationError when setting max_concurrency after build."""
+        config = HangarConfig()
+        config.build()
+
+        with pytest.raises(ConfigurationError, match="already built"):
+            config.max_concurrency(10)
+
+    def test_max_concurrency_chaining(self):
+        """max_concurrency should return self for fluent chaining."""
+        config = (
+            HangarConfig()
+            .add_provider("math", command=["python"])
+            .max_concurrency(30)
+            .set_intervals(gc_interval_s=60)
+            .build()
+        )
+
+        assert config.max_concurrency == 30
+        assert config.gc_interval_s == 60
+        assert "math" in config.providers
+
+
 class TestHangarConfigDiscovery:
     """Tests for HangarConfig discovery settings."""
 
@@ -186,6 +260,23 @@ class TestHangarConfigToDict:
         assert "discovery" in result
         assert result["discovery"]["docker"] == {"enabled": True}
         assert result["discovery"]["filesystem"]["paths"] == ["./providers"]
+
+    def test_to_dict_includes_max_concurrency(self):
+        """Should include max_concurrency in dict output."""
+        builder = HangarConfig()
+        builder.add_provider("math", command=["python"])
+        builder.max_concurrency(30)
+        result = builder.to_dict()
+
+        assert result["max_concurrency"] == 30
+
+    def test_to_dict_includes_default_max_concurrency(self):
+        """Should include default max_concurrency in dict output."""
+        builder = HangarConfig()
+        builder.add_provider("math", command=["python"])
+        result = builder.to_dict()
+
+        assert result["max_concurrency"] == FACADE_DEFAULT_CONCURRENCY
 
 
 # --- ProviderInfo Tests ---
@@ -276,6 +367,35 @@ class TestHangarInitialization:
         hangar = Hangar.from_builder(config)
         assert hangar._config is config
         assert hangar._started is False
+
+    def test_from_builder_uses_configured_max_concurrency(self):
+        """Executor should use max_concurrency from builder config."""
+        config = HangarConfig().add_provider("math", command=["python"]).max_concurrency(42).build()
+        hangar = Hangar.from_builder(config)
+
+        assert hangar._executor._max_workers == 42
+
+    def test_from_builder_uses_default_max_concurrency(self):
+        """Executor should default to FACADE_DEFAULT_CONCURRENCY when not explicitly set."""
+        config = HangarConfig().add_provider("math", command=["python"]).build()
+        hangar = Hangar.from_builder(config)
+
+        assert hangar._executor._max_workers == FACADE_DEFAULT_CONCURRENCY
+
+    def test_from_config_uses_default_max_concurrency(self):
+        """Executor should default to FACADE_DEFAULT_CONCURRENCY for file-based config."""
+        hangar = Hangar.from_config("config.yaml")
+
+        assert hangar._executor._max_workers == FACADE_DEFAULT_CONCURRENCY
+
+    def test_executor_not_hardcoded_to_four(self):
+        """Executor must not be hardcoded to 4 workers (the original bug)."""
+        hangar = Hangar.from_config("config.yaml")
+        assert hangar._executor._max_workers != 4
+
+        config = HangarConfig().add_provider("math", command=["python"]).build()
+        hangar2 = Hangar.from_builder(config)
+        assert hangar2._executor._max_workers != 4
 
 
 class TestHangarNotStarted:

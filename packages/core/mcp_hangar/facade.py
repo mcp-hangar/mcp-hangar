@@ -31,7 +31,7 @@ import asyncio
 from concurrent.futures import ThreadPoolExecutor
 from dataclasses import dataclass, field
 from pathlib import Path
-from typing import Any, TYPE_CHECKING
+from typing import TYPE_CHECKING, Any
 
 from .domain.exceptions import ConfigurationError, ProviderNotFoundError
 from .domain.value_objects import ProviderMode, ProviderState
@@ -56,6 +56,14 @@ class DiscoverySpec:
     filesystem: list[str] = field(default_factory=list)
 
 
+# Facade concurrency defaults
+FACADE_DEFAULT_CONCURRENCY = 20
+"""Default thread pool size for Hangar.invoke() concurrent tool calls."""
+
+FACADE_MAX_CONCURRENCY = 100
+"""Upper bound for facade thread pool size."""
+
+
 @dataclass
 class HangarConfigData:
     """Internal configuration data structure."""
@@ -64,6 +72,7 @@ class HangarConfigData:
     discovery: DiscoverySpec = field(default_factory=DiscoverySpec)
     gc_interval_s: int = 30
     health_check_interval_s: int = 10
+    max_concurrency: int = FACADE_DEFAULT_CONCURRENCY
 
 
 class HangarConfig:
@@ -176,6 +185,27 @@ class HangarConfig:
         )
         return self
 
+    def max_concurrency(self, value: int) -> HangarConfig:
+        """Set maximum concurrent tool invocations via Hangar.invoke().
+
+        Controls the thread pool size for the async facade.
+        Default: 20. Range: 1-100.
+
+        Args:
+            value: Maximum concurrent invocations.
+
+        Returns:
+            Self for chaining.
+
+        Raises:
+            ValueError: If value is outside the allowed range.
+        """
+        self._check_not_built()
+        if value < 1 or value > FACADE_MAX_CONCURRENCY:
+            raise ValueError(f"max_concurrency must be between 1 and {FACADE_MAX_CONCURRENCY}, got {value}")
+        self._data.max_concurrency = value
+        return self
+
     def set_intervals(
         self,
         *,
@@ -218,6 +248,7 @@ class HangarConfig:
         """
         result: dict[str, Any] = {
             "providers": dict(self._data.providers),
+            "max_concurrency": self._data.max_concurrency,
         }
 
         # Add discovery if enabled
@@ -330,7 +361,8 @@ class Hangar:
         self._config = config
         self._config_path = str(config_path) if config_path else None
         self._context = _context
-        self._executor = ThreadPoolExecutor(max_workers=4, thread_name_prefix="hangar-")
+        pool_size = config.max_concurrency if config else FACADE_DEFAULT_CONCURRENCY
+        self._executor = ThreadPoolExecutor(max_workers=pool_size, thread_name_prefix="hangar-")
         self._started = False
 
     @classmethod
