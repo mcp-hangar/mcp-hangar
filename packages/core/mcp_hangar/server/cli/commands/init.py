@@ -560,8 +560,7 @@ def init_command(
             else:
                 smoke_test_passed = False
                 console.print(
-                    f"\n  [yellow]{test_result.failed_count} of {len(test_result.results)} "
-                    f"providers failed[/yellow]"
+                    f"\n  [yellow]{test_result.failed_count} of {len(test_result.results)} providers failed[/yellow]"
                 )
                 console.print("  [dim]Configuration saved - fix issues and run 'mcp-hangar status'[/dim]")
 

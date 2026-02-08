@@ -47,7 +47,7 @@ class RedisResponseCache(IResponseCache):
             import redis
         except ImportError as e:
             raise ImportError(
-                "redis package is required for RedisResponseCache. " "Install with: pip install redis"
+                "redis package is required for RedisResponseCache. Install with: pip install redis"
             ) from e
 
         self._redis_url = redis_url
