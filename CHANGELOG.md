@@ -7,6 +7,40 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.7.0] - 2026-02-08
+
+### Added
+
+- **Two-level concurrency model**: New `ConcurrencyManager` with global and per-provider semaphores
+  - Global semaphore limits total in-flight calls across all providers and batches (default: 50)
+  - Per-provider semaphores limit concurrent calls to each individual provider (default: 10)
+  - Consistent lock ordering (global-first, then provider) prevents deadlocks
+  - All calls submitted to thread pool at once — no more sequential chunking into waves
+  - Calls start as soon as any slot is free, enabling true parallel execution
+- **Concurrency configuration**: New `execution` section in `config.yaml`
+  - `execution.max_concurrency` — global limit across all providers
+  - `execution.default_provider_concurrency` — default per-provider limit
+  - Per-provider `max_concurrency` override in provider config
+- **Concurrency observability**: New Prometheus metrics for concurrency control
+  - `mcp_hangar_batch_inflight_calls` — global in-flight call gauge
+  - `mcp_hangar_batch_inflight_calls_per_provider` — per-provider in-flight gauge
+  - `mcp_hangar_batch_concurrency_wait_seconds` — histogram of slot acquisition wait time
+  - `mcp_hangar_batch_concurrency_queued` — gauge of calls queued due to contention
+- **Concurrency test suite**: 40 new unit tests covering limits, isolation, metrics, parallelism, thread safety, and backward compatibility
+
+### Changed
+
+- **Repository migration**: All URLs updated from `github.com/mapyr` to `github.com/mcp-hangar`
+  - GitHub repository, container registry (GHCR), Go module paths, documentation links, Helm chart sources
+- **BatchExecutor**: Integrated with `ConcurrencyManager` for cross-batch backpressure
+- **Ruff/isort alignment**: Added `[tool.ruff.lint.isort]` config to root `pyproject.toml` so ruff I001 and standalone isort produce identical import ordering
+
+### Fixed
+
+- **Import ordering**: Fixed isort violations in `scripts/validate_config.py` and `examples/discovery/test_container_discovery.py`
+- **E402 violations**: Moved mid-file imports to top of file in `examples/auth-keycloak/test_keycloak_integration.py`
+- **B007 violation**: Renamed unused loop variable in `examples/auth-keycloak/test_oidc_local.py`
+
 ## [0.6.7] - 2026-02-06
 
 ### Fixed
@@ -728,7 +762,8 @@ The following items are documented technical debt introduced to enable CI:
 - Rate limiting to prevent denial of service
 - Audit logging for security-relevant events
 
-[Unreleased]: https://github.com/mcp-hangar/mcp-hangar/compare/v0.6.7...HEAD
+[Unreleased]: https://github.com/mcp-hangar/mcp-hangar/compare/v0.7.0...HEAD
+[0.7.0]: https://github.com/mcp-hangar/mcp-hangar/compare/v0.6.7...v0.7.0
 [0.6.7]: https://github.com/mcp-hangar/mcp-hangar/compare/v0.6.6...v0.6.7
 [0.6.6]: https://github.com/mcp-hangar/mcp-hangar/compare/v0.6.5...v0.6.6
 [0.6.5]: https://github.com/mcp-hangar/mcp-hangar/compare/v0.6.4...v0.6.5
