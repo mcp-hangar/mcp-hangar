@@ -14,7 +14,7 @@ This milestone hardens the authentication layer against known attack vectors and
 - [x] **Phase 1: Timing Attack Prevention** - Eliminate timing leaks in API key validation
 - [x] **Phase 2: Rate Limiter Hardening** - Audit, test, and enhance existing rate limiter
 - [x] **Phase 3: JWT Lifetime Enforcement** - Add configurable maximum token lifetime
-- [ ] **Phase 4: API Key Rotation** - Support key rotation with grace period
+- [x] **Phase 4: API Key Rotation** - Support key rotation with grace period
 
 ## Phase Details
 
@@ -86,8 +86,8 @@ Plans:
 
 Plans:
 
-- [ ] 04-01-PLAN.md -- TDD: KeyRotated event + InMemoryApiKeyStore rotation with grace period (KROT-01, KROT-02, KROT-03)
-- [ ] 04-02-PLAN.md -- Cross-store rotation: SQLite/Postgres/EventSourced + cross-store tests (KROT-04)
+- [x] 04-01-PLAN.md -- TDD: KeyRotated event + InMemoryApiKeyStore rotation with grace period (KROT-01, KROT-02, KROT-03)
+- [x] 04-02-PLAN.md -- Cross-store rotation: SQLite/Postgres/EventSourced + cross-store tests (KROT-04)
 
 ## Progress
 
@@ -99,8 +99,8 @@ Phases execute in numeric order: 1 → 2 → 3 → 4
 | 1. Timing Attack Prevention | 2/2 | Complete | 2026-02-15 |
 | 2. Rate Limiter Hardening | 2/2 | Complete | 2026-02-15 |
 | 3. JWT Lifetime Enforcement | 1/1 | Complete | 2026-02-15 |
-| 4. API Key Rotation | 0/2 | Planning complete | - |
+| 4. API Key Rotation | 2/2 | Complete | 2026-02-15 |
 
 ---
 *Created: 2026-02-15*
-*Last updated: 2026-02-15 after Phase 4 planning complete*
+*Last updated: 2026-02-15 after Phase 4 execution complete*
