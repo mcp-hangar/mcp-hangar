@@ -6,6 +6,7 @@ Separates commands (write) from queries (read) following CQRS.
 Note: Tool invocation is handled by hangar_call in batch/.
 """
 
+import logging
 from typing import Any
 
 from mcp.server.fastmcp import FastMCP
@@ -13,8 +14,12 @@ from mcp.server.fastmcp import FastMCP
 from ...application.commands import StartProviderCommand
 from ...application.mcp.tooling import mcp_tool_wrapper
 from ...application.queries import GetProviderQuery, GetProviderToolsQuery
+from ...domain.services import get_tool_access_resolver
+from ...metrics import TOOLS_FILTERED_TOTAL
 from ..context import get_context
 from ..validation import check_rate_limit, tool_error_hook, tool_error_mapper, validate_provider_id_input
+
+logger = logging.getLogger(__name__)
 
 # =============================================================================
 # Helper Functions
@@ -34,10 +39,31 @@ def _get_tools_for_group(provider: str) -> dict[str, Any]:
     query = GetProviderToolsQuery(provider_id=selected.provider_id)
     tools = ctx.query_bus.execute(query)
 
+    # Apply tool access filtering for group context
+    resolver = get_tool_access_resolver()
+    filtered_tools = resolver.filter_tools(
+        provider_id=selected.provider_id,
+        tools=tools,
+        group_id=provider,
+        member_id=selected.provider_id,
+    )
+
+    if len(filtered_tools) < len(tools):
+        filtered_count = len(tools) - len(filtered_tools)
+        TOOLS_FILTERED_TOTAL.set(filtered_count, provider=provider)
+        logger.debug(
+            "tools_filtered_by_policy: provider_id=%s, group_id=%s, total=%d, visible=%d, filtered=%d",
+            selected.provider_id,
+            provider,
+            len(tools),
+            len(filtered_tools),
+            filtered_count,
+        )
+
     return {
         "provider": provider,
         "group": True,
-        "tools": [t.to_dict() for t in tools],
+        "tools": [t.to_dict() for t in filtered_tools],
     }
 
 
@@ -45,15 +71,30 @@ def _get_tools_for_provider(provider: str) -> dict[str, Any]:
     """Get tools for a single provider."""
     ctx = get_context()
     provider_obj = ctx.get_provider(provider)
+    resolver = get_tool_access_resolver()
 
     # If provider has predefined tools, return them without starting
     if provider_obj.has_tools:
         tools = provider_obj.tools.list_tools()
+        # Apply tool access filtering
+        filtered_tools = resolver.filter_tools(provider_id=provider, tools=tools)
+
+        if len(filtered_tools) < len(tools):
+            filtered_count = len(tools) - len(filtered_tools)
+            TOOLS_FILTERED_TOTAL.set(filtered_count, provider=provider)
+            logger.debug(
+                "tools_filtered_by_policy: provider_id=%s, total=%d, visible=%d, filtered=%d",
+                provider,
+                len(tools),
+                len(filtered_tools),
+                filtered_count,
+            )
+
         return {
             "provider": provider,
             "state": provider_obj.state.value,
             "predefined": provider_obj.tools_predefined,
-            "tools": [t.to_dict() for t in tools],
+            "tools": [t.to_dict() for t in filtered_tools],
         }
 
     # Start provider and discover tools
@@ -61,11 +102,25 @@ def _get_tools_for_provider(provider: str) -> dict[str, Any]:
     query = GetProviderToolsQuery(provider_id=provider)
     tools = ctx.query_bus.execute(query)
 
+    # Apply tool access filtering
+    filtered_tools = resolver.filter_tools(provider_id=provider, tools=tools)
+
+    if len(filtered_tools) < len(tools):
+        filtered_count = len(tools) - len(filtered_tools)
+        TOOLS_FILTERED_TOTAL.set(filtered_count, provider=provider)
+        logger.debug(
+            "tools_filtered_by_policy: provider_id=%s, total=%d, visible=%d, filtered=%d",
+            provider,
+            len(tools),
+            len(filtered_tools),
+            filtered_count,
+        )
+
     return {
         "provider": provider,
         "state": provider_obj.state.value,
         "predefined": False,
-        "tools": [t.to_dict() for t in tools],
+        "tools": [t.to_dict() for t in filtered_tools],
     }
 
 
@@ -210,7 +265,21 @@ def register_provider_tools(mcp: FastMCP) -> None:
             raise ValueError(f"unknown_provider: {provider}")
 
         query = GetProviderQuery(provider_id=provider)
-        return ctx.query_bus.execute(query).to_dict()
+        result = ctx.query_bus.execute(query).to_dict()
+
+        # Add tool access policy summary
+        resolver = get_tool_access_resolver()
+        result["tools_policy"] = resolver.get_policy_summary(provider)
+
+        # Filter tools in the response if present
+        if "tools" in result and result["tools"]:
+            original_count = len(result["tools"])
+            result["tools"] = resolver.filter_tool_dicts(provider, result["tools"])
+            filtered_count = original_count - len(result["tools"])
+            if filtered_count > 0:
+                result["tools_policy"]["filtered_count"] = filtered_count
+
+        return result
 
     @mcp.tool(name="hangar_warm")
     @mcp_tool_wrapper(

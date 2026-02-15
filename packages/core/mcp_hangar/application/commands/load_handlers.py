@@ -16,6 +16,8 @@ from ...domain.exceptions import (
     UnverifiedProviderError,
 )
 from ...domain.security.redactor import OutputRedactor
+from ...domain.services import get_tool_access_resolver
+from ...domain.value_objects import ToolAccessPolicy
 from ...infrastructure.command_bus import CommandHandler
 from ...infrastructure.event_bus import EventBus
 from ...infrastructure.runtime_store import LoadMetadata, RuntimeProviderStore
@@ -249,6 +251,21 @@ class LoadProviderHandler(CommandHandler):
             )
             self._runtime_store.add(provider, metadata)
 
+            # Register tool access policy if specified
+            if command.allow_tools or command.deny_tools:
+                policy = ToolAccessPolicy(
+                    allow_list=tuple(command.allow_tools or []),
+                    deny_list=tuple(command.deny_tools or []),
+                )
+                resolver = get_tool_access_resolver()
+                resolver.set_provider_policy(provider_id, policy)
+                logger.debug(
+                    "hot_loaded_provider_tool_policy_set",
+                    provider_id=provider_id,
+                    has_allow_list=bool(command.allow_tools),
+                    has_deny_list=bool(command.deny_tools),
+                )
+
             duration_ms = (time.perf_counter() - start_time) * 1000
 
             self._event_bus.publish(
@@ -388,6 +405,10 @@ class UnloadProviderHandler(CommandHandler):
                 )
 
         self._runtime_store.remove(command.provider_id)
+
+        # Remove tool access policy for unloaded provider
+        resolver = get_tool_access_resolver()
+        resolver.remove_provider_policy(command.provider_id)
 
         lifetime_seconds = metadata.lifetime_seconds()
 

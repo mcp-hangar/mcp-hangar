@@ -490,7 +490,12 @@ def register_load_tools(mcp: FastMCP) -> None:
         error_mapper=lambda exc: tool_error_mapper(exc),
         on_error=tool_error_hook,
     )
-    async def hangar_load(name: str, force_unverified: bool = False) -> dict:
+    async def hangar_load(
+        name: str,
+        force_unverified: bool = False,
+        allow_tools: list[str] | None = None,
+        deny_tools: list[str] | None = None,
+    ) -> dict:
         """Load an MCP provider from the official registry at runtime.
 
         CHOOSE THIS when: you need a capability not in configured providers.
@@ -503,6 +508,8 @@ def register_load_tools(mcp: FastMCP) -> None:
         Args:
             name: str - Provider name from registry (e.g., "time", "stripe", "mcp-server-github")
             force_unverified: bool - Allow loading unverified providers (default: false)
+            allow_tools: list[str] | None - If set, only these tools are visible (glob patterns supported)
+            deny_tools: list[str] | None - If set, these tools are hidden (glob patterns supported)
 
         Returns:
             Success: {status: "loaded", provider: str, tools: list[str]}
@@ -515,6 +522,9 @@ def register_load_tools(mcp: FastMCP) -> None:
         Example:
             hangar_load("time")
             # {"status": "loaded", "provider_id": "mcp-server-time", "tools": ["get_current_time"]}
+
+            hangar_load("grafana", deny_tools=["delete_*", "create_alert_rule"])
+            # {"status": "loaded", "provider_id": "grafana", "tools": [...]} (filtered)
 
             hangar_load("sql")
             # {"status": "ambiguous", "message": "Multiple providers match 'sql'",
@@ -539,6 +549,8 @@ def register_load_tools(mcp: FastMCP) -> None:
             name=name,
             force_unverified=force_unverified,
             user_id=None,
+            allow_tools=allow_tools,
+            deny_tools=deny_tools,
         )
 
         try:

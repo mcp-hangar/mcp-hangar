@@ -14,6 +14,11 @@ from .provider_launcher import (
     ProviderLauncher,
     SubprocessLauncher,
 )
+from .tool_access_resolver import (
+    get_tool_access_resolver,
+    reset_tool_access_resolver,
+    ToolAccessResolver,
+)
 
 __all__ = [
     "AuditService",
@@ -30,4 +35,7 @@ __all__ = [
     "ProviderStartError",
     "collect_startup_diagnostics",
     "get_suggestion_for_error",
+    "ToolAccessResolver",
+    "get_tool_access_resolver",
+    "reset_tool_access_resolver",
 ]

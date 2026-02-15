@@ -32,7 +32,7 @@ PROVIDER_ENV_REQUIREMENTS: dict[str, list[str]] = {
     "sentry": ["SENTRY_AUTH_TOKEN", "SENTRY_ORG", "SENTRY_PROJECT"],
 }
 
-VALID_MODES = {"container", "subprocess", "http", "sse", "group"}
+VALID_MODES = {"container", "docker", "subprocess", "http", "sse", "remote", "group"}
 
 REQUIRED_PROVIDER_FIELDS = {"mode"}
 
@@ -114,7 +114,7 @@ def validate_provider(name: str, config: dict[str, Any], result: ValidationResul
         result.add_error(f"Provider '{name}': invalid mode '{mode}' (valid: {', '.join(VALID_MODES)})")
 
     # Mode-specific validation
-    if mode == "container":
+    if mode in ("container", "docker"):
         for field in REQUIRED_CONTAINER_FIELDS:
             if field not in config:
                 result.add_error(f"Provider '{name}': container mode requires '{field}'")
@@ -126,6 +126,16 @@ def validate_provider(name: str, config: dict[str, Any], result: ValidationResul
                 result.add_warning(
                     f"Provider '{name}': invalid volume format '{vol}' (expected 'host:container[:mode]')"
                 )
+
+        # Validate command format (optional)
+        command = config.get("command")
+        if command is not None and not isinstance(command, list):
+            result.add_error(f"Provider '{name}': 'command' must be a list")
+
+        # Validate args format (optional)
+        args = config.get("args")
+        if args is not None and not isinstance(args, list):
+            result.add_error(f"Provider '{name}': 'args' must be a list")
 
     elif mode == "subprocess":
         for subprocess_field in REQUIRED_SUBPROCESS_FIELDS:

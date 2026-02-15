@@ -4,10 +4,13 @@ Replaces the 21-parameter Provider.__init__() with a structured configuration ob
 This follows the Builder pattern and improves code clarity.
 """
 
+import logging
 from dataclasses import dataclass, field
 from typing import Any
 
-from ..value_objects import HealthCheckInterval, IdleTTL, ProviderMode
+from ..value_objects import HealthCheckInterval, IdleTTL, ProviderMode, ToolAccessPolicy
+
+logger = logging.getLogger(__name__)
 
 
 @dataclass
@@ -31,6 +34,8 @@ class ContainerConfig:
     """Configuration for container (Docker/Podman) mode providers."""
 
     image: str
+    command: list[str] | None = None  # Override container entrypoint
+    args: list[str] | None = None  # Arguments passed to container command
     volumes: list[str] = field(default_factory=list)
     env: dict[str, str] = field(default_factory=dict)
     build: dict[str, str] | None = None
@@ -48,6 +53,58 @@ class RemoteConfig:
     auth: dict[str, Any] | None = None
     tls: dict[str, Any] | None = None
     http: dict[str, Any] | None = None
+
+
+@dataclass
+class ToolsConfig:
+    """Tool access configuration for a provider, group, or member.
+
+    Controls which tools are visible and invocable. This is config-driven,
+    identity-agnostic filtering that runs before RBAC.
+
+    Resolution semantics:
+    - If allow_list is defined, ONLY matching tools are visible (deny_list ignored)
+    - If only deny_list is defined, all tools EXCEPT matching are visible
+    - If both are empty, all tools are visible (no filtering)
+    - Supports fnmatch glob patterns (e.g., 'delete_*', '*_alert_*')
+
+    Example:
+        tools:
+          deny_list:
+            - create_alert_rule
+            - delete_*
+    """
+
+    allow_list: list[str] = field(default_factory=list)
+    deny_list: list[str] = field(default_factory=list)
+
+    def __post_init__(self) -> None:
+        """Validate and warn if both lists are defined."""
+        if self.allow_list and self.deny_list:
+            logger.warning(
+                "tools_config_both_lists: Both allow_list and deny_list defined. "
+                "allow_list takes precedence, deny_list will be ignored."
+            )
+
+        # Validate patterns are valid strings
+        for pattern in self.allow_list:
+            if not isinstance(pattern, str) or not pattern.strip():
+                raise ValueError(f"Invalid allow_list pattern: {pattern!r}")
+
+        for pattern in self.deny_list:
+            if not isinstance(pattern, str) or not pattern.strip():
+                raise ValueError(f"Invalid deny_list pattern: {pattern!r}")
+
+    def to_policy(self) -> ToolAccessPolicy:
+        """Convert to immutable ToolAccessPolicy value object."""
+        return ToolAccessPolicy(
+            allow_list=tuple(self.allow_list),
+            deny_list=tuple(self.deny_list),
+        )
+
+    def is_empty(self) -> bool:
+        """Check if no filtering is configured."""
+        return not self.allow_list and not self.deny_list
 
 
 @dataclass
@@ -94,6 +151,9 @@ class ProviderConfig:
     # Pre-defined tools (allows visibility before provider starts)
     tools: list[dict[str, Any]] = field(default_factory=list)
 
+    # Tool access policy (controls which tools are visible/invocable)
+    tools_access: ToolsConfig | None = None
+
     def __post_init__(self) -> None:
         """Normalize mode to ProviderMode enum."""
         if isinstance(self.mode, str):
@@ -126,6 +186,8 @@ class ProviderConfig:
             resources = data.get("resources", {})
             container_config = ContainerConfig(
                 image=data.get("image", ""),
+                command=data.get("command"),
+                args=data.get("args"),
                 volumes=data.get("volumes", []),
                 env=data.get("env", {}),
                 build=data.get("build"),
@@ -154,6 +216,27 @@ class ProviderConfig:
             HealthCheckInterval(health_interval_s) if isinstance(health_interval_s, int) else health_interval_s
         )
 
+        # Parse tools config - can be either:
+        # 1. A list of predefined tool schemas
+        # 2. A dict with allow_list/deny_list for access policy
+        tools_data = data.get("tools")
+        predefined_tools: list[dict[str, Any]] = []
+        tools_access_config: ToolsConfig | None = None
+
+        if tools_data is not None:
+            if isinstance(tools_data, list):
+                # List format: predefined tool schemas
+                predefined_tools = tools_data
+            elif isinstance(tools_data, dict):
+                # Dict format: access policy with allow_list/deny_list
+                allow_list = tools_data.get("allow_list", [])
+                deny_list = tools_data.get("deny_list", [])
+                if allow_list or deny_list:
+                    tools_access_config = ToolsConfig(
+                        allow_list=allow_list,
+                        deny_list=deny_list,
+                    )
+
         return cls(
             provider_id=provider_id,
             mode=mode,
@@ -166,7 +249,8 @@ class ProviderConfig:
                 check_interval=health_interval,
                 max_consecutive_failures=data.get("max_consecutive_failures", 3),
             ),
-            tools=data.get("tools", []),
+            tools=predefined_tools,
+            tools_access=tools_access_config,
         )
 
     def get_command(self) -> list[str] | None:
@@ -188,3 +272,13 @@ class ProviderConfig:
         if self.container:
             return self.container.env
         return {}
+
+    def get_tools_policy(self) -> ToolAccessPolicy:
+        """Get the tool access policy for this provider.
+
+        Returns:
+            ToolAccessPolicy, or unrestricted policy if no tools_access configured.
+        """
+        if self.tools_access:
+            return self.tools_access.to_policy()
+        return ToolAccessPolicy()  # Unrestricted

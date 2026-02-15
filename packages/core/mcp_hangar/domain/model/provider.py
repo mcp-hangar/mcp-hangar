@@ -88,6 +88,8 @@ class Provider(AggregateRoot):
         network: str = "none",
         read_only: bool = True,
         user: str | None = None,  # UID:GID or username
+        container_command: list[str] | None = None,  # Override container entrypoint
+        container_args: list[str] | None = None,  # Arguments for container command
         description: str | None = None,  # Description/preprompt for AI models
         # Pre-defined tools (allows visibility before provider starts)
         tools: list[dict[str, Any]] | None = None,
@@ -133,6 +135,8 @@ class Provider(AggregateRoot):
         self._network = network
         self._read_only = read_only
         self._user = user
+        self._container_command = container_command  # Override container entrypoint
+        self._container_args = container_args  # Arguments for container command
 
         # HTTP transport configuration (for remote mode)
         self._auth_config = auth
@@ -202,6 +206,8 @@ class Provider(AggregateRoot):
         network = "none"
         read_only = True
         user = None
+        container_command = None
+        container_args = None
 
         if config.container:
             volumes = config.container.volumes
@@ -213,6 +219,8 @@ class Provider(AggregateRoot):
             network = config.container.network
             read_only = config.container.read_only
             user = config.container.user
+            container_command = config.container.command
+            container_args = config.container.args
 
         # Extract remote-specific config
         auth = None
@@ -240,6 +248,8 @@ class Provider(AggregateRoot):
             network=network,
             read_only=read_only,
             user=user,
+            container_command=container_command,
+            container_args=container_args,
             description=config.description,
             tools=config.tools,
             auth=auth,
@@ -512,6 +522,8 @@ class Provider(AggregateRoot):
         if self._mode == ProviderMode.DOCKER:
             return {
                 "image": self._image,
+                "command": self._container_command,
+                "args": self._container_args,
                 "volumes": self._volumes,
                 "env": self._env,
                 "memory_limit": self._resources.get("memory", "512m"),
@@ -524,6 +536,8 @@ class Provider(AggregateRoot):
         if self._mode.value in ("container", "podman"):
             return {
                 "image": self._get_container_image(),
+                "command": self._container_command,
+                "args": self._container_args,
                 "volumes": self._volumes,
                 "env": self._env,
                 "memory_limit": self._resources.get("memory", "512m"),

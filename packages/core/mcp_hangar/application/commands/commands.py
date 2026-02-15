@@ -66,6 +66,9 @@ class LoadProviderCommand(Command):
     name: str
     force_unverified: bool = False
     user_id: str | None = None
+    # Tool access filtering for hot-loaded providers
+    allow_tools: list[str] | None = None
+    deny_tools: list[str] | None = None
 
 
 @dataclass(frozen=True)

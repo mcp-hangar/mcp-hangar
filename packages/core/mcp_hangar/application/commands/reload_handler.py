@@ -6,6 +6,7 @@ from typing import Any
 from ...domain.events import ConfigurationReloaded, ConfigurationReloadFailed, ConfigurationReloadRequested
 from ...domain.exceptions import ConfigurationError
 from ...domain.repository import IProviderRepository
+from ...domain.services import get_tool_access_resolver
 from ...infrastructure.command_bus import CommandHandler
 from ...infrastructure.event_bus import EventBus
 from ...logging_config import get_logger
@@ -141,10 +142,16 @@ class ReloadConfigurationHandler(CommandHandler):
             # 3. Clear groups (will be reloaded)
             GROUPS.clear()
 
-            # 4. Load new configuration (adds new and updates existing)
+            # 4. Invalidate and clear tool access policies before reload
+            # Policies will be re-registered during load_config
+            resolver = get_tool_access_resolver()
+            resolver.clear_all()
+            logger.debug("tool_access_policies_cleared_for_reload")
+
+            # 5. Load new configuration (adds new and updates existing)
             load_config(new_providers_config)
 
-            # 5. Auto-start providers if they were running before
+            # 6. Auto-start providers if they were running before
             # (This depends on auto_start config and provider state)
             for provider_id in added_ids:
                 provider = self._repository.get(provider_id)

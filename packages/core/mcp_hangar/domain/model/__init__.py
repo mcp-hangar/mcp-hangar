@@ -23,6 +23,7 @@ from .provider_config import (
     ProviderConfig,
     RemoteConfig,
     SubprocessConfig,
+    ToolsConfig,
 )
 from .provider_group import (
     GroupCircuitClosed,
@@ -55,7 +56,8 @@ __all__ = [
     "ContainerResourceConfig",
     "RemoteConfig",
     "HealthConfig",
-    "ProviderState",
+    "ToolsConfig",
+    # Event Sourced Provider
     "EventSourcedProvider",
     "ProviderSnapshot",
     # Provider Group
@@ -63,6 +65,7 @@ __all__ = [
     "GroupMember",
     "GroupState",
     "LoadBalancerStrategy",
+    "ProviderState",
     "MemberWeight",
     "MemberPriority",
     # Load Balancer

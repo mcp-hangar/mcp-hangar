@@ -243,6 +243,25 @@ class ToolTimeoutError(ToolError):
         self.timeout = timeout
 
 
+class ToolAccessDeniedError(ToolError):
+    """Raised when a tool is not accessible due to access policy.
+
+    This is a config-driven denial, not an RBAC denial. The tool exists
+    but is filtered out by the provider's tool access policy.
+
+    Note: Error message intentionally does not leak policy details.
+    """
+
+    def __init__(self, provider_id: str, tool_name: str):
+        super().__init__(
+            message="Tool not available for this provider",
+            provider_id=provider_id,
+            operation="invoke",
+            details={"tool_name": tool_name, "reason": "tool_not_in_access_policy"},
+        )
+        self.tool_name = tool_name
+
+
 # --- Client/Communication Exceptions ---
 
 

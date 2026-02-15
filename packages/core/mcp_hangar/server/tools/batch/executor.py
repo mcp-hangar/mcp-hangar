@@ -17,6 +17,7 @@ from typing import Any
 
 from ....application.commands import InvokeToolCommand, StartProviderCommand
 from ....domain.events import BatchCallCompleted, BatchInvocationCompleted, BatchInvocationRequested
+from ....domain.services import get_tool_access_resolver
 from ....infrastructure.single_flight import SingleFlight
 from ....logging_config import get_logger
 from ....metrics import (
@@ -27,6 +28,7 @@ from ....metrics import (
     BATCH_DURATION_SECONDS,
     BATCH_SIZE_HISTOGRAM,
     BATCH_TRUNCATIONS_TOTAL,
+    TOOL_ACCESS_DENIED_TOTAL,
 )
 from ....retry import retry_sync, RetryPolicy, RetryResult
 from ...context import get_context
@@ -385,6 +387,63 @@ class BatchExecutor:
                     success=False,
                     error=f"Provider '{call.provider}' not found",
                     error_type="ProviderNotFoundError",
+                    elapsed_ms=(time.perf_counter() - call_start) * 1000,
+                )
+
+        # Check tool access policy BEFORE starting provider or executing
+        # This is config-driven filtering, identity-agnostic (runs before RBAC)
+        resolver = get_tool_access_resolver()
+        if is_group:
+            group_obj = GROUPS.get(call.provider)
+            # For groups, we check against group policy
+            # Member-specific policy will be checked when member is selected
+            if not resolver.is_tool_allowed(
+                provider_id=call.provider,
+                tool_name=call.tool,
+                group_id=call.provider,
+            ):
+                logger.info(
+                    "tool_access_denied",
+                    provider_id=call.provider,
+                    tool=call.tool,
+                    reason="tool_not_in_access_policy",
+                )
+                TOOL_ACCESS_DENIED_TOTAL.inc(
+                    provider=call.provider,
+                    tool=call.tool,
+                    reason="tool_not_in_access_policy",
+                )
+                return CallResult(
+                    index=call.index,
+                    call_id=call.call_id,
+                    success=False,
+                    error="Tool not available for this provider",
+                    error_type="ToolAccessDeniedError",
+                    elapsed_ms=(time.perf_counter() - call_start) * 1000,
+                )
+        else:
+            # For standalone providers
+            if not resolver.is_tool_allowed(
+                provider_id=call.provider,
+                tool_name=call.tool,
+            ):
+                logger.info(
+                    "tool_access_denied",
+                    provider_id=call.provider,
+                    tool=call.tool,
+                    reason="tool_not_in_access_policy",
+                )
+                TOOL_ACCESS_DENIED_TOTAL.inc(
+                    provider=call.provider,
+                    tool=call.tool,
+                    reason="tool_not_in_access_policy",
+                )
+                return CallResult(
+                    index=call.index,
+                    call_id=call.call_id,
+                    success=False,
+                    error="Tool not available for this provider",
+                    error_type="ToolAccessDeniedError",
                     elapsed_ms=(time.perf_counter() - call_start) * 1000,
                 )
 

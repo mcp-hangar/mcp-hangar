@@ -51,6 +51,9 @@ from .provider import (
 # Security - Authentication & Authorization
 from .security import Permission, Principal, PrincipalId, PrincipalType, Role
 
+# Tool Access Policy
+from .tool_access_policy import ToolAccessPolicy
+
 # Truncation
 from .truncation import ContinuationId, TruncationConfig
 
@@ -94,6 +97,8 @@ __all__ = [
     "NamespaceId",
     "CatalogItemId",
     "ResourceScope",
+    # Tool Access Policy
+    "ToolAccessPolicy",
     # Truncation
     "TruncationConfig",
     "ContinuationId",

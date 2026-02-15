@@ -855,6 +855,29 @@ BATCH_CONCURRENCY_QUEUED_TOTAL = Counter(
 )
 
 
+# -----------------------------------------------------------------------------
+# Tool Access Policy Metrics
+# -----------------------------------------------------------------------------
+
+TOOL_ACCESS_DENIED_TOTAL = Counter(
+    name="mcp_hangar_tool_access_denied",
+    description="Total tool invocations denied by access policy",
+    labels=["provider", "tool", "reason"],  # reason: tool_not_in_access_policy
+)
+
+TOOLS_FILTERED_TOTAL = Gauge(
+    name="mcp_hangar_tools_filtered",
+    description="Number of tools filtered by access policy per provider",
+    labels=["provider"],
+)
+
+TOOL_ACCESS_POLICY_ACTIVE = Gauge(
+    name="mcp_hangar_tool_access_policy_active",
+    description="Whether tool access policy is active (1) or unrestricted (0) per provider",
+    labels=["provider"],
+)
+
+
 # =============================================================================
 # Register All Metrics
 # =============================================================================
@@ -931,6 +954,16 @@ def _register_all_metrics():
             BATCH_CONCURRENCY_QUEUED_TOTAL,
         ]
     )
+
+    # Tool access policy metrics
+    metrics.extend(
+        [
+            TOOL_ACCESS_DENIED_TOTAL,
+            TOOLS_FILTERED_TOTAL,
+            TOOL_ACCESS_POLICY_ACTIVE,
+        ]
+    )
+
     for metric in metrics:
         REGISTRY.register(metric)
 

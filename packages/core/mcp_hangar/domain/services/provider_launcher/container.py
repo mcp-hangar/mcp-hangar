@@ -33,6 +33,8 @@ class ContainerConfig:
     """Configuration for container-based provider launch."""
 
     image: str
+    command: list[str] | None = None  # Override container entrypoint
+    args: list[str] | None = None  # Arguments passed to container command
     volumes: list[str] = field(default_factory=list)
     env: dict[str, str] = field(default_factory=dict)
     memory_limit: str = "512m"
@@ -362,14 +364,29 @@ class ContainerLauncher(ProviderLauncher):
             sanitized = self._sanitizer.sanitize_environment_value(value)
             cmd.extend(["-e", f"{key}={sanitized}"])
 
+        # Command override (entrypoint)
+        if config.command:
+            cmd.extend(["--entrypoint", config.command[0]])
+
         # Image
         cmd.append(config.image)
+
+        # Command arguments (after image)
+        # If command has multiple parts, add remaining as args
+        if config.command and len(config.command) > 1:
+            cmd.extend(config.command[1:])
+
+        # Additional args
+        if config.args:
+            cmd.extend(config.args)
 
         return cmd
 
     def launch(
         self,
         image: str,
+        command: list[str] | None = None,
+        args: list[str] | None = None,
         volumes: list[str] | None = None,
         env: dict[str, str] | None = None,
         memory_limit: str = "512m",
@@ -383,6 +400,8 @@ class ContainerLauncher(ProviderLauncher):
 
         Args:
             image: Container image name and tag
+            command: Override container entrypoint
+            args: Arguments passed to container command
             volumes: Volume mounts (host:container:mode)
             env: Environment variables
             memory_limit: Memory limit (e.g., "512m", "1g")
@@ -420,6 +439,8 @@ class ContainerLauncher(ProviderLauncher):
         # Build config
         config = ContainerConfig(
             image=image,
+            command=command,
+            args=args,
             volumes=volumes,
             env=env,
             memory_limit=memory_limit,
@@ -480,10 +501,13 @@ class ContainerLauncher(ProviderLauncher):
         """
         return self.launch(
             image=config.image,
+            command=config.command,
+            args=config.args,
             volumes=config.volumes,
             env=config.env,
             memory_limit=config.memory_limit,
             cpu_limit=config.cpu_limit,
             network=config.network,
             read_only=config.read_only,
+            user=config.user,
         )
