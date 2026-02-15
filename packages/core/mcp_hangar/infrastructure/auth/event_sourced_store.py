@@ -7,7 +7,7 @@ and rebuilding state on load. Provides:
 - Event publishing via EventBus
 """
 
-from datetime import datetime, UTC
+from datetime import datetime, timedelta, UTC
 import hashlib
 import secrets
 import threading
@@ -262,6 +262,14 @@ class EventSourcedApiKeyStore(IApiKeyStore):
         if key.is_expired:
             raise ExpiredCredentialsError("API key has expired")
 
+        # Check rotation and grace period
+        if key.is_rotated and not key.is_in_grace_period:
+            raise ExpiredCredentialsError(
+                message="API key has been rotated and grace period has expired",
+                auth_method="api_key",
+                expired_at=key.grace_until.timestamp() if key.grace_until else None,
+            )
+
         # Record usage
         key.record_usage()
 
@@ -393,7 +401,7 @@ class EventSourcedApiKeyStore(IApiKeyStore):
         grace_period_seconds: float = 86400,
         rotated_by: str = "system",
     ) -> str:
-        """Rotate an API key (stub - not yet implemented for EventSourced).
+        """Rotate an API key with a grace period.
 
         Args:
             key_id: Unique identifier of the key to rotate.
@@ -404,9 +412,62 @@ class EventSourcedApiKeyStore(IApiKeyStore):
             The new raw API key (only shown once!).
 
         Raises:
-            NotImplementedError: EventSourced key rotation will be implemented in Plan 02.
+            ValueError: If key doesn't exist, is revoked, or already rotated.
         """
-        raise NotImplementedError("EventSourced key rotation will be implemented in Plan 02")
+        # Find key by key_id
+        self._build_index()
+
+        key_hash = None
+        index_entry = None
+        for kh, (kid, principal_id) in self._index.items():
+            if kid == key_id:
+                key_hash = kh
+                index_entry = (kid, principal_id)
+                break
+
+        if key_hash is None:
+            raise ValueError(f"API key not found: {key_id}")
+
+        # Load old key
+        old_key = self._load_key(key_hash, index_entry=index_entry)
+        if old_key is None:
+            raise ValueError(f"API key not found: {key_id}")
+
+        # Generate new key
+        raw_key = _generate_key()
+        new_key_hash = _hash_key(raw_key)
+        new_key_id = secrets.token_urlsafe(8)
+        grace_until = datetime.now(UTC) + timedelta(seconds=grace_period_seconds)
+
+        # Create new key aggregate
+        new_key = EventSourcedApiKey.create(
+            key_hash=new_key_hash,
+            key_id=new_key_id,
+            principal_id=old_key.principal_id,
+            name=old_key.name,
+            created_by=rotated_by,
+            tenant_id=old_key.tenant_id,
+            groups=old_key.groups,
+            expires_at=old_key.expires_at,
+        )
+
+        # Rotate old key
+        old_key.rotate(new_key_id=new_key_id, grace_until=grace_until, rotated_by=rotated_by)
+
+        # Save both aggregates
+        self._save_key(old_key)
+        self._save_key(new_key)
+
+        logger.info(
+            "api_key_rotated",
+            old_key_id=key_id,
+            new_key_id=new_key_id,
+            principal_id=old_key.principal_id,
+            grace_until=grace_until.isoformat(),
+            rotated_by=rotated_by,
+        )
+
+        return raw_key
 
 
 class EventSourcedRoleStore(IRoleStore):

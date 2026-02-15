@@ -11,7 +11,7 @@ from dataclasses import dataclass, field
 from datetime import datetime, UTC
 from typing import Any
 
-from ..events import ApiKeyCreated, ApiKeyRevoked, DomainEvent
+from ..events import ApiKeyCreated, ApiKeyRevoked, KeyRotated, DomainEvent
 from ..value_objects import Principal, PrincipalId, PrincipalType
 from .aggregate import AggregateRoot
 
@@ -32,6 +32,8 @@ class ApiKeySnapshot:
         last_used_at: Last usage timestamp.
         revoked: Whether the key is revoked.
         revoked_at: When the key was revoked.
+        rotated_to_key_id: Key ID this was rotated to (if rotated).
+        grace_until: Timestamp when grace period expires.
         version: Aggregate version.
     """
 
@@ -46,6 +48,8 @@ class ApiKeySnapshot:
     last_used_at: float | None
     revoked: bool
     revoked_at: float | None
+    rotated_to_key_id: str | None
+    grace_until: float | None
     version: int
     metadata: dict[str, Any] = field(default_factory=dict)
 
@@ -63,6 +67,8 @@ class ApiKeySnapshot:
             "last_used_at": self.last_used_at,
             "revoked": self.revoked,
             "revoked_at": self.revoked_at,
+            "rotated_to_key_id": self.rotated_to_key_id,
+            "grace_until": self.grace_until,
             "version": self.version,
             "metadata": self.metadata,
         }
@@ -82,6 +88,8 @@ class ApiKeySnapshot:
             last_used_at=d.get("last_used_at"),
             revoked=d.get("revoked", False),
             revoked_at=d.get("revoked_at"),
+            rotated_to_key_id=d.get("rotated_to_key_id"),
+            grace_until=d.get("grace_until"),
             version=d.get("version", 0),
             metadata=d.get("metadata", {}),
         )
@@ -133,6 +141,10 @@ class EventSourcedApiKey(AggregateRoot):
         self._revoked_at: datetime | None = None
         self._metadata: dict[str, Any] = {}
 
+        # Rotation state
+        self._rotated_to_key_id: str | None = None
+        self._grace_until: datetime | None = None
+
     @property
     def key_hash(self) -> str:
         return self._key_hash
@@ -180,8 +192,33 @@ class EventSourcedApiKey(AggregateRoot):
         return datetime.now(UTC) > self._expires_at
 
     @property
+    def is_rotated(self) -> bool:
+        """Check if this key has been rotated."""
+        return self._rotated_to_key_id is not None
+
+    @property
+    def grace_until(self) -> datetime | None:
+        """Get grace period expiration time."""
+        return self._grace_until
+
+    @property
+    def is_in_grace_period(self) -> bool:
+        """Check if rotated key is still within grace period."""
+        if not self.is_rotated or self._grace_until is None:
+            return False
+        return datetime.now(UTC) < self._grace_until
+
+    @property
     def is_valid(self) -> bool:
-        return not self._revoked and not self.is_expired
+        """Check if key is valid for authentication.
+
+        Valid if: not revoked AND not expired AND (not rotated OR in grace period)
+        """
+        if self._revoked or self.is_expired:
+            return False
+        if self.is_rotated and not self.is_in_grace_period:
+            return False
+        return True
 
     # =========================================================================
     # Factory Methods
@@ -312,6 +349,8 @@ class EventSourcedApiKey(AggregateRoot):
         key._last_used_at = datetime.fromtimestamp(snapshot.last_used_at, tz=UTC) if snapshot.last_used_at else None
         key._revoked = snapshot.revoked
         key._revoked_at = datetime.fromtimestamp(snapshot.revoked_at, tz=UTC) if snapshot.revoked_at else None
+        key._rotated_to_key_id = snapshot.rotated_to_key_id
+        key._grace_until = datetime.fromtimestamp(snapshot.grace_until, tz=UTC) if snapshot.grace_until else None
         key._metadata = dict(snapshot.metadata)
         key._version = snapshot.version
 
@@ -356,6 +395,40 @@ class EventSourcedApiKey(AggregateRoot):
         """Record that this key was used for authentication."""
         self._last_used_at = datetime.now(UTC)
 
+    def rotate(self, new_key_id: str, grace_until: datetime, rotated_by: str) -> None:
+        """Rotate this API key.
+
+        Args:
+            new_key_id: The key_id of the new key.
+            grace_until: When the old key becomes invalid.
+            rotated_by: Principal initiating the rotation.
+
+        Raises:
+            ValueError: If key is revoked or already has pending rotation.
+        """
+        if self._revoked:
+            raise ValueError(f"Cannot rotate revoked key {self._key_id}")
+
+        if self._rotated_to_key_id is not None and self._grace_until and datetime.now(UTC) < self._grace_until:
+            raise ValueError(f"Key {self._key_id} already has pending rotation")
+
+        now = datetime.now(UTC)
+
+        self._record_event(
+            KeyRotated(
+                key_id=self._key_id,
+                principal_id=self._principal_id,
+                new_key_id=new_key_id,
+                rotated_at=now.timestamp(),
+                grace_until=grace_until.timestamp(),
+                rotated_by=rotated_by,
+            )
+        )
+
+        # Apply immediately
+        self._rotated_to_key_id = new_key_id
+        self._grace_until = grace_until
+
     # =========================================================================
     # Event Application
     # =========================================================================
@@ -371,6 +444,10 @@ class EventSourcedApiKey(AggregateRoot):
         elif isinstance(event, ApiKeyRevoked):
             self._revoked = True
             self._revoked_at = datetime.fromtimestamp(event.occurred_at, tz=UTC)
+
+        elif isinstance(event, KeyRotated):
+            self._rotated_to_key_id = event.new_key_id
+            self._grace_until = datetime.fromtimestamp(event.grace_until, tz=UTC)
 
         self._version += 1
 
@@ -406,6 +483,8 @@ class EventSourcedApiKey(AggregateRoot):
             last_used_at=self._last_used_at.timestamp() if self._last_used_at else None,
             revoked=self._revoked,
             revoked_at=self._revoked_at.timestamp() if self._revoked_at else None,
+            rotated_to_key_id=self._rotated_to_key_id,
+            grace_until=self._grace_until.timestamp() if self._grace_until else None,
             version=self._version,
             metadata=dict(self._metadata),
         )
