@@ -64,7 +64,7 @@ mcp-hangar = "mcp_hangar.server.cli:cli_main"
 [project.urls]
 Homepage = "https://mcp-hangar.io"
 Documentation = "https://docs.mcp-hangar.io"
-Repository = "https://github.com/mapyr/mcp-hangar"
+Repository = "https://github.com/mcp-hangar/mcp-hangar"
 
 [build-system]
 requires = ["hatchling"]
