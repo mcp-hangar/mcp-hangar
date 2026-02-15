@@ -131,31 +131,56 @@ Klucze pozostają ważne do ręcznego unieważnienia.
 
 ---
 
-### 5. TIMING ATTACK - MINIMALNE RYZYKO
+### 5. TIMING ATTACK - ROZWIĄZANE
 
-**Status:** CZĘŚCIOWO ROZWIĄZANE
+**Status:** ROZWIĄZANE
 
-**Dowód z testów:**
+**Rozwiązanie (2026-02-15):**
 
-```
-Valid key avg: 0.069ms
-Invalid key avg: 0.088ms
-Difference: 0.019ms
-```
+Wszystkie 4 backendy storage używają constant-time hash comparison:
 
-**Opis:**
-Różnica czasowa między walidacją poprawnego i niepoprawnego klucza
-jest niewielka (~0.02ms), ale teoretycznie wykrywalna przy wielu próbach.
+1. **InMemoryApiKeyStore** - iteruje wszystkie klucze bez wcześniejszego wyjścia, używa `hmac.compare_digest` dla każdego porównania
+2. **SQLiteApiKeyStore** - wykonuje dummy comparison na miss dla wyrównania czasów
+3. **PostgresApiKeyStore** - wykonuje dummy comparison na miss dla wyrównania czasów
+4. **EventSourcedApiKeyStore** - używa `constant_time_key_lookup` dla iteracji indeksu
 
-**Rekomendacja:**
-Użyć `hmac.compare_digest()` dla constant-time comparison:
+**Implementacja:**
 
 ```python
-import hmac
+# Utility module: mcp_hangar/infrastructure/auth/constant_time.py
+def constant_time_key_lookup(target_hash: str, hash_dict: dict[str, V]) -> V | None:
+    result: V | None = None
+    target_bytes = target_hash.encode("utf-8")
 
-def _verify_key_hash(self, provided_hash: str, stored_hash: str) -> bool:
-    return hmac.compare_digest(provided_hash.encode(), stored_hash.encode())
+    for stored_hash, value in hash_dict.items():
+        if hmac.compare_digest(target_bytes, stored_hash.encode("utf-8")):
+            result = value  # No break - continues iterating
+
+    return result
+
+# SQLite/Postgres stores:
+_DUMMY_HASH = "0" * 64
+if row is None:
+    hmac.compare_digest(key_hash.encode("utf-8"), _DUMMY_HASH.encode("utf-8"))
+    return None
 ```
+
+**Weryfikacja:**
+
+Automatyczne testy regresji w `tests/unit/test_timing_attack_prevention.py`:
+
+- Strukturalne testy potwierdzające użycie `hmac.compare_digest`
+- Testy czasowe sprawdzające że stosunek valid/invalid < 5x
+- Testy pozycji klucza w słowniku (powinny być podobne czasy)
+
+**Pliki:**
+
+- `mcp_hangar/infrastructure/auth/constant_time.py` (utility)
+- `mcp_hangar/infrastructure/auth/api_key_authenticator.py` (InMemory)
+- `mcp_hangar/infrastructure/auth/sqlite_store.py` (SQLite)
+- `mcp_hangar/infrastructure/auth/postgres_store.py` (Postgres)
+- `mcp_hangar/infrastructure/auth/event_sourced_store.py` (EventSourced)
+- `tests/unit/test_timing_attack_prevention.py` (automated regression tests)
 
 ---
 
@@ -231,6 +256,13 @@ def _validate_token_lifetime(self, claims: dict) -> None:
 - X-Forwarded-For tylko z trusted proxies ✅
 - Konfigurowalny zestaw proxy ✅
 
+### 14. Constant-Time Key Comparison
+
+- hmac.compare_digest dla wszystkich porównań hashy ✅
+- Wszystkie 4 backendy (InMemory, SQLite, Postgres, EventSourced) zabezpieczone ✅
+- Automatyczne testy regresji dodane (`test_timing_attack_prevention.py`) ✅
+- Utility module: `mcp_hangar/infrastructure/auth/constant_time.py` ✅
+
 ---
 
 ## 📋 Dodatkowe testy do wykonania
@@ -285,7 +317,6 @@ atheris.Fuzz()
 
 4. Dodać IP allowlist dla kluczy
 2. Implementować rotację kluczy
-3. Dodać constant-time comparison
 
 ### Priorytet 3 (v1.2)
 
@@ -300,7 +331,7 @@ atheris.Fuzz()
 | Obszar | Testy | Status |
 |--------|-------|--------|
 | Brute-force | test_rapid_failed_attempts | ✅ (wykrywa brak rate limiting) |
-| Timing attack | test_key_enumeration_via_timing | ✅ |
+| Timing attack | test_key_enumeration_via_timing + test_timing_attack_prevention.py | ✅ ROZWIĄZANE |
 | Token expiration | test_expired_key_is_rejected | ✅ |
 | Key revocation | test_revoked_key_is_immediately_rejected | ✅ |
 | Concurrent access | test_concurrent_* | ✅ |
