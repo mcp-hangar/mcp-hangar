@@ -4,6 +4,7 @@ Defines dataclasses for auth configuration and functions to load
 auth settings from YAML configuration files.
 """
 
+import os
 from dataclasses import dataclass, field
 from typing import Any
 
@@ -35,6 +36,8 @@ class OIDCAuthConfig:
         groups_claim: JWT claim for group memberships.
         tenant_claim: JWT claim for tenant identifier.
         email_claim: JWT claim for email address.
+        max_token_lifetime_seconds: Maximum allowed token lifetime (exp - iat) in seconds.
+            Value of 0 means disabled. Default: 3600.
     """
 
     enabled: bool = False
@@ -48,6 +51,9 @@ class OIDCAuthConfig:
     groups_claim: str = "groups"
     tenant_claim: str = "tenant_id"
     email_claim: str = "email"
+
+    # Lifetime enforcement
+    max_token_lifetime_seconds: int = 3600
 
 
 @dataclass
@@ -207,6 +213,11 @@ def parse_auth_config(config_dict: dict[str, Any] | None) -> AuthConfig:
 
     # Parse OIDC config
     oidc_dict = config_dict.get("oidc", {})
+
+    # Get max_token_lifetime with env var override
+    default_lifetime = oidc_dict.get("max_token_lifetime_seconds", 3600)
+    max_token_lifetime_seconds = int(os.environ.get("MCP_JWT_MAX_TOKEN_LIFETIME", str(default_lifetime)))
+
     oidc_config = OIDCAuthConfig(
         enabled=oidc_dict.get("enabled", False),
         issuer=oidc_dict.get("issuer", ""),
@@ -217,6 +228,7 @@ def parse_auth_config(config_dict: dict[str, Any] | None) -> AuthConfig:
         groups_claim=oidc_dict.get("groups_claim", "groups"),
         tenant_claim=oidc_dict.get("tenant_claim", "tenant_id"),
         email_claim=oidc_dict.get("email_claim", "email"),
+        max_token_lifetime_seconds=max_token_lifetime_seconds,
     )
 
     # Parse OPA config

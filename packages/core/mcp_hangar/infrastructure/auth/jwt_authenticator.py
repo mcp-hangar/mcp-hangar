@@ -10,7 +10,7 @@ from typing import Any
 import structlog
 
 from ...domain.contracts.authentication import AuthRequest, IAuthenticator, ITokenValidator
-from ...domain.exceptions import ExpiredCredentialsError, InvalidCredentialsError
+from ...domain.exceptions import ExpiredCredentialsError, InvalidCredentialsError, TokenLifetimeExceededError
 from ...domain.value_objects import Principal, PrincipalId, PrincipalType
 
 logger = structlog.get_logger(__name__)
@@ -29,6 +29,8 @@ class OIDCConfig:
         groups_claim: JWT claim for groups (default: groups).
         tenant_claim: JWT claim for tenant ID (default: tenant_id).
         email_claim: JWT claim for email (default: email).
+        max_token_lifetime: Maximum allowed token lifetime (exp - iat) in seconds.
+            Value of 0 means disabled (no lifetime check). Default: 3600.
     """
 
     issuer: str
@@ -41,6 +43,9 @@ class OIDCConfig:
     groups_claim: str = "groups"
     tenant_claim: str = "tenant_id"
     email_claim: str = "email"
+
+    # Lifetime enforcement
+    max_token_lifetime: int = 3600
 
 
 class JWTAuthenticator(IAuthenticator):
@@ -96,6 +101,9 @@ class JWTAuthenticator(IAuthenticator):
 
         claims = self._validator.validate(token)
 
+        # Enforce token lifetime before creating principal
+        self._enforce_token_lifetime(claims)
+
         principal = self._claims_to_principal(claims)
 
         logger.info(
@@ -107,6 +115,43 @@ class JWTAuthenticator(IAuthenticator):
         )
 
         return principal
+
+    def _enforce_token_lifetime(self, claims: dict[str, Any]) -> None:
+        """Enforce maximum token lifetime constraint.
+
+        Args:
+            claims: Validated JWT claims containing iat and exp.
+
+        Raises:
+            InvalidCredentialsError: If required claims (iat, exp) are missing.
+            TokenLifetimeExceededError: If token lifetime exceeds max_token_lifetime.
+        """
+        # Skip check if disabled
+        if self._config.max_token_lifetime <= 0:
+            return
+
+        # Validate required claims for lifetime check
+        if "iat" not in claims:
+            raise InvalidCredentialsError(
+                message="JWT token missing required 'iat' claim for lifetime validation",
+                auth_method="jwt",
+            )
+
+        if "exp" not in claims:
+            raise InvalidCredentialsError(
+                message="JWT token missing required 'exp' claim for lifetime validation",
+                auth_method="jwt",
+            )
+
+        # Compute token lifetime
+        token_lifetime = claims["exp"] - claims["iat"]
+
+        # Enforce maximum lifetime
+        if token_lifetime > self._config.max_token_lifetime:
+            raise TokenLifetimeExceededError(
+                actual_lifetime=token_lifetime,
+                max_lifetime=self._config.max_token_lifetime,
+            )
 
     def _claims_to_principal(self, claims: dict[str, Any]) -> Principal:
         """Convert JWT claims to Principal.

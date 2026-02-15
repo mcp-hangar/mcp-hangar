@@ -241,6 +241,7 @@ def bootstrap_auth(
                 groups_claim=config.oidc.groups_claim,
                 tenant_claim=config.oidc.tenant_claim,
                 email_claim=config.oidc.email_claim,
+                max_token_lifetime=config.oidc.max_token_lifetime_seconds,
             )
             token_validator = JWKSTokenValidator(oidc_config)
             authenticators.append(JWTAuthenticator(oidc_config, token_validator))
