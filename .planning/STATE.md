@@ -10,30 +10,30 @@ See: .planning/PROJECT.md (updated 2026-02-15)
 ## Current Position
 
 Phase: 2 of 4 (Rate Limiter Hardening)
-Plan: 1 of 2 complete
-Status: Plan 02-01 complete (exponential backoff lockout), ready for Plan 02-02
-Last activity: 2026-02-15 - Completed 02-01 (AuthRateLimiter exponential backoff)
+Plan: 2 of 2 complete
+Status: Phase 2 complete (domain events + cleanup hardening), ready for Phase 3
+Last activity: 2026-02-15 - Completed 02-02 (Rate limiter domain events and cleanup hardening)
 
-Progress: [██░░░░░░░░] 25% (1 of 4 phases complete)
+Progress: [█████░░░░░] 50% (2 of 4 phases complete)
 
 ## Performance Metrics
 
 **Velocity:**
 
-- Total plans completed: 3
-- Average duration: 3.9 minutes
-- Total execution time: 0.20 hours
+- Total plans completed: 4
+- Average duration: 3.8 minutes
+- Total execution time: 0.25 hours
 
 **By Phase:**
 
 | Phase | Plans | Total | Avg/Plan |
 |-------|-------|-------|----------|
 | 01-timing-attack-prevention | 2 | 6.6m | 3.3m |
-| 02-rate-limiter-hardening | 1 | 4.5m | 4.5m |
+| 02-rate-limiter-hardening | 2 | 8.5m | 4.3m |
 
 **Recent Trend:**
 
-- Last 5 plans: 01-01 (2.5m), 01-02 (4.1m), 02-01 (4.5m)
+- Last 5 plans: 01-01 (2.5m), 01-02 (4.1m), 02-01 (4.5m), 02-02 (4.0m)
 - Trend: Consistent velocity
 
 *Updated after each plan completion*
@@ -55,6 +55,10 @@ Recent decisions affecting current work:
 - 2026-02-15: Exponential backoff uses factor^(count-1) to keep first lockout at base duration
 - 2026-02-15: Lockout count persists through expiry, resets only on successful authentication
 - 2026-02-15: Default escalation: 2.0x per lockout, capped at 3600s (1 hour)
+- 2026-02-15: event_publisher is optional (None by default) for backward compatibility
+- 2026-02-15: Event publishing never raises (caught in _publish_event helper)
+- 2026-02-15: Cleanup emits unlock events for expired lockouts found during cleanup
+- 2026-02-15: Refactored _maybe_cleanup into _do_cleanup for reuse by force_cleanup()
 
 ### Pending Todos
 
@@ -67,5 +71,5 @@ None yet.
 ## Session Continuity
 
 Last session: 2026-02-15
-Stopped at: Completed Phase 2 Plan 1 (02-01-PLAN.md) - AuthRateLimiter exponential backoff
+Stopped at: Completed Phase 2 Plan 2 (02-02-PLAN.md) - Rate limiter domain events and cleanup hardening
 Resume file: None
