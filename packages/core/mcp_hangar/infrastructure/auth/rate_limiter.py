@@ -35,6 +35,8 @@ class AuthRateLimitConfig:
         window_seconds: Time window for counting attempts.
         lockout_seconds: How long to lock out after exceeding limit.
         cleanup_interval: How often to clean up old entries.
+        lockout_escalation_factor: Multiplier for each consecutive lockout.
+        max_lockout_seconds: Maximum lockout duration (cap for exponential backoff).
     """
 
     enabled: bool = True
@@ -42,6 +44,8 @@ class AuthRateLimitConfig:
     window_seconds: int = 60
     lockout_seconds: int = 300
     cleanup_interval: int = 300  # 5 minutes
+    lockout_escalation_factor: float = 2.0
+    max_lockout_seconds: int = 3600  # 1 hour
 
 
 @dataclass
@@ -50,6 +54,7 @@ class _AttemptTracker:
 
     attempts: list[float] = field(default_factory=list)
     locked_until: float | None = None
+    lockout_count: int = 0
 
 
 class AuthRateLimiter:
@@ -138,9 +143,10 @@ class AuthRateLimiter:
                         reason="locked_out",
                     )
                 else:
-                    # Lockout expired, reset tracker
+                    # Lockout expired, clear lockout flag
+                    # Keep lockout_count for exponential backoff
+                    # Attempts will be pruned by window logic below
                     tracker.locked_until = None
-                    tracker.attempts.clear()
 
             # Count attempts in current window
             window_start = now - self._config.window_seconds
@@ -150,18 +156,25 @@ class AuthRateLimiter:
             remaining = self._config.max_attempts - len(recent_attempts)
 
             if remaining <= 0:
-                # Lock out the IP
-                tracker.locked_until = now + self._config.lockout_seconds
+                # Lock out the IP with exponential backoff
+                tracker.lockout_count += 1
+                effective_lockout = min(
+                    self._config.lockout_seconds
+                    * (self._config.lockout_escalation_factor ** (tracker.lockout_count - 1)),
+                    self._config.max_lockout_seconds,
+                )
+                tracker.locked_until = now + effective_lockout
                 logger.warning(
                     "auth_rate_limit_exceeded",
                     ip=ip,
                     attempts=len(recent_attempts),
-                    lockout_seconds=self._config.lockout_seconds,
+                    lockout_seconds=effective_lockout,
+                    lockout_count=tracker.lockout_count,
                 )
                 return RateLimitResult(
                     allowed=False,
                     remaining=0,
-                    retry_after=self._config.lockout_seconds,
+                    retry_after=effective_lockout,
                     reason="rate_limit_exceeded",
                 )
 
