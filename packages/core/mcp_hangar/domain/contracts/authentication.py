@@ -222,3 +222,25 @@ class IApiKeyStore(Protocol):
             Number of active API keys.
         """
         ...
+
+    @abstractmethod
+    def rotate_key(
+        self,
+        key_id: str,
+        grace_period_seconds: float = 86400,
+        rotated_by: str = "system",
+    ) -> str:
+        """Rotate an API key, producing a new key while keeping old valid during grace period.
+
+        Args:
+            key_id: Unique identifier of the key to rotate.
+            grace_period_seconds: How long the old key remains valid (default: 24h).
+            rotated_by: Principal initiating the rotation.
+
+        Returns:
+            The new raw API key (only shown once!).
+
+        Raises:
+            ValueError: If key not found, already revoked, or already has pending rotation.
+        """
+        ...

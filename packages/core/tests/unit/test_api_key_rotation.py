@@ -52,8 +52,10 @@ class TestApiKeyRotation:
             name="test-key",
         )
         old_key_hash = ApiKeyAuthenticator._hash_key(old_key)
-        metadata = store.get_key_by_hash(old_key_hash)
-        key_id = metadata.key_id
+        # Get the key_id before rotation - use internal API for testing
+        with store._lock:
+            metadata, _ = store._keys[old_key_hash]
+            key_id = metadata.key_id
 
         # Rotate with 10 second grace period
         store.rotate_key(key_id=key_id, grace_period_seconds=10)
@@ -76,8 +78,10 @@ class TestApiKeyRotation:
             name="test-key",
         )
         old_key_hash = ApiKeyAuthenticator._hash_key(old_key)
-        metadata = store.get_key_by_hash(old_key_hash)
-        key_id = metadata.key_id
+        # Get the key_id before rotation - use internal API for testing
+        with store._lock:
+            metadata, _ = store._keys[old_key_hash]
+            key_id = metadata.key_id
 
         # Rotate with 1 second grace period
         store.rotate_key(key_id=key_id, grace_period_seconds=1)
@@ -105,8 +109,10 @@ class TestApiKeyRotation:
             name="test-key",
         )
         old_key_hash = ApiKeyAuthenticator._hash_key(old_key)
-        metadata = store.get_key_by_hash(old_key_hash)
-        key_id = metadata.key_id
+        # Get the key_id before rotation - use internal API for testing
+        with store._lock:
+            metadata, _ = store._keys[old_key_hash]
+            key_id = metadata.key_id
 
         # Rotate the key
         new_key = store.rotate_key(key_id=key_id)
@@ -133,8 +139,10 @@ class TestApiKeyRotation:
             name="test-key",
         )
         old_key_hash = ApiKeyAuthenticator._hash_key(old_key)
-        metadata = store.get_key_by_hash(old_key_hash)
-        key_id = metadata.key_id
+        # Get the key_id before rotation - use internal API for testing
+        with store._lock:
+            metadata, _ = store._keys[old_key_hash]
+            key_id = metadata.key_id
 
         # Clear events from creation
         events.clear()
@@ -162,8 +170,10 @@ class TestApiKeyRotation:
             name="test-key",
         )
         old_key_hash = ApiKeyAuthenticator._hash_key(old_key)
-        metadata = store.get_key_by_hash(old_key_hash)
-        key_id = metadata.key_id
+        # Get the key_id before rotation - use internal API for testing
+        with store._lock:
+            metadata, _ = store._keys[old_key_hash]
+            key_id = metadata.key_id
 
         grace_period = 7200  # 2 hours
         before = time.time()
@@ -199,8 +209,10 @@ class TestApiKeyRotation:
             name="test-key",
         )
         old_key_hash = ApiKeyAuthenticator._hash_key(old_key)
-        metadata = store.get_key_by_hash(old_key_hash)
-        key_id = metadata.key_id
+        # Get the key_id before rotation - use internal API for testing
+        with store._lock:
+            metadata, _ = store._keys[old_key_hash]
+            key_id = metadata.key_id
 
         # Revoke the key
         store.revoke_key(key_id)
@@ -220,8 +232,10 @@ class TestApiKeyRotation:
             name="test-key",
         )
         old_key_hash = ApiKeyAuthenticator._hash_key(old_key)
-        metadata = store.get_key_by_hash(old_key_hash)
-        key_id = metadata.key_id
+        # Get the key_id before rotation - use internal API for testing
+        with store._lock:
+            metadata, _ = store._keys[old_key_hash]
+            key_id = metadata.key_id
 
         # Rotate once
         store.rotate_key(key_id=key_id, grace_period_seconds=3600)
@@ -241,8 +255,10 @@ class TestApiKeyRotation:
             name="test-key",
         )
         old_key_hash = ApiKeyAuthenticator._hash_key(old_key)
-        metadata = store.get_key_by_hash(old_key_hash)
-        key_id = metadata.key_id
+        # Get the key_id before rotation - use internal API for testing
+        with store._lock:
+            metadata, _ = store._keys[old_key_hash]
+            key_id = metadata.key_id
 
         before = time.time()
         store.rotate_key(key_id=key_id)  # No grace_period_seconds specified

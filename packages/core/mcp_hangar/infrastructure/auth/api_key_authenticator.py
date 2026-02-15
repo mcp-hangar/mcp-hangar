@@ -8,6 +8,7 @@ from datetime import datetime, UTC
 import hashlib
 import secrets
 import threading
+import time
 
 import structlog
 
@@ -149,13 +150,33 @@ class InMemoryApiKeyStore(IApiKeyStore):
     # Maximum number of keys per principal to prevent abuse
     MAX_KEYS_PER_PRINCIPAL = 100
 
-    def __init__(self) -> None:
-        """Initialize the in-memory store."""
+    def __init__(self, event_publisher=None) -> None:
+        """Initialize the in-memory store.
+
+        Args:
+            event_publisher: Optional callback for publishing domain events.
+        """
         self._lock = threading.RLock()
         # key_hash -> (metadata, principal)
         self._keys: dict[str, tuple[ApiKeyMetadata, Principal]] = {}
         # principal_id -> list of key_ids
         self._principal_keys: dict[str, list[str]] = {}
+        # Rotation tracking: old_key_hash -> (new_key_hash, grace_until)
+        self._rotated_keys: dict[str, tuple[str, float]] = {}
+        self._event_publisher = event_publisher
+
+    def _publish_event(self, event) -> None:
+        """Safely publish an event if publisher is configured.
+
+        Never raises - event publishing failures are logged but don't affect operations.
+        """
+        if self._event_publisher is None:
+            return
+
+        try:
+            self._event_publisher(event)
+        except Exception as e:
+            logger.warning("event_publish_failed", event_type=type(event).__name__, error=str(e))
 
     def get_principal_for_key(self, key_hash: str) -> Principal | None:
         """Look up principal for an API key hash.
@@ -167,7 +188,7 @@ class InMemoryApiKeyStore(IApiKeyStore):
             Principal if found and valid, None if not found.
 
         Raises:
-            ExpiredCredentialsError: If the key has expired.
+            ExpiredCredentialsError: If the key has expired or rotated with expired grace period.
             RevokedCredentialsError: If the key has been revoked.
         """
         with self._lock:
@@ -190,6 +211,18 @@ class InMemoryApiKeyStore(IApiKeyStore):
                     auth_method="api_key",
                     expired_at=metadata.expires_at.timestamp(),
                 )
+
+            # Check if this key has been rotated
+            if key_hash in self._rotated_keys:
+                _, grace_until = self._rotated_keys[key_hash]
+                now = time.time()
+                if now >= grace_until:
+                    raise ExpiredCredentialsError(
+                        message="API key has been rotated and grace period has expired",
+                        auth_method="api_key",
+                        expired_at=grace_until,
+                    )
+                # Still within grace period - allow it
 
             # Update last_used_at
             # Note: Creating new metadata object since ApiKeyMetadata is a dataclass
@@ -388,3 +421,102 @@ class InMemoryApiKeyStore(IApiKeyStore):
                     if metadata.expires_at is None or metadata.expires_at > now:
                         count += 1
             return count
+
+    def rotate_key(
+        self,
+        key_id: str,
+        grace_period_seconds: float = 86400,
+        rotated_by: str = "system",
+    ) -> str:
+        """Rotate an API key, producing a new key while keeping old valid during grace period.
+
+        Args:
+            key_id: Unique identifier of the key to rotate.
+            grace_period_seconds: How long the old key remains valid (default: 24h).
+            rotated_by: Principal initiating the rotation.
+
+        Returns:
+            The new raw API key (only shown once!).
+
+        Raises:
+            ValueError: If key not found, already revoked, or already has pending rotation.
+        """
+        with self._lock:
+            # Find the old key by key_id
+            old_key_hash = None
+            old_metadata = None
+            old_principal = None
+
+            for key_hash, (metadata, principal) in self._keys.items():
+                if metadata.key_id == key_id:
+                    old_key_hash = key_hash
+                    old_metadata = metadata
+                    old_principal = principal
+                    break
+
+            if old_key_hash is None:
+                raise ValueError(f"API key not found: {key_id}")
+
+            # Check if key is revoked
+            if old_metadata.revoked:
+                raise ValueError("Cannot rotate revoked key")
+
+            # Check if key already has pending rotation
+            if old_key_hash in self._rotated_keys:
+                raise ValueError("Key already has pending rotation")
+
+            # Generate new key
+            raw_new_key = ApiKeyAuthenticator.generate_key()
+            new_key_hash = ApiKeyAuthenticator._hash_key(raw_new_key)
+            new_key_id = secrets.token_urlsafe(8)
+
+            now_dt = datetime.now(UTC)
+            now_ts = time.time()
+            grace_until = now_ts + grace_period_seconds
+
+            # Create new key metadata (same principal, new key_id)
+            new_metadata = ApiKeyMetadata(
+                key_id=new_key_id,
+                name=old_metadata.name,
+                principal_id=old_metadata.principal_id,
+                created_at=now_dt,
+                expires_at=old_metadata.expires_at,
+                last_used_at=None,
+                revoked=False,
+            )
+
+            # Store new key
+            self._keys[new_key_hash] = (new_metadata, old_principal)
+
+            # Add new key to principal's key list
+            if old_metadata.principal_id not in self._principal_keys:
+                self._principal_keys[old_metadata.principal_id] = []
+            self._principal_keys[old_metadata.principal_id].append(new_key_id)
+
+            # Mark old key as rotated
+            self._rotated_keys[old_key_hash] = (new_key_hash, grace_until)
+
+            # Emit KeyRotated event
+            from ...domain.events import KeyRotated
+
+            self._publish_event(
+                KeyRotated(
+                    key_id=key_id,
+                    principal_id=old_metadata.principal_id,
+                    new_key_id=new_key_id,
+                    rotated_at=now_ts,
+                    grace_until=grace_until,
+                    rotated_by=rotated_by,
+                )
+            )
+
+            logger.info(
+                "api_key_rotated",
+                old_key_id=key_id,
+                new_key_id=new_key_id,
+                principal_id=old_metadata.principal_id,
+                grace_until=grace_until,
+                rotated_by=rotated_by,
+            )
+
+            return raw_new_key

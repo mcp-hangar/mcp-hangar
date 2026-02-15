@@ -471,6 +471,30 @@ class RateLimitUnlock(DomainEvent):
         super().__init__()
 
 
+@dataclass
+class KeyRotated(DomainEvent):
+    """Published when an API key is rotated.
+
+    Attributes:
+        key_id: The key_id that was rotated (old key).
+        principal_id: Principal the key belongs to.
+        new_key_id: The new key's key_id.
+        rotated_at: Timestamp when rotation occurred.
+        grace_until: Timestamp when old key becomes invalid.
+        rotated_by: Principal who initiated the rotation.
+    """
+
+    key_id: str
+    principal_id: str
+    new_key_id: str
+    rotated_at: float
+    grace_until: float
+    rotated_by: str
+
+    def __post_init__(self):
+        super().__init__()
+
+
 # --- Multi-Tenancy Events ---
 
 

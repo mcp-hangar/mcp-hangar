@@ -363,6 +363,27 @@ class SQLiteApiKeyStore(IApiKeyStore):
 
         return cursor.fetchone()["count"]
 
+    def rotate_key(
+        self,
+        key_id: str,
+        grace_period_seconds: float = 86400,
+        rotated_by: str = "system",
+    ) -> str:
+        """Rotate an API key (stub - not yet implemented for SQLite).
+
+        Args:
+            key_id: Unique identifier of the key to rotate.
+            grace_period_seconds: How long the old key remains valid (default: 24h).
+            rotated_by: Principal initiating the rotation.
+
+        Returns:
+            The new raw API key (only shown once!).
+
+        Raises:
+            NotImplementedError: SQLite key rotation will be implemented in Plan 02.
+        """
+        raise NotImplementedError("SQLite key rotation will be implemented in Plan 02")
+
     def close(self) -> None:
         """Close the database connection."""
         if hasattr(self._local, "connection") and self._local.connection:
