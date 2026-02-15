@@ -6,12 +6,15 @@ the number of failed authentication attempts per IP address.
 Uses a token bucket algorithm with per-IP tracking.
 """
 
+from collections.abc import Callable
 from dataclasses import dataclass, field
 import threading
 import time
 from typing import NamedTuple
 
 import structlog
+
+from ...domain.events import RateLimitLockout, RateLimitUnlock
 
 logger = structlog.get_logger(__name__)
 
@@ -80,16 +83,34 @@ class AuthRateLimiter:
         limiter.record_success(client_ip)
     """
 
-    def __init__(self, config: AuthRateLimitConfig | None = None):
+    def __init__(
+        self,
+        config: AuthRateLimitConfig | None = None,
+        event_publisher: Callable[[object], None] | None = None,
+    ):
         """Initialize rate limiter.
 
         Args:
             config: Rate limit configuration. Uses defaults if None.
+            event_publisher: Optional callback for publishing domain events.
         """
         self._config = config or AuthRateLimitConfig()
         self._trackers: dict[str, _AttemptTracker] = {}
         self._lock = threading.RLock()
         self._last_cleanup = time.time()
+        self._event_publisher = event_publisher
+
+    def _publish_event(self, event: object) -> None:
+        """Publish a domain event if event_publisher is configured.
+
+        Args:
+            event: Domain event to publish.
+        """
+        if self._event_publisher:
+            try:
+                self._event_publisher(event)
+            except Exception as e:
+                logger.warning("rate_limiter_event_publish_failed", event_type=type(event).__name__, error=str(e))
 
     @property
     def enabled(self) -> bool:
@@ -146,6 +167,13 @@ class AuthRateLimiter:
                     # Lockout expired, clear lockout flag
                     # Keep lockout_count for exponential backoff
                     # Attempts will be pruned by window logic below
+                    self._publish_event(
+                        RateLimitUnlock(
+                            source_ip=ip,
+                            lockout_count=tracker.lockout_count,
+                            unlock_reason="expired",
+                        )
+                    )
                     tracker.locked_until = None
 
             # Count attempts in current window
@@ -170,6 +198,14 @@ class AuthRateLimiter:
                     attempts=len(recent_attempts),
                     lockout_seconds=effective_lockout,
                     lockout_count=tracker.lockout_count,
+                )
+                self._publish_event(
+                    RateLimitLockout(
+                        source_ip=ip,
+                        lockout_duration_seconds=effective_lockout,
+                        lockout_count=tracker.lockout_count,
+                        failed_attempts=len(recent_attempts),
+                    )
                 )
                 return RateLimitResult(
                     allowed=False,
@@ -220,6 +256,15 @@ class AuthRateLimiter:
 
         with self._lock:
             if ip in self._trackers:
+                tracker = self._trackers[ip]
+                if tracker.locked_until is not None:
+                    self._publish_event(
+                        RateLimitUnlock(
+                            source_ip=ip,
+                            lockout_count=tracker.lockout_count,
+                            unlock_reason="success",
+                        )
+                    )
                 del self._trackers[ip]
                 logger.debug("auth_success_cleared_tracker", ip=ip)
 
@@ -263,9 +308,28 @@ class AuthRateLimiter:
         """
         with self._lock:
             if ip is None:
+                # Clear all - emit unlock events for locked IPs
+                for tracked_ip, tracker in list(self._trackers.items()):
+                    if tracker.locked_until is not None:
+                        self._publish_event(
+                            RateLimitUnlock(
+                                source_ip=tracked_ip,
+                                lockout_count=tracker.lockout_count,
+                                unlock_reason="manual_clear",
+                            )
+                        )
                 self._trackers.clear()
                 logger.info("auth_rate_limit_cleared_all")
             elif ip in self._trackers:
+                tracker = self._trackers[ip]
+                if tracker.locked_until is not None:
+                    self._publish_event(
+                        RateLimitUnlock(
+                            source_ip=ip,
+                            lockout_count=tracker.lockout_count,
+                            unlock_reason="manual_clear",
+                        )
+                    )
                 del self._trackers[ip]
                 logger.info("auth_rate_limit_cleared", ip=ip)
 

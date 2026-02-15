@@ -433,6 +433,44 @@ class ApiKeyRevoked(DomainEvent):
         super().__init__()
 
 
+@dataclass
+class RateLimitLockout(DomainEvent):
+    """Published when an IP is locked out due to excessive failed auth attempts.
+
+    Attributes:
+        source_ip: The IP address that was locked out.
+        lockout_duration_seconds: How long the lockout lasts.
+        lockout_count: How many consecutive lockouts this IP has had.
+        failed_attempts: Number of failed attempts that triggered the lockout.
+    """
+
+    source_ip: str
+    lockout_duration_seconds: float
+    lockout_count: int
+    failed_attempts: int
+
+    def __post_init__(self):
+        super().__init__()
+
+
+@dataclass
+class RateLimitUnlock(DomainEvent):
+    """Published when an IP lockout expires (detected on next check or cleanup).
+
+    Attributes:
+        source_ip: The IP address that was unlocked.
+        lockout_count: Total consecutive lockouts before unlock.
+        unlock_reason: Why the unlock happened (expired, success, manual_clear).
+    """
+
+    source_ip: str
+    lockout_count: int
+    unlock_reason: str
+
+    def __post_init__(self):
+        super().__init__()
+
+
 # --- Multi-Tenancy Events ---
 
 

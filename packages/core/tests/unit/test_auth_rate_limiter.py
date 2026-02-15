@@ -9,12 +9,14 @@ Tests cover:
 - Window-based attempt expiry
 - Status reporting
 - Clear operations
+- Domain event emission
 """
 
-from unittest.mock import patch
+from unittest.mock import Mock, patch
 
 import pytest
 
+from mcp_hangar.domain.events import RateLimitLockout, RateLimitUnlock
 from mcp_hangar.infrastructure.auth.rate_limiter import (
     AuthRateLimiter,
     AuthRateLimitConfig,
@@ -428,3 +430,117 @@ class TestAuthRateLimiterClear:
         for ip in ["192.168.1.100", "192.168.1.200", "192.168.1.300"]:
             result = limiter.check_rate_limit(ip)
             assert result.remaining == 10
+
+
+class TestAuthRateLimiterDomainEvents:
+    """Tests for domain event emission."""
+
+    @patch("time.time")
+    def test_lockout_emits_rate_limit_lockout_event(self, mock_time):
+        """Trigger lockout, verify event_publisher called with RateLimitLockout event."""
+        mock_time.return_value = 1000.0
+        event_publisher = Mock()
+        config = AuthRateLimitConfig(max_attempts=3, lockout_seconds=300)
+        limiter = AuthRateLimiter(config, event_publisher=event_publisher)
+
+        # Trigger lockout
+        for i in range(3):
+            limiter.record_failure("192.168.1.100")
+        limiter.check_rate_limit("192.168.1.100")
+
+        # Verify event was published
+        assert event_publisher.call_count == 1
+        event = event_publisher.call_args[0][0]
+        assert isinstance(event, RateLimitLockout)
+        assert event.source_ip == "192.168.1.100"
+        assert event.lockout_duration_seconds == 300
+        assert event.lockout_count == 1
+        assert event.failed_attempts == 3
+
+    @patch("time.time")
+    def test_lockout_expiry_emits_unlock_event(self, mock_time):
+        """Trigger lockout, advance time past expiry, call check_rate_limit, verify RateLimitUnlock emitted."""
+        mock_time.return_value = 1000.0
+        event_publisher = Mock()
+        config = AuthRateLimitConfig(max_attempts=3, lockout_seconds=300, cleanup_interval=600)
+        limiter = AuthRateLimiter(config, event_publisher=event_publisher)
+
+        # Trigger lockout
+        for i in range(3):
+            limiter.record_failure("192.168.1.100")
+        limiter.check_rate_limit("192.168.1.100")
+
+        # Reset mock to ignore lockout event
+        event_publisher.reset_mock()
+
+        # Advance time past lockout expiry (but not cleanup interval)
+        mock_time.return_value = 1301.0
+        limiter.check_rate_limit("192.168.1.100")
+
+        # Verify unlock event was published
+        assert event_publisher.call_count == 1
+        event = event_publisher.call_args[0][0]
+        assert isinstance(event, RateLimitUnlock)
+        assert event.source_ip == "192.168.1.100"
+        assert event.lockout_count == 1
+        assert event.unlock_reason == "expired"
+
+    @patch("time.time")
+    def test_success_emits_unlock_event_if_locked(self, mock_time):
+        """Trigger lockout, call record_success, verify RateLimitUnlock emitted with unlock_reason=success."""
+        mock_time.return_value = 1000.0
+        event_publisher = Mock()
+        config = AuthRateLimitConfig(max_attempts=3, lockout_seconds=300)
+        limiter = AuthRateLimiter(config, event_publisher=event_publisher)
+
+        # Trigger lockout
+        for i in range(3):
+            limiter.record_failure("192.168.1.100")
+        limiter.check_rate_limit("192.168.1.100")
+
+        # Reset mock to ignore lockout event
+        event_publisher.reset_mock()
+
+        # Successful auth
+        limiter.record_success("192.168.1.100")
+
+        # Verify unlock event was published
+        assert event_publisher.call_count == 1
+        event = event_publisher.call_args[0][0]
+        assert isinstance(event, RateLimitUnlock)
+        assert event.source_ip == "192.168.1.100"
+        assert event.lockout_count == 1
+        assert event.unlock_reason == "success"
+
+    @patch("time.time")
+    def test_success_does_not_emit_unlock_if_not_locked(self, mock_time):
+        """Record some failures (no lockout), call record_success, verify NO RateLimitUnlock emitted."""
+        mock_time.return_value = 1000.0
+        event_publisher = Mock()
+        limiter = AuthRateLimiter(event_publisher=event_publisher)
+
+        # Record some failures but not enough to trigger lockout
+        for i in range(5):
+            limiter.record_failure("192.168.1.100")
+
+        # Successful auth
+        limiter.record_success("192.168.1.100")
+
+        # Verify NO unlock event was published (IP was not locked)
+        assert event_publisher.call_count == 0
+
+    @patch("time.time")
+    def test_no_event_publisher_does_not_raise(self, mock_time):
+        """Create AuthRateLimiter without event_publisher, trigger lockout - should not raise."""
+        mock_time.return_value = 1000.0
+        config = AuthRateLimitConfig(max_attempts=3, lockout_seconds=300)
+        limiter = AuthRateLimiter(config)  # No event_publisher
+
+        # Trigger lockout - should not raise
+        for i in range(3):
+            limiter.record_failure("192.168.1.100")
+        result = limiter.check_rate_limit("192.168.1.100")
+
+        # Verify lockout occurred
+        assert result.allowed is False
+        assert result.reason == "rate_limit_exceeded"
