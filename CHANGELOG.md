@@ -7,6 +7,49 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.8.0] - 2026-02-15
+
+### Added
+
+- **Tool Access Filtering**: Config-driven tool visibility control per provider, group, or member
+  - `ToolAccessPolicy` value object with fnmatch glob pattern support (`*`, `?`, `[seq]`)
+  - `ToolsConfig` dataclass for YAML configuration with `allow_list` and `deny_list`
+  - `ToolAccessResolver` domain service with 3-level policy merge (provider -> group -> member)
+  - Caching with automatic invalidation on policy changes
+  - `ToolAccessDeniedError` exception for filtered tools (does not leak policy details)
+  - Integration with hot-loading (`LoadProviderCommand.allow_tools/deny_tools`)
+  - Integration with config reload (policies cleared and re-registered)
+  - New Prometheus metrics: `mcp_hangar_tool_access_denied_total`, `mcp_hangar_tool_access_policy_evaluations_total`
+  - Example config:
+
+    ```yaml
+    providers:
+      grafana:
+        tools:
+          deny_list:
+            - delete_*
+            - create_alert_rule
+    ```
+
+- **Container Command Override**: Docker/Podman providers can now override container entrypoint
+  - `container.command` — list of strings to override container entrypoint
+  - `container.args` — additional arguments passed after command
+  - Example config:
+
+    ```yaml
+    providers:
+      custom:
+        mode: docker
+        image: my-mcp-server:latest
+        container:
+          command: ["python", "-m", "custom_entrypoint"]
+          args: ["--verbose"]
+    ```
+
+### Changed
+
+- `ProviderState` is now exported from `mcp_hangar.domain.model` module
+
 ## [0.7.0] - 2026-02-08
 
 ### Added
