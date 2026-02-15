@@ -11,7 +11,7 @@ inject the EventBus.publish method as the event_publisher.
 """
 
 from collections.abc import Callable
-from datetime import datetime, UTC
+from datetime import datetime, timedelta, UTC
 import hmac
 import json
 from pathlib import Path
@@ -23,7 +23,7 @@ import structlog
 
 from ...domain.contracts.authentication import ApiKeyMetadata, IApiKeyStore
 from ...domain.contracts.authorization import IRoleStore
-from ...domain.events import ApiKeyCreated, ApiKeyRevoked, RoleAssigned, RoleRevoked
+from ...domain.events import ApiKeyCreated, ApiKeyRevoked, KeyRotated, RoleAssigned, RoleRevoked
 from ...domain.exceptions import ExpiredCredentialsError, RevokedCredentialsError
 from ...domain.security.roles import BUILTIN_ROLES
 from ...domain.value_objects import Permission, Principal, PrincipalId, PrincipalType, Role
@@ -49,7 +49,9 @@ CREATE TABLE IF NOT EXISTS api_keys (
     last_used_at TEXT,
     revoked INTEGER NOT NULL DEFAULT 0,
     revoked_at TEXT,
-    metadata TEXT DEFAULT '{}'
+    metadata TEXT DEFAULT '{}',
+    rotated_to_key_id TEXT,
+    grace_until TEXT
 );
 
 CREATE INDEX IF NOT EXISTS idx_api_keys_principal_id ON api_keys(principal_id);
@@ -132,6 +134,22 @@ class SQLiteApiKeyStore(IApiKeyStore):
 
         conn = self._get_connection()
         conn.executescript(SQLITE_SCHEMA)
+
+        # Add rotation columns if they don't exist (migration for existing DBs)
+        try:
+            cursor = conn.execute("PRAGMA table_info(api_keys)")
+            columns = {row["name"] for row in cursor.fetchall()}
+
+            if "rotated_to_key_id" not in columns:
+                conn.execute("ALTER TABLE api_keys ADD COLUMN rotated_to_key_id TEXT")
+                logger.info("sqlite_migration_added_column", column="rotated_to_key_id")
+
+            if "grace_until" not in columns:
+                conn.execute("ALTER TABLE api_keys ADD COLUMN grace_until TEXT")
+                logger.info("sqlite_migration_added_column", column="grace_until")
+        except Exception as e:
+            logger.warning("sqlite_migration_check_failed", error=str(e))
+
         conn.commit()
         self._initialized = True
         logger.info("sqlite_api_key_store_initialized", db_path=self._db_path)
@@ -142,7 +160,8 @@ class SQLiteApiKeyStore(IApiKeyStore):
         cursor = conn.execute(
             """
             SELECT principal_id, tenant_id, groups, name, key_id,
-                   expires_at, revoked, metadata, key_hash
+                   expires_at, revoked, metadata, key_hash,
+                   rotated_to_key_id, grace_until
             FROM api_keys
             WHERE key_hash = ?
         """,
@@ -161,6 +180,24 @@ class SQLiteApiKeyStore(IApiKeyStore):
                 message="API key has been revoked",
                 auth_method="api_key",
             )
+
+        # Check rotation and grace period
+        if row["rotated_to_key_id"] is not None:
+            # Key has been rotated - check grace period
+            if row["grace_until"]:
+                grace_until = datetime.fromisoformat(row["grace_until"])
+                if datetime.now(UTC) >= grace_until:
+                    raise ExpiredCredentialsError(
+                        message="API key has been rotated and grace period has expired",
+                        auth_method="api_key",
+                        expired_at=grace_until.timestamp(),
+                    )
+            else:
+                # No grace period set, reject immediately
+                raise ExpiredCredentialsError(
+                    message="API key has been rotated and grace period has expired",
+                    auth_method="api_key",
+                )
 
         # Check expiration
         if row["expires_at"]:
@@ -369,7 +406,7 @@ class SQLiteApiKeyStore(IApiKeyStore):
         grace_period_seconds: float = 86400,
         rotated_by: str = "system",
     ) -> str:
-        """Rotate an API key (stub - not yet implemented for SQLite).
+        """Rotate an API key with a grace period.
 
         Args:
             key_id: Unique identifier of the key to rotate.
@@ -380,9 +417,104 @@ class SQLiteApiKeyStore(IApiKeyStore):
             The new raw API key (only shown once!).
 
         Raises:
-            NotImplementedError: SQLite key rotation will be implemented in Plan 02.
+            ValueError: If key doesn't exist, is revoked, or already rotated.
         """
-        raise NotImplementedError("SQLite key rotation will be implemented in Plan 02")
+        from .api_key_authenticator import ApiKeyAuthenticator
+
+        conn = self._get_connection()
+
+        # Look up existing key
+        cursor = conn.execute(
+            """
+            SELECT key_hash, principal_id, name, tenant_id, groups, expires_at,
+                   revoked, rotated_to_key_id, grace_until
+            FROM api_keys
+            WHERE key_id = ?
+        """,
+            (key_id,),
+        )
+
+        row = cursor.fetchone()
+        if row is None:
+            raise ValueError(f"API key not found: {key_id}")
+
+        if row["revoked"]:
+            raise ValueError(f"Cannot rotate revoked key {key_id}")
+
+        # Check if already rotated with active grace period
+        if row["rotated_to_key_id"] is not None and row["grace_until"]:
+            grace_until = datetime.fromisoformat(row["grace_until"])
+            if datetime.now(UTC) < grace_until:
+                raise ValueError(f"Key {key_id} already has pending rotation")
+
+        # Generate new key
+        raw_key = ApiKeyAuthenticator.generate_key()
+        key_hash = ApiKeyAuthenticator._hash_key(raw_key)
+        new_key_id = secrets.token_urlsafe(8)
+        now = datetime.now(UTC)
+        grace_until = now + timedelta(seconds=grace_period_seconds)
+
+        # Begin transaction
+        try:
+            # Insert new key row
+            conn.execute(
+                """
+                INSERT INTO api_keys
+                (key_hash, key_id, principal_id, name, tenant_id, groups, created_at, expires_at)
+                VALUES (?, ?, ?, ?, ?, ?, ?, ?)
+            """,
+                (
+                    key_hash,
+                    new_key_id,
+                    row["principal_id"],
+                    row["name"],
+                    row["tenant_id"],
+                    row["groups"],
+                    now.isoformat(),
+                    row["expires_at"],
+                ),
+            )
+
+            # Update old key to track rotation
+            conn.execute(
+                """
+                UPDATE api_keys
+                SET rotated_to_key_id = ?, grace_until = ?
+                WHERE key_id = ?
+            """,
+                (new_key_id, grace_until.isoformat(), key_id),
+            )
+
+            conn.commit()
+
+            logger.info(
+                "api_key_rotated",
+                old_key_id=key_id,
+                new_key_id=new_key_id,
+                principal_id=row["principal_id"],
+                grace_until=grace_until.isoformat(),
+                rotated_by=rotated_by,
+            )
+
+            # Emit domain event
+            if self._event_publisher:
+                self._event_publisher(
+                    KeyRotated(
+                        key_id=key_id,
+                        principal_id=row["principal_id"],
+                        new_key_id=new_key_id,
+                        rotated_at=now.timestamp(),
+                        grace_until=grace_until.timestamp(),
+                        rotated_by=rotated_by,
+                    )
+                )
+
+            return raw_key
+
+        except Exception as e:
+            conn.rollback()
+            logger.error("api_key_rotation_failed", key_id=key_id, error=str(e))
+            raise
 
     def close(self) -> None:
         """Close the database connection."""

@@ -12,7 +12,7 @@ Requires: asyncpg or psycopg2
 
 from collections.abc import Callable
 from contextlib import contextmanager
-from datetime import datetime, UTC
+from datetime import datetime, timedelta, UTC
 import hmac
 import json
 import secrets
@@ -21,7 +21,7 @@ import structlog
 
 from ...domain.contracts.authentication import ApiKeyMetadata, IApiKeyStore
 from ...domain.contracts.authorization import IRoleStore
-from ...domain.events import ApiKeyCreated, ApiKeyRevoked, RoleAssigned, RoleRevoked
+from ...domain.events import ApiKeyCreated, ApiKeyRevoked, KeyRotated, RoleAssigned, RoleRevoked
 from ...domain.exceptions import ExpiredCredentialsError, RevokedCredentialsError
 from ...domain.security.roles import BUILTIN_ROLES
 from ...domain.value_objects import Permission, Principal, PrincipalId, PrincipalType, Role
@@ -46,12 +46,18 @@ CREATE TABLE IF NOT EXISTS api_keys (
     last_used_at TIMESTAMP WITH TIME ZONE,
     revoked BOOLEAN NOT NULL DEFAULT FALSE,
     revoked_at TIMESTAMP WITH TIME ZONE,
-    metadata JSONB DEFAULT '{}'
+    metadata JSONB DEFAULT '{}',
+    rotated_to_key_id VARCHAR(32),
+    grace_until TIMESTAMP WITH TIME ZONE
 );
 
 CREATE INDEX IF NOT EXISTS idx_api_keys_principal_id ON api_keys(principal_id);
 CREATE INDEX IF NOT EXISTS idx_api_keys_key_id ON api_keys(key_id);
 CREATE INDEX IF NOT EXISTS idx_api_keys_expires_at ON api_keys(expires_at) WHERE expires_at IS NOT NULL;
+
+-- Add rotation columns if they don't exist (migration)
+ALTER TABLE api_keys ADD COLUMN IF NOT EXISTS rotated_to_key_id VARCHAR(32);
+ALTER TABLE api_keys ADD COLUMN IF NOT EXISTS grace_until TIMESTAMP WITH TIME ZONE;
 """
 
 # SQL Schema for Roles
@@ -98,6 +104,7 @@ class PostgresApiKeyStore(IApiKeyStore):
         self,
         connection_factory,
         table_prefix: str = "",
+        event_publisher: Callable | None = None,
     ):
         """Initialize the PostgreSQL store.
 
@@ -105,10 +112,12 @@ class PostgresApiKeyStore(IApiKeyStore):
             connection_factory: Callable that returns a DB connection.
                                Should support context manager protocol.
             table_prefix: Optional prefix for table names.
+            event_publisher: Optional callback for publishing domain events.
         """
         self._get_connection = connection_factory
         self._prefix = table_prefix
         self._table = f"{table_prefix}api_keys" if table_prefix else "api_keys"
+        self._event_publisher = event_publisher
 
     def initialize(self) -> None:
         """Create tables if they don't exist."""
@@ -128,7 +137,8 @@ class PostgresApiKeyStore(IApiKeyStore):
             cur.execute(
                 f"""
                     SELECT principal_id, tenant_id, groups, name, key_id,
-                           expires_at, revoked, metadata
+                           expires_at, revoked, metadata,
+                           rotated_to_key_id, grace_until
                     FROM {self._table}
                     WHERE key_hash = %s
                 """,
@@ -141,7 +151,18 @@ class PostgresApiKeyStore(IApiKeyStore):
                 hmac.compare_digest(key_hash.encode("utf-8"), _DUMMY_HASH.encode("utf-8"))
                 return None
 
-            principal_id, tenant_id, groups, name, key_id, expires_at, revoked, metadata = row
+            (
+                principal_id,
+                tenant_id,
+                groups,
+                name,
+                key_id,
+                expires_at,
+                revoked,
+                metadata,
+                rotated_to_key_id,
+                grace_until,
+            ) = row
 
             # Check revocation
             if revoked:
@@ -149,6 +170,23 @@ class PostgresApiKeyStore(IApiKeyStore):
                     message="API key has been revoked",
                     auth_method="api_key",
                 )
+
+            # Check rotation and grace period
+            if rotated_to_key_id is not None:
+                # Key has been rotated - check grace period
+                if grace_until:
+                    if datetime.now(UTC) >= grace_until:
+                        raise ExpiredCredentialsError(
+                            message="API key has been rotated and grace period has expired",
+                            auth_method="api_key",
+                            expired_at=grace_until.timestamp(),
+                        )
+                else:
+                    # No grace period set, reject immediately
+                    raise ExpiredCredentialsError(
+                        message="API key has been rotated and grace period has expired",
+                        auth_method="api_key",
+                    )
 
             # Check expiration
             if expires_at and expires_at < datetime.now(UTC):
@@ -346,6 +384,131 @@ class PostgresApiKeyStore(IApiKeyStore):
                 (principal_id,),
             )
             return cur.fetchone()[0]
+
+    def rotate_key(
+        self,
+        key_id: str,
+        grace_period_seconds: float = 86400,
+        rotated_by: str = "system",
+    ) -> str:
+        """Rotate an API key with a grace period.
+
+        Args:
+            key_id: Unique identifier of the key to rotate.
+            grace_period_seconds: How long the old key remains valid (default: 24h).
+            rotated_by: Principal initiating the rotation.
+
+        Returns:
+            The new raw API key (only shown once!).
+
+        Raises:
+            ValueError: If key doesn't exist, is revoked, or already rotated.
+        """
+        from .api_key_authenticator import ApiKeyAuthenticator
+
+        with self._get_connection() as conn, conn.cursor() as cur:
+            # Look up existing key
+            cur.execute(
+                f"""
+                    SELECT key_hash, principal_id, name, tenant_id, groups, expires_at,
+                           revoked, rotated_to_key_id, grace_until
+                    FROM {self._table}
+                    WHERE key_id = %s
+                """,
+                (key_id,),
+            )
+
+            row = cur.fetchone()
+            if row is None:
+                raise ValueError(f"API key not found: {key_id}")
+
+            (
+                old_key_hash,
+                principal_id,
+                name,
+                tenant_id,
+                groups,
+                expires_at,
+                revoked,
+                rotated_to_key_id,
+                grace_until,
+            ) = row
+
+            if revoked:
+                raise ValueError(f"Cannot rotate revoked key {key_id}")
+
+            # Check if already rotated with active grace period
+            if rotated_to_key_id is not None and grace_until:
+                if datetime.now(UTC) < grace_until:
+                    raise ValueError(f"Key {key_id} already has pending rotation")
+
+            # Generate new key
+            raw_key = ApiKeyAuthenticator.generate_key()
+            key_hash = ApiKeyAuthenticator._hash_key(raw_key)
+            new_key_id = secrets.token_urlsafe(8)
+            now = datetime.now(UTC)
+            grace_until_dt = now + timedelta(seconds=grace_period_seconds)
+
+            try:
+                # Insert new key row
+                cur.execute(
+                    f"""
+                        INSERT INTO {self._table}
+                        (key_hash, key_id, principal_id, name, tenant_id, groups, created_at, expires_at)
+                        VALUES (%s, %s, %s, %s, %s, %s, %s, %s)
+                    """,
+                    (
+                        key_hash,
+                        new_key_id,
+                        principal_id,
+                        name,
+                        tenant_id,
+                        groups,
+                        now,
+                        expires_at,
+                    ),
+                )
+
+                # Update old key to track rotation
+                cur.execute(
+                    f"""
+                        UPDATE {self._table}
+                        SET rotated_to_key_id = %s, grace_until = %s
+                        WHERE key_id = %s
+                    """,
+                    (new_key_id, grace_until_dt, key_id),
+                )
+
+                conn.commit()
+
+                logger.info(
+                    "api_key_rotated",
+                    old_key_id=key_id,
+                    new_key_id=new_key_id,
+                    principal_id=principal_id,
+                    grace_until=grace_until_dt.isoformat(),
+                    rotated_by=rotated_by,
+                )
+
+                # Emit domain event
+                if self._event_publisher:
+                    self._event_publisher(
+                        KeyRotated(
+                            key_id=key_id,
+                            principal_id=principal_id,
+                            new_key_id=new_key_id,
+                            rotated_at=now.timestamp(),
+                            grace_until=grace_until_dt.timestamp(),
+                            rotated_by=rotated_by,
+                        )
+                    )
+
+                return raw_key
+
+            except Exception as e:
+                conn.rollback()
+                logger.error("api_key_rotation_failed", key_id=key_id, error=str(e))
+                raise
 
 
 class PostgresRoleStore(IRoleStore):
