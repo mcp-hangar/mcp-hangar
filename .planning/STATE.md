@@ -10,19 +10,19 @@ See: .planning/PROJECT.md (updated 2026-02-15)
 ## Current Position
 
 Phase: 4 of 4 (API Key Rotation)
-Plan: None yet (ready to plan)
-Status: Phase 3 verified and complete, ready to plan Phase 4
-Last activity: 2026-02-15 - Phase 3 verified (7/7 must-haves passed)
+Plan: 1 of 2 (InMemory store rotation complete)
+Status: Plan 04-01 complete, ready for Plan 04-02 (SQLite/EventSourced rotation)
+Last activity: 2026-02-15 - Plan 04-01 complete (10/10 tests pass, 0 regressions)
 
-Progress: [███████░░░] 75% (3 of 4 phases complete)
+Progress: [████████░░] 87.5% (3.5 of 4 phases complete)
 
 ## Performance Metrics
 
 **Velocity:**
 
-- Total plans completed: 5
-- Average duration: 3.9 minutes
-- Total execution time: 0.30 hours
+- Total plans completed: 6
+- Average duration: 4.1 minutes
+- Total execution time: 0.35 hours
 
 **By Phase:**
 
@@ -31,10 +31,11 @@ Progress: [███████░░░] 75% (3 of 4 phases complete)
 | 01-timing-attack-prevention | 2 | 6.6m | 3.3m |
 | 02-rate-limiter-hardening | 2 | 8.5m | 4.3m |
 | 03-jwt-lifetime-enforcement | 1 | 3.9m | 3.9m |
+| 04-api-key-rotation | 1 | 5.2m | 5.2m |
 
 **Recent Trend:**
 
-- Last 5 plans: 01-02 (4.1m), 02-01 (4.5m), 02-02 (4.0m), 03-01 (3.9m)
+- Last 5 plans: 02-01 (4.5m), 02-02 (4.0m), 03-01 (3.9m), 04-01 (5.2m)
 - Trend: Consistent velocity
 
 *Updated after each plan completion*
@@ -65,6 +66,11 @@ Recent decisions affecting current work:
 - 2026-02-15: Enforce lifetime check before creating Principal (fail fast)
 - 2026-02-15: Raise specific TokenLifetimeExceededError for clear debugging
 - 2026-02-15: MCP_JWT_MAX_TOKEN_LIFETIME env var overrides YAML config
+- 2026-02-15: Default grace period: 86400 seconds (24 hours) balances security and operational convenience
+- 2026-02-15: Grace period tracked in _rotated_keys dict: old_key_hash -> (new_key_hash, grace_until)
+- 2026-02-15: Old keys remain fully functional during grace period (no warnings, just works)
+- 2026-02-15: After grace expires, raise ExpiredCredentialsError with clear rotation message
+- 2026-02-15: Prevent rotating already-rotated keys to avoid cascading grace periods
 
 ### Pending Todos
 
@@ -77,5 +83,5 @@ None yet.
 ## Session Continuity
 
 Last session: 2026-02-15
-Stopped at: Phase 3 verified complete (7/7 must-haves), ready for Phase 4 planning
+Stopped at: Completed 04-01-PLAN.md (API key rotation for InMemory store)
 Resume file: None
