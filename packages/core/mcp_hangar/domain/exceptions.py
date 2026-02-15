@@ -487,6 +487,32 @@ class RateLimitExceededError(AuthenticationError):
         self.retry_after = retry_after
 
 
+class TokenLifetimeExceededError(AuthenticationError):
+    """JWT token lifetime exceeds the configured maximum.
+
+    Raised when:
+    - Token lifetime (exp - iat) exceeds max_token_lifetime
+    - Prevents excessively long-lived tokens from being accepted
+    """
+
+    def __init__(
+        self,
+        actual_lifetime: float,
+        max_lifetime: float,
+    ):
+        message = f"JWT token lifetime exceeds maximum allowed: {actual_lifetime}s > {max_lifetime}s"
+        super().__init__(
+            message=message,
+            auth_method="jwt",
+            details={
+                "actual_lifetime": actual_lifetime,
+                "max_lifetime": max_lifetime,
+            },
+        )
+        self.actual_lifetime = actual_lifetime
+        self.max_lifetime = max_lifetime
+
+
 # --- Authorization Exceptions ---
 
 

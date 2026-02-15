@@ -5,14 +5,14 @@
 See: .planning/PROJECT.md (updated 2026-02-15)
 
 **Core value:** Reliable, observable MCP provider management with production-grade lifecycle control
-**Current focus:** Phase 2 - Rate Limiter Hardening
+**Current focus:** Phase 3 - JWT Lifetime Enforcement
 
 ## Current Position
 
-Phase: 2 of 4 (Rate Limiter Hardening)
-Plan: 2 of 2 complete
-Status: Phase 2 complete (domain events + cleanup hardening), ready for Phase 3
-Last activity: 2026-02-15 - Completed 02-02 (Rate limiter domain events and cleanup hardening)
+Phase: 3 of 4 (JWT Lifetime Enforcement)
+Plan: None yet (ready to plan)
+Status: Phase 2 verified and complete, ready to plan Phase 3
+Last activity: 2026-02-15 - Phase 2 verified (12/12 must-haves passed)
 
 Progress: [█████░░░░░] 50% (2 of 4 phases complete)
 
@@ -71,5 +71,5 @@ None yet.
 ## Session Continuity
 
 Last session: 2026-02-15
-Stopped at: Completed Phase 2 Plan 2 (02-02-PLAN.md) - Rate limiter domain events and cleanup hardening
+Stopped at: Phase 2 verified complete (12/12 must-haves), ready for Phase 3 planning
 Resume file: None
