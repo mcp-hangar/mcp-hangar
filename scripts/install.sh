@@ -1,10 +1,10 @@
 #!/usr/bin/env bash
 #
 # MCP Hangar Installer
-# https://get.mcp-hangar.io
+# https://mcp-hangar.io/install.sh
 #
 # Usage:
-#   curl -sSL https://get.mcp-hangar.io | bash
+#   curl -sSL https://mcp-hangar.io/install.sh | bash
 #
 # This script:
 #   1. Detects available Python package manager (uv, pip)

@@ -8,7 +8,7 @@
 ## Quick Install (Recommended)
 
 ```bash
-curl -sSL https://get.mcp-hangar.io | bash
+curl -sSL https://mcp-hangar.io/install.sh | bash
 ```
 
 This will install the latest version of MCP Hangar and set up your environment.

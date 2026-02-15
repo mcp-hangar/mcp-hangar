@@ -8,7 +8,7 @@ Production-grade infrastructure for Model Context Protocol.
 
 ```bash
 # Quick install (recommended)
-curl -sSL https://get.mcp-hangar.io | bash
+curl -sSL https://mcp-hangar.io/install.sh | bash
 
 # Or via pip
 pip install mcp-hangar

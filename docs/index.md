@@ -36,7 +36,7 @@ MCP Hangar is a monorepo containing multiple packages:
 **30 seconds to working MCP providers:**
 
 ```bash
-curl -sSL https://get.mcp-hangar.io | bash && mcp-hangar init -y && mcp-hangar serve
+curl -sSL https://mcp-hangar.io/install.sh | bash && mcp-hangar init -y && mcp-hangar serve
 ```
 
 That's it. Filesystem, fetch, and memory providers are now available to Claude.

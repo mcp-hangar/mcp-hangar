@@ -5,7 +5,7 @@ Get MCP Hangar running with Claude Desktop in under 30 seconds.
 ## One-Liner Install
 
 ```bash
-curl -sSL https://get.mcp-hangar.io | bash && mcp-hangar init -y && mcp-hangar serve
+curl -sSL https://mcp-hangar.io/install.sh | bash && mcp-hangar init -y && mcp-hangar serve
 ```
 
 That's it. Restart Claude Desktop and you have:

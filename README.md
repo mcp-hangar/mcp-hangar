@@ -18,7 +18,7 @@ Hangar runs them in parallel. 200ms total. Same results, 50x faster.
 
 ```bash
 # Install, configure, and start - zero interaction
-curl -sSL https://get.mcp-hangar.io | bash && mcp-hangar init -y && mcp-hangar serve
+curl -sSL https://mcp-hangar.io/install.sh | bash && mcp-hangar init -y && mcp-hangar serve
 ```
 
 That's it. Filesystem, fetch, and memory providers are now available to Claude.

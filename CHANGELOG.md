@@ -204,8 +204,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   - New fields in `ProviderDefinition`: `uvx_package`, `get_preferred_runtime()`, `get_command_package()`
 
 - **One-Liner Quick Start**: Zero-interaction installation and setup
-  - New install script at `scripts/install.sh` (hosted at get.mcp-hangar.io)
-  - Full happy path: `curl -sSL https://get.mcp-hangar.io | bash && mcp-hangar init -y && mcp-hangar serve`
+  - New install script at `scripts/install.sh` (hosted at mcp-hangar.io/install.sh)
+  - Full happy path: `curl -sSL https://mcp-hangar.io/install.sh | bash && mcp-hangar init -y && mcp-hangar serve`
   - Auto-detects uv/pip, installs package, verifies installation
   - `init -y` uses starter bundle with detected runtime (uvx preferred)
   - Works on clean Mac/Linux with Python 3.11+ and uvx or npx
@@ -594,7 +594,7 @@ All metrics renamed from `mcp_registry_*` to `mcp_hangar_*`:
   - `.add_provider()` for subprocess, docker, and remote providers
   - `.enable_discovery()` for Docker/Kubernetes/filesystem auto-discovery
   - Type-safe validation at build time
-- **Quick Install Script**: `curl -sSL https://get.mcp-hangar.io | bash`
+- **Quick Install Script**: `curl -sSL https://mcp-hangar.io/install.sh | bash`
 
 ### Improved
 
