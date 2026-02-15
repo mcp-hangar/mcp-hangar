@@ -14,6 +14,7 @@ import structlog
 from ...domain.contracts.authentication import ApiKeyMetadata, AuthRequest, IApiKeyStore, IAuthenticator
 from ...domain.exceptions import ExpiredCredentialsError, InvalidCredentialsError, RevokedCredentialsError
 from ...domain.value_objects import Principal, PrincipalId, PrincipalType
+from .constant_time import constant_time_key_lookup
 
 logger = structlog.get_logger(__name__)
 
@@ -170,10 +171,12 @@ class InMemoryApiKeyStore(IApiKeyStore):
             RevokedCredentialsError: If the key has been revoked.
         """
         with self._lock:
-            if key_hash not in self._keys:
+            # Use constant-time lookup to prevent timing attacks
+            match = constant_time_key_lookup(key_hash, self._keys)
+            if match is None:
                 return None
 
-            metadata, principal = self._keys[key_hash]
+            metadata, principal = match
 
             if metadata.revoked:
                 raise RevokedCredentialsError(
