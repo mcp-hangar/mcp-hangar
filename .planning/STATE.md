@@ -10,19 +10,19 @@ See: .planning/PROJECT.md (updated 2026-02-15)
 ## Current Position
 
 Phase: 3 of 4 (JWT Lifetime Enforcement)
-Plan: None yet (ready to plan)
-Status: Phase 2 verified and complete, ready to plan Phase 3
-Last activity: 2026-02-15 - Phase 2 verified (12/12 must-haves passed)
+Plan: 1 of 1 complete
+Status: Phase 3 Plan 01 complete - JWT lifetime enforcement implemented
+Last activity: 2026-02-15 - Completed 03-01 (JWT lifetime enforcement via TDD)
 
-Progress: [█████░░░░░] 50% (2 of 4 phases complete)
+Progress: [███████░░░] 75% (3 of 4 phases complete)
 
 ## Performance Metrics
 
 **Velocity:**
 
-- Total plans completed: 4
-- Average duration: 3.8 minutes
-- Total execution time: 0.25 hours
+- Total plans completed: 5
+- Average duration: 3.9 minutes
+- Total execution time: 0.30 hours
 
 **By Phase:**
 
@@ -30,10 +30,11 @@ Progress: [█████░░░░░] 50% (2 of 4 phases complete)
 |-------|-------|-------|----------|
 | 01-timing-attack-prevention | 2 | 6.6m | 3.3m |
 | 02-rate-limiter-hardening | 2 | 8.5m | 4.3m |
+| 03-jwt-lifetime-enforcement | 1 | 3.9m | 3.9m |
 
 **Recent Trend:**
 
-- Last 5 plans: 01-01 (2.5m), 01-02 (4.1m), 02-01 (4.5m), 02-02 (4.0m)
+- Last 5 plans: 01-02 (4.1m), 02-01 (4.5m), 02-02 (4.0m), 03-01 (3.9m)
 - Trend: Consistent velocity
 
 *Updated after each plan completion*
@@ -59,6 +60,11 @@ Recent decisions affecting current work:
 - 2026-02-15: Event publishing never raises (caught in _publish_event helper)
 - 2026-02-15: Cleanup emits unlock events for expired lockouts found during cleanup
 - 2026-02-15: Refactored _maybe_cleanup into _do_cleanup for reuse by force_cleanup()
+- 2026-02-15: Default max_token_lifetime to 3600 seconds (1 hour) balances usability and security
+- 2026-02-15: Setting max_token_lifetime=0 disables the check (escape hatch)
+- 2026-02-15: Enforce lifetime check before creating Principal (fail fast)
+- 2026-02-15: Raise specific TokenLifetimeExceededError for clear debugging
+- 2026-02-15: MCP_JWT_MAX_TOKEN_LIFETIME env var overrides YAML config
 
 ### Pending Todos
 
@@ -71,5 +77,5 @@ None yet.
 ## Session Continuity
 
 Last session: 2026-02-15
-Stopped at: Phase 2 verified complete (12/12 must-haves), ready for Phase 3 planning
+Stopped at: Completed 03-01-PLAN.md (JWT lifetime enforcement)
 Resume file: None
