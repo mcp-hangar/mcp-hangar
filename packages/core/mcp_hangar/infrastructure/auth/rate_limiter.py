@@ -340,19 +340,35 @@ class AuthRateLimiter:
         """
         if now - self._last_cleanup < self._config.cleanup_interval:
             return
+        self._do_cleanup(now)
 
+    def _do_cleanup(self, now: float) -> int:
+        """Perform cleanup. Must be called under self._lock.
+
+        Returns:
+            Number of trackers removed.
+        """
         self._last_cleanup = now
         window_start = now - self._config.window_seconds
 
         # Remove trackers with no recent activity and not locked
         to_remove = []
         for ip, tracker in self._trackers.items():
-            # Keep if locked
+            # Keep if locked and lockout not expired
             if tracker.locked_until is not None and now < tracker.locked_until:
                 continue
             # Keep if has recent attempts
             if any(t > window_start for t in tracker.attempts):
                 continue
+            # Emit unlock for expired lockouts being cleaned up
+            if tracker.locked_until is not None and now >= tracker.locked_until:
+                self._publish_event(
+                    RateLimitUnlock(
+                        source_ip=ip,
+                        lockout_count=tracker.lockout_count,
+                        unlock_reason="cleanup",
+                    )
+                )
             to_remove.append(ip)
 
         for ip in to_remove:
@@ -360,6 +376,18 @@ class AuthRateLimiter:
 
         if to_remove:
             logger.debug("auth_rate_limit_cleanup", removed_count=len(to_remove))
+
+        return len(to_remove)
+
+    def force_cleanup(self) -> int:
+        """Force immediate cleanup of stale trackers.
+
+        Returns:
+            Number of trackers removed.
+        """
+        now = time.time()
+        with self._lock:
+            return self._do_cleanup(now)
 
 
 # Global instance for use across the application

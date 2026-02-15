@@ -544,3 +544,130 @@ class TestAuthRateLimiterDomainEvents:
         # Verify lockout occurred
         assert result.allowed is False
         assert result.reason == "rate_limit_exceeded"
+
+
+class TestAuthRateLimiterCleanup:
+    """Tests for cleanup edge cases."""
+
+    @patch("time.time")
+    def test_cleanup_runs_after_interval(self, mock_time):
+        """Set cleanup_interval=1, record failure, advance time by 2s, verify tracker was removed."""
+        mock_time.return_value = 1000.0
+        config = AuthRateLimitConfig(cleanup_interval=1, window_seconds=60)
+        limiter = AuthRateLimiter(config)
+
+        # Record one failure at t=1000
+        limiter.record_failure("192.168.1.100")
+
+        # Advance time past window + cleanup interval
+        mock_time.return_value = 1062.0
+
+        # Trigger cleanup via check_rate_limit
+        result = limiter.check_rate_limit("192.168.1.100")
+
+        # Tracker should be removed (no recent attempts in 60s window)
+        assert result.remaining == 10
+        assert result.reason == "no_previous_attempts"
+
+    @patch("time.time")
+    def test_cleanup_preserves_active_lockouts(self, mock_time):
+        """Trigger lockout, force_cleanup before lockout expires, verify tracker is still present."""
+        mock_time.return_value = 1000.0
+        config = AuthRateLimitConfig(max_attempts=3, lockout_seconds=300)
+        limiter = AuthRateLimiter(config)
+
+        # Trigger lockout
+        for i in range(3):
+            limiter.record_failure("192.168.1.100")
+        limiter.check_rate_limit("192.168.1.100")
+
+        # Advance time but not past lockout expiry
+        mock_time.return_value = 1100.0
+
+        # Force cleanup
+        removed_count = limiter.force_cleanup()
+
+        # Tracker should NOT be removed (lockout still active)
+        assert removed_count == 0
+        status = limiter.get_status("192.168.1.100")
+        assert status["locked"] is True
+
+    @patch("time.time")
+    def test_cleanup_removes_expired_lockouts_with_no_activity(self, mock_time):
+        """Trigger lockout, advance time past lockout + window, force_cleanup, verify tracker removed."""
+        mock_time.return_value = 1000.0
+        config = AuthRateLimitConfig(max_attempts=3, lockout_seconds=300, window_seconds=60)
+        limiter = AuthRateLimiter(config)
+
+        # Trigger lockout at t=1000
+        for i in range(3):
+            limiter.record_failure("192.168.1.100")
+        limiter.check_rate_limit("192.168.1.100")
+
+        # Advance time past lockout expiry + window (300s lockout + 60s window)
+        mock_time.return_value = 1400.0
+
+        # Force cleanup
+        removed_count = limiter.force_cleanup()
+
+        # Tracker should be removed (lockout expired, no recent attempts)
+        assert removed_count == 1
+        status = limiter.get_status("192.168.1.100")
+        assert status["attempts"] == 0
+        assert status["locked"] is False
+
+    @patch("time.time")
+    def test_cleanup_emits_unlock_for_expired_lockouts(self, mock_time):
+        """Trigger lockout, advance time past lockout, force_cleanup, verify unlock event emitted."""
+        mock_time.return_value = 1000.0
+        event_publisher = Mock()
+        config = AuthRateLimitConfig(max_attempts=3, lockout_seconds=300, window_seconds=60)
+        limiter = AuthRateLimiter(config, event_publisher=event_publisher)
+
+        # Trigger lockout
+        for i in range(3):
+            limiter.record_failure("192.168.1.100")
+        limiter.check_rate_limit("192.168.1.100")
+
+        # Reset mock to ignore lockout event
+        event_publisher.reset_mock()
+
+        # Advance time past lockout + window
+        mock_time.return_value = 1400.0
+
+        # Force cleanup
+        limiter.force_cleanup()
+
+        # Verify unlock event was published
+        assert event_publisher.call_count == 1
+        event = event_publisher.call_args[0][0]
+        assert isinstance(event, RateLimitUnlock)
+        assert event.source_ip == "192.168.1.100"
+        assert event.lockout_count == 1
+        assert event.unlock_reason == "cleanup"
+
+    @patch("time.time")
+    def test_force_cleanup_returns_removed_count(self, mock_time):
+        """Add multiple stale trackers, call force_cleanup, verify returns correct count."""
+        mock_time.return_value = 1000.0
+        config = AuthRateLimitConfig(window_seconds=60)
+        limiter = AuthRateLimiter(config)
+
+        # Add failures for 3 IPs at t=1000
+        for ip in ["192.168.1.100", "192.168.1.200", "192.168.1.300"]:
+            for i in range(3):
+                limiter.record_failure(ip)
+
+        # Advance time past window
+        mock_time.return_value = 1100.0
+
+        # Force cleanup
+        removed_count = limiter.force_cleanup()
+
+        # All 3 trackers should be removed
+        assert removed_count == 3
+
+        # Verify all trackers are gone
+        for ip in ["192.168.1.100", "192.168.1.200", "192.168.1.300"]:
+            status = limiter.get_status(ip)
+            assert status["attempts"] == 0
