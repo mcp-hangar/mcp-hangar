@@ -13,6 +13,7 @@ Requires: asyncpg or psycopg2
 from collections.abc import Callable
 from contextlib import contextmanager
 from datetime import datetime, UTC
+import hmac
 import json
 import secrets
 
@@ -26,6 +27,9 @@ from ...domain.security.roles import BUILTIN_ROLES
 from ...domain.value_objects import Permission, Principal, PrincipalId, PrincipalType, Role
 
 logger = structlog.get_logger(__name__)
+
+# Dummy hash for constant-time comparison padding
+_DUMMY_HASH = "0" * 64  # SHA-256 length sentinel
 
 
 # SQL Schema for API Keys
@@ -133,6 +137,8 @@ class PostgresApiKeyStore(IApiKeyStore):
 
             row = cur.fetchone()
             if row is None:
+                # Perform dummy comparison to equalize timing with found-key path
+                hmac.compare_digest(key_hash.encode("utf-8"), _DUMMY_HASH.encode("utf-8"))
                 return None
 
             principal_id, tenant_id, groups, name, key_id, expires_at, revoked, metadata = row

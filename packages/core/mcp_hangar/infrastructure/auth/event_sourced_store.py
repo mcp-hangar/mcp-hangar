@@ -13,6 +13,7 @@ import secrets
 import threading
 from typing import Protocol
 
+from .constant_time import constant_time_key_lookup
 from ...domain.contracts.authentication import ApiKeyMetadata, IApiKeyStore
 from ...domain.contracts.authorization import IRoleStore
 from ...domain.contracts.event_store import IEventStore
@@ -121,8 +122,14 @@ class EventSourcedApiKeyStore(IApiKeyStore):
         """Get stream ID for a key hash."""
         return f"{self.STREAM_PREFIX}:{key_hash}"
 
-    def _load_key(self, key_hash: str) -> EventSourcedApiKey | None:
-        """Load API key aggregate from events."""
+    def _load_key(self, key_hash: str, index_entry: tuple[str, str] | None = None) -> EventSourcedApiKey | None:
+        """Load API key aggregate from events.
+
+        Args:
+            key_hash: Hash of the API key to load.
+            index_entry: Optional (key_id, principal_id) tuple from index.
+                        If provided, skips the index lookup.
+        """
         stream_id = self._stream_id(key_hash)
 
         # Try snapshot first
@@ -135,12 +142,15 @@ class EventSourcedApiKeyStore(IApiKeyStore):
         if not events and not snapshot:
             return None
 
-        # Get metadata from index or first event
-        self._build_index()
-        if key_hash not in self._index:
-            return None
-
-        key_id, principal_id = self._index[key_hash]
+        # Get metadata from index or provided entry
+        if index_entry is not None:
+            key_id, principal_id = index_entry
+        else:
+            # Get metadata from index or first event
+            self._build_index()
+            if key_hash not in self._index:
+                return None
+            key_id, principal_id = self._index[key_hash]
 
         if snapshot:
             key = EventSourcedApiKey.from_snapshot(snapshot, events)
@@ -229,8 +239,19 @@ class EventSourcedApiKeyStore(IApiKeyStore):
     # =========================================================================
 
     def get_principal_for_key(self, key_hash: str) -> Principal | None:
-        """Look up principal for an API key hash."""
-        key = self._load_key(key_hash)
+        """Look up principal for an API key hash.
+
+        Uses constant-time index lookup to prevent timing attacks.
+        """
+        # Build index and perform constant-time lookup
+        self._build_index()
+        index_entry = constant_time_key_lookup(key_hash, self._index)
+
+        if index_entry is None:
+            return None
+
+        # Load key using the index entry to avoid dict lookup
+        key = self._load_key(key_hash, index_entry=index_entry)
 
         if key is None:
             return None
