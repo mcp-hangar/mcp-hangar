@@ -7,6 +7,43 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.9.0] - 2026-02-15
+
+### Added
+
+- **Timing Attack Prevention**: Constant-time API key validation using `hmac.compare_digest` across all auth stores
+  - New `constant_time_key_lookup()` utility iterates all entries to prevent timing side-channel attacks
+  - Applied to InMemory, SQLite, Postgres, and EventSourced stores
+  - Timing verification tests confirm uniform lookup duration
+
+- **Rate Limiter Exponential Backoff**: Lockout duration escalates with consecutive failures
+  - Configurable `lockout_escalation_factor` (default: 2.0) and `max_lockout_seconds` (default: 3600)
+  - New `RateLimitLockout` domain event emitted on IP lockout with duration and attempt count
+  - New `RateLimitUnlock` domain event emitted on expiry, successful auth, or manual clear
+  - Hardened cleanup worker for concurrent cleanup and timer drift edge cases
+
+- **JWT Lifetime Enforcement**: Reject tokens with excessive lifetime (`exp - iat > max_token_lifetime`)
+  - Configurable `max_token_lifetime` (default: 3600s, 0 to disable)
+  - YAML config via `oidc.max_token_lifetime_seconds` or env var `MCP_JWT_MAX_TOKEN_LIFETIME`
+  - New `TokenLifetimeExceededError` with clear diagnostic message including actual vs max lifetime
+  - Missing `iat` or `exp` claims produce explicit `InvalidCredentialsError`
+
+- **API Key Rotation**: Zero-downtime key rotation with configurable grace period
+  - `IApiKeyStore.rotate_key(key_id, grace_period_seconds=86400, rotated_by="system")` contract
+  - Old key remains valid during grace period (default: 24h), then raises `ExpiredCredentialsError`
+  - New `KeyRotated` domain event with `key_id`, `new_key_id`, `rotated_at`, `grace_until`, `rotated_by`
+  - Implemented in all 4 auth stores: InMemory, SQLite, Postgres, EventSourced
+  - SQLite and Postgres stores include schema migrations adding `rotated_at`, `grace_until`, `replaced_by_key_id` columns
+  - Guards against rotating revoked keys or double-rotating the same key
+
+### Changed
+
+- `AuthRateLimiter` now accepts optional `event_publisher` callback for domain event integration
+- `InMemoryApiKeyStore` now accepts optional `event_publisher` callback
+- `_AttemptTracker` tracks `lockout_count` for exponential backoff state
+- `OIDCConfig` and `OIDCAuthConfig` include `max_token_lifetime` / `max_token_lifetime_seconds` fields
+- `auth_bootstrap.py` passes `max_token_lifetime` to `OIDCConfig` during OIDC setup
+
 ## [0.8.0] - 2026-02-15
 
 ### Added
