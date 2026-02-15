@@ -10,19 +10,19 @@ See: .planning/PROJECT.md (updated 2026-02-15)
 ## Current Position
 
 Phase: 4 of 4 (API Key Rotation)
-Plan: 1 of 2 (InMemory store rotation complete)
-Status: Plan 04-01 complete, ready for Plan 04-02 (SQLite/EventSourced rotation)
-Last activity: 2026-02-15 - Plan 04-01 complete (10/10 tests pass, 0 regressions)
+Plan: 2 of 2 (COMPLETE)
+Status: Phase 04 complete - All 4 stores support key rotation with grace period
+Last activity: 2026-02-15 - Plan 04-02 complete (19/19 rotation tests pass, 80/80 auth tests pass)
 
-Progress: [████████░░] 87.5% (3.5 of 4 phases complete)
+Progress: [██████████] 100% (4 of 4 phases complete)
 
 ## Performance Metrics
 
 **Velocity:**
 
-- Total plans completed: 6
-- Average duration: 4.1 minutes
-- Total execution time: 0.35 hours
+- Total plans completed: 7
+- Average duration: 5.2 minutes
+- Total execution time: 0.61 hours
 
 **By Phase:**
 
@@ -31,12 +31,12 @@ Progress: [████████░░] 87.5% (3.5 of 4 phases complete)
 | 01-timing-attack-prevention | 2 | 6.6m | 3.3m |
 | 02-rate-limiter-hardening | 2 | 8.5m | 4.3m |
 | 03-jwt-lifetime-enforcement | 1 | 3.9m | 3.9m |
-| 04-api-key-rotation | 1 | 5.2m | 5.2m |
+| 04-api-key-rotation | 2 | 14.3m | 7.2m |
 
 **Recent Trend:**
 
-- Last 5 plans: 02-01 (4.5m), 02-02 (4.0m), 03-01 (3.9m), 04-01 (5.2m)
-- Trend: Consistent velocity
+- Last 5 plans: 02-02 (4.0m), 03-01 (3.9m), 04-01 (5.2m), 04-02 (9.1m)
+- Trend: Increased complexity in Plan 04-02 (cross-store + event sourcing)
 
 *Updated after each plan completion*
 
@@ -71,6 +71,12 @@ Recent decisions affecting current work:
 - 2026-02-15: Old keys remain fully functional during grace period (no warnings, just works)
 - 2026-02-15: After grace expires, raise ExpiredCredentialsError with clear rotation message
 - 2026-02-15: Prevent rotating already-rotated keys to avoid cascading grace periods
+- 2026-02-15: SQLite migration: ALTER TABLE in initialize() with PRAGMA table_info check
+- 2026-02-15: Postgres migration: ALTER TABLE IF NOT EXISTS for idempotent migration
+- 2026-02-15: EventSourcedApiKey.rotate() creates new key aggregate and rotates old key
+- 2026-02-15: Grace period enforcement: same pattern across all stores (check rotated_to_key_id, compare timestamps)
+- 2026-02-15: Event sourcing: KeyRotated event applied in _apply_event() for replay
+- 2026-02-15: Snapshot includes rotation fields (rotated_to_key_id, grace_until) for backward compatibility
 
 ### Pending Todos
 
@@ -83,5 +89,5 @@ None yet.
 ## Session Continuity
 
 Last session: 2026-02-15
-Stopped at: Completed 04-01-PLAN.md (API key rotation for InMemory store)
+Stopped at: Completed 04-02-PLAN.md (Phase 04 complete - all stores support rotation)
 Resume file: None
