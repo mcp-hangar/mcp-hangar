@@ -90,11 +90,16 @@ nav:
       - Observability: guides/OBSERVABILITY.md
       - Authentication: guides/AUTHENTICATION.md
       - Kubernetes: guides/KUBERNETES.md
+      - Provider Groups: guides/PROVIDER_GROUPS.md
+      - Facade API: guides/FACADE_API.md
   - Development:
       - Contributing: development/CONTRIBUTING.md
       - Release Process: runbooks/RELEASE.md
   - Reference:
       - CLI: reference/cli.md
+      - Configuration: reference/configuration.md
+      - MCP Tools: reference/tools.md
+      - Hot-Reload: reference/hot-reload.md
       - Changelog: changelog.md
       - Security: security.md
       - Auth Security Audit: security/AUTH_SECURITY_AUDIT.md
