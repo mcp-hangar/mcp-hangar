@@ -5,16 +5,16 @@
 See: .planning/PROJECT.md (updated 2026-02-28)
 
 **Core value:** Reliable, observable MCP provider management with production-grade lifecycle control
-**Current focus:** v0.10 Documentation & Kubernetes Maturity
+**Current focus:** Phase 5 - Documentation Content (v0.10)
 
 ## Current Position
 
-Phase: Not started (defining requirements)
-Plan: --
-Status: Defining requirements
-Last activity: 2026-02-28 -- Milestone v0.10 started
+Phase: 5 of 7 (Documentation Content)
+Plan: -- of -- in current phase
+Status: Ready to plan
+Last activity: 2026-02-28 -- v0.10 roadmap created (3 phases, 18 requirements)
 
-Progress: Milestone initialized, requirements being defined
+Progress: [███████░░░░░░░░░░░░░] 57% (7/7 v0.9 plans complete, 0/? v0.10 plans)
 
 ## Performance Metrics
 
@@ -40,6 +40,11 @@ Progress: Milestone initialized, requirements being defined
 ### Decisions
 
 All v0.9 decisions archived in PROJECT.md Key Decisions table.
+v0.10 research highlights:
+
+- MCPProviderGroup is read-only aggregator (no owner refs on MCPProviders)
+- MCPDiscoverySource is parent controller (creates MCPProvider CRs with owner refs)
+- Broken doc link fixes deferred to v0.11 (DEFER-01)
 
 ### Pending Todos
 
@@ -52,5 +57,5 @@ None.
 ## Session Continuity
 
 Last session: 2026-02-28
-Stopped at: Milestone v0.10 initialization
+Stopped at: v0.10 roadmap created, Phase 5 ready to plan
 Resume file: None

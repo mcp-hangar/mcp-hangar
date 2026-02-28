@@ -69,31 +69,31 @@ Which phases cover which requirements. Updated during roadmap creation.
 
 | Requirement | Phase | Status |
 |-------------|-------|--------|
-| DOC-01 | -- | Pending |
-| DOC-02 | -- | Pending |
-| DOC-03 | -- | Pending |
-| DOC-04 | -- | Pending |
-| DOC-05 | -- | Pending |
-| DOC-06 | -- | Pending |
-| DOC-07 | -- | Pending |
-| DOC-08 | -- | Pending |
-| K8S-01 | -- | Pending |
-| K8S-02 | -- | Pending |
-| K8S-03 | -- | Pending |
-| K8S-04 | -- | Pending |
-| K8S-05 | -- | Pending |
-| K8S-06 | -- | Pending |
-| K8S-07 | -- | Pending |
-| HELM-01 | -- | Pending |
-| HELM-02 | -- | Pending |
-| HELM-03 | -- | Pending |
+| DOC-01 | Phase 5 | Pending |
+| DOC-02 | Phase 5 | Pending |
+| DOC-03 | Phase 5 | Pending |
+| DOC-04 | Phase 5 | Pending |
+| DOC-05 | Phase 5 | Pending |
+| DOC-06 | Phase 5 | Pending |
+| DOC-07 | Phase 5 | Pending |
+| DOC-08 | Phase 5 | Pending |
+| K8S-01 | Phase 6 | Pending |
+| K8S-02 | Phase 6 | Pending |
+| K8S-03 | Phase 6 | Pending |
+| K8S-04 | Phase 6 | Pending |
+| K8S-05 | Phase 6 | Pending |
+| K8S-06 | Phase 6 | Pending |
+| K8S-07 | Phase 6 | Pending |
+| HELM-01 | Phase 7 | Pending |
+| HELM-02 | Phase 7 | Pending |
+| HELM-03 | Phase 7 | Pending |
 
 **Coverage:**
 
 - v0.10 requirements: 18 total
-- Mapped to phases: 0
-- Unmapped: 18
+- Mapped to phases: 18
+- Unmapped: 0
 
 ---
 *Requirements defined: 2026-02-28*
-*Last updated: 2026-02-28 after initial definition*
+*Last updated: 2026-02-28 after roadmap creation (phase mappings added)*
