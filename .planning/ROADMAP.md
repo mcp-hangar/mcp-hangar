@@ -19,7 +19,7 @@
 
 ### 🚧 v0.10 Documentation & Kubernetes Maturity (In Progress)
 
-- [ ] **Phase 5: Documentation Content** - Create 4 missing documentation pages (Configuration Reference, MCP Tools Reference, Provider Groups Guide, Facade API Guide)
+- [x] **Phase 5: Documentation Content** - Create 4 missing documentation pages (Configuration Reference, MCP Tools Reference, Provider Groups Guide, Facade API Guide)
 - [ ] **Phase 6: Kubernetes Controllers** - Implement MCPProviderGroup and MCPDiscoverySource controllers with integration tests
 - [ ] **Phase 7: Helm Chart Maturity** - Synchronize both Helm charts to v0.10.0 with NOTES.txt and test templates
 
@@ -42,7 +42,7 @@
 Plans:
 
 - [x] 05-01-PLAN.md -- Reference pages: Configuration Reference (DOC-01, DOC-02) and MCP Tools Reference (DOC-03, DOC-04)
-- [ ] 05-02-PLAN.md -- Guide pages: Provider Groups Guide (DOC-05, DOC-06) and Facade API Guide (DOC-07, DOC-08) + mkdocs.yml nav integration
+- [x] 05-02-PLAN.md -- Guide pages: Provider Groups Guide (DOC-05, DOC-06) and Facade API Guide (DOC-07, DOC-08) + mkdocs.yml nav integration
 
 ### Phase 6: Kubernetes Controllers
 
@@ -81,10 +81,10 @@ Phases execute in numeric order: 5 -> 6 -> 7
 | 2. Rate Limiter Hardening | v0.9 | 2/2 | Complete | 2026-02-15 |
 | 3. JWT Lifetime Enforcement | v0.9 | 1/1 | Complete | 2026-02-15 |
 | 4. API Key Rotation | v0.9 | 2/2 | Complete | 2026-02-15 |
-| 5. Documentation Content | v0.10 | 1/2 | In Progress | - |
+| 5. Documentation Content | v0.10 | 2/2 | Complete | 2026-02-28 |
 | 6. Kubernetes Controllers | v0.10 | 0/? | Not started | - |
 | 7. Helm Chart Maturity | v0.10 | 0/? | Not started | - |
 
 ---
 *Created: 2026-02-15*
-*Last updated: 2026-02-28 after 05-01 plan complete (reference pages)*
+*Last updated: 2026-02-28 after 05-02 plan complete (guide pages, Phase 5 complete)*

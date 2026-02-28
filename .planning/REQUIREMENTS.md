@@ -13,10 +13,10 @@ Requirements for milestone v0.10 Documentation & Kubernetes Maturity.
 - [x] **DOC-02**: Configuration Reference page lists all environment variables with descriptions and examples
 - [x] **DOC-03**: MCP Tools Reference page documents all 22 tools with parameters, return formats, and error codes
 - [x] **DOC-04**: MCP Tools Reference page documents side effects and state changes for each tool
-- [ ] **DOC-05**: Provider Groups Guide covers all 5 load balancing strategies with usage examples
-- [ ] **DOC-06**: Provider Groups Guide covers health policies, circuit breaker, and tool access filtering
-- [ ] **DOC-07**: Facade API Guide documents Hangar/SyncHangar public API with method signatures
-- [ ] **DOC-08**: Facade API Guide covers HangarConfig builder and framework integration patterns
+- [x] **DOC-05**: Provider Groups Guide covers all 5 load balancing strategies with usage examples
+- [x] **DOC-06**: Provider Groups Guide covers health policies, circuit breaker, and tool access filtering
+- [x] **DOC-07**: Facade API Guide documents Hangar/SyncHangar public API with method signatures
+- [x] **DOC-08**: Facade API Guide covers HangarConfig builder and framework integration patterns
 
 ### Kubernetes Controllers
 
@@ -73,10 +73,10 @@ Which phases cover which requirements. Updated during roadmap creation.
 | DOC-02 | Phase 5 | Complete |
 | DOC-03 | Phase 5 | Complete |
 | DOC-04 | Phase 5 | Complete |
-| DOC-05 | Phase 5 | Pending |
-| DOC-06 | Phase 5 | Pending |
-| DOC-07 | Phase 5 | Pending |
-| DOC-08 | Phase 5 | Pending |
+| DOC-05 | Phase 5 | Complete |
+| DOC-06 | Phase 5 | Complete |
+| DOC-07 | Phase 5 | Complete |
+| DOC-08 | Phase 5 | Complete |
 | K8S-01 | Phase 6 | Pending |
 | K8S-02 | Phase 6 | Pending |
 | K8S-03 | Phase 6 | Pending |
@@ -96,4 +96,4 @@ Which phases cover which requirements. Updated during roadmap creation.
 
 ---
 *Requirements defined: 2026-02-28*
-*Last updated: 2026-02-28 after 05-01 complete (DOC-01 through DOC-04 done)*
+*Last updated: 2026-02-28 after 05-02 complete (DOC-05 through DOC-08 done, Phase 5 complete)*
