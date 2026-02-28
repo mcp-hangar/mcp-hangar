@@ -9,10 +9,10 @@ Requirements for milestone v0.10 Documentation & Kubernetes Maturity.
 
 ### Documentation Content
 
-- [ ] **DOC-01**: Configuration Reference page documents full YAML schema with all keys, defaults, and validation rules
-- [ ] **DOC-02**: Configuration Reference page lists all environment variables with descriptions and examples
-- [ ] **DOC-03**: MCP Tools Reference page documents all 22 tools with parameters, return formats, and error codes
-- [ ] **DOC-04**: MCP Tools Reference page documents side effects and state changes for each tool
+- [x] **DOC-01**: Configuration Reference page documents full YAML schema with all keys, defaults, and validation rules
+- [x] **DOC-02**: Configuration Reference page lists all environment variables with descriptions and examples
+- [x] **DOC-03**: MCP Tools Reference page documents all 22 tools with parameters, return formats, and error codes
+- [x] **DOC-04**: MCP Tools Reference page documents side effects and state changes for each tool
 - [ ] **DOC-05**: Provider Groups Guide covers all 5 load balancing strategies with usage examples
 - [ ] **DOC-06**: Provider Groups Guide covers health policies, circuit breaker, and tool access filtering
 - [ ] **DOC-07**: Facade API Guide documents Hangar/SyncHangar public API with method signatures
@@ -69,10 +69,10 @@ Which phases cover which requirements. Updated during roadmap creation.
 
 | Requirement | Phase | Status |
 |-------------|-------|--------|
-| DOC-01 | Phase 5 | Pending |
-| DOC-02 | Phase 5 | Pending |
-| DOC-03 | Phase 5 | Pending |
-| DOC-04 | Phase 5 | Pending |
+| DOC-01 | Phase 5 | Complete |
+| DOC-02 | Phase 5 | Complete |
+| DOC-03 | Phase 5 | Complete |
+| DOC-04 | Phase 5 | Complete |
 | DOC-05 | Phase 5 | Pending |
 | DOC-06 | Phase 5 | Pending |
 | DOC-07 | Phase 5 | Pending |
@@ -96,4 +96,4 @@ Which phases cover which requirements. Updated during roadmap creation.
 
 ---
 *Requirements defined: 2026-02-28*
-*Last updated: 2026-02-28 after roadmap creation (phase mappings added)*
+*Last updated: 2026-02-28 after 05-01 complete (DOC-01 through DOC-04 done)*
