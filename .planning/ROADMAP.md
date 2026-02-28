@@ -56,7 +56,13 @@ Plans:
   3. MCPDiscoverySource controller discovers providers using all 4 modes (Namespace, ConfigMap, Annotations, ServiceDiscovery) and creates MCPProvider CRs with owner references
   4. MCPDiscoverySource controller supports both additive and authoritative sync modes (authoritative deletes only its own labeled resources)
   5. Both controllers pass envtest-based integration tests covering happy path and failure scenarios
-**Plans**: TBD
+**Plans:** 3 plans
+
+Plans:
+
+- [ ] 06-01-PLAN.md -- MCPProviderGroup controller: label selection, status aggregation, health policy evaluation (K8S-01, K8S-02, K8S-03)
+- [ ] 06-02-PLAN.md -- MCPDiscoverySource controller: 4 discovery modes, additive/authoritative sync, owner references (K8S-04, K8S-05, K8S-06)
+- [ ] 06-03-PLAN.md -- envtest suite, integration tests for both controllers, main.go wiring (K8S-07)
 
 ### Phase 7: Helm Chart Maturity
 
@@ -82,9 +88,9 @@ Phases execute in numeric order: 5 -> 6 -> 7
 | 3. JWT Lifetime Enforcement | v0.9 | 1/1 | Complete | 2026-02-15 |
 | 4. API Key Rotation | v0.9 | 2/2 | Complete | 2026-02-15 |
 | 5. Documentation Content | v0.10 | 2/2 | Complete | 2026-02-28 |
-| 6. Kubernetes Controllers | v0.10 | 0/? | Not started | - |
+| 6. Kubernetes Controllers | v0.10 | 0/3 | Not started | - |
 | 7. Helm Chart Maturity | v0.10 | 0/? | Not started | - |
 
 ---
 *Created: 2026-02-15*
-*Last updated: 2026-02-28 after 05-02 plan complete (guide pages, Phase 5 complete)*
+*Last updated: 2026-03-01 after Phase 6 planning (3 plans created)*
