@@ -5,14 +5,14 @@
 See: .planning/PROJECT.md (updated 2026-02-28)
 
 **Core value:** Reliable, observable MCP provider management with production-grade lifecycle control
-**Current focus:** Phase 5 - Documentation Content (v0.10)
+**Current focus:** Phase 6 - Kubernetes Controllers (v0.10)
 
 ## Current Position
 
-Phase: 5 of 7 (Documentation Content)
-Plan: 2 of 2 in current phase (phase complete)
-Status: Phase Complete
-Last activity: 2026-02-28 -- Completed 05-02 Guide Pages (Provider Groups + Facade API + mkdocs nav)
+Phase: 6 of 7 (Kubernetes Controllers)
+Plan: 0 of ? in current phase (context gathered, needs planning)
+Status: Context Gathered
+Last activity: 2026-02-28 -- Phase 6 context gathered (group health, authoritative sync, error tolerance)
 
 Progress: [██████████████░░░░░░] 69% (7/7 v0.9 plans complete, 2/2 Phase 5 plans)
 
@@ -50,6 +50,14 @@ v0.10 research highlights:
 - Replaced table inside admonition with inline text to pass markdownlint MD046 rule
 - Added markdownlint-disable MD046 to FACADE_API.md for pymdownx.tabbed compatibility (indented code blocks under tab markers conflict with fenced-only rule)
 - Placed Configuration, MCP Tools, and Hot-Reload before Changelog in Reference nav for logical grouping
+- Phase 6: Group Ready is threshold-based (minHealthyPercentage/minHealthyCount); Degraded+Ready can coexist
+- Phase 6: Zero-member groups get Ready=Unknown with reason NoProviders
+- Phase 6: Group uses 3 condition types: Ready, Degraded, Available
+- Phase 6: Authoritative sync deletes immediately; label-based ownership tracking (mcp-hangar.io/managed-by)
+- Phase 6: Additive mode never deletes; discovery controller overwrites spec drift on sync
+- Phase 6: Partial scan failures tolerated -- skip failing sources, sync partial results
+- Phase 6: Authoritative deletion scoped to successfully-scanned sources only
+- Phase 6: Synced condition + lastSyncError for error reporting; Paused=full freeze
 
 ### Pending Todos
 
@@ -62,5 +70,5 @@ None.
 ## Session Continuity
 
 Last session: 2026-02-28
-Stopped at: Completed 05-02-PLAN.md (Guide Pages), Phase 5 complete. Ready for Phase 6.
-Resume file: .planning/phases/06-kubernetes-controllers/ (needs research + planning)
+Stopped at: Phase 6 context gathered. Ready for research + planning.
+Resume file: .planning/phases/06-kubernetes-controllers/06-CONTEXT.md
