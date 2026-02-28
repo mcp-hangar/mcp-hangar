@@ -12,6 +12,21 @@ Reliable, observable MCP provider management with production-grade lifecycle con
 
 v0.9 Security Hardening shipped 2026-02-15. Auth layer hardened with timing-safe key validation, exponential backoff rate limiting, JWT lifetime enforcement, and zero-downtime API key rotation.
 
+## Current Milestone: v0.10 Documentation & Kubernetes Maturity
+
+**Goal:** Close documentation gaps (broken links, missing reference pages, missing guides) and bring the Kubernetes operator to feature-complete status (MCPProviderGroup and MCPDiscoverySource controllers) with synchronized Helm charts.
+
+**Target features:**
+
+- Fix 29 broken documentation links, stale references, and old org name references
+- Create Configuration Reference (full YAML schema, env vars, validation rules)
+- Create MCP Tools Reference (all 22 tools with parameters, returns, side effects)
+- Create Provider Groups Guide (strategies, health policies, circuit breaker)
+- Create Facade API Guide (Hangar/SyncHangar, HangarConfig builder)
+- Implement MCPProviderGroup Kubernetes controller (reconciler, tests)
+- Implement MCPDiscoverySource Kubernetes controller (reconciler, tests)
+- Synchronize Helm charts from 0.2.0 to 0.10.0 with test templates and NOTES.txt
+
 ## Requirements
 
 ### Validated
@@ -32,7 +47,14 @@ v0.9 Security Hardening shipped 2026-02-15. Auth layer hardened with timing-safe
 
 ### Active
 
-(None -- planning next milestone)
+- Fix broken documentation links, stale version references, old org name across 8 files
+- Configuration Reference page documenting full YAML schema, all environment variables, validation rules
+- MCP Tools Reference page documenting all 22 tools with parameters, return formats, side effects
+- Provider Groups Guide covering load balancing strategies, health policies, circuit breaker, tool access filtering
+- Facade API Guide covering Hangar/SyncHangar API, HangarConfig builder, framework integration
+- MCPProviderGroup Kubernetes controller with label-based selection, status aggregation, health policy evaluation
+- MCPDiscoverySource Kubernetes controller with 4 discovery modes, additive/authoritative, provider creation
+- Helm charts version sync (0.2.0 to 0.10.0) with test templates and post-install instructions
 
 ### Out of Scope
 
@@ -79,4 +101,4 @@ v0.9 Security Hardening shipped 2026-02-15. Auth layer hardened with timing-safe
 | Prevent cascading rotations | Avoids multiple grace periods on same key | Good -- v0.9 |
 
 ---
-*Last updated: 2026-02-15 after v0.9 milestone*
+*Last updated: 2026-02-28 after v0.10 milestone started*
