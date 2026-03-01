@@ -17,73 +17,16 @@
 
 </details>
 
-### ✅ v0.10 Documentation & Kubernetes Maturity (Shipped 2026-03-01)
+<details>
+<summary>✅ v0.10 Documentation & Kubernetes Maturity (Phases 5-7) -- SHIPPED 2026-03-01</summary>
 
-- [x] **Phase 5: Documentation Content** - Create 4 missing documentation pages (Configuration Reference, MCP Tools Reference, Provider Groups Guide, Facade API Guide)
-- [x] **Phase 6: Kubernetes Controllers** - Implement MCPProviderGroup and MCPDiscoverySource controllers with integration tests
-- [x] **Phase 7: Helm Chart Maturity** - Synchronize both Helm charts to v0.10.0 with NOTES.txt and test templates
+- [x] Phase 5: Documentation Content (2/2 plans) -- completed 2026-02-28
+- [x] Phase 6: Kubernetes Controllers (3/3 plans) -- completed 2026-03-01
+- [x] Phase 7: Helm Chart Maturity (1/1 plan) -- completed 2026-03-01
 
-## Phase Details
-
-### Phase 5: Documentation Content
-
-**Goal**: Users can find comprehensive reference and guide documentation for configuration, tools, provider groups, and the facade API
-**Depends on**: Nothing (documentation pages are independent of v0.10 controller/Helm work)
-**Requirements**: DOC-01, DOC-02, DOC-03, DOC-04, DOC-05, DOC-06, DOC-07, DOC-08
-**Success Criteria** (what must be TRUE):
-
-  1. Configuration Reference page exists with full YAML schema (all keys, defaults, validation rules) and all environment variables with descriptions
-  2. MCP Tools Reference page exists documenting all 22 tools with parameters, return formats, error codes, and side effects
-  3. Provider Groups Guide exists covering all 5 load balancing strategies, health policies, circuit breaker, and tool access filtering with usage examples
-  4. Facade API Guide exists documenting Hangar/SyncHangar public API with method signatures, HangarConfig builder, and framework integration patterns
-  5. All 4 new pages are integrated into mkdocs.yml navigation and render correctly with `mkdocs build`
-**Plans:** 2 plans
-
-Plans:
-
-- [x] 05-01-PLAN.md -- Reference pages: Configuration Reference (DOC-01, DOC-02) and MCP Tools Reference (DOC-03, DOC-04)
-- [x] 05-02-PLAN.md -- Guide pages: Provider Groups Guide (DOC-05, DOC-06) and Facade API Guide (DOC-07, DOC-08) + mkdocs.yml nav integration
-
-### Phase 6: Kubernetes Controllers
-
-**Goal**: MCPProviderGroup and MCPDiscoverySource custom resources are reconciled by working controllers with full test coverage
-**Depends on**: Nothing (Go operator work is independent of documentation)
-**Requirements**: K8S-01, K8S-02, K8S-03, K8S-04, K8S-05, K8S-06, K8S-07
-**Success Criteria** (what must be TRUE):
-
-  1. MCPProviderGroup controller reconciles groups by selecting MCPProviders via label selector and aggregating their status (ready/degraded/dead counts)
-  2. MCPProviderGroup controller evaluates health policies and reports conditions on the group status subresource
-  3. MCPDiscoverySource controller discovers providers using all 4 modes (Namespace, ConfigMap, Annotations, ServiceDiscovery) and creates MCPProvider CRs with owner references
-  4. MCPDiscoverySource controller supports both additive and authoritative sync modes (authoritative deletes only its own labeled resources)
-  5. Both controllers pass envtest-based integration tests covering happy path and failure scenarios
-**Plans:** 3/3 plans executed
-
-Plans:
-
-- [x] 06-01-PLAN.md -- MCPProviderGroup controller: label selection, status aggregation, health policy evaluation (K8S-01, K8S-02, K8S-03) -- **DONE**
-- [x] 06-02-PLAN.md -- MCPDiscoverySource controller: 4 discovery modes, additive/authoritative sync, owner references (K8S-04, K8S-05, K8S-06) -- **DONE**
-- [x] 06-03-PLAN.md -- envtest suite, integration tests for both controllers, main.go wiring (K8S-07) -- **DONE**
-
-### Phase 7: Helm Chart Maturity
-
-**Goal**: Both Helm charts are version-synchronized and include post-install guidance and automated test validation
-**Depends on**: Phase 6 (CRDs must be finalized before chart templates and tests reference them)
-**Requirements**: HELM-01, HELM-02, HELM-03
-**Success Criteria** (what must be TRUE):
-
-  1. Both charts (mcp-hangar, mcp-hangar-operator) are at version 0.10.0 and pass `helm lint`
-  2. Both charts include NOTES.txt with post-install instructions (endpoints, status commands, CRD upgrade guidance, docs links)
-  3. Both charts include Helm test templates that validate installation (e.g., pod readiness, CRD existence)
-**Plans:** 1 plan
-
-Plans:
-
-- [x] 07-01-PLAN.md -- Version bump to 0.10.0, NOTES.txt for both charts, and Helm test templates (HELM-01, HELM-02, HELM-03) -- **DONE**
+</details>
 
 ## Progress
-
-**Execution Order:**
-Phases execute in numeric order: 5 -> 6 -> 7
 
 | Phase | Milestone | Plans Complete | Status | Completed |
 |-------|-----------|----------------|--------|-----------|
@@ -97,4 +40,4 @@ Phases execute in numeric order: 5 -> 6 -> 7
 
 ---
 *Created: 2026-02-15*
-*Last updated: 2026-03-01 after Phase 7 execution (v0.10 milestone complete)*
+*Last updated: 2026-03-01 -- v0.10 milestone shipped*
