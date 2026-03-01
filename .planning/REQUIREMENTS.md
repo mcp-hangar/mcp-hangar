@@ -96,4 +96,4 @@ Which phases cover which requirements. Updated during roadmap creation.
 
 ---
 *Requirements defined: 2026-02-28*
-*Last updated: 2026-02-28 after 05-02 complete (DOC-05 through DOC-08 done, Phase 5 complete)*
+*Last updated: 2026-03-01 after Phase 6 complete (K8S-01 through K8S-07 done)*
