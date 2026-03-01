@@ -102,6 +102,28 @@ func main() {
 		os.Exit(1)
 	}
 
+	// Setup MCPProviderGroup controller
+	if err = (&controller.MCPProviderGroupReconciler{
+		Client:       mgr.GetClient(),
+		Scheme:       mgr.GetScheme(),
+		Recorder:     mgr.GetEventRecorderFor("mcpprovidergroup-controller"),
+		HangarClient: hangarClient,
+	}).SetupWithManager(mgr); err != nil {
+		setupLog.Error(err, "unable to create controller", "controller", "MCPProviderGroup")
+		os.Exit(1)
+	}
+
+	// Setup MCPDiscoverySource controller
+	if err = (&controller.MCPDiscoverySourceReconciler{
+		Client:       mgr.GetClient(),
+		Scheme:       mgr.GetScheme(),
+		Recorder:     mgr.GetEventRecorderFor("mcpdiscoverysource-controller"),
+		HangarClient: hangarClient,
+	}).SetupWithManager(mgr); err != nil {
+		setupLog.Error(err, "unable to create controller", "controller", "MCPDiscoverySource")
+		os.Exit(1)
+	}
+
 	// Health checks
 	if err := mgr.AddHealthzCheck("healthz", healthz.Ping); err != nil {
 		setupLog.Error(err, "unable to set up health check")
