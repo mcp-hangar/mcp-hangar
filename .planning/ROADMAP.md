@@ -56,7 +56,7 @@ Plans:
   3. MCPDiscoverySource controller discovers providers using all 4 modes (Namespace, ConfigMap, Annotations, ServiceDiscovery) and creates MCPProvider CRs with owner references
   4. MCPDiscoverySource controller supports both additive and authoritative sync modes (authoritative deletes only its own labeled resources)
   5. Both controllers pass envtest-based integration tests covering happy path and failure scenarios
-**Plans:** 3 plans
+**Plans:** 2/3 plans executed
 
 Plans:
 
@@ -88,7 +88,7 @@ Phases execute in numeric order: 5 -> 6 -> 7
 | 3. JWT Lifetime Enforcement | v0.9 | 1/1 | Complete | 2026-02-15 |
 | 4. API Key Rotation | v0.9 | 2/2 | Complete | 2026-02-15 |
 | 5. Documentation Content | v0.10 | 2/2 | Complete | 2026-02-28 |
-| 6. Kubernetes Controllers | v0.10 | 1/3 | In Progress | - |
+| 6. Kubernetes Controllers | 2/3 | In Progress|  | - |
 | 7. Helm Chart Maturity | v0.10 | 0/? | Not started | - |
 
 ---

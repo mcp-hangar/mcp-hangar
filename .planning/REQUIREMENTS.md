@@ -23,9 +23,9 @@ Requirements for milestone v0.10 Documentation & Kubernetes Maturity.
 - [x] **K8S-01**: MCPProviderGroup controller reconciles groups with label-based MCPProvider selection
 - [x] **K8S-02**: MCPProviderGroup controller aggregates member status (ready/degraded/dead counts)
 - [x] **K8S-03**: MCPProviderGroup controller evaluates health policies and reports conditions
-- [ ] **K8S-04**: MCPDiscoverySource controller implements 4 discovery modes (Namespace, ConfigMap, Annotations, ServiceDiscovery)
-- [ ] **K8S-05**: MCPDiscoverySource controller supports additive and authoritative sync modes
-- [ ] **K8S-06**: MCPDiscoverySource controller creates MCPProvider CRs with owner references and provider templates
+- [x] **K8S-04**: MCPDiscoverySource controller implements 4 discovery modes (Namespace, ConfigMap, Annotations, ServiceDiscovery)
+- [x] **K8S-05**: MCPDiscoverySource controller supports additive and authoritative sync modes
+- [x] **K8S-06**: MCPDiscoverySource controller creates MCPProvider CRs with owner references and provider templates
 - [ ] **K8S-07**: Both controllers have envtest-based integration tests covering happy path and failure scenarios
 
 ### Helm Charts
@@ -80,9 +80,9 @@ Which phases cover which requirements. Updated during roadmap creation.
 | K8S-01 | Phase 6 | Complete |
 | K8S-02 | Phase 6 | Complete |
 | K8S-03 | Phase 6 | Complete |
-| K8S-04 | Phase 6 | Pending |
-| K8S-05 | Phase 6 | Pending |
-| K8S-06 | Phase 6 | Pending |
+| K8S-04 | Phase 6 | Complete |
+| K8S-05 | Phase 6 | Complete |
+| K8S-06 | Phase 6 | Complete |
 | K8S-07 | Phase 6 | Pending |
 | HELM-01 | Phase 7 | Pending |
 | HELM-02 | Phase 7 | Pending |
