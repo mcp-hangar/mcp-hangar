@@ -74,7 +74,11 @@ Plans:
   1. Both charts (mcp-hangar, mcp-hangar-operator) are at version 0.10.0 and pass `helm lint`
   2. Both charts include NOTES.txt with post-install instructions (endpoints, status commands, CRD upgrade guidance, docs links)
   3. Both charts include Helm test templates that validate installation (e.g., pod readiness, CRD existence)
-**Plans**: TBD
+**Plans:** 1 plan
+
+Plans:
+
+- [ ] 07-01-PLAN.md -- Version bump to 0.10.0, NOTES.txt for both charts, and Helm test templates (HELM-01, HELM-02, HELM-03)
 
 ## Progress
 
