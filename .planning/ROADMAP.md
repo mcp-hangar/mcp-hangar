@@ -3,7 +3,7 @@
 ## Milestones
 
 - ✅ **v0.9 Security Hardening** -- Phases 1-4 (shipped 2026-02-15)
-- 🚧 **v0.10 Documentation & Kubernetes Maturity** -- Phases 5-7 (in progress)
+- ✅ **v0.10 Documentation & Kubernetes Maturity** -- Phases 5-7 (shipped 2026-03-01)
 
 ## Phases
 
@@ -17,11 +17,11 @@
 
 </details>
 
-### 🚧 v0.10 Documentation & Kubernetes Maturity (In Progress)
+### ✅ v0.10 Documentation & Kubernetes Maturity (Shipped 2026-03-01)
 
 - [x] **Phase 5: Documentation Content** - Create 4 missing documentation pages (Configuration Reference, MCP Tools Reference, Provider Groups Guide, Facade API Guide)
 - [x] **Phase 6: Kubernetes Controllers** - Implement MCPProviderGroup and MCPDiscoverySource controllers with integration tests
-- [ ] **Phase 7: Helm Chart Maturity** - Synchronize both Helm charts to v0.10.0 with NOTES.txt and test templates
+- [x] **Phase 7: Helm Chart Maturity** - Synchronize both Helm charts to v0.10.0 with NOTES.txt and test templates
 
 ## Phase Details
 
@@ -78,7 +78,7 @@ Plans:
 
 Plans:
 
-- [ ] 07-01-PLAN.md -- Version bump to 0.10.0, NOTES.txt for both charts, and Helm test templates (HELM-01, HELM-02, HELM-03)
+- [x] 07-01-PLAN.md -- Version bump to 0.10.0, NOTES.txt for both charts, and Helm test templates (HELM-01, HELM-02, HELM-03) -- **DONE**
 
 ## Progress
 
@@ -93,8 +93,8 @@ Phases execute in numeric order: 5 -> 6 -> 7
 | 4. API Key Rotation | v0.9 | 2/2 | Complete | 2026-02-15 |
 | 5. Documentation Content | v0.10 | 2/2 | Complete | 2026-02-28 |
 | 6. Kubernetes Controllers | v0.10 | 3/3 | Complete | 2026-03-01 |
-| 7. Helm Chart Maturity | v0.10 | 0/? | Not started | - |
+| 7. Helm Chart Maturity | v0.10 | 1/1 | Complete | 2026-03-01 |
 
 ---
 *Created: 2026-02-15*
-*Last updated: 2026-03-01 after Phase 6 planning (3 plans created)*
+*Last updated: 2026-03-01 after Phase 7 execution (v0.10 milestone complete)*

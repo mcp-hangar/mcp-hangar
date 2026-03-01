@@ -30,9 +30,9 @@ Requirements for milestone v0.10 Documentation & Kubernetes Maturity.
 
 ### Helm Charts
 
-- [ ] **HELM-01**: Both charts (mcp-hangar, mcp-hangar-operator) updated to version 0.10.0
-- [ ] **HELM-02**: Both charts include NOTES.txt with post-install instructions (endpoints, status commands, docs links)
-- [ ] **HELM-03**: Both charts include Helm test templates for installation validation
+- [x] **HELM-01**: Both charts (mcp-hangar, mcp-hangar-operator) updated to version 0.10.0
+- [x] **HELM-02**: Both charts include NOTES.txt with post-install instructions (endpoints, status commands, docs links)
+- [x] **HELM-03**: Both charts include Helm test templates for installation validation
 
 ## Future Requirements
 
@@ -84,9 +84,9 @@ Which phases cover which requirements. Updated during roadmap creation.
 | K8S-05 | Phase 6 | Complete |
 | K8S-06 | Phase 6 | Complete |
 | K8S-07 | Phase 6 | Complete |
-| HELM-01 | Phase 7 | Pending |
-| HELM-02 | Phase 7 | Pending |
-| HELM-03 | Phase 7 | Pending |
+| HELM-01 | Phase 7 | Complete |
+| HELM-02 | Phase 7 | Complete |
+| HELM-03 | Phase 7 | Complete |
 
 **Coverage:**
 
@@ -96,4 +96,4 @@ Which phases cover which requirements. Updated during roadmap creation.
 
 ---
 *Requirements defined: 2026-02-28*
-*Last updated: 2026-03-01 after Phase 6 complete (K8S-01 through K8S-07 done)*
+*Last updated: 2026-03-01 after Phase 7 complete (HELM-01 through HELM-03 done, v0.10 milestone complete)*
