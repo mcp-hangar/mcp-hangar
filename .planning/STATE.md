@@ -2,13 +2,13 @@
 gsd_state_version: 1.0
 milestone: v0.10
 milestone_name: Documentation & Kubernetes Maturity
-status: unknown
-last_updated: "2026-03-01T01:36:41.000Z"
+status: in_progress
+last_updated: "2026-03-01T01:48:00.000Z"
 progress:
-  total_phases: 6
-  completed_phases: 5
-  total_plans: 12
-  completed_plans: 12
+  total_phases: 7
+  completed_phases: 6
+  total_plans: 13
+  completed_plans: 13
 ---
 
 # Project State
@@ -22,12 +22,12 @@ See: .planning/PROJECT.md (updated 2026-02-28)
 
 ## Current Position
 
-Phase: 6 of 7 (Kubernetes Controllers)
-Plan: 3 of 3 in current phase (plans 1-2 complete, executing plan 3 next)
+Phase: 7 of 7 (Helm Chart Maturity)
+Plan: 0 of ? in current phase (Phase 6 complete, Phase 7 not yet planned)
 Status: In Progress
-Last activity: 2026-03-01 -- Plan 06-02 complete (MCPDiscoverySource controller)
+Last activity: 2026-03-01 -- Plan 06-03 complete (envtest integration tests + main.go wiring)
 
-Progress: [████████████████░░░░] 80% (7/7 v0.9 plans complete, 2/2 Phase 5, 2/3 Phase 6)
+Progress: [██████████████████░░] 90% (7/7 v0.9 plans, 2/2 Phase 5, 3/3 Phase 6 complete)
 
 ## Performance Metrics
 
@@ -46,13 +46,14 @@ Progress: [████████████████░░░░] 80% (7/
 | 03-jwt-lifetime-enforcement | 1 | 3.9m | 3.9m |
 | 04-api-key-rotation | 2 | 14.3m | 7.2m |
 | 05-documentation-content | 2 | 8.0m | 4.0m |
-| 06-kubernetes-controllers | 1 | 2.0m | 2.0m |
+| 06-kubernetes-controllers | 3 | 2.0m+3.0m | 2.0m |
 
 *Updated after each plan completion*
 
 | Phase | Plan | Duration | Tasks | Files |
 |-------|------|----------|-------|-------|
 | 06 | 02 | 3.0m | 1 | 1 |
+| 06 | 03 | ~67m | 2 | 4 |
 
 ## Accumulated Context
 
@@ -78,6 +79,7 @@ v0.10 research highlights:
 - Phase 6: Synced condition + lastSyncError for error reporting; Paused=full freeze
 - 06-01: Group is read-only aggregator with no owner refs; Initializing/empty counted as Cold; Available based on ReadyCount > 0
 - 06-02: Authoritative deletion scoped to successful scans only; paused check first in reconcileNormal; provider names prefixed with source name for uniqueness
+- 06-03: Used require.Eventually with retry for annotation updates to handle conflict errors in envtest; metricsserver.Options{BindAddress:"0"} to disable metrics port in tests
 
 ### Pending Todos
 
@@ -90,5 +92,5 @@ None.
 ## Session Continuity
 
 Last session: 2026-03-01
-Stopped at: Completed 06-02-PLAN.md (MCPDiscoverySource controller)
-Resume file: .planning/phases/06-kubernetes-controllers/06-03-PLAN.md
+Stopped at: Completed 06-03-PLAN.md (envtest integration tests + main.go wiring, Phase 6 complete)
+Resume file: .planning/phases/07-helm-chart-maturity/ (Phase 7 not yet planned)

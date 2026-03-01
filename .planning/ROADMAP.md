@@ -20,7 +20,7 @@
 ### 🚧 v0.10 Documentation & Kubernetes Maturity (In Progress)
 
 - [x] **Phase 5: Documentation Content** - Create 4 missing documentation pages (Configuration Reference, MCP Tools Reference, Provider Groups Guide, Facade API Guide)
-- [ ] **Phase 6: Kubernetes Controllers** - Implement MCPProviderGroup and MCPDiscoverySource controllers with integration tests
+- [x] **Phase 6: Kubernetes Controllers** - Implement MCPProviderGroup and MCPDiscoverySource controllers with integration tests
 - [ ] **Phase 7: Helm Chart Maturity** - Synchronize both Helm charts to v0.10.0 with NOTES.txt and test templates
 
 ## Phase Details
@@ -56,13 +56,13 @@ Plans:
   3. MCPDiscoverySource controller discovers providers using all 4 modes (Namespace, ConfigMap, Annotations, ServiceDiscovery) and creates MCPProvider CRs with owner references
   4. MCPDiscoverySource controller supports both additive and authoritative sync modes (authoritative deletes only its own labeled resources)
   5. Both controllers pass envtest-based integration tests covering happy path and failure scenarios
-**Plans:** 2/3 plans executed
+**Plans:** 3/3 plans executed
 
 Plans:
 
-- [ ] 06-01-PLAN.md -- MCPProviderGroup controller: label selection, status aggregation, health policy evaluation (K8S-01, K8S-02, K8S-03) -- **DONE**
-- [ ] 06-02-PLAN.md -- MCPDiscoverySource controller: 4 discovery modes, additive/authoritative sync, owner references (K8S-04, K8S-05, K8S-06)
-- [ ] 06-03-PLAN.md -- envtest suite, integration tests for both controllers, main.go wiring (K8S-07)
+- [x] 06-01-PLAN.md -- MCPProviderGroup controller: label selection, status aggregation, health policy evaluation (K8S-01, K8S-02, K8S-03) -- **DONE**
+- [x] 06-02-PLAN.md -- MCPDiscoverySource controller: 4 discovery modes, additive/authoritative sync, owner references (K8S-04, K8S-05, K8S-06) -- **DONE**
+- [x] 06-03-PLAN.md -- envtest suite, integration tests for both controllers, main.go wiring (K8S-07) -- **DONE**
 
 ### Phase 7: Helm Chart Maturity
 
@@ -88,7 +88,7 @@ Phases execute in numeric order: 5 -> 6 -> 7
 | 3. JWT Lifetime Enforcement | v0.9 | 1/1 | Complete | 2026-02-15 |
 | 4. API Key Rotation | v0.9 | 2/2 | Complete | 2026-02-15 |
 | 5. Documentation Content | v0.10 | 2/2 | Complete | 2026-02-28 |
-| 6. Kubernetes Controllers | 2/3 | In Progress|  | - |
+| 6. Kubernetes Controllers | v0.10 | 3/3 | Complete | 2026-03-01 |
 | 7. Helm Chart Maturity | v0.10 | 0/? | Not started | - |
 
 ---
