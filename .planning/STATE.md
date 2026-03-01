@@ -10,19 +10,19 @@ See: .planning/PROJECT.md (updated 2026-02-28)
 ## Current Position
 
 Phase: 6 of 7 (Kubernetes Controllers)
-Plan: 0 of ? in current phase (context gathered, needs planning)
-Status: Context Gathered
-Last activity: 2026-02-28 -- Phase 6 context gathered (group health, authoritative sync, error tolerance)
+Plan: 2 of 3 in current phase (plan 1 complete, executing plan 2 next)
+Status: In Progress
+Last activity: 2026-03-01 -- Plan 06-01 complete (MCPProviderGroup controller)
 
-Progress: [██████████████░░░░░░] 69% (7/7 v0.9 plans complete, 2/2 Phase 5 plans)
+Progress: [███████████████░░░░░] 75% (7/7 v0.9 plans complete, 2/2 Phase 5, 1/3 Phase 6)
 
 ## Performance Metrics
 
 **v0.9 Velocity:**
 
-- Total plans completed: 9
-- Average duration: 5.0 minutes
-- Total execution time: 0.75 hours
+- Total plans completed: 10
+- Average duration: 4.7 minutes
+- Total execution time: 0.78 hours
 
 **By Phase:**
 
@@ -33,6 +33,7 @@ Progress: [██████████████░░░░░░] 69% (7/
 | 03-jwt-lifetime-enforcement | 1 | 3.9m | 3.9m |
 | 04-api-key-rotation | 2 | 14.3m | 7.2m |
 | 05-documentation-content | 2 | 8.0m | 4.0m |
+| 06-kubernetes-controllers | 1 | 2.0m | 2.0m |
 
 *Updated after each plan completion*
 
@@ -58,6 +59,7 @@ v0.10 research highlights:
 - Phase 6: Partial scan failures tolerated -- skip failing sources, sync partial results
 - Phase 6: Authoritative deletion scoped to successfully-scanned sources only
 - Phase 6: Synced condition + lastSyncError for error reporting; Paused=full freeze
+- 06-01: Group is read-only aggregator with no owner refs; Initializing/empty counted as Cold; Available based on ReadyCount > 0
 
 ### Pending Todos
 
@@ -69,6 +71,6 @@ None.
 
 ## Session Continuity
 
-Last session: 2026-02-28
-Stopped at: Phase 6 context gathered. Ready for research + planning.
-Resume file: .planning/phases/06-kubernetes-controllers/06-CONTEXT.md
+Last session: 2026-03-01
+Stopped at: Completed 06-01-PLAN.md (MCPProviderGroup controller)
+Resume file: .planning/phases/06-kubernetes-controllers/06-02-PLAN.md

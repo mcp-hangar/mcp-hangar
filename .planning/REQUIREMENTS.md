@@ -20,9 +20,9 @@ Requirements for milestone v0.10 Documentation & Kubernetes Maturity.
 
 ### Kubernetes Controllers
 
-- [ ] **K8S-01**: MCPProviderGroup controller reconciles groups with label-based MCPProvider selection
-- [ ] **K8S-02**: MCPProviderGroup controller aggregates member status (ready/degraded/dead counts)
-- [ ] **K8S-03**: MCPProviderGroup controller evaluates health policies and reports conditions
+- [x] **K8S-01**: MCPProviderGroup controller reconciles groups with label-based MCPProvider selection
+- [x] **K8S-02**: MCPProviderGroup controller aggregates member status (ready/degraded/dead counts)
+- [x] **K8S-03**: MCPProviderGroup controller evaluates health policies and reports conditions
 - [ ] **K8S-04**: MCPDiscoverySource controller implements 4 discovery modes (Namespace, ConfigMap, Annotations, ServiceDiscovery)
 - [ ] **K8S-05**: MCPDiscoverySource controller supports additive and authoritative sync modes
 - [ ] **K8S-06**: MCPDiscoverySource controller creates MCPProvider CRs with owner references and provider templates
@@ -77,9 +77,9 @@ Which phases cover which requirements. Updated during roadmap creation.
 | DOC-06 | Phase 5 | Complete |
 | DOC-07 | Phase 5 | Complete |
 | DOC-08 | Phase 5 | Complete |
-| K8S-01 | Phase 6 | Pending |
-| K8S-02 | Phase 6 | Pending |
-| K8S-03 | Phase 6 | Pending |
+| K8S-01 | Phase 6 | Complete |
+| K8S-02 | Phase 6 | Complete |
+| K8S-03 | Phase 6 | Complete |
 | K8S-04 | Phase 6 | Pending |
 | K8S-05 | Phase 6 | Pending |
 | K8S-06 | Phase 6 | Pending |

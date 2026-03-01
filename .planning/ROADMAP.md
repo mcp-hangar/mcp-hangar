@@ -60,7 +60,7 @@ Plans:
 
 Plans:
 
-- [ ] 06-01-PLAN.md -- MCPProviderGroup controller: label selection, status aggregation, health policy evaluation (K8S-01, K8S-02, K8S-03)
+- [ ] 06-01-PLAN.md -- MCPProviderGroup controller: label selection, status aggregation, health policy evaluation (K8S-01, K8S-02, K8S-03) -- **DONE**
 - [ ] 06-02-PLAN.md -- MCPDiscoverySource controller: 4 discovery modes, additive/authoritative sync, owner references (K8S-04, K8S-05, K8S-06)
 - [ ] 06-03-PLAN.md -- envtest suite, integration tests for both controllers, main.go wiring (K8S-07)
 
@@ -88,7 +88,7 @@ Phases execute in numeric order: 5 -> 6 -> 7
 | 3. JWT Lifetime Enforcement | v0.9 | 1/1 | Complete | 2026-02-15 |
 | 4. API Key Rotation | v0.9 | 2/2 | Complete | 2026-02-15 |
 | 5. Documentation Content | v0.10 | 2/2 | Complete | 2026-02-28 |
-| 6. Kubernetes Controllers | v0.10 | 0/3 | Not started | - |
+| 6. Kubernetes Controllers | v0.10 | 1/3 | In Progress | - |
 | 7. Helm Chart Maturity | v0.10 | 0/? | Not started | - |
 
 ---
