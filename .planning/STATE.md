@@ -18,14 +18,14 @@ progress:
 See: .planning/PROJECT.md (updated 2026-02-28)
 
 **Core value:** Reliable, observable MCP provider management with production-grade lifecycle control
-**Current focus:** Phase 6 - Kubernetes Controllers (v0.10)
+**Current focus:** Phase 7 - Helm Chart Maturity (v0.10)
 
 ## Current Position
 
 Phase: 7 of 7 (Helm Chart Maturity)
-Plan: 0 of ? in current phase (Phase 6 complete, Phase 7 not yet planned)
+Plan: 0 of ? in current phase (Phase 7 context gathered, not yet planned)
 Status: In Progress
-Last activity: 2026-03-01 -- Plan 06-03 complete (envtest integration tests + main.go wiring)
+Last activity: 2026-03-01 -- Phase 7 context gathered (NOTES.txt content decisions)
 
 Progress: [██████████████████░░] 90% (7/7 v0.9 plans, 2/2 Phase 5, 3/3 Phase 6 complete)
 
@@ -92,5 +92,5 @@ None.
 ## Session Continuity
 
 Last session: 2026-03-01
-Stopped at: Completed 06-03-PLAN.md (envtest integration tests + main.go wiring, Phase 6 complete)
-Resume file: .planning/phases/07-helm-chart-maturity/ (Phase 7 not yet planned)
+Stopped at: Phase 7 context gathered (NOTES.txt content decisions)
+Resume file: .planning/phases/07-helm-chart-maturity/07-CONTEXT.md
