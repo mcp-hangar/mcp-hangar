@@ -12,7 +12,7 @@ from mcp_hangar.application.commands import (
     StartProviderCommand,
     StopProviderCommand,
 )
-from mcp_hangar.infrastructure.command_bus import CommandBus, CommandHandler, get_command_bus
+from mcp_hangar.infrastructure.command_bus import CommandBus, CommandBusMiddleware, CommandHandler, get_command_bus
 
 
 class TestCommands:
@@ -238,3 +238,141 @@ class TestCommandIntegration:
 
         assert start_calls == ["p1", "p3"]
         assert stop_calls == ["p2"]
+
+
+class TestCommandBusMiddleware:
+    """Tests for CommandBus middleware pipeline."""
+
+    def test_send_without_middleware_dispatches_directly(self):
+        """Test backward compat: no middleware means direct handler dispatch."""
+        bus = CommandBus()
+        handler = Mock(spec=CommandHandler)
+        handler.handle.return_value = {"ok": True}
+
+        bus.register(StartProviderCommand, handler)
+
+        cmd = StartProviderCommand(provider_id="test")
+        result = bus.send(cmd)
+
+        handler.handle.assert_called_once_with(cmd)
+        assert result == {"ok": True}
+
+    def test_add_middleware_adds_to_pipeline(self):
+        """Test add_middleware() registers middleware."""
+        bus = CommandBus()
+
+        class DummyMiddleware(CommandBusMiddleware):
+            def __call__(self, command, next_handler):
+                return next_handler(command)
+
+        mw = DummyMiddleware()
+        bus.add_middleware(mw)
+
+        assert mw in bus._middleware
+
+    def test_middleware_called_before_handler(self):
+        """Test middleware is invoked before the handler."""
+        bus = CommandBus()
+        call_order = []
+
+        class TrackingMiddleware(CommandBusMiddleware):
+            def __call__(self, command, next_handler):
+                call_order.append("middleware")
+                return next_handler(command)
+
+        class TrackingHandler(CommandHandler):
+            def handle(self, command):
+                call_order.append("handler")
+                return {"done": True}
+
+        bus.add_middleware(TrackingMiddleware())
+        bus.register(StartProviderCommand, TrackingHandler())
+
+        bus.send(StartProviderCommand(provider_id="test"))
+
+        assert call_order == ["middleware", "handler"]
+
+    def test_multiple_middleware_execute_in_registration_order(self):
+        """Test multiple middleware run in the order they were added."""
+        bus = CommandBus()
+        order = []
+
+        class OrderMiddleware(CommandBusMiddleware):
+            def __init__(self, name):
+                self._name = name
+
+            def __call__(self, command, next_handler):
+                order.append(self._name)
+                return next_handler(command)
+
+        bus.add_middleware(OrderMiddleware("first"))
+        bus.add_middleware(OrderMiddleware("second"))
+        bus.add_middleware(OrderMiddleware("third"))
+
+        handler = Mock(spec=CommandHandler)
+        handler.handle.return_value = None
+        bus.register(StartProviderCommand, handler)
+
+        bus.send(StartProviderCommand(provider_id="test"))
+
+        assert order == ["first", "second", "third"]
+
+    def test_middleware_can_reject_command_by_raising(self):
+        """Test middleware can raise to reject a command before handler runs."""
+        bus = CommandBus()
+
+        class RejectMiddleware(CommandBusMiddleware):
+            def __call__(self, command, next_handler):
+                raise ValueError("rejected")
+
+        handler = Mock(spec=CommandHandler)
+        bus.add_middleware(RejectMiddleware())
+        bus.register(StartProviderCommand, handler)
+
+        with pytest.raises(ValueError, match="rejected"):
+            bus.send(StartProviderCommand(provider_id="test"))
+
+        handler.handle.assert_not_called()
+
+    def test_middleware_receives_command_and_can_inspect_it(self):
+        """Test middleware receives the command object for inspection."""
+        bus = CommandBus()
+        captured = {}
+
+        class InspectMiddleware(CommandBusMiddleware):
+            def __call__(self, command, next_handler):
+                captured["command_type"] = type(command).__name__
+                captured["provider_id"] = command.provider_id
+                return next_handler(command)
+
+        handler = Mock(spec=CommandHandler)
+        handler.handle.return_value = None
+        bus.add_middleware(InspectMiddleware())
+        bus.register(StartProviderCommand, handler)
+
+        bus.send(StartProviderCommand(provider_id="abc"))
+
+        assert captured["command_type"] == "StartProviderCommand"
+        assert captured["provider_id"] == "abc"
+
+    def test_handler_not_called_when_middleware_raises(self):
+        """Test handler is NOT called if earlier middleware raises."""
+        bus = CommandBus()
+        handler_calls = []
+
+        class FailMiddleware(CommandBusMiddleware):
+            def __call__(self, command, next_handler):
+                raise RuntimeError("boom")
+
+        class TrackHandler(CommandHandler):
+            def handle(self, command):
+                handler_calls.append(True)
+                return None
+
+        bus.add_middleware(FailMiddleware())
+        bus.register(StartProviderCommand, TrackHandler())
+
+        with pytest.raises(RuntimeError, match="boom"):
+            bus.send(StartProviderCommand(provider_id="x"))
+
+        assert handler_calls == []

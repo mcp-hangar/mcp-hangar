@@ -4,11 +4,15 @@ Command Bus - dispatches commands to their handlers.
 Commands represent intent to change the system state.
 Each command has exactly one handler.
 
+Supports a middleware pipeline that intercepts command dispatch.
+Middleware executes in registration order before the handler.
+
 Note: Command classes are defined in application.commands to maintain
 proper layer separation (infrastructure should not define business commands).
 """
 
 from abc import ABC, abstractmethod
+from collections.abc import Callable
 from typing import Any, TYPE_CHECKING
 
 from mcp_hangar.logging_config import get_logger
@@ -28,16 +32,40 @@ class CommandHandler(ABC):
         pass
 
 
+class CommandBusMiddleware(ABC):
+    """Middleware that intercepts command dispatch.
+
+    Middleware can inspect, validate, or reject commands before they reach handlers.
+    """
+
+    @abstractmethod
+    def __call__(self, command: "Command", next_handler: Callable[["Command"], Any]) -> Any:
+        """Process the command, optionally calling next_handler to continue.
+
+        Args:
+            command: The command being dispatched.
+            next_handler: Call this to continue the middleware chain.
+
+        Returns:
+            The result from the handler (or from rejection).
+
+        Raises:
+            Any exception to reject the command.
+        """
+
+
 class CommandBus:
     """
     Dispatches commands to their registered handlers.
 
     Each command type can have exactly one handler.
     The bus is responsible for routing commands to the appropriate handler.
+    Supports a middleware pipeline executed before handler dispatch.
     """
 
     def __init__(self):
         self._handlers: dict[type, CommandHandler] = {}
+        self._middleware: list[CommandBusMiddleware] = []
 
     def register(self, command_type: type, handler: CommandHandler) -> None:
         """
@@ -67,9 +95,20 @@ class CommandBus:
             return True
         return False
 
+    def add_middleware(self, middleware: CommandBusMiddleware) -> None:
+        """Add middleware to the command bus pipeline.
+
+        Middleware is executed in registration order before the handler.
+
+        Args:
+            middleware: The middleware to add.
+        """
+        self._middleware.append(middleware)
+        logger.debug("command_bus_middleware_added", middleware=type(middleware).__name__)
+
     def send(self, command: "Command") -> Any:
         """
-        Send a command to its handler.
+        Send a command through middleware pipeline to its handler.
 
         Args:
             command: The command to execute
@@ -87,7 +126,24 @@ class CommandBus:
             raise ValueError(f"No handler registered for {command_type.__name__}")
 
         logger.debug("command_dispatching", command_type=command_type.__name__)
-        return handler.handle(command)
+
+        # Build middleware chain (innermost = handler.handle)
+        def final_handler(cmd: "Command") -> Any:
+            return handler.handle(cmd)
+
+        # Wrap in middleware (reverse order so first-registered runs first)
+        chain = final_handler
+        for mw in reversed(self._middleware):
+
+            def make_step(middleware: CommandBusMiddleware, next_step: Callable) -> Callable:
+                def step(cmd: "Command") -> Any:
+                    return middleware(cmd, next_step)
+
+                return step
+
+            chain = make_step(mw, chain)
+
+        return chain(command)
 
     def has_handler(self, command_type: type) -> bool:
         """Check if a handler is registered for the command type."""
