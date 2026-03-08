@@ -6,9 +6,11 @@ For distributed systems, consider PostgreSQL or EventStoreDB.
 
 from collections.abc import Iterator
 from datetime import datetime, UTC
+import json
 from pathlib import Path
 import sqlite3
 import threading
+from typing import Any
 
 from mcp_hangar.domain.contracts.event_store import ConcurrencyError, IEventStore
 from mcp_hangar.domain.events import DomainEvent
@@ -103,6 +105,14 @@ class SQLiteEventStore(IEventStore):
                     version INTEGER NOT NULL DEFAULT -1,
                     created_at TEXT NOT NULL,
                     updated_at TEXT NOT NULL
+                );
+
+                -- Aggregate snapshots for bounded replay
+                CREATE TABLE IF NOT EXISTS snapshots (
+                    stream_id TEXT PRIMARY KEY,
+                    version INTEGER NOT NULL,
+                    state_data TEXT NOT NULL,
+                    created_at TEXT NOT NULL
                 );
             """
             )
@@ -381,6 +391,74 @@ class SQLiteEventStore(IEventStore):
             else:
                 cursor = conn.execute("SELECT stream_id FROM streams ORDER BY stream_id")
             return [row["stream_id"] for row in cursor.fetchall()]
+        finally:
+            if not self._is_memory:
+                conn.close()
+
+    def save_snapshot(
+        self,
+        stream_id: str,
+        version: int,
+        state: dict[str, Any],
+    ) -> None:
+        """Save aggregate snapshot inside lock scope for version consistency.
+
+        Args:
+            stream_id: Stream identifier (matches event stream).
+            version: Stream version this snapshot represents.
+            state: Serialized aggregate state (must be JSON-serializable).
+        """
+        with self._lock:
+            conn = self._connect()
+            try:
+                timestamp = datetime.now(UTC).isoformat()
+                conn.execute(
+                    """
+                    INSERT OR REPLACE INTO snapshots
+                    (stream_id, version, state_data, created_at)
+                    VALUES (?, ?, ?, ?)
+                    """,
+                    (stream_id, version, json.dumps(state), timestamp),
+                )
+                conn.commit()
+                logger.debug(
+                    "snapshot_saved",
+                    stream_id=stream_id,
+                    version=version,
+                )
+            except Exception as e:  # infra-boundary: rollback and propagate on any DB error
+                conn.rollback()
+                logger.error("snapshot_save_failed", stream_id=stream_id, error=str(e))
+                raise
+            finally:
+                if not self._is_memory:
+                    conn.close()
+
+    def load_snapshot(
+        self,
+        stream_id: str,
+    ) -> dict[str, Any] | None:
+        """Load latest snapshot for a stream.
+
+        Args:
+            stream_id: Stream identifier.
+
+        Returns:
+            Dict with "version" and "state" keys, or None if no snapshot exists.
+        """
+        conn = self._connect()
+        try:
+            cursor = conn.execute(
+                "SELECT version, state_data FROM snapshots WHERE stream_id = ?",
+                (stream_id,),
+            )
+            row = cursor.fetchone()
+            if row is None:
+                return None
+            return {
+                "version": row["version"],
+                "state": json.loads(row["state_data"]),
+            }
         finally:
             if not self._is_memory:
                 conn.close()

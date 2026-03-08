@@ -6,6 +6,7 @@ enabling Event Sourcing pattern with optimistic concurrency control.
 
 from abc import ABC, abstractmethod
 from collections.abc import Iterator
+from typing import Any
 
 from ..events import DomainEvent
 
@@ -137,6 +138,38 @@ class IEventStore(ABC):
             List of stream IDs matching the prefix.
         """
 
+    @abstractmethod
+    def save_snapshot(
+        self,
+        stream_id: str,
+        version: int,
+        state: dict[str, Any],
+    ) -> None:
+        """Save an aggregate snapshot at a given version.
+
+        Snapshots accelerate aggregate loading by storing state at a point
+        in time, so only subsequent events need replaying.
+
+        Args:
+            stream_id: Stream identifier (matches event stream).
+            version: Stream version this snapshot represents.
+            state: Serialized aggregate state (must be JSON-serializable).
+        """
+
+    @abstractmethod
+    def load_snapshot(
+        self,
+        stream_id: str,
+    ) -> dict[str, Any] | None:
+        """Load the latest snapshot for a stream.
+
+        Args:
+            stream_id: Stream identifier.
+
+        Returns:
+            Dict with "version" and "state" keys, or None if no snapshot exists.
+        """
+
 
 class NullEventStore(IEventStore):
     """Null object implementation - discards all events.
@@ -176,3 +209,18 @@ class NullEventStore(IEventStore):
     def list_streams(self, prefix: str = "") -> list[str]:
         """Return empty list (no streams)."""
         return []
+
+    def save_snapshot(
+        self,
+        stream_id: str,
+        version: int,
+        state: dict[str, Any],
+    ) -> None:
+        """Accept but discard snapshots."""
+
+    def load_snapshot(
+        self,
+        stream_id: str,
+    ) -> dict[str, Any] | None:
+        """Return None (no snapshots persisted)."""
+        return None

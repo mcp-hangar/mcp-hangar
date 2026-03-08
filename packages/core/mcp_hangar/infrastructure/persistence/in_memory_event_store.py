@@ -6,6 +6,7 @@ Useful for testing and development. Events are lost on restart.
 from collections.abc import Iterator
 from dataclasses import dataclass, field
 import threading
+from typing import Any
 
 from mcp_hangar.domain.contracts.event_store import ConcurrencyError, IEventStore
 from mcp_hangar.domain.events import DomainEvent
@@ -43,6 +44,7 @@ class InMemoryEventStore(IEventStore):
         """Initialize empty event store."""
         self._streams: dict[str, Stream] = {}
         self._all_events: list[StoredEvent] = []
+        self._snapshots: dict[str, dict[str, Any]] = {}
         self._lock = threading.Lock()
         self._global_position = 0
 
@@ -148,3 +150,25 @@ class InMemoryEventStore(IEventStore):
             if prefix:
                 return [sid for sid in self._streams.keys() if sid.startswith(prefix)]
             return list(self._streams.keys())
+
+    def save_snapshot(
+        self,
+        stream_id: str,
+        version: int,
+        state: dict[str, Any],
+    ) -> None:
+        """Save aggregate snapshot in memory."""
+        with self._lock:
+            self._snapshots[stream_id] = {
+                "version": version,
+                "state": state,
+            }
+            logger.debug("snapshot_saved", stream_id=stream_id, version=version)
+
+    def load_snapshot(
+        self,
+        stream_id: str,
+    ) -> dict[str, Any] | None:
+        """Load latest snapshot for a stream."""
+        with self._lock:
+            return self._snapshots.get(stream_id)
