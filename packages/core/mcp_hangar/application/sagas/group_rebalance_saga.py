@@ -12,7 +12,7 @@ that may not flow through the standard invoke path.
 from __future__ import annotations
 
 from collections.abc import Callable
-from typing import TYPE_CHECKING
+from typing import TYPE_CHECKING, Any
 
 from ...domain.events import (
     DomainEvent,
@@ -138,3 +138,11 @@ class GroupRebalanceSaga(EventTriggeredSaga):
                 group.report_failure(provider_id)
 
         return []
+
+    def to_dict(self) -> dict[str, Any]:
+        """Return empty dict -- this saga has no meaningful state to persist."""
+        return {}
+
+    def from_dict(self, data: dict[str, Any]) -> None:
+        """No-op -- state is transient, rebuilt from group objects at init."""
+        pass

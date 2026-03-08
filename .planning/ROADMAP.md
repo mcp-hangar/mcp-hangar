@@ -69,8 +69,8 @@ Plans:
 **Plans**: 3 plans
 Plans:
 
-- [ ] 09-01-PLAN.md -- Saga persistence foundation: SagaStateStore + saga serialization + SagaManager checkpoint (PERS-01)
-- [ ] 09-02-PLAN.md -- Circuit breaker persistence: CB from_dict + ProviderSnapshot CB fields (PERS-03)
+- [ ] 09-01-PLAN.md -- Saga persistence foundation: SagaStateStore + saga serialization + SagaManager checkpoint (PERS-01) -- RED phase complete (failing tests written)
+- [x] 09-02-PLAN.md -- Circuit breaker persistence: CB from_dict + ProviderSnapshot CB fields (PERS-03) -- completed 2026-03-08
 - [ ] 09-03-PLAN.md -- Idempotency filter + bootstrap wiring: saga resume + CB restore (PERS-02, PERS-03)
 
 ### Phase 10: Operational Hardening
@@ -101,7 +101,7 @@ Phases execute in numeric order: 8 -> 9 -> 10
 | 6. Kubernetes Controllers | v0.10 | 3/3 | Complete | 2026-03-01 |
 | 7. Helm Chart Maturity | v0.10 | 1/1 | Complete | 2026-03-01 |
 | 8. Safety Foundation | v1.0 | 3/3 | Complete | 2026-03-08 |
-| 9. State Survival | v1.0 | 0/3 | Not started | - |
+| 9. State Survival | v1.0 | 1/3 | In Progress | - |
 | 10. Operational Hardening | v1.0 | 0/TBD | Not started | - |
 
 ---

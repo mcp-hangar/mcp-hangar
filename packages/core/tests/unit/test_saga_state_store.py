@@ -2,13 +2,6 @@
 
 import json
 
-from mcp_hangar.application.sagas.group_rebalance_saga import GroupRebalanceSaga
-from mcp_hangar.application.sagas.provider_failover_saga import (
-    FailoverConfig,
-    FailoverState,
-    ProviderFailoverSaga,
-)
-from mcp_hangar.application.sagas.provider_recovery_saga import ProviderRecoverySaga
 from mcp_hangar.infrastructure.persistence.database_common import (
     MigrationRunner,
     SQLiteConfig,
@@ -19,6 +12,19 @@ from mcp_hangar.infrastructure.persistence.saga_state_store import (
     NullSagaStateStore,
     SagaStateStore,
 )
+
+# Import application.commands FIRST to break circular import chain:
+# Importing commands triggers: commands.__init__ -> reload_handler -> server.config
+# -> server.state -> application.sagas (completing the sagas package init).
+# After that, importing individual saga submodules works normally.
+from mcp_hangar.application.commands import Command  # noqa: F401
+from mcp_hangar.application.sagas.group_rebalance_saga import GroupRebalanceSaga
+from mcp_hangar.application.sagas.provider_failover_saga import (
+    FailoverConfig,
+    FailoverState,
+    ProviderFailoverSaga,
+)
+from mcp_hangar.application.sagas.provider_recovery_saga import ProviderRecoverySaga
 
 
 class TestSagaStateStoreCheckpoint:

@@ -7,8 +7,8 @@ last_updated: "2026-03-08"
 progress:
   total_phases: 10
   completed_phases: 8
-  total_plans: 16
-  completed_plans: 16
+  total_plans: 19
+  completed_plans: 17
 ---
 
 # Project State
@@ -18,17 +18,17 @@ progress:
 See: .planning/PROJECT.md (updated 2026-03-08)
 
 **Core value:** Reliable, observable MCP provider management with production-grade lifecycle control
-**Current focus:** Phase 8 - Safety Foundation
+**Current focus:** Phase 9 - State Survival
 
 ## Current Position
 
 Milestone: v1.0 Production Hardening
-Phase: 8 of 10 (Safety Foundation) -- COMPLETE
-Plan: 3 of 3 in current phase (all complete)
-Status: Executing -- Phase 8 complete (plans 08-01, 08-02, 08-03)
-Last activity: 2026-03-08 -- Completed 08-03: Exception hygiene audit (EXCP-01)
+Phase: 9 of 10 (State Survival) -- IN PROGRESS
+Plan: 2 of 3 in current phase (09-01 RED complete, 09-02 complete)
+Status: In Progress -- plan 09-03 remaining
+Last activity: 2026-03-08 -- Completed plan 09-02 (circuit breaker persistence)
 
-Progress: [████████░░] 100% phase 8 (8/10 phases, 16/16 plans)
+Progress: [█████████░] 84% milestone (8/10 phases, 17/19 plans)
 
 ## Performance Metrics
 
@@ -47,6 +47,8 @@ Progress: [████████░░] 100% phase 8 (8/10 phases, 16/16 plan
 **v1.0 Velocity:**
 
 - Plans completed: 3 (08-01, 08-02, 08-03) -- Phase 8 complete
+- Phase 9: 2/3 plans executed (09-01 RED, 09-02 complete), 09-03 remaining
+- 09-02 duration: ~7 min
 
 See `.planning/RETROSPECTIVE.md` for full cross-milestone trends.
 
@@ -63,6 +65,8 @@ All v0.9 and v0.10 decisions archived in PROJECT.md Key Decisions table.
 - Multi-lock-cycle pattern for invoke_tool() refresh follows health_check() reference implementation
 - Boolean _refresh_in_progress flag for refresh deduplication (not per-tool locking)
 - Annotated all except Exception catches with fault-barrier or infra-boundary comments -- optional dependencies make narrowing unsafe, convention established for future code
+- CircuitBreaker.from_dict() added opened_at to to_dict() for round-trip fidelity -- was missing from original output
+- ProviderSnapshot.circuit_breaker_state uses raw dict (not CB instance) to avoid coupling snapshot to CB lifecycle
 
 ### Pending Todos
 
@@ -76,5 +80,5 @@ None.
 ## Session Continuity
 
 Last session: 2026-03-08
-Stopped at: Completed 08-03-PLAN.md (Exception hygiene audit) -- Phase 8 complete
-Resume with: Plan Phase 9 (State Survival)
+Stopped at: Completed 09-02-PLAN.md (circuit breaker persistence), 09-01 RED phase done
+Resume with: /gsd-execute-phase 9 (plan 09-03 remaining)

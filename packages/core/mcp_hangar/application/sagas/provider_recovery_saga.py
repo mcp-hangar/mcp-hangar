@@ -2,6 +2,8 @@
 
 import time
 
+from typing import Any
+
 from ...domain.events import DomainEvent, HealthCheckFailed, ProviderDegraded, ProviderStarted, ProviderStopped
 from ...infrastructure.saga_manager import EventTriggeredSaga
 from ...logging_config import get_logger
@@ -169,3 +171,11 @@ class ProviderRecoverySaga(EventTriggeredSaga):
     def reset_all_retry_states(self) -> None:
         """Reset all retry states."""
         self._retry_state.clear()
+
+    def to_dict(self) -> dict[str, Any]:
+        """Serialize retry state for persistence."""
+        return {"retry_state": dict(self._retry_state)}
+
+    def from_dict(self, data: dict[str, Any]) -> None:
+        """Restore retry state from persistence."""
+        self._retry_state = data.get("retry_state", {})

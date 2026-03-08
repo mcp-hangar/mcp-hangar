@@ -123,6 +123,12 @@ class SimpleEventSaga(EventTriggeredSaga):
             return [StartProviderCommand(provider_id=event.provider_id)]
         return []
 
+    def to_dict(self) -> dict:
+        return {"handled_count": len(self.handled_events_list)}
+
+    def from_dict(self, data: dict) -> None:
+        pass
+
 
 class TestSaga:
     """Test Saga base class."""

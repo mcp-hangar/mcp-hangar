@@ -19,6 +19,7 @@ from .lock_hierarchy import LockLevel, TrackedLock
 
 if TYPE_CHECKING:
     from ..application.commands import Command
+    from .persistence.saga_state_store import SagaStateStore
 
 logger = get_logger(__name__)
 
@@ -177,6 +178,16 @@ class EventTriggeredSaga(ABC):
         """
         pass
 
+    @abstractmethod
+    def to_dict(self) -> dict[str, Any]:
+        """Serialize saga state for persistence."""
+        ...
+
+    @abstractmethod
+    def from_dict(self, data: dict[str, Any]) -> None:
+        """Restore saga state from persistence."""
+        ...
+
     def should_handle(self, event: DomainEvent) -> bool:
         """Check if this saga should handle the given event."""
         return type(event) in self.handled_events
@@ -197,9 +208,11 @@ class SagaManager:
         self,
         command_bus: CommandBus | None = None,
         event_bus: EventBus | None = None,
+        saga_state_store: "SagaStateStore | None" = None,
     ):
         self._command_bus = command_bus or get_command_bus()
         self._event_bus = event_bus or get_event_bus()
+        self._saga_state_store = saga_state_store
 
         # Active sagas being orchestrated
         self._active_sagas: dict[str, Saga] = {}

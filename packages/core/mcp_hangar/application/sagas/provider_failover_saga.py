@@ -2,6 +2,7 @@
 
 from dataclasses import dataclass
 import time
+from typing import Any
 
 from ...domain.events import DomainEvent, ProviderDegraded, ProviderStarted, ProviderStopped
 from ...infrastructure.saga_manager import EventTriggeredSaga
@@ -263,3 +264,36 @@ class ProviderFailoverSaga(EventTriggeredSaga):
             self._pending_failbacks.pop(primary_id, None)
             return True
         return False
+
+    def to_dict(self) -> dict[str, Any]:
+        """Serialize failover state for persistence."""
+        return {
+            "failover_configs": {
+                k: {
+                    "primary_id": v.primary_id,
+                    "backup_id": v.backup_id,
+                    "auto_failback": v.auto_failback,
+                    "failback_delay_s": v.failback_delay_s,
+                }
+                for k, v in self._failover_configs.items()
+            },
+            "active_failovers": {
+                k: {
+                    "primary_id": v.primary_id,
+                    "backup_id": v.backup_id,
+                    "failed_at": v.failed_at,
+                    "backup_started_at": v.backup_started_at,
+                    "is_active": v.is_active,
+                }
+                for k, v in self._active_failovers.items()
+            },
+            "active_backups": list(self._active_backups),
+            "pending_failbacks": dict(self._pending_failbacks),
+        }
+
+    def from_dict(self, data: dict[str, Any]) -> None:
+        """Restore failover state from persistence."""
+        self._failover_configs = {k: FailoverConfig(**v) for k, v in data.get("failover_configs", {}).items()}
+        self._active_failovers = {k: FailoverState(**v) for k, v in data.get("active_failovers", {}).items()}
+        self._active_backups = set(data.get("active_backups", []))
+        self._pending_failbacks = dict(data.get("pending_failbacks", {}))
