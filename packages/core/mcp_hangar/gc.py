@@ -57,6 +57,7 @@ class BackgroundWorker:
         self._event_bus = event_bus or get_event_bus()
         self.thread = threading.Thread(target=self._loop, daemon=True, name=f"worker-{task}")
         self.running = False
+        self._next_check_at: dict[str, float] = {}
 
     def start(self):
         """Start the background worker thread."""
@@ -105,11 +106,20 @@ class BackgroundWorker:
                             record_provider_stop(provider_id, "idle")
 
                     elif self.task == "health_check":
-                        # Determine whether provider is cold (not started yet)
+                        # State-aware health check scheduling
                         state_str = normalize_state_to_str(provider.state)
-                        is_cold = state_str == "cold"
 
-                        # Active health check
+                        # Skip providers that are not started or starting up
+                        if state_str in ("cold", "initializing"):
+                            continue
+
+                        # Check per-provider timing -- skip if not due yet
+                        now = time.time()
+                        next_check = self._next_check_at.get(provider_id, 0.0)
+                        if now < next_check:
+                            continue
+
+                        # Perform health check
                         hc_start = time.perf_counter()
                         is_healthy = provider.health_check()
                         hc_duration = time.perf_counter() - hc_start
@@ -120,12 +130,26 @@ class BackgroundWorker:
                             provider=provider_id,
                             duration=hc_duration,
                             healthy=is_healthy,
-                            is_cold=is_cold,
+                            is_cold=False,
                             consecutive_failures=consecutive,
                         )
 
-                        if not is_healthy and not is_cold:
+                        if not is_healthy:
                             logger.warning("health_check_unhealthy", provider_id=provider_id)
+
+                        # Calculate next check interval based on current state
+                        # Re-read state after health check (it may have changed)
+                        current_state = normalize_state_to_str(provider.state)
+                        health_tracker = getattr(provider, "health", None)
+                        if health_tracker and hasattr(health_tracker, "get_health_check_interval"):
+                            interval = health_tracker.get_health_check_interval(
+                                current_state, normal_interval=float(self.interval_s)
+                            )
+                        else:
+                            interval = float(self.interval_s)
+
+                        if interval > 0:
+                            self._next_check_at[provider_id] = now + interval
 
                     # Publish any collected events
                     self._publish_events(provider)
@@ -143,6 +167,13 @@ class BackgroundWorker:
             if self.task == "gc":
                 duration = time.perf_counter() - start_time
                 record_gc_cycle(duration, gc_collected)
+
+            # Clean up stale entries from _next_check_at for removed providers
+            if self.task == "health_check":
+                current_ids = {pid for pid, _ in providers_snapshot}
+                stale_ids = set(self._next_check_at) - current_ids
+                for stale_id in stale_ids:
+                    del self._next_check_at[stale_id]
 
 
 class ConfigReloadWorker:

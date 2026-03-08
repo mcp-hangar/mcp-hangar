@@ -137,7 +137,7 @@ class TestBackgroundWorkerHealthCheckScheduling:
         # (not affected by state-aware health check scheduling)
 
     @patch("mcp_hangar.gc.observe_health_check")
-    @patch("mcp_hangar.gc.time.sleep", side_effect=StopIteration)
+    @patch("mcp_hangar.gc.time.sleep", side_effect=[None, StopIteration])
     def test_loop_skips_cold_in_health_check_mode(self, mock_sleep, mock_observe):
         """Integration: _loop skips COLD providers for health_check task."""
         cold_provider = _make_provider(ProviderState.COLD)
@@ -159,7 +159,7 @@ class TestBackgroundWorkerHealthCheckScheduling:
         ready_provider.health_check.assert_called_once()
 
     @patch("mcp_hangar.gc.observe_health_check")
-    @patch("mcp_hangar.gc.time.sleep", side_effect=StopIteration)
+    @patch("mcp_hangar.gc.time.sleep", side_effect=[None, StopIteration])
     def test_loop_skips_initializing_in_health_check_mode(self, mock_sleep, mock_observe):
         """Integration: _loop skips INITIALIZING providers for health_check task."""
         init_provider = _make_provider(ProviderState.INITIALIZING)
@@ -176,7 +176,7 @@ class TestBackgroundWorkerHealthCheckScheduling:
         init_provider.health_check.assert_not_called()
 
     @patch("mcp_hangar.gc.observe_health_check")
-    @patch("mcp_hangar.gc.time.sleep", side_effect=StopIteration)
+    @patch("mcp_hangar.gc.time.sleep", side_effect=[None, StopIteration])
     def test_loop_sets_next_check_at_after_health_check(self, mock_sleep, mock_observe):
         """Integration: _loop sets _next_check_at after checking a READY provider."""
         provider = _make_provider(ProviderState.READY)
@@ -194,7 +194,7 @@ class TestBackgroundWorkerHealthCheckScheduling:
         assert worker._next_check_at["ready-one"] > time.time()
 
     @patch("mcp_hangar.gc.observe_health_check")
-    @patch("mcp_hangar.gc.time.sleep", side_effect=StopIteration)
+    @patch("mcp_hangar.gc.time.sleep", side_effect=[None, StopIteration])
     def test_loop_respects_next_check_at_timing(self, mock_sleep, mock_observe):
         """Integration: _loop skips providers whose next_check_at is in the future."""
         provider = _make_provider(ProviderState.READY)
