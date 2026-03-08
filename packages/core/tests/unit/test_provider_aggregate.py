@@ -1,8 +1,11 @@
 """Tests for Provider aggregate root."""
 
 import threading
+import time
+from unittest.mock import MagicMock, patch
 
 from mcp_hangar.domain.events import ProviderStopped
+from mcp_hangar.domain.exceptions import CannotStartProviderError, ProviderStartError
 from mcp_hangar.domain.model import Provider, ProviderState
 from mcp_hangar.domain.model.provider import VALID_TRANSITIONS
 from mcp_hangar.domain.value_objects import ProviderMode
@@ -332,6 +335,202 @@ class TestProviderThreadSafety:
 
         assert len(errors) == 0
         assert provider.state == ProviderState.COLD
+
+
+class TestEnsureReadyConcurrency:
+    """Test ensure_ready() with threading.Event for concurrent startup coordination."""
+
+    def _make_provider(self, **kwargs):
+        """Create a provider with default test settings."""
+        defaults = {
+            "provider_id": "test",
+            "mode": "subprocess",
+            "command": ["python", "-m", "test"],
+        }
+        defaults.update(kwargs)
+        return Provider(**defaults)
+
+    def test_concurrent_ensure_ready_only_one_create_client(self):
+        """Two threads calling ensure_ready() on COLD provider -- only one _create_client() call."""
+        provider = self._make_provider()
+        create_count = {"calls": 0}
+
+        def slow_create_client():
+            create_count["calls"] += 1
+            time.sleep(0.3)
+            mock_client = MagicMock()
+            mock_client.is_alive.return_value = True
+            mock_client.call.return_value = {"result": {"tools": []}}
+            return mock_client
+
+        errors = []
+        results = []
+
+        def call_ensure_ready():
+            try:
+                provider.ensure_ready()
+                results.append("ok")
+            except Exception as e:
+                errors.append(e)
+
+        with patch.object(provider, "_create_client", side_effect=slow_create_client):
+            with patch.object(provider, "_perform_mcp_handshake"):
+                t1 = threading.Thread(target=call_ensure_ready)
+                t2 = threading.Thread(target=call_ensure_ready)
+                t1.start()
+                time.sleep(0.05)
+                t2.start()
+                t1.join(timeout=10)
+                t2.join(timeout=10)
+
+        assert create_count["calls"] == 1, f"Expected 1 _create_client call, got {create_count['calls']}"
+        assert len(errors) == 0, f"Unexpected errors: {errors}"
+        assert len(results) == 2, "Both threads should complete successfully"
+        # Verify _ready_event mechanism exists
+        assert hasattr(provider, "_ready_event"), "Provider must have _ready_event for concurrent waiter coordination"
+
+    def test_waiter_gets_result_when_starter_completes(self):
+        """Second thread waits on _ready_event and sees READY when first thread completes."""
+        provider = self._make_provider()
+        completion_order = []
+
+        def slow_create_client():
+            time.sleep(0.2)
+            mock_client = MagicMock()
+            mock_client.is_alive.return_value = True
+            mock_client.call.return_value = {"result": {"tools": []}}
+            return mock_client
+
+        def call_ensure_ready(name):
+            try:
+                provider.ensure_ready()
+                completion_order.append(name)
+            except Exception:
+                pass
+
+        with patch.object(provider, "_create_client", side_effect=slow_create_client):
+            with patch.object(provider, "_perform_mcp_handshake"):
+                t1 = threading.Thread(target=call_ensure_ready, args=("starter",))
+                t1.start()
+                time.sleep(0.05)
+                t2 = threading.Thread(target=call_ensure_ready, args=("waiter",))
+                t2.start()
+                t1.join(timeout=10)
+                t2.join(timeout=10)
+
+        assert provider.state == ProviderState.READY
+        assert len(completion_order) == 2
+
+    def test_startup_failure_propagates_to_waiters(self):
+        """If startup fails, waiting thread receives the ProviderStartError."""
+        provider = self._make_provider()
+        errors = []
+
+        def failing_create_client():
+            time.sleep(0.1)
+            raise RuntimeError("subprocess crashed")
+
+        def call_ensure_ready():
+            try:
+                provider.ensure_ready()
+            except (ProviderStartError, CannotStartProviderError) as e:
+                errors.append(e)
+            except Exception as e:
+                errors.append(e)
+
+        with patch.object(provider, "_create_client", side_effect=failing_create_client):
+            t1 = threading.Thread(target=call_ensure_ready)
+            t1.start()
+            time.sleep(0.05)
+            t2 = threading.Thread(target=call_ensure_ready)
+            t2.start()
+            t1.join(timeout=10)
+            t2.join(timeout=10)
+
+        # Both threads should get an error (not stuck waiting)
+        assert len(errors) == 2, f"Expected 2 errors, got {len(errors)}: {errors}"
+
+    def test_ready_event_timeout_raises_cannot_start(self):
+        """_ready_event.wait() with timeout raises error if startup takes too long."""
+        provider = self._make_provider()
+
+        def very_slow_create_client():
+            time.sleep(5.0)
+            mock_client = MagicMock()
+            mock_client.is_alive.return_value = True
+            mock_client.call.return_value = {"result": {"tools": []}}
+            return mock_client
+
+        errors = []
+
+        def call_ensure_ready():
+            try:
+                provider.ensure_ready()
+            except (CannotStartProviderError, ProviderStartError) as e:
+                errors.append(e)
+            except Exception as e:
+                errors.append(e)
+
+        with patch.object(provider, "_create_client", side_effect=very_slow_create_client):
+            with patch.object(provider, "_perform_mcp_handshake"):
+                t1 = threading.Thread(target=call_ensure_ready)
+                t1.start()
+                time.sleep(0.05)
+                t2 = threading.Thread(target=call_ensure_ready)
+                t2.start()
+                t2.join(timeout=5)
+                t1.join(timeout=6)
+
+        # At least the waiter should have timed out
+        assert len(errors) >= 1, "At least one thread should have received an error"
+
+    def test_ready_event_reset_on_dead_to_initializing_retry(self):
+        """After DEAD -> INITIALIZING retry, _ready_event is reset correctly."""
+        provider = self._make_provider()
+        call_count = {"n": 0}
+
+        def create_client_fail_then_succeed():
+            call_count["n"] += 1
+            if call_count["n"] == 1:
+                raise RuntimeError("first attempt fails")
+            mock_client = MagicMock()
+            mock_client.is_alive.return_value = True
+            mock_client.call.return_value = {"result": {"tools": []}}
+            return mock_client
+
+        with patch.object(provider, "_create_client", side_effect=create_client_fail_then_succeed):
+            with patch.object(provider, "_perform_mcp_handshake"):
+                try:
+                    provider.ensure_ready()
+                except (ProviderStartError, Exception):
+                    pass
+
+                assert provider.state in (ProviderState.DEAD, ProviderState.DEGRADED)
+
+                # Second attempt: should succeed with fresh event
+                provider.ensure_ready()
+
+        assert provider.state == ProviderState.READY
+        assert call_count["n"] == 2
+
+    def test_ensure_ready_on_ready_provider_returns_immediately(self):
+        """ensure_ready() on READY provider returns immediately (fast path)."""
+        provider = self._make_provider()
+
+        mock_client = MagicMock()
+        mock_client.is_alive.return_value = True
+        mock_client.call.return_value = {"result": {"tools": []}}
+
+        # Manually set provider to READY state
+        with provider._lock:
+            provider._state = ProviderState.READY
+            provider._client = mock_client
+
+        with patch.object(provider, "_create_client") as mock_create:
+            provider.ensure_ready()
+            mock_create.assert_not_called()
+
+        assert provider.state == ProviderState.READY
 
 
 class TestProviderPredefinedTools:
