@@ -1,170 +1,251 @@
 # Project Research Summary
 
-**Project:** MCP Hangar v0.10 — Documentation & Kubernetes Maturity
-**Domain:** Production-grade MCP provider infrastructure platform — operator controllers, documentation, Helm charts
-**Researched:** 2026-02-28
+**Project:** MCP Hangar v1.0 Production Hardening
+**Domain:** DDD/CQRS/Event Sourcing platform hardening (concurrency, persistence, security, resilience)
+**Researched:** 2026-03-08
 **Confidence:** HIGH
 
 ## Executive Summary
 
-MCP Hangar v0.10 is a maturity milestone, not a feature milestone. The platform already has a working Python core with DDD/CQRS/Event Sourcing, a Kubernetes operator with one controller (MCPProvider), and Helm charts at v0.2.0. What's missing: two CRD types (MCPProviderGroup, MCPDiscoverySource) have Go types defined but no controllers to reconcile them, documentation has 29 broken links and four missing reference/guide pages, and Helm charts are version-lagged at 0.2.0 vs. app 0.10.0. The work is well-scoped: implement two controllers following established patterns, fix and extend docs, and sync Helm charts.
+MCP Hangar is a production-grade MCP provider platform built on DDD, CQRS, and Event Sourcing with thread-based concurrency. The v1.0 hardening milestone covers 11 features across P0/P1/P2 priorities that address real production gaps: lock hierarchy violations that can deadlock, bare exception catches that silently swallow failures, unvalidated commands from discovery sources, ephemeral saga and circuit breaker state lost on restart, unbounded event replay on startup, and missing property-based testing for the core state machine. The critical finding is that the existing codebase already contains most of the primitives needed -- `InputValidator`, `BackoffStrategy`, `TokenBucket`, `SagaContext.to_dict()`, `ProviderSnapshot`, `SQLiteConnectionFactory` -- but they are either unwired, incomplete, or bypassed in key code paths.
 
-The recommended approach is to fix documentation foundations first (broken links, org name), then implement both Kubernetes controllers with tests, and finally sync Helm charts and add remaining doc pages. The controllers are the highest-risk, highest-effort items but have well-documented patterns to follow: the existing MCPProvider controller (535 lines, with tests) serves as a direct template. All Go dependencies already exist in go.mod. No new Python dependencies are needed beyond documentation tooling (mkdocstrings-python, mkdocs-htmlproofer-plugin).
+The recommended approach is zero new third-party dependencies. All 11 features can be implemented using Python stdlib (`sqlite3`, `threading`, `json`) and existing project infrastructure (`TrackedLock`, `MigrationRunner`, `EventSerializer`). This is the correct outcome for a stability milestone -- adding dependencies during hardening is counterproductive. The three SQLite tables needed (saga checkpoints, circuit breaker state, snapshots) colocate in the existing event store database using the existing `MigrationRunner` for schema management.
 
-The key risks are: (1) infinite reconciliation loops between MCPProviderGroup and MCPDiscoverySource controllers when both watch MCPProvider resources, (2) finalizer deadlocks when MCPDiscoverySource owns MCPProviders that have their own finalizers, and (3) Helm CRD upgrade gaps since `helm upgrade` does not update CRDs from the `crds/` directory. All three are preventable with established patterns: MCPProviderGroup must be a read-only aggregator (never write to MCPProviders), MCPDiscoverySource must rely on Kubernetes garbage collection (not explicit child deletion in finalizers), and Helm charts need explicit CRD upgrade documentation or a pre-upgrade hook.
+The top risks are: (1) I/O-under-lock removal in `Provider._start()` and `_refresh_tools()` introduces TOCTOU races that require structural restructuring, not simple extraction; (2) the 42 bare `except Exception:` catches must be categorized into fault-barriers, cleanup, and bug-hiding before BLE001 enforcement -- uniform treatment causes background worker crash loops; (3) saga persistence requires idempotency design before implementation because event-triggered sagas have non-idempotent side effects that duplicate on restart replay; (4) a live lock hierarchy violation exists in `ProviderGroup._try_start_member()` (level 11 acquiring level 10) that creates latent deadlock risk.
 
 ## Key Findings
 
 ### Recommended Stack
 
-No new major dependencies are needed. The existing stack (Python 3.11+, Go 1.23.0, controller-runtime v0.17.0, MkDocs Material) covers everything. Stack additions are limited to documentation tooling and test infrastructure.
+No new third-party dependencies. All hardening features use existing stack: Python 3.11+ stdlib, SQLite (already a dependency via event store), `hypothesis>=6.90.0` (already in dev deps), `ruff>=0.3.0` (already in dev deps), `mypy>=1.8.0` (already in dev deps).
 
-**Core additions:**
+**Core technologies (all existing):**
 
-- **mkdocstrings-python 2.0.3**: API reference generation from Python docstrings -- uses Griffe for static analysis (no import side effects), supports Google-style docstrings matching project convention
-- **mkdocs-htmlproofer-plugin 1.5.0**: Link validation in rendered HTML -- catches broken internal links, anchors, and external URLs during `mkdocs build`; actively maintained (Feb 2026)
-- **helm-unittest 1.0.3**: Declarative Helm template testing -- no cluster required, fast CI feedback, tests live alongside charts
-- **chart-testing (ct) 3.14.0**: Chart linting and schema validation -- official Helm project tool, superset of `helm lint`
-- **envtest / ginkgo / gomega**: Already indirect dependencies in go.mod -- promote to direct for controller integration tests; no installation needed
+- **sqlite3 (stdlib):** Saga checkpoints, circuit breaker state, snapshot store -- reuses existing `SQLiteConnectionFactory` and `MigrationRunner`
+- **threading (stdlib):** `TrackedLock` for new stores at `LockLevel.REPOSITORY` (31), `threading.Event` for `_start()` concurrency fix
+- **hypothesis (dev dep):** `RuleBasedStateMachine` for Provider state machine property testing -- already used in `tests/unit/observability/test_property_based.py`
+- **ruff BLE001 rule:** Bare-except enforcement -- must enable AFTER categorization audit of 42 instances
 
-**What NOT to use:** mkdocs-linkcheck (unmaintained since 2021), Sphinx (project committed to MkDocs), kubebuilder scaffolding (would overwrite existing customizations), Operator SDK (unnecessary abstraction), kuttl (overkill for this scope).
+**Configuration changes needed:**
+
+- `pyproject.toml`: Add `BLE` to ruff `select` list, remove `B904` from ignore list
+- `pyproject.toml`: Incrementally enable mypy `check_untyped_defs`, `no_implicit_optional`, `disallow_incomplete_defs`
+- 3 new SQLite tables via `MigrationRunner`: `saga_checkpoints`, `circuit_breaker_state`, `snapshots`
 
 ### Expected Features
 
-**Must have (P0 -- enterprise adoption blockers):**
+**Must have (table stakes):**
 
-- Fix 29 broken documentation links (including missing `docs/security/` directory, stale `mapyr` org name)
-- Configuration Reference page (full YAML schema, env vars, defaults, validation rules)
-- MCP Tools Reference page (all 22 tools with parameters, returns, side effects)
-- MCPProviderGroup controller (label-based selection, status aggregation, health policy evaluation)
-- MCPDiscoverySource controller (4 discovery modes, additive/authoritative, provider template application)
-- Helm chart version sync 0.2.0 to 0.10.0
+- Saga persistence with checkpoint/resume -- in-memory state lost on restart leaves providers in inconsistent states
+- Circuit breaker state persistence -- resets on restart cause cascading failures against known-bad providers
+- Event store snapshots -- replay grows unbounded, startup time degrades linearly with history
+- Exponential backoff with jitter for health checks -- fixed-interval checks hammer degraded providers
+- Command validation for discovery sources -- Docker labels execute arbitrary commands with zero validation
+- Transport-agnostic rate limiting -- only MCP tool calls are rate-limited; HTTP API, CLI, programmatic callers bypass
+- Property-based state machine testing -- example-based tests cannot verify ALL transition sequences maintain invariants
 
-**Should have (P1 -- significantly improves experience):**
+**Should have (differentiators -- defer to follow-up):**
 
-- Provider Groups Guide (strategies, health policies, circuit breaker)
-- Facade API Guide (Hangar/SyncHangar, HangarConfig builder)
-- NOTES.txt post-install instructions for both Helm charts
-- Helm test templates for CI/CD validation
-- Controller tests for MCPProviderGroup and MCPDiscoverySource
+- Saga compensation on partial failure (requires saga persistence first)
+- HALF_OPEN circuit breaker state (small code change, well-understood pattern)
+- Snapshot compaction / old event pruning (requires snapshots first)
+- Rate limit metrics and Prometheus observability
 
-**Defer to v0.11+:**
+**Defer (anti-features):**
 
-- CRD API Reference (auto-generated from Go types)
-- Operational troubleshooting runbooks
-- Helm values.schema.json
-- MCPProviderGroup automatic rebalancing
-- ADRs for operator design decisions
+- Distributed saga coordination, external circuit breaker service, real-time event streaming, ML anomaly detection, async/asyncio rewrite, custom binary snapshot format
 
 ### Architecture Approach
 
-The v0.10 architecture adds two new controllers to an existing controller-runtime operator. MCPProviderGroup is a read-only aggregation layer that watches MCPProviders via label selectors (like how a Service selects Pods). MCPDiscoverySource creates and manages MCPProvider custom resources as a parent using owner references. The controllers communicate through the Kubernetes API only -- no shared mutable state, no direct inter-controller calls.
+The 11 features integrate into the existing 4-layer DDD architecture (domain -> application -> infrastructure -> server) without violating layer boundaries. Six new components are needed: `CommandValidator` (domain), `ISagaStore` interface (domain/contracts), `SQLiteSagaStore` (infrastructure), `InMemorySagaStore` (infrastructure), `HealthCheckPolicy` (domain/policies), and `RateLimitMiddleware` (application). The circuit breaker persistence piggybacks on the existing `ProviderSnapshot` dataclass rather than creating a separate store -- CB is a child entity of Provider, not an independent aggregate.
 
-**Major components:**
+**Major components (new):**
 
-1. **MCPProviderGroup controller** -- selects MCPProviders via label selector, aggregates status (ready/degraded/dead counts), evaluates health policies, updates group conditions. Uses `EnqueueRequestsFromMapFunc` to watch MCPProvider changes without ownership.
-2. **MCPDiscoverySource controller** -- implements 4 discovery strategies (Namespace, ConfigMap, Annotations, ServiceDiscovery) via a common interface, creates MCPProvider CRs with controller owner references, supports additive and authoritative sync modes, uses `RequeueAfter` for periodic rescan.
-3. **Discovery strategies package** (`pkg/discovery/`) -- strategy interface + 4 implementations, keeping scanning logic separate from controller lifecycle management.
-4. **Documentation pages** -- 4 new MkDocs pages (Configuration Reference, MCP Tools Reference, Provider Groups Guide, Facade API Guide) integrated into existing nav structure.
+1. **CommandValidator** (domain/security) -- Allowlist-based validation for discovery-sourced commands, applied at registration time, not launch time
+2. **ISagaStore + SQLiteSagaStore** (domain/contracts + infrastructure/persistence) -- Checkpoint after each saga step, restore incomplete sagas on bootstrap
+3. **HealthCheckPolicy** (domain/policies) -- State-aware health check scheduling: skip COLD/DEAD, backoff DEGRADED, normal interval for READY
+4. **RateLimitMiddleware** (application/services) -- Wraps command/query bus execution for transport-agnostic enforcement
+
+**Major components (modified):**
+
+1. **Provider._start() / _refresh_tools()** -- Restructure to extract I/O from lock scope using state-guard + `threading.Event` pattern
+2. **StdioClient** -- Fix request-response race: register PendingRequest BEFORE writing to stdin
+3. **ProviderSnapshot** -- Extend with circuit breaker state fields; fix value object deserialization in `from_snapshot()`
 
 ### Critical Pitfalls
 
-1. **Infinite reconciliation loop** -- MCPDiscoverySource creates MCPProviders, MCPProviderGroup watches them, status updates trigger re-reconciliation in a tight cycle. **Prevention:** MCPProviderGroup must never set owner references on MCPProviders; must compare computed status against current status and skip no-op updates; use `EnqueueRequestsFromMapFunc` not `Owns()`.
+1. **I/O-under-lock removal introduces TOCTOU races** -- `_refresh_tools()` is called inside locked `invoke_tool()`. Moving I/O outside requires restructuring to separate lock-acquire/release cycles, not simple extraction. `_start()` blocks ALL threads for 30+ seconds during cold start. Fix: use `INITIALIZING` state guard + `threading.Event` for waiters.
 
-2. **Finalizer deadlock on deletion** -- MCPDiscoverySource owns MCPProviders with finalizers. If child finalizer cleanup fails (e.g., Hangar core down), parent finalizer blocks indefinitely, blocking namespace deletion. **Prevention:** Do not explicitly delete children in finalizer; rely on Kubernetes garbage collection; set `blockOwnerDeletion: false`; add finalizer timeout.
+2. **42 bare excepts must be categorized before BLE001** -- Three categories: fault-barriers (background loops that MUST catch broadly), cleanup paths (narrow to specific exceptions), and bug-hiding (replace entirely). Uniform treatment crashes `BackgroundWorker._loop()` on first unhandled exception, permanently killing GC or health check workers.
 
-3. **Helm CRD upgrade gap** -- `helm upgrade` does NOT update CRDs from the `crds/` directory. Jumping from 0.2.0 to 0.10.0 means new CRD schemas are not applied. **Prevention:** Document explicit `kubectl apply -f crds/` step; consider pre-upgrade hook Job; ensure all new CRD fields have defaults.
+3. **Saga persistence breaks idempotency** -- `ProviderRecoverySaga.handle()` has side effects (incrementing counters, issuing commands) that are not idempotent. On restart replay, degraded providers get extra restart attempts, potentially exceeding `max_retries` immediately. Fix: track `last_event_id` per saga, set `_replaying` flag during replay to suppress command emission.
 
-4. **Status update conflicts (409)** -- Both MCPProvider controller and MCPProviderGroup controller access MCPProvider objects. Concurrent reads/writes cause 409 Conflict errors. **Prevention:** MCPProviderGroup must only READ MCPProvider status, never write to it; MCPProviderGroup updates only its OWN status subresource.
+4. **ProviderGroup._try_start_member() violates lock hierarchy** -- Acquires Provider lock (level 10) while holding ProviderGroup lock (level 11). This creates deadlock risk when combined with event handlers calling `group.report_success()` while holding Provider lock. Fix: release group lock before `ensure_ready()`, re-acquire after.
 
-5. **Authoritative mode deletes user-created MCPProviders** -- Discovery controller in authoritative mode deletes any MCPProvider not in its discovered set. **Prevention:** Only delete resources with the `mcp-hangar.io/discovery-source` label matching this source; never touch unlabeled resources.
+5. **Snapshot version mismatch causes silent data corruption** -- Snapshot save and event append are not in the same transaction. Concurrent operations cause version drift. Fix: save snapshots inside `EventStore.append()` lock scope, add version consistency check in `from_snapshot()`.
 
 ## Implications for Roadmap
 
-Based on research, the work naturally segments into 4 phases. Phase numbering continues from v0.9 (starting at Phase 5).
+Based on research, the 11 features group into 3 phases driven by priority, dependency ordering, and risk isolation.
 
-### Phase 5: Documentation Foundations
+### Phase 1: Safety Foundation (P0)
 
-**Rationale:** Fix broken links and org name references first because all new doc pages will link to existing pages. Broken foundations undermine all subsequent documentation work. This is low complexity, high impact, and unblocks everything else.
-**Delivers:** Clean, navigable documentation with no broken links; correct GitHub org references throughout; `mkdocs build --strict` passes; htmlproofer plugin integrated.
-**Addresses:** Fix 29 broken links (P0), stale org name (Pitfall 13), missing `docs/security/` directory.
-**Avoids:** Documentation cross-reference drift (Pitfall 12), org name inconsistency (Pitfall 13).
-**Stack:** mkdocs-htmlproofer-plugin 1.5.0, pyproject.toml docs dependency group.
+**Rationale:** P0 features prevent deadlocks, data loss, and security breaches. They have zero dependencies on each other. Exception hygiene must complete before saga persistence (Phase 2) because saga error handling depends on trustworthy exception propagation. Concurrency fixes must precede persistence work because persistence introduces new lock-holding paths.
 
-### Phase 6: Kubernetes Controllers
+**Delivers:** A codebase where locks are held correctly, exceptions are handled specifically, and discovery-sourced commands are validated against an allowlist. The foundation that all subsequent hardening features build on.
 
-**Rationale:** Both controllers are the highest-complexity, highest-risk items. They should be implemented together (they share patterns and infrastructure) but in sequence: MCPProviderGroup first (simpler, read-only aggregation), MCPDiscoverySource second (creates resources, more complex lifecycle). Controllers MUST land before documentation references them as working.
-**Delivers:** Fully functional MCPProviderGroup and MCPDiscoverySource controllers with integration tests; both registered in main.go; distinct finalizer names per controller; metrics emitting.
-**Addresses:** MCPProviderGroup controller (P0), MCPDiscoverySource controller (P0), controller tests (P1).
-**Avoids:** Infinite reconciliation loop (Pitfall 1), finalizer deadlock (Pitfall 2), status update conflicts (Pitfall 4), authoritative mode data loss (Pitfall 6), shared finalizer names (Pitfall 9).
-**Stack:** envtest, ginkgo/gomega (promote from indirect to direct deps), controller-runtime patterns.
+**Addresses features:**
 
-### Phase 7: Documentation Content
+- Concurrency safety (I/O-under-lock in `_start()`, `_refresh_tools()`, `ProviderGroup._try_start_member()`)
+- Exception hygiene (42 bare excepts categorized and fixed, BLE001 enabled)
+- Command injection prevention (`CommandValidator` wired into discovery pipeline)
 
-**Rationale:** New reference and guide pages depend on both clean link infrastructure (Phase 5) and working controllers (Phase 6, for accurate K8s documentation). Write docs after controllers exist to avoid documenting unimplemented features (Pitfall 7).
-**Delivers:** Configuration Reference, MCP Tools Reference, Provider Groups Guide, Facade API Guide; updated mkdocs.yml nav; mkdocstrings integration for Python API docs.
-**Addresses:** Configuration Reference (P0), MCP Tools Reference (P0), Provider Groups Guide (P1), Facade API Guide (P1).
-**Avoids:** Referencing features before controllers exist (Pitfall 7), mkdocstrings Go confusion (Pitfall 8).
-**Stack:** mkdocstrings-python 2.0.3 for Facade API and Tools Reference pages.
+**Avoids pitfalls:**
 
-### Phase 8: Helm Chart Maturity
+- Pitfall 1 (TOCTOU races) -- restructure `_refresh_tools()` to separate lock cycles
+- Pitfall 2 (`_start()` blocking) -- use `INITIALIZING` state guard + `threading.Event`
+- Pitfall 3 (crash loops from blind except removal) -- categorize before enabling BLE001
+- Pitfall 4 (command injection) -- validate at discovery/registration time, not launch time
+- Pitfall 10 (lock hierarchy violation) -- release group lock before `ensure_ready()`
 
-**Rationale:** Helm chart sync is low complexity but depends on controllers being finalized (CRDs may need regeneration, chart templates reference controller config). NOTES.txt should include accurate CRD upgrade instructions informed by actual upgrade testing. Helm tests validate the full stack.
-**Delivers:** Both charts at v0.10.0; NOTES.txt with post-install instructions and CRD upgrade guidance; Helm test templates; CRDs regenerated if needed; chart linting passes.
-**Addresses:** Helm version sync (P0), NOTES.txt (P1), Helm test templates (P1).
-**Avoids:** CRD field breakage on upgrade (Pitfall 3), values.yaml breaking changes (Pitfall 10).
-**Stack:** helm-unittest 1.0.3, chart-testing 3.14.0.
+**Build order within phase:**
+
+1. Exception hygiene audit (categorize 42 catches, lowest implementation risk)
+2. StdioClient race fix (register pending before write, small and focused)
+3. Provider lock restructuring (`_start()`, `_refresh_tools()`, `ProviderGroup._try_start_member()`)
+4. Command validator (new domain component + discovery pipeline wiring)
+
+### Phase 2: State Survival (P1)
+
+**Rationale:** These ensure state survives restarts. Saga persistence is the highest-complexity feature in the milestone and benefits from maximum iteration time. Circuit breaker persistence is simpler and piggybacks on the existing `ProviderSnapshot` infrastructure. Both share SQLite patterns (same `MigrationRunner`, same connection factory).
+
+**Delivers:** Sagas checkpoint after each step and resume on restart. Circuit breaker state persists in provider snapshots. No more silent state loss on process restart.
+
+**Addresses features:**
+
+- Saga persistence with checkpoint/resume
+- Circuit breaker state persistence
+
+**Avoids pitfalls:**
+
+- Pitfall 6 (saga idempotency) -- design idempotency mechanism BEFORE implementing persistence; track `last_event_id`, use `_replaying` flag
+- Pitfall 7 (stale circuit breaker state) -- persist failure count only, not timing; health-check on restore before honoring persisted OPEN state
+
+**Build order within phase:**
+
+1. `ISagaStore` contract (domain layer interface)
+2. `SQLiteSagaStore` implementation + schema migration
+3. `SagaManager` checkpoint/restore logic
+4. Saga idempotency guards on `EventTriggeredSaga` implementations
+5. Circuit breaker in `ProviderSnapshot` (extend existing dataclass)
+6. Bootstrap wiring for both
+
+**Depends on Phase 1:** Exception hygiene must be complete so saga error handling is trustworthy. Lock restructuring must be complete so saga persistence does not introduce new I/O-under-lock.
+
+### Phase 3: Operational Hardening (P2)
+
+**Rationale:** P2 features improve operational quality without preventing data loss or security breaches. They can be built in any order. Testing and typing sweeps should come last to avoid merge conflicts and to exercise hardened code paths.
+
+**Delivers:** Fast startup via snapshots, intelligent health check scheduling, transport-agnostic rate limiting, resilient Docker discovery, improved type safety, and property-based testing of the core state machine.
+
+**Addresses features:**
+
+- Health check backoff with jitter
+- Event store snapshots for fast aggregate replay
+- Rate limiter middleware (transport-agnostic)
+- Typing and code quality (`py.typed`, mypy strictness)
+- Testing gaps (property-based state machine tests)
+- Docker discovery resilience (retry/reconnect)
+
+**Avoids pitfalls:**
+
+- Pitfall 5 (snapshot version mismatch) -- save snapshots inside `EventStore.append()` lock scope
+- Pitfall 8 (backoff-on-backoff) -- document that health backoff + saga backoff creates 120s max combined delay; share time source
+- Pitfall 9 (rate limiter migration) -- atomic changeset: add middleware + remove old `check_rate_limit()` in same change
+- Pitfall 11 (Docker discovery duplicates) -- track containers by ID + fingerprint across reconnections
+- Pitfall 12 (snapshot value objects) -- use value object constructors in `from_snapshot()`
+- Pitfall 14 (`py.typed` exposure) -- fix all mypy errors BEFORE adding marker
+
+**Build order within phase:**
+
+1. Health check backoff (self-contained, high operational value)
+2. Event store snapshots (mostly completing existing code)
+3. Rate limiter middleware (refactoring existing code to application layer)
+4. Docker discovery resilience (isolated single-file change)
+5. Typing and code quality (sweep after all other code changes)
+6. Property-based testing (last -- tests the hardened code)
 
 ### Phase Ordering Rationale
 
-- **Phase 5 first** because broken links and wrong org name are foundational -- fixing them is a prerequisite for all doc work and takes minimal effort.
-- **Phase 6 before Phase 7** because writing documentation about controllers that don't exist yet leads to inaccuracy (Pitfall 7) and wasted rework. Controllers inform the docs, not the other way around.
-- **Phase 8 last** because Helm charts depend on finalized CRD schemas (from Phase 6) and should include documentation links (from Phase 7) in NOTES.txt. Chart version sync without controller implementation would be cosmetic.
-- **Phases 5 and 6 could partially overlap** since doc fixes and controller implementation are independent codepaths (Python/MkDocs vs. Go/operator). The roadmapper may choose to parallelize.
+- **P0 first** because concurrency and security fixes are prerequisites for everything else. Saga persistence under broken locks or with swallowed exceptions is worse than no persistence.
+- **P1 second** because state survival is the highest-value production improvement. Ephemeral saga and circuit breaker state is the biggest operational risk after P0 safety.
+- **P2 third** because these are improvements, not fixes. They make the system better but don't prevent data loss or security breaches.
+- **Within each phase**, build order follows dependency chains: contracts before implementations, audits before enforcement, infrastructure before wiring.
+- **Testing and typing last** because they catch regressions in hardened code and avoid merge conflicts during active development.
 
 ### Research Flags
 
 Phases likely needing deeper research during planning:
 
-- **Phase 6 (Kubernetes Controllers):** The MCPProviderGroup cross-resource watch pattern and MCPDiscoverySource authoritative mode are the most complex items. The existing MCPProvider controller provides a template, but the cross-controller interaction patterns (Pitfalls 1, 2, 4) need careful task-level design. Research the envtest setup for multi-controller scenarios.
+- **Phase 1, Concurrency safety:** The `_start()` restructuring is the highest-risk change in the milestone. The interaction between `threading.Event`, `INITIALIZING` state guard, and the existing `ensure_ready()` callers needs detailed design. The `_refresh_tools()` restructuring to separate lock cycles is non-trivial because it changes the `invoke_tool()` control flow.
+- **Phase 2, Saga persistence:** Idempotency design for `EventTriggeredSaga` vs step-based `Saga` requires two different persistence models. Step-based sagas need checkpoint-resume; event-triggered sagas need event-position-tracking. The interaction between `SagaManager._handle_event()` and the new persistence layer needs careful sequencing design.
+- **Phase 3, Event store snapshots:** The snapshot version coordination gap (snapshot save not transactional with event append) needs a concrete design. The existing `EventStoreSnapshot` class and `ProviderSnapshot` dataclass partially overlap -- need to clarify which abstraction owns what.
 
-Phases with standard patterns (skip research-phase):
+Phases with standard patterns (skip detailed research):
 
-- **Phase 5 (Documentation Foundations):** Straightforward link fixing and plugin configuration. Well-documented MkDocs patterns.
-- **Phase 7 (Documentation Content):** Standard MkDocs content authoring. mkdocstrings is already configured.
-- **Phase 8 (Helm Chart Maturity):** Standard Helm chart practices. helm-unittest has clear documentation.
+- **Phase 1, Exception hygiene:** Well-defined audit + categorize + fix pattern. No design decisions needed.
+- **Phase 1, Command injection prevention:** Wire existing `InputValidator` into discovery pipeline. Straightforward.
+- **Phase 2, Circuit breaker persistence:** Extend `ProviderSnapshot` with 3 fields. Simple, low-risk.
+- **Phase 3, Health check backoff:** Add jitter to existing formula, make `BackgroundWorker` state-aware. Well-understood patterns.
+- **Phase 3, Rate limiter middleware:** Move enforcement from server to application layer. Standard middleware pattern.
+- **Phase 3, Docker discovery resilience:** Add retry with backoff to single file. Standard retry pattern.
+- **Phase 3, Typing/code quality:** Mechanical modernization sweep.
+- **Phase 3, Property-based testing:** Hypothesis `RuleBasedStateMachine` is well-documented and already used in the codebase.
 
 ## Confidence Assessment
 
 | Area | Confidence | Notes |
 |------|------------|-------|
-| Stack | HIGH | All dependencies verified against project files (go.mod, pyproject.toml, mkdocs.yml). No speculative recommendations -- everything is either already in the project or has verified versions on PyPI/GitHub. |
-| Features | HIGH | Features derived from direct codebase gap analysis. Cross-referenced with established patterns from cert-manager, Prometheus Operator, ArgoCD. |
-| Architecture | HIGH | Controller patterns are standard controller-runtime. Existing MCPProvider controller provides proven template. All CRD types already defined. |
-| Pitfalls | HIGH | Pitfalls identified from direct code analysis (specific line numbers referenced) and well-known Kubernetes operator failure modes. Helm CRD upgrade behavior is documented Helm behavior. |
+| Stack | HIGH | All findings from direct codebase analysis of `pyproject.toml`, existing infrastructure modules. Zero new dependencies is verified. |
+| Features | HIGH | All 11 features traced through existing code. Gaps identified at specific file/line level. Complexity assessments based on actual code state. |
+| Architecture | HIGH | All integration points verified against existing layer structure. Lock hierarchy, event flow, and bootstrap wiring confirmed. |
+| Pitfalls | HIGH | All 16 pitfalls identified from actual code patterns, not theoretical concerns. Lock hierarchy violation verified in `ProviderGroup`. Bare except count (42) from grep. |
 
 **Overall confidence:** HIGH
 
+All research based on direct codebase analysis of 20+ source files across all architectural layers. No reliance on external documentation for implementation specifics. All existing code paths traced.
+
 ### Gaps to Address
 
-- **CRD schema evolution:** The jump from 0.2.0 to 0.10.0 may have introduced CRD field changes that weren't tracked. During Phase 8, verify that existing CRD schemas in the `crds/` directory match the current Go types by running `controller-gen`. If they diverge, existing cluster resources could fail validation.
-- **HangarClient group methods:** The ARCHITECTURE.md notes that `pkg/hangar/client.go` "may need RegisterGroup/SyncGroup methods." This is unresolved -- Phase 6 planning should determine if MCPProviderGroup needs to sync state with the Python core or if it's purely a Kubernetes-level aggregation.
-- **Discovery strategy completeness:** Four discovery strategies are specified (Namespace, ConfigMap, Annotations, ServiceDiscovery) but their exact behaviors need to be derived from the Python core's existing discovery implementations. Phase 6 planning should cross-reference `packages/core/mcp_hangar/infrastructure/discovery/` with the Go types.
-- **mkdocstrings integration depth:** The MCP Tools Reference page plans to use mkdocstrings to auto-generate from Python docstrings. The quality depends on existing docstring coverage in `server/tools/`. If docstrings are sparse, manual documentation may be needed instead.
+- **Snapshot version coordination mechanism:** The exact design for transactional snapshot-save-with-event-append needs work during Phase 3 planning. Three options identified (compare-and-snapshot, save-inside-append-lock, post-replay verification) but no recommendation locked in.
+- **`EventTriggeredSaga` vs `Saga` persistence models:** These are fundamentally different (event-position-tracking vs checkpoint-resume) but will share the same `ISagaStore` interface. The interface design needs to accommodate both without leaking implementation details.
+- **Health check backoff + saga backoff interaction:** The combined worst-case is 120s recovery time. Whether this is acceptable or whether a shared time source is needed requires operator input or a documented SLA decision.
+- **`ProviderGroup._try_start_member()` fix scope:** The lock hierarchy violation fix (release group lock before `ensure_ready()`) may reveal other call paths with the same pattern (`start_all()` has the same issue). A full audit of `ProviderGroup` lock usage is needed during Phase 1 planning.
+- **Rate limiter key scheme migration:** Keeping identical keys during middleware migration is recommended, but the exact `key_extractor: Callable` design needs specification during Phase 3 planning.
 
 ## Sources
 
 ### Primary (HIGH confidence)
 
-- Project source code (go.mod, pyproject.toml, mkdocs.yml, mcpprovider_controller.go, CRD types) -- exact versions, patterns, and gaps
-- controller-runtime documentation and Kubebuilder book -- canonical patterns for Watches, MapFunc, owner references
-- Helm documentation -- CRD lifecycle behavior during install vs. upgrade
+- **Direct codebase analysis:** `packages/core/mcp_hangar/` -- 20+ source files across domain, application, infrastructure, and server layers
+- **`CLAUDE.md`:** Architecture constraints, lock hierarchy rules, forbidden patterns, layer dependencies
+- **`.planning/PROJECT.md`:** Milestone context, feature priorities, design constraints
+- **`pyproject.toml`:** Current dependencies, ruff config, mypy config, existing dev dependencies
+- **`infrastructure/persistence/database_common.py`:** `SQLiteConnectionFactory`, `MigrationRunner`, `SQLiteConfig`
+- **`infrastructure/lock_hierarchy.py`:** `TrackedLock`, `LockLevel` enum, lock ordering rules
+- **`domain/model/provider.py`:** Provider aggregate, state machine, `VALID_TRANSITIONS`, lock-holding paths
+- **`infrastructure/saga_manager.py`:** `SagaManager`, `SagaContext.to_dict()`, in-memory-only storage
+- **`domain/model/circuit_breaker.py`:** `CircuitBreaker`, `to_dict()`, `threading.Lock` (not TrackedLock)
+- **`domain/security/input_validator.py`:** `InputValidator`, allowlist/blocklist, `validate_command()`
+- **`domain/security/rate_limiter.py`:** `InMemoryRateLimiter`, `TokenBucket`, global singleton anti-pattern
+- **Python 3.11 stdlib documentation:** `sqlite3`, `threading`, `json`, `dataclasses` capabilities
 
 ### Secondary (MEDIUM confidence)
 
-- GitHub releases for helm-unittest v1.0.3, chart-testing v3.14.0 -- version verification
-- Patterns from cert-manager, Prometheus Operator, ArgoCD, Istio -- industry-standard operator patterns
+- **DDD/CQRS/Event Sourcing patterns** (Vaughn Vernon, Greg Young) -- established patterns applied to architecture decisions
+- **Hypothesis documentation** -- `RuleBasedStateMachine` API and testing patterns
 
 ---
-*Research completed: 2026-02-28*
+
+*Research completed: 2026-03-08*
 *Ready for roadmap: yes*
