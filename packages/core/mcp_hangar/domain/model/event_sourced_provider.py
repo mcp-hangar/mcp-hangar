@@ -49,6 +49,7 @@ class ProviderSnapshot:
     tool_names: list[str]
     last_used: float
     meta: dict[str, Any]
+    circuit_breaker_state: dict[str, Any] | None = None
 
     def to_dict(self) -> dict[str, Any]:
         """Convert to dictionary for serialization."""
@@ -72,6 +73,7 @@ class ProviderSnapshot:
             "tool_names": self.tool_names,
             "last_used": self.last_used,
             "meta": self.meta,
+            "circuit_breaker_state": self.circuit_breaker_state,
         }
 
     @classmethod
@@ -97,6 +99,7 @@ class ProviderSnapshot:
             tool_names=d.get("tool_names", []),
             last_used=d.get("last_used", 0.0),
             meta=d.get("meta", {}),
+            circuit_breaker_state=d.get("circuit_breaker_state"),
         )
 
 

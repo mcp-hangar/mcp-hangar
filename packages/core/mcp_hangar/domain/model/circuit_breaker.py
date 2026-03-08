@@ -13,6 +13,7 @@ from dataclasses import dataclass
 from enum import Enum
 import threading
 import time
+from typing import Any
 
 
 class CircuitState(Enum):
@@ -139,7 +140,7 @@ class CircuitBreaker:
         self._failure_count = 0
         self._opened_at = None
 
-    def to_dict(self) -> dict:
+    def to_dict(self) -> dict[str, Any]:
         """Get circuit breaker status as dictionary."""
         with self._lock:
             return {
@@ -148,4 +149,29 @@ class CircuitBreaker:
                 "failure_count": self._failure_count,
                 "failure_threshold": self._config.failure_threshold,
                 "reset_timeout_s": self._config.reset_timeout_s,
+                "opened_at": self._opened_at,
             }
+
+    @classmethod
+    def from_dict(cls, d: dict[str, Any]) -> "CircuitBreaker":
+        """Restore circuit breaker from a serialized dictionary.
+
+        Reconstructs a CircuitBreaker with its full state including
+        open/closed status, failure count, and opened_at timestamp.
+        Missing fields use safe defaults (closed state, zero failures).
+
+        Args:
+            d: Dictionary from to_dict(), or partial dict with safe defaults.
+
+        Returns:
+            CircuitBreaker instance with restored state.
+        """
+        config = CircuitBreakerConfig(
+            failure_threshold=d.get("failure_threshold", 10),
+            reset_timeout_s=d.get("reset_timeout_s", 60.0),
+        )
+        cb = cls(config=config)
+        cb._state = CircuitState(d.get("state", "closed"))
+        cb._failure_count = d.get("failure_count", 0)
+        cb._opened_at = d.get("opened_at")
+        return cb
