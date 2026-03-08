@@ -19,6 +19,7 @@ from mcp_hangar.logging_config import get_logger
 
 if TYPE_CHECKING:
     from ..application.commands import Command
+    from ..domain.security.rate_limiter import RateLimiter
 
 logger = get_logger(__name__)
 
@@ -148,6 +149,46 @@ class CommandBus:
     def has_handler(self, command_type: type) -> bool:
         """Check if a handler is registered for the command type."""
         return command_type in self._handlers
+
+
+class RateLimitMiddleware(CommandBusMiddleware):
+    """Middleware that enforces rate limiting on all commands.
+
+    Checks rate limit before allowing command dispatch. Raises
+    RateLimitExceeded if the rate limit is exceeded.
+    """
+
+    def __init__(self, rate_limiter: "RateLimiter"):
+        """Initialize with rate limiter.
+
+        Args:
+            rate_limiter: Rate limiter instance to check against.
+        """
+        self._rate_limiter = rate_limiter
+
+    def __call__(self, command: "Command", next_handler: Callable[["Command"], Any]) -> Any:
+        """Check rate limit before dispatching command."""
+        # Use command type name as rate limit key for granularity
+        key = type(command).__name__
+        result = self._rate_limiter.consume(key)
+
+        if not result.allowed:
+            # Update Prometheus metrics
+            try:
+                from mcp_hangar import metrics as prometheus_metrics
+
+                prometheus_metrics.RATE_LIMIT_HITS_TOTAL.inc(endpoint=key)
+            except Exception:  # fault-barrier: metrics failure must not block rate limit enforcement
+                pass
+
+            from mcp_hangar.domain.exceptions import RateLimitExceeded
+
+            raise RateLimitExceeded(
+                limit=result.limit,
+                window_seconds=int(1.0 / result.limit) if result.limit else 1,
+            )
+
+        return next_handler(command)
 
 
 # Global command bus instance

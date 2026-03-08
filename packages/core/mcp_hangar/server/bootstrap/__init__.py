@@ -229,6 +229,12 @@ def bootstrap(
         burst_size=runtime.rate_limit_config.burst_size,
     )
 
+    # Add rate limit middleware to command bus
+    from ...infrastructure.command_bus import RateLimitMiddleware
+
+    rate_limit_mw = RateLimitMiddleware(rate_limiter=runtime.rate_limiter)
+    runtime.command_bus.add_middleware(rate_limit_mw)
+
     # Initialize authentication and authorization
     auth_config = parse_auth_config(full_config.get("auth"))
     auth_components = bootstrap_auth(

@@ -4,6 +4,8 @@ This module provides validation functions that use the ApplicationContext
 for accessing rate limiter and security handler, following DIP.
 """
 
+import warnings
+
 from .. import metrics as prometheus_metrics
 from ..application.mcp.tooling import ToolErrorPayload
 from ..domain.exceptions import RateLimitExceeded
@@ -19,9 +21,18 @@ from .context import get_context
 def check_rate_limit(key: str = "global") -> None:
     """Check rate limit and raise exception if exceeded.
 
+    .. deprecated::
+        Rate limiting is now enforced at the command bus middleware layer
+        via RateLimitMiddleware. This function will be removed in a future version.
+
     Gets rate limiter from application context (DIP).
     Updates Prometheus metrics when rate limit is hit.
     """
+    warnings.warn(
+        "check_rate_limit() is deprecated. Rate limiting is enforced at command bus middleware.",
+        DeprecationWarning,
+        stacklevel=2,
+    )
     ctx = get_context()
     result = ctx.rate_limiter.consume(key)
     if not result.allowed:
