@@ -31,8 +31,8 @@
 
 **Milestone Goal:** Harden MCP Hangar for production by fixing concurrency hazards, cleaning up exception handling, persisting critical state across restarts, and improving operational resilience with bounded startup, intelligent health checks, transport-agnostic rate limiting, and strict typing.
 
-- [ ] **Phase 8: Safety Foundation** - Fix concurrency hazards, clean up exception handling, validate discovery-sourced commands (3 plans)
-- [x] **Phase 9: State Survival** - Persist saga checkpoints and circuit breaker state across restarts
+- [x] **Phase 8: Safety Foundation** - Fix concurrency hazards, clean up exception handling, validate discovery-sourced commands (3 plans) -- completed 2026-03-08
+- [x] **Phase 9: State Survival** - Persist saga checkpoints and circuit breaker state across restarts -- completed 2026-03-08
 - [ ] **Phase 10: Operational Hardening** - Event store snapshots, health check backoff, rate limiter middleware, Docker resilience, property-based testing, typing strictness
 
 ## Phase Details
@@ -85,6 +85,15 @@ Plans:
   3. Rate limiting is enforced at the command bus middleware layer, covering stdio, HTTP, and programmatic callers uniformly regardless of transport
   4. Docker discovery source reconnects automatically with retry and exponential backoff when the Docker daemon connection is lost
   5. Property-based tests using Hypothesis RuleBasedStateMachine verify that all Provider state transition sequences maintain invariants, and the package includes py.typed with incrementally-enabled mypy strictness and all resulting type errors fixed
+**Plans**: 6 plans (3 waves)
+Plans:
+
+- [x] 10-01-PLAN.md -- Health check backoff with jitter + state-aware BackgroundWorker scheduling (RESL-01, RESL-02) -- completed 2026-03-08
+- [ ] 10-02-PLAN.md -- Event store snapshots + aggregate replay from snapshots (PERS-04, PERS-05)
+- [ ] 10-03-PLAN.md -- Rate limiter command bus middleware (SECR-02)
+- [ ] 10-04-PLAN.md -- Docker discovery resilience (RESL-03)
+- [ ] 10-05-PLAN.md -- Property-based testing with Hypothesis RuleBasedStateMachine (TEST-01)
+- [ ] 10-06-PLAN.md -- Typing strictness + py.typed marker (QUAL-01)
 
 ## Progress
 
@@ -102,8 +111,8 @@ Phases execute in numeric order: 8 -> 9 -> 10
 | 7. Helm Chart Maturity | v0.10 | 1/1 | Complete | 2026-03-01 |
 | 8. Safety Foundation | v1.0 | 3/3 | Complete | 2026-03-08 |
 | 9. State Survival | v1.0 | 3/3 | Complete | 2026-03-08 |
-| 10. Operational Hardening | v1.0 | 0/TBD | Not started | - |
+| 10. Operational Hardening | v1.0 | 1/6 | In Progress | - |
 
 ---
 *Created: 2026-02-15*
-*Last updated: 2026-03-08 -- v1.0 roadmap created*
+*Last updated: 2026-03-08 -- Phase 10 plan 10-01 complete*

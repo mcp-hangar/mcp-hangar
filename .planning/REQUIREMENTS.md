@@ -33,8 +33,8 @@ Requirements for v1.0 Production Hardening. Each maps to roadmap phases.
 
 ### Resilience
 
-- [ ] **RESL-01**: Health check backoff uses exponential formula with jitter, preventing thundering herd on multi-provider recovery
-- [ ] **RESL-02**: `BackgroundWorker` schedules health checks based on provider state -- normal interval for READY, backoff with jitter for DEGRADED, longer ceiling for DEAD, skip for COLD
+- [x] **RESL-01**: Health check backoff uses exponential formula with jitter, preventing thundering herd on multi-provider recovery
+- [x] **RESL-02**: `BackgroundWorker` schedules health checks based on provider state -- normal interval for READY, backoff with jitter for DEGRADED, longer ceiling for DEAD, skip for COLD
 - [ ] **RESL-03**: Docker discovery source reconnects automatically with retry and exponential backoff when the Docker daemon connection is lost
 
 ### Testing & Code Quality
@@ -96,8 +96,8 @@ Which phases cover which requirements. Updated during roadmap creation.
 | PERS-03 | Phase 9 | Complete |
 | PERS-04 | Phase 10 | Pending |
 | PERS-05 | Phase 10 | Pending |
-| RESL-01 | Phase 10 | Pending |
-| RESL-02 | Phase 10 | Pending |
+| RESL-01 | Phase 10 | Complete |
+| RESL-02 | Phase 10 | Complete |
 | RESL-03 | Phase 10 | Pending |
 | TEST-01 | Phase 10 | Pending |
 | QUAL-01 | Phase 10 | Pending |

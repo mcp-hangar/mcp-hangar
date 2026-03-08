@@ -7,8 +7,8 @@ last_updated: "2026-03-08"
 progress:
   total_phases: 10
   completed_phases: 9
-  total_plans: 19
-  completed_plans: 19
+  total_plans: 25
+  completed_plans: 20
 ---
 
 # Project State
@@ -18,17 +18,17 @@ progress:
 See: .planning/PROJECT.md (updated 2026-03-08)
 
 **Core value:** Reliable, observable MCP provider management with production-grade lifecycle control
-**Current focus:** Phase 9 - State Survival
+**Current focus:** Phase 10 - Operational Hardening
 
 ## Current Position
 
 Milestone: v1.0 Production Hardening
-Phase: 9 of 10 (State Survival) -- COMPLETE
-Plan: 3 of 3 in current phase (all complete)
-Status: Phase 9 complete -- ready for Phase 10
-Last activity: 2026-03-08 -- Completed plan 09-03 (idempotency filter + bootstrap wiring)
+Phase: 10 of 10 (Operational Hardening) -- IN PROGRESS (6 plans, 3 waves)
+Plan: 1 of 6 in current phase (10-01 complete)
+Status: Executing Phase 10 -- plan 10-01 complete
+Last activity: 2026-03-08 -- Completed 10-01 (health check jitter + state-aware scheduling)
 
-Progress: [█████████░] 95% milestone (9/10 phases, 19/19 plans)
+Progress: [████████░░] 80% milestone (9/10 phases, 20/25 plans)
 
 ## Performance Metrics
 
@@ -48,6 +48,8 @@ Progress: [█████████░] 95% milestone (9/10 phases, 19/19 pla
 
 - Plans completed: 3 (08-01, 08-02, 08-03) -- Phase 8 complete
 - Phase 9: 3/3 plans complete (09-01, 09-02, 09-03) -- Phase 9 complete
+- Phase 10: 1/6 plans complete (10-01)
+- 10-01 duration: ~8 min
 - 09-01 duration: ~16 min
 - 09-02 duration: ~7 min
 - 09-03 duration: ~9 min
@@ -76,6 +78,8 @@ All v0.9 and v0.10 decisions archived in PROJECT.md Key Decisions table.
 - CB state saved at shutdown only -- avoids write amplification, sufficient for cross-restart persistence
 - Saga state store reused for CB persistence under saga_type=circuit_breaker -- no new tables needed
 - init_saga() returns SagaStateStore so ApplicationContext can reference it for shutdown CB save
+- jitter_factor default 0.1 (10%) for HealthTracker backoff -- same pattern as retry.py
+- BackgroundWorker keeps time.sleep(interval_s) as base tick rate with per-provider_next_check_at timestamps for skip logic
 
 ### Pending Todos
 
@@ -84,10 +88,10 @@ None.
 ### Blockers/Concerns
 
 - [Phase 9]: RESOLVED -- Saga idempotency implemented with is_processed()/mark_processed() guards
-- [Phase 10]: Snapshot version coordination gap -- snapshot save not transactional with event append, needs concrete design during planning
+- [Phase 10]: RESOLVED -- Snapshot version coordination addressed in 10-02 plan: save_snapshot inside_lock scope for version consistency
 
 ## Session Continuity
 
 Last session: 2026-03-08
-Stopped at: Completed 09-03-PLAN.md (idempotency filter + bootstrap wiring) -- Phase 9 complete
-Resume with: /gsd-execute-phase 10 (operational hardening)
+Stopped at: Completed 10-01-PLAN.md (health check jitter + state-aware scheduling)
+Resume with: /gsd-execute-phase 10 (operational hardening) -- continue with 10-02
