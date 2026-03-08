@@ -15,7 +15,7 @@ Example:
     try:
         result = invoke_tool(...)
         span.end_success(result)
-    except Exception as e:
+    except Exception as e:  # fault-barrier: docstring example
         span.end_error(e)
 
 Note:

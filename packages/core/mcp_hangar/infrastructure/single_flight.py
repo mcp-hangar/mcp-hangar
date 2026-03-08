@@ -129,7 +129,7 @@ class SingleFlight:
             state.exception = None
             logger.debug("single_flight_completed", key=key)
             return result
-        except Exception as e:
+        except Exception as e:  # infra-boundary: records exception for waiting callers, then re-raises
             state.exception = e
             logger.debug("single_flight_failed", key=key, error=str(e))
             raise

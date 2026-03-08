@@ -123,7 +123,7 @@ class SQLiteKnowledgeBase(IKnowledgeBase):
             logger.info("sqlite_kb_initialized", path=self._db_path)
             return True
 
-        except Exception as e:
+        except Exception as e:  # infra-boundary: returns False on any init failure
             logger.error("sqlite_kb_init_failed", error=str(e))
             return False
 
@@ -205,7 +205,7 @@ class SQLiteKnowledgeBase(IKnowledgeBase):
                     logger.debug("cache_hit", provider=provider, tool=tool)
                     return json.loads(row[0])
                 return None
-        except Exception as e:
+        except Exception as e:  # infra-boundary: graceful degradation, returns fallback on DB error
             logger.warning("cache_get_failed", error=str(e))
             return None
 
@@ -236,7 +236,7 @@ class SQLiteKnowledgeBase(IKnowledgeBase):
                 )
                 await db.commit()
                 return True
-        except Exception as e:
+        except Exception as e:  # infra-boundary: graceful degradation, returns fallback on DB error
             logger.warning("cache_set_failed", error=str(e))
             return False
 
@@ -254,7 +254,7 @@ class SQLiteKnowledgeBase(IKnowledgeBase):
                     cursor = await db.execute("DELETE FROM tool_cache")
                 await db.commit()
                 return cursor.rowcount
-        except Exception as e:
+        except Exception as e:  # infra-boundary: graceful degradation, returns fallback on DB error
             logger.warning("cache_invalidate_failed", error=str(e))
             return 0
 
@@ -267,7 +267,7 @@ class SQLiteKnowledgeBase(IKnowledgeBase):
                 await db.commit()
                 logger.info("cache_cleanup", deleted=cursor.rowcount)
                 return cursor.rowcount
-        except Exception as e:
+        except Exception as e:  # infra-boundary: graceful degradation, returns fallback on DB error
             logger.warning("cache_cleanup_failed", error=str(e))
             return 0
 
@@ -297,7 +297,7 @@ class SQLiteKnowledgeBase(IKnowledgeBase):
                 )
                 await db.commit()
                 return True
-        except Exception as e:
+        except Exception as e:  # infra-boundary: graceful degradation, returns fallback on DB error
             logger.warning("audit_log_failed", error=str(e))
             return False
 
@@ -360,7 +360,7 @@ class SQLiteKnowledgeBase(IKnowledgeBase):
                     )
                     for row in rows
                 ]
-        except Exception as e:
+        except Exception as e:  # infra-boundary: graceful degradation, returns fallback on DB error
             logger.warning("audit_query_failed", error=str(e))
             return []
 
@@ -396,7 +396,7 @@ class SQLiteKnowledgeBase(IKnowledgeBase):
                         "avg_duration_ms": row[5],
                     }
                 return {}
-        except Exception as e:
+        except Exception as e:  # infra-boundary: graceful degradation, returns fallback on DB error
             logger.warning("audit_stats_failed", error=str(e))
             return {}
 
@@ -415,7 +415,7 @@ class SQLiteKnowledgeBase(IKnowledgeBase):
                 )
                 await db.commit()
                 return True
-        except Exception as e:
+        except Exception as e:  # infra-boundary: graceful degradation, returns fallback on DB error
             logger.warning("record_state_failed", error=str(e))
             return False
 
@@ -445,7 +445,7 @@ class SQLiteKnowledgeBase(IKnowledgeBase):
                     )
                     for row in rows
                 ]
-        except Exception as e:
+        except Exception as e:  # infra-boundary: graceful degradation, returns fallback on DB error
             logger.warning("get_state_history_failed", error=str(e))
             return []
 
@@ -469,7 +469,7 @@ class SQLiteKnowledgeBase(IKnowledgeBase):
                 )
                 await db.commit()
                 return True
-        except Exception as e:
+        except Exception as e:  # infra-boundary: graceful degradation, returns fallback on DB error
             logger.warning("record_metric_failed", error=str(e))
             return False
 
@@ -517,6 +517,6 @@ class SQLiteKnowledgeBase(IKnowledgeBase):
                     )
                     for row in rows
                 ]
-        except Exception as e:
+        except Exception as e:  # infra-boundary: graceful degradation, returns fallback on DB error
             logger.warning("get_metrics_failed", error=str(e))
             return []

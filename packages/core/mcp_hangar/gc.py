@@ -270,11 +270,11 @@ class ConfigReloadWorker:
             self._observer.schedule(handler, str(watch_dir), recursive=False)
             self._observer.start()
             logger.info("config_file_watcher_started", watch_dir=str(watch_dir))
-        except Exception as e:
+        except Exception as e:  # fault-barrier: watchdog init failure must not crash config reload worker
             logger.error(
                 "watchdog_start_failed_falling_back_to_polling",
                 error=str(e),
-            )  # fault-barrier: watchdog init failure must not crash config reload worker
+            )
             self._start_polling()
 
     def _start_polling(self):

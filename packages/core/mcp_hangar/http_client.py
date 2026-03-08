@@ -394,7 +394,7 @@ class HttpClient:
             prometheus_metrics.HTTP_ERRORS_TOTAL.inc(provider=provider_label, error_type="connection_refused")
             raise ClientError(f"connection_failed: {e}") from e
 
-        except Exception as e:
+        except Exception as e:  # infra-boundary: unexpected HTTP errors wrapped as ClientError
             duration_s = time.time() - start_time
             duration_ms = duration_s * 1000
             logger.error(
@@ -514,7 +514,7 @@ class HttpClient:
 
         except TimeoutError:
             raise
-        except Exception as e:
+        except Exception as e:  # infra-boundary: SSE errors wrapped as JSON-RPC error response
             logger.error("http_client_sse_error", request_id=request_id, error=str(e))
             return {
                 "error": {
@@ -590,7 +590,7 @@ class HttpClient:
         # Close httpx client
         try:
             self._client.close()
-        except Exception as e:
+        except Exception as e:  # fault-barrier: close cleanup must not propagate
             logger.debug("http_client_close_error", error=str(e))
 
         # Clean up pending requests

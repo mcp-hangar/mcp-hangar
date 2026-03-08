@@ -180,7 +180,7 @@ class SQLiteProviderConfigRepository:
 
         except ConcurrentModificationError:
             raise
-        except Exception as e:
+        except Exception as e:  # infra-boundary: re-raises as PersistenceError
             logger.error(f"Failed to save provider config: {e}")
             raise PersistenceError(f"Failed to save provider config: {e}") from e
 
@@ -207,7 +207,7 @@ class SQLiteProviderConfigRepository:
                 config_data = json.loads(row[0])
                 return ProviderConfigSnapshot.from_dict(config_data)
 
-        except Exception as e:
+        except Exception as e:  # infra-boundary: re-raises as PersistenceError
             logger.error(f"Failed to get provider config: {e}")
             raise PersistenceError(f"Failed to get provider config: {e}") from e
 
@@ -227,13 +227,13 @@ class SQLiteProviderConfigRepository:
                     try:
                         config_data = json.loads(row[0])
                         configs.append(ProviderConfigSnapshot.from_dict(config_data))
-                    except Exception as e:
+                    except Exception as e:  # infra-boundary: skip malformed config entry
                         logger.warning(f"Failed to deserialize config: {e}")
                         continue
 
                 return configs
 
-        except Exception as e:
+        except Exception as e:  # infra-boundary: re-raises as PersistenceError
             logger.error(f"Failed to get all provider configs: {e}")
             raise PersistenceError(f"Failed to get all provider configs: {e}") from e
 
@@ -264,7 +264,7 @@ class SQLiteProviderConfigRepository:
 
                 return deleted
 
-        except Exception as e:
+        except Exception as e:  # infra-boundary: re-raises as PersistenceError
             logger.error(f"Failed to delete provider config: {e}")
             raise PersistenceError(f"Failed to delete provider config: {e}") from e
 
@@ -292,7 +292,7 @@ class SQLiteProviderConfigRepository:
 
                 return deleted
 
-        except Exception as e:
+        except Exception as e:  # infra-boundary: re-raises as PersistenceError
             logger.error(f"Failed to hard-delete provider config: {e}")
             raise PersistenceError(f"Failed to hard-delete provider config: {e}") from e
 
@@ -314,7 +314,7 @@ class SQLiteProviderConfigRepository:
                 row = await cursor.fetchone()
                 return row is not None
 
-        except Exception as e:
+        except Exception as e:  # infra-boundary: re-raises as PersistenceError
             logger.error(f"Failed to check provider existence: {e}")
             raise PersistenceError(f"Failed to check provider existence: {e}") from e
 
@@ -341,7 +341,7 @@ class SQLiteProviderConfigRepository:
                 config_data = json.loads(row[0])
                 return (ProviderConfigSnapshot.from_dict(config_data), row[1])
 
-        except Exception as e:
+        except Exception as e:  # infra-boundary: re-raises as PersistenceError
             logger.error(f"Failed to get provider config with version: {e}")
             raise PersistenceError(f"Failed to get provider config with version: {e}") from e
 
@@ -366,7 +366,7 @@ class SQLiteProviderConfigRepository:
                     ),
                 )
 
-        except Exception as e:
+        except Exception as e:  # infra-boundary: non-critical, best-effort update
             logger.error(f"Failed to update last_started_at: {e}")
             # Non-critical operation, don't raise
 
@@ -392,6 +392,6 @@ class SQLiteProviderConfigRepository:
                     ),
                 )
 
-        except Exception as e:
+        except Exception as e:  # infra-boundary: non-critical, best-effort update
             logger.error(f"Failed to update failure count: {e}")
             # Non-critical operation, don't raise

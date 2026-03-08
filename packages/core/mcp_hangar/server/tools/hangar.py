@@ -732,7 +732,7 @@ def hangar_reload_config(graceful: bool = True) -> dict:
             "duration_ms": result.get("duration_ms", 0),
         }
 
-    except Exception as e:
+    except Exception as e:  # fault-barrier: reload failure must return error result, not crash MCP tool
         return {
             "status": "failed",
             "message": f"Configuration reload failed: {str(e)}",

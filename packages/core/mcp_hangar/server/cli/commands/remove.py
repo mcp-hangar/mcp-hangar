@@ -36,7 +36,7 @@ def _get_configured_providers(config_path: Path) -> list[str]:
         with open(config_path) as f:
             config = yaml.safe_load(f) or {}
         return list(config.get("providers", {}).keys())
-    except Exception:
+    except Exception:  # fault-barrier: config read must not crash remove command
         return []
 
 
@@ -91,7 +91,7 @@ def _try_stop_provider(provider_name: str) -> bool:
                     return True
             except httpx.ConnectError:
                 continue
-    except Exception:
+    except Exception:  # fault-barrier: stop attempt must not crash remove command
         pass
 
     return False

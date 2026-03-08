@@ -206,7 +206,7 @@ class SQLiteEventStore(IEventStore):
             except ConcurrencyError:
                 conn.rollback()
                 raise
-            except Exception as e:
+            except Exception as e:  # infra-boundary: rollback and propagate on any DB error
                 conn.rollback()
                 logger.error(
                     "event_append_failed",

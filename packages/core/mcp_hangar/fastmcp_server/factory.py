@@ -332,7 +332,7 @@ class MCPServerFactory:
         try:
             data = self._hangar.list()
             checks["hangar_list_ok"] = isinstance(data, dict) and "providers" in data
-        except Exception as e:
+        except Exception as e:  # fault-barrier: health check probe must return result not crash
             checks["hangar_list_ok"] = False
             checks["hangar_list_error"] = str(e)
 
@@ -340,7 +340,7 @@ class MCPServerFactory:
         try:
             h = self._hangar.health()
             checks["hangar_health_ok"] = isinstance(h, dict) and "status" in h
-        except Exception as e:
+        except Exception as e:  # fault-barrier: health check probe must return result not crash
             checks["hangar_health_ok"] = False
             checks["hangar_health_error"] = str(e)
 
@@ -361,7 +361,7 @@ class MCPServerFactory:
                             p.get("state", "cold"),
                             p.get("mode", "subprocess"),
                         )
-        except Exception as e:
+        except Exception as e:  # fault-barrier: metrics update must not crash server
             logger.debug("metrics_update_failed", error=str(e))
 
 

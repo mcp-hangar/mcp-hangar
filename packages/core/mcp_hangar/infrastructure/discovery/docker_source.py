@@ -251,9 +251,8 @@ class DockerDiscoverySource(DiscoverySource):
             for net_info in networks.values():
                 if ip := net_info.get("IPAddress"):
                     return ip
-        except Exception:
+        except Exception:  # infra-boundary: best-effort container IP extraction
             pass
-        return None
 
     async def health_check(self) -> bool:
         """Check if container runtime is accessible.
@@ -268,7 +267,7 @@ class DockerDiscoverySource(DiscoverySource):
         except (OSError, ConnectionError, RuntimeError, TimeoutError) as e:
             logger.warning(f"Container runtime health check failed: {e}")
             return False
-        except Exception as e:
+        except Exception as e:  # infra-boundary: health check returns unhealthy on error
             # Docker client can raise various exceptions depending on version
             # Log and return False for any connection-related failure
             logger.warning(f"Container runtime health check failed: {type(e).__name__}: {e}")
@@ -283,6 +282,5 @@ class DockerDiscoverySource(DiscoverySource):
         if self._client:
             try:
                 self._client.close()
-            except Exception:
+            except Exception:  # infra-boundary: best-effort cleanup on close
                 pass
-            self._client = None

@@ -106,7 +106,7 @@ class ApplicationContext:
         for worker in self.background_workers:
             try:
                 worker.stop()
-            except Exception as e:
+            except Exception as e:  # fault-barrier: shutdown must complete even if individual worker stop fails
                 logger.warning(
                     "worker_stop_failed",
                     task=worker.task,
@@ -117,14 +117,14 @@ class ApplicationContext:
         if self.discovery_orchestrator:
             try:
                 asyncio.run(self.discovery_orchestrator.stop())
-            except Exception as e:
+            except Exception as e:  # fault-barrier: shutdown must complete even if discovery stop fails
                 logger.warning("discovery_orchestrator_stop_failed", error=str(e))
 
         # Stop all providers
         for provider_id, provider in PROVIDERS.items():
             try:
                 provider.stop()
-            except Exception as e:
+            except Exception as e:  # fault-barrier: shutdown must complete even if individual provider stop fails
                 logger.warning(
                     "provider_stop_failed",
                     provider_id=provider_id,

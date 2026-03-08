@@ -211,7 +211,7 @@ class BatchExecutor:
                                     BATCH_CANCELLATIONS_TOTAL.inc(reason="fail_fast")
                                     break
 
-                        except Exception as e:
+                        except Exception as e:  # fault-barrier: future exception handling for batch result collection
                             # Future raised exception
                             call = calls[index]
                             results[index] = CallResult(
@@ -467,7 +467,7 @@ class BatchExecutor:
                     call.provider,
                     lambda: ctx.command_bus.send(StartProviderCommand(provider_id=call.provider)),
                 )
-            except Exception as e:
+            except Exception as e:  # fault-barrier: provider start failure must return error result, not crash batch
                 return CallResult(
                     index=call.index,
                     call_id=call.call_id,
@@ -586,7 +586,7 @@ class BatchExecutor:
             # No retry - direct execution
             try:
                 result = do_invoke()
-            except Exception as e:
+            except Exception as e:  # fault-barrier: tool invocation failure must return error result, not crash batch
                 elapsed_ms = (time.perf_counter() - call_start) * 1000
                 error_type = type(e).__name__
 

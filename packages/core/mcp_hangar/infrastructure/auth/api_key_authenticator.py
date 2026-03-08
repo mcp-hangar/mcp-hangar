@@ -175,7 +175,7 @@ class InMemoryApiKeyStore(IApiKeyStore):
 
         try:
             self._event_publisher(event)
-        except Exception as e:
+        except Exception as e:  # infra-boundary: event publishing must not break key operations
             logger.warning("event_publish_failed", event_type=type(event).__name__, error=str(e))
 
     def get_principal_for_key(self, key_hash: str) -> Principal | None:

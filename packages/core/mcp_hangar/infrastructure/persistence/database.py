@@ -192,7 +192,7 @@ class Database:
                     "provider_count": provider_count,
                     "audit_entries": audit_count,
                 }
-        except Exception as e:
+        except Exception as e:  # infra-boundary: health check returns unhealthy on any error
             logger.error(f"Database health check failed: {e}")
             return {
                 "status": "unhealthy",

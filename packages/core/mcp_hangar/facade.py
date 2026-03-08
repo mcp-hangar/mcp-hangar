@@ -601,7 +601,7 @@ class Hangar:
             try:
                 info = await self.get_provider(name)
                 result.append(info)
-            except Exception as e:
+            except Exception as e:  # fault-barrier: single provider info failure must not break list_providers
                 # Include provider even if we can't get full info
                 result.append(
                     ProviderInfo(

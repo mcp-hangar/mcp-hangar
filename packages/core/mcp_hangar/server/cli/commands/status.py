@@ -64,7 +64,7 @@ def _get_status_from_server() -> dict | None:
                     return response.json()
             except httpx.ConnectError:
                 continue
-    except Exception:
+    except Exception:  # fault-barrier: health probe must not crash status command
         pass
 
     return None
@@ -98,7 +98,7 @@ def _get_status_from_config(config_path: Path | None) -> dict:
                     config = yaml.safe_load(f)
                 used_path = path
                 break
-            except Exception:
+            except Exception:  # fault-barrier: config read must not crash status display
                 continue
 
     if not config:

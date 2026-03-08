@@ -222,7 +222,7 @@ class AuthenticationMiddleware:
         if self._event_publisher:
             try:
                 self._event_publisher(event)
-            except Exception as e:
+            except Exception as e:  # infra-boundary: event publishing must not break auth flow
                 logger.warning("event_publish_failed", event_type=type(event).__name__, error=str(e))
 
 
@@ -373,7 +373,7 @@ class AuthorizationMiddleware:
         if self._event_publisher:
             try:
                 self._event_publisher(event)
-            except Exception as e:
+            except Exception as e:  # infra-boundary: event publishing must not break auth flow
                 logger.warning(
                     "event_publish_failed",
                     event_type=type(event).__name__,

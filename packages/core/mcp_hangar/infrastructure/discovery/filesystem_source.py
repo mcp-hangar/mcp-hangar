@@ -149,7 +149,7 @@ class FilesystemDiscoverySource(DiscoverySource):
                         providers.append(provider)
                         self._cached_providers[provider.name] = provider
                         await self.on_provider_discovered(provider)
-                except Exception as e:
+                except Exception as e:  # infra-boundary: skip malformed config file
                     logger.error(f"Failed to parse {file_path}: {e}")
 
         logger.debug(f"Filesystem discovery found {len(providers)} providers")
@@ -268,7 +268,7 @@ class FilesystemDiscoverySource(DiscoverySource):
         """
         try:
             return self.path.exists() and self.path.is_dir()
-        except Exception as e:
+        except Exception as e:  # infra-boundary: health check returns unhealthy on error
             logger.warning(f"Filesystem health check failed: {e}")
             return False
 
@@ -288,7 +288,7 @@ class FilesystemDiscoverySource(DiscoverySource):
             self._observer.schedule(self._event_handler, str(self.path), recursive=False)
             self._observer.start()
             logger.info(f"Filesystem discovery source started (watching {self.path})")
-        except Exception as e:
+        except Exception as e:  # infra-boundary: watcher start failure is non-fatal
             logger.error(f"Failed to start file watcher: {e}")
 
     async def stop(self) -> None:
@@ -297,7 +297,7 @@ class FilesystemDiscoverySource(DiscoverySource):
             try:
                 self._observer.stop()
                 self._observer.join(timeout=5)
-            except Exception as e:
+            except Exception as e:  # infra-boundary: best-effort watcher stop
                 logger.warning(f"Error stopping file watcher: {e}")
             finally:
                 self._observer = None
@@ -333,7 +333,7 @@ class FilesystemDiscoverySource(DiscoverySource):
                     elif not old_provider:
                         await self.on_provider_discovered(new_provider)
                     self._cached_providers[new_provider.name] = new_provider
-            except Exception as e:
+            except Exception as e:  # infra-boundary: skip individual file change on error
                 logger.error(f"Error parsing changed file {file_path}: {e}")
 
 

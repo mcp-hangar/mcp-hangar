@@ -119,10 +119,10 @@ class EntrypointDiscoverySource(DiscoverySource):
                     if provider:
                         providers.append(provider)
                         await self.on_provider_discovered(provider)
-                except Exception as e:
+                except Exception as e:  # infra-boundary: skip individual entrypoint on load failure
                     logger.error(f"Failed to load entry point {ep.name}: {e}")
 
-        except Exception as e:
+        except Exception as e:  # infra-boundary: skip entrypoint group on error
             logger.error(f"Entry point discovery failed: {e}")
             raise
 
@@ -146,7 +146,7 @@ class EntrypointDiscoverySource(DiscoverySource):
             if callable(factory):
                 try:
                     config = factory()
-                except Exception as e:
+                except Exception as e:  # infra-boundary: skip individual entrypoint on load failure
                     logger.warning(f"Entry point {ep.name} factory failed: {e}")
                     config = None
             else:
@@ -155,7 +155,7 @@ class EntrypointDiscoverySource(DiscoverySource):
             # Build provider from config or defaults
             return self._build_provider(ep, config)
 
-        except Exception as e:
+        except Exception as e:  # infra-boundary: skip entrypoint group on error
             logger.error(f"Error loading entry point {ep.name}: {e}")
             return None
 
@@ -236,7 +236,7 @@ class EntrypointDiscoverySource(DiscoverySource):
             # Just check that we can access entry_points
             entry_points()
             return True
-        except Exception as e:
+        except Exception as e:  # infra-boundary: health check returns unhealthy on error
             logger.warning(f"Entrypoint health check failed: {e}")
             return False
 

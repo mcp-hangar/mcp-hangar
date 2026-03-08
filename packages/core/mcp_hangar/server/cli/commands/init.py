@@ -564,7 +564,7 @@ def init_command(
                 )
                 console.print("  [dim]Configuration saved - fix issues and run 'mcp-hangar status'[/dim]")
 
-        except Exception as e:
+        except Exception as e:  # fault-barrier: smoke test failure must not crash init wizard
             smoke_test_passed = False
             console.print(f"  [yellow]Smoke test failed: {e}[/yellow]")
             console.print("  [dim]Configuration saved - verify manually with 'mcp-hangar serve'[/dim]")

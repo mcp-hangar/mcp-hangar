@@ -21,7 +21,7 @@ def _get_version() -> str:
     """Get package version from metadata."""
     try:
         return version("mcp-hangar")
-    except Exception:
+    except Exception:  # fault-barrier: version lookup must not crash CLI
         return "unknown"
 
 

@@ -274,7 +274,7 @@ class EventSourcedProviderRepository(IProviderRepository):
                     event.event_id = stored.event_id
                     event.occurred_at = stored.occurred_at
                     domain_events.append(event)
-                except Exception as e:
+                except Exception as e:  # infra-boundary: skip malformed event during replay
                     logger.warning(f"Failed to hydrate event {stored.event_type}: {e}")
 
         return domain_events

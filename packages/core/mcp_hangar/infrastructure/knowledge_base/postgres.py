@@ -133,7 +133,7 @@ class PostgresKnowledgeBase(IKnowledgeBase):
         except ImportError:
             logger.error("asyncpg_not_installed", hint="pip install asyncpg")
             return False
-        except Exception as e:
+        except Exception as e:  # infra-boundary: returns False on any init failure
             logger.error("postgres_kb_init_failed", error=str(e))
             return False
 
@@ -218,7 +218,7 @@ class PostgresKnowledgeBase(IKnowledgeBase):
                     logger.debug("cache_hit", provider=provider, tool=tool)
                     return json.loads(row["result"])
                 return None
-        except Exception as e:
+        except Exception as e:  # infra-boundary: graceful degradation, returns fallback on DB error
             logger.warning("cache_get_failed", error=str(e))
             return None
 
@@ -253,7 +253,7 @@ class PostgresKnowledgeBase(IKnowledgeBase):
                     expires_at,
                 )
                 return True
-        except Exception as e:
+        except Exception as e:  # infra-boundary: graceful degradation, returns fallback on DB error
             logger.warning("cache_set_failed", error=str(e))
             return False
 
@@ -275,7 +275,7 @@ class PostgresKnowledgeBase(IKnowledgeBase):
                     result = await conn.execute("DELETE FROM tool_cache")
                 # Parse "DELETE N" to get count
                 return int(result.split()[-1]) if result else 0
-        except Exception as e:
+        except Exception as e:  # infra-boundary: graceful degradation, returns fallback on DB error
             logger.warning("cache_invalidate_failed", error=str(e))
             return 0
 
@@ -288,7 +288,7 @@ class PostgresKnowledgeBase(IKnowledgeBase):
                 result = await conn.fetchval("SELECT cleanup_expired_cache()")
                 logger.info("cache_cleanup", deleted=result)
                 return result or 0
-        except Exception as e:
+        except Exception as e:  # infra-boundary: graceful degradation, returns fallback on DB error
             logger.warning("cache_cleanup_failed", error=str(e))
             return 0
 
@@ -318,7 +318,7 @@ class PostgresKnowledgeBase(IKnowledgeBase):
                     entry.correlation_id,
                 )
                 return True
-        except Exception as e:
+        except Exception as e:  # infra-boundary: graceful degradation, returns fallback on DB error
             logger.warning("audit_log_failed", error=str(e))
             return False
 
@@ -386,7 +386,7 @@ class PostgresKnowledgeBase(IKnowledgeBase):
                     )
                     for row in rows
                 ]
-        except Exception as e:
+        except Exception as e:  # infra-boundary: graceful degradation, returns fallback on DB error
             logger.warning("audit_query_failed", error=str(e))
             return []
 
@@ -410,7 +410,7 @@ class PostgresKnowledgeBase(IKnowledgeBase):
                     """
                 )
                 return dict(row) if row else {}
-        except Exception as e:
+        except Exception as e:  # infra-boundary: graceful degradation, returns fallback on DB error
             logger.warning("audit_stats_failed", error=str(e))
             return {}
 
@@ -434,7 +434,7 @@ class PostgresKnowledgeBase(IKnowledgeBase):
                     entry.reason,
                 )
                 return True
-        except Exception as e:
+        except Exception as e:  # infra-boundary: graceful degradation, returns fallback on DB error
             logger.warning("record_state_failed", error=str(e))
             return False
 
@@ -465,7 +465,7 @@ class PostgresKnowledgeBase(IKnowledgeBase):
                     )
                     for row in rows
                 ]
-        except Exception as e:
+        except Exception as e:  # infra-boundary: graceful degradation, returns fallback on DB error
             logger.warning("get_state_history_failed", error=str(e))
             return []
 
@@ -489,7 +489,7 @@ class PostgresKnowledgeBase(IKnowledgeBase):
                     json.dumps(entry.labels or {}),
                 )
                 return True
-        except Exception as e:
+        except Exception as e:  # infra-boundary: graceful degradation, returns fallback on DB error
             logger.warning("record_metric_failed", error=str(e))
             return False
 
@@ -540,6 +540,6 @@ class PostgresKnowledgeBase(IKnowledgeBase):
                     )
                     for row in rows
                 ]
-        except Exception as e:
+        except Exception as e:  # infra-boundary: graceful degradation, returns fallback on DB error
             logger.warning("get_metrics_failed", error=str(e))
             return []

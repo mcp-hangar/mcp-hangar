@@ -78,7 +78,7 @@ def init_truncation(config: dict[str, Any]) -> TruncationManager | None:
                 max_entries=truncation_config.max_cache_entries,
                 default_ttl_s=truncation_config.cache_ttl_s,
             )
-        except Exception as e:
+        except Exception as e:  # infra-boundary: Redis init failure falls back to memory cache
             logger.error(
                 "truncation_redis_init_failed",
                 error=str(e),

@@ -109,7 +109,7 @@ class AuthRateLimiter:
         if self._event_publisher:
             try:
                 self._event_publisher(event)
-            except Exception as e:
+            except Exception as e:  # infra-boundary: event publishing must not break rate limiting
                 logger.warning("rate_limiter_event_publish_failed", event_type=type(event).__name__, error=str(e))
 
     @property

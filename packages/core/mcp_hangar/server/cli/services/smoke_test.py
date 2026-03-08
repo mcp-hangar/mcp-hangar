@@ -108,7 +108,7 @@ def _test_single_provider(
                 # Stop provider after successful test
                 try:
                     provider.stop()
-                except Exception:
+                except Exception:  # fault-barrier: best-effort cleanup after successful test
                     pass  # Best effort cleanup
 
                 return ProviderTestResult(
@@ -123,7 +123,7 @@ def _test_single_provider(
         duration_ms = (time.perf_counter() - start_time) * 1000
         try:
             provider.stop()
-        except Exception:
+        except Exception:  # fault-barrier: best-effort cleanup after timeout
             pass
 
         return ProviderTestResult(
@@ -157,7 +157,7 @@ def _test_single_provider(
             suggestion="Provider is in backoff state, try again later",
         )
 
-    except Exception as e:
+    except Exception as e:  # fault-barrier: smoke test must return result, not crash CLI
         duration_ms = (time.perf_counter() - start_time) * 1000
         return ProviderTestResult(
             provider_id=provider_id,

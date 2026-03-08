@@ -99,7 +99,7 @@ class RecoveryService:
 
                     logger.debug(f"Recovery: Restored provider {config.provider_id}")
 
-                except Exception as e:
+                except Exception as e:  # infra-boundary: skip individual provider on recovery failure
                     result.failed_count += 1
                     result.failed_ids.append(config.provider_id)
                     result.errors[config.provider_id] = str(e)
@@ -108,7 +108,7 @@ class RecoveryService:
             # Record recovery in audit log
             await self._record_recovery_audit(result)
 
-        except Exception as e:
+        except Exception as e:  # infra-boundary: log critical recovery failure
             logger.error(f"Recovery: Critical failure: {e}")
             result.errors["_critical"] = str(e)
 
@@ -177,7 +177,7 @@ class RecoveryService:
                     },
                 )
             )
-        except Exception as e:
+        except Exception as e:  # infra-boundary: audit recording is non-critical
             logger.warning(f"Failed to record recovery audit: {e}")
 
     async def get_recovery_status(self) -> dict[str, Any]:
@@ -231,7 +231,7 @@ class RecoveryService:
             logger.info(f"Recovery: Single provider {provider_id} restored")
             return True
 
-        except Exception as e:
+        except Exception as e:  # infra-boundary: returns False on recovery failure
             logger.error(f"Recovery: Failed to restore {provider_id}: {e}")
             return False
 

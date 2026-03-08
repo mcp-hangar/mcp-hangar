@@ -354,7 +354,7 @@ def register_provider_tools(mcp: FastMCP) -> None:
                     command = StartProviderCommand(provider_id=provider_id)
                     ctx.command_bus.send(command)
                     warmed.append(provider_id)
-            except Exception as e:
+            except Exception as e:  # fault-barrier: single provider warm failure must not crash batch
                 failed.append({"id": provider_id, "error": str(e)[:100]})
 
         return {
