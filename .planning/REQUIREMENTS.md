@@ -28,8 +28,8 @@ Requirements for v1.0 Production Hardening. Each maps to roadmap phases.
 - [x] **PERS-01**: Saga state is checkpointed to SQLite after each step transition, with schema managed by existing `MigrationRunner`
 - [x] **PERS-02**: Incomplete sagas are detected and resumed on bootstrap, with idempotency guards preventing duplicate command emission during event replay
 - [x] **PERS-03**: Circuit breaker state (state, failure_count, opened_at) persists across restarts via provider snapshots, preventing cascading failures against known-bad providers
-- [ ] **PERS-04**: Event store supports snapshots -- `IEventStore` contract includes snapshot methods, `SQLiteEventStore` implements snapshot storage and retrieval
-- [ ] **PERS-05**: Aggregate replay loads from latest snapshot plus subsequent events, bounding startup time regardless of total event history
+- [x] **PERS-04**: Event store supports snapshots -- `IEventStore` contract includes snapshot methods, `SQLiteEventStore` implements snapshot storage and retrieval
+- [x] **PERS-05**: Aggregate replay loads from latest snapshot plus subsequent events, bounding startup time regardless of total event history
 
 ### Resilience
 
@@ -94,8 +94,8 @@ Which phases cover which requirements. Updated during roadmap creation.
 | PERS-01 | Phase 9 | Complete |
 | PERS-02 | Phase 9 | Complete |
 | PERS-03 | Phase 9 | Complete |
-| PERS-04 | Phase 10 | Pending |
-| PERS-05 | Phase 10 | Pending |
+| PERS-04 | Phase 10 | Complete |
+| PERS-05 | Phase 10 | Complete |
 | RESL-01 | Phase 10 | Complete |
 | RESL-02 | Phase 10 | Complete |
 | RESL-03 | Phase 10 | Pending |

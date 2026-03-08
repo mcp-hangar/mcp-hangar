@@ -8,7 +8,7 @@ progress:
   total_phases: 10
   completed_phases: 9
   total_plans: 25
-  completed_plans: 20
+  completed_plans: 21
 ---
 
 # Project State
@@ -24,11 +24,11 @@ See: .planning/PROJECT.md (updated 2026-03-08)
 
 Milestone: v1.0 Production Hardening
 Phase: 10 of 10 (Operational Hardening) -- IN PROGRESS (6 plans, 3 waves)
-Plan: 1 of 6 in current phase (10-01 complete)
-Status: Executing Phase 10 -- plan 10-01 complete
-Last activity: 2026-03-08 -- Completed 10-01 (health check jitter + state-aware scheduling)
+Plan: 2 of 6 in current phase (10-01, 10-02 complete)
+Status: Executing Phase 10 -- plan 10-02 complete
+Last activity: 2026-03-08 -- Completed 10-02 (event store snapshots + aggregate replay)
 
-Progress: [████████░░] 80% milestone (9/10 phases, 20/25 plans)
+Progress: [████████░░] 84% milestone (9/10 phases, 21/25 plans)
 
 ## Performance Metrics
 
@@ -48,7 +48,8 @@ Progress: [████████░░] 80% milestone (9/10 phases, 20/25 pla
 
 - Plans completed: 3 (08-01, 08-02, 08-03) -- Phase 8 complete
 - Phase 9: 3/3 plans complete (09-01, 09-02, 09-03) -- Phase 9 complete
-- Phase 10: 1/6 plans complete (10-01)
+- Phase 10: 2/6 plans complete (10-01, 10-02)
+- 10-02 duration: ~8 min
 - 10-01 duration: ~8 min
 - 09-01 duration: ~16 min
 - 09-02 duration: ~7 min
@@ -80,6 +81,9 @@ All v0.9 and v0.10 decisions archived in PROJECT.md Key Decisions table.
 - init_saga() returns SagaStateStore so ApplicationContext can reference it for shutdown CB save
 - jitter_factor default 0.1 (10%) for HealthTracker backoff -- same pattern as retry.py
 - BackgroundWorker keeps time.sleep(interval_s) as base tick rate with per-provider_next_check_at timestamps for skip logic
+- hasattr-based API detection at **init** for old/new event store compatibility (self._has_new_api, self._has_snapshot_methods)
+- Dual hydration path: new IEventStore.read_stream() returns DomainEvent directly, old EventStore.load() returns StoredEvent needing hydration
+- InMemoryEventStore (persistence module) also gets snapshot support for test symmetry
 
 ### Pending Todos
 
@@ -93,5 +97,5 @@ None.
 ## Session Continuity
 
 Last session: 2026-03-08
-Stopped at: Completed 10-01-PLAN.md (health check jitter + state-aware scheduling)
-Resume with: /gsd-execute-phase 10 (operational hardening) -- continue with 10-02
+Stopped at: Completed 10-02-PLAN.md (event store snapshots + aggregate replay from snapshots)
+Resume with: /gsd-execute-phase 10 (operational hardening) -- continue with 10-03
