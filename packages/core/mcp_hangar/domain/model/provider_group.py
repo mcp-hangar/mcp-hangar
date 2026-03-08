@@ -289,6 +289,11 @@ class ProviderGroup(AggregateRoot):
         """
         Add a provider to the group.
 
+        Uses two-phase lock pattern to avoid lock hierarchy violation:
+        Phase 1 (locked): Register member, emit event.
+        Phase 2 (unlocked): Call ensure_ready() if auto_start (provider I/O).
+        Phase 3 (locked): Update rotation state if member still exists.
+
         Args:
             provider: Provider instance to add
             weight: Load balancing weight (higher = more traffic)
@@ -297,8 +302,12 @@ class ProviderGroup(AggregateRoot):
         Raises:
             ValueError: If member already exists in group
         """
+        need_start = False
+        member: GroupMember | None = None
+        member_id: str = ""
+
+        # Phase 1: Register member under lock
         with self._lock:
-            # Get member ID as string for dictionary key
             member_id = str(provider.id)
 
             if member_id in self._members:
@@ -325,10 +334,11 @@ class ProviderGroup(AggregateRoot):
             )
 
             logger.info(f"Added member {member_id} to group {self.id} (weight={weight}, priority={priority})")
+            need_start = self._auto_start
 
-            # Auto-start if configured
-            if self._auto_start:
-                self._try_start_member(member)
+        # Phase 2: Provider I/O outside lock (avoids level-11-holds-level-10)
+        if need_start:
+            self._try_start_member_unlocked(member, member_id)
 
     def remove_member(self, member_id: str) -> bool:
         """
@@ -360,33 +370,55 @@ class ProviderGroup(AggregateRoot):
         with self._lock:
             return self._members.get(member_id)
 
-    def _try_start_member(self, member: GroupMember) -> bool:
-        """
-        Try to start a member and add to rotation if successful.
+    def _try_start_member_unlocked(self, member: GroupMember, member_id: str) -> bool:
+        """Try to start a member with two-phase lock pattern.
+
+        Phase 1 (unlocked): Call ensure_ready() -- provider I/O outside group lock
+        to respect lock hierarchy (Provider level 10 < ProviderGroup level 11).
+        Phase 2 (locked): Re-acquire lock to update rotation state. Handles the
+        case where the member was removed by another thread during Phase 1.
+
+        Args:
+            member: The group member to start.
+            member_id: The member's provider ID string.
 
         Returns:
-            True if member started and added to rotation
+            True if member started and added to rotation.
         """
+        # Phase 1: Provider I/O outside lock
         try:
             member.provider.ensure_ready()
-            if member.provider.state == ProviderState.READY:
-                member.in_rotation = True
-                member.consecutive_failures = 0
-                member.consecutive_successes = 1
+        except Exception as e:
+            logger.warning(f"Failed to start member {member_id}: {e}")
+            with self._lock:
+                # Only update if member still exists (may have been removed)
+                if member_id in self._members:
+                    self._members[member_id].in_rotation = False
+            return False
+
+        # Phase 2: Re-acquire lock to update state
+        with self._lock:
+            # Member may have been removed by another thread during Phase 1
+            if member_id not in self._members:
+                return False
+
+            current_member = self._members[member_id]
+            if current_member.provider.state == ProviderState.READY:
+                current_member.in_rotation = True
+                current_member.consecutive_failures = 0
+                current_member.consecutive_successes = 1
                 self._update_state()
                 self._record_event(
                     GroupMemberHealthChanged(
                         group_id=self.id,
-                        member_id=member.id,
+                        member_id=member_id,
                         in_rotation=True,
                         reason="started",
                     )
                 )
-                logger.info(f"Member {member.id} started and added to rotation")
+                logger.info(f"Member {member_id} started and added to rotation")
                 return True
-        except Exception as e:
-            logger.warning(f"Failed to start member {member.id}: {e}")
-            member.in_rotation = False
+
         return False
 
     # --- Load Balancing ---
@@ -591,28 +623,50 @@ class ProviderGroup(AggregateRoot):
     # --- Lifecycle ---
 
     def start_all(self) -> int:
-        """
-        Start all members.
+        """Start all members.
+
+        Uses two-phase lock pattern to avoid lock hierarchy violation:
+        Phase 1 (locked): Snapshot member references.
+        Phase 2 (unlocked): Call ensure_ready() on each member.
 
         Returns:
-            Number of members successfully started
+            Number of members successfully started.
         """
+        # Phase 1: Snapshot members under lock
         with self._lock:
-            started = 0
-            for member in self._members.values():
-                if self._try_start_member(member):
-                    started += 1
-            return started
+            members_snapshot = [(mid, m) for mid, m in self._members.items()]
+
+        # Phase 2: Start each member outside lock
+        started = 0
+        for member_id, member in members_snapshot:
+            if self._try_start_member_unlocked(member, member_id):
+                started += 1
+        return started
 
     def stop_all(self) -> None:
-        """Stop all members."""
+        """Stop all members.
+
+        Uses two-phase lock pattern to avoid lock hierarchy violation:
+        Phase 1 (locked): Snapshot member references.
+        Phase 2 (unlocked): Call shutdown() on each member.
+        Phase 3 (locked): Update rotation state.
+        """
+        # Phase 1: Snapshot members under lock
         with self._lock:
-            for member in self._members.values():
-                try:
-                    member.provider.shutdown()
-                    member.in_rotation = False
-                except Exception as e:
-                    logger.warning(f"Failed to stop member {member.id}: {e}")
+            members_snapshot = [(mid, m) for mid, m in self._members.items()]
+
+        # Phase 2: Shutdown each member outside lock
+        for member_id, member in members_snapshot:
+            try:
+                member.provider.shutdown()
+            except Exception as e:
+                logger.warning(f"Failed to stop member {member_id}: {e}")
+
+        # Phase 3: Update state under lock
+        with self._lock:
+            for member_id, _ in members_snapshot:
+                if member_id in self._members:
+                    self._members[member_id].in_rotation = False
             self._update_state()
 
     def shutdown(self) -> None:
