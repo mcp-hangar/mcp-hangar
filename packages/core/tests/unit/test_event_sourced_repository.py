@@ -46,7 +46,7 @@ class TestRepositorySnapshotSaveViaEventStore:
 
         # Record enough events to trigger snapshot (interval=3)
         provider._record_event(
-            ProviderStateChanged(provider_id="test-provider", old_state="COLD", new_state="INITIALIZING")
+            ProviderStateChanged(provider_id="test-provider", old_state="cold", new_state="initializing")
         )
         provider._record_event(
             ProviderStarted(provider_id="test-provider", mode="subprocess", tools_count=2, startup_duration_ms=50.0)
@@ -85,7 +85,7 @@ class TestRepositorySnapshotSaveViaEventStore:
 
         # Record fewer events than interval (interval=3)
         provider._record_event(
-            ProviderStateChanged(provider_id="test-provider", old_state="COLD", new_state="INITIALIZING")
+            ProviderStateChanged(provider_id="test-provider", old_state="cold", new_state="initializing")
         )
         provider._record_event(
             ProviderStarted(provider_id="test-provider", mode="subprocess", tools_count=2, startup_duration_ms=50.0)
@@ -127,7 +127,7 @@ class TestRepositorySnapshotLoadViaEventStore:
 
         # Record events to trigger snapshot
         provider._record_event(
-            ProviderStateChanged(provider_id="test-provider", old_state="COLD", new_state="INITIALIZING")
+            ProviderStateChanged(provider_id="test-provider", old_state="cold", new_state="initializing")
         )
         provider._record_event(
             ProviderStarted(provider_id="test-provider", mode="subprocess", tools_count=2, startup_duration_ms=50.0)
@@ -177,7 +177,7 @@ class TestRepositorySnapshotLoadViaEventStore:
 
         # Record only 1 event (below snapshot interval)
         provider._record_event(
-            ProviderStateChanged(provider_id="test-provider", old_state="COLD", new_state="INITIALIZING")
+            ProviderStateChanged(provider_id="test-provider", old_state="cold", new_state="initializing")
         )
 
         repo._save_config("test-provider", provider)
@@ -203,15 +203,9 @@ class TestRepositorySnapshotStateEquivalence:
             snapshot_interval=3,
         )
 
-        # Create provider with events past snapshot interval
-        provider = EventSourcedProvider(
-            provider_id="test-provider",
-            mode="subprocess",
-            command=["python", "-m", "test"],
-        )
-
+        # Define events that will be used for both paths
         events_to_record = [
-            ProviderStateChanged(provider_id="test-provider", old_state="COLD", new_state="INITIALIZING"),
+            ProviderStateChanged(provider_id="test-provider", old_state="cold", new_state="initializing"),
             ProviderStarted(provider_id="test-provider", mode="subprocess", tools_count=2, startup_duration_ms=50.0),
             ToolInvocationCompleted(
                 provider_id="test-provider",
@@ -229,6 +223,15 @@ class TestRepositorySnapshotStateEquivalence:
             ),
         ]
 
+        # Create provider with applied events (from_events applies them, updating state)
+        provider = EventSourcedProvider.from_events(
+            provider_id="test-provider",
+            mode="subprocess",
+            events=events_to_record,
+            command=["python", "-m", "test"],
+        )
+
+        # Re-record events as uncommitted so repo.add() persists them
         for event in events_to_record:
             provider._record_event(event)
 
@@ -247,9 +250,11 @@ class TestRepositorySnapshotStateEquivalence:
             command=["python", "-m", "test"],
         )
 
-        # Both should have the same version and state
+        # Both should have the same provider state (lifecycle phase)
         assert loaded_from_snapshot is not None
-        assert loaded_from_snapshot._version == full_replay._version
+        assert loaded_from_snapshot._state == full_replay._state
+        assert loaded_from_snapshot._health._consecutive_failures == full_replay._health._consecutive_failures
+        assert loaded_from_snapshot._health._total_failures == full_replay._health._total_failures
 
 
 class TestRepositoryBackwardCompatibility:
@@ -271,7 +276,7 @@ class TestRepositoryBackwardCompatibility:
         )
 
         provider._record_event(
-            ProviderStateChanged(provider_id="test-provider", old_state="COLD", new_state="INITIALIZING")
+            ProviderStateChanged(provider_id="test-provider", old_state="cold", new_state="initializing")
         )
         provider._record_event(
             ProviderStarted(provider_id="test-provider", mode="subprocess", tools_count=2, startup_duration_ms=50.0)

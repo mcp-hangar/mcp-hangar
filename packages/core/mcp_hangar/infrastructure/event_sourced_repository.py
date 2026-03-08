@@ -65,6 +65,11 @@ class EventSourcedProviderRepository(IProviderRepository):
     - Publishes events to EventBus after save
     - Caches loaded providers
 
+    Supports both the old EventStore API (get_version, load, stream_exists,
+    get_all_stream_ids) and the new IEventStore API (get_stream_version,
+    read_stream, list_streams, save_snapshot, load_snapshot) via runtime
+    method detection.
+
     Thread-safe implementation.
     """
 
@@ -89,12 +94,51 @@ class EventSourcedProviderRepository(IProviderRepository):
         self._snapshot_store = snapshot_store
         self._snapshot_interval = snapshot_interval
 
+        # Detect API capabilities once at init
+        self._has_new_api = hasattr(self._event_store, "get_stream_version")
+        self._has_snapshot_methods = hasattr(self._event_store, "save_snapshot")
+
         # Configuration store (for non-event data like command, env)
         self._config_store = ProviderConfigStore()
 
         # In-memory cache for loaded providers
         self._cache: dict[str, EventSourcedProvider] = {}
         self._lock = threading.RLock()
+
+    # --- API compatibility helpers ---
+
+    def _store_get_version(self, stream_id: str) -> int:
+        """Get stream version from event store, supporting both APIs."""
+        if self._has_new_api:
+            return self._event_store.get_stream_version(stream_id)
+        return self._event_store.get_version(stream_id)
+
+    def _store_stream_exists(self, stream_id: str) -> bool:
+        """Check if stream exists, supporting both APIs."""
+        if hasattr(self._event_store, "stream_exists"):
+            return self._event_store.stream_exists(stream_id)
+        # New API: version -1 means stream does not exist
+        return self._store_get_version(stream_id) >= 0
+
+    def _store_load_events(
+        self,
+        stream_id: str,
+        from_version: int = 0,
+        to_version: int | None = None,
+    ) -> list:
+        """Load events from store, supporting both APIs.
+
+        Returns raw stored events (StoredEvent for old API, DomainEvent for new API).
+        """
+        if self._has_new_api:
+            return self._event_store.read_stream(stream_id, from_version=from_version)
+        return self._event_store.load(stream_id, from_version=from_version, to_version=to_version)
+
+    def _store_get_all_stream_ids(self) -> list[str]:
+        """Get all stream IDs, supporting both APIs."""
+        if hasattr(self._event_store, "get_all_stream_ids"):
+            return self._event_store.get_all_stream_ids()
+        return self._event_store.list_streams()
 
     def add(self, provider_id: str, provider: ProviderLike) -> None:
         """
@@ -125,7 +169,7 @@ class EventSourcedProviderRepository(IProviderRepository):
 
             if events:
                 # Get current version from event store
-                current_version = self._event_store.get_version(provider_id)
+                current_version = self._store_get_version(provider_id)
 
                 # Append events
                 new_version = self._event_store.append(
@@ -138,7 +182,8 @@ class EventSourcedProviderRepository(IProviderRepository):
                 provider.mark_events_committed()
 
                 # Create snapshot if needed
-                if self._snapshot_store:
+                has_snapshot_support = self._has_snapshot_methods or self._snapshot_store
+                if has_snapshot_support:
                     events_since_snapshot = self._get_events_since_snapshot(provider_id)
                     if events_since_snapshot >= self._snapshot_interval:
                         self._create_snapshot(provider)
@@ -186,7 +231,7 @@ class EventSourcedProviderRepository(IProviderRepository):
         config = self._config_store.load(provider_id)
         if not config:
             # Check if there are events for this provider
-            if not self._event_store.stream_exists(provider_id):
+            if not self._store_stream_exists(provider_id):
                 return None
             # Use default config
             config = {"mode": "subprocess"}
@@ -195,23 +240,33 @@ class EventSourcedProviderRepository(IProviderRepository):
         snapshot = None
         snapshot_version = -1
 
-        if self._snapshot_store:
+        if self._has_snapshot_methods:
+            # New IEventStore with built-in snapshot support
+            snapshot_data = self._event_store.load_snapshot(provider_id)
+            if snapshot_data:
+                snapshot = ProviderSnapshot.from_dict(snapshot_data["state"])
+                snapshot_version = snapshot_data["version"]
+        elif self._snapshot_store:
+            # Legacy snapshot store
             snapshot_data = self._snapshot_store.load_snapshot(provider_id)
             if snapshot_data:
                 snapshot = ProviderSnapshot.from_dict(snapshot_data["state"])
                 snapshot_version = snapshot_data["version"]
 
         # Load events (from snapshot version or beginning)
-        events = self._event_store.load(stream_id=provider_id, from_version=snapshot_version + 1)
+        raw_events = self._store_load_events(stream_id=provider_id, from_version=snapshot_version + 1)
 
-        # Convert stored events to domain events
-        domain_events = self._hydrate_events(events)
+        # Convert to domain events (new API returns DomainEvent directly, old returns StoredEvent)
+        if self._has_new_api:
+            domain_events = raw_events
+        else:
+            domain_events = self._hydrate_events(raw_events)
 
         if snapshot:
             # Load from snapshot + subsequent events
             provider = EventSourcedProvider.from_snapshot(snapshot, domain_events)
         else:
-            if not domain_events and not self._event_store.stream_exists(provider_id):
+            if not domain_events and not self._store_stream_exists(provider_id):
                 return None
 
             # Load from scratch
@@ -298,24 +353,31 @@ class EventSourcedProviderRepository(IProviderRepository):
 
     def _get_events_since_snapshot(self, provider_id: str) -> int:
         """Get number of events since last snapshot."""
-        if not self._snapshot_store:
-            return self._event_store.get_version(provider_id) + 1
+        snapshot_version = -1
 
-        snapshot_data = self._snapshot_store.load_snapshot(provider_id)
-        snapshot_version = snapshot_data["version"] if snapshot_data else -1
+        if self._has_snapshot_methods:
+            snapshot_data = self._event_store.load_snapshot(provider_id)
+            snapshot_version = snapshot_data["version"] if snapshot_data else -1
+        elif self._snapshot_store:
+            snapshot_data = self._snapshot_store.load_snapshot(provider_id)
+            snapshot_version = snapshot_data["version"] if snapshot_data else -1
 
-        current_version = self._event_store.get_version(provider_id)
+        current_version = self._store_get_version(provider_id)
         return current_version - snapshot_version
 
     def _create_snapshot(self, provider: EventSourcedProvider) -> None:
         """Create a snapshot for the provider."""
-        if not self._snapshot_store:
-            return
-
         snapshot = provider.create_snapshot()
-        version = self._event_store.get_version(provider.provider_id)
+        version = self._store_get_version(provider.provider_id)
 
-        self._snapshot_store.save_snapshot(stream_id=provider.provider_id, version=version, state=snapshot.to_dict())
+        if self._has_snapshot_methods:
+            self._event_store.save_snapshot(stream_id=provider.provider_id, version=version, state=snapshot.to_dict())
+        elif self._snapshot_store:
+            self._snapshot_store.save_snapshot(
+                stream_id=provider.provider_id, version=version, state=snapshot.to_dict()
+            )
+        else:
+            return
 
         logger.debug(f"Created snapshot for provider {provider.provider_id} at version {version}")
 
@@ -324,7 +386,7 @@ class EventSourcedProviderRepository(IProviderRepository):
         with self._lock:
             if provider_id in self._cache:
                 return True
-            return self._event_store.stream_exists(provider_id) or self._config_store.load(provider_id) is not None
+            return self._store_stream_exists(provider_id) or self._config_store.load(provider_id) is not None
 
     def remove(self, provider_id: str) -> bool:
         """
@@ -350,7 +412,7 @@ class EventSourcedProviderRepository(IProviderRepository):
         with self._lock:
             # Get all known provider IDs
             provider_ids = set(self._cache.keys())
-            provider_ids.update(self._event_store.get_all_stream_ids())
+            provider_ids.update(self._store_get_all_stream_ids())
             provider_ids.update(self._config_store.get_all_ids())
 
             result = {}
@@ -365,7 +427,7 @@ class EventSourcedProviderRepository(IProviderRepository):
         """Get all provider IDs."""
         with self._lock:
             provider_ids = set(self._cache.keys())
-            provider_ids.update(self._event_store.get_all_stream_ids())
+            provider_ids.update(self._store_get_all_stream_ids())
             provider_ids.update(self._config_store.get_all_ids())
             return list(provider_ids)
 
@@ -388,13 +450,14 @@ class EventSourcedProviderRepository(IProviderRepository):
             else:
                 self._cache.clear()
 
-    def get_event_history(self, provider_id: str) -> list[StoredEvent]:
+    def get_event_history(self, provider_id: str) -> list:
         """
         Get full event history for a provider.
 
         Useful for debugging and audit.
+        Returns StoredEvent list (old API) or DomainEvent list (new API).
         """
-        return self._event_store.load(provider_id)
+        return self._store_load_events(provider_id)
 
     def replay_provider(self, provider_id: str, to_version: int) -> EventSourcedProvider | None:
         """
@@ -411,8 +474,12 @@ class EventSourcedProviderRepository(IProviderRepository):
         if not config:
             return None
 
-        events = self._event_store.load(provider_id, from_version=0, to_version=to_version)
-        domain_events = self._hydrate_events(events)
+        raw_events = self._store_load_events(provider_id, from_version=0, to_version=to_version)
+
+        if self._has_new_api:
+            domain_events = raw_events
+        else:
+            domain_events = self._hydrate_events(raw_events)
 
         return EventSourcedProvider.from_events(
             provider_id=provider_id,
