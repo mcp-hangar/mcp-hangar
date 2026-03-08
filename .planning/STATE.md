@@ -8,7 +8,7 @@ progress:
   total_phases: 10
   completed_phases: 8
   total_plans: 19
-  completed_plans: 17
+  completed_plans: 18
 ---
 
 # Project State
@@ -24,11 +24,11 @@ See: .planning/PROJECT.md (updated 2026-03-08)
 
 Milestone: v1.0 Production Hardening
 Phase: 9 of 10 (State Survival) -- IN PROGRESS
-Plan: 2 of 3 in current phase (09-01 RED complete, 09-02 complete)
+Plan: 3 of 3 in current phase (09-01 complete, 09-02 complete, 09-03 remaining)
 Status: In Progress -- plan 09-03 remaining
-Last activity: 2026-03-08 -- Completed plan 09-02 (circuit breaker persistence)
+Last activity: 2026-03-08 -- Completed plan 09-01 (saga persistence foundation)
 
-Progress: [█████████░] 84% milestone (8/10 phases, 17/19 plans)
+Progress: [█████████░] 89% milestone (8/10 phases, 18/19 plans)
 
 ## Performance Metrics
 
@@ -47,7 +47,8 @@ Progress: [█████████░] 84% milestone (8/10 phases, 17/19 pla
 **v1.0 Velocity:**
 
 - Plans completed: 3 (08-01, 08-02, 08-03) -- Phase 8 complete
-- Phase 9: 2/3 plans executed (09-01 RED, 09-02 complete), 09-03 remaining
+- Phase 9: 2/3 plans complete (09-01, 09-02), 09-03 remaining
+- 09-01 duration: ~16 min
 - 09-02 duration: ~7 min
 
 See `.planning/RETROSPECTIVE.md` for full cross-milestone trends.
@@ -67,6 +68,8 @@ All v0.9 and v0.10 decisions archived in PROJECT.md Key Decisions table.
 - Annotated all except Exception catches with fault-barrier or infra-boundary comments -- optional dependencies make narrowing unsafe, convention established for future code
 - CircuitBreaker.from_dict() added opened_at to to_dict() for round-trip fidelity -- was missing from original output
 - ProviderSnapshot.circuit_breaker_state uses raw dict (not CB instance) to avoid coupling snapshot to CB lifecycle
+- Saga checkpoint fires after saga.handle() but before command dispatch -- persists post-handle state regardless of command execution outcome
+- Circular import in application.sagas resolved by importing application.commands first to complete the import chain
 
 ### Pending Todos
 
@@ -80,5 +83,5 @@ None.
 ## Session Continuity
 
 Last session: 2026-03-08
-Stopped at: Completed 09-02-PLAN.md (circuit breaker persistence), 09-01 RED phase done
+Stopped at: Completed 09-01-PLAN.md (saga persistence foundation), 09-02 also complete
 Resume with: /gsd-execute-phase 9 (plan 09-03 remaining)
