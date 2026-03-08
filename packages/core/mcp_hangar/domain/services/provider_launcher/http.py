@@ -177,7 +177,7 @@ class HttpLauncher(ProviderLauncher):
                 http_config=http_cfg,
             )
             return client
-        except Exception as e:
+        except (OSError, ConnectionError, TimeoutError) as e:
             raise ProviderStartError(
                 provider_id="unknown",
                 reason=f"Failed to connect to HTTP provider: {e}",

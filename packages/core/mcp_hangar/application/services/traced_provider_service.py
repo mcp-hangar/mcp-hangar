@@ -122,7 +122,7 @@ class TracedProviderService:
             span.end_success(output=result)
             return result
 
-        except Exception as e:
+        except Exception as e:  # fault-barrier: record error in trace span, then re-raise
             span.end_error(error=e)
             raise
 
@@ -155,7 +155,7 @@ class TracedProviderService:
 
             return healthy
 
-        except Exception as e:
+        except Exception as e:  # fault-barrier: record error in observability, then re-raise
             latency_ms = (time.perf_counter() - start_time) * 1000
 
             self._observability.record_health_check(
@@ -191,7 +191,7 @@ class TracedProviderService:
             if provider_id:
                 try:
                     results[provider_id] = self.health_check(provider_id, trace_id)
-                except Exception:
+                except Exception:  # fault-barrier: single provider health check failure must not crash batch check
                     results[provider_id] = False
 
         return results

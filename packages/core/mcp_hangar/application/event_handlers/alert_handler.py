@@ -179,7 +179,7 @@ class AlertEventHandler:
         for sink in self._sinks:
             try:
                 sink.send(alert)
-            except Exception as e:
+            except Exception as e:  # fault-barrier: alert sink failure must not crash event handler
                 logger.error(f"Failed to send alert to sink: {e}")
 
     @property

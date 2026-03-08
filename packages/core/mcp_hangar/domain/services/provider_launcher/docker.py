@@ -230,7 +230,7 @@ class DockerLauncher(ProviderLauncher):
                 reason="Docker not found. Is Docker installed and in PATH?",
                 details={"image": image},
             ) from e
-        except Exception as e:
+        except (OSError, subprocess.SubprocessError) as e:
             raise ProviderStartError(
                 provider_id="unknown",
                 reason=f"docker_spawn_failed: {e}",

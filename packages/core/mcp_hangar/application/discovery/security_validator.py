@@ -358,7 +358,7 @@ class SecurityValidator:
                 reason="Health check timed out",
                 details={"url": url, "timeout": self.config.health_check_timeout_s},
             )
-        except Exception as e:
+        except Exception as e:  # fault-barrier: health check failure returns validation report, not crash
             return ValidationReport(
                 result=ValidationResult.FAILED_HEALTH,
                 provider=provider,

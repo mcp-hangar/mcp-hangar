@@ -11,6 +11,7 @@ from typing import Any, TYPE_CHECKING
 
 from ...logging_config import get_logger
 from ..events import DomainEvent
+from ..exceptions import ProviderStartError, CannotStartProviderError
 from ..value_objects import GroupId, GroupState, LoadBalancerStrategy, MemberPriority, MemberWeight, ProviderState
 from .aggregate import AggregateRoot
 from .circuit_breaker import CircuitBreaker, CircuitBreakerConfig
@@ -388,7 +389,7 @@ class ProviderGroup(AggregateRoot):
         # Phase 1: Provider I/O outside lock
         try:
             member.provider.ensure_ready()
-        except Exception as e:
+        except (ProviderStartError, CannotStartProviderError) as e:
             logger.warning(f"Failed to start member {member_id}: {e}")
             with self._lock:
                 # Only update if member still exists (may have been removed)
@@ -659,7 +660,7 @@ class ProviderGroup(AggregateRoot):
         for member_id, member in members_snapshot:
             try:
                 member.provider.shutdown()
-            except Exception as e:
+            except Exception as e:  # fault-barrier: shutdown of one member must not prevent others
                 logger.warning(f"Failed to stop member {member_id}: {e}")
 
         # Phase 3: Update state under lock

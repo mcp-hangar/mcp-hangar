@@ -178,7 +178,7 @@ class ImageBuilder:
                 timeout=30,
             )
             return result.returncode == 0
-        except Exception as e:
+        except (OSError, subprocess.SubprocessError) as e:
             logger.warning(f"Failed to check image existence: {e}")
             return False
 
@@ -263,7 +263,7 @@ class ImageBuilder:
                 provider_id="image_builder",
                 reason="Image build timed out after 10 minutes",
             )
-        except Exception as e:
+        except (OSError, subprocess.SubprocessError) as e:
             raise ProviderStartError(provider_id="image_builder", reason=f"Image build failed: {e}")
 
     def build_if_needed(self, config: BuildConfig) -> str:
@@ -293,7 +293,7 @@ class ImageBuilder:
         try:
             result = subprocess.run([self._runtime, "rmi", tag], capture_output=True, text=True, timeout=60)
             return result.returncode == 0
-        except Exception as e:
+        except (OSError, subprocess.SubprocessError) as e:
             logger.warning(f"Failed to remove image {tag}: {e}")
             return False
 

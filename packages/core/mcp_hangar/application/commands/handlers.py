@@ -76,7 +76,7 @@ class StartProviderHandler(BaseProviderHandler):
         try:
             provider.ensure_ready()
             record_provider_start(command.provider_id, success=True)
-        except Exception as e:
+        except Exception as e:  # fault-barrier: catch for metrics recording, then re-raise
             record_provider_start(command.provider_id, success=False)
             record_error("provider", type(e).__name__)
             raise
@@ -129,7 +129,7 @@ class InvokeToolHandler(BaseProviderHandler):
             success = True
             return result
 
-        except Exception as e:
+        except Exception as e:  # fault-barrier: catch for metrics recording, then re-raise
             error_type = type(e).__name__
             raise
 

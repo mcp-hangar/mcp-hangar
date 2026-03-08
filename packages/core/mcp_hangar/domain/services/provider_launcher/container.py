@@ -482,7 +482,7 @@ class ContainerLauncher(ProviderLauncher):
                 reason=f"{self._runtime} not found. Is it installed and in PATH?",
                 details={"image": image},
             ) from e
-        except Exception as e:
+        except (OSError, subprocess.SubprocessError) as e:
             raise ProviderStartError(
                 provider_id="unknown",
                 reason=f"container_spawn_failed: {e}",

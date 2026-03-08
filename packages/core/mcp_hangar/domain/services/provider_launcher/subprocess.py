@@ -277,7 +277,7 @@ class SubprocessLauncher(ProviderLauncher):
                 reason=f"Permission denied: {resolved_command[0] if resolved_command else ''}",
                 details={"command": safe_command},
             ) from e
-        except Exception as e:
+        except (OSError, subprocess.SubprocessError) as e:
             raise ProviderStartError(
                 provider_id="unknown",
                 reason=f"subprocess_spawn_failed: {e}",

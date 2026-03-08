@@ -81,7 +81,7 @@ class BackgroundWorker:
         for event in provider.collect_events():
             try:
                 self._event_bus.publish(event)
-            except Exception:
+            except Exception:  # fault-barrier: event publishing must not crash background worker
                 logger.exception("event_publish_failed")
 
     def _loop(self):
@@ -130,7 +130,7 @@ class BackgroundWorker:
                     # Publish any collected events
                     self._publish_events(provider)
 
-                except Exception as e:
+                except Exception as e:  # fault-barrier: single provider failure must not crash background worker loop
                     record_error("gc", type(e).__name__)
                     logger.exception(
                         "background_task_failed",
@@ -274,7 +274,7 @@ class ConfigReloadWorker:
             logger.error(
                 "watchdog_start_failed_falling_back_to_polling",
                 error=str(e),
-            )
+            )  # fault-barrier: watchdog init failure must not crash config reload worker
             self._start_polling()
 
     def _start_polling(self):
@@ -304,7 +304,7 @@ class ConfigReloadWorker:
                     self._last_mtime = current_mtime
                     self._trigger_reload()
 
-            except Exception as e:
+            except Exception as e:  # fault-barrier: polling error must not crash config reload worker
                 logger.error("config_polling_error", error=str(e))
 
     def _trigger_reload(self):
@@ -322,7 +322,7 @@ class ConfigReloadWorker:
             result = self.command_bus.send(command)
             logger.info("config_reload_triggered", result=result)
 
-        except Exception as e:
+        except Exception as e:  # fault-barrier: reload trigger failure must not crash worker
             logger.error(
                 "config_reload_trigger_failed",
                 error=str(e),

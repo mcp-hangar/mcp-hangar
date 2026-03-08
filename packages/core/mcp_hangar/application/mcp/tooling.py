@@ -103,7 +103,7 @@ def mcp_tool_wrapper(
 
                 try:
                     return await func(*args, **kwargs)
-                except Exception as exc:
+                except Exception as exc:  # fault-barrier: map all tool exceptions to error payloads for MCP client
                     # Optional error hook (e.g. security auditing).
                     if on_error is not None:
                         try:
@@ -141,7 +141,7 @@ def mcp_tool_wrapper(
 
                 try:
                     return func(*args, **kwargs)
-                except Exception as exc:
+                except Exception as exc:  # fault-barrier: map all tool exceptions to error payloads for MCP client
                     # Optional error hook (e.g. security auditing).
                     if on_error is not None:
                         try:
