@@ -5,6 +5,9 @@ __pycache__/
 .idea/
 .vscode/
 
+# Planning docs (local only, not committed to repo)
+.planning/
+
 # Local config (contains user-specific paths)
 # Keep *.example files, ignore actual configs
 config.yaml
@@ -238,6 +241,7 @@ logs/
 
 # Operator build artifacts
 operator/bin/
+packages/operator/operator
 
 # Coverage reports (already in htmlcov but just to be safe)
 htmlcov/

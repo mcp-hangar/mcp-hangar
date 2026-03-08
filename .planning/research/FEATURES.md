@@ -1,183 +1,199 @@
 # Feature Landscape
 
-**Domain:** Documentation, Kubernetes operator, and Helm chart maturity for a production-grade MCP infrastructure platform
-**Researched:** 2026-02-28
-**Confidence:** HIGH (based on direct codebase analysis + established patterns from mature K8s operators like cert-manager, Prometheus Operator, Istio, ArgoCD, and CNCF documentation standards)
+**Domain:** Production hardening for MCP provider platform (MCP Hangar)
+**Researched:** 2026-03-08
+**Confidence:** HIGH (based on direct codebase analysis of 20+ source files across all layers)
 
 ---
 
 ## Table Stakes
 
-Features users expect for enterprise adoption. Missing = product feels incomplete or untrusted.
+Features that production deployments require. Missing = system is unreliable under real-world conditions (restarts, failures, growth).
 
-### Documentation
+### 1. Saga Persistence and Checkpointing
 
-| Feature | Why Expected | Complexity | Dependencies | Notes |
-|---------|--------------|------------|--------------|-------|
-| Configuration Reference (full YAML schema) | Enterprise users need exhaustive config docs to deploy without reading source code. Every major infra tool (Prometheus, Grafana, ArgoCD) ships one. | Med | Existing config.py, value_objects | Must cover all YAML keys, env vars, defaults, validation rules, and examples. Currently missing entirely -- only `reference/cli.md` and `reference/hot-reload.md` exist. |
-| MCP Tools Reference (all 22 tools) | Users calling tools via MCP protocol need parameter names, types, return schemas, error codes, and side effects documented. Like an API reference. | Med | Existing tool implementations in `server/tools/` | Currently zero tool reference pages. The 22 tools are the primary API surface -- undocumented API is a non-starter for enterprise. |
-| Fix broken documentation links | Broken links (29 identified) signal unmaintained docs. Enterprise evaluators check for this. `docs/security/AUTH_SECURITY_AUDIT.md` referenced in mkdocs.yml but directory does not exist. | Low | All existing docs | mkdocs.yml references `security/AUTH_SECURITY_AUDIT.md` but `docs/security/` directory is missing entirely. Stale org name `mapyr` in mkdocs.yml repo_url. |
-| Provider Groups Guide | Provider groups are a core differentiator (load balancing, failover, circuit breaker). Undocumented features are invisible features. | Med | Existing group implementation | Currently no guide for groups despite having 5 LB strategies, health policies, and circuit breaker. |
-| Facade API Guide (Hangar/SyncHangar) | Programmatic users need to know the public API surface for embedding MCP Hangar in applications and frameworks. | Med | Existing facade implementation | No docs exist for the programmatic API. Enterprise devs integrating Hangar into their apps have no starting point. |
+| Attribute | Detail |
+|-----------|--------|
+| **Why Expected** | In-memory saga state is lost on restart. Long-running recoveries and failovers silently vanish, leaving providers in inconsistent states with no trace of what happened. |
+| **Complexity** | High |
+| **Existing Code** | 3 sagas: `ProviderRecoverySaga`, `GroupRebalanceSaga`, `ProviderFailoverSaga` -- all `EventTriggeredSaga` subclasses. `SagaManager` handles dispatch. `SagaContext` has `to_dict()` serialization. `SagaState` enum covers full lifecycle (NOT_STARTED, RUNNING, COMPLETED, COMPENSATING, COMPENSATED, FAILED). |
+| **Gap** | All state lives in Python dicts (`_retry_state`, `_active_failovers`, `_member_to_group`). No persistence backend. No checkpoint triggers. No resume-on-bootstrap logic. Recovery saga comment explicitly says "In a real implementation, you would use a scheduler." |
+| **What's Needed** | Persistence backend (SQLite table for saga state), checkpoint triggers on saga state transitions, bootstrap-time saga resume, idempotent step execution for crash recovery. |
 
-### Kubernetes Operator
+### 2. Circuit Breaker State Persistence
 
-| Feature | Why Expected | Complexity | Dependencies | Notes |
-|---------|--------------|------------|--------------|-------|
-| MCPProviderGroup controller | CRD types defined, no controller exists. Groups are central to the domain model. An operator managing individual providers but not groups is like a Deployment controller without ReplicaSets. | High | MCPProvider controller (done), group CRD types (done) | Must implement label-based MCPProvider selection, status aggregation (ready/degraded/dead counts), health policy evaluation, and condition reporting. |
-| MCPDiscoverySource controller | CRD types defined, no controller exists. Discovery is table stakes for K8s-native infrastructure -- operators should react to cluster state, not require manual CR creation. | High | MCPProvider controller (done), discovery CRD types (done) | Must implement 4 discovery modes (Namespace, ConfigMap, Annotations, ServiceDiscovery), additive vs authoritative sync, refresh intervals, and provider template application. |
-| Controller tests | The existing MCPProvider controller has tests. New controllers without tests are unshippable for production-grade claims. | Med | Each new controller | Standard controller-runtime envtest pattern. |
-| Status conditions on all CRDs | Already implemented on MCPProvider (Ready, Progressing, Degraded, Available). New controllers must follow same pattern. | Low | Part of each controller | Standard K8s condition types for observability. |
+| Attribute | Detail |
+|-----------|--------|
+| **Why Expected** | Circuit breaker state resets on restart. A provider that was tripping the breaker gets retried immediately after restart, causing cascading failures against a known-bad provider. |
+| **Complexity** | Medium |
+| **Existing Code** | `CircuitBreaker` in `domain/model/circuit_breaker.py` with CLOSED/OPEN states. `to_dict()` serialization exists. Thread-safe with `threading.Lock()`. `CircuitBreakerConfig` has `failure_threshold` and `reset_timeout_s`. |
+| **Gap** | No persistence hook. No restore-on-bootstrap. State is simple (state + failure_count + opened_at) but completely ephemeral. Missing HALF_OPEN state is a separate concern (listed as differentiator). |
+| **What's Needed** | Save hook on state changes, restore from storage on bootstrap, storage backend choice (SQLite or event store). |
 
-### Helm Charts
+### 3. Event Store Snapshots
 
-| Feature | Why Expected | Complexity | Dependencies | Notes |
-|---------|--------------|------------|--------------|-------|
-| Version sync (0.2.0 to 0.10.0) | Charts at 0.2.0 while app is at 0.10.0 signals abandonment. Enterprise users check chart versions against app versions. | Low | Chart.yaml updates, values.yaml review | Both `mcp-hangar` and `mcp-hangar-operator` charts stuck at 0.2.0. Must update Chart.yaml `version` and `appVersion`. |
-| NOTES.txt post-install instructions | Every serious Helm chart prints useful info after install (endpoints, next steps, common commands). Currently missing from both charts. | Low | Template values | Standard practice: show service URL, how to check status, link to docs. Both charts lack NOTES.txt entirely. |
-| Helm test templates | `helm test` is the standard way to verify chart installation. Missing tests = no CI/CD validation path. Enterprise users expect `helm test <release>` to work. | Med | Running pods, service endpoints | Need connection test pods that verify the operator/server are reachable and healthy. |
+| Attribute | Detail |
+|-----------|--------|
+| **Why Expected** | Without snapshots, event replay grows unbounded. Startup time degrades linearly with event history. For long-running production deployments with thousands of state transitions, this becomes a real problem. |
+| **Complexity** | High |
+| **Existing Code** | Domain-side plumbing exists: `ProviderSnapshot` dataclass with `to_dict()`/`from_dict()`, `EventSourcedProviderRepository` has `snapshot_store`, `snapshot_interval`, `_create_snapshot` method. `EventStoreSnapshot` class exists in `infrastructure/event_store.py` but only for `FileEventStore`. |
+| **Gap** | `IEventStore` contract lacks snapshot methods. `SQLiteEventStore` has no snapshots table. The two event store abstractions (`domain/contracts/event_store.py` IEventStore vs `infrastructure/event_store.py` EventStore ABC) are not aligned on snapshot support. |
+| **What's Needed** | Add snapshot methods to `IEventStore` contract, create snapshots table in SQLiteEventStore, integrate snapshot-aware replay in `EventSourcedProviderRepository`, snapshot creation trigger (every N events). |
+
+### 4. Exponential Backoff with Jitter for Health Checks
+
+| Attribute | Detail |
+|-----------|--------|
+| **Why Expected** | Fixed-interval health checks hammer degraded providers. Without jitter, multiple providers failing simultaneously create thundering herd on recovery. State-unaware scheduling wastes resources checking healthy providers at the same rate as degraded ones. |
+| **Complexity** | Medium |
+| **Existing Code** | `HealthTracker` in `domain/model/health_tracker.py` has `_calculate_backoff()` computing `min(60, 2^consecutive_failures)`. `can_retry()` and `time_until_retry()` exist. `BackgroundWorker` in `gc.py` uses fixed `interval_s` for ALL providers regardless of state. |
+| **Gap** | No jitter in backoff formula. `BackgroundWorker` runs health checks at uniform interval for all providers -- healthy, degraded, and dead get same frequency. No state-aware scheduling. |
+| **What's Needed** | Add jitter to `_calculate_backoff()` (e.g., `backoff * (0.5 + random(0, 0.5))`), make `BackgroundWorker` state-aware (healthy=normal interval, degraded=backoff+jitter, dead=longer backoff with ceiling). |
+
+### 5. Command Validation for Discovery-Sourced Providers
+
+| Attribute | Detail |
+|-----------|--------|
+| **Why Expected** | Docker/K8s discovery sources accept arbitrary commands from labels/annotations without validation. A malicious or misconfigured label can inject arbitrary commands into provider startup. This is a security boundary issue. |
+| **Complexity** | Medium |
+| **Existing Code** | `InputValidator` in `domain/security/input_validator.py` has `validate_command()` with allowlist/blocklist and `DANGEROUS_PATTERNS` regex list. Docker discovery (`docker_source.py` line 206) does raw `cmd.split()` with NO validation. `allowed_commands` parameter exists but defaults to `None` (blocklist only). |
+| **Gap** | Discovery pipeline bypasses `InputValidator` entirely. The validator exists and works -- it's just not wired into the discovery path. |
+| **What's Needed** | Wire `InputValidator.validate_command()` into discovery pipeline before provider registration. Apply validation in `DockerDiscoverySource` and `KubernetesDiscoverySource`. Consider making allowlist mandatory for discovery-sourced providers (higher trust bar than manually configured ones). |
+
+### 6. Transport-Agnostic Rate Limiting
+
+| Attribute | Detail |
+|-----------|--------|
+| **Why Expected** | Rate limiting exists only at server layer (`server/validation.py`). Direct command bus usage, internal callers, programmatic API users, and alternative transports bypass rate limiting entirely. A single noisy client can monopolize provider resources. |
+| **Complexity** | Medium |
+| **Existing Code** | Full implementation exists: `TokenBucket` + `InMemoryRateLimiter` + `CompositeRateLimiter` in `domain/security/rate_limiter.py`. `RateLimitResult` has `to_headers()` for HTTP responses. Currently enforced only in `server/validation.py` via `check_rate_limit()`. Auth middleware has its own separate `AuthRateLimiter`. |
+| **Gap** | Enforcement point is too high in the stack. Domain-layer implementation, server-layer enforcement. Any entry point that doesn't go through `server/validation.py` skips rate limiting. |
+| **What's Needed** | Move enforcement to command bus middleware or application service decorator. All tool invocation paths must pass through rate limiting regardless of transport (stdio, HTTP, programmatic). Keep server-layer response formatting (headers) but move the check inward. |
+
+### 7. Property-Based State Machine Testing
+
+| Attribute | Detail |
+|-----------|--------|
+| **Why Expected** | The provider state machine is the single most critical invariant in the system. Example-based tests cover specific transitions but cannot verify that ALL transition sequences maintain invariants. A single missed invalid transition can cause silent state corruption. |
+| **Complexity** | Medium |
+| **Existing Code** | `VALID_TRANSITIONS` dict in `domain/model/provider.py` defines the state machine cleanly. `ProviderState` enum has 5 states. `EventSourcedProvider` replays events to rebuild state. `_transition_to()` validates transitions and emits events. |
+| **Gap** | No property-based tests exist. Only example-based unit tests for specific transitions. |
+| **What's Needed** | Hypothesis stateful testing that generates random sequences of operations (start, stop, health check pass/fail, degrade, recover) and verifies: (a) invalid transitions always raise `InvalidStateTransitionError`, (b) every valid transition emits `ProviderStateChanged` event, (c) event replay reproduces identical state, (d) no reachable state has undefined behavior. |
 
 ---
 
 ## Differentiators
 
-Features that set MCP Hangar apart. Not expected, but valued by enterprise adopters.
+Features that go beyond baseline production-readiness. Not required, but significantly improve operational confidence.
 
 | Feature | Value Proposition | Complexity | Dependencies | Notes |
-|---------|-------------------|------------|--------------|-------|
-| CRD API Reference (auto-generated) | Auto-generated CRD reference from Go types. Most K8s operators (cert-manager, Istio) publish complete CRD field docs. Reduces support burden. | Med | CRD Go types in `api/v1alpha1/` | Could use `crd-ref-docs` or `gen-crd-api-reference-docs` tools. Not blocking for v0.10, but high value. |
-| Troubleshooting guide / runbook for operators | Production operators ship runbooks: "provider stuck in Initializing", "discovery not finding services", "group health degraded". Reduces on-call burden. | Med | Understanding of failure modes | Only `runbooks/RELEASE.md` exists today. Operational runbooks are a strong differentiator for enterprise adoption. |
-| MCPProviderGroup controller with automatic rebalancing | When group members change (provider added/removed), controller automatically rebalances. Goes beyond basic label-based selection. | High | MCPProviderGroup controller | Maps to existing domain saga pattern (GroupRebalanceSaga). Could be deferred to v0.11. |
-| Discovery source event emission | Controller emits K8s Events and domain events when providers are discovered/created/removed. Enables audit trail in K8s-native way. | Med | MCPDiscoverySource controller | Matches existing domain event pattern. Standard operator practice. |
-| Helm chart values schema (values.schema.json) | JSON Schema for values.yaml enables IDE validation and `helm lint` enforcement. Cert-manager, Istio, and ArgoCD ship these. | Med | Existing values.yaml | Not table stakes yet for v0.10, but signals chart maturity. |
-| Architecture Decision Records for K8s design choices | Document why controllers are designed the way they are. ADR-001 for Langfuse exists; need ADRs for operator design decisions. | Low | Design decisions | Helps future contributors understand tradeoffs. |
+|---------|------------------|------------|--------------|-------|
+| Saga compensation on partial failure | When a multi-step saga fails mid-way, automatically undo completed steps (e.g., rebalance that moved 2 of 5 providers). Without this, operators must manually clean up partial state. | High | Saga persistence (table stakes #1) | `SagaState.COMPENSATING`/`COMPENSATED` states exist but no compensation logic is implemented. Requires persistent checkpoint state to know what to undo. |
+| HALF_OPEN circuit breaker state | Allow controlled probe requests through a tripped breaker to detect recovery. Current OPEN-to-CLOSED jump on timeout is abrupt and can cause request spikes. | Low | Circuit breaker persistence (table stakes #2) | Small code change: add HALF_OPEN state, allow single probe request, close on success / re-open on failure. Well-understood pattern. |
+| Snapshot compaction (old event pruning) | After snapshot creation, old events can be archived or deleted to bound storage growth. Without this, event store grows forever even with snapshots. | Medium | Event store snapshots (table stakes #3) | Only valuable after snapshots work. Separate concern -- snapshots stop read-time growth, compaction stops write-time growth. |
+| Rate limit metrics and observability | Emit Prometheus metrics for rate limit hits, rejections, and bucket utilization. Without this, operators can't tell if rate limits are too strict or too loose. | Low | Rate limiter (table stakes #6) | `RateLimitResult` already has structured data. Need counters/histograms wired to `PrometheusMetricsPublisher`. |
+| Fuzz testing for event deserialization | Ensure event replay is resilient to malformed or corrupted event data. Catches edge cases in `from_dict()` and event upcaster paths. | Medium | Event store, property-based testing infrastructure | Complements property-based testing. Different focus: testing validates logic invariants, fuzzing validates data resilience. |
 
 ---
 
 ## Anti-Features
 
-Features to explicitly NOT build in v0.10. Either premature, out of scope, or actively harmful.
+Features to explicitly NOT build in this production hardening milestone.
 
 | Anti-Feature | Why Avoid | What to Do Instead |
-|--------------|-----------|-------------------|
-| Webhook admission controller for CRDs | Adds operational complexity (TLS cert management, webhook availability requirements). CRD validation via kubebuilder markers is sufficient at this stage. | Use kubebuilder validation markers (already in place) and CEL validation expressions in CRDs. |
-| CRD version conversion (v1alpha1 to v1beta1) | Premature. API is not stable yet. Converting between versions adds maintenance burden without users needing it. | Keep v1alpha1 until API stabilizes. The `crds.conversion.enabled: false` in values.yaml is correct. |
-| Multi-cluster operator support | Massive complexity leap. No evidence of demand. Single-cluster operator with namespace scoping is sufficient. | Document single-cluster deployment. Let users deploy one operator per cluster. |
-| Operator Lifecycle Manager (OLM) packaging | OLM adoption is declining outside OpenShift. Helm is the dominant distribution mechanism. | Ship Helm charts. Add OLM only if OpenShift users request it. |
-| Auto-generated API docs from docstrings (Python) | mkdocstrings plugin is already configured but generating API docs for internal domain code exposes implementation details. | Document the public API surface (Hangar/SyncHangar facade) manually. Keep domain internals private. |
-| Helm umbrella chart combining server + operator | Couples lifecycle of two independent components. Operator may be updated independently of server. | Ship two separate charts (already the case). Document deployment order in guides. |
-| Discovery controller managing cross-namespace resources | Security concern. Discovery in namespace A creating providers in namespace B requires elevated RBAC and violates least-privilege. | Discovery creates MCPProviders in same namespace as MCPDiscoverySource. Document cross-namespace patterns as manual. |
+|-------------|-----------|-------------------|
+| Distributed saga coordination (cross-node) | MCP Hangar is single-process by design. Distributed sagas (2PC, Raft-based) add massive complexity for zero benefit in current architecture. | Persist saga state locally (SQLite). Multi-node is a separate milestone if ever needed. |
+| External circuit breaker service (Resilience4j sidecar, etc.) | Over-engineering. Adds operational dependency and network hop for a simple state machine. | Use existing in-process `CircuitBreaker` with persistence to SQLite or event store. |
+| Real-time event streaming / event bus replication | Not needed for single-process hardening. Adds infrastructure requirements (Kafka, NATS) without matching need. | Snapshots + bounded event log is sufficient. Streaming is a scale-out concern for a future milestone. |
+| ML-based anomaly detection for health checks | Exponential backoff with jitter covers 99% of real-world cases. ML adds complexity, unpredictability, and debugging difficulty without proportional value. | Deterministic backoff with configurable thresholds. Operators understand `min(60, 2^n * jitter)`. They don't understand ML models. |
+| Per-request command allowlist UI / admin panel | Scope creep. The allowlist should be configuration-driven (YAML), not require a separate UI. | Use YAML config for allowed commands. CLI can validate config correctness. |
+| Async/asyncio rewrite of domain layer | `CLAUDE.md` explicitly states "Don't use asyncio in core domain (thread-based by design)." The domain layer works. Rewriting it doesn't harden it. | Keep thread-based. Focus hardening on persistence, resilience, and testing -- not rewriting working code. |
+| Custom snapshot serialization format | Inventing a binary format for snapshots adds complexity and debugging difficulty. | Use JSON serialization via existing `to_dict()`/`from_dict()` methods. Optimize only if profiling shows serialization is a bottleneck (it won't be). |
 
 ---
 
 ## Feature Dependencies
 
-```
-Fix broken docs links ──► (unblocks all other docs, readers can navigate)
-         │
-         ├──► Configuration Reference
-         │         │
-         │         └──► Provider Groups Guide (references config syntax)
-         │         └──► Facade API Guide (references config syntax)
-         │
-         └──► MCP Tools Reference (standalone, references no other new pages)
+```text
+Saga persistence (#1) ---------> Saga compensation (differentiator)
+                                   (compensation needs persistent checkpoints to know what to undo)
 
-MCPProvider controller (DONE) ──► MCPProviderGroup controller
-         │                              │
-         │                              └──► Group health policy evaluation
-         │                              └──► Label-based provider selection
-         │
-         └──► MCPDiscoverySource controller
-                  │
-                  └──► Provider template application
-                  └──► Additive vs authoritative sync
+Event store snapshots (#3) ----> Snapshot compaction (differentiator)
+                                   (can't compact without snapshots to restore from)
 
-Helm version sync ──► NOTES.txt (references correct versions)
-         │
-         └──► Helm test templates (tests correct endpoints)
+Circuit breaker persistence (#2) -> HALF_OPEN state (differentiator)
+                                   (HALF_OPEN probe state should persist across restarts too)
+
+Rate limiter middleware (#6) --> Rate limit metrics (differentiator)
+                                   (metrics should reflect transport-agnostic enforcement)
+
+Property-based testing (#7) ---> Fuzz testing (differentiator)
+                                   (testing infrastructure and patterns carry over)
 ```
 
-**Critical path:** Fix broken docs links must come first because all new doc pages will link to existing pages. MCPProviderGroup and MCPDiscoverySource controllers are independent of each other but both depend on the existing MCPProvider controller. Helm version sync must precede NOTES.txt and test templates.
+**No circular dependencies among table stakes.** All 7 table-stakes features can be implemented independently and in parallel. The dependency arrows above show what must come before differentiators.
+
+**Internal codebase dependencies (existing code each feature touches):**
+
+| Feature | Primary Files Modified | Shared Dependencies |
+|---------|----------------------|---------------------|
+| Saga persistence | `infrastructure/saga_manager.py`, saga implementations, bootstrap | `IEventStore` or SQLite |
+| Circuit breaker persistence | `domain/model/circuit_breaker.py`, bootstrap | SQLite or file storage |
+| Event store snapshots | `domain/contracts/event_store.py`, `infrastructure/persistence/sqlite_event_store.py`, `infrastructure/event_sourced_repository.py` | `IEventStore` contract |
+| Health check backoff | `domain/model/health_tracker.py`, `gc.py` | Provider state awareness |
+| Command validation | `infrastructure/discovery/docker_source.py`, discovery pipeline | `InputValidator` |
+| Rate limit middleware | `infrastructure/command_bus.py` or application services, `server/validation.py` | `InMemoryRateLimiter` |
+| Property-based testing | `tests/` (new test files) | `Provider`, `VALID_TRANSITIONS`, `EventSourcedProvider` |
 
 ---
 
-## Prioritization Matrix
+## MVP Recommendation
 
-### P0 -- Must ship in v0.10 (enterprise adoption blockers)
+### Phase 1 -- Foundation (highest risk, highest value, do first)
 
-| Feature | Category | Complexity | Rationale |
-|---------|----------|------------|-----------|
-| Fix 29 broken documentation links | Docs | Low | Foundational. Broken links undermine all other doc efforts. Includes fixing missing `docs/security/` directory and stale `mapyr` org name. |
-| Configuration Reference | Docs | Med | Users cannot deploy without knowing config options. Currently zero config reference exists. |
-| MCP Tools Reference | Docs | Med | The 22 MCP tools are the entire user-facing API. Undocumented API = unusable product for new users. |
-| Helm version sync (0.2.0 to 0.10.0) | Helm | Low | Version mismatch signals abandoned charts. Quick fix with high signal value. |
-| MCPProviderGroup controller | K8s | High | CRD types defined, no controller. Incomplete operator is worse than no operator -- implies broken product. |
-| MCPDiscoverySource controller | K8s | High | Same as above. CRD exists without controller = unusable custom resource. |
+1. **Event store snapshots** (#3) -- Unblocks unbounded growth problem. Domain plumbing already exists (`ProviderSnapshot`, `_create_snapshot`). Primary work: `IEventStore` contract update + SQLite snapshots table. High complexity but well-defined scope.
+2. **Saga persistence** (#1) -- Highest complexity and highest impact. Without it, any restart loses in-flight recovery/failover state with no trace. `SagaContext.to_dict()` exists. Primary work: persistence backend + checkpoint triggers + resume logic.
 
-### P1 -- Should ship in v0.10 (significantly improves experience)
+### Phase 2 -- Safety (close security and resilience gaps)
 
-| Feature | Category | Complexity | Rationale |
-|---------|----------|------------|-----------|
-| Provider Groups Guide | Docs | Med | Groups are a differentiator. Without docs, the feature is invisible. |
-| Facade API Guide | Docs | Med | Programmatic users need this to integrate Hangar into their applications. |
-| NOTES.txt post-install instructions | Helm | Low | Quick win. Users expect post-install guidance from `helm install`. |
-| Helm test templates | Helm | Med | Enables CI/CD validation. Standard practice for production Helm charts. |
-| Controller tests (Group + Discovery) | K8s | Med | Production-grade claim requires tests. Already have pattern from MCPProvider controller. |
+3. **Command validation for discovery** (#5) -- Security gap. Smallest scope: wire existing `InputValidator` into discovery pipeline. `validate_command()` works, just needs calling from `DockerDiscoverySource`.
+4. **Transport-agnostic rate limiting** (#6) -- Enforcement gap. Domain implementation complete. Primary work: command bus middleware or application service decorator to move enforcement inward.
+5. **Circuit breaker persistence** (#2) -- Simple state, `to_dict()` exists, low risk. Natural companion to saga persistence (same storage patterns).
 
-### P2 -- Nice to have (defer to v0.11 if time-constrained)
+### Phase 3 -- Reliability and Confidence (validates everything above)
 
-| Feature | Category | Complexity | Rationale |
-|---------|----------|------------|-----------|
-| CRD API Reference (auto-generated) | Docs | Med | High value but not blocking. Can reference CRD YAML examples in K8s guide instead. |
-| Troubleshooting / operational runbooks | Docs | Med | Important for production use but can iterate after initial adoption. |
-| Helm values.schema.json | Helm | Med | IDE validation is nice but not blocking deployment. |
-| MCPProviderGroup automatic rebalancing | K8s | High | Stretch goal. Basic label selection + status aggregation is sufficient for v0.10. |
-| ADRs for operator design decisions | Docs | Low | Good practice but not user-facing. |
+6. **Exponential backoff with jitter** (#4) -- `HealthTracker` needs jitter formula. `BackgroundWorker` needs state-aware scheduling. Medium complexity, well-understood patterns.
+7. **Property-based state machine testing** (#7) -- Validates the state machine that all other features depend on. Catches edge cases in transitions. Best done last because it can also test the hardened code paths.
+
+### Defer to later milestone
+
+- Saga compensation, HALF_OPEN circuit breaker, snapshot compaction, rate limit metrics, fuzz testing
+
+### Ordering Rationale
+
+- **Foundation first** because event store snapshots and saga persistence are highest-risk, highest-complexity, and most likely to surface design issues. Start them when there's maximum time to iterate.
+- **Safety second** because these close real security/resilience gaps (command injection, rate limit bypass) with lower implementation risk -- the code already exists and just needs wiring.
+- **Confidence last** because testing and backoff improvements validate and refine everything built before them. Property-based testing is most valuable when it can exercise hardened code paths.
 
 ---
 
-## Current State Gaps Analysis
+## Complexity Summary
 
-### Documentation: What Exists vs What's Needed
-
-| Category | Exists | Missing (Table Stakes) |
-|----------|--------|----------------------|
-| Getting Started | installation.md, quickstart.md | None -- adequate |
-| Guides | 8 guides (auth, batch, containers, discovery, HTTP, K8s, observability, testing) | Provider Groups guide, Facade API guide |
-| Reference | CLI reference, hot-reload reference | Configuration Reference, MCP Tools Reference, CRD API Reference |
-| Cookbook | 4 recipes (HTTP gateway, health checks, circuit breaker, failover) | None -- adequate for v0.10 |
-| Architecture | Overview, Event Sourcing, 1 ADR | None -- adequate for v0.10 |
-| Runbooks | Release process | Operational troubleshooting (P2) |
-| Security | security.md (policy) | AUTH_SECURITY_AUDIT.md referenced but missing |
-
-### Kubernetes Operator: What Exists vs What's Needed
-
-| Component | Status | Gap |
-|-----------|--------|-----|
-| CRD types (MCPProvider) | Done, 535 lines | None |
-| CRD types (MCPProviderGroup) | Done, 264 lines | None |
-| CRD types (MCPDiscoverySource) | Done, 297 lines | None |
-| MCPProvider controller | Done, 535 lines, with tests | None |
-| MCPProviderGroup controller | **Missing** | Full reconciler needed |
-| MCPDiscoverySource controller | **Missing** | Full reconciler needed |
-| Hangar client (pkg/hangar) | Done, with tests | May need new methods for group/discovery |
-| Pod builder (pkg/provider) | Done, with tests | None |
-| Metrics (pkg/metrics) | Done, with tests | May need new metrics for group/discovery |
-
-### Helm Charts: What Exists vs What's Needed
-
-| Component | Status | Gap |
-|-----------|--------|-----|
-| mcp-hangar chart | 0.2.0, 7 templates | Version sync to 0.10.0, missing NOTES.txt, missing tests |
-| mcp-hangar-operator chart | 0.2.0, 9 templates + CRDs | Version sync to 0.10.0, missing NOTES.txt, missing tests |
-| CRD templates | 3 CRD YAMLs in operator chart | May need regeneration if CRD types changed |
-| values.yaml | Both charts have comprehensive values | Review for new features (group/discovery config) |
+| # | Feature | Complexity | Risk | Key Effort |
+|---|---------|-----------|------|------------|
+| 1 | Saga persistence & checkpointing | High | Medium | Serialization exists; need persistence backend, checkpoint triggers, resume-on-bootstrap, idempotent step execution |
+| 2 | Circuit breaker persistence | Medium | Low | `to_dict()` exists; need save/restore hooks, storage backend |
+| 3 | Event store snapshots | High | Medium | Domain snapshot exists; need `IEventStore` contract changes, SQLite table, snapshot-aware replay |
+| 4 | Exponential backoff + jitter | Medium | Low | Backoff formula exists; need jitter, state-aware scheduling in `BackgroundWorker` |
+| 5 | Command validation for discovery | Medium | Low | `InputValidator` exists; need wiring into discovery sources |
+| 6 | Transport-agnostic rate limiting | Medium | Low | Rate limiter exists in domain; need command bus middleware or decorator |
+| 7 | Property-based state machine testing | Medium | Low | `VALID_TRANSITIONS` clean dict; Hypothesis stateful testing well-documented |
 
 ---
 
 ## Sources
 
-- **Direct codebase analysis**: All findings based on reading actual files in the repository (HIGH confidence)
-- **Kubernetes operator patterns**: Derived from established patterns in cert-manager, Prometheus Operator, ArgoCD, and Istio operators (HIGH confidence -- these are industry standard)
-- **Helm chart conventions**: Based on Helm best practices documentation and patterns from major CNCF charts (HIGH confidence)
-- **Documentation standards**: Based on patterns from Kubernetes, Docker, Terraform, and similar infrastructure documentation sites (HIGH confidence)
+- **Direct codebase analysis** of 20+ source files across domain, application, infrastructure, and server layers (HIGH confidence)
+- `CLAUDE.md` project instructions -- architecture constraints, forbidden patterns, layer rules (HIGH confidence)
+- `.planning/PROJECT.md` milestone context, constraints, and design decisions (HIGH confidence)
+- All findings verified against actual source code, not documentation or comments alone
