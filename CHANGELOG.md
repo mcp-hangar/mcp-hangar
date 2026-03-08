@@ -7,6 +7,73 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.11.0] - 2026-03-08
+
+### Added
+
+- **Saga Persistence Foundation**: `SagaStateStore` with serialization/deserialization for durable saga state
+  - Checkpoint integration in `SagaManager._handle_event` for crash recovery
+  - Idempotency filter preventing duplicate event processing in sagas
+
+- **Circuit Breaker Persistence**: Circuit breaker state survives restarts via `ProviderSnapshot` CB fields
+  - Bootstrap wiring restores CB state on startup
+
+- **Event Store Snapshots**: `IEventStore`, `SQLiteEventStore`, and `InMemoryEventStore` support snapshots
+  - `EventSourcedProviderRepository` integrated with snapshot methods for faster aggregate hydration
+
+- **Health Check Scheduling**: State-aware `BackgroundWorker` with adaptive health check intervals
+  - `HealthTracker` jitter on backoff to prevent thundering herd
+  - State-dependent check intervals (healthy vs degraded providers)
+
+- **CommandBus Middleware Pipeline**: Extensible middleware support for cross-cutting concerns
+  - `RateLimitMiddleware` wired into bootstrap for command-level rate limiting
+
+- **Docker Discovery Resilience**: Reconnection with exponential backoff on Docker daemon failures
+
+- **Property-Based Testing**: Hypothesis-powered state machine tests for Provider aggregate
+
+- **PEP 561 Support**: `py.typed` marker for downstream type checking
+
+### Fixed
+
+- **Concurrency Safety**: `ProviderGroup` lock hierarchy violation (CONC-01) resolved
+- **invoke_tool() Refresh**: Split into two-lock-cycle pattern (CONC-03) to avoid holding locks during I/O
+- **ensure_ready()/_start()**: Restructured with `threading.Event` coordination for safer startup
+- **Exception Hygiene**: All exception catches across domain, application, infrastructure, and server layers
+  narrowed and annotated -- no more bare `except Exception` without justification
+- **Type Safety**: Fixed mypy errors in `rate_limiter`, `gc`, and `docker_source`
+
+### Changed
+
+- Discovery pipeline now validates commands before provider registration
+- `StdioClient` ordering invariant documented with regression tests
+
+## [0.10.0] - 2026-03-01
+
+### Added
+
+- **Kubernetes Operator Controllers**:
+  - `MCPProviderGroupReconciler` with label selection and status aggregation
+  - `MCPDiscoverySourceReconciler` with 4 discovery modes
+  - envtest integration tests for both controllers
+
+- **Helm Chart Maturity**: Test templates and NOTES.txt for both charts, version bump to 0.10.0
+
+- **Documentation Content**:
+  - Configuration Reference page
+  - MCP Tools Reference page
+  - Provider Groups Guide
+  - Facade API Guide
+  - Updated mkdocs.yml navigation
+
+### Changed
+
+- Install URL updated to `mcp-hangar.io/install.sh`
+
+### Removed
+
+- `docs/security/AUTH_SECURITY_AUDIT.md` (superseded by inline security documentation)
+
 ## [0.9.0] - 2026-02-15
 
 ### Added
@@ -851,7 +918,11 @@ The following items are documented technical debt introduced to enable CI:
 - Rate limiting to prevent denial of service
 - Audit logging for security-relevant events
 
-[Unreleased]: https://github.com/mcp-hangar/mcp-hangar/compare/v0.7.0...HEAD
+[Unreleased]: https://github.com/mcp-hangar/mcp-hangar/compare/v0.11.0...HEAD
+[0.11.0]: https://github.com/mcp-hangar/mcp-hangar/compare/v0.10.0...v0.11.0
+[0.10.0]: https://github.com/mcp-hangar/mcp-hangar/compare/v0.9.0...v0.10.0
+[0.9.0]: https://github.com/mcp-hangar/mcp-hangar/compare/v0.8.0...v0.9.0
+[0.8.0]: https://github.com/mcp-hangar/mcp-hangar/compare/v0.7.0...v0.8.0
 [0.7.0]: https://github.com/mcp-hangar/mcp-hangar/compare/v0.6.7...v0.7.0
 [0.6.7]: https://github.com/mcp-hangar/mcp-hangar/compare/v0.6.6...v0.6.7
 [0.6.6]: https://github.com/mcp-hangar/mcp-hangar/compare/v0.6.5...v0.6.6
