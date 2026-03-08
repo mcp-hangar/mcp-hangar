@@ -4,7 +4,7 @@ Verifies that commands from untrusted discovery sources are validated
 via InputValidator.validate_command() before provider registration.
 """
 
-from unittest.mock import AsyncMock, MagicMock, patch
+from unittest.mock import AsyncMock, MagicMock
 
 import pytest
 
@@ -15,13 +15,13 @@ from mcp_hangar.application.discovery.discovery_orchestrator import (
 from mcp_hangar.domain.discovery.discovered_provider import DiscoveredProvider
 from mcp_hangar.domain.security.input_validator import (
     InputValidator,
-    ValidationResult,
 )
 
 
 def _make_discovered_provider(
     name: str = "test-provider",
     source_type: str = "docker",
+    mode: str = "subprocess",
     command: list[str] | None = None,
     fingerprint: str = "fp-123",
 ) -> DiscoveredProvider:
@@ -29,11 +29,11 @@ def _make_discovered_provider(
     connection_info: dict = {}
     if command is not None:
         connection_info["command"] = command
-    return DiscoveredProvider(
+    return DiscoveredProvider.create(
         name=name,
         source_type=source_type,
+        mode=mode,
         connection_info=connection_info,
-        fingerprint=fingerprint,
     )
 
 

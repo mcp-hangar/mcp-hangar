@@ -6,6 +6,7 @@ from typing import Any
 from ...application.discovery import DiscoveryConfig, DiscoveryOrchestrator
 from ...domain.discovery import DiscoveryMode
 from ...domain.model import Provider
+from ...domain.security.input_validator import InputValidator
 from ...logging_config import get_logger
 from ..state import PROVIDERS, set_discovery_orchestrator
 
@@ -33,6 +34,7 @@ def create_discovery_orchestrator(config: dict[str, Any]) -> DiscoveryOrchestrat
     orchestrator = DiscoveryOrchestrator(
         config=orchestrator_config,
         static_providers=static_providers,
+        input_validator=InputValidator(),
     )
 
     sources_config = discovery_config.get("sources", [])

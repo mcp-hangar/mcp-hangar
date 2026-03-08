@@ -4,17 +4,22 @@ Main coordination component for provider discovery.
 Manages discovery sources, validation, and integration with the registry.
 """
 
+from __future__ import annotations
+
 import asyncio
 from collections.abc import Awaitable, Callable
 from dataclasses import dataclass, field
 from datetime import datetime, UTC
-from typing import Any
+from typing import TYPE_CHECKING, Any
 
 from mcp_hangar.domain.discovery.conflict_resolver import ConflictResolver
 from mcp_hangar.domain.discovery.discovered_provider import DiscoveredProvider
 from mcp_hangar.domain.discovery.discovery_service import DiscoveryCycleResult, DiscoveryService
 from mcp_hangar.domain.discovery.discovery_source import DiscoverySource
 from mcp_hangar.logging_config import get_logger
+
+if TYPE_CHECKING:
+    from mcp_hangar.domain.security.input_validator import InputValidator
 
 # Import main metrics for unified observability
 from mcp_hangar import metrics as main_metrics
@@ -51,7 +56,7 @@ class DiscoveryConfig:
     drain_timeout_s: int = 30
 
     @classmethod
-    def from_dict(cls, data: dict[str, Any]) -> "DiscoveryConfig":
+    def from_dict(cls, data: dict[str, Any]) -> DiscoveryConfig:
         """Create from dictionary (e.g., from config.yaml).
 
         Args:
@@ -106,14 +111,17 @@ class DiscoveryOrchestrator:
         self,
         config: DiscoveryConfig | None = None,
         static_providers: set[str] | None = None,
+        input_validator: InputValidator | None = None,
     ):
         """Initialize discovery orchestrator.
 
         Args:
             config: Discovery configuration
             static_providers: Set of static provider names (from config)
+            input_validator: Optional InputValidator for command validation
         """
         self.config = config or DiscoveryConfig()
+        self._input_validator = input_validator
 
         # Core components
         self._conflict_resolver = ConflictResolver(static_providers)
@@ -296,7 +304,7 @@ class DiscoveryOrchestrator:
             provider: Provider to process
 
         Returns:
-            Status string: "registered", "updated", "quarantined", "skipped"
+            Status string: "registered", "updated", "quarantined", "skipped", "rejected"
         """
         # Check if already tracked
         existing = self._lifecycle_manager.get_provider(provider.name)
@@ -308,6 +316,21 @@ class DiscoveryOrchestrator:
             else:
                 # Config changed, need to validate again
                 pass
+
+        # Validate command from untrusted discovery sources
+        command = provider.connection_info.get("command", [])
+        if command and self._input_validator:
+            validation_result = self._input_validator.validate_command(command)
+            if not validation_result.valid:
+                issues = "; ".join(i.message for i in validation_result.issues)
+                logger.warning(
+                    "discovered_provider_command_rejected",
+                    provider_name=provider.name,
+                    source=provider.source_type,
+                    command=command,
+                    reason=issues,
+                )
+                return "rejected"
 
         # Validate provider
         validation_report = await self._validator.validate(provider)
