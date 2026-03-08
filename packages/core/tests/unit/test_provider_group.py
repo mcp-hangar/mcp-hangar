@@ -386,3 +386,160 @@ class TestSerialization:
         assert len(status["members"]) == 1
         assert status["members"][0]["id"] == "provider-1"
         assert status["members"][0]["weight"] == 3
+
+
+# --- Lock Hierarchy Tests (CONC-01) ---
+
+
+class TestProviderGroupLockHierarchy:
+    """Verify group lock is NOT held when calling provider operations.
+
+    Lock hierarchy: Provider._lock (level 10) < ProviderGroup._lock (level 11).
+    Group lock must be released before calling ensure_ready() or shutdown()
+    to avoid level-11-holds-level-10 deadlock.
+    """
+
+    def test_add_member_does_not_hold_group_lock_during_ensure_ready(self):
+        """add_member() with auto_start must release group lock before ensure_ready()."""
+        from mcp_hangar.infrastructure.lock_hierarchy import LockLevel, get_current_thread_locks
+
+        group = ProviderGroup(group_id="lock-test", auto_start=True)
+        lock_held_during_ensure_ready = []
+
+        def check_lock_not_held():
+            # Check thread-local held locks for PROVIDER_GROUP level
+            held = get_current_thread_locks()
+            group_held = any(level == LockLevel.PROVIDER_GROUP for level, _ in held)
+            lock_held_during_ensure_ready.append(group_held)
+
+        provider = create_mock_provider("p1", ProviderState.COLD)
+        provider.ensure_ready = MagicMock(side_effect=check_lock_not_held)
+        # After ensure_ready, provider.state should be READY
+        provider.state = ProviderState.READY
+
+        group.add_member(provider, weight=1)
+
+        assert len(lock_held_during_ensure_ready) == 1, "ensure_ready() should have been called once"
+        assert lock_held_during_ensure_ready[0] is False, (
+            "Group lock must NOT be held when calling ensure_ready(). "
+            "This violates lock hierarchy: level 11 holding level 10."
+        )
+
+    def test_start_all_does_not_hold_group_lock_during_ensure_ready(self):
+        """start_all() must release group lock before ensure_ready()."""
+        from mcp_hangar.infrastructure.lock_hierarchy import LockLevel, get_current_thread_locks
+
+        group = ProviderGroup(group_id="lock-test", auto_start=False)
+        lock_held_during_ensure_ready = []
+
+        def check_lock_not_held():
+            held = get_current_thread_locks()
+            group_held = any(level == LockLevel.PROVIDER_GROUP for level, _ in held)
+            lock_held_during_ensure_ready.append(group_held)
+
+        provider = create_mock_provider("p1", ProviderState.COLD)
+        provider.ensure_ready = MagicMock(side_effect=check_lock_not_held)
+        provider.state = ProviderState.READY
+
+        group.add_member(provider)
+        result = group.start_all()
+
+        assert len(lock_held_during_ensure_ready) == 1, "ensure_ready() should have been called once"
+        assert lock_held_during_ensure_ready[0] is False, (
+            "Group lock must NOT be held during ensure_ready() in start_all()"
+        )
+
+    def test_stop_all_does_not_hold_group_lock_during_shutdown(self):
+        """stop_all() must release group lock before shutdown()."""
+        from mcp_hangar.infrastructure.lock_hierarchy import LockLevel, get_current_thread_locks
+
+        group = ProviderGroup(group_id="lock-test", auto_start=False)
+        lock_held_during_shutdown = []
+
+        def check_lock_not_held():
+            held = get_current_thread_locks()
+            group_held = any(level == LockLevel.PROVIDER_GROUP for level, _ in held)
+            lock_held_during_shutdown.append(group_held)
+
+        provider = create_mock_provider("p1", ProviderState.READY)
+        provider.shutdown = MagicMock(side_effect=check_lock_not_held)
+
+        group.add_member(provider)
+        group.stop_all()
+
+        assert len(lock_held_during_shutdown) >= 1, "shutdown() should have been called"
+        assert lock_held_during_shutdown[0] is False, "Group lock must NOT be held during shutdown() in stop_all()"
+
+    def test_member_removed_between_phases_handled_gracefully(self):
+        """Member removed between lock release and re-acquire is handled."""
+        group = ProviderGroup(group_id="lock-test", auto_start=True)
+
+        def ensure_ready_and_remove():
+            # Simulate: another thread removes the member during ensure_ready
+            group.remove_member("p1")
+
+        provider = create_mock_provider("p1", ProviderState.COLD)
+        provider.ensure_ready = MagicMock(side_effect=ensure_ready_and_remove)
+        provider.state = ProviderState.READY
+
+        # Should not raise KeyError
+        group.add_member(provider, weight=1)
+
+        # Member was removed during Phase 2, so it should not be in the group
+        assert group.get_member("p1") is None
+
+    def test_concurrent_add_and_start_all_no_deadlock(self):
+        """Concurrent add_member() + start_all() must not deadlock."""
+        import threading
+
+        group = ProviderGroup(group_id="lock-test", auto_start=True)
+        barrier = threading.Barrier(2, timeout=5)
+        errors: list[Exception] = []
+
+        def add_provider():
+            try:
+                provider = create_mock_provider("p-add", ProviderState.COLD)
+                provider.state = ProviderState.READY
+
+                def slow_start():
+                    barrier.wait()
+
+                provider.ensure_ready = MagicMock(side_effect=slow_start)
+                group.add_member(provider)
+            except Exception as e:
+                errors.append(e)
+
+        def start_providers():
+            try:
+                from mcp_hangar.domain.model.provider_group import GroupMember
+
+                provider2 = create_mock_provider("p-start", ProviderState.COLD)
+                provider2.state = ProviderState.READY
+
+                def slow_start():
+                    barrier.wait()
+
+                provider2.ensure_ready = MagicMock(side_effect=slow_start)
+                with group._lock:
+                    member = GroupMember(
+                        provider=provider2,
+                        weight=1,
+                        priority=1,
+                    )
+                    group._members["p-start"] = member
+
+                group.start_all()
+            except Exception as e:
+                errors.append(e)
+
+        t1 = threading.Thread(target=add_provider)
+        t2 = threading.Thread(target=start_providers)
+        t1.start()
+        t2.start()
+        t1.join(timeout=10)
+        t2.join(timeout=10)
+
+        assert not t1.is_alive(), "add_member thread deadlocked"
+        assert not t2.is_alive(), "start_all thread deadlocked"
+        deadlock_errors = [e for e in errors if not isinstance(e, threading.BrokenBarrierError)]
+        assert not deadlock_errors, f"Unexpected errors: {deadlock_errors}"
