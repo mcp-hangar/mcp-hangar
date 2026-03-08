@@ -6,9 +6,9 @@ status: in_progress
 last_updated: "2026-03-08"
 progress:
   total_phases: 10
-  completed_phases: 8
+  completed_phases: 9
   total_plans: 19
-  completed_plans: 18
+  completed_plans: 19
 ---
 
 # Project State
@@ -23,12 +23,12 @@ See: .planning/PROJECT.md (updated 2026-03-08)
 ## Current Position
 
 Milestone: v1.0 Production Hardening
-Phase: 9 of 10 (State Survival) -- IN PROGRESS
-Plan: 3 of 3 in current phase (09-01 complete, 09-02 complete, 09-03 remaining)
-Status: In Progress -- plan 09-03 remaining
-Last activity: 2026-03-08 -- Completed plan 09-01 (saga persistence foundation)
+Phase: 9 of 10 (State Survival) -- COMPLETE
+Plan: 3 of 3 in current phase (all complete)
+Status: Phase 9 complete -- ready for Phase 10
+Last activity: 2026-03-08 -- Completed plan 09-03 (idempotency filter + bootstrap wiring)
 
-Progress: [█████████░] 89% milestone (8/10 phases, 18/19 plans)
+Progress: [█████████░] 95% milestone (9/10 phases, 19/19 plans)
 
 ## Performance Metrics
 
@@ -47,9 +47,10 @@ Progress: [█████████░] 89% milestone (8/10 phases, 18/19 pla
 **v1.0 Velocity:**
 
 - Plans completed: 3 (08-01, 08-02, 08-03) -- Phase 8 complete
-- Phase 9: 2/3 plans complete (09-01, 09-02), 09-03 remaining
+- Phase 9: 3/3 plans complete (09-01, 09-02, 09-03) -- Phase 9 complete
 - 09-01 duration: ~16 min
 - 09-02 duration: ~7 min
+- 09-03 duration: ~9 min
 
 See `.planning/RETROSPECTIVE.md` for full cross-milestone trends.
 
@@ -71,17 +72,22 @@ All v0.9 and v0.10 decisions archived in PROJECT.md Key Decisions table.
 - Saga checkpoint fires after saga.handle() but before command dispatch -- persists post-handle state regardless of command execution outcome
 - Circular import in application.sagas resolved by importing application.commands first to complete the import chain
 
+- Saga idempotency guard: is_processed() before handle(), mark_processed() after checkpoint, skip when no global_position (live events)
+- CB state saved at shutdown only -- avoids write amplification, sufficient for cross-restart persistence
+- Saga state store reused for CB persistence under saga_type=circuit_breaker -- no new tables needed
+- init_saga() returns SagaStateStore so ApplicationContext can reference it for shutdown CB save
+
 ### Pending Todos
 
 None.
 
 ### Blockers/Concerns
 
-- [Phase 9]: Saga idempotency design must precede implementation -- event-triggered sagas have non-idempotent side effects that duplicate on restart replay
+- [Phase 9]: RESOLVED -- Saga idempotency implemented with is_processed()/mark_processed() guards
 - [Phase 10]: Snapshot version coordination gap -- snapshot save not transactional with event append, needs concrete design during planning
 
 ## Session Continuity
 
 Last session: 2026-03-08
-Stopped at: Completed 09-01-PLAN.md (saga persistence foundation), 09-02 also complete
-Resume with: /gsd-execute-phase 9 (plan 09-03 remaining)
+Stopped at: Completed 09-03-PLAN.md (idempotency filter + bootstrap wiring) -- Phase 9 complete
+Resume with: /gsd-execute-phase 10 (operational hardening)
