@@ -8,7 +8,7 @@ progress:
   total_phases: 10
   completed_phases: 9
   total_plans: 25
-  completed_plans: 21
+  completed_plans: 23
 ---
 
 # Project State
@@ -24,11 +24,11 @@ See: .planning/PROJECT.md (updated 2026-03-08)
 
 Milestone: v1.0 Production Hardening
 Phase: 10 of 10 (Operational Hardening) -- IN PROGRESS (6 plans, 3 waves)
-Plan: 2 of 6 in current phase (10-01, 10-02 complete)
-Status: Executing Phase 10 -- plan 10-02 complete
-Last activity: 2026-03-08 -- Completed 10-02 (event store snapshots + aggregate replay)
+Plan: 4 of 6 in current phase (10-01, 10-02, 10-03, 10-04 complete)
+Status: Executing Phase 10 -- plan 10-04 complete
+Last activity: 2026-03-08 -- Completed 10-04 (Docker discovery resilience with reconnection)
 
-Progress: [████████░░] 84% milestone (9/10 phases, 21/25 plans)
+Progress: [█████████░] 92% milestone (9/10 phases, 23/25 plans)
 
 ## Performance Metrics
 
@@ -48,7 +48,9 @@ Progress: [████████░░] 84% milestone (9/10 phases, 21/25 pla
 
 - Plans completed: 3 (08-01, 08-02, 08-03) -- Phase 8 complete
 - Phase 9: 3/3 plans complete (09-01, 09-02, 09-03) -- Phase 9 complete
-- Phase 10: 2/6 plans complete (10-01, 10-02)
+- Phase 10: 4/6 plans complete (10-01, 10-02, 10-03, 10-04)
+- 10-04 duration: ~5 min
+- 10-03 duration: ~6 min
 - 10-02 duration: ~8 min
 - 10-01 duration: ~8 min
 - 09-01 duration: ~16 min
@@ -84,6 +86,12 @@ All v0.9 and v0.10 decisions archived in PROJECT.md Key Decisions table.
 - hasattr-based API detection at **init** for old/new event store compatibility (self._has_new_api, self._has_snapshot_methods)
 - Dual hydration path: new IEventStore.read_stream() returns DomainEvent directly, old EventStore.load() returns StoredEvent needing hydration
 - InMemoryEventStore (persistence module) also gets snapshot support for test symmetry
+- CommandBusMiddleware uses **call**(command, next_handler) chain-of-responsibility pattern for extensible middleware pipeline
+- Rate limit key derived from command type name for per-command-type granularity
+- check_rate_limit() deprecated rather than removed -- tool wrapper callers still reference it
+- Inline backoff implementation in DockerDiscoverySource (pattern from retry.py, not imported) to keep discovery source self-contained
+- discover() resets client and returns empty list on mid-discovery error -- next scheduled call retries, no recursive retry risk
+- Container IDs tracked in _known_container_ids set, updated each successful discovery cycle
 
 ### Pending Todos
 
@@ -97,5 +105,5 @@ None.
 ## Session Continuity
 
 Last session: 2026-03-08
-Stopped at: Completed 10-02-PLAN.md (event store snapshots + aggregate replay from snapshots)
-Resume with: /gsd-execute-phase 10 (operational hardening) -- continue with 10-03
+Stopped at: Completed 10-04-PLAN.md (Docker discovery resilience with reconnection)
+Resume with: /gsd-execute-phase 10 (operational hardening) -- continue with 10-05

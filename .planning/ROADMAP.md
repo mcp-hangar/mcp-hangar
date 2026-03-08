@@ -90,8 +90,8 @@ Plans:
 
 - [x] 10-01-PLAN.md -- Health check backoff with jitter + state-aware BackgroundWorker scheduling (RESL-01, RESL-02) -- completed 2026-03-08
 - [x] 10-02-PLAN.md -- Event store snapshots + aggregate replay from snapshots (PERS-04, PERS-05) -- completed 2026-03-08
-- [ ] 10-03-PLAN.md -- Rate limiter command bus middleware (SECR-02)
-- [ ] 10-04-PLAN.md -- Docker discovery resilience (RESL-03)
+- [x] 10-03-PLAN.md -- Rate limiter command bus middleware (SECR-02) -- completed 2026-03-08
+- [x] 10-04-PLAN.md -- Docker discovery resilience (RESL-03) -- completed 2026-03-08
 - [ ] 10-05-PLAN.md -- Property-based testing with Hypothesis RuleBasedStateMachine (TEST-01)
 - [ ] 10-06-PLAN.md -- Typing strictness + py.typed marker (QUAL-01)
 
@@ -111,8 +111,8 @@ Phases execute in numeric order: 8 -> 9 -> 10
 | 7. Helm Chart Maturity | v0.10 | 1/1 | Complete | 2026-03-01 |
 | 8. Safety Foundation | v1.0 | 3/3 | Complete | 2026-03-08 |
 | 9. State Survival | v1.0 | 3/3 | Complete | 2026-03-08 |
-| 10. Operational Hardening | v1.0 | 2/6 | In Progress | - |
+| 10. Operational Hardening | v1.0 | 4/6 | In Progress | - |
 
 ---
 *Created: 2026-02-15*
-*Last updated: 2026-03-08 -- Phase 10 plan 10-02 complete*
+*Last updated: 2026-03-08 -- Phase 10 plan 10-04 complete*

@@ -35,7 +35,7 @@ Requirements for v1.0 Production Hardening. Each maps to roadmap phases.
 
 - [x] **RESL-01**: Health check backoff uses exponential formula with jitter, preventing thundering herd on multi-provider recovery
 - [x] **RESL-02**: `BackgroundWorker` schedules health checks based on provider state -- normal interval for READY, backoff with jitter for DEGRADED, longer ceiling for DEAD, skip for COLD
-- [ ] **RESL-03**: Docker discovery source reconnects automatically with retry and exponential backoff when the Docker daemon connection is lost
+- [x] **RESL-03**: Docker discovery source reconnects automatically with retry and exponential backoff when the Docker daemon connection is lost
 
 ### Testing & Code Quality
 
