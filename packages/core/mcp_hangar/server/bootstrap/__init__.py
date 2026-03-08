@@ -30,6 +30,7 @@ from mcp.server.fastmcp import FastMCP
 from ...application.commands.load_handlers import LoadProviderHandler, UnloadProviderHandler
 from ...application.discovery import DiscoveryOrchestrator
 from ...application.ports.observability import ObservabilityPort
+from ...infrastructure.persistence.saga_state_store import NullSagaStateStore, SagaStateStore
 from ...gc import BackgroundWorker
 from ...logging_config import get_logger
 from ..auth_bootstrap import AuthComponents, bootstrap_auth
@@ -37,7 +38,7 @@ from ..auth_config import parse_auth_config
 from ..config import load_config, load_configuration
 from ..context import get_context, init_context
 from ..state import get_runtime, GROUPS, PROVIDERS
-from .cqrs import init_cqrs, init_saga
+from .cqrs import init_cqrs, init_saga, save_group_circuit_breakers
 from .discovery import _auto_add_volumes, _create_discovery_source, create_discovery_orchestrator
 from .event_handlers import init_event_handlers
 from .event_store import init_event_store
@@ -90,6 +91,9 @@ class ApplicationContext:
     observability_adapter: ObservabilityPort | None = None
     """Observability adapter for tracing (Langfuse, etc.)."""
 
+    saga_state_store: SagaStateStore | NullSagaStateStore | None = None
+    """Saga state store for persisting saga state and circuit breakers."""
+
     @property
     def providers(self) -> dict[str, Any]:
         """Get providers dictionary for easy access."""
@@ -119,6 +123,13 @@ class ApplicationContext:
                 asyncio.run(self.discovery_orchestrator.stop())
             except Exception as e:  # fault-barrier: shutdown must complete even if discovery stop fails
                 logger.warning("discovery_orchestrator_stop_failed", error=str(e))
+
+        # Save circuit breaker state for provider groups before stopping
+        if self.saga_state_store is not None:
+            try:
+                save_group_circuit_breakers(self.saga_state_store, GROUPS)
+            except Exception as e:  # fault-barrier: shutdown must complete even if CB save fails
+                logger.warning("circuit_breaker_save_failed", error=str(e))
 
         # Stop all providers
         for provider_id, provider in PROVIDERS.items():
@@ -209,8 +220,8 @@ def bootstrap(
     # Initialize CQRS
     init_cqrs(runtime, config_path)
 
-    # Initialize saga
-    init_saga()
+    # Initialize saga with persistence
+    saga_state_store = init_saga(full_config)
 
     logger.info(
         "security_config_loaded",
@@ -286,6 +297,7 @@ def bootstrap(
         load_provider_handler=load_handler,
         unload_provider_handler=unload_handler,
         observability_adapter=observability_adapter,
+        saga_state_store=saga_state_store,
     )
 
     # Update application context for tools to access
