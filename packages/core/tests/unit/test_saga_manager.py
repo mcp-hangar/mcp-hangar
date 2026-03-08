@@ -395,18 +395,14 @@ class TestSagaManagerCheckpoint:
         mock_store = MagicMock(spec=SagaStateStore)
         lock_held_during_checkpoint = []
 
-        original_checkpoint = mock_store.checkpoint
-
         def checkpoint_spy(**kwargs):
-            # Check if the manager's lock is currently held
-            # Try to acquire non-blocking: if we CAN acquire, lock is NOT held (good)
-            acquired = manager._lock._lock.acquire(blocking=False)
-            if acquired:
-                lock_held_during_checkpoint.append(False)
-                manager._lock._lock.release()
-            else:
-                lock_held_during_checkpoint.append(True)
-            return original_checkpoint(**kwargs)
+            # Check the thread-local lock tracking used by TrackedLock
+            # to verify SagaManager lock is NOT held during checkpoint I/O.
+            from mcp_hangar.infrastructure.lock_hierarchy import _get_held_locks
+
+            held = _get_held_locks()
+            saga_mgr_held = any(name == "SagaManager" for _, name in held)
+            lock_held_during_checkpoint.append(saga_mgr_held)
 
         mock_store.checkpoint.side_effect = checkpoint_spy
 

@@ -379,6 +379,23 @@ class SagaManager:
             if saga.should_handle(event):
                 try:
                     commands = saga.handle(event)
+
+                    # Checkpoint after successful handling (outside lock)
+                    if self._saga_state_store is not None:
+                        try:
+                            self._saga_state_store.checkpoint(
+                                saga_type=saga.saga_type,
+                                saga_id=saga._saga_id,
+                                state_data=saga.to_dict(),
+                                last_event_position=getattr(event, "global_position", 0) or 0,
+                            )
+                        except Exception as e:  # fault-barrier: checkpoint failure must not break event handling
+                            logger.error(
+                                "saga_checkpoint_failed",
+                                saga_type=saga.saga_type,
+                                error=str(e),
+                            )
+
                     for command in commands:
                         try:
                             self._command_bus.send(command)
