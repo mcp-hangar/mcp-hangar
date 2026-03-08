@@ -54,7 +54,7 @@ Plans:
 
 - [x] 08-01-PLAN.md -- Quick wins + security + group lock fix (CONC-04, SECR-01, CONC-01) -- completed 2026-03-08
 - [x] 08-02-PLAN.md -- Provider concurrency refactor (CONC-02, CONC-03) -- completed 2026-03-08
-- [ ] 08-03-PLAN.md -- Exception hygiene audit (EXCP-01)
+- [x] 08-03-PLAN.md -- Exception hygiene audit (EXCP-01) -- completed 2026-03-08
 
 ### Phase 9: State Survival
 
@@ -95,7 +95,7 @@ Phases execute in numeric order: 8 -> 9 -> 10
 | 5. Documentation Content | v0.10 | 2/2 | Complete | 2026-02-28 |
 | 6. Kubernetes Controllers | v0.10 | 3/3 | Complete | 2026-03-01 |
 | 7. Helm Chart Maturity | v0.10 | 1/1 | Complete | 2026-03-01 |
-| 8. Safety Foundation | v1.0 | 2/3 | In progress | - |
+| 8. Safety Foundation | v1.0 | 3/3 | Complete | 2026-03-08 |
 | 9. State Survival | v1.0 | 0/TBD | Not started | - |
 | 10. Operational Hardening | v1.0 | 0/TBD | Not started | - |
 

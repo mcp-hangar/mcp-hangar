@@ -6,9 +6,9 @@ status: in_progress
 last_updated: "2026-03-08"
 progress:
   total_phases: 10
-  completed_phases: 7
+  completed_phases: 8
   total_plans: 16
-  completed_plans: 15
+  completed_plans: 16
 ---
 
 # Project State
@@ -23,12 +23,12 @@ See: .planning/PROJECT.md (updated 2026-03-08)
 ## Current Position
 
 Milestone: v1.0 Production Hardening
-Phase: 8 of 10 (Safety Foundation)
-Plan: 2 of 3 in current phase
-Status: Executing -- plans 08-01, 08-02 complete
-Last activity: 2026-03-08 -- Completed 08-02: Provider concurrency refactor (CONC-02, CONC-03)
+Phase: 8 of 10 (Safety Foundation) -- COMPLETE
+Plan: 3 of 3 in current phase (all complete)
+Status: Executing -- Phase 8 complete (plans 08-01, 08-02, 08-03)
+Last activity: 2026-03-08 -- Completed 08-03: Exception hygiene audit (EXCP-01)
 
-Progress: [████████░░] 81% (7/10 phases, 15/16 plans)
+Progress: [████████░░] 100% phase 8 (8/10 phases, 16/16 plans)
 
 ## Performance Metrics
 
@@ -46,7 +46,7 @@ Progress: [████████░░] 81% (7/10 phases, 15/16 plans)
 
 **v1.0 Velocity:**
 
-- Plans completed: 2 (08-01, 08-02)
+- Plans completed: 3 (08-01, 08-02, 08-03) -- Phase 8 complete
 
 See `.planning/RETROSPECTIVE.md` for full cross-milestone trends.
 
@@ -62,6 +62,7 @@ All v0.9 and v0.10 decisions archived in PROJECT.md Key Decisions table.
 - threading.Event with clear/set for concurrent startup coordination (not condition variable)
 - Multi-lock-cycle pattern for invoke_tool() refresh follows health_check() reference implementation
 - Boolean _refresh_in_progress flag for refresh deduplication (not per-tool locking)
+- Annotated all except Exception catches with fault-barrier or infra-boundary comments -- optional dependencies make narrowing unsafe, convention established for future code
 
 ### Pending Todos
 
@@ -75,5 +76,5 @@ None.
 ## Session Continuity
 
 Last session: 2026-03-08
-Stopped at: Completed 08-02-PLAN.md (Provider concurrency refactor)
-Resume with: Execute 08-03-PLAN.md (Exception hygiene audit)
+Stopped at: Completed 08-03-PLAN.md (Exception hygiene audit) -- Phase 8 complete
+Resume with: Plan Phase 9 (State Survival)

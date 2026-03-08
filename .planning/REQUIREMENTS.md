@@ -9,18 +9,18 @@ Requirements for v1.0 Production Hardening. Each maps to roadmap phases.
 
 ### Concurrency & Safety
 
-- [ ] **CONC-01**: Provider lock hierarchy is enforced -- `ProviderGroup._try_start_member()` releases group lock before acquiring provider lock, eliminating the level-11-holds-level-10 deadlock risk
+- [x] **CONC-01**: Provider lock hierarchy is enforced -- `ProviderGroup._try_start_member()` releases group lock before acquiring provider lock, eliminating the level-11-holds-level-10 deadlock risk
 - [x] **CONC-02**: Provider `_start()` releases its lock before performing I/O (subprocess launch, tool discovery), using INITIALIZING state guard and threading.Event for concurrent waiters
 - [x] **CONC-03**: Provider `_refresh_tools()` performs tool discovery I/O outside lock scope, restructured to separate lock-acquire/release cycles within `invoke_tool()` control flow
-- [ ] **CONC-04**: StdioClient registers PendingRequest before writing request to stdin, preventing request-response mismatch under concurrent load
+- [x] **CONC-04**: StdioClient registers PendingRequest before writing request to stdin, preventing request-response mismatch under concurrent load
 
 ### Exception Hygiene
 
-- [ ] **EXCP-01**: All 42 bare `except Exception:` catches are categorized (fault-barrier, cleanup, bug-hiding) and each category is handled appropriately -- fault-barriers kept with structured logging, cleanup paths narrowed to specific exceptions, bug-hiding catches removed or replaced with specific error handling
+- [x] **EXCP-01**: All 42 bare `except Exception:` catches are categorized (fault-barrier, cleanup, bug-hiding) and each category is handled appropriately -- fault-barriers kept with structured logging, cleanup paths narrowed to specific exceptions, bug-hiding catches removed or replaced with specific error handling
 
 ### Security
 
-- [ ] **SECR-01**: Discovery-sourced provider commands (Docker labels, K8s annotations) are validated against an allowlist via `InputValidator.validate_command()` before provider registration
+- [x] **SECR-01**: Discovery-sourced provider commands (Docker labels, K8s annotations) are validated against an allowlist via `InputValidator.validate_command()` before provider registration
 - [ ] **SECR-02**: Rate limiting is enforced at command bus middleware layer, covering all entry points (stdio, HTTP, programmatic) regardless of transport
 
 ### State Persistence
@@ -84,12 +84,12 @@ Which phases cover which requirements. Updated during roadmap creation.
 
 | Requirement | Phase | Status |
 |-------------|-------|--------|
-| CONC-01 | Phase 8 | Pending |
+| CONC-01 | Phase 8 | Complete |
 | CONC-02 | Phase 8 | Complete |
 | CONC-03 | Phase 8 | Complete |
-| CONC-04 | Phase 8 | Pending |
-| EXCP-01 | Phase 8 | Pending |
-| SECR-01 | Phase 8 | Pending |
+| CONC-04 | Phase 8 | Complete |
+| EXCP-01 | Phase 8 | Complete |
+| SECR-01 | Phase 8 | Complete |
 | SECR-02 | Phase 10 | Pending |
 | PERS-01 | Phase 9 | Pending |
 | PERS-02 | Phase 9 | Pending |
