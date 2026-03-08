@@ -1,9 +1,12 @@
 """Tests for Saga Manager infrastructure."""
 
+from unittest.mock import MagicMock
+
 from mcp_hangar.application.commands import Command, StartProviderCommand, StopProviderCommand
 from mcp_hangar.domain.events import DomainEvent, ProviderDegraded, ProviderStarted
 from mcp_hangar.infrastructure.command_bus import CommandBus, CommandHandler
 from mcp_hangar.infrastructure.event_bus import EventBus
+from mcp_hangar.infrastructure.persistence.saga_state_store import SagaStateStore
 from mcp_hangar.infrastructure.saga_manager import (
     EventTriggeredSaga,
     Saga,
@@ -330,3 +333,139 @@ class TestSagaManager:
         # Completed sagas won't be found (only active)
         result = manager.get_saga("nonexistent")
         assert result is None
+
+
+class TestSagaManagerCheckpoint:
+    """Test SagaManager checkpoint integration with SagaStateStore."""
+
+    def _make_manager(
+        self,
+        saga_state_store: "SagaStateStore | None" = None,
+    ) -> tuple[SagaManager, CommandBus, EventBus]:
+        """Create a SagaManager with optional state store."""
+        command_bus = CommandBus()
+        event_bus = EventBus()
+
+        class SuccessHandler(CommandHandler):
+            def handle(self, command):
+                return {"status": "ok"}
+
+        command_bus.register(StartProviderCommand, SuccessHandler())
+
+        manager = SagaManager(
+            command_bus=command_bus,
+            event_bus=event_bus,
+            saga_state_store=saga_state_store,
+        )
+        return manager, command_bus, event_bus
+
+    def test_checkpoint_called_after_successful_handle(self):
+        """SagaManager._handle_event() calls saga_state_store.checkpoint() after successful saga.handle()."""
+        mock_store = MagicMock(spec=SagaStateStore)
+        manager, command_bus, event_bus = self._make_manager(saga_state_store=mock_store)
+
+        saga = SimpleEventSaga()
+        manager.register_event_saga(saga)
+
+        event = ProviderDegraded("p1", 3, 5, "error")
+        event_bus.publish(event)
+
+        mock_store.checkpoint.assert_called_once()
+        call_kwargs = mock_store.checkpoint.call_args
+        assert call_kwargs[1]["saga_type"] == "simple_event_saga"
+        assert call_kwargs[1]["saga_id"] == saga._saga_id
+        # to_dict() should reflect post-handle state (1 handled event)
+        assert call_kwargs[1]["state_data"] == {"handled_count": 1}
+
+    def test_no_checkpoint_without_store(self):
+        """SagaManager._handle_event() does NOT call checkpoint if saga_state_store is None."""
+        manager, command_bus, event_bus = self._make_manager(saga_state_store=None)
+
+        saga = SimpleEventSaga()
+        manager.register_event_saga(saga)
+
+        event = ProviderDegraded("p1", 3, 5, "error")
+        event_bus.publish(event)
+
+        # No checkpoint called -- saga handles the event but no store to write to
+        assert len(saga.handled_events_list) == 1
+
+    def test_checkpoint_called_outside_lock(self):
+        """Checkpoint is called OUTSIDE the SagaManager lock (no I/O under lock)."""
+        mock_store = MagicMock(spec=SagaStateStore)
+        lock_held_during_checkpoint = []
+
+        original_checkpoint = mock_store.checkpoint
+
+        def checkpoint_spy(**kwargs):
+            # Check if the manager's lock is currently held
+            # Try to acquire non-blocking: if we CAN acquire, lock is NOT held (good)
+            acquired = manager._lock._lock.acquire(blocking=False)
+            if acquired:
+                lock_held_during_checkpoint.append(False)
+                manager._lock._lock.release()
+            else:
+                lock_held_during_checkpoint.append(True)
+            return original_checkpoint(**kwargs)
+
+        mock_store.checkpoint.side_effect = checkpoint_spy
+
+        manager, command_bus, event_bus = self._make_manager(saga_state_store=mock_store)
+
+        saga = SimpleEventSaga()
+        manager.register_event_saga(saga)
+
+        event = ProviderDegraded("p1", 3, 5, "error")
+        event_bus.publish(event)
+
+        assert len(lock_held_during_checkpoint) == 1
+        assert lock_held_during_checkpoint[0] is False, "Checkpoint must be called outside the lock"
+
+    def test_checkpoint_failure_does_not_break_event_handling(self):
+        """If checkpoint write fails, event handling still succeeds (fault barrier)."""
+        mock_store = MagicMock(spec=SagaStateStore)
+        mock_store.checkpoint.side_effect = RuntimeError("SQLite disk I/O error")
+
+        manager, command_bus, event_bus = self._make_manager(saga_state_store=mock_store)
+
+        saga = SimpleEventSaga()
+        manager.register_event_saga(saga)
+
+        commands_sent = []
+        original_send = command_bus.send
+
+        def tracking_send(command):
+            commands_sent.append(command)
+            return original_send(command)
+
+        command_bus.send = tracking_send
+
+        event = ProviderDegraded("p1", 3, 5, "error")
+        # Should not raise even though checkpoint fails
+        event_bus.publish(event)
+
+        # Event was handled by saga
+        assert len(saga.handled_events_list) == 1
+        # Command was still sent despite checkpoint failure
+        assert len(commands_sent) == 1
+        assert commands_sent[0].provider_id == "p1"
+
+    def test_checkpoint_passes_correct_saga_state_and_position(self):
+        """SagaManager._handle_event() correctly passes saga.to_dict() and event position to checkpoint."""
+        mock_store = MagicMock(spec=SagaStateStore)
+        manager, command_bus, event_bus = self._make_manager(saga_state_store=mock_store)
+
+        saga = SimpleEventSaga()
+        manager.register_event_saga(saga)
+
+        event = ProviderDegraded("p1", 3, 5, "error")
+        # Set a global_position to verify it's passed through
+        event.global_position = 42
+        event_bus.publish(event)
+
+        mock_store.checkpoint.assert_called_once_with(
+            saga_type="simple_event_saga",
+            saga_id=saga._saga_id,
+            state_data={"handled_count": 1},
+            last_event_position=42,
+        )
