@@ -665,3 +665,143 @@ class TestProviderPredefinedTools:
         assert provider.has_tools is False
         assert provider.tools_predefined is False  # Empty list = no predefined tools
         assert provider.tools.count() == 0
+
+
+class TestInvokeToolRefresh:
+    """Test invoke_tool() with two-lock-cycle pattern for tool refresh."""
+
+    def _make_ready_provider(self):
+        """Create a provider in READY state with a mock client."""
+        provider = Provider(
+            provider_id="test",
+            mode="subprocess",
+            command=["python", "-m", "test"],
+        )
+        mock_client = MagicMock()
+        mock_client.is_alive.return_value = True
+
+        # Set provider to READY state with client
+        with provider._lock:
+            provider._state = ProviderState.READY
+            provider._client = mock_client
+
+        return provider, mock_client
+
+    def test_invoke_tool_does_not_hold_lock_during_refresh_rpc(self):
+        """invoke_tool() does NOT hold lock during tools/list RPC."""
+        provider, mock_client = self._make_ready_provider()
+        lock_held_during_refresh = {"held": False}
+
+        # Track calls: first tools/list for refresh, then tools/call for invocation
+        def mock_call(method, params, timeout=None):
+            if method == "tools/list":
+                # Check if lock is held (try to acquire with timeout=0)
+                acquired = provider._lock.acquire(blocking=False)
+                if acquired:
+                    provider._lock.release()
+                    lock_held_during_refresh["held"] = False
+                else:
+                    lock_held_during_refresh["held"] = True
+                return {"result": {"tools": [{"name": "new_tool", "description": "A new tool", "inputSchema": {}}]}}
+            if method == "tools/call":
+                return {"result": {"content": [{"text": "ok"}]}}
+            return {"result": {}}
+
+        mock_client.call.side_effect = mock_call
+
+        result = provider.invoke_tool("new_tool", {})
+
+        assert result is not None
+        # The _refresh_in_progress flag should exist for deduplication
+        assert hasattr(provider, "_refresh_in_progress"), (
+            "Provider must have _refresh_in_progress flag for refresh deduplication"
+        )
+        # Lock should NOT have been held during tools/list RPC
+        assert lock_held_during_refresh["held"] is False, "Lock must not be held during tools/list RPC"
+
+    def test_concurrent_invoke_tool_only_one_refresh_rpc(self):
+        """Concurrent invoke_tool() calls with stale tools -- only one tools/list refresh RPC."""
+        provider, mock_client = self._make_ready_provider()
+        refresh_count = {"calls": 0}
+
+        def mock_call(method, params, timeout=None):
+            if method == "tools/list":
+                refresh_count["calls"] += 1
+                time.sleep(0.2)  # Slow refresh to allow concurrent access
+                return {"result": {"tools": [{"name": "new_tool", "description": "A tool", "inputSchema": {}}]}}
+            if method == "tools/call":
+                return {"result": {"content": [{"text": "ok"}]}}
+            return {"result": {}}
+
+        mock_client.call.side_effect = mock_call
+
+        errors = []
+        results = []
+
+        def call_invoke(name):
+            try:
+                result = provider.invoke_tool("new_tool", {})
+                results.append(result)
+            except Exception as e:
+                errors.append(e)
+
+        t1 = threading.Thread(target=call_invoke, args=("t1",))
+        t2 = threading.Thread(target=call_invoke, args=("t2",))
+        t1.start()
+        time.sleep(0.05)
+        t2.start()
+        t1.join(timeout=10)
+        t2.join(timeout=10)
+
+        # At most one tools/list refresh RPC should have been issued
+        assert refresh_count["calls"] <= 1, f"Expected at most 1 refresh RPC, got {refresh_count['calls']}"
+
+    def test_refresh_failure_does_not_corrupt_tool_registry(self):
+        """Tool refresh failure does not corrupt tool registry -- old tools still available."""
+        provider, mock_client = self._make_ready_provider()
+
+        # Pre-load an existing tool
+        from mcp_hangar.domain.model.tool_catalog import ToolSchema
+
+        provider._tools.add(ToolSchema(name="existing_tool", description="Existing", input_schema={}))
+
+        call_count = {"n": 0}
+
+        def mock_call(method, params, timeout=None):
+            call_count["n"] += 1
+            if method == "tools/list":
+                raise RuntimeError("network error during refresh")
+            if method == "tools/call":
+                return {"result": {"content": [{"text": "ok"}]}}
+            return {"result": {}}
+
+        mock_client.call.side_effect = mock_call
+
+        # Invoke existing tool -- refresh will fail but tool should still work
+        result = provider.invoke_tool("existing_tool", {})
+
+        assert result is not None
+        assert provider._tools.has("existing_tool"), "Existing tool must survive failed refresh"
+
+    def test_invoke_tool_end_to_end_with_refresh(self):
+        """invoke_tool() works end-to-end: tool found via refresh, invoked, result returned."""
+        provider, mock_client = self._make_ready_provider()
+
+        def mock_call(method, params, timeout=None):
+            if method == "tools/list":
+                return {
+                    "result": {
+                        "tools": [
+                            {"name": "calculator", "description": "Calculate things", "inputSchema": {}},
+                        ]
+                    }
+                }
+            if method == "tools/call":
+                return {"result": {"content": [{"type": "text", "text": "42"}]}}
+            return {"result": {}}
+
+        mock_client.call.side_effect = mock_call
+
+        result = provider.invoke_tool("calculator", {"expression": "6*7"})
+
+        assert result == {"content": [{"type": "text", "text": "42"}]}
