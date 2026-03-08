@@ -180,6 +180,11 @@ class StdioClient:
 
         pending = PendingRequest(request_id=request_id, result_queue=result_queue, started_at=time.time())
 
+        # SAFETY: Register pending request BEFORE writing to stdin.
+        # The reader thread (_reader_loop) checks self.pending under pending_lock.
+        # If we wrote first and the response arrived before registration,
+        # the response would be dropped (no matching pending request).
+        # This ordering guarantees every response finds its handler.
         with self.pending_lock:
             self.pending[request_id] = pending
 
