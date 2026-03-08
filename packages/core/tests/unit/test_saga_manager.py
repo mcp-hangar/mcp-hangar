@@ -465,3 +465,138 @@ class TestSagaManagerCheckpoint:
             state_data={"handled_count": 1},
             last_event_position=42,
         )
+
+
+class TestSagaManagerIdempotency:
+    """Test SagaManager idempotency filter in _handle_event()."""
+
+    def _make_manager(
+        self,
+        saga_state_store: "SagaStateStore | None" = None,
+    ) -> tuple[SagaManager, CommandBus, EventBus]:
+        """Create a SagaManager with optional state store."""
+        command_bus = CommandBus()
+        event_bus = EventBus()
+
+        class SuccessHandler(CommandHandler):
+            def handle(self, command):
+                return {"status": "ok"}
+
+        command_bus.register(StartProviderCommand, SuccessHandler())
+
+        manager = SagaManager(
+            command_bus=command_bus,
+            event_bus=event_bus,
+            saga_state_store=saga_state_store,
+        )
+        return manager, command_bus, event_bus
+
+    def test_skips_already_processed_event(self):
+        """When is_processed() returns True, saga.handle() is NOT called."""
+        mock_store = MagicMock(spec=SagaStateStore)
+        mock_store.is_processed.return_value = True
+        manager, command_bus, event_bus = self._make_manager(saga_state_store=mock_store)
+
+        saga = SimpleEventSaga()
+        manager.register_event_saga(saga)
+
+        event = ProviderDegraded("p1", 3, 5, "error")
+        event.global_position = 42
+        event_bus.publish(event)
+
+        # is_processed was called
+        mock_store.is_processed.assert_called_once_with("simple_event_saga", 42)
+        # saga.handle() was NOT called
+        assert len(saga.handled_events_list) == 0
+
+    def test_processes_event_when_not_already_processed(self):
+        """When is_processed() returns False, saga.handle() IS called and mark_processed() is called."""
+        mock_store = MagicMock(spec=SagaStateStore)
+        mock_store.is_processed.return_value = False
+        manager, command_bus, event_bus = self._make_manager(saga_state_store=mock_store)
+
+        saga = SimpleEventSaga()
+        manager.register_event_saga(saga)
+
+        event = ProviderDegraded("p1", 3, 5, "error")
+        event.global_position = 42
+        event_bus.publish(event)
+
+        # saga.handle() was called
+        assert len(saga.handled_events_list) == 1
+        # mark_processed was called with correct args
+        mock_store.mark_processed.assert_called_once_with("simple_event_saga", 42)
+
+    def test_skips_idempotency_check_when_no_global_position(self):
+        """When event has no global_position attribute, idempotency check is SKIPPED."""
+        mock_store = MagicMock(spec=SagaStateStore)
+        manager, command_bus, event_bus = self._make_manager(saga_state_store=mock_store)
+
+        saga = SimpleEventSaga()
+        manager.register_event_saga(saga)
+
+        event = ProviderDegraded("p1", 3, 5, "error")
+        # No global_position attribute set
+        event_bus.publish(event)
+
+        # is_processed should NOT be called (no position to check)
+        mock_store.is_processed.assert_not_called()
+        # Event was processed normally
+        assert len(saga.handled_events_list) == 1
+
+    def test_no_idempotency_check_when_store_is_none(self):
+        """When saga_state_store is None, no idempotency check occurs (backward compat)."""
+        manager, command_bus, event_bus = self._make_manager(saga_state_store=None)
+
+        saga = SimpleEventSaga()
+        manager.register_event_saga(saga)
+
+        event = ProviderDegraded("p1", 3, 5, "error")
+        event.global_position = 42
+        event_bus.publish(event)
+
+        # Event was processed normally despite having global_position
+        assert len(saga.handled_events_list) == 1
+
+    def test_mark_processed_called_with_correct_args(self):
+        """mark_processed() is called with correct saga_type and event_position after successful handle."""
+        mock_store = MagicMock(spec=SagaStateStore)
+        mock_store.is_processed.return_value = False
+        manager, command_bus, event_bus = self._make_manager(saga_state_store=mock_store)
+
+        saga = SimpleEventSaga()
+        manager.register_event_saga(saga)
+
+        event = ProviderDegraded("p1", 3, 5, "error")
+        event.global_position = 99
+        event_bus.publish(event)
+
+        mock_store.mark_processed.assert_called_once_with("simple_event_saga", 99)
+
+    def test_mark_processed_failure_does_not_break_handling(self):
+        """If mark_processed() raises, event handling still succeeds (fault barrier)."""
+        mock_store = MagicMock(spec=SagaStateStore)
+        mock_store.is_processed.return_value = False
+        mock_store.mark_processed.side_effect = RuntimeError("Disk full")
+        manager, command_bus, event_bus = self._make_manager(saga_state_store=mock_store)
+
+        commands_sent = []
+        original_send = command_bus.send
+
+        def tracking_send(command):
+            commands_sent.append(command)
+            return original_send(command)
+
+        command_bus.send = tracking_send
+
+        saga = SimpleEventSaga()
+        manager.register_event_saga(saga)
+
+        event = ProviderDegraded("p1", 3, 5, "error")
+        event.global_position = 42
+        event_bus.publish(event)
+
+        # Event was handled despite mark_processed failure
+        assert len(saga.handled_events_list) == 1
+        # Command was still sent
+        assert len(commands_sent) == 1
