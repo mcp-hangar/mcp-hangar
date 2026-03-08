@@ -406,6 +406,139 @@ class TestSQLiteEventStorePersistence:
         assert store.get_stream_version("provider:math") == -1
 
 
+class TestNullEventStoreSnapshots:
+    """Tests for NullEventStore snapshot methods."""
+
+    def test_save_snapshot_is_noop(self):
+        store = NullEventStore()
+
+        # Should not raise
+        store.save_snapshot("stream:test", 5, {"provider_id": "test", "state": "READY"})
+
+    def test_load_snapshot_returns_none(self):
+        store = NullEventStore()
+
+        result = store.load_snapshot("stream:test")
+
+        assert result is None
+
+    def test_load_snapshot_returns_none_after_save(self):
+        store = NullEventStore()
+        store.save_snapshot("stream:test", 5, {"provider_id": "test"})
+
+        # NullEventStore discards snapshots
+        result = store.load_snapshot("stream:test")
+
+        assert result is None
+
+
+class TestSQLiteEventStoreSnapshots:
+    """Tests for SQLiteEventStore snapshot methods."""
+
+    @pytest.fixture
+    def store(self) -> SQLiteEventStore:
+        """Create in-memory SQLite store for testing."""
+        return SQLiteEventStore(":memory:")
+
+    def test_save_and_load_snapshot_roundtrip(self, store: SQLiteEventStore):
+        state = {"provider_id": "math", "mode": "subprocess", "state": "READY", "version": 5}
+        store.save_snapshot("provider:math", 5, state)
+
+        result = store.load_snapshot("provider:math")
+
+        assert result is not None
+        assert result["version"] == 5
+        assert result["state"] == state
+
+    def test_load_snapshot_returns_none_for_nonexistent_stream(self, store: SQLiteEventStore):
+        result = store.load_snapshot("provider:nonexistent")
+
+        assert result is None
+
+    def test_save_snapshot_replaces_previous(self, store: SQLiteEventStore):
+        state_v1 = {"provider_id": "math", "state": "READY", "version": 5}
+        state_v2 = {"provider_id": "math", "state": "DEGRADED", "version": 10}
+
+        store.save_snapshot("provider:math", 5, state_v1)
+        store.save_snapshot("provider:math", 10, state_v2)
+
+        result = store.load_snapshot("provider:math")
+
+        assert result is not None
+        assert result["version"] == 10
+        assert result["state"] == state_v2
+
+    def test_save_snapshot_inside_lock_scope(self, store: SQLiteEventStore):
+        """Verify save_snapshot uses self._lock for version consistency."""
+        # Append an event so stream version is 0
+        event = ProviderStarted(
+            provider_id="math",
+            mode="subprocess",
+            tools_count=3,
+            startup_duration_ms=50.0,
+        )
+        store.append("provider:math", [event], expected_version=-1)
+
+        # Save snapshot at version 0
+        state = {"provider_id": "math", "state": "READY"}
+        store.save_snapshot("provider:math", 0, state)
+
+        result = store.load_snapshot("provider:math")
+        assert result is not None
+        assert result["version"] == 0
+
+    def test_snapshot_version_matches_stream_version(self, store: SQLiteEventStore):
+        """Snapshot version should match stream version at save time."""
+        event = ProviderStarted(
+            provider_id="math",
+            mode="subprocess",
+            tools_count=3,
+            startup_duration_ms=50.0,
+        )
+        version = store.append("provider:math", [event], expected_version=-1)
+
+        state = {"provider_id": "math", "state": "READY"}
+        store.save_snapshot("provider:math", version, state)
+
+        snapshot = store.load_snapshot("provider:math")
+        stream_version = store.get_stream_version("provider:math")
+
+        assert snapshot["version"] == stream_version
+
+    def test_snapshot_persists_across_connections(self, tmp_path: Path):
+        """Snapshot data survives across connections (file-based SQLite)."""
+        db_path = tmp_path / "events.db"
+
+        # Save snapshot with first connection
+        store1 = SQLiteEventStore(db_path)
+        state = {"provider_id": "math", "state": "READY", "version": 5}
+        store1.save_snapshot("provider:math", 5, state)
+
+        # Load snapshot with new connection
+        store2 = SQLiteEventStore(db_path)
+        result = store2.load_snapshot("provider:math")
+
+        assert result is not None
+        assert result["version"] == 5
+        assert result["state"] == state
+
+    def test_snapshots_isolated_between_streams(self, store: SQLiteEventStore):
+        """Snapshots for different streams are independent."""
+        state_math = {"provider_id": "math", "state": "READY"}
+        state_sqlite = {"provider_id": "sqlite", "state": "DEGRADED"}
+
+        store.save_snapshot("provider:math", 5, state_math)
+        store.save_snapshot("provider:sqlite", 10, state_sqlite)
+
+        math_snap = store.load_snapshot("provider:math")
+        sqlite_snap = store.load_snapshot("provider:sqlite")
+
+        assert math_snap["version"] == 5
+        assert math_snap["state"] == state_math
+        assert sqlite_snap["version"] == 10
+        assert sqlite_snap["state"] == state_sqlite
+
+
 class TestEventStoreThreadSafety:
     """Concurrent access tests for event stores."""
 
