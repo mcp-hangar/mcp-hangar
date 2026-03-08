@@ -1,6 +1,7 @@
 """Health tracking entity for providers."""
 
 from dataclasses import dataclass, field
+import random
 import time
 
 
@@ -11,8 +12,9 @@ class HealthTracker:
     This is a mutable entity (not a value object) that encapsulates
     health-related business logic including:
     - Failure counting and threshold detection
-    - Backoff calculation for retry logic
+    - Backoff calculation with jitter for retry logic
     - Success/failure recording with timestamps
+    - State-aware health check interval computation
 
     Note:
         This class is intentionally mutable as it tracks state over time.
@@ -20,6 +22,8 @@ class HealthTracker:
 
     Attributes:
         max_consecutive_failures: Threshold for triggering degradation.
+        jitter_factor: Random jitter range (0.0-1.0) applied to backoff to
+            prevent thundering herd. Default 0.1 means +/-10%.
 
     Example:
         >>> tracker = HealthTracker(max_consecutive_failures=3)
@@ -29,6 +33,7 @@ class HealthTracker:
     """
 
     max_consecutive_failures: int = 3
+    jitter_factor: float = 0.1
     _consecutive_failures: int = field(default=0, init=False)
     _last_success_at: float | None = field(default=None, init=False)
     _last_failure_at: float | None = field(default=None, init=False)
@@ -157,8 +162,39 @@ class HealthTracker:
         return max(0.0, remaining)
 
     def _calculate_backoff(self) -> float:
-        """Calculate backoff duration based on consecutive failures."""
-        return min(60.0, 2**self._consecutive_failures)
+        """Calculate backoff duration with jitter.
+
+        Uses exponential backoff: min(60, 2^consecutive_failures)
+        with random jitter to prevent thundering herd.
+
+        Returns:
+            Backoff duration in seconds, with jitter applied.
+        """
+        base = min(60.0, 2**self._consecutive_failures)
+        if self.jitter_factor <= 0.0:
+            return base
+        jitter = base * random.uniform(-self.jitter_factor, self.jitter_factor)
+        return min(60.0, max(0.0, base + jitter))
+
+    def get_health_check_interval(self, state: str, normal_interval: float = 10.0) -> float:
+        """Get the health check interval based on provider state.
+
+        Args:
+            state: Provider state string (cold, initializing, ready, degraded, dead).
+            normal_interval: Normal check interval for healthy providers.
+
+        Returns:
+            Seconds until next health check. 0.0 means skip this provider.
+        """
+        if state in ("cold", "initializing"):
+            return 0.0  # Skip -- not started or starting
+        if state == "ready":
+            return normal_interval
+        if state == "degraded":
+            return self._calculate_backoff()
+        if state == "dead":
+            return 60.0  # Longer ceiling for dead providers
+        return normal_interval  # Fallback
 
     def reset(self) -> None:
         """Reset health tracker to initial state."""

@@ -94,7 +94,7 @@ class TestHealthTracker:
 
         time_left = tracker.time_until_retry()
         assert time_left > 0
-        assert time_left <= 2.0  # 2^1 = 2 seconds max
+        assert time_left <= 2.2  # 2^1 = 2s base, +10% jitter tolerance
 
     def test_record_invocation_failure(self):
         """Test recording invocation failure (non-consecutive)."""
