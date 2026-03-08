@@ -281,7 +281,11 @@ class ConfigReloadWorker:
                     return
 
                 # Check if this is our config file
-                if Path(event.src_path).resolve() == self.worker.config_path.resolve():
+                src_path = str(event.src_path)  # Normalize bytes|str to str
+                if (
+                    self.worker.config_path is not None
+                    and Path(src_path).resolve() == self.worker.config_path.resolve()
+                ):
                     self._debounced_reload()
 
             def _debounced_reload(self):

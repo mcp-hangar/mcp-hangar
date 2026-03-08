@@ -10,6 +10,7 @@ from dataclasses import dataclass
 from enum import Enum
 import threading
 import time
+from typing import Any
 
 
 class RateLimitScope(Enum):
@@ -54,7 +55,7 @@ class RateLimitResult:
     retry_after: float | None = None  # Seconds until request would be allowed
     limit: int = 0  # The configured limit
 
-    def to_dict(self) -> dict[str, any]:
+    def to_dict(self) -> dict[str, Any]:
         """Convert to dictionary for API responses."""
         result = {
             "allowed": self.allowed,
@@ -289,7 +290,7 @@ class InMemoryRateLimiter(RateLimiter):
             self._buckets.clear()
             self._bucket_last_used.clear()
 
-    def get_stats(self) -> dict[str, any]:
+    def get_stats(self) -> dict[str, Any]:
         """Get rate limiter statistics."""
         with self._lock:
             return {

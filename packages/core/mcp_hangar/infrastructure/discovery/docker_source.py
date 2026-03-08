@@ -26,6 +26,7 @@ from pathlib import Path
 import platform
 import random
 import time
+from typing import Any
 
 from mcp_hangar.domain.discovery.discovered_provider import DiscoveredProvider
 from mcp_hangar.domain.discovery.discovery_source import DiscoveryMode, DiscoverySource
@@ -139,7 +140,7 @@ class DockerDiscoverySource(DiscoverySource):
 
         self._socket_path = socket_path
         self._default_ttl = default_ttl
-        self._client: docker.DockerClient | None = None
+        self._client: Any = None  # docker.DockerClient when available
         self._max_retries = max_retries
         self._initial_backoff_s = initial_backoff_s
         self._max_backoff_s = max_backoff_s
@@ -317,7 +318,7 @@ class DockerDiscoverySource(DiscoverySource):
             ttl_seconds=int(labels.get(f"{self.LABEL_PREFIX}ttl", self._default_ttl)),
         )
 
-    def _get_container_ip(self, container) -> str | None:
+    def _get_container_ip(self, container: Any) -> str | None:
         """Get container IP address from any network."""
         try:
             networks = container.attrs.get("NetworkSettings", {}).get("Networks", {})
@@ -326,6 +327,7 @@ class DockerDiscoverySource(DiscoverySource):
                     return ip
         except Exception:  # infra-boundary: best-effort container IP extraction
             pass
+        return None
 
     async def health_check(self) -> bool:
         """Check if container runtime is accessible.
