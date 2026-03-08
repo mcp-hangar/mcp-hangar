@@ -1,0 +1,291 @@
+"""Tests for SagaStateStore persistence and saga serialization."""
+
+import json
+
+from mcp_hangar.application.sagas.group_rebalance_saga import GroupRebalanceSaga
+from mcp_hangar.application.sagas.provider_failover_saga import (
+    FailoverConfig,
+    FailoverState,
+    ProviderFailoverSaga,
+)
+from mcp_hangar.application.sagas.provider_recovery_saga import ProviderRecoverySaga
+from mcp_hangar.infrastructure.persistence.database_common import (
+    MigrationRunner,
+    SQLiteConfig,
+    SQLiteConnectionFactory,
+)
+from mcp_hangar.infrastructure.persistence.saga_state_store import (
+    SAGA_STORE_MIGRATIONS,
+    NullSagaStateStore,
+    SagaStateStore,
+)
+
+
+class TestSagaStateStoreCheckpoint:
+    """Test SagaStateStore.checkpoint() persistence."""
+
+    def test_checkpoint_persists_state(self):
+        """Test that checkpoint() writes state to SQLite and load() retrieves it."""
+        factory = SQLiteConnectionFactory(SQLiteConfig(path=":memory:"))
+        store = SagaStateStore(factory)
+
+        state_data = {"retry_state": {"p1": {"retries": 2}}}
+        store.checkpoint("provider_recovery", "saga-123", state_data, 42)
+
+        result = store.load("provider_recovery")
+        assert result is not None
+        assert result["state_data"] == state_data
+        assert result["last_event_position"] == 42
+
+    def test_checkpoint_overwrites_previous_state(self):
+        """Test that checkpoint() with same saga_type+saga_id overwrites previous state."""
+        factory = SQLiteConnectionFactory(SQLiteConfig(path=":memory:"))
+        store = SagaStateStore(factory)
+
+        store.checkpoint("provider_recovery", "saga-123", {"version": 1}, 10)
+        store.checkpoint("provider_recovery", "saga-123", {"version": 2}, 20)
+
+        result = store.load("provider_recovery")
+        assert result is not None
+        assert result["state_data"] == {"version": 2}
+        assert result["last_event_position"] == 20
+
+
+class TestSagaStateStoreLoad:
+    """Test SagaStateStore.load() retrieval."""
+
+    def test_load_returns_none_for_unknown_saga_type(self):
+        """Test that load() returns None for an unknown saga_type."""
+        factory = SQLiteConnectionFactory(SQLiteConfig(path=":memory:"))
+        store = SagaStateStore(factory)
+
+        result = store.load("nonexistent_saga")
+        assert result is None
+
+
+class TestSagaStateStoreIdempotency:
+    """Test SagaStateStore.mark_processed() and is_processed()."""
+
+    def test_mark_processed_and_is_processed(self):
+        """Test that mark_processed() records event position and is_processed() returns True."""
+        factory = SQLiteConnectionFactory(SQLiteConfig(path=":memory:"))
+        store = SagaStateStore(factory)
+
+        store.mark_processed("provider_recovery", 42)
+
+        assert store.is_processed("provider_recovery", 42) is True
+
+    def test_is_processed_returns_false_for_unrecorded_position(self):
+        """Test that is_processed() returns False for an unrecorded position."""
+        factory = SQLiteConnectionFactory(SQLiteConfig(path=":memory:"))
+        store = SagaStateStore(factory)
+
+        assert store.is_processed("provider_recovery", 99) is False
+
+    def test_is_processed_returns_false_for_different_saga_type(self):
+        """Test that is_processed() is scoped to saga_type."""
+        factory = SQLiteConnectionFactory(SQLiteConfig(path=":memory:"))
+        store = SagaStateStore(factory)
+
+        store.mark_processed("provider_recovery", 42)
+
+        assert store.is_processed("provider_failover", 42) is False
+
+
+class TestSagaStateStoreMigrations:
+    """Test that MigrationRunner creates the expected tables."""
+
+    def test_migrations_create_saga_state_table(self):
+        """Test that the migration creates saga_state and saga_idempotency tables."""
+        factory = SQLiteConnectionFactory(SQLiteConfig(path=":memory:"))
+        runner = MigrationRunner(factory, SAGA_STORE_MIGRATIONS, table_name="saga_state_migrations")
+        applied = runner.run()
+
+        assert applied == 1
+
+        with factory.get_connection() as conn:
+            cursor = conn.execute(
+                "SELECT name FROM sqlite_master WHERE type='table' "
+                "AND name IN ('saga_state', 'saga_idempotency') ORDER BY name"
+            )
+            tables = [row[0] for row in cursor.fetchall()]
+
+        assert "saga_idempotency" in tables
+        assert "saga_state" in tables
+
+
+class TestProviderRecoverySagaSerialization:
+    """Test ProviderRecoverySaga.to_dict() / from_dict() round-trip."""
+
+    def test_to_dict_serializes_retry_state(self):
+        """Test that to_dict() returns retry state dict."""
+        saga = ProviderRecoverySaga()
+        saga._retry_state = {
+            "p1": {"retries": 2, "last_attempt": 1000.0, "next_retry": 1010.0},
+            "p2": {"retries": 0, "last_attempt": 0, "next_retry": 0},
+        }
+
+        result = saga.to_dict()
+
+        assert "retry_state" in result
+        assert result["retry_state"]["p1"]["retries"] == 2
+
+    def test_from_dict_restores_retry_state(self):
+        """Test that from_dict() restores retry state from serialized data."""
+        saga = ProviderRecoverySaga()
+        data = {
+            "retry_state": {
+                "p1": {"retries": 3, "last_attempt": 500.0, "next_retry": 510.0},
+            }
+        }
+
+        saga.from_dict(data)
+
+        assert saga._retry_state["p1"]["retries"] == 3
+        assert saga._retry_state["p1"]["last_attempt"] == 500.0
+
+    def test_round_trip_serialization(self):
+        """Test full round-trip: to_dict -> from_dict preserves state."""
+        saga = ProviderRecoverySaga()
+        saga._retry_state = {
+            "p1": {"retries": 1, "last_attempt": 100.0, "next_retry": 105.0},
+        }
+
+        serialized = saga.to_dict()
+
+        restored_saga = ProviderRecoverySaga()
+        restored_saga.from_dict(serialized)
+
+        assert restored_saga._retry_state == saga._retry_state
+
+
+class TestProviderFailoverSagaSerialization:
+    """Test ProviderFailoverSaga.to_dict() / from_dict() round-trip."""
+
+    def test_to_dict_serializes_failover_state(self):
+        """Test that to_dict() serializes failover_configs and active_failovers."""
+        saga = ProviderFailoverSaga()
+        saga._failover_configs["p1"] = FailoverConfig(
+            primary_id="p1", backup_id="p1-backup", auto_failback=True, failback_delay_s=30.0
+        )
+        saga._active_failovers["p1"] = FailoverState(
+            primary_id="p1", backup_id="p1-backup", failed_at=1000.0, backup_started_at=1001.0, is_active=True
+        )
+        saga._active_backups = {"p1-backup"}
+        saga._pending_failbacks = {"p1": 1030.0}
+
+        result = saga.to_dict()
+
+        assert "failover_configs" in result
+        assert result["failover_configs"]["p1"]["primary_id"] == "p1"
+        assert "active_failovers" in result
+        assert result["active_failovers"]["p1"]["failed_at"] == 1000.0
+        assert "active_backups" in result
+        assert "p1-backup" in result["active_backups"]
+        assert "pending_failbacks" in result
+        assert result["pending_failbacks"]["p1"] == 1030.0
+
+    def test_from_dict_restores_failover_state(self):
+        """Test that from_dict() restores all failover state."""
+        saga = ProviderFailoverSaga()
+        data = {
+            "failover_configs": {
+                "p1": {
+                    "primary_id": "p1",
+                    "backup_id": "p1-backup",
+                    "auto_failback": False,
+                    "failback_delay_s": 60.0,
+                },
+            },
+            "active_failovers": {
+                "p1": {
+                    "primary_id": "p1",
+                    "backup_id": "p1-backup",
+                    "failed_at": 2000.0,
+                    "backup_started_at": None,
+                    "is_active": True,
+                },
+            },
+            "active_backups": ["p1-backup"],
+            "pending_failbacks": {"p1": 2030.0},
+        }
+
+        saga.from_dict(data)
+
+        assert saga._failover_configs["p1"].primary_id == "p1"
+        assert saga._failover_configs["p1"].auto_failback is False
+        assert saga._active_failovers["p1"].failed_at == 2000.0
+        assert saga._active_failovers["p1"].backup_started_at is None
+        assert "p1-backup" in saga._active_backups
+        assert saga._pending_failbacks["p1"] == 2030.0
+
+    def test_round_trip_serialization(self):
+        """Test full round-trip: to_dict -> json -> from_dict preserves state."""
+        saga = ProviderFailoverSaga()
+        saga._failover_configs["p1"] = FailoverConfig(
+            primary_id="p1", backup_id="p1-backup", auto_failback=True, failback_delay_s=30.0
+        )
+        saga._active_failovers["p1"] = FailoverState(
+            primary_id="p1", backup_id="p1-backup", failed_at=1000.0, backup_started_at=1001.0, is_active=True
+        )
+        saga._active_backups = {"p1-backup"}
+        saga._pending_failbacks = {"p1": 1030.0}
+
+        serialized = saga.to_dict()
+        # Simulate JSON round-trip (what SagaStateStore does)
+        json_str = json.dumps(serialized)
+        deserialized = json.loads(json_str)
+
+        restored = ProviderFailoverSaga()
+        restored.from_dict(deserialized)
+
+        assert restored._failover_configs["p1"].primary_id == "p1"
+        assert restored._active_failovers["p1"].failed_at == 1000.0
+        assert "p1-backup" in restored._active_backups
+        assert restored._pending_failbacks["p1"] == 1030.0
+
+
+class TestGroupRebalanceSagaSerialization:
+    """Test GroupRebalanceSaga.to_dict() / from_dict()."""
+
+    def test_to_dict_returns_empty_dict(self):
+        """Test that to_dict() returns empty dict for stateless saga."""
+        saga = GroupRebalanceSaga()
+
+        result = saga.to_dict()
+
+        assert result == {}
+
+    def test_from_dict_is_noop(self):
+        """Test that from_dict() is a no-op for stateless saga."""
+        saga = GroupRebalanceSaga()
+        saga._member_to_group = {"p1": "g1"}
+
+        # from_dict should not affect the transient _member_to_group
+        saga.from_dict({})
+
+        assert saga._member_to_group == {"p1": "g1"}
+
+
+class TestNullSagaStateStore:
+    """Test NullSagaStateStore (null object pattern)."""
+
+    def test_checkpoint_does_nothing(self):
+        """Test that checkpoint() on NullSagaStateStore does not raise."""
+        store = NullSagaStateStore()
+        store.checkpoint("test", "id", {"key": "val"}, 1)
+
+    def test_load_returns_none(self):
+        """Test that load() returns None."""
+        store = NullSagaStateStore()
+        assert store.load("test") is None
+
+    def test_mark_processed_does_nothing(self):
+        """Test that mark_processed() does not raise."""
+        store = NullSagaStateStore()
+        store.mark_processed("test", 1)
+
+    def test_is_processed_returns_false(self):
+        """Test that is_processed() returns False."""
+        store = NullSagaStateStore()
+        assert store.is_processed("test", 1) is False
