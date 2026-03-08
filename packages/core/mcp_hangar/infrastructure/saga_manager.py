@@ -375,8 +375,20 @@ class SagaManager:
         with self._lock:
             sagas = list(self._event_sagas.values())
 
+        event_position = getattr(event, "global_position", None)
+
         for saga in sagas:
             if saga.should_handle(event):
+                # Idempotency check: skip already-processed events
+                if self._saga_state_store is not None and event_position is not None:
+                    if self._saga_state_store.is_processed(saga.saga_type, event_position):
+                        logger.debug(
+                            "saga_event_already_processed",
+                            saga_type=saga.saga_type,
+                            event_position=event_position,
+                        )
+                        continue
+
                 try:
                     commands = saga.handle(event)
 
@@ -387,9 +399,14 @@ class SagaManager:
                                 saga_type=saga.saga_type,
                                 saga_id=saga._saga_id,
                                 state_data=saga.to_dict(),
-                                last_event_position=getattr(event, "global_position", 0) or 0,
+                                last_event_position=event_position or 0,
                             )
-                        except Exception as e:  # fault-barrier: checkpoint failure must not break event handling
+                            if event_position is not None:
+                                self._saga_state_store.mark_processed(
+                                    saga.saga_type,
+                                    event_position,
+                                )
+                        except Exception as e:  # fault-barrier: checkpoint/mark failure must not break event handling
                             logger.error(
                                 "saga_checkpoint_failed",
                                 saga_type=saga.saga_type,

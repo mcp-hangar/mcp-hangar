@@ -449,6 +449,7 @@ class TestSagaManagerCheckpoint:
     def test_checkpoint_passes_correct_saga_state_and_position(self):
         """SagaManager._handle_event() correctly passes saga.to_dict() and event position to checkpoint."""
         mock_store = MagicMock(spec=SagaStateStore)
+        mock_store.is_processed.return_value = False
         manager, command_bus, event_bus = self._make_manager(saga_state_store=mock_store)
 
         saga = SimpleEventSaga()
