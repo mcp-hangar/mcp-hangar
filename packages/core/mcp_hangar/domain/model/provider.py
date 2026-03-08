@@ -167,6 +167,11 @@ class Provider(AggregateRoot):
         self._ready_event.set()
         self._start_error: Exception | None = None
 
+        # Tool refresh deduplication
+        # Prevents concurrent invoke_tool() calls from issuing duplicate
+        # tools/list RPCs when the tool is not yet in the catalog.
+        self._refresh_in_progress = False
+
         # Thread safety
         # Lock hierarchy level: PROVIDER (10)
         # Safe to acquire after: (none - this is top level for domain)
@@ -787,8 +792,12 @@ class Provider(AggregateRoot):
 
         Thread-safe. Ensures provider is ready before invocation.
 
-        Note: This method follows the "copy reference under lock, I/O outside lock"
-        pattern to avoid blocking other operations during tool invocation.
+        Uses a multi-lock-cycle pattern to avoid holding the lock during I/O:
+        - Lock cycle 1: Ensure ready, check tool exists, decide if refresh needed
+        - Refresh phase (outside lock): tools/list RPC if needed
+        - Lock cycle 2 (if refreshed): Apply results, re-check tool, prepare invocation
+        - Invocation phase (outside lock): tools/call RPC
+        - Lock cycle 3: Update state based on result
 
         Args:
             tool_name: Name of the tool to invoke
@@ -805,36 +814,75 @@ class Provider(AggregateRoot):
         """
         correlation_id = str(CorrelationId())
 
-        # Phase 1: Validation and state update under lock
+        # Lock cycle 1: Validation, ensure ready, check tool, maybe prepare refresh
+        needs_refresh = False
+        tool_found = False
+        client = None
         with self._lock:
-            # Ensure ready
             self.ensure_ready()
 
-            # Check tool exists
-            if not self._tools.has(tool_name):
-                # Try refreshing tools once
-                self._refresh_tools()
+            if self._tools.has(tool_name):
+                tool_found = True
+            elif not self._refresh_in_progress:
+                # We will perform the refresh -- claim the slot
+                self._refresh_in_progress = True
+                needs_refresh = True
+            # else: another thread is refreshing, we skip and re-check later
 
-            if not self._tools.has(tool_name):
-                raise ToolNotFoundError(self.provider_id, tool_name)
-
-            self._health._total_invocations += 1
-
-            # Copy client reference - safe because client is stable once READY
-            # Any state transition that invalidates client must acquire this lock first
-            client = self._client
-
-            # Record start event
-            self._record_event(
-                ToolInvocationRequested(
-                    provider_id=self.provider_id,
-                    tool_name=tool_name,
-                    correlation_id=correlation_id,
-                    arguments=arguments,
+            if tool_found:
+                # Tool exists, proceed directly to invocation
+                self._health._total_invocations += 1
+                client = self._client
+                self._record_event(
+                    ToolInvocationRequested(
+                        provider_id=self.provider_id,
+                        tool_name=tool_name,
+                        correlation_id=correlation_id,
+                        arguments=arguments,
+                    )
                 )
-            )
 
-        # Phase 2: I/O outside lock (allows concurrent reads on provider state)
+        # Refresh phase (outside lock): tools/list RPC
+        if needs_refresh:
+            refresh_error = None
+            refresh_result = None
+            # Copy client reference for I/O -- already validated as READY above
+            with self._lock:
+                refresh_client = self._client
+
+            try:
+                refresh_result = refresh_client.call("tools/list", {}, timeout=5.0)
+            except Exception as e:
+                refresh_error = e
+                logger.warning(f"tool_refresh_failed: {self.provider_id}, error={e}")
+
+            # Lock cycle 2: Apply refresh results, clear flag, re-check tool
+            with self._lock:
+                self._refresh_in_progress = False
+
+                if refresh_error is None and refresh_result and "result" in refresh_result:
+                    tool_list = refresh_result.get("result", {}).get("tools", [])
+                    self._tools.update_from_list(tool_list)
+
+                if not self._tools.has(tool_name):
+                    raise ToolNotFoundError(self.provider_id, tool_name)
+
+                tool_found = True
+                self._health._total_invocations += 1
+                client = self._client
+                self._record_event(
+                    ToolInvocationRequested(
+                        provider_id=self.provider_id,
+                        tool_name=tool_name,
+                        correlation_id=correlation_id,
+                        arguments=arguments,
+                    )
+                )
+        elif not tool_found:
+            # Another thread is refreshing but tool still not found -- raise
+            raise ToolNotFoundError(self.provider_id, tool_name)
+
+        # Invocation phase (outside lock): tools/call RPC
         start_time = time.time()
         response = None
         invocation_error = None
@@ -848,7 +896,7 @@ class Provider(AggregateRoot):
         except Exception as e:
             invocation_error = e
 
-        # Phase 3: Update state based on result (under lock)
+        # Lock cycle 3: Update state based on result
         with self._lock:
             if invocation_error is not None:
                 self._health.record_failure()
@@ -915,7 +963,13 @@ class Provider(AggregateRoot):
             return result
 
     def _refresh_tools(self) -> None:
-        """Refresh tool catalog from provider (must hold lock)."""
+        """Refresh tool catalog from provider.
+
+        Note: This performs I/O (tools/list RPC). Callers should prefer the
+        two-lock-cycle pattern in invoke_tool() which performs the RPC outside
+        the lock. This method is retained for internal use but should NOT be
+        called while holding the provider lock.
+        """
         if not self._client or not self._client.is_alive():
             return
 
