@@ -160,6 +160,13 @@ class Provider(AggregateRoot):
             self._tools.update_from_list(tools)
             self._tools_predefined = True
 
+        # Concurrent startup coordination
+        # _ready_event is set initially (no one waiting). Cleared when a thread
+        # begins startup (INITIALIZING), set again on success or failure.
+        self._ready_event = threading.Event()
+        self._ready_event.set()
+        self._start_error: Exception | None = None
+
         # Thread safety
         # Lock hierarchy level: PROVIDER (10)
         # Safe to acquire after: (none - this is top level for domain)
@@ -419,12 +426,21 @@ class Provider(AggregateRoot):
 
         Thread-safe. Blocks until ready or raises exception.
 
+        Uses threading.Event for concurrent startup coordination:
+        - First caller to find COLD/DEAD/DEGRADED becomes the "starter"
+        - Subsequent callers finding INITIALIZING become "waiters"
+        - Starter performs I/O outside lock, then signals waiters via Event
+        - Failed startup propagates error to all waiters
+
         Raises:
-            CannotStartProviderError: If backoff hasn't elapsed
+            CannotStartProviderError: If backoff hasn't elapsed or startup times out
             ProviderStartError: If provider fails to start
         """
+        should_start = False
+        ready_event = None
+
         with self._lock:
-            # Fast path - already ready
+            # Fast path -- already ready
             if self._state == ProviderState.READY:
                 if self._client and self._client.is_alive():
                     return
@@ -432,59 +448,99 @@ class Provider(AggregateRoot):
                 logger.warning(f"provider_dead: {self.provider_id}")
                 self._state = ProviderState.DEAD
 
-            # Check if we can start
-            can_start, reason, time_left = self._can_start()
-            if not can_start:
-                raise CannotStartProviderError(
-                    self.provider_id,
-                    f"backoff not elapsed, retry in {time_left:.1f}s",
-                    time_left,
-                )
-
-            # Start if needed
-            if self._state in (
+            # Another thread is starting: become a waiter
+            if self._state == ProviderState.INITIALIZING:
+                ready_event = self._ready_event
+            elif self._state in (
                 ProviderState.COLD,
                 ProviderState.DEAD,
                 ProviderState.DEGRADED,
             ):
-                self._start()
+                # Check if we can start
+                can_start, reason, time_left = self._can_start()
+                if not can_start:
+                    raise CannotStartProviderError(
+                        self.provider_id,
+                        f"backoff not elapsed, retry in {time_left:.1f}s",
+                        time_left,
+                    )
+                # We are the starter: transition and prepare event
+                self._transition_to(ProviderState.INITIALIZING)
+                self._ready_event = threading.Event()  # Fresh event for this attempt
+                self._start_error = None
+                ready_event = self._ready_event
+                should_start = True
+            else:
+                return  # Unknown state, no-op
+
+        if should_start:
+            # Path A: We are the starter -- all I/O outside lock
+            self._start()
+        else:
+            # Path B: We are a waiter -- wait for starter to finish
+            if not ready_event.wait(timeout=30.0):
+                raise CannotStartProviderError(
+                    self.provider_id,
+                    "startup_timeout: timed out waiting for provider to start",
+                    30.0,
+                )
+            if self._start_error:
+                raise ProviderStartError(
+                    provider_id=self.provider_id,
+                    reason=str(self._start_error),
+                )
 
     def _start(self) -> None:
         """
-        Start provider process (must hold lock).
+        Start provider process with I/O outside lock.
 
-        Handles subprocess, docker, container modes.
+        Called after ensure_ready() has set state to INITIALIZING and
+        released the lock. Performs subprocess launch and MCP handshake
+        outside the lock, then reacquires to finalize or handle failure.
+
+        Signals _ready_event on completion (success or failure) to wake
+        any concurrent waiters.
         """
         start_time = time.time()
-        self._transition_to(ProviderState.INITIALIZING)
-
         cold_start_time = self._begin_cold_start_tracking()
         client = None  # Track client for diagnostics on failure
 
         try:
+            # I/O outside lock: subprocess launch and MCP handshake
             client = self._create_client()
             self._perform_mcp_handshake(client)
-            self._finalize_start(client, start_time)
-            self._end_cold_start_tracking(cold_start_time, success=True)
+
+            # Reacquire lock to finalize state
+            with self._lock:
+                self._finalize_start(client, start_time)
+                self._end_cold_start_tracking(cold_start_time, success=True)
+                self._ready_event.set()  # Wake waiters: success
 
         except ProviderStartError as e:
-            self._end_cold_start_tracking(cold_start_time, success=False)
-            self._handle_start_failure(e)
+            with self._lock:
+                self._end_cold_start_tracking(cold_start_time, success=False)
+                self._handle_start_failure(e)
+                self._start_error = e
+                self._ready_event.set()  # Wake waiters: failure
             raise
         except Exception as e:
-            self._end_cold_start_tracking(cold_start_time, success=False)
-            self._handle_start_failure(e)
-
             # Collect diagnostics from client if available
             diagnostics = self._collect_startup_diagnostics(client) if client else {}
 
-            raise ProviderStartError(
-                provider_id=self.provider_id,
-                reason=str(e),
-                stderr=diagnostics.get("stderr"),
-                exit_code=diagnostics.get("exit_code"),
-                suggestion=diagnostics.get("suggestion"),
-            ) from e
+            with self._lock:
+                self._end_cold_start_tracking(cold_start_time, success=False)
+                self._handle_start_failure(e)
+                start_error = ProviderStartError(
+                    provider_id=self.provider_id,
+                    reason=str(e),
+                    stderr=diagnostics.get("stderr"),
+                    exit_code=diagnostics.get("exit_code"),
+                    suggestion=diagnostics.get("suggestion"),
+                )
+                self._start_error = start_error
+                self._ready_event.set()  # Wake waiters: failure
+
+            raise start_error from e
 
     def _begin_cold_start_tracking(self) -> float | None:
         """Begin tracking cold start metrics. Returns start timestamp."""
