@@ -106,6 +106,138 @@ class TestProviderSnapshot:
         assert snapshot.version == 15
 
 
+class TestProviderSnapshotCircuitBreakerState:
+    """Tests for ProviderSnapshot circuit breaker state field."""
+
+    def test_snapshot_with_circuit_breaker_state_round_trip(self):
+        """Snapshot with CB state dict should round-trip correctly (to_dict -> from_dict)."""
+        cb_state = {
+            "state": "open",
+            "is_open": True,
+            "failure_count": 5,
+            "failure_threshold": 3,
+            "reset_timeout_s": 60.0,
+            "opened_at": 1700000000.0,
+        }
+        snapshot = ProviderSnapshot(
+            provider_id="test-provider",
+            mode="subprocess",
+            state="ready",
+            version=10,
+            command=["python", "server.py"],
+            image=None,
+            endpoint=None,
+            env={},
+            idle_ttl_s=300,
+            health_check_interval_s=60,
+            max_consecutive_failures=3,
+            consecutive_failures=0,
+            total_failures=2,
+            total_invocations=100,
+            last_success_at=1000.0,
+            last_failure_at=500.0,
+            tool_names=["add"],
+            last_used=1000.0,
+            meta={},
+            circuit_breaker_state=cb_state,
+        )
+
+        d = snapshot.to_dict()
+        restored = ProviderSnapshot.from_dict(d)
+
+        assert restored.circuit_breaker_state == cb_state
+        assert restored.circuit_breaker_state["state"] == "open"
+        assert restored.circuit_breaker_state["opened_at"] == 1700000000.0
+
+    def test_snapshot_without_circuit_breaker_state_backward_compat(self):
+        """from_dict without circuit_breaker_state key should default to None (backward compat)."""
+        d = {
+            "provider_id": "p1",
+            "mode": "subprocess",
+            "state": "cold",
+            "version": 5,
+            "command": None,
+            "image": None,
+            "endpoint": None,
+            "env": {},
+            "idle_ttl_s": 300,
+            "health_check_interval_s": 60,
+            "max_consecutive_failures": 3,
+            "consecutive_failures": 0,
+            "total_failures": 0,
+            "total_invocations": 0,
+            "last_success_at": None,
+            "last_failure_at": None,
+            "tool_names": [],
+            "last_used": 0.0,
+            "meta": {},
+        }
+
+        snapshot = ProviderSnapshot.from_dict(d)
+
+        assert snapshot.circuit_breaker_state is None
+
+    def test_from_snapshot_with_circuit_breaker_state_does_not_crash(self):
+        """EventSourcedProvider.from_snapshot() does not crash when circuit_breaker_state is present."""
+        snapshot = ProviderSnapshot(
+            provider_id="p1",
+            mode="subprocess",
+            state="ready",
+            version=10,
+            command=["python", "server.py"],
+            image=None,
+            endpoint=None,
+            env={},
+            idle_ttl_s=300,
+            health_check_interval_s=60,
+            max_consecutive_failures=3,
+            consecutive_failures=0,
+            total_failures=0,
+            total_invocations=0,
+            last_success_at=None,
+            last_failure_at=None,
+            tool_names=[],
+            last_used=0.0,
+            meta={},
+            circuit_breaker_state={"state": "open", "failure_count": 5},
+        )
+
+        provider = EventSourcedProvider.from_snapshot(snapshot)
+
+        assert provider.provider_id == "p1"
+        assert provider.state == ProviderState.READY
+
+    def test_from_snapshot_with_none_circuit_breaker_state_does_not_crash(self):
+        """EventSourcedProvider.from_snapshot() does not crash when circuit_breaker_state is None."""
+        snapshot = ProviderSnapshot(
+            provider_id="p1",
+            mode="subprocess",
+            state="ready",
+            version=10,
+            command=["python", "server.py"],
+            image=None,
+            endpoint=None,
+            env={},
+            idle_ttl_s=300,
+            health_check_interval_s=60,
+            max_consecutive_failures=3,
+            consecutive_failures=0,
+            total_failures=0,
+            total_invocations=0,
+            last_success_at=None,
+            last_failure_at=None,
+            tool_names=[],
+            last_used=0.0,
+            meta={},
+            circuit_breaker_state=None,
+        )
+
+        provider = EventSourcedProvider.from_snapshot(snapshot)
+
+        assert provider.provider_id == "p1"
+        assert provider.state == ProviderState.READY
+
+
 class TestEventSourcedProvider:
     """Test EventSourcedProvider."""
 

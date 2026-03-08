@@ -204,3 +204,109 @@ class TestCircuitBreakerToDict:
 
         assert result["state"] == "open"
         assert result["is_open"] is True
+
+    def test_to_dict_includes_opened_at(self):
+        """to_dict should include opened_at field."""
+        config = CircuitBreakerConfig(failure_threshold=1)
+        cb = CircuitBreaker(config)
+        cb.record_failure()  # Opens circuit
+
+        result = cb.to_dict()
+
+        assert "opened_at" in result
+        assert isinstance(result["opened_at"], float)
+
+    def test_to_dict_opened_at_none_when_closed(self):
+        """to_dict should include opened_at as None when circuit is closed."""
+        cb = CircuitBreaker()
+
+        result = cb.to_dict()
+
+        assert "opened_at" in result
+        assert result["opened_at"] is None
+
+
+class TestCircuitBreakerFromDict:
+    """Tests for CircuitBreaker.from_dict() deserialization."""
+
+    def test_from_dict_closed_state(self):
+        """from_dict with closed state produces a closed breaker with zero failures."""
+        d = {
+            "state": "closed",
+            "is_open": False,
+            "failure_count": 0,
+            "failure_threshold": 10,
+            "reset_timeout_s": 60.0,
+            "opened_at": None,
+        }
+
+        cb = CircuitBreaker.from_dict(d)
+
+        assert cb.state == CircuitState.CLOSED
+        assert cb.is_open is False
+        assert cb.failure_count == 0
+
+    def test_from_dict_open_state(self):
+        """from_dict with open state produces an open breaker with correct failure_count and opened_at."""
+        opened_at = 1700000000.0
+        d = {
+            "state": "open",
+            "is_open": True,
+            "failure_count": 5,
+            "failure_threshold": 3,
+            "reset_timeout_s": 120.0,
+            "opened_at": opened_at,
+        }
+
+        cb = CircuitBreaker.from_dict(d)
+
+        assert cb.state == CircuitState.OPEN
+        assert cb.is_open is True
+        assert cb.failure_count == 5
+        # Verify opened_at was restored by checking to_dict round-trip
+        result = cb.to_dict()
+        assert result["opened_at"] == opened_at
+
+    def test_to_dict_from_dict_round_trip(self):
+        """Round-trip (to_dict -> from_dict -> to_dict) produces identical dicts."""
+        config = CircuitBreakerConfig(failure_threshold=3, reset_timeout_s=30.0)
+        cb = CircuitBreaker(config)
+        # Record failures to open circuit
+        cb.record_failure()
+        cb.record_failure()
+        cb.record_failure()
+        assert cb.is_open is True
+
+        first_dict = cb.to_dict()
+        restored_cb = CircuitBreaker.from_dict(first_dict)
+        second_dict = restored_cb.to_dict()
+
+        assert first_dict == second_dict
+
+    def test_from_dict_missing_fields_uses_defaults(self):
+        """from_dict with empty dict should produce a valid closed CB with safe defaults."""
+        cb = CircuitBreaker.from_dict({})
+
+        assert cb.state == CircuitState.CLOSED
+        assert cb.is_open is False
+        assert cb.failure_count == 0
+        # Config defaults should be enforced
+        result = cb.to_dict()
+        assert result["failure_threshold"] >= 1
+        assert result["reset_timeout_s"] >= 1.0
+
+    def test_from_dict_restores_config(self):
+        """from_dict should restore failure_threshold and reset_timeout_s from config."""
+        d = {
+            "state": "closed",
+            "failure_count": 0,
+            "failure_threshold": 7,
+            "reset_timeout_s": 45.0,
+            "opened_at": None,
+        }
+
+        cb = CircuitBreaker.from_dict(d)
+        result = cb.to_dict()
+
+        assert result["failure_threshold"] == 7
+        assert result["reset_timeout_s"] == 45.0
