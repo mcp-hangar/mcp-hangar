@@ -24,6 +24,8 @@ Label Reference:
 import os
 from pathlib import Path
 import platform
+import random
+import time
 
 from mcp_hangar.domain.discovery.discovered_provider import DiscoveredProvider
 from mcp_hangar.domain.discovery.discovery_source import DiscoveryMode, DiscoverySource
@@ -116,6 +118,9 @@ class DockerDiscoverySource(DiscoverySource):
         mode: DiscoveryMode = DiscoveryMode.ADDITIVE,
         socket_path: str | None = None,
         default_ttl: int = 90,
+        max_retries: int = 5,
+        initial_backoff_s: float = 1.0,
+        max_backoff_s: float = 30.0,
     ):
         """Initialize discovery source.
 
@@ -123,6 +128,9 @@ class DockerDiscoverySource(DiscoverySource):
             mode: Discovery mode (additive or authoritative)
             socket_path: Path to socket (None = auto-detect)
             default_ttl: Default TTL for discovered providers
+            max_retries: Maximum connection retry attempts
+            initial_backoff_s: Initial backoff delay in seconds
+            max_backoff_s: Maximum backoff delay cap in seconds
         """
         super().__init__(mode)
 
@@ -132,47 +140,112 @@ class DockerDiscoverySource(DiscoverySource):
         self._socket_path = socket_path
         self._default_ttl = default_ttl
         self._client: docker.DockerClient | None = None
+        self._max_retries = max_retries
+        self._initial_backoff_s = initial_backoff_s
+        self._max_backoff_s = max_backoff_s
+        self._known_container_ids: set[str] = set()
 
     def _ensure_client(self) -> None:
-        """Ensure Docker client is connected."""
+        """Ensure Docker client is connected, retrying with backoff on failure."""
         if self._client is not None:
             return
 
-        # Find socket
-        socket = self._socket_path or find_container_socket()
+        last_error: Exception | None = None
 
-        if socket:
-            logger.info(f"Connecting to container runtime at: {socket}")
-            self._client = docker.DockerClient(base_url=f"unix://{socket}")
-        else:
-            # Last resort: let docker library figure it out
-            logger.info("Using docker.from_env() for container runtime")
-            self._client = docker.from_env()
+        for attempt in range(self._max_retries):
+            try:
+                socket = self._socket_path or find_container_socket()
+
+                if socket:
+                    logger.info("docker_connecting", socket=socket, attempt=attempt + 1)
+                    self._client = docker.DockerClient(base_url=f"unix://{socket}")
+                else:
+                    logger.info("docker_connecting_from_env", attempt=attempt + 1)
+                    self._client = docker.from_env()
+
+                # Verify connection works
+                self._client.ping()
+                logger.info("docker_connected", attempt=attempt + 1)
+                return
+
+            except (DockerException, OSError, ConnectionError) as e:
+                last_error = e
+                self._client = None  # Reset on failure
+                if attempt < self._max_retries - 1:
+                    delay = min(
+                        self._max_backoff_s,
+                        self._initial_backoff_s * (2**attempt),
+                    )
+                    jitter = delay * random.uniform(-0.1, 0.1)
+                    sleep_time = max(0.1, delay + jitter)
+                    logger.warning(
+                        "docker_connection_retry",
+                        attempt=attempt + 1,
+                        max_retries=self._max_retries,
+                        backoff_s=sleep_time,
+                        error=str(e),
+                    )
+                    time.sleep(sleep_time)
+
+        logger.error(
+            "docker_connection_exhausted",
+            max_retries=self._max_retries,
+            last_error=str(last_error),
+        )
+        raise DockerException(f"Failed to connect to Docker after {self._max_retries} attempts: {last_error}")
+
+    def _reconnect(self) -> None:
+        """Force reconnection by closing existing client and retrying."""
+        if self._client:
+            try:
+                self._client.close()
+            except Exception:  # infra-boundary: best-effort cleanup before reconnect
+                pass
+            self._client = None
+
+        self._ensure_client()
 
     @property
     def source_type(self) -> str:
         return "docker"
 
     async def discover(self) -> list[DiscoveredProvider]:
-        """Discover providers from container labels."""
-        self._ensure_client()
+        """Discover providers from container labels with automatic reconnection."""
+        try:
+            self._ensure_client()
+        except (DockerException, OSError, ConnectionError) as e:
+            logger.error("docker_discovery_connection_failed", error=str(e))
+            return []  # Graceful degradation
+
         providers = []
 
         try:
             # Get all containers with MCP label (including stopped)
             containers = self._client.containers.list(all=True, filters={"label": f"{self.LABEL_PREFIX}enabled=true"})
 
+            # Track container IDs to prevent duplicates after reconnection
+            current_ids: set[str] = set()
+
             for container in containers:
+                container_id = container.id[:12]
+                current_ids.add(container_id)
+
                 provider = self._parse_container(container)
                 if provider:
                     providers.append(provider)
                     await self.on_provider_discovered(provider)
 
-            logger.debug(f"Discovered {len(providers)} providers from containers")
+            self._known_container_ids = current_ids
+            logger.debug(
+                "docker_discovery_complete",
+                providers_found=len(providers),
+                containers_tracked=len(current_ids),
+            )
 
-        except DockerException as e:
-            logger.error(f"Container discovery failed: {e}")
-            raise
+        except (DockerException, OSError, ConnectionError) as e:
+            logger.warning("docker_discovery_lost_connection", error=str(e))
+            self._client = None  # Force reconnection on next call
+            return []  # Graceful degradation -- next discover() will reconnect
 
         return providers
 

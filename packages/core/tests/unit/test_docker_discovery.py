@@ -15,9 +15,15 @@ def _mock_docker_available():
     """Ensure DOCKER_AVAILABLE is True and docker module is mocked."""
     with patch("mcp_hangar.infrastructure.discovery.docker_source.DOCKER_AVAILABLE", True):
         with patch("mcp_hangar.infrastructure.discovery.docker_source.docker") as mock_docker:
-            mock_docker.DockerClient = MagicMock
-            mock_docker.from_env.return_value = MagicMock()
-            yield mock_docker
+            # DockerClient is a MagicMock so .return_value works properly
+            mock_docker.DockerClient = MagicMock()
+            mock_docker.from_env = MagicMock()
+            # Patch find_container_socket to return None so from_env path is used
+            with patch(
+                "mcp_hangar.infrastructure.discovery.docker_source.find_container_socket",
+                return_value=None,
+            ):
+                yield mock_docker
 
 
 @pytest.fixture
@@ -37,12 +43,11 @@ class TestEnsureClientRetry:
 
         mock_client = MagicMock()
         mock_client.ping.side_effect = DockerException("Connection refused")
-        mock_docker.DockerClient.return_value = mock_client
         mock_docker.from_env.return_value = mock_client
 
         source = DockerDiscoverySource(max_retries=3, initial_backoff_s=0.01)
 
-        with patch("time.sleep"):
+        with patch("mcp_hangar.infrastructure.discovery.docker_source.time.sleep"):
             with pytest.raises(DockerException, match="Failed to connect.*3 attempts"):
                 source._ensure_client()
 
@@ -63,7 +68,7 @@ class TestEnsureClientRetry:
 
         source = DockerDiscoverySource(max_retries=5, initial_backoff_s=0.01)
 
-        with patch("time.sleep"):
+        with patch("mcp_hangar.infrastructure.discovery.docker_source.time.sleep"):
             source._ensure_client()
 
         assert source._client is ok_client
@@ -80,7 +85,7 @@ class TestEnsureClientRetry:
 
         source = DockerDiscoverySource(max_retries=2, initial_backoff_s=0.01)
 
-        with patch("time.sleep"):
+        with patch("mcp_hangar.infrastructure.discovery.docker_source.time.sleep"):
             with pytest.raises(DockerException, match="Failed to connect.*2 attempts"):
                 source._ensure_client()
 
@@ -119,7 +124,10 @@ class TestBackoffTiming:
         )
 
         sleep_calls = []
-        with patch("time.sleep", side_effect=lambda t: sleep_calls.append(t)):
+        with patch(
+            "mcp_hangar.infrastructure.discovery.docker_source.time.sleep",
+            side_effect=lambda t: sleep_calls.append(t),
+        ):
             with pytest.raises(DockerException):
                 source._ensure_client()
 
@@ -130,7 +138,7 @@ class TestBackoffTiming:
         # Expected base delays: 1, 2, 4, 8
         for i, actual in enumerate(sleep_calls):
             expected_base = 1.0 * (2**i)
-            # Allow 10% jitter
+            # Allow 15% jitter tolerance (jitter is +/-10%)
             assert actual >= expected_base * 0.85, f"Sleep {i}: {actual} < {expected_base * 0.85}"
             assert actual <= expected_base * 1.15, f"Sleep {i}: {actual} > {expected_base * 1.15}"
 
@@ -151,7 +159,10 @@ class TestBackoffTiming:
         )
 
         sleep_calls = []
-        with patch("time.sleep", side_effect=lambda t: sleep_calls.append(t)):
+        with patch(
+            "mcp_hangar.infrastructure.discovery.docker_source.time.sleep",
+            side_effect=lambda t: sleep_calls.append(t),
+        ):
             with pytest.raises(DockerException):
                 source._ensure_client()
 
@@ -176,7 +187,7 @@ class TestDiscoverReconnection:
 
         source = DockerDiscoverySource(max_retries=2, initial_backoff_s=0.01)
 
-        with patch("time.sleep"):
+        with patch("mcp_hangar.infrastructure.discovery.docker_source.time.sleep"):
             result = await source.discover()
 
         assert result == []
@@ -197,7 +208,7 @@ class TestDiscoverReconnection:
 
         source = DockerDiscoverySource(max_retries=2, initial_backoff_s=0.01)
 
-        with patch("time.sleep"):
+        with patch("mcp_hangar.infrastructure.discovery.docker_source.time.sleep"):
             result = await source.discover()
 
         # Should have reset client to None for reconnection on next call
@@ -236,14 +247,14 @@ class TestDiscoverReconnection:
 
         source = DockerDiscoverySource(max_retries=2, initial_backoff_s=0.01)
 
-        with patch("time.sleep"):
+        with patch("mcp_hangar.infrastructure.discovery.docker_source.time.sleep"):
             result1 = await source.discover()
 
         assert result1 == []
 
         # Second call: reconnect and succeed
         mock_docker.from_env.side_effect = [ok_client]
-        with patch("time.sleep"):
+        with patch("mcp_hangar.infrastructure.discovery.docker_source.time.sleep"):
             result2 = await source.discover()
 
         assert len(result2) == 1
