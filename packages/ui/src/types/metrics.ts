@@ -42,3 +42,15 @@ export interface Alert {
   created_at: string
   resolved_at?: string
 }
+
+export interface MetricHistoryPoint {
+  provider_id: string
+  metric_name: string
+  value: number
+  recorded_at: number
+}
+
+export interface MetricsHistoryResponse {
+  points: MetricHistoryPoint[]
+  count: number
+}

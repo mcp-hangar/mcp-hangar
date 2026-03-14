@@ -9,6 +9,7 @@ import {
   Search,
   Shield,
   Settings,
+  Network,
 } from 'lucide-react'
 import { cn } from '../../lib/cn'
 
@@ -16,6 +17,7 @@ const NAV_ITEMS = [
   { label: 'Dashboard', path: '/', icon: LayoutDashboard, end: true },
   { label: 'Providers', path: '/providers', icon: Server, end: false },
   { label: 'Groups', path: '/groups', icon: Layers, end: false },
+  { label: 'Topology', path: '/topology', icon: Network, end: false },
   { label: 'Executions', path: '/executions', icon: Activity, end: false },
   { label: 'Metrics', path: '/metrics', icon: BarChart2, end: false },
   { label: 'Events', path: '/events', icon: Radio, end: false },

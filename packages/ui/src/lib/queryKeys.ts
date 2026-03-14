@@ -36,6 +36,7 @@ export const queryKeys = {
   observability: {
     all: ['observability'] as const,
     metrics: () => ['observability', 'metrics'] as const,
+    metricsHistory: (params?: object) => ['observability', 'metricsHistory', params] as const,
     audit: (params?: object) => ['observability', 'audit', params] as const,
     securityEvents: () => ['observability', 'securityEvents'] as const,
     alerts: () => ['observability', 'alerts'] as const,
