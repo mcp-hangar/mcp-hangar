@@ -17,6 +17,7 @@ from ...application.queries.queries import (
     GetToolInvocationHistoryQuery,
     ListProvidersQuery,
 )
+from ...infrastructure.persistence.log_buffer import get_log_buffer
 from .middleware import dispatch_command, dispatch_query
 from .serializers import HangarJSONResponse
 
@@ -115,6 +116,38 @@ async def get_provider_health(request: Request) -> HangarJSONResponse:
     return HangarJSONResponse(result.to_dict())
 
 
+async def get_provider_logs(request: Request) -> HangarJSONResponse:
+    """Get buffered log lines for a provider.
+
+    Path params:
+        provider_id: Provider identifier.
+    Query params:
+        lines: Number of most recent lines to return (default 100, max 1000).
+
+    Returns:
+        JSON with {"logs": [...], "provider_id": str, "count": int}.
+        Returns an empty list if the provider exists but has no log buffer yet.
+        Returns 404 if the provider is not registered.
+    """
+    provider_id = request.path_params["provider_id"]
+    try:
+        lines = int(request.query_params.get("lines", 100))
+    except ValueError:
+        lines = 100
+    lines = min(max(1, lines), 1000)
+
+    # Raises ProviderNotFoundError (-> 404) if unknown provider
+    await dispatch_query(GetProviderQuery(provider_id=provider_id))
+
+    buffer = get_log_buffer(provider_id)
+    if buffer is None:
+        log_dicts: list[dict] = []
+    else:
+        log_dicts = [line.to_dict() for line in buffer.tail(lines)]
+
+    return HangarJSONResponse({"logs": log_dicts, "provider_id": provider_id, "count": len(log_dicts)})
+
+
 async def get_provider_tool_history(request: Request) -> HangarJSONResponse:
     """Get tool invocation history for a provider.
 
@@ -154,5 +187,6 @@ provider_routes = [
     Route("/{provider_id:str}/stop", stop_provider, methods=["POST"]),
     Route("/{provider_id:str}/tools", get_provider_tools, methods=["GET"]),
     Route("/{provider_id:str}/health", get_provider_health, methods=["GET"]),
+    Route("/{provider_id:str}/logs", get_provider_logs, methods=["GET"]),
     Route("/{provider_id:str}/tools/history", get_provider_tool_history, methods=["GET"]),
 ]
