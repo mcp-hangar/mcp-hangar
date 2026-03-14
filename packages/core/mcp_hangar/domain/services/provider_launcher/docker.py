@@ -218,7 +218,7 @@ class DockerLauncher(ProviderLauncher):
                 cmd,
                 stdin=subprocess.PIPE,
                 stdout=subprocess.PIPE,
-                stderr=subprocess.DEVNULL,
+                stderr=subprocess.PIPE,  # Capture stderr for live log streaming
                 text=True,
                 bufsize=1,
                 shell=False,  # Never use shell

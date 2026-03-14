@@ -9,6 +9,7 @@ from ...logging_config import get_logger
 if TYPE_CHECKING:
     from ...infrastructure.lock_hierarchy import TrackedLock
 
+from ..contracts.log_buffer import IProviderLogBuffer
 from ..contracts.metrics_publisher import IMetricsPublisher, NullMetricsPublisher
 from ..events import (
     HealthCheckFailed,
@@ -99,6 +100,7 @@ class Provider(AggregateRoot):
         http: dict[str, Any] | None = None,  # HTTP transport config
         # Dependencies
         metrics_publisher: IMetricsPublisher | None = None,
+        log_buffer: IProviderLogBuffer | None = None,
     ):
         super().__init__()
 
@@ -145,6 +147,7 @@ class Provider(AggregateRoot):
 
         # Dependencies (Dependency Inversion Principle)
         self._metrics_publisher = metrics_publisher or NullMetricsPublisher()
+        self._log_buffer = log_buffer
 
         # State
         self._state = ProviderState.COLD
@@ -573,7 +576,54 @@ class Provider(AggregateRoot):
 
         launcher = get_launcher(self._mode.value)
         config = self._get_launch_config()
-        return launcher.launch(**config)
+        client = launcher.launch(**config)
+
+        # Start live stderr-reader thread if a log buffer is configured and the
+        # client has a process with a stderr pipe (subprocess/docker/container modes).
+        if self._log_buffer is not None:
+            self._start_stderr_reader(client)
+
+        return client
+
+    def _start_stderr_reader(self, client: Any) -> None:
+        """Spawn a daemon thread that reads stderr lines into the log buffer.
+
+        The thread iterates over ``client.process.stderr`` line-by-line until
+        EOF (process exit), appending each line to ``self._log_buffer``.  It
+        is a daemon thread so it never blocks interpreter shutdown.
+
+        This method is a no-op when the process has no stderr pipe (e.g., when
+        stderr is ``DEVNULL`` or the client is an HTTP transport with no process).
+
+        Args:
+            client: The newly created client (``StdioClient`` or similar).
+        """
+        process = getattr(client, "process", None)
+        stderr_pipe = getattr(process, "stderr", None) if process is not None else None
+        if stderr_pipe is None:
+            return
+
+        from ..value_objects.log import LogLine
+
+        provider_id = self.provider_id
+        log_buffer = self._log_buffer
+
+        def _reader() -> None:
+            try:
+                for raw_line in stderr_pipe:
+                    content = raw_line.rstrip("\n")
+                    log_buffer.append(
+                        LogLine(
+                            provider_id=provider_id,
+                            stream="stderr",
+                            content=content,
+                        )
+                    )
+            except Exception:  # noqa: BLE001 -- fault-barrier: reader thread must not crash on pipe error
+                pass
+
+        t = threading.Thread(target=_reader, daemon=True, name=f"stderr-reader-{provider_id}")
+        t.start()
 
     def _get_launch_config(self) -> dict[str, Any]:
         """Get launch configuration for the current mode."""
