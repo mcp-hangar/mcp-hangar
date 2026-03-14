@@ -153,8 +153,8 @@ Plans:
 
 Plans:
 
-- [ ] 12-01-PLAN.md -- EventBus.unsubscribe_from_all + WebSocket infrastructure (WS-03, WS-04, WS-05)
-- [ ] 12-02-PLAN.md -- WebSocket endpoints (events, state) + ASGI routing (WS-01, WS-02, WS-03, WS-05)
+- [x] 12-01-PLAN.md -- EventBus.unsubscribe_from_all + WebSocket infrastructure (WS-03, WS-04, WS-05)
+- [x] 12-02-PLAN.md -- WebSocket endpoints (events, state) + ASGI routing (WS-01, WS-02, WS-03, WS-05)
 
 ### Phase 13: Frontend Foundation
 
@@ -168,7 +168,13 @@ Plans:
   3. WebSocket hooks (`useWebSocket`, `useEventStream`, `useProviderState`) handle auto-reconnect with exponential backoff and trigger TanStack Query cache invalidation
   4. Layout shell with sidebar navigation, header with system status indicator, and content area is functional
   5. Vite dev server proxies `/api/*` to backend for CORS-free development
-**Plans**: TBD
+**Plans**: 3 plans
+
+Plans:
+
+- [ ] 13-01-PLAN.md -- Vite + React + TypeScript scaffold, types, API client, TanStack Query keys (UI-01, UI-02, INTG-03)
+- [ ] 13-02-PLAN.md -- WebSocket hooks: useWebSocket, useEventStream, useProviderState + Zustand WS store (UI-03, INTG-03)
+- [ ] 13-03-PLAN.md -- Layout shell, routing (all 9 pages), sidebar nav, header with system status (UI-01, UI-04)
 
 ### Phase 14: Dashboard & Provider Management
 
