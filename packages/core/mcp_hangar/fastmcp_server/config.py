@@ -5,6 +5,7 @@ and ServerConfig for HTTP server settings.
 """
 
 from dataclasses import dataclass
+from pathlib import Path
 
 from .protocols import (
     HangarApproveFn,
@@ -88,6 +89,8 @@ class ServerConfig:
     auth_enabled: bool = False
     auth_skip_paths: tuple[str, ...] = ("/health", "/ready", "/_ready", "/metrics")
     trusted_proxies: frozenset[str] = frozenset(["127.0.0.1", "::1"])
+    # UI static files (opt-in: set to path of Vite build output to enable SPA serving)
+    ui_dist: Path | None = None
 
 
 __all__ = [

@@ -138,6 +138,7 @@ class MCPServerFactory:
             Combined ASGI app callable.
         """
         from ..server.api import create_api_router
+        from .asgi import resolve_ui_dist
 
         mcp = self.create_server()
         mcp_app = mcp.streamable_http_app()
@@ -160,11 +161,18 @@ class MCPServerFactory:
         # Create REST API app
         api_app = create_api_router()
 
+        # Resolve UI static files directory (opt-in)
+        ui_dist = resolve_ui_dist(self._config.ui_dist)
+        if ui_dist is not None:
+            logger.info("ui_static_serving_enabled", ui_dist=str(ui_dist))
+
         # Create auth-aware combined app
         if self._config.auth_enabled and self._auth_components:
-            return create_auth_combined_app(aux_app, mcp_app, self._auth_components, self._config, api_app)
+            return create_auth_combined_app(
+                aux_app, mcp_app, self._auth_components, self._config, api_app, ui_dist=ui_dist
+            )
         else:
-            return create_combined_asgi_app(aux_app, mcp_app, api_app)
+            return create_combined_asgi_app(aux_app, mcp_app, api_app, ui_dist=ui_dist)
 
     def _register_core_tools(self, mcp: FastMCP) -> None:
         """Register core control plane tools.
