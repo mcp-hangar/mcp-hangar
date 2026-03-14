@@ -10,6 +10,7 @@ import { EventsPage } from './features/events/EventsPage'
 import { DiscoveryPage } from './features/discovery/DiscoveryPage'
 import { AuthPage } from './features/auth/AuthPage'
 import { ConfigPage } from './features/config/ConfigPage'
+import { SecurityPage } from './features/security/SecurityPage'
 
 export function App(): JSX.Element {
   return (
@@ -25,6 +26,7 @@ export function App(): JSX.Element {
         <Route path="discovery" element={<DiscoveryPage />} />
         <Route path="auth" element={<AuthPage />} />
         <Route path="config" element={<ConfigPage />} />
+        <Route path="security" element={<SecurityPage />} />
       </Route>
     </Routes>
   )

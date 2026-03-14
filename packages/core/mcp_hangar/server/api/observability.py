@@ -4,6 +4,7 @@ Exposes metrics, audit log, security events, and alert history
 for operational visibility. All endpoints are read-only.
 """
 
+from datetime import datetime
 from starlette.requests import Request
 from starlette.routing import Route
 
@@ -117,9 +118,73 @@ async def get_alert_history(request: Request) -> HangarJSONResponse:
     return HangarJSONResponse({"alerts": [a.to_dict() for a in alerts], "total": len(alerts)})
 
 
+async def get_per_provider_metrics(request: Request) -> HangarJSONResponse:
+    """Get per-provider metrics parsed from Prometheus text output.
+
+    Parses the Prometheus text exposition format and aggregates counters by provider.
+
+    Returns:
+        JSON with {"providers": [...], "timestamp": str}.
+        Each provider entry: {"provider_id", "tool_calls_total", "tool_call_errors",
+        "cold_starts_total", "health_checks_total", "health_check_failures"}.
+    """
+    prometheus_text = get_metrics()
+    per_provider: dict[str, dict] = {}
+
+    def _get_entry(provider_id: str) -> dict:
+        if provider_id not in per_provider:
+            per_provider[provider_id] = {
+                "provider_id": provider_id,
+                "tool_calls_total": 0.0,
+                "tool_call_errors": 0.0,
+                "cold_starts_total": 0.0,
+                "health_checks_total": 0.0,
+                "health_check_failures": 0.0,
+            }
+        return per_provider[provider_id]
+
+    for line in prometheus_text.splitlines():
+        # Skip comment/help/type lines and blank lines
+        if not line.strip() or line.startswith("#"):
+            continue
+        # Only process lines with a provider label
+        if 'provider="' not in line:
+            continue
+        try:
+            value = float(line.split()[-1])
+            # Extract provider_id from label: provider="<id>"
+            parts = line.split('provider="')
+            provider_id = parts[1].split('"')[0]
+            if not provider_id:
+                continue
+        except (ValueError, IndexError):
+            continue
+
+        entry = _get_entry(provider_id)
+
+        if line.startswith("mcp_hangar_tool_calls_total{"):
+            entry["tool_calls_total"] += value
+        elif line.startswith("mcp_hangar_tool_call_errors_total{"):
+            entry["tool_call_errors"] += value
+        elif line.startswith("mcp_hangar_health_checks_total{"):
+            entry["health_checks_total"] += value
+            if 'result="unhealthy"' in line:
+                entry["health_check_failures"] += value
+        elif line.startswith("mcp_hangar_provider_cold_start_seconds_count{"):
+            entry["cold_starts_total"] += value
+
+    return HangarJSONResponse(
+        {
+            "providers": list(per_provider.values()),
+            "timestamp": datetime.utcnow().isoformat() + "Z",
+        }
+    )
+
+
 # Route definitions for mounting in the API router
 observability_routes = [
     Route("/metrics", get_metrics_summary, methods=["GET"]),
+    Route("/metrics/per-provider", get_per_provider_metrics, methods=["GET"]),
     Route("/audit", get_audit_log, methods=["GET"]),
     Route("/security", get_security_events, methods=["GET"]),
     Route("/alerts", get_alert_history, methods=["GET"]),

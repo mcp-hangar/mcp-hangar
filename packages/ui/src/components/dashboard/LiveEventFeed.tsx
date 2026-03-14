@@ -1,3 +1,4 @@
+import { useMemo } from 'react'
 import { cn } from '../../lib/cn'
 import { useEventStream } from '../../hooks/useEventStream'
 import { EmptyState } from '../ui'
@@ -6,6 +7,7 @@ import type { WsConnectionStatus } from '../../store/ws'
 interface LiveEventFeedProps {
   maxEvents?: number
   className?: string
+  typeFilter?: string
 }
 
 function statusDotClass(status: WsConnectionStatus): string {
@@ -23,9 +25,13 @@ function formatTime(isoString: string): string {
   }
 }
 
-export function LiveEventFeed({ maxEvents = 20, className }: LiveEventFeedProps): JSX.Element {
+export function LiveEventFeed({ maxEvents = 20, className, typeFilter }: LiveEventFeedProps): JSX.Element {
   const { events, status } = useEventStream({ bufferSize: maxEvents })
-  const reversed = [...events].reverse()
+  const allReversed = [...events].reverse()
+  const reversed = useMemo(
+    () => (typeFilter ? allReversed.filter((e) => e.event_type === typeFilter) : allReversed),
+    [allReversed, typeFilter],
+  )
 
   return (
     <div className={cn('bg-white rounded-lg border border-gray-200 p-4', className)}>

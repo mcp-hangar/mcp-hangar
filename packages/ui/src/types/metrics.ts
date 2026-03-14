@@ -2,35 +2,37 @@ export interface ProviderMetrics {
   provider_id: string
   tool_calls_total: number
   tool_call_errors: number
-  tool_call_duration_p50_ms?: number
-  tool_call_duration_p95_ms?: number
   cold_starts_total: number
   health_checks_total: number
   health_check_failures: number
 }
 
-export interface MetricsSnapshot {
-  timestamp: string
+export interface PerProviderMetricsResponse {
   providers: ProviderMetrics[]
-  system?: Record<string, unknown>
+  timestamp: string
 }
 
-export interface AuditEntry {
-  id: string
-  entity_id: string
-  entity_type: string
-  action: string
-  actor?: string
+export interface AuditRecord {
+  event_id: string
+  event_type: string
   occurred_at: string
-  details?: Record<string, unknown>
+  provider_id?: string
+  data?: Record<string, unknown>
+  recorded_at?: string
 }
 
 export interface SecurityEvent {
   event_id: string
   event_type: string
   severity: 'low' | 'medium' | 'high' | 'critical'
-  occurred_at: string
+  message: string
+  timestamp: string
+  provider_id?: string
+  tool_name?: string
+  source_ip?: string | null
+  user_id?: string | null
   details?: Record<string, unknown>
+  correlation_id?: string | null
 }
 
 export interface Alert {
