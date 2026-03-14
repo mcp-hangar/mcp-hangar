@@ -6,6 +6,7 @@ or create the buffer for a given provider without passing instances around.
 
 import threading
 from collections import deque
+from collections.abc import Callable
 
 from ...domain.contracts.log_buffer import IProviderLogBuffer
 from ...domain.value_objects.log import LogLine
@@ -28,17 +29,30 @@ class ProviderLogBuffer(IProviderLogBuffer):
     Uses a :class:`collections.deque` with a fixed ``maxlen`` so that appending
     beyond capacity silently discards the oldest entry -- O(1) append, O(k) tail.
 
+    An optional *on_append* callback is invoked (synchronously, under no lock)
+    after each successful :meth:`append`.  The bootstrap layer uses this to wire
+    in :class:`~mcp_hangar.server.api.ws.logs.LogStreamBroadcaster` without
+    coupling the domain layer to the WebSocket infrastructure.
+
     Args:
         provider_id: Identifier of the provider this buffer belongs to.
         max_lines: Maximum number of lines to retain.  Defaults to
             :data:`DEFAULT_MAX_LINES` (1000).
+        on_append: Optional callable invoked with each :class:`LogLine` after
+            it is stored.  Called from whatever thread calls :meth:`append`.
     """
 
-    def __init__(self, provider_id: str, max_lines: int = DEFAULT_MAX_LINES) -> None:
+    def __init__(
+        self,
+        provider_id: str,
+        max_lines: int = DEFAULT_MAX_LINES,
+        on_append: Callable[[LogLine], None] | None = None,
+    ) -> None:
         self._provider_id = provider_id
         self._max_lines = max_lines
         self._buffer: deque[LogLine] = deque(maxlen=max_lines)
         self._lock = threading.Lock()
+        self._on_append = on_append
 
     @property
     def provider_id(self) -> str:
@@ -49,12 +63,16 @@ class ProviderLogBuffer(IProviderLogBuffer):
         """Add a log line to the buffer.
 
         When the buffer is full the oldest line is automatically discarded.
+        If an *on_append* callback was provided at construction time it is
+        invoked after the line is stored (outside the lock).
 
         Args:
             line: The :class:`~mcp_hangar.domain.value_objects.log.LogLine` to store.
         """
         with self._lock:
             self._buffer.append(line)
+        if self._on_append is not None:
+            self._on_append(line)
 
     def tail(self, n: int) -> list[LogLine]:
         """Return the most recent *n* log lines, oldest first.
