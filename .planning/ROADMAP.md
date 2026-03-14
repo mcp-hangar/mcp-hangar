@@ -208,7 +208,13 @@ Plans:
   2. Events page shows live WebSocket event stream with type/severity filters and paginated audit log with entity/time filters
   3. Executions page shows tool invocation timeline, failures view with error details, and success rate/p95 statistics
   4. Security events viewer shows security events with severity indicators
-**Plans**: TBD
+**Plans**: 3 plans
+
+Plans:
+
+- [ ] 15-01-PLAN.md -- API client fixes + per-provider backend endpoint + MetricsPage (UI-09)
+- [ ] 15-02-PLAN.md -- EventsPage: live stream with type filter + paginated audit log (UI-10)
+- [ ] 15-03-PLAN.md -- ExecutionsPage + SecurityPage + /security route (UI-11, UI-12)
 
 ### Phase 16: Auth, Config & Production
 

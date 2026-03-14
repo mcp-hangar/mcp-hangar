@@ -3,12 +3,12 @@ gsd_state_version: 1.0
 milestone: v2.0
 milestone_name: Management UI
 status: unknown
-last_updated: "2026-03-14T00:00:00Z"
+last_updated: "2026-03-14T17:35:06Z"
 progress:
   total_phases: 16
-  completed_phases: 13
-  total_plans: 27
-  completed_plans: 27
+  completed_phases: 14
+  total_plans: 31
+  completed_plans: 31
 ---
 
 # Project State
@@ -23,12 +23,12 @@ See: .planning/PROJECT.md (updated 2026-03-14)
 ## Current Position
 
 Milestone: v2.0 Management UI -- IN PROGRESS
-Phase: 13 of 16 (Frontend Foundation) -- COMPLETE
-Plan: next phase (Phase 14)
-Status: Phase 13 all 3 plans complete. packages/ui/ scaffolded with Vite + React + TypeScript; TypeScript types + typed API clients + TanStack Query keys; WebSocket Zustand store + useWebSocket + useEventStream + useProviderState hooks; layout shell (Sidebar + Header + Layout) + 10 routed placeholder pages wired.
-Last activity: 2026-03-14 -- Phase 13-03 executed: App.tsx, main.tsx, layout shell, 10 placeholder pages (zero TypeScript errors)
+Phase: 14 of 16 (Dashboard Provider Management) -- COMPLETE
+Plan: next phase (Phase 15)
+Status: Phase 14 all 4 plans complete. Shared UI primitives (ProviderStateBadge, HealthBadge, CircuitBreakerBadge, MetricCard, ActionButton, EmptyState, LoadingSpinner); Dashboard with metric cards, state distribution chart, live event feed; Providers list + detail pages; Groups, Discovery, Config pages fully implemented.
+Last activity: 2026-03-14 -- Phase 14-04 executed: GroupsPage (two-panel), DiscoveryPage (3 sections with approve/reject), ConfigPage (JSON viewer + hot reload). Zero TypeScript errors.
 
-Progress: [########__] ~81% milestone (13 of 16 phases complete)
+Progress: [#########_] ~88% milestone (14 of 16 phases complete)
 
 ## Performance Metrics
 
@@ -147,6 +147,13 @@ All v0.9, v0.10, and v1.0 decisions archived in PROJECT.md Key Decisions table.
 - SystemStatusBadge polls /api/system/info every 30s; displays version + ready/total count when backend is up, "Backend offline" on error
 - Zustand stores use module-level singletons -- no React Provider wrapper needed
 
+**v2.0 decisions (Phase 14 execution):**
+
+- GroupsPage uses selectedGroupId state to drive conditional detail query (enabled: !!selectedGroupId)
+- Rebalance and approve/reject mutations invalidate parent .all query key to refresh all sub-keys
+- ConfigPage 5-second feedback via useEffect + setTimeout clearing reloadMessage state
+- Quarantine section is informational only -- approve/reject actions only at pending stage
+
 ### Pending Todos
 
 None beyond phase planning/execution.
@@ -158,5 +165,5 @@ None beyond phase planning/execution.
 ## Session Continuity
 
 Last session: 2026-03-14
-Stopped at: Phase 13 complete -- Frontend foundation: scaffold, types, API clients, WebSocket hooks, layout shell, 9 routed pages
-Resume with: Start Phase 14 (next phase after Frontend Foundation)
+Stopped at: Phase 14 complete -- Dashboard, Providers, Groups, Discovery, Config pages all fully implemented with zero TypeScript errors
+Resume with: Start Phase 15 (next phase after Dashboard Provider Management)
