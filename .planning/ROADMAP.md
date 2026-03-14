@@ -132,6 +132,7 @@ Plans:
 Plans:
 
 - [x] 11-01-PLAN.md -- API foundation + provider endpoints (REST-01, REST-03, REST-08, REST-09, REST-10, INTG-01) -- completed 2026-03-14
+- [x] 11-02-PLAN.md -- Groups, discovery, config, and system endpoints (REST-02, REST-04, REST-05, REST-06, REST-07) -- completed 2026-03-14
 
 ### Phase 12: WebSocket Infrastructure
 
@@ -218,7 +219,7 @@ Phases execute in numeric order: 11 -> 12 -> 13 -> 14 -> 15 -> 16
 | 8. Safety Foundation | v1.0 | 3/3 | Complete | 2026-03-08 |
 | 9. State Survival | v1.0 | 3/3 | Complete | 2026-03-08 |
 | 10. Operational Hardening | v1.0 | 6/6 | Complete | 2026-03-08 |
-| 11. Backend REST API | v2.0 | 1/? | In Progress | -- |
+| 11. Backend REST API | v2.0 | 2/? | In Progress | -- |
 | 12. WebSocket Infrastructure | v2.0 | 0/? | Pending | -- |
 | 13. Frontend Foundation | v2.0 | 0/? | Pending | -- |
 | 14. Dashboard & Provider Mgmt | v2.0 | 0/? | Pending | -- |
@@ -227,4 +228,4 @@ Phases execute in numeric order: 11 -> 12 -> 13 -> 14 -> 15 -> 16
 
 ---
 *Created: 2026-02-15*
-*Last updated: 2026-03-14 -- v2.0 Management UI milestone added (Phases 11-16)*
+*Last updated: 2026-03-14 -- Phase 11-02 complete: groups, discovery, config, system REST endpoints*

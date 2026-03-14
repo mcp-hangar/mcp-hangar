@@ -8,7 +8,7 @@ progress:
   total_phases: 6
   completed_phases: 0
   total_plans: 0
-  completed_plans: 1
+  completed_plans: 2
 ---
 
 # Project State
@@ -24,11 +24,11 @@ See: .planning/PROJECT.md (updated 2026-03-14)
 
 Milestone: v2.0 Management UI -- IN PROGRESS
 Phase: 11 of 16 (Backend REST API) -- IN PROGRESS
-Plan: 02 (next up -- Events/WebSocket bridge, or next plan in phase 11)
-Status: Phase 11 Plan 01 complete. REST API foundation + provider endpoints implemented.
-Last activity: 2026-03-14 -- Phase 11-01 executed: API module, provider endpoints, /api/ ASGI mount
+Plan: 03 (next plan in phase 11)
+Status: Phase 11 Plan 02 complete. Groups, discovery, config, and system endpoints implemented.
+Last activity: 2026-03-14 -- Phase 11-02 executed: group/discovery/config/system REST endpoints (58 tests, all passing)
 
-Progress: [__________] 0% milestone (0/6 phases, 1/? plans)
+Progress: [__________] 0% milestone (0/6 phases, 2/? plans)
 
 ## Performance Metrics
 
@@ -110,6 +110,13 @@ All v0.9, v0.10, and v1.0 decisions archived in PROJECT.md Key Decisions table.
 - dispatch_query/dispatch_command use run_in_threadpool for async-safe CQRS dispatch
 - /api/ routes bypass auth gate in create_auth_combined_app (API handles auth separately)
 
+**v2.0 decisions (Phase 11-02 execution):**
+
+- ProviderGroup serialized via to_status_dict() for consistent member representation
+- DiscoveryNotConfigured extends ProviderNotFoundError to inherit HTTP 404 mapping
+- system.py uses only dispatch_query (no get_context import) -- minimal dependency surface
+- Config sanitization is top-level only (non-recursive) as a practical defense-in-depth measure
+
 ### Pending Todos
 
 None beyond phase planning/execution.
@@ -122,5 +129,5 @@ None beyond phase planning/execution.
 ## Session Continuity
 
 Last session: 2026-03-14
-Stopped at: Phase 11-01 complete -- REST API foundation + provider endpoints
-Resume with: Start Phase 11-02 -- WebSocket bridge / next plan in Backend REST API phase
+Stopped at: Phase 11-02 complete -- groups, discovery, config, system REST endpoints
+Resume with: Start Phase 11-03 -- next plan in Backend REST API phase
