@@ -44,6 +44,7 @@ from .event_handlers import init_event_handlers
 from .event_store import init_event_store
 from .hot_loading import init_hot_loading
 from .knowledge_base import init_knowledge_base
+from .logs import init_log_buffers
 from .observability import init_observability, shutdown_observability
 from .retry_config import init_retry_config
 from .tools import register_all_tools
@@ -259,6 +260,9 @@ def bootstrap(
     mcp_server = FastMCP("mcp-registry")
     register_all_tools(mcp_server)
 
+    # Wire log buffers to providers (must run after load_config populates PROVIDERS)
+    init_log_buffers(PROVIDERS)
+
     # Create background workers (not started)
     workers = create_background_workers()
 
@@ -342,6 +346,7 @@ __all__ = [
     "init_event_store",
     "init_hot_loading",
     "init_knowledge_base",
+    "init_log_buffers",
     "init_observability",
     "init_retry_config",
     "init_saga",

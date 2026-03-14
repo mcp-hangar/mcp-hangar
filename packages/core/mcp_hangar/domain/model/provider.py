@@ -382,6 +382,20 @@ class Provider(AggregateRoot):
         """Get the internal lock (for backward compatibility)."""
         return self._lock
 
+    def set_log_buffer(self, buffer: "IProviderLogBuffer") -> None:
+        """Inject or replace the log buffer for this provider.
+
+        Intended for use by the bootstrap composition root to wire in the
+        infrastructure log buffer after the provider has been constructed from
+        config.  Safe to call before the provider is started.
+
+        Args:
+            buffer: The :class:`~mcp_hangar.domain.contracts.log_buffer.IProviderLogBuffer`
+                implementation to use for capturing stderr output.
+        """
+        with self._lock:
+            self._log_buffer = buffer
+
     # --- State Management ---
 
     def _transition_to(self, new_state: ProviderState) -> None:
@@ -606,7 +620,8 @@ class Provider(AggregateRoot):
         from ..value_objects.log import LogLine
 
         provider_id = self.provider_id
-        log_buffer = self._log_buffer
+        # self._log_buffer is guaranteed non-None here: _create_client guards with `if self._log_buffer is not None`
+        log_buffer: IProviderLogBuffer = self._log_buffer  # type: ignore[assignment]
 
         def _reader() -> None:
             try:
