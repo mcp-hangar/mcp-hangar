@@ -46,3 +46,10 @@ logs/
 Dockerfile
 docker-compose.yml
 .dockerignore
+
+# Node / UI
+packages/ui/node_modules/
+packages/ui/.next/
+
+# Planning (not needed in image)
+.planning/
