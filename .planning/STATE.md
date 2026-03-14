@@ -3,12 +3,12 @@ gsd_state_version: 1.0
 milestone: v2.0
 milestone_name: Management UI
 status: unknown
-last_updated: "2026-03-14T15:59:17.575Z"
+last_updated: "2026-03-14T00:00:00Z"
 progress:
-  total_phases: 8
-  completed_phases: 8
-  total_plans: 24
-  completed_plans: 24
+  total_phases: 16
+  completed_phases: 13
+  total_plans: 27
+  completed_plans: 27
 ---
 
 # Project State
@@ -23,12 +23,12 @@ See: .planning/PROJECT.md (updated 2026-03-14)
 ## Current Position
 
 Milestone: v2.0 Management UI -- IN PROGRESS
-Phase: 12 of 16 (WebSocket Infrastructure) -- COMPLETE
-Plan: next phase (Phase 13)
-Status: Phase 12 both plans complete. WebSocket infrastructure (EventBus extension, connection manager, queue, filters) and endpoint handlers (events + state) implemented and wired into ASGI routing.
-Last activity: 2026-03-14 -- Phase 12-02 executed: ws_events_endpoint, ws_state_endpoint, ws_routes, ASGI websocket routing (20 tests, all passing)
+Phase: 13 of 16 (Frontend Foundation) -- COMPLETE
+Plan: next phase (Phase 14)
+Status: Phase 13 all 3 plans complete. packages/ui/ scaffolded with Vite + React + TypeScript; TypeScript types + typed API clients + TanStack Query keys; WebSocket Zustand store + useWebSocket + useEventStream + useProviderState hooks; layout shell (Sidebar + Header + Layout) + 10 routed placeholder pages wired.
+Last activity: 2026-03-14 -- Phase 13-03 executed: App.tsx, main.tsx, layout shell, 10 placeholder pages (zero TypeScript errors)
 
-Progress: [__________] 0% milestone (phase 12 complete)
+Progress: [########__] ~81% milestone (13 of 16 phases complete)
 
 ## Performance Metrics
 
@@ -140,6 +140,13 @@ All v0.9, v0.10, and v1.0 decisions archived in PROJECT.md Key Decisions table.
 - Severity filter deferred -- DomainEvent has no severity field; only event_types and provider_ids filters implemented
 - combined_app health/metrics gate is HTTP-only; websocket scopes route to /api/* or mcp_app
 
+**v2.0 decisions (Phase 13 execution):**
+
+- NavLink end=true on Dashboard route to prevent it matching all child paths
+- Sidebar inlines its own icon-mapped NAV_ITEMS (typed lucide-react components) rather than importing from constants.ts which stores string icon names
+- SystemStatusBadge polls /api/system/info every 30s; displays version + ready/total count when backend is up, "Backend offline" on error
+- Zustand stores use module-level singletons -- no React Provider wrapper needed
+
 ### Pending Todos
 
 None beyond phase planning/execution.
@@ -151,5 +158,5 @@ None beyond phase planning/execution.
 ## Session Continuity
 
 Last session: 2026-03-14
-Stopped at: Phase 12 complete -- WebSocket infrastructure + endpoint handlers + ASGI routing wired
-Resume with: Start Phase 13 (next phase after WebSocket infrastructure)
+Stopped at: Phase 13 complete -- Frontend foundation: scaffold, types, API clients, WebSocket hooks, layout shell, 9 routed pages
+Resume with: Start Phase 14 (next phase after Frontend Foundation)
