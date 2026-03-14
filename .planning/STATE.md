@@ -2,13 +2,13 @@
 gsd_state_version: 1.0
 milestone: v2.0
 milestone_name: Management UI
-status: in_progress
-last_updated: "2026-03-14"
+status: unknown
+last_updated: "2026-03-14T16:10:00Z"
 progress:
-  total_phases: 6
-  completed_phases: 0
-  total_plans: 0
-  completed_plans: 2
+  total_phases: 8
+  completed_phases: 7
+  total_plans: 24
+  completed_plans: 23
 ---
 
 # Project State
@@ -24,9 +24,9 @@ See: .planning/PROJECT.md (updated 2026-03-14)
 
 Milestone: v2.0 Management UI -- IN PROGRESS
 Phase: 11 of 16 (Backend REST API) -- IN PROGRESS
-Plan: 03 (next plan in phase 11)
-Status: Phase 11 Plan 02 complete. Groups, discovery, config, and system endpoints implemented.
-Last activity: 2026-03-14 -- Phase 11-02 executed: group/discovery/config/system REST endpoints (58 tests, all passing)
+Plan: 05 (next plan in phase 11)
+Status: Phase 11 Plan 04 complete. Auth REST endpoints (API keys + roles) and init_auth_cqrs wiring implemented.
+Last activity: 2026-03-14 -- Phase 11-04 executed: POST/DELETE/GET /api/auth/keys + /roles + /roles/assign + /roles/revoke (22 tests, all passing)
 
 Progress: [__________] 0% milestone (0/6 phases, 2/? plans)
 
@@ -116,6 +116,14 @@ All v0.9, v0.10, and v1.0 decisions archived in PROJECT.md Key Decisions table.
 - DiscoveryNotConfigured extends ProviderNotFoundError to inherit HTTP 404 mapping
 - system.py uses only dispatch_query (no get_context import) -- minimal dependency surface
 - Config sanitization is top-level only (non-recursive) as a practical defense-in-depth measure
+- [Phase 11-backend-rest-api]: EventStore API used is get_all_stream_ids()+load() not read_all() -- plan spec had incorrect interface, implementation adapted to real API
+- [Phase 11-backend-rest-api]: GetToolInvocationHistoryHandler does not extend BaseQueryHandler -- reads from event store directly, not provider repository
+
+**v2.0 decisions (Phase 11-04 execution):**
+
+- init_auth_cqrs checks getattr(auth_components, "enabled", False) not just is None -- AuthComponents may exist with enabled=False
+- TestClient.delete() does not accept json= kwarg in this Starlette version -- tests use request("DELETE", url, json=...) pattern
+- revoke_api_key body parsing uses try/except -- DELETE body is optional per HTTP spec, fault-tolerant parsing is correct
 
 ### Pending Todos
 
@@ -129,5 +137,5 @@ None beyond phase planning/execution.
 ## Session Continuity
 
 Last session: 2026-03-14
-Stopped at: Phase 11-02 complete -- groups, discovery, config, system REST endpoints
-Resume with: Start Phase 11-03 -- next plan in Backend REST API phase
+Stopped at: Phase 11-04 complete -- auth REST endpoints (API keys + roles) + init_auth_cqrs bootstrap wiring
+Resume with: Start Phase 11-05 -- next plan in Backend REST API phase

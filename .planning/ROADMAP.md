@@ -222,7 +222,7 @@ Phases execute in numeric order: 11 -> 12 -> 13 -> 14 -> 15 -> 16
 | 8. Safety Foundation | v1.0 | 3/3 | Complete | 2026-03-08 |
 | 9. State Survival | v1.0 | 3/3 | Complete | 2026-03-08 |
 | 10. Operational Hardening | v1.0 | 6/6 | Complete | 2026-03-08 |
-| 11. Backend REST API | v2.0 | 2/? | In Progress | -- |
+| 11. Backend REST API | 4/5 | In Progress|  | -- |
 | 12. WebSocket Infrastructure | v2.0 | 0/? | Pending | -- |
 | 13. Frontend Foundation | v2.0 | 0/? | Pending | -- |
 | 14. Dashboard & Provider Mgmt | v2.0 | 0/? | Pending | -- |

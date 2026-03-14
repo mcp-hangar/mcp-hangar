@@ -18,7 +18,7 @@ Requirements for v2.0 Management UI. The goal is a browser-based management inte
 - [x] **REST-01**: REST API endpoints exist for all provider lifecycle operations (list, get, start, stop) wrapping existing CQRS commands/queries, returning JSON responses with consistent error format
 - [ ] **REST-02**: REST API endpoints exist for provider group operations (list groups, get group detail, trigger rebalance) wrapping existing CQRS and saga infrastructure
 - [x] **REST-03**: REST API endpoints exist for tool listing per provider (including JSON Schema) and tool invocation history queried from the event store
-- [ ] **REST-04**: REST API endpoints exist for authentication management (create/revoke API keys, create/list roles, assign/revoke role assignments) wrapping existing auth CQRS handlers
+- [x] **REST-04**: REST API endpoints exist for authentication management (create/revoke API keys, create/list roles, assign/revoke role assignments) wrapping existing auth CQRS handlers
 - [ ] **REST-05**: REST API endpoints exist for configuration (get current config, trigger hot reload) and system info (build info, uptime, provider counts)
 - [ ] **REST-06**: REST API endpoints exist for discovery management (list sources with health, list pending providers, list quarantined providers, approve/reject discovered providers)
 - [ ] **REST-07**: REST API endpoints exist for observability data (metrics as JSON, audit log with entity/time filters, security events, alert history)
@@ -123,7 +123,7 @@ Which phases cover which requirements. Updated during roadmap creation.
 | REST-01 | Phase 11 | Complete |
 | REST-02 | Phase 11 | Pending |
 | REST-03 | Phase 11 | Complete |
-| REST-04 | Phase 11 | Pending |
+| REST-04 | Phase 11 | Complete |
 | REST-05 | Phase 11 | Pending |
 | REST-06 | Phase 11 | Pending |
 | REST-07 | Phase 11 | Pending |
