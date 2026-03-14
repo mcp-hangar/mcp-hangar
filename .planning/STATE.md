@@ -23,12 +23,12 @@ See: .planning/PROJECT.md (updated 2026-03-14)
 ## Current Position
 
 Milestone: v2.0 Management UI -- IN PROGRESS
-Phase: 11 of 16 (Backend REST API) -- IN PROGRESS
-Plan: 06 (next plan in phase 11)
-Status: Phase 11 Plan 05 complete. Observability REST endpoints (metrics, audit, security, alerts) and global handler singletons implemented.
-Last activity: 2026-03-14 -- Phase 11-05 executed: GET /api/observability/metrics + /audit + /security + /alerts (21 tests, all passing)
+Phase: 12 of 16 (WebSocket Infrastructure) -- COMPLETE
+Plan: next phase (Phase 13)
+Status: Phase 12 both plans complete. WebSocket infrastructure (EventBus extension, connection manager, queue, filters) and endpoint handlers (events + state) implemented and wired into ASGI routing.
+Last activity: 2026-03-14 -- Phase 12-02 executed: ws_events_endpoint, ws_state_endpoint, ws_routes, ASGI websocket routing (20 tests, all passing)
 
-Progress: [__________] 0% milestone (0/6 phases, 2/? plans)
+Progress: [__________] 0% milestone (phase 12 complete)
 
 ## Performance Metrics
 
@@ -131,17 +131,25 @@ All v0.9, v0.10, and v1.0 decisions archived in PROJECT.md Key Decisions table.
 - TestClient.delete() does not accept json= kwarg in this Starlette version -- tests use request("DELETE", url, json=...) pattern
 - revoke_api_key body parsing uses try/except -- DELETE body is optional per HTTP spec, fault-tolerant parsing is correct
 
+**v2.0 decisions (Phase 12 execution):**
+
+- ws_events_endpoint subscribes/unsubscribes EventBus handler per-connection in try/finally -- guarantees cleanup on any disconnect path
+- EventStreamQueue uses call_soon_threadsafe + _safe_put wrapper to silently drop on QueueFull
+- connection_manager is a module-level singleton instantiated at import time
+- auth_combined_app: only lifespan scopes pass to mcp_app directly; websocket /api/* routed to api_app without auth
+- Severity filter deferred -- DomainEvent has no severity field; only event_types and provider_ids filters implemented
+- combined_app health/metrics gate is HTTP-only; websocket scopes route to /api/* or mcp_app
+
 ### Pending Todos
 
 None beyond phase planning/execution.
 
 ### Blockers/Concerns
 
-- EventBus lacks `unsubscribe_from_all()` -- must be added in Phase 12 (WS-04)
-- JSON serialization of domain objects may need dedicated serializers (Pitfall 6)
+- JSON serialization of domain objects may need dedicated serializers (Pitfall 6) -- to be assessed in Phase 13+
 
 ## Session Continuity
 
 Last session: 2026-03-14
-Stopped at: Phase 11-05 complete -- observability REST endpoints (metrics, audit log, security events, alert history) + global audit/alert handler singletons
-Resume with: Start Phase 11-06 -- next plan in Backend REST API phase
+Stopped at: Phase 12 complete -- WebSocket infrastructure + endpoint handlers + ASGI routing wired
+Resume with: Start Phase 13 (next phase after WebSocket infrastructure)
