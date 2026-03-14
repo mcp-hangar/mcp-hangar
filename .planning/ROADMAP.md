@@ -188,7 +188,14 @@ Plans:
   3. Group list shows strategy, member counts, circuit breaker; detail view has member list and rebalance action
   4. Discovery page shows source health, pending providers with approve/reject, quarantined providers
   5. Configuration page shows current config (read-only) and hot reload trigger
-**Plans**: TBD
+**Plans**: 4 plans
+
+Plans:
+
+- [ ] 14-01-PLAN.md -- Shared UI primitives: ProviderStateBadge, HealthBadge, CircuitBreakerBadge, MetricCard, ActionButton, EmptyState, LoadingSpinner (UI-14)
+- [ ] 14-02-PLAN.md -- Dashboard page: metric cards, state distribution chart, live event feed, alert summary (UI-05)
+- [ ] 14-03-PLAN.md -- Provider list (filtered table + start/stop) + Provider detail (health, tools, circuit breaker) (UI-06)
+- [ ] 14-04-PLAN.md -- Groups list + detail + rebalance, Discovery sources + pending + quarantined, Config viewer + hot reload (UI-07, UI-08, UI-13)
 
 ### Phase 15: Observability & Operations
 
