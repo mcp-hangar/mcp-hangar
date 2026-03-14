@@ -62,3 +62,12 @@ class GetSystemMetricsQuery(Query):
     """Query to get overall system metrics."""
 
     pass
+
+
+@dataclass(frozen=True)
+class GetToolInvocationHistoryQuery(Query):
+    """Query to get tool invocation history for a provider."""
+
+    provider_id: str
+    limit: int = 100
+    from_position: int = 0

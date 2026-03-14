@@ -12,6 +12,7 @@ from ...application.queries.queries import (
     GetProviderHealthQuery,
     GetProviderQuery,
     GetProviderToolsQuery,
+    GetToolInvocationHistoryQuery,
     ListProvidersQuery,
 )
 from .middleware import dispatch_command, dispatch_query
@@ -112,6 +113,37 @@ async def get_provider_health(request: Request) -> HangarJSONResponse:
     return HangarJSONResponse(result.to_dict())
 
 
+async def get_provider_tool_history(request: Request) -> HangarJSONResponse:
+    """Get tool invocation history for a provider.
+
+    Path params:
+        provider_id: Provider identifier.
+    Query params:
+        limit: Max records to return (default 100, max 500).
+        from_position: Event store version to start from (default 0).
+
+    Returns:
+        JSON with {"provider_id": ..., "history": [...], "total": int}.
+    """
+    provider_id = request.path_params["provider_id"]
+    try:
+        limit = int(request.query_params.get("limit", 100))
+    except ValueError:
+        limit = 100
+    try:
+        from_position = int(request.query_params.get("from_position", 0))
+    except ValueError:
+        from_position = 0
+    result = await dispatch_query(
+        GetToolInvocationHistoryQuery(
+            provider_id=provider_id,
+            limit=limit,
+            from_position=from_position,
+        )
+    )
+    return HangarJSONResponse(result)
+
+
 # Route definitions for mounting in the API router
 provider_routes = [
     Route("/", list_providers, methods=["GET"]),
@@ -120,4 +152,5 @@ provider_routes = [
     Route("/{provider_id:str}/stop", stop_provider, methods=["POST"]),
     Route("/{provider_id:str}/tools", get_provider_tools, methods=["GET"]),
     Route("/{provider_id:str}/health", get_provider_health, methods=["GET"]),
+    Route("/{provider_id:str}/tools/history", get_provider_tool_history, methods=["GET"]),
 ]

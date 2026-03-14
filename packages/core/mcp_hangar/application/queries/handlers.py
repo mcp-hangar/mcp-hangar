@@ -8,11 +8,13 @@ from ...domain.repository import IProviderRepository
 from ...infrastructure.query_bus import QueryBus
 from ...logging_config import get_logger
 from ..read_models import HealthInfo, ProviderDetails, ProviderSummary, SystemMetrics, ToolInfo
+from ...infrastructure.event_store import get_event_store
 from .queries import (
     GetProviderHealthQuery,
     GetProviderQuery,
     GetProviderToolsQuery,
     GetSystemMetricsQuery,
+    GetToolInvocationHistoryQuery,
     ListProvidersQuery,
     QueryHandler,
 )
@@ -222,6 +224,42 @@ class GetSystemMetricsHandler(BaseQueryHandler):
         )
 
 
+class GetToolInvocationHistoryHandler(QueryHandler):
+    """Handler for GetToolInvocationHistoryQuery."""
+
+    def handle(self, query: GetToolInvocationHistoryQuery) -> dict:
+        """Get tool invocation history for a provider from the event store.
+
+        Reads all streams matching the provider's stream ID and filters for
+        ToolInvocationCompleted and ToolInvocationFailed events.
+
+        Returns:
+            Dict with provider_id, history list, and total count.
+        """
+        event_store = get_event_store()
+        target_stream_id = f"provider-{query.provider_id}"
+        tool_event_types = {"ToolInvocationCompleted", "ToolInvocationFailed"}
+        limit = min(max(1, query.limit), 500)
+
+        history = []
+        if event_store.stream_exists(target_stream_id):
+            events = event_store.load(target_stream_id)
+            for stored_event in events:
+                if stored_event.event_type not in tool_event_types:
+                    continue
+                if stored_event.version <= query.from_position:
+                    continue
+                history.append(stored_event.to_dict())
+                if len(history) >= limit:
+                    break
+
+        return {
+            "provider_id": query.provider_id,
+            "history": history,
+            "total": len(history),
+        }
+
+
 def register_all_handlers(query_bus: QueryBus, repository: IProviderRepository) -> None:
     """
     Register all query handlers with the query bus.
@@ -235,5 +273,6 @@ def register_all_handlers(query_bus: QueryBus, repository: IProviderRepository) 
     query_bus.register(GetProviderToolsQuery, GetProviderToolsHandler(repository))
     query_bus.register(GetProviderHealthQuery, GetProviderHealthHandler(repository))
     query_bus.register(GetSystemMetricsQuery, GetSystemMetricsHandler(repository))
+    query_bus.register(GetToolInvocationHistoryQuery, GetToolInvocationHistoryHandler())
 
     logger.info("query_handlers_registered")
