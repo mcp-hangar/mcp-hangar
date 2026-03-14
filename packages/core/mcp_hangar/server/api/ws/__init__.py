@@ -1,5 +1,16 @@
 """WebSocket endpoint package.
 
-ws_routes is populated by __init__.py after endpoint modules are imported.
-Plan 01 creates infrastructure; Plan 02 adds endpoints and exports ws_routes.
+Exports ws_routes for mounting in the API router.
 """
+
+from starlette.routing import WebSocketRoute
+
+from .events import ws_events_endpoint
+from .state import ws_state_endpoint
+
+ws_routes = [
+    WebSocketRoute("/events", ws_events_endpoint),
+    WebSocketRoute("/state", ws_state_endpoint),
+]
+
+__all__ = ["ws_routes"]

@@ -30,6 +30,7 @@ def create_api_router() -> Starlette:
     from .observability import observability_routes
     from .providers import provider_routes
     from .system import system_routes
+    from .ws import ws_routes
 
     routes = [
         Mount("/providers", routes=provider_routes),
@@ -39,6 +40,7 @@ def create_api_router() -> Starlette:
         Mount("/system", routes=system_routes),
         Mount("/auth", routes=auth_routes),
         Mount("/observability", routes=observability_routes),
+        Mount("/ws", routes=ws_routes),
     ]
 
     exception_handlers = {

@@ -76,13 +76,15 @@ def create_combined_asgi_app(aux_app: Starlette, mcp_app: Any, api_app: Any = No
 
     async def combined_app(scope, receive, send):
         """Combined ASGI app that routes to metrics/health, REST API, or MCP."""
-        if scope["type"] == "http":
+        scope_type = scope["type"]
+        if scope_type in ("http", "websocket"):
             path = scope.get("path", "")
-            if path in ("/health", "/ready", "/metrics"):
+            # Health/metrics only available on HTTP (not WebSocket).
+            if scope_type == "http" and path in ("/health", "/ready", "/metrics"):
                 await aux_app(scope, receive, send)
                 return
             if api_app is not None and (path == "/api" or path.startswith("/api/")):
-                # Strip /api prefix before forwarding to api_app
+                # Strip /api prefix before forwarding to api_app.
                 scope = dict(scope)
                 scope["path"] = path[4:] or "/"
                 scope["root_path"] = scope.get("root_path", "") + "/api"
@@ -123,19 +125,21 @@ def create_auth_combined_app(
 
     async def auth_combined_app(scope, receive, send):
         """Combined ASGI app with authentication for MCP endpoints."""
-        if scope["type"] != "http":
-            # Non-HTTP (e.g., lifespan) - pass through
+        scope_type = scope["type"]
+
+        # Lifespan events go directly to mcp_app (no routing needed).
+        if scope_type == "lifespan":
             await mcp_app(scope, receive, send)
             return
 
         path = scope.get("path", "")
 
-        # Skip auth for health/metrics endpoints
-        if path in skip_paths:
+        # Skip auth for health/metrics endpoints (HTTP only).
+        if scope_type == "http" and path in skip_paths:
             await aux_app(scope, receive, send)
             return
 
-        # Route /api/ paths to REST API (no auth required for API endpoints)
+        # Route /api/ paths to REST API for both HTTP and WebSocket (no auth on API).
         if api_app is not None and (path == "/api" or path.startswith("/api/")):
             api_scope = dict(scope)
             api_scope["path"] = path[4:] or "/"
@@ -143,23 +147,28 @@ def create_auth_combined_app(
             await api_app(api_scope, receive, send)
             return
 
-        # For MCP endpoints, apply authentication
-        # Build headers dict from scope
+        # For non-API HTTP scopes, apply authentication before forwarding to mcp_app.
+        if scope_type != "http":
+            # WebSocket on non-/api/ paths goes to mcp_app without auth (MCP protocol).
+            await mcp_app(scope, receive, send)
+            return
+
+        # Build headers dict from scope (HTTP only from here).
         headers = {}
         for key, value in scope.get("headers", []):
             headers[key.decode("latin-1").lower()] = value.decode("latin-1")
 
-        # Get client IP
+        # Get client IP.
         client = scope.get("client")
         source_ip = client[0] if client else "unknown"
 
-        # Trust X-Forwarded-For only from trusted proxies
+        # Trust X-Forwarded-For only from trusted proxies.
         if source_ip in trusted_proxies:
             forwarded_for = headers.get("x-forwarded-for")
             if forwarded_for:
                 source_ip = forwarded_for.split(",")[0].strip()
 
-        # Create auth request
+        # Create auth request.
         auth_request = AuthRequest(
             headers=headers,
             source_ip=source_ip,
@@ -168,13 +177,8 @@ def create_auth_combined_app(
         )
 
         try:
-            # Authenticate
             auth_context = auth_components.authn_middleware.authenticate(auth_request)
-
-            # Store auth context in scope for downstream handlers
             scope["auth"] = auth_context
-
-            # Pass to MCP app
             await mcp_app(scope, receive, send)
 
         except AuthenticationError as e:
