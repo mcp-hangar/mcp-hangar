@@ -7,7 +7,7 @@ from ...application.commands.auth_handlers import register_auth_command_handlers
 from ...application.queries import register_all_handlers as register_query_handlers
 from ...application.queries.auth_handlers import register_auth_query_handlers
 from ...application.sagas import GroupRebalanceSaga
-from ...application.sagas.provider_failover_saga import ProviderFailoverSaga
+from ...application.sagas.provider_failover_saga import ProviderFailoverEventSaga
 from ...application.sagas.provider_recovery_saga import ProviderRecoverySaga
 from ...domain.model.circuit_breaker import CircuitBreaker
 from ...infrastructure.persistence.saga_state_store import NullSagaStateStore, SagaStateStore
@@ -94,7 +94,7 @@ def _create_saga_state_store(
 
 def _restore_saga_state(
     store: SagaStateStore | NullSagaStateStore,
-    saga: "ProviderRecoverySaga | ProviderFailoverSaga",
+    saga: "ProviderRecoverySaga | ProviderFailoverEventSaga",
 ) -> None:
     """Restore saga state from persistent store.
 
@@ -220,8 +220,8 @@ def init_saga(full_config: dict[str, Any] | None = None) -> SagaStateStore | Nul
     _restore_saga_state(saga_state_store, recovery_saga)
     saga_manager.register_event_saga(recovery_saga)
 
-    # 3. ProviderFailoverSaga
-    failover_saga = ProviderFailoverSaga()
+    # 3. ProviderFailoverEventSaga
+    failover_saga = ProviderFailoverEventSaga()
     _restore_saga_state(saga_state_store, failover_saga)
     saga_manager.register_event_saga(failover_saga)
 

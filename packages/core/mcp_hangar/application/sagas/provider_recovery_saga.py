@@ -5,7 +5,7 @@ import time
 from typing import Any
 
 from ...domain.events import DomainEvent, HealthCheckFailed, ProviderDegraded, ProviderStarted, ProviderStopped
-from ...infrastructure.saga_manager import EventTriggeredSaga
+from ...infrastructure.saga_manager import EventTriggeredSaga, get_saga_manager
 from ...logging_config import get_logger
 from ..commands import Command, StartProviderCommand, StopProviderCommand
 
@@ -102,10 +102,12 @@ class ProviderRecoverySaga(EventTriggeredSaga):
             f"{state['retries']}/{self._max_retries} in {backoff:.1f}s"
         )
 
-        # Note: In a real implementation, you would use a scheduler
-        # to delay the command. For now, we return it immediately.
-        # The provider's internal backoff will handle timing.
-        return [StartProviderCommand(provider_id=provider_id)]
+        # Schedule the restart command to fire after the computed backoff delay.
+        get_saga_manager().schedule_command(
+            StartProviderCommand(provider_id=provider_id),
+            delay_s=backoff,
+        )
+        return []
 
     def _handle_started(self, event: ProviderStarted) -> list[Command]:
         """

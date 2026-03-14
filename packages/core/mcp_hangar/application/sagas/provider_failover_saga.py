@@ -1,11 +1,36 @@
-"""Provider Failover Saga - failover to backup providers on failure."""
+"""Provider Failover Saga - failover to backup providers on failure.
 
-from dataclasses import dataclass
+Architecture
+------------
+There are two classes here:
+
+``ProviderFailoverSaga``
+    A step-based :class:`~mcp_hangar.infrastructure.saga_manager.Saga` subclass.
+    Each instance handles one concrete failover (primary -> backup).  It defines
+    three named steps with compensation commands so that SagaManager can roll back
+    partial work automatically on failure.
+
+    Steps:
+        1. ``start_backup``  - StartProviderCommand(backup_id)
+                               compensation: StopProviderCommand(backup_id, reason="compensation")
+        2. ``await_primary`` - no-op marker step (primary restart is event-driven)
+                               compensation: no-op
+        3. ``failback``      - StopProviderCommand(backup_id, reason="failback")
+                               compensation: StartProviderCommand(backup_id)
+
+``ProviderFailoverEventSaga``
+    An :class:`~mcp_hangar.infrastructure.saga_manager.EventTriggeredSaga` that
+    listens for domain events and starts ``ProviderFailoverSaga`` instances via the
+    SagaManager when a configured primary degrades.  This class owns the failover
+    configuration and tracks which pairs are currently active.
+"""
+
 import time
+from dataclasses import dataclass
 from typing import Any
 
 from ...domain.events import DomainEvent, ProviderDegraded, ProviderStarted, ProviderStopped
-from ...infrastructure.saga_manager import EventTriggeredSaga
+from ...infrastructure.saga_manager import EventTriggeredSaga, Saga, SagaContext, get_saga_manager
 from ...logging_config import get_logger
 from ..commands import Command, StartProviderCommand, StopProviderCommand
 
@@ -33,23 +58,73 @@ class FailoverState:
     is_active: bool = True
 
 
-class ProviderFailoverSaga(EventTriggeredSaga):
+class ProviderFailoverSaga(Saga):
     """
-    Saga that orchestrates failover to backup providers.
+    Step-based saga that orchestrates failover to a single backup provider.
 
-    Failover Strategy:
-    1. Configure primary-backup pairs
-    2. When primary is degraded/stopped, start the backup
-    3. Optionally, fail back to primary when it recovers
-    4. Track active failovers to prevent cycles
+    This saga is started on demand by ``ProviderFailoverEventSaga`` whenever a
+    configured primary provider becomes degraded.  It progresses through three
+    named steps; if any step fails SagaManager runs compensations in reverse order.
 
-    Configuration:
-    - Failover pairs: Define which providers are backups for others
-    - Auto-failback: Whether to automatically switch back to primary
-    - Failback delay: How long to wait before failing back
+    Steps:
+        1. ``start_backup``  - starts the backup provider.
+        2. ``await_primary`` - marker step; no command (primary restart is async).
+        3. ``failback``      - stops the backup once the primary is healthy again.
 
-    Usage:
-        saga = ProviderFailoverSaga()
+    Context data expected in ``initial_data``:
+        - ``primary_id`` (str): ID of the degraded primary provider.
+        - ``backup_id``  (str): ID of the backup provider to start.
+        - ``failback_delay_s`` (float, optional): Seconds to wait before failback.
+    """
+
+    @property
+    def saga_type(self) -> str:
+        return "provider_failover"
+
+    def configure(self, context: SagaContext) -> None:
+        """
+        Configure saga steps from context data.
+
+        The context must contain ``primary_id`` and ``backup_id``.
+        """
+        primary_id: str = context.data["primary_id"]
+        backup_id: str = context.data["backup_id"]
+
+        self.add_step(
+            name="start_backup",
+            command=StartProviderCommand(provider_id=backup_id),
+            compensation_command=StopProviderCommand(provider_id=backup_id, reason="compensation"),
+        )
+        self.add_step(
+            name="await_primary",
+            command=None,  # no-op: primary recovery is handled by ProviderRecoverySaga
+            compensation_command=None,
+        )
+        self.add_step(
+            name="failback",
+            command=StopProviderCommand(provider_id=backup_id, reason="failback"),
+            compensation_command=StartProviderCommand(provider_id=backup_id),
+        )
+
+        logger.info(
+            "failover_saga_configured",
+            primary_id=primary_id,
+            backup_id=backup_id,
+            steps=len(self._steps),
+        )
+
+
+class ProviderFailoverEventSaga(EventTriggeredSaga):
+    """
+    Event-driven coordinator that starts ``ProviderFailoverSaga`` instances.
+
+    Listens for domain events and starts a new step-based ``ProviderFailoverSaga``
+    whenever a configured primary degrades.  Also handles auto-failback using
+    ``SagaManager.schedule_command`` so the delay is properly enforced.
+
+    Usage::
+
+        saga = ProviderFailoverEventSaga()
         saga.configure_failover("primary-provider", "backup-provider")
         saga_manager.register_event_saga(saga)
     """
@@ -66,12 +141,12 @@ class ProviderFailoverSaga(EventTriggeredSaga):
         # Providers currently acting as backups (to avoid cascading failovers)
         self._active_backups: set[str] = set()
 
-        # Providers pending failback: primary_id -> scheduled_time
-        self._pending_failbacks: dict[str, float] = {}
+        # Pending failback timer IDs: primary_id -> timer_id
+        self._pending_failback_timers: dict[str, str] = {}
 
     @property
     def saga_type(self) -> str:
-        return "provider_failover"
+        return "provider_failover_event"
 
     @property
     def handled_events(self) -> list[type[DomainEvent]]:
@@ -88,10 +163,10 @@ class ProviderFailoverSaga(EventTriggeredSaga):
         Configure a failover pair.
 
         Args:
-            primary_id: Primary provider ID
-            backup_id: Backup provider ID
-            auto_failback: Whether to automatically fail back when primary recovers
-            failback_delay_s: Delay before failing back
+            primary_id: Primary provider ID.
+            backup_id: Backup provider ID.
+            auto_failback: Whether to automatically fail back when primary recovers.
+            failback_delay_s: Delay in seconds before failing back.
         """
         self._failover_configs[primary_id] = FailoverConfig(
             primary_id=primary_id,
@@ -99,7 +174,7 @@ class ProviderFailoverSaga(EventTriggeredSaga):
             auto_failback=auto_failback,
             failback_delay_s=failback_delay_s,
         )
-        logger.info(f"Configured failover: {primary_id} -> {backup_id}")
+        logger.info("failover_configured", primary_id=primary_id, backup_id=backup_id)
 
     def remove_failover(self, primary_id: str) -> bool:
         """Remove a failover configuration."""
@@ -119,31 +194,22 @@ class ProviderFailoverSaga(EventTriggeredSaga):
         return []
 
     def _handle_degraded(self, event: ProviderDegraded) -> list[Command]:
-        """
-        Handle provider degraded event.
-
-        Initiates failover if this is a primary provider with a configured backup.
-        """
+        """Initiate failover when a primary degrades."""
         provider_id = event.provider_id
-        commands = []
 
-        # Check if this provider is a backup currently serving
         if provider_id in self._active_backups:
-            logger.warning(f"Backup provider {provider_id} degraded - no further failover")
+            logger.warning("backup_provider_degraded", provider_id=provider_id)
             return []
 
-        # Check if this provider has a backup configured
         config = self._failover_configs.get(provider_id)
         if not config:
             return []
 
-        # Check if failover is already active
         if provider_id in self._active_failovers:
-            logger.debug(f"Failover already active for {provider_id}")
+            logger.debug("failover_already_active", primary_id=provider_id)
             return []
 
-        # Initiate failover
-        logger.info(f"Initiating failover: {provider_id} -> {config.backup_id}")
+        logger.info("initiating_failover", primary_id=provider_id, backup_id=config.backup_id)
 
         self._active_failovers[provider_id] = FailoverState(
             primary_id=provider_id,
@@ -152,88 +218,72 @@ class ProviderFailoverSaga(EventTriggeredSaga):
         )
         self._active_backups.add(config.backup_id)
 
-        # Start backup provider
-        commands.append(StartProviderCommand(provider_id=config.backup_id))
+        # Start the step-based ProviderFailoverSaga for this pair.
+        # Commands are dispatched by SagaManager; we return empty here.
+        saga_manager = get_saga_manager()
+        failover_saga = ProviderFailoverSaga()
+        saga_manager.start_saga(
+            failover_saga,
+            initial_data={
+                "primary_id": provider_id,
+                "backup_id": config.backup_id,
+                "failback_delay_s": config.failback_delay_s,
+            },
+        )
 
-        return commands
+        return []
 
     def _handle_started(self, event: ProviderStarted) -> list[Command]:
-        """
-        Handle provider started event.
-
-        - If it's a backup being started, mark failover as complete
-        - If it's a primary recovering, consider failback
-        """
+        """Mark backup as started; schedule failback if primary recovers."""
         provider_id = event.provider_id
-        commands = []
 
-        # Check if this is a backup being started for failover
+        # Mark backup start time
         for primary_id, state in self._active_failovers.items():
             if state.backup_id == provider_id and state.backup_started_at is None:
                 state.backup_started_at = time.time()
-                logger.info(f"Failover complete: {primary_id} -> {provider_id}")
+                logger.info("failover_backup_started", primary_id=primary_id, backup_id=provider_id)
 
-        # Check if this is a primary recovering
+        # Primary recovered while failover is active -> schedule failback
         if provider_id in self._active_failovers:
             state = self._active_failovers[provider_id]
             config = self._failover_configs.get(provider_id)
 
             if config and config.auto_failback:
-                # Schedule failback
-                failback_time = time.time() + config.failback_delay_s
-                self._pending_failbacks[provider_id] = failback_time
+                logger.info(
+                    "primary_recovered_scheduling_failback",
+                    primary_id=provider_id,
+                    delay_s=config.failback_delay_s,
+                )
+                stop_cmd = StopProviderCommand(provider_id=state.backup_id, reason="failback")
+                saga_manager = get_saga_manager()
+                timer_id = saga_manager.schedule_command(stop_cmd, delay_s=config.failback_delay_s)
+                self._pending_failback_timers[provider_id] = timer_id
 
-                logger.info(f"Primary {provider_id} recovered, scheduling failback in {config.failback_delay_s}s")
+                # Clean up failover tracking
+                del self._active_failovers[provider_id]
+                self._active_backups.discard(state.backup_id)
 
-                # In a real implementation, you'd use a scheduler
-                # For now, immediately trigger failback commands
-                commands.extend(self._execute_failback(provider_id))
-
-        return commands
+        return []
 
     def _handle_stopped(self, event: ProviderStopped) -> list[Command]:
-        """
-        Handle provider stopped event.
-
-        Clean up failover state if a backup is stopped.
-        """
+        """Clean up when a backup is stopped."""
         provider_id = event.provider_id
-        commands = []
 
-        # If a backup is stopped, clean up
         if provider_id in self._active_backups:
             self._active_backups.discard(provider_id)
 
-            # Find and clean up the failover state
             for primary_id, state in list(self._active_failovers.items()):
                 if state.backup_id == provider_id:
                     del self._active_failovers[primary_id]
-                    self._pending_failbacks.pop(primary_id, None)
-                    logger.info(f"Failover {primary_id} -> {provider_id} ended")
+                    timer_id = self._pending_failback_timers.pop(primary_id, None)
+                    if timer_id is not None:
+                        try:
+                            get_saga_manager().cancel_scheduled_command(timer_id)
+                        except Exception as e:  # noqa: BLE001 -- fault-barrier: cancel failure must not block event handling
+                            logger.warning("failback_timer_cancel_failed", error=str(e))
+                    logger.info("failover_ended", primary_id=primary_id, backup_id=provider_id)
 
-        return commands
-
-    def _execute_failback(self, primary_id: str) -> list[Command]:
-        """Execute failback to primary provider."""
-        commands = []
-
-        state = self._active_failovers.get(primary_id)
-        config = self._failover_configs.get(primary_id)
-
-        if not state or not config:
-            return []
-
-        logger.info(f"Executing failback: {state.backup_id} -> {primary_id}")
-
-        # Stop the backup (primary is already running)
-        commands.append(StopProviderCommand(provider_id=state.backup_id, reason="failback"))
-
-        # Clean up failover state
-        del self._active_failovers[primary_id]
-        self._active_backups.discard(state.backup_id)
-        self._pending_failbacks.pop(primary_id, None)
-
-        return commands
+        return []
 
     def get_active_failovers(self) -> dict[str, FailoverState]:
         """Get all active failovers."""
@@ -253,7 +303,15 @@ class ProviderFailoverSaga(EventTriggeredSaga):
 
     def force_failback(self, primary_id: str) -> list[Command]:
         """Manually force a failback to primary."""
-        return self._execute_failback(primary_id)
+        state = self._active_failovers.get(primary_id)
+        if not state:
+            return []
+        cmd: Command = StopProviderCommand(provider_id=state.backup_id, reason="failback")
+        commands: list[Command] = [cmd]
+        del self._active_failovers[primary_id]
+        self._active_backups.discard(state.backup_id)
+        self._pending_failback_timers.pop(primary_id, None)
+        return commands
 
     def cancel_failover(self, primary_id: str) -> bool:
         """Cancel an active failover (keeps backup running)."""
@@ -261,7 +319,12 @@ class ProviderFailoverSaga(EventTriggeredSaga):
             state = self._active_failovers[primary_id]
             self._active_backups.discard(state.backup_id)
             del self._active_failovers[primary_id]
-            self._pending_failbacks.pop(primary_id, None)
+            timer_id = self._pending_failback_timers.pop(primary_id, None)
+            if timer_id is not None:
+                try:
+                    get_saga_manager().cancel_scheduled_command(timer_id)
+                except Exception as e:  # noqa: BLE001 -- fault-barrier: cancel failure must not block caller
+                    logger.warning("failback_timer_cancel_failed", error=str(e))
             return True
         return False
 
@@ -288,7 +351,7 @@ class ProviderFailoverSaga(EventTriggeredSaga):
                 for k, v in self._active_failovers.items()
             },
             "active_backups": list(self._active_backups),
-            "pending_failbacks": dict(self._pending_failbacks),
+            "pending_failback_timers": dict(self._pending_failback_timers),
         }
 
     def from_dict(self, data: dict[str, Any]) -> None:
@@ -296,4 +359,5 @@ class ProviderFailoverSaga(EventTriggeredSaga):
         self._failover_configs = {k: FailoverConfig(**v) for k, v in data.get("failover_configs", {}).items()}
         self._active_failovers = {k: FailoverState(**v) for k, v in data.get("active_failovers", {}).items()}
         self._active_backups = set(data.get("active_backups", []))
-        self._pending_failbacks = dict(data.get("pending_failbacks", {}))
+        # Timers cannot be restored across process restarts; start fresh.
+        self._pending_failback_timers = {}

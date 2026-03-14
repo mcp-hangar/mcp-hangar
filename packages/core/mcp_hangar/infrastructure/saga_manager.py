@@ -4,6 +4,7 @@ Sagas coordinate long-running business processes that span multiple aggregates
 or services. They react to domain events and emit commands.
 """
 
+import threading
 import time
 import uuid
 from abc import ABC, abstractmethod
@@ -19,7 +20,7 @@ from .lock_hierarchy import LockLevel, TrackedLock
 
 if TYPE_CHECKING:
     from ..application.commands import Command
-    from .persistence.saga_state_store import SagaStateStore
+    from .persistence.saga_state_store import NullSagaStateStore, SagaStateStore
 
 logger = get_logger(__name__)
 
@@ -208,11 +209,11 @@ class SagaManager:
         self,
         command_bus: CommandBus | None = None,
         event_bus: EventBus | None = None,
-        saga_state_store: "SagaStateStore | None" = None,
+        saga_state_store: "SagaStateStore | NullSagaStateStore | None" = None,
     ):
         self._command_bus = command_bus or get_command_bus()
         self._event_bus = event_bus or get_event_bus()
-        self._saga_state_store = saga_state_store
+        self._saga_state_store: SagaStateStore | NullSagaStateStore | None = saga_state_store
 
         # Active sagas being orchestrated
         self._active_sagas: dict[str, Saga] = {}
@@ -223,6 +224,9 @@ class SagaManager:
         # Completed saga history (for debugging)
         self._saga_history: list[SagaContext] = []
         self._max_history = 100
+
+        # Pending scheduled commands: timer_id -> threading.Timer
+        self._pending_timers: dict[str, threading.Timer] = {}
 
         # Lock hierarchy level: SAGA_MANAGER (40)
         # Safe to acquire after: PROVIDER, EVENT_BUS, EVENT_STORE
@@ -248,6 +252,93 @@ class SagaManager:
             else:
                 found = False
         return found
+
+    def schedule_command(self, command: "Command", delay_s: float) -> str:
+        """
+        Schedule a command to be sent after a delay.
+
+        The command is dispatched via the command bus after ``delay_s`` seconds.
+        The returned timer ID can be used to cancel the scheduled command before
+        it fires.
+
+        Thread-safety: the timer registry is protected by ``self._lock``.  The
+        command is dispatched **outside** the lock so that command handlers can
+        themselves call ``schedule_command`` without deadlocking.
+
+        Args:
+            command: The command to dispatch after the delay.
+            delay_s: Delay in seconds before the command is sent.
+
+        Returns:
+            A unique timer ID that can be passed to ``cancel_scheduled_command``.
+        """
+        timer_id = str(uuid.uuid4())
+
+        def _fire() -> None:
+            with self._lock:
+                self._pending_timers.pop(timer_id, None)
+            try:
+                self._command_bus.send(command)
+                logger.debug(
+                    "scheduled_command_dispatched",
+                    timer_id=timer_id,
+                    command=type(command).__name__,
+                )
+            except Exception as e:  # noqa: BLE001 -- fault-barrier: scheduled command failure must not crash timer thread
+                logger.error(
+                    "scheduled_command_failed",
+                    timer_id=timer_id,
+                    command=type(command).__name__,
+                    error=str(e),
+                )
+
+        timer = threading.Timer(delay_s, _fire)
+        timer.daemon = True
+
+        with self._lock:
+            self._pending_timers[timer_id] = timer
+
+        timer.start()
+        logger.debug(
+            "command_scheduled",
+            timer_id=timer_id,
+            command=type(command).__name__,
+            delay_s=delay_s,
+        )
+        return timer_id
+
+    def cancel_scheduled_command(self, timer_id: str) -> bool:
+        """
+        Cancel a previously scheduled command.
+
+        Args:
+            timer_id: The timer ID returned by ``schedule_command``.
+
+        Returns:
+            True if the timer was found and cancelled, False otherwise.
+        """
+        with self._lock:
+            timer = self._pending_timers.pop(timer_id, None)
+        if timer is not None:
+            timer.cancel()
+            logger.debug("scheduled_command_cancelled", timer_id=timer_id)
+            return True
+        return False
+
+    def cancel_all_scheduled_commands(self) -> int:
+        """
+        Cancel all pending scheduled commands.
+
+        Returns:
+            The number of timers cancelled.
+        """
+        with self._lock:
+            timers = list(self._pending_timers.values())
+            self._pending_timers.clear()
+        for timer in timers:
+            timer.cancel()
+        logger.debug("all_scheduled_commands_cancelled", count=len(timers))
+        return len(timers)
 
     def start_saga(self, saga: Saga, initial_data: dict[str, Any] | None = None) -> SagaContext:
         """

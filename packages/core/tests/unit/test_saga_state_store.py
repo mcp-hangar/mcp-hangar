@@ -24,7 +24,7 @@ from mcp_hangar.application.sagas.group_rebalance_saga import GroupRebalanceSaga
 from mcp_hangar.application.sagas.provider_failover_saga import (
     FailoverConfig,
     FailoverState,
-    ProviderFailoverSaga,
+    ProviderFailoverEventSaga,
 )
 from mcp_hangar.application.sagas.provider_recovery_saga import ProviderRecoverySaga
 
@@ -168,11 +168,11 @@ class TestProviderRecoverySagaSerialization:
 
 
 class TestProviderFailoverSagaSerialization:
-    """Test ProviderFailoverSaga.to_dict() / from_dict() round-trip."""
+    """Test ProviderFailoverEventSaga.to_dict() / from_dict() round-trip."""
 
     def test_to_dict_serializes_failover_state(self):
         """Test that to_dict() serializes failover_configs and active_failovers."""
-        saga = ProviderFailoverSaga()
+        saga = ProviderFailoverEventSaga()
         saga._failover_configs["p1"] = FailoverConfig(
             primary_id="p1", backup_id="p1-backup", auto_failback=True, failback_delay_s=30.0
         )
@@ -180,7 +180,7 @@ class TestProviderFailoverSagaSerialization:
             primary_id="p1", backup_id="p1-backup", failed_at=1000.0, backup_started_at=1001.0, is_active=True
         )
         saga._active_backups = {"p1-backup"}
-        saga._pending_failbacks = {"p1": 1030.0}
+        saga._pending_failback_timers = {"p1": "timer-id-abc"}
 
         result = saga.to_dict()
 
@@ -190,12 +190,11 @@ class TestProviderFailoverSagaSerialization:
         assert result["active_failovers"]["p1"]["failed_at"] == 1000.0
         assert "active_backups" in result
         assert "p1-backup" in result["active_backups"]
-        assert "pending_failbacks" in result
-        assert result["pending_failbacks"]["p1"] == 1030.0
+        assert "pending_failback_timers" in result
 
     def test_from_dict_restores_failover_state(self):
         """Test that from_dict() restores all failover state."""
-        saga = ProviderFailoverSaga()
+        saga = ProviderFailoverEventSaga()
         data = {
             "failover_configs": {
                 "p1": {
@@ -215,7 +214,7 @@ class TestProviderFailoverSagaSerialization:
                 },
             },
             "active_backups": ["p1-backup"],
-            "pending_failbacks": {"p1": 2030.0},
+            "pending_failback_timers": {},
         }
 
         saga.from_dict(data)
@@ -225,11 +224,12 @@ class TestProviderFailoverSagaSerialization:
         assert saga._active_failovers["p1"].failed_at == 2000.0
         assert saga._active_failovers["p1"].backup_started_at is None
         assert "p1-backup" in saga._active_backups
-        assert saga._pending_failbacks["p1"] == 2030.0
+        # Timers are not restored across restarts
+        assert saga._pending_failback_timers == {}
 
     def test_round_trip_serialization(self):
         """Test full round-trip: to_dict -> json -> from_dict preserves state."""
-        saga = ProviderFailoverSaga()
+        saga = ProviderFailoverEventSaga()
         saga._failover_configs["p1"] = FailoverConfig(
             primary_id="p1", backup_id="p1-backup", auto_failback=True, failback_delay_s=30.0
         )
@@ -237,20 +237,20 @@ class TestProviderFailoverSagaSerialization:
             primary_id="p1", backup_id="p1-backup", failed_at=1000.0, backup_started_at=1001.0, is_active=True
         )
         saga._active_backups = {"p1-backup"}
-        saga._pending_failbacks = {"p1": 1030.0}
+        saga._pending_failback_timers = {}
 
         serialized = saga.to_dict()
         # Simulate JSON round-trip (what SagaStateStore does)
         json_str = json.dumps(serialized)
         deserialized = json.loads(json_str)
 
-        restored = ProviderFailoverSaga()
+        restored = ProviderFailoverEventSaga()
         restored.from_dict(deserialized)
 
         assert restored._failover_configs["p1"].primary_id == "p1"
         assert restored._active_failovers["p1"].failed_at == 1000.0
         assert "p1-backup" in restored._active_backups
-        assert restored._pending_failbacks["p1"] == 1030.0
+        assert restored._pending_failback_timers == {}
 
 
 class TestGroupRebalanceSagaSerialization:
@@ -344,7 +344,7 @@ class TestBootstrapSagaWiring:
         assert saga._retry_state["p1"]["retries"] == 3
 
     def test_restore_saga_state_loads_failover_saga(self):
-        """init_saga helper restores ProviderFailoverSaga state from store."""
+        """init_saga helper restores ProviderFailoverEventSaga state from store."""
         from mcp_hangar.server.bootstrap.cqrs import _restore_saga_state
 
         factory = SQLiteConnectionFactory(SQLiteConfig(path=":memory:"))
@@ -357,11 +357,11 @@ class TestBootstrapSagaWiring:
             },
             "active_failovers": {},
             "active_backups": [],
-            "pending_failbacks": {},
+            "pending_failback_timers": {},
         }
-        store.checkpoint("provider_failover", "saga-id", state_data, 10)
+        store.checkpoint("provider_failover_event", "saga-id", state_data, 10)
 
-        saga = ProviderFailoverSaga()
+        saga = ProviderFailoverEventSaga()
         _restore_saga_state(store, saga)
 
         assert saga._failover_configs["p1"].primary_id == "p1"
