@@ -149,7 +149,12 @@ Plans:
   3. EventBus has an `unsubscribe_from_all()` method and WebSocket disconnections trigger cleanup
   4. A thread-safe queue bridges sync EventBus handlers to async WebSocket broadcast
   5. Connection manager tracks active connections with ping/pong heartbeat for dead connection detection
-**Plans**: TBD
+**Plans**: 2 plans
+
+Plans:
+
+- [ ] 12-01-PLAN.md -- EventBus.unsubscribe_from_all + WebSocket infrastructure (WS-03, WS-04, WS-05)
+- [ ] 12-02-PLAN.md -- WebSocket endpoints (events, state) + ASGI routing (WS-01, WS-02, WS-03, WS-05)
 
 ### Phase 13: Frontend Foundation
 
