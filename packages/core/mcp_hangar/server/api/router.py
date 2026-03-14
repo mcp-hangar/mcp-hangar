@@ -1,0 +1,42 @@
+"""REST API router factory.
+
+Creates a Starlette application with:
+- CORSMiddleware configured from environment
+- Exception handlers mapping domain errors to JSON error envelopes
+- Provider endpoint routes mounted at /providers
+"""
+
+from starlette.applications import Starlette
+from starlette.middleware.cors import CORSMiddleware
+from starlette.routing import Mount
+
+from ...domain.exceptions import MCPError
+from .middleware import error_handler, get_cors_config
+
+
+def create_api_router() -> Starlette:
+    """Create the REST API Starlette application.
+
+    Returns a fully configured Starlette app with CORS middleware,
+    error handlers, and all API endpoint routes mounted.
+
+    Returns:
+        Starlette application serving the REST API.
+    """
+    from .providers import provider_routes
+
+    routes = [
+        Mount("/providers", routes=provider_routes),
+    ]
+
+    exception_handlers = {
+        MCPError: error_handler,
+        Exception: error_handler,
+    }
+
+    app = Starlette(routes=routes, exception_handlers=exception_handlers)
+
+    cors_config = get_cors_config()
+    app.add_middleware(CORSMiddleware, **cors_config)
+
+    return app
