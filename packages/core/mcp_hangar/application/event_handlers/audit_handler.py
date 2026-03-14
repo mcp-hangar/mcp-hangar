@@ -201,3 +201,22 @@ class AuditEventHandler:
     ) -> list[AuditRecord]:
         """Query audit records."""
         return self._store.query(provider_id=provider_id, event_type=event_type, since=since, limit=limit)
+
+
+# --- Global audit handler instance ---
+
+_audit_handler: AuditEventHandler | None = None
+
+
+def get_audit_handler() -> AuditEventHandler:
+    """Get or create the global audit handler instance."""
+    global _audit_handler
+    if _audit_handler is None:
+        _audit_handler = AuditEventHandler()
+    return _audit_handler
+
+
+def reset_audit_handler() -> None:
+    """Reset the global audit handler (for testing)."""
+    global _audit_handler
+    _audit_handler = None

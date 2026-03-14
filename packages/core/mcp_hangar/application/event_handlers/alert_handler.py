@@ -190,3 +190,22 @@ class AlertEventHandler:
     def clear_alerts(self) -> None:
         """Clear sent alerts (for testing)."""
         self._alerts_sent.clear()
+
+
+# --- Global alert handler instance ---
+
+_alert_handler: AlertEventHandler | None = None
+
+
+def get_alert_handler() -> AlertEventHandler:
+    """Get or create the global alert handler instance."""
+    global _alert_handler
+    if _alert_handler is None:
+        _alert_handler = AlertEventHandler()
+    return _alert_handler
+
+
+def reset_alert_handler() -> None:
+    """Reset the global alert handler (for testing)."""
+    global _alert_handler
+    _alert_handler = None

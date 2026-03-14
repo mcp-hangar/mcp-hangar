@@ -2,7 +2,12 @@
 
 from typing import TYPE_CHECKING
 
-from ...application.event_handlers import AlertEventHandler, AuditEventHandler, LoggingEventHandler, MetricsEventHandler
+from ...application.event_handlers import (
+    LoggingEventHandler,
+    MetricsEventHandler,
+    get_alert_handler,
+    get_audit_handler,
+)
 from ...logging_config import get_logger
 
 if TYPE_CHECKING:
@@ -23,10 +28,10 @@ def init_event_handlers(runtime: "Runtime") -> None:
     metrics_handler = MetricsEventHandler()
     runtime.event_bus.subscribe_to_all(metrics_handler.handle)
 
-    alert_handler = AlertEventHandler()
+    alert_handler = get_alert_handler()
     runtime.event_bus.subscribe_to_all(alert_handler.handle)
 
-    audit_handler = AuditEventHandler()
+    audit_handler = get_audit_handler()
     runtime.event_bus.subscribe_to_all(audit_handler.handle)
 
     runtime.event_bus.subscribe_to_all(runtime.security_handler.handle)
