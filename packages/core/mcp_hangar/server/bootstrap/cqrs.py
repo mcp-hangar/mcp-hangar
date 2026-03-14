@@ -3,7 +3,9 @@
 from typing import Any, TYPE_CHECKING
 
 from ...application.commands import register_all_handlers as register_command_handlers
+from ...application.commands.auth_handlers import register_auth_command_handlers
 from ...application.queries import register_all_handlers as register_query_handlers
+from ...application.queries.auth_handlers import register_auth_query_handlers
 from ...application.sagas import GroupRebalanceSaga
 from ...application.sagas.provider_failover_saga import ProviderFailoverSaga
 from ...application.sagas.provider_recovery_saga import ProviderRecoverySaga
@@ -32,6 +34,30 @@ def init_cqrs(runtime: "Runtime", current_config_path: str | None = None) -> Non
     register_command_handlers(runtime.command_bus, PROVIDER_REPOSITORY, runtime.event_bus, current_config_path)
     register_query_handlers(runtime.query_bus, PROVIDER_REPOSITORY)
     logger.info("cqrs_handlers_registered")
+
+
+def init_auth_cqrs(runtime: "Runtime", auth_components: Any) -> None:
+    """Register auth command and query handlers if auth is enabled.
+
+    Args:
+        runtime: Runtime instance with command and query buses.
+        auth_components: AuthComponents from bootstrap_auth().
+    """
+    if auth_components is None or not getattr(auth_components, "enabled", False):
+        logger.info("auth_cqrs_skipped", reason="auth_disabled")
+        return
+
+    register_auth_command_handlers(
+        runtime.command_bus,
+        api_key_store=getattr(auth_components, "api_key_store", None),
+        role_store=getattr(auth_components, "role_store", None),
+    )
+    register_auth_query_handlers(
+        runtime.query_bus,
+        api_key_store=getattr(auth_components, "api_key_store", None),
+        role_store=getattr(auth_components, "role_store", None),
+    )
+    logger.info("auth_cqrs_handlers_registered")
 
 
 def _create_saga_state_store(

@@ -38,7 +38,7 @@ from ..auth_config import parse_auth_config
 from ..config import load_config, load_configuration
 from ..context import get_context, init_context
 from ..state import get_runtime, GROUPS, PROVIDERS
-from .cqrs import init_cqrs, init_saga, save_group_circuit_breakers
+from .cqrs import init_cqrs, init_auth_cqrs, init_saga, save_group_circuit_breakers
 from .discovery import _auto_add_volumes, _create_discovery_source, create_discovery_orchestrator
 from .event_handlers import init_event_handlers
 from .event_store import init_event_store
@@ -241,6 +241,7 @@ def bootstrap(
         config=auth_config,
         event_publisher=lambda event: runtime.event_bus.publish(event),
     )
+    init_auth_cqrs(runtime, auth_components)
 
     # Initialize retry configuration
     init_retry_config(full_config)
@@ -336,6 +337,7 @@ __all__ = [
     "HEALTH_CHECK_INTERVAL_SECONDS",
     # Initialization functions (with and without underscore prefix)
     "init_cqrs",
+    "init_auth_cqrs",
     "init_event_handlers",
     "init_event_store",
     "init_hot_loading",
