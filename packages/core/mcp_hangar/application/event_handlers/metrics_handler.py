@@ -9,6 +9,7 @@ from dataclasses import dataclass, field
 import time
 
 from mcp_hangar.domain.events import (
+    CircuitBreakerStateChanged,
     DomainEvent,
     HealthCheckFailed,
     HealthCheckPassed,
@@ -98,6 +99,8 @@ class MetricsEventHandler:
             self._handle_health_failed(event)
         elif isinstance(event, ProviderDegraded):
             self._handle_provider_degraded(event)
+        elif isinstance(event, CircuitBreakerStateChanged):
+            self._handle_circuit_breaker_state_changed(event)
 
     def _handle_provider_started(self, event: ProviderStarted) -> None:
         """Handle provider started event."""
@@ -189,6 +192,10 @@ class MetricsEventHandler:
 
         # Update Prometheus metrics
         prometheus_metrics.update_provider_state(event.provider_id, "degraded")
+
+    def _handle_circuit_breaker_state_changed(self, event: CircuitBreakerStateChanged) -> None:
+        """Handle circuit breaker state changed event."""
+        prometheus_metrics.update_circuit_breaker_state(event.provider_id, event.new_state)
 
     def get_metrics(self, provider_id: str) -> ProviderMetrics | None:
         """

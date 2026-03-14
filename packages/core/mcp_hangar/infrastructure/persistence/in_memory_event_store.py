@@ -10,6 +10,7 @@ from typing import Any
 
 from mcp_hangar.domain.contracts.event_store import ConcurrencyError, IEventStore
 from mcp_hangar.domain.events import DomainEvent
+from mcp_hangar.domain.exceptions import CompactionError
 from mcp_hangar.logging_config import get_logger
 
 logger = get_logger(__name__)
@@ -172,3 +173,49 @@ class InMemoryEventStore(IEventStore):
         """Load latest snapshot for a stream."""
         with self._lock:
             return self._snapshots.get(stream_id)
+
+    def compact_stream(self, stream_id: str) -> int:
+        """Delete events that precede the latest snapshot for a stream.
+
+        Args:
+            stream_id: Identifier of the stream to compact.
+
+        Returns:
+            Number of events deleted.
+
+        Raises:
+            CompactionError: When no snapshot exists for the stream.
+        """
+        with self._lock:
+            snapshot = self._snapshots.get(stream_id)
+            if snapshot is None:
+                raise CompactionError(stream_id, "no snapshot exists; create a snapshot before compacting")
+
+            snapshot_version: int = snapshot["version"]
+            stream = self._streams.get(stream_id)
+
+            if stream is None:
+                return 0
+
+            before_count = len(stream.events)
+            compacted = [e for e in stream.events if e.stream_version > snapshot_version]
+            deleted = before_count - len(compacted)
+            stream.events = compacted
+
+            # Also remove from global list
+            self._all_events = [
+                e for e in self._all_events if not (e.stream_id == stream_id and e.stream_version <= snapshot_version)
+            ]
+
+        from ...metrics import record_events_compacted
+
+        record_events_compacted(stream_id, deleted)
+
+        logger.info(
+            "stream_compacted",
+            stream_id=stream_id,
+            snapshot_version=snapshot_version,
+            events_deleted=deleted,
+        )
+
+        return deleted

@@ -9,6 +9,7 @@ from collections.abc import Iterator
 from typing import Any
 
 from ..events import DomainEvent
+from ..exceptions import CompactionError  # noqa: F401 -- re-exported for consumers of this module
 
 
 class ConcurrencyError(Exception):
@@ -170,6 +171,26 @@ class IEventStore(ABC):
             Dict with "version" and "state" keys, or None if no snapshot exists.
         """
 
+    @abstractmethod
+    def compact_stream(self, stream_id: str) -> int:
+        """Delete events that precede the latest snapshot for a stream.
+
+        Compaction reduces storage by removing events that are already
+        captured in a snapshot. Only events with stream_version less than
+        or equal to the snapshot version are deleted.
+
+        Args:
+            stream_id: Identifier of the event stream to compact.
+
+        Returns:
+            Number of events deleted.
+
+        Raises:
+            CompactionError: When no snapshot exists for the stream.
+                Compaction without a snapshot would destroy all events
+                with no way to reconstruct aggregate state.
+        """
+
 
 class NullEventStore(IEventStore):
     """Null object implementation - discards all events.
@@ -224,3 +245,7 @@ class NullEventStore(IEventStore):
     ) -> dict[str, Any] | None:
         """Return None (no snapshots persisted)."""
         return None
+
+    def compact_stream(self, stream_id: str) -> int:
+        """No-op: NullEventStore has no events to compact."""
+        return 0

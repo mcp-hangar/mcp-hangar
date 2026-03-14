@@ -708,6 +708,28 @@ class CatalogItemNotDeployableError(MCPError):
         self.item_id = item_id
 
 
+# --- Event Store Exceptions ---
+
+
+class CompactionError(MCPError):
+    """Raised when event stream compaction fails.
+
+    Compaction requires a snapshot to exist for the stream.
+    If no snapshot is found, this error is raised to prevent
+    data loss (compaction without a snapshot would destroy
+    all events with no way to rebuild aggregate state).
+    """
+
+    def __init__(self, stream_id: str, reason: str):
+        super().__init__(
+            message=f"Cannot compact stream '{stream_id}': {reason}",
+            operation="compact_stream",
+            details={"stream_id": stream_id, "reason": reason},
+        )
+        self.stream_id = stream_id
+        self.reason = reason
+
+
 # --- Registry Exceptions ---
 
 

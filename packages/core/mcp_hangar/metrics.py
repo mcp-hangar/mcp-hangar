@@ -862,6 +862,26 @@ BATCH_CONCURRENCY_QUEUED_TOTAL = Counter(
 
 
 # -----------------------------------------------------------------------------
+# Circuit Breaker Metrics
+# -----------------------------------------------------------------------------
+
+CIRCUIT_BREAKER_STATE = Gauge(
+    name="mcp_hangar_circuit_breaker_state",
+    description="Current circuit breaker state per provider and state (1=active, 0=inactive)",
+    labels=["provider", "state"],
+)
+
+# -----------------------------------------------------------------------------
+# Event Store Compaction Metrics
+# -----------------------------------------------------------------------------
+
+EVENTS_COMPACTED_TOTAL = Counter(
+    name="mcp_hangar_events_compacted",
+    description="Total number of events removed by stream compaction",
+    labels=["stream_id"],
+)
+
+# -----------------------------------------------------------------------------
 # Tool Access Policy Metrics
 # -----------------------------------------------------------------------------
 
@@ -968,6 +988,14 @@ def _register_all_metrics():
             TOOL_ACCESS_DENIED_TOTAL,
             TOOLS_FILTERED_TOTAL,
             TOOL_ACCESS_POLICY_ACTIVE,
+        ]
+    )
+
+    # Circuit breaker and event store compaction metrics
+    metrics.extend(
+        [
+            CIRCUIT_BREAKER_STATE,
+            EVENTS_COMPACTED_TOTAL,
         ]
     )
 
@@ -1095,6 +1123,31 @@ def record_gc_cycle(duration: float, collected: dict[str, int] = None):
 def record_error(component: str, error_type: str):
     """Record an error."""
     ERRORS_TOTAL.inc(component=component, error_type=error_type)
+
+
+def update_circuit_breaker_state(provider: str, new_state: str) -> None:
+    """Update circuit breaker state gauge for a provider.
+
+    Sets the active state label to 1 and all others to 0 so that
+    PromQL can filter by state label.
+
+    Args:
+        provider: Provider ID.
+        new_state: New circuit breaker state value (closed, open, half_open).
+    """
+    for state in ("closed", "open", "half_open"):
+        CIRCUIT_BREAKER_STATE.set(1.0 if state == new_state else 0.0, provider=provider, state=state)
+
+
+def record_events_compacted(stream_id: str, count: int) -> None:
+    """Record events removed by compaction.
+
+    Args:
+        stream_id: The stream that was compacted.
+        count: Number of events removed.
+    """
+    if count > 0:
+        EVENTS_COMPACTED_TOTAL.inc(count, stream_id=stream_id)
 
 
 # =============================================================================

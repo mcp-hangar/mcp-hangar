@@ -27,6 +27,7 @@ def create_api_router() -> Starlette:
     from .config import config_routes
     from .discovery import discovery_routes
     from .groups import group_routes
+    from .maintenance import maintenance_routes
     from .observability import observability_routes
     from .providers import provider_routes
     from .system import system_routes
@@ -40,6 +41,7 @@ def create_api_router() -> Starlette:
         Mount("/system", routes=system_routes),
         Mount("/auth", routes=auth_routes),
         Mount("/observability", routes=observability_routes),
+        Mount("/maintenance", routes=maintenance_routes),
         Mount("/ws", routes=ws_routes),
     ]
 

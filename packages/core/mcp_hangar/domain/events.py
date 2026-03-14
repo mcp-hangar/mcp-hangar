@@ -79,6 +79,21 @@ class ProviderStateChanged(DomainEvent):
         super().__init__()
 
 
+# Circuit Breaker Events
+
+
+@dataclass
+class CircuitBreakerStateChanged(DomainEvent):
+    """Published when a circuit breaker transitions between states."""
+
+    provider_id: str
+    old_state: str  # closed, open, half_open
+    new_state: str  # closed, open, half_open
+
+    def __post_init__(self):
+        super().__init__()
+
+
 # Tool Invocation Events
 
 

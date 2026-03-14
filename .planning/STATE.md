@@ -1,14 +1,14 @@
 ---
 gsd_state_version: 1.0
-milestone: v2.0
-milestone_name: Management UI
-status: unknown
-last_updated: "2026-03-14T17:35:06Z"
+milestone: v3.0
+milestone_name: Infrastructure Maturity
+status: in_progress
+last_updated: "2026-03-14T22:00:00Z"
 progress:
-  total_phases: 16
-  completed_phases: 14
-  total_plans: 31
-  completed_plans: 31
+  total_phases: 4
+  completed_phases: 2
+  total_plans: 11
+  completed_plans: 6
 ---
 
 # Project State
@@ -18,17 +18,16 @@ progress:
 See: .planning/PROJECT.md (updated 2026-03-14)
 
 **Core value:** Reliable, observable MCP provider management with production-grade lifecycle control
-**Current focus:** v2.0 Management UI -- browser-based management interface with REST API, WebSocket streaming, and React frontend
+**Current focus:** v3.0 Infrastructure Maturity -- close all deferred requirements, harden circuit breaker with HALF_OPEN, implement event store compaction, saga compensation, and add topology visualization and metric time-series to the UI.
 
 ## Current Position
 
-Milestone: v2.0 Management UI -- IN PROGRESS
-Phase: 14 of 16 (Dashboard Provider Management) -- COMPLETE
-Plan: next phase (Phase 15)
-Status: Phase 14 all 4 plans complete. Shared UI primitives (ProviderStateBadge, HealthBadge, CircuitBreakerBadge, MetricCard, ActionButton, EmptyState, LoadingSpinner); Dashboard with metric cards, state distribution chart, live event feed; Providers list + detail pages; Groups, Discovery, Config pages fully implemented.
-Last activity: 2026-03-14 -- Phase 14-04 executed: GroupsPage (two-panel), DiscoveryPage (3 sections with approve/reject), ConfigPage (JSON viewer + hot reload). Zero TypeScript errors.
+Milestone: v2.0 Management UI -- COMPLETE (shipped 2026-03-14)
+Next milestone: v3.0 Infrastructure Maturity -- IN PROGRESS (phases 17-20, 11 plans)
+Status: Phase 17 (Quick Wins) COMPLETE. Phase 18 (Circuit Breaker & Event Store Compaction) COMPLETE.
+Last activity: 2026-03-14 -- Phase 18 complete. Plans 18-01, 18-02, 18-03 all shipped.
 
-Progress: [#########_] ~88% milestone (14 of 16 phases complete)
+Progress: [####------] 50% milestone (2 of 4 phases complete)
 
 ## Performance Metrics
 
@@ -165,5 +164,5 @@ None beyond phase planning/execution.
 ## Session Continuity
 
 Last session: 2026-03-14
-Stopped at: Phase 14 complete -- Dashboard, Providers, Groups, Discovery, Config pages all fully implemented with zero TypeScript errors
-Resume with: Start Phase 15 (next phase after Dashboard Provider Management)
+Stopped at: Phase 18 (Circuit Breaker & Event Store Compaction) complete. Plans 18-01, 18-02, 18-03 all shipped.
+Resume with: Phase 19 -- check ROADMAP.md for next phase definition.

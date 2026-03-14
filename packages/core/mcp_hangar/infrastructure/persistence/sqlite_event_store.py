@@ -14,6 +14,7 @@ from typing import Any
 
 from mcp_hangar.domain.contracts.event_store import ConcurrencyError, IEventStore
 from mcp_hangar.domain.events import DomainEvent
+from mcp_hangar.domain.exceptions import CompactionError
 from mcp_hangar.logging_config import get_logger
 
 from .event_serializer import EventSerializer
@@ -462,3 +463,51 @@ class SQLiteEventStore(IEventStore):
         finally:
             if not self._is_memory:
                 conn.close()
+
+    def compact_stream(self, stream_id: str) -> int:
+        """Delete events that precede the latest snapshot for a stream.
+
+        Args:
+            stream_id: Identifier of the stream to compact.
+
+        Returns:
+            Number of events deleted.
+
+        Raises:
+            CompactionError: When no snapshot exists for the stream.
+        """
+        snapshot = self.load_snapshot(stream_id)
+        if snapshot is None:
+            raise CompactionError(stream_id, "no snapshot exists; create a snapshot before compacting")
+
+        snapshot_version: int = snapshot["version"]
+
+        with self._lock:
+            conn = self._connect()
+            try:
+                cursor = conn.execute(
+                    "DELETE FROM events WHERE stream_id = ? AND stream_version <= ?",
+                    (stream_id, snapshot_version),
+                )
+                deleted = cursor.rowcount
+                conn.commit()
+            except Exception as e:  # noqa: BLE001 -- infra-boundary: rollback and propagate on any DB error
+                conn.rollback()
+                logger.error("compact_stream_failed", stream_id=stream_id, error=str(e))
+                raise
+            finally:
+                if not self._is_memory:
+                    conn.close()
+
+        from ...metrics import record_events_compacted
+
+        record_events_compacted(stream_id, deleted)
+
+        logger.info(
+            "stream_compacted",
+            stream_id=stream_id,
+            snapshot_version=snapshot_version,
+            events_deleted=deleted,
+        )
+
+        return deleted

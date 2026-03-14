@@ -140,6 +140,8 @@ def _restore_group_circuit_breakers(
         try:
             cb = CircuitBreaker.from_dict(result["state_data"])
             group._circuit_breaker = cb
+            # Re-wire the state-change callback so transitions after restore emit events/metrics.
+            cb._on_state_change = group._on_circuit_breaker_state_change
             logger.info(
                 "circuit_breaker_restored",
                 group_id=group_id,

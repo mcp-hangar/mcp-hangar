@@ -10,7 +10,7 @@ import time
 from typing import Any, TYPE_CHECKING
 
 from ...logging_config import get_logger
-from ..events import DomainEvent
+from ..events import CircuitBreakerStateChanged, DomainEvent
 from ..exceptions import ProviderStartError, CannotStartProviderError
 from ..value_objects import GroupId, GroupState, LoadBalancerStrategy, MemberPriority, MemberWeight, ProviderState
 from .aggregate import AggregateRoot
@@ -202,6 +202,7 @@ class ProviderGroup(AggregateRoot):
                 reset_timeout_s=circuit_reset_timeout_s,
             )
         )
+        self._circuit_breaker._on_state_change = self._on_circuit_breaker_state_change
 
         # Threading
         # Lock hierarchy level: PROVIDER_GROUP (11)
@@ -226,6 +227,23 @@ class ProviderGroup(AggregateRoot):
             return TrackedLock(LockLevel.PROVIDER_GROUP, f"ProviderGroup:{group_id}")
         except ImportError:
             return threading.RLock()
+
+    def _on_circuit_breaker_state_change(self, old_state: Any, new_state: Any) -> None:
+        """Emit a domain event when the circuit breaker transitions between states.
+
+        Called by CircuitBreaker._fire_state_change outside of any lock.
+
+        Args:
+            old_state: Previous CircuitState enum value.
+            new_state: New CircuitState enum value.
+        """
+        self._record_event(
+            CircuitBreakerStateChanged(
+                provider_id=self._id.value,
+                old_state=old_state.value,
+                new_state=new_state.value,
+            )
+        )
 
     # --- Properties ---
 

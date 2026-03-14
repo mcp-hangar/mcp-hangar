@@ -12,6 +12,7 @@ import json
 from hypothesis import HealthCheck, given, settings, strategies as st
 
 from mcp_hangar.domain.events import (
+    CircuitBreakerStateChanged,
     DomainEvent,
     DiscoveryCycleCompleted,
     DiscoverySourceHealthChanged,
@@ -89,6 +90,7 @@ _MINIMAL_EVENTS: dict[str, DomainEvent] = {
         duration_ms=0.0,
     ),
     "DiscoverySourceHealthChanged": DiscoverySourceHealthChanged(source_type="filesystem", is_healthy=True),
+    "CircuitBreakerStateChanged": CircuitBreakerStateChanged(provider_id="p1", old_state="closed", new_state="open"),
 }
 
 

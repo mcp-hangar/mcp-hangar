@@ -9,6 +9,7 @@ import json
 from typing import Any
 
 from mcp_hangar.domain.events import (
+    CircuitBreakerStateChanged,
     DiscoveryCycleCompleted,
     DiscoverySourceHealthChanged,
     DomainEvent,
@@ -42,6 +43,8 @@ EVENT_TYPE_MAP: dict[str, type[DomainEvent]] = {
     "ProviderDegraded": ProviderDegraded,
     "ProviderStateChanged": ProviderStateChanged,
     "ProviderIdleDetected": ProviderIdleDetected,
+    # Circuit Breaker
+    "CircuitBreakerStateChanged": CircuitBreakerStateChanged,
     # Tool Invocation
     "ToolInvocationRequested": ToolInvocationRequested,
     "ToolInvocationCompleted": ToolInvocationCompleted,
@@ -66,6 +69,8 @@ EVENT_VERSION_MAP: dict[str, int] = {
     "ProviderDegraded": 1,
     "ProviderStateChanged": 1,
     "ProviderIdleDetected": 1,
+    # Circuit Breaker
+    "CircuitBreakerStateChanged": 1,
     # Tool Invocation
     "ToolInvocationRequested": 1,
     "ToolInvocationCompleted": 1,
