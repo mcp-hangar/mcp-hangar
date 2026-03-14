@@ -9,6 +9,7 @@ from starlette.requests import Request
 from starlette.routing import Route
 
 from ...application.event_handlers import get_alert_handler, get_audit_handler, get_security_handler
+from ...infrastructure.persistence.metrics_history_store import get_metrics_history_store
 from ...metrics import get_metrics
 from .serializers import HangarJSONResponse
 
@@ -181,10 +182,73 @@ async def get_per_provider_metrics(request: Request) -> HangarJSONResponse:
     )
 
 
+async def get_metrics_history(request: Request) -> HangarJSONResponse:
+    """Get time-series metric history for a provider.
+
+    Query params:
+        provider: Provider ID to filter by (optional, returns all if omitted).
+        metric: Metric name to filter by (optional, returns all metrics if omitted).
+        from: Start of time range as Unix timestamp (optional).
+        to: End of time range as Unix timestamp (optional).
+        limit: Maximum points to return, 1-10000 (default 1000).
+
+    Returns:
+        JSON with {"points": [...], "count": int}.
+        Each point: {"provider_id", "metric_name", "value", "recorded_at"}.
+    """
+    provider_id = request.query_params.get("provider") or None
+    metric_name = request.query_params.get("metric") or None
+
+    from_ts: float | None = None
+    to_ts: float | None = None
+    try:
+        raw_from = request.query_params.get("from")
+        if raw_from:
+            from_ts = float(raw_from)
+    except ValueError:
+        pass
+    try:
+        raw_to = request.query_params.get("to")
+        if raw_to:
+            to_ts = float(raw_to)
+    except ValueError:
+        pass
+
+    try:
+        limit = int(request.query_params.get("limit", 1000))
+    except ValueError:
+        limit = 1000
+
+    store = get_metrics_history_store()
+    points = store.query(
+        provider_id=provider_id,
+        metric_name=metric_name,
+        from_ts=from_ts,
+        to_ts=to_ts,
+        limit=limit,
+    )
+
+    return HangarJSONResponse(
+        {
+            "points": [
+                {
+                    "provider_id": p.provider_id,
+                    "metric_name": p.metric_name,
+                    "value": p.value,
+                    "recorded_at": p.recorded_at,
+                }
+                for p in points
+            ],
+            "count": len(points),
+        }
+    )
+
+
 # Route definitions for mounting in the API router
 observability_routes = [
     Route("/metrics", get_metrics_summary, methods=["GET"]),
     Route("/metrics/per-provider", get_per_provider_metrics, methods=["GET"]),
+    Route("/metrics/history", get_metrics_history, methods=["GET"]),
     Route("/audit", get_audit_log, methods=["GET"]),
     Route("/security", get_security_events, methods=["GET"]),
     Route("/alerts", get_alert_history, methods=["GET"]),

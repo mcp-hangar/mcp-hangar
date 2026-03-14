@@ -1,6 +1,6 @@
 """Background workers initialization."""
 
-from ...gc import BackgroundWorker
+from ...gc import BackgroundWorker, MetricsSnapshotWorker
 from ...logging_config import get_logger
 from ..state import PROVIDERS
 
@@ -12,12 +12,15 @@ GC_WORKER_INTERVAL_SECONDS = 30
 HEALTH_CHECK_INTERVAL_SECONDS = 60
 """Interval for health check worker."""
 
+METRICS_SNAPSHOT_INTERVAL_SECONDS = 60
+"""Interval for metrics history snapshot worker."""
 
-def create_background_workers() -> list[BackgroundWorker]:
+
+def create_background_workers() -> list[BackgroundWorker | MetricsSnapshotWorker]:
     """Create (but don't start) background workers.
 
     Returns:
-        List of BackgroundWorker instances (not started).
+        List of worker instances (not started).
     """
     gc_worker = BackgroundWorker(
         PROVIDERS,
@@ -31,5 +34,9 @@ def create_background_workers() -> list[BackgroundWorker]:
         task="health_check",
     )
 
-    logger.info("background_workers_created", workers=["gc", "health_check"])
-    return [gc_worker, health_worker]
+    metrics_worker = MetricsSnapshotWorker(
+        interval_s=METRICS_SNAPSHOT_INTERVAL_SECONDS,
+    )
+
+    logger.info("background_workers_created", workers=["gc", "health_check", "metrics_snapshot"])
+    return [gc_worker, health_worker, metrics_worker]

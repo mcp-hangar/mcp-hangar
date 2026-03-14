@@ -157,17 +157,19 @@ class TestCreateBackgroundWorkers:
     """Tests for _create_background_workers function."""
 
     def test_creates_two_workers(self):
-        """Should create GC and health check workers."""
+        """Should create GC, health check, and metrics snapshot workers."""
         mock_worker_class = MagicMock()
+        mock_snapshot_class = MagicMock()
 
         with patch("mcp_hangar.server.bootstrap.workers.BackgroundWorker", mock_worker_class):
-            with patch("mcp_hangar.server.bootstrap.workers.PROVIDERS", {}):
-                from mcp_hangar.server.bootstrap import _create_background_workers
+            with patch("mcp_hangar.server.bootstrap.workers.MetricsSnapshotWorker", mock_snapshot_class):
+                with patch("mcp_hangar.server.bootstrap.workers.PROVIDERS", {}):
+                    from mcp_hangar.server.bootstrap import _create_background_workers
 
-                workers = _create_background_workers()
+                    workers = _create_background_workers()
 
         assert mock_worker_class.call_count == 2
-        assert len(workers) == 2
+        assert len(workers) == 3
 
     def test_workers_not_started(self):
         """Workers should be created but not started."""

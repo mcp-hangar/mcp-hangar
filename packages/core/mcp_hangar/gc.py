@@ -363,3 +363,130 @@ class ConfigReloadWorker:
                 error=str(e),
                 error_type=type(e).__name__,
             )
+
+
+class MetricsSnapshotWorker:
+    """Background worker that periodically snapshots per-provider metrics to SQLite.
+
+    Takes a live metric reading every ``interval_s`` seconds and persists the
+    resulting :class:`~mcp_hangar.infrastructure.persistence.metrics_history_store.MetricPoint`
+    rows via :class:`~mcp_hangar.infrastructure.persistence.metrics_history_store.MetricsHistoryStore`.
+
+    Every ``prune_interval`` snapshots (default: 144 — roughly every 2.4 hours at
+    60-second intervals) old rows beyond the retention window are pruned.
+
+    Args:
+        interval_s: Seconds between metric snapshots (default: 60).
+        prune_interval: How many snapshot cycles between prune runs (default: 144).
+    """
+
+    def __init__(
+        self,
+        interval_s: int = 60,
+        prune_interval: int = 144,
+    ) -> None:
+        self.interval_s = interval_s
+        self._prune_interval = prune_interval
+        self._cycle = 0
+        self.running = False
+        self.thread = threading.Thread(target=self._loop, daemon=True, name="worker-metrics-snapshot")
+
+    def start(self) -> None:
+        """Start the background snapshot worker."""
+        self.running = True
+        self.thread.start()
+        logger.info("metrics_snapshot_worker_started", interval_s=self.interval_s)
+
+    def stop(self) -> None:
+        """Signal the worker to stop.  Does not block until completion."""
+        self.running = False
+        logger.info("metrics_snapshot_worker_stopped")
+
+    def _loop(self) -> None:
+        """Main worker loop."""
+        while self.running:
+            time.sleep(self.interval_s)
+            if not self.running:
+                break
+            try:
+                self._take_snapshot()
+            except Exception as e:  # noqa: BLE001 -- fault-barrier: snapshot failure must not crash worker
+                logger.error("metrics_snapshot_error", error=str(e))
+
+            self._cycle += 1
+            if self._cycle % self._prune_interval == 0:
+                try:
+                    self._prune()
+                except Exception as e:  # noqa: BLE001 -- fault-barrier: prune failure must not crash worker
+                    logger.error("metrics_prune_error", error=str(e))
+
+    def _take_snapshot(self) -> None:
+        """Collect current metrics and write to the history store."""
+        from .infrastructure.persistence.metrics_history_store import MetricPoint, get_metrics_history_store
+        from .metrics import get_metrics
+
+        prometheus_text = get_metrics()
+        now = time.time()
+        per_provider: dict[str, dict[str, float]] = {}
+
+        for line in prometheus_text.splitlines():
+            if not line.strip() or line.startswith("#"):
+                continue
+            if 'provider="' not in line:
+                continue
+            try:
+                value = float(line.split()[-1])
+                parts = line.split('provider="')
+                provider_id = parts[1].split('"')[0]
+                if not provider_id:
+                    continue
+            except (ValueError, IndexError):
+                continue
+
+            entry = per_provider.setdefault(
+                provider_id,
+                {
+                    "tool_calls_total": 0.0,
+                    "tool_call_errors": 0.0,
+                    "cold_starts_total": 0.0,
+                    "health_checks_total": 0.0,
+                    "health_check_failures": 0.0,
+                },
+            )
+
+            if line.startswith("mcp_hangar_tool_calls_total{"):
+                entry["tool_calls_total"] += value
+            elif line.startswith("mcp_hangar_tool_call_errors_total{"):
+                entry["tool_call_errors"] += value
+            elif line.startswith("mcp_hangar_health_checks_total{"):
+                entry["health_checks_total"] += value
+                if 'result="unhealthy"' in line:
+                    entry["health_check_failures"] += value
+            elif line.startswith("mcp_hangar_provider_cold_start_seconds_count{"):
+                entry["cold_starts_total"] += value
+
+        points: list[MetricPoint] = []
+        for provider_id, metrics in per_provider.items():
+            for metric_name, metric_value in metrics.items():
+                points.append(
+                    MetricPoint(
+                        provider_id=provider_id,
+                        metric_name=metric_name,
+                        value=metric_value,
+                        recorded_at=now,
+                    )
+                )
+
+        if points:
+            store = get_metrics_history_store()
+            store.record_snapshot(points)
+            logger.debug("metrics_snapshot_recorded", providers=len(per_provider), points=len(points))
+
+    def _prune(self) -> None:
+        """Prune old metric history rows."""
+        from .infrastructure.persistence.metrics_history_store import get_metrics_history_store
+
+        store = get_metrics_history_store()
+        deleted = store.prune()
+        if deleted:
+            logger.info("metrics_history_pruned_by_worker", deleted=deleted)
