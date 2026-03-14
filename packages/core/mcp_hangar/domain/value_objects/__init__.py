@@ -17,6 +17,9 @@ All types are re-exported here for backward compatibility.
 # Common / shared value objects
 from .common import CatalogItemId, CorrelationId, NamespaceId, ResourceScope, TenantId, ToolArguments, ToolName
 
+# Log value objects
+from .log import LogLine
+
 # Configuration
 from .config import (
     CommandLine,
@@ -102,4 +105,6 @@ __all__ = [
     # Truncation
     "TruncationConfig",
     "ContinuationId",
+    # Log
+    "LogLine",
 ]

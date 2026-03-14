@@ -8,6 +8,7 @@ from .authentication import ApiKeyMetadata, AuthRequest, IApiKeyStore, IAuthenti
 from .authorization import AuthorizationRequest, AuthorizationResult, IAuthorizer, IPolicyEngine, IRoleStore
 from .event_store import ConcurrencyError, IEventStore, NullEventStore, StreamNotFoundError
 from .installer import InstalledPackage, IPackageInstaller
+from .log_buffer import IProviderLogBuffer
 from .metrics_publisher import IMetricsPublisher
 from .persistence import (
     AuditAction,
@@ -66,4 +67,6 @@ __all__ = [
     "CacheRetrievalResult",
     "IResponseCache",
     "NullResponseCache",
+    # Log buffer
+    "IProviderLogBuffer",
 ]
