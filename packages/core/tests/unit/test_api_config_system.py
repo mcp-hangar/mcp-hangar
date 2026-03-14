@@ -52,10 +52,9 @@ def api_client(mock_context):
 
     with patch("mcp_hangar.server.api.middleware.get_context", return_value=mock_context):
         with patch("mcp_hangar.server.api.config.get_context", return_value=mock_context):
-            with patch("mcp_hangar.server.api.system.get_context", return_value=mock_context):
-                app = create_api_router()
-                client = TestClient(app, raise_server_exceptions=False)
-                yield client
+            app = create_api_router()
+            client = TestClient(app, raise_server_exceptions=False)
+            yield client
 
 
 # ---------------------------------------------------------------------------

@@ -23,14 +23,18 @@ def create_api_router() -> Starlette:
     Returns:
         Starlette application serving the REST API.
     """
+    from .config import config_routes
     from .discovery import discovery_routes
     from .groups import group_routes
     from .providers import provider_routes
+    from .system import system_routes
 
     routes = [
         Mount("/providers", routes=provider_routes),
         Mount("/groups", routes=group_routes),
         Mount("/discovery", routes=discovery_routes),
+        Mount("/config", routes=config_routes),
+        Mount("/system", routes=system_routes),
     ]
 
     exception_handlers = {
