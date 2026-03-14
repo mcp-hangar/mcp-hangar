@@ -4,6 +4,7 @@ Implements GET/POST endpoints for provider group operations,
 reading directly from the application context groups dict.
 """
 
+from starlette.concurrency import run_in_threadpool
 from starlette.requests import Request
 from starlette.routing import Route
 
@@ -60,7 +61,7 @@ async def rebalance_group(request: Request) -> HangarJSONResponse:
     group = ctx.groups.get(group_id)
     if group is None:
         raise ProviderNotFoundError(provider_id=group_id)
-    group.rebalance()
+    await run_in_threadpool(group.rebalance)
     return HangarJSONResponse({"status": "rebalanced", "group_id": group_id})
 
 
