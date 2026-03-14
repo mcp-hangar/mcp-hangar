@@ -229,12 +229,12 @@ class LoadProviderHandler(CommandHandler):
 
             try:
                 provider.ensure_ready()
-            except Exception:  # fault-barrier: cleanup installed package on startup failure, then re-raise
+            except Exception:  # noqa: BLE001 -- fault-barrier: cleanup installed package on startup failure, then re-raise
                 # Cleanup installed package on startup failure
                 if installed.cleanup:
                     try:
                         installed.cleanup()
-                    except Exception:  # fault-barrier: cleanup failure must not mask startup error
+                    except Exception:  # noqa: BLE001 -- fault-barrier: cleanup failure must not mask startup error
                         pass
                 raise
 
@@ -292,7 +292,7 @@ class LoadProviderHandler(CommandHandler):
         except (UnverifiedProviderError, MissingSecretsError):
             raise
 
-        except Exception as e:  # fault-barrier: catch-all for error event publishing, then re-raise
+        except Exception as e:  # noqa: BLE001 -- fault-barrier: catch-all for error event publishing, then re-raise
             # Redact secrets from error message if redactor exists
             error_reason = str(e)
             try:
@@ -387,7 +387,7 @@ class UnloadProviderHandler(CommandHandler):
 
         try:
             provider.shutdown()
-        except Exception as e:  # fault-barrier: shutdown failure must not prevent cleanup
+        except Exception as e:  # noqa: BLE001 -- fault-barrier: shutdown failure must not prevent cleanup
             logger.warning(
                 "provider_shutdown_error",
                 provider_id=command.provider_id,
@@ -397,7 +397,7 @@ class UnloadProviderHandler(CommandHandler):
         if metadata.cleanup:
             try:
                 metadata.cleanup()
-            except Exception as e:  # fault-barrier: cleanup callback failure must not prevent unload
+            except Exception as e:  # noqa: BLE001 -- fault-barrier: cleanup callback failure must not prevent unload
                 logger.warning(
                     "provider_cleanup_error",
                     provider_id=command.provider_id,

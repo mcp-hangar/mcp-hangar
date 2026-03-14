@@ -140,7 +140,7 @@ class EventSerializer:
             data = {"_version": version, **self._to_dict(event)}
             json_data = json.dumps(data, default=self._json_encoder, ensure_ascii=False)
             return event_type, json_data
-        except Exception as e:  # infra-boundary: re-raises as EventSerializationError
+        except Exception as e:  # noqa: BLE001 -- infra-boundary: re-raises as EventSerializationError
             logger.error(
                 "event_serialization_failed",
                 event_type=event_type,
@@ -188,7 +188,7 @@ class EventSerializer:
             return self._from_dict(event_class, payload)
         except json.JSONDecodeError as e:
             raise EventSerializationError(event_type, f"Invalid JSON: {e}") from e
-        except Exception as e:  # infra-boundary: re-raises as EventSerializationError
+        except Exception as e:  # noqa: BLE001 -- infra-boundary: re-raises as EventSerializationError
             logger.error(
                 "event_deserialization_failed",
                 event_type=event_type,

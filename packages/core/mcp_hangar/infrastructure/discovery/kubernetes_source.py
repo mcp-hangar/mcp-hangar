@@ -99,7 +99,7 @@ class KubernetesDiscoverySource(DiscoverySource):
                 f"Kubernetes discovery initialized "
                 f"(in_cluster={self.in_cluster}, namespaces={self.namespaces or 'all'})"
             )
-        except Exception as e:  # infra-boundary: k8s init failure is non-fatal
+        except Exception as e:  # noqa: BLE001 -- infra-boundary: k8s init failure is non-fatal
             logger.error(f"Failed to initialize Kubernetes client: {e}")
             raise
 
@@ -130,7 +130,7 @@ class KubernetesDiscoverySource(DiscoverySource):
 
             except ApiException as e:
                 logger.warning(f"Failed to list pods in {namespace}: {e.reason}")
-            except Exception as e:  # infra-boundary: skip namespace on discovery error
+            except Exception as e:  # noqa: BLE001 -- infra-boundary: skip namespace on discovery error
                 logger.error(f"Error discovering in namespace {namespace}: {e}")
 
         logger.debug(f"Kubernetes discovery found {len(providers)} providers")
@@ -216,7 +216,7 @@ class KubernetesDiscoverySource(DiscoverySource):
             self._ensure_initialized()
             self._v1.get_api_resources()
             return True
-        except Exception as e:  # infra-boundary: health check returns unhealthy on error
+        except Exception as e:  # noqa: BLE001 -- infra-boundary: health check returns unhealthy on error
             logger.warning(f"Kubernetes health check failed: {e}")
             return False
 

@@ -4,6 +4,8 @@ Implements GET/POST endpoints for provider CRUD operations,
 routing through the CQRS dispatch helpers.
 """
 
+import json
+
 from starlette.requests import Request
 from starlette.routing import Route
 
@@ -78,7 +80,7 @@ async def stop_provider(request: Request) -> HangarJSONResponse:
     try:
         body = await request.json()
         reason = body.get("reason", reason)
-    except Exception:  # empty body or invalid JSON
+    except (json.JSONDecodeError, ValueError):  # empty body or invalid JSON
         pass
 
     result = await dispatch_command(StopProviderCommand(provider_id=provider_id, reason=reason))

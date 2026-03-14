@@ -117,7 +117,7 @@ def _try_hot_reload() -> bool:
                     return True
             except httpx.ConnectError:
                 continue
-    except Exception:  # fault-barrier: reload attempt must not crash add command
+    except Exception:  # noqa: BLE001 -- fault-barrier: reload attempt must not crash add command
         pass
     return False
 

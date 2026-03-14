@@ -6,6 +6,8 @@ Implements GET /config (current configuration) and POST /config/reload
 Sensitive fields are stripped from GET responses so secrets are never leaked.
 """
 
+import json
+
 from starlette.requests import Request
 from starlette.routing import Route
 
@@ -72,7 +74,7 @@ async def reload_config(request: Request) -> HangarJSONResponse:
         body = await request.json()
         config_path = body.get("config_path", None)
         graceful = body.get("graceful", True)
-    except Exception:  # empty body or non-JSON content
+    except (json.JSONDecodeError, ValueError):  # empty body or non-JSON content
         pass
 
     result = await dispatch_command(

@@ -36,7 +36,7 @@ class ProviderService:
         for event in events:
             try:
                 self._event_bus.publish(event)
-            except Exception as e:  # fault-barrier: event publishing must not crash provider operations
+            except Exception as e:  # noqa: BLE001 -- fault-barrier: event publishing must not crash provider operations
                 logger.error(f"Failed to publish event {event.__class__.__name__}: {e}")
 
     def _get_provider(self, provider_id: str) -> Provider:

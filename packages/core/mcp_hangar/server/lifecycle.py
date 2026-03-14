@@ -95,7 +95,7 @@ class ServerLifecycle:
             self._context.mcp_server.run()
         except KeyboardInterrupt:
             logger.info("stdio_server_shutdown", reason="keyboard_interrupt")
-        except Exception as e:  # fault-barrier: fatal server error boundary
+        except Exception as e:  # noqa: BLE001 -- fault-barrier: fatal server error boundary
             logger.critical(
                 "fatal_server_error",
                 error=str(e),
@@ -227,7 +227,7 @@ class ServerLifecycle:
             logger.info("http_server_shutdown", reason="keyboard_interrupt")
         except asyncio.CancelledError:
             logger.info("http_server_shutdown", reason="cancelled")
-        except Exception as e:  # fault-barrier: fatal server error boundary
+        except Exception as e:  # noqa: BLE001 -- fault-barrier: fatal server error boundary
             logger.critical(
                 "fatal_server_error",
                 error=str(e),
@@ -274,7 +274,7 @@ class ServerLifecycle:
         for provider, metadata in runtime_store.list_all():
             try:
                 provider.shutdown()
-            except Exception as e:  # fault-barrier: one provider shutdown failure must not prevent others
+            except Exception as e:  # noqa: BLE001 -- fault-barrier: one provider shutdown failure must not prevent others
                 logger.warning(
                     "runtime_provider_shutdown_error",
                     provider_id=str(provider.provider_id),
@@ -284,7 +284,7 @@ class ServerLifecycle:
             if metadata.cleanup:
                 try:
                     metadata.cleanup()
-                except Exception as e:  # fault-barrier: cleanup callback failure must not prevent other cleanups
+                except Exception as e:  # noqa: BLE001 -- fault-barrier: cleanup callback failure must not prevent other cleanups
                     logger.warning(
                         "runtime_provider_cleanup_error",
                         provider_id=str(provider.provider_id),
@@ -414,7 +414,7 @@ def _setup_signal_handlers(lifecycle: ServerLifecycle) -> None:
             result = lifecycle._context.runtime.command_bus.send(command)
             logger.info("config_reload_completed_via_signal", result=result)
 
-        except Exception as e:  # fault-barrier: signal handler must not crash process
+        except Exception as e:  # noqa: BLE001 -- fault-barrier: signal handler must not crash process
             logger.error(
                 "config_reload_failed_via_signal",
                 error=str(e),

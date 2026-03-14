@@ -4,6 +4,8 @@ Implements API key and role management endpoints, routing through
 the CQRS dispatch helpers to registered auth handlers.
 """
 
+import json
+
 from starlette.requests import Request
 from starlette.routing import Route
 
@@ -70,7 +72,7 @@ async def revoke_api_key(request: Request) -> HangarJSONResponse:
     body = {}
     try:
         body = await request.json()
-    except Exception:
+    except (json.JSONDecodeError, ValueError):
         pass
 
     result = await dispatch_command(

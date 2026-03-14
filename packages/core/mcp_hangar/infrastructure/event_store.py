@@ -183,7 +183,7 @@ class InMemoryEventStore(EventStore):
             for subscriber in subscribers:
                 try:
                     subscriber(stored)
-                except Exception as e:  # fault-barrier: subscriber errors must not break event store
+                except Exception as e:  # noqa: BLE001 -- fault-barrier: subscriber errors must not break event store
                     logger.error(f"Event subscriber error: {e}")
 
         return new_version

@@ -120,10 +120,25 @@ class AuthenticationMiddleware:
                 reason=rate_result.reason,
                 retry_after=rate_result.retry_after,
             )
+            try:
+                from mcp_hangar import metrics as prometheus_metrics
+
+                prometheus_metrics.RATE_LIMIT_HITS_TOTAL.inc(result="rejected")
+                stats = self._rate_limiter.get_stats() if hasattr(self._rate_limiter, "get_stats") else {}
+                prometheus_metrics.RATE_LIMIT_ACTIVE_BUCKETS.set(stats.get("active_buckets", 0))
+            except Exception:  # noqa: BLE001 -- fault-barrier: metrics failure must not block auth enforcement
+                pass
             raise RateLimitExceededError(
                 message=f"Too many auth attempts. Retry in {int(rate_result.retry_after or 0)}s.",
                 retry_after=rate_result.retry_after,
             )
+
+        try:
+            from mcp_hangar import metrics as prometheus_metrics
+
+            prometheus_metrics.RATE_LIMIT_HITS_TOTAL.inc(result="allowed")
+        except Exception:  # noqa: BLE001 -- fault-barrier: metrics failure must not block auth
+            pass
 
     def _try_authenticate(self, authenticator: IAuthenticator, request: AuthRequest) -> AuthContext:
         """Try to authenticate with a specific authenticator.
@@ -222,7 +237,7 @@ class AuthenticationMiddleware:
         if self._event_publisher:
             try:
                 self._event_publisher(event)
-            except Exception as e:  # infra-boundary: event publishing must not break auth flow
+            except Exception as e:  # noqa: BLE001 -- infra-boundary: event publishing must not break auth flow
                 logger.warning("event_publish_failed", event_type=type(event).__name__, error=str(e))
 
 
@@ -373,7 +388,7 @@ class AuthorizationMiddleware:
         if self._event_publisher:
             try:
                 self._event_publisher(event)
-            except Exception as e:  # infra-boundary: event publishing must not break auth flow
+            except Exception as e:  # noqa: BLE001 -- infra-boundary: event publishing must not break auth flow
                 logger.warning(
                     "event_publish_failed",
                     event_type=type(event).__name__,

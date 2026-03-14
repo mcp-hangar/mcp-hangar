@@ -110,7 +110,7 @@ class ApplicationContext:
         for worker in self.background_workers:
             try:
                 worker.stop()
-            except Exception as e:  # fault-barrier: shutdown must complete even if individual worker stop fails
+            except Exception as e:  # noqa: BLE001 -- fault-barrier: shutdown must complete even if individual worker stop fails
                 logger.warning(
                     "worker_stop_failed",
                     task=worker.task,
@@ -121,21 +121,21 @@ class ApplicationContext:
         if self.discovery_orchestrator:
             try:
                 asyncio.run(self.discovery_orchestrator.stop())
-            except Exception as e:  # fault-barrier: shutdown must complete even if discovery stop fails
+            except Exception as e:  # noqa: BLE001 -- fault-barrier: shutdown must complete even if discovery stop fails
                 logger.warning("discovery_orchestrator_stop_failed", error=str(e))
 
         # Save circuit breaker state for provider groups before stopping
         if self.saga_state_store is not None:
             try:
                 save_group_circuit_breakers(self.saga_state_store, GROUPS)
-            except Exception as e:  # fault-barrier: shutdown must complete even if CB save fails
+            except Exception as e:  # noqa: BLE001 -- fault-barrier: shutdown must complete even if CB save fails
                 logger.warning("circuit_breaker_save_failed", error=str(e))
 
         # Stop all providers
         for provider_id, provider in PROVIDERS.items():
             try:
                 provider.stop()
-            except Exception as e:  # fault-barrier: shutdown must complete even if individual provider stop fails
+            except Exception as e:  # noqa: BLE001 -- fault-barrier: shutdown must complete even if individual provider stop fails
                 logger.warning(
                     "provider_stop_failed",
                     provider_id=provider_id,

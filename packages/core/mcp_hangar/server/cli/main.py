@@ -100,7 +100,7 @@ def main_callback(
 
         try:
             ver = get_version("mcp-hangar")
-        except Exception:  # fault-barrier: version lookup must not crash CLI
+        except Exception:  # noqa: BLE001 -- fault-barrier: version lookup must not crash CLI
             ver = "unknown"
         console.print(f"mcp-hangar {ver}")
         raise typer.Exit(0)
@@ -153,7 +153,7 @@ def cli_main():
     except KeyboardInterrupt:
         error_console.print("\nInterrupted by user")
         sys.exit(130)
-    except Exception as e:  # fault-barrier: CLI entry point must catch all for clean exit
+    except Exception as e:  # noqa: BLE001 -- fault-barrier: CLI entry point must catch all for clean exit
         # Unexpected error - show stack trace in verbose mode
         import traceback
 

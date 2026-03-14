@@ -9,7 +9,7 @@ Example usage:
     try:
         result = provider.invoke(...)
         span.end_success(result)
-    except Exception as e:  # fault-barrier: docstring example
+    except Exception as e:  # noqa: BLE001 -- fault-barrier: docstring example
         span.end_error(e)
 """
 

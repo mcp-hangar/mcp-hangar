@@ -154,7 +154,7 @@ class UpcasterChain:
 
             try:
                 working_data = step.upcast(working_data)
-            except Exception as e:  # infra-boundary: re-raises as UpcastingError
+            except Exception as e:  # noqa: BLE001 -- infra-boundary: re-raises as UpcastingError
                 raise UpcastingError(
                     event_type=event_type,
                     from_version=working_version,

@@ -241,7 +241,7 @@ def observe_discovery(source_type: str):
 
                 return result
 
-            except Exception as e:  # fault-barrier: catch for error metrics, then re-raise
+            except Exception as e:  # noqa: BLE001 -- fault-barrier: catch for error metrics, then re-raise
                 metrics.inc_errors(source=source_type, error_type=type(e).__name__)
                 raise
 

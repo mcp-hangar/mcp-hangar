@@ -178,7 +178,7 @@ def init_tracing(
                 _tracer_provider.add_span_processor(BatchSpanProcessor(otlp_exporter))
                 exporters_added += 1
                 logger.info("tracing_otlp_exporter_added", endpoint=otlp_endpoint)
-            except Exception as e:  # fault-barrier: exporter init must not crash tracing setup
+            except Exception as e:  # noqa: BLE001 -- fault-barrier: exporter init must not crash tracing setup
                 logger.warning("tracing_otlp_exporter_failed", error=str(e))
 
         # Jaeger exporter (fallback)
@@ -195,7 +195,7 @@ def init_tracing(
                     host=jaeger_host,
                     port=jaeger_port,
                 )
-            except Exception as e:  # fault-barrier: exporter init must not crash tracing setup
+            except Exception as e:  # noqa: BLE001 -- fault-barrier: exporter init must not crash tracing setup
                 logger.warning("tracing_jaeger_exporter_failed", error=str(e))
 
         # Console exporter (debugging)
@@ -220,7 +220,7 @@ def init_tracing(
         )
         return True
 
-    except Exception as e:  # fault-barrier: tracing init failure must not crash application
+    except Exception as e:  # noqa: BLE001 -- fault-barrier: tracing init failure must not crash application
         logger.error("tracing_initialization_failed", error=str(e))
         return False
 
@@ -233,7 +233,7 @@ def shutdown_tracing() -> None:
         try:
             _tracer_provider.shutdown()
             logger.info("tracing_shutdown_complete")
-        except Exception as e:  # fault-barrier: tracing shutdown must not crash application
+        except Exception as e:  # noqa: BLE001 -- fault-barrier: tracing shutdown must not crash application
             logger.warning("tracing_shutdown_error", error=str(e))
         finally:
             _tracer_provider = None
@@ -291,7 +291,7 @@ def trace_tool_invocation(
                     result = func(*args, **kwargs)
                     span.set_attribute("mcp.result.success", True)
                     return result
-                except Exception as e:  # fault-barrier: tracing must not crash tool invocation; re-raises original
+                except Exception as e:  # noqa: BLE001 -- fault-barrier: tracing must not crash tool invocation; re-raises original
                     span.set_attribute("mcp.result.success", False)
                     span.set_attribute("mcp.error.type", type(e).__name__)
                     span.set_attribute("mcp.error.message", str(e)[:500])

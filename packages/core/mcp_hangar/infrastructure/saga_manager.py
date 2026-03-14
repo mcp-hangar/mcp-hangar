@@ -304,9 +304,9 @@ class SagaManager:
                         step.completed = True
                         saga.on_step_completed(step, result)
                         logger.debug(f"Saga {saga_id} step '{step.name}' completed")
-                    except (
-                        Exception
-                    ) as e:  # fault-barrier: step failure triggers compensation, must not crash saga executor
+                    except (  # fault-barrier: step failure triggers compensation, must not crash saga executor
+                        Exception  # noqa: BLE001
+                    ) as e:
                         step.error = str(e)
                         saga.on_step_failed(step, e)
                         logger.error(f"Saga {saga_id} step '{step.name}' failed: {e}")
@@ -327,7 +327,7 @@ class SagaManager:
             saga.on_saga_completed()
             logger.info(f"Saga {saga_id} completed successfully")
 
-        except Exception as e:  # fault-barrier: unexpected saga failure must be recorded, not crash manager
+        except Exception as e:  # noqa: BLE001 -- fault-barrier: unexpected saga failure must be recorded, not crash manager
             context.state = SagaState.FAILED
             context.error = str(e)
             logger.error(f"Saga {saga_id} failed unexpectedly: {e}")
@@ -352,7 +352,7 @@ class SagaManager:
                     self._command_bus.send(step.compensation_command)
                     step.compensated = True
                     logger.debug(f"Saga {saga_id} step '{step.name}' compensated")
-                except Exception as e:  # fault-barrier: compensation failure must not prevent other compensations
+                except Exception as e:  # noqa: BLE001 -- fault-barrier: compensation failure must not prevent other compensations
                     logger.error(f"Saga {saga_id} compensation for '{step.name}' failed: {e}")
                     # Continue compensating other steps
 
@@ -406,7 +406,7 @@ class SagaManager:
                                     saga.saga_type,
                                     event_position,
                                 )
-                        except Exception as e:  # fault-barrier: checkpoint/mark failure must not break event handling
+                        except Exception as e:  # noqa: BLE001 -- fault-barrier: checkpoint/mark failure must not break event handling
                             logger.error(
                                 "saga_checkpoint_failed",
                                 saga_type=saga.saga_type,
@@ -417,9 +417,9 @@ class SagaManager:
                         try:
                             self._command_bus.send(command)
                             logger.debug(f"Saga {saga.saga_type} sent command {type(command).__name__}")
-                        except Exception as e:  # fault-barrier: command failure must not crash event handler
+                        except Exception as e:  # noqa: BLE001 -- fault-barrier: command failure must not crash event handler
                             logger.error(f"Saga {saga.saga_type} command failed: {e}")
-                except Exception as e:  # fault-barrier: saga handler failure must not crash event bus
+                except Exception as e:  # noqa: BLE001 -- fault-barrier: saga handler failure must not crash event bus
                     logger.error(f"Saga {saga.saga_type} failed to handle event: {e}")
 
     def get_active_sagas(self) -> list[SagaContext]:

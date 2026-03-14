@@ -216,7 +216,7 @@ class SQLiteEventStore(IEventStore):
             except ConcurrencyError:
                 conn.rollback()
                 raise
-            except Exception as e:  # infra-boundary: rollback and propagate on any DB error
+            except Exception as e:  # noqa: BLE001 -- infra-boundary: rollback and propagate on any DB error
                 conn.rollback()
                 logger.error(
                     "event_append_failed",
@@ -426,7 +426,7 @@ class SQLiteEventStore(IEventStore):
                     stream_id=stream_id,
                     version=version,
                 )
-            except Exception as e:  # infra-boundary: rollback and propagate on any DB error
+            except Exception as e:  # noqa: BLE001 -- infra-boundary: rollback and propagate on any DB error
                 conn.rollback()
                 logger.error("snapshot_save_failed", stream_id=stream_id, error=str(e))
                 raise

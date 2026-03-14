@@ -177,8 +177,11 @@ class RateLimitMiddleware(CommandBusMiddleware):
             try:
                 from mcp_hangar import metrics as prometheus_metrics
 
-                prometheus_metrics.RATE_LIMIT_HITS_TOTAL.inc(endpoint=key)
-            except Exception:  # fault-barrier: metrics failure must not block rate limit enforcement
+                prometheus_metrics.RATE_LIMIT_HITS_TOTAL.inc(result="rejected")
+                if hasattr(self._rate_limiter, "get_stats"):
+                    stats = self._rate_limiter.get_stats()  # type: ignore[attr-defined]
+                    prometheus_metrics.RATE_LIMIT_ACTIVE_BUCKETS.set(stats.get("active_buckets", 0))
+            except Exception:  # noqa: BLE001 -- fault-barrier: metrics failure must not block rate limit enforcement
                 pass
 
             from mcp_hangar.domain.exceptions import RateLimitExceeded
@@ -187,6 +190,17 @@ class RateLimitMiddleware(CommandBusMiddleware):
                 limit=result.limit,
                 window_seconds=int(1.0 / result.limit) if result.limit else 1,
             )
+
+        # Update allowed metric
+        try:
+            from mcp_hangar import metrics as prometheus_metrics
+
+            prometheus_metrics.RATE_LIMIT_HITS_TOTAL.inc(result="allowed")
+            if hasattr(self._rate_limiter, "get_stats"):
+                stats = self._rate_limiter.get_stats()  # type: ignore[attr-defined]
+                prometheus_metrics.RATE_LIMIT_ACTIVE_BUCKETS.set(stats.get("active_buckets", 0))
+        except Exception:  # noqa: BLE001 -- fault-barrier: metrics failure must not block command dispatch
+            pass
 
         return next_handler(command)
 

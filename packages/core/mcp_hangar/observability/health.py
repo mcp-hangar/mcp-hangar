@@ -109,7 +109,7 @@ class HealthCheck:
                 message=f"Check timed out after {self.timeout_seconds}s",
                 duration_ms=duration_ms,
             )
-        except Exception as e:  # fault-barrier: health check must return result, not crash
+        except Exception as e:  # noqa: BLE001 -- fault-barrier: health check must return result, not crash
             duration_ms = (time.perf_counter() - start) * 1000
             status = HealthStatus.UNHEALTHY if self.critical else HealthStatus.DEGRADED
             return HealthCheckResult(

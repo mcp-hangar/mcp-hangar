@@ -207,7 +207,7 @@ class PostgresApiKeyStore(IApiKeyStore):
                     (key_hash,),
                 )
                 conn.commit()
-            except Exception as e:  # infra-boundary: non-critical last_used_at update
+            except Exception as e:  # noqa: BLE001 -- infra-boundary: non-critical last_used_at update
                 logger.warning("failed_to_update_last_used", error=str(e))
                 conn.rollback()
 
@@ -505,7 +505,7 @@ class PostgresApiKeyStore(IApiKeyStore):
 
                 return raw_key
 
-            except Exception as e:  # infra-boundary: rotate_key error propagated after logging
+            except Exception as e:  # noqa: BLE001 -- infra-boundary: rotate_key error propagated after logging
                 conn.rollback()
                 logger.error("api_key_rotation_failed", key_id=key_id, error=str(e))
                 raise

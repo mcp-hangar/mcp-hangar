@@ -200,7 +200,7 @@ class ProgressTracker:
         if self._callback:
             try:
                 self._callback(stage.value, message, elapsed)
-            except Exception as e:  # fault-barrier: progress callback must not crash provider operation
+            except Exception as e:  # noqa: BLE001 -- fault-barrier: progress callback must not crash provider operation
                 logger.debug("progress_callback_error", error=str(e))
 
         logger.debug(
@@ -243,7 +243,7 @@ class ProgressTracker:
         if self._callback:
             try:
                 self._callback(ProgressStage.COMPLETE.value, event.message, elapsed)
-            except Exception:  # fault-barrier: progress callback must not crash completion
+            except Exception:  # noqa: BLE001 -- fault-barrier: progress callback must not crash completion
                 pass
 
         logger.debug(

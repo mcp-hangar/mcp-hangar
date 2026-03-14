@@ -184,7 +184,7 @@ class AuditEventHandler:
 
         try:
             self._store.record(record)
-        except Exception as e:  # fault-barrier: audit store failure must not crash event handler
+        except Exception as e:  # noqa: BLE001 -- fault-barrier: audit store failure must not crash event handler
             logger.error(f"Failed to record audit event: {e}")
 
     @property

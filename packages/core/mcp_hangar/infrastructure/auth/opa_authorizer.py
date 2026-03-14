@@ -117,7 +117,7 @@ class OPAAuthorizer(IPolicyEngine):
             )
             return AuthorizationResult.deny(reason=f"opa_error:http_{e.response.status_code}")
 
-        except Exception as e:  # infra-boundary: fail-closed catch after specific httpx exceptions
+        except Exception as e:  # noqa: BLE001 -- infra-boundary: fail-closed catch after specific httpx exceptions
             logger.error("opa_evaluation_failed", url=url, error=str(e))
             return AuthorizationResult.deny(reason=f"opa_error:{type(e).__name__}")
 

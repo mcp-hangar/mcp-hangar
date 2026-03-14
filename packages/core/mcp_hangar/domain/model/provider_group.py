@@ -660,7 +660,7 @@ class ProviderGroup(AggregateRoot):
         for member_id, member in members_snapshot:
             try:
                 member.provider.shutdown()
-            except Exception as e:  # fault-barrier: shutdown of one member must not prevent others
+            except Exception as e:  # noqa: BLE001 -- fault-barrier: shutdown of one member must not prevent others
                 logger.warning(f"Failed to stop member {member_id}: {e}")
 
         # Phase 3: Update state under lock

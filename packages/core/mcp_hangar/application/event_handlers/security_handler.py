@@ -229,7 +229,7 @@ class CallbackSecuritySink(SecurityEventSink):
         """Call the callback with the event."""
         try:
             self._callback(event)
-        except Exception as e:  # fault-barrier: callback failure must not crash security handler
+        except Exception as e:  # noqa: BLE001 -- fault-barrier: callback failure must not crash security handler
             logger.error(f"Security callback failed: {e}")
 
 
@@ -244,7 +244,7 @@ class CompositeSecuritySink(SecurityEventSink):
         for sink in self._sinks:
             try:
                 sink.emit(event)
-            except Exception as e:  # fault-barrier: single sink failure must not prevent other sinks
+            except Exception as e:  # noqa: BLE001 -- fault-barrier: single sink failure must not prevent other sinks
                 logger.error(f"Security sink {type(sink).__name__} failed: {e}")
 
     def add_sink(self, sink: SecurityEventSink) -> None:
@@ -458,7 +458,7 @@ class SecurityEventHandler:
         """Emit a security event to the sink."""
         try:
             self._sink.emit(event)
-        except Exception as e:  # fault-barrier: security event emission failure must not crash handler
+        except Exception as e:  # noqa: BLE001 -- fault-barrier: security event emission failure must not crash handler
             logger.error(f"Failed to emit security event: {e}")
 
     # --- Public API for direct security event emission ---

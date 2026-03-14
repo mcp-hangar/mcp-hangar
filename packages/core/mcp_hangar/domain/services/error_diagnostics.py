@@ -126,7 +126,7 @@ def collect_startup_diagnostics(client: Any) -> dict[str, Any]:
         rc = proc.poll()
         if rc is not None:
             diagnostics["exit_code"] = rc
-    except Exception:  # fault-barrier: diagnostics collection must not mask original error
+    except Exception:  # noqa: BLE001 -- fault-barrier: diagnostics collection must not mask original error
         pass
 
     # Get stderr - prefer already captured by StdioClient
@@ -143,7 +143,7 @@ def collect_startup_diagnostics(client: Any) -> dict[str, Any]:
                     err_text = (err_bytes if isinstance(err_bytes, str) else err_bytes.decode(errors="replace")).strip()
                     if err_text:
                         diagnostics["stderr"] = err_text
-            except Exception:  # fault-barrier: diagnostics collection must not mask original error
+            except Exception:  # noqa: BLE001 -- fault-barrier: diagnostics collection must not mask original error
                 pass
 
     # Generate suggestion based on error patterns

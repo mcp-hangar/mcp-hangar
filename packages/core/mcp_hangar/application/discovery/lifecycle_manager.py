@@ -100,7 +100,7 @@ class DiscoveryLifecycleManager:
                 await asyncio.sleep(self.check_interval)
             except asyncio.CancelledError:
                 break
-            except Exception as e:  # fault-barrier: lifecycle check error must not crash background loop
+            except Exception as e:  # noqa: BLE001 -- fault-barrier: lifecycle check error must not crash background loop
                 logger.error(f"Error in lifecycle loop: {e}")
                 await asyncio.sleep(self.check_interval)
 
@@ -141,7 +141,7 @@ class DiscoveryLifecycleManager:
             # Callback to main registry
             if self.on_deregister:
                 await self.on_deregister(name, reason)
-        except Exception as e:  # fault-barrier: deregister callback failure must not crash lifecycle
+        except Exception as e:  # noqa: BLE001 -- fault-barrier: deregister callback failure must not crash lifecycle
             logger.error(f"Error deregistering provider {name}: {e}")
         finally:
             self._draining.discard(name)

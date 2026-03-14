@@ -151,7 +151,7 @@ def setup_logging(
             )
             file_handler.setFormatter(file_formatter)
             root_logger.addHandler(file_handler)
-        except Exception as e:  # fault-barrier: file logging setup failure must not crash application
+        except Exception as e:  # noqa: BLE001 -- fault-barrier: file logging setup failure must not crash application
             root_logger.warning(f"Could not setup file logging: {e}")
 
     # Silence noisy third-party loggers or ensure they use structlog

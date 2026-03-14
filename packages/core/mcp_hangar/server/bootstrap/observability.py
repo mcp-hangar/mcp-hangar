@@ -169,7 +169,7 @@ def init_tracing(config: TracingConfig) -> bool:
             hint="Install with: pip install opentelemetry-api opentelemetry-sdk opentelemetry-exporter-otlp",
         )
         return False
-    except Exception as e:  # fault-barrier: tracing init failure must not crash application
+    except Exception as e:  # noqa: BLE001 -- fault-barrier: tracing init failure must not crash application
         logger.warning("tracing_initialization_failed", error=str(e))
         return False
 
@@ -225,7 +225,7 @@ def init_langfuse(config: LangfuseBootstrapConfig) -> ObservabilityPort:
     except ValueError as e:
         logger.warning("langfuse_config_invalid", error=str(e))
         return NullObservabilityAdapter()
-    except Exception as e:  # fault-barrier: langfuse init failure must not crash application
+    except Exception as e:  # noqa: BLE001 -- fault-barrier: langfuse init failure must not crash application
         logger.warning("langfuse_initialization_failed", error=str(e))
         return NullObservabilityAdapter()
 
@@ -268,7 +268,7 @@ def shutdown_observability(adapter: ObservabilityPort | None) -> None:
         try:
             adapter.shutdown()
             logger.debug("langfuse_shutdown_complete")
-        except Exception as e:  # fault-barrier: langfuse shutdown must not crash application
+        except Exception as e:  # noqa: BLE001 -- fault-barrier: langfuse shutdown must not crash application
             logger.warning("langfuse_shutdown_error", error=str(e))
 
     # Shutdown OpenTelemetry tracing
@@ -279,5 +279,5 @@ def shutdown_observability(adapter: ObservabilityPort | None) -> None:
         logger.debug("tracing_shutdown_complete")
     except ImportError:
         pass
-    except Exception as e:  # fault-barrier: tracing shutdown must not crash application
+    except Exception as e:  # noqa: BLE001 -- fault-barrier: tracing shutdown must not crash application
         logger.warning("tracing_shutdown_error", error=str(e))

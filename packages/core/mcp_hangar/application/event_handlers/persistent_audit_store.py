@@ -50,7 +50,7 @@ class PersistentAuditStore(AuditStore):
         """Async record method."""
         try:
             await self._repo.append(entry)
-        except Exception as e:  # fault-barrier: persistence failure must not crash audit pipeline
+        except Exception as e:  # noqa: BLE001 -- fault-barrier: persistence failure must not crash audit pipeline
             logger.error(f"Failed to persist audit entry: {e}")
 
     def query(
@@ -105,7 +105,7 @@ class PersistentAuditStore(AuditStore):
                 entries = asyncio.run(coro)
                 return [self._entry_to_record(e) for e in entries]
 
-        except Exception as e:  # fault-barrier: query failure returns empty list, not crash
+        except Exception as e:  # noqa: BLE001 -- fault-barrier: query failure returns empty list, not crash
             logger.error(f"Failed to query audit records: {e}")
             return []
 

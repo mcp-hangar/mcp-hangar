@@ -146,7 +146,7 @@ def _restore_group_circuit_breakers(
                 state=cb.state.value,
                 failure_count=cb.failure_count,
             )
-        except Exception as e:  # fault-barrier: CB restore failure must not prevent bootstrap
+        except Exception as e:  # noqa: BLE001 -- fault-barrier: CB restore failure must not prevent bootstrap
             logger.warning(
                 "circuit_breaker_restore_failed",
                 group_id=group_id,
@@ -177,7 +177,7 @@ def save_group_circuit_breakers(
                 last_event_position=0,
             )
             logger.debug("circuit_breaker_saved", group_id=group_id)
-        except Exception as e:  # fault-barrier: CB save failure must not prevent shutdown
+        except Exception as e:  # noqa: BLE001 -- fault-barrier: CB save failure must not prevent shutdown
             logger.warning(
                 "circuit_breaker_save_failed",
                 group_id=group_id,

@@ -147,7 +147,7 @@ class SQLiteApiKeyStore(IApiKeyStore):
             if "grace_until" not in columns:
                 conn.execute("ALTER TABLE api_keys ADD COLUMN grace_until TEXT")
                 logger.info("sqlite_migration_added_column", column="grace_until")
-        except Exception as e:  # infra-boundary: migration check failure is non-fatal
+        except Exception as e:  # noqa: BLE001 -- infra-boundary: migration check failure is non-fatal
             logger.warning("sqlite_migration_check_failed", error=str(e))
 
         conn.commit()
@@ -220,7 +220,7 @@ class SQLiteApiKeyStore(IApiKeyStore):
                 (datetime.now(UTC).isoformat(), key_hash),
             )
             conn.commit()
-        except Exception as e:  # infra-boundary: non-critical last_used_at update
+        except Exception as e:  # noqa: BLE001 -- infra-boundary: non-critical last_used_at update
             logger.warning("failed_to_update_last_used", error=str(e))
 
         # Parse groups from JSON
@@ -511,7 +511,7 @@ class SQLiteApiKeyStore(IApiKeyStore):
 
             return raw_key
 
-        except Exception as e:  # infra-boundary: rotate_key error propagated after logging
+        except Exception as e:  # noqa: BLE001 -- infra-boundary: rotate_key error propagated after logging
             conn.rollback()
             logger.error("api_key_rotation_failed", key_id=key_id, error=str(e))
             raise
@@ -521,7 +521,7 @@ class SQLiteApiKeyStore(IApiKeyStore):
         if hasattr(self._local, "connection") and self._local.connection:
             try:
                 self._local.connection.commit()  # Ensure any pending changes
-            except Exception:  # infra-boundary: best-effort commit during close
+            except Exception:  # noqa: BLE001 -- infra-boundary: best-effort commit during close
                 pass
             self._local.connection.close()
             self._local.connection = None
@@ -776,7 +776,7 @@ class SQLiteRoleStore(IRoleStore):
                 self._local.connection.commit()  # Ensure any pending changes
                 # Checkpoint WAL to make data visible to new connections
                 self._local.connection.execute("PRAGMA wal_checkpoint(TRUNCATE)")
-            except Exception:  # infra-boundary: best-effort commit/checkpoint during close
+            except Exception:  # noqa: BLE001 -- infra-boundary: best-effort commit/checkpoint during close
                 pass
             self._local.connection.close()
             self._local.connection = None

@@ -528,7 +528,7 @@ class Provider(AggregateRoot):
                 self._start_error = e
                 self._ready_event.set()  # Wake waiters: failure
             raise
-        except Exception as e:  # fault-barrier: wrap unexpected startup errors in ProviderStartError for callers
+        except Exception as e:  # noqa: BLE001 -- fault-barrier: wrap unexpected startup errors in ProviderStartError for callers
             # Collect diagnostics from client if available
             diagnostics = self._collect_startup_diagnostics(client) if client else {}
 
@@ -552,7 +552,7 @@ class Provider(AggregateRoot):
         try:
             self._metrics_publisher.begin_cold_start(self.provider_id)
             return time.time()
-        except Exception:  # fault-barrier: metrics must not crash provider startup
+        except Exception:  # noqa: BLE001 -- fault-barrier: metrics must not crash provider startup
             return None
 
     def _end_cold_start_tracking(self, start_time: float | None, success: bool) -> None:
@@ -564,7 +564,7 @@ class Provider(AggregateRoot):
                 duration = time.time() - start_time
                 self._metrics_publisher.record_cold_start(self.provider_id, duration, self._mode.value)
             self._metrics_publisher.end_cold_start(self.provider_id)
-        except Exception:  # fault-barrier: metrics must not crash provider startup
+        except Exception:  # noqa: BLE001 -- fault-barrier: metrics must not crash provider startup
             pass
 
     def _create_client(self) -> Any:
@@ -698,7 +698,7 @@ class Provider(AggregateRoot):
             rc = proc.poll()
             if rc is not None:
                 logger.error(f"provider_process_exit_code: {rc}")
-        except Exception:  # fault-barrier: diagnostics logging must not mask startup errors
+        except Exception:  # noqa: BLE001 -- fault-barrier: diagnostics logging must not mask startup errors
             pass
 
         # Try to capture stderr (may already be captured by StdioClient)
@@ -716,7 +716,7 @@ class Provider(AggregateRoot):
                     err_text = (err_bytes if isinstance(err_bytes, str) else err_bytes.decode(errors="replace")).strip()
                     if err_text:
                         logger.error(f"provider_stderr: {err_text}")
-            except Exception:  # fault-barrier: diagnostics logging must not mask startup errors
+            except Exception:  # noqa: BLE001 -- fault-barrier: diagnostics logging must not mask startup errors
                 pass
 
     def _collect_startup_diagnostics(self, client: Any) -> dict[str, Any]:
@@ -756,7 +756,7 @@ class Provider(AggregateRoot):
         if self._client:
             try:
                 self._client.close()
-            except Exception:  # fault-barrier: cleanup must not mask original startup error
+            except Exception:  # noqa: BLE001 -- fault-barrier: cleanup must not mask original startup error
                 pass
             self._client = None
 
@@ -1098,7 +1098,7 @@ class Provider(AggregateRoot):
         if self._client:
             try:
                 self._client.close()
-            except Exception as e:  # fault-barrier: shutdown cleanup must not propagate
+            except Exception as e:  # noqa: BLE001 -- fault-barrier: shutdown cleanup must not propagate
                 logger.warning(f"shutdown_error: {self.provider_id}, error={e}")
             self._client = None
 

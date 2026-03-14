@@ -82,7 +82,7 @@ class BackgroundWorker:
         for event in provider.collect_events():
             try:
                 self._event_bus.publish(event)
-            except Exception:  # fault-barrier: event publishing must not crash background worker
+            except Exception:  # noqa: BLE001 -- fault-barrier: event publishing must not crash background worker
                 logger.exception("event_publish_failed")
 
     def _loop(self):
@@ -154,7 +154,7 @@ class BackgroundWorker:
                     # Publish any collected events
                     self._publish_events(provider)
 
-                except Exception as e:  # fault-barrier: single provider failure must not crash background worker loop
+                except Exception as e:  # noqa: BLE001 -- fault-barrier: single provider failure must not crash background worker loop
                     record_error("gc", type(e).__name__)
                     logger.exception(
                         "background_task_failed",
@@ -305,7 +305,7 @@ class ConfigReloadWorker:
             self._observer.schedule(handler, str(watch_dir), recursive=False)
             self._observer.start()
             logger.info("config_file_watcher_started", watch_dir=str(watch_dir))
-        except Exception as e:  # fault-barrier: watchdog init failure must not crash config reload worker
+        except Exception as e:  # noqa: BLE001 -- fault-barrier: watchdog init failure must not crash config reload worker
             logger.error(
                 "watchdog_start_failed_falling_back_to_polling",
                 error=str(e),
@@ -339,7 +339,7 @@ class ConfigReloadWorker:
                     self._last_mtime = current_mtime
                     self._trigger_reload()
 
-            except Exception as e:  # fault-barrier: polling error must not crash config reload worker
+            except Exception as e:  # noqa: BLE001 -- fault-barrier: polling error must not crash config reload worker
                 logger.error("config_polling_error", error=str(e))
 
     def _trigger_reload(self):
@@ -357,7 +357,7 @@ class ConfigReloadWorker:
             result = self.command_bus.send(command)
             logger.info("config_reload_triggered", result=result)
 
-        except Exception as e:  # fault-barrier: reload trigger failure must not crash worker
+        except Exception as e:  # noqa: BLE001 -- fault-barrier: reload trigger failure must not crash worker
             logger.error(
                 "config_reload_trigger_failed",
                 error=str(e),

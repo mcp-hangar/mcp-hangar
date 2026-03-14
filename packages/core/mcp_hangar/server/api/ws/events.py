@@ -46,7 +46,7 @@ async def ws_events_endpoint(websocket: WebSocket) -> None:
     try:
         filter_msg = await asyncio.wait_for(websocket.receive_json(), timeout=_FILTER_TIMEOUT_S)
         filters = parse_subscription_filters(filter_msg)
-    except (TimeoutError, Exception):
+    except (TimeoutError, Exception):  # noqa: BLE001
         filters = {}
 
     # Per-connection async queue and event loop capture for thread-safe delivery.

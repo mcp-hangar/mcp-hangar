@@ -50,7 +50,7 @@ def create_discovery_orchestrator(config: dict[str, Any]) -> DiscoveryOrchestrat
                 source_type=source_type,
                 error=str(e),
             )
-        except Exception as e:  # fault-barrier: discovery source init failure must not crash bootstrap
+        except Exception as e:  # noqa: BLE001 -- fault-barrier: discovery source init failure must not crash bootstrap
             logger.error(
                 "discovery_source_error",
                 source_type=source_type,
@@ -205,7 +205,7 @@ async def _on_provider_register(provider) -> bool:
             mode=provider_mode,
         )
         return True
-    except Exception as e:  # fault-barrier: registration failure must not crash discovery cycle
+    except Exception as e:  # noqa: BLE001 -- fault-barrier: registration failure must not crash discovery cycle
         logger.error(
             "discovery_registration_failed",
             provider_name=provider.name,
@@ -232,7 +232,7 @@ async def _on_provider_deregister(name: str, reason: str):
                 provider_name=name,
                 reason=reason,
             )
-    except Exception as e:  # fault-barrier: deregistration failure must not crash discovery cycle
+    except Exception as e:  # noqa: BLE001 -- fault-barrier: deregistration failure must not crash discovery cycle
         logger.error(
             "discovery_deregistration_failed",
             provider_name=name,

@@ -34,7 +34,7 @@ async def get_system_info(request: Request) -> HangarJSONResponse:
         import mcp_hangar
 
         version = mcp_hangar.__version__
-    except Exception:
+    except (ImportError, AttributeError):
         version = "0.0.0.dev"
 
     uptime_seconds = time.time() - _START_TIME

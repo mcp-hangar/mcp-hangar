@@ -149,7 +149,7 @@ class EventBus:
         for handler in handlers:
             try:
                 handler(event)
-            except Exception as e:  # fault-barrier: handler errors must not break other handlers
+            except Exception as e:  # noqa: BLE001 -- fault-barrier: handler errors must not break other handlers
                 logger.exception(
                     "event_handler_error",
                     event_type=event.__class__.__name__,
@@ -159,7 +159,7 @@ class EventBus:
                 for error_handler in self._error_handlers:
                     try:
                         error_handler(e, event)
-                    except Exception as eh:  # fault-barrier: error_handler failure must not break event publishing
+                    except Exception as eh:  # noqa: BLE001 -- fault-barrier: error_handler failure must not break event publishing
                         logger.exception(
                             "event_error_handler_failed",
                             event_type=event.__class__.__name__,

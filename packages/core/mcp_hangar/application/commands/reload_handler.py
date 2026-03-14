@@ -126,7 +126,7 @@ class ReloadConfigurationHandler(CommandHandler):
                             provider_id=provider_id,
                             graceful=command.graceful,
                         )
-                    except Exception as e:  # fault-barrier: stop failure must not prevent reload of other providers
+                    except Exception as e:  # noqa: BLE001 -- fault-barrier: stop failure must not prevent reload of other providers
                         logger.warning(
                             "provider_stop_failed_during_reload",
                             provider_id=provider_id,
@@ -198,7 +198,7 @@ class ReloadConfigurationHandler(CommandHandler):
                 "duration_ms": duration_ms,
             }
 
-        except Exception as e:  # fault-barrier: wrap reload errors in ConfigurationError for callers
+        except Exception as e:  # noqa: BLE001 -- fault-barrier: wrap reload errors in ConfigurationError for callers
             duration_ms = (time.perf_counter() - start_time) * 1000
 
             # Publish failure event

@@ -81,7 +81,7 @@ line-length = 120
 target-version = "py311"
 
 [tool.ruff.lint]
-select = ["E", "F", "N", "W", "UP", "B", "C4", "SIM"]
+select = ["E", "F", "N", "W", "UP", "B", "BLE001", "C4", "SIM"]
 ignore = [
     "B007",   # Loop control variable not used - often intentional
     "B011",   # assert False - acceptable in tests

@@ -37,7 +37,7 @@ def check_rate_limit(key: str = "global") -> None:
     result = ctx.rate_limiter.consume(key)
     if not result.allowed:
         # Update Prometheus metrics
-        prometheus_metrics.RATE_LIMIT_HITS_TOTAL.inc(endpoint=key)
+        prometheus_metrics.RATE_LIMIT_HITS_TOTAL.inc(result="rejected")
 
         ctx.security_handler.log_rate_limit_exceeded(
             limit=result.limit,

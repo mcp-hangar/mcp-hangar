@@ -264,7 +264,7 @@ class DiscoveryService:
                 # Update tracked providers for this source
                 self._providers_by_source[source_type] = current_names
 
-            except Exception as e:  # fault-barrier: single source failure must not crash discovery cycle
+            except Exception as e:  # noqa: BLE001 -- fault-barrier: single source failure must not crash discovery cycle
                 logger.error(f"Discovery failed for source {source_type}: {e}")
                 result.error_count += 1
                 result.source_results[source_type] = 0
@@ -314,7 +314,7 @@ class DiscoveryService:
                 is_healthy = await source.health_check()
                 self._source_status[source_type].is_healthy = is_healthy
                 self._source_status[source_type].is_enabled = source.is_enabled
-            except Exception as e:  # fault-barrier: health check failure must not crash status query
+            except Exception as e:  # noqa: BLE001 -- fault-barrier: health check failure must not crash status query
                 self._source_status[source_type].is_healthy = False
                 self._source_status[source_type].error_message = str(e)
 
@@ -399,7 +399,7 @@ class DiscoveryService:
         for source in self._sources.values():
             try:
                 await source.start()
-            except Exception as e:  # fault-barrier: single source start failure must not prevent others
+            except Exception as e:  # noqa: BLE001 -- fault-barrier: single source start failure must not prevent others
                 logger.error(f"Failed to start source {source.source_type}: {e}")
 
     async def stop(self) -> None:
@@ -407,5 +407,5 @@ class DiscoveryService:
         for source in self._sources.values():
             try:
                 await source.stop()
-            except Exception as e:  # fault-barrier: single source stop failure must not prevent others
+            except Exception as e:  # noqa: BLE001 -- fault-barrier: single source stop failure must not prevent others
                 logger.error(f"Failed to stop source {source.source_type}: {e}")

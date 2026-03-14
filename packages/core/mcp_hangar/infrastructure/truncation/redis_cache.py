@@ -99,7 +99,7 @@ class RedisResponseCache(IResponseCache):
                 size_bytes=len(serialized),
                 ttl_s=ttl_s,
             )
-        except Exception as e:  # infra-boundary: graceful degradation on Redis failure
+        except Exception as e:  # noqa: BLE001 -- infra-boundary: graceful degradation on Redis failure
             logger.error(
                 "redis_cache_store_failed",
                 continuation_id=continuation_id,
@@ -126,7 +126,7 @@ class RedisResponseCache(IResponseCache):
 
         try:
             serialized = self._client.get(key)
-        except Exception as e:  # infra-boundary: graceful degradation on Redis failure
+        except Exception as e:  # noqa: BLE001 -- infra-boundary: graceful degradation on Redis failure
             logger.error(
                 "redis_cache_retrieve_failed",
                 continuation_id=continuation_id,
@@ -196,7 +196,7 @@ class RedisResponseCache(IResponseCache):
             if deleted:
                 logger.debug("redis_cache_entry_deleted", continuation_id=continuation_id)
             return deleted > 0
-        except Exception as e:  # infra-boundary: graceful degradation on Redis failure
+        except Exception as e:  # noqa: BLE001 -- infra-boundary: graceful degradation on Redis failure
             logger.error(
                 "redis_cache_delete_failed",
                 continuation_id=continuation_id,
@@ -235,7 +235,7 @@ class RedisResponseCache(IResponseCache):
                 )
                 count += len(keys)
             return count
-        except Exception as e:  # infra-boundary: graceful degradation on Redis failure
+        except Exception as e:  # noqa: BLE001 -- infra-boundary: graceful degradation on Redis failure
             logger.error("redis_cache_size_failed", error=str(e))
             return 0
 
@@ -263,7 +263,7 @@ class RedisResponseCache(IResponseCache):
 
             logger.info("redis_cache_cleared", count=total_deleted)
             return total_deleted
-        except Exception as e:  # infra-boundary: graceful degradation on Redis failure
+        except Exception as e:  # noqa: BLE001 -- infra-boundary: graceful degradation on Redis failure
             logger.error("redis_cache_clear_failed", error=str(e))
             return 0
 
@@ -275,5 +275,5 @@ class RedisResponseCache(IResponseCache):
         """
         try:
             return self._client.ping()
-        except Exception:  # infra-boundary: graceful degradation on Redis failure
+        except Exception:  # noqa: BLE001 -- infra-boundary: graceful degradation on Redis failure
             return False

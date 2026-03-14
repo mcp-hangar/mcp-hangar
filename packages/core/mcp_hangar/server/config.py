@@ -311,7 +311,7 @@ def _load_provider_config(provider_id: str, spec_dict: dict[str, Any]) -> Provid
         try:
             cm = get_concurrency_manager()
             cm.set_provider_limit(provider_id, int(provider_max_concurrency))
-        except Exception as e:  # fault-barrier: concurrency config failure must not crash provider setup
+        except Exception as e:  # noqa: BLE001 -- fault-barrier: concurrency config failure must not crash provider setup
             logger.warning(
                 "provider_concurrency_limit_failed",
                 provider_id=provider_id,

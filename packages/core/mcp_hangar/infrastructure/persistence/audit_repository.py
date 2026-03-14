@@ -142,7 +142,7 @@ class SQLiteAuditRepository:
 
             logger.debug(f"Audit: {entry.action.value} on {entry.entity_type}/{entry.entity_id} by {entry.actor}")
 
-        except Exception as e:  # infra-boundary: re-raises as PersistenceError
+        except Exception as e:  # noqa: BLE001 -- infra-boundary: re-raises as PersistenceError
             logger.error(f"Failed to append audit entry: {e}")
             raise PersistenceError(f"Failed to append audit entry: {e}") from e
 
@@ -194,7 +194,7 @@ class SQLiteAuditRepository:
                 rows = await cursor.fetchall()
                 return [self._row_to_entry(row) for row in rows]
 
-        except Exception as e:  # infra-boundary: re-raises as PersistenceError
+        except Exception as e:  # noqa: BLE001 -- infra-boundary: re-raises as PersistenceError
             logger.error(f"Failed to get audit entries by entity: {e}")
             raise PersistenceError(f"Failed to get audit entries by entity: {e}") from e
 
@@ -243,7 +243,7 @@ class SQLiteAuditRepository:
                 rows = await cursor.fetchall()
                 return [self._row_to_entry(row) for row in rows]
 
-        except Exception as e:  # infra-boundary: re-raises as PersistenceError
+        except Exception as e:  # noqa: BLE001 -- infra-boundary: re-raises as PersistenceError
             logger.error(f"Failed to get audit entries by time range: {e}")
             raise PersistenceError(f"Failed to get audit entries by time range: {e}") from e
 
@@ -272,7 +272,7 @@ class SQLiteAuditRepository:
                 rows = await cursor.fetchall()
                 return [self._row_to_entry(row) for row in rows]
 
-        except Exception as e:  # infra-boundary: re-raises as PersistenceError
+        except Exception as e:  # noqa: BLE001 -- infra-boundary: re-raises as PersistenceError
             logger.error(f"Failed to get audit entries by correlation: {e}")
             raise PersistenceError(f"Failed to get audit entries by correlation: {e}") from e
 
@@ -305,7 +305,7 @@ class SQLiteAuditRepository:
                 row = await cursor.fetchone()
                 return row[0] if row else 0
 
-        except Exception as e:  # infra-boundary: re-raises as PersistenceError
+        except Exception as e:  # noqa: BLE001 -- infra-boundary: re-raises as PersistenceError
             logger.error(f"Failed to count audit entries: {e}")
             raise PersistenceError(f"Failed to count audit entries: {e}") from e
 
@@ -344,7 +344,7 @@ class SQLiteAuditRepository:
                 rows = await cursor.fetchall()
                 return [self._row_to_entry(row) for row in rows]
 
-        except Exception as e:  # infra-boundary: re-raises as PersistenceError
+        except Exception as e:  # noqa: BLE001 -- infra-boundary: re-raises as PersistenceError
             logger.error(f"Failed to get recent actions: {e}")
             raise PersistenceError(f"Failed to get recent actions: {e}") from e
 

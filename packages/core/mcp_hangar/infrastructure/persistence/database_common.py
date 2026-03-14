@@ -131,7 +131,7 @@ class SQLiteConnectionFactory:
         if self._persistent_conn:
             try:
                 self._persistent_conn.commit()
-            except Exception:  # infra-boundary: best-effort cleanup on close
+            except Exception:  # noqa: BLE001 -- infra-boundary: best-effort cleanup on close
                 pass
             self._persistent_conn.close()
             self._persistent_conn = None
@@ -140,7 +140,7 @@ class SQLiteConnectionFactory:
             try:
                 self._local.connection.commit()
                 self._local.connection.execute("PRAGMA wal_checkpoint(TRUNCATE)")
-            except Exception:  # infra-boundary: best-effort cleanup on close
+            except Exception:  # noqa: BLE001 -- infra-boundary: best-effort cleanup on close
                 pass
             self._local.connection.close()
             self._local.connection = None

@@ -50,7 +50,7 @@ async def ws_state_endpoint(websocket: WebSocket) -> None:
         )
         raw_interval = float(msg.get("interval", _DEFAULT_INTERVAL_S))
         interval = max(_MIN_INTERVAL_S, min(_MAX_INTERVAL_S, raw_interval))
-    except (TimeoutError, Exception):
+    except (TimeoutError, Exception):  # noqa: BLE001
         interval = _DEFAULT_INTERVAL_S
 
     logger.info("ws_state_connected", interval=interval)

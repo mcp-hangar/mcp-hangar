@@ -654,8 +654,14 @@ ERRORS_TOTAL = Counter(
 
 RATE_LIMIT_HITS_TOTAL = Counter(
     name="mcp_hangar_rate_limit_hits",
-    description="Total number of requests that hit rate limits",
-    labels=["endpoint"],
+    description="Total number of rate limit decisions by result (allowed or rejected)",
+    labels=["result"],  # result: allowed, rejected
+)
+
+RATE_LIMIT_ACTIVE_BUCKETS = Gauge(
+    name="mcp_hangar_rate_limit_active_buckets",
+    description="Number of active rate limit token buckets",
+    labels=[],
 )
 
 # -----------------------------------------------------------------------------
@@ -914,6 +920,7 @@ def _register_all_metrics():
         GC_PROVIDERS_COLLECTED_TOTAL,
         ERRORS_TOTAL,
         RATE_LIMIT_HITS_TOTAL,
+        RATE_LIMIT_ACTIVE_BUCKETS,
         # Discovery metrics
         DISCOVERY_SOURCES_TOTAL,
         DISCOVERY_SOURCES_HEALTHY,

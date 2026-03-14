@@ -287,7 +287,7 @@ async def retry_async(
                 total_time_s=total_time,
             )
 
-        except Exception as e:  # fault-barrier: retry framework must catch all errors to manage retry logic
+        except Exception as e:  # noqa: BLE001 -- fault-barrier: retry framework must catch all errors to manage retry logic
             last_error = e
             error_type = type(e).__name__
 
@@ -328,7 +328,7 @@ async def retry_async(
                 if on_retry:
                     try:
                         on_retry(attempt + 1, e, delay)
-                    except Exception:  # fault-barrier: retry callback must not break retry loop
+                    except Exception:  # noqa: BLE001 -- fault-barrier: retry callback must not break retry loop
                         pass  # Ignore callback errors
 
                 # Wait before retry
@@ -403,7 +403,7 @@ def retry_sync(
                 total_time_s=total_time,
             )
 
-        except Exception as e:  # fault-barrier: retry framework must catch all errors to manage retry logic
+        except Exception as e:  # noqa: BLE001 -- fault-barrier: retry framework must catch all errors to manage retry logic
             last_error = e
             error_type = type(e).__name__
 

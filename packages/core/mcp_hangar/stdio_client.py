@@ -103,7 +103,7 @@ class StdioClient:
                     # Unsolicited notification - log and ignore
                     logger.debug("stdio_client_notification", message=msg)
 
-            except Exception as e:  # fault-barrier: reader loop must not crash silently
+            except Exception as e:  # noqa: BLE001 -- fault-barrier: reader loop must not crash silently
                 logger.error("stdio_client_reader_error", error=str(e))
                 break
 
@@ -135,9 +135,9 @@ class StdioClient:
                                 err_text = err_text[:2000] + "... (truncated)"
                             logger.error("stdio_client_process_stderr", stderr=err_text)
                             stderr_text = err_text
-                except Exception as read_err:  # fault-barrier: stderr capture must not crash diagnostics
+                except Exception as read_err:  # noqa: BLE001 -- fault-barrier: stderr capture must not crash diagnostics
                     logger.debug("stdio_client_stderr_read_failed", error=str(read_err))
-        except Exception as e:  # fault-barrier: process diagnostics must not propagate
+        except Exception as e:  # noqa: BLE001 -- fault-barrier: process diagnostics must not propagate
             logger.debug("stdio_client_capture_error", error=str(e))
         return stderr_text
 
@@ -206,7 +206,7 @@ class StdioClient:
             self.process.stdin.write(request_str)
             self.process.stdin.flush()
             logger.debug("stdio_client_request_sent")
-        except Exception as e:  # infra-boundary: write failure wrapped as ClientError
+        except Exception as e:  # noqa: BLE001 -- infra-boundary: write failure wrapped as ClientError
             logger.error("stdio_client_write_failed", error=str(e))
             with self.pending_lock:
                 self.pending.pop(request_id, None)
@@ -237,7 +237,7 @@ class StdioClient:
         # Try graceful shutdown via RPC
         try:
             self.call("shutdown", {}, timeout=3.0)
-        except Exception as e:  # fault-barrier: shutdown RPC failure is expected
+        except Exception as e:  # noqa: BLE001 -- fault-barrier: shutdown RPC failure is expected
             logger.debug("stdio_client_shutdown_rpc_failed", error=str(e))
 
         # Terminate process
@@ -250,7 +250,7 @@ class StdioClient:
                     logger.warning("stdio_client_process_terminate_timeout")
                     self.process.kill()
                     self.process.wait()
-        except Exception as e:  # fault-barrier: cleanup must not crash close
+        except Exception as e:  # noqa: BLE001 -- fault-barrier: cleanup must not crash close
             logger.error("stdio_client_cleanup_error", error=str(e))
 
         # Clean up any remaining pending requests

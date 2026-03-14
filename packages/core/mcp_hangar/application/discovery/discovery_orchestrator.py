@@ -229,7 +229,7 @@ class DiscoveryOrchestrator:
                     await self.run_discovery_cycle()
             except asyncio.CancelledError:
                 break
-            except Exception as e:  # fault-barrier: discovery loop error must not crash background task
+            except Exception as e:  # noqa: BLE001 -- fault-barrier: discovery loop error must not crash background task
                 logger.error(f"Error in discovery loop: {e}")
                 self._metrics.inc_errors(source="orchestrator", error_type=type(e).__name__)
 
@@ -266,7 +266,7 @@ class DiscoveryOrchestrator:
             result.deregistered_count = cycle_result.deregistered_count
             result.error_count = cycle_result.error_count
 
-        except Exception as e:  # fault-barrier: cycle failure must not crash orchestrator
+        except Exception as e:  # noqa: BLE001 -- fault-barrier: cycle failure must not crash orchestrator
             logger.error(f"Discovery cycle failed: {e}")
             result.error_count += 1
             self._metrics.inc_errors(source="orchestrator", error_type=type(e).__name__)
@@ -364,7 +364,7 @@ class DiscoveryOrchestrator:
                 if not success:
                     logger.warning(f"Control plane rejected provider: {provider.name}")
                     return "skipped"
-            except Exception as e:  # fault-barrier: registration callback failure must not crash discovery
+            except Exception as e:  # noqa: BLE001 -- fault-barrier: registration callback failure must not crash discovery
                 logger.error(f"Error registering provider {provider.name}: {e}")
                 return "skipped"
 
@@ -395,7 +395,7 @@ class DiscoveryOrchestrator:
         if self.on_deregister:
             try:
                 await self.on_deregister(name, reason)
-            except Exception as e:  # fault-barrier: deregister callback failure must not crash lifecycle
+            except Exception as e:  # noqa: BLE001 -- fault-barrier: deregister callback failure must not crash lifecycle
                 logger.error(f"Error in deregister callback for {name}: {e}")
 
     # Public API for tools
@@ -449,7 +449,7 @@ class DiscoveryOrchestrator:
             if self.on_register:
                 try:
                     await self.on_register(provider)
-                except Exception as e:  # fault-barrier: registration callback failure must not crash approval
+                except Exception as e:  # noqa: BLE001 -- fault-barrier: registration callback failure must not crash approval
                     logger.error(f"Error registering approved provider {name}: {e}")
                     return {"approved": False, "provider": name, "error": str(e)}
 
