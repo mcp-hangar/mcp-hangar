@@ -21,7 +21,7 @@ Requirements for v2.0 Management UI. The goal is a browser-based management inte
 - [x] **REST-04**: REST API endpoints exist for authentication management (create/revoke API keys, create/list roles, assign/revoke role assignments) wrapping existing auth CQRS handlers
 - [ ] **REST-05**: REST API endpoints exist for configuration (get current config, trigger hot reload) and system info (build info, uptime, provider counts)
 - [ ] **REST-06**: REST API endpoints exist for discovery management (list sources with health, list pending providers, list quarantined providers, approve/reject discovered providers)
-- [ ] **REST-07**: REST API endpoints exist for observability data (metrics as JSON, audit log with entity/time filters, security events, alert history)
+- [x] **REST-07**: REST API endpoints exist for observability data (metrics as JSON, audit log with entity/time filters, security events, alert history)
 - [x] **REST-08**: All REST handlers use `starlette.concurrency.run_in_threadpool()` for CQRS dispatch -- no sync operations block the ASGI event loop
 - [x] **REST-09**: REST API is mounted under `/api/` prefix on the existing ASGI application alongside existing routes (`/health`, `/ready`, `/metrics`, `/mcp`), with no disruption to existing endpoints
 - [x] **REST-10**: REST error responses use a consistent JSON envelope (`{"error": {"code": ..., "message": ..., "details": ...}}`) mapping domain exceptions to appropriate HTTP status codes
@@ -126,7 +126,7 @@ Which phases cover which requirements. Updated during roadmap creation.
 | REST-04 | Phase 11 | Complete |
 | REST-05 | Phase 11 | Pending |
 | REST-06 | Phase 11 | Pending |
-| REST-07 | Phase 11 | Pending |
+| REST-07 | Phase 11 | Complete |
 | REST-08 | Phase 11 | Complete |
 | REST-09 | Phase 11 | Complete |
 | REST-10 | Phase 11 | Complete |

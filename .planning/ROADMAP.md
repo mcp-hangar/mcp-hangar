@@ -133,9 +133,9 @@ Plans:
 
 - [x] 11-01-PLAN.md -- API foundation + provider endpoints (REST-01, REST-03, REST-08, REST-09, REST-10, INTG-01) -- completed 2026-03-14
 - [x] 11-02-PLAN.md -- Groups, discovery, config, and system endpoints (REST-02, REST-04, REST-05, REST-06, REST-07) -- completed 2026-03-14
-- [ ] 11-03-PLAN.md -- Tool invocation history endpoint + groups.py thread-safety fix (REST-03 gap)
-- [ ] 11-04-PLAN.md -- Auth management endpoints: API keys and roles (REST-04 gap)
-- [ ] 11-05-PLAN.md -- Observability endpoints: metrics, audit, security, alerts (REST-07 gap)
+- [x] 11-03-PLAN.md -- Tool invocation history endpoint + groups.py thread-safety fix (REST-03 gap) -- completed 2026-03-14
+- [x] 11-04-PLAN.md -- Auth management endpoints: API keys and roles (REST-04 gap) -- completed 2026-03-14
+- [x] 11-05-PLAN.md -- Observability endpoints: metrics, audit, security, alerts (REST-07 gap) -- completed 2026-03-14
 
 ### Phase 12: WebSocket Infrastructure
 
@@ -222,7 +222,7 @@ Phases execute in numeric order: 11 -> 12 -> 13 -> 14 -> 15 -> 16
 | 8. Safety Foundation | v1.0 | 3/3 | Complete | 2026-03-08 |
 | 9. State Survival | v1.0 | 3/3 | Complete | 2026-03-08 |
 | 10. Operational Hardening | v1.0 | 6/6 | Complete | 2026-03-08 |
-| 11. Backend REST API | 4/5 | In Progress|  | -- |
+| 11. Backend REST API | v2.0 | 5/5 | Complete | 2026-03-14 |
 | 12. WebSocket Infrastructure | v2.0 | 0/? | Pending | -- |
 | 13. Frontend Foundation | v2.0 | 0/? | Pending | -- |
 | 14. Dashboard & Provider Mgmt | v2.0 | 0/? | Pending | -- |
@@ -231,4 +231,4 @@ Phases execute in numeric order: 11 -> 12 -> 13 -> 14 -> 15 -> 16
 
 ---
 *Created: 2026-02-15*
-*Last updated: 2026-03-14 -- Phase 11-02 complete: groups, discovery, config, system REST endpoints*
+*Last updated: 2026-03-14 -- Phase 11-05 complete: observability REST endpoints (metrics, audit, security, alerts) -- Phase 11 Backend REST API COMPLETE*

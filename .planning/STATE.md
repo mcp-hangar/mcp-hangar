@@ -3,12 +3,12 @@ gsd_state_version: 1.0
 milestone: v2.0
 milestone_name: Management UI
 status: unknown
-last_updated: "2026-03-14T16:10:00Z"
+last_updated: "2026-03-14T15:52:00Z"
 progress:
   total_phases: 8
   completed_phases: 7
   total_plans: 24
-  completed_plans: 23
+  completed_plans: 24
 ---
 
 # Project State
@@ -24,9 +24,9 @@ See: .planning/PROJECT.md (updated 2026-03-14)
 
 Milestone: v2.0 Management UI -- IN PROGRESS
 Phase: 11 of 16 (Backend REST API) -- IN PROGRESS
-Plan: 05 (next plan in phase 11)
-Status: Phase 11 Plan 04 complete. Auth REST endpoints (API keys + roles) and init_auth_cqrs wiring implemented.
-Last activity: 2026-03-14 -- Phase 11-04 executed: POST/DELETE/GET /api/auth/keys + /roles + /roles/assign + /roles/revoke (22 tests, all passing)
+Plan: 06 (next plan in phase 11)
+Status: Phase 11 Plan 05 complete. Observability REST endpoints (metrics, audit, security, alerts) and global handler singletons implemented.
+Last activity: 2026-03-14 -- Phase 11-05 executed: GET /api/observability/metrics + /audit + /security + /alerts (21 tests, all passing)
 
 Progress: [__________] 0% milestone (0/6 phases, 2/? plans)
 
@@ -119,6 +119,12 @@ All v0.9, v0.10, and v1.0 decisions archived in PROJECT.md Key Decisions table.
 - [Phase 11-backend-rest-api]: EventStore API used is get_all_stream_ids()+load() not read_all() -- plan spec had incorrect interface, implementation adapted to real API
 - [Phase 11-backend-rest-api]: GetToolInvocationHistoryHandler does not extend BaseQueryHandler -- reads from event store directly, not provider repository
 
+**v2.0 decisions (Phase 11-05 execution):**
+
+- SecurityEventHandler sink accessed defensively via getattr(_sink) then getattr(sink) -- private attribute name not guaranteed by public API
+- Alert level filtering performed in API layer not handler -- alerts_sent returns all, filtering is a query concern
+- Metrics JSON summary built by parsing Prometheus text lines with known prefixes -- avoids coupling to prometheus_client internals
+
 **v2.0 decisions (Phase 11-04 execution):**
 
 - init_auth_cqrs checks getattr(auth_components, "enabled", False) not just is None -- AuthComponents may exist with enabled=False
@@ -137,5 +143,5 @@ None beyond phase planning/execution.
 ## Session Continuity
 
 Last session: 2026-03-14
-Stopped at: Phase 11-04 complete -- auth REST endpoints (API keys + roles) + init_auth_cqrs bootstrap wiring
-Resume with: Start Phase 11-05 -- next plan in Backend REST API phase
+Stopped at: Phase 11-05 complete -- observability REST endpoints (metrics, audit log, security events, alert history) + global audit/alert handler singletons
+Resume with: Start Phase 11-06 -- next plan in Backend REST API phase
