@@ -1,34 +1,34 @@
 ---
 gsd_state_version: 1.0
-milestone: v1.0
-milestone_name: Production Hardening
+milestone: v2.0
+milestone_name: Management UI
 status: in_progress
-last_updated: "2026-03-08"
+last_updated: "2026-03-14"
 progress:
-  total_phases: 10
-  completed_phases: 9
-  total_plans: 25
-  completed_plans: 23
+  total_phases: 6
+  completed_phases: 0
+  total_plans: 0
+  completed_plans: 1
 ---
 
 # Project State
 
 ## Project Reference
 
-See: .planning/PROJECT.md (updated 2026-03-08)
+See: .planning/PROJECT.md (updated 2026-03-14)
 
 **Core value:** Reliable, observable MCP provider management with production-grade lifecycle control
-**Current focus:** Phase 10 - Operational Hardening
+**Current focus:** v2.0 Management UI -- browser-based management interface with REST API, WebSocket streaming, and React frontend
 
 ## Current Position
 
-Milestone: v1.0 Production Hardening
-Phase: 10 of 10 (Operational Hardening) -- IN PROGRESS (6 plans, 3 waves)
-Plan: 4 of 6 in current phase (10-01, 10-02, 10-03, 10-04 complete)
-Status: Executing Phase 10 -- plan 10-04 complete
-Last activity: 2026-03-08 -- Completed 10-04 (Docker discovery resilience with reconnection)
+Milestone: v2.0 Management UI -- IN PROGRESS
+Phase: 11 of 16 (Backend REST API) -- IN PROGRESS
+Plan: 02 (next up -- Events/WebSocket bridge, or next plan in phase 11)
+Status: Phase 11 Plan 01 complete. REST API foundation + provider endpoints implemented.
+Last activity: 2026-03-14 -- Phase 11-01 executed: API module, provider endpoints, /api/ ASGI mount
 
-Progress: [█████████░] 92% milestone (9/10 phases, 23/25 plans)
+Progress: [__________] 0% milestone (0/6 phases, 1/? plans)
 
 ## Performance Metrics
 
@@ -46,64 +46,81 @@ Progress: [█████████░] 92% milestone (9/10 phases, 23/25 pla
 
 **v1.0 Velocity:**
 
-- Plans completed: 3 (08-01, 08-02, 08-03) -- Phase 8 complete
-- Phase 9: 3/3 plans complete (09-01, 09-02, 09-03) -- Phase 9 complete
-- Phase 10: 4/6 plans complete (10-01, 10-02, 10-03, 10-04)
-- 10-04 duration: ~5 min
-- 10-03 duration: ~6 min
-- 10-02 duration: ~8 min
-- 10-01 duration: ~8 min
-- 09-01 duration: ~16 min
-- 09-02 duration: ~7 min
-- 09-03 duration: ~9 min
+- Total plans completed: 12
+- Timeline: 1 day (2026-03-08)
+- Files changed: 107 files, +5,073/-381 lines
+- Plan durations: 3-16 min (avg ~6 min)
+
+**Cumulative (v0.9 through v1.0):**
+
+- Total plans: 25 across 10 phases in 3 milestones
+- Total files changed: ~177 files, ~18,851 lines added
+- Total sessions: ~9
 
 See `.planning/RETROSPECTIVE.md` for full cross-milestone trends.
 
 ## Accumulated Context
 
+### Key Research Findings (v2.0)
+
+Research completed in `.planning/research/` covers architecture, features, stack, and pitfalls.
+
+**Backend discoveries:**
+
+- Zero new Python dependencies needed -- Starlette and websockets already in dependency tree
+- All 18 MCP tools map cleanly to REST endpoints via existing CQRS handlers
+- EventBus.subscribe_to_all() exists but EventBus lacks unsubscribe -- must add for WS cleanup
+- Backend is thread-based -- REST handlers MUST use `run_in_threadpool()` for CQRS dispatch
+- 60+ Prometheus metrics exist with in-memory registry
+- All domain objects have `to_dict()` serialization
+
+**Architecture decisions:**
+
+- REST layer wraps CQRS -- no new business logic, pure transport
+- WebSocket for bidirectional event streaming (not SSE -- need subscription filters)
+- Thread-safe queue bridges sync EventBus to async WS broadcast
+- Frontend in `packages/ui/` as separate monorepo package
+- API under `/api/` prefix, mounted alongside existing ASGI routes
+
+**Key pitfalls identified:**
+
+- Async/sync bridge: `run_in_threadpool()` required for all CQRS dispatch
+- WS lifecycle: EventBus needs `unsubscribe_from_all()` for cleanup
+- CORS: Vite dev on 5173, backend on 8000 -- CORSMiddleware required
+- Race conditions: WS events must invalidate TanStack Query cache, not replace data
+- SPA fallback: backend must serve `index.html` for non-API routes in production
+
 ### Decisions
 
-All v0.9 and v0.10 decisions archived in PROJECT.md Key Decisions table.
+All v0.9, v0.10, and v1.0 decisions archived in PROJECT.md Key Decisions table.
 
-- Used get_current_thread_locks() for TrackedLock ownership checks (TrackedLock has no_is_owned())
-- Two-phase lock pattern for ProviderGroup: snapshot under lock, I/O outside lock, re-acquire to update state
-- InputValidator injected as optional dependency into DiscoveryOrchestrator with TYPE_CHECKING guard
-- threading.Event with clear/set for concurrent startup coordination (not condition variable)
-- Multi-lock-cycle pattern for invoke_tool() refresh follows health_check() reference implementation
-- Boolean _refresh_in_progress flag for refresh deduplication (not per-tool locking)
-- Annotated all except Exception catches with fault-barrier or infra-boundary comments -- optional dependencies make narrowing unsafe, convention established for future code
-- CircuitBreaker.from_dict() added opened_at to to_dict() for round-trip fidelity -- was missing from original output
-- ProviderSnapshot.circuit_breaker_state uses raw dict (not CB instance) to avoid coupling snapshot to CB lifecycle
-- Saga checkpoint fires after saga.handle() but before command dispatch -- persists post-handle state regardless of command execution outcome
-- Circular import in application.sagas resolved by importing application.commands first to complete the import chain
+**v2.0 decisions (planning phase):**
 
-- Saga idempotency guard: is_processed() before handle(), mark_processed() after checkpoint, skip when no global_position (live events)
-- CB state saved at shutdown only -- avoids write amplification, sufficient for cross-restart persistence
-- Saga state store reused for CB persistence under saga_type=circuit_breaker -- no new tables needed
-- init_saga() returns SagaStateStore so ApplicationContext can reference it for shutdown CB save
-- jitter_factor default 0.1 (10%) for HealthTracker backoff -- same pattern as retry.py
-- BackgroundWorker keeps time.sleep(interval_s) as base tick rate with per-provider_next_check_at timestamps for skip logic
-- hasattr-based API detection at **init** for old/new event store compatibility (self._has_new_api, self._has_snapshot_methods)
-- Dual hydration path: new IEventStore.read_stream() returns DomainEvent directly, old EventStore.load() returns StoredEvent needing hydration
-- InMemoryEventStore (persistence module) also gets snapshot support for test symmetry
-- CommandBusMiddleware uses **call**(command, next_handler) chain-of-responsibility pattern for extensible middleware pipeline
-- Rate limit key derived from command type name for per-command-type granularity
-- check_rate_limit() deprecated rather than removed -- tool wrapper callers still reference it
-- Inline backoff implementation in DockerDiscoverySource (pattern from retry.py, not imported) to keep discovery source self-contained
-- discover() resets client and returns empty list on mid-discovery error -- next scheduled call retries, no recursive retry risk
-- Container IDs tracked in _known_container_ids set, updated each successful discovery cycle
+- Starlette routes (not FastAPI) -- already using Starlette, no new dependency
+- WebSocket over SSE -- bidirectional needed for subscription filters
+- Separate `packages/ui/` -- consistent with monorepo structure
+- React + TypeScript + Vite + TanStack Query + Zustand + Tailwind + Radix + Recharts
+- Static build served by backend in production (single deployment)
+
+**v2.0 decisions (Phase 11-01 execution):**
+
+- Path prefix /api stripped manually in combined_app before forwarding scope to api_app
+- CORS origins read from MCP_CORS_ORIGINS env var, defaulting to localhost:5173 for dev
+- Error envelope format: {error: {code, message, details}} -- consistent across all 4xx/5xx
+- dispatch_query/dispatch_command use run_in_threadpool for async-safe CQRS dispatch
+- /api/ routes bypass auth gate in create_auth_combined_app (API handles auth separately)
 
 ### Pending Todos
 
-None.
+None beyond phase planning/execution.
 
 ### Blockers/Concerns
 
-- [Phase 9]: RESOLVED -- Saga idempotency implemented with is_processed()/mark_processed() guards
-- [Phase 10]: RESOLVED -- Snapshot version coordination addressed in 10-02 plan: save_snapshot inside_lock scope for version consistency
+- EventBus lacks `unsubscribe_from_all()` -- must be added in Phase 12 (WS-04)
+- JSON serialization of domain objects may need dedicated serializers (Pitfall 6)
 
 ## Session Continuity
 
-Last session: 2026-03-08
-Stopped at: Completed 10-04-PLAN.md (Docker discovery resilience with reconnection)
-Resume with: /gsd-execute-phase 10 (operational hardening) -- continue with 10-05
+Last session: 2026-03-14
+Stopped at: Phase 11-01 complete -- REST API foundation + provider endpoints
+Resume with: Start Phase 11-02 -- WebSocket bridge / next plan in Backend REST API phase

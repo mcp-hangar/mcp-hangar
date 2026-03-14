@@ -4,7 +4,8 @@
 
 - ✅ **v0.9 Security Hardening** -- Phases 1-4 (shipped 2026-02-15)
 - ✅ **v0.10 Documentation & Kubernetes Maturity** -- Phases 5-7 (shipped 2026-03-01)
-- 🚧 **v1.0 Production Hardening** -- Phases 8-10 (in progress)
+- ✅ **v1.0 Production Hardening** -- Phases 8-10 (shipped 2026-03-08, released as v0.11.0: 2026-03-09)
+- **v2.0 Management UI** -- Phases 11-16 (in progress)
 
 ## Phases
 
@@ -27,15 +28,30 @@
 
 </details>
 
-### 🚧 v1.0 Production Hardening (In Progress)
+<details>
+<summary>✅ v1.0 Production Hardening (Phases 8-10) -- SHIPPED 2026-03-08</summary>
 
-**Milestone Goal:** Harden MCP Hangar for production by fixing concurrency hazards, cleaning up exception handling, persisting critical state across restarts, and improving operational resilience with bounded startup, intelligent health checks, transport-agnostic rate limiting, and strict typing.
+- [x] Phase 8: Safety Foundation (3/3 plans) -- completed 2026-03-08
+- [x] Phase 9: State Survival (3/3 plans) -- completed 2026-03-08
+- [x] Phase 10: Operational Hardening (6/6 plans) -- completed 2026-03-08
 
-- [x] **Phase 8: Safety Foundation** - Fix concurrency hazards, clean up exception handling, validate discovery-sourced commands (3 plans) -- completed 2026-03-08
-- [x] **Phase 9: State Survival** - Persist saga checkpoints and circuit breaker state across restarts -- completed 2026-03-08
-- [ ] **Phase 10: Operational Hardening** - Event store snapshots, health check backoff, rate limiter middleware, Docker resilience, property-based testing, typing strictness
+</details>
+
+### v2.0 Management UI (In Progress)
+
+**Milestone Goal:** Add a browser-based management UI for MCP Hangar with full provider lifecycle control, real-time event streaming, metrics dashboards, auth management, and configuration visibility -- backed by a REST API layer wrapping existing CQRS infrastructure and WebSocket streaming from the EventBus.
+
+- [ ] **Phase 11: Backend REST API** - Starlette routes wrapping CQRS commands/queries for providers, groups, auth, config, discovery, events, metrics, audit, and system endpoints
+- [ ] **Phase 12: WebSocket Infrastructure** - Connection manager, EventBus subscription bridge (sync-to-async queue), event streaming channel, state snapshot channel
+- [ ] **Phase 13: Frontend Foundation** - Vite + React + TypeScript project, routing, API client with TanStack Query, WebSocket hooks with auto-reconnect, layout shell, component library
+- [ ] **Phase 14: Dashboard & Provider Management** - Dashboard page, provider list/detail, group management, discovery management, configuration viewer
+- [ ] **Phase 15: Observability & Operations** - Metrics dashboards with Recharts, event stream viewer, audit log, execution history, security events
+- [ ] **Phase 16: Auth, Config & Production** - API key management, role management, production static build serving, SPA routing fallback, Docker multi-stage build
 
 ## Phase Details
+
+<details>
+<summary>Phase 8-10 Details (v1.0 -- Complete)</summary>
 
 ### Phase 8: Safety Foundation
 
@@ -59,7 +75,7 @@ Plans:
 ### Phase 9: State Survival
 
 **Goal**: Saga and circuit breaker state survives process restarts -- incomplete sagas resume from their last checkpoint and circuit breakers remember known-bad providers
-**Depends on**: Phase 8 (exception hygiene must be trustworthy before saga error handling; lock restructuring must be complete before persistence adds new I/O paths)
+**Depends on**: Phase 8
 **Requirements**: PERS-01, PERS-02, PERS-03
 **Success Criteria** (what must be TRUE):
 
@@ -69,36 +85,126 @@ Plans:
 **Plans**: 3 plans
 Plans:
 
-- [x] 09-01-PLAN.md -- Saga persistence foundation: SagaStateStore + saga serialization + SagaManager checkpoint (PERS-01) -- completed 2026-03-08
-- [x] 09-02-PLAN.md -- Circuit breaker persistence: CB from_dict + ProviderSnapshot CB fields (PERS-03) -- completed 2026-03-08
-- [x] 09-03-PLAN.md -- Idempotency filter + bootstrap wiring: saga resume + CB restore (PERS-02, PERS-03) -- completed 2026-03-08
+- [x] 09-01-PLAN.md -- Saga persistence foundation (PERS-01) -- completed 2026-03-08
+- [x] 09-02-PLAN.md -- Circuit breaker persistence (PERS-03) -- completed 2026-03-08
+- [x] 09-03-PLAN.md -- Idempotency filter + bootstrap wiring (PERS-02, PERS-03) -- completed 2026-03-08
 
 ### Phase 10: Operational Hardening
 
 **Goal**: Startup time is bounded by snapshots, health checks use intelligent backoff, rate limiting covers all entry points, Docker discovery self-heals, and the core state machine is verified by property-based tests with strict typing
-**Depends on**: Phase 9 (snapshots build on persistence patterns; testing and typing exercise hardened code to catch regressions)
+**Depends on**: Phase 9
 **Requirements**: PERS-04, PERS-05, SECR-02, RESL-01, RESL-02, RESL-03, TEST-01, QUAL-01
 **Success Criteria** (what must be TRUE):
 
   1. IEventStore supports snapshots and aggregate replay loads from latest snapshot plus subsequent events, bounding startup time regardless of total event history
-  2. Health checks use exponential backoff with jitter for degraded providers (preventing thundering herd) and BackgroundWorker schedules checks based on provider state -- normal for READY, backoff for DEGRADED, longer ceiling for DEAD, skip for COLD
+  2. Health checks use exponential backoff with jitter for degraded providers and BackgroundWorker schedules checks based on provider state
   3. Rate limiting is enforced at the command bus middleware layer, covering stdio, HTTP, and programmatic callers uniformly regardless of transport
   4. Docker discovery source reconnects automatically with retry and exponential backoff when the Docker daemon connection is lost
-  5. Property-based tests using Hypothesis RuleBasedStateMachine verify that all Provider state transition sequences maintain invariants, and the package includes py.typed with incrementally-enabled mypy strictness and all resulting type errors fixed
-**Plans**: 6 plans (3 waves)
+  5. Property-based tests using Hypothesis RuleBasedStateMachine verify that all Provider state transition sequences maintain invariants, and the package includes py.typed with incrementally-enabled mypy strictness
+**Plans**: 6 plans
 Plans:
 
-- [x] 10-01-PLAN.md -- Health check backoff with jitter + state-aware BackgroundWorker scheduling (RESL-01, RESL-02) -- completed 2026-03-08
-- [x] 10-02-PLAN.md -- Event store snapshots + aggregate replay from snapshots (PERS-04, PERS-05) -- completed 2026-03-08
+- [x] 10-01-PLAN.md -- Health check backoff with jitter (RESL-01, RESL-02) -- completed 2026-03-08
+- [x] 10-02-PLAN.md -- Event store snapshots (PERS-04, PERS-05) -- completed 2026-03-08
 - [x] 10-03-PLAN.md -- Rate limiter command bus middleware (SECR-02) -- completed 2026-03-08
 - [x] 10-04-PLAN.md -- Docker discovery resilience (RESL-03) -- completed 2026-03-08
-- [ ] 10-05-PLAN.md -- Property-based testing with Hypothesis RuleBasedStateMachine (TEST-01)
-- [ ] 10-06-PLAN.md -- Typing strictness + py.typed marker (QUAL-01)
+- [x] 10-05-PLAN.md -- Property-based testing (TEST-01) -- completed 2026-03-08
+- [x] 10-06-PLAN.md -- Typing strictness + py.typed (QUAL-01) -- completed 2026-03-08
+
+</details>
+
+### Phase 11: Backend REST API
+
+**Goal**: A complete REST API layer exists under `/api/` that wraps all existing CQRS commands and queries, providing JSON endpoints for provider lifecycle, groups, auth, config, discovery, events, metrics, audit, and system operations -- with consistent error handling and no new business logic
+**Depends on**: Phase 10 (stable backend with persisted state, rate limiting, and typed interfaces)
+**Requirements**: REST-01, REST-02, REST-03, REST-04, REST-05, REST-06, REST-07, REST-08, REST-09, REST-10, INTG-01
+**Success Criteria** (what must be TRUE):
+
+  1. REST endpoints exist for all provider lifecycle operations (list, get, start, stop), group operations (list, detail, rebalance), and tool listing per provider -- each wrapping existing CQRS handlers via `run_in_threadpool()`
+  2. REST endpoints exist for auth management (API keys CRUD, roles CRUD, role assignments), configuration (get config, hot reload), and discovery (sources, pending, quarantined, approve/reject)
+  3. REST endpoints exist for observability data (metrics as JSON, audit log with filters, security events, alert history, event store queries)
+  4. All endpoints are mounted under `/api/` on the existing ASGI application without disrupting `/health`, `/ready`, `/metrics`, or `/mcp` routes
+  5. Error responses use a consistent JSON envelope mapping domain exceptions to HTTP status codes
+  6. CORS middleware is configured with environment-variable-driven allowed origins
+  7. No sync CQRS operations run on the ASGI event loop -- all use `run_in_threadpool()`
+**Plans**: TBD (to be created during phase planning)
+
+Plans:
+
+- [x] 11-01-PLAN.md -- API foundation + provider endpoints (REST-01, REST-03, REST-08, REST-09, REST-10, INTG-01) -- completed 2026-03-14
+
+### Phase 12: WebSocket Infrastructure
+
+**Goal**: Real-time event streaming and state updates flow from the backend to browser clients over WebSocket, with clean connection lifecycle management and no resource leaks
+**Depends on**: Phase 11 (REST API establishes ASGI integration patterns and serializers reused by WebSocket)
+**Requirements**: WS-01, WS-02, WS-03, WS-04, WS-05
+**Success Criteria** (what must be TRUE):
+
+  1. A WebSocket endpoint at `/api/ws/events` streams domain events in real-time, with client-side subscription filters for event type, provider ID, and severity
+  2. A WebSocket endpoint at `/api/ws/state` sends periodic provider/group state snapshots at a configurable interval
+  3. EventBus has an `unsubscribe_from_all()` method and WebSocket disconnections trigger cleanup
+  4. A thread-safe queue bridges sync EventBus handlers to async WebSocket broadcast
+  5. Connection manager tracks active connections with ping/pong heartbeat for dead connection detection
+**Plans**: TBD
+
+### Phase 13: Frontend Foundation
+
+**Goal**: A React + TypeScript project exists with routing, typed API client, WebSocket hooks, and a layout shell -- the foundation all feature pages build on
+**Depends on**: Phase 12 (WebSocket endpoints must exist for hook development and testing)
+**Requirements**: UI-01, UI-02, UI-03, UI-04, INTG-03
+**Success Criteria** (what must be TRUE):
+
+  1. `packages/ui/` contains a Vite + React + TypeScript project with react-router routing for all 9 pages
+  2. API client layer provides typed functions for all REST endpoints with TanStack Query integration (caching, background refetch)
+  3. WebSocket hooks (`useWebSocket`, `useEventStream`, `useProviderState`) handle auto-reconnect with exponential backoff and trigger TanStack Query cache invalidation
+  4. Layout shell with sidebar navigation, header with system status indicator, and content area is functional
+  5. Vite dev server proxies `/api/*` to backend for CORS-free development
+**Plans**: TBD
+
+### Phase 14: Dashboard & Provider Management
+
+**Goal**: Core management pages are functional -- dashboard with system overview, provider list/detail with lifecycle actions, group management, discovery management, and configuration viewer
+**Depends on**: Phase 13 (layout shell, API client, and WebSocket hooks must be ready)
+**Requirements**: UI-05, UI-06, UI-07, UI-08, UI-13, UI-14
+**Success Criteria** (what must be TRUE):
+
+  1. Dashboard shows provider state distribution chart, key metric cards, live event feed via WebSocket, and alert summary
+  2. Provider list is filterable/sortable with state indicators and start/stop actions; detail view shows health, tools with schemas, circuit breaker, event timeline
+  3. Group list shows strategy, member counts, circuit breaker; detail view has member list and rebalance action
+  4. Discovery page shows source health, pending providers with approve/reject, quarantined providers
+  5. Configuration page shows current config (read-only) and hot reload trigger
+**Plans**: TBD
+
+### Phase 15: Observability & Operations
+
+**Goal**: Operational visibility pages are functional -- metrics dashboards with charts, event stream viewer, audit log, execution history, and security events
+**Depends on**: Phase 14 (dashboard patterns, chart components, and table components established)
+**Requirements**: UI-09, UI-10, UI-11, UI-12
+**Success Criteria** (what must be TRUE):
+
+  1. Metrics page shows RED metrics per provider with Recharts visualizations and SLI availability/error budget
+  2. Events page shows live WebSocket event stream with type/severity filters and paginated audit log with entity/time filters
+  3. Executions page shows tool invocation timeline, failures view with error details, and success rate/p95 statistics
+  4. Security events viewer shows security events with severity indicators
+**Plans**: TBD
+
+### Phase 16: Auth, Config & Production
+
+**Goal**: Auth management UI is functional and the application is production-ready -- API key management, role management, static build serving with SPA fallback, and Docker multi-stage build
+**Depends on**: Phase 15 (all feature pages complete, patterns established)
+**Requirements**: UI-15, UI-16, INTG-02, INTG-04
+**Success Criteria** (what must be TRUE):
+
+  1. Auth page provides API key management (list, create, revoke) per principal
+  2. Auth page provides role management (list builtin/custom, create custom) and role assignment (assign/revoke)
+  3. Backend serves UI static build in production mode with SPA routing fallback for all non-API routes
+  4. Multi-stage Docker build produces a single image with Python backend and UI static files
+**Plans**: TBD
 
 ## Progress
 
 **Execution Order:**
-Phases execute in numeric order: 8 -> 9 -> 10
+Phases execute in numeric order: 11 -> 12 -> 13 -> 14 -> 15 -> 16
 
 | Phase | Milestone | Plans Complete | Status | Completed |
 |-------|-----------|----------------|--------|-----------|
@@ -111,8 +217,14 @@ Phases execute in numeric order: 8 -> 9 -> 10
 | 7. Helm Chart Maturity | v0.10 | 1/1 | Complete | 2026-03-01 |
 | 8. Safety Foundation | v1.0 | 3/3 | Complete | 2026-03-08 |
 | 9. State Survival | v1.0 | 3/3 | Complete | 2026-03-08 |
-| 10. Operational Hardening | v1.0 | 4/6 | In Progress | - |
+| 10. Operational Hardening | v1.0 | 6/6 | Complete | 2026-03-08 |
+| 11. Backend REST API | v2.0 | 1/? | In Progress | -- |
+| 12. WebSocket Infrastructure | v2.0 | 0/? | Pending | -- |
+| 13. Frontend Foundation | v2.0 | 0/? | Pending | -- |
+| 14. Dashboard & Provider Mgmt | v2.0 | 0/? | Pending | -- |
+| 15. Observability & Operations | v2.0 | 0/? | Pending | -- |
+| 16. Auth, Config & Production | v2.0 | 0/? | Pending | -- |
 
 ---
 *Created: 2026-02-15*
-*Last updated: 2026-03-08 -- Phase 10 plan 10-04 complete*
+*Last updated: 2026-03-14 -- v2.0 Management UI milestone added (Phases 11-16)*
