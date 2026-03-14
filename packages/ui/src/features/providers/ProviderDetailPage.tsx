@@ -1,3 +1,4 @@
+import { useState } from 'react'
 import { useParams } from 'react-router'
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query'
 import { queryKeys } from '../../lib/queryKeys'
@@ -11,10 +12,13 @@ import {
   LoadingSpinner,
 } from '../../components/ui'
 import { ToolList } from '../../components/providers/ToolList'
+import { useProviderLogs } from '../../hooks/useProviderLogs'
+import { LogViewer } from './LogViewer'
 
 export function ProviderDetailPage(): JSX.Element {
   const { id } = useParams<{ id: string }>()
   const queryClient = useQueryClient()
+  const [logsOpen, setLogsOpen] = useState(false)
 
   const { data: provider, isLoading } = useQuery({
     queryKey: queryKeys.providers.detail(id!),
@@ -37,6 +41,11 @@ export function ProviderDetailPage(): JSX.Element {
   const stopMutation = useMutation({
     mutationFn: () => providersApi.stop(id!),
     onSuccess: () => queryClient.invalidateQueries({ queryKey: queryKeys.providers.all }),
+  })
+
+  const { logs, status: logsStatus, clearLogs } = useProviderLogs({
+    providerId: id!,
+    enabled: !!id && logsOpen,
   })
 
   if (isLoading) {
@@ -144,6 +153,30 @@ export function ProviderDetailPage(): JSX.Element {
           </span>
         </div>
         <ToolList tools={provider.tools ?? []} />
+      </div>
+
+      {/* Process Logs Section */}
+      <div className="bg-white rounded-lg border border-gray-200 overflow-hidden">
+        <button
+          type="button"
+          className="w-full flex items-center justify-between px-4 py-3 text-left hover:bg-gray-50 transition-colors"
+          onClick={() => setLogsOpen((v) => !v)}
+          aria-expanded={logsOpen}
+        >
+          <h3 className="text-sm font-medium text-gray-700">Process Logs</h3>
+          <svg
+            className={`w-4 h-4 text-gray-400 transition-transform ${logsOpen ? 'rotate-180' : ''}`}
+            fill="none"
+            stroke="currentColor"
+            viewBox="0 0 24 24"
+            aria-hidden="true"
+          >
+            <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M19 9l-7 7-7-7" />
+          </svg>
+        </button>
+        {logsOpen && (
+          <LogViewer logs={logs} status={logsStatus} onClear={clearLogs} />
+        )}
       </div>
     </div>
   )

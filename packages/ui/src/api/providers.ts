@@ -1,4 +1,5 @@
 import type { HealthInfo, ProviderDetails, ProviderSummary, ToolInfo, ToolInvocationRecord } from '../types/provider'
+import type { LogLine } from '../hooks/useProviderLogs'
 import { apiClient } from './client'
 
 export const providersApi = {
@@ -16,4 +17,8 @@ export const providersApi = {
     apiClient.get<HealthInfo>(`/providers/${id}/health`),
   toolHistory: (id: string) =>
     apiClient.get<{ history: ToolInvocationRecord[] }>(`/providers/${id}/tools/history`),
+  logs: (id: string, lines = 100) =>
+    apiClient.get<{ logs: LogLine[]; provider_id: string; count: number }>(
+      `/providers/${id}/logs?lines=${lines}`,
+    ),
 }
