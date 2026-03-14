@@ -122,12 +122,13 @@ class MCPServerFactory:
         return mcp
 
     def create_asgi_app(self) -> Any:
-        """Create ASGI application with metrics/health endpoints.
+        """Create ASGI application with metrics/health endpoints and REST API.
 
         Creates a combined ASGI app that handles:
         - /health: Liveness endpoint
         - /ready: Readiness endpoint with internal checks
         - /metrics: Prometheus metrics
+        - /api/: REST API endpoints
         - /mcp: MCP streamable HTTP endpoint (and related paths)
 
         If auth is enabled (config.auth_enabled=True and auth_components provided),
@@ -136,6 +137,8 @@ class MCPServerFactory:
         Returns:
             Combined ASGI app callable.
         """
+        from ..server.api import create_api_router
+
         mcp = self.create_server()
         mcp_app = mcp.streamable_http_app()
 
@@ -154,11 +157,14 @@ class MCPServerFactory:
         )
         aux_app = Starlette(routes=routes)
 
+        # Create REST API app
+        api_app = create_api_router()
+
         # Create auth-aware combined app
         if self._config.auth_enabled and self._auth_components:
-            return create_auth_combined_app(aux_app, mcp_app, self._auth_components, self._config)
+            return create_auth_combined_app(aux_app, mcp_app, self._auth_components, self._config, api_app)
         else:
-            return create_combined_asgi_app(aux_app, mcp_app)
+            return create_combined_asgi_app(aux_app, mcp_app, api_app)
 
     def _register_core_tools(self, mcp: FastMCP) -> None:
         """Register core control plane tools.

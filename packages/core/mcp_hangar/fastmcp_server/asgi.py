@@ -62,23 +62,31 @@ def create_health_routes(
     ]
 
 
-def create_combined_asgi_app(aux_app: Starlette, mcp_app: Any) -> Any:
-    """Create combined ASGI app that routes to metrics/health or MCP.
+def create_combined_asgi_app(aux_app: Starlette, mcp_app: Any, api_app: Any = None) -> Any:
+    """Create combined ASGI app that routes to metrics/health, REST API, or MCP.
 
     Args:
         aux_app: Starlette app for health/metrics endpoints.
         mcp_app: FastMCP ASGI app.
+        api_app: Optional REST API ASGI app mounted at /api/.
 
     Returns:
         Combined ASGI app callable.
     """
 
     async def combined_app(scope, receive, send):
-        """Combined ASGI app that routes to metrics/health or MCP."""
+        """Combined ASGI app that routes to metrics/health, REST API, or MCP."""
         if scope["type"] == "http":
             path = scope.get("path", "")
             if path in ("/health", "/ready", "/metrics"):
                 await aux_app(scope, receive, send)
+                return
+            if api_app is not None and (path == "/api" or path.startswith("/api/")):
+                # Strip /api prefix before forwarding to api_app
+                scope = dict(scope)
+                scope["path"] = path[4:] or "/"
+                scope["root_path"] = scope.get("root_path", "") + "/api"
+                await api_app(scope, receive, send)
                 return
         await mcp_app(scope, receive, send)
 
@@ -90,6 +98,7 @@ def create_auth_combined_app(
     mcp_app: Any,
     auth_components: "AuthComponents",
     config: "ServerConfig",
+    api_app: Any = None,
 ) -> Any:
     """Create auth-enabled combined ASGI app.
 
@@ -101,6 +110,7 @@ def create_auth_combined_app(
         mcp_app: FastMCP ASGI app.
         auth_components: Authentication components from bootstrap_auth().
         config: Server configuration with auth settings.
+        api_app: Optional REST API ASGI app mounted at /api/.
 
     Returns:
         Combined ASGI app with auth middleware.
@@ -123,6 +133,14 @@ def create_auth_combined_app(
         # Skip auth for health/metrics endpoints
         if path in skip_paths:
             await aux_app(scope, receive, send)
+            return
+
+        # Route /api/ paths to REST API (no auth required for API endpoints)
+        if api_app is not None and (path == "/api" or path.startswith("/api/")):
+            api_scope = dict(scope)
+            api_scope["path"] = path[4:] or "/"
+            api_scope["root_path"] = scope.get("root_path", "") + "/api"
+            await api_app(api_scope, receive, send)
             return
 
         # For MCP endpoints, apply authentication
