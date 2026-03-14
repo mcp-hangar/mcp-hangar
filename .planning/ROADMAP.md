@@ -41,7 +41,7 @@
 
 **Milestone Goal:** Add a browser-based management UI for MCP Hangar with full provider lifecycle control, real-time event streaming, metrics dashboards, auth management, and configuration visibility -- backed by a REST API layer wrapping existing CQRS infrastructure and WebSocket streaming from the EventBus.
 
-- [ ] **Phase 11: Backend REST API** - Starlette routes wrapping CQRS commands/queries for providers, groups, auth, config, discovery, events, metrics, audit, and system endpoints
+- [x] **Phase 11: Backend REST API** - Starlette routes wrapping CQRS commands/queries for providers, groups, auth, config, discovery, events, metrics, audit, and system endpoints (completed 2026-03-14)
 - [ ] **Phase 12: WebSocket Infrastructure** - Connection manager, EventBus subscription bridge (sync-to-async queue), event streaming channel, state snapshot channel
 - [ ] **Phase 13: Frontend Foundation** - Vite + React + TypeScript project, routing, API client with TanStack Query, WebSocket hooks with auto-reconnect, layout shell, component library
 - [ ] **Phase 14: Dashboard & Provider Management** - Dashboard page, provider list/detail, group management, discovery management, configuration viewer
@@ -222,7 +222,7 @@ Phases execute in numeric order: 11 -> 12 -> 13 -> 14 -> 15 -> 16
 | 8. Safety Foundation | v1.0 | 3/3 | Complete | 2026-03-08 |
 | 9. State Survival | v1.0 | 3/3 | Complete | 2026-03-08 |
 | 10. Operational Hardening | v1.0 | 6/6 | Complete | 2026-03-08 |
-| 11. Backend REST API | v2.0 | 5/5 | Complete | 2026-03-14 |
+| 11. Backend REST API | v2.0 | Complete    | 2026-03-14 | 2026-03-14 |
 | 12. WebSocket Infrastructure | v2.0 | 0/? | Pending | -- |
 | 13. Frontend Foundation | v2.0 | 0/? | Pending | -- |
 | 14. Dashboard & Provider Mgmt | v2.0 | 0/? | Pending | -- |
