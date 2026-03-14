@@ -91,6 +91,21 @@ class EventBus:
 
         logger.debug("Subscribed handler to all events")
 
+    def unsubscribe_from_all(self, handler: Callable[[DomainEvent], None]) -> None:
+        """Unsubscribe a handler that was registered via subscribe_to_all.
+
+        Silently ignores handlers that are not currently registered.
+
+        Args:
+            handler: The handler to remove.
+        """
+        with self._lock:
+            if DomainEvent in self._handlers:
+                try:
+                    self._handlers[DomainEvent].remove(handler)
+                except ValueError:
+                    pass  # handler not registered -- silently ignore
+
     def unsubscribe(self, event_type: type[DomainEvent], handler: Callable[[DomainEvent], None]) -> None:
         """
         Unsubscribe a handler from an event type.
