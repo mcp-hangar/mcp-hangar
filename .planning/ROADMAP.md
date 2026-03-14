@@ -127,12 +127,15 @@ Plans:
   5. Error responses use a consistent JSON envelope mapping domain exceptions to HTTP status codes
   6. CORS middleware is configured with environment-variable-driven allowed origins
   7. No sync CQRS operations run on the ASGI event loop -- all use `run_in_threadpool()`
-**Plans**: TBD (to be created during phase planning)
+**Plans**: 5 plans
 
 Plans:
 
 - [x] 11-01-PLAN.md -- API foundation + provider endpoints (REST-01, REST-03, REST-08, REST-09, REST-10, INTG-01) -- completed 2026-03-14
 - [x] 11-02-PLAN.md -- Groups, discovery, config, and system endpoints (REST-02, REST-04, REST-05, REST-06, REST-07) -- completed 2026-03-14
+- [ ] 11-03-PLAN.md -- Tool invocation history endpoint + groups.py thread-safety fix (REST-03 gap)
+- [ ] 11-04-PLAN.md -- Auth management endpoints: API keys and roles (REST-04 gap)
+- [ ] 11-05-PLAN.md -- Observability endpoints: metrics, audit, security, alerts (REST-07 gap)
 
 ### Phase 12: WebSocket Infrastructure
 
