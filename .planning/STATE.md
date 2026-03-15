@@ -2,8 +2,8 @@
 gsd_state_version: 1.0
 milestone: v4.0
 milestone_name: Log Streaming
-status: complete
-last_updated: "2026-03-15T11:00:00Z"
+status: archived
+last_updated: "2026-03-15T12:00:00Z"
 progress:
   total_phases: 2
   completed_phases: 2
@@ -15,18 +15,18 @@ progress:
 
 ## Project Reference
 
-See: .planning/PROJECT.md (updated 2026-03-14)
+See: .planning/PROJECT.md (updated 2026-03-15)
 
 **Core value:** Reliable, observable MCP provider management with production-grade lifecycle control
-**Current focus:** v4.0 Log Streaming -- COMPLETE. All 6 plans across phases 21-22 verified. Live stderr capture, ring buffers, REST endpoint, WebSocket streaming, and LogViewer UI all shipped.
+**Current focus:** v4.0 Log Streaming ARCHIVED. All 22 phases across 6 milestones complete. Run `/gsd-new-milestone` to plan the next milestone.
 
 ## Current Position
 
-Milestone: v4.0 Log Streaming -- COMPLETE
-Status: All phases complete. Phase 21 (3/3 plans) and Phase 22 (3/3 plans) verified.
-Last activity: 2026-03-15 -- v4.0 milestone complete. LOG-01 through LOG-05 all verified. 81/81 log-related unit tests pass.
+Milestone: v4.0 Log Streaming -- ARCHIVED
+Status: Milestone complete and archived. All planning documents updated.
+Last activity: 2026-03-15 -- v4.0 milestone archived. MILESTONES.md, PROJECT.md, ROADMAP.md, STATE.md, RETROSPECTIVE.md updated. Git tag v4.0 pending.
 
-Progress: [##########] 100% -- v4.0 milestone complete (6 of 6 plans)
+Progress: [##########] 100% -- v4.0 milestone archived
 
 ## Performance Metrics
 
@@ -189,14 +189,14 @@ All v0.9, v0.10, and v1.0 decisions archived in PROJECT.md Key Decisions table.
 
 ### Pending Todos
 
-None -- v4.0 milestone complete. All phases and plans verified.
+None -- v4.0 milestone archived. All planning documents updated.
 
 ### Blockers/Concerns
 
-- JSON serialization of domain objects may need dedicated serializers (Pitfall 6) -- to be assessed in Phase 13+
+None.
 
 ## Session Continuity
 
 Last session: 2026-03-15
-Stopped at: v4.0 milestone complete. Plans 21-01 through 22-03 all verified. 81/81 log-related unit tests pass. No further planned phases.
-Resume with: No action needed -- roadmap complete through v4.0
+Stopped at: v4.0 milestone archived. All planning documents updated. Git tag v4.0 to be created.
+Resume with: Run `/gsd-new-milestone` to start planning the next milestone.
