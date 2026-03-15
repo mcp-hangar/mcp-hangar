@@ -5,7 +5,9 @@
 - ✅ **v0.9 Security Hardening** -- Phases 1-4 (shipped 2026-02-15)
 - ✅ **v0.10 Documentation & Kubernetes Maturity** -- Phases 5-7 (shipped 2026-03-01)
 - ✅ **v1.0 Production Hardening** -- Phases 8-10 (shipped 2026-03-08, released as v0.11.0: 2026-03-09)
-- **v2.0 Management UI** -- Phases 11-16 (in progress)
+- ✅ **v2.0 Management UI** -- Phases 11-16 (shipped 2026-03-14)
+- ✅ **v3.0 Infrastructure Maturity** -- Phases 17-20 (shipped 2026-03-14)
+- **v4.0 Log Streaming** -- Phases 21-22 (shipped 2026-03-15)
 
 ## Phases
 
@@ -37,16 +39,19 @@
 
 </details>
 
-### v2.0 Management UI (In Progress)
+<details>
+<summary>✅ v2.0 Management UI (Phases 11-16) -- SHIPPED 2026-03-14</summary>
 
 **Milestone Goal:** Add a browser-based management UI for MCP Hangar with full provider lifecycle control, real-time event streaming, metrics dashboards, auth management, and configuration visibility -- backed by a REST API layer wrapping existing CQRS infrastructure and WebSocket streaming from the EventBus.
 
 - [x] **Phase 11: Backend REST API** - Starlette routes wrapping CQRS commands/queries for providers, groups, auth, config, discovery, events, metrics, audit, and system endpoints (completed 2026-03-14)
-- [ ] **Phase 12: WebSocket Infrastructure** - Connection manager, EventBus subscription bridge (sync-to-async queue), event streaming channel, state snapshot channel
-- [ ] **Phase 13: Frontend Foundation** - Vite + React + TypeScript project, routing, API client with TanStack Query, WebSocket hooks with auto-reconnect, layout shell, component library
-- [ ] **Phase 14: Dashboard & Provider Management** - Dashboard page, provider list/detail, group management, discovery management, configuration viewer
-- [ ] **Phase 15: Observability & Operations** - Metrics dashboards with Recharts, event stream viewer, audit log, execution history, security events
-- [ ] **Phase 16: Auth, Config & Production** - API key management, role management, production static build serving, SPA routing fallback, Docker multi-stage build
+- [x] **Phase 12: WebSocket Infrastructure** - Connection manager, EventBus subscription bridge (sync-to-async queue), event streaming channel, state snapshot channel (completed 2026-03-14)
+- [x] **Phase 13: Frontend Foundation** - Vite + React + TypeScript project, routing, API client with TanStack Query, WebSocket hooks with auto-reconnect, layout shell, component library (completed 2026-03-14)
+- [x] **Phase 14: Dashboard & Provider Management** - Dashboard page, provider list/detail, group management, discovery management, configuration viewer (completed 2026-03-14)
+- [x] **Phase 15: Observability & Operations** - Metrics dashboards with Recharts, event stream viewer, audit log, execution history, security events (completed 2026-03-14)
+- [x] **Phase 16: Auth, Config & Production** - API key management, role management, production static build serving, SPA routing fallback, Docker multi-stage build (completed 2026-03-14)
+
+</details>
 
 ## Phase Details
 
@@ -172,9 +177,9 @@ Plans:
 
 Plans:
 
-- [ ] 13-01-PLAN.md -- Vite + React + TypeScript scaffold, types, API client, TanStack Query keys (UI-01, UI-02, INTG-03)
-- [ ] 13-02-PLAN.md -- WebSocket hooks: useWebSocket, useEventStream, useProviderState + Zustand WS store (UI-03, INTG-03)
-- [ ] 13-03-PLAN.md -- Layout shell, routing (all 9 pages), sidebar nav, header with system status (UI-01, UI-04)
+- [x] 13-01-PLAN.md -- Vite + React + TypeScript scaffold, types, API client, TanStack Query keys (UI-01, UI-02, INTG-03)
+- [x] 13-02-PLAN.md -- WebSocket hooks: useWebSocket, useEventStream, useProviderState + Zustand WS store (UI-03, INTG-03)
+- [x] 13-03-PLAN.md -- Layout shell, routing (all 9 pages), sidebar nav, header with system status (UI-01, UI-04)
 
 ### Phase 14: Dashboard & Provider Management
 
@@ -192,10 +197,10 @@ Plans:
 
 Plans:
 
-- [ ] 14-01-PLAN.md -- Shared UI primitives: ProviderStateBadge, HealthBadge, CircuitBreakerBadge, MetricCard, ActionButton, EmptyState, LoadingSpinner (UI-14)
-- [ ] 14-02-PLAN.md -- Dashboard page: metric cards, state distribution chart, live event feed, alert summary (UI-05)
-- [ ] 14-03-PLAN.md -- Provider list (filtered table + start/stop) + Provider detail (health, tools, circuit breaker) (UI-06)
-- [ ] 14-04-PLAN.md -- Groups list + detail + rebalance, Discovery sources + pending + quarantined, Config viewer + hot reload (UI-07, UI-08, UI-13)
+- [x] 14-01-PLAN.md -- Shared UI primitives: ProviderStateBadge, HealthBadge, CircuitBreakerBadge, MetricCard, ActionButton, EmptyState, LoadingSpinner (UI-14)
+- [x] 14-02-PLAN.md -- Dashboard page: metric cards, state distribution chart, live event feed, alert summary (UI-05)
+- [x] 14-03-PLAN.md -- Provider list (filtered table + start/stop) + Provider detail (health, tools, circuit breaker) (UI-06)
+- [x] 14-04-PLAN.md -- Groups list + detail + rebalance, Discovery sources + pending + quarantined, Config viewer + hot reload (UI-07, UI-08, UI-13)
 
 ### Phase 15: Observability & Operations
 
@@ -212,9 +217,9 @@ Plans:
 
 Plans:
 
-- [ ] 15-01-PLAN.md -- API client fixes + per-provider backend endpoint + MetricsPage (UI-09)
-- [ ] 15-02-PLAN.md -- EventsPage: live stream with type filter + paginated audit log (UI-10)
-- [ ] 15-03-PLAN.md -- ExecutionsPage + SecurityPage + /security route (UI-11, UI-12)
+- [x] 15-01-PLAN.md -- API client fixes + per-provider backend endpoint + MetricsPage (UI-09)
+- [x] 15-02-PLAN.md -- EventsPage: live stream with type filter + paginated audit log (UI-10)
+- [x] 15-03-PLAN.md -- ExecutionsPage + SecurityPage + /security route (UI-11, UI-12)
 
 ### Phase 16: Auth, Config & Production
 
@@ -227,12 +232,96 @@ Plans:
   2. Auth page provides role management (list builtin/custom, create custom) and role assignment (assign/revoke)
   3. Backend serves UI static build in production mode with SPA routing fallback for all non-API routes
   4. Multi-stage Docker build produces a single image with Python backend and UI static files
-**Plans**: TBD
+**Plans**: 3 plans
+
+Plans:
+
+- [x] 16-01-PLAN.md -- Auth API client fixes + AuthPage implementation (UI-15, UI-16) -- completed 2026-03-14
+- [x] 16-02-PLAN.md -- Static build serving + SPA fallback (INTG-02) -- completed 2026-03-14
+- [x] 16-03-PLAN.md -- Multi-stage Docker build with UI baked in (INTG-04) -- completed 2026-03-14
+
+## v3.0 Infrastructure Maturity
+
+**Milestone Goal:** Close all six requirements deferred from v1.0 (EXCP-02, PERS-06, PERS-07, PERS-08, RESL-04, TEST-02), extend observability depth with rate-limit metrics and circuit breaker instrumentation, implement snapshot compaction to bound event store growth, harden the circuit breaker with HALF_OPEN probe semantics, put saga compensation into production use, and promote two UI features (topology visualization, metric time-series) from the v2.0 out-of-scope list.
+
+### Phase 17: Quick Wins
+
+**Goal**: Close the three smallest deferred requirements in a single phase -- exception hygiene linting, rate-limit metric completeness, and fuzz testing for event deserialization -- so the codebase is cleaner and better-covered before the heavier infrastructure work in Phases 18-19.
+**Depends on**: Phase 16 (v2.0 complete)
+**Requirements**: EXCP-02, RESL-04, TEST-02
+**Success Criteria** (what must be TRUE):
+
+  1. Ruff BLE001 is listed in the `select` array in `pyproject.toml`. `ruff check` passes with zero BLE001 violations. All fault-barrier `except Exception` sites carry `# noqa: BLE001` with an inline justification. The four REST API JSON-parsing catches are narrowed to `json.JSONDecodeError | ValueError`.
+  2. `RATE_LIMIT_HITS_TOTAL` counter carries a `result` label (`allowed` | `rejected`). `RATE_LIMIT_ACTIVE_BUCKETS` Gauge is defined and updated from `InMemoryRateLimiter.get_stats()`. `InMemoryRateLimiter.consume()` increments the counter. The auth rate limiter increments the counter on lockout. All existing wire points are updated to the new counter signature.
+  3. `packages/core/tests/unit/test_event_deserialization_fuzz.py` exists with four `@given`-based tests covering arbitrary-input robustness, unknown-key tolerance, and serialize/deserialize round-trip for all 17 event types.
+
+**Plans**: 3 plans
+
+Plans:
+
+- [x] 17-01-PLAN.md -- BLE001 enablement: enable rule, narrow 4 REST catches, add noqa suppressions to fault-barrier sites (EXCP-02)
+- [x] 17-02-PLAN.md -- Rate limit metrics: add `result` label, ACTIVE_BUCKETS gauge, wire InMemoryRateLimiter + auth limiter (RESL-04)
+- [x] 17-03-PLAN.md -- Fuzz tests: 4 @given tests for EventSerializer + UpcasterChain round-trip and adversarial inputs (TEST-02)
+
+### Phase 18: Circuit Breaker & Event Store Compaction
+
+**Goal**: The circuit breaker implements the full industry-standard three-state machine with probe semantics, and the event store supports compaction so event history does not grow without bound. Both changes are self-contained domain/infrastructure work with no saga dependencies.
+**Depends on**: Phase 17
+**Requirements**: PERS-07, PERS-08
+**Success Criteria** (what must be TRUE):
+
+  1. `CircuitState` enum has `CLOSED`, `OPEN`, `HALF_OPEN`. `CircuitBreaker.allow_request()` in `OPEN` state transitions to `HALF_OPEN` (not `CLOSED`) on timeout expiry, gates exactly `probe_count` requests, and resets to `OPEN` on probe failure or to `CLOSED` on probe success. `CircuitBreakerConfig.probe_count: int = 1` exists. Old snapshots without `HALF_OPEN` load without error.
+  2. `mcp_hangar_circuit_breaker_state` Gauge (labels: `provider`, `state`) is defined in `metrics.py` and updated on every `CircuitBreaker` state transition. A `CircuitBreakerStateChanged` domain event is emitted on every transition.
+  3. `IEventStore.compact_stream(stream_id)` is defined. `SQLiteEventStore` and `InMemoryEventStore` implement it. Compaction raises `CompactionError` when no snapshot exists. `POST /api/maintenance/compact` admin endpoint is wired. `mcp_hangar_events_compacted_total` counter is incremented on success.
+
+**Plans**: 3 plans
+
+Plans:
+
+- [x] 18-01-PLAN.md -- CircuitBreaker HALF_OPEN state machine: new enum value, probe_count config, allow_request/record_success/record_failure logic (PERS-07)
+- [x] 18-02-PLAN.md -- Circuit breaker instrumentation: CircuitBreakerStateChanged event, mcp_hangar_circuit_breaker_state Gauge, from_dict backward compat, snapshot persistence update (PERS-07)
+- [x] 18-03-PLAN.md -- Snapshot compaction: IEventStore.compact_stream(), SQLite + InMemory implementations, CompactionError, admin endpoint, mcp_hangar_events_compacted_total counter (PERS-08)
+
+### Phase 19: Saga Compensation
+
+**Goal**: Saga compensation moves from implemented-but-unused infrastructure to a tested production pattern. `ProviderFailoverSaga` is converted to the step-based `Saga` class, the delayed-command facility is added to `SagaManager`, and integration tests verify the full compensation path.
+**Depends on**: Phase 18 (circuit breaker changes affect provider group behavior that failover saga depends on)
+**Requirements**: PERS-06
+**Success Criteria** (what must be TRUE):
+
+  1. `ProviderFailoverSaga` is a `Saga` subclass with at least three named `SagaStep` entries, each carrying a `compensation_command`. The `compensation_command` fields are not `None`.
+  2. `SagaManager` has a `schedule_command(command, delay_s)` facility. `ProviderRecoverySaga` backoff delays and `ProviderFailoverSaga` failback delays use it instead of the current inline TODO comments.
+  3. Integration tests in `tests/integration/test_saga_compensation.py` exercise: (a) successful failover end-to-end, (b) mid-saga failure triggers `_compensate_saga()` and all compensation commands are dispatched in reverse step order, (c) a compensated saga reaches `SagaState.COMPENSATED`.
+
+**Plans**: 2 plans
+
+Plans:
+
+- [x] 19-01-PLAN.md -- SagaManager delayed-command facility + ProviderFailoverSaga step-based conversion with compensation commands (PERS-06)
+- [x] 19-02-PLAN.md -- Saga compensation integration tests: happy path, mid-saga failure, full COMPENSATING -> COMPENSATED path (PERS-06)
+
+### Phase 20: UI Enhancements
+
+**Goal**: Two formerly out-of-scope UI features are delivered -- provider topology visualization and metric time-series persistence -- completing the v3.0 milestone.
+**Depends on**: Phase 19 (all backend work must be stable before UI work; HALF_OPEN state and compaction endpoint referenced in UI)
+**Requirements**: UI-17, UI-18
+**Success Criteria** (what must be TRUE):
+
+  1. A `/topology` route renders an interactive D3.js force-directed graph of providers and groups. Nodes are colored by provider state; group nodes are visually distinct. Clicking a node navigates to its detail page. Graph updates on WebSocket `state` channel messages.
+  2. `MetricsHistoryStore` (SQLite-backed) records metric snapshots every 60 seconds. `GET /api/metrics/history` accepts `provider`, `metric`, `from`, `to` query params. The metrics page shows a time-range selector and switches to a time-series line chart for the selected range. A background worker prunes history older than configured retention (default 7 days).
+
+**Plans**: 3 plans
+
+Plans:
+
+- [x] 20-01-PLAN.md -- MetricsHistoryStore (SQLite schema, snapshot worker, pruning worker) + GET /api/metrics/history endpoint (UI-18 backend)
+- [x] 20-02-PLAN.md -- MetricsPage time-series: time-range selector, history API client, line chart replacing point-in-time chart (UI-18 frontend)
+- [x] 20-03-PLAN.md -- Topology page: D3.js force-directed graph, provider/group nodes, state-colored nodes, WebSocket-driven updates, node click navigation (UI-17)
 
 ## Progress
 
 **Execution Order:**
-Phases execute in numeric order: 11 -> 12 -> 13 -> 14 -> 15 -> 16
+Phases execute in numeric order: 1 -> 2 -> ... -> 20
 
 | Phase | Milestone | Plans Complete | Status | Completed |
 |-------|-----------|----------------|--------|-----------|
@@ -246,13 +335,94 @@ Phases execute in numeric order: 11 -> 12 -> 13 -> 14 -> 15 -> 16
 | 8. Safety Foundation | v1.0 | 3/3 | Complete | 2026-03-08 |
 | 9. State Survival | v1.0 | 3/3 | Complete | 2026-03-08 |
 | 10. Operational Hardening | v1.0 | 6/6 | Complete | 2026-03-08 |
-| 11. Backend REST API | v2.0 | Complete    | 2026-03-14 | 2026-03-14 |
-| 12. WebSocket Infrastructure | v2.0 | 0/? | Pending | -- |
-| 13. Frontend Foundation | v2.0 | 0/? | Pending | -- |
-| 14. Dashboard & Provider Mgmt | v2.0 | 0/? | Pending | -- |
-| 15. Observability & Operations | v2.0 | 0/? | Pending | -- |
-| 16. Auth, Config & Production | v2.0 | 0/? | Pending | -- |
+| 11. Backend REST API | v2.0 | 5/5 | Complete | 2026-03-14 |
+| 12. WebSocket Infrastructure | v2.0 | 2/2 | Complete | 2026-03-14 |
+| 13. Frontend Foundation | v2.0 | 3/3 | Complete | 2026-03-14 |
+| 14. Dashboard & Provider Mgmt | v2.0 | 4/4 | Complete | 2026-03-14 |
+| 15. Observability & Operations | v2.0 | 3/3 | Complete | 2026-03-14 |
+| 16. Auth, Config & Production | v2.0 | 3/3 | Complete | 2026-03-14 |
+| 17. Quick Wins | v3.0 | 3/3 | Complete | 2026-03-14 |
+| 18. Circuit Breaker & Compaction | v3.0 | 3/3 | Complete | 2026-03-14 |
+| 19. Saga Compensation | v3.0 | 2/2 | Complete | 2026-03-14 |
+| 20. UI Enhancements | v3.0 | 3/3 | Complete | 2026-03-14 |
 
 ---
-*Created: 2026-02-15*
-*Last updated: 2026-03-14 -- Phase 11-05 complete: observability REST endpoints (metrics, audit, security, alerts) -- Phase 11 Backend REST API COMPLETE*
+*Roadmap extended: 2026-03-14 -- v3.0 Infrastructure Maturity phases 17-20 added*
+*Roadmap extended: 2026-03-14 -- v4.0 Log Streaming phases 21-22 added*
+
+## v4.0 Log Streaming
+
+**Milestone Goal:** Stream live stdout/stderr from running provider subprocesses and containers to browser clients over WebSocket. Providers currently crash silently -- engineers have no visibility into what a provider is doing. Fix the four critical gaps: live stderr reading (not post-mortem drain), Docker DEVNULL→PIPE, per-provider ring buffer for history, and a WebSocket endpoint + UI log viewer in the provider detail page.
+
+### Phase 21: Log Capture Infrastructure
+
+**Goal**: Per-provider log ring buffers exist, launchers stream stderr lines into them in real time, and a REST endpoint exposes log history -- establishing the capture layer before WebSocket streaming is added.
+**Depends on**: Phase 20 (v3.0 complete)
+**Requirements**: LOG-01, LOG-02, LOG-03
+**Success Criteria** (what must be TRUE):
+
+  1. `LogLine` value object (`provider_id`, `stream: Literal["stdout","stderr"]`, `content: str`, `recorded_at: float`) and `IProviderLogBuffer` interface (`append`, `tail`, `clear`, `provider_id`) exist in `domain/`. `ProviderLogBuffer` implements `IProviderLogBuffer` with a `collections.deque(maxlen=N)` ring buffer (default 1000 lines). Singleton registry `get_log_buffer(provider_id)` / `set_log_buffer(provider_id, buffer)` exists.
+  2. `SubprocessLauncher` and `ContainerLauncher` spawn a daemon thread that reads `process.stderr` line-by-line and appends `LogLine(stream="stderr")` entries to the provider's buffer. `DockerLauncher` is changed from `stderr=subprocess.DEVNULL` to `stderr=subprocess.PIPE` and gains an identical reader thread. All reader threads terminate cleanly when the process exits.
+  3. `GET /api/providers/{provider_id}/logs` accepts `lines` (default 100, max 1000) and returns `{"logs": [{...LogLine...}], "provider_id": "...", "count": N}`. Returns 404 for unknown providers, empty list for providers with no log buffer yet.
+
+**Plans**: 3 plans
+
+Plans:
+
+- [x] 21-01-PLAN.md -- LogLine value object, IProviderLogBuffer interface, ProviderLogBuffer ring buffer, singleton registry (LOG-01)
+- [x] 21-02-PLAN.md -- Live stderr-reader threads in SubprocessLauncher + ContainerLauncher + DockerLauncher (LOG-02)
+- [x] 21-03-PLAN.md -- GET /api/providers/{id}/logs REST endpoint + unit tests (LOG-03)
+
+### Phase 22: Log Streaming WebSocket + UI
+
+**Goal**: Real-time log lines flow to browser clients over WebSocket, and the provider detail page shows a live log viewer with history, auto-scroll, and stream (stdout/stderr) coloring.
+**Depends on**: Phase 21 (ring buffers and reader threads must be in place)
+**Requirements**: LOG-04, LOG-05
+**Success Criteria** (what must be TRUE):
+
+  1. `LogStreamBroadcaster` has per-provider registered async callbacks. `IProviderLogBuffer.append()` notifies the broadcaster. A WebSocket endpoint `GET /api/ws/providers/{provider_id}/logs` sends the buffered history on connect (as individual `{"type":"log_line",...}` messages), then streams live lines until disconnect. Disconnection cleans up the registered callback (no leak).
+  2. Bootstrap wires `LogStreamBroadcaster` and `ProviderLogBuffer` instances per configured provider. Integration test: connect WebSocket, trigger provider start, assert log lines arrive.
+  3. `LogViewer` React component renders log lines in a monospace font with stderr in amber and stdout in gray. `useProviderLogs` hook manages the WebSocket connection with auto-reconnect. `ProviderDetailPage` has a "Process Logs" section at the bottom using `LogViewer`. `npx tsc --noEmit` exits 0.
+
+**Plans**: 3 plans
+
+Plans:
+
+- [x] 22-01-PLAN.md -- LogStreamBroadcaster + GET /ws/providers/{id}/logs WebSocket endpoint (LOG-04)
+- [x] 22-02-PLAN.md -- Bootstrap wiring (log buffer + broadcaster per provider) + integration tests (LOG-04)
+- [x] 22-03-PLAN.md -- LogViewer component + useProviderLogs hook + ProviderDetailPage integration (LOG-05)
+
+## v4.0 Progress
+
+**Execution Order:**
+Phases execute in numeric order: 1 -> 2 -> ... -> 22
+
+| Phase | Milestone | Plans Complete | Status | Completed |
+|-------|-----------|----------------|--------|-----------|
+| 1. Timing Attack Prevention | v0.9 | 2/2 | Complete | 2026-02-15 |
+| 2. Rate Limiter Hardening | v0.9 | 2/2 | Complete | 2026-02-15 |
+| 3. JWT Lifetime Enforcement | v0.9 | 1/1 | Complete | 2026-02-15 |
+| 4. API Key Rotation | v0.9 | 2/2 | Complete | 2026-02-15 |
+| 5. Documentation Content | v0.10 | 2/2 | Complete | 2026-02-28 |
+| 6. Kubernetes Controllers | v0.10 | 3/3 | Complete | 2026-03-01 |
+| 7. Helm Chart Maturity | v0.10 | 1/1 | Complete | 2026-03-01 |
+| 8. Safety Foundation | v1.0 | 3/3 | Complete | 2026-03-08 |
+| 9. State Survival | v1.0 | 3/3 | Complete | 2026-03-08 |
+| 10. Operational Hardening | v1.0 | 6/6 | Complete | 2026-03-08 |
+| 11. Backend REST API | v2.0 | 5/5 | Complete | 2026-03-14 |
+| 12. WebSocket Infrastructure | v2.0 | 2/2 | Complete | 2026-03-14 |
+| 13. Frontend Foundation | v2.0 | 3/3 | Complete | 2026-03-14 |
+| 14. Dashboard & Provider Mgmt | v2.0 | 4/4 | Complete | 2026-03-14 |
+| 15. Observability & Operations | v2.0 | 3/3 | Complete | 2026-03-14 |
+| 16. Auth, Config & Production | v2.0 | 3/3 | Complete | 2026-03-14 |
+| 17. Quick Wins | v3.0 | 3/3 | Complete | 2026-03-14 |
+| 18. Circuit Breaker & Compaction | v3.0 | 3/3 | Complete | 2026-03-14 |
+| 19. Saga Compensation | v3.0 | 2/2 | Complete | 2026-03-14 |
+| 20. UI Enhancements | v3.0 | 3/3 | Complete | 2026-03-14 |
+| 21. Log Capture Infrastructure | v4.0 | 3/3 | Complete | 2026-03-15 |
+| 22. Log Streaming WebSocket + UI | v4.0 | 3/3 | Complete | 2026-03-15 |
+
+---
+*Roadmap extended: 2026-03-14 -- v3.0 Infrastructure Maturity phases 17-20 added*
+*Roadmap extended: 2026-03-14 -- v4.0 Log Streaming phases 21-22 added*
+*v4.0 Log Streaming COMPLETE: 2026-03-15 -- phases 21-22 shipped, LOG-01 through LOG-05 satisfied*

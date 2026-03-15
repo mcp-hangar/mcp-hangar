@@ -1,13 +1,13 @@
 ---
 gsd_state_version: 1.0
-milestone: v3.0
-milestone_name: Infrastructure Maturity
-status: in_progress
-last_updated: "2026-03-14T22:00:00Z"
+milestone: v4.0
+milestone_name: Log Streaming
+status: complete
+last_updated: "2026-03-15T11:00:00Z"
 progress:
-  total_phases: 4
+  total_phases: 2
   completed_phases: 2
-  total_plans: 11
+  total_plans: 6
   completed_plans: 6
 ---
 
@@ -18,16 +18,15 @@ progress:
 See: .planning/PROJECT.md (updated 2026-03-14)
 
 **Core value:** Reliable, observable MCP provider management with production-grade lifecycle control
-**Current focus:** v3.0 Infrastructure Maturity -- close all deferred requirements, harden circuit breaker with HALF_OPEN, implement event store compaction, saga compensation, and add topology visualization and metric time-series to the UI.
+**Current focus:** v4.0 Log Streaming -- COMPLETE. All 6 plans across phases 21-22 verified. Live stderr capture, ring buffers, REST endpoint, WebSocket streaming, and LogViewer UI all shipped.
 
 ## Current Position
 
-Milestone: v2.0 Management UI -- COMPLETE (shipped 2026-03-14)
-Next milestone: v3.0 Infrastructure Maturity -- IN PROGRESS (phases 17-20, 11 plans)
-Status: Phase 17 (Quick Wins) COMPLETE. Phase 18 (Circuit Breaker & Event Store Compaction) COMPLETE.
-Last activity: 2026-03-14 -- Phase 18 complete. Plans 18-01, 18-02, 18-03 all shipped.
+Milestone: v4.0 Log Streaming -- COMPLETE
+Status: All phases complete. Phase 21 (3/3 plans) and Phase 22 (3/3 plans) verified.
+Last activity: 2026-03-15 -- v4.0 milestone complete. LOG-01 through LOG-05 all verified. 81/81 log-related unit tests pass.
 
-Progress: [####------] 50% milestone (2 of 4 phases complete)
+Progress: [##########] 100% -- v4.0 milestone complete (6 of 6 plans)
 
 ## Performance Metrics
 
@@ -153,9 +152,44 @@ All v0.9, v0.10, and v1.0 decisions archived in PROJECT.md Key Decisions table.
 - ConfigPage 5-second feedback via useEffect + setTimeout clearing reloadMessage state
 - Quarantine section is informational only -- approve/reject actions only at pending stage
 
+**v4.0 decisions (Phase 21-01 execution):**
+
+- DEFAULT_MAX_LINES = 1000 per provider -- configurable at construction time
+- on_append callback invoked outside the lock to prevent I/O under lock antipattern
+- get_or_create_log_buffer uses _registry_lock for thread-safe idempotency
+- Lazy imports in init_log_buffers() avoid circular dependency between server/bootstrap and infrastructure layers
+
+**v4.0 decisions (Phase 21-02 execution):**
+
+- Reader thread uses BLE001 noqa fault-barrier -- pipe errors silently swallowed to prevent thread crash
+- _start_stderr_reader is a no-op when process or stderr is None -- safe for HTTP remote transport
+- _create_client guards _start_stderr_reader with_log_buffer is not None check
+
+**v4.0 decisions (Phase 21-03 execution):**
+
+- lines param invalid value falls back to 100, not 400 error -- tolerant parsing for non-critical param
+- Provider existence check before buffer lookup ensures consistent 404 semantics for unknown providers
+- get_log_buffer None guard returns empty list -- cold/unstarted providers shouldn't 404
+
+**v4.0 decisions (Phase 22-01 execution):**
+
+- Broadcaster callbacks are per-provider async callables -- enables concurrent streaming to multiple clients
+- on_append invoked outside ProviderLogBuffer._lock per CLAUDE.md no-I/O-under-lock rule
+- try/finally in WS handler guarantees cleanup regardless of disconnect reason
+
+**v4.0 decisions (Phase 22-02 execution):**
+
+- Deferred buffer injection: Provider constructed first, buffer injected after by init_log_buffers() -- avoids constructor signature change
+- LogStreamBroadcaster singleton carried on ApplicationContext for WS endpoint access
+
+**v4.0 decisions (Phase 22-03 execution):**
+
+- Amber for stderr, gray for stdout -- conventional color coding matching terminal standards
+- useProviderLogs follows same auto-reconnect pattern as useWebSocket hook -- consistent with existing hooks
+
 ### Pending Todos
 
-None beyond phase planning/execution.
+None -- v4.0 milestone complete. All phases and plans verified.
 
 ### Blockers/Concerns
 
@@ -163,6 +197,6 @@ None beyond phase planning/execution.
 
 ## Session Continuity
 
-Last session: 2026-03-14
-Stopped at: Phase 18 (Circuit Breaker & Event Store Compaction) complete. Plans 18-01, 18-02, 18-03 all shipped.
-Resume with: Phase 19 -- check ROADMAP.md for next phase definition.
+Last session: 2026-03-15
+Stopped at: v4.0 milestone complete. Plans 21-01 through 22-03 all verified. 81/81 log-related unit tests pass. No further planned phases.
+Resume with: No action needed -- roadmap complete through v4.0
