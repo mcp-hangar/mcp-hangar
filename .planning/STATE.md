@@ -3,12 +3,12 @@ gsd_state_version: 1.0
 milestone: v5.0
 milestone_name: Platform Management Console
 status: in_progress
-last_updated: "2026-03-22T12:48:56Z"
+last_updated: "2026-03-22T14:01:00Z"
 progress:
   total_phases: 8
-  completed_phases: 0
+  completed_phases: 1
   total_plans: 37
-  completed_plans: 4
+  completed_plans: 10
 ---
 
 # Project State
@@ -22,11 +22,11 @@ See: .planning/PROJECT.md (updated 2026-03-22)
 
 ## Current Position
 
-Milestone: v5.0 Platform Management Console -- IN PROGRESS (Phase 23)
-Status: Phase 23 Plans 01, 02, 03, and 04 complete. Provider CRUD events/commands/handlers, group CRUD handlers, config serializer, and REST endpoints all implemented with TDD.
-Last activity: 2026-03-22 -- Phase 23, Plan 04 executed (10 new REST endpoints for provider/group CRUD + config export/backup, register_crud_handlers wired into init_cqrs(), 50 tests passing).
+Milestone: v5.0 Platform Management Console -- IN PROGRESS (Phase 23 + Phase 25 complete)
+Status: Phase 23 Plans 01-05 complete (backend CRUD + integration tests). Phase 25 Plans 01-05 complete (UI CRUD forms). Phase 23 now fully complete.
+Last activity: 2026-03-22 -- Phase 23, Plan 05 executed (14 integration tests: provider CRUD, group CRUD, config serializer round-trip, 2756 tests passing total).
 
-Progress: [||........] 11% -- Phase 23 Plans 01 + 02 + 03 + 04 of 37 total plans complete
+Progress: [|||.......] 27% -- 10 of 37 total plans complete (Phase 23: 5/5, Phase 25: 5/5)
 
 ## Performance Metrics
 
@@ -119,7 +119,7 @@ All v0.9, v0.10, and v1.0 decisions archived in PROJECT.md Key Decisions table.
 
 **v2.0 decisions (Phase 11-05 execution):**
 
-- SecurityEventHandler sink accessed defensively via getattr(_sink) then getattr(sink) -- private attribute name not guaranteed by public API
+- SecurityEventHandler sink accessed defensively via getattr(\_sink) then getattr(sink) -- private attribute name not guaranteed by public API
 - Alert level filtering performed in API layer not handler -- alerts_sent returns all, filtering is a query concern
 - Metrics JSON summary built by parsing Prometheus text lines with known prefixes -- avoids coupling to prometheus_client internals
 
@@ -132,11 +132,11 @@ All v0.9, v0.10, and v1.0 decisions archived in PROJECT.md Key Decisions table.
 **v2.0 decisions (Phase 12 execution):**
 
 - ws_events_endpoint subscribes/unsubscribes EventBus handler per-connection in try/finally -- guarantees cleanup on any disconnect path
-- EventStreamQueue uses call_soon_threadsafe + _safe_put wrapper to silently drop on QueueFull
+- EventStreamQueue uses call_soon_threadsafe + \_safe_put wrapper to silently drop on QueueFull
 - connection_manager is a module-level singleton instantiated at import time
-- auth_combined_app: only lifespan scopes pass to mcp_app directly; websocket /api/* routed to api_app without auth
+- auth_combined_app: only lifespan scopes pass to mcp_app directly; websocket /api/\* routed to api_app without auth
 - Severity filter deferred -- DomainEvent has no severity field; only event_types and provider_ids filters implemented
-- combined_app health/metrics gate is HTTP-only; websocket scopes route to /api/* or mcp_app
+- combined_app health/metrics gate is HTTP-only; websocket scopes route to /api/\* or mcp_app
 
 **v2.0 decisions (Phase 13 execution):**
 
@@ -156,14 +156,14 @@ All v0.9, v0.10, and v1.0 decisions archived in PROJECT.md Key Decisions table.
 
 - DEFAULT_MAX_LINES = 1000 per provider -- configurable at construction time
 - on_append callback invoked outside the lock to prevent I/O under lock antipattern
-- get_or_create_log_buffer uses _registry_lock for thread-safe idempotency
+- get_or_create_log_buffer uses \_registry_lock for thread-safe idempotency
 - Lazy imports in init_log_buffers() avoid circular dependency between server/bootstrap and infrastructure layers
 
 **v4.0 decisions (Phase 21-02 execution):**
 
 - Reader thread uses BLE001 noqa fault-barrier -- pipe errors silently swallowed to prevent thread crash
-- _start_stderr_reader is a no-op when process or stderr is None -- safe for HTTP remote transport
-- _create_client guards _start_stderr_reader with_log_buffer is not None check
+- \_start_stderr_reader is a no-op when process or stderr is None -- safe for HTTP remote transport
+- \_create_client guards \_start_stderr_reader with_log_buffer is not None check
 
 **v4.0 decisions (Phase 21-03 execution):**
 
@@ -174,7 +174,7 @@ All v0.9, v0.10, and v1.0 decisions archived in PROJECT.md Key Decisions table.
 **v4.0 decisions (Phase 22-01 execution):**
 
 - Broadcaster callbacks are per-provider async callables -- enables concurrent streaming to multiple clients
-- on_append invoked outside ProviderLogBuffer._lock per CLAUDE.md no-I/O-under-lock rule
+- on_append invoked outside ProviderLogBuffer.\_lock per CLAUDE.md no-I/O-under-lock rule
 - try/finally in WS handler guarantees cleanup regardless of disconnect reason
 
 **v4.0 decisions (Phase 22-02 execution):**
@@ -197,7 +197,7 @@ All v0.9, v0.10, and v1.0 decisions archived in PROJECT.md Key Decisions table.
 **v5.0 decisions (Phase 23-02 execution):**
 
 - Each group handler owns its own threading.Lock (not a single shared groups lock) to minimize contention and match the per-provider pattern
-- ProviderGroup.update() acquires self._lock internally; UpdateGroupHandler does not hold its own lock during the call (avoids nested locking)
+- ProviderGroup.update() acquires self.\_lock internally; UpdateGroupHandler does not hold its own lock during the call (avoids nested locking)
 - DeleteGroupHandler: del from GROUPS inside lock, then stop_all() outside lock to avoid holding lock during I/O
 - AddGroupMemberHandler: repository.get() before acquiring lock so the lookup does not block other group mutations
 - UpdateGroupCommand does not have a strategy field (Plan 01 only added description/min_healthy); ProviderGroup.update() still accepts strategy for future use
@@ -214,6 +214,11 @@ All v0.9, v0.10, and v1.0 decisions archived in PROJECT.md Key Decisions table.
 - Config routes ordered /export and /backup before /reload to avoid ambiguous path matching
 - register_crud_handlers() imported lazily inside init_cqrs() to mirror existing PROVIDER_REPOSITORY lazy import pattern
 - member_id body key mapped to provider_id command field in add_group_member -- REST API uses member_id for clarity; command uses provider_id for domain consistency
+
+**v5.0 decisions (Phase 23-05 execution):**
+
+- GroupMember.id property returns str(provider.id) -- plan example code used hasattr guard but actual API has clean id property
+- write_config_backup() calls serialize_full_config() without args internally; integration tests must patch it to avoid live get_context() dependency
 
 ### v5.0 Key Discoveries
 
@@ -239,5 +244,5 @@ None.
 ## Session Continuity
 
 Last session: 2026-03-22
-Stopped at: Completed Phase 23, Plan 04 -- 10 new REST endpoints (provider CRUD, group CRUD + members, config export/backup), register_crud_handlers wired in init_cqrs(), 50 tests passing.
-Resume with: Execute Phase 23 Plan 05.
+Stopped at: Completed Phase 25 (all 5 plans) -- full provider + group CRUD forms in React/TypeScript. ProviderCreateDrawer (4-step wizard), ProviderEditDrawer, ProviderDeleteDialog, ProvidersPage wiring, GroupCreateDrawer, GroupEditDrawer, GroupMemberPanel (add/remove/inline-edit), GroupsPage wiring, ToolAccessPolicyEditor. Phase 23 Plan 05 (tests) still pending.
+Resume with: Execute Phase 23 Plan 05 (CRUD integration tests), then Phase 24 (Discovery + Catalog API).

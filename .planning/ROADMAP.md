@@ -66,13 +66,13 @@
 **Requirements**: CONC-01, CONC-02, CONC-03, CONC-04, EXCP-01, SECR-01
 **Success Criteria** (what must be TRUE):
 
-  1. ProviderGroup operations that start member providers never hold the group lock while acquiring a provider lock -- the level-11-holds-level-10 deadlock path is eliminated
-  2. Provider cold starts (subprocess launch, tool discovery) perform all I/O outside the provider lock, using INITIALIZING state guard so concurrent callers wait via threading.Event instead of blocking on the lock
-  3. StdioClient request-response matching is race-free -- PendingRequest is registered before the request is written to stdin, so no response can arrive before its handler exists
-  4. All 42 bare `except Exception:` catches are resolved -- fault-barriers kept with structured logging, cleanup paths narrowed to specific exceptions, bug-hiding catches removed or replaced
-  5. Provider commands sourced from Docker labels or Kubernetes annotations are validated against a command allowlist before registration, preventing command injection from untrusted discovery sources
-**Plans**: 3 plans
-Plans:
+1. ProviderGroup operations that start member providers never hold the group lock while acquiring a provider lock -- the level-11-holds-level-10 deadlock path is eliminated
+2. Provider cold starts (subprocess launch, tool discovery) perform all I/O outside the provider lock, using INITIALIZING state guard so concurrent callers wait via threading.Event instead of blocking on the lock
+3. StdioClient request-response matching is race-free -- PendingRequest is registered before the request is written to stdin, so no response can arrive before its handler exists
+4. All 42 bare `except Exception:` catches are resolved -- fault-barriers kept with structured logging, cleanup paths narrowed to specific exceptions, bug-hiding catches removed or replaced
+5. Provider commands sourced from Docker labels or Kubernetes annotations are validated against a command allowlist before registration, preventing command injection from untrusted discovery sources
+   **Plans**: 3 plans
+   Plans:
 
 - [x] 08-01-PLAN.md -- Quick wins + security + group lock fix (CONC-04, SECR-01, CONC-01) -- completed 2026-03-08
 - [x] 08-02-PLAN.md -- Provider concurrency refactor (CONC-02, CONC-03) -- completed 2026-03-08
@@ -85,11 +85,11 @@ Plans:
 **Requirements**: PERS-01, PERS-02, PERS-03
 **Success Criteria** (what must be TRUE):
 
-  1. Saga state is checkpointed to SQLite after each step transition, and incomplete sagas are detected and resumed on bootstrap without emitting duplicate commands during event replay
-  2. Circuit breaker state (state, failure_count, opened_at) persists in provider snapshots and is restored on restart, so previously-tripped breakers remain open against known-bad providers
-  3. Both saga checkpoints and circuit breaker state use the existing SQLiteConnectionFactory and MigrationRunner infrastructure -- no new database connections or migration systems
-**Plans**: 3 plans
-Plans:
+1. Saga state is checkpointed to SQLite after each step transition, and incomplete sagas are detected and resumed on bootstrap without emitting duplicate commands during event replay
+2. Circuit breaker state (state, failure_count, opened_at) persists in provider snapshots and is restored on restart, so previously-tripped breakers remain open against known-bad providers
+3. Both saga checkpoints and circuit breaker state use the existing SQLiteConnectionFactory and MigrationRunner infrastructure -- no new database connections or migration systems
+   **Plans**: 3 plans
+   Plans:
 
 - [x] 09-01-PLAN.md -- Saga persistence foundation (PERS-01) -- completed 2026-03-08
 - [x] 09-02-PLAN.md -- Circuit breaker persistence (PERS-03) -- completed 2026-03-08
@@ -102,13 +102,13 @@ Plans:
 **Requirements**: PERS-04, PERS-05, SECR-02, RESL-01, RESL-02, RESL-03, TEST-01, QUAL-01
 **Success Criteria** (what must be TRUE):
 
-  1. IEventStore supports snapshots and aggregate replay loads from latest snapshot plus subsequent events, bounding startup time regardless of total event history
-  2. Health checks use exponential backoff with jitter for degraded providers and BackgroundWorker schedules checks based on provider state
-  3. Rate limiting is enforced at the command bus middleware layer, covering stdio, HTTP, and programmatic callers uniformly regardless of transport
-  4. Docker discovery source reconnects automatically with retry and exponential backoff when the Docker daemon connection is lost
-  5. Property-based tests using Hypothesis RuleBasedStateMachine verify that all Provider state transition sequences maintain invariants, and the package includes py.typed with incrementally-enabled mypy strictness
-**Plans**: 6 plans
-Plans:
+1. IEventStore supports snapshots and aggregate replay loads from latest snapshot plus subsequent events, bounding startup time regardless of total event history
+2. Health checks use exponential backoff with jitter for degraded providers and BackgroundWorker schedules checks based on provider state
+3. Rate limiting is enforced at the command bus middleware layer, covering stdio, HTTP, and programmatic callers uniformly regardless of transport
+4. Docker discovery source reconnects automatically with retry and exponential backoff when the Docker daemon connection is lost
+5. Property-based tests using Hypothesis RuleBasedStateMachine verify that all Provider state transition sequences maintain invariants, and the package includes py.typed with incrementally-enabled mypy strictness
+   **Plans**: 6 plans
+   Plans:
 
 - [x] 10-01-PLAN.md -- Health check backoff with jitter (RESL-01, RESL-02) -- completed 2026-03-08
 - [x] 10-02-PLAN.md -- Event store snapshots (PERS-04, PERS-05) -- completed 2026-03-08
@@ -233,8 +233,8 @@ Plans:
 - [x] 23-01-PLAN.md -- New domain events (ProviderRegistered with source field, ProviderUpdated, ProviderDeregistered, GroupUpdated, GroupDeleted) + provider CQRS commands + handlers (CRUD-01)
 - [x] 23-02-PLAN.md -- Group CQRS commands + handlers (CRUD-02)
 - [x] 23-03-PLAN.md -- Config serializer: serialize functions + backup rotation (CRUD-03)
-- [ ] 23-04-PLAN.md -- REST endpoints: provider/group CRUD + config export/backup (CRUD-01, CRUD-02, CRUD-03)
-- [ ] 23-05-PLAN.md -- Unit + integration tests (CRUD-01, CRUD-02, CRUD-03)
+- [x] 23-04-PLAN.md -- REST endpoints: provider/group CRUD + config export/backup (CRUD-01, CRUD-02, CRUD-03)
+- [x] 23-05-PLAN.md -- Unit + integration tests (CRUD-01, CRUD-02, CRUD-03)
 
 ### Phase 24: Discovery Source Management + Static MCP Catalog API (C2)
 
@@ -246,11 +246,11 @@ Plans:
 
 ### Phase 25: Provider & Group CRUD Forms (U1)
 
-- [ ] 25-01-PLAN.md -- TypeScript types + MSW handlers + API client for CRUD (CRUD-04)
-- [ ] 25-02-PLAN.md -- ProviderCreateDrawer + ProviderEditDrawer (CRUD-04)
-- [ ] 25-03-PLAN.md -- ProviderDeleteDialog + ProvidersPage actions (CRUD-04)
-- [ ] 25-04-PLAN.md -- GroupCreateDrawer + GroupEditDrawer + GroupMemberPanel (CRUD-05)
-- [ ] 25-05-PLAN.md -- ToolAccessPolicyEditor + GroupsPage enhancements (CRUD-05)
+- [x] 25-01-PLAN.md -- TypeScript types + MSW handlers + API client for CRUD (CRUD-04)
+- [x] 25-02-PLAN.md -- ProviderCreateDrawer + ProviderEditDrawer (CRUD-04)
+- [x] 25-03-PLAN.md -- ProviderDeleteDialog + ProvidersPage actions (CRUD-04)
+- [x] 25-04-PLAN.md -- GroupCreateDrawer + GroupEditDrawer + GroupMemberPanel (CRUD-05)
+- [x] 25-05-PLAN.md -- ToolAccessPolicyEditor + GroupsPage enhancements (CRUD-05)
 
 ### Phase 26: Discovery Source Wizard + Catalog Browser (U2)
 
@@ -293,43 +293,46 @@ Plans:
 
 ## Progress
 
-**22 of 30 phases complete across 7 milestones. v5.0 in planning.**
+**23 of 30 phases complete across 7 milestones. v5.0 in progress.**
 
-| Phase | Milestone | Plans Complete | Status | Completed |
-|-------|-----------|----------------|--------|-----------|
-| 1. Timing Attack Prevention | v0.9 | 2/2 | Complete | 2026-02-15 |
-| 2. Rate Limiter Hardening | v0.9 | 2/2 | Complete | 2026-02-15 |
-| 3. JWT Lifetime Enforcement | v0.9 | 1/1 | Complete | 2026-02-15 |
-| 4. API Key Rotation | v0.9 | 2/2 | Complete | 2026-02-15 |
-| 5. Documentation Content | v0.10 | 2/2 | Complete | 2026-02-28 |
-| 6. Kubernetes Controllers | v0.10 | 3/3 | Complete | 2026-03-01 |
-| 7. Helm Chart Maturity | v0.10 | 1/1 | Complete | 2026-03-01 |
-| 8. Safety Foundation | v1.0 | 3/3 | Complete | 2026-03-08 |
-| 9. State Survival | v1.0 | 3/3 | Complete | 2026-03-08 |
-| 10. Operational Hardening | v1.0 | 6/6 | Complete | 2026-03-08 |
-| 11. Backend REST API | v2.0 | 5/5 | Complete | 2026-03-14 |
-| 12. WebSocket Infrastructure | v2.0 | 2/2 | Complete | 2026-03-14 |
-| 13. Frontend Foundation | v2.0 | 3/3 | Complete | 2026-03-14 |
-| 14. Dashboard & Provider Mgmt | v2.0 | 4/4 | Complete | 2026-03-14 |
-| 15. Observability & Operations | v2.0 | 3/3 | Complete | 2026-03-14 |
-| 16. Auth, Config & Production | v2.0 | 3/3 | Complete | 2026-03-14 |
-| 17. Quick Wins | v3.0 | 3/3 | Complete | 2026-03-14 |
-| 18. Circuit Breaker & Compaction | v3.0 | 3/3 | Complete | 2026-03-14 |
-| 19. Saga Compensation | v3.0 | 2/2 | Complete | 2026-03-14 |
-| 20. UI Enhancements | v3.0 | 3/3 | Complete | 2026-03-14 |
-| 21. Log Capture Infrastructure | v4.0 | 3/3 | Complete | 2026-03-15 |
-| 22. Log Streaming WebSocket + UI | v4.0 | 3/3 | Complete | 2026-03-15 |
-| 23. Provider/Group CRUD (C1) | 3/5 | In Progress|  | -- |
-| 24. Discovery + Catalog API (C2) | v5.0 | 0/5 | Planning | -- |
-| 25. CRUD Forms (U1) | v5.0 | 0/5 | Planning | -- |
-| 26. Discovery Wizard + Catalog (U2) | v5.0 | 0/4 | Planning | -- |
-| 27. RBAC + Tool Access API (C3) | v5.0 | 0/5 | Planning | -- |
-| 28. RBAC + Tool Access UI (U3) | v5.0 | 0/4 | Planning | -- |
-| 29. Config Export (C4) | v5.0 | 0/4 | Planning | -- |
-| 30. Config Export UI + Polish (U4) | v5.0 | 0/5 | Planning | -- |
+| Phase                               | Milestone | Plans Complete | Status      | Completed  |
+| ----------------------------------- | --------- | -------------- | ----------- | ---------- |
+| 1. Timing Attack Prevention         | v0.9      | 2/2            | Complete    | 2026-02-15 |
+| 2. Rate Limiter Hardening           | v0.9      | 2/2            | Complete    | 2026-02-15 |
+| 3. JWT Lifetime Enforcement         | v0.9      | 1/1            | Complete    | 2026-02-15 |
+| 4. API Key Rotation                 | v0.9      | 2/2            | Complete    | 2026-02-15 |
+| 5. Documentation Content            | v0.10     | 2/2            | Complete    | 2026-02-28 |
+| 6. Kubernetes Controllers           | v0.10     | 3/3            | Complete    | 2026-03-01 |
+| 7. Helm Chart Maturity              | v0.10     | 1/1            | Complete    | 2026-03-01 |
+| 8. Safety Foundation                | v1.0      | 3/3            | Complete    | 2026-03-08 |
+| 9. State Survival                   | v1.0      | 3/3            | Complete    | 2026-03-08 |
+| 10. Operational Hardening           | v1.0      | 6/6            | Complete    | 2026-03-08 |
+| 11. Backend REST API                | v2.0      | 5/5            | Complete    | 2026-03-14 |
+| 12. WebSocket Infrastructure        | v2.0      | 2/2            | Complete    | 2026-03-14 |
+| 13. Frontend Foundation             | v2.0      | 3/3            | Complete    | 2026-03-14 |
+| 14. Dashboard & Provider Mgmt       | v2.0      | 4/4            | Complete    | 2026-03-14 |
+| 15. Observability & Operations      | v2.0      | 3/3            | Complete    | 2026-03-14 |
+| 16. Auth, Config & Production       | v2.0      | 3/3            | Complete    | 2026-03-14 |
+| 17. Quick Wins                      | v3.0      | 3/3            | Complete    | 2026-03-14 |
+| 18. Circuit Breaker & Compaction    | v3.0      | 3/3            | Complete    | 2026-03-14 |
+| 19. Saga Compensation               | v3.0      | 2/2            | Complete    | 2026-03-14 |
+| 20. UI Enhancements                 | v3.0      | 3/3            | Complete    | 2026-03-14 |
+| 21. Log Capture Infrastructure      | v4.0      | 3/3            | Complete    | 2026-03-15 |
+| 22. Log Streaming WebSocket + UI    | v4.0      | 3/3            | Complete    | 2026-03-15 |
+| 23. Provider/Group CRUD (C1)        | v5.0      | 5/5            | Complete    | 2026-03-22 |
+| 24. Discovery + Catalog API (C2)    | v5.0      | 0/5            | Planning    | --         |
+| 25. CRUD Forms (U1)                 | v5.0      | 5/5            | Complete    | 2026-03-22 |
+| 26. Discovery Wizard + Catalog (U2) | v5.0      | 0/4            | Planning    | --         |
+| 27. RBAC + Tool Access API (C3)     | v5.0      | 0/5            | Planning    | --         |
+| 28. RBAC + Tool Access UI (U3)      | v5.0      | 0/4            | Planning    | --         |
+| 29. Config Export (C4)              | v5.0      | 0/4            | Planning    | --         |
+| 30. Config Export UI + Polish (U4)  | v5.0      | 0/5            | Planning    | --         |
 
 ---
-*Roadmap extended: 2026-03-14 -- v3.0 Infrastructure Maturity phases 17-20 added*
-*Roadmap extended: 2026-03-14 -- v4.0 Log Streaming phases 21-22 added*
-*v4.0 Log Streaming COMPLETE: 2026-03-15 -- phases 21-22 shipped, LOG-01 through LOG-05 satisfied*
-*Roadmap extended: 2026-03-22 -- v5.0 Platform Management Console phases 23-30 added (8 phases, 37 plans, 2 tracks)*
+
+_Roadmap extended: 2026-03-14 -- v3.0 Infrastructure Maturity phases 17-20 added_
+_Roadmap extended: 2026-03-14 -- v4.0 Log Streaming phases 21-22 added_
+_v4.0 Log Streaming COMPLETE: 2026-03-15 -- phases 21-22 shipped, LOG-01 through LOG-05 satisfied_
+_Roadmap extended: 2026-03-22 -- v5.0 Platform Management Console phases 23-30 added (8 phases, 37 plans, 2 tracks)_
+_Phase 25 COMPLETE: 2026-03-22 -- CRUD-04 + CRUD-05 UI track done; all 5 plans shipped_
+_Phase 23 COMPLETE: 2026-03-22 -- CRUD-01 + CRUD-02 + CRUD-03 backend + 14 integration tests; all 5 plans shipped_
