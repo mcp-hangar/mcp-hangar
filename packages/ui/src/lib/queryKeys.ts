@@ -18,6 +18,11 @@ export const queryKeys = {
     pending: () => ['discovery', 'pending'] as const,
     quarantined: () => ['discovery', 'quarantined'] as const,
   },
+  catalog: {
+    all: ['catalog'] as const,
+    list: (params?: { search?: string; tags?: string }) => ['catalog', 'list', params] as const,
+    detail: (entryId: string) => ['catalog', 'detail', entryId] as const,
+  },
   config: {
     all: ['config'] as const,
     current: () => ['config', 'current'] as const,

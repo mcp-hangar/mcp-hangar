@@ -38,11 +38,39 @@ export interface GroupDetails extends GroupSummary {
  * Matches SourceStatus.to_dict() in discovery_service.py.
  */
 export interface DiscoverySourceStatus {
+  source_id: string
   source_type: string
-  mode?: string
+  mode: string
   is_healthy: boolean
+  is_enabled: boolean
+  last_discovery: string | null
   providers_count: number
-  error?: string
+  error_message: string | null
+}
+
+/**
+ * Discovery source spec as managed by DiscoveryRegistry.
+ * Matches DiscoverySourceSpec.to_dict() in value_objects/discovery.py.
+ */
+export interface DiscoverySourceSpec {
+  source_id: string
+  source_type: 'docker' | 'filesystem' | 'kubernetes' | 'entrypoint'
+  mode: 'additive' | 'authoritative'
+  enabled: boolean
+  config: Record<string, unknown>
+}
+
+export interface RegisterSourceRequest {
+  source_type: 'docker' | 'filesystem' | 'kubernetes' | 'entrypoint'
+  mode: 'additive' | 'authoritative'
+  enabled?: boolean
+  config?: Record<string, unknown>
+}
+
+export interface UpdateSourceRequest {
+  mode?: 'additive' | 'authoritative'
+  enabled?: boolean
+  config?: Record<string, unknown>
 }
 
 /**
