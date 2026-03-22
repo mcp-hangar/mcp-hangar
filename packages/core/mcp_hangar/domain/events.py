@@ -833,3 +833,42 @@ class ConfigurationReloadFailed(DomainEvent):
 
     def __post_init__(self):
         super().__init__()
+
+
+# =============================================================================
+# Provider CRUD Events
+# =============================================================================
+
+
+@dataclass
+class ProviderRegistered(DomainEvent):
+    """Published when a provider is registered via API, config, or discovery."""
+
+    provider_id: str
+    source: str  # "api" | "config" | "discovery"
+    mode: str
+
+    def __post_init__(self):
+        super().__init__()
+
+
+@dataclass
+class ProviderUpdated(DomainEvent):
+    """Published when a provider configuration is updated."""
+
+    provider_id: str
+    source: str
+
+    def __post_init__(self):
+        super().__init__()
+
+
+@dataclass
+class ProviderDeregistered(DomainEvent):
+    """Published when a provider is deleted/deregistered."""
+
+    provider_id: str
+    source: str
+
+    def __post_init__(self):
+        super().__init__()

@@ -19,6 +19,7 @@ from ..events import (
     ProviderStarted,
     ProviderStateChanged,
     ProviderStopped,
+    ProviderUpdated,
     ToolInvocationCompleted,
     ToolInvocationFailed,
     ToolInvocationRequested,
@@ -320,6 +321,18 @@ class Provider(AggregateRoot):
         """Current provider state."""
         with self._lock:
             return self._state
+
+    @property
+    def state_snapshot(self) -> ProviderState:
+        """Read current state without acquiring lock.
+
+        Safe for callers that cannot acquire Provider lock due to lock hierarchy
+        constraints (e.g., ProviderGroup at level 11 cannot acquire Provider at
+        level 10).  Reading an enum attribute is atomic in CPython (GIL-protected
+        single pointer read).  The value may be slightly stale, which is
+        acceptable for health checks and rotation decisions.
+        """
+        return self._state
 
     @property
     def health(self) -> HealthTracker:
@@ -1199,3 +1212,65 @@ class Provider(AggregateRoot):
                 "health": self._health.to_dict(),
                 "meta": dict(self._meta),
             }
+
+    def to_config_dict(self) -> dict[str, Any]:
+        """Return YAML-compatible config spec dict.
+
+        Returns the minimal representation for round-trip:
+        load_config(to_config_dict()) produces an equivalent Provider.
+
+        Returns:
+            Dictionary of provider configuration fields, omitting optional
+            fields that are empty or equal to their defaults.
+        """
+        spec: dict[str, Any] = {
+            "mode": self._mode.value,
+            "idle_ttl_s": self._idle_ttl.seconds,
+            "health_check_interval_s": self._health_check_interval.seconds,
+        }
+        if self._command:
+            spec["command"] = list(self._command)
+        if self._image:
+            spec["image"] = self._image
+        if self._endpoint:
+            spec["endpoint"] = self._endpoint
+        if self._env:
+            spec["env"] = dict(self._env)
+        if self._description:
+            spec["description"] = self._description
+        if self._volumes:
+            spec["volumes"] = list(self._volumes)
+        if self._network and self._network != "none":
+            spec["network"] = self._network
+        if not self._read_only:
+            spec["read_only"] = False
+        return spec
+
+    def update_config(
+        self,
+        description: str | None = None,
+        env: dict[str, str] | None = None,
+        idle_ttl_s: int | None = None,
+        health_check_interval_s: int | None = None,
+    ) -> None:
+        """Update mutable configuration fields and record a domain event.
+
+        Only non-None arguments are applied; fields not passed are unchanged.
+        Acquires self._lock internally -- do NOT call under an external lock.
+
+        Args:
+            description: New human-readable description (optional).
+            env: New environment variable dict (replaces existing, optional).
+            idle_ttl_s: New idle TTL in seconds (optional).
+            health_check_interval_s: New health check interval in seconds (optional).
+        """
+        with self._lock:
+            if description is not None:
+                self._description = description
+            if env is not None:
+                self._env = dict(env)
+            if idle_ttl_s is not None:
+                self._idle_ttl = IdleTTL(idle_ttl_s)
+            if health_check_interval_s is not None:
+                self._health_check_interval = HealthCheckInterval(health_check_interval_s)
+        self._record_event(ProviderUpdated(provider_id=self.provider_id, source="api"))
