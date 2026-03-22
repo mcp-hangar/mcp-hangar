@@ -238,11 +238,11 @@
 
 ### Phase 24: Discovery Source Management + Static MCP Catalog API (C2)
 
-- [ ] 24-01-PLAN.md -- DiscoveryRegistry + DiscoverySourceSpec (DISC-01)
-- [ ] 24-02-PLAN.md -- Discovery REST endpoints (DISC-02)
-- [ ] 24-03-PLAN.md -- McpProviderEntry model + McpCatalogRepository + seed (CAT-01)
-- [ ] 24-04-PLAN.md -- Catalog REST endpoints + deploy action (CAT-02)
-- [ ] 24-05-PLAN.md -- Discovery + catalog tests (DISC-01, DISC-02, CAT-01, CAT-02)
+- [x] 24-01-PLAN.md -- DiscoveryRegistry + DiscoverySourceSpec (DISC-01)
+- [x] 24-02-PLAN.md -- Discovery REST endpoints (DISC-02)
+- [x] 24-03-PLAN.md -- McpProviderEntry model + McpCatalogRepository + seed (CAT-01)
+- [x] 24-04-PLAN.md -- Catalog REST endpoints + deploy action (CAT-02)
+- [x] 24-05-PLAN.md -- Discovery + catalog tests (DISC-01, DISC-02, CAT-01, CAT-02)
 
 ### Phase 25: Provider & Group CRUD Forms (U1)
 
@@ -254,10 +254,10 @@
 
 ### Phase 26: Discovery Source Wizard + Catalog Browser (U2)
 
-- [ ] 26-01-PLAN.md -- TypeScript types + MSW handlers for discovery/catalog (DISC-03, CAT-03)
-- [ ] 26-02-PLAN.md -- AddDiscoverySourceWizard + DiscoveryPage enhancements (DISC-03)
-- [ ] 26-03-PLAN.md -- CatalogPage: search, tags, grid, Deploy + CatalogEntryDrawer (CAT-03)
-- [ ] 26-04-PLAN.md -- Sidebar Catalog link + component tests (DISC-03, CAT-03)
+- [x] 26-01-PLAN.md -- TypeScript types + MSW handlers + API clients for discovery/catalog (DISC-03, CAT-03)
+- [x] 26-02-PLAN.md -- DiscoveryPage field fixes + AddSourceDrawer + EditSourceDrawer + source actions (DISC-03)
+- [x] 26-03-PLAN.md -- CatalogPage: search, tags, grid, CatalogEntryDrawer + Deploy + AddEntryDrawer (CAT-03)
+- [x] 26-04-PLAN.md -- Sidebar Catalog link + /catalog route + component tests (DISC-03, CAT-03)
 
 ### Phase 27: RBAC Management API + Tool Access Policy CRUD (C3)
 
@@ -293,40 +293,40 @@
 
 ## Progress
 
-**23 of 30 phases complete across 7 milestones. v5.0 in progress.**
+**24 of 30 phases complete across 7 milestones. v5.0 in progress.**
 
-| Phase                               | Milestone | Plans Complete | Status      | Completed  |
-| ----------------------------------- | --------- | -------------- | ----------- | ---------- |
-| 1. Timing Attack Prevention         | v0.9      | 2/2            | Complete    | 2026-02-15 |
-| 2. Rate Limiter Hardening           | v0.9      | 2/2            | Complete    | 2026-02-15 |
-| 3. JWT Lifetime Enforcement         | v0.9      | 1/1            | Complete    | 2026-02-15 |
-| 4. API Key Rotation                 | v0.9      | 2/2            | Complete    | 2026-02-15 |
-| 5. Documentation Content            | v0.10     | 2/2            | Complete    | 2026-02-28 |
-| 6. Kubernetes Controllers           | v0.10     | 3/3            | Complete    | 2026-03-01 |
-| 7. Helm Chart Maturity              | v0.10     | 1/1            | Complete    | 2026-03-01 |
-| 8. Safety Foundation                | v1.0      | 3/3            | Complete    | 2026-03-08 |
-| 9. State Survival                   | v1.0      | 3/3            | Complete    | 2026-03-08 |
-| 10. Operational Hardening           | v1.0      | 6/6            | Complete    | 2026-03-08 |
-| 11. Backend REST API                | v2.0      | 5/5            | Complete    | 2026-03-14 |
-| 12. WebSocket Infrastructure        | v2.0      | 2/2            | Complete    | 2026-03-14 |
-| 13. Frontend Foundation             | v2.0      | 3/3            | Complete    | 2026-03-14 |
-| 14. Dashboard & Provider Mgmt       | v2.0      | 4/4            | Complete    | 2026-03-14 |
-| 15. Observability & Operations      | v2.0      | 3/3            | Complete    | 2026-03-14 |
-| 16. Auth, Config & Production       | v2.0      | 3/3            | Complete    | 2026-03-14 |
-| 17. Quick Wins                      | v3.0      | 3/3            | Complete    | 2026-03-14 |
-| 18. Circuit Breaker & Compaction    | v3.0      | 3/3            | Complete    | 2026-03-14 |
-| 19. Saga Compensation               | v3.0      | 2/2            | Complete    | 2026-03-14 |
-| 20. UI Enhancements                 | v3.0      | 3/3            | Complete    | 2026-03-14 |
-| 21. Log Capture Infrastructure      | v4.0      | 3/3            | Complete    | 2026-03-15 |
-| 22. Log Streaming WebSocket + UI    | v4.0      | 3/3            | Complete    | 2026-03-15 |
-| 23. Provider/Group CRUD (C1)        | v5.0      | 5/5            | Complete    | 2026-03-22 |
-| 24. Discovery + Catalog API (C2)    | v5.0      | 0/5            | Planning    | --         |
-| 25. CRUD Forms (U1)                 | v5.0      | 5/5            | Complete    | 2026-03-22 |
-| 26. Discovery Wizard + Catalog (U2) | v5.0      | 0/4            | Planning    | --         |
-| 27. RBAC + Tool Access API (C3)     | v5.0      | 0/5            | Planning    | --         |
-| 28. RBAC + Tool Access UI (U3)      | v5.0      | 0/4            | Planning    | --         |
-| 29. Config Export (C4)              | v5.0      | 0/4            | Planning    | --         |
-| 30. Config Export UI + Polish (U4)  | v5.0      | 0/5            | Planning    | --         |
+| Phase                               | Milestone | Plans Complete | Status   | Completed  |
+| ----------------------------------- | --------- | -------------- | -------- | ---------- |
+| 1. Timing Attack Prevention         | v0.9      | 2/2            | Complete | 2026-02-15 |
+| 2. Rate Limiter Hardening           | v0.9      | 2/2            | Complete | 2026-02-15 |
+| 3. JWT Lifetime Enforcement         | v0.9      | 1/1            | Complete | 2026-02-15 |
+| 4. API Key Rotation                 | v0.9      | 2/2            | Complete | 2026-02-15 |
+| 5. Documentation Content            | v0.10     | 2/2            | Complete | 2026-02-28 |
+| 6. Kubernetes Controllers           | v0.10     | 3/3            | Complete | 2026-03-01 |
+| 7. Helm Chart Maturity              | v0.10     | 1/1            | Complete | 2026-03-01 |
+| 8. Safety Foundation                | v1.0      | 3/3            | Complete | 2026-03-08 |
+| 9. State Survival                   | v1.0      | 3/3            | Complete | 2026-03-08 |
+| 10. Operational Hardening           | v1.0      | 6/6            | Complete | 2026-03-08 |
+| 11. Backend REST API                | v2.0      | 5/5            | Complete | 2026-03-14 |
+| 12. WebSocket Infrastructure        | v2.0      | 2/2            | Complete | 2026-03-14 |
+| 13. Frontend Foundation             | v2.0      | 3/3            | Complete | 2026-03-14 |
+| 14. Dashboard & Provider Mgmt       | v2.0      | 4/4            | Complete | 2026-03-14 |
+| 15. Observability & Operations      | v2.0      | 3/3            | Complete | 2026-03-14 |
+| 16. Auth, Config & Production       | v2.0      | 3/3            | Complete | 2026-03-14 |
+| 17. Quick Wins                      | v3.0      | 3/3            | Complete | 2026-03-14 |
+| 18. Circuit Breaker & Compaction    | v3.0      | 3/3            | Complete | 2026-03-14 |
+| 19. Saga Compensation               | v3.0      | 2/2            | Complete | 2026-03-14 |
+| 20. UI Enhancements                 | v3.0      | 3/3            | Complete | 2026-03-14 |
+| 21. Log Capture Infrastructure      | v4.0      | 3/3            | Complete | 2026-03-15 |
+| 22. Log Streaming WebSocket + UI    | v4.0      | 3/3            | Complete | 2026-03-15 |
+| 23. Provider/Group CRUD (C1)        | v5.0      | 5/5            | Complete | 2026-03-22 |
+| 24. Discovery + Catalog API (C2)    | v5.0      | 5/5            | Complete | 2026-03-22 |
+| 25. CRUD Forms (U1)                 | v5.0      | 5/5            | Complete | 2026-03-22 |
+| 26. Discovery Wizard + Catalog (U2) | v5.0      | 4/4            | Complete | 2026-03-22 |
+| 27. RBAC + Tool Access API (C3)     | v5.0      | 1/5            | In Progress | --      |
+| 28. RBAC + Tool Access UI (U3)      | v5.0      | 0/4            | Planning | --         |
+| 29. Config Export (C4)              | v5.0      | 0/4            | Planning | --         |
+| 30. Config Export UI + Polish (U4)  | v5.0      | 0/5            | Planning | --         |
 
 ---
 
@@ -336,3 +336,4 @@ _v4.0 Log Streaming COMPLETE: 2026-03-15 -- phases 21-22 shipped, LOG-01 through
 _Roadmap extended: 2026-03-22 -- v5.0 Platform Management Console phases 23-30 added (8 phases, 37 plans, 2 tracks)_
 _Phase 25 COMPLETE: 2026-03-22 -- CRUD-04 + CRUD-05 UI track done; all 5 plans shipped_
 _Phase 23 COMPLETE: 2026-03-22 -- CRUD-01 + CRUD-02 + CRUD-03 backend + 14 integration tests; all 5 plans shipped_
+_Phase 26 COMPLETE: 2026-03-22 -- DISC-03 + CAT-03 UI track done; all 4 plans shipped (discovery source mgmt + catalog browser + 19 new tests)_

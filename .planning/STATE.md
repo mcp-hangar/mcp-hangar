@@ -3,12 +3,12 @@ gsd_state_version: 1.0
 milestone: v5.0
 milestone_name: Platform Management Console
 status: in_progress
-last_updated: "2026-03-22T18:00:00Z"
+last_updated: "2026-03-22T15:08:53Z"
 progress:
   total_phases: 8
-  completed_phases: 2
+  completed_phases: 4
   total_plans: 37
-  completed_plans: 10
+  completed_plans: 20
 ---
 
 # Project State
@@ -18,15 +18,15 @@ progress:
 See: .planning/PROJECT.md (updated 2026-03-22)
 
 **Core value:** Reliable, observable MCP provider management with production-grade lifecycle control
-**Current focus:** v5.0 Platform Management Console -- PLANNING. Transform from config-file-driven to full platform management console with CRUD, catalog, RBAC, tool access policies, and config export.
+**Current focus:** v5.0 Platform Management Console -- IN PROGRESS. Transform from config-file-driven to full platform management console with CRUD, catalog, RBAC, tool access policies, and config export.
 
 ## Current Position
 
-Milestone: v5.0 Platform Management Console -- IN PROGRESS (Phase 23 + Phase 25 complete)
-Status: Phase 23 Plans 01-05 complete (backend CRUD + integration tests) + gap closure (3 runtime fixes in groups.py) -- verification passed. Phase 25 Plans 01-05 complete (UI CRUD forms).
-Last activity: 2026-03-22 -- Phase 23 gap closure: fixed weight/priority defaults and strategy field in groups.py; verification passed (8/8 must-haves).
+Milestone: v5.0 Platform Management Console -- IN PROGRESS (Phases 23-26 complete, Phase 27 in progress)
+Status: Phase 23 Plans 01-05 complete (backend CRUD + integration tests). Phase 24 Plans 01-05 complete (discovery source management + static MCP catalog API). Phase 25 Plans 01-05 complete (UI CRUD forms). Phase 26 Plans 01-04 complete (discovery source wizard + catalog browser UI). Phase 27 Plan 01 complete (domain exceptions, events, extended protocols, SQLiteToolAccessPolicyStore).
+Last activity: 2026-03-22 -- Phase 27 Plan 01: domain + infrastructure foundation for RBAC Tool Access API (RoleNotFoundError, CannotModifyBuiltinRoleError, 5 new events, IRoleStore extensions, IToolAccessPolicyStore, SQLiteToolAccessPolicyStore).
 
-Progress: [|||.......] 27% -- 10 of 37 total plans complete (Phase 23: 5/5, Phase 25: 5/5)
+Progress: [|||||.....] 54% -- 20 of 37 total plans complete (Phase 23: 5/5, Phase 24: 5/5, Phase 25: 5/5, Phase 26: 4/4, Phase 27: 1/5)
 
 ## Performance Metrics
 
@@ -201,7 +201,7 @@ All v0.9, v0.10, and v1.0 decisions archived in PROJECT.md Key Decisions table.
 - DeleteGroupHandler: del from GROUPS inside lock, then stop_all() outside lock to avoid holding lock during I/O
 - AddGroupMemberHandler: repository.get() before acquiring lock so the lookup does not block other group mutations
 - UpdateGroupCommand does have a strategy field (added in Plan 02); update_group handler was erroneously omitting it -- fixed in gap closure commit 92f0c8f
-**v5.0 decisions (Phase 23-03 execution):**
+  **v5.0 decisions (Phase 23-03 execution):**
 
 - serialize_full_config(providers=None, groups=None) accepts optional explicit dicts so tests bypass get_context() -- testability without patching
 - to_config_dict() omits description key entirely when None (not just setting it to None) -- matches config.py load behavior
@@ -232,6 +232,16 @@ All v0.9, v0.10, and v1.0 decisions archived in PROJECT.md Key Decisions table.
 - **ToolAccessPolicy value object exists**: allow/deny lists with merge semantics. v5.0 adds REST endpoints to manage policies.
 - **RBAC infrastructure exists**: Built-in roles in `domain/security/roles.py`, SQLite auth store at `infrastructure/auth/sqlite_store.py`. v5.0 adds custom role CRUD via `RoleStore`.
 
+**v5.0 decisions (Phase 24 execution):**
+
+- `ProviderNotFoundError.__init__` only accepts `provider_id: str` — no `operation=` kwarg; handlers pass `provider_id=source_id`
+- `run_in_threadpool` imported locally inside each handler function in `discovery.py` to avoid F401 ruff lint error (unused top-level import)
+- `CatalogNotConfigured` bypasses `ProviderNotFoundError.__init__` by calling `MCPError.__init__` directly (same pattern as `DiscoveryNotConfigured`)
+- `register_discovery_handlers` called directly from `bootstrap/__init__.py` after `DiscoveryRegistry` is created (not via `init_cqrs`) because `DiscoveryRegistry` is instantiated after `init_cqrs` runs
+- Catalog init uses fault-barrier pattern (`except Exception`) so catalog failure never prevents server startup
+- Tags filter for `list_entries` applied in Python (not SQL) to avoid JSON SQL complexity in SQLite
+- `McpProviderEntry.image` must be explicitly passed in tests (constructor requires it even if `None`)
+
 ### Pending Todos
 
 None.
@@ -243,5 +253,5 @@ None.
 ## Session Continuity
 
 Last session: 2026-03-22
-Stopped at: Phase 23 fully complete -- verification passed (8/8 must-haves, 0 gaps). 3 runtime bugs fixed in groups.py (weight/priority defaults, strategy field on update). Phase 25 (UI CRUD forms) also complete.
-Resume with: Execute Phase 24 (Discovery Source Management + Static MCP Catalog API).
+Stopped at: Phase 26 complete -- all 4 plans executed (ad115a3, 1361ebe, ff54f5f). 90 UI tests passing. Summaries written. ROADMAP + STATE updated. Phase 27 Plan 01 already committed (67ee346).
+Resume with: Continue Phase 27 (RBAC Management API + Tool Access Policy CRUD -- backend) or run Phase 26 UAT.
