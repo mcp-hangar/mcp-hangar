@@ -1,5 +1,5 @@
 import { useState } from 'react'
-import { Link } from 'react-router-dom'
+import { Link } from 'react-router'
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query'
 import { groupsApi } from '../../api/groups'
 import { queryKeys } from '../../lib/queryKeys'
@@ -47,20 +47,16 @@ export function GroupsPage(): JSX.Element {
                   onClick={() => setSelectedGroupId(group.group_id)}
                   className={cn(
                     'cursor-pointer rounded-lg border p-3 hover:bg-gray-50 transition-colors',
-                    selectedGroupId === group.group_id
-                      ? 'border-blue-500 bg-blue-50'
-                      : 'border-gray-200 bg-white',
+                    selectedGroupId === group.group_id ? 'border-blue-500 bg-blue-50' : 'border-gray-200 bg-white'
                   )}
                 >
                   <div className="flex items-center justify-between gap-2">
                     <span className="text-sm font-medium text-gray-900 truncate">{group.group_id}</span>
-                    {group.circuit_breaker && (
-                      <CircuitBreakerBadge state={group.circuit_breaker.state} />
-                    )}
+                    {group.circuit_breaker && <CircuitBreakerBadge state={group.circuit_breaker.state} />}
                   </div>
                   <p className="text-xs text-gray-500 mt-0.5">{group.strategy}</p>
                   <p className="text-xs text-gray-500 mt-1">
-                    {group.healthy_count}/{group.member_count} healthy
+                    {group.healthy_count}/{group.total_members} healthy
                   </p>
                 </div>
               ))}
@@ -80,9 +76,7 @@ export function GroupsPage(): JSX.Element {
               <div className="flex items-center justify-between gap-3 flex-wrap">
                 <div className="flex items-center gap-2">
                   <h3 className="text-lg font-semibold text-gray-900">{detail.group_id}</h3>
-                  {detail.circuit_breaker && (
-                    <CircuitBreakerBadge state={detail.circuit_breaker.state} />
-                  )}
+                  {detail.circuit_breaker && <CircuitBreakerBadge state={detail.circuit_breaker.state} />}
                 </div>
                 <ActionButton
                   variant="primary"
@@ -120,17 +114,16 @@ export function GroupsPage(): JSX.Element {
                     </thead>
                     <tbody className="divide-y divide-gray-50">
                       {detail.members.map((member) => (
-                        <tr key={member.provider_id}>
+                        <tr key={member.id}>
                           <td className="py-2 pr-4">
-                            <Link
-                              to={`/providers/${member.provider_id}`}
-                              className="text-blue-600 hover:underline text-sm"
-                            >
-                              {member.provider_id}
+                            <Link to={`/providers/${member.id}`} className="text-blue-600 hover:underline text-sm">
+                              {member.id}
                             </Link>
                           </td>
                           <td className="py-2 pr-4 text-sm text-gray-700">{member.state}</td>
-                          <td className="py-2 text-sm text-gray-700">{member.health ?? '—'}</td>
+                          <td className="py-2 text-sm text-gray-700">
+                            {member.consecutive_failures > 0 ? `${member.consecutive_failures} failures` : '—'}
+                          </td>
                         </tr>
                       ))}
                     </tbody>

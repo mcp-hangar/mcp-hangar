@@ -1,41 +1,78 @@
+import type { CircuitBreakerInfo } from './provider'
+
+/**
+ * Group member as returned by GET /groups/{id} in to_status_dict().
+ */
 export interface GroupMember {
-  provider_id: string
+  id: string
   state: string
-  health?: string
+  in_rotation: boolean
+  weight: number
+  priority: number
+  consecutive_failures: number
 }
 
+/**
+ * Group summary as returned by GET /groups/ and GET /groups/{id}.
+ * Matches ProviderGroup.to_status_dict() in provider_group.py.
+ */
 export interface GroupSummary {
   group_id: string
+  description?: string
+  state?: string
   strategy: string
-  member_count: number
+  min_healthy?: number
   healthy_count: number
-  circuit_breaker?: { state: string }
+  total_members: number
+  is_available?: boolean
+  circuit_open: boolean
+  circuit_breaker?: CircuitBreakerInfo | null
 }
 
 export interface GroupDetails extends GroupSummary {
   members: GroupMember[]
 }
 
+/**
+ * Discovery source status as returned by GET /discovery/sources.
+ * Matches SourceStatus.to_dict() in discovery_service.py.
+ */
 export interface DiscoverySourceStatus {
-  source_id: string
   source_type: string
-  healthy: boolean
-  last_scan?: string
-  provider_count: number
+  mode?: string
+  is_healthy: boolean
+  providers_count: number
   error?: string
 }
 
+/**
+ * Pending provider as returned by GET /discovery/pending.
+ * Matches DiscoveredProvider.to_dict() in discovered_provider.py.
+ */
 export interface PendingProvider {
-  provider_id: string
-  source_id: string
+  name: string
+  source_type: string
+  mode: string
+  connection_info: Record<string, unknown>
+  metadata: Record<string, unknown>
+  fingerprint: string
   discovered_at: string
-  command?: string[]
-  mode?: string
+  last_seen_at: string
+  ttl_seconds: number
+  is_expired: boolean
 }
 
-export interface QuarantinedProvider extends PendingProvider {
+/**
+ * Quarantined provider record as returned by GET /discovery/quarantined.
+ * The backend returns a dict keyed by provider name:
+ * { name: { provider: PendingProvider, reason: string, quarantine_time: string } }
+ * The API client normalises this to an array of QuarantinedProvider.
+ */
+export interface QuarantinedProvider {
+  name: string
+  provider: PendingProvider
   reason: string
-  quarantined_at: string
+  quarantine_time: string
 }
 
 export interface SystemInfo {
