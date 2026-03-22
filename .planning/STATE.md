@@ -3,12 +3,12 @@ gsd_state_version: 1.0
 milestone: v5.0
 milestone_name: Platform Management Console
 status: in_progress
-last_updated: "2026-03-22T13:40:00Z"
+last_updated: "2026-03-22T12:48:56Z"
 progress:
   total_phases: 8
   completed_phases: 0
   total_plans: 37
-  completed_plans: 3
+  completed_plans: 4
 ---
 
 # Project State
@@ -23,10 +23,10 @@ See: .planning/PROJECT.md (updated 2026-03-22)
 ## Current Position
 
 Milestone: v5.0 Platform Management Console -- IN PROGRESS (Phase 23)
-Status: Phase 23 Plans 01, 02, and 03 complete. Provider CRUD events/commands/handlers, group CRUD handlers, and config serializer implemented with TDD.
-Last activity: 2026-03-22 -- Phase 23, Plan 02 executed (5 group CRUD handlers, ProviderGroup.update() aggregate method, 17 new tests, 41 total passing).
+Status: Phase 23 Plans 01, 02, 03, and 04 complete. Provider CRUD events/commands/handlers, group CRUD handlers, config serializer, and REST endpoints all implemented with TDD.
+Last activity: 2026-03-22 -- Phase 23, Plan 04 executed (10 new REST endpoints for provider/group CRUD + config export/backup, register_crud_handlers wired into init_cqrs(), 50 tests passing).
 
-Progress: [||........] 8% -- Phase 23 Plans 01 + 02 + 03 of 37 total plans complete
+Progress: [||........] 11% -- Phase 23 Plans 01 + 02 + 03 + 04 of 37 total plans complete
 
 ## Performance Metrics
 
@@ -208,6 +208,13 @@ All v0.9, v0.10, and v1.0 decisions archived in PROJECT.md Key Decisions table.
 - to_config_dict() omits description key entirely when None (not just setting it to None) -- matches config.py load behavior
 - yaml.safe_dump with sort_keys=True, allow_unicode=True for deterministic YAML output
 
+**v5.0 decisions (Phase 23-04 execution):**
+
+- UpdateGroupCommand has no strategy field (confirmed by Plan 02 design); removed from update_group handler
+- Config routes ordered /export and /backup before /reload to avoid ambiguous path matching
+- register_crud_handlers() imported lazily inside init_cqrs() to mirror existing PROVIDER_REPOSITORY lazy import pattern
+- member_id body key mapped to provider_id command field in add_group_member -- REST API uses member_id for clarity; command uses provider_id for domain consistency
+
 ### v5.0 Key Discoveries
 
 - **Existing domain events**: `events.py` already has `RoleAssigned`, `RoleRevoked`, `CatalogItemPublished`, `CatalogItemApproved`, `CatalogItemRejected`, `CatalogItemDeprecated` and many auth events. Some v5.0 events partially exist.
@@ -232,5 +239,5 @@ None.
 ## Session Continuity
 
 Last session: 2026-03-22
-Stopped at: Completed Phase 23, Plan 02 -- group CRUD handlers (CreateGroupHandler, UpdateGroupHandler, DeleteGroupHandler, AddGroupMemberHandler, RemoveGroupMemberHandler), ProviderGroup.update(), 41 tests passing.
-Resume with: Execute Phase 23 Plan 04 (Group/Provider REST CRUD endpoints).
+Stopped at: Completed Phase 23, Plan 04 -- 10 new REST endpoints (provider CRUD, group CRUD + members, config export/backup), register_crud_handlers wired in init_cqrs(), 50 tests passing.
+Resume with: Execute Phase 23 Plan 05.
