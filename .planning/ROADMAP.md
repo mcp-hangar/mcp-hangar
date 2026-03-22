@@ -323,7 +323,7 @@
 | 24. Discovery + Catalog API (C2)    | v5.0      | 5/5            | Complete | 2026-03-22 |
 | 25. CRUD Forms (U1)                 | v5.0      | 5/5            | Complete | 2026-03-22 |
 | 26. Discovery Wizard + Catalog (U2) | v5.0      | 4/4            | Complete | 2026-03-22 |
-| 27. RBAC + Tool Access API (C3)     | v5.0      | 1/5            | In Progress | --      |
+| 27. RBAC + Tool Access API (C3)     | v5.0      | 2/5            | In Progress | --      |
 | 28. RBAC + Tool Access UI (U3)      | v5.0      | 0/4            | Planning | --         |
 | 29. Config Export (C4)              | v5.0      | 0/4            | Planning | --         |
 | 30. Config Export UI + Polish (U4)  | v5.0      | 0/5            | Planning | --         |
