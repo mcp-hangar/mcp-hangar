@@ -341,6 +341,7 @@ class UpdateGroupHandler(CommandHandler):
 
         # group.update() acquires its own lock internally
         group.update(
+            strategy=command.strategy,
             description=command.description,
             min_healthy=command.min_healthy,
         )

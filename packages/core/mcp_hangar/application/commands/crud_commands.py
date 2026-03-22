@@ -111,12 +111,14 @@ class UpdateGroupCommand(Command):
 
     Attributes:
         group_id: Identifier of the group to update.
+        strategy: New load balancing strategy (optional).
         description: New human-readable description (optional).
         min_healthy: New minimum healthy member count (optional).
         source: Who is updating this group ("api", "config").
     """
 
     group_id: str
+    strategy: str | None = None
     description: str | None = None
     min_healthy: int | None = None
     source: str = "api"
