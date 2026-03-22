@@ -10,6 +10,11 @@ from starlette.requests import Request
 from starlette.routing import Route
 
 from ...application.commands.commands import StartProviderCommand, StopProviderCommand
+from ...application.commands.crud_commands import (
+    CreateProviderCommand,
+    DeleteProviderCommand,
+    UpdateProviderCommand,
+)
 from ...application.queries.queries import (
     GetProviderHealthQuery,
     GetProviderQuery,
@@ -179,10 +184,109 @@ async def get_provider_tool_history(request: Request) -> HangarJSONResponse:
     return HangarJSONResponse(result)
 
 
+async def create_provider(request: Request) -> HangarJSONResponse:
+    """Create a new provider.
+
+    Request body (JSON):
+        provider_id: Unique provider identifier (required).
+        mode: Provider mode -- subprocess, docker, remote (required).
+        command: Subprocess command list (for subprocess mode).
+        image: Docker image name (for docker mode).
+        endpoint: HTTP endpoint URL (for remote mode).
+        env: Environment variables dict.
+        idle_ttl_s: Idle TTL in seconds (default 300).
+        health_check_interval_s: Health check interval in seconds (default 60).
+        description: Human-readable description.
+        volumes: Volume mounts list (for docker mode).
+        network: Docker network name (default "none").
+        read_only: Read-only filesystem flag (default True).
+
+    Returns:
+        JSON with {"provider_id": ..., "created": true}, status 201.
+
+    Raises:
+        ValidationError: If provider_id already exists (-> 422).
+    """
+    body = await request.json()
+    result = await dispatch_command(
+        CreateProviderCommand(
+            provider_id=body["provider_id"],
+            mode=body["mode"],
+            command=body.get("command"),
+            image=body.get("image"),
+            endpoint=body.get("endpoint"),
+            env=body.get("env", {}),
+            idle_ttl_s=body.get("idle_ttl_s", 300),
+            health_check_interval_s=body.get("health_check_interval_s", 60),
+            description=body.get("description"),
+            source="api",
+        )
+    )
+    return HangarJSONResponse(result, status_code=201)
+
+
+async def update_provider(request: Request) -> HangarJSONResponse:
+    """Update mutable configuration fields on an existing provider.
+
+    Path params:
+        provider_id: Provider identifier.
+
+    Request body (JSON, all fields optional):
+        description: New human-readable description.
+        env: New environment variables dict (replaces existing).
+        idle_ttl_s: New idle TTL in seconds.
+        health_check_interval_s: New health check interval in seconds.
+
+    Returns:
+        JSON with {"provider_id": ..., "updated": true}, status 200.
+
+    Raises:
+        ProviderNotFoundError: If provider does not exist (-> 404).
+    """
+    provider_id = request.path_params["provider_id"]
+    body = await request.json()
+    result = await dispatch_command(
+        UpdateProviderCommand(
+            provider_id=provider_id,
+            description=body.get("description"),
+            env=body.get("env"),
+            idle_ttl_s=body.get("idle_ttl_s"),
+            health_check_interval_s=body.get("health_check_interval_s"),
+            source="api",
+        )
+    )
+    return HangarJSONResponse(result)
+
+
+async def delete_provider(request: Request) -> HangarJSONResponse:
+    """Delete a provider, stopping it first if running.
+
+    Path params:
+        provider_id: Provider identifier.
+
+    Returns:
+        JSON with {"provider_id": ..., "deleted": true}, status 200.
+
+    Raises:
+        ProviderNotFoundError: If provider does not exist (-> 404).
+    """
+    provider_id = request.path_params["provider_id"]
+    result = await dispatch_command(
+        DeleteProviderCommand(
+            provider_id=provider_id,
+            source="api",
+        )
+    )
+    return HangarJSONResponse(result)
+
+
 # Route definitions for mounting in the API router
 provider_routes = [
     Route("/", list_providers, methods=["GET"]),
+    Route("/", create_provider, methods=["POST"]),
     Route("/{provider_id:str}", get_provider, methods=["GET"]),
+    Route("/{provider_id:str}", update_provider, methods=["PUT"]),
+    Route("/{provider_id:str}", delete_provider, methods=["DELETE"]),
     Route("/{provider_id:str}/start", start_provider, methods=["POST"]),
     Route("/{provider_id:str}/stop", stop_provider, methods=["POST"]),
     Route("/{provider_id:str}/tools", get_provider_tools, methods=["GET"]),
