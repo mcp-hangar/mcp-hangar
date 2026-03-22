@@ -7,6 +7,7 @@ import {
   BarChart2,
   Radio,
   Search,
+  BookOpen,
   Shield,
   Settings,
   Network,
@@ -22,6 +23,7 @@ const NAV_ITEMS = [
   { label: 'Metrics', path: '/metrics', icon: BarChart2, end: false },
   { label: 'Events', path: '/events', icon: Radio, end: false },
   { label: 'Discovery', path: '/discovery', icon: Search, end: false },
+  { label: 'Catalog', path: '/catalog', icon: BookOpen, end: false },
   { label: 'Auth', path: '/auth', icon: Shield, end: false },
   { label: 'Config', path: '/config', icon: Settings, end: false },
 ]
@@ -41,9 +43,7 @@ export function Sidebar(): JSX.Element {
             className={({ isActive }) =>
               cn(
                 'flex items-center gap-2.5 px-4 py-2 text-sm transition-colors',
-                isActive
-                  ? 'bg-blue-50 text-blue-700 font-medium'
-                  : 'text-gray-600 hover:bg-gray-50 hover:text-gray-900',
+                isActive ? 'bg-blue-50 text-blue-700 font-medium' : 'text-gray-600 hover:bg-gray-50 hover:text-gray-900'
               )
             }
           >

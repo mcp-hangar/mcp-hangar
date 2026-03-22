@@ -306,18 +306,18 @@ export const handlers = [
 
   // --- Discovery source management ---
 
-  // GET /api/discovery/sources/ -- discovery source list
-  http.get(`${BASE}/discovery/sources/`, () => {
+  // GET /api/discovery/sources -- discovery source list
+  http.get(`${BASE}/discovery/sources`, () => {
     return HttpResponse.json({ sources: mockDiscoverySources })
   }),
 
-  // GET /api/discovery/pending/ -- pending providers
-  http.get(`${BASE}/discovery/pending/`, () => {
+  // GET /api/discovery/pending -- pending providers
+  http.get(`${BASE}/discovery/pending`, () => {
     return HttpResponse.json({ pending: mockPendingProviders })
   }),
 
-  // GET /api/discovery/quarantined/ -- quarantined providers
-  http.get(`${BASE}/discovery/quarantined/`, () => {
+  // GET /api/discovery/quarantined -- quarantined providers
+  http.get(`${BASE}/discovery/quarantined`, () => {
     return HttpResponse.json({ quarantined: {} })
   }),
 
@@ -331,8 +331,8 @@ export const handlers = [
     return HttpResponse.json({ status: 'rejected', name: params.name })
   }),
 
-  // POST /api/discovery/sources/ -- register new discovery source
-  http.post(`${BASE}/discovery/sources/`, async ({ request }) => {
+  // POST /api/discovery/sources -- register new discovery source
+  http.post(`${BASE}/discovery/sources`, async ({ request }) => {
     const body = (await request.json()) as RegisterSourceRequest
     return HttpResponse.json({ source_id: `${body.source_type}-new`, registered: true }, { status: 201 })
   }),
