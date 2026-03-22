@@ -1,4 +1,4 @@
-import { useState } from 'react'
+import { useState, type JSX } from 'react'
 import { useParams } from 'react-router'
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query'
 import { queryKeys } from '../../lib/queryKeys'
@@ -11,14 +11,20 @@ import {
   EmptyState,
   LoadingSpinner,
 } from '../../components/ui'
+import { ToolAccessPolicyEditor } from '../../components/ui/ToolAccessPolicyEditor'
 import { ToolList } from '../../components/providers/ToolList'
 import { useProviderLogs } from '../../hooks/useProviderLogs'
+import { useToolAccessPolicy } from '../../hooks/useToolAccessPolicy'
 import { LogViewer } from './LogViewer'
 
 export function ProviderDetailPage(): JSX.Element {
   const { id } = useParams<{ id: string }>()
   const queryClient = useQueryClient()
   const [logsOpen, setLogsOpen] = useState(false)
+  const [tapOpen, setTapOpen] = useState(false)
+  const [allowedTools, setAllowedTools] = useState<string[]>([])
+  const [deniedTools, setDeniedTools] = useState<string[]>([])
+  const [tapDirty, setTapDirty] = useState(false)
 
   const { data: provider, isLoading } = useQuery({
     queryKey: queryKeys.providers.detail(id!),
@@ -43,10 +49,34 @@ export function ProviderDetailPage(): JSX.Element {
     onSuccess: () => queryClient.invalidateQueries({ queryKey: queryKeys.providers.all }),
   })
 
-  const { logs, status: logsStatus, clearLogs } = useProviderLogs({
+  const {
+    logs,
+    status: logsStatus,
+    clearLogs,
+  } = useProviderLogs({
     providerId: id!,
     enabled: !!id && logsOpen,
   })
+
+  const {
+    policy: tapPolicy,
+    savePolicy,
+    clearPolicy,
+    isSaving: tapSaving,
+    isClearing: tapClearing,
+  } = useToolAccessPolicy('provider', id!)
+
+  // Sync local TAP state when policy data changes
+  const tapPolicyKey = tapPolicy ? `${tapPolicy.allow_list.join(',')}_${tapPolicy.deny_list.join(',')}` : ''
+  const [lastPolicyKey, setLastPolicyKey] = useState('')
+  if (tapPolicyKey !== lastPolicyKey) {
+    setLastPolicyKey(tapPolicyKey)
+    if (tapPolicy) {
+      setAllowedTools(tapPolicy.allow_list)
+      setDeniedTools(tapPolicy.deny_list)
+      setTapDirty(false)
+    }
+  }
 
   if (isLoading) {
     return (
@@ -60,7 +90,7 @@ export function ProviderDetailPage(): JSX.Element {
     return <EmptyState message={`Provider '${id}' not found.`} />
   }
 
-  const health = healthData?.status ?? provider.health
+  const health = healthData ?? provider.health
   const cb = provider.circuit_breaker
 
   return (
@@ -104,9 +134,7 @@ export function ProviderDetailPage(): JSX.Element {
         {provider.command && (
           <div className="col-span-2">
             <span className="text-xs text-gray-500 uppercase font-medium">Command</span>
-            <p className="text-sm font-mono text-gray-800 mt-0.5 break-all">
-              {provider.command.join(' ')}
-            </p>
+            <p className="text-sm font-mono text-gray-800 mt-0.5 break-all">{provider.command.join(' ')}</p>
           </div>
         )}
         <div>
@@ -115,9 +143,7 @@ export function ProviderDetailPage(): JSX.Element {
             {health ? (
               <>
                 <HealthBadge status={health.status} />
-                <span className="text-xs text-gray-400">
-                  {health.consecutive_failures} consecutive failures
-                </span>
+                <span className="text-xs text-gray-400">{health.consecutive_failures} consecutive failures</span>
               </>
             ) : (
               <span className="text-sm text-gray-400">\u2014</span>
@@ -132,9 +158,7 @@ export function ProviderDetailPage(): JSX.Element {
                 <CircuitBreakerBadge state={cb.state} />
                 <span className="text-xs text-gray-400">{cb.failure_count} failures</span>
                 {cb.state === 'open' && cb.opened_at && (
-                  <span className="text-xs text-gray-400">
-                    opened {new Date(cb.opened_at).toLocaleString()}
-                  </span>
+                  <span className="text-xs text-gray-400">opened {new Date(cb.opened_at).toLocaleString()}</span>
                 )}
               </>
             ) : (
@@ -174,8 +198,62 @@ export function ProviderDetailPage(): JSX.Element {
             <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M19 9l-7 7-7-7" />
           </svg>
         </button>
-        {logsOpen && (
-          <LogViewer logs={logs} status={logsStatus} onClear={clearLogs} />
+        {logsOpen && <LogViewer logs={logs} status={logsStatus} onClear={clearLogs} />}
+      </div>
+
+      {/* Tool Access Policy Section */}
+      <div className="bg-white rounded-lg border border-gray-200 overflow-hidden">
+        <button
+          type="button"
+          className="w-full flex items-center justify-between px-4 py-3 text-left hover:bg-gray-50 transition-colors"
+          onClick={() => setTapOpen((v) => !v)}
+          aria-expanded={tapOpen}
+        >
+          <h3 className="text-sm font-medium text-gray-700">Tool Access Policy</h3>
+          <svg
+            className={`w-4 h-4 text-gray-400 transition-transform ${tapOpen ? 'rotate-180' : ''}`}
+            fill="none"
+            stroke="currentColor"
+            viewBox="0 0 24 24"
+            aria-hidden="true"
+          >
+            <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M19 9l-7 7-7-7" />
+          </svg>
+        </button>
+        {tapOpen && (
+          <div className="px-4 pb-4 space-y-4">
+            <ToolAccessPolicyEditor
+              allowedTools={allowedTools}
+              deniedTools={deniedTools}
+              onAllowedChange={(tools) => {
+                setAllowedTools(tools)
+                setTapDirty(true)
+              }}
+              onDeniedChange={(tools) => {
+                setDeniedTools(tools)
+                setTapDirty(true)
+              }}
+              disabled={tapSaving || tapClearing}
+            />
+            <div className="flex gap-2">
+              <button
+                type="button"
+                disabled={!tapDirty || tapSaving}
+                onClick={() => savePolicy({ allow_list: allowedTools, deny_list: deniedTools })}
+                className="px-3 py-1.5 text-sm bg-blue-600 text-white rounded-md hover:bg-blue-700 disabled:opacity-50 disabled:cursor-not-allowed"
+              >
+                {tapSaving ? 'Saving...' : 'Save Policy'}
+              </button>
+              <button
+                type="button"
+                disabled={tapClearing}
+                onClick={() => clearPolicy()}
+                className="px-3 py-1.5 text-sm border border-gray-300 rounded-md hover:bg-gray-50 disabled:opacity-50 disabled:cursor-not-allowed"
+              >
+                {tapClearing ? 'Clearing...' : 'Clear Policy'}
+              </button>
+            </div>
+          </div>
         )}
       </div>
     </div>

@@ -16,6 +16,7 @@ import type {
 } from '../../types/provider-crud'
 import type { RegisterSourceRequest } from '../../types/system'
 import type { AddCatalogEntryRequest } from '../../types/catalog'
+import type { CheckPermissionRequest, SetToolAccessPolicyRequest, UpdateRoleRequest } from '../../types/auth'
 
 const BASE = '/api'
 
@@ -411,5 +412,204 @@ export const handlers = [
   http.post(`${BASE}/catalog/:entryId/deploy`, ({ params }) => {
     const entry = mockCatalogEntries.find((e) => e.entry_id === params.entryId)
     return HttpResponse.json({ provider_id: entry?.name ?? 'deployed-provider', deployed: true }, { status: 201 })
+  }),
+
+  // --- Auth: RBAC + Tool Access Policy (Phase 28) ---
+
+  // GET /api/auth/roles/all -- list all roles (builtin + custom)
+  http.get(`${BASE}/auth/roles/all`, ({ request }) => {
+    const url = new URL(request.url)
+    const includeBuiltin = url.searchParams.get('include_builtin') !== 'false'
+
+    const builtinRoles = [
+      {
+        name: 'admin',
+        description: 'Full system access',
+        permissions: ['*:*:*'],
+        permissions_count: 1,
+        is_builtin: true,
+      },
+      {
+        name: 'provider-admin',
+        description: 'Manage providers',
+        permissions: ['provider:*:*', 'group:*:*'],
+        permissions_count: 2,
+        is_builtin: true,
+      },
+      {
+        name: 'developer',
+        description: 'Invoke tools and read providers',
+        permissions: ['tool:invoke:*', 'provider:read:*'],
+        permissions_count: 2,
+        is_builtin: true,
+      },
+      {
+        name: 'viewer',
+        description: 'Read-only access',
+        permissions: ['provider:read:*', 'group:read:*', 'config:read:*'],
+        permissions_count: 3,
+        is_builtin: true,
+      },
+      {
+        name: 'auditor',
+        description: 'Audit and security events',
+        permissions: ['provider:read:*', 'config:read:*'],
+        permissions_count: 2,
+        is_builtin: true,
+      },
+      {
+        name: 'service-account',
+        description: 'Machine-to-machine access',
+        permissions: ['tool:invoke:*'],
+        permissions_count: 1,
+        is_builtin: true,
+      },
+    ]
+
+    const customRoles = [
+      {
+        name: 'custom-operator',
+        description: 'Custom operations role',
+        permissions: ['provider:start:*', 'provider:stop:*'],
+        permissions_count: 2,
+        is_builtin: false,
+      },
+    ]
+
+    const roles = includeBuiltin ? [...builtinRoles, ...customRoles] : customRoles
+
+    return HttpResponse.json({
+      roles,
+      total: roles.length,
+      builtin_count: includeBuiltin ? builtinRoles.length : 0,
+      custom_count: customRoles.length,
+    })
+  }),
+
+  // GET /api/auth/roles/:roleName -- get single role
+  http.get(`${BASE}/auth/roles/:roleName`, ({ params }) => {
+    const roleName = String(params.roleName)
+    // Skip if this matches a known exact path handled elsewhere
+    if (roleName === 'all' || roleName === 'assign' || roleName === 'revoke') {
+      return
+    }
+    const allRoles = [
+      { name: 'admin', description: 'Full system access', permissions: ['*:*:*'], permissions_count: 1 },
+      {
+        name: 'custom-operator',
+        description: 'Custom operations role',
+        permissions: ['provider:start:*', 'provider:stop:*'],
+        permissions_count: 2,
+      },
+    ]
+    const role = allRoles.find((r) => r.name === roleName)
+    if (!role) {
+      return HttpResponse.json({ found: false, role: null })
+    }
+    return HttpResponse.json({ found: true, role })
+  }),
+
+  // DELETE /api/auth/roles/:roleName -- delete custom role
+  http.delete(`${BASE}/auth/roles/:roleName`, ({ params }) => {
+    const roleName = String(params.roleName)
+    if (roleName === 'revoke') {
+      return
+    }
+    return new HttpResponse(null, { status: 204 })
+  }),
+
+  // PATCH /api/auth/roles/:roleName -- update custom role
+  http.patch(`${BASE}/auth/roles/:roleName`, async ({ params, request }) => {
+    const roleName = String(params.roleName)
+    const body = (await request.json()) as UpdateRoleRequest
+    return HttpResponse.json({
+      role_name: roleName,
+      description: body.description ?? null,
+      permissions_count: body.permissions.length,
+      updated: true,
+      updated_by: body.updated_by ?? 'system',
+    })
+  }),
+
+  // GET /api/auth/principals -- list all principals
+  http.get(`${BASE}/auth/principals`, () => {
+    return HttpResponse.json({
+      principals: [
+        { principal_id: 'user:alice', roles: ['admin', 'developer'] },
+        { principal_id: 'user:bob', roles: ['viewer'] },
+        { principal_id: 'service:ci-bot', roles: ['service-account'] },
+      ],
+      total: 3,
+    })
+  }),
+
+  // GET /api/auth/permissions -- list all permission resource types
+  http.get(`${BASE}/auth/permissions`, () => {
+    return HttpResponse.json({
+      permissions: [
+        { resource_type: 'provider', actions: ['read', 'write', 'invoke', 'admin', 'start', 'stop'] },
+        { resource_type: 'group', actions: ['read', 'write', 'admin'] },
+        { resource_type: 'tool', actions: ['invoke', 'read'] },
+        { resource_type: 'config', actions: ['read', 'write'] },
+        { resource_type: '*', actions: ['*'] },
+      ],
+    })
+  }),
+
+  // POST /api/auth/check-permission -- check if principal has permission
+  http.post(`${BASE}/auth/check-permission`, async ({ request }) => {
+    const body = (await request.json()) as CheckPermissionRequest
+    // Mock: admin principal always allowed, others depend on action
+    const isAdmin = body.principal_id === 'user:alice'
+    return HttpResponse.json({
+      principal_id: body.principal_id,
+      action: body.action,
+      resource_type: body.resource_type,
+      resource_id: body.resource_id ?? '*',
+      allowed: isAdmin,
+      granted_by_role: isAdmin ? 'admin' : null,
+    })
+  }),
+
+  // GET /api/auth/policies/:scope/:targetId -- get tool access policy
+  http.get(`${BASE}/auth/policies/:scope/:targetId`, ({ params }) => {
+    const scope = String(params.scope)
+    const targetId = String(params.targetId)
+    // Return a mock policy for "math" provider, empty for others
+    if (targetId === 'math') {
+      return HttpResponse.json({
+        found: true,
+        scope,
+        target_id: targetId,
+        allow_list: ['math-*', 'calculate'],
+        deny_list: ['dangerous-*'],
+      })
+    }
+    return HttpResponse.json({
+      found: false,
+      scope,
+      target_id: targetId,
+      allow_list: [],
+      deny_list: [],
+    })
+  }),
+
+  // POST /api/auth/policies/:scope/:targetId -- set tool access policy
+  http.post(`${BASE}/auth/policies/:scope/:targetId`, async ({ params, request }) => {
+    const scope = String(params.scope)
+    const targetId = String(params.targetId)
+    const body = (await request.json()) as SetToolAccessPolicyRequest
+    return HttpResponse.json({
+      scope,
+      target_id: targetId,
+      allow_list: body.allow_list,
+      deny_list: body.deny_list,
+      set: true,
+    })
+  }),
+
+  // DELETE /api/auth/policies/:scope/:targetId -- clear tool access policy
+  http.delete(`${BASE}/auth/policies/:scope/:targetId`, () => {
+    return new HttpResponse(null, { status: 204 })
   }),
 ]

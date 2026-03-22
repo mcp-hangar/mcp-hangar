@@ -6,9 +6,11 @@ import { groupsApi } from '../../api/groups'
 import { queryKeys } from '../../lib/queryKeys'
 import { cn } from '../../lib/cn'
 import { CircuitBreakerBadge, ActionButton, EmptyState, LoadingSpinner } from '../../components/ui'
+import { ToolAccessPolicyEditor } from '../../components/ui/ToolAccessPolicyEditor'
 import { GroupCreateDrawer } from './GroupCreateDrawer'
 import { GroupEditDrawer } from './GroupEditDrawer'
 import { GroupMemberPanel } from './GroupMemberPanel'
+import { useToolAccessPolicy } from '../../hooks/useToolAccessPolicy'
 import type { GroupSummary } from '../../types/system'
 
 interface GroupDeleteDialogProps {
@@ -52,6 +54,88 @@ function GroupDeleteDialog({ groupId, open, onOpenChange, onConfirm, isPending }
         </Dialog.Content>
       </Dialog.Portal>
     </Dialog.Root>
+  )
+}
+
+interface GroupPolicySectionProps {
+  groupId: string
+}
+
+function GroupPolicySection({ groupId }: GroupPolicySectionProps): JSX.Element {
+  const [tapOpen, setTapOpen] = useState(false)
+  const [allowedTools, setAllowedTools] = useState<string[]>([])
+  const [deniedTools, setDeniedTools] = useState<string[]>([])
+  const [tapDirty, setTapDirty] = useState(false)
+
+  const { policy, savePolicy, clearPolicy, isSaving, isClearing } = useToolAccessPolicy('group', groupId)
+
+  // Sync local state when policy data changes
+  const policyKey = policy ? `${policy.allow_list.join(',')}_${policy.deny_list.join(',')}` : ''
+  const [lastPolicyKey, setLastPolicyKey] = useState('')
+  if (policyKey !== lastPolicyKey) {
+    setLastPolicyKey(policyKey)
+    if (policy) {
+      setAllowedTools(policy.allow_list)
+      setDeniedTools(policy.deny_list)
+      setTapDirty(false)
+    }
+  }
+
+  return (
+    <div className="border border-gray-200 rounded-lg overflow-hidden">
+      <button
+        type="button"
+        className="w-full flex items-center justify-between px-4 py-3 text-left hover:bg-gray-50 transition-colors"
+        onClick={() => setTapOpen((v) => !v)}
+        aria-expanded={tapOpen}
+      >
+        <h4 className="text-sm font-medium text-gray-700">Tool Access Policy</h4>
+        <svg
+          className={`w-4 h-4 text-gray-400 transition-transform ${tapOpen ? 'rotate-180' : ''}`}
+          fill="none"
+          stroke="currentColor"
+          viewBox="0 0 24 24"
+          aria-hidden="true"
+        >
+          <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M19 9l-7 7-7-7" />
+        </svg>
+      </button>
+      {tapOpen && (
+        <div className="px-4 pb-4 space-y-4">
+          <ToolAccessPolicyEditor
+            allowedTools={allowedTools}
+            deniedTools={deniedTools}
+            onAllowedChange={(tools) => {
+              setAllowedTools(tools)
+              setTapDirty(true)
+            }}
+            onDeniedChange={(tools) => {
+              setDeniedTools(tools)
+              setTapDirty(true)
+            }}
+            disabled={isSaving || isClearing}
+          />
+          <div className="flex gap-2">
+            <button
+              type="button"
+              disabled={!tapDirty || isSaving}
+              onClick={() => savePolicy({ allow_list: allowedTools, deny_list: deniedTools })}
+              className="px-3 py-1.5 text-sm bg-blue-600 text-white rounded-md hover:bg-blue-700 disabled:opacity-50 disabled:cursor-not-allowed"
+            >
+              {isSaving ? 'Saving...' : 'Save Policy'}
+            </button>
+            <button
+              type="button"
+              disabled={isClearing}
+              onClick={() => clearPolicy()}
+              className="px-3 py-1.5 text-sm border border-gray-300 rounded-md hover:bg-gray-50 disabled:opacity-50 disabled:cursor-not-allowed"
+            >
+              {isClearing ? 'Clearing...' : 'Clear Policy'}
+            </button>
+          </div>
+        </div>
+      )}
+    </div>
   )
 }
 
@@ -189,6 +273,9 @@ export function GroupsPage(): JSX.Element {
 
               {/* Members panel */}
               <GroupMemberPanel groupId={detail.group_id} members={detail.members} />
+
+              {/* Tool Access Policy */}
+              <GroupPolicySection groupId={detail.group_id} />
             </div>
           )}
         </div>

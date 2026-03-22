@@ -36,7 +36,12 @@ export const queryKeys = {
     all: ['auth'] as const,
     apiKeys: (principalId?: string) => ['auth', 'apiKeys', principalId] as const,
     roles: () => ['auth', 'roles'] as const,
+    allRoles: (includeBuiltin?: boolean) => ['auth', 'allRoles', includeBuiltin] as const,
+    role: (roleName: string) => ['auth', 'role', roleName] as const,
     assignments: (principalId?: string) => ['auth', 'assignments', principalId] as const,
+    principals: () => ['auth', 'principals'] as const,
+    permissions: () => ['auth', 'permissions'] as const,
+    policy: (scope: string, targetId: string) => ['auth', 'policy', scope, targetId] as const,
   },
   observability: {
     all: ['observability'] as const,
