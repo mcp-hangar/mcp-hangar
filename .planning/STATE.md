@@ -3,10 +3,10 @@ gsd_state_version: 1.0
 milestone: v5.0
 milestone_name: Platform Management Console
 status: in_progress
-last_updated: "2026-03-22T14:01:00Z"
+last_updated: "2026-03-22T18:00:00Z"
 progress:
   total_phases: 8
-  completed_phases: 1
+  completed_phases: 2
   total_plans: 37
   completed_plans: 10
 ---
@@ -23,8 +23,8 @@ See: .planning/PROJECT.md (updated 2026-03-22)
 ## Current Position
 
 Milestone: v5.0 Platform Management Console -- IN PROGRESS (Phase 23 + Phase 25 complete)
-Status: Phase 23 Plans 01-05 complete (backend CRUD + integration tests). Phase 25 Plans 01-05 complete (UI CRUD forms). Phase 23 now fully complete.
-Last activity: 2026-03-22 -- Phase 23, Plan 05 executed (14 integration tests: provider CRUD, group CRUD, config serializer round-trip, 2756 tests passing total).
+Status: Phase 23 Plans 01-05 complete (backend CRUD + integration tests) + gap closure (3 runtime fixes in groups.py) -- verification passed. Phase 25 Plans 01-05 complete (UI CRUD forms).
+Last activity: 2026-03-22 -- Phase 23 gap closure: fixed weight/priority defaults and strategy field in groups.py; verification passed (8/8 must-haves).
 
 Progress: [|||.......] 27% -- 10 of 37 total plans complete (Phase 23: 5/5, Phase 25: 5/5)
 
@@ -200,8 +200,7 @@ All v0.9, v0.10, and v1.0 decisions archived in PROJECT.md Key Decisions table.
 - ProviderGroup.update() acquires self.\_lock internally; UpdateGroupHandler does not hold its own lock during the call (avoids nested locking)
 - DeleteGroupHandler: del from GROUPS inside lock, then stop_all() outside lock to avoid holding lock during I/O
 - AddGroupMemberHandler: repository.get() before acquiring lock so the lookup does not block other group mutations
-- UpdateGroupCommand does not have a strategy field (Plan 01 only added description/min_healthy); ProviderGroup.update() still accepts strategy for future use
-
+- UpdateGroupCommand does have a strategy field (added in Plan 02); update_group handler was erroneously omitting it -- fixed in gap closure commit 92f0c8f
 **v5.0 decisions (Phase 23-03 execution):**
 
 - serialize_full_config(providers=None, groups=None) accepts optional explicit dicts so tests bypass get_context() -- testability without patching
@@ -210,7 +209,7 @@ All v0.9, v0.10, and v1.0 decisions archived in PROJECT.md Key Decisions table.
 
 **v5.0 decisions (Phase 23-04 execution):**
 
-- UpdateGroupCommand has no strategy field (confirmed by Plan 02 design); removed from update_group handler
+- UpdateGroupCommand has strategy field (added in Plan 02); update_group handler initially omitted it -- fixed in gap closure (commit 92f0c8f)
 - Config routes ordered /export and /backup before /reload to avoid ambiguous path matching
 - register_crud_handlers() imported lazily inside init_cqrs() to mirror existing PROVIDER_REPOSITORY lazy import pattern
 - member_id body key mapped to provider_id command field in add_group_member -- REST API uses member_id for clarity; command uses provider_id for domain consistency
@@ -244,5 +243,5 @@ None.
 ## Session Continuity
 
 Last session: 2026-03-22
-Stopped at: Completed Phase 25 (all 5 plans) -- full provider + group CRUD forms in React/TypeScript. ProviderCreateDrawer (4-step wizard), ProviderEditDrawer, ProviderDeleteDialog, ProvidersPage wiring, GroupCreateDrawer, GroupEditDrawer, GroupMemberPanel (add/remove/inline-edit), GroupsPage wiring, ToolAccessPolicyEditor. Phase 23 Plan 05 (tests) still pending.
-Resume with: Execute Phase 23 Plan 05 (CRUD integration tests), then Phase 24 (Discovery + Catalog API).
+Stopped at: Phase 23 fully complete -- verification passed (8/8 must-haves, 0 gaps). 3 runtime bugs fixed in groups.py (weight/priority defaults, strategy field on update). Phase 25 (UI CRUD forms) also complete.
+Resume with: Execute Phase 24 (Discovery Source Management + Static MCP Catalog API).
