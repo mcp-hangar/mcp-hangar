@@ -12,6 +12,7 @@ import { AuthPage } from './features/auth/AuthPage'
 import { ConfigPage } from './features/config/ConfigPage'
 import { SecurityPage } from './features/security/SecurityPage'
 import { TopologyPage } from './features/topology/TopologyPage'
+import { CatalogPage } from './features/catalog/CatalogPage'
 
 export function App(): JSX.Element {
   return (
@@ -29,6 +30,7 @@ export function App(): JSX.Element {
         <Route path="config" element={<ConfigPage />} />
         <Route path="security" element={<SecurityPage />} />
         <Route path="topology" element={<TopologyPage />} />
+        <Route path="catalog" element={<CatalogPage />} />
       </Route>
     </Routes>
   )
