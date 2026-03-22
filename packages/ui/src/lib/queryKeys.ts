@@ -26,6 +26,8 @@ export const queryKeys = {
   config: {
     all: ['config'] as const,
     current: () => ['config', 'current'] as const,
+    export: () => ['config', 'export'] as const,
+    diff: () => ['config', 'diff'] as const,
   },
   system: {
     all: ['system'] as const,

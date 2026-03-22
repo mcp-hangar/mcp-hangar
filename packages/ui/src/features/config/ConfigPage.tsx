@@ -1,72 +1,48 @@
-import { useState, useEffect } from 'react'
-import { useQuery, useMutation } from '@tanstack/react-query'
-import { configApi } from '../../api/config'
-import { queryKeys } from '../../lib/queryKeys'
+import { useState } from 'react'
 import { cn } from '../../lib/cn'
-import { ActionButton, LoadingSpinner } from '../../components/ui'
+import { CurrentConfigTab } from './CurrentConfigTab'
+import { ExportBackupTab } from './ExportBackupTab'
+import { DiffTab } from './DiffTab'
+
+type ConfigTab = 'current' | 'export' | 'diff'
+
+const TABS: { id: ConfigTab; label: string }[] = [
+  { id: 'current', label: 'Current Config' },
+  { id: 'export', label: 'Export & Backup' },
+  { id: 'diff', label: 'Diff' },
+]
 
 export function ConfigPage(): JSX.Element {
-  const [reloadMessage, setReloadMessage] = useState<{ text: string; ok: boolean } | null>(null)
-
-  const { data, isLoading, error } = useQuery({
-    queryKey: queryKeys.config.current(),
-    queryFn: configApi.current,
-  })
-
-  const reloadMutation = useMutation({
-    mutationFn: configApi.reload,
-    onSuccess: (result) => {
-      setReloadMessage({ text: result.message ?? 'Config reloaded.', ok: true })
-    },
-    onError: () => {
-      setReloadMessage({ text: 'Reload failed.', ok: false })
-    },
-  })
-
-  useEffect(() => {
-    if (reloadMessage) {
-      const t = setTimeout(() => setReloadMessage(null), 5000)
-      return () => clearTimeout(t)
-    }
-  }, [reloadMessage])
+  const [activeTab, setActiveTab] = useState<ConfigTab>('current')
 
   return (
     <div className="space-y-4 p-6">
-      {/* Header row */}
-      <div className="flex items-center justify-between gap-4">
-        <h2 className="text-lg font-semibold text-gray-900">Configuration</h2>
-        <ActionButton
-          variant="primary"
-          onClick={() => reloadMutation.mutate()}
-          isLoading={reloadMutation.isPending}
-        >
-          Hot Reload
-        </ActionButton>
+      <h2 className="text-lg font-semibold text-gray-900">Configuration</h2>
+
+      {/* Tab bar */}
+      <div className="flex gap-1 border-b">
+        {TABS.map((tab) => (
+          <button
+            key={tab.id}
+            onClick={() => setActiveTab(tab.id)}
+            className={cn(
+              'px-4 py-2 text-sm font-medium border-b-2 -mb-px transition-colors',
+              activeTab === tab.id
+                ? 'border-blue-600 text-blue-600'
+                : 'border-transparent text-gray-500 hover:text-gray-700 hover:border-gray-300'
+            )}
+          >
+            {tab.label}
+          </button>
+        ))}
       </div>
 
-      {/* Inline feedback message */}
-      {reloadMessage && (
-        <p className={cn('text-sm', reloadMessage.ok ? 'text-green-600' : 'text-red-600')}>
-          {reloadMessage.text}
-        </p>
-      )}
-
-      {/* Config JSON viewer */}
-      <div className="bg-white rounded-lg border p-4">
-        {isLoading ? (
-          <LoadingSpinner />
-        ) : error ? (
-          <p className="text-sm text-red-600">Failed to load configuration.</p>
-        ) : (
-          <pre className="text-xs font-mono overflow-x-auto whitespace-pre-wrap text-gray-700">
-            {JSON.stringify(data?.config ?? {}, null, 2)}
-          </pre>
-        )}
+      {/* Tab content */}
+      <div className="pt-2">
+        {activeTab === 'current' && <CurrentConfigTab />}
+        {activeTab === 'export' && <ExportBackupTab />}
+        {activeTab === 'diff' && <DiffTab />}
       </div>
-
-      <p className="text-xs text-gray-400">
-        Configuration is read-only in the UI. Edit the config file and use Hot Reload to apply changes.
-      </p>
     </div>
   )
 }

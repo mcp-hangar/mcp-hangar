@@ -612,4 +612,61 @@ export const handlers = [
   http.delete(`${BASE}/auth/policies/:scope/:targetId`, () => {
     return new HttpResponse(null, { status: 204 })
   }),
+
+  // ---- Config endpoints ----
+
+  // GET /api/config -- current config
+  http.get(`${BASE}/config`, () => {
+    return HttpResponse.json({
+      config: {
+        providers: {
+          math: { mode: 'subprocess', command: ['python', '-m', 'math_server'], idle_ttl_s: 300 },
+          weather: { mode: 'remote', url: 'http://weather:8080/mcp' },
+        },
+        logging: { level: 'INFO', json_format: true },
+      },
+    })
+  }),
+
+  // POST /api/config/reload -- hot reload
+  http.post(`${BASE}/config/reload`, () => {
+    return HttpResponse.json({
+      status: 'reloaded',
+      result: null,
+      message: 'Config reloaded successfully.',
+    })
+  }),
+
+  // POST /api/config/export -- serialize in-memory config to YAML
+  http.post(`${BASE}/config/export`, () => {
+    return HttpResponse.json({
+      yaml: 'providers:\n  math:\n    command:\n    - python\n    - -m\n    - math_server\n    idle_ttl_s: 300\n    mode: subprocess\n  weather:\n    mode: remote\n    url: http://weather:8080/mcp\n',
+    })
+  }),
+
+  // POST /api/config/backup -- create rotating backup
+  http.post(`${BASE}/config/backup`, () => {
+    return HttpResponse.json({
+      path: '/etc/mcp-hangar/config.yaml.bak1',
+    })
+  }),
+
+  // GET /api/config/diff -- unified diff between on-disk and in-memory
+  http.get(`${BASE}/config/diff`, () => {
+    return HttpResponse.json({
+      has_diff: true,
+      diff: '--- on-disk\n+++ in-memory\n@@ -1,4 +1,5 @@\n providers:\n   math:\n     command:\n     - python\n     - -m\n     - math_server\n-    idle_ttl_s: 600\n+    idle_ttl_s: 300\n     mode: subprocess\n+  weather:\n+    mode: remote\n+    url: http://weather:8080/mcp\n',
+      on_disk: {
+        providers: {
+          math: { mode: 'subprocess', command: ['python', '-m', 'math_server'], idle_ttl_s: 600 },
+        },
+      },
+      in_memory: {
+        providers: {
+          math: { mode: 'subprocess', command: ['python', '-m', 'math_server'], idle_ttl_s: 300 },
+          weather: { mode: 'remote', url: 'http://weather:8080/mcp' },
+        },
+      },
+    })
+  }),
 ]
