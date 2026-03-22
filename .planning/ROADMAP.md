@@ -261,11 +261,11 @@
 
 ### Phase 27: RBAC Management API + Tool Access Policy CRUD (C3)
 
-- [ ] 27-01-PLAN.md -- RoleStore (SQLite) + custom role CRUD + events (RBAC-01)
-- [ ] 27-02-PLAN.md -- REST endpoints: roles, principals, permissions (RBAC-02)
-- [ ] 27-03-PLAN.md -- Tool access policy REST endpoints (TAP-01)
-- [ ] 27-04-PLAN.md -- Bootstrap wiring for RoleStore + access endpoints (RBAC-01, RBAC-02, TAP-01)
-- [ ] 27-05-PLAN.md -- Tests: RoleStore, permissions, access policy (RBAC-01, RBAC-02, TAP-01)
+- [x] 27-01-PLAN.md -- RoleStore (SQLite) + custom role CRUD + events (RBAC-01)
+- [x] 27-02-PLAN.md -- REST endpoints: roles, principals, permissions (RBAC-02)
+- [x] 27-03-PLAN.md -- Tool access policy REST endpoints (TAP-01)
+- [x] 27-04-PLAN.md -- Bootstrap wiring for RoleStore + access endpoints (RBAC-01, RBAC-02, TAP-01)
+- [x] 27-05-PLAN.md -- Tests: RoleStore, permissions, access policy (RBAC-01, RBAC-02, TAP-01)
 
 ### Phase 28: RBAC Management + Tool Access Policy Editor (U3)
 
@@ -323,7 +323,7 @@
 | 24. Discovery + Catalog API (C2)    | v5.0      | 5/5            | Complete | 2026-03-22 |
 | 25. CRUD Forms (U1)                 | v5.0      | 5/5            | Complete | 2026-03-22 |
 | 26. Discovery Wizard + Catalog (U2) | v5.0      | 4/4            | Complete | 2026-03-22 |
-| 27. RBAC + Tool Access API (C3)     | v5.0      | 2/5            | In Progress | --      |
+| 27. RBAC + Tool Access API (C3)     | v5.0      | 5/5            | Complete    | 2026-03-22 |
 | 28. RBAC + Tool Access UI (U3)      | v5.0      | 0/4            | Planning | --         |
 | 29. Config Export (C4)              | v5.0      | 0/4            | Planning | --         |
 | 30. Config Export UI + Polish (U4)  | v5.0      | 0/5            | Planning | --         |

@@ -3,12 +3,12 @@ gsd_state_version: 1.0
 milestone: v5.0
 milestone_name: Platform Management Console
 status: in_progress
-last_updated: "2026-03-22T15:08:53Z"
+last_updated: "2026-03-22T16:35:00Z"
 progress:
   total_phases: 8
-  completed_phases: 4
+  completed_phases: 5
   total_plans: 37
-  completed_plans: 21
+  completed_plans: 26
 ---
 
 # Project State
@@ -22,11 +22,11 @@ See: .planning/PROJECT.md (updated 2026-03-22)
 
 ## Current Position
 
-Milestone: v5.0 Platform Management Console -- IN PROGRESS (Phases 23-26 complete, Phase 27 in progress)
-Status: Phase 23 Plans 01-05 complete (backend CRUD + integration tests). Phase 24 Plans 01-05 complete (discovery source management + static MCP catalog API). Phase 25 Plans 01-05 complete (UI CRUD forms). Phase 26 Plans 01-04 complete (discovery source wizard + catalog browser UI). Phase 27 Plans 01-02 complete (domain exceptions/events/protocols/stores + CQRS handlers).
-Last activity: 2026-03-22 -- Phase 27 Plan 02: CQRS commands and query handlers (4 commands, 3 queries, 7 handlers, updated registration functions).
+Milestone: v5.0 Platform Management Console -- IN PROGRESS (Phases 23-27 complete, Phase 28 next)
+Status: Phase 23 Plans 01-05 complete (backend CRUD + integration tests). Phase 24 Plans 01-05 complete (discovery source management + static MCP catalog API). Phase 25 Plans 01-05 complete (UI CRUD forms). Phase 26 Plans 01-04 complete (discovery source wizard + catalog browser UI). Phase 27 Plans 01-05 complete (RBAC management API + Tool Access Policy CRUD -- domain, CQRS, REST, bootstrap, tests).
+Last activity: 2026-03-22 -- Phase 27 Plan 05: Full test suite (2788 tests passing). Fixed list_permissions import scoping, check_permission combined-string format, get_tool_access_policy 200/found semantics.
 
-Progress: [|||||.....] 57% -- 21 of 37 total plans complete (Phase 23: 5/5, Phase 24: 5/5, Phase 25: 5/5, Phase 26: 4/4, Phase 27: 2/5)
+Progress: [||||||....] 70% -- 26 of 37 total plans complete (Phase 23: 5/5, Phase 24: 5/5, Phase 25: 5/5, Phase 26: 4/4, Phase 27: 5/5)
 
 ## Performance Metrics
 
@@ -253,5 +253,5 @@ None.
 ## Session Continuity
 
 Last session: 2026-03-22
-Stopped at: Phase 26 complete -- all 4 plans executed (ad115a3, 1361ebe, ff54f5f). 90 UI tests passing. Summaries written. ROADMAP + STATE updated. Phase 27 Plan 01 already committed (67ee346).
-Resume with: Continue Phase 27 (RBAC Management API + Tool Access Policy CRUD -- backend) or run Phase 26 UAT.
+Stopped at: Phase 27 complete -- all 5 plans executed. 2788 unit tests passing. Summaries written. ROADMAP + STATE updated.
+Resume with: Continue with Phase 28 (next phase after RBAC + TAP).
