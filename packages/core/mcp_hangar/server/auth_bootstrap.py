@@ -6,6 +6,7 @@ This is the composition root for auth infrastructure.
 
 from collections.abc import Callable
 from pathlib import Path
+from typing import Any
 
 import structlog
 
@@ -27,7 +28,7 @@ def _create_storage_backends(
     event_publisher: Callable | None = None,
     event_store=None,
     event_bus=None,
-) -> tuple[IApiKeyStore, IRoleStore]:
+) -> tuple[IApiKeyStore, IRoleStore, Any]:
     """Create storage backends based on configuration.
 
     Args:
@@ -38,7 +39,7 @@ def _create_storage_backends(
         event_bus: Optional event bus for event_sourcing driver.
 
     Returns:
-        Tuple of (api_key_store, role_store).
+        Tuple of (api_key_store, role_store, tap_store).
 
     Raises:
         ValueError: If unknown storage driver is specified.
@@ -49,6 +50,7 @@ def _create_storage_backends(
         logger.info("auth_storage_memory", warning="Data will be lost on restart")
         api_key_store = InMemoryApiKeyStore()
         role_store = InMemoryRoleStore()
+        tap_store = None
 
     elif driver == "event_sourcing":
         from ..infrastructure.auth.event_sourced_store import EventSourcedApiKeyStore, EventSourcedRoleStore
@@ -66,6 +68,7 @@ def _create_storage_backends(
             event_store=event_store,
             event_publisher=event_bus,
         )
+        tap_store = None
 
     elif driver == "sqlite":
         from ..infrastructure.auth.sqlite_store import SQLiteApiKeyStore, SQLiteRoleStore
@@ -81,6 +84,10 @@ def _create_storage_backends(
 
         role_store = SQLiteRoleStore(db_path, event_publisher=event_publisher)
         role_store.initialize()
+
+        from ..infrastructure.auth.sqlite_tap_store import SQLiteToolAccessPolicyStore
+
+        tap_store = SQLiteToolAccessPolicyStore(db_path)
 
     elif driver == "postgresql" or driver == "postgres":
         from ..infrastructure.auth.postgres_store import (
@@ -111,13 +118,14 @@ def _create_storage_backends(
 
         role_store = PostgresRoleStore(connection_factory, event_publisher=event_publisher)
         role_store.initialize()
+        tap_store = None
 
     else:
         raise ValueError(
             f"Unknown auth storage driver: {driver}. Use 'memory', 'event_sourcing', 'sqlite', or 'postgresql'."
         )
 
-    return api_key_store, role_store
+    return api_key_store, role_store, tap_store
 
 
 class AuthComponents:
@@ -127,9 +135,10 @@ class AuthComponents:
 
     Attributes:
         authn_middleware: Authentication middleware.
-        authz_middleware: Authorization middleware.
+        authz_middleware: AuthorizationMiddleware.
         api_key_store: API key storage (for key management).
         role_store: Role storage (for role management).
+        tap_store: Tool access policy storage (for TAP management).
     """
 
     def __init__(
@@ -138,11 +147,13 @@ class AuthComponents:
         authz_middleware: AuthorizationMiddleware,
         api_key_store: IApiKeyStore | None = None,
         role_store: IRoleStore | None = None,
+        tap_store: Any | None = None,
     ):
         self.authn_middleware = authn_middleware
         self.authz_middleware = authz_middleware
         self.api_key_store = api_key_store
         self.role_store = role_store
+        self.tap_store = tap_store
 
     @property
     def enabled(self) -> bool:
@@ -183,6 +194,60 @@ class NullAuthComponents(AuthComponents):
         return False
 
 
+def _replay_tap_policies(tap_store: Any) -> None:
+    """Replay persisted TAP policies into the in-memory ToolAccessResolver on startup.
+
+    Reads all rows from the SQLiteToolAccessPolicyStore and applies them to the
+    ToolAccessResolver singleton so runtime enforcement is consistent with the
+    persisted state after a server restart.
+
+    Args:
+        tap_store: SQLiteToolAccessPolicyStore instance.
+    """
+    from ..domain.services.tool_access_resolver import ToolAccessResolver
+    from ..domain.value_objects.tool_access_policy import ToolAccessPolicy
+
+    try:
+        from ..domain.services.tool_access_resolver import get_tool_access_resolver
+
+        resolver = get_tool_access_resolver()
+    except ImportError:
+        from ..domain.services import tool_access_resolver as _tap_module
+
+        resolver = getattr(_tap_module, "_resolver", None) or ToolAccessResolver()
+
+    if resolver is None:
+        logger.warning("tap_replay_skipped", reason="resolver_not_initialized")
+        return
+
+    policies = tap_store.list_all_policies()
+    for scope, target_id, allow_list, deny_list in policies:
+        policy = ToolAccessPolicy(
+            allow_list=tuple(allow_list),
+            deny_list=tuple(deny_list),
+        )
+        try:
+            if scope == "provider":
+                resolver.set_provider_policy(target_id, policy)
+            elif scope == "group":
+                resolver.set_group_policy(target_id, policy)
+            elif scope == "member":
+                parts = target_id.split(":", 1)
+                if len(parts) == 2:
+                    resolver.set_member_policy(parts[0], parts[1], policy)
+                else:
+                    resolver.set_member_policy(target_id, target_id, policy)
+        except Exception as e:  # noqa: BLE001 -- fault-barrier: replay failure must not prevent startup
+            logger.warning(
+                "tap_policy_replay_failed",
+                scope=scope,
+                target_id=target_id,
+                error=str(e),
+            )
+
+    logger.info("tap_policies_replayed", count=len(policies))
+
+
 def bootstrap_auth(
     config: AuthConfig,
     event_publisher: Callable | None = None,
@@ -208,7 +273,7 @@ def bootstrap_auth(
 
     # Initialize storage backends based on configuration
     # Pass event_publisher for CQRS integration - stores will emit domain events
-    api_key_store, role_store = _create_storage_backends(
+    api_key_store, role_store, tap_store = _create_storage_backends(
         config,
         event_publisher=event_publisher,
         event_store=event_store,
@@ -333,9 +398,14 @@ def bootstrap_auth(
         opa_enabled=config.opa.enabled,
     )
 
+    # Replay TAP policies from SQLite into the in-memory resolver on startup
+    if tap_store is not None:
+        _replay_tap_policies(tap_store)
+
     return AuthComponents(
         authn_middleware=authn_middleware,
         authz_middleware=authz_middleware,
         api_key_store=api_key_store,
         role_store=role_store,
+        tap_store=tap_store,
     )

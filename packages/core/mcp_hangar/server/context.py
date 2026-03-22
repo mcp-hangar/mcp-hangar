@@ -11,10 +11,13 @@ from typing import Any, Optional, Protocol, runtime_checkable, TYPE_CHECKING
 if TYPE_CHECKING:
     from ..application.commands.load_handlers import LoadProviderHandler, UnloadProviderHandler
     from ..application.discovery import DiscoveryOrchestrator
+    from ..application.discovery.discovery_registry import DiscoveryRegistry
     from ..application.sagas import GroupRebalanceSaga
     from ..bootstrap.runtime import Runtime
+    from ..domain.contracts.catalog import McpCatalogRepository
     from ..domain.model import Provider, ProviderGroup
     from ..domain.repository import IProviderRepository
+    from ..server.auth_bootstrap import AuthComponents
 
 
 # =============================================================================
@@ -125,6 +128,9 @@ class ApplicationContext:
     group_rebalance_saga: Optional["GroupRebalanceSaga"] = None
     load_provider_handler: Optional["LoadProviderHandler"] = None
     unload_provider_handler: Optional["UnloadProviderHandler"] = None
+    catalog_repository: Optional["McpCatalogRepository"] = None
+    discovery_registry: Optional["DiscoveryRegistry"] = None
+    auth_components: Optional["AuthComponents"] = None
 
     @property
     def repository(self) -> "IProviderRepository":
@@ -194,6 +200,20 @@ class ApplicationContext:
     def group_exists(self, group_id: str) -> bool:
         """Check if a group exists."""
         return group_id in self.groups
+
+    @property
+    def role_store(self) -> Any:
+        """Get the role store from auth components, if available."""
+        if self.auth_components is None:
+            return None
+        return getattr(self.auth_components, "role_store", None)
+
+    @property
+    def tap_store(self) -> Any:
+        """Get the tool access policy store from auth components, if available."""
+        if self.auth_components is None:
+            return None
+        return getattr(self.auth_components, "tap_store", None)
 
 
 # Singleton context - initialized lazily or explicitly

@@ -22,12 +22,18 @@ if TYPE_CHECKING:
 logger = get_logger(__name__)
 
 
-def init_cqrs(runtime: "Runtime", current_config_path: str | None = None) -> None:
+def init_cqrs(
+    runtime: "Runtime",
+    current_config_path: str | None = None,
+    discovery_registry: Any | None = None,
+) -> None:
     """Register command and query handlers.
 
     Args:
         runtime: Runtime instance with command and query buses.
         current_config_path: Current configuration file path for reload handler.
+        discovery_registry: Optional DiscoveryRegistry; if provided, registers
+            discovery source management handlers.
     """
     from ...application.commands.crud_handlers import register_crud_handlers
     from ..state import GROUPS, PROVIDER_REPOSITORY
@@ -35,6 +41,13 @@ def init_cqrs(runtime: "Runtime", current_config_path: str | None = None) -> Non
     register_command_handlers(runtime.command_bus, PROVIDER_REPOSITORY, runtime.event_bus, current_config_path)
     register_query_handlers(runtime.query_bus, PROVIDER_REPOSITORY)
     register_crud_handlers(runtime.command_bus, PROVIDER_REPOSITORY, runtime.event_bus, GROUPS)
+
+    if discovery_registry is not None:
+        from ...application.commands.discovery_handlers import register_discovery_handlers
+
+        register_discovery_handlers(runtime.command_bus, discovery_registry)
+        logger.info("discovery_cqrs_handlers_registered")
+
     logger.info("cqrs_handlers_registered")
 
 
@@ -49,15 +62,21 @@ def init_auth_cqrs(runtime: "Runtime", auth_components: Any) -> None:
         logger.info("auth_cqrs_skipped", reason="auth_disabled")
         return
 
+    tap_store = getattr(auth_components, "tap_store", None)
+    event_bus = getattr(runtime, "event_bus", None)
+
     register_auth_command_handlers(
         runtime.command_bus,
         api_key_store=getattr(auth_components, "api_key_store", None),
         role_store=getattr(auth_components, "role_store", None),
+        tap_store=tap_store,
+        event_bus=event_bus,
     )
     register_auth_query_handlers(
         runtime.query_bus,
         api_key_store=getattr(auth_components, "api_key_store", None),
         role_store=getattr(auth_components, "role_store", None),
+        tap_store=tap_store,
     )
     logger.info("auth_cqrs_handlers_registered")
 
