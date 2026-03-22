@@ -1,4 +1,4 @@
-"""Unit tests for Provider CRUD command handlers.
+"""Unit tests for Provider and Group CRUD command handlers.
 
 Tests cover:
 - ProviderRegistered, ProviderUpdated, ProviderDeregistered domain events
@@ -7,6 +7,11 @@ Tests cover:
 - CreateProviderHandler: creates provider, emits event, rejects duplicates
 - UpdateProviderHandler: updates mutable fields, emits event, raises on missing
 - DeleteProviderHandler: removes provider, shuts down if running, emits event
+- CreateGroupHandler: creates group, emits GroupCreated, rejects duplicates
+- UpdateGroupHandler: updates group description/min_healthy, emits GroupUpdated
+- DeleteGroupHandler: removes group, calls stop_all(), emits GroupDeleted
+- AddGroupMemberHandler: adds provider to group, raises on missing provider/group
+- RemoveGroupMemberHandler: removes provider from group, raises on missing group
 """
 
 from unittest.mock import MagicMock
@@ -16,17 +21,32 @@ import pytest
 from mcp_hangar.domain.events import ProviderDeregistered, ProviderRegistered, ProviderUpdated
 from mcp_hangar.domain.exceptions import ProviderNotFoundError, ValidationError
 from mcp_hangar.domain.model.provider import Provider
-from mcp_hangar.domain.model.provider_group import GroupDeleted, GroupUpdated
+from mcp_hangar.domain.model.provider_group import (
+    GroupCreated,
+    GroupDeleted,
+    GroupUpdated,
+    ProviderGroup,
+)
 from mcp_hangar.domain.repository import InMemoryProviderRepository
 from mcp_hangar.domain.value_objects import ProviderState
 from mcp_hangar.application.commands.crud_commands import (
+    AddGroupMemberCommand,
+    CreateGroupCommand,
     CreateProviderCommand,
+    DeleteGroupCommand,
     DeleteProviderCommand,
+    RemoveGroupMemberCommand,
+    UpdateGroupCommand,
     UpdateProviderCommand,
 )
 from mcp_hangar.application.commands.crud_handlers import (
+    AddGroupMemberHandler,
+    CreateGroupHandler,
     CreateProviderHandler,
+    DeleteGroupHandler,
     DeleteProviderHandler,
+    RemoveGroupMemberHandler,
+    UpdateGroupHandler,
     UpdateProviderHandler,
 )
 
@@ -262,5 +282,206 @@ class TestDeleteProviderHandler:
 
     def test_missing_provider_raises_not_found(self):
         cmd = DeleteProviderCommand(provider_id="nonexistent")
+        with pytest.raises(ProviderNotFoundError):
+            self.handler.handle(cmd)
+
+
+# ---------------------------------------------------------------------------
+# TestCreateGroupHandler
+# ---------------------------------------------------------------------------
+
+
+class TestCreateGroupHandler:
+    """Tests for CreateGroupHandler."""
+
+    def setup_method(self):
+        self.groups: dict = {}
+        self.event_bus = _make_event_bus()
+        self.handler = CreateGroupHandler(groups=self.groups, event_bus=self.event_bus)
+
+    def test_creates_group_in_groups_dict(self):
+        cmd = CreateGroupCommand(group_id="g", strategy="round_robin")
+        self.handler.handle(cmd)
+        assert "g" in self.groups
+
+    def test_emits_group_created_event(self):
+        cmd = CreateGroupCommand(group_id="g", strategy="round_robin")
+        self.handler.handle(cmd)
+        # The handler publishes GroupCreated via collect_events() or direct publish
+        call_args = [call[0][0] for call in self.event_bus.publish.call_args_list]
+        created_events = [e for e in call_args if isinstance(e, GroupCreated)]
+        assert len(created_events) == 1
+        assert created_events[0].group_id == "g"
+        assert created_events[0].strategy == "round_robin"
+        assert created_events[0].min_healthy == 1
+
+    def test_duplicate_group_raises_validation_error(self):
+        cmd = CreateGroupCommand(group_id="g", strategy="round_robin")
+        self.handler.handle(cmd)
+        with pytest.raises(ValidationError):
+            self.handler.handle(cmd)
+
+    def test_strategy_defaults_to_round_robin(self):
+        cmd = CreateGroupCommand(group_id="g")
+        self.handler.handle(cmd)
+        call_args = [call[0][0] for call in self.event_bus.publish.call_args_list]
+        created_events = [e for e in call_args if isinstance(e, GroupCreated)]
+        assert created_events[0].strategy == "round_robin"
+
+
+# ---------------------------------------------------------------------------
+# TestUpdateGroupHandler
+# ---------------------------------------------------------------------------
+
+
+class TestUpdateGroupHandler:
+    """Tests for UpdateGroupHandler."""
+
+    def setup_method(self):
+        self.groups: dict = {}
+        self.event_bus = _make_event_bus()
+        group = ProviderGroup(group_id="g", description="original", min_healthy=1)
+        # Drain the GroupCreated event so it doesn't interfere
+        group.collect_events()
+        self.groups["g"] = group
+        self.handler = UpdateGroupHandler(groups=self.groups, event_bus=self.event_bus)
+
+    def test_updates_description(self):
+        cmd = UpdateGroupCommand(group_id="g", description="new desc")
+        self.handler.handle(cmd)
+        assert self.groups["g"].to_config_dict()["description"] == "new desc"
+
+    def test_updates_min_healthy(self):
+        cmd = UpdateGroupCommand(group_id="g", min_healthy=2)
+        self.handler.handle(cmd)
+        assert self.groups["g"].to_config_dict()["min_healthy"] == 2
+
+    def test_emits_group_updated_event(self):
+        cmd = UpdateGroupCommand(group_id="g", description="updated")
+        self.handler.handle(cmd)
+        call_args = [call[0][0] for call in self.event_bus.publish.call_args_list]
+        updated_events = [e for e in call_args if isinstance(e, GroupUpdated)]
+        assert len(updated_events) == 1
+        assert updated_events[0].group_id == "g"
+
+    def test_missing_group_raises_not_found(self):
+        cmd = UpdateGroupCommand(group_id="unknown", description="x")
+        with pytest.raises(ProviderNotFoundError):
+            self.handler.handle(cmd)
+
+    def test_none_fields_not_updated(self):
+        # Pre-condition: description is "original", min_healthy is 1
+        cmd = UpdateGroupCommand(group_id="g")  # all None
+        self.handler.handle(cmd)
+        cfg = self.groups["g"].to_config_dict()
+        assert cfg["description"] == "original"
+        assert cfg["min_healthy"] == 1
+
+
+# ---------------------------------------------------------------------------
+# TestDeleteGroupHandler
+# ---------------------------------------------------------------------------
+
+
+class TestDeleteGroupHandler:
+    """Tests for DeleteGroupHandler."""
+
+    def setup_method(self):
+        self.groups: dict = {}
+        self.event_bus = _make_event_bus()
+        group = ProviderGroup(group_id="g")
+        group.collect_events()
+        self.groups["g"] = group
+        self.handler = DeleteGroupHandler(groups=self.groups, event_bus=self.event_bus)
+
+    def test_removes_group_from_dict(self):
+        cmd = DeleteGroupCommand(group_id="g")
+        self.handler.handle(cmd)
+        assert "g" not in self.groups
+
+    def test_emits_group_deleted_event(self):
+        cmd = DeleteGroupCommand(group_id="g")
+        self.handler.handle(cmd)
+        call_args = [call[0][0] for call in self.event_bus.publish.call_args_list]
+        deleted_events = [e for e in call_args if isinstance(e, GroupDeleted)]
+        assert len(deleted_events) == 1
+        assert deleted_events[0].group_id == "g"
+
+    def test_missing_group_raises_not_found(self):
+        cmd = DeleteGroupCommand(group_id="unknown")
+        with pytest.raises(ProviderNotFoundError):
+            self.handler.handle(cmd)
+
+
+# ---------------------------------------------------------------------------
+# TestAddGroupMemberHandler
+# ---------------------------------------------------------------------------
+
+
+class TestAddGroupMemberHandler:
+    """Tests for AddGroupMemberHandler."""
+
+    def setup_method(self):
+        self.repo = InMemoryProviderRepository()
+        self.groups: dict = {}
+        self.event_bus = _make_event_bus()
+        # Pre-populate provider
+        provider = _make_cold_provider(provider_id="p")
+        self.repo.add("p", provider)
+        # Pre-populate group (with auto_start=False to avoid provider I/O)
+        group = ProviderGroup(group_id="g", auto_start=False)
+        group.collect_events()
+        self.groups["g"] = group
+        self.handler = AddGroupMemberHandler(repository=self.repo, groups=self.groups, event_bus=self.event_bus)
+
+    def test_adds_member_to_group(self):
+        cmd = AddGroupMemberCommand(group_id="g", provider_id="p")
+        self.handler.handle(cmd)
+        group = self.groups["g"]
+        member_ids = [m.id for m in group.members]
+        assert "p" in member_ids
+
+    def test_missing_provider_raises_not_found(self):
+        cmd = AddGroupMemberCommand(group_id="g", provider_id="nonexistent")
+        with pytest.raises(ProviderNotFoundError):
+            self.handler.handle(cmd)
+
+    def test_missing_group_raises_not_found(self):
+        cmd = AddGroupMemberCommand(group_id="unknown", provider_id="p")
+        with pytest.raises(ProviderNotFoundError):
+            self.handler.handle(cmd)
+
+
+# ---------------------------------------------------------------------------
+# TestRemoveGroupMemberHandler
+# ---------------------------------------------------------------------------
+
+
+class TestRemoveGroupMemberHandler:
+    """Tests for RemoveGroupMemberHandler."""
+
+    def setup_method(self):
+        self.repo = InMemoryProviderRepository()
+        self.groups: dict = {}
+        self.event_bus = _make_event_bus()
+        # Pre-populate provider
+        provider = _make_cold_provider(provider_id="p")
+        self.repo.add("p", provider)
+        # Pre-populate group with member p (auto_start=False)
+        group = ProviderGroup(group_id="g", auto_start=False)
+        group.add_member(provider)
+        group.collect_events()
+        self.groups["g"] = group
+        self.handler = RemoveGroupMemberHandler(groups=self.groups, event_bus=self.event_bus)
+
+    def test_removes_member_from_group(self):
+        cmd = RemoveGroupMemberCommand(group_id="g", provider_id="p")
+        self.handler.handle(cmd)
+        group = self.groups["g"]
+        member_ids = [m.id for m in group.members]
+        assert "p" not in member_ids
+
+    def test_missing_group_raises_not_found(self):
+        cmd = RemoveGroupMemberCommand(group_id="unknown", provider_id="p")
         with pytest.raises(ProviderNotFoundError):
             self.handler.handle(cmd)

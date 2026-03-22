@@ -3,12 +3,12 @@ gsd_state_version: 1.0
 milestone: v5.0
 milestone_name: Platform Management Console
 status: in_progress
-last_updated: "2026-03-22T12:25:43Z"
+last_updated: "2026-03-22T12:29:06Z"
 progress:
   total_phases: 8
   completed_phases: 0
   total_plans: 37
-  completed_plans: 1
+  completed_plans: 2
 ---
 
 # Project State
@@ -23,10 +23,10 @@ See: .planning/PROJECT.md (updated 2026-03-22)
 ## Current Position
 
 Milestone: v5.0 Platform Management Console -- IN PROGRESS (Phase 23)
-Status: Phase 23 Plan 03 complete. ProviderGroup.to_config_dict() and config_serializer module implemented with TDD.
-Last activity: 2026-03-22 -- Phase 23, Plan 03 executed (config serializer + ProviderGroup.to_config_dict with bak1..bak5 rotation).
+Status: Phase 23 Plans 01 and 03 complete. Provider CRUD events/commands/handlers and config serializer implemented with TDD.
+Last activity: 2026-03-22 -- Phase 23, Plan 01 executed (provider CRUD events, 8 command dataclasses, 3 handlers, to_config_dict, update_config). 24 tests passing.
 
-Progress: [|.........] 3% -- Phase 23 Plan 03 of 37 total plans complete
+Progress: [|.........] 5% -- Phase 23 Plans 01 + 03 of 37 total plans complete
 
 ## Performance Metrics
 
@@ -187,6 +187,13 @@ All v0.9, v0.10, and v1.0 decisions archived in PROJECT.md Key Decisions table.
 - Amber for stderr, gray for stdout -- conventional color coding matching terminal standards
 - useProviderLogs follows same auto-reconnect pattern as useWebSocket hook -- consistent with existing hooks
 
+**v5.0 decisions (Phase 23-01 execution):**
+
+- IdleTTL and HealthCheckInterval use .seconds attribute (not .value) -- plan snippet had incorrect attribute, auto-fixed in GREEN phase
+- state_snapshot property added to Provider for lock-free CPython read -- needed by ProviderGroup callers constrained by lock hierarchy
+- UpdateProviderHandler uses provider.collect_events() after update_config() to forward ProviderUpdated event -- respects aggregate event sourcing pattern
+- DeleteProviderHandler calls provider.shutdown() only for non-COLD/non-DEAD states -- matches state machine invariants
+
 **v5.0 decisions (Phase 23-03 execution):**
 
 - serialize_full_config(providers=None, groups=None) accepts optional explicit dicts so tests bypass get_context() -- testability without patching
@@ -217,5 +224,5 @@ None.
 ## Session Continuity
 
 Last session: 2026-03-22
-Stopped at: Completed Phase 23, Plan 03 -- config serializer + ProviderGroup.to_config_dict. 24 tests passing.
-Resume with: Execute Phase 23 Plan 04 (REST endpoints for config serialization).
+Stopped at: Completed Phase 23, Plan 01 -- provider CRUD events, commands, handlers, to_config_dict, update_config. 24 tests passing.
+Resume with: Execute Phase 23 Plan 02 (Group CRUD handlers) or Plan 04 (REST endpoints).
