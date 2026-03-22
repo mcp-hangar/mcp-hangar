@@ -1,9 +1,14 @@
 import { useState } from 'react'
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query'
+import { Plus } from 'lucide-react'
 import { queryKeys } from '../../lib/queryKeys'
 import { providersApi } from '../../api/providers'
 import { EmptyState, LoadingSpinner } from '../../components/ui'
 import { ProviderRow } from '../../components/providers/ProviderRow'
+import { ProviderCreateDrawer } from './ProviderCreateDrawer'
+import { ProviderEditDrawer } from './ProviderEditDrawer'
+import { ProviderDeleteDialog } from './ProviderDeleteDialog'
+import type { ProviderSummary } from '../../types/provider'
 
 const STATE_FILTERS: Array<{ label: string; value: string | undefined }> = [
   { label: 'All', value: undefined },
@@ -16,11 +21,20 @@ const STATE_FILTERS: Array<{ label: string; value: string | undefined }> = [
 export function ProvidersPage(): JSX.Element {
   const queryClient = useQueryClient()
   const [stateFilter, setStateFilter] = useState<string | undefined>(undefined)
+  const [createOpen, setCreateOpen] = useState(false)
+  const [editProvider, setEditProvider] = useState<ProviderSummary | null>(null)
+  const [deleteProvider, setDeleteProvider] = useState<ProviderSummary | null>(null)
 
   const { data, isLoading, error } = useQuery({
     queryKey: queryKeys.providers.list(stateFilter),
     queryFn: () => providersApi.list(stateFilter),
     refetchInterval: 15_000,
+  })
+
+  const { data: editDetails } = useQuery({
+    queryKey: queryKeys.providers.detail(editProvider?.provider_id ?? ''),
+    queryFn: () => providersApi.get(editProvider!.provider_id),
+    enabled: !!editProvider,
   })
 
   const startMutation = useMutation({
@@ -37,7 +51,17 @@ export function ProvidersPage(): JSX.Element {
 
   return (
     <div className="p-6 space-y-4">
-      <h2 className="text-lg font-semibold text-gray-900">Providers</h2>
+      <div className="flex items-center justify-between">
+        <h2 className="text-lg font-semibold text-gray-900">Providers</h2>
+        <button
+          type="button"
+          onClick={() => setCreateOpen(true)}
+          className="flex items-center gap-1.5 px-3 py-1.5 text-sm bg-blue-600 text-white rounded-md hover:bg-blue-700"
+        >
+          <Plus size={16} />
+          New Provider
+        </button>
+      </div>
 
       {/* State Filter Tabs */}
       <div className="flex gap-1 mb-4">
@@ -87,11 +111,36 @@ export function ProvidersPage(): JSX.Element {
                   onStop={(id) => stopMutation.mutate(id)}
                   isStarting={startMutation.isPending && startMutation.variables === p.provider_id}
                   isStopping={stopMutation.isPending && stopMutation.variables === p.provider_id}
+                  onEdit={setEditProvider}
+                  onDelete={setDeleteProvider}
                 />
               ))}
             </tbody>
           </table>
         </div>
+      )}
+
+      <ProviderCreateDrawer open={createOpen} onOpenChange={setCreateOpen} />
+
+      {editDetails && (
+        <ProviderEditDrawer
+          key={editProvider?.provider_id}
+          provider={editDetails}
+          open={!!editProvider}
+          onOpenChange={(o) => {
+            if (!o) setEditProvider(null)
+          }}
+        />
+      )}
+
+      {deleteProvider && (
+        <ProviderDeleteDialog
+          provider={deleteProvider}
+          open={!!deleteProvider}
+          onOpenChange={(o) => {
+            if (!o) setDeleteProvider(null)
+          }}
+        />
       )}
     </div>
   )
