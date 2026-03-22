@@ -116,3 +116,63 @@ class CreateCustomRoleCommand(Command):
     description: str = ""
     permissions: frozenset[str] = field(default_factory=frozenset)
     created_by: str = "system"
+
+
+@dataclass(frozen=True)
+class DeleteCustomRoleCommand(Command):
+    """Command to delete a custom role.
+
+    Attributes:
+        role_name: Name of the role to delete.
+        deleted_by: Principal deleting the role.
+    """
+
+    role_name: str
+    deleted_by: str = "system"
+
+
+@dataclass(frozen=True)
+class UpdateCustomRoleCommand(Command):
+    """Command to update a custom role's permissions and description.
+
+    Attributes:
+        role_name: Name of the role to update.
+        permissions: New set of permission strings (format: "resource:action:id").
+        description: New human-readable description (None to clear).
+        updated_by: Principal making the update.
+    """
+
+    role_name: str
+    permissions: list[str] = field(default_factory=list)
+    description: str | None = None
+    updated_by: str = "system"
+
+
+@dataclass(frozen=True)
+class SetToolAccessPolicyCommand(Command):
+    """Command to set (upsert) a tool access policy for a scope/target.
+
+    Attributes:
+        scope: One of "provider", "group", or "member".
+        target_id: Identifier of the provider, group, or member.
+        allow_list: Tool name patterns to allow (empty = no allow restriction).
+        deny_list: Tool name patterns to deny (empty = no deny restriction).
+    """
+
+    scope: str
+    target_id: str
+    allow_list: list[str] = field(default_factory=list)
+    deny_list: list[str] = field(default_factory=list)
+
+
+@dataclass(frozen=True)
+class ClearToolAccessPolicyCommand(Command):
+    """Command to remove a tool access policy for a scope/target.
+
+    Attributes:
+        scope: One of "provider", "group", or "member".
+        target_id: Identifier of the provider, group, or member.
+    """
+
+    scope: str
+    target_id: str

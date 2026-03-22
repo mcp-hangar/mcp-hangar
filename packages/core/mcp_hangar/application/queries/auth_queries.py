@@ -116,3 +116,44 @@ class GetAuthAuditLogQuery(Query):
     event_type: str | None = None
     limit: int = 100
     since_timestamp: float | None = None
+
+
+# =============================================================================
+# Role Management Queries (Phase 27)
+# =============================================================================
+
+
+@dataclass(frozen=True)
+class ListAllRolesQuery(Query):
+    """Query to list all roles (builtin and/or custom).
+
+    Attributes:
+        include_builtin: Whether to include built-in roles in the result.
+    """
+
+    include_builtin: bool = True
+
+
+@dataclass(frozen=True)
+class ListPrincipalsQuery(Query):
+    """Query to list all principals with at least one role assignment."""
+
+    pass
+
+
+# =============================================================================
+# Tool Access Policy Queries (Phase 27)
+# =============================================================================
+
+
+@dataclass(frozen=True)
+class GetToolAccessPolicyQuery(Query):
+    """Query to retrieve the stored tool access policy for a scope/target.
+
+    Attributes:
+        scope: One of "provider", "group", or "member".
+        target_id: Identifier of the provider, group, or member.
+    """
+
+    scope: str
+    target_id: str

@@ -215,8 +215,9 @@ class TestRegisterAuthQueryHandlers:
             role_store=role_store,
         )
 
-        # Should have registered: 2 api_key + 3 role + 1 builtin = 6 handlers
-        assert query_bus.register.call_count == 6
+        # Should have registered: 2 api_key + 5 role + 1 builtin = 8 handlers
+        # role: get_roles_for_principal, get_role, check_permission, list_all, list_principals
+        assert query_bus.register.call_count == 8
 
     def test_builtin_roles_always_registered(self):
         """ListBuiltinRolesQuery is always registered."""

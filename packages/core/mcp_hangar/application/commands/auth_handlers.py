@@ -8,16 +8,28 @@ from typing import Any
 
 from ...domain.contracts.authentication import IApiKeyStore
 from ...domain.contracts.authorization import IRoleStore
+from ...domain.events import (
+    CustomRoleCreated,
+    CustomRoleDeleted,
+    CustomRoleUpdated,
+    ToolAccessPolicyCleared,
+    ToolAccessPolicySet,
+)
 from ...domain.value_objects import Permission, Role
+from ...domain.value_objects.tool_access_policy import ToolAccessPolicy
 from ...infrastructure.command_bus import CommandHandler
 from ...logging_config import get_logger
 from .auth_commands import (
     AssignRoleCommand,
+    ClearToolAccessPolicyCommand,
     CreateApiKeyCommand,
     CreateCustomRoleCommand,
+    DeleteCustomRoleCommand,
     ListApiKeysCommand,
     RevokeApiKeyCommand,
     RevokeRoleCommand,
+    SetToolAccessPolicyCommand,
+    UpdateCustomRoleCommand,
 )
 
 logger = get_logger(__name__)
@@ -232,11 +244,12 @@ class RevokeRoleHandler(CommandHandler):
 class CreateCustomRoleHandler(CommandHandler):
     """Handler for CreateCustomRoleCommand.
 
-    Creates a custom role with specified permissions.
+    Creates a custom role with specified permissions and emits CustomRoleCreated.
     """
 
-    def __init__(self, role_store: IRoleStore):
+    def __init__(self, role_store: IRoleStore, event_bus: Any = None):
         self._store = role_store
+        self._event_bus = event_bus
 
     def handle(self, command: CreateCustomRoleCommand) -> dict[str, Any]:
         """Create a custom role.
@@ -262,6 +275,15 @@ class CreateCustomRoleHandler(CommandHandler):
 
         self._store.add_role(role)
 
+        if self._event_bus is not None:
+            self._event_bus.publish(
+                CustomRoleCreated(
+                    role_name=command.role_name,
+                    permissions=list(command.permissions),
+                    description=command.description or None,
+                )
+            )
+
         return {
             "role_name": command.role_name,
             "description": command.description,
@@ -271,10 +293,197 @@ class CreateCustomRoleHandler(CommandHandler):
         }
 
 
+class DeleteCustomRoleHandler(CommandHandler):
+    """Handler for DeleteCustomRoleCommand.
+
+    Deletes a custom role from the store and emits CustomRoleDeleted.
+    Raises CannotModifyBuiltinRoleError if the role is built-in.
+    Raises RoleNotFoundError if the role does not exist.
+    """
+
+    def __init__(self, role_store: IRoleStore, event_bus: Any):
+        self._store = role_store
+        self._event_bus = event_bus
+
+    def handle(self, command: DeleteCustomRoleCommand) -> dict[str, Any]:
+        """Delete a custom role.
+
+        Returns:
+            Dict with deletion confirmation.
+        """
+        logger.info(
+            "deleting_custom_role",
+            role_name=command.role_name,
+            deleted_by=command.deleted_by,
+        )
+
+        # Raises CannotModifyBuiltinRoleError or RoleNotFoundError if invalid
+        self._store.delete_role(command.role_name)
+        self._event_bus.publish(CustomRoleDeleted(role_name=command.role_name))
+
+        return {
+            "role_name": command.role_name,
+            "deleted": True,
+            "deleted_by": command.deleted_by,
+        }
+
+
+class UpdateCustomRoleHandler(CommandHandler):
+    """Handler for UpdateCustomRoleCommand.
+
+    Updates a custom role's permissions and description, emits CustomRoleUpdated.
+    Raises CannotModifyBuiltinRoleError if the role is built-in.
+    Raises RoleNotFoundError if the role does not exist.
+    """
+
+    def __init__(self, role_store: IRoleStore, event_bus: Any):
+        self._store = role_store
+        self._event_bus = event_bus
+
+    def handle(self, command: UpdateCustomRoleCommand) -> dict[str, Any]:
+        """Update a custom role.
+
+        Returns:
+            Dict with updated role info.
+        """
+        logger.info(
+            "updating_custom_role",
+            role_name=command.role_name,
+            permissions_count=len(command.permissions),
+            updated_by=command.updated_by,
+        )
+
+        permissions = [Permission.parse(p) for p in command.permissions]
+        # Raises CannotModifyBuiltinRoleError or RoleNotFoundError if invalid
+        updated_role = self._store.update_role(command.role_name, permissions, command.description)
+
+        self._event_bus.publish(
+            CustomRoleUpdated(
+                role_name=command.role_name,
+                permissions=list(command.permissions),
+                description=command.description,
+            )
+        )
+
+        return {
+            "role_name": updated_role.name,
+            "description": updated_role.description,
+            "permissions_count": len(updated_role.permissions),
+            "updated": True,
+            "updated_by": command.updated_by,
+        }
+
+
+class SetToolAccessPolicyHandler(CommandHandler):
+    """Handler for SetToolAccessPolicyCommand.
+
+    Persists the policy to the TAP store, updates the in-memory resolver,
+    and emits ToolAccessPolicySet.
+    """
+
+    def __init__(self, tap_store: Any, event_bus: Any):
+        self._tap_store = tap_store
+        self._event_bus = event_bus
+
+    def handle(self, command: SetToolAccessPolicyCommand) -> dict[str, Any]:
+        """Set a tool access policy.
+
+        Returns:
+            Dict with confirmation.
+        """
+        logger.info(
+            "setting_tool_access_policy",
+            scope=command.scope,
+            target_id=command.target_id,
+            allow_count=len(command.allow_list),
+            deny_count=len(command.deny_list),
+        )
+
+        # 1. Persist to store
+        self._tap_store.set_policy(
+            scope=command.scope,
+            target_id=command.target_id,
+            allow_list=command.allow_list,
+            deny_list=command.deny_list,
+        )
+
+        # 2. Update in-memory resolver so runtime enforcement is immediate
+        from ...domain.services.tool_access_resolver import get_tool_access_resolver
+
+        resolver = get_tool_access_resolver()
+        policy = ToolAccessPolicy(
+            allow_list=tuple(command.allow_list),
+            deny_list=tuple(command.deny_list),
+        )
+        if command.scope == "provider":
+            resolver.set_provider_policy(command.target_id, policy)
+        elif command.scope == "group":
+            resolver.set_group_policy(command.target_id, policy)
+        elif command.scope == "member":
+            # target_id for member scope is "group_id:member_id"
+            parts = command.target_id.split(":", 1)
+            if len(parts) == 2:
+                resolver.set_member_policy(parts[0], parts[1], policy)
+            else:
+                resolver.set_member_policy(command.target_id, command.target_id, policy)
+
+        # 3. Emit domain event
+        self._event_bus.publish(
+            ToolAccessPolicySet(
+                scope=command.scope,
+                target_id=command.target_id,
+                allow_list=command.allow_list,
+                deny_list=command.deny_list,
+            )
+        )
+
+        return {
+            "scope": command.scope,
+            "target_id": command.target_id,
+            "allow_list": command.allow_list,
+            "deny_list": command.deny_list,
+            "set": True,
+        }
+
+
+class ClearToolAccessPolicyHandler(CommandHandler):
+    """Handler for ClearToolAccessPolicyCommand.
+
+    Removes the policy from the TAP store and emits ToolAccessPolicyCleared.
+    """
+
+    def __init__(self, tap_store: Any, event_bus: Any):
+        self._tap_store = tap_store
+        self._event_bus = event_bus
+
+    def handle(self, command: ClearToolAccessPolicyCommand) -> dict[str, Any]:
+        """Clear a tool access policy.
+
+        Returns:
+            Dict with confirmation.
+        """
+        logger.info(
+            "clearing_tool_access_policy",
+            scope=command.scope,
+            target_id=command.target_id,
+        )
+
+        self._tap_store.clear_policy(scope=command.scope, target_id=command.target_id)
+        self._event_bus.publish(ToolAccessPolicyCleared(scope=command.scope, target_id=command.target_id))
+
+        return {
+            "scope": command.scope,
+            "target_id": command.target_id,
+            "cleared": True,
+        }
+
+
 def register_auth_command_handlers(
     command_bus,
     api_key_store: IApiKeyStore | None = None,
     role_store: IRoleStore | None = None,
+    tap_store: Any = None,
+    event_bus: Any = None,
 ) -> None:
     """Register all auth command handlers with the command bus.
 
@@ -282,6 +491,8 @@ def register_auth_command_handlers(
         command_bus: CommandBus instance.
         api_key_store: API key store (optional, handlers skipped if None).
         role_store: Role store (optional, handlers skipped if None).
+        tap_store: Tool access policy store (optional, TAP handlers skipped if None).
+        event_bus: Event bus for emitting domain events (optional).
     """
     if api_key_store:
         command_bus.register(CreateApiKeyCommand, CreateApiKeyHandler(api_key_store))
@@ -292,5 +503,12 @@ def register_auth_command_handlers(
     if role_store:
         command_bus.register(AssignRoleCommand, AssignRoleHandler(role_store))
         command_bus.register(RevokeRoleCommand, RevokeRoleHandler(role_store))
-        command_bus.register(CreateCustomRoleCommand, CreateCustomRoleHandler(role_store))
+        command_bus.register(CreateCustomRoleCommand, CreateCustomRoleHandler(role_store, event_bus=event_bus))
+        command_bus.register(DeleteCustomRoleCommand, DeleteCustomRoleHandler(role_store, event_bus=event_bus))
+        command_bus.register(UpdateCustomRoleCommand, UpdateCustomRoleHandler(role_store, event_bus=event_bus))
         logger.info("auth_role_handlers_registered")
+
+    if tap_store:
+        command_bus.register(SetToolAccessPolicyCommand, SetToolAccessPolicyHandler(tap_store, event_bus=event_bus))
+        command_bus.register(ClearToolAccessPolicyCommand, ClearToolAccessPolicyHandler(tap_store, event_bus=event_bus))
+        logger.info("auth_tap_handlers_registered")

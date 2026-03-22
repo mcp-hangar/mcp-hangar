@@ -249,8 +249,8 @@ class TestRegisterAuthCommandHandlers:
             role_store=role_store,
         )
 
-        # Should have registered 6 handlers
-        assert command_bus.register.call_count == 6
+        # Should have registered 8 handlers (3 API key + 5 role: assign, revoke, create, delete, update)
+        assert command_bus.register.call_count == 8
 
     def test_register_without_stores(self):
         """Registration skips handlers if stores not provided."""
