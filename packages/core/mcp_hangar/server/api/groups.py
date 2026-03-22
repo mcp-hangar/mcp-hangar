@@ -90,7 +90,7 @@ async def create_group(request: Request) -> HangarJSONResponse:
         CreateGroupCommand(
             group_id=body["group_id"],
             strategy=body.get("strategy", "round_robin"),
-            min_healthy=body.get("min_healthy"),
+            min_healthy=body.get("min_healthy", 1),
             description=body.get("description"),
         )
     )
@@ -116,6 +116,7 @@ async def update_group(request: Request) -> HangarJSONResponse:
     result = await dispatch_command(
         UpdateGroupCommand(
             group_id=group_id,
+            strategy=body.get("strategy"),
             min_healthy=body.get("min_healthy"),
             description=body.get("description"),
         )
@@ -157,8 +158,8 @@ async def add_group_member(request: Request) -> HangarJSONResponse:
         AddGroupMemberCommand(
             group_id=group_id,
             provider_id=body["member_id"],
-            weight=body.get("weight"),
-            priority=body.get("priority"),
+            weight=body.get("weight", 1),
+            priority=body.get("priority", 1),
         )
     )
     return HangarJSONResponse(result, status_code=201)
