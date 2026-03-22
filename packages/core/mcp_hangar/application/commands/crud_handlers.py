@@ -7,18 +7,25 @@ All handlers:
 - Are thread-safe (mutations guarded via repository or injected lock)
 """
 
+import threading
 from typing import Any
 
 from ...domain.events import ProviderDeregistered, ProviderRegistered
 from ...domain.exceptions import ProviderNotFoundError, ValidationError
 from ...domain.model.provider import Provider
+from ...domain.model.provider_group import GroupDeleted, ProviderGroup
 from ...domain.repository import IProviderRepository
-from ...domain.value_objects import ProviderState
+from ...domain.value_objects import LoadBalancerStrategy, ProviderState
 from ...infrastructure.command_bus import CommandHandler
 from ...logging_config import get_logger
 from .crud_commands import (
+    AddGroupMemberCommand,
+    CreateGroupCommand,
     CreateProviderCommand,
+    DeleteGroupCommand,
     DeleteProviderCommand,
+    RemoveGroupMemberCommand,
+    UpdateGroupCommand,
     UpdateProviderCommand,
 )
 
@@ -239,6 +246,266 @@ class DeleteProviderHandler(CommandHandler):
 
 
 # =============================================================================
+# Group CRUD Handlers
+# =============================================================================
+
+
+class CreateGroupHandler(CommandHandler):
+    """Handler for CreateGroupCommand.
+
+    Creates a new ProviderGroup in the groups dict and emits GroupCreated.
+    Raises ValidationError if a group with the same ID already exists.
+    Thread-safe via a per-handler threading.Lock.
+    """
+
+    def __init__(self, groups: dict, event_bus: Any) -> None:
+        """Initialize the handler.
+
+        Args:
+            groups: Shared groups dict mapping group_id to ProviderGroup.
+            event_bus: Event bus for publishing domain events.
+        """
+        self._groups = groups
+        self._event_bus = event_bus
+        self._lock = threading.Lock()
+
+    def handle(self, command: CreateGroupCommand) -> dict[str, Any]:
+        """Create a new provider group.
+
+        Args:
+            command: CreateGroupCommand with group configuration.
+
+        Returns:
+            Dict with group_id and created flag.
+
+        Raises:
+            ValidationError: If a group with the same ID already exists.
+        """
+        with self._lock:
+            if command.group_id in self._groups:
+                raise ValidationError(f"Group already exists: {command.group_id}")
+            group = ProviderGroup(
+                group_id=command.group_id,
+                strategy=LoadBalancerStrategy(command.strategy),
+                min_healthy=command.min_healthy,
+                description=command.description,
+            )
+            self._groups[command.group_id] = group
+
+        # Publish events OUTSIDE lock (no I/O under lock)
+        for event in group.collect_events():
+            self._event_bus.publish(event)
+
+        logger.info("group_created", group_id=command.group_id, strategy=command.strategy)
+        return {"group_id": command.group_id, "created": True}
+
+
+class UpdateGroupHandler(CommandHandler):
+    """Handler for UpdateGroupCommand.
+
+    Updates mutable configuration fields on an existing ProviderGroup via
+    ProviderGroup.update(). Raises ProviderNotFoundError if not found.
+    Thread-safe via a per-handler threading.Lock.
+    """
+
+    def __init__(self, groups: dict, event_bus: Any) -> None:
+        """Initialize the handler.
+
+        Args:
+            groups: Shared groups dict mapping group_id to ProviderGroup.
+            event_bus: Event bus for publishing domain events.
+        """
+        self._groups = groups
+        self._event_bus = event_bus
+        self._lock = threading.Lock()
+
+    def handle(self, command: UpdateGroupCommand) -> dict[str, Any]:
+        """Update group configuration.
+
+        Delegates field updates to ProviderGroup.update() which acquires the
+        group lock internally and records a GroupUpdated event on the aggregate.
+
+        Args:
+            command: UpdateGroupCommand with fields to update.
+
+        Returns:
+            Dict with group_id and updated flag.
+
+        Raises:
+            ProviderNotFoundError: If group does not exist.
+        """
+        with self._lock:
+            group = self._groups.get(command.group_id)
+            if group is None:
+                raise ProviderNotFoundError(command.group_id)
+
+        # group.update() acquires its own lock internally
+        group.update(
+            description=command.description,
+            min_healthy=command.min_healthy,
+        )
+
+        # Collect the GroupUpdated event and forward through event bus
+        for event in group.collect_events():
+            self._event_bus.publish(event)
+
+        logger.info("group_updated", group_id=command.group_id, source=command.source)
+        return {"group_id": command.group_id, "updated": True}
+
+
+class DeleteGroupHandler(CommandHandler):
+    """Handler for DeleteGroupCommand.
+
+    Removes a ProviderGroup from the groups dict, calls stop_all() on the
+    group (outside the lock), and emits GroupDeleted.
+    Raises ProviderNotFoundError if not found.
+    Thread-safe via a per-handler threading.Lock.
+    """
+
+    def __init__(self, groups: dict, event_bus: Any) -> None:
+        """Initialize the handler.
+
+        Args:
+            groups: Shared groups dict mapping group_id to ProviderGroup.
+            event_bus: Event bus for publishing domain events.
+        """
+        self._groups = groups
+        self._event_bus = event_bus
+        self._lock = threading.Lock()
+
+    def handle(self, command: DeleteGroupCommand) -> dict[str, Any]:
+        """Delete a provider group, stopping all members first.
+
+        Args:
+            command: DeleteGroupCommand with group_id to delete.
+
+        Returns:
+            Dict with group_id and deleted flag.
+
+        Raises:
+            ProviderNotFoundError: If group does not exist.
+        """
+        with self._lock:
+            group = self._groups.get(command.group_id)
+            if group is None:
+                raise ProviderNotFoundError(command.group_id)
+            del self._groups[command.group_id]
+
+        # I/O (stop) outside lock — stop_all() acquires Provider locks individually
+        group.stop_all()
+
+        # Collect any lifecycle events from stop_all(), then emit GroupDeleted
+        for event in group.collect_events():
+            self._event_bus.publish(event)
+        self._event_bus.publish(GroupDeleted(group_id=command.group_id))
+
+        logger.info("group_deleted", group_id=command.group_id, source=command.source)
+        return {"group_id": command.group_id, "deleted": True}
+
+
+class AddGroupMemberHandler(CommandHandler):
+    """Handler for AddGroupMemberCommand.
+
+    Adds a Provider to an existing ProviderGroup.
+    Raises ProviderNotFoundError if provider or group does not exist.
+    Thread-safe via a per-handler threading.Lock for the groups dict lookup.
+    """
+
+    def __init__(self, repository: IProviderRepository, groups: dict, event_bus: Any) -> None:
+        """Initialize the handler.
+
+        Args:
+            repository: Provider repository for member lookup.
+            groups: Shared groups dict mapping group_id to ProviderGroup.
+            event_bus: Event bus for publishing domain events.
+        """
+        self._repository = repository
+        self._groups = groups
+        self._event_bus = event_bus
+        self._lock = threading.Lock()
+
+    def handle(self, command: AddGroupMemberCommand) -> dict[str, Any]:
+        """Add a provider to a group.
+
+        Looks up provider first (outside lock), then acquires lock to
+        find the group and call group.add_member().
+
+        Args:
+            command: AddGroupMemberCommand with group_id and provider_id.
+
+        Returns:
+            Dict with group_id, provider_id, and added flag.
+
+        Raises:
+            ProviderNotFoundError: If provider or group does not exist.
+        """
+        # Provider lookup outside lock (read-only, thread-safe via repository)
+        provider = self._repository.get(command.provider_id)
+        if provider is None:
+            raise ProviderNotFoundError(command.provider_id)
+
+        with self._lock:
+            group = self._groups.get(command.group_id)
+            if group is None:
+                raise ProviderNotFoundError(command.group_id)
+            # group.add_member() acquires group's own lock internally
+            group.add_member(provider, weight=command.weight, priority=command.priority)
+
+        # Collect GroupMemberAdded event and forward
+        for event in group.collect_events():
+            self._event_bus.publish(event)
+
+        logger.info("group_member_added", group_id=command.group_id, provider_id=command.provider_id)
+        return {"group_id": command.group_id, "provider_id": command.provider_id, "added": True}
+
+
+class RemoveGroupMemberHandler(CommandHandler):
+    """Handler for RemoveGroupMemberCommand.
+
+    Removes a Provider from an existing ProviderGroup.
+    Raises ProviderNotFoundError if the group does not exist.
+    Thread-safe via a per-handler threading.Lock.
+    """
+
+    def __init__(self, groups: dict, event_bus: Any) -> None:
+        """Initialize the handler.
+
+        Args:
+            groups: Shared groups dict mapping group_id to ProviderGroup.
+            event_bus: Event bus for publishing domain events.
+        """
+        self._groups = groups
+        self._event_bus = event_bus
+        self._lock = threading.Lock()
+
+    def handle(self, command: RemoveGroupMemberCommand) -> dict[str, Any]:
+        """Remove a provider from a group.
+
+        Args:
+            command: RemoveGroupMemberCommand with group_id and provider_id.
+
+        Returns:
+            Dict with group_id, provider_id, and removed flag.
+
+        Raises:
+            ProviderNotFoundError: If group does not exist.
+        """
+        with self._lock:
+            group = self._groups.get(command.group_id)
+            if group is None:
+                raise ProviderNotFoundError(command.group_id)
+            # group.remove_member() acquires group's own lock internally
+            group.remove_member(command.provider_id)
+
+        # Collect GroupMemberRemoved event and forward
+        for event in group.collect_events():
+            self._event_bus.publish(event)
+
+        logger.info("group_member_removed", group_id=command.group_id, provider_id=command.provider_id)
+        return {"group_id": command.group_id, "provider_id": command.provider_id, "removed": True}
+
+
+# =============================================================================
 # Registration
 # =============================================================================
 
@@ -249,21 +516,33 @@ def register_crud_handlers(
     event_bus: Any,
     groups: dict | None = None,
 ) -> None:
-    """Register all provider CRUD command handlers with the command bus.
-
-    Group CRUD handlers are added in plan 02 (CRUD-02). This function registers
-    only the provider commands defined in CRUD-01.
+    """Register all provider and group CRUD command handlers with the command bus.
 
     Args:
         command_bus: Command bus to register handlers on.
         repository: Provider repository for handler injection.
         event_bus: Event bus for handler injection.
-        groups: Groups dict (reserved for plan 02 group handlers, unused here).
+        groups: Groups dict for group handler injection. If None, group handlers
+            are not registered.
     """
-    from .crud_commands import CreateProviderCommand, DeleteProviderCommand, UpdateProviderCommand
-
+    # Provider handlers
     command_bus.register(CreateProviderCommand, CreateProviderHandler(repository=repository, event_bus=event_bus))
     command_bus.register(UpdateProviderCommand, UpdateProviderHandler(repository=repository, event_bus=event_bus))
     command_bus.register(DeleteProviderCommand, DeleteProviderHandler(repository=repository, event_bus=event_bus))
+
+    # Group handlers (require groups dict)
+    if groups is not None:
+        command_bus.register(CreateGroupCommand, CreateGroupHandler(groups=groups, event_bus=event_bus))
+        command_bus.register(UpdateGroupCommand, UpdateGroupHandler(groups=groups, event_bus=event_bus))
+        command_bus.register(DeleteGroupCommand, DeleteGroupHandler(groups=groups, event_bus=event_bus))
+        command_bus.register(
+            AddGroupMemberCommand,
+            AddGroupMemberHandler(repository=repository, groups=groups, event_bus=event_bus),
+        )
+        command_bus.register(
+            RemoveGroupMemberCommand,
+            RemoveGroupMemberHandler(groups=groups, event_bus=event_bus),
+        )
+        logger.info("crud_group_handlers_registered")
 
     logger.info("crud_provider_handlers_registered")

@@ -740,6 +740,32 @@ class ProviderGroup(AggregateRoot):
                     return member.provider.get_tool_names()
             return []
 
+    # --- Configuration Update ---
+
+    def update(
+        self,
+        strategy: str | None = None,
+        description: str | None = None,
+        min_healthy: int | None = None,
+    ) -> None:
+        """Update mutable configuration fields.
+
+        Only non-None arguments are applied. Records GroupUpdated event.
+
+        Args:
+            strategy: New load balancing strategy string (optional).
+            description: New human-readable description (optional).
+            min_healthy: New minimum healthy member count, min 1 (optional).
+        """
+        with self._lock:
+            if strategy is not None:
+                self._strategy = LoadBalancerStrategy(strategy)
+            if description is not None:
+                self._description = description
+            if min_healthy is not None:
+                self._min_healthy = max(1, min_healthy)
+        self._record_event(GroupUpdated(group_id=self.id))
+
     # --- Serialization ---
 
     def to_config_dict(self) -> dict[str, Any]:
