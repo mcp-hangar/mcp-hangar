@@ -35,7 +35,7 @@ export interface ProviderCreateResponse {
   mode: ProviderMode
 }
 
-export type GroupStrategy = 'round_robin' | 'weighted' | 'priority' | 'failover'
+export type GroupStrategy = 'round_robin' | 'weighted_round_robin' | 'least_connections' | 'random' | 'priority'
 
 export interface GroupCreateRequest {
   group_id: string

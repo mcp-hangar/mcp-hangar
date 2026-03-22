@@ -53,6 +53,8 @@ from .workers import create_background_workers, GC_WORKER_INTERVAL_SECONDS, HEAL
 
 if TYPE_CHECKING:
     from ...bootstrap.runtime import Runtime
+    from ...domain.contracts.catalog import McpCatalogRepository
+    from ...application.discovery.discovery_registry import DiscoveryRegistry
 
 logger = get_logger(__name__)
 
@@ -94,6 +96,12 @@ class ApplicationContext:
 
     saga_state_store: SagaStateStore | NullSagaStateStore | None = None
     """Saga state store for persisting saga state and circuit breakers."""
+
+    catalog_repository: "McpCatalogRepository | None" = None
+    """Static MCP provider catalog repository."""
+
+    discovery_registry: "DiscoveryRegistry | None" = None
+    """Discovery source registry (wraps DiscoveryOrchestrator)."""
 
     @property
     def providers(self) -> dict[str, Any]:
@@ -160,6 +168,37 @@ def _ensure_data_dir() -> None:
             logger.warning("data_directory_creation_failed", error=str(e))
 
 
+def _init_catalog(full_config: dict[str, Any]) -> Any:
+    """Initialize the MCP provider catalog SQLite repository and seed it.
+
+    Creates the catalog table if it does not exist and loads builtin
+    entries from data/catalog_seed.yaml on first boot.
+
+    Args:
+        full_config: Full application configuration dictionary.
+
+    Returns:
+        SQLiteMcpCatalogRepository instance (or None on error).
+    """
+    from ...infrastructure.catalog.seed_loader import load_catalog_seed
+    from ...infrastructure.catalog.sqlite_catalog_repository import SQLiteMcpCatalogRepository
+    from ...infrastructure.persistence.database_common import SQLiteConfig
+
+    catalog_config = full_config.get("catalog", {})
+    db_path = catalog_config.get("db_path", "data/catalog.db")
+
+    try:
+        config = SQLiteConfig(path=db_path)
+        repo = SQLiteMcpCatalogRepository(config)
+        seed_path = Path("data/catalog_seed.yaml")
+        seeded = load_catalog_seed(repo, seed_path)
+        logger.info("catalog_initialized", db_path=db_path, seeded=seeded)
+        return repo
+    except Exception as e:  # noqa: BLE001 -- fault-barrier: catalog failure must not prevent bootstrap
+        logger.warning("catalog_init_failed", error=str(e))
+        return None
+
+
 def bootstrap(
     config_path: str | None = None,
     config_dict: dict[str, Any] | None = None,
@@ -218,9 +257,8 @@ def bootstrap(
     # Initialize event handlers
     init_event_handlers(runtime)
 
-    # Initialize CQRS
+    # Initialize CQRS (base handlers; discovery handlers registered after DiscoveryRegistry is created)
     init_cqrs(runtime, config_path)
-
     # Initialize saga with persistence
     saga_state_store = init_saga(full_config)
 
@@ -249,6 +287,9 @@ def bootstrap(
 
     # Initialize knowledge base
     init_knowledge_base(full_config)
+
+    # Initialize catalog repository and seed
+    catalog_repo = _init_catalog(full_config)
 
     # Initialize truncation system
     init_truncation(full_config)
@@ -287,6 +328,16 @@ def bootstrap(
     if discovery_config.get("enabled", False):
         discovery_orchestrator = create_discovery_orchestrator(full_config)
 
+    # Create DiscoveryRegistry and register CQRS handlers
+    discovery_registry = None
+    if discovery_orchestrator is not None:
+        from ...application.commands.discovery_handlers import register_discovery_handlers
+        from ...application.discovery.discovery_registry import DiscoveryRegistry
+
+        discovery_registry = DiscoveryRegistry(orchestrator=discovery_orchestrator)
+        register_discovery_handlers(runtime.command_bus, discovery_registry)
+        logger.info("discovery_registry_created")
+
     # Log ready state
     provider_ids = list(PROVIDERS.keys())
     group_ids = list(GROUPS.keys())
@@ -309,12 +360,17 @@ def bootstrap(
         unload_provider_handler=unload_handler,
         observability_adapter=observability_adapter,
         saga_state_store=saga_state_store,
+        catalog_repository=catalog_repo,
+        discovery_registry=discovery_registry,
     )
 
     # Update application context for tools to access
     ctx = get_context()
+    ctx.groups = GROUPS  # Wire shared GROUPS dict so API reads/writes use same instance
     ctx.load_provider_handler = load_handler
     ctx.unload_provider_handler = unload_handler
+    ctx.catalog_repository = catalog_repo
+    ctx.discovery_registry = discovery_registry
 
     return context
 

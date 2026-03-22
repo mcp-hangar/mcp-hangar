@@ -115,9 +115,10 @@ export function GroupCreateDrawer({ open, onOpenChange }: GroupCreateDrawerProps
             className="w-full rounded-md border border-gray-300 px-3 py-2 text-sm focus:border-blue-500 focus:outline-none focus:ring-1 focus:ring-blue-500"
           >
             <option value="round_robin">Round Robin</option>
-            <option value="weighted">Weighted</option>
+            <option value="weighted_round_robin">Weighted Round Robin</option>
+            <option value="least_connections">Least Connections</option>
+            <option value="random">Random</option>
             <option value="priority">Priority</option>
-            <option value="failover">Failover</option>
           </select>
         </div>
 

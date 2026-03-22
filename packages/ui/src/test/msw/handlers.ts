@@ -48,18 +48,18 @@ export const handlers = [
     )
   }),
 
-  // POST /api/providers/:id/start/ -- start provider
-  http.post(`${BASE}/providers/:id/start/`, ({ params }) => {
+  // POST /api/providers/:id/start -- start provider
+  http.post(`${BASE}/providers/:id/start`, ({ params }) => {
     return HttpResponse.json({ status: 'started', provider_id: params.id })
   }),
 
-  // POST /api/providers/:id/stop/ -- stop provider
-  http.post(`${BASE}/providers/:id/stop/`, ({ params }) => {
+  // POST /api/providers/:id/stop -- stop provider
+  http.post(`${BASE}/providers/:id/stop`, ({ params }) => {
     return HttpResponse.json({ status: 'stopped', provider_id: params.id })
   }),
 
-  // GET /api/providers/:id/ -- provider details
-  http.get(`${BASE}/providers/:id/`, ({ params }) => {
+  // GET /api/providers/:id -- provider details
+  http.get(`${BASE}/providers/:id`, ({ params }) => {
     const providerId = String(params.id)
     return HttpResponse.json(
       buildProviderDetails({
@@ -75,8 +75,8 @@ export const handlers = [
     )
   }),
 
-  // PUT /api/providers/:id/ -- update provider
-  http.put(`${BASE}/providers/:id/`, async ({ params, request }) => {
+  // PUT /api/providers/:id -- update provider
+  http.put(`${BASE}/providers/:id`, async ({ params, request }) => {
     const body = (await request.json()) as ProviderUpdateRequest
     return HttpResponse.json(
       buildProviderDetails({
@@ -86,13 +86,13 @@ export const handlers = [
     )
   }),
 
-  // DELETE /api/providers/:id/ -- delete provider
-  http.delete(`${BASE}/providers/:id/`, () => {
+  // DELETE /api/providers/:id -- delete provider
+  http.delete(`${BASE}/providers/:id`, () => {
     return new HttpResponse(null, { status: 204 })
   }),
 
-  // GET /api/providers/:id/health/ -- provider health details
-  http.get(`${BASE}/providers/:id/health/`, () => {
+  // GET /api/providers/:id/health -- provider health details
+  http.get(`${BASE}/providers/:id/health`, () => {
     return HttpResponse.json(buildHealthInfo())
   }),
 
@@ -114,8 +114,8 @@ export const handlers = [
     })
   }),
 
-  // GET /api/groups/:id/ -- group detail
-  http.get(`${BASE}/groups/:id/`, ({ params }) => {
+  // GET /api/groups/:id -- group detail
+  http.get(`${BASE}/groups/:id`, ({ params }) => {
     return HttpResponse.json({
       group_id: String(params.id),
       strategy: 'round_robin',
@@ -151,8 +151,8 @@ export const handlers = [
     )
   }),
 
-  // PUT /api/groups/:id/ -- update group
-  http.put(`${BASE}/groups/:id/`, async ({ params, request }) => {
+  // PUT /api/groups/:id -- update group
+  http.put(`${BASE}/groups/:id`, async ({ params, request }) => {
     const body = (await request.json()) as GroupUpdateRequest
     return HttpResponse.json({
       group_id: String(params.id),
@@ -161,13 +161,13 @@ export const handlers = [
     })
   }),
 
-  // DELETE /api/groups/:id/ -- delete group
-  http.delete(`${BASE}/groups/:id/`, () => {
+  // DELETE /api/groups/:id -- delete group
+  http.delete(`${BASE}/groups/:id`, () => {
     return new HttpResponse(null, { status: 204 })
   }),
 
-  // POST /api/groups/:groupId/members/ -- add member
-  http.post(`${BASE}/groups/:groupId/members/`, async ({ request }) => {
+  // POST /api/groups/:groupId/members -- add member
+  http.post(`${BASE}/groups/:groupId/members`, async ({ request }) => {
     const body = (await request.json()) as GroupMemberAddRequest
     return HttpResponse.json(
       {
@@ -182,8 +182,8 @@ export const handlers = [
     )
   }),
 
-  // PUT /api/groups/:groupId/members/:memberId/ -- update member
-  http.put(`${BASE}/groups/:groupId/members/:memberId/`, async ({ params, request }) => {
+  // PUT /api/groups/:groupId/members/:memberId -- update member
+  http.put(`${BASE}/groups/:groupId/members/:memberId`, async ({ params, request }) => {
     const body = (await request.json()) as GroupMemberUpdateRequest
     return HttpResponse.json({
       id: String(params.memberId),
@@ -195,8 +195,8 @@ export const handlers = [
     })
   }),
 
-  // DELETE /api/groups/:groupId/members/:memberId/ -- remove member
-  http.delete(`${BASE}/groups/:groupId/members/:memberId/`, () => {
+  // DELETE /api/groups/:groupId/members/:memberId -- remove member
+  http.delete(`${BASE}/groups/:groupId/members/:memberId`, () => {
     return new HttpResponse(null, { status: 204 })
   }),
 
@@ -205,8 +205,8 @@ export const handlers = [
     return HttpResponse.json(buildSystemApiResponse())
   }),
 
-  // GET /api/observability/alerts/ -- alerts
-  http.get(`${BASE}/observability/alerts/`, () => {
+  // GET /api/observability/alerts -- alerts
+  http.get(`${BASE}/observability/alerts`, () => {
     return HttpResponse.json({
       alerts: [
         buildAlert({ alert_id: 'a-1', level: 'critical', message: 'Provider math is dead', resolved_at: null }),

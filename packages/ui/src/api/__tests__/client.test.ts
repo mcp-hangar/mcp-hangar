@@ -9,7 +9,7 @@ describe('apiClient', () => {
     server.use(
       http.get('/api/test-endpoint/', () => {
         return HttpResponse.json({ value: 42 })
-      }),
+      })
     )
 
     const result = await apiClient.get<{ value: number }>('/test-endpoint')
@@ -22,7 +22,7 @@ describe('apiClient', () => {
       http.post('/api/test-post/', async ({ request }) => {
         capturedBody = await request.json()
         return HttpResponse.json({ ok: true })
-      }),
+      })
     )
 
     const result = await apiClient.post<{ ok: boolean }>('/test-post', { name: 'test' })
@@ -35,9 +35,9 @@ describe('apiClient', () => {
       http.get('/api/not-found/', () => {
         return HttpResponse.json(
           { error: { code: 'PROVIDER_NOT_FOUND', message: 'Provider xyz not found' } },
-          { status: 404 },
+          { status: 404 }
         )
-      }),
+      })
     )
 
     await expect(apiClient.get('/not-found')).rejects.toThrow(HangarApiError)
@@ -59,7 +59,7 @@ describe('apiClient', () => {
           status: 500,
           statusText: 'Internal Server Error',
         })
-      }),
+      })
     )
 
     await expect(apiClient.get('/server-error')).rejects.toThrow(HangarApiError)
@@ -69,7 +69,7 @@ describe('apiClient', () => {
     server.use(
       http.delete('/api/resource/', () => {
         return new HttpResponse(null, { status: 204 })
-      }),
+      })
     )
 
     const result = await apiClient.delete('/resource')
@@ -82,7 +82,7 @@ describe('apiClient', () => {
       http.get('/api/trailing/', ({ request }) => {
         capturedUrl = request.url
         return HttpResponse.json({ ok: true })
-      }),
+      })
     )
 
     await apiClient.get('/trailing')
@@ -95,11 +95,25 @@ describe('apiClient', () => {
       http.get('/api/query/', ({ request }) => {
         capturedUrl = request.url
         return HttpResponse.json({ ok: true })
-      }),
+      })
     )
 
     await apiClient.get('/query?foo=bar')
     expect(capturedUrl).toContain('/api/query/?foo=bar')
+  })
+
+  it('does not add trailing slash to multi-segment paths', async () => {
+    let capturedUrl = ''
+    server.use(
+      http.get('/api/groups/my-group', ({ request }) => {
+        capturedUrl = request.url
+        return HttpResponse.json({ group_id: 'my-group' })
+      })
+    )
+
+    await apiClient.get('/groups/my-group')
+    expect(capturedUrl).toContain('/api/groups/my-group')
+    expect(capturedUrl).not.toMatch(/my-group\/$/)
   })
 
   it('DELETE: sends JSON body', async () => {
@@ -108,7 +122,7 @@ describe('apiClient', () => {
       http.delete('/api/delete-test/', async ({ request }) => {
         capturedBody = await request.json()
         return HttpResponse.json({ deleted: true })
-      }),
+      })
     )
 
     const result = await apiClient.delete<{ deleted: boolean }>('/delete-test', { id: '123' })

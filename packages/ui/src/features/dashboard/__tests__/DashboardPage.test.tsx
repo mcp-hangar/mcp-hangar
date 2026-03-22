@@ -51,7 +51,7 @@ describe('DashboardPage', () => {
 
   it('shows "No active alerts" when all alerts are resolved', async () => {
     server.use(
-      http.get('/api/observability/alerts/', () => {
+      http.get('/api/observability/alerts', () => {
         return HttpResponse.json({
           alerts: [
             {
@@ -66,7 +66,7 @@ describe('DashboardPage', () => {
             },
           ],
         })
-      }),
+      })
     )
 
     renderWithProviders(<DashboardPage />)
@@ -82,7 +82,7 @@ describe('DashboardPage', () => {
       http.get('/api/system/', async () => {
         await new Promise((r) => setTimeout(r, 10_000))
         return HttpResponse.json({})
-      }),
+      })
     )
 
     renderWithProviders(<DashboardPage />)
@@ -103,7 +103,7 @@ describe('DashboardPage', () => {
     server.use(
       http.get('/api/system/', () => {
         return new HttpResponse(null, { status: 500 })
-      }),
+      })
     )
 
     // Should not throw; TanStack Query handles errors
