@@ -557,3 +557,406 @@ class TestGetPrincipalRoles:
         assert data["principal_id"] == "alice"
         assert data["count"] == 1
         assert len(data["roles"]) == 1
+
+
+# ---------------------------------------------------------------------------
+# GET /auth/roles/all
+# ---------------------------------------------------------------------------
+
+
+class TestListAllRoles:
+    """Tests for GET /auth/roles/all."""
+
+    def test_returns_200(self, api_client):
+        """GET /auth/roles/all returns HTTP 200."""
+        mock_result = {"roles": [], "total": 0, "builtin_count": 0, "custom_count": 0}
+        with patch(
+            "mcp_hangar.server.api.auth.dispatch_query",
+            new=AsyncMock(return_value=mock_result),
+        ):
+            response = api_client.get("/auth/roles/all")
+        assert response.status_code == 200
+
+    def test_returns_roles_list(self, api_client):
+        """GET /auth/roles/all returns roles list with total."""
+        mock_result = {
+            "roles": [{"name": "admin", "is_builtin": True, "permissions_count": 5}],
+            "total": 1,
+            "builtin_count": 1,
+            "custom_count": 0,
+        }
+        with patch(
+            "mcp_hangar.server.api.auth.dispatch_query",
+            new=AsyncMock(return_value=mock_result),
+        ):
+            response = api_client.get("/auth/roles/all")
+        data = response.json()
+        assert "roles" in data
+        assert data["total"] == 1
+
+    def test_dispatches_list_all_roles_query(self, api_client):
+        """GET /auth/roles/all dispatches ListAllRolesQuery."""
+        from mcp_hangar.application.queries.auth_queries import ListAllRolesQuery
+
+        captured = []
+
+        async def capture_query(q):
+            captured.append(q)
+            return {"roles": [], "total": 0, "builtin_count": 0, "custom_count": 0}
+
+        with patch("mcp_hangar.server.api.auth.dispatch_query", side_effect=capture_query):
+            api_client.get("/auth/roles/all?include_builtin=false")
+
+        assert len(captured) == 1
+        assert isinstance(captured[0], ListAllRolesQuery)
+        assert captured[0].include_builtin is False
+
+
+# ---------------------------------------------------------------------------
+# GET /auth/roles/{role_name}
+# ---------------------------------------------------------------------------
+
+
+class TestGetRole:
+    """Tests for GET /auth/roles/{role_name}."""
+
+    def test_returns_200_when_found(self, api_client):
+        """GET /auth/roles/{role_name} returns 200 when role exists."""
+        mock_result = {
+            "role_name": "admin",
+            "description": "Full access",
+            "permissions": [],
+            "found": True,
+        }
+        with patch(
+            "mcp_hangar.server.api.auth.dispatch_query",
+            new=AsyncMock(return_value=mock_result),
+        ):
+            response = api_client.get("/auth/roles/admin")
+        assert response.status_code == 200
+
+    def test_returns_role_data(self, api_client):
+        """GET /auth/roles/{role_name} returns role data in body."""
+        mock_result = {
+            "role_name": "developer",
+            "description": "Developer role",
+            "permissions": ["tool:invoke:*"],
+            "found": True,
+        }
+        with patch(
+            "mcp_hangar.server.api.auth.dispatch_query",
+            new=AsyncMock(return_value=mock_result),
+        ):
+            response = api_client.get("/auth/roles/developer")
+        data = response.json()
+        assert data["role_name"] == "developer"
+
+
+# ---------------------------------------------------------------------------
+# DELETE /auth/roles/{role_name}
+# ---------------------------------------------------------------------------
+
+
+class TestDeleteRole:
+    """Tests for DELETE /auth/roles/{role_name}."""
+
+    def test_returns_204(self, api_client):
+        """DELETE /auth/roles/{role_name} returns HTTP 204."""
+        mock_result = {"role_name": "my-role", "deleted": True, "deleted_by": "system"}
+        with patch(
+            "mcp_hangar.server.api.auth.dispatch_command",
+            new=AsyncMock(return_value=mock_result),
+        ):
+            response = api_client.delete("/auth/roles/my-role")
+        assert response.status_code == 204
+
+    def test_passes_role_name_from_path(self, api_client):
+        """DELETE /auth/roles/{role_name} dispatches DeleteCustomRoleCommand with correct role_name."""
+        from mcp_hangar.application.commands.auth_commands import DeleteCustomRoleCommand
+
+        captured = []
+
+        async def capture_command(cmd):
+            captured.append(cmd)
+            return {"role_name": "ops-role", "deleted": True, "deleted_by": "system"}
+
+        with patch("mcp_hangar.server.api.auth.dispatch_command", side_effect=capture_command):
+            api_client.delete("/auth/roles/ops-role")
+
+        assert len(captured) == 1
+        assert isinstance(captured[0], DeleteCustomRoleCommand)
+        assert captured[0].role_name == "ops-role"
+
+
+# ---------------------------------------------------------------------------
+# PATCH /auth/roles/{role_name}
+# ---------------------------------------------------------------------------
+
+
+class TestUpdateRole:
+    """Tests for PATCH /auth/roles/{role_name}."""
+
+    def test_returns_200(self, api_client):
+        """PATCH /auth/roles/{role_name} returns HTTP 200."""
+        mock_result = {
+            "role_name": "my-role",
+            "description": "Updated",
+            "permissions_count": 1,
+            "updated": True,
+            "updated_by": "system",
+        }
+        with patch(
+            "mcp_hangar.server.api.auth.dispatch_command",
+            new=AsyncMock(return_value=mock_result),
+        ):
+            response = api_client.patch(
+                "/auth/roles/my-role",
+                json={"permissions": ["tool:invoke:*"], "description": "Updated"},
+            )
+        assert response.status_code == 200
+
+    def test_returns_updated_role(self, api_client):
+        """PATCH /auth/roles/{role_name} returns updated role in body."""
+        mock_result = {
+            "role_name": "my-role",
+            "description": "New desc",
+            "permissions_count": 2,
+            "updated": True,
+            "updated_by": "admin",
+        }
+        with patch(
+            "mcp_hangar.server.api.auth.dispatch_command",
+            new=AsyncMock(return_value=mock_result),
+        ):
+            response = api_client.patch("/auth/roles/my-role", json={"permissions": []})
+        data = response.json()
+        assert data["updated"] is True
+        assert data["role_name"] == "my-role"
+
+
+# ---------------------------------------------------------------------------
+# GET /auth/principals
+# ---------------------------------------------------------------------------
+
+
+class TestListPrincipals:
+    """Tests for GET /auth/principals."""
+
+    def test_returns_200(self, api_client):
+        """GET /auth/principals returns HTTP 200."""
+        mock_result = {"principals": [], "total": 0}
+        with patch(
+            "mcp_hangar.server.api.auth.dispatch_query",
+            new=AsyncMock(return_value=mock_result),
+        ):
+            response = api_client.get("/auth/principals")
+        assert response.status_code == 200
+
+    def test_returns_principals_list(self, api_client):
+        """GET /auth/principals returns principals list."""
+        mock_result = {
+            "principals": [{"principal_id": "alice", "roles": ["viewer"]}],
+            "total": 1,
+        }
+        with patch(
+            "mcp_hangar.server.api.auth.dispatch_query",
+            new=AsyncMock(return_value=mock_result),
+        ):
+            response = api_client.get("/auth/principals")
+        data = response.json()
+        assert data["total"] == 1
+        assert len(data["principals"]) == 1
+
+
+# ---------------------------------------------------------------------------
+# GET /auth/permissions
+# ---------------------------------------------------------------------------
+
+
+class TestListPermissions:
+    """Tests for GET /auth/permissions."""
+
+    def test_returns_200(self, api_client):
+        """GET /auth/permissions returns HTTP 200 with static list."""
+        response = api_client.get("/auth/permissions")
+        assert response.status_code == 200
+
+    def test_returns_non_empty_permissions(self, api_client):
+        """GET /auth/permissions returns a non-empty list."""
+        response = api_client.get("/auth/permissions")
+        data = response.json()
+        assert "permissions" in data
+        assert len(data["permissions"]) > 0
+
+
+# ---------------------------------------------------------------------------
+# POST /auth/check-permission
+# ---------------------------------------------------------------------------
+
+
+class TestCheckPermission:
+    """Tests for POST /auth/check-permission."""
+
+    def test_returns_200(self, api_client):
+        """POST /auth/check-permission returns HTTP 200."""
+        mock_result = {"allowed": True, "principal_id": "alice", "permission": "tool:invoke:math"}
+        with patch(
+            "mcp_hangar.server.api.auth.dispatch_query",
+            new=AsyncMock(return_value=mock_result),
+        ):
+            response = api_client.post(
+                "/auth/check-permission",
+                json={"principal_id": "alice", "permission": "tool:invoke:math"},
+            )
+        assert response.status_code == 200
+
+    def test_returns_allowed_bool(self, api_client):
+        """POST /auth/check-permission returns allowed field."""
+        mock_result = {"allowed": False, "principal_id": "bob", "permission": "tool:invoke:admin_tool"}
+        with patch(
+            "mcp_hangar.server.api.auth.dispatch_query",
+            new=AsyncMock(return_value=mock_result),
+        ):
+            response = api_client.post(
+                "/auth/check-permission",
+                json={"principal_id": "bob", "permission": "tool:invoke:admin_tool"},
+            )
+        data = response.json()
+        assert "allowed" in data
+
+
+# ---------------------------------------------------------------------------
+# POST /auth/policies/{scope}/{target_id}
+# ---------------------------------------------------------------------------
+
+
+class TestSetToolAccessPolicy:
+    """Tests for POST /auth/policies/{scope}/{target_id}."""
+
+    def test_returns_200_for_provider_scope(self, api_client):
+        """POST /auth/policies/provider/{id} returns HTTP 200."""
+        mock_result = {
+            "scope": "provider",
+            "target_id": "math",
+            "allow_list": ["add"],
+            "deny_list": [],
+            "set": True,
+        }
+        with patch(
+            "mcp_hangar.server.api.auth.dispatch_command",
+            new=AsyncMock(return_value=mock_result),
+        ):
+            response = api_client.post(
+                "/auth/policies/provider/math",
+                json={"allow_list": ["add"], "deny_list": []},
+            )
+        assert response.status_code == 200
+
+    def test_returns_400_for_invalid_scope(self, api_client):
+        """POST /auth/policies/{invalid_scope}/id returns HTTP 400."""
+        response = api_client.post(
+            "/auth/policies/invalid_scope/math",
+            json={"allow_list": [], "deny_list": []},
+        )
+        assert response.status_code == 400
+
+    def test_dispatches_set_tap_command(self, api_client):
+        """POST /auth/policies/{scope}/{id} dispatches SetToolAccessPolicyCommand."""
+        from mcp_hangar.application.commands.auth_commands import SetToolAccessPolicyCommand
+
+        captured = []
+
+        async def capture_command(cmd):
+            captured.append(cmd)
+            return {"scope": "group", "target_id": "team-a", "allow_list": ["tool1"], "deny_list": [], "set": True}
+
+        with patch("mcp_hangar.server.api.auth.dispatch_command", side_effect=capture_command):
+            api_client.post(
+                "/auth/policies/group/team-a",
+                json={"allow_list": ["tool1"], "deny_list": []},
+            )
+
+        assert len(captured) == 1
+        assert isinstance(captured[0], SetToolAccessPolicyCommand)
+        assert captured[0].scope == "group"
+        assert captured[0].target_id == "team-a"
+
+
+# ---------------------------------------------------------------------------
+# GET /auth/policies/{scope}/{target_id}
+# ---------------------------------------------------------------------------
+
+
+class TestGetToolAccessPolicy:
+    """Tests for GET /auth/policies/{scope}/{target_id}."""
+
+    def test_returns_200(self, api_client):
+        """GET /auth/policies/{scope}/{id} returns HTTP 200."""
+        mock_result = {
+            "found": False,
+            "scope": "provider",
+            "target_id": "math",
+            "allow_list": [],
+            "deny_list": [],
+        }
+        with patch(
+            "mcp_hangar.server.api.auth.dispatch_query",
+            new=AsyncMock(return_value=mock_result),
+        ):
+            response = api_client.get("/auth/policies/provider/math")
+        assert response.status_code == 200
+
+    def test_returns_found_field(self, api_client):
+        """GET /auth/policies/{scope}/{id} returns found field in body."""
+        mock_result = {
+            "found": True,
+            "scope": "provider",
+            "target_id": "math",
+            "allow_list": ["add"],
+            "deny_list": [],
+        }
+        with patch(
+            "mcp_hangar.server.api.auth.dispatch_query",
+            new=AsyncMock(return_value=mock_result),
+        ):
+            response = api_client.get("/auth/policies/provider/math")
+        data = response.json()
+        assert "found" in data
+        assert data["found"] is True
+
+
+# ---------------------------------------------------------------------------
+# DELETE /auth/policies/{scope}/{target_id}
+# ---------------------------------------------------------------------------
+
+
+class TestClearToolAccessPolicy:
+    """Tests for DELETE /auth/policies/{scope}/{target_id}."""
+
+    def test_returns_204(self, api_client):
+        """DELETE /auth/policies/{scope}/{id} returns HTTP 204."""
+        mock_result = {"scope": "provider", "target_id": "math", "cleared": True}
+        with patch(
+            "mcp_hangar.server.api.auth.dispatch_command",
+            new=AsyncMock(return_value=mock_result),
+        ):
+            response = api_client.delete("/auth/policies/provider/math")
+        assert response.status_code == 204
+
+    def test_dispatches_clear_tap_command(self, api_client):
+        """DELETE /auth/policies/{scope}/{id} dispatches ClearToolAccessPolicyCommand."""
+        from mcp_hangar.application.commands.auth_commands import ClearToolAccessPolicyCommand
+
+        captured = []
+
+        async def capture_command(cmd):
+            captured.append(cmd)
+            return {"scope": "provider", "target_id": "math", "cleared": True}
+
+        with patch("mcp_hangar.server.api.auth.dispatch_command", side_effect=capture_command):
+            api_client.delete("/auth/policies/provider/math")
+
+        assert len(captured) == 1
+        assert isinstance(captured[0], ClearToolAccessPolicyCommand)
+        assert captured[0].scope == "provider"
+        assert captured[0].target_id == "math"

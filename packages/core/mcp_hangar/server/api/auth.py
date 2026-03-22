@@ -317,10 +317,10 @@ async def list_permissions(request: Request) -> HangarJSONResponse:
     Returns:
         JSON with {"permissions": [{"resource_type": ..., "actions": [...]}]}.
     """
-    from ...domain.value_objects.security import ACTIONS, RESOURCE_TYPES
-
     # Graceful fallback: if constants don't exist, return known defaults
     try:
+        from ...domain.value_objects.security import ACTIONS, RESOURCE_TYPES
+
         permissions = [{"resource_type": rt, "actions": list(ACTIONS)} for rt in RESOURCE_TYPES]
     except Exception:  # noqa: BLE001
         permissions = [
@@ -339,6 +339,7 @@ async def check_permission(request: Request) -> HangarJSONResponse:
 
     Request body:
         principal_id: Principal to check.
+        permission: Combined permission string (e.g. "tool:invoke:math"), OR
         action: Action being requested (e.g. "invoke").
         resource_type: Resource type (e.g. "tool").
         resource_id: Specific resource ID (default "*").
@@ -347,12 +348,25 @@ async def check_permission(request: Request) -> HangarJSONResponse:
         JSON with {"allowed": bool, "granted_by_role": str | null}.
     """
     body = await request.json()
+    principal_id = body["principal_id"]
+
+    if "action" in body:
+        action = body["action"]
+        resource_type = body.get("resource_type", "*")
+        resource_id = body.get("resource_id", "*")
+    else:
+        # Parse combined permission string: "resource_type:action:resource_id"
+        parts = body.get("permission", ":*:*").split(":", 2)
+        resource_type = parts[0] if len(parts) > 0 else "*"
+        action = parts[1] if len(parts) > 1 else "*"
+        resource_id = parts[2] if len(parts) > 2 else "*"
+
     result = await dispatch_query(
         CheckPermissionQuery(
-            principal_id=body["principal_id"],
-            action=body["action"],
-            resource_type=body["resource_type"],
-            resource_id=body.get("resource_id", "*"),
+            principal_id=principal_id,
+            action=action,
+            resource_type=resource_type,
+            resource_id=resource_id,
         )
     )
     return HangarJSONResponse(result)
@@ -430,17 +444,6 @@ async def get_tool_access_policy(request: Request) -> HangarJSONResponse:
         )
 
     result = await dispatch_query(GetToolAccessPolicyQuery(scope=scope, target_id=target_id))
-
-    if not result.get("found"):
-        return HangarJSONResponse(
-            {
-                "error": {
-                    "code": "PolicyNotFound",
-                    "message": f"No tool access policy found for scope='{scope}', target_id='{target_id}'.",
-                }
-            },
-            status_code=404,
-        )
 
     return HangarJSONResponse(result)
 
