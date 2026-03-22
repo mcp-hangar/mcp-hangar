@@ -29,10 +29,12 @@ def init_cqrs(runtime: "Runtime", current_config_path: str | None = None) -> Non
         runtime: Runtime instance with command and query buses.
         current_config_path: Current configuration file path for reload handler.
     """
-    from ..state import PROVIDER_REPOSITORY
+    from ...application.commands.crud_handlers import register_crud_handlers
+    from ..state import GROUPS, PROVIDER_REPOSITORY
 
     register_command_handlers(runtime.command_bus, PROVIDER_REPOSITORY, runtime.event_bus, current_config_path)
     register_query_handlers(runtime.query_bus, PROVIDER_REPOSITORY)
+    register_crud_handlers(runtime.command_bus, PROVIDER_REPOSITORY, runtime.event_bus, GROUPS)
     logger.info("cqrs_handlers_registered")
 
 
@@ -86,10 +88,18 @@ def _create_saga_state_store(
     from ...infrastructure.persistence.database_common import SQLiteConfig, SQLiteConnectionFactory
 
     saga_db_path = "data/saga_state.db"
-    factory = SQLiteConnectionFactory(SQLiteConfig(path=saga_db_path))
-    store = SagaStateStore(factory)
-    logger.info("saga_state_store_created", path=saga_db_path)
-    return store
+    try:
+        factory = SQLiteConnectionFactory(SQLiteConfig(path=saga_db_path))
+        store = SagaStateStore(factory)
+        logger.info("saga_state_store_created", path=saga_db_path)
+        return store
+    except OSError as e:
+        logger.warning(
+            "saga_state_store_sqlite_fallback_to_null",
+            error=str(e),
+            path=saga_db_path,
+        )
+        return NullSagaStateStore()
 
 
 def _restore_saga_state(
