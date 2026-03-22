@@ -9,6 +9,7 @@ from dataclasses import dataclass, field
 from typing import Any, Protocol, runtime_checkable
 
 from ..value_objects import Permission, Principal, Role
+from ..value_objects.tool_access_policy import ToolAccessPolicy
 
 
 @dataclass
@@ -178,6 +179,51 @@ class IRoleStore(Protocol):
         """
         ...
 
+    @abstractmethod
+    def list_all_roles(self) -> list[Role]:
+        """List all custom (non-builtin) roles.
+
+        Returns:
+            List of all custom roles in the store.
+        """
+        ...
+
+    @abstractmethod
+    def delete_role(self, role_name: str) -> None:
+        """Delete a custom role and remove all its assignments.
+
+        Args:
+            role_name: Name of the role to delete.
+
+        Raises:
+            RoleNotFoundError: If the role does not exist.
+            CannotModifyBuiltinRoleError: If the role is a built-in role.
+        """
+        ...
+
+    @abstractmethod
+    def update_role(
+        self,
+        role_name: str,
+        permissions: list["Permission"],
+        description: str | None,
+    ) -> Role:
+        """Update a custom role's permissions and description.
+
+        Args:
+            role_name: Name of the role to update.
+            permissions: New list of permissions.
+            description: New description (None to clear).
+
+        Returns:
+            Updated Role value object.
+
+        Raises:
+            RoleNotFoundError: If the role does not exist.
+            CannotModifyBuiltinRoleError: If the role is a built-in role.
+        """
+        ...
+
 
 @runtime_checkable
 class IPolicyEngine(Protocol):
@@ -227,3 +273,62 @@ class IPolicyEngine(Protocol):
             },
             "context": request.context,
         }
+
+
+@runtime_checkable
+class IToolAccessPolicyStore(Protocol):
+    """Persistent storage for tool access policies.
+
+    Stores per-scope tool access policies that survive server restarts.
+    Scope values: "provider", "group", "member".
+    """
+
+    @abstractmethod
+    def set_policy(
+        self,
+        scope: str,
+        target_id: str,
+        allow_list: list[str],
+        deny_list: list[str],
+    ) -> None:
+        """Persist a tool access policy for a scope/target combination.
+
+        Args:
+            scope: "provider", "group", or "member".
+            target_id: Identifier of the provider, group, or member.
+            allow_list: Tool name patterns to allow.
+            deny_list: Tool name patterns to deny.
+        """
+        ...
+
+    @abstractmethod
+    def get_policy(self, scope: str, target_id: str) -> ToolAccessPolicy | None:
+        """Retrieve a stored policy.
+
+        Args:
+            scope: Scope string.
+            target_id: Target identifier.
+
+        Returns:
+            ToolAccessPolicy if found, None otherwise.
+        """
+        ...
+
+    @abstractmethod
+    def clear_policy(self, scope: str, target_id: str) -> None:
+        """Remove a stored policy.
+
+        Args:
+            scope: Scope string.
+            target_id: Target identifier.
+        """
+        ...
+
+    @abstractmethod
+    def list_all_policies(self) -> list[tuple[str, str, list[str], list[str]]]:
+        """List all stored policies for startup replay.
+
+        Returns:
+            List of (scope, target_id, allow_list, deny_list) tuples.
+        """
+        ...

@@ -872,3 +872,71 @@ class ProviderDeregistered(DomainEvent):
 
     def __post_init__(self):
         super().__init__()
+
+
+# =============================================================================
+# RBAC Management Events
+# =============================================================================
+
+
+@dataclass
+class CustomRoleCreated(DomainEvent):
+    """Published when a custom role is created."""
+
+    role_name: str
+    permissions: list[str]
+    description: str | None = None
+    schema_version: int = 1
+
+    def __post_init__(self):
+        super().__init__()
+
+
+@dataclass
+class CustomRoleDeleted(DomainEvent):
+    """Published when a custom role is deleted."""
+
+    role_name: str
+    schema_version: int = 1
+
+    def __post_init__(self):
+        super().__init__()
+
+
+@dataclass
+class CustomRoleUpdated(DomainEvent):
+    """Published when a custom role's permissions or description are updated."""
+
+    role_name: str
+    permissions: list[str]
+    description: str | None = None
+    schema_version: int = 1
+
+    def __post_init__(self):
+        super().__init__()
+
+
+@dataclass
+class ToolAccessPolicySet(DomainEvent):
+    """Published when a tool access policy is set for a scope/target."""
+
+    scope: str  # "provider", "group", or "member"
+    target_id: str
+    allow_list: list[str]
+    deny_list: list[str]
+    schema_version: int = 1
+
+    def __post_init__(self):
+        super().__init__()
+
+
+@dataclass
+class ToolAccessPolicyCleared(DomainEvent):
+    """Published when a tool access policy is removed for a scope/target."""
+
+    scope: str
+    target_id: str
+    schema_version: int = 1
+
+    def __post_init__(self):
+        super().__init__()

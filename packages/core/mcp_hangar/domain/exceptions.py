@@ -623,6 +623,28 @@ class TenantAccessDeniedError(AuthorizationError):
         self.resource_tenant = resource_tenant
 
 
+class RoleNotFoundError(AuthorizationError):
+    """Raised when a role is not found in the store."""
+
+    def __init__(self, role_name: str):
+        super().__init__(
+            message=f"Role not found: {role_name}",
+            details={"role_name": role_name},
+        )
+        self.role_name = role_name
+
+
+class CannotModifyBuiltinRoleError(AuthorizationError):
+    """Raised when an attempt is made to modify or delete a built-in role."""
+
+    def __init__(self, role_name: str):
+        super().__init__(
+            message=f"Cannot modify built-in role: {role_name}",
+            details={"role_name": role_name},
+        )
+        self.role_name = role_name
+
+
 # --- Multi-Tenancy Exceptions ---
 
 
