@@ -8,6 +8,7 @@
 - ✅ **v2.0 Management UI** -- Phases 11-16 (shipped 2026-03-14)
 - ✅ **v3.0 Infrastructure Maturity** -- Phases 17-20 (shipped 2026-03-14)
 - ✅ **v4.0 Log Streaming** -- Phases 21-22 (shipped 2026-03-15)
+- 🔨 **v5.0 Platform Management Console** -- Phases 23-30 (in progress)
 
 ## Phases
 
@@ -222,9 +223,77 @@ Plans:
 
 </details>
 
+<details>
+<summary>🔨 v5.0 Platform Management Console Phase Details (Phases 23-30) -- IN PROGRESS</summary>
+
+**Milestone Goal:** Transform MCP Hangar from a config-file-driven system into a full platform management console. CRUD for providers/groups, discovery source management, MCP catalog, RBAC management, tool access policy editing, and config export/backup/diff -- from UI, API, and static config. Two parallel tracks: Core (Python) and UI (React/TypeScript).
+
+### Phase 23: Provider/Group CRUD + Config Serialization (C1)
+
+- [ ] 23-01-PLAN.md -- New domain events (ProviderRegistered with source field, ProviderUpdated, ProviderDeregistered, GroupUpdated, GroupDeleted) + provider CQRS commands + handlers (CRUD-01)
+- [ ] 23-02-PLAN.md -- Group CQRS commands + handlers (CRUD-02)
+- [ ] 23-03-PLAN.md -- Config serializer: serialize functions + backup rotation (CRUD-03)
+- [ ] 23-04-PLAN.md -- REST endpoints: provider/group CRUD + config export/backup (CRUD-01, CRUD-02, CRUD-03)
+- [ ] 23-05-PLAN.md -- Unit + integration tests (CRUD-01, CRUD-02, CRUD-03)
+
+### Phase 24: Discovery Source Management + Static MCP Catalog API (C2)
+
+- [ ] 24-01-PLAN.md -- DiscoveryRegistry + DiscoverySourceSpec (DISC-01)
+- [ ] 24-02-PLAN.md -- Discovery REST endpoints (DISC-02)
+- [ ] 24-03-PLAN.md -- McpProviderEntry model + McpCatalogRepository + seed (CAT-01)
+- [ ] 24-04-PLAN.md -- Catalog REST endpoints + deploy action (CAT-02)
+- [ ] 24-05-PLAN.md -- Discovery + catalog tests (DISC-01, DISC-02, CAT-01, CAT-02)
+
+### Phase 25: Provider & Group CRUD Forms (U1)
+
+- [ ] 25-01-PLAN.md -- TypeScript types + MSW handlers + API client for CRUD (CRUD-04)
+- [ ] 25-02-PLAN.md -- ProviderCreateDrawer + ProviderEditDrawer (CRUD-04)
+- [ ] 25-03-PLAN.md -- ProviderDeleteDialog + ProvidersPage actions (CRUD-04)
+- [ ] 25-04-PLAN.md -- GroupCreateDrawer + GroupEditDrawer + GroupMemberPanel (CRUD-05)
+- [ ] 25-05-PLAN.md -- ToolAccessPolicyEditor + GroupsPage enhancements (CRUD-05)
+
+### Phase 26: Discovery Source Wizard + Catalog Browser (U2)
+
+- [ ] 26-01-PLAN.md -- TypeScript types + MSW handlers for discovery/catalog (DISC-03, CAT-03)
+- [ ] 26-02-PLAN.md -- AddDiscoverySourceWizard + DiscoveryPage enhancements (DISC-03)
+- [ ] 26-03-PLAN.md -- CatalogPage: search, tags, grid, Deploy + CatalogEntryDrawer (CAT-03)
+- [ ] 26-04-PLAN.md -- Sidebar Catalog link + component tests (DISC-03, CAT-03)
+
+### Phase 27: RBAC Management API + Tool Access Policy CRUD (C3)
+
+- [ ] 27-01-PLAN.md -- RoleStore (SQLite) + custom role CRUD + events (RBAC-01)
+- [ ] 27-02-PLAN.md -- REST endpoints: roles, principals, permissions (RBAC-02)
+- [ ] 27-03-PLAN.md -- Tool access policy REST endpoints (TAP-01)
+- [ ] 27-04-PLAN.md -- Bootstrap wiring for RoleStore + access endpoints (RBAC-01, RBAC-02, TAP-01)
+- [ ] 27-05-PLAN.md -- Tests: RoleStore, permissions, access policy (RBAC-01, RBAC-02, TAP-01)
+
+### Phase 28: RBAC Management + Tool Access Policy Editor (U3)
+
+- [ ] 28-01-PLAN.md -- TypeScript types + MSW handlers for roles/principals/access (RBAC-03, TAP-02)
+- [ ] 28-02-PLAN.md -- SecurityPage tabs: Events | Roles | Principals; Create Role drawer (RBAC-03)
+- [ ] 28-03-PLAN.md -- Principals tab: role assignment, effective permissions (RBAC-03)
+- [ ] 28-04-PLAN.md -- ToolAccessPolicyEditor in ProviderDetail + GroupsPage + tests (TAP-02)
+
+### Phase 29: Config Export Finalization + Persistence Integration (C4)
+
+- [ ] 29-01-PLAN.md -- Extended serialize_full_config with all sections (CFG-01)
+- [ ] 29-02-PLAN.md -- GET /api/config/diff endpoint (CFG-01)
+- [ ] 29-03-PLAN.md -- Full backup snapshot + rotation validation (CFG-01)
+- [ ] 29-04-PLAN.md -- Round-trip integration tests (CFG-03)
+
+### Phase 30: Config Export UI + Integration Polish (U4)
+
+- [ ] 30-01-PLAN.md -- TypeScript types + MSW handlers for config export/diff (CFG-02)
+- [ ] 30-02-PLAN.md -- ConfigPage tabs: Current Config | Export/Backup | Diff (CFG-02)
+- [ ] 30-03-PLAN.md -- Diff tab: colored diff view (CFG-02)
+- [ ] 30-04-PLAN.md -- Radix Toast notification system (CFG-02, XC-02)
+- [ ] 30-05-PLAN.md -- Integration polish: skeletons, validation, MSW completeness, test coverage (XC-01, XC-02)
+
+</details>
+
 ## Progress
 
-**All 22 phases complete across 6 milestones.**
+**22 of 30 phases complete across 7 milestones. v5.0 in planning.**
 
 | Phase | Milestone | Plans Complete | Status | Completed |
 |-------|-----------|----------------|--------|-----------|
@@ -250,8 +319,17 @@ Plans:
 | 20. UI Enhancements | v3.0 | 3/3 | Complete | 2026-03-14 |
 | 21. Log Capture Infrastructure | v4.0 | 3/3 | Complete | 2026-03-15 |
 | 22. Log Streaming WebSocket + UI | v4.0 | 3/3 | Complete | 2026-03-15 |
+| 23. Provider/Group CRUD (C1) | v5.0 | 5/5 | Planned | -- |
+| 24. Discovery + Catalog API (C2) | v5.0 | 0/5 | Planning | -- |
+| 25. CRUD Forms (U1) | v5.0 | 0/5 | Planning | -- |
+| 26. Discovery Wizard + Catalog (U2) | v5.0 | 0/4 | Planning | -- |
+| 27. RBAC + Tool Access API (C3) | v5.0 | 0/5 | Planning | -- |
+| 28. RBAC + Tool Access UI (U3) | v5.0 | 0/4 | Planning | -- |
+| 29. Config Export (C4) | v5.0 | 0/4 | Planning | -- |
+| 30. Config Export UI + Polish (U4) | v5.0 | 0/5 | Planning | -- |
 
 ---
 *Roadmap extended: 2026-03-14 -- v3.0 Infrastructure Maturity phases 17-20 added*
 *Roadmap extended: 2026-03-14 -- v4.0 Log Streaming phases 21-22 added*
 *v4.0 Log Streaming COMPLETE: 2026-03-15 -- phases 21-22 shipped, LOG-01 through LOG-05 satisfied*
+*Roadmap extended: 2026-03-22 -- v5.0 Platform Management Console phases 23-30 added (8 phases, 37 plans, 2 tracks)*
