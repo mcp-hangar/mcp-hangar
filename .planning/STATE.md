@@ -3,12 +3,12 @@ gsd_state_version: 1.0
 milestone: v5.0
 milestone_name: Platform Management Console
 status: in_progress
-last_updated: "2026-03-22T12:29:06Z"
+last_updated: "2026-03-22T13:40:00Z"
 progress:
   total_phases: 8
   completed_phases: 0
   total_plans: 37
-  completed_plans: 2
+  completed_plans: 3
 ---
 
 # Project State
@@ -23,10 +23,10 @@ See: .planning/PROJECT.md (updated 2026-03-22)
 ## Current Position
 
 Milestone: v5.0 Platform Management Console -- IN PROGRESS (Phase 23)
-Status: Phase 23 Plans 01 and 03 complete. Provider CRUD events/commands/handlers and config serializer implemented with TDD.
-Last activity: 2026-03-22 -- Phase 23, Plan 01 executed (provider CRUD events, 8 command dataclasses, 3 handlers, to_config_dict, update_config). 24 tests passing.
+Status: Phase 23 Plans 01, 02, and 03 complete. Provider CRUD events/commands/handlers, group CRUD handlers, and config serializer implemented with TDD.
+Last activity: 2026-03-22 -- Phase 23, Plan 02 executed (5 group CRUD handlers, ProviderGroup.update() aggregate method, 17 new tests, 41 total passing).
 
-Progress: [|.........] 5% -- Phase 23 Plans 01 + 03 of 37 total plans complete
+Progress: [||........] 8% -- Phase 23 Plans 01 + 02 + 03 of 37 total plans complete
 
 ## Performance Metrics
 
@@ -194,6 +194,14 @@ All v0.9, v0.10, and v1.0 decisions archived in PROJECT.md Key Decisions table.
 - UpdateProviderHandler uses provider.collect_events() after update_config() to forward ProviderUpdated event -- respects aggregate event sourcing pattern
 - DeleteProviderHandler calls provider.shutdown() only for non-COLD/non-DEAD states -- matches state machine invariants
 
+**v5.0 decisions (Phase 23-02 execution):**
+
+- Each group handler owns its own threading.Lock (not a single shared groups lock) to minimize contention and match the per-provider pattern
+- ProviderGroup.update() acquires self._lock internally; UpdateGroupHandler does not hold its own lock during the call (avoids nested locking)
+- DeleteGroupHandler: del from GROUPS inside lock, then stop_all() outside lock to avoid holding lock during I/O
+- AddGroupMemberHandler: repository.get() before acquiring lock so the lookup does not block other group mutations
+- UpdateGroupCommand does not have a strategy field (Plan 01 only added description/min_healthy); ProviderGroup.update() still accepts strategy for future use
+
 **v5.0 decisions (Phase 23-03 execution):**
 
 - serialize_full_config(providers=None, groups=None) accepts optional explicit dicts so tests bypass get_context() -- testability without patching
@@ -224,5 +232,5 @@ None.
 ## Session Continuity
 
 Last session: 2026-03-22
-Stopped at: Completed Phase 23, Plan 01 -- provider CRUD events, commands, handlers, to_config_dict, update_config. 24 tests passing.
-Resume with: Execute Phase 23 Plan 02 (Group CRUD handlers) or Plan 04 (REST endpoints).
+Stopped at: Completed Phase 23, Plan 02 -- group CRUD handlers (CreateGroupHandler, UpdateGroupHandler, DeleteGroupHandler, AddGroupMemberHandler, RemoveGroupMemberHandler), ProviderGroup.update(), 41 tests passing.
+Resume with: Execute Phase 23 Plan 04 (Group/Provider REST CRUD endpoints).

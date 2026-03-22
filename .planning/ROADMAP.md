@@ -230,9 +230,9 @@ Plans:
 
 ### Phase 23: Provider/Group CRUD + Config Serialization (C1)
 
-- [ ] 23-01-PLAN.md -- New domain events (ProviderRegistered with source field, ProviderUpdated, ProviderDeregistered, GroupUpdated, GroupDeleted) + provider CQRS commands + handlers (CRUD-01)
-- [ ] 23-02-PLAN.md -- Group CQRS commands + handlers (CRUD-02)
-- [ ] 23-03-PLAN.md -- Config serializer: serialize functions + backup rotation (CRUD-03)
+- [x] 23-01-PLAN.md -- New domain events (ProviderRegistered with source field, ProviderUpdated, ProviderDeregistered, GroupUpdated, GroupDeleted) + provider CQRS commands + handlers (CRUD-01)
+- [x] 23-02-PLAN.md -- Group CQRS commands + handlers (CRUD-02)
+- [x] 23-03-PLAN.md -- Config serializer: serialize functions + backup rotation (CRUD-03)
 - [ ] 23-04-PLAN.md -- REST endpoints: provider/group CRUD + config export/backup (CRUD-01, CRUD-02, CRUD-03)
 - [ ] 23-05-PLAN.md -- Unit + integration tests (CRUD-01, CRUD-02, CRUD-03)
 
@@ -319,7 +319,7 @@ Plans:
 | 20. UI Enhancements | v3.0 | 3/3 | Complete | 2026-03-14 |
 | 21. Log Capture Infrastructure | v4.0 | 3/3 | Complete | 2026-03-15 |
 | 22. Log Streaming WebSocket + UI | v4.0 | 3/3 | Complete | 2026-03-15 |
-| 23. Provider/Group CRUD (C1) | 1/5 | In Progress|  | -- |
+| 23. Provider/Group CRUD (C1) | 3/5 | In Progress|  | -- |
 | 24. Discovery + Catalog API (C2) | v5.0 | 0/5 | Planning | -- |
 | 25. CRUD Forms (U1) | v5.0 | 0/5 | Planning | -- |
 | 26. Discovery Wizard + Catalog (U2) | v5.0 | 0/4 | Planning | -- |
