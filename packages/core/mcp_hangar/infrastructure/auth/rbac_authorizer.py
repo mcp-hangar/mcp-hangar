@@ -296,6 +296,54 @@ class InMemoryRoleStore(IRoleStore):
                         revoked_by=revoked_by,
                     )
 
+    def list_all_roles(self) -> list[Role]:
+        """List all non-builtin roles."""
+        from ...domain.security.roles import BUILTIN_ROLES
+
+        with self._lock:
+            return [role for name, role in self._roles.items() if name not in BUILTIN_ROLES]
+
+    def delete_role(self, role_name: str) -> None:
+        """Delete a custom role and its assignments."""
+        from ...domain.exceptions import CannotModifyBuiltinRoleError, RoleNotFoundError
+        from ...domain.security.roles import BUILTIN_ROLES
+
+        with self._lock:
+            if role_name in BUILTIN_ROLES:
+                raise CannotModifyBuiltinRoleError(role_name)
+            if role_name not in self._roles:
+                raise RoleNotFoundError(role_name)
+            del self._roles[role_name]
+            # Remove all assignments to this role
+            for principal_id, scope_map in list(self._assignments.items()):
+                for scope, role_set in list(scope_map.items()):
+                    role_set.discard(role_name)
+        logger.info("role_deleted", role_name=role_name)
+
+    def update_role(
+        self,
+        role_name: str,
+        permissions: list[Permission],
+        description: str | None,
+    ) -> Role:
+        """Update a custom role's permissions and description."""
+        from ...domain.exceptions import CannotModifyBuiltinRoleError, RoleNotFoundError
+        from ...domain.security.roles import BUILTIN_ROLES
+
+        with self._lock:
+            if role_name in BUILTIN_ROLES:
+                raise CannotModifyBuiltinRoleError(role_name)
+            if role_name not in self._roles:
+                raise RoleNotFoundError(role_name)
+            updated = Role(
+                name=role_name,
+                description=description or "",
+                permissions=frozenset(permissions),
+            )
+            self._roles[role_name] = updated
+        logger.info("role_updated", role_name=role_name)
+        return updated
+
     def list_assignments(self, principal_id: str) -> dict[str, list[str]]:
         """List all role assignments for a principal.
 

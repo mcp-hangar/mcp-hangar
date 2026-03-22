@@ -666,3 +666,64 @@ class EventSourcedRoleStore(IRoleStore):
                 scope=scope,
                 revoked_by=revoked_by,
             )
+
+    def list_all_roles(self) -> list[Role]:
+        """List all custom (non-builtin) roles."""
+        with self._lock:
+            return list(self._custom_roles.values())
+
+    def delete_role(self, role_name: str) -> None:
+        """Delete a custom role.
+
+        Args:
+            role_name: Name of the role to delete.
+
+        Raises:
+            RoleNotFoundError: If the role does not exist.
+            CannotModifyBuiltinRoleError: If the role is a built-in role.
+        """
+        from ...domain.exceptions import CannotModifyBuiltinRoleError, RoleNotFoundError
+
+        if role_name in BUILTIN_ROLES:
+            raise CannotModifyBuiltinRoleError(role_name)
+        with self._lock:
+            if role_name not in self._custom_roles:
+                raise RoleNotFoundError(role_name)
+            del self._custom_roles[role_name]
+        logger.info("custom_role_deleted", role_name=role_name)
+
+    def update_role(
+        self,
+        role_name: str,
+        permissions: list,
+        description: str | None,
+    ) -> Role:
+        """Update a custom role's permissions and description.
+
+        Args:
+            role_name: Name of the role to update.
+            permissions: New list of permissions.
+            description: New description (None to clear).
+
+        Returns:
+            Updated Role value object.
+
+        Raises:
+            RoleNotFoundError: If the role does not exist.
+            CannotModifyBuiltinRoleError: If the role is a built-in role.
+        """
+        from ...domain.exceptions import CannotModifyBuiltinRoleError, RoleNotFoundError
+
+        if role_name in BUILTIN_ROLES:
+            raise CannotModifyBuiltinRoleError(role_name)
+        with self._lock:
+            if role_name not in self._custom_roles:
+                raise RoleNotFoundError(role_name)
+            updated = Role(
+                name=role_name,
+                description=description or "",
+                permissions=frozenset(permissions),
+            )
+            self._custom_roles[role_name] = updated
+        logger.info("custom_role_updated", role_name=role_name)
+        return updated

@@ -769,6 +769,79 @@ class SQLiteRoleStore(IRoleStore):
                     )
                 )
 
+    def list_all_roles(self) -> list[Role]:
+        """List all custom (non-builtin) roles."""
+        conn = self._get_connection()
+        cursor = conn.execute("SELECT name, description, permissions FROM roles WHERE is_builtin = 0")
+        roles = []
+        for row in cursor.fetchall():
+            permissions_list = json.loads(row["permissions"]) if row["permissions"] else []
+            permissions = frozenset(
+                Permission(
+                    resource_type=p["resource_type"],
+                    action=p["action"],
+                    resource_id=p.get("resource_id", "*"),
+                )
+                for p in permissions_list
+            )
+            roles.append(Role(name=row["name"], description=row["description"] or "", permissions=permissions))
+        return roles
+
+    def delete_role(self, role_name: str) -> None:
+        """Delete a custom role and cascade-remove all its assignments.
+
+        The roles table has ON DELETE CASCADE on role_assignments.role_name,
+        so deleting the role row automatically removes assignments.
+        """
+        from ...domain.exceptions import CannotModifyBuiltinRoleError, RoleNotFoundError
+        from ...domain.security.roles import BUILTIN_ROLES as _BUILTIN
+
+        if role_name in _BUILTIN:
+            raise CannotModifyBuiltinRoleError(role_name)
+
+        conn = self._get_connection()
+        cursor = conn.execute("SELECT 1 FROM roles WHERE name = ?", (role_name,))
+        if cursor.fetchone() is None:
+            raise RoleNotFoundError(role_name)
+
+        conn.execute("DELETE FROM roles WHERE name = ?", (role_name,))
+        conn.commit()
+        logger.info("role_deleted", role_name=role_name)
+
+    def update_role(
+        self,
+        role_name: str,
+        permissions: list[Permission],
+        description: str | None,
+    ) -> Role:
+        """Update a custom role's permissions and description."""
+        from ...domain.exceptions import CannotModifyBuiltinRoleError, RoleNotFoundError
+        from ...domain.security.roles import BUILTIN_ROLES as _BUILTIN
+
+        if role_name in _BUILTIN:
+            raise CannotModifyBuiltinRoleError(role_name)
+
+        conn = self._get_connection()
+        cursor = conn.execute("SELECT 1 FROM roles WHERE name = ? AND is_builtin = 0", (role_name,))
+        if cursor.fetchone() is None:
+            raise RoleNotFoundError(role_name)
+
+        permissions_json = json.dumps(
+            [{"resource_type": p.resource_type, "action": p.action, "resource_id": p.resource_id} for p in permissions]
+        )
+        now = datetime.now(UTC).isoformat()
+        conn.execute(
+            "UPDATE roles SET permissions = ?, description = ?, updated_at = ? WHERE name = ?",
+            (permissions_json, description, now, role_name),
+        )
+        conn.commit()
+        logger.info("role_updated", role_name=role_name, permissions_count=len(permissions))
+        return Role(
+            name=role_name,
+            description=description or "",
+            permissions=frozenset(permissions),
+        )
+
     def close(self) -> None:
         """Close the database connection."""
         if hasattr(self._local, "connection") and self._local.connection:
