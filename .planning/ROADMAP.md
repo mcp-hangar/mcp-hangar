@@ -319,7 +319,7 @@ Plans:
 | 20. UI Enhancements | v3.0 | 3/3 | Complete | 2026-03-14 |
 | 21. Log Capture Infrastructure | v4.0 | 3/3 | Complete | 2026-03-15 |
 | 22. Log Streaming WebSocket + UI | v4.0 | 3/3 | Complete | 2026-03-15 |
-| 23. Provider/Group CRUD (C1) | v5.0 | 5/5 | Planned | -- |
+| 23. Provider/Group CRUD (C1) | 1/5 | In Progress|  | -- |
 | 24. Discovery + Catalog API (C2) | v5.0 | 0/5 | Planning | -- |
 | 25. CRUD Forms (U1) | v5.0 | 0/5 | Planning | -- |
 | 26. Discovery Wizard + Catalog (U2) | v5.0 | 0/4 | Planning | -- |

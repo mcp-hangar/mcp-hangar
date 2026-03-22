@@ -1,32 +1,32 @@
 ---
 gsd_state_version: 1.0
-milestone: v4.0
-milestone_name: Log Streaming
-status: archived
-last_updated: "2026-03-15T12:00:00Z"
+milestone: v5.0
+milestone_name: Platform Management Console
+status: in_progress
+last_updated: "2026-03-22T12:25:43Z"
 progress:
-  total_phases: 2
-  completed_phases: 2
-  total_plans: 6
-  completed_plans: 6
+  total_phases: 8
+  completed_phases: 0
+  total_plans: 37
+  completed_plans: 1
 ---
 
 # Project State
 
 ## Project Reference
 
-See: .planning/PROJECT.md (updated 2026-03-15)
+See: .planning/PROJECT.md (updated 2026-03-22)
 
 **Core value:** Reliable, observable MCP provider management with production-grade lifecycle control
-**Current focus:** v4.0 Log Streaming ARCHIVED. All 22 phases across 6 milestones complete. Run `/gsd-new-milestone` to plan the next milestone.
+**Current focus:** v5.0 Platform Management Console -- PLANNING. Transform from config-file-driven to full platform management console with CRUD, catalog, RBAC, tool access policies, and config export.
 
 ## Current Position
 
-Milestone: v4.0 Log Streaming -- ARCHIVED
-Status: Milestone complete and archived. All planning documents updated.
-Last activity: 2026-03-15 -- v4.0 milestone archived. MILESTONES.md, PROJECT.md, ROADMAP.md, STATE.md, RETROSPECTIVE.md updated. Git tag v4.0 pending.
+Milestone: v5.0 Platform Management Console -- IN PROGRESS (Phase 23)
+Status: Phase 23 Plan 03 complete. ProviderGroup.to_config_dict() and config_serializer module implemented with TDD.
+Last activity: 2026-03-22 -- Phase 23, Plan 03 executed (config serializer + ProviderGroup.to_config_dict with bak1..bak5 rotation).
 
-Progress: [##########] 100% -- v4.0 milestone archived
+Progress: [|.........] 3% -- Phase 23 Plan 03 of 37 total plans complete
 
 ## Performance Metrics
 
@@ -187,9 +187,28 @@ All v0.9, v0.10, and v1.0 decisions archived in PROJECT.md Key Decisions table.
 - Amber for stderr, gray for stdout -- conventional color coding matching terminal standards
 - useProviderLogs follows same auto-reconnect pattern as useWebSocket hook -- consistent with existing hooks
 
+**v5.0 decisions (Phase 23-03 execution):**
+
+- serialize_full_config(providers=None, groups=None) accepts optional explicit dicts so tests bypass get_context() -- testability without patching
+- to_config_dict() omits description key entirely when None (not just setting it to None) -- matches config.py load behavior
+- yaml.safe_dump with sort_keys=True, allow_unicode=True for deterministic YAML output
+
+### v5.0 Key Discoveries
+
+- **Existing domain events**: `events.py` already has `RoleAssigned`, `RoleRevoked`, `CatalogItemPublished`, `CatalogItemApproved`, `CatalogItemRejected`, `CatalogItemDeprecated` and many auth events. Some v5.0 events partially exist.
+- **Existing group events**: `GroupCreated`, `GroupMemberAdded`, `GroupMemberRemoved`, `GroupMemberHealthChanged`, `GroupStateChanged`, `GroupCircuitOpened`, `GroupCircuitClosed` already exist in `domain/model/provider_group.py`. New events `GroupUpdated`, `GroupDeleted` follow the same `Group*` naming convention (not `ProviderGroup*`).
+- **Provider API is read-only**: Current `server/api/providers.py` only has GET (list/detail), POST start/stop. No POST create, PUT update, DELETE. Same for groups API.
+- **ProviderRegistered is a NEW event**: `domain/events.py` has `ProviderDiscovered` (from discovery flow), `ProviderApproved`, `ProviderHotLoaded` -- but no `ProviderRegistered`. CRUD-01 creates this as a new event with `source: str` field (`"api"` / `"config"` / `"discovery"`) to distinguish creation origin.
+- **Optimistic concurrency deferred**: REST CRUD uses last-write-wins. Event sourcing `expected_version` exists but is not exposed via ETag/If-Match headers. Acceptable for single-admin v5.0 scope.
+- **Catalog seed entries need builtin flag**: `McpProviderEntry.builtin: bool` prevents accidental deletion of seed entries via API. Only custom entries can be removed.
+- **Auth API partial coverage**: POST/GET/DELETE /api/auth/keys, GET/POST /api/auth/roles, POST assign, DELETE revoke. v5.0 extends with custom role CRUD (PUT/DELETE for roles) and principal management.
+- **Config loading is one-way**: `server/config.py` has `load_config()` that parses YAML to Provider/ProviderGroup objects. v5.0 needs the inverse: serialize in-memory state back to YAML.
+- **ToolAccessPolicy value object exists**: allow/deny lists with merge semantics. v5.0 adds REST endpoints to manage policies.
+- **RBAC infrastructure exists**: Built-in roles in `domain/security/roles.py`, SQLite auth store at `infrastructure/auth/sqlite_store.py`. v5.0 adds custom role CRUD via `RoleStore`.
+
 ### Pending Todos
 
-None -- v4.0 milestone archived. All planning documents updated.
+None.
 
 ### Blockers/Concerns
 
@@ -197,6 +216,6 @@ None.
 
 ## Session Continuity
 
-Last session: 2026-03-15
-Stopped at: v4.0 milestone archived. All planning documents updated. Git tag v4.0 to be created.
-Resume with: Run `/gsd-new-milestone` to start planning the next milestone.
+Last session: 2026-03-22
+Stopped at: Completed Phase 23, Plan 03 -- config serializer + ProviderGroup.to_config_dict. 24 tests passing.
+Resume with: Execute Phase 23 Plan 04 (REST endpoints for config serialization).
