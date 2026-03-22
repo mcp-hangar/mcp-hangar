@@ -111,6 +111,26 @@ class GroupCircuitClosed(DomainEvent):
         super().__init__()
 
 
+@dataclass
+class GroupUpdated(DomainEvent):
+    """Published when a group configuration is updated."""
+
+    group_id: str
+
+    def __post_init__(self):
+        super().__init__()
+
+
+@dataclass
+class GroupDeleted(DomainEvent):
+    """Published when a group is deleted."""
+
+    group_id: str
+
+    def __post_init__(self):
+        super().__init__()
+
+
 # --- Group Member ---
 
 
@@ -404,7 +424,7 @@ class ProviderGroup(AggregateRoot):
         Returns:
             True if member started and added to rotation.
         """
-        # Phase 1: Provider I/O outside lock
+        # Phase 1: Provider I/O outside group lock (respects Provider level 10 < ProviderGroup level 11)
         try:
             member.provider.ensure_ready()
         except (ProviderStartError, CannotStartProviderError) as e:
@@ -415,14 +435,18 @@ class ProviderGroup(AggregateRoot):
                     self._members[member_id].in_rotation = False
             return False
 
-        # Phase 2: Re-acquire lock to update state
+        # Read provider state outside group lock to avoid lock order violation
+        # (Provider._lock level 10 must not be acquired while holding ProviderGroup._lock level 11)
+        provider_state = member.provider.state
+
+        # Phase 2: Re-acquire group lock to update rotation state
         with self._lock:
             # Member may have been removed by another thread during Phase 1
             if member_id not in self._members:
                 return False
 
             current_member = self._members[member_id]
-            if current_member.provider.state == ProviderState.READY:
+            if provider_state == ProviderState.READY:
                 current_member.in_rotation = True
                 current_member.consecutive_failures = 0
                 current_member.consecutive_successes = 1
@@ -495,7 +519,7 @@ class ProviderGroup(AggregateRoot):
         """Add member back to rotation if healthy threshold reached."""
         if member.in_rotation:
             return
-        if member.provider.state != ProviderState.READY:
+        if member.provider.state_snapshot != ProviderState.READY:
             return
         if member.consecutive_successes < self._healthy_threshold:
             return
@@ -603,7 +627,7 @@ class ProviderGroup(AggregateRoot):
         """
         with self._lock:
             for member in self._members.values():
-                if member.provider.state == ProviderState.READY:
+                if member.provider.state_snapshot == ProviderState.READY:
                     if not member.in_rotation:
                         member.in_rotation = True
                         member.consecutive_failures = 0
@@ -704,7 +728,7 @@ class ProviderGroup(AggregateRoot):
         """
         with self._lock:
             for member in self._members.values():
-                if member.in_rotation and member.provider.state == ProviderState.READY:
+                if member.in_rotation and member.provider.state_snapshot == ProviderState.READY:
                     return list(member.provider.tools)
             return []
 
@@ -712,11 +736,32 @@ class ProviderGroup(AggregateRoot):
         """Get list of tool names from a healthy member."""
         with self._lock:
             for member in self._members.values():
-                if member.in_rotation and member.provider.state == ProviderState.READY:
+                if member.in_rotation and member.provider.state_snapshot == ProviderState.READY:
                     return member.provider.get_tool_names()
             return []
 
     # --- Serialization ---
+
+    def to_config_dict(self) -> dict[str, Any]:
+        """Return YAML-compatible config spec dict.
+
+        Includes mode="group", strategy, min_healthy, auto_start,
+        description (if set), and members list.
+
+        Returns:
+            Dict with all fields required to reconstruct this group from config.
+        """
+        with self._lock:
+            spec: dict[str, Any] = {
+                "mode": "group",
+                "strategy": self._strategy.value,
+                "min_healthy": self._min_healthy,
+                "auto_start": self._auto_start,
+                "members": [{"id": m.id, "weight": m.weight, "priority": m.priority} for m in self._members.values()],
+            }
+            if self._description:
+                spec["description"] = self._description
+            return spec
 
     def to_status_dict(self) -> dict[str, Any]:
         """Get status as dictionary."""
@@ -734,7 +779,7 @@ class ProviderGroup(AggregateRoot):
                 "members": [
                     {
                         "id": m.id,
-                        "state": m.provider.state.value,
+                        "state": m.provider.state_snapshot.value,
                         "in_rotation": m.in_rotation,
                         "weight": m.weight,
                         "priority": m.priority,
