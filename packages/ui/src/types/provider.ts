@@ -24,6 +24,7 @@ export interface ToolSchema {
 export interface ToolInfo {
   name: string
   description?: string
+  schema?: ToolSchema
   inputSchema?: ToolSchema
   outputSchema?: ToolSchema
 }
@@ -85,4 +86,11 @@ export interface ToolInvocationRecord {
   occurred_at: number
   data: Record<string, unknown>
   stored_at: number
+  // Flattened fields extracted from event data by the API
+  correlation_id?: string
+  tool_name?: string
+  requested_at?: string
+  duration_ms?: number | null
+  success?: boolean | null
+  error?: string | null
 }

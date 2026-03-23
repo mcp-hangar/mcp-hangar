@@ -134,7 +134,7 @@ export function ExecutionsPage(): JSX.Element {
                       className="border-t border-surface-tertiary hover:bg-surface-secondary transition-colors duration-150"
                     >
                       <td className="px-3 py-2 font-mono text-text-primary">{r.tool_name}</td>
-                      <td className="px-3 py-2 text-text-muted text-xs">{new Date(r.requested_at).toLocaleString()}</td>
+                      <td className="px-3 py-2 text-text-muted text-xs">{r.requested_at ? new Date(r.requested_at).toLocaleString() : '\u2014'}</td>
                       <td className="px-3 py-2 text-text-muted">
                         {r.duration_ms != null ? `${r.duration_ms}ms` : '\u2014'}
                       </td>
