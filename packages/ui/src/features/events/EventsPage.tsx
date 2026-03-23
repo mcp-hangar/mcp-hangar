@@ -3,7 +3,7 @@ import { useQuery, keepPreviousData } from '@tanstack/react-query'
 import { queryKeys } from '../../lib/queryKeys'
 import { eventsApi } from '../../api/events'
 import { LiveEventFeed } from '../../components/dashboard/LiveEventFeed'
-import { LoadingSpinner, EmptyState } from '../../components/ui'
+import { LoadingSpinner, EmptyState, PageContainer } from '../../components/ui'
 
 const PAGE_SIZE = 20
 
@@ -37,15 +37,15 @@ export function EventsPage(): JSX.Element {
   const pageRecords = records.slice((page - 1) * PAGE_SIZE, page * PAGE_SIZE)
 
   return (
-    <div className="p-6 space-y-6">
-      <h2 className="text-lg font-semibold text-gray-900">Events &amp; Logs</h2>
+    <PageContainer className="p-6 space-y-6">
+      <h2 className="text-lg font-semibold text-text-primary">Events &amp; Logs</h2>
 
       {/* Live Event Stream */}
       <section className="space-y-3">
         <div className="flex items-center gap-3">
-          <h3 className="text-sm font-medium text-gray-700">Live Stream</h3>
+          <h3 className="text-sm font-medium text-text-secondary">Live Stream</h3>
           <select
-            className="text-sm border border-gray-300 rounded-md px-3 py-1.5 bg-white"
+            className="text-sm border border-border-strong rounded-lg px-3 py-1.5 bg-surface"
             value={typeFilter}
             onChange={(e) => setTypeFilter(e.target.value)}
           >
@@ -65,25 +65,25 @@ export function EventsPage(): JSX.Element {
 
       {/* Audit Log */}
       <section className="space-y-3">
-        <h3 className="text-sm font-medium text-gray-700">Audit Log</h3>
+        <h3 className="text-sm font-medium text-text-secondary">Audit Log</h3>
         <div className="flex items-center gap-3 flex-wrap">
           <input
             type="text"
             placeholder="Provider ID"
-            className="text-sm border border-gray-300 rounded-md px-3 py-1.5"
+            className="text-sm border border-border-strong rounded-lg px-3 py-1.5 bg-surface"
             value={providerIdFilter}
             onChange={(e) => setProviderIdFilter(e.target.value)}
           />
           <input
             type="text"
             placeholder="Event type"
-            className="text-sm border border-gray-300 rounded-md px-3 py-1.5"
+            className="text-sm border border-border-strong rounded-lg px-3 py-1.5 bg-surface"
             value={eventTypeFilter}
             onChange={(e) => setEventTypeFilter(e.target.value)}
           />
         </div>
 
-        <div className="bg-white rounded-lg border border-gray-200">
+        <div className="bg-surface rounded-xl border border-border shadow-xs">
           {isLoading ? (
             <div className="flex justify-center py-8">
               <LoadingSpinner />
@@ -96,42 +96,49 @@ export function EventsPage(): JSX.Element {
             <>
               <table className="table-auto w-full text-sm">
                 <thead>
-                  <tr className="bg-gray-50 text-left text-xs font-medium text-gray-500">
-                    <th className="px-3 py-2">Event Type</th>
-                    <th className="px-3 py-2">Provider</th>
-                    <th className="px-3 py-2">Occurred At</th>
-                    <th className="px-3 py-2">Event ID</th>
+                  <tr className="bg-surface-secondary text-left">
+                    <th className="text-[11px] font-medium text-text-muted uppercase tracking-wider px-3 py-2.5">
+                      Event Type
+                    </th>
+                    <th className="text-[11px] font-medium text-text-muted uppercase tracking-wider px-3 py-2.5">
+                      Provider
+                    </th>
+                    <th className="text-[11px] font-medium text-text-muted uppercase tracking-wider px-3 py-2.5">
+                      Occurred At
+                    </th>
+                    <th className="text-[11px] font-medium text-text-muted uppercase tracking-wider px-3 py-2.5">
+                      Event ID
+                    </th>
                   </tr>
                 </thead>
                 <tbody>
                   {pageRecords.map((r) => (
-                    <tr key={r.event_id} className="border-t border-gray-100">
-                      <td className="px-3 py-2 font-mono text-gray-800">{r.event_type}</td>
-                      <td className="px-3 py-2 text-gray-600">{r.provider_id ?? '—'}</td>
-                      <td className="px-3 py-2 text-gray-500">
-                        {new Date(r.occurred_at).toLocaleString()}
-                      </td>
-                      <td className="px-3 py-2 font-mono text-xs text-gray-400">
-                        {r.event_id.slice(0, 8)}...
-                      </td>
+                    <tr
+                      key={r.event_id}
+                      className="border-t border-surface-tertiary hover:bg-surface-secondary transition-colors duration-150"
+                    >
+                      <td className="px-3 py-2 font-mono text-text-primary">{r.event_type}</td>
+                      <td className="px-3 py-2 text-text-muted">{r.provider_id ?? '\u2014'}</td>
+                      <td className="px-3 py-2 text-text-muted">{new Date(r.occurred_at).toLocaleString()}</td>
+                      <td className="px-3 py-2 font-mono text-xs text-text-faint">{r.event_id.slice(0, 8)}...</td>
                     </tr>
                   ))}
                 </tbody>
               </table>
-              <div className="flex items-center justify-between px-3 py-2 border-t border-gray-100">
-                <span className="text-xs text-gray-500">
+              <div className="flex items-center justify-between px-3 py-2.5 border-t border-surface-tertiary">
+                <span className="text-xs text-text-muted">
                   Page {page} of {pageCount} ({records.length} total)
                 </span>
                 <div className="flex items-center gap-2">
                   <button
-                    className="text-sm px-3 py-1 border border-gray-300 rounded disabled:opacity-40"
+                    className="text-sm px-3 py-1 border border-border-strong rounded-lg hover:bg-surface-secondary transition-colors disabled:opacity-40"
                     onClick={() => setPage((p) => Math.max(1, p - 1))}
                     disabled={page <= 1}
                   >
                     Previous
                   </button>
                   <button
-                    className="text-sm px-3 py-1 border border-gray-300 rounded disabled:opacity-40"
+                    className="text-sm px-3 py-1 border border-border-strong rounded-lg hover:bg-surface-secondary transition-colors disabled:opacity-40"
                     onClick={() => setPage((p) => Math.min(pageCount, p + 1))}
                     disabled={page >= pageCount}
                   >
@@ -143,6 +150,6 @@ export function EventsPage(): JSX.Element {
           )}
         </div>
       </section>
-    </div>
+    </PageContainer>
   )
 }

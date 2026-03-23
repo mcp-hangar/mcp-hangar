@@ -138,7 +138,7 @@ export function AddEntryDrawer({ open, onClose }: AddEntryDrawerProps): JSX.Elem
         <button
           type="button"
           onClick={onClose}
-          className="px-4 py-1.5 text-sm border border-gray-300 rounded-md hover:bg-gray-50"
+          className="px-4 py-1.5 text-sm border border-border-strong rounded-lg hover:bg-surface-secondary transition-colors"
         >
           Cancel
         </button>
@@ -146,7 +146,7 @@ export function AddEntryDrawer({ open, onClose }: AddEntryDrawerProps): JSX.Elem
           type="button"
           onClick={handleSubmit}
           disabled={!isValid || addMutation.isPending}
-          className="px-4 py-1.5 text-sm bg-blue-600 text-white rounded-md hover:bg-blue-700 disabled:opacity-50 disabled:cursor-not-allowed"
+          className="px-4 py-1.5 text-sm bg-accent text-white rounded-lg hover:bg-accent-hover transition-colors disabled:opacity-50 disabled:cursor-not-allowed"
         >
           {addMutation.isPending ? 'Adding...' : 'Add Entry'}
         </button>
@@ -166,41 +166,41 @@ export function AddEntryDrawer({ open, onClose }: AddEntryDrawerProps): JSX.Elem
       <div className="space-y-4">
         {/* Name */}
         <div>
-          <label className="block text-sm font-medium text-gray-700 mb-1">
-            Name <span className="text-red-500">*</span>
+          <label className="block text-sm font-medium text-text-secondary mb-1">
+            Name <span className="text-danger">*</span>
           </label>
           <input
             type="text"
             value={form.name}
             onChange={(e) => setField('name', e.target.value)}
             placeholder="e.g. my-tool-provider"
-            className="w-full rounded-md border border-gray-300 px-3 py-2 text-sm focus:border-blue-500 focus:outline-none focus:ring-1 focus:ring-blue-500"
+            className="w-full rounded-lg border border-border-strong bg-surface px-3 py-2 text-sm focus:border-accent focus:outline-none focus:ring-1 focus:ring-accent"
           />
         </div>
 
         {/* Description */}
         <div>
-          <label className="block text-sm font-medium text-gray-700 mb-1">
-            Description <span className="text-red-500">*</span>
+          <label className="block text-sm font-medium text-text-secondary mb-1">
+            Description <span className="text-danger">*</span>
           </label>
           <textarea
             value={form.description}
             onChange={(e) => setField('description', e.target.value)}
             placeholder="What does this provider do?"
             rows={3}
-            className="w-full rounded-md border border-gray-300 px-3 py-2 text-sm focus:border-blue-500 focus:outline-none focus:ring-1 focus:ring-blue-500 resize-none"
+            className="w-full rounded-lg border border-border-strong bg-surface px-3 py-2 text-sm focus:border-accent focus:outline-none focus:ring-1 focus:ring-accent resize-none"
           />
         </div>
 
         {/* Mode */}
         <div>
-          <label className="block text-sm font-medium text-gray-700 mb-1">
-            Mode <span className="text-red-500">*</span>
+          <label className="block text-sm font-medium text-text-secondary mb-1">
+            Mode <span className="text-danger">*</span>
           </label>
           <select
             value={form.mode}
             onChange={(e) => setField('mode', e.target.value as McpProviderEntry['mode'])}
-            className="w-full rounded-md border border-gray-300 px-3 py-2 text-sm focus:border-blue-500 focus:outline-none focus:ring-1 focus:ring-blue-500"
+            className="w-full rounded-lg border border-border-strong bg-surface px-3 py-2 text-sm focus:border-accent focus:outline-none focus:ring-1 focus:ring-accent"
           >
             <option value="subprocess">subprocess</option>
             <option value="docker">docker</option>
@@ -211,46 +211,46 @@ export function AddEntryDrawer({ open, onClose }: AddEntryDrawerProps): JSX.Elem
         {/* Command */}
         {showCommand && (
           <div>
-            <label className="block text-sm font-medium text-gray-700 mb-1">Command</label>
+            <label className="block text-sm font-medium text-text-secondary mb-1">Command</label>
             <input
               type="text"
               value={form.command}
               onChange={(e) => setField('command', e.target.value)}
               placeholder="e.g. python -m my_server"
-              className="w-full rounded-md border border-gray-300 px-3 py-2 text-sm font-mono focus:border-blue-500 focus:outline-none focus:ring-1 focus:ring-blue-500"
+              className="w-full rounded-lg border border-border-strong bg-surface px-3 py-2 text-sm font-mono focus:border-accent focus:outline-none focus:ring-1 focus:ring-accent"
             />
-            <p className="text-xs text-gray-400 mt-1">Space-separated command and arguments</p>
+            <p className="text-xs text-text-faint mt-1">Space-separated command and arguments</p>
           </div>
         )}
 
         {/* Image */}
         {showImage && (
           <div>
-            <label className="block text-sm font-medium text-gray-700 mb-1">Image</label>
+            <label className="block text-sm font-medium text-text-secondary mb-1">Image</label>
             <input
               type="text"
               value={form.image}
               onChange={(e) => setField('image', e.target.value)}
               placeholder="e.g. ghcr.io/org/provider:latest"
-              className="w-full rounded-md border border-gray-300 px-3 py-2 text-sm font-mono focus:border-blue-500 focus:outline-none focus:ring-1 focus:ring-blue-500"
+              className="w-full rounded-lg border border-border-strong bg-surface px-3 py-2 text-sm font-mono focus:border-accent focus:outline-none focus:ring-1 focus:ring-accent"
             />
           </div>
         )}
 
         {/* Tags */}
         <div>
-          <label className="block text-sm font-medium text-gray-700 mb-1">Tags</label>
-          <div className="flex flex-wrap items-center gap-1 rounded-md border border-gray-300 px-2 py-1.5 focus-within:border-blue-500 focus-within:ring-1 focus-within:ring-blue-500">
+          <label className="block text-sm font-medium text-text-secondary mb-1">Tags</label>
+          <div className="flex flex-wrap items-center gap-1 rounded-lg border border-border-strong px-2 py-1.5 focus-within:border-accent focus-within:ring-1 focus-within:ring-accent">
             {form.tags.map((tag) => (
               <span
                 key={tag}
-                className="inline-flex items-center gap-0.5 rounded-full bg-gray-100 px-2 py-0.5 text-xs text-gray-700"
+                className="inline-flex items-center gap-0.5 rounded-full bg-surface-tertiary px-2 py-0.5 text-xs text-text-secondary"
               >
                 {tag}
                 <button
                   type="button"
                   onClick={() => removeTag(tag)}
-                  className="ml-0.5 text-gray-400 hover:text-gray-600"
+                  className="ml-0.5 text-text-faint hover:text-text-muted"
                   aria-label={`Remove tag ${tag}`}
                 >
                   x
@@ -273,18 +273,18 @@ export function AddEntryDrawer({ open, onClose }: AddEntryDrawerProps): JSX.Elem
 
         {/* Required env vars */}
         <div>
-          <label className="block text-sm font-medium text-gray-700 mb-1">Required Env Vars</label>
-          <div className="flex flex-wrap items-center gap-1 rounded-md border border-gray-300 px-2 py-1.5 focus-within:border-blue-500 focus-within:ring-1 focus-within:ring-blue-500">
+          <label className="block text-sm font-medium text-text-secondary mb-1">Required Env Vars</label>
+          <div className="flex flex-wrap items-center gap-1 rounded-lg border border-border-strong px-2 py-1.5 focus-within:border-accent focus-within:ring-1 focus-within:ring-accent">
             {form.required_env.map((env) => (
               <span
                 key={env}
-                className="inline-flex items-center gap-0.5 rounded bg-amber-50 border border-amber-200 px-2 py-0.5 text-xs font-mono text-amber-700"
+                className="inline-flex items-center gap-0.5 rounded bg-warning-surface border border-warning px-2 py-0.5 text-xs font-mono text-warning-text"
               >
                 {env}
                 <button
                   type="button"
                   onClick={() => removeEnv(env)}
-                  className="ml-0.5 text-amber-400 hover:text-amber-600"
+                  className="ml-0.5 text-warning-text hover:text-warning"
                   aria-label={`Remove env var ${env}`}
                 >
                   x
@@ -305,7 +305,7 @@ export function AddEntryDrawer({ open, onClose }: AddEntryDrawerProps): JSX.Elem
           </div>
         </div>
 
-        {error && <p className="text-sm text-red-600 mt-2">{error}</p>}
+        {error && <p className="text-sm text-danger mt-2">{error}</p>}
       </div>
     </Drawer>
   )

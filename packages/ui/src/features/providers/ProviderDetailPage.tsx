@@ -1,8 +1,11 @@
 import { useState, type JSX } from 'react'
 import { useParams } from 'react-router'
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query'
+import { motion, AnimatePresence } from 'framer-motion'
+import { ChevronDown } from 'lucide-react'
 import { queryKeys } from '../../lib/queryKeys'
 import { providersApi } from '../../api/providers'
+import { expandVariants } from '../../lib/animations'
 import {
   ProviderStateBadge,
   HealthBadge,
@@ -10,6 +13,7 @@ import {
   ActionButton,
   EmptyState,
   LoadingSpinner,
+  PageContainer,
 } from '../../components/ui'
 import { ToolAccessPolicyEditor } from '../../components/ui/ToolAccessPolicyEditor'
 import { ToolList } from '../../components/providers/ToolList'
@@ -94,10 +98,10 @@ export function ProviderDetailPage(): JSX.Element {
   const cb = provider.circuit_breaker
 
   return (
-    <div className="space-y-6 p-6">
+    <PageContainer className="space-y-6 p-6">
       {/* Header Row */}
       <div className="flex items-center gap-3 flex-wrap">
-        <h2 className="text-xl font-semibold text-gray-900">{provider.provider_id}</h2>
+        <h2 className="text-xl font-semibold text-text-primary">{provider.provider_id}</h2>
         <ProviderStateBadge state={provider.state} />
         <div className="flex gap-2 ml-auto">
           <ActionButton
@@ -120,59 +124,59 @@ export function ProviderDetailPage(): JSX.Element {
       </div>
 
       {/* Details Card */}
-      <div className="bg-white rounded-lg border border-gray-200 p-4 grid grid-cols-2 gap-x-8 gap-y-2">
+      <div className="bg-surface rounded-xl border border-border p-4 shadow-xs grid grid-cols-2 gap-x-8 gap-y-2">
         <div>
-          <span className="text-xs text-gray-500 uppercase font-medium">Mode</span>
-          <p className="text-sm text-gray-800 mt-0.5 capitalize">{provider.mode}</p>
+          <span className="text-xs text-text-muted uppercase tracking-wider font-medium">Mode</span>
+          <p className="text-sm text-text-primary mt-0.5 capitalize">{provider.mode}</p>
         </div>
         <div>
-          <span className="text-xs text-gray-500 uppercase font-medium">Idle TTL</span>
-          <p className="text-sm text-gray-800 mt-0.5">
+          <span className="text-xs text-text-muted uppercase tracking-wider font-medium">Idle TTL</span>
+          <p className="text-sm text-text-primary mt-0.5">
             {provider.idle_ttl_s != null ? `${provider.idle_ttl_s}s` : '\u2014'}
           </p>
         </div>
         {provider.command && (
           <div className="col-span-2">
-            <span className="text-xs text-gray-500 uppercase font-medium">Command</span>
-            <p className="text-sm font-mono text-gray-800 mt-0.5 break-all">{provider.command.join(' ')}</p>
+            <span className="text-xs text-text-muted uppercase tracking-wider font-medium">Command</span>
+            <p className="text-sm font-mono text-text-primary mt-0.5 break-all">{provider.command.join(' ')}</p>
           </div>
         )}
         <div>
-          <span className="text-xs text-gray-500 uppercase font-medium">Health</span>
+          <span className="text-xs text-text-muted uppercase tracking-wider font-medium">Health</span>
           <div className="flex items-center gap-2 mt-0.5">
             {health ? (
               <>
                 <HealthBadge status={health.status} />
-                <span className="text-xs text-gray-400">{health.consecutive_failures} consecutive failures</span>
+                <span className="text-xs text-text-faint">{health.consecutive_failures} consecutive failures</span>
               </>
             ) : (
-              <span className="text-sm text-gray-400">\u2014</span>
+              <span className="text-sm text-text-faint">\u2014</span>
             )}
           </div>
         </div>
         <div>
-          <span className="text-xs text-gray-500 uppercase font-medium">Circuit Breaker</span>
+          <span className="text-xs text-text-muted uppercase tracking-wider font-medium">Circuit Breaker</span>
           <div className="flex items-center gap-2 mt-0.5">
             {cb ? (
               <>
                 <CircuitBreakerBadge state={cb.state} />
-                <span className="text-xs text-gray-400">{cb.failure_count} failures</span>
+                <span className="text-xs text-text-faint">{cb.failure_count} failures</span>
                 {cb.state === 'open' && cb.opened_at && (
-                  <span className="text-xs text-gray-400">opened {new Date(cb.opened_at).toLocaleString()}</span>
+                  <span className="text-xs text-text-faint">opened {new Date(cb.opened_at).toLocaleString()}</span>
                 )}
               </>
             ) : (
-              <span className="text-sm text-gray-400">\u2014</span>
+              <span className="text-sm text-text-faint">\u2014</span>
             )}
           </div>
         </div>
       </div>
 
       {/* Tools Section */}
-      <div className="bg-white rounded-lg border border-gray-200 p-4">
+      <div className="bg-surface rounded-xl border border-border p-4 shadow-xs">
         <div className="flex items-center gap-2 mb-3">
-          <h3 className="text-sm font-medium text-gray-700">Tools</h3>
-          <span className="text-xs font-medium bg-gray-100 text-gray-600 rounded-full px-2 py-0.5">
+          <h3 className="text-sm font-medium text-text-secondary">Tools</h3>
+          <span className="text-xs font-medium bg-surface-tertiary text-text-muted rounded-full px-2 py-0.5">
             {provider.tools?.length ?? 0}
           </span>
         </div>
@@ -180,82 +184,94 @@ export function ProviderDetailPage(): JSX.Element {
       </div>
 
       {/* Process Logs Section */}
-      <div className="bg-white rounded-lg border border-gray-200 overflow-hidden">
+      <div className="bg-surface rounded-xl border border-border overflow-hidden shadow-xs">
         <button
           type="button"
-          className="w-full flex items-center justify-between px-4 py-3 text-left hover:bg-gray-50 transition-colors"
+          className="w-full flex items-center justify-between px-4 py-3 text-left hover:bg-surface-secondary transition-colors duration-150"
           onClick={() => setLogsOpen((v) => !v)}
           aria-expanded={logsOpen}
         >
-          <h3 className="text-sm font-medium text-gray-700">Process Logs</h3>
-          <svg
-            className={`w-4 h-4 text-gray-400 transition-transform ${logsOpen ? 'rotate-180' : ''}`}
-            fill="none"
-            stroke="currentColor"
-            viewBox="0 0 24 24"
-            aria-hidden="true"
-          >
-            <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M19 9l-7 7-7-7" />
-          </svg>
+          <h3 className="text-sm font-medium text-text-secondary">Process Logs</h3>
+          <ChevronDown
+            size={16}
+            className={`text-text-faint transition-transform duration-200 ${logsOpen ? 'rotate-180' : ''}`}
+          />
         </button>
-        {logsOpen && <LogViewer logs={logs} status={logsStatus} onClear={clearLogs} />}
+        <AnimatePresence initial={false}>
+          {logsOpen && (
+            <motion.div
+              variants={expandVariants}
+              initial="hidden"
+              animate="visible"
+              exit="exit"
+              style={{ overflow: 'hidden' }}
+            >
+              <LogViewer logs={logs} status={logsStatus} onClear={clearLogs} />
+            </motion.div>
+          )}
+        </AnimatePresence>
       </div>
 
       {/* Tool Access Policy Section */}
-      <div className="bg-white rounded-lg border border-gray-200 overflow-hidden">
+      <div className="bg-surface rounded-xl border border-border overflow-hidden shadow-xs">
         <button
           type="button"
-          className="w-full flex items-center justify-between px-4 py-3 text-left hover:bg-gray-50 transition-colors"
+          className="w-full flex items-center justify-between px-4 py-3 text-left hover:bg-surface-secondary transition-colors duration-150"
           onClick={() => setTapOpen((v) => !v)}
           aria-expanded={tapOpen}
         >
-          <h3 className="text-sm font-medium text-gray-700">Tool Access Policy</h3>
-          <svg
-            className={`w-4 h-4 text-gray-400 transition-transform ${tapOpen ? 'rotate-180' : ''}`}
-            fill="none"
-            stroke="currentColor"
-            viewBox="0 0 24 24"
-            aria-hidden="true"
-          >
-            <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M19 9l-7 7-7-7" />
-          </svg>
+          <h3 className="text-sm font-medium text-text-secondary">Tool Access Policy</h3>
+          <ChevronDown
+            size={16}
+            className={`text-text-faint transition-transform duration-200 ${tapOpen ? 'rotate-180' : ''}`}
+          />
         </button>
-        {tapOpen && (
-          <div className="px-4 pb-4 space-y-4">
-            <ToolAccessPolicyEditor
-              allowedTools={allowedTools}
-              deniedTools={deniedTools}
-              onAllowedChange={(tools) => {
-                setAllowedTools(tools)
-                setTapDirty(true)
-              }}
-              onDeniedChange={(tools) => {
-                setDeniedTools(tools)
-                setTapDirty(true)
-              }}
-              disabled={tapSaving || tapClearing}
-            />
-            <div className="flex gap-2">
-              <button
-                type="button"
-                disabled={!tapDirty || tapSaving}
-                onClick={() => savePolicy({ allow_list: allowedTools, deny_list: deniedTools })}
-                className="px-3 py-1.5 text-sm bg-blue-600 text-white rounded-md hover:bg-blue-700 disabled:opacity-50 disabled:cursor-not-allowed"
-              >
-                {tapSaving ? 'Saving...' : 'Save Policy'}
-              </button>
-              <button
-                type="button"
-                disabled={tapClearing}
-                onClick={() => clearPolicy()}
-                className="px-3 py-1.5 text-sm border border-gray-300 rounded-md hover:bg-gray-50 disabled:opacity-50 disabled:cursor-not-allowed"
-              >
-                {tapClearing ? 'Clearing...' : 'Clear Policy'}
-              </button>
-            </div>
-          </div>
-        )}
+        <AnimatePresence initial={false}>
+          {tapOpen && (
+            <motion.div
+              variants={expandVariants}
+              initial="hidden"
+              animate="visible"
+              exit="exit"
+              style={{ overflow: 'hidden' }}
+            >
+              <div className="px-4 pb-4 space-y-4">
+                <ToolAccessPolicyEditor
+                  allowedTools={allowedTools}
+                  deniedTools={deniedTools}
+                  onAllowedChange={(tools) => {
+                    setAllowedTools(tools)
+                    setTapDirty(true)
+                  }}
+                  onDeniedChange={(tools) => {
+                    setDeniedTools(tools)
+                    setTapDirty(true)
+                  }}
+                  disabled={tapSaving || tapClearing}
+                />
+                <div className="flex gap-2">
+                  <button
+                    type="button"
+                    disabled={!tapDirty || tapSaving}
+                    onClick={() => savePolicy({ allow_list: allowedTools, deny_list: deniedTools })}
+                    className="px-3 py-1.5 text-sm bg-accent text-white rounded-lg hover:bg-accent-hover transition-colors disabled:opacity-50 disabled:cursor-not-allowed"
+                  >
+                    {tapSaving ? 'Saving...' : 'Save Policy'}
+                  </button>
+                  <button
+                    type="button"
+                    disabled={tapClearing}
+                    onClick={() => clearPolicy()}
+                    className="px-3 py-1.5 text-sm border border-border-strong rounded-lg hover:bg-surface-secondary transition-colors disabled:opacity-50 disabled:cursor-not-allowed"
+                  >
+                    {tapClearing ? 'Clearing...' : 'Clear Policy'}
+                  </button>
+                </div>
+              </div>
+            </motion.div>
+          )}
+        </AnimatePresence>
       </div>
-    </div>
+    </PageContainer>
   )
 }

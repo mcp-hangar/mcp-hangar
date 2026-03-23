@@ -69,7 +69,7 @@ export function GroupEditDrawer({ group, open, onOpenChange }: GroupEditDrawerPr
         <button
           type="button"
           onClick={() => onOpenChange(false)}
-          className="px-4 py-1.5 text-sm border border-gray-300 rounded-md hover:bg-gray-50"
+          className="px-4 py-1.5 text-sm border border-border-strong rounded-lg hover:bg-surface-secondary transition-colors"
         >
           Cancel
         </button>
@@ -77,7 +77,7 @@ export function GroupEditDrawer({ group, open, onOpenChange }: GroupEditDrawerPr
           type="button"
           onClick={handleSubmit}
           disabled={updateMutation.isPending}
-          className="px-4 py-1.5 text-sm bg-blue-600 text-white rounded-md hover:bg-blue-700 disabled:opacity-50 disabled:cursor-not-allowed"
+          className="px-4 py-1.5 text-sm bg-accent text-white rounded-lg hover:bg-accent-hover transition-colors disabled:opacity-50 disabled:cursor-not-allowed"
         >
           {updateMutation.isPending ? 'Saving...' : 'Save Changes'}
         </button>
@@ -89,19 +89,19 @@ export function GroupEditDrawer({ group, open, onOpenChange }: GroupEditDrawerPr
     <Drawer open={open} onOpenChange={onOpenChange} title="Edit Group" footer={footer}>
       <div className="space-y-4">
         <div>
-          <label className="block text-sm font-medium text-gray-700 mb-1">Group ID</label>
-          <p className="px-3 py-2 text-sm text-gray-700 bg-gray-50 rounded-md border border-gray-200">
+          <label className="block text-sm font-medium text-text-secondary mb-1">Group ID</label>
+          <p className="px-3 py-2 text-sm text-text-secondary bg-surface-secondary rounded-lg border border-border">
             {group.group_id}
           </p>
-          <p className="text-xs text-gray-500 mt-1">Group ID cannot be changed.</p>
+          <p className="text-xs text-text-muted mt-1">Group ID cannot be changed.</p>
         </div>
 
         <div>
-          <label className="block text-sm font-medium text-gray-700 mb-1">Strategy</label>
+          <label className="block text-sm font-medium text-text-secondary mb-1">Strategy</label>
           <select
             value={form.strategy}
             onChange={(e) => setField('strategy', e.target.value as GroupStrategy)}
-            className="w-full rounded-md border border-gray-300 px-3 py-2 text-sm focus:border-blue-500 focus:outline-none focus:ring-1 focus:ring-blue-500"
+            className="w-full rounded-lg border border-border-strong bg-surface px-3 py-2 text-sm focus:border-accent focus:outline-none focus:ring-1 focus:ring-accent"
           >
             <option value="round_robin">Round Robin</option>
             <option value="weighted_round_robin">Weighted Round Robin</option>
@@ -112,29 +112,29 @@ export function GroupEditDrawer({ group, open, onOpenChange }: GroupEditDrawerPr
         </div>
 
         <div>
-          <label className="block text-sm font-medium text-gray-700 mb-1">Description</label>
+          <label className="block text-sm font-medium text-text-secondary mb-1">Description</label>
           <input
             type="text"
             value={form.description}
             onChange={(e) => setField('description', e.target.value)}
             placeholder="Brief description of this group"
-            className="w-full rounded-md border border-gray-300 px-3 py-2 text-sm focus:border-blue-500 focus:outline-none focus:ring-1 focus:ring-blue-500"
+            className="w-full rounded-lg border border-border-strong bg-surface px-3 py-2 text-sm focus:border-accent focus:outline-none focus:ring-1 focus:ring-accent"
           />
         </div>
 
         <div>
-          <label className="block text-sm font-medium text-gray-700 mb-1">Min Healthy</label>
+          <label className="block text-sm font-medium text-text-secondary mb-1">Min Healthy</label>
           <input
             type="number"
             value={form.min_healthy}
             onChange={(e) => setField('min_healthy', e.target.value)}
             placeholder="1"
             min="0"
-            className="w-full rounded-md border border-gray-300 px-3 py-2 text-sm focus:border-blue-500 focus:outline-none focus:ring-1 focus:ring-blue-500"
+            className="w-full rounded-lg border border-border-strong bg-surface px-3 py-2 text-sm focus:border-accent focus:outline-none focus:ring-1 focus:ring-accent"
           />
         </div>
 
-        {error && <p className="text-sm text-red-600 mt-2">{error}</p>}
+        {error && <p className="text-sm text-danger mt-2">{error}</p>}
       </div>
     </Drawer>
   )

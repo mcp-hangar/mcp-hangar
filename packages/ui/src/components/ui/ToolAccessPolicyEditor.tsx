@@ -1,4 +1,6 @@
 import { useState } from 'react'
+import { motion, AnimatePresence } from 'framer-motion'
+import { X } from 'lucide-react'
 
 interface TagInputProps {
   label: string
@@ -30,25 +32,31 @@ function TagInput({ label, tags, onChange, disabled }: TagInputProps): JSX.Eleme
 
   return (
     <div>
-      <label className="block text-xs font-medium text-gray-700 mb-1">{label}</label>
-      <div className="min-h-[42px] flex flex-wrap gap-1.5 items-center p-2 border border-gray-300 rounded-md focus-within:ring-2 focus-within:ring-blue-500 focus-within:border-blue-500">
-        {tags.map((tag) => (
-          <span
-            key={tag}
-            className="inline-flex items-center gap-1 px-2 py-0.5 text-xs bg-blue-50 text-blue-700 rounded border border-blue-200"
-          >
-            {tag}
-            {!disabled && (
-              <button
-                type="button"
-                onClick={() => onChange(tags.filter((t) => t !== tag))}
-                className="text-blue-400 hover:text-blue-600 leading-none"
-              >
-                &times;
-              </button>
-            )}
-          </span>
-        ))}
+      <label className="block text-xs font-medium text-text-secondary mb-1.5">{label}</label>
+      <div className="min-h-[42px] flex flex-wrap gap-1.5 items-center p-2 bg-surface border border-border rounded-lg focus-within:ring-2 focus-within:ring-accent/30 focus-within:border-accent transition-all duration-150">
+        <AnimatePresence>
+          {tags.map((tag) => (
+            <motion.span
+              key={tag}
+              initial={{ opacity: 0, scale: 0.8 }}
+              animate={{ opacity: 1, scale: 1 }}
+              exit={{ opacity: 0, scale: 0.8 }}
+              transition={{ duration: 0.12 }}
+              className="inline-flex items-center gap-1 px-2 py-0.5 text-xs bg-accent-surface text-accent-text rounded-md border border-accent/15 font-mono"
+            >
+              {tag}
+              {!disabled && (
+                <button
+                  type="button"
+                  onClick={() => onChange(tags.filter((t) => t !== tag))}
+                  className="text-accent/50 hover:text-accent transition-colors duration-100 rounded-sm hover:bg-accent/10 p-px"
+                >
+                  <X size={10} />
+                </button>
+              )}
+            </motion.span>
+          ))}
+        </AnimatePresence>
         {!disabled && (
           <input
             type="text"
@@ -59,11 +67,11 @@ function TagInput({ label, tags, onChange, disabled }: TagInputProps): JSX.Eleme
               if (inputValue.trim()) addTag(inputValue)
             }}
             placeholder={tags.length === 0 ? 'Type and press Enter...' : ''}
-            className="flex-1 min-w-[120px] outline-none text-sm bg-transparent"
+            className="flex-1 min-w-[120px] outline-none text-sm bg-transparent text-text-primary placeholder:text-text-faint"
           />
         )}
       </div>
-      <p className="text-xs text-gray-400 mt-0.5">Press Enter or comma to add. Supports * wildcards.</p>
+      <p className="text-xs text-text-faint mt-1">Press Enter or comma to add. Supports * wildcards.</p>
     </div>
   )
 }
@@ -84,7 +92,7 @@ export function ToolAccessPolicyEditor({
   disabled,
 }: ToolAccessPolicyEditorProps): JSX.Element {
   return (
-    <div className="space-y-4">
+    <div className="space-y-5">
       <TagInput label="Allowed Tools" tags={allowedTools} onChange={onAllowedChange} disabled={disabled} />
       <TagInput label="Denied Tools" tags={deniedTools} onChange={onDeniedChange} disabled={disabled} />
     </div>

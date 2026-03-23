@@ -27,7 +27,7 @@ export function CurrentConfigTab(): JSX.Element {
     <div className="space-y-4">
       {/* Header row */}
       <div className="flex items-center justify-between gap-4">
-        <p className="text-sm text-gray-500">
+        <p className="text-sm text-text-muted">
           Configuration is read-only in the UI. Edit the config file and use Hot Reload to apply changes.
         </p>
         <ActionButton variant="primary" onClick={() => reloadMutation.mutate()} isLoading={reloadMutation.isPending}>
@@ -36,13 +36,13 @@ export function CurrentConfigTab(): JSX.Element {
       </div>
 
       {/* Config JSON viewer */}
-      <div className="bg-white rounded-lg border p-4">
+      <div className="bg-surface rounded-xl border p-4 shadow-xs">
         {isLoading ? (
           <LoadingSpinner />
         ) : error ? (
-          <p className="text-sm text-red-600">Failed to load configuration.</p>
+          <p className="text-sm text-danger">Failed to load configuration.</p>
         ) : (
-          <pre className="text-xs font-mono overflow-x-auto whitespace-pre-wrap text-gray-700">
+          <pre className="text-xs font-mono overflow-x-auto whitespace-pre-wrap text-text-secondary">
             {JSON.stringify(data?.config ?? {}, null, 2)}
           </pre>
         )}

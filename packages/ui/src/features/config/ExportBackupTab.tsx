@@ -58,8 +58,8 @@ export function ExportBackupTab(): JSX.Element {
       <div className="space-y-3">
         <div className="flex items-center justify-between">
           <div>
-            <h3 className="text-sm font-medium text-gray-900">Export Configuration</h3>
-            <p className="text-xs text-gray-500">Serialize the current in-memory configuration to YAML format.</p>
+            <h3 className="text-sm font-medium text-text-primary">Export Configuration</h3>
+            <p className="text-xs text-text-muted">Serialize the current in-memory configuration to YAML format.</p>
           </div>
           <ActionButton variant="primary" onClick={() => exportMutation.mutate()} isLoading={exportMutation.isPending}>
             Export YAML
@@ -75,7 +75,9 @@ export function ExportBackupTab(): JSX.Element {
                 onClick={handleCopyToClipboard}
                 className={cn(
                   'inline-flex items-center gap-1 rounded px-2 py-1 text-xs font-medium',
-                  copySuccess ? 'bg-green-100 text-green-700' : 'bg-gray-100 text-gray-700 hover:bg-gray-200'
+                  copySuccess
+                    ? 'bg-success-surface text-success-text'
+                    : 'bg-surface-tertiary text-text-secondary hover:bg-surface-secondary'
                 )}
               >
                 <Copy className="h-3 w-3" />
@@ -83,13 +85,13 @@ export function ExportBackupTab(): JSX.Element {
               </button>
               <button
                 onClick={handleDownload}
-                className="inline-flex items-center gap-1 rounded bg-gray-100 px-2 py-1 text-xs font-medium text-gray-700 hover:bg-gray-200"
+                className="inline-flex items-center gap-1 rounded bg-surface-tertiary px-2 py-1 text-xs font-medium text-text-secondary hover:bg-surface-secondary"
               >
                 <Download className="h-3 w-3" />
                 Download
               </button>
             </div>
-            <pre className="max-h-96 overflow-auto rounded-lg border bg-gray-50 p-4 text-xs font-mono text-gray-700">
+            <pre className="max-h-96 overflow-auto rounded-xl border bg-surface-secondary p-4 text-xs font-mono text-text-secondary">
               {exportedYaml}
             </pre>
           </div>
@@ -100,8 +102,8 @@ export function ExportBackupTab(): JSX.Element {
       <div className="border-t pt-6">
         <div className="flex items-center justify-between">
           <div>
-            <h3 className="text-sm font-medium text-gray-900">Create Backup</h3>
-            <p className="text-xs text-gray-500">
+            <h3 className="text-sm font-medium text-text-primary">Create Backup</h3>
+            <p className="text-xs text-text-muted">
               Create a rotating backup of the config file on disk (up to 5 backups).
             </p>
           </div>

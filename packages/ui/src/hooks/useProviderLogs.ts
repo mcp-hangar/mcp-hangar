@@ -6,7 +6,8 @@ export interface LogLine {
   provider_id: string
   stream: 'stdout' | 'stderr'
   content: string
-  recorded_at: string
+  /** Unix timestamp (float) as returned by the backend LogLine.recorded_at field. */
+  recorded_at: number
 }
 
 interface LogMessage {
@@ -14,7 +15,7 @@ interface LogMessage {
   provider_id: string
   stream: 'stdout' | 'stderr'
   content: string
-  recorded_at: string
+  recorded_at: number
 }
 
 interface UseProviderLogsOptions {

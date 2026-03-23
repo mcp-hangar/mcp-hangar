@@ -7,11 +7,19 @@ interface ProviderStateBadgeProps {
 }
 
 const STATE_STYLES: Record<ProviderState, string> = {
-  cold: 'bg-gray-100 text-gray-600',
-  initializing: 'bg-blue-100 text-blue-700',
-  ready: 'bg-green-100 text-green-700',
-  degraded: 'bg-yellow-100 text-yellow-700',
-  dead: 'bg-red-100 text-red-700',
+  cold: 'bg-surface-tertiary text-text-muted border-border',
+  initializing: 'bg-accent-surface text-accent-text border-accent/20',
+  ready: 'bg-success-surface text-success-text border-success/20',
+  degraded: 'bg-warning-surface text-warning-text border-warning/20',
+  dead: 'bg-danger-surface text-danger-text border-danger/20',
+}
+
+const STATE_DOT: Record<ProviderState, string> = {
+  cold: 'bg-text-faint',
+  initializing: 'bg-accent animate-pulse',
+  ready: 'bg-success',
+  degraded: 'bg-warning',
+  dead: 'bg-danger',
 }
 
 export function ProviderStateBadge({ state, className }: ProviderStateBadgeProps): JSX.Element {
@@ -19,11 +27,12 @@ export function ProviderStateBadge({ state, className }: ProviderStateBadgeProps
   return (
     <span
       className={cn(
-        'text-xs font-medium px-2 py-0.5 rounded-full',
+        'inline-flex items-center gap-1.5 text-xs font-medium px-2 py-0.5 rounded-md border',
         STATE_STYLES[state],
-        className,
+        className
       )}
     >
+      <span className={cn('h-1.5 w-1.5 rounded-full', STATE_DOT[state])} />
       {label}
     </span>
   )

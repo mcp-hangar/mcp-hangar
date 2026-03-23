@@ -16,9 +16,9 @@ interface CatalogEntryDrawerProps {
 }
 
 const MODE_BADGE_STYLES: Record<McpProviderEntry['mode'], string> = {
-  subprocess: 'bg-gray-100 text-gray-700',
-  docker: 'bg-blue-100 text-blue-700',
-  remote: 'bg-purple-100 text-purple-700',
+  subprocess: 'bg-surface-tertiary text-text-secondary',
+  docker: 'bg-accent-surface text-accent-text',
+  remote: 'bg-warning-surface text-warning-text',
 }
 
 export function CatalogEntryDrawer({ entry, open, onClose, onDeploy }: CatalogEntryDrawerProps): JSX.Element {
@@ -68,7 +68,7 @@ export function CatalogEntryDrawer({ entry, open, onClose, onDeploy }: CatalogEn
             type="button"
             onClick={handleDelete}
             disabled={deleteMutation.isPending}
-            className="inline-flex items-center gap-1.5 px-3 py-1.5 text-sm font-medium rounded-md bg-red-600 text-white hover:bg-red-700 disabled:opacity-50 disabled:cursor-not-allowed"
+            className="inline-flex items-center gap-1.5 px-3 py-1.5 text-sm font-medium rounded-lg bg-danger text-white hover:bg-danger-hover disabled:opacity-50 disabled:cursor-not-allowed"
           >
             <Trash2 size={14} />
             {confirmDelete ? 'Confirm Delete' : 'Delete'}
@@ -78,7 +78,7 @@ export function CatalogEntryDrawer({ entry, open, onClose, onDeploy }: CatalogEn
       <button
         type="button"
         onClick={() => onDeploy(entry)}
-        className="inline-flex items-center gap-1.5 px-3 py-1.5 text-sm font-medium rounded-md bg-blue-600 text-white hover:bg-blue-700"
+        className="inline-flex items-center gap-1.5 px-3 py-1.5 text-sm font-medium rounded-lg bg-accent text-white hover:bg-accent-hover"
       >
         <Rocket size={14} />
         Deploy as Provider
@@ -95,7 +95,7 @@ export function CatalogEntryDrawer({ entry, open, onClose, onDeploy }: CatalogEn
             {entry.mode}
           </span>
           {entry.verified && (
-            <span className="inline-flex items-center gap-1 text-xs text-green-600">
+            <span className="inline-flex items-center gap-1 text-xs text-success">
               <CheckCircle size={14} />
               Verified
             </span>
@@ -104,33 +104,38 @@ export function CatalogEntryDrawer({ entry, open, onClose, onDeploy }: CatalogEn
 
         {/* Description */}
         <section>
-          <h3 className="text-sm font-medium text-gray-700 mb-1">Description</h3>
-          <p className="text-sm text-gray-600">{entry.description}</p>
+          <h3 className="text-sm font-medium text-text-secondary mb-1">Description</h3>
+          <p className="text-sm text-text-muted">{entry.description}</p>
         </section>
 
         {/* Connection */}
         <section>
-          <h3 className="text-sm font-medium text-gray-700 mb-1">Connection</h3>
+          <h3 className="text-sm font-medium text-text-secondary mb-1">Connection</h3>
           {entry.command.length > 0 && (
-            <pre className="bg-gray-100 p-2 rounded text-xs font-mono text-gray-800 overflow-x-auto">
+            <pre className="bg-surface-tertiary p-2 rounded text-xs font-mono text-text-primary overflow-x-auto">
               {entry.command.join(' ')}
             </pre>
           )}
           {entry.image && (
-            <p className="text-sm text-gray-600 mt-1">
-              Image: <code className="bg-gray-100 px-1 py-0.5 rounded text-xs">{entry.image}</code>
+            <p className="text-sm text-text-muted mt-1">
+              Image: <code className="bg-surface-tertiary px-1 py-0.5 rounded text-xs">{entry.image}</code>
             </p>
           )}
-          {entry.command.length === 0 && !entry.image && <p className="text-sm text-gray-400">No connection details</p>}
+          {entry.command.length === 0 && !entry.image && (
+            <p className="text-sm text-text-faint">No connection details</p>
+          )}
         </section>
 
         {/* Tags */}
         {entry.tags.length > 0 && (
           <section>
-            <h3 className="text-sm font-medium text-gray-700 mb-1">Tags</h3>
+            <h3 className="text-sm font-medium text-text-secondary mb-1">Tags</h3>
             <div className="flex flex-wrap gap-1">
               {entry.tags.map((tag) => (
-                <span key={tag} className="inline-block rounded-full bg-gray-100 px-2 py-0.5 text-xs text-gray-600">
+                <span
+                  key={tag}
+                  className="inline-block rounded-full bg-surface-tertiary px-2 py-0.5 text-xs text-text-muted"
+                >
                   {tag}
                 </span>
               ))}
@@ -141,12 +146,12 @@ export function CatalogEntryDrawer({ entry, open, onClose, onDeploy }: CatalogEn
         {/* Required env vars */}
         {entry.required_env.length > 0 && (
           <section>
-            <h3 className="text-sm font-medium text-gray-700 mb-1">Required Environment Variables</h3>
+            <h3 className="text-sm font-medium text-text-secondary mb-1">Required Environment Variables</h3>
             <div className="flex flex-wrap gap-1">
               {entry.required_env.map((env) => (
                 <span
                   key={env}
-                  className="inline-block rounded bg-amber-50 border border-amber-200 px-2 py-0.5 text-xs font-mono text-amber-700"
+                  className="inline-block rounded bg-warning-surface border border-warning px-2 py-0.5 text-xs font-mono text-warning-text"
                 >
                   {env}
                 </span>
@@ -157,16 +162,16 @@ export function CatalogEntryDrawer({ entry, open, onClose, onDeploy }: CatalogEn
 
         {/* Metadata */}
         <section>
-          <h3 className="text-sm font-medium text-gray-700 mb-1">Metadata</h3>
+          <h3 className="text-sm font-medium text-text-secondary mb-1">Metadata</h3>
           <dl className="grid grid-cols-2 gap-y-1 text-sm">
-            <dt className="text-gray-500">Source</dt>
-            <dd className="text-gray-800">{entry.source}</dd>
-            <dt className="text-gray-500">Entry ID</dt>
-            <dd className="text-gray-800 font-mono text-xs">{entry.entry_id}</dd>
+            <dt className="text-text-muted">Source</dt>
+            <dd className="text-text-primary">{entry.source}</dd>
+            <dt className="text-text-muted">Entry ID</dt>
+            <dd className="text-text-primary font-mono text-xs">{entry.entry_id}</dd>
           </dl>
         </section>
 
-        {error && <p className="text-sm text-red-600">{error}</p>}
+        {error && <p className="text-sm text-danger">{error}</p>}
       </div>
     </Drawer>
   )

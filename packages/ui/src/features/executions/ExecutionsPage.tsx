@@ -1,8 +1,10 @@
 import { useState } from 'react'
 import { useQuery } from '@tanstack/react-query'
+import { motion } from 'framer-motion'
 import { queryKeys } from '../../lib/queryKeys'
 import { providersApi } from '../../api/providers'
-import { MetricCard, LoadingSpinner, EmptyState } from '../../components/ui'
+import { staggerContainer } from '../../lib/animations'
+import { MetricCard, LoadingSpinner, EmptyState, PageContainer } from '../../components/ui'
 
 export function ExecutionsPage(): JSX.Element {
   const [selectedProviderId, setSelectedProviderId] = useState<string | null>(null)
@@ -23,23 +25,22 @@ export function ExecutionsPage(): JSX.Element {
   const displayedHistory = viewTab === 'failures' ? history.filter((r) => r.success === false) : history
 
   const successCount = history.filter((r) => r.success === true).length
-  const successRate =
-    history.length === 0 ? 'N/A' : ((successCount / history.length) * 100).toFixed(1) + '%'
+  const successRate = history.length === 0 ? 'N/A' : ((successCount / history.length) * 100).toFixed(1) + '%'
   const durations = history.flatMap((r) => (r.duration_ms != null ? [r.duration_ms] : []))
   const p95 = computeP95(durations)
 
   return (
-    <div className="p-6 space-y-6">
-      <h2 className="text-lg font-semibold text-gray-900">Executions</h2>
+    <PageContainer className="p-6 space-y-6">
+      <h2 className="text-lg font-semibold text-text-primary">Executions</h2>
 
       {/* Provider selector */}
       <div className="flex items-center gap-3">
-        <label htmlFor="exec-provider-select" className="text-sm font-medium text-gray-700">
+        <label htmlFor="exec-provider-select" className="text-sm font-medium text-text-secondary">
           Provider
         </label>
         <select
           id="exec-provider-select"
-          className="text-sm border border-gray-300 rounded-md px-3 py-1.5 bg-white"
+          className="text-sm border border-border-strong rounded-lg px-3 py-1.5 bg-surface"
           value={selectedProviderId ?? ''}
           onChange={(e) => {
             setSelectedProviderId(e.target.value || null)
@@ -64,11 +65,16 @@ export function ExecutionsPage(): JSX.Element {
       ) : (
         <>
           {/* Summary cards */}
-          <div className="grid grid-cols-2 lg:grid-cols-3 gap-4">
+          <motion.div
+            variants={staggerContainer}
+            initial="hidden"
+            animate="visible"
+            className="grid grid-cols-2 lg:grid-cols-3 gap-4"
+          >
             <MetricCard label="Total Invocations" value={history.length} />
             <MetricCard label="Success Rate" value={successRate} />
             <MetricCard label="p95 Duration" value={p95 > 0 ? `${p95}ms` : 'N/A'} />
-          </div>
+          </motion.div>
 
           {/* Tab controls */}
           <div className="flex gap-2">
@@ -76,15 +82,15 @@ export function ExecutionsPage(): JSX.Element {
               <button
                 key={tab}
                 onClick={() => setViewTab(tab)}
-                className={`text-sm px-4 py-1.5 rounded-md border font-medium ${
+                className={`text-sm px-4 py-1.5 rounded-lg border font-medium transition-colors ${
                   viewTab === tab
-                    ? 'bg-gray-900 text-white border-gray-900'
-                    : 'bg-white text-gray-700 border-gray-300 hover:bg-gray-50'
+                    ? 'bg-accent text-white border-accent'
+                    : 'bg-surface text-text-secondary border-border-strong hover:bg-surface-secondary'
                 }`}
               >
                 {tab === 'all' ? 'All' : 'Failures'}
                 {tab === 'failures' && history.filter((r) => r.success === false).length > 0 && (
-                  <span className="ml-1.5 bg-red-100 text-red-600 text-xs px-1.5 py-0.5 rounded-full">
+                  <span className="ml-1.5 bg-danger-surface text-danger text-xs px-1.5 py-0.5 rounded-full">
                     {history.filter((r) => r.success === false).length}
                   </span>
                 )}
@@ -93,51 +99,60 @@ export function ExecutionsPage(): JSX.Element {
           </div>
 
           {/* History table */}
-          <div className="bg-white rounded-lg border border-gray-200">
+          <div className="bg-surface rounded-xl border border-border shadow-xs">
             {displayedHistory.length === 0 ? (
               <div className="p-4">
-                <EmptyState
-                  message={viewTab === 'failures' ? 'No failed invocations.' : 'No invocations.'}
-                />
+                <EmptyState message={viewTab === 'failures' ? 'No failed invocations.' : 'No invocations.'} />
               </div>
             ) : (
               <table className="table-auto w-full text-sm">
                 <thead>
-                  <tr className="bg-gray-50 text-left text-xs font-medium text-gray-500">
-                    <th className="px-3 py-2">Tool</th>
-                    <th className="px-3 py-2">Requested At</th>
-                    <th className="px-3 py-2">Duration</th>
-                    <th className="px-3 py-2">Status</th>
-                    {viewTab === 'failures' && <th className="px-3 py-2">Error</th>}
+                  <tr className="bg-surface-secondary text-left">
+                    <th className="text-[11px] font-medium text-text-muted uppercase tracking-wider px-3 py-2.5">
+                      Tool
+                    </th>
+                    <th className="text-[11px] font-medium text-text-muted uppercase tracking-wider px-3 py-2.5">
+                      Requested At
+                    </th>
+                    <th className="text-[11px] font-medium text-text-muted uppercase tracking-wider px-3 py-2.5">
+                      Duration
+                    </th>
+                    <th className="text-[11px] font-medium text-text-muted uppercase tracking-wider px-3 py-2.5">
+                      Status
+                    </th>
+                    {viewTab === 'failures' && (
+                      <th className="text-[11px] font-medium text-text-muted uppercase tracking-wider px-3 py-2.5">
+                        Error
+                      </th>
+                    )}
                   </tr>
                 </thead>
                 <tbody>
                   {displayedHistory.map((r) => (
-                    <tr key={r.correlation_id} className="border-t border-gray-100">
-                      <td className="px-3 py-2 font-mono text-gray-800">{r.tool_name}</td>
-                      <td className="px-3 py-2 text-gray-500 text-xs">
-                        {new Date(r.requested_at).toLocaleString()}
-                      </td>
-                      <td className="px-3 py-2 text-gray-600">
-                        {r.duration_ms != null ? `${r.duration_ms}ms` : '—'}
+                    <tr
+                      key={r.correlation_id}
+                      className="border-t border-surface-tertiary hover:bg-surface-secondary transition-colors duration-150"
+                    >
+                      <td className="px-3 py-2 font-mono text-text-primary">{r.tool_name}</td>
+                      <td className="px-3 py-2 text-text-muted text-xs">{new Date(r.requested_at).toLocaleString()}</td>
+                      <td className="px-3 py-2 text-text-muted">
+                        {r.duration_ms != null ? `${r.duration_ms}ms` : '\u2014'}
                       </td>
                       <td className="px-3 py-2">
                         <span
                           className={`text-xs px-2 py-0.5 rounded-full font-medium ${
                             r.success === true
-                              ? 'bg-green-100 text-green-700'
+                              ? 'bg-success-surface text-success-text'
                               : r.success === false
-                                ? 'bg-red-100 text-red-700'
-                                : 'bg-gray-100 text-gray-500'
+                                ? 'bg-danger-surface text-danger-text'
+                                : 'bg-surface-tertiary text-text-muted'
                           }`}
                         >
                           {r.success === true ? 'success' : r.success === false ? 'failed' : 'unknown'}
                         </span>
                       </td>
                       {viewTab === 'failures' && (
-                        <td className="px-3 py-2 text-xs text-red-600 max-w-xs truncate">
-                          {r.error ?? '—'}
-                        </td>
+                        <td className="px-3 py-2 text-xs text-danger max-w-xs truncate">{r.error ?? '\u2014'}</td>
                       )}
                     </tr>
                   ))}
@@ -147,7 +162,7 @@ export function ExecutionsPage(): JSX.Element {
           </div>
         </>
       )}
-    </div>
+    </PageContainer>
   )
 }
 

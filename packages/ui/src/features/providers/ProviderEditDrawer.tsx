@@ -114,7 +114,7 @@ export function ProviderEditDrawer({ provider, open, onOpenChange }: ProviderEdi
           <button
             type="button"
             onClick={() => setStep((s) => (s - 1) as Step)}
-            className="px-4 py-2 text-sm font-medium text-gray-700 bg-white border border-gray-300 rounded-md hover:bg-gray-50"
+            className="px-4 py-2 text-sm font-medium text-text-secondary bg-surface border border-border-strong rounded-lg hover:bg-surface-secondary transition-colors"
           >
             Back
           </button>
@@ -125,7 +125,7 @@ export function ProviderEditDrawer({ provider, open, onOpenChange }: ProviderEdi
           <button
             type="button"
             onClick={() => setStep((s) => (s + 1) as Step)}
-            className="px-4 py-2 text-sm font-medium text-white bg-blue-600 rounded-md hover:bg-blue-700"
+            className="px-4 py-2 text-sm font-medium text-white bg-accent rounded-lg hover:bg-accent-hover"
           >
             Next
           </button>
@@ -134,7 +134,7 @@ export function ProviderEditDrawer({ provider, open, onOpenChange }: ProviderEdi
             type="button"
             onClick={() => updateMutation.mutate(buildUpdateRequest(form))}
             disabled={updateMutation.isPending}
-            className="px-4 py-2 text-sm font-medium text-white bg-blue-600 rounded-md hover:bg-blue-700 disabled:opacity-50 disabled:cursor-not-allowed"
+            className="px-4 py-2 text-sm font-medium text-white bg-accent rounded-lg hover:bg-accent-hover disabled:opacity-50 disabled:cursor-not-allowed"
           >
             {updateMutation.isPending ? 'Saving...' : 'Save Changes'}
           </button>
@@ -154,22 +154,22 @@ export function ProviderEditDrawer({ provider, open, onOpenChange }: ProviderEdi
                 className={cn(
                   'w-7 h-7 rounded-full flex items-center justify-center text-xs font-medium',
                   i < step
-                    ? 'bg-blue-600 text-white'
+                    ? 'bg-accent text-white'
                     : i === step
-                      ? 'bg-blue-600 text-white ring-2 ring-blue-200'
-                      : 'bg-gray-100 text-gray-400'
+                      ? 'bg-accent text-white ring-2 ring-accent'
+                      : 'bg-surface-tertiary text-text-faint'
                 )}
               >
                 {i < step ? '✓' : i + 1}
               </span>
               <span
-                className={cn('text-xs whitespace-nowrap', i === step ? 'text-blue-600 font-medium' : 'text-gray-400')}
+                className={cn('text-xs whitespace-nowrap', i === step ? 'text-accent font-medium' : 'text-text-faint')}
               >
                 {label}
               </span>
             </div>
             {i < STEPS.length - 1 && (
-              <div className={cn('h-px w-10 mx-2 mb-5', i < step ? 'bg-blue-600' : 'bg-gray-200')} />
+              <div className={cn('h-px w-10 mx-2 mb-5', i < step ? 'bg-accent' : 'bg-border')} />
             )}
           </div>
         ))}
@@ -178,7 +178,7 @@ export function ProviderEditDrawer({ provider, open, onOpenChange }: ProviderEdi
       {/* Step 0: Mode (read-only) */}
       {step === 0 && (
         <div className="space-y-3">
-          <p className="text-sm text-gray-600 mb-4">Provider mode cannot be changed after creation.</p>
+          <p className="text-sm text-text-muted mb-4">Provider mode cannot be changed after creation.</p>
           <div className="grid grid-cols-1 gap-3">
             {(
               [
@@ -191,15 +191,17 @@ export function ProviderEditDrawer({ provider, open, onOpenChange }: ProviderEdi
                 key={mode}
                 className={cn(
                   'flex items-start gap-3 rounded-lg border-2 p-4 cursor-default',
-                  form.mode === mode ? 'border-blue-500 bg-blue-50' : 'border-gray-200 opacity-50'
+                  form.mode === mode ? 'border-accent bg-accent-surface' : 'border-border opacity-50'
                 )}
               >
-                <Icon size={20} className={form.mode === mode ? 'text-blue-600' : 'text-gray-500'} />
+                <Icon size={20} className={form.mode === mode ? 'text-accent' : 'text-text-muted'} />
                 <div>
-                  <p className={cn('text-sm font-medium', form.mode === mode ? 'text-blue-900' : 'text-gray-900')}>
+                  <p
+                    className={cn('text-sm font-medium', form.mode === mode ? 'text-accent-text' : 'text-text-primary')}
+                  >
                     {name}
                   </p>
-                  <p className="text-xs text-gray-500 mt-0.5">{desc}</p>
+                  <p className="text-xs text-text-muted mt-0.5">{desc}</p>
                 </div>
               </div>
             ))}
@@ -211,62 +213,62 @@ export function ProviderEditDrawer({ provider, open, onOpenChange }: ProviderEdi
       {step === 1 && (
         <div className="space-y-4">
           <div>
-            <label className="block text-sm font-medium text-gray-700 mb-1">Provider ID</label>
-            <p className="px-3 py-2 text-sm text-gray-700 bg-gray-50 rounded-md border border-gray-200">
+            <label className="block text-sm font-medium text-text-secondary mb-1">Provider ID</label>
+            <p className="px-3 py-2 text-sm text-text-secondary bg-surface-secondary rounded-lg border border-border">
               {form.provider_id}
             </p>
-            <p className="text-xs text-gray-500 mt-1">Provider ID cannot be changed.</p>
+            <p className="text-xs text-text-muted mt-1">Provider ID cannot be changed.</p>
           </div>
 
           {form.mode === 'subprocess' && (
             <div>
-              <label className="block text-sm font-medium text-gray-700 mb-1">Command</label>
+              <label className="block text-sm font-medium text-text-secondary mb-1">Command</label>
               <input
                 type="text"
                 value={form.command}
                 onChange={(e) => setField('command', e.target.value)}
                 placeholder="python,-m,my_server"
-                className="w-full rounded-md border border-gray-300 px-3 py-2 text-sm focus:border-blue-500 focus:outline-none focus:ring-1 focus:ring-blue-500"
+                className="w-full rounded-lg border border-border-strong bg-surface px-3 py-2 text-sm focus:border-accent focus:outline-none focus:ring-1 focus:ring-accent"
               />
-              <p className="text-xs text-gray-500 mt-1">Enter values separated by commas.</p>
+              <p className="text-xs text-text-muted mt-1">Enter values separated by commas.</p>
             </div>
           )}
 
           {form.mode === 'docker' && (
             <>
               <div>
-                <label className="block text-sm font-medium text-gray-700 mb-1">Image</label>
+                <label className="block text-sm font-medium text-text-secondary mb-1">Image</label>
                 <input
                   type="text"
                   value={form.image}
                   onChange={(e) => setField('image', e.target.value)}
                   placeholder="my-org/my-provider:latest"
-                  className="w-full rounded-md border border-gray-300 px-3 py-2 text-sm focus:border-blue-500 focus:outline-none focus:ring-1 focus:ring-blue-500"
+                  className="w-full rounded-lg border border-border-strong bg-surface px-3 py-2 text-sm focus:border-accent focus:outline-none focus:ring-1 focus:ring-accent"
                 />
               </div>
               <div>
-                <label className="block text-sm font-medium text-gray-700 mb-1">Args</label>
+                <label className="block text-sm font-medium text-text-secondary mb-1">Args</label>
                 <input
                   type="text"
                   value={form.args}
                   onChange={(e) => setField('args', e.target.value)}
                   placeholder="--flag,value"
-                  className="w-full rounded-md border border-gray-300 px-3 py-2 text-sm focus:border-blue-500 focus:outline-none focus:ring-1 focus:ring-blue-500"
+                  className="w-full rounded-lg border border-border-strong bg-surface px-3 py-2 text-sm focus:border-accent focus:outline-none focus:ring-1 focus:ring-accent"
                 />
-                <p className="text-xs text-gray-500 mt-1">Enter values separated by commas.</p>
+                <p className="text-xs text-text-muted mt-1">Enter values separated by commas.</p>
               </div>
             </>
           )}
 
           {form.mode === 'remote' && (
             <div>
-              <label className="block text-sm font-medium text-gray-700 mb-1">Endpoint URL</label>
+              <label className="block text-sm font-medium text-text-secondary mb-1">Endpoint URL</label>
               <input
                 type="url"
                 value={form.endpoint}
                 onChange={(e) => setField('endpoint', e.target.value)}
                 placeholder="https://my-provider.example.com/mcp"
-                className="w-full rounded-md border border-gray-300 px-3 py-2 text-sm focus:border-blue-500 focus:outline-none focus:ring-1 focus:ring-blue-500"
+                className="w-full rounded-lg border border-border-strong bg-surface px-3 py-2 text-sm focus:border-accent focus:outline-none focus:ring-1 focus:ring-accent"
               />
             </div>
           )}
@@ -277,23 +279,23 @@ export function ProviderEditDrawer({ provider, open, onOpenChange }: ProviderEdi
       {step === 2 && (
         <div className="space-y-4">
           <div>
-            <label className="block text-sm font-medium text-gray-700 mb-1">Idle TTL (seconds)</label>
+            <label className="block text-sm font-medium text-text-secondary mb-1">Idle TTL (seconds)</label>
             <input
               type="number"
               value={form.idle_ttl_s}
               onChange={(e) => setField('idle_ttl_s', e.target.value)}
               placeholder="300 — provider stops after this many idle seconds"
-              className="w-full rounded-md border border-gray-300 px-3 py-2 text-sm focus:border-blue-500 focus:outline-none focus:ring-1 focus:ring-blue-500"
+              className="w-full rounded-lg border border-border-strong bg-surface px-3 py-2 text-sm focus:border-accent focus:outline-none focus:ring-1 focus:ring-accent"
             />
           </div>
           <div>
-            <label className="block text-sm font-medium text-gray-700 mb-1">Description</label>
+            <label className="block text-sm font-medium text-text-secondary mb-1">Description</label>
             <input
               type="text"
               value={form.description}
               onChange={(e) => setField('description', e.target.value)}
               placeholder="Brief description of this provider"
-              className="w-full rounded-md border border-gray-300 px-3 py-2 text-sm focus:border-blue-500 focus:outline-none focus:ring-1 focus:ring-blue-500"
+              className="w-full rounded-lg border border-border-strong bg-surface px-3 py-2 text-sm focus:border-accent focus:outline-none focus:ring-1 focus:ring-accent"
             />
           </div>
         </div>
@@ -303,29 +305,29 @@ export function ProviderEditDrawer({ provider, open, onOpenChange }: ProviderEdi
       {step === 3 && (
         <div className="space-y-4">
           <div>
-            <label className="block text-sm font-medium text-gray-700 mb-1">Allowed Tools</label>
+            <label className="block text-sm font-medium text-text-secondary mb-1">Allowed Tools</label>
             <textarea
               value={form.allowed_tools}
               onChange={(e) => setField('allowed_tools', e.target.value)}
               rows={4}
               placeholder="Enter tool name patterns, one per line. Leave empty for no restriction."
-              className="w-full rounded-md border border-gray-300 px-3 py-2 text-sm focus:border-blue-500 focus:outline-none focus:ring-1 focus:ring-blue-500 resize-none"
+              className="w-full rounded-lg border border-border-strong bg-surface px-3 py-2 text-sm focus:border-accent focus:outline-none focus:ring-1 focus:ring-accent resize-none"
             />
           </div>
           <div>
-            <label className="block text-sm font-medium text-gray-700 mb-1">Denied Tools</label>
+            <label className="block text-sm font-medium text-text-secondary mb-1">Denied Tools</label>
             <textarea
               value={form.denied_tools}
               onChange={(e) => setField('denied_tools', e.target.value)}
               rows={4}
               placeholder="Enter tool name patterns, one per line. Leave empty for no restriction."
-              className="w-full rounded-md border border-gray-300 px-3 py-2 text-sm focus:border-blue-500 focus:outline-none focus:ring-1 focus:ring-blue-500 resize-none"
+              className="w-full rounded-lg border border-border-strong bg-surface px-3 py-2 text-sm focus:border-accent focus:outline-none focus:ring-1 focus:ring-accent resize-none"
             />
           </div>
         </div>
       )}
 
-      {error && <p className="text-sm text-red-600 mt-4">{error}</p>}
+      {error && <p className="text-sm text-danger mt-4">{error}</p>}
     </Drawer>
   )
 }

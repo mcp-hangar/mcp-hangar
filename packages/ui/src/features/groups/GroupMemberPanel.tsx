@@ -68,13 +68,15 @@ export function GroupMemberPanel({ groupId, members }: GroupMemberPanelProps): J
       <div className="space-y-2">
         <div className="flex items-center justify-between">
           <div className="flex items-center gap-2">
-            <span className="text-xs font-medium text-gray-500 uppercase tracking-wide">Members</span>
-            <span className="text-xs bg-gray-100 text-gray-600 rounded-full px-2 py-0.5">{members.length}</span>
+            <span className="text-xs font-medium text-text-muted uppercase tracking-wide">Members</span>
+            <span className="text-xs bg-surface-tertiary text-text-muted rounded-full px-2 py-0.5">
+              {members.length}
+            </span>
           </div>
           <button
             type="button"
             onClick={() => setAddOpen(true)}
-            className="flex items-center gap-1 px-2 py-1 text-xs text-blue-600 border border-blue-200 rounded hover:bg-blue-50"
+            className="flex items-center gap-1 px-2 py-1 text-xs text-accent border border-accent rounded-lg hover:bg-accent-surface transition-colors"
           >
             <Plus size={12} />
             Add
@@ -86,27 +88,27 @@ export function GroupMemberPanel({ groupId, members }: GroupMemberPanelProps): J
         ) : (
           <table className="w-full text-sm">
             <thead>
-              <tr className="border-b border-gray-100">
-                <th className="text-left text-xs font-medium text-gray-500 py-2 pr-3">Provider</th>
-                <th className="text-left text-xs font-medium text-gray-500 py-2 pr-3">State</th>
-                <th className="text-left text-xs font-medium text-gray-500 py-2 pr-3">Weight</th>
-                <th className="text-left text-xs font-medium text-gray-500 py-2 pr-3">Priority</th>
-                <th className="text-left text-xs font-medium text-gray-500 py-2">Actions</th>
+              <tr className="border-b border-surface-tertiary">
+                <th className="text-left text-xs font-medium text-text-muted py-2 pr-3">Provider</th>
+                <th className="text-left text-xs font-medium text-text-muted py-2 pr-3">State</th>
+                <th className="text-left text-xs font-medium text-text-muted py-2 pr-3">Weight</th>
+                <th className="text-left text-xs font-medium text-text-muted py-2 pr-3">Priority</th>
+                <th className="text-left text-xs font-medium text-text-muted py-2">Actions</th>
               </tr>
             </thead>
-            <tbody className="divide-y divide-gray-50">
+            <tbody className="divide-y divide-surface-secondary">
               {members.map((member) => {
                 const isEditing = editingId === member.id
                 const isConfirming = confirmingId === member.id
 
                 return (
-                  <tr key={member.id} className="hover:bg-gray-50">
+                  <tr key={member.id} className="hover:bg-surface-secondary transition-colors duration-150">
                     <td className="py-2 pr-3">
-                      <Link to={`/providers/${member.id}`} className="text-blue-600 hover:underline text-sm">
+                      <Link to={`/providers/${member.id}`} className="text-accent hover:underline text-sm">
                         {member.id}
                       </Link>
                     </td>
-                    <td className="py-2 pr-3 text-sm text-gray-700">{member.state}</td>
+                    <td className="py-2 pr-3 text-sm text-text-secondary">{member.state}</td>
                     <td className="py-2 pr-3">
                       {isEditing ? (
                         <input
@@ -114,10 +116,10 @@ export function GroupMemberPanel({ groupId, members }: GroupMemberPanelProps): J
                           type="number"
                           value={editForm.weight}
                           onChange={(e) => setEditForm((f) => ({ ...f, weight: e.target.value }))}
-                          className="w-16 rounded border border-gray-300 px-1.5 py-0.5 text-sm focus:border-blue-500 focus:outline-none"
+                          className="w-16 rounded border border-border-strong px-1.5 py-0.5 text-sm focus:border-accent focus:outline-none"
                         />
                       ) : (
-                        <span className="text-sm text-gray-700">{member.weight}</span>
+                        <span className="text-sm text-text-secondary">{member.weight}</span>
                       )}
                     </td>
                     <td className="py-2 pr-3">
@@ -126,10 +128,10 @@ export function GroupMemberPanel({ groupId, members }: GroupMemberPanelProps): J
                           type="number"
                           value={editForm.priority}
                           onChange={(e) => setEditForm((f) => ({ ...f, priority: e.target.value }))}
-                          className="w-16 rounded border border-gray-300 px-1.5 py-0.5 text-sm focus:border-blue-500 focus:outline-none"
+                          className="w-16 rounded border border-border-strong px-1.5 py-0.5 text-sm focus:border-accent focus:outline-none"
                         />
                       ) : (
-                        <span className="text-sm text-gray-700">{member.priority}</span>
+                        <span className="text-sm text-text-secondary">{member.priority}</span>
                       )}
                     </td>
                     <td className="py-2">
@@ -139,14 +141,14 @@ export function GroupMemberPanel({ groupId, members }: GroupMemberPanelProps): J
                             type="button"
                             onClick={() => handleEditSave(member.id)}
                             disabled={updateMutation.isPending}
-                            className="text-xs px-2 py-0.5 text-white bg-blue-600 rounded hover:bg-blue-700 disabled:opacity-50"
+                            className="text-xs px-2 py-0.5 text-white bg-accent rounded hover:bg-accent-hover disabled:opacity-50"
                           >
                             Save
                           </button>
                           <button
                             type="button"
                             onClick={() => setEditingId(null)}
-                            className="text-xs px-2 py-0.5 text-gray-600 border border-gray-300 rounded hover:bg-gray-50"
+                            className="text-xs px-2 py-0.5 text-text-muted border border-border-strong rounded hover:bg-surface-secondary"
                           >
                             Cancel
                           </button>
@@ -157,14 +159,14 @@ export function GroupMemberPanel({ groupId, members }: GroupMemberPanelProps): J
                             type="button"
                             onClick={() => removeMutation.mutate(member.id)}
                             disabled={removeMutation.isPending}
-                            className="text-xs px-2 py-0.5 text-white bg-red-600 rounded hover:bg-red-700 disabled:opacity-50"
+                            className="text-xs px-2 py-0.5 text-white bg-danger rounded hover:bg-danger-hover disabled:opacity-50"
                           >
                             Remove
                           </button>
                           <button
                             type="button"
                             onClick={() => setConfirmingId(null)}
-                            className="text-xs px-2 py-0.5 text-gray-600 border border-gray-300 rounded hover:bg-gray-50"
+                            className="text-xs px-2 py-0.5 text-text-muted border border-border-strong rounded hover:bg-surface-secondary"
                           >
                             Cancel
                           </button>
@@ -174,7 +176,7 @@ export function GroupMemberPanel({ groupId, members }: GroupMemberPanelProps): J
                           <button
                             type="button"
                             onClick={() => handleEditStart(member)}
-                            className="p-1 text-gray-400 hover:text-gray-600 hover:bg-gray-100 rounded"
+                            className="p-1 text-text-faint hover:text-text-secondary hover:bg-surface-tertiary rounded"
                             title="Edit weight and priority"
                           >
                             <Pencil size={12} />
@@ -185,7 +187,7 @@ export function GroupMemberPanel({ groupId, members }: GroupMemberPanelProps): J
                               setConfirmingId(member.id)
                               setEditingId(null)
                             }}
-                            className={cn('text-xs text-red-600 hover:underline')}
+                            className={cn('text-xs text-danger hover:underline')}
                           >
                             Remove
                           </button>
@@ -265,7 +267,7 @@ function AddMemberDrawer({ groupId, open, onOpenChange }: AddMemberDrawerProps):
         <button
           type="button"
           onClick={() => onOpenChange(false)}
-          className="px-4 py-1.5 text-sm border border-gray-300 rounded-md hover:bg-gray-50"
+          className="px-4 py-1.5 text-sm border border-border-strong rounded-lg hover:bg-surface-secondary transition-colors"
         >
           Cancel
         </button>
@@ -273,7 +275,7 @@ function AddMemberDrawer({ groupId, open, onOpenChange }: AddMemberDrawerProps):
           type="button"
           onClick={handleSubmit}
           disabled={!providerId.trim() || addMutation.isPending}
-          className="px-4 py-1.5 text-sm bg-blue-600 text-white rounded-md hover:bg-blue-700 disabled:opacity-50 disabled:cursor-not-allowed"
+          className="px-4 py-1.5 text-sm bg-accent text-white rounded-lg hover:bg-accent-hover disabled:opacity-50 disabled:cursor-not-allowed transition-colors"
         >
           {addMutation.isPending ? 'Adding...' : 'Add Member'}
         </button>
@@ -285,8 +287,8 @@ function AddMemberDrawer({ groupId, open, onOpenChange }: AddMemberDrawerProps):
     <Drawer open={open} onOpenChange={onOpenChange} title="Add Member" footer={footer}>
       <div className="space-y-4">
         <div className="relative">
-          <label className="block text-sm font-medium text-gray-700 mb-1">
-            Provider ID <span className="text-red-500">*</span>
+          <label className="block text-sm font-medium text-text-secondary mb-1">
+            Provider ID <span className="text-danger">*</span>
           </label>
           <input
             type="text"
@@ -298,10 +300,10 @@ function AddMemberDrawer({ groupId, open, onOpenChange }: AddMemberDrawerProps):
               setAddError(null)
             }}
             placeholder="Search providers..."
-            className="w-full rounded-md border border-gray-300 px-3 py-2 text-sm focus:border-blue-500 focus:outline-none focus:ring-1 focus:ring-blue-500"
+            className="w-full rounded-lg border border-border-strong bg-surface px-3 py-2 text-sm focus:border-accent focus:outline-none focus:ring-1 focus:ring-accent"
           />
           {suggestions.length > 0 && (
-            <ul className="absolute z-10 w-full mt-1 bg-white border border-gray-200 rounded-md shadow-lg max-h-48 overflow-y-auto">
+            <ul className="absolute z-10 w-full mt-1 bg-surface border border-border rounded-lg shadow-lg max-h-48 overflow-y-auto">
               {suggestions.map((p) => (
                 <li
                   key={p.provider_id}
@@ -309,10 +311,10 @@ function AddMemberDrawer({ groupId, open, onOpenChange }: AddMemberDrawerProps):
                     setProviderId(p.provider_id)
                     setQuery('')
                   }}
-                  className="px-3 py-2 text-sm text-gray-700 hover:bg-gray-50 cursor-pointer"
+                  className="px-3 py-2 text-sm text-text-secondary hover:bg-surface-secondary cursor-pointer"
                 >
                   {p.provider_id}
-                  <span className="ml-2 text-xs text-gray-400">{p.state}</span>
+                  <span className="ml-2 text-xs text-text-faint">{p.state}</span>
                 </li>
               ))}
             </ul>
@@ -320,28 +322,28 @@ function AddMemberDrawer({ groupId, open, onOpenChange }: AddMemberDrawerProps):
         </div>
 
         <div>
-          <label className="block text-sm font-medium text-gray-700 mb-1">Weight</label>
+          <label className="block text-sm font-medium text-text-secondary mb-1">Weight</label>
           <input
             type="number"
             value={weight}
             onChange={(e) => setWeight(e.target.value)}
             min="1"
-            className="w-full rounded-md border border-gray-300 px-3 py-2 text-sm focus:border-blue-500 focus:outline-none focus:ring-1 focus:ring-blue-500"
+            className="w-full rounded-lg border border-border-strong bg-surface px-3 py-2 text-sm focus:border-accent focus:outline-none focus:ring-1 focus:ring-accent"
           />
         </div>
 
         <div>
-          <label className="block text-sm font-medium text-gray-700 mb-1">Priority</label>
+          <label className="block text-sm font-medium text-text-secondary mb-1">Priority</label>
           <input
             type="number"
             value={priority}
             onChange={(e) => setPriority(e.target.value)}
             min="0"
-            className="w-full rounded-md border border-gray-300 px-3 py-2 text-sm focus:border-blue-500 focus:outline-none focus:ring-1 focus:ring-blue-500"
+            className="w-full rounded-lg border border-border-strong bg-surface px-3 py-2 text-sm focus:border-accent focus:outline-none focus:ring-1 focus:ring-accent"
           />
         </div>
 
-        {addError && <p className="text-sm text-red-600">{addError}</p>}
+        {addError && <p className="text-sm text-danger">{addError}</p>}
       </div>
     </Drawer>
   )

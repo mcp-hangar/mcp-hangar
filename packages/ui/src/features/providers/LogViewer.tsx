@@ -16,10 +16,10 @@ const STATUS_LABEL: Record<WsStatus, string> = {
 }
 
 const STATUS_DOT_CLASS: Record<WsStatus, string> = {
-  connected: 'bg-green-400',
-  connecting: 'bg-yellow-400 animate-pulse',
-  disconnected: 'bg-gray-400',
-  error: 'bg-red-400',
+  connected: 'bg-success',
+  connecting: 'bg-warning animate-pulse',
+  disconnected: 'bg-text-faint',
+  error: 'bg-danger',
 }
 
 export function LogViewer({ logs, status, onClear }: LogViewerProps): JSX.Element {
@@ -43,30 +43,27 @@ export function LogViewer({ logs, status, onClear }: LogViewerProps): JSX.Elemen
   }
 
   return (
-    <div className="flex flex-col h-64">
+    <div className="flex flex-col h-64 rounded-xl overflow-hidden border border-border">
       {/* Toolbar */}
-      <div className="flex items-center justify-between px-3 py-1.5 border-b border-gray-200 bg-gray-50">
+      <div className="flex items-center justify-between px-3 py-1.5 border-b border-border bg-surface-secondary">
         <div className="flex items-center gap-2">
-          <span
-            className={`inline-block w-2 h-2 rounded-full ${STATUS_DOT_CLASS[status]}`}
-            aria-hidden="true"
-          />
-          <span className="text-xs text-gray-500">{STATUS_LABEL[status]}</span>
-          <span className="text-xs text-gray-400">{logs.length} lines</span>
+          <span className={`inline-block w-2 h-2 rounded-full ${STATUS_DOT_CLASS[status]}`} aria-hidden="true" />
+          <span className="text-xs text-text-muted">{STATUS_LABEL[status]}</span>
+          <span className="text-xs text-text-faint">{logs.length} lines</span>
         </div>
         <div className="flex items-center gap-3">
           <label className="flex items-center gap-1.5 cursor-pointer select-none">
             <input
               type="checkbox"
-              className="w-3 h-3 rounded accent-blue-600"
+              className="w-3 h-3 rounded accent-accent"
               checked={autoScroll}
               onChange={(e) => setAutoScroll(e.target.checked)}
             />
-            <span className="text-xs text-gray-500">Auto-scroll</span>
+            <span className="text-xs text-text-muted">Auto-scroll</span>
           </label>
           <button
             type="button"
-            className="text-xs text-gray-400 hover:text-gray-600 transition-colors"
+            className="text-xs text-text-faint hover:text-text-muted transition-colors"
             onClick={onClear}
           >
             Clear
@@ -78,18 +75,18 @@ export function LogViewer({ logs, status, onClear }: LogViewerProps): JSX.Elemen
       <div
         ref={containerRef}
         onScroll={handleScroll}
-        className="flex-1 overflow-y-auto bg-gray-950 font-mono text-xs leading-5 p-3 space-y-0"
+        className="flex-1 overflow-y-auto bg-log-bg font-mono text-xs leading-5 p-3 space-y-0"
       >
         {logs.length === 0 ? (
-          <span className="text-gray-600">No log output yet.</span>
+          <span className="text-text-faint">No log output yet.</span>
         ) : (
           logs.map((line, idx) => (
             <div
               // eslint-disable-next-line react/no-array-index-key
               key={idx}
-              className={line.stream === 'stderr' ? 'text-amber-400' : 'text-gray-300'}
+              className={line.stream === 'stderr' ? 'text-warning-text' : 'text-log-text'}
             >
-              <span className="text-gray-600 select-none mr-2">
+              <span className="text-text-faint select-none mr-2">
                 {new Date(line.recorded_at).toLocaleTimeString([], {
                   hour: '2-digit',
                   minute: '2-digit',

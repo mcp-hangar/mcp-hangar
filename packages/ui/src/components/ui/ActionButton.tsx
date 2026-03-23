@@ -1,20 +1,28 @@
 import React from 'react'
+import { motion } from 'framer-motion'
 import { cn } from '../../lib/cn'
 import { LoadingSpinner } from './LoadingSpinner'
+import { buttonTap } from '../../lib/animations'
 
 interface ActionButtonProps {
   onClick: () => void
   isLoading?: boolean
   disabled?: boolean
   variant?: 'primary' | 'danger' | 'ghost'
+  size?: 'sm' | 'md'
   children: React.ReactNode
   className?: string
 }
 
 const VARIANT_STYLES: Record<'primary' | 'danger' | 'ghost', string> = {
-  primary: 'bg-blue-600 text-white hover:bg-blue-700',
-  danger: 'bg-red-600 text-white hover:bg-red-700',
-  ghost: 'bg-transparent text-gray-700 border border-gray-300 hover:bg-gray-50',
+  primary: 'bg-accent text-white shadow-xs hover:bg-accent-hover hover:shadow-sm active:shadow-xs',
+  danger: 'bg-danger text-white shadow-xs hover:bg-danger-hover hover:shadow-sm active:shadow-xs',
+  ghost: 'text-text-secondary border border-border hover:bg-surface-secondary hover:border-border-strong',
+}
+
+const SIZE_STYLES: Record<'sm' | 'md', string> = {
+  sm: 'px-2.5 py-1 text-xs gap-1',
+  md: 'px-3.5 py-1.5 text-sm gap-1.5',
 }
 
 export function ActionButton({
@@ -22,23 +30,26 @@ export function ActionButton({
   isLoading = false,
   disabled = false,
   variant = 'primary',
+  size = 'md',
   children,
   className,
 }: ActionButtonProps): JSX.Element {
   return (
-    <button
+    <motion.button
       type="button"
       onClick={onClick}
       disabled={disabled || isLoading}
+      whileTap={disabled ? undefined : buttonTap}
       className={cn(
-        'inline-flex items-center gap-1.5 px-3 py-1.5 text-sm font-medium rounded-md transition-colors',
-        'disabled:opacity-50 disabled:cursor-not-allowed',
+        'inline-flex items-center font-medium rounded-lg transition-all duration-150',
+        'disabled:opacity-40 disabled:cursor-not-allowed disabled:pointer-events-none',
         VARIANT_STYLES[variant],
-        className,
+        SIZE_STYLES[size],
+        className
       )}
     >
-      {isLoading && <LoadingSpinner size={12} />}
+      {isLoading && <LoadingSpinner size={size === 'sm' ? 10 : 12} />}
       {children}
-    </button>
+    </motion.button>
   )
 }

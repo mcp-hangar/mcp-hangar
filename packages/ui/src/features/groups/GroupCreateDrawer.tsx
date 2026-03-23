@@ -73,7 +73,7 @@ export function GroupCreateDrawer({ open, onOpenChange }: GroupCreateDrawerProps
         <button
           type="button"
           onClick={() => onOpenChange(false)}
-          className="px-4 py-1.5 text-sm border border-gray-300 rounded-md hover:bg-gray-50"
+          className="px-4 py-1.5 text-sm border border-border-strong rounded-lg hover:bg-surface-secondary transition-colors"
         >
           Cancel
         </button>
@@ -81,7 +81,7 @@ export function GroupCreateDrawer({ open, onOpenChange }: GroupCreateDrawerProps
           type="button"
           onClick={handleSubmit}
           disabled={!isValid || createMutation.isPending}
-          className="px-4 py-1.5 text-sm bg-blue-600 text-white rounded-md hover:bg-blue-700 disabled:opacity-50 disabled:cursor-not-allowed"
+          className="px-4 py-1.5 text-sm bg-accent text-white rounded-lg hover:bg-accent-hover transition-colors disabled:opacity-50 disabled:cursor-not-allowed"
         >
           {createMutation.isPending ? 'Creating...' : 'Create Group'}
         </button>
@@ -93,26 +93,26 @@ export function GroupCreateDrawer({ open, onOpenChange }: GroupCreateDrawerProps
     <Drawer open={open} onOpenChange={onOpenChange} title="Create Group" footer={footer}>
       <div className="space-y-4">
         <div>
-          <label className="block text-sm font-medium text-gray-700 mb-1">
-            Group ID <span className="text-red-500">*</span>
+          <label className="block text-sm font-medium text-text-secondary mb-1">
+            Group ID <span className="text-danger">*</span>
           </label>
           <input
             type="text"
             value={form.group_id}
             onChange={(e) => setField('group_id', e.target.value)}
             placeholder="e.g. primary-tools"
-            className="w-full rounded-md border border-gray-300 px-3 py-2 text-sm focus:border-blue-500 focus:outline-none focus:ring-1 focus:ring-blue-500"
+            className="w-full rounded-lg border border-border-strong bg-surface px-3 py-2 text-sm focus:border-accent focus:outline-none focus:ring-1 focus:ring-accent"
           />
         </div>
 
         <div>
-          <label className="block text-sm font-medium text-gray-700 mb-1">
-            Strategy <span className="text-red-500">*</span>
+          <label className="block text-sm font-medium text-text-secondary mb-1">
+            Strategy <span className="text-danger">*</span>
           </label>
           <select
             value={form.strategy}
             onChange={(e) => setField('strategy', e.target.value as GroupStrategy)}
-            className="w-full rounded-md border border-gray-300 px-3 py-2 text-sm focus:border-blue-500 focus:outline-none focus:ring-1 focus:ring-blue-500"
+            className="w-full rounded-lg border border-border-strong bg-surface px-3 py-2 text-sm focus:border-accent focus:outline-none focus:ring-1 focus:ring-accent"
           >
             <option value="round_robin">Round Robin</option>
             <option value="weighted_round_robin">Weighted Round Robin</option>
@@ -123,29 +123,29 @@ export function GroupCreateDrawer({ open, onOpenChange }: GroupCreateDrawerProps
         </div>
 
         <div>
-          <label className="block text-sm font-medium text-gray-700 mb-1">Description</label>
+          <label className="block text-sm font-medium text-text-secondary mb-1">Description</label>
           <input
             type="text"
             value={form.description}
             onChange={(e) => setField('description', e.target.value)}
             placeholder="Brief description of this group"
-            className="w-full rounded-md border border-gray-300 px-3 py-2 text-sm focus:border-blue-500 focus:outline-none focus:ring-1 focus:ring-blue-500"
+            className="w-full rounded-lg border border-border-strong bg-surface px-3 py-2 text-sm focus:border-accent focus:outline-none focus:ring-1 focus:ring-accent"
           />
         </div>
 
         <div>
-          <label className="block text-sm font-medium text-gray-700 mb-1">Min Healthy</label>
+          <label className="block text-sm font-medium text-text-secondary mb-1">Min Healthy</label>
           <input
             type="number"
             value={form.min_healthy}
             onChange={(e) => setField('min_healthy', e.target.value)}
             placeholder="1"
             min="0"
-            className="w-full rounded-md border border-gray-300 px-3 py-2 text-sm focus:border-blue-500 focus:outline-none focus:ring-1 focus:ring-blue-500"
+            className="w-full rounded-lg border border-border-strong bg-surface px-3 py-2 text-sm focus:border-accent focus:outline-none focus:ring-1 focus:ring-accent"
           />
         </div>
 
-        {error && <p className="text-sm text-red-600 mt-2">{error}</p>}
+        {error && <p className="text-sm text-danger mt-2">{error}</p>}
       </div>
     </Drawer>
   )

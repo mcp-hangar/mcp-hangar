@@ -1,9 +1,11 @@
 import { useState } from 'react'
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query'
+import { motion } from 'framer-motion'
 import { Plus } from 'lucide-react'
 import { queryKeys } from '../../lib/queryKeys'
 import { providersApi } from '../../api/providers'
-import { EmptyState, LoadingSpinner } from '../../components/ui'
+import { staggerContainer } from '../../lib/animations'
+import { EmptyState, LoadingSpinner, PageContainer } from '../../components/ui'
 import { ProviderRow } from '../../components/providers/ProviderRow'
 import { ProviderCreateDrawer } from './ProviderCreateDrawer'
 import { ProviderEditDrawer } from './ProviderEditDrawer'
@@ -50,13 +52,13 @@ export function ProvidersPage(): JSX.Element {
   const providers = data?.providers ?? []
 
   return (
-    <div className="p-6 space-y-4">
+    <PageContainer className="p-6 space-y-4">
       <div className="flex items-center justify-between">
-        <h2 className="text-lg font-semibold text-gray-900">Providers</h2>
+        <h2 className="text-lg font-semibold text-text-primary">Providers</h2>
         <button
           type="button"
           onClick={() => setCreateOpen(true)}
-          className="flex items-center gap-1.5 px-3 py-1.5 text-sm bg-blue-600 text-white rounded-md hover:bg-blue-700"
+          className="flex items-center gap-1.5 px-3 py-1.5 text-sm bg-accent text-white rounded-lg hover:bg-accent-hover transition-colors"
         >
           <Plus size={16} />
           New Provider
@@ -70,10 +72,10 @@ export function ProvidersPage(): JSX.Element {
             key={filter.label}
             type="button"
             onClick={() => setStateFilter(filter.value)}
-            className={`px-3 py-1.5 text-sm font-medium rounded-md transition-colors ${
+            className={`px-3 py-1.5 text-sm font-medium rounded-lg transition-colors ${
               stateFilter === filter.value
-                ? 'bg-blue-600 text-white'
-                : 'bg-white text-gray-600 border border-gray-300 hover:bg-gray-50'
+                ? 'bg-accent text-white'
+                : 'bg-surface text-text-muted border border-border-strong hover:bg-surface-secondary'
             }`}
           >
             {filter.label}
@@ -86,23 +88,29 @@ export function ProvidersPage(): JSX.Element {
           <LoadingSpinner size={32} />
         </div>
       ) : error ? (
-        <p className="text-sm text-red-600">Failed to load providers.</p>
+        <p className="text-sm text-danger">Failed to load providers.</p>
       ) : providers.length === 0 ? (
         <EmptyState message="No providers match the filter." />
       ) : (
-        <div className="bg-white rounded-lg border border-gray-200 overflow-hidden">
+        <div className="bg-surface rounded-xl border border-border overflow-hidden shadow-xs">
           <table className="w-full text-left border-collapse">
             <thead>
-              <tr className="border-b border-gray-200">
-                <th className="text-xs font-medium text-gray-500 uppercase py-2 px-3">Provider</th>
-                <th className="text-xs font-medium text-gray-500 uppercase py-2 px-3">State</th>
-                <th className="text-xs font-medium text-gray-500 uppercase py-2 px-3">Mode</th>
-                <th className="text-xs font-medium text-gray-500 uppercase py-2 px-3 text-right">Tools</th>
-                <th className="text-xs font-medium text-gray-500 uppercase py-2 px-3">Health</th>
-                <th className="text-xs font-medium text-gray-500 uppercase py-2 px-3">Actions</th>
+              <tr className="border-b border-border">
+                <th className="text-[11px] font-medium text-text-muted uppercase tracking-wider py-2.5 px-3">
+                  Provider
+                </th>
+                <th className="text-[11px] font-medium text-text-muted uppercase tracking-wider py-2.5 px-3">State</th>
+                <th className="text-[11px] font-medium text-text-muted uppercase tracking-wider py-2.5 px-3">Mode</th>
+                <th className="text-[11px] font-medium text-text-muted uppercase tracking-wider py-2.5 px-3 text-right">
+                  Tools
+                </th>
+                <th className="text-[11px] font-medium text-text-muted uppercase tracking-wider py-2.5 px-3">Health</th>
+                <th className="text-[11px] font-medium text-text-muted uppercase tracking-wider py-2.5 px-3">
+                  Actions
+                </th>
               </tr>
             </thead>
-            <tbody>
+            <motion.tbody variants={staggerContainer} initial="hidden" animate="visible">
               {providers.map((p) => (
                 <ProviderRow
                   key={p.provider_id}
@@ -115,7 +123,7 @@ export function ProvidersPage(): JSX.Element {
                   onDelete={setDeleteProvider}
                 />
               ))}
-            </tbody>
+            </motion.tbody>
           </table>
         </div>
       )}
@@ -142,6 +150,6 @@ export function ProvidersPage(): JSX.Element {
           }}
         />
       )}
-    </div>
+    </PageContainer>
   )
 }

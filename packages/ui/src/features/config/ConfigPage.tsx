@@ -1,5 +1,6 @@
 import { useState } from 'react'
 import { cn } from '../../lib/cn'
+import { PageContainer } from '../../components/ui'
 import { CurrentConfigTab } from './CurrentConfigTab'
 import { ExportBackupTab } from './ExportBackupTab'
 import { DiffTab } from './DiffTab'
@@ -16,11 +17,11 @@ export function ConfigPage(): JSX.Element {
   const [activeTab, setActiveTab] = useState<ConfigTab>('current')
 
   return (
-    <div className="space-y-4 p-6">
-      <h2 className="text-lg font-semibold text-gray-900">Configuration</h2>
+    <PageContainer className="space-y-4 p-6">
+      <h2 className="text-lg font-semibold text-text-primary">Configuration</h2>
 
       {/* Tab bar */}
-      <div className="flex gap-1 border-b">
+      <div className="flex gap-1 border-b border-border">
         {TABS.map((tab) => (
           <button
             key={tab.id}
@@ -28,8 +29,8 @@ export function ConfigPage(): JSX.Element {
             className={cn(
               'px-4 py-2 text-sm font-medium border-b-2 -mb-px transition-colors',
               activeTab === tab.id
-                ? 'border-blue-600 text-blue-600'
-                : 'border-transparent text-gray-500 hover:text-gray-700 hover:border-gray-300'
+                ? 'border-accent text-accent'
+                : 'border-transparent text-text-muted hover:text-text-secondary hover:border-border-strong'
             )}
           >
             {tab.label}
@@ -43,6 +44,6 @@ export function ConfigPage(): JSX.Element {
         {activeTab === 'export' && <ExportBackupTab />}
         {activeTab === 'diff' && <DiffTab />}
       </div>
-    </div>
+    </PageContainer>
   )
 }

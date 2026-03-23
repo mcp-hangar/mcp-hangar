@@ -4,7 +4,11 @@ import { BrowserRouter } from 'react-router'
 import { QueryClient, QueryClientProvider } from '@tanstack/react-query'
 import { ReactQueryDevtools } from '@tanstack/react-query-devtools'
 import { App } from './App'
+import { initTheme } from './store/theme'
 import './index.css'
+
+// Apply persisted or system theme before first paint to avoid flash
+initTheme()
 
 const queryClient = new QueryClient({
   defaultOptions: {
@@ -24,5 +28,5 @@ createRoot(document.getElementById('root')!).render(
         <ReactQueryDevtools initialIsOpen={false} />
       </QueryClientProvider>
     </BrowserRouter>
-  </StrictMode>,
+  </StrictMode>
 )

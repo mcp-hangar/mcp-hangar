@@ -2,6 +2,33 @@ import { useCallback, useEffect, useRef, useState } from 'react'
 
 export type WsStatus = 'disconnected' | 'connecting' | 'connected' | 'error'
 
+export interface WebSocketConnection {
+  readyState: number
+  onopen: ((event: Event) => void) | null
+  onmessage: ((event: MessageEvent) => void) | null
+  onclose: ((event: CloseEvent) => void) | null
+  onerror: ((event: Event) => void) | null
+  send: (data: string) => void
+  close: () => void
+}
+
+export type WebSocketFactory = (url: string) => WebSocketConnection
+
+const READY_STATE_CONNECTING = 0
+const READY_STATE_OPEN = 1
+
+const defaultWebSocketFactory: WebSocketFactory = (url) => new WebSocket(url)
+
+let webSocketFactory: WebSocketFactory = defaultWebSocketFactory
+
+export function setWebSocketFactory(factory: WebSocketFactory): void {
+  webSocketFactory = factory
+}
+
+export function resetWebSocketFactory(): void {
+  webSocketFactory = defaultWebSocketFactory
+}
+
 interface UseWebSocketOptions {
   url: string
   onMessage: (event: MessageEvent) => void
@@ -32,7 +59,7 @@ export function useWebSocket({
   reconnectMaxMs = 30000,
 }: UseWebSocketOptions): UseWebSocketReturn {
   const [status, setStatus] = useState<WsStatus>('disconnected')
-  const wsRef = useRef<WebSocket | null>(null)
+  const wsRef = useRef<WebSocketConnection | null>(null)
   const reconnectAttemptRef = useRef(0)
   const reconnectTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null)
   const shouldReconnectRef = useRef(true)
@@ -48,11 +75,16 @@ export function useWebSocket({
   onErrorRef.current = onError
 
   const connect = useCallback(() => {
-    if (wsRef.current?.readyState === WebSocket.OPEN) return
-    if (wsRef.current?.readyState === WebSocket.CONNECTING) return
+    if (wsRef.current?.readyState === READY_STATE_OPEN) return
+    if (wsRef.current?.readyState === READY_STATE_CONNECTING) return
+
+    if (reconnectTimerRef.current) {
+      clearTimeout(reconnectTimerRef.current)
+      reconnectTimerRef.current = null
+    }
 
     setStatus('connecting')
-    const ws = new WebSocket(url)
+    const ws = webSocketFactory(url)
     wsRef.current = ws
 
     ws.onopen = () => {
@@ -87,6 +119,10 @@ export function useWebSocket({
   useEffect(() => {
     if (!enabled) {
       shouldReconnectRef.current = false
+      if (reconnectTimerRef.current) {
+        clearTimeout(reconnectTimerRef.current)
+        reconnectTimerRef.current = null
+      }
       wsRef.current?.close()
       return
     }
@@ -106,7 +142,7 @@ export function useWebSocket({
   }, [enabled, connect])
 
   const send = useCallback((data: string) => {
-    if (wsRef.current?.readyState === WebSocket.OPEN) {
+    if (wsRef.current?.readyState === READY_STATE_OPEN) {
       wsRef.current.send(data)
     }
   }, [])

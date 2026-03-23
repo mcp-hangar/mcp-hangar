@@ -1,12 +1,12 @@
-import { useEffect, useRef, useMemo } from 'react'
-import { useNavigate } from 'react-router-dom'
+import { useCallback, useEffect, useRef, useMemo } from 'react'
+import { useNavigate } from 'react-router'
 import { useQuery } from '@tanstack/react-query'
 import * as d3 from 'd3'
 import { queryKeys } from '../../lib/queryKeys'
 import { providersApi } from '../../api/providers'
 import { groupsApi } from '../../api/groups'
 import { useProviderState } from '../../hooks/useProviderState'
-import { LoadingSpinner } from '../../components/ui'
+import { LoadingSpinner, PageContainer } from '../../components/ui'
 import type { ProviderState } from '../../types/provider'
 
 // Node and link types for D3 simulation
@@ -22,22 +22,39 @@ interface TopoLink extends d3.SimulationLinkDatum<TopoNode> {
   target: string | TopoNode
 }
 
-const STATE_COLORS: Record<ProviderState, string> = {
-  cold: '#94a3b8',
-  initializing: '#60a5fa',
-  ready: '#22c55e',
-  degraded: '#f59e0b',
-  dead: '#ef4444',
+function getCssColor(varName: string, fallback: string): string {
+  if (typeof window === 'undefined') return fallback
+  const value = getComputedStyle(document.documentElement).getPropertyValue(varName).trim()
+  return value || fallback
 }
 
-const GROUP_COLOR = '#8b5cf6'
-const DEFAULT_PROVIDER_COLOR = '#94a3b8'
+function getStateColors(): Record<ProviderState, string> {
+  return {
+    cold: getCssColor('--color-chart-5', '#94a3b8'),
+    initializing: getCssColor('--color-chart-1', '#60a5fa'),
+    ready: getCssColor('--color-chart-2', '#22c55e'),
+    degraded: getCssColor('--color-chart-3', '#f59e0b'),
+    dead: getCssColor('--color-chart-4', '#ef4444'),
+  }
+}
+
+function getGroupColor(): string {
+  return getCssColor('--color-chart-6', '#8b5cf6')
+}
+
+function getDefaultProviderColor(): string {
+  return getCssColor('--color-chart-5', '#94a3b8')
+}
+
 const NODE_RADIUS_PROVIDER = 18
 const NODE_RADIUS_GROUP = 24
 
 function nodeColor(node: TopoNode): string {
-  if (node.kind === 'group') return GROUP_COLOR
-  return node.state ? (STATE_COLORS[node.state] ?? DEFAULT_PROVIDER_COLOR) : DEFAULT_PROVIDER_COLOR
+  const stateColors = getStateColors()
+  const groupColor = getGroupColor()
+  const defaultColor = getDefaultProviderColor()
+  if (node.kind === 'group') return groupColor
+  return node.state ? (stateColors[node.state] ?? defaultColor) : defaultColor
 }
 
 function nodeRadius(node: TopoNode): number {
@@ -73,25 +90,41 @@ function TopologyGraph({ nodes, links, onNodeClick }: TopologyGraphProps): JSX.E
 
     const simulation = d3
       .forceSimulation<TopoNode>(simNodes)
-      .force('link', d3.forceLink<TopoNode, TopoLink>(simLinks).id((d) => d.id).distance(100))
+      .force(
+        'link',
+        d3
+          .forceLink<TopoNode, TopoLink>(simLinks)
+          .id((d) => d.id)
+          .distance(100)
+      )
       .force('charge', d3.forceManyBody<TopoNode>().strength(-300))
       .force('center', d3.forceCenter(width / 2, height / 2))
-      .force('collision', d3.forceCollide<TopoNode>((d) => nodeRadius(d) + 8))
+      .force(
+        'collision',
+        d3.forceCollide<TopoNode>((d) => nodeRadius(d) + 8)
+      )
 
     simulationRef.current = simulation
+
+    const linkColor = getCssColor('--color-chart-5', '#e2e8f0')
+    const labelColor = getCssColor('--color-chart-7', '#374151')
+    const groupColor = getGroupColor()
 
     // Zoom/pan container
     const container = svg.append('g')
     svg.call(
-      d3.zoom<SVGSVGElement, unknown>().scaleExtent([0.3, 3]).on('zoom', (event: d3.D3ZoomEvent<SVGSVGElement, unknown>) => {
-        container.attr('transform', event.transform.toString())
-      }),
+      d3
+        .zoom<SVGSVGElement, unknown>()
+        .scaleExtent([0.3, 3])
+        .on('zoom', (event: d3.D3ZoomEvent<SVGSVGElement, unknown>) => {
+          container.attr('transform', event.transform.toString())
+        })
     )
 
     // Links
     const link = container
       .append('g')
-      .attr('stroke', '#e2e8f0')
+      .attr('stroke', linkColor)
       .attr('stroke-width', 2)
       .selectAll<SVGLineElement, TopoLink>('line')
       .data(simLinks)
@@ -121,7 +154,7 @@ function TopologyGraph({ nodes, links, onNodeClick }: TopologyGraphProps): JSX.E
             if (!event.active) simulation.alphaTarget(0)
             d.fx = null
             d.fy = null
-          }),
+          })
       )
 
     // Circles
@@ -138,7 +171,7 @@ function TopologyGraph({ nodes, links, onNodeClick }: TopologyGraphProps): JSX.E
       .append('circle')
       .attr('r', (d) => nodeRadius(d) + 4)
       .attr('fill', 'none')
-      .attr('stroke', GROUP_COLOR)
+      .attr('stroke', groupColor)
       .attr('stroke-width', 2)
       .attr('stroke-dasharray', '4 2')
 
@@ -148,7 +181,7 @@ function TopologyGraph({ nodes, links, onNodeClick }: TopologyGraphProps): JSX.E
       .attr('text-anchor', 'middle')
       .attr('dy', (d) => nodeRadius(d) + 14)
       .attr('font-size', '11px')
-      .attr('fill', '#374151')
+      .attr('fill', labelColor)
       .text((d) => d.label)
 
     simulation.on('tick', () => {
@@ -206,57 +239,58 @@ export function TopologyPage(): JSX.Element {
       label: g.group_id,
     }))
 
-    // Links: groups → their members (we don't have member data from GroupSummary,
+    // Links: groups -> their members (we don't have member data from GroupSummary,
     // so render isolated group nodes; detail links require GroupDetails).
-    // For now emit no links — topology still shows all nodes clearly.
+    // For now emit no links -- topology still shows all nodes clearly.
     const topoLinks: TopoLink[] = []
 
     return { nodes: [...providerNodes, ...groupNodes], links: topoLinks }
   }, [providersData, groupsData])
 
-  function handleNodeClick(node: TopoNode): void {
-    if (node.kind === 'provider') {
-      void navigate(`/providers/${node.id}`)
-    } else {
-      // Strip the 'group:' prefix
-      void navigate(`/groups/${node.id.replace(/^group:/, '')}`)
-    }
-  }
+  const handleNodeClick = useCallback(
+    (node: TopoNode): void => {
+      if (node.kind === 'provider') {
+        void navigate(`/providers/${node.id}`)
+      } else {
+        // Strip the 'group:' prefix
+        void navigate(`/groups/${node.id.replace(/^group:/, '')}`)
+      }
+    },
+    [navigate]
+  )
 
   // Legend data
+  const stateColors = getStateColors()
   const legendEntries: { label: string; color: string }[] = [
-    { label: 'ready', color: STATE_COLORS.ready },
-    { label: 'initializing', color: STATE_COLORS.initializing },
-    { label: 'degraded', color: STATE_COLORS.degraded },
-    { label: 'dead', color: STATE_COLORS.dead },
-    { label: 'cold / unknown', color: DEFAULT_PROVIDER_COLOR },
-    { label: 'group', color: GROUP_COLOR },
+    { label: 'ready', color: stateColors.ready },
+    { label: 'initializing', color: stateColors.initializing },
+    { label: 'degraded', color: stateColors.degraded },
+    { label: 'dead', color: stateColors.dead },
+    { label: 'cold / unknown', color: getDefaultProviderColor() },
+    { label: 'group', color: getGroupColor() },
   ]
 
   return (
-    <div className="p-6 flex flex-col h-full space-y-4">
+    <PageContainer className="p-6 flex flex-col h-full space-y-4">
       <div className="flex items-center justify-between">
-        <h2 className="text-lg font-semibold text-gray-900">Topology</h2>
+        <h2 className="text-lg font-semibold text-text-primary">Topology</h2>
         <div className="flex items-center gap-4">
           {legendEntries.map((e) => (
-            <span key={e.label} className="flex items-center gap-1 text-xs text-gray-600">
-              <span
-                className="inline-block w-3 h-3 rounded-full flex-shrink-0"
-                style={{ backgroundColor: e.color }}
-              />
+            <span key={e.label} className="flex items-center gap-1 text-xs text-text-muted">
+              <span className="inline-block w-3 h-3 rounded-full flex-shrink-0" style={{ backgroundColor: e.color }} />
               {e.label}
             </span>
           ))}
         </div>
       </div>
 
-      <div className="flex-1 bg-white rounded-lg border border-gray-200 overflow-hidden min-h-[500px]">
+      <div className="flex-1 bg-surface rounded-xl border border-border overflow-hidden shadow-xs min-h-[500px]">
         {isLoading ? (
           <div className="flex items-center justify-center h-full">
             <LoadingSpinner />
           </div>
         ) : nodes.length === 0 ? (
-          <div className="flex items-center justify-center h-full text-sm text-gray-500">
+          <div className="flex items-center justify-center h-full text-sm text-text-muted">
             No providers or groups found.
           </div>
         ) : (
@@ -264,9 +298,9 @@ export function TopologyPage(): JSX.Element {
         )}
       </div>
 
-      <p className="text-xs text-gray-400">
+      <p className="text-xs text-text-faint">
         Click a node to navigate to its detail page. Drag nodes to reposition. Scroll to zoom.
       </p>
-    </div>
+    </PageContainer>
   )
 }

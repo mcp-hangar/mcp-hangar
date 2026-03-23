@@ -21,26 +21,39 @@ export interface AuditRecord {
   recorded_at?: string
 }
 
+/**
+ * Security event as returned by GET /observability/security.
+ * Matches SecurityEvent.to_dict() in security_handler.py.
+ * severity can be 'info' | 'low' | 'medium' | 'high' | 'critical'.
+ */
 export interface SecurityEvent {
   event_id: string
   event_type: string
-  severity: 'low' | 'medium' | 'high' | 'critical'
+  severity: 'info' | 'low' | 'medium' | 'high' | 'critical'
   message: string
   timestamp: string
-  provider_id?: string
-  tool_name?: string
+  provider_id?: string | null
+  tool_name?: string | null
   source_ip?: string | null
   user_id?: string | null
   details?: Record<string, unknown>
   correlation_id?: string | null
 }
 
+/**
+ * Alert as returned by GET /observability/alerts.
+ * Matches Alert.to_dict() in alert_handler.py.
+ */
 export interface Alert {
   alert_id: string
-  level: 'warning' | 'critical'
+  level: 'warning' | 'critical' | 'info'
   message: string
+  provider_id: string
+  event_type: string
+  timestamp: string
   created_at: string
-  resolved_at?: string
+  resolved_at?: string | null
+  details?: Record<string, unknown>
 }
 
 export interface MetricHistoryPoint {

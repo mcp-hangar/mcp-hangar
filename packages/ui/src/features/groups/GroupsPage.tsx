@@ -1,11 +1,13 @@
 import { useState } from 'react'
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query'
+import { motion, AnimatePresence } from 'framer-motion'
 import * as Dialog from '@radix-ui/react-dialog'
-import { Plus, Pencil, Trash2 } from 'lucide-react'
+import { Plus, Pencil, Trash2, ChevronDown } from 'lucide-react'
 import { groupsApi } from '../../api/groups'
 import { queryKeys } from '../../lib/queryKeys'
 import { cn } from '../../lib/cn'
-import { CircuitBreakerBadge, ActionButton, EmptyState, LoadingSpinner } from '../../components/ui'
+import { modalVariants, overlayVariants, expandVariants } from '../../lib/animations'
+import { CircuitBreakerBadge, ActionButton, EmptyState, LoadingSpinner, PageContainer } from '../../components/ui'
 import { ToolAccessPolicyEditor } from '../../components/ui/ToolAccessPolicyEditor'
 import { GroupCreateDrawer } from './GroupCreateDrawer'
 import { GroupEditDrawer } from './GroupEditDrawer'
@@ -25,18 +27,32 @@ function GroupDeleteDialog({ groupId, open, onOpenChange, onConfirm, isPending }
   return (
     <Dialog.Root open={open} onOpenChange={onOpenChange}>
       <Dialog.Portal>
-        <Dialog.Overlay className="fixed inset-0 bg-black/40 z-40" />
+        <Dialog.Overlay asChild>
+          <motion.div
+            variants={overlayVariants}
+            initial="hidden"
+            animate="visible"
+            exit="exit"
+            className="fixed inset-0 bg-overlay z-40"
+          />
+        </Dialog.Overlay>
         <Dialog.Content className="fixed inset-0 flex items-center justify-center z-50 p-4">
-          <div className="bg-white rounded-lg shadow-xl w-full max-w-md p-6 space-y-4">
-            <Dialog.Title className="text-base font-semibold text-gray-900">Delete Group</Dialog.Title>
-            <p className="text-sm text-gray-600">
+          <motion.div
+            variants={modalVariants}
+            initial="hidden"
+            animate="visible"
+            exit="exit"
+            className="bg-surface rounded-xl shadow-xl w-full max-w-md p-6 space-y-4"
+          >
+            <Dialog.Title className="text-base font-semibold text-text-primary">Delete Group</Dialog.Title>
+            <p className="text-sm text-text-muted">
               Delete <span className="font-medium">{groupId}</span>? This cannot be undone.
             </p>
             <div className="flex justify-end gap-2 pt-2">
               <Dialog.Close asChild>
                 <button
                   type="button"
-                  className="px-4 py-1.5 text-sm border border-gray-300 rounded-md hover:bg-gray-50"
+                  className="px-4 py-1.5 text-sm border border-border-strong rounded-lg hover:bg-surface-secondary transition-colors"
                 >
                   Cancel
                 </button>
@@ -45,12 +61,12 @@ function GroupDeleteDialog({ groupId, open, onOpenChange, onConfirm, isPending }
                 type="button"
                 disabled={isPending}
                 onClick={onConfirm}
-                className="px-4 py-1.5 text-sm bg-red-600 text-white rounded-md hover:bg-red-700 disabled:opacity-50 disabled:cursor-not-allowed"
+                className="px-4 py-1.5 text-sm bg-danger text-white rounded-lg hover:bg-danger-hover transition-colors disabled:opacity-50 disabled:cursor-not-allowed"
               >
                 {isPending ? 'Deleting...' : 'Delete'}
               </button>
             </div>
-          </div>
+          </motion.div>
         </Dialog.Content>
       </Dialog.Portal>
     </Dialog.Root>
@@ -82,59 +98,64 @@ function GroupPolicySection({ groupId }: GroupPolicySectionProps): JSX.Element {
   }
 
   return (
-    <div className="border border-gray-200 rounded-lg overflow-hidden">
+    <div className="border border-border rounded-xl overflow-hidden">
       <button
         type="button"
-        className="w-full flex items-center justify-between px-4 py-3 text-left hover:bg-gray-50 transition-colors"
+        className="w-full flex items-center justify-between px-4 py-3 text-left hover:bg-surface-secondary transition-colors duration-150"
         onClick={() => setTapOpen((v) => !v)}
         aria-expanded={tapOpen}
       >
-        <h4 className="text-sm font-medium text-gray-700">Tool Access Policy</h4>
-        <svg
-          className={`w-4 h-4 text-gray-400 transition-transform ${tapOpen ? 'rotate-180' : ''}`}
-          fill="none"
-          stroke="currentColor"
-          viewBox="0 0 24 24"
-          aria-hidden="true"
-        >
-          <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M19 9l-7 7-7-7" />
-        </svg>
+        <h4 className="text-sm font-medium text-text-secondary">Tool Access Policy</h4>
+        <ChevronDown
+          size={16}
+          className={`text-text-faint transition-transform duration-200 ${tapOpen ? 'rotate-180' : ''}`}
+        />
       </button>
-      {tapOpen && (
-        <div className="px-4 pb-4 space-y-4">
-          <ToolAccessPolicyEditor
-            allowedTools={allowedTools}
-            deniedTools={deniedTools}
-            onAllowedChange={(tools) => {
-              setAllowedTools(tools)
-              setTapDirty(true)
-            }}
-            onDeniedChange={(tools) => {
-              setDeniedTools(tools)
-              setTapDirty(true)
-            }}
-            disabled={isSaving || isClearing}
-          />
-          <div className="flex gap-2">
-            <button
-              type="button"
-              disabled={!tapDirty || isSaving}
-              onClick={() => savePolicy({ allow_list: allowedTools, deny_list: deniedTools })}
-              className="px-3 py-1.5 text-sm bg-blue-600 text-white rounded-md hover:bg-blue-700 disabled:opacity-50 disabled:cursor-not-allowed"
-            >
-              {isSaving ? 'Saving...' : 'Save Policy'}
-            </button>
-            <button
-              type="button"
-              disabled={isClearing}
-              onClick={() => clearPolicy()}
-              className="px-3 py-1.5 text-sm border border-gray-300 rounded-md hover:bg-gray-50 disabled:opacity-50 disabled:cursor-not-allowed"
-            >
-              {isClearing ? 'Clearing...' : 'Clear Policy'}
-            </button>
-          </div>
-        </div>
-      )}
+      <AnimatePresence initial={false}>
+        {tapOpen && (
+          <motion.div
+            variants={expandVariants}
+            initial="hidden"
+            animate="visible"
+            exit="exit"
+            style={{ overflow: 'hidden' }}
+          >
+            <div className="px-4 pb-4 space-y-4">
+              <ToolAccessPolicyEditor
+                allowedTools={allowedTools}
+                deniedTools={deniedTools}
+                onAllowedChange={(tools) => {
+                  setAllowedTools(tools)
+                  setTapDirty(true)
+                }}
+                onDeniedChange={(tools) => {
+                  setDeniedTools(tools)
+                  setTapDirty(true)
+                }}
+                disabled={isSaving || isClearing}
+              />
+              <div className="flex gap-2">
+                <button
+                  type="button"
+                  disabled={!tapDirty || isSaving}
+                  onClick={() => savePolicy({ allow_list: allowedTools, deny_list: deniedTools })}
+                  className="px-3 py-1.5 text-sm bg-accent text-white rounded-lg hover:bg-accent-hover transition-colors disabled:opacity-50 disabled:cursor-not-allowed"
+                >
+                  {isSaving ? 'Saving...' : 'Save Policy'}
+                </button>
+                <button
+                  type="button"
+                  disabled={isClearing}
+                  onClick={() => clearPolicy()}
+                  className="px-3 py-1.5 text-sm border border-border-strong rounded-lg hover:bg-surface-secondary transition-colors disabled:opacity-50 disabled:cursor-not-allowed"
+                >
+                  {isClearing ? 'Clearing...' : 'Clear Policy'}
+                </button>
+              </div>
+            </div>
+          </motion.div>
+        )}
+      </AnimatePresence>
     </div>
   )
 }
@@ -175,17 +196,17 @@ export function GroupsPage(): JSX.Element {
   const groups = listData?.groups ?? []
 
   return (
-    <div className="space-y-4 p-6">
-      <h2 className="text-lg font-semibold text-gray-900">Groups</h2>
+    <PageContainer className="space-y-4 p-6">
+      <h2 className="text-lg font-semibold text-text-primary">Groups</h2>
       <div className="flex gap-6">
-        {/* Left panel — group list */}
+        {/* Left panel -- group list */}
         <div className="w-80 shrink-0">
           <div className="flex items-center justify-between mb-3">
-            <h3 className="text-sm font-semibold text-gray-700 uppercase tracking-wide">Groups</h3>
+            <h3 className="text-sm font-semibold text-text-secondary uppercase tracking-wide">Groups</h3>
             <button
               type="button"
               onClick={() => setCreateOpen(true)}
-              className="flex items-center gap-1 px-2.5 py-1 text-xs bg-blue-600 text-white rounded-md hover:bg-blue-700"
+              className="flex items-center gap-1 px-2.5 py-1 text-xs bg-accent text-white rounded-lg hover:bg-accent-hover transition-colors"
             >
               <Plus size={14} />
               New
@@ -202,12 +223,12 @@ export function GroupsPage(): JSX.Element {
                   key={group.group_id}
                   onClick={() => setSelectedGroupId(group.group_id)}
                   className={cn(
-                    'cursor-pointer rounded-lg border p-3 hover:bg-gray-50 transition-colors',
-                    selectedGroupId === group.group_id ? 'border-blue-500 bg-blue-50' : 'border-gray-200 bg-white'
+                    'cursor-pointer rounded-xl border p-3 hover:bg-surface-secondary transition-colors',
+                    selectedGroupId === group.group_id ? 'border-accent bg-accent-surface' : 'border-border bg-surface'
                   )}
                 >
                   <div className="flex items-center justify-between gap-2">
-                    <span className="text-sm font-medium text-gray-900 truncate">{group.group_id}</span>
+                    <span className="text-sm font-medium text-text-primary truncate">{group.group_id}</span>
                     <div className="flex items-center gap-1 shrink-0">
                       {group.circuit_breaker && <CircuitBreakerBadge state={group.circuit_breaker.state} />}
                       <button
@@ -216,7 +237,7 @@ export function GroupsPage(): JSX.Element {
                           e.stopPropagation()
                           setEditGroup(group)
                         }}
-                        className="p-1 text-gray-400 hover:text-gray-600 rounded"
+                        className="p-1 text-text-faint hover:text-text-secondary rounded transition-colors"
                       >
                         <Pencil size={13} />
                       </button>
@@ -226,14 +247,14 @@ export function GroupsPage(): JSX.Element {
                           e.stopPropagation()
                           setDeleteGroupId(group.group_id)
                         }}
-                        className="p-1 text-gray-400 hover:text-red-500 rounded"
+                        className="p-1 text-text-faint hover:text-danger rounded transition-colors"
                       >
                         <Trash2 size={13} />
                       </button>
                     </div>
                   </div>
-                  <p className="text-xs text-gray-500 mt-0.5">{group.strategy}</p>
-                  <p className="text-xs text-gray-500 mt-1">
+                  <p className="text-xs text-text-muted mt-0.5">{group.strategy}</p>
+                  <p className="text-xs text-text-muted mt-1">
                     {group.healthy_count}/{group.total_members} healthy
                   </p>
                 </div>
@@ -242,18 +263,18 @@ export function GroupsPage(): JSX.Element {
           )}
         </div>
 
-        {/* Right panel — group detail */}
+        {/* Right panel -- group detail */}
         <div className="flex-1">
           {!selectedGroupId ? (
             <EmptyState message="Select a group to view details." />
           ) : !detail ? (
             <LoadingSpinner />
           ) : (
-            <div className="bg-white rounded-lg border p-4 space-y-4">
+            <div className="bg-surface rounded-xl border border-border p-4 space-y-4 shadow-xs">
               {/* Header */}
               <div className="flex items-center justify-between gap-3 flex-wrap">
                 <div className="flex items-center gap-2">
-                  <h3 className="text-lg font-semibold text-gray-900">{detail.group_id}</h3>
+                  <h3 className="text-lg font-semibold text-text-primary">{detail.group_id}</h3>
                   {detail.circuit_breaker && <CircuitBreakerBadge state={detail.circuit_breaker.state} />}
                 </div>
                 <ActionButton
@@ -267,8 +288,8 @@ export function GroupsPage(): JSX.Element {
 
               {/* Strategy */}
               <div>
-                <span className="text-xs font-medium text-gray-500 uppercase tracking-wide">Strategy</span>
-                <p className="text-sm text-gray-900 mt-0.5">{detail.strategy}</p>
+                <span className="text-xs font-medium text-text-muted uppercase tracking-wider">Strategy</span>
+                <p className="text-sm text-text-primary mt-0.5">{detail.strategy}</p>
               </div>
 
               {/* Members panel */}
@@ -305,6 +326,6 @@ export function GroupsPage(): JSX.Element {
           isPending={deleteMutation.isPending}
         />
       )}
-    </div>
+    </PageContainer>
   )
 }
