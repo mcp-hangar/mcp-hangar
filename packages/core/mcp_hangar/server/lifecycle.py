@@ -186,13 +186,22 @@ class ServerLifecycle:
             Route("/metrics", metrics_endpoint, methods=["GET"]),
         ]
 
-        aux_app = Starlette(routes=routes)
+        # Create REST API router for /api/* endpoints
+        from ..server.api import create_api_router
+
+        api_app = create_api_router()
+
+        # Mount health/metrics and REST API together in one Starlette app
+        from starlette.routing import Mount
+
+        all_routes = routes + [Mount("/api", app=api_app)]
+        aux_app = Starlette(routes=all_routes)
 
         async def combined_app(scope, receive, send):
-            """Combined ASGI app that routes to metrics/health or MCP."""
-            if scope["type"] == "http":
+            """Combined ASGI app that routes to aux (health/metrics/api) or MCP."""
+            if scope["type"] in ("http", "websocket"):
                 path = scope.get("path", "")
-                if path.startswith("/health/") or path == "/metrics":
+                if path.startswith("/health/") or path == "/metrics" or path == "/api" or path.startswith("/api/"):
                     await aux_app(scope, receive, send)
                     return
             await mcp_app(scope, receive, send)

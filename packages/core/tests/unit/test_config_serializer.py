@@ -326,3 +326,378 @@ class TestWriteConfigBackup:
 
         assert result.endswith(".bak1")
         assert Path(result).exists()
+
+
+# ---------------------------------------------------------------------------
+# TestSerializeExecutionConfig
+# ---------------------------------------------------------------------------
+
+
+class TestSerializeExecutionConfig:
+    """Tests for serialize_execution_config()."""
+
+    def test_returns_empty_dict_when_limits_are_zero(self):
+        """serialize_execution_config() should return {} when all limits are 0 (unlimited)."""
+        from mcp_hangar.server.config_serializer import serialize_execution_config
+
+        mock_manager = MagicMock()
+        mock_manager.global_limit = 0
+        mock_manager.default_provider_limit = 0
+
+        with patch(
+            "mcp_hangar.server.tools.batch.concurrency.get_concurrency_manager",
+            return_value=mock_manager,
+        ):
+            result = serialize_execution_config()
+
+        assert result == {}
+
+    def test_includes_global_limit_when_nonzero(self):
+        """serialize_execution_config() should include max_concurrency when > 0."""
+        from mcp_hangar.server.config_serializer import serialize_execution_config
+
+        mock_manager = MagicMock()
+        mock_manager.global_limit = 100
+        mock_manager.default_provider_limit = 0
+
+        with patch(
+            "mcp_hangar.server.tools.batch.concurrency.get_concurrency_manager",
+            return_value=mock_manager,
+        ):
+            result = serialize_execution_config()
+
+        assert result["max_concurrency"] == 100
+        assert "default_provider_concurrency" not in result
+
+    def test_includes_default_provider_limit_when_nonzero(self):
+        """serialize_execution_config() should include default_provider_concurrency when > 0."""
+        from mcp_hangar.server.config_serializer import serialize_execution_config
+
+        mock_manager = MagicMock()
+        mock_manager.global_limit = 0
+        mock_manager.default_provider_limit = 20
+
+        with patch(
+            "mcp_hangar.server.tools.batch.concurrency.get_concurrency_manager",
+            return_value=mock_manager,
+        ):
+            result = serialize_execution_config()
+
+        assert result["default_provider_concurrency"] == 20
+        assert "max_concurrency" not in result
+
+    def test_returns_empty_dict_on_exception(self):
+        """serialize_execution_config() should return {} if concurrency manager raises."""
+        from mcp_hangar.server.config_serializer import serialize_execution_config
+
+        with patch(
+            "mcp_hangar.server.tools.batch.concurrency.get_concurrency_manager",
+            side_effect=RuntimeError("unavailable"),
+        ):
+            result = serialize_execution_config()
+
+        assert result == {}
+
+
+class TestSerializeFullConfigExtended:
+    """Tests for the extended serialize_full_config() with passthrough sections."""
+
+    def test_execution_section_included_when_nonzero_limits(self):
+        """serialize_full_config() should include execution section if limits are nonzero."""
+        from mcp_hangar.server.config_serializer import serialize_full_config
+
+        mock_manager = MagicMock()
+        mock_manager.global_limit = 50
+        mock_manager.default_provider_limit = 10
+
+        with patch(
+            "mcp_hangar.server.tools.batch.concurrency.get_concurrency_manager",
+            return_value=mock_manager,
+        ):
+            result = serialize_full_config(providers={}, groups={})
+
+        assert "execution" in result
+        assert result["execution"]["max_concurrency"] == 50
+        assert result["execution"]["default_provider_concurrency"] == 10
+
+    def test_execution_section_omitted_when_zero_limits(self):
+        """serialize_full_config() should omit execution section if all limits are 0."""
+        from mcp_hangar.server.config_serializer import serialize_full_config
+
+        mock_manager = MagicMock()
+        mock_manager.global_limit = 0
+        mock_manager.default_provider_limit = 0
+
+        with patch(
+            "mcp_hangar.server.tools.batch.concurrency.get_concurrency_manager",
+            return_value=mock_manager,
+        ):
+            result = serialize_full_config(providers={}, groups={})
+
+        assert "execution" not in result
+
+    def test_passthrough_sections_included_from_stored_full_config(self):
+        """serialize_full_config() should include event_store/auth from stored full_config."""
+        from mcp_hangar.server.config_serializer import serialize_full_config
+
+        mock_ctx = MagicMock()
+        mock_ctx.repository.get_all.return_value = {}
+        mock_ctx.groups = {}
+        mock_ctx.full_config = {
+            "providers": {},
+            "event_store": {"enabled": True, "driver": "sqlite", "path": "data/events.db"},
+            "auth": {"enabled": True},
+        }
+
+        mock_manager = MagicMock()
+        mock_manager.global_limit = 0
+        mock_manager.default_provider_limit = 0
+
+        with (
+            patch("mcp_hangar.server.config_serializer.get_context", return_value=mock_ctx),
+            patch(
+                "mcp_hangar.server.tools.batch.concurrency.get_concurrency_manager",
+                return_value=mock_manager,
+            ),
+        ):
+            result = serialize_full_config(providers={}, groups={})
+
+        assert "event_store" in result
+        assert result["event_store"]["driver"] == "sqlite"
+        assert "auth" in result
+        assert result["auth"]["enabled"] is True
+
+    def test_passthrough_does_not_override_providers_section(self):
+        """Passthrough from full_config must not overwrite the serialized providers key."""
+        from mcp_hangar.server.config_serializer import serialize_full_config
+
+        provider = _make_mock_provider("p", {"mode": "subprocess"})
+        mock_ctx = MagicMock()
+        mock_ctx.full_config = {"providers": {"old": {"mode": "subprocess"}}}
+
+        mock_manager = MagicMock()
+        mock_manager.global_limit = 0
+        mock_manager.default_provider_limit = 0
+
+        with (
+            patch("mcp_hangar.server.config_serializer.get_context", return_value=mock_ctx),
+            patch(
+                "mcp_hangar.server.tools.batch.concurrency.get_concurrency_manager",
+                return_value=mock_manager,
+            ),
+        ):
+            result = serialize_full_config(providers={"p": provider}, groups={})
+
+        # "p" should be present (from explicit arg), "old" should NOT be overwritten back
+        assert "p" in result["providers"]
+        assert "old" not in result["providers"]
+
+    def test_passthrough_ignores_unknown_sections(self):
+        """Passthrough should only include known safe keys, not arbitrary config data."""
+        from mcp_hangar.server.config_serializer import serialize_full_config
+
+        mock_ctx = MagicMock()
+        mock_ctx.full_config = {"providers": {}, "custom_plugin": {"secret": "val"}}
+
+        mock_manager = MagicMock()
+        mock_manager.global_limit = 0
+        mock_manager.default_provider_limit = 0
+
+        with (
+            patch("mcp_hangar.server.config_serializer.get_context", return_value=mock_ctx),
+            patch(
+                "mcp_hangar.server.tools.batch.concurrency.get_concurrency_manager",
+                return_value=mock_manager,
+            ),
+        ):
+            result = serialize_full_config(providers={}, groups={})
+
+        assert "custom_plugin" not in result
+
+    def test_context_failure_does_not_break_serialization(self):
+        """Passthrough silently skips if get_context() raises."""
+        from mcp_hangar.server.config_serializer import serialize_full_config
+
+        mock_manager = MagicMock()
+        mock_manager.global_limit = 0
+        mock_manager.default_provider_limit = 0
+
+        with (
+            patch(
+                "mcp_hangar.server.config_serializer.get_context",
+                side_effect=RuntimeError("no context"),
+            ),
+            patch(
+                "mcp_hangar.server.tools.batch.concurrency.get_concurrency_manager",
+                return_value=mock_manager,
+            ),
+        ):
+            result = serialize_full_config(providers={}, groups={})
+
+        assert "providers" in result
+
+
+# ---------------------------------------------------------------------------
+# TestWriteConfigBackupSnapshot (Plan 03)
+# ---------------------------------------------------------------------------
+
+
+class TestWriteConfigBackupSnapshot:
+    """Tests for snapshot metadata embedded in write_config_backup() output."""
+
+    def test_bak1_contains_snapshot_metadata_key(self, tmp_path: Path):
+        """Backup file should contain __snapshot__ key with metadata."""
+        from mcp_hangar.server.config_serializer import write_config_backup
+
+        config_file = tmp_path / "cfg.yaml"
+        config_file.write_text("providers: {}")
+
+        with patch(
+            "mcp_hangar.server.config_serializer.serialize_full_config",
+            return_value={"providers": {}},
+        ):
+            write_config_backup(str(config_file))
+
+        bak1 = tmp_path / "cfg.yaml.bak1"
+        parsed = yaml.safe_load(bak1.read_text())
+        assert "__snapshot__" in parsed
+
+    def test_snapshot_metadata_has_timestamp(self, tmp_path: Path):
+        """__snapshot__ block should contain an ISO 8601 timestamp string."""
+        from mcp_hangar.server.config_serializer import write_config_backup
+
+        config_file = tmp_path / "cfg.yaml"
+        config_file.write_text("providers: {}")
+
+        with patch(
+            "mcp_hangar.server.config_serializer.serialize_full_config",
+            return_value={"providers": {}},
+        ):
+            write_config_backup(str(config_file))
+
+        bak1 = tmp_path / "cfg.yaml.bak1"
+        parsed = yaml.safe_load(bak1.read_text())
+        snapshot = parsed["__snapshot__"]
+        assert "timestamp" in snapshot
+        assert isinstance(snapshot["timestamp"], str)
+        # ISO 8601 UTC strings always contain 'T' and end with '+00:00' or 'Z'
+        assert "T" in snapshot["timestamp"]
+
+    def test_snapshot_metadata_has_provider_count(self, tmp_path: Path):
+        """__snapshot__ block should contain provider_count matching actual providers."""
+        from mcp_hangar.server.config_serializer import write_config_backup
+
+        config_file = tmp_path / "cfg.yaml"
+        config_file.write_text("providers: {}")
+
+        config_dict = {
+            "providers": {
+                "p1": {"mode": "subprocess", "command": ["python"]},
+                "p2": {"mode": "docker", "image": "img"},
+            }
+        }
+
+        with patch(
+            "mcp_hangar.server.config_serializer.serialize_full_config",
+            return_value=config_dict,
+        ):
+            write_config_backup(str(config_file))
+
+        bak1 = tmp_path / "cfg.yaml.bak1"
+        parsed = yaml.safe_load(bak1.read_text())
+        assert parsed["__snapshot__"]["provider_count"] == 2
+        assert parsed["__snapshot__"]["group_count"] == 0
+
+    def test_snapshot_metadata_counts_groups_separately(self, tmp_path: Path):
+        """__snapshot__ block should count groups distinct from providers."""
+        from mcp_hangar.server.config_serializer import write_config_backup
+
+        config_file = tmp_path / "cfg.yaml"
+        config_file.write_text("providers: {}")
+
+        config_dict = {
+            "providers": {
+                "p1": {"mode": "subprocess", "command": ["python"]},
+                "g1": {"mode": "group", "members": []},
+            }
+        }
+
+        with patch(
+            "mcp_hangar.server.config_serializer.serialize_full_config",
+            return_value=config_dict,
+        ):
+            write_config_backup(str(config_file))
+
+        bak1 = tmp_path / "cfg.yaml.bak1"
+        parsed = yaml.safe_load(bak1.read_text())
+        assert parsed["__snapshot__"]["provider_count"] == 1
+        assert parsed["__snapshot__"]["group_count"] == 1
+
+    def test_full_rotation_chain_integrity(self, tmp_path: Path):
+        """After 6 successive backups the chain should hold bak1=newest, bak5=5th oldest."""
+        from mcp_hangar.server.config_serializer import write_config_backup
+
+        config_file = tmp_path / "cfg.yaml"
+        config_file.write_text("providers: {}")
+
+        # Write 6 backups, each with a distinct sentinel value so we can trace provenance
+        for i in range(1, 7):
+            with patch(
+                "mcp_hangar.server.config_serializer.serialize_full_config",
+                return_value={"providers": {}, "_sentinel": i},
+            ):
+                write_config_backup(str(config_file))
+
+        # After 6 writes:
+        # bak1 = write 6 (newest)
+        # bak2 = write 5
+        # bak3 = write 4
+        # bak4 = write 3
+        # bak5 = write 2 (oldest retained; write 1 is dropped)
+        for slot, expected_sentinel in [(1, 6), (2, 5), (3, 4), (4, 3), (5, 2)]:
+            bak = tmp_path / f"cfg.yaml.bak{slot}"
+            assert bak.exists(), f"bak{slot} should exist"
+            parsed = yaml.safe_load(bak.read_text())
+            assert parsed.get("_sentinel") == expected_sentinel, (
+                f"bak{slot} should have sentinel {expected_sentinel}, got {parsed.get('_sentinel')}"
+            )
+
+    def test_rotation_never_creates_bak6(self, tmp_path: Path):
+        """write_config_backup() should never create a .bak6 file."""
+        from mcp_hangar.server.config_serializer import write_config_backup
+
+        config_file = tmp_path / "cfg.yaml"
+        config_file.write_text("providers: {}")
+
+        for _ in range(10):
+            with patch(
+                "mcp_hangar.server.config_serializer.serialize_full_config",
+                return_value={"providers": {}},
+            ):
+                write_config_backup(str(config_file))
+
+        bak6 = tmp_path / "cfg.yaml.bak6"
+        assert not bak6.exists(), "bak6 must never be created"
+
+    def test_snapshot_key_absent_from_legacy_backup_promoted_to_bak2(self, tmp_path: Path):
+        """Old bak1 (without __snapshot__) is correctly promoted to bak2 on next backup."""
+        from mcp_hangar.server.config_serializer import write_config_backup
+
+        config_file = tmp_path / "cfg.yaml"
+        config_file.write_text("providers: {}")
+
+        # Simulate a legacy backup without __snapshot__
+        legacy_content = yaml.safe_dump({"providers": {"legacy": {"mode": "subprocess"}}})
+        (tmp_path / "cfg.yaml.bak1").write_text(legacy_content)
+
+        with patch(
+            "mcp_hangar.server.config_serializer.serialize_full_config",
+            return_value={"providers": {"new_p": {"mode": "subprocess"}}},
+        ):
+            write_config_backup(str(config_file))
+
+        bak2 = tmp_path / "cfg.yaml.bak2"
+        parsed = yaml.safe_load(bak2.read_text())
+        assert "legacy" in parsed["providers"]
+        # Legacy backup promoted to bak2 -- no __snapshot__ key expected there
+        assert "__snapshot__" not in parsed

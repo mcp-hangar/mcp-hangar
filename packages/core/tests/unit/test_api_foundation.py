@@ -416,7 +416,7 @@ class TestSerializers:
         )
         result = serialize_provider_summary(summary)
         assert isinstance(result, dict)
-        assert result["provider"] == "test"
+        assert result["provider_id"] == "test"
         assert result["state"] == "ready"
         assert result["tools_count"] == 3
 
@@ -452,7 +452,7 @@ class TestSerializers:
         )
         result = serialize_provider_details(details)
         assert isinstance(result, dict)
-        assert result["provider"] == "test"
+        assert result["provider_id"] == "test"
         assert len(result["tools"]) == 1
         assert result["tools"][0]["name"] == "my_tool"
         assert "health" in result

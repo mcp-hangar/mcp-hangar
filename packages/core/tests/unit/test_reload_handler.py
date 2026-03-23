@@ -75,7 +75,7 @@ class TestReloadConfigurationHandler:
             requested_by="test",
         )
 
-        with patch("mcp_hangar.application.commands.reload_handler.load_config"):
+        with patch("mcp_hangar.server.config.load_config"):
             handler.handle(command)
 
         # Check first event published
@@ -120,7 +120,7 @@ class TestReloadConfigurationHandler:
             graceful=True,
         )
 
-        with patch("mcp_hangar.application.commands.reload_handler.load_config"):
+        with patch("mcp_hangar.server.config.load_config"):
             result = handler.handle(command)
 
         assert result["success"] is True
@@ -174,7 +174,7 @@ class TestReloadConfigurationHandler:
                 graceful=True,
             )
 
-            with patch("mcp_hangar.application.commands.reload_handler.load_config"):
+            with patch("mcp_hangar.server.config.load_config"):
                 result = handler.handle(command)
 
             assert result["success"] is True
@@ -230,7 +230,7 @@ class TestReloadConfigurationHandler:
                 graceful=True,
             )
 
-            with patch("mcp_hangar.application.commands.reload_handler.load_config"):
+            with patch("mcp_hangar.server.config.load_config"):
                 result = handler.handle(command)
 
             assert result["success"] is True
@@ -284,7 +284,7 @@ class TestReloadConfigurationHandler:
                 graceful=True,
             )
 
-            with patch("mcp_hangar.application.commands.reload_handler.load_config"):
+            with patch("mcp_hangar.server.config.load_config"):
                 result = handler.handle(command)
 
             assert result["success"] is True
@@ -333,7 +333,7 @@ class TestReloadConfigurationHandler:
                 graceful=False,
             )
 
-            with patch("mcp_hangar.application.commands.reload_handler.load_config"):
+            with patch("mcp_hangar.server.config.load_config"):
                 handler.handle(command)
 
             existing_provider.shutdown.assert_called_once()

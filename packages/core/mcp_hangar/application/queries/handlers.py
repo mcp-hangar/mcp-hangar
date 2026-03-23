@@ -1,14 +1,15 @@
 """Query handlers implementation."""
 
 import time
+from typing import Any
 
+from ...domain.contracts.runtime_store import IRuntimeProviderStore
 from ...domain.exceptions import ProviderNotFoundError
 from ...domain.policies.provider_health import to_health_status_string
 from ...domain.repository import IProviderRepository
-from ...infrastructure.query_bus import QueryBus
 from ...logging_config import get_logger
+from ..ports.bus import IQueryBus
 from ..read_models import HealthInfo, ProviderDetails, ProviderSummary, SystemMetrics, ToolInfo
-from ...infrastructure.event_store import get_event_store
 from .queries import (
     GetProviderHealthQuery,
     GetProviderQuery,
@@ -25,8 +26,13 @@ logger = get_logger(__name__)
 class BaseQueryHandler(QueryHandler):
     """Base class for query handlers."""
 
-    def __init__(self, repository: IProviderRepository):
+    def __init__(
+        self,
+        repository: IProviderRepository,
+        runtime_store: IRuntimeProviderStore | None = None,
+    ):
         self._repository = repository
+        self._runtime_store = runtime_store
 
     def _get_provider(self, provider_id: str):
         """Get provider or raise ProviderNotFoundError.
@@ -39,12 +45,10 @@ class BaseQueryHandler(QueryHandler):
             return provider
 
         # Then check runtime (hot-loaded) providers
-        from ...server.state import get_runtime_providers
-
-        runtime_store = get_runtime_providers()
-        provider = runtime_store.get_provider(provider_id)
-        if provider is not None:
-            return provider
+        if self._runtime_store is not None:
+            provider = self._runtime_store.get_provider(provider_id)
+            if provider is not None:
+                return provider
 
         raise ProviderNotFoundError(provider_id)
 
@@ -227,6 +231,15 @@ class GetSystemMetricsHandler(BaseQueryHandler):
 class GetToolInvocationHistoryHandler(QueryHandler):
     """Handler for GetToolInvocationHistoryQuery."""
 
+    def __init__(self, event_store: Any = None):
+        """Initialize the handler.
+
+        Args:
+            event_store: Optional event store instance for reading invocation history.
+                Injected from bootstrap; falls back to global singleton if None.
+        """
+        self._event_store = event_store
+
     def handle(self, query: GetToolInvocationHistoryQuery) -> dict:
         """Get tool invocation history for a provider from the event store.
 
@@ -236,7 +249,12 @@ class GetToolInvocationHistoryHandler(QueryHandler):
         Returns:
             Dict with provider_id, history list, and total count.
         """
-        event_store = get_event_store()
+        if self._event_store is not None:
+            event_store = self._event_store
+        else:
+            from ...infrastructure.event_store import get_event_store
+
+            event_store = get_event_store()
         target_stream_id = f"provider-{query.provider_id}"
         tool_event_types = {"ToolInvocationCompleted", "ToolInvocationFailed"}
         limit = min(max(1, query.limit), 500)
@@ -260,19 +278,26 @@ class GetToolInvocationHistoryHandler(QueryHandler):
         }
 
 
-def register_all_handlers(query_bus: QueryBus, repository: IProviderRepository) -> None:
+def register_all_handlers(
+    query_bus: IQueryBus,
+    repository: IProviderRepository,
+    runtime_store: IRuntimeProviderStore | None = None,
+    event_store: Any = None,
+) -> None:
     """
     Register all query handlers with the query bus.
 
     Args:
         query_bus: The query bus to register handlers with
         repository: Provider repository
+        runtime_store: Optional runtime provider store for hot-loaded provider lookup
+        event_store: Optional event store for tool invocation history
     """
-    query_bus.register(ListProvidersQuery, ListProvidersHandler(repository))
-    query_bus.register(GetProviderQuery, GetProviderHandler(repository))
-    query_bus.register(GetProviderToolsQuery, GetProviderToolsHandler(repository))
-    query_bus.register(GetProviderHealthQuery, GetProviderHealthHandler(repository))
-    query_bus.register(GetSystemMetricsQuery, GetSystemMetricsHandler(repository))
-    query_bus.register(GetToolInvocationHistoryQuery, GetToolInvocationHistoryHandler())
+    query_bus.register(ListProvidersQuery, ListProvidersHandler(repository, runtime_store))
+    query_bus.register(GetProviderQuery, GetProviderHandler(repository, runtime_store))
+    query_bus.register(GetProviderToolsQuery, GetProviderToolsHandler(repository, runtime_store))
+    query_bus.register(GetProviderHealthQuery, GetProviderHealthHandler(repository, runtime_store))
+    query_bus.register(GetSystemMetricsQuery, GetSystemMetricsHandler(repository, runtime_store))
+    query_bus.register(GetToolInvocationHistoryQuery, GetToolInvocationHistoryHandler(event_store))
 
     logger.info("query_handlers_registered")

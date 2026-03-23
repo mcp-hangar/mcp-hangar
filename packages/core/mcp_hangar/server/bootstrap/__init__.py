@@ -371,6 +371,7 @@ def bootstrap(
     ctx.unload_provider_handler = unload_handler
     ctx.catalog_repository = catalog_repo
     ctx.discovery_registry = discovery_registry
+    ctx.full_config = full_config  # Store for config round-trip serialization
 
     return context
 

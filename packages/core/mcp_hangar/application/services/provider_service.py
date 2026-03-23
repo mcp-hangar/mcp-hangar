@@ -5,7 +5,7 @@ from typing import Any
 from ...domain.exceptions import ProviderNotFoundError
 from ...domain.model import Provider
 from ...domain.repository import IProviderRepository
-from ...infrastructure.event_bus import EventBus
+from ...domain.contracts.event_bus import IEventBus
 from ...logging_config import get_logger
 
 logger = get_logger(__name__)
@@ -25,7 +25,7 @@ class ProviderService:
     def __init__(
         self,
         repository: IProviderRepository,
-        event_bus: EventBus,
+        event_bus: IEventBus,
     ):
         self._repository = repository
         self._event_bus = event_bus

@@ -13,8 +13,8 @@ from ...domain.events import (
     ToolInvocationCompleted,
     ToolInvocationFailed,
 )
-from ...infrastructure.async_executor import submit_async
 from ...logging_config import get_logger
+from ..ports.async_task import IAsyncTaskSubmitter
 
 logger = get_logger(__name__)
 
@@ -27,8 +27,14 @@ class KnowledgeBaseEventHandler:
     without modifying existing code.
     """
 
-    def __init__(self):
-        """Initialize handler with event type mappings."""
+    def __init__(self, async_task: IAsyncTaskSubmitter | None = None):
+        """Initialize handler with event type mappings.
+
+        Args:
+            async_task: Async task submitter for background persistence.
+                Falls back to global AsyncExecutor singleton if None.
+        """
+        self._async_task = async_task
         # Strategy mapping: event type -> persistence handler
         # Using Any for handlers to avoid complex generic types
         self._handlers: dict[type[DomainEvent], Callable] = {
@@ -56,10 +62,18 @@ class KnowledgeBaseEventHandler:
             return
 
         # Submit async persistence using executor (fire-and-forget)
-        submit_async(
-            handler(event),
-            on_error=lambda e: logger.debug("kb_persist_error", error=str(e), event_type=type(event).__name__),
-        )
+        if self._async_task is not None:
+            self._async_task.submit(
+                handler(event),
+                on_error=lambda e: logger.debug("kb_persist_error", error=str(e), event_type=type(event).__name__),
+            )
+        else:
+            from ...infrastructure.async_executor import submit_async
+
+            submit_async(
+                handler(event),
+                on_error=lambda e: logger.debug("kb_persist_error", error=str(e), event_type=type(event).__name__),
+            )
 
     async def _persist_state_change(self, event: ProviderStateChanged) -> None:
         """Persist provider state change event."""

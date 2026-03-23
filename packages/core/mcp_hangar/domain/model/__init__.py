@@ -36,9 +36,12 @@ from .provider_group import (
     GroupStateChanged,
     ProviderGroup,
 )
+from .catalog import McpProviderEntry
 from .tool_catalog import ToolCatalog, ToolSchema
 
 __all__ = [
+    # Catalog
+    "McpProviderEntry",
     # Base
     "AggregateRoot",
     # Circuit Breaker

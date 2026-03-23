@@ -22,7 +22,7 @@ from ...domain.events import (
     ProviderStarted,
     ProviderStopped,
 )
-from ...infrastructure.saga_manager import EventTriggeredSaga
+from ...application.ports.saga import EventTriggeredSaga
 from ...logging_config import get_logger
 from ..commands import Command
 

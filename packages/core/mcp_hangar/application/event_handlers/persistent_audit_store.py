@@ -8,8 +8,8 @@ import asyncio
 from datetime import datetime, UTC
 
 from ...domain.contracts.persistence import AuditAction, AuditEntry, IAuditRepository
-from ...infrastructure.async_executor import submit_async
 from ...logging_config import get_logger
+from ..ports.async_task import IAsyncTaskSubmitter
 from .audit_handler import AuditRecord, AuditStore
 
 logger = get_logger(__name__)
@@ -25,13 +25,16 @@ class PersistentAuditStore(AuditStore):
     without blocking the main thread.
     """
 
-    def __init__(self, repository: IAuditRepository):
+    def __init__(self, repository: IAuditRepository, async_task: IAsyncTaskSubmitter | None = None):
         """Initialize with audit repository.
 
         Args:
             repository: Async audit repository for persistence
+            async_task: Async task submitter for background persistence.
+                Falls back to global AsyncExecutor singleton if None.
         """
         self._repo = repository
+        self._async_task = async_task
 
     def record(self, audit_record: AuditRecord) -> None:
         """Store an audit record asynchronously.
@@ -44,7 +47,18 @@ class PersistentAuditStore(AuditStore):
         """
         entry = self._record_to_entry(audit_record)
 
-        submit_async(self._async_record(entry), on_error=lambda e: logger.error(f"Failed to persist audit record: {e}"))
+        if self._async_task is not None:
+            self._async_task.submit(
+                self._async_record(entry),
+                on_error=lambda e: logger.error(f"Failed to persist audit record: {e}"),
+            )
+        else:
+            from ...infrastructure.async_executor import submit_async
+
+            submit_async(
+                self._async_record(entry),
+                on_error=lambda e: logger.error(f"Failed to persist audit record: {e}"),
+            )
 
     async def _async_record(self, entry: AuditEntry) -> None:
         """Async record method."""

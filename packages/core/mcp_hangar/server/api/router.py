@@ -24,6 +24,7 @@ def create_api_router() -> Starlette:
         Starlette application serving the REST API.
     """
     from .auth import auth_routes
+    from .catalog import catalog_routes
     from .config import config_routes
     from .discovery import discovery_routes
     from .groups import group_routes
@@ -37,6 +38,7 @@ def create_api_router() -> Starlette:
         Mount("/providers", routes=provider_routes),
         Mount("/groups", routes=group_routes),
         Mount("/discovery", routes=discovery_routes),
+        Mount("/catalog", routes=catalog_routes),
         Mount("/config", routes=config_routes),
         Mount("/system", routes=system_routes),
         Mount("/auth", routes=auth_routes),

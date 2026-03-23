@@ -120,10 +120,12 @@ class ApplicationContext:
         groups: Provider groups for load balancing
         discovery_orchestrator: Optional discovery service
         group_rebalance_saga: Optional saga for group rebalancing
+        full_config: Full configuration dictionary loaded at startup (for config serialization)
     """
 
     runtime: "Runtime"
     groups: dict[str, "ProviderGroup"] = field(default_factory=dict)
+    full_config: dict[str, Any] = field(default_factory=dict)
     discovery_orchestrator: Optional["DiscoveryOrchestrator"] = None
     group_rebalance_saga: Optional["GroupRebalanceSaga"] = None
     load_provider_handler: Optional["LoadProviderHandler"] = None

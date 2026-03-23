@@ -17,7 +17,7 @@ from ...domain.events import (
 )
 from ...domain.value_objects import Permission, Role
 from ...domain.value_objects.tool_access_policy import ToolAccessPolicy
-from ...infrastructure.command_bus import CommandHandler
+from ...domain.contracts.command import CommandHandler
 from ...logging_config import get_logger
 from .auth_commands import (
     AssignRoleCommand,

@@ -73,7 +73,10 @@ async def ws_events_endpoint(websocket: WebSocket) -> None:
                 await websocket.send_text(json.dumps(event.to_dict(), cls=HangarJSONEncoder))
             except TimeoutError:
                 # No event for 30s -- send ping to detect dead connections.
-                await websocket.send_json({"type": "ping"})
+                try:
+                    await websocket.send_json({"type": "ping"})
+                except RuntimeError:
+                    break
                 try:
                     pong = await asyncio.wait_for(
                         websocket.receive_json(),
@@ -85,6 +88,9 @@ async def ws_events_endpoint(websocket: WebSocket) -> None:
                 except TimeoutError:
                     logger.debug("ws_events_pong_timeout", connection_id=connection_id)
                     break
+            except RuntimeError:
+                # Client disconnected while we were about to send -- exit cleanly.
+                break
     except WebSocketDisconnect:
         logger.debug("ws_events_disconnected", connection_id=connection_id)
     finally:

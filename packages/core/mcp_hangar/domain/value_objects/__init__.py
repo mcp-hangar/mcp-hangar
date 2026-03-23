@@ -60,6 +60,9 @@ from .tool_access_policy import ToolAccessPolicy
 # Truncation
 from .truncation import ContinuationId, TruncationConfig
 
+# Discovery
+from .discovery import DiscoverySourceSpec
+
 __all__ = [
     # Security
     "PrincipalType",
@@ -107,4 +110,6 @@ __all__ = [
     "ContinuationId",
     # Log
     "LogLine",
+    # Discovery
+    "DiscoverySourceSpec",
 ]

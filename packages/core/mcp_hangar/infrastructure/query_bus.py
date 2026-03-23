@@ -7,6 +7,7 @@ Each query has exactly one handler that returns data.
 
 from typing import Any
 
+from mcp_hangar.application.ports.bus import IQueryBus
 from mcp_hangar.logging_config import get_logger
 
 # Re-export query classes from canonical location for backward compatibility
@@ -23,7 +24,7 @@ from ..application.queries.queries import (  # noqa: F401
 logger = get_logger(__name__)
 
 
-class QueryBus:
+class QueryBus(IQueryBus):
     """
     Dispatches queries to their registered handlers.
 

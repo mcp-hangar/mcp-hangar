@@ -30,7 +30,7 @@ from dataclasses import dataclass
 from typing import Any
 
 from ...domain.events import DomainEvent, ProviderDegraded, ProviderStarted, ProviderStopped
-from ...infrastructure.saga_manager import EventTriggeredSaga, Saga, SagaContext, get_saga_manager
+from ...application.ports.saga import EventTriggeredSaga, ISagaManager, Saga, SagaContext
 from ...logging_config import get_logger
 from ..commands import Command, StartProviderCommand, StopProviderCommand
 
@@ -129,8 +129,10 @@ class ProviderFailoverEventSaga(EventTriggeredSaga):
         saga_manager.register_event_saga(saga)
     """
 
-    def __init__(self):
+    def __init__(self, saga_manager: ISagaManager | None = None):
         super().__init__()
+
+        self._saga_manager = saga_manager
 
         # Failover configuration: primary_id -> FailoverConfig
         self._failover_configs: dict[str, FailoverConfig] = {}
@@ -220,16 +222,29 @@ class ProviderFailoverEventSaga(EventTriggeredSaga):
 
         # Start the step-based ProviderFailoverSaga for this pair.
         # Commands are dispatched by SagaManager; we return empty here.
-        saga_manager = get_saga_manager()
-        failover_saga = ProviderFailoverSaga()
-        saga_manager.start_saga(
-            failover_saga,
-            initial_data={
-                "primary_id": provider_id,
-                "backup_id": config.backup_id,
-                "failback_delay_s": config.failback_delay_s,
-            },
-        )
+        if self._saga_manager is not None:
+            failover_saga = ProviderFailoverSaga()
+            self._saga_manager.start_saga(
+                failover_saga,
+                initial_data={
+                    "primary_id": provider_id,
+                    "backup_id": config.backup_id,
+                    "failback_delay_s": config.failback_delay_s,
+                },
+            )
+        else:
+            from ...infrastructure.saga_manager import get_saga_manager
+
+            saga_manager = get_saga_manager()
+            failover_saga = ProviderFailoverSaga()
+            saga_manager.start_saga(
+                failover_saga,
+                initial_data={
+                    "primary_id": provider_id,
+                    "backup_id": config.backup_id,
+                    "failback_delay_s": config.failback_delay_s,
+                },
+            )
 
         return []
 
@@ -255,8 +270,12 @@ class ProviderFailoverEventSaga(EventTriggeredSaga):
                     delay_s=config.failback_delay_s,
                 )
                 stop_cmd = StopProviderCommand(provider_id=state.backup_id, reason="failback")
-                saga_manager = get_saga_manager()
-                timer_id = saga_manager.schedule_command(stop_cmd, delay_s=config.failback_delay_s)
+                sm = self._saga_manager
+                if sm is None:
+                    from ...infrastructure.saga_manager import get_saga_manager
+
+                    sm = get_saga_manager()
+                timer_id = sm.schedule_command(stop_cmd, delay_s=config.failback_delay_s)
                 self._pending_failback_timers[provider_id] = timer_id
 
                 # Clean up failover tracking
@@ -278,7 +297,12 @@ class ProviderFailoverEventSaga(EventTriggeredSaga):
                     timer_id = self._pending_failback_timers.pop(primary_id, None)
                     if timer_id is not None:
                         try:
-                            get_saga_manager().cancel_scheduled_command(timer_id)
+                            sm = self._saga_manager
+                            if sm is None:
+                                from ...infrastructure.saga_manager import get_saga_manager
+
+                                sm = get_saga_manager()
+                            sm.cancel_scheduled_command(timer_id)
                         except Exception as e:  # noqa: BLE001 -- fault-barrier: cancel failure must not block event handling
                             logger.warning("failback_timer_cancel_failed", error=str(e))
                     logger.info("failover_ended", primary_id=primary_id, backup_id=provider_id)
@@ -322,7 +346,12 @@ class ProviderFailoverEventSaga(EventTriggeredSaga):
             timer_id = self._pending_failback_timers.pop(primary_id, None)
             if timer_id is not None:
                 try:
-                    get_saga_manager().cancel_scheduled_command(timer_id)
+                    sm = self._saga_manager
+                    if sm is None:
+                        from ...infrastructure.saga_manager import get_saga_manager
+
+                        sm = get_saga_manager()
+                    sm.cancel_scheduled_command(timer_id)
                 except Exception as e:  # noqa: BLE001 -- fault-barrier: cancel failure must not block caller
                     logger.warning("failback_timer_cancel_failed", error=str(e))
             return True

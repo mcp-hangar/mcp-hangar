@@ -3,13 +3,15 @@
 import time
 from typing import Any
 
+from ...domain.contracts.command import CommandHandler
+from ...domain.contracts.event_bus import IEventBus
 from ...domain.contracts.provider_runtime import ProviderRuntime
+from ...domain.contracts.runtime_store import IRuntimeProviderStore
 from ...domain.exceptions import ProviderNotFoundError
 from ...domain.repository import IProviderRepository
-from ...infrastructure.command_bus import CommandBus, CommandHandler
-from ...infrastructure.event_bus import EventBus
 from ...logging_config import get_logger
 from ...metrics import observe_tool_call, record_error, record_provider_start, record_provider_stop
+from ..ports.bus import ICommandBus
 from .commands import (
     HealthCheckCommand,
     InvokeToolCommand,
@@ -24,9 +26,15 @@ logger = get_logger(__name__)
 class BaseProviderHandler(CommandHandler):
     """Base class for handlers that work with providers."""
 
-    def __init__(self, repository: IProviderRepository, event_bus: EventBus):
+    def __init__(
+        self,
+        repository: IProviderRepository,
+        event_bus: IEventBus,
+        runtime_store: IRuntimeProviderStore | None = None,
+    ):
         self._repository = repository
         self._event_bus = event_bus
+        self._runtime_store = runtime_store
 
     def _get_provider(self, provider_id: str) -> ProviderRuntime:
         """Get provider or raise domain ProviderNotFoundError.
@@ -39,12 +47,10 @@ class BaseProviderHandler(CommandHandler):
             return provider
 
         # Then check runtime (hot-loaded) providers
-        from ...server.state import get_runtime_providers
-
-        runtime_store = get_runtime_providers()
-        provider = runtime_store.get_provider(provider_id)
-        if provider is not None:
-            return provider
+        if self._runtime_store is not None:
+            provider = self._runtime_store.get_provider(provider_id)
+            if provider is not None:
+                return provider
 
         raise ProviderNotFoundError(provider_id)
 
@@ -182,10 +188,13 @@ class ShutdownIdleProvidersHandler(BaseProviderHandler):
 
 
 def register_all_handlers(
-    command_bus: CommandBus,
+    command_bus: ICommandBus,
     repository: IProviderRepository,
-    event_bus: EventBus,
+    event_bus: IEventBus,
     current_config_path: str | None = None,
+    config_loader=None,
+    groups: dict | None = None,
+    runtime_store: IRuntimeProviderStore | None = None,
 ) -> None:
     """
     Register all command handlers with the command bus.
@@ -195,21 +204,30 @@ def register_all_handlers(
         repository: Provider repository
         event_bus: Event bus for publishing events
         current_config_path: Current configuration file path for reload handler
+        config_loader: IConfigLoader implementation for reload handler
+        groups: Groups dict for reload handler
+        runtime_store: Optional runtime provider store for hot-loaded provider lookup
     """
     from .commands import ReloadConfigurationCommand
     from .reload_handler import ReloadConfigurationHandler
 
-    command_bus.register(StartProviderCommand, StartProviderHandler(repository, event_bus))
-    command_bus.register(StopProviderCommand, StopProviderHandler(repository, event_bus))
-    command_bus.register(InvokeToolCommand, InvokeToolHandler(repository, event_bus))
-    command_bus.register(HealthCheckCommand, HealthCheckHandler(repository, event_bus))
+    command_bus.register(StartProviderCommand, StartProviderHandler(repository, event_bus, runtime_store))
+    command_bus.register(StopProviderCommand, StopProviderHandler(repository, event_bus, runtime_store))
+    command_bus.register(InvokeToolCommand, InvokeToolHandler(repository, event_bus, runtime_store))
+    command_bus.register(HealthCheckCommand, HealthCheckHandler(repository, event_bus, runtime_store))
     command_bus.register(
         ShutdownIdleProvidersCommand,
-        ShutdownIdleProvidersHandler(repository, event_bus),
+        ShutdownIdleProvidersHandler(repository, event_bus, runtime_store),
     )
     command_bus.register(
         ReloadConfigurationCommand,
-        ReloadConfigurationHandler(repository, event_bus, current_config_path),
+        ReloadConfigurationHandler(
+            repository,
+            event_bus,
+            current_config_path,
+            config_loader=config_loader,
+            groups=groups,
+        ),
     )
 
     logger.info("command_handlers_registered")

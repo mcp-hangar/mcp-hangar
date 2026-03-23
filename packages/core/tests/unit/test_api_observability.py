@@ -2,6 +2,8 @@
 
 Tests cover:
 - GET /observability/metrics - Prometheus text + JSON summary
+- GET /observability/metrics/per-provider - Per-provider metric aggregates
+- GET /observability/metrics/history - Time-series metric history
 - GET /observability/audit - Audit log records with optional filters
 - GET /observability/security - Security events
 - GET /observability/alerts - Alert history with optional level filter
@@ -362,3 +364,286 @@ class TestGetAlertHistory:
         data = response.json()
         assert data["total"] == 1
         assert data["alerts"][0]["level"] == "critical"
+
+
+# ---------------------------------------------------------------------------
+# GET /observability/metrics/per-provider
+# ---------------------------------------------------------------------------
+
+SAMPLE_PER_PROVIDER_TEXT = """# HELP mcp_hangar_tool_calls_total Total tool calls
+# TYPE mcp_hangar_tool_calls_total counter
+mcp_hangar_tool_calls_total{provider="math",tool="add",status="success"} 10.0
+mcp_hangar_tool_calls_total{provider="math",tool="add",status="error"} 2.0
+mcp_hangar_tool_calls_total{provider="science",tool="calc",status="success"} 5.0
+# HELP mcp_hangar_tool_call_errors_total Total tool call errors
+# TYPE mcp_hangar_tool_call_errors_total counter
+mcp_hangar_tool_call_errors_total{provider="math",tool="add"} 2.0
+# HELP mcp_hangar_health_checks_total Total health checks
+# TYPE mcp_hangar_health_checks_total counter
+mcp_hangar_health_checks_total{provider="math",result="healthy"} 8.0
+mcp_hangar_health_checks_total{provider="math",result="unhealthy"} 1.0
+# HELP mcp_hangar_provider_cold_start_seconds Cold start latency
+# TYPE mcp_hangar_provider_cold_start_seconds histogram
+mcp_hangar_provider_cold_start_seconds_count{provider="math"} 3.0
+"""
+
+
+@pytest.fixture
+def per_provider_api_client(mock_audit_records, mock_security_events, mock_alerts):
+    """TestClient with per-provider metrics Prometheus text mocked."""
+    from mcp_hangar.server.api import create_api_router
+
+    mock_audit_handler = Mock()
+    mock_audit_handler.query.return_value = mock_audit_records
+
+    mock_security_handler = Mock()
+    mock_sink = Mock()
+    mock_sink.query.return_value = mock_security_events
+    mock_security_handler._sink = mock_sink
+    mock_security_handler.sink = mock_sink
+
+    mock_alert_handler = Mock()
+    mock_alert_handler.alerts_sent = mock_alerts
+
+    with (
+        patch("mcp_hangar.server.api.observability.get_metrics", return_value=SAMPLE_PER_PROVIDER_TEXT),
+        patch("mcp_hangar.server.api.observability.get_audit_handler", return_value=mock_audit_handler),
+        patch("mcp_hangar.server.api.observability.get_security_handler", return_value=mock_security_handler),
+        patch("mcp_hangar.server.api.observability.get_alert_handler", return_value=mock_alert_handler),
+    ):
+        app = create_api_router()
+        client = TestClient(app, raise_server_exceptions=False)
+        yield client
+
+
+class TestGetPerProviderMetrics:
+    """Tests for GET /observability/metrics/per-provider."""
+
+    def test_returns_200(self, per_provider_api_client):
+        """GET /observability/metrics/per-provider returns HTTP 200."""
+        response = per_provider_api_client.get("/observability/metrics/per-provider")
+        assert response.status_code == 200
+
+    def test_returns_providers_key(self, per_provider_api_client):
+        """Response contains providers list."""
+        response = per_provider_api_client.get("/observability/metrics/per-provider")
+        data = response.json()
+        assert "providers" in data
+        assert isinstance(data["providers"], list)
+
+    def test_returns_timestamp_key(self, per_provider_api_client):
+        """Response contains a timestamp string."""
+        response = per_provider_api_client.get("/observability/metrics/per-provider")
+        data = response.json()
+        assert "timestamp" in data
+        assert isinstance(data["timestamp"], str)
+
+    def test_aggregates_by_provider(self, per_provider_api_client):
+        """Separate entries exist for each provider found in metrics."""
+        response = per_provider_api_client.get("/observability/metrics/per-provider")
+        data = response.json()
+        provider_ids = {p["provider_id"] for p in data["providers"]}
+        assert "math" in provider_ids
+        assert "science" in provider_ids
+
+    def test_tool_calls_total_summed_per_provider(self, per_provider_api_client):
+        """tool_calls_total sums all labeled lines for each provider."""
+        response = per_provider_api_client.get("/observability/metrics/per-provider")
+        data = response.json()
+        math_entry = next(p for p in data["providers"] if p["provider_id"] == "math")
+        # 10.0 (success) + 2.0 (error) = 12.0
+        assert math_entry["tool_calls_total"] == pytest.approx(12.0)
+
+    def test_tool_call_errors_counted(self, per_provider_api_client):
+        """tool_call_errors is populated from mcp_hangar_tool_call_errors_total lines."""
+        response = per_provider_api_client.get("/observability/metrics/per-provider")
+        data = response.json()
+        math_entry = next(p for p in data["providers"] if p["provider_id"] == "math")
+        assert math_entry["tool_call_errors"] == pytest.approx(2.0)
+
+    def test_health_check_failures_counted(self, per_provider_api_client):
+        """health_check_failures counts only result=unhealthy lines."""
+        response = per_provider_api_client.get("/observability/metrics/per-provider")
+        data = response.json()
+        math_entry = next(p for p in data["providers"] if p["provider_id"] == "math")
+        assert math_entry["health_check_failures"] == pytest.approx(1.0)
+
+    def test_cold_starts_counted(self, per_provider_api_client):
+        """cold_starts_total is populated from histogram _count lines."""
+        response = per_provider_api_client.get("/observability/metrics/per-provider")
+        data = response.json()
+        math_entry = next(p for p in data["providers"] if p["provider_id"] == "math")
+        assert math_entry["cold_starts_total"] == pytest.approx(3.0)
+
+    def test_provider_entry_has_required_keys(self, per_provider_api_client):
+        """Each provider entry contains all required metric keys."""
+        response = per_provider_api_client.get("/observability/metrics/per-provider")
+        data = response.json()
+        entry = data["providers"][0]
+        for key in (
+            "provider_id",
+            "tool_calls_total",
+            "tool_call_errors",
+            "cold_starts_total",
+            "health_checks_total",
+            "health_check_failures",
+        ):
+            assert key in entry, f"Missing key: {key}"
+
+    def test_provider_without_errors_has_zero(self, per_provider_api_client):
+        """Provider with no error lines gets tool_call_errors=0."""
+        response = per_provider_api_client.get("/observability/metrics/per-provider")
+        data = response.json()
+        science_entry = next(p for p in data["providers"] if p["provider_id"] == "science")
+        assert science_entry["tool_call_errors"] == pytest.approx(0.0)
+
+
+# ---------------------------------------------------------------------------
+# GET /observability/metrics/history
+# ---------------------------------------------------------------------------
+
+
+@pytest.fixture
+def mock_metric_points():
+    """Sample MetricPoint-like objects returned by the history store."""
+    p1 = Mock()
+    p1.provider_id = "math"
+    p1.metric_name = "tool_calls_total"
+    p1.value = 10.0
+    p1.recorded_at = 1_700_000_000.0
+
+    p2 = Mock()
+    p2.provider_id = "science"
+    p2.metric_name = "tool_calls_total"
+    p2.value = 5.0
+    p2.recorded_at = 1_700_000_060.0
+
+    return [p1, p2]
+
+
+@pytest.fixture
+def history_api_client(mock_audit_records, mock_security_events, mock_alerts, mock_metric_points):
+    """TestClient with metrics history store mocked."""
+    from mcp_hangar.server.api import create_api_router
+
+    mock_audit_handler = Mock()
+    mock_audit_handler.query.return_value = mock_audit_records
+
+    mock_security_handler = Mock()
+    mock_sink = Mock()
+    mock_sink.query.return_value = mock_security_events
+    mock_security_handler._sink = mock_sink
+    mock_security_handler.sink = mock_sink
+
+    mock_alert_handler = Mock()
+    mock_alert_handler.alerts_sent = mock_alerts
+
+    mock_store = Mock()
+    mock_store.query.return_value = mock_metric_points
+
+    with (
+        patch("mcp_hangar.server.api.observability.get_metrics", return_value=""),
+        patch("mcp_hangar.server.api.observability.get_audit_handler", return_value=mock_audit_handler),
+        patch("mcp_hangar.server.api.observability.get_security_handler", return_value=mock_security_handler),
+        patch("mcp_hangar.server.api.observability.get_alert_handler", return_value=mock_alert_handler),
+        patch("mcp_hangar.server.api.observability.get_metrics_history_store", return_value=mock_store),
+    ):
+        app = create_api_router()
+        client = TestClient(app, raise_server_exceptions=False)
+        yield client, mock_store
+
+
+class TestGetMetricsHistory:
+    """Tests for GET /observability/metrics/history."""
+
+    def test_returns_200(self, history_api_client):
+        """GET /observability/metrics/history returns HTTP 200."""
+        client, _ = history_api_client
+        response = client.get("/observability/metrics/history")
+        assert response.status_code == 200
+
+    def test_returns_points_key(self, history_api_client):
+        """Response contains points list."""
+        client, _ = history_api_client
+        response = client.get("/observability/metrics/history")
+        data = response.json()
+        assert "points" in data
+        assert isinstance(data["points"], list)
+
+    def test_returns_count_key(self, history_api_client):
+        """Response contains count equal to number of points returned."""
+        client, _ = history_api_client
+        response = client.get("/observability/metrics/history")
+        data = response.json()
+        assert "count" in data
+        assert data["count"] == len(data["points"])
+
+    def test_points_have_required_fields(self, history_api_client):
+        """Each point contains provider_id, metric_name, value, recorded_at."""
+        client, _ = history_api_client
+        response = client.get("/observability/metrics/history")
+        data = response.json()
+        point = data["points"][0]
+        for key in ("provider_id", "metric_name", "value", "recorded_at"):
+            assert key in point, f"Missing key: {key}"
+
+    def test_provider_filter_passed_to_store(self, history_api_client):
+        """provider query param is forwarded to store.query()."""
+        client, mock_store = history_api_client
+        client.get("/observability/metrics/history?provider=math")
+        call_kwargs = mock_store.query.call_args.kwargs
+        assert call_kwargs.get("provider_id") == "math"
+
+    def test_metric_filter_passed_to_store(self, history_api_client):
+        """metric query param is forwarded to store.query()."""
+        client, mock_store = history_api_client
+        client.get("/observability/metrics/history?metric=tool_calls_total")
+        call_kwargs = mock_store.query.call_args.kwargs
+        assert call_kwargs.get("metric_name") == "tool_calls_total"
+
+    def test_from_and_to_passed_to_store(self, history_api_client):
+        """from/to Unix timestamp params are forwarded as floats to store.query()."""
+        client, mock_store = history_api_client
+        client.get("/observability/metrics/history?from=1700000000&to=1700003600")
+        call_kwargs = mock_store.query.call_args.kwargs
+        assert call_kwargs.get("from_ts") == pytest.approx(1_700_000_000.0)
+        assert call_kwargs.get("to_ts") == pytest.approx(1_700_003_600.0)
+
+    def test_limit_passed_to_store(self, history_api_client):
+        """limit query param is forwarded to store.query()."""
+        client, mock_store = history_api_client
+        client.get("/observability/metrics/history?limit=50")
+        call_kwargs = mock_store.query.call_args.kwargs
+        assert call_kwargs.get("limit") == 50
+
+    def test_empty_history_returns_zero_count(self, mock_audit_records, mock_security_events, mock_alerts):
+        """Empty history store returns points=[] and count=0."""
+        from mcp_hangar.server.api import create_api_router
+
+        mock_audit_handler = Mock()
+        mock_audit_handler.query.return_value = mock_audit_records
+        mock_security_handler = Mock()
+        mock_sink = Mock()
+        mock_sink.query.return_value = mock_security_events
+        mock_security_handler._sink = mock_sink
+        mock_security_handler.sink = mock_sink
+        mock_alert_handler = Mock()
+        mock_alert_handler.alerts_sent = mock_alerts
+        mock_store = Mock()
+        mock_store.query.return_value = []
+
+        with (
+            patch("mcp_hangar.server.api.observability.get_metrics", return_value=""),
+            patch("mcp_hangar.server.api.observability.get_audit_handler", return_value=mock_audit_handler),
+            patch("mcp_hangar.server.api.observability.get_security_handler", return_value=mock_security_handler),
+            patch("mcp_hangar.server.api.observability.get_alert_handler", return_value=mock_alert_handler),
+            patch("mcp_hangar.server.api.observability.get_metrics_history_store", return_value=mock_store),
+        ):
+            app = create_api_router()
+            client = TestClient(app, raise_server_exceptions=False)
+            response = client.get("/observability/metrics/history")
+
+        assert response.status_code == 200
+        data = response.json()
+        assert data["points"] == []
+        assert data["count"] == 0

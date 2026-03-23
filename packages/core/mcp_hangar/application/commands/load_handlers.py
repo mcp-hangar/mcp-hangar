@@ -18,8 +18,8 @@ from ...domain.exceptions import (
 from ...domain.security.redactor import OutputRedactor
 from ...domain.services import get_tool_access_resolver
 from ...domain.value_objects import ToolAccessPolicy
-from ...infrastructure.command_bus import CommandHandler
-from ...infrastructure.event_bus import EventBus
+from ...domain.contracts.command import CommandHandler
+from ...domain.contracts.event_bus import IEventBus
 from ...infrastructure.runtime_store import LoadMetadata, RuntimeProviderStore
 from ...logging_config import get_logger
 from ..services.package_resolver import PackageResolver
@@ -105,7 +105,7 @@ class LoadProviderHandler(CommandHandler):
         secrets_resolver: SecretsResolver,
         installers: list[IPackageInstaller],
         runtime_store: RuntimeProviderStore,
-        event_bus: EventBus,
+        event_bus: IEventBus,
         provider_factory: callable,
         provider_repository: Any,
     ):
@@ -356,7 +356,7 @@ class UnloadProviderHandler(CommandHandler):
     def __init__(
         self,
         runtime_store: RuntimeProviderStore,
-        event_bus: EventBus,
+        event_bus: IEventBus,
     ):
         """Initialize the handler.
 

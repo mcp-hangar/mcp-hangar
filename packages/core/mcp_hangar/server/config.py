@@ -162,7 +162,18 @@ def _load_group_members(
             logger.warning("skipping_invalid_member_id", member_id=member_id)
             continue
 
-        member_provider = _load_provider_config(member_id, member_spec)
+        # Use already-loaded provider if it exists (defined in top-level providers section).
+        # Only create a new one from member_spec if not found.
+        if member_id in PROVIDERS:
+            member_provider = PROVIDERS[member_id]
+            logger.debug(
+                "group_member_resolved_from_providers",
+                group_id=group_id,
+                member_id=member_id,
+                mode=member_provider.mode.value,
+            )
+        else:
+            member_provider = _load_provider_config(member_id, member_spec)
         group.add_member(
             member_provider,
             weight=member_spec.get("weight", 1),
@@ -438,6 +449,33 @@ def _init_concurrency_from_config(full_config: dict[str, Any]) -> None:
         default_provider_limit=default_provider_limit,
         provider_limits=provider_limits,
     )
+
+
+class ServerConfigLoader:
+    """IConfigLoader implementation backed by server-layer config functions.
+
+    Used by ReloadConfigurationHandler to load and apply configuration without
+    importing server-layer symbols from the application layer.
+    """
+
+    def load_from_file(self, path: str) -> dict[str, Any]:
+        """Load and parse a configuration file.
+
+        Args:
+            path: Path to the YAML configuration file.
+
+        Returns:
+            Parsed configuration as a dictionary.
+        """
+        return load_config_from_file(path)
+
+    def apply_providers(self, providers_config: dict[str, Any]) -> None:
+        """Apply a providers configuration section to the running system.
+
+        Args:
+            providers_config: Mapping of provider_id -> provider spec dict.
+        """
+        load_config(providers_config)
 
 
 def load_configuration(config_path: str | None = None) -> dict[str, Any]:

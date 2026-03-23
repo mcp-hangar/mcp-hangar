@@ -289,3 +289,107 @@ class TestStorageBootstrap:
             from mcp_hangar.infrastructure.auth.sqlite_store import SQLiteApiKeyStore
 
             assert isinstance(components.api_key_store, SQLiteApiKeyStore)
+
+
+class TestSQLiteRoleStoreNewMethods:
+    """Tests for list_all_roles, delete_role, update_role added in Phase 27."""
+
+    @pytest.fixture
+    def store(self):
+        """Create a temporary SQLiteRoleStore."""
+        with tempfile.TemporaryDirectory() as tmpdir:
+            db_path = Path(tmpdir) / "test_roles_p27.db"
+            s = SQLiteRoleStore(db_path)
+            s.initialize()
+            yield s
+            s.close()
+
+    @pytest.fixture
+    def custom_role(self):
+        """A custom role fixture."""
+        from mcp_hangar.domain.value_objects import Permission
+
+        return Role(
+            name="ops-custom",
+            description="Custom ops role",
+            permissions=frozenset([Permission("tool", "invoke", "math:*")]),
+        )
+
+    def test_list_all_roles_returns_only_custom(self, store, custom_role):
+        """list_all_roles returns only non-builtin roles."""
+        store.add_role(custom_role)
+
+        roles = store.list_all_roles()
+        role_names = {r.name for r in roles}
+
+        assert "ops-custom" in role_names
+        # Built-in roles must NOT appear
+        assert "admin" not in role_names
+        assert "developer" not in role_names
+
+    def test_list_all_roles_empty_when_no_custom_roles(self, store):
+        """list_all_roles returns empty list when no custom roles exist."""
+        roles = store.list_all_roles()
+        assert roles == []
+
+    def test_delete_custom_role_removes_it(self, store, custom_role):
+        """delete_role removes the role from the store."""
+        store.add_role(custom_role)
+        assert store.get_role("ops-custom") is not None
+
+        store.delete_role("ops-custom")
+
+        assert store.get_role("ops-custom") is None
+
+    def test_delete_custom_role_absent_from_list_all(self, store, custom_role):
+        """After delete_role the role no longer appears in list_all_roles."""
+        store.add_role(custom_role)
+        store.delete_role("ops-custom")
+
+        roles = store.list_all_roles()
+        assert all(r.name != "ops-custom" for r in roles)
+
+    def test_delete_builtin_role_raises(self, store):
+        """delete_role raises CannotModifyBuiltinRoleError for built-in roles."""
+        from mcp_hangar.domain.exceptions import CannotModifyBuiltinRoleError
+
+        with pytest.raises(CannotModifyBuiltinRoleError):
+            store.delete_role("admin")
+
+    def test_delete_unknown_role_raises(self, store):
+        """delete_role raises RoleNotFoundError for non-existent role."""
+        from mcp_hangar.domain.exceptions import RoleNotFoundError
+
+        with pytest.raises(RoleNotFoundError):
+            store.delete_role("does-not-exist")
+
+    def test_update_role_changes_permissions(self, store, custom_role):
+        """update_role returns Role with new permissions."""
+        from mcp_hangar.domain.value_objects import Permission
+
+        store.add_role(custom_role)
+        new_perms = [Permission("provider", "read", "*")]
+
+        updated = store.update_role("ops-custom", new_perms, "Updated description")
+
+        assert updated.name == "ops-custom"
+        assert updated.description == "Updated description"
+        assert len(updated.permissions) == 1
+        # Persisted version also reflects new permissions
+        retrieved = store.get_role("ops-custom")
+        assert retrieved is not None
+        assert len(retrieved.permissions) == 1
+
+    def test_update_builtin_role_raises(self, store):
+        """update_role raises CannotModifyBuiltinRoleError for built-in roles."""
+        from mcp_hangar.domain.exceptions import CannotModifyBuiltinRoleError
+
+        with pytest.raises(CannotModifyBuiltinRoleError):
+            store.update_role("admin", [], "Hacked admin")
+
+    def test_update_unknown_role_raises(self, store):
+        """update_role raises RoleNotFoundError for non-existent role."""
+        from mcp_hangar.domain.exceptions import RoleNotFoundError
+
+        with pytest.raises(RoleNotFoundError):
+            store.update_role("ghost-role", [], None)

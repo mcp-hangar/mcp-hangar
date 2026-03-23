@@ -7,12 +7,14 @@ reads on startup.  It is the persistence-side of the CRUD cycle.
 Public API:
     serialize_providers(providers=None) -> dict[str, Any]
     serialize_groups(groups=None) -> dict[str, Any]
+    serialize_execution_config() -> dict[str, Any]
     serialize_full_config(providers=None, groups=None) -> dict[str, Any]
     write_config_backup(config_path: str) -> str
 """
 
 from __future__ import annotations
 
+import datetime
 from pathlib import Path
 from typing import TYPE_CHECKING, Any
 
@@ -57,14 +59,42 @@ def serialize_groups(groups: dict[str, ProviderGroup] | None = None) -> dict[str
     return {group_id: group.to_config_dict() for group_id, group in groups.items()}
 
 
+def serialize_execution_config() -> dict[str, Any]:
+    """Return the execution/concurrency section of the config.
+
+    Reads live values from the ConcurrencyManager singleton.  Only includes
+    non-zero (non-default) values so that the output remains minimal and
+    idempotent on round-trip.
+
+    Returns:
+        Dict suitable for the ``"execution"`` top-level key, may be empty
+        if all values are at their defaults.
+    """
+    try:
+        from .tools.batch.concurrency import get_concurrency_manager
+
+        manager = get_concurrency_manager()
+        section: dict[str, Any] = {}
+        if manager.global_limit != 0:
+            section["max_concurrency"] = manager.global_limit
+        if manager.default_provider_limit != 0:
+            section["default_provider_concurrency"] = manager.default_provider_limit
+        return section
+    except Exception:  # noqa: BLE001 -- fault-barrier: concurrency unavailable should not break serializer
+        return {}
+
+
 def serialize_full_config(
     providers: dict[str, Provider] | None = None,
     groups: dict[str, ProviderGroup] | None = None,
 ) -> dict[str, Any]:
     """Return the complete config as a YAML-compatible dict.
 
-    Merges providers and groups under a single ``"providers"`` key,
-    matching the top-level structure expected by ``server/config.py``.
+    Includes the ``"providers"`` section (providers + groups merged) and any
+    additional top-level sections that were present in the original config file
+    (e.g. ``event_store``, ``auth``, ``catalog``, ``discovery``,
+    ``config_reload``).  The ``execution`` section is always reconstructed from
+    the live ConcurrencyManager state.
 
     Args:
         providers: Optional explicit providers dict.  Passed through to
@@ -73,11 +103,57 @@ def serialize_full_config(
             :func:`serialize_groups`.
 
     Returns:
-        ``{"providers": {**serialized_providers, **serialized_groups}}``
+        Full config dict with ``"providers"`` key and any additional
+        top-level sections from the original loaded config.
     """
     serialized_providers = serialize_providers(providers)
     serialized_groups = serialize_groups(groups)
-    return {"providers": {**serialized_providers, **serialized_groups}}
+
+    config: dict[str, Any] = {"providers": {**serialized_providers, **serialized_groups}}
+
+    # Append execution section from live ConcurrencyManager state
+    execution = serialize_execution_config()
+    if execution:
+        config["execution"] = execution
+
+    # Pass through other top-level sections from the original config so that
+    # the exported YAML can be used as a drop-in replacement for config.yaml.
+    # Sections that are purely runtime-derived (providers, execution) are
+    # handled above; everything else is preserved verbatim.
+    _PASSTHROUGH_KEYS = frozenset({"event_store", "auth", "catalog", "discovery", "config_reload", "logging"})
+    try:
+        ctx = get_context()
+        stored = getattr(ctx, "full_config", {}) or {}
+        for key in _PASSTHROUGH_KEYS:
+            if key in stored and key not in config:
+                config[key] = stored[key]
+    except Exception:  # noqa: BLE001 -- fault-barrier: missing context must not break serialization
+        pass
+
+    return config
+
+
+def _build_snapshot_metadata(config: dict[str, Any]) -> dict[str, Any]:
+    """Build a snapshot metadata block for embedding in backup files.
+
+    The metadata is stored under the ``__snapshot__`` key and contains
+    information useful for identifying and validating a backup without
+    fully parsing it.
+
+    Args:
+        config: The full config dict that will be written to the backup.
+
+    Returns:
+        Dict with ``timestamp``, ``provider_count``, and ``group_count`` keys.
+    """
+    providers_section = config.get("providers", {}) or {}
+    provider_count = sum(1 for v in providers_section.values() if isinstance(v, dict) and v.get("mode") != "group")
+    group_count = sum(1 for v in providers_section.values() if isinstance(v, dict) and v.get("mode") == "group")
+    return {
+        "timestamp": datetime.datetime.now(datetime.UTC).isoformat(),
+        "provider_count": provider_count,
+        "group_count": group_count,
+    }
 
 
 def write_config_backup(config_path: str) -> str:
@@ -89,6 +165,12 @@ def write_config_backup(config_path: str) -> str:
         bak2 -> bak3
         bak1 -> bak2
         <new> -> bak1
+
+    The backup file embeds a ``__snapshot__`` metadata block with the
+    creation timestamp, provider count, and group count so that backups
+    can be audited without a live server.  The ``__snapshot__`` key is
+    ignored by ``load_config_from_file`` because it is not a standard
+    config section.
 
     Args:
         config_path: Absolute or relative path to the config YAML file.
@@ -105,8 +187,10 @@ def write_config_backup(config_path: str) -> str:
         if newer.exists():
             newer.rename(older)
     backup_path = base.parent / f"{base.name}.bak1"
+    snapshot = serialize_full_config()
+    snapshot["__snapshot__"] = _build_snapshot_metadata(snapshot)
     content = yaml.safe_dump(
-        serialize_full_config(),
+        snapshot,
         default_flow_style=False,
         sort_keys=True,
         allow_unicode=True,

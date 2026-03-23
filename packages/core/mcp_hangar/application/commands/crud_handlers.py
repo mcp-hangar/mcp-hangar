@@ -16,7 +16,7 @@ from ...domain.model.provider import Provider
 from ...domain.model.provider_group import GroupDeleted, ProviderGroup
 from ...domain.repository import IProviderRepository
 from ...domain.value_objects import LoadBalancerStrategy, ProviderState
-from ...infrastructure.command_bus import CommandHandler
+from ...domain.contracts.command import CommandHandler
 from ...logging_config import get_logger
 from .crud_commands import (
     AddGroupMemberCommand,

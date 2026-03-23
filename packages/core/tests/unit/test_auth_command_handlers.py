@@ -210,10 +210,16 @@ class TestCreateCustomRoleHandler:
         return InMemoryRoleStore()
 
     @pytest.fixture
-    def handler(self, store):
+    def handler_no_bus(self, store):
         return CreateCustomRoleHandler(store)
 
-    def test_create_custom_role(self, store, handler):
+    @pytest.fixture
+    def handler_with_bus(self, store):
+        from unittest.mock import Mock
+
+        return CreateCustomRoleHandler(store, event_bus=Mock())
+
+    def test_create_custom_role(self, store, handler_no_bus):
         """Creating a custom role adds it to store."""
         command = CreateCustomRoleCommand(
             role_name="custom-role",
@@ -222,7 +228,7 @@ class TestCreateCustomRoleHandler:
             created_by="admin",
         )
 
-        result = handler.handle(command)
+        result = handler_no_bus.handle(command)
 
         assert result["created"] is True
         assert result["role_name"] == "custom-role"
@@ -233,24 +239,73 @@ class TestCreateCustomRoleHandler:
         assert role is not None
         assert role.description == "A custom role"
 
+    def test_create_custom_role_emits_event_when_bus_provided(self, store, handler_with_bus):
+        """CreateCustomRoleHandler emits CustomRoleCreated when event_bus is given."""
+        from mcp_hangar.application.commands.auth_handlers import CreateCustomRoleHandler
+        from mcp_hangar.domain.events import CustomRoleCreated
+
+        bus = Mock()
+        handler = CreateCustomRoleHandler(store, event_bus=bus)
+        command = CreateCustomRoleCommand(
+            role_name="evt-role",
+            description="Event test",
+            permissions=frozenset(["tool:invoke:*"]),
+            created_by="admin",
+        )
+
+        handler.handle(command)
+
+        bus.publish.assert_called_once()
+        event = bus.publish.call_args[0][0]
+        assert isinstance(event, CustomRoleCreated)
+        assert event.role_name == "evt-role"
+
+    def test_create_custom_role_no_event_when_no_bus(self, store, handler_no_bus):
+        """CreateCustomRoleHandler does not raise when event_bus is None."""
+        command = CreateCustomRoleCommand(
+            role_name="no-bus-role",
+            permissions=frozenset(),
+            created_by="system",
+        )
+        result = handler_no_bus.handle(command)
+        assert result["created"] is True
+
 
 class TestRegisterAuthCommandHandlers:
     """Tests for handler registration."""
 
-    def test_register_handlers(self):
-        """All handlers are registered with command bus."""
+    def test_register_handlers_with_all_stores(self):
+        """All handlers are registered when all stores provided."""
         command_bus = Mock()
         api_key_store = InMemoryApiKeyStore()
         role_store = InMemoryRoleStore()
+        tap_store = Mock()
+        event_bus = Mock()
 
         register_auth_command_handlers(
             command_bus=command_bus,
             api_key_store=api_key_store,
             role_store=role_store,
+            tap_store=tap_store,
+            event_bus=event_bus,
         )
 
-        # Should have registered 8 handlers (3 API key + 5 role: assign, revoke, create, delete, update)
-        assert command_bus.register.call_count == 8
+        # 3 api_key + 5 role + 2 tap = 10 total
+        assert command_bus.register.call_count == 10
+
+    def test_register_handlers_role_only(self):
+        """Only role handlers registered when only role_store provided."""
+        command_bus = Mock()
+        role_store = InMemoryRoleStore()
+
+        register_auth_command_handlers(
+            command_bus=command_bus,
+            api_key_store=None,
+            role_store=role_store,
+        )
+
+        # 5 role handlers
+        assert command_bus.register.call_count == 5
 
     def test_register_without_stores(self):
         """Registration skips handlers if stores not provided."""
@@ -262,5 +317,135 @@ class TestRegisterAuthCommandHandlers:
             role_store=None,
         )
 
-        # No handlers registered
         assert command_bus.register.call_count == 0
+
+
+class TestDeleteCustomRoleHandler:
+    """Tests for DeleteCustomRoleHandler."""
+
+    @pytest.fixture
+    def store(self):
+        store = InMemoryRoleStore()
+        from mcp_hangar.domain.value_objects import Permission, Role
+
+        store.add_role(
+            Role(
+                name="to-delete",
+                description="Will be deleted",
+                permissions=frozenset([Permission("tool", "invoke", "*")]),
+            )
+        )
+        return store
+
+    @pytest.fixture
+    def event_bus(self):
+        return Mock()
+
+    @pytest.fixture
+    def handler(self, store, event_bus):
+        from mcp_hangar.application.commands.auth_handlers import DeleteCustomRoleHandler
+
+        return DeleteCustomRoleHandler(store, event_bus)
+
+    def test_delete_role_returns_confirmation(self, handler):
+        """Deleting a custom role returns confirmation dict."""
+        from mcp_hangar.application.commands.auth_commands import DeleteCustomRoleCommand
+
+        command = DeleteCustomRoleCommand(role_name="to-delete", deleted_by="admin")
+        result = handler.handle(command)
+
+        assert result["deleted"] is True
+        assert result["role_name"] == "to-delete"
+        assert result["deleted_by"] == "admin"
+
+    def test_delete_role_emits_event(self, handler, event_bus):
+        """Deleting a custom role emits CustomRoleDeleted."""
+        from mcp_hangar.application.commands.auth_commands import DeleteCustomRoleCommand
+        from mcp_hangar.domain.events import CustomRoleDeleted
+
+        command = DeleteCustomRoleCommand(role_name="to-delete")
+        handler.handle(command)
+
+        event_bus.publish.assert_called_once()
+        event = event_bus.publish.call_args[0][0]
+        assert isinstance(event, CustomRoleDeleted)
+        assert event.role_name == "to-delete"
+
+    def test_delete_builtin_role_propagates_error(self, handler):
+        """CannotModifyBuiltinRoleError propagates from store."""
+        from mcp_hangar.application.commands.auth_commands import DeleteCustomRoleCommand
+        from mcp_hangar.domain.exceptions import CannotModifyBuiltinRoleError
+
+        command = DeleteCustomRoleCommand(role_name="admin")
+        with pytest.raises(CannotModifyBuiltinRoleError):
+            handler.handle(command)
+
+
+class TestUpdateCustomRoleHandler:
+    """Tests for UpdateCustomRoleHandler."""
+
+    @pytest.fixture
+    def store(self):
+        store = InMemoryRoleStore()
+        from mcp_hangar.domain.value_objects import Permission, Role
+
+        store.add_role(
+            Role(
+                name="to-update",
+                description="Original",
+                permissions=frozenset([Permission("tool", "invoke", "*")]),
+            )
+        )
+        return store
+
+    @pytest.fixture
+    def event_bus(self):
+        return Mock()
+
+    @pytest.fixture
+    def handler(self, store, event_bus):
+        from mcp_hangar.application.commands.auth_handlers import UpdateCustomRoleHandler
+
+        return UpdateCustomRoleHandler(store, event_bus)
+
+    def test_update_role_returns_confirmation(self, handler):
+        """Updating a custom role returns confirmation dict."""
+        from mcp_hangar.application.commands.auth_commands import UpdateCustomRoleCommand
+
+        command = UpdateCustomRoleCommand(
+            role_name="to-update",
+            permissions=["provider:read:*"],
+            description="Updated",
+            updated_by="admin",
+        )
+        result = handler.handle(command)
+
+        assert result["updated"] is True
+        assert result["role_name"] == "to-update"
+        assert result["updated_by"] == "admin"
+        assert result["permissions_count"] == 1
+
+    def test_update_role_emits_event(self, handler, event_bus):
+        """Updating a custom role emits CustomRoleUpdated."""
+        from mcp_hangar.application.commands.auth_commands import UpdateCustomRoleCommand
+        from mcp_hangar.domain.events import CustomRoleUpdated
+
+        command = UpdateCustomRoleCommand(
+            role_name="to-update",
+            permissions=["provider:read:*"],
+        )
+        handler.handle(command)
+
+        event_bus.publish.assert_called_once()
+        event = event_bus.publish.call_args[0][0]
+        assert isinstance(event, CustomRoleUpdated)
+        assert event.role_name == "to-update"
+
+    def test_update_unknown_role_propagates_error(self, handler):
+        """RoleNotFoundError propagates from store."""
+        from mcp_hangar.application.commands.auth_commands import UpdateCustomRoleCommand
+        from mcp_hangar.domain.exceptions import RoleNotFoundError
+
+        command = UpdateCustomRoleCommand(role_name="ghost", permissions=[])
+        with pytest.raises(RoleNotFoundError):
+            handler.handle(command)

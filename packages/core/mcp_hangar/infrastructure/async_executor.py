@@ -22,12 +22,13 @@ from collections.abc import Callable, Coroutine
 from concurrent.futures import ThreadPoolExecutor
 from typing import Any, Optional
 
+from ..application.ports.async_task import IAsyncTaskSubmitter
 from ..logging_config import get_logger
 
 logger = get_logger(__name__)
 
 
-class AsyncExecutor:
+class AsyncExecutor(IAsyncTaskSubmitter):
     """Executes async coroutines from sync context using a thread pool.
 
     This class provides a singleton executor that runs async operations

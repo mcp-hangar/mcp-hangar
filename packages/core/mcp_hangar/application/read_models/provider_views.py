@@ -73,7 +73,7 @@ class ProviderSummary:
     def to_dict(self) -> dict[str, Any]:
         """Convert to dictionary."""
         result = {
-            "provider": self.provider_id,
+            "provider_id": self.provider_id,
             "state": self.state,
             "mode": self.mode,
             "alive": self.is_alive,
@@ -105,7 +105,7 @@ class ProviderDetails:
     def to_dict(self) -> dict[str, Any]:
         """Convert to dictionary."""
         return {
-            "provider": self.provider_id,
+            "provider_id": self.provider_id,
             "state": self.state,
             "mode": self.mode,
             "alive": self.is_alive,

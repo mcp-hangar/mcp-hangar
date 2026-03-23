@@ -15,6 +15,8 @@ from abc import ABC, abstractmethod
 from collections.abc import Callable
 from typing import Any, TYPE_CHECKING
 
+from mcp_hangar.domain.contracts.command import CommandHandler  # noqa: F401 -- re-exported for backward compat
+from mcp_hangar.application.ports.bus import ICommandBus
 from mcp_hangar.logging_config import get_logger
 
 if TYPE_CHECKING:
@@ -22,15 +24,6 @@ if TYPE_CHECKING:
     from ..domain.security.rate_limiter import RateLimiter
 
 logger = get_logger(__name__)
-
-
-class CommandHandler(ABC):
-    """Base class for command handlers."""
-
-    @abstractmethod
-    def handle(self, command: "Command") -> Any:
-        """Handle the command and return result."""
-        pass
 
 
 class CommandBusMiddleware(ABC):
@@ -55,7 +48,7 @@ class CommandBusMiddleware(ABC):
         """
 
 
-class CommandBus:
+class CommandBus(ICommandBus):
     """
     Dispatches commands to their registered handlers.
 

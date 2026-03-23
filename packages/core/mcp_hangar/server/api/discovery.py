@@ -7,8 +7,16 @@ sources, pending providers, quarantined providers, approve/reject.
 from starlette.requests import Request
 from starlette.routing import Route
 
+from ...application.commands.discovery_commands import (
+    DeregisterDiscoverySourceCommand,
+    RegisterDiscoverySourceCommand,
+    ToggleDiscoverySourceCommand,
+    TriggerSourceScanCommand,
+    UpdateDiscoverySourceCommand,
+)
 from ...domain.exceptions import ProviderNotFoundError
 from ..context import get_context
+from .middleware import dispatch_command
 from .serializers import HangarJSONResponse
 
 
@@ -130,11 +138,136 @@ async def reject_provider(request: Request) -> HangarJSONResponse:
     return HangarJSONResponse(result)
 
 
+async def register_source(request: Request) -> HangarJSONResponse:
+    """Register a new discovery source.
+
+    Body:
+        source_type: Type of source ("docker", "filesystem", "kubernetes", "entrypoint").
+        mode: Discovery mode ("additive" or "authoritative").
+        enabled: Whether to activate immediately (default: true).
+        config: Source-specific configuration dict (default: {}).
+
+    Returns:
+        JSON with {"source_id": ..., "registered": true} and HTTP 201.
+
+    Raises:
+        DiscoveryNotConfigured: If discovery is not configured.
+    """
+    _require_orchestrator()  # Guard: discovery must be configured
+    body = await request.json()
+    result = await dispatch_command(
+        RegisterDiscoverySourceCommand(
+            source_type=body["source_type"],
+            mode=body["mode"],
+            enabled=body.get("enabled", True),
+            config=body.get("config", {}),
+        )
+    )
+    return HangarJSONResponse(result, status_code=201)
+
+
+async def update_source(request: Request) -> HangarJSONResponse:
+    """Update an existing discovery source spec.
+
+    Path params:
+        source_id: UUID of the source to update.
+
+    Body:
+        mode: Optional new mode string.
+        enabled: Optional new enabled state.
+        config: Optional new config dict (replaces entire config).
+
+    Returns:
+        JSON with {"source_id": ..., "updated": true}.
+
+    Raises:
+        ProviderNotFoundError: If source_id is not registered (-> 404).
+    """
+    source_id = request.path_params["source_id"]
+    body = await request.json()
+    result = await dispatch_command(
+        UpdateDiscoverySourceCommand(
+            source_id=source_id,
+            mode=body.get("mode"),
+            enabled=body.get("enabled"),
+            config=body.get("config"),
+        )
+    )
+    return HangarJSONResponse(result)
+
+
+async def deregister_source(request: Request) -> HangarJSONResponse:
+    """Remove a discovery source from the registry.
+
+    Path params:
+        source_id: UUID of the source to remove.
+
+    Returns:
+        JSON with {"source_id": ..., "deregistered": true}.
+
+    Raises:
+        ProviderNotFoundError: If source_id is not registered (-> 404).
+    """
+    source_id = request.path_params["source_id"]
+    result = await dispatch_command(DeregisterDiscoverySourceCommand(source_id=source_id))
+    return HangarJSONResponse(result)
+
+
+async def trigger_scan(request: Request) -> HangarJSONResponse:
+    """Trigger an immediate discovery scan for a source.
+
+    Path params:
+        source_id: UUID of the source to scan.
+
+    Returns:
+        JSON with {"source_id": ..., "scan_triggered": true, "providers_found": int}.
+
+    Raises:
+        ProviderNotFoundError: If source_id is not registered (-> 404).
+    """
+    source_id = request.path_params["source_id"]
+    result = await dispatch_command(TriggerSourceScanCommand(source_id=source_id))
+    return HangarJSONResponse(result)
+
+
+async def toggle_source(request: Request) -> HangarJSONResponse:
+    """Enable or disable a discovery source.
+
+    Path params:
+        source_id: UUID of the source to toggle.
+
+    Body:
+        enabled: true to enable, false to disable.
+
+    Returns:
+        JSON with {"source_id": ..., "enabled": bool}.
+
+    Raises:
+        ProviderNotFoundError: If source_id is not registered (-> 404).
+    """
+    source_id = request.path_params["source_id"]
+    body = await request.json()
+    result = await dispatch_command(
+        ToggleDiscoverySourceCommand(
+            source_id=source_id,
+            enabled=body["enabled"],
+        )
+    )
+    return HangarJSONResponse(result)
+
+
 # Route definitions for mounting in the API router
 discovery_routes = [
+    # Existing discovery routes (approval workflow)
     Route("/sources", list_sources, methods=["GET"]),
     Route("/pending", list_pending, methods=["GET"]),
     Route("/quarantined", list_quarantined, methods=["GET"]),
     Route("/approve/{name:str}", approve_provider, methods=["POST"]),
     Route("/reject/{name:str}", reject_provider, methods=["POST"]),
+    # Discovery source management (DISC-02)
+    Route("/sources", register_source, methods=["POST"]),
+    Route("/sources/{source_id:str}", update_source, methods=["PUT"]),
+    Route("/sources/{source_id:str}", deregister_source, methods=["DELETE"]),
+    Route("/sources/{source_id:str}/scan", trigger_scan, methods=["POST"]),
+    Route("/sources/{source_id:str}/enable", toggle_source, methods=["PUT"]),
 ]

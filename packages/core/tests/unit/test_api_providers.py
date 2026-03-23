@@ -165,7 +165,7 @@ class TestListProviders:
         response = api_client.get("/providers/")
         data = response.json()
         provider = data["providers"][0]
-        assert provider["provider"] == "math"
+        assert provider["provider_id"] == "math"
         assert provider["state"] == "ready"
         assert provider["tools_count"] == 1
 
@@ -200,7 +200,7 @@ class TestGetProvider:
         """GET /providers/math returns provider details."""
         response = api_client.get("/providers/math")
         data = response.json()
-        assert data["provider"] == "math"
+        assert data["provider_id"] == "math"
         assert data["state"] == "ready"
         assert "tools" in data
         assert "health" in data

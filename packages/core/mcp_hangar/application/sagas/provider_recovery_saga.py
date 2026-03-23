@@ -5,7 +5,7 @@ import time
 from typing import Any
 
 from ...domain.events import DomainEvent, HealthCheckFailed, ProviderDegraded, ProviderStarted, ProviderStopped
-from ...infrastructure.saga_manager import EventTriggeredSaga, get_saga_manager
+from ...application.ports.saga import EventTriggeredSaga, ISagaManager
 from ...logging_config import get_logger
 from ..commands import Command, StartProviderCommand, StopProviderCommand
 
@@ -35,6 +35,7 @@ class ProviderRecoverySaga(EventTriggeredSaga):
         initial_backoff_s: float = 5.0,
         max_backoff_s: float = 60.0,
         backoff_multiplier: float = 2.0,
+        saga_manager: ISagaManager | None = None,
     ):
         super().__init__()
 
@@ -42,6 +43,7 @@ class ProviderRecoverySaga(EventTriggeredSaga):
         self._initial_backoff_s = initial_backoff_s
         self._max_backoff_s = max_backoff_s
         self._backoff_multiplier = backoff_multiplier
+        self._saga_manager = saga_manager
 
         # Track retry state per provider
         # provider_id -> {"retries": int, "last_attempt": float, "next_retry": float}
@@ -103,7 +105,12 @@ class ProviderRecoverySaga(EventTriggeredSaga):
         )
 
         # Schedule the restart command to fire after the computed backoff delay.
-        get_saga_manager().schedule_command(
+        sm = self._saga_manager
+        if sm is None:
+            from ...infrastructure.saga_manager import get_saga_manager
+
+            sm = get_saga_manager()
+        sm.schedule_command(
             StartProviderCommand(provider_id=provider_id),
             delay_s=backoff,
         )

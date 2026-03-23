@@ -385,6 +385,7 @@ class MetricsSnapshotWorker:
         interval_s: int = 60,
         prune_interval: int = 144,
     ) -> None:
+        self.task = "metrics_snapshot"
         self.interval_s = interval_s
         self._prune_interval = prune_interval
         self._cycle = 0

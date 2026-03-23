@@ -10,11 +10,13 @@ from ...application.sagas import GroupRebalanceSaga
 from ...application.sagas.provider_failover_saga import ProviderFailoverEventSaga
 from ...application.sagas.provider_recovery_saga import ProviderRecoverySaga
 from ...domain.model.circuit_breaker import CircuitBreaker
+from ...infrastructure.event_store import get_event_store
 from ...infrastructure.persistence.saga_state_store import NullSagaStateStore, SagaStateStore
 from ...infrastructure.saga_manager import get_saga_manager
 from ...logging_config import get_logger
+from ..config import ServerConfigLoader
 from ..context import get_context
-from ..state import set_group_rebalance_saga
+from ..state import GROUPS, RUNTIME_PROVIDERS, set_group_rebalance_saga
 
 if TYPE_CHECKING:
     from ...bootstrap.runtime import Runtime
@@ -36,10 +38,23 @@ def init_cqrs(
             discovery source management handlers.
     """
     from ...application.commands.crud_handlers import register_crud_handlers
-    from ..state import GROUPS, PROVIDER_REPOSITORY
+    from ..state import PROVIDER_REPOSITORY
 
-    register_command_handlers(runtime.command_bus, PROVIDER_REPOSITORY, runtime.event_bus, current_config_path)
-    register_query_handlers(runtime.query_bus, PROVIDER_REPOSITORY)
+    register_command_handlers(
+        runtime.command_bus,
+        PROVIDER_REPOSITORY,
+        runtime.event_bus,
+        current_config_path,
+        config_loader=ServerConfigLoader(),
+        groups=GROUPS,
+        runtime_store=RUNTIME_PROVIDERS,
+    )
+    register_query_handlers(
+        runtime.query_bus,
+        PROVIDER_REPOSITORY,
+        runtime_store=RUNTIME_PROVIDERS,
+        event_store=get_event_store(),
+    )
     register_crud_handlers(runtime.command_bus, PROVIDER_REPOSITORY, runtime.event_bus, GROUPS)
 
     if discovery_registry is not None:
@@ -245,12 +260,12 @@ def init_saga(full_config: dict[str, Any] | None = None) -> SagaStateStore | Nul
     saga_manager.register_event_saga(group_saga)
 
     # 2. ProviderRecoverySaga
-    recovery_saga = ProviderRecoverySaga()
+    recovery_saga = ProviderRecoverySaga(saga_manager=saga_manager)
     _restore_saga_state(saga_state_store, recovery_saga)
     saga_manager.register_event_saga(recovery_saga)
 
     # 3. ProviderFailoverEventSaga
-    failover_saga = ProviderFailoverEventSaga()
+    failover_saga = ProviderFailoverEventSaga(saga_manager=saga_manager)
     _restore_saga_state(saga_state_store, failover_saga)
     saga_manager.register_event_saga(failover_saga)
 

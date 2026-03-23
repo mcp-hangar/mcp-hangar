@@ -3,15 +3,14 @@
 import time
 from typing import Any
 
+from ...domain.contracts.command import CommandHandler
+from ...domain.contracts.event_bus import IEventBus
 from ...domain.events import ConfigurationReloaded, ConfigurationReloadFailed, ConfigurationReloadRequested
 from ...domain.exceptions import ConfigurationError
 from ...domain.repository import IProviderRepository
 from ...domain.services import get_tool_access_resolver
-from ...infrastructure.command_bus import CommandHandler
-from ...infrastructure.event_bus import EventBus
 from ...logging_config import get_logger
-from ...server.config import load_config, load_config_from_file
-from ...server.state import GROUPS
+from ..ports.config_loader import IConfigLoader
 from .commands import ReloadConfigurationCommand
 
 logger = get_logger(__name__)
@@ -30,8 +29,10 @@ class ReloadConfigurationHandler(CommandHandler):
     def __init__(
         self,
         provider_repository: IProviderRepository,
-        event_bus: EventBus,
+        event_bus: IEventBus,
         current_config_path: str | None = None,
+        config_loader: IConfigLoader | None = None,
+        groups: dict | None = None,
     ):
         """Initialize the handler.
 
@@ -39,10 +40,14 @@ class ReloadConfigurationHandler(CommandHandler):
             provider_repository: Repository for provider persistence.
             event_bus: Event bus for publishing events.
             current_config_path: Current configuration file path.
+            config_loader: Config loader for loading/applying configuration.
+            groups: Groups dict reference for clearing during reload.
         """
         self._repository = provider_repository
         self._event_bus = event_bus
         self._current_config_path = current_config_path
+        self._config_loader = config_loader
+        self._groups = groups if groups is not None else {}
 
     def handle(self, command: ReloadConfigurationCommand) -> dict[str, Any]:
         """Handle the reload configuration command.
@@ -74,7 +79,13 @@ class ReloadConfigurationHandler(CommandHandler):
 
         try:
             # Load and validate new configuration
-            new_full_config = load_config_from_file(config_path)
+            if self._config_loader is not None:
+                new_full_config = self._config_loader.load_from_file(config_path)
+            else:
+                # Fallback: import server-layer function directly (legacy path)
+                from ...server.config import load_config_from_file as _load_from_file
+
+                new_full_config = _load_from_file(config_path)
             new_providers_config = new_full_config.get("providers", {})
 
             # Capture current state
@@ -140,7 +151,7 @@ class ReloadConfigurationHandler(CommandHandler):
                     logger.info("provider_removed", provider_id=provider_id)
 
             # 3. Clear groups (will be reloaded)
-            GROUPS.clear()
+            self._groups.clear()
 
             # 4. Invalidate and clear tool access policies before reload
             # Policies will be re-registered during load_config
@@ -149,7 +160,13 @@ class ReloadConfigurationHandler(CommandHandler):
             logger.debug("tool_access_policies_cleared_for_reload")
 
             # 5. Load new configuration (adds new and updates existing)
-            load_config(new_providers_config)
+            if self._config_loader is not None:
+                self._config_loader.apply_providers(new_providers_config)
+            else:
+                # Fallback: import server-layer function directly (legacy path)
+                from ...server.config import load_config as _load_config
+
+                _load_config(new_providers_config)
 
             # 6. Auto-start providers if they were running before
             # (This depends on auto_start config and provider state)

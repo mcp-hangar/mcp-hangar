@@ -7,6 +7,7 @@ Supports optional event persistence via IEventStore.
 from collections.abc import Callable
 import threading
 
+from mcp_hangar.domain.contracts.event_bus import IEventBus
 from mcp_hangar.domain.contracts.event_store import IEventStore, NullEventStore
 from mcp_hangar.domain.events import DomainEvent
 from mcp_hangar.infrastructure.lock_hierarchy import LockLevel, TrackedLock
@@ -23,7 +24,7 @@ class EventHandler:
         raise NotImplementedError
 
 
-class EventBus:
+class EventBus(IEventBus):
     """
     Thread-safe event bus for publishing and subscribing to domain events.
 

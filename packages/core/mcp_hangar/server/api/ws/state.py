@@ -70,7 +70,7 @@ async def ws_state_endpoint(websocket: WebSocket) -> None:
             }
             await websocket.send_text(json.dumps(payload, cls=HangarJSONEncoder))
             await asyncio.sleep(interval)
-    except WebSocketDisconnect:
+    except (WebSocketDisconnect, RuntimeError):
         logger.debug("ws_state_disconnected")
     finally:
         logger.info("ws_state_cleanup_done")

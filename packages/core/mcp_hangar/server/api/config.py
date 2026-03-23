@@ -2,11 +2,13 @@
 
 Implements GET /config (current configuration), POST /config/reload
 (hot-reload configuration from file), POST /config/export (serialize
-current state to YAML), and POST /config/backup (create rotating backup).
+current state to YAML), POST /config/backup (create rotating backup),
+and GET /config/diff (diff on-disk vs in-memory state).
 
 Sensitive fields are stripped from GET responses so secrets are never leaked.
 """
 
+import difflib
 import json
 import os
 
@@ -52,10 +54,8 @@ async def get_config(request: Request) -> HangarJSONResponse:
     config_repository = ctx.runtime.config_repository if ctx.runtime else None
 
     if config_repository is not None:
-        from starlette.concurrency import run_in_threadpool
-
-        raw = await run_in_threadpool(config_repository.get_all)
-        config_dict = {"providers": [p for p in raw]} if raw else {}
+        raw = await config_repository.get_all()
+        config_dict = {"providers": list(raw)} if raw else {}
     else:
         # Fallback: minimal operational config
         config_dict = {"providers": []}
@@ -128,9 +128,66 @@ async def backup_config(request: Request) -> HangarJSONResponse:
     return HangarJSONResponse({"path": backup_path})
 
 
+async def diff_config(request: Request) -> HangarJSONResponse:
+    """Diff on-disk config file vs current in-memory state.
+
+    Computes a unified diff between the YAML representation of the config file
+    as it exists on disk and the serialised current in-memory provider/group
+    state.  The diff is returned as a unified-diff string along with the raw
+    dicts for both sides.
+
+    Query parameters:
+        config_path: Path to the config file (default: MCP_CONFIG env var or
+            ``"config.yaml"``).
+
+    Returns:
+        JSON with:
+          - ``has_diff``: True if the on-disk and in-memory configs differ.
+          - ``diff``: Unified diff string (empty when ``has_diff`` is False).
+          - ``on_disk``: Sanitized on-disk config dict (``{}`` if file missing).
+          - ``in_memory``: Current in-memory config dict.
+    """
+    config_path = request.query_params.get("config_path") or os.environ.get("MCP_CONFIG", "config.yaml")
+
+    def _compute_diff() -> dict:
+        from ...server.config import load_config_from_file
+
+        # Load on-disk config (best effort -- return empty dict if missing/invalid)
+        try:
+            on_disk_raw = load_config_from_file(config_path)
+        except (FileNotFoundError, ValueError):
+            on_disk_raw = {}
+
+        in_memory = serialize_full_config()
+
+        on_disk_yaml = yaml.safe_dump(on_disk_raw, default_flow_style=False, sort_keys=True, allow_unicode=True)
+        in_memory_yaml = yaml.safe_dump(in_memory, default_flow_style=False, sort_keys=True, allow_unicode=True)
+
+        diff_lines = list(
+            difflib.unified_diff(
+                on_disk_yaml.splitlines(keepends=True),
+                in_memory_yaml.splitlines(keepends=True),
+                fromfile="on-disk",
+                tofile="in-memory",
+            )
+        )
+        diff_str = "".join(diff_lines)
+
+        return {
+            "has_diff": bool(diff_str),
+            "diff": diff_str,
+            "on_disk": _sanitize(on_disk_raw),
+            "in_memory": _sanitize(in_memory),
+        }
+
+    result = await run_in_threadpool(_compute_diff)
+    return HangarJSONResponse(result)
+
+
 # Route definitions for mounting in the API router
 config_routes = [
     Route("/", get_config, methods=["GET"]),
+    Route("/diff", diff_config, methods=["GET"]),
     Route("/export", export_config, methods=["POST"]),
     Route("/backup", backup_config, methods=["POST"]),
     Route("/reload", reload_config, methods=["POST"]),

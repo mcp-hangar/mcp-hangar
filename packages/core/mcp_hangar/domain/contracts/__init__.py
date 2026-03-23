@@ -4,7 +4,11 @@ This module defines contracts (abstract interfaces) that the domain layer
 depends on. Implementations are provided by the infrastructure layer.
 """
 
+from .catalog import McpCatalogRepository
 from .authentication import ApiKeyMetadata, AuthRequest, IApiKeyStore, IAuthenticator, ITokenValidator
+from .command import CommandHandler
+from .event_bus import IEventBus
+from .runtime_store import IRuntimeProviderStore
 from .authorization import AuthorizationRequest, AuthorizationResult, IAuthorizer, IPolicyEngine, IRoleStore
 from .event_store import ConcurrencyError, IEventStore, NullEventStore, StreamNotFoundError
 from .installer import InstalledPackage, IPackageInstaller
@@ -25,6 +29,8 @@ from .registry import IRegistryClient, PackageInfo, ServerDetails, ServerSummary
 from .response_cache import CacheRetrievalResult, IResponseCache, NullResponseCache
 
 __all__ = [
+    # Catalog contracts
+    "McpCatalogRepository",
     # Authentication contracts
     "ApiKeyMetadata",
     "AuthRequest",
@@ -37,6 +43,10 @@ __all__ = [
     "IAuthorizer",
     "IPolicyEngine",
     "IRoleStore",
+    # Command handler
+    "CommandHandler",
+    # Event bus
+    "IEventBus",
     # Event store
     "ConcurrencyError",
     "IEventStore",
@@ -69,4 +79,6 @@ __all__ = [
     "NullResponseCache",
     # Log buffer
     "IProviderLogBuffer",
+    # Runtime store
+    "IRuntimeProviderStore",
 ]

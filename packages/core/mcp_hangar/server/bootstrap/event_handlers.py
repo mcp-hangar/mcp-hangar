@@ -38,8 +38,9 @@ def init_event_handlers(runtime: "Runtime") -> None:
 
     # Knowledge base handler (PostgreSQL persistence)
     from ...application.event_handlers.knowledge_base_handler import KnowledgeBaseEventHandler
+    from ...infrastructure.async_executor import async_executor
 
-    kb_handler = KnowledgeBaseEventHandler()
+    kb_handler = KnowledgeBaseEventHandler(async_task=async_executor)
     runtime.event_bus.subscribe_to_all(kb_handler.handle)
 
     logger.info(

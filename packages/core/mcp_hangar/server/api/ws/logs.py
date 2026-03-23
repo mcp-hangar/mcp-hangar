@@ -185,8 +185,12 @@ async def ws_logs_endpoint(websocket: WebSocket) -> None:
     # Send buffered history before registering for live lines to avoid gaps.
     buffer = get_log_buffer(provider_id)
     if buffer is not None:
-        for line in buffer.tail(100):
-            await websocket.send_json(_line_to_message(line))
+        try:
+            for line in buffer.tail(100):
+                await websocket.send_json(_line_to_message(line))
+        except (RuntimeError, WebSocketDisconnect):
+            logger.debug("ws_logs_disconnected_during_history", provider_id=provider_id)
+            return
 
     # Register for live delivery.
     client_queue: asyncio.Queue[LogLine] = asyncio.Queue(maxsize=_CLIENT_QUEUE_MAXSIZE)
@@ -201,7 +205,10 @@ async def ws_logs_endpoint(websocket: WebSocket) -> None:
                 await websocket.send_json(_line_to_message(line))
             except TimeoutError:
                 # No log line for a while -- send ping to check if client is alive.
-                await websocket.send_json({"type": "ping"})
+                try:
+                    await websocket.send_json({"type": "ping"})
+                except RuntimeError:
+                    break
                 try:
                     pong = await asyncio.wait_for(
                         websocket.receive_json(),
@@ -213,6 +220,9 @@ async def ws_logs_endpoint(websocket: WebSocket) -> None:
                 except TimeoutError:
                     logger.debug("ws_logs_pong_timeout", provider_id=provider_id)
                     break
+            except RuntimeError:
+                # Client disconnected while we were about to send -- exit cleanly.
+                break
     except WebSocketDisconnect:
         logger.debug("ws_logs_disconnected", provider_id=provider_id)
     finally:

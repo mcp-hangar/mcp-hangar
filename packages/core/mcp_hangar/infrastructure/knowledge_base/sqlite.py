@@ -97,11 +97,22 @@ class SQLiteKnowledgeBase(IKnowledgeBase):
         self._initialized = False
 
     def _parse_dsn(self, dsn: str) -> str:
-        """Parse DSN to get database path."""
-        if dsn.startswith("sqlite://"):
-            return dsn.replace("sqlite://", "")
+        """Parse DSN to get database path.
+
+        Handles standard SQLite DSN forms:
+          sqlite:////abs/path.db  -> /abs/path.db  (absolute, 4 slashes)
+          sqlite:///rel/path.db   -> rel/path.db   (relative, 3 slashes)
+          sqlite:///./rel/path.db -> ./rel/path.db (relative with ./, 3 slashes)
+        """
+        if dsn.startswith("sqlite:////"):
+            # Absolute path: sqlite:////abs/path -> /abs/path
+            return dsn[len("sqlite:///") :]
         elif dsn.startswith("sqlite:///"):
-            return dsn.replace("sqlite:///", "")
+            # Relative path: sqlite:///rel/path -> rel/path
+            return dsn[len("sqlite:///") :]
+        elif dsn.startswith("sqlite://"):
+            # Fallback for bare 2-slash form: sqlite://path -> path
+            return dsn[len("sqlite://") :]
         elif dsn.endswith(".db"):
             return dsn
         else:

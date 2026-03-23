@@ -11,6 +11,7 @@ from datetime import datetime
 import threading
 from typing import TYPE_CHECKING
 
+from ..domain.contracts.runtime_store import IRuntimeProviderStore
 from ..logging_config import get_logger
 
 if TYPE_CHECKING:
@@ -58,7 +59,7 @@ class LoadMetadata:
         }
 
 
-class RuntimeProviderStore:
+class RuntimeProviderStore(IRuntimeProviderStore):
     """Thread-safe in-memory store for hot-loaded providers.
 
     Stores providers that are loaded at runtime from the registry.

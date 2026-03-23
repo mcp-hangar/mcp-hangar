@@ -320,3 +320,130 @@ class TestRouterIntegration:
         ):
             response = api_client.get("/system/")
             assert response.status_code == 200
+
+
+# ---------------------------------------------------------------------------
+# GET /config/diff
+# ---------------------------------------------------------------------------
+
+
+class TestDiffConfig:
+    """Tests for GET /config/diff."""
+
+    def test_returns_200(self, api_client):
+        """GET /config/diff returns HTTP 200."""
+        with (
+            patch(
+                "mcp_hangar.server.api.config.serialize_full_config",
+                return_value={"providers": {}},
+            ),
+            patch(
+                "mcp_hangar.server.config.load_config_from_file",
+                side_effect=FileNotFoundError,
+            ),
+        ):
+            response = api_client.get("/config/diff")
+        assert response.status_code == 200
+
+    def test_returns_has_diff_key(self, api_client):
+        """GET /config/diff response always has has_diff key."""
+        with (
+            patch(
+                "mcp_hangar.server.api.config.serialize_full_config",
+                return_value={"providers": {}},
+            ),
+            patch(
+                "mcp_hangar.server.config.load_config_from_file",
+                side_effect=FileNotFoundError,
+            ),
+        ):
+            response = api_client.get("/config/diff")
+        data = response.json()
+        assert "has_diff" in data
+
+    def test_returns_diff_string(self, api_client):
+        """GET /config/diff response includes diff string."""
+        with (
+            patch(
+                "mcp_hangar.server.api.config.serialize_full_config",
+                return_value={"providers": {}},
+            ),
+            patch(
+                "mcp_hangar.server.config.load_config_from_file",
+                side_effect=FileNotFoundError,
+            ),
+        ):
+            response = api_client.get("/config/diff")
+        data = response.json()
+        assert "diff" in data
+        assert isinstance(data["diff"], str)
+
+    def test_no_diff_when_configs_match(self, api_client):
+        """GET /config/diff reports has_diff False when on-disk matches in-memory."""
+        config_dict = {"providers": {"p": {"mode": "subprocess", "command": ["python"]}}}
+        with (
+            patch(
+                "mcp_hangar.server.api.config.serialize_full_config",
+                return_value=config_dict,
+            ),
+            patch(
+                "mcp_hangar.server.config.load_config_from_file",
+                return_value=config_dict,
+            ),
+        ):
+            response = api_client.get("/config/diff")
+        data = response.json()
+        assert data["has_diff"] is False
+        assert data["diff"] == ""
+
+    def test_has_diff_true_when_configs_differ(self, api_client):
+        """GET /config/diff reports has_diff True when configs differ."""
+        on_disk = {"providers": {"old": {"mode": "subprocess", "command": ["python"]}}}
+        in_memory = {"providers": {"new": {"mode": "subprocess", "command": ["node"]}}}
+        with (
+            patch(
+                "mcp_hangar.server.api.config.serialize_full_config",
+                return_value=in_memory,
+            ),
+            patch(
+                "mcp_hangar.server.config.load_config_from_file",
+                return_value=on_disk,
+            ),
+        ):
+            response = api_client.get("/config/diff")
+        data = response.json()
+        assert data["has_diff"] is True
+        assert len(data["diff"]) > 0
+
+    def test_on_disk_empty_when_file_missing(self, api_client):
+        """GET /config/diff on_disk is empty dict when config file is missing."""
+        with (
+            patch(
+                "mcp_hangar.server.api.config.serialize_full_config",
+                return_value={"providers": {}},
+            ),
+            patch(
+                "mcp_hangar.server.config.load_config_from_file",
+                side_effect=FileNotFoundError,
+            ),
+        ):
+            response = api_client.get("/config/diff")
+        data = response.json()
+        assert data["on_disk"] == {}
+
+    def test_in_memory_matches_serialized_config(self, api_client):
+        """GET /config/diff in_memory key contains the serialized in-memory providers."""
+        in_memory = {"providers": {"p": {"mode": "subprocess"}}}
+        with (
+            patch(
+                "mcp_hangar.server.api.config.serialize_full_config",
+                return_value=in_memory,
+            ),
+            patch(
+                "mcp_hangar.server.config.load_config_from_file",
+                side_effect=FileNotFoundError,
+            ),
+        ):
+            response = api_client.get("/config/diff")
+        data = response.json()
+        assert "p" in data["in_memory"]["providers"]

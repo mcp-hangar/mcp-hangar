@@ -8,6 +8,7 @@ InMemoryProviderRepository used throughout.
 
 import os
 import tempfile
+from pathlib import Path
 from unittest.mock import patch
 
 import pytest
@@ -250,3 +251,153 @@ class TestConfigSerializerIntegration:
                 bak2_path = config_path + ".bak2"
                 assert os.path.exists(bak1_path_second)
                 assert os.path.exists(bak2_path)
+
+
+# =============================================================================
+# TestConfigRoundTripIntegration (Plan 04)
+# =============================================================================
+
+
+class TestConfigRoundTripIntegration:
+    """Round-trip integration tests: serialize -> write -> reload -> verify."""
+
+    def _make_provider(self, provider_id: str, mode: str = "subprocess") -> Provider:
+        """Create a real Provider for round-trip tests."""
+        return Provider(
+            provider_id=provider_id,
+            mode=ProviderMode.SUBPROCESS if mode == "subprocess" else ProviderMode.SUBPROCESS,
+            command=["python", "-m", f"{provider_id}_server"],
+        )
+
+    def test_serialize_then_yaml_dump_then_safe_load_preserves_provider_id(self):
+        """serialize_full_config -> safe_dump -> safe_load round-trip preserves provider id."""
+        provider = self._make_provider("analytics")
+        config_dict = serialize_full_config(providers={"analytics": provider}, groups={})
+
+        yaml_str = yaml.safe_dump(config_dict, default_flow_style=False, allow_unicode=True)
+        reloaded = yaml.safe_load(yaml_str)
+
+        assert "analytics" in reloaded["providers"]
+
+    def test_serialize_then_yaml_dump_then_safe_load_preserves_mode(self):
+        """serialize_full_config -> safe_dump -> safe_load round-trip preserves mode field."""
+        provider = self._make_provider("analytics")
+        config_dict = serialize_full_config(providers={"analytics": provider}, groups={})
+
+        yaml_str = yaml.safe_dump(config_dict, default_flow_style=False, allow_unicode=True)
+        reloaded = yaml.safe_load(yaml_str)
+
+        assert reloaded["providers"]["analytics"]["mode"] == "subprocess"
+
+    def test_serialize_then_yaml_dump_then_safe_load_preserves_command(self):
+        """serialize_full_config -> safe_dump -> safe_load round-trip preserves command list."""
+        provider = self._make_provider("analytics")
+        config_dict = serialize_full_config(providers={"analytics": provider}, groups={})
+
+        yaml_str = yaml.safe_dump(config_dict, default_flow_style=False, allow_unicode=True)
+        reloaded = yaml.safe_load(yaml_str)
+
+        assert reloaded["providers"]["analytics"]["command"] == ["python", "-m", "analytics_server"]
+
+    def test_serialize_multiple_providers_all_survive_round_trip(self):
+        """Multiple providers all survive serialize -> YAML -> reload cycle."""
+        providers = {
+            "alpha": self._make_provider("alpha"),
+            "beta": self._make_provider("beta"),
+            "gamma": self._make_provider("gamma"),
+        }
+        config_dict = serialize_full_config(providers=providers, groups={})
+        yaml_str = yaml.safe_dump(config_dict, default_flow_style=False, allow_unicode=True)
+        reloaded = yaml.safe_load(yaml_str)
+
+        for name in ("alpha", "beta", "gamma"):
+            assert name in reloaded["providers"], f"provider {name} missing after round-trip"
+
+    def test_backup_bak1_content_survives_yaml_reload(self, tmp_path: Path):
+        """write_config_backup() output can be re-loaded with yaml.safe_load without error."""
+        provider = self._make_provider("audit")
+        config_dict = serialize_full_config(providers={"audit": provider}, groups={})
+
+        config_file = tmp_path / "config.yaml"
+        config_file.write_text(yaml.safe_dump({"providers": {}}))
+
+        with patch(
+            "mcp_hangar.server.config_serializer.serialize_full_config",
+            return_value=config_dict,
+        ):
+            bak1_path = write_config_backup(str(config_file))
+
+        reloaded = yaml.safe_load(Path(bak1_path).read_text())
+        assert isinstance(reloaded, dict)
+        assert "providers" in reloaded
+        assert "audit" in reloaded["providers"]
+
+    def test_backup_bak1_snapshot_metadata_is_parseable(self, tmp_path: Path):
+        """__snapshot__ metadata in bak1 is a dict with expected keys."""
+        provider = self._make_provider("audit")
+        config_dict = serialize_full_config(providers={"audit": provider}, groups={})
+
+        config_file = tmp_path / "config.yaml"
+        config_file.write_text(yaml.safe_dump({"providers": {}}))
+
+        with patch(
+            "mcp_hangar.server.config_serializer.serialize_full_config",
+            return_value=config_dict,
+        ):
+            bak1_path = write_config_backup(str(config_file))
+
+        reloaded = yaml.safe_load(Path(bak1_path).read_text())
+        snapshot = reloaded["__snapshot__"]
+        assert "timestamp" in snapshot
+        assert "provider_count" in snapshot
+        assert "group_count" in snapshot
+        assert snapshot["provider_count"] == 1
+        assert snapshot["group_count"] == 0
+
+    def test_rotation_preserves_provider_data_in_bak2(self, tmp_path: Path):
+        """After two backups, bak2 contains the first backup's provider data."""
+        provider_v1 = self._make_provider("v1")
+        provider_v2 = self._make_provider("v2")
+
+        config_v1 = serialize_full_config(providers={"v1": provider_v1}, groups={})
+        config_v2 = serialize_full_config(providers={"v2": provider_v2}, groups={})
+
+        config_file = tmp_path / "config.yaml"
+        config_file.write_text(yaml.safe_dump({"providers": {}}))
+
+        with patch(
+            "mcp_hangar.server.config_serializer.serialize_full_config",
+            return_value=config_v1,
+        ):
+            write_config_backup(str(config_file))
+
+        with patch(
+            "mcp_hangar.server.config_serializer.serialize_full_config",
+            return_value=config_v2,
+        ):
+            write_config_backup(str(config_file))
+
+        bak2 = yaml.safe_load((tmp_path / "config.yaml.bak2").read_text())
+        bak1 = yaml.safe_load((tmp_path / "config.yaml.bak1").read_text())
+
+        assert "v1" in bak2["providers"], "bak2 should hold first backup content"
+        assert "v2" in bak1["providers"], "bak1 should hold second backup content"
+
+    def test_serialize_full_config_is_deterministic(self):
+        """Two calls with the same providers produce identical YAML."""
+        provider = self._make_provider("stable")
+        providers = {"stable": provider}
+
+        first = yaml.safe_dump(
+            serialize_full_config(providers=providers, groups={}),
+            default_flow_style=False,
+            sort_keys=True,
+            allow_unicode=True,
+        )
+        second = yaml.safe_dump(
+            serialize_full_config(providers=providers, groups={}),
+            default_flow_style=False,
+            sort_keys=True,
+            allow_unicode=True,
+        )
+        assert first == second

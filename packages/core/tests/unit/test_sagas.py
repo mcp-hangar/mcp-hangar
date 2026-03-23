@@ -1,6 +1,6 @@
 """Tests for Provider Recovery and Failover Sagas."""
 
-from unittest.mock import MagicMock, patch
+from unittest.mock import MagicMock
 
 from mcp_hangar.application.commands import StartProviderCommand, StopProviderCommand
 from mcp_hangar.application.sagas.provider_failover_saga import ProviderFailoverEventSaga, ProviderFailoverSaga
@@ -29,13 +29,10 @@ class TestProviderRecoverySaga:
     def test_handle_degraded_first_time(self):
         """Test handling first degradation schedules a restart via SagaManager."""
         mock_saga_manager = MagicMock()
-        with patch(
-            "mcp_hangar.application.sagas.provider_recovery_saga.get_saga_manager", return_value=mock_saga_manager
-        ):
-            saga = ProviderRecoverySaga(max_retries=3)
+        saga = ProviderRecoverySaga(max_retries=3, saga_manager=mock_saga_manager)
 
-            event = ProviderDegraded("p1", 3, 5, "timeout")
-            commands = saga.handle(event)
+        event = ProviderDegraded("p1", 3, 5, "timeout")
+        commands = saga.handle(event)
 
         # No immediate commands; restart is scheduled via SagaManager
         assert len(commands) == 0
@@ -239,13 +236,10 @@ class TestProviderFailoverSaga:
     def test_handle_degraded_initiates_failover(self):
         """Test that degradation starts a ProviderFailoverSaga via SagaManager."""
         mock_saga_manager = MagicMock()
-        with patch(
-            "mcp_hangar.application.sagas.provider_failover_saga.get_saga_manager", return_value=mock_saga_manager
-        ):
-            saga = ProviderFailoverEventSaga()
-            saga.configure_failover("primary", "backup")
+        saga = ProviderFailoverEventSaga(saga_manager=mock_saga_manager)
+        saga.configure_failover("primary", "backup")
 
-            commands = saga.handle(ProviderDegraded("primary", 3, 5, "error"))
+        commands = saga.handle(ProviderDegraded("primary", 3, 5, "error"))
 
         # Commands are dispatched via SagaManager, not returned directly
         assert len(commands) == 0
@@ -271,52 +265,43 @@ class TestProviderFailoverSaga:
     def test_handle_degraded_failover_already_active(self):
         """Test that redundant degradation doesn't trigger new failover."""
         mock_saga_manager = MagicMock()
-        with patch(
-            "mcp_hangar.application.sagas.provider_failover_saga.get_saga_manager", return_value=mock_saga_manager
-        ):
-            saga = ProviderFailoverEventSaga()
-            saga.configure_failover("primary", "backup")
+        saga = ProviderFailoverEventSaga(saga_manager=mock_saga_manager)
+        saga.configure_failover("primary", "backup")
 
-            # First degradation
-            saga.handle(ProviderDegraded("primary", 3, 5, "error"))
-            assert mock_saga_manager.start_saga.call_count == 1
+        # First degradation
+        saga.handle(ProviderDegraded("primary", 3, 5, "error"))
+        assert mock_saga_manager.start_saga.call_count == 1
 
-            # Second degradation (should not create another failover)
-            commands2 = saga.handle(ProviderDegraded("primary", 4, 6, "error"))
-            assert len(commands2) == 0
-            assert mock_saga_manager.start_saga.call_count == 1  # Not called again
+        # Second degradation (should not create another failover)
+        commands2 = saga.handle(ProviderDegraded("primary", 4, 6, "error"))
+        assert len(commands2) == 0
+        assert mock_saga_manager.start_saga.call_count == 1  # Not called again
 
     def test_handle_degraded_backup_is_active(self):
         """Test that backup degradation doesn't cascade."""
         mock_saga_manager = MagicMock()
-        with patch(
-            "mcp_hangar.application.sagas.provider_failover_saga.get_saga_manager", return_value=mock_saga_manager
-        ):
-            saga = ProviderFailoverEventSaga()
-            saga.configure_failover("primary", "backup")
+        saga = ProviderFailoverEventSaga(saga_manager=mock_saga_manager)
+        saga.configure_failover("primary", "backup")
 
-            # Initiate failover
-            saga.handle(ProviderDegraded("primary", 3, 5, "error"))
+        # Initiate failover
+        saga.handle(ProviderDegraded("primary", 3, 5, "error"))
 
-            # Backup degradation (should not cascade)
-            commands = saga.handle(ProviderDegraded("backup", 1, 1, "error"))
+        # Backup degradation (should not cascade)
+        commands = saga.handle(ProviderDegraded("backup", 1, 1, "error"))
 
         assert len(commands) == 0
 
     def test_handle_started_backup(self):
         """Test that backup start completes failover."""
         mock_saga_manager = MagicMock()
-        with patch(
-            "mcp_hangar.application.sagas.provider_failover_saga.get_saga_manager", return_value=mock_saga_manager
-        ):
-            saga = ProviderFailoverEventSaga()
-            saga.configure_failover("primary", "backup")
+        saga = ProviderFailoverEventSaga(saga_manager=mock_saga_manager)
+        saga.configure_failover("primary", "backup")
 
-            # Initiate failover
-            saga.handle(ProviderDegraded("primary", 3, 5, "error"))
+        # Initiate failover
+        saga.handle(ProviderDegraded("primary", 3, 5, "error"))
 
-            # Backup started
-            saga.handle(ProviderStarted("backup", "subprocess", 5, 100.0))
+        # Backup started
+        saga.handle(ProviderStarted("backup", "subprocess", 5, 100.0))
 
         failovers = saga.get_active_failovers()
         assert failovers["primary"].backup_started_at is not None
@@ -325,18 +310,15 @@ class TestProviderFailoverSaga:
         """Test that primary recovery schedules failback via SagaManager."""
         mock_saga_manager = MagicMock()
         mock_saga_manager.schedule_command.return_value = "timer-id-xyz"
-        with patch(
-            "mcp_hangar.application.sagas.provider_failover_saga.get_saga_manager", return_value=mock_saga_manager
-        ):
-            saga = ProviderFailoverEventSaga()
-            saga.configure_failover("primary", "backup", auto_failback=True, failback_delay_s=30.0)
+        saga = ProviderFailoverEventSaga(saga_manager=mock_saga_manager)
+        saga.configure_failover("primary", "backup", auto_failback=True, failback_delay_s=30.0)
 
-            # Initiate failover
-            saga.handle(ProviderDegraded("primary", 3, 5, "error"))
-            saga.handle(ProviderStarted("backup", "subprocess", 5, 100.0))
+        # Initiate failover
+        saga.handle(ProviderDegraded("primary", 3, 5, "error"))
+        saga.handle(ProviderStarted("backup", "subprocess", 5, 100.0))
 
-            # Primary recovers
-            commands = saga.handle(ProviderStarted("primary", "subprocess", 5, 100.0))
+        # Primary recovers
+        commands = saga.handle(ProviderStarted("primary", "subprocess", 5, 100.0))
 
         # Failback is scheduled via SagaManager, not returned as command
         assert len(commands) == 0
@@ -353,17 +335,14 @@ class TestProviderFailoverSaga:
     def test_handle_started_primary_no_failback(self):
         """Test that auto_failback=False prevents failback."""
         mock_saga_manager = MagicMock()
-        with patch(
-            "mcp_hangar.application.sagas.provider_failover_saga.get_saga_manager", return_value=mock_saga_manager
-        ):
-            saga = ProviderFailoverEventSaga()
-            saga.configure_failover("primary", "backup", auto_failback=False)
+        saga = ProviderFailoverEventSaga(saga_manager=mock_saga_manager)
+        saga.configure_failover("primary", "backup", auto_failback=False)
 
-            # Initiate failover
-            saga.handle(ProviderDegraded("primary", 3, 5, "error"))
+        # Initiate failover
+        saga.handle(ProviderDegraded("primary", 3, 5, "error"))
 
-            # Primary recovers
-            commands = saga.handle(ProviderStarted("primary", "subprocess", 5, 100.0))
+        # Primary recovers
+        commands = saga.handle(ProviderStarted("primary", "subprocess", 5, 100.0))
 
         # Should not schedule failback
         assert len(commands) == 0
@@ -372,17 +351,14 @@ class TestProviderFailoverSaga:
     def test_handle_stopped_backup_clears_failover(self):
         """Test that stopping backup clears failover."""
         mock_saga_manager = MagicMock()
-        with patch(
-            "mcp_hangar.application.sagas.provider_failover_saga.get_saga_manager", return_value=mock_saga_manager
-        ):
-            saga = ProviderFailoverEventSaga()
-            saga.configure_failover("primary", "backup")
+        saga = ProviderFailoverEventSaga(saga_manager=mock_saga_manager)
+        saga.configure_failover("primary", "backup")
 
-            # Initiate failover
-            saga.handle(ProviderDegraded("primary", 3, 5, "error"))
+        # Initiate failover
+        saga.handle(ProviderDegraded("primary", 3, 5, "error"))
 
-            # Backup stopped
-            saga.handle(ProviderStopped("backup", "shutdown"))
+        # Backup stopped
+        saga.handle(ProviderStopped("backup", "shutdown"))
 
         assert len(saga.get_active_failovers()) == 0
         assert not saga.is_backup_active("backup")
@@ -390,29 +366,23 @@ class TestProviderFailoverSaga:
     def test_is_backup_active(self):
         """Test checking if provider is active backup."""
         mock_saga_manager = MagicMock()
-        with patch(
-            "mcp_hangar.application.sagas.provider_failover_saga.get_saga_manager", return_value=mock_saga_manager
-        ):
-            saga = ProviderFailoverEventSaga()
-            saga.configure_failover("primary", "backup")
+        saga = ProviderFailoverEventSaga(saga_manager=mock_saga_manager)
+        saga.configure_failover("primary", "backup")
 
-            assert not saga.is_backup_active("backup")
+        assert not saga.is_backup_active("backup")
 
-            saga.handle(ProviderDegraded("primary", 3, 5, "error"))
+        saga.handle(ProviderDegraded("primary", 3, 5, "error"))
 
-            assert saga.is_backup_active("backup")
+        assert saga.is_backup_active("backup")
 
     def test_force_failback(self):
         """Test forcing failback."""
         mock_saga_manager = MagicMock()
-        with patch(
-            "mcp_hangar.application.sagas.provider_failover_saga.get_saga_manager", return_value=mock_saga_manager
-        ):
-            saga = ProviderFailoverEventSaga()
-            saga.configure_failover("primary", "backup", auto_failback=False)
+        saga = ProviderFailoverEventSaga(saga_manager=mock_saga_manager)
+        saga.configure_failover("primary", "backup", auto_failback=False)
 
-            # Initiate failover
-            saga.handle(ProviderDegraded("primary", 3, 5, "error"))
+        # Initiate failover
+        saga.handle(ProviderDegraded("primary", 3, 5, "error"))
 
         # Force failback
         commands = saga.force_failback("primary")
@@ -422,14 +392,11 @@ class TestProviderFailoverSaga:
     def test_cancel_failover(self):
         """Test canceling failover (keeps backup running)."""
         mock_saga_manager = MagicMock()
-        with patch(
-            "mcp_hangar.application.sagas.provider_failover_saga.get_saga_manager", return_value=mock_saga_manager
-        ):
-            saga = ProviderFailoverEventSaga()
-            saga.configure_failover("primary", "backup")
+        saga = ProviderFailoverEventSaga(saga_manager=mock_saga_manager)
+        saga.configure_failover("primary", "backup")
 
-            # Initiate failover
-            saga.handle(ProviderDegraded("primary", 3, 5, "error"))
+        # Initiate failover
+        saga.handle(ProviderDegraded("primary", 3, 5, "error"))
 
         # Cancel
         result = saga.cancel_failover("primary")

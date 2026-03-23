@@ -14,6 +14,7 @@ def create_mock_provider(provider_id: str, state: ProviderState = ProviderState.
     mock.id = provider_id
     mock.provider_id = provider_id
     mock.state = state
+    mock.state_snapshot = state
     mock.ensure_ready = MagicMock()
     mock.shutdown = MagicMock()
     mock.tools = []
@@ -442,7 +443,7 @@ class TestProviderGroupLockHierarchy:
         provider.state = ProviderState.READY
 
         group.add_member(provider)
-        result = group.start_all()
+        group.start_all()
 
         assert len(lock_held_during_ensure_ready) == 1, "ensure_ready() should have been called once"
         assert lock_held_during_ensure_ready[0] is False, (
@@ -506,7 +507,7 @@ class TestProviderGroupLockHierarchy:
 
                 provider.ensure_ready = MagicMock(side_effect=slow_start)
                 group.add_member(provider)
-            except Exception as e:
+            except Exception as e:  # noqa: BLE001 -- thread error collector
                 errors.append(e)
 
         def start_providers():
@@ -529,7 +530,7 @@ class TestProviderGroupLockHierarchy:
                     group._members["p-start"] = member
 
                 group.start_all()
-            except Exception as e:
+            except Exception as e:  # noqa: BLE001 -- thread error collector
                 errors.append(e)
 
         t1 = threading.Thread(target=add_provider)
