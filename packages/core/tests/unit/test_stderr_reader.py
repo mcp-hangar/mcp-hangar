@@ -1,5 +1,6 @@
 """Unit tests for Phase 21-02: live stderr-reader threads in launchers and Provider._start_stderr_reader."""
 
+import os
 import subprocess
 import sys
 import threading
@@ -223,7 +224,10 @@ class TestContainerLauncherStderrPipe:
         with patch("shutil.which", return_value="/usr/bin/docker"):
             launcher = ContainerLauncher(runtime="docker")
 
-        with patch("subprocess.Popen", side_effect=fake_popen):
+        # Ensure MCP_CONTAINER_INHERIT_STDERR is unset so stderr=PIPE is used
+        env = os.environ.copy()
+        env.pop("MCP_CONTAINER_INHERIT_STDERR", None)
+        with patch("subprocess.Popen", side_effect=fake_popen), patch.dict(os.environ, env, clear=True):
             try:
                 launcher.launch("mcp/math:latest")
             except Exception:  # noqa: BLE001
