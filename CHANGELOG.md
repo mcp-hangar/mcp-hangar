@@ -7,6 +7,87 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.12.0] - 2026-03-23
+
+### Added
+
+- **REST API Foundation** (Phases 11-12):
+  - Full REST API at `/api/` prefix with CORS middleware, JSON serializers, and error handling
+  - Provider endpoints: list, detail, start, stop, tool invocation history
+  - Group and discovery source management endpoints
+  - Config and system status endpoints
+  - Auth endpoints with API key and role management
+  - Observability endpoints (audit log, alerts)
+  - WebSocket infrastructure: `ws_events_endpoint`, `ws_state_endpoint`, connection manager with queue and filters
+  - `EventBus.unsubscribe_from_all` for WebSocket lifecycle
+
+- **Dashboard UI** (Phases 13-16, 25-26, 28, 30):
+  - React 19 + TypeScript + Vite 6 frontend application (`packages/ui`)
+  - Dashboard page with metrics charts, state distribution, live event feed, and alerts
+  - Providers list and detail pages with start/stop actions
+  - Groups, Discovery, Config, and Topology pages
+  - RBAC management UI with tool access policy editor
+  - Catalog browser and discovery source management pages
+  - Config export UI with colored diff viewer and toast notifications
+  - ThemeToggle, PageContainer, Skeleton, and Drawer shared components
+  - Zustand WebSocket store with exponential backoff reconnection
+  - `useEventStream`, `useProviderState`, `useProviderLogs` hooks
+  - Metrics time-series chart and D3 force-graph topology visualization
+  - Auth page with API key and role management
+  - Multi-stage Docker build with UI static files baked in
+  - Static file serving and SPA fallback for production deployment
+
+- **Provider Log Streaming** (Phases 21-22):
+  - `LogLine` value object, `IProviderLogBuffer` contract, and `ProviderLogBuffer` ring buffer
+  - Live stderr-reader threads for subprocess and Docker providers
+  - `GET /api/providers/{id}/logs` REST endpoint with `lines` parameter
+  - `LogStreamBroadcaster` and `/ws/providers/{id}/logs` WebSocket endpoint
+  - `LogViewer` component and `useProviderLogs` hook in UI
+
+- **Provider/Group CRUD** (Phase 23):
+  - Provider CRUD events, commands, and handlers (create, update, delete)
+  - Group CRUD handlers with `ProviderGroup.update()` and `to_config_dict()`
+  - Config serializer module for export/backup
+  - Provider and group CRUD REST endpoints
+  - Config export and backup endpoints
+  - Integration tests for CRUD operations and config serializer
+
+- **RBAC and Tool Access Policies** (Phase 27):
+  - Domain exceptions, events, and extended authorization contracts
+  - `IRoleStore` extensions and `SQLiteToolAccessPolicyStore`
+  - CQRS commands and query handlers for RBAC and TAP management
+  - 10 REST route handlers for role and policy management
+  - `tap_store` and `event_bus` wired through bootstrap and context
+
+- **Catalog API** (Phase 24+):
+  - Catalog domain model and repository (memory/SQLite)
+  - Catalog REST API endpoints
+  - Discovery commands, handlers, and registry
+  - Discovery value objects
+
+- **Extracted Port Interfaces**:
+  - `AsyncTaskPort`, `BusPort`, `ConfigLoaderPort`, `SagaPort` in `application/ports/`
+  - `ICatalogRepository`, `ICommandBus`, `IEventBusPort`, `IRuntimeStore` in `domain/contracts/`
+
+- **Circuit Breaker HALF_OPEN**: State transition support with `CircuitBreakerStateChanged` event and event store compaction
+
+- **Saga Compensation**: `schedule_command` support, `ProviderFailoverSaga` compensation steps, integration tests
+
+- **Metrics History**: `MetricsHistoryStore`, snapshot worker, `/api/metrics/history` endpoint
+
+### Fixed
+
+- Thread-safety regression in `groups.py` rebalance
+- Group member weight/priority defaults and strategy passthrough on update
+- Group strategy enum, groups dict wiring, `normalizePath` trailing slash
+- Missing `strategy` field in `UpdateGroupCommand`
+
+### Changed
+
+- Rate limit metrics exported to Prometheus (RESL-04)
+- BLE001 exception hygiene across codebase (EXCP-02)
+- Fuzz tests for input validation (TEST-02)
+
 ## [0.11.0] - 2026-03-08
 
 ### Added
