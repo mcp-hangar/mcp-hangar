@@ -37,6 +37,8 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
 
       - name: Set up Python
         uses: actions/setup-python@v5
@@ -44,7 +46,7 @@ jobs:
           python-version: '3.11'
 
       - name: Install MkDocs
-        run: pip install mkdocs-material mkdocs-minify-plugin
+        run: pip install mkdocs-material mkdocs-minify-plugin "mkdocstrings[python]" mkdocs-git-revision-date-localized-plugin
 
       - name: Build docs
         run: mkdocs build --strict
