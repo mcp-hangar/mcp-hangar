@@ -4,8 +4,8 @@
 site_name: MCP Hangar
 site_description: Production-grade hot-load registry for MCP providers
 site_url: https://mcp-hangar.io
-repo_url: https://github.com/mapyr/mcp-hangar
-repo_name: mapyr/mcp-hangar
+repo_url: https://github.com/mcp-hangar/mcp-hangar
+repo_name: mcp-hangar/mcp-hangar
 edit_uri: edit/main/docs/
 
 theme:
@@ -72,10 +72,19 @@ nav:
       - Quick Start: getting-started/quickstart.md
   - Cookbook:
       - Overview: cookbook/index.md
-      - 01 — HTTP Gateway: cookbook/01-http-gateway.md
-      - 02 — Health Checks: cookbook/02-health-checks.md
-      - 03 — Circuit Breaker: cookbook/03-circuit-breaker.md
-      - 04 — Failover: cookbook/04-failover.md
+      - 01 -- HTTP Gateway: cookbook/01-http-gateway.md
+      - 02 -- Health Checks: cookbook/02-health-checks.md
+      - 03 -- Circuit Breaker: cookbook/03-circuit-breaker.md
+      - 04 -- Failover: cookbook/04-failover.md
+      - 05 -- Load Balancing: cookbook/05-load-balancing.md
+      - 06 -- Rate Limiting: cookbook/06-rate-limiting.md
+      - 07 -- Observability Metrics: cookbook/07-observability-metrics.md
+      - 08 -- Observability Langfuse: cookbook/08-observability-langfuse.md
+      - 09 -- Subprocess Providers: cookbook/09-subprocess-providers.md
+      - 10 -- Discovery Docker: cookbook/10-discovery-docker.md
+      - 11 -- Discovery Kubernetes: cookbook/11-discovery-kubernetes.md
+      - 12 -- Auth and RBAC: cookbook/12-auth-rbac.md
+      - 13 -- Production Checklist: cookbook/13-production-checklist.md
   - Architecture:
       - Overview: architecture/OVERVIEW.md
       - Event Sourcing: architecture/EVENT_SOURCING.md
@@ -92,12 +101,17 @@ nav:
       - Kubernetes: guides/KUBERNETES.md
       - Provider Groups: guides/PROVIDER_GROUPS.md
       - Facade API: guides/FACADE_API.md
+      - REST API: guides/REST_API.md
+      - Dashboard UI: guides/DASHBOARD.md
+      - Log Streaming: guides/LOG_STREAMING.md
+      - WebSockets: guides/WEBSOCKETS.md
   - Development:
       - Contributing: development/CONTRIBUTING.md
       - Release Process: runbooks/RELEASE.md
   - Reference:
       - CLI: reference/cli.md
       - Configuration: reference/configuration.md
+      - REST API: reference/rest-api.md
       - MCP Tools: reference/tools.md
       - Hot-Reload: reference/hot-reload.md
       - Changelog: changelog.md
@@ -108,6 +122,6 @@ nav:
 extra:
   social:
     - icon: fontawesome/brands/github
-      link: https://github.com/mapyr/mcp-hangar
+      link: https://github.com/mcp-hangar/mcp-hangar
     - icon: fontawesome/brands/python
       link: https://pypi.org/project/mcp-hangar/

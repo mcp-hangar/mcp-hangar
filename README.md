@@ -54,6 +54,16 @@ mcp-hangar init
 mcp-hangar serve
 ```
 
+### HTTP Mode with Dashboard
+
+```bash
+# Start with REST API and Dashboard UI
+mcp-hangar serve --http --port 8000
+
+# Dashboard: http://localhost:8000
+# REST API:  http://localhost:8000/api/
+```
+
 ### Custom Configuration
 
 Create `~/.config/mcp-hangar/config.yaml`:
@@ -114,7 +124,7 @@ Single call. Parallel execution. All results returned together.
 
 ## Why It's Fast
 
-**Single-flight cold starts.** When 10 parallel calls hit a cold provider, it initializes once — not 10 times.
+**Single-flight cold starts.** When 10 parallel calls hit a cold provider, it initializes once -- not 10 times.
 
 **Automatic concurrency.** Configurable parallelism with backpressure. No thundering herd.
 
@@ -128,24 +138,33 @@ Single call. Parallel execution. All results returned together.
 
 **Observability.** Correlation IDs across parallel calls. OpenTelemetry traces, Prometheus metrics.
 
-**Multi-provider.** Subprocess, Docker, remote HTTP — mix them in a single batch call.
+**REST API.** Full CRUD for providers, groups, discovery, config, and auth. WebSocket streams for real-time events.
+
+**Dashboard UI.** Web-based management with provider state, log streaming, topology, metrics charts, and RBAC management.
+
+**RBAC.** Role-based access control with tool-level policies. API key authentication.
+
+**Multi-provider.** Subprocess, Docker, remote HTTP -- mix them in a single batch call.
 
 ## Configuration
 
 ```yaml
 providers:
-  - id: fast-provider
+  fast-provider:
+    mode: subprocess
     command: ["python", "fast.py"]
     idle_ttl_s: 300              # Shutdown after 5min idle
     health_check_interval_s: 60  # Check health every minute
     max_consecutive_failures: 3  # Circuit breaker threshold
 
-  - id: docker-provider
+  docker-provider:
+    mode: docker
     image: my-registry/mcp-server:latest
     network: bridge
 
-  - id: remote-provider
-    url: "https://api.example.com/mcp"
+  remote-provider:
+    mode: remote
+    endpoint: "https://api.example.com/mcp"
 ```
 
 ## Works Everywhere
@@ -158,15 +177,17 @@ Same API. Same reliability. Different scale.
 
 ## Documentation
 
-- [Getting Started](https://mcp-hangar.io/getting-started/)
-- [Configuration Reference](https://mcp-hangar.io/configuration/)
-- [Claude Code Integration](https://mcp-hangar.io/guides/claude-code/)
-- [Observability Setup](https://mcp-hangar.io/guides/observability/)
+- [Getting Started](https://mcp-hangar.io/getting-started/quickstart/)
+- [REST API Guide](https://mcp-hangar.io/guides/REST_API/)
+- [Dashboard UI](https://mcp-hangar.io/guides/DASHBOARD/)
+- [Configuration Reference](https://mcp-hangar.io/reference/configuration/)
+- [Observability Setup](https://mcp-hangar.io/guides/OBSERVABILITY/)
+- [Authentication & RBAC](https://mcp-hangar.io/guides/AUTHENTICATION/)
 
 ## License
 
-MIT — use it, fork it, ship it.
+MIT -- use it, fork it, ship it.
 
 ---
 
-[Docs](https://mcp-hangar.io) · [PyPI](https://pypi.org/project/mcp-hangar/) · [GitHub](https://github.com/mcp-hangar/mcp-hangar)
+[Docs](https://mcp-hangar.io) | [PyPI](https://pypi.org/project/mcp-hangar/) | [GitHub](https://github.com/mcp-hangar/mcp-hangar)
