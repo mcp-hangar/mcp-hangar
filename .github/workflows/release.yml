@@ -112,10 +112,21 @@ jobs:
           MCP_CONTAINER_RUNTIME: docker
         working-directory: .
         run: |
-          cd examples/provider_math && docker build -t mcp-math:latest .
+          retry() {
+            local max=3 delay=10
+            for i in $(seq 1 $max); do
+              "$@" && return 0
+              echo "Attempt $i/$max failed, retrying in ${delay}s..."
+              sleep $delay
+              delay=$((delay * 2))
+            done
+            echo "All $max attempts failed."
+            return 1
+          }
+          cd examples/provider_math && retry docker build -t mcp-math:latest .
           cd ../../
-          docker build -f docker/Dockerfile.memory -t mcp-memory:latest .
-          docker build -f docker/Dockerfile.filesystem -t mcp-filesystem:latest .
+          retry docker build -f docker/Dockerfile.memory -t mcp-memory:latest .
+          retry docker build -f docker/Dockerfile.filesystem -t mcp-filesystem:latest .
 
       - name: Run tests
         env:
