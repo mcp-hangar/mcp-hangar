@@ -93,7 +93,8 @@ Other available strategies:
 | `round_robin` | Cycle through members sequentially |
 | `random` | Random member selection |
 | `least_connections` | Route to member with fewest active calls |
-| `weighted` | Respect `weight` field -- higher weight gets more traffic |
+| `weighted_round_robin` | Respect `weight` field -- higher weight gets more traffic |
+| `priority` | Route to lowest priority number (primary/backup pattern) |
 
 ## Key Config Reference
 

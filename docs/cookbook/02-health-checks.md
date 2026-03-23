@@ -150,12 +150,12 @@ Hangar's background health check worker probes each READY provider every 30 seco
 
 When the provider fails to respond, Hangar records a failure in the `HealthTracker`. After `max_consecutive_failures` (3 by default) failed checks, the provider state transitions from READY to DEGRADED. This transition emits a `ProviderDegraded` domain event, which updates metrics and triggers alerts.
 
-When the provider comes back online, the next health check succeeds. The state automatically transitions back from DEGRADED to READY. No manual intervention required — Hangar detected the failure and recovery without human involvement.
+When the provider comes back online, Hangar reinitializes it (DEGRADED -> INITIALIZING -> READY). No manual intervention required -- Hangar detected the failure and recovery without human involvement.
 
 State machine transitions:
 
-- READY → DEGRADED (after 3 consecutive failures)
-- DEGRADED → READY (on successful health check)
+- READY -> DEGRADED (after 3 consecutive failures)
+- DEGRADED -> INITIALIZING -> READY (on reinitialize after recovery)
 
 ## Key Config Reference
 

@@ -43,19 +43,22 @@ providers:
         weight: 1
       - id: my-mcp-3
         weight: 1
+```
 
-rate_limiting:                           # NEW: global rate limiting
-  enabled: true                          # NEW: enable rate limiter
-  max_requests_per_minute: 60            # NEW: 60 requests/min per principal
-  burst_size: 10                         # NEW: allow short bursts up to 10
+Rate limiting is configured via environment variables:
+
+```bash
+export MCP_RATE_LIMIT_RPS=1          # NEW: 1 request per second steady-state
+export MCP_RATE_LIMIT_BURST=10       # NEW: allow short bursts up to 10
 ```
 
 ## Try It
 
-1. Start Hangar with the updated config:
+1. Start Hangar with rate limiting configured:
 
    ```bash
-   mcp-hangar serve --http --port 8000
+   MCP_RATE_LIMIT_RPS=1 MCP_RATE_LIMIT_BURST=10 \
+     mcp-hangar serve --http --port 8000
    ```
 
 2. Send requests within the limit:
@@ -105,11 +108,10 @@ Rate limiting applies to both MCP tool calls and REST API requests.
 
 ## Key Config Reference
 
-| Key | Type | Default | Description |
-|-----|------|---------|-------------|
-| `rate_limiting.enabled` | bool | `false` | Enable rate limiting |
-| `rate_limiting.max_requests_per_minute` | int | `60` | Steady-state rate limit per principal |
-| `rate_limiting.burst_size` | int | `10` | Maximum burst above the rate limit |
+| Environment Variable | Type | Default | Description |
+|---------------------|------|---------|-------------|
+| `MCP_RATE_LIMIT_RPS` | float | `10` | Requests per second steady-state limit |
+| `MCP_RATE_LIMIT_BURST` | int | `20` | Maximum burst above the rate limit |
 
 ## What's Next
 
