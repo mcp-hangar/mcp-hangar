@@ -6,7 +6,8 @@ __pycache__/
 .vscode/
 
 # Planning docs (local only, not committed to repo)
-.planning/
+.planning
+**/.planning
 
 # Local config (contains user-specific paths)
 # Keep *.example files, ignore actual configs
@@ -248,3 +249,9 @@ htmlcov/
 .coverage
 coverage.xml
 .data/
+
+# AI assistant local settings (per-user, not committed)
+.claude/
+**/.claude/
+.opencode/
+**/.opencode/
