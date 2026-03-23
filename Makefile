@@ -1,6 +1,6 @@
 # MCP-Hangar Monorepo Makefile
 
-.PHONY: all clean test lint build publish help
+.PHONY: all clean test lint build publish help dev dev-backend dev-frontend
 
 VERSION ?= $(shell git describe --tags --always --dirty)
 PACKAGES := core operator helm-charts
@@ -10,7 +10,21 @@ PACKAGES := core operator helm-charts
 help: ## Show this help
 	@awk 'BEGIN {FS = ":.*##"; printf "\nUsage:\n  make \033[36m<target>\033[0m\n"} /^[a-zA-Z_0-9-]+:.*?##/ { printf "  \033[36m%-15s\033[0m %s\n", $$1, $$2 } /^##@/ { printf "\n\033[1m%s\033[0m\n", substr($$0, 5) } ' $(MAKEFILE_LIST)
 
+CONFIG ?= config.max.yaml
+
 ##@ Development
+
+dev: ## Start backend (HTTP) and frontend dev server concurrently
+	@trap 'kill 0' INT; \
+	mcp-hangar --config $(CONFIG) serve --http & \
+	cd packages/ui && npm run dev & \
+	wait
+
+dev-backend: ## Start backend HTTP server only
+	mcp-hangar --config $(CONFIG) serve --http
+
+dev-frontend: ## Start frontend Vite dev server only
+	cd packages/ui && npm run dev
 
 all: lint test build ## Run lint, test, build for all packages
 
@@ -113,10 +127,13 @@ clean: ## Clean build artifacts
 
 ##@ Development Setup
 
-setup: setup-core setup-operator ## Setup development environment
+setup: setup-core setup-operator setup-subprojects ## Setup development environment
 
 setup-core: ## Setup Python development environment
 	cd packages/core && pip install -e ".[dev]"
 
 setup-operator: ## Setup Go development environment
 	cd packages/operator && go mod download
+
+setup-subprojects: ## Setup subproject AI assistant configs (GSD symlinks)
+	bash scripts/setup-subproject-symlinks.sh
