@@ -1,5 +1,6 @@
 """Event handlers registration."""
 
+import os
 from typing import TYPE_CHECKING
 
 from ...application.event_handlers import (
@@ -8,6 +9,9 @@ from ...application.event_handlers import (
     get_alert_handler,
     get_audit_handler,
 )
+from ...application.event_handlers.audit_event_handler import OTLPAuditEventHandler
+from ...application.ports.observability import NullAuditExporter
+from ...domain.events import ProviderStateChanged, ToolInvocationCompleted, ToolInvocationFailed
 from ...logging_config import get_logger
 
 if TYPE_CHECKING:
@@ -36,6 +40,19 @@ def init_event_handlers(runtime: "Runtime") -> None:
 
     runtime.event_bus.subscribe_to_all(runtime.security_handler.handle)
 
+    # OTLP audit exporter handler -- exports security events as OTLP log records
+    if os.getenv("OTEL_EXPORTER_OTLP_ENDPOINT"):
+        from ...infrastructure.observability.otlp_audit_exporter import OTLPAuditExporter
+
+        otlp_audit_exporter = OTLPAuditExporter()
+    else:
+        otlp_audit_exporter = NullAuditExporter()
+
+    otlp_audit_handler = OTLPAuditEventHandler(audit_exporter=otlp_audit_exporter)
+    runtime.event_bus.subscribe(ToolInvocationCompleted, otlp_audit_handler.handle)
+    runtime.event_bus.subscribe(ToolInvocationFailed, otlp_audit_handler.handle)
+    runtime.event_bus.subscribe(ProviderStateChanged, otlp_audit_handler.handle)
+
     # Knowledge base handler (PostgreSQL persistence)
     from ...application.event_handlers.knowledge_base_handler import KnowledgeBaseEventHandler
     from ...infrastructure.async_executor import async_executor
@@ -45,5 +62,13 @@ def init_event_handlers(runtime: "Runtime") -> None:
 
     logger.info(
         "event_handlers_registered",
-        handlers=["logging", "metrics", "alert", "audit", "security", "knowledge_base"],
+        handlers=[
+            "logging",
+            "metrics",
+            "alert",
+            "audit",
+            "security",
+            "otlp_audit",
+            "knowledge_base",
+        ],
     )
