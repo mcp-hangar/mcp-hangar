@@ -48,6 +48,7 @@ class CallSpec:
     arguments: dict[str, Any]
     timeout: float | None = None
     max_retries: int = 1  # Default: no retries (single attempt)
+    metadata: dict[str, str] | None = None  # W3C TraceContext headers (traceparent, tracestate)
 
 
 @dataclass
