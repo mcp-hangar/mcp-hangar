@@ -1,14 +1,5 @@
 """Query handlers for CQRS."""
 
-# Import base classes and query types first (no circular dependencies)
-from .auth_queries import (
-    CheckPermissionQuery,
-    GetApiKeyCountQuery,
-    GetApiKeysByPrincipalQuery,
-    GetRoleQuery,
-    GetRolesForPrincipalQuery,
-    ListBuiltinRolesQuery,
-)
 from .queries import (
     GetProviderHealthQuery,
     GetProviderQuery,
@@ -19,9 +10,22 @@ from .queries import (
     QueryHandler,
 )
 
+# Auth queries live in enterprise/auth/queries/.
+# Re-export conditionally for backwards compatibility.
+try:
+    from enterprise.auth.queries.queries import (  # noqa: F401
+        CheckPermissionQuery,
+        GetApiKeyCountQuery,
+        GetApiKeysByPrincipalQuery,
+        GetRoleQuery,
+        GetRolesForPrincipalQuery,
+        ListBuiltinRolesQuery,
+    )
+except ImportError:
+    pass
+
 
 # Lazy import handlers to avoid circular imports
-# These modules import from infrastructure.query_bus which imports from this module
 def __getattr__(name: str):
     """Lazy import handlers to break circular dependency."""
     if name in (
@@ -45,9 +49,12 @@ def __getattr__(name: str):
         "ListBuiltinRolesHandler",
         "register_auth_query_handlers",
     ):
-        from . import auth_handlers
+        try:
+            from enterprise.auth.queries import handlers as auth_handlers
 
-        return getattr(auth_handlers, name)
+            return getattr(auth_handlers, name)
+        except ImportError as err:
+            raise AttributeError(f"module {__name__!r} has no attribute {name!r} (enterprise not installed)") from err
 
     raise AttributeError(f"module {__name__!r} has no attribute {name!r}")
 
@@ -62,26 +69,11 @@ __all__ = [
     "GetProviderToolsQuery",
     "GetProviderHealthQuery",
     "GetSystemMetricsQuery",
-    # Provider Query Handlers
+    # Handlers
     "ListProvidersHandler",
     "GetProviderHandler",
     "GetProviderToolsHandler",
     "GetProviderHealthHandler",
     "GetSystemMetricsHandler",
     "register_all_handlers",
-    # Auth Queries
-    "GetApiKeysByPrincipalQuery",
-    "GetApiKeyCountQuery",
-    "GetRolesForPrincipalQuery",
-    "GetRoleQuery",
-    "ListBuiltinRolesQuery",
-    "CheckPermissionQuery",
-    # Auth Query Handlers
-    "GetApiKeysByPrincipalHandler",
-    "GetApiKeyCountHandler",
-    "GetRolesForPrincipalHandler",
-    "GetRoleHandler",
-    "ListBuiltinRolesHandler",
-    "CheckPermissionHandler",
-    "register_auth_query_handlers",
 ]

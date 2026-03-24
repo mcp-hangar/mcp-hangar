@@ -196,7 +196,7 @@ def init_langfuse(config: LangfuseBootstrapConfig) -> ObservabilityPort:
         return NullObservabilityAdapter()
 
     try:
-        from ...infrastructure.observability.langfuse_adapter import LangfuseConfig, LangfuseObservabilityAdapter
+        from enterprise.integrations.langfuse import LangfuseConfig, LangfuseObservabilityAdapter
 
         langfuse_config = LangfuseConfig(
             enabled=True,

@@ -23,7 +23,6 @@ def create_api_router() -> Starlette:
     Returns:
         Starlette application serving the REST API.
     """
-    from .auth import auth_routes
     from .catalog import catalog_routes
     from .config import config_routes
     from .discovery import discovery_routes
@@ -41,11 +40,18 @@ def create_api_router() -> Starlette:
         Mount("/catalog", routes=catalog_routes),
         Mount("/config", routes=config_routes),
         Mount("/system", routes=system_routes),
-        Mount("/auth", routes=auth_routes),
         Mount("/observability", routes=observability_routes),
         Mount("/maintenance", routes=maintenance_routes),
         Mount("/ws", routes=ws_routes),
     ]
+
+    # Auth routes are part of enterprise tier.
+    try:
+        from enterprise.auth.api.routes import auth_routes
+
+        routes.append(Mount("/auth", routes=auth_routes))
+    except ImportError:
+        pass
 
     exception_handlers = {
         MCPError: error_handler,

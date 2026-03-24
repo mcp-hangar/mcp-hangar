@@ -15,7 +15,7 @@ from starlette.routing import Route
 from ..logging_config import get_logger
 
 if TYPE_CHECKING:
-    from ..server.auth_bootstrap import AuthComponents
+    from mcp_hangar.server.bootstrap import AuthComponents
     from .config import ServerConfig
 
 logger = get_logger(__name__)

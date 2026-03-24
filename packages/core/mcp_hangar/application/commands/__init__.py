@@ -1,22 +1,5 @@
 """Command handlers for CQRS."""
 
-from .auth_commands import (
-    AssignRoleCommand,
-    CreateApiKeyCommand,
-    CreateCustomRoleCommand,
-    ListApiKeysCommand,
-    RevokeApiKeyCommand,
-    RevokeRoleCommand,
-)
-from .auth_handlers import (
-    AssignRoleHandler,
-    CreateApiKeyHandler,
-    CreateCustomRoleHandler,
-    ListApiKeysHandler,
-    register_auth_command_handlers,
-    RevokeApiKeyHandler,
-    RevokeRoleHandler,
-)
 from .commands import (
     Command,
     HealthCheckCommand,
@@ -39,6 +22,29 @@ from .handlers import (
 from .load_handlers import LoadProviderHandler, LoadResult, UnloadProviderHandler
 from .reload_handler import ReloadConfigurationHandler
 
+# Auth commands and handlers live in enterprise/auth/commands/.
+# Re-export conditionally for backwards compatibility.
+try:
+    from enterprise.auth.commands.commands import (  # noqa: F401
+        AssignRoleCommand,
+        CreateApiKeyCommand,
+        CreateCustomRoleCommand,
+        ListApiKeysCommand,
+        RevokeApiKeyCommand,
+        RevokeRoleCommand,
+    )
+    from enterprise.auth.commands.handlers import (  # noqa: F401
+        AssignRoleHandler,
+        CreateApiKeyHandler,
+        CreateCustomRoleHandler,
+        ListApiKeysHandler,
+        register_auth_command_handlers,
+        RevokeApiKeyHandler,
+        RevokeRoleHandler,
+    )
+except ImportError:
+    pass
+
 __all__ = [
     # Commands
     "Command",
@@ -50,13 +56,6 @@ __all__ = [
     "LoadProviderCommand",
     "UnloadProviderCommand",
     "ReloadConfigurationCommand",
-    # Auth Commands
-    "CreateApiKeyCommand",
-    "RevokeApiKeyCommand",
-    "ListApiKeysCommand",
-    "AssignRoleCommand",
-    "RevokeRoleCommand",
-    "CreateCustomRoleCommand",
     # Handlers
     "StartProviderHandler",
     "StopProviderHandler",
@@ -69,12 +68,4 @@ __all__ = [
     "UnloadProviderHandler",
     "LoadResult",
     "ReloadConfigurationHandler",
-    # Auth Handlers
-    "CreateApiKeyHandler",
-    "RevokeApiKeyHandler",
-    "ListApiKeysHandler",
-    "AssignRoleHandler",
-    "RevokeRoleHandler",
-    "CreateCustomRoleHandler",
-    "register_auth_command_handlers",
 ]

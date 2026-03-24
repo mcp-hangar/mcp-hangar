@@ -161,6 +161,7 @@ ignore_missing_imports = true
 testpaths = ["tests"]
 asyncio_mode = "auto"
 addopts = "-v --cov=mcp_hangar --cov-report=term-missing"
+pythonpath = [".", "../.."]
 
 [dependency-groups]
 dev = [

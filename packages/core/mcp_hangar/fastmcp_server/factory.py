@@ -14,7 +14,7 @@ from .asgi import create_auth_combined_app, create_combined_asgi_app, create_hea
 from .config import HangarFunctions, ServerConfig
 
 if TYPE_CHECKING:
-    from ..server.auth_bootstrap import AuthComponents
+    from mcp_hangar.server.bootstrap import AuthComponents
     from .builder import MCPServerFactoryBuilder
 
 logger = get_logger(__name__)

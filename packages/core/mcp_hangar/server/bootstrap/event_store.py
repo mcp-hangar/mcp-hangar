@@ -4,7 +4,6 @@ from pathlib import Path
 from typing import Any, TYPE_CHECKING
 
 from ...domain.contracts.event_store import NullEventStore
-from ...infrastructure.persistence import SQLiteEventStore
 from ...logging_config import get_logger
 
 if TYPE_CHECKING:
@@ -46,13 +45,28 @@ def init_event_store(runtime: "Runtime", config: dict[str, Any]) -> None:
         logger.info("event_store_initialized", driver="memory")
     elif driver == "sqlite":
         db_path = event_store_config.get("path", "data/events.db")
-        # Ensure directory exists - fallback to in-memory if read-only
+        # SQLiteEventStore lives in enterprise tier (BSL 1.1).
+        # Fallback to in-memory when enterprise is not installed.
+        try:
+            from enterprise.persistence.sqlite_event_store import SQLiteEventStore
+        except ImportError:
+            logger.warning(
+                "event_store_sqlite_enterprise_unavailable",
+                fallback="memory",
+                hint="Install mcp-hangar-enterprise for SQLite event store.",
+            )
+            from ...infrastructure.persistence import InMemoryEventStore
+
+            event_store = InMemoryEventStore()
+            logger.info("event_store_initialized", driver="memory", reason="enterprise_not_installed")
+            runtime.event_bus.set_event_store(event_store)
+            return
+
         try:
             Path(db_path).parent.mkdir(parents=True, exist_ok=True)
             event_store = SQLiteEventStore(db_path)
             logger.info("event_store_initialized", driver="sqlite", path=db_path)
         except OSError as e:
-            # Read-only filesystem or permission denied - use in-memory store
             logger.warning(
                 "event_store_sqlite_fallback_to_memory",
                 error=str(e),

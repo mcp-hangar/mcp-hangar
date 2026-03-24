@@ -229,7 +229,7 @@ def langfuse_container(postgres_container: dict) -> Generator[dict[str, Any], No
         # Wait for Langfuse to be ready
         try:
             wait_for_logs(container, "Ready", timeout=60)
-        except Exception:
+        except Exception:  # noqa: BLE001 -- fault-barrier: container startup fallback
             # Fallback: wait and check health endpoint
             time.sleep(10)
 
@@ -246,7 +246,7 @@ def langfuse_container(postgres_container: dict) -> Generator[dict[str, Any], No
 @pytest.fixture
 def langfuse_config(langfuse_container: dict):
     """Create LangfuseConfig from container."""
-    from mcp_hangar.infrastructure.observability.langfuse_adapter import LangfuseConfig
+    from enterprise.integrations.langfuse import LangfuseConfig
 
     return LangfuseConfig(
         enabled=True,
@@ -310,7 +310,7 @@ def math_provider_container() -> Generator[dict[str, Any], None, None]:
                 "port": container.get_exposed_port(8080),
                 "url": container.get_mcp_url(),
             }
-    except Exception as e:
+    except Exception as e:  # noqa: BLE001 -- fault-barrier: pytest.skip on container unavailable
         pytest.skip(f"Math provider container not available: {e}")
 
 
@@ -336,7 +336,7 @@ def sqlite_provider_container() -> Generator[dict[str, Any], None, None]:
                 "port": container.get_exposed_port(8080),
                 "url": container.get_mcp_url(),
             }
-    except Exception as e:
+    except Exception as e:  # noqa: BLE001 -- fault-barrier: pytest.skip on container unavailable
         pytest.skip(f"SQLite provider container not available: {e}")
 
 

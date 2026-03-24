@@ -17,7 +17,7 @@ if TYPE_CHECKING:
     from ..domain.contracts.catalog import McpCatalogRepository
     from ..domain.model import Provider, ProviderGroup
     from ..domain.repository import IProviderRepository
-    from ..server.auth_bootstrap import AuthComponents
+    from mcp_hangar.server.bootstrap import AuthComponents
 
 
 # =============================================================================

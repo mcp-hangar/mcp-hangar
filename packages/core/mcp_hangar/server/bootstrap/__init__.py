@@ -33,11 +33,41 @@ from ...application.ports.observability import ObservabilityPort
 from ...infrastructure.persistence.saga_state_store import NullSagaStateStore, SagaStateStore
 from ...gc import BackgroundWorker
 from ...logging_config import get_logger
-from ..auth_bootstrap import AuthComponents, bootstrap_auth
-from ..auth_config import parse_auth_config
 from ..config import load_config, load_configuration
 from ..context import get_context, init_context
 from ..state import get_runtime, GROUPS, PROVIDERS
+
+# Auth components: load from enterprise when available, else noop.
+try:
+    from enterprise.auth.bootstrap import AuthComponents, NullAuthComponents, bootstrap_auth
+    from enterprise.auth.config import parse_auth_config
+
+    _enterprise_auth_available = True
+except ImportError:
+    _enterprise_auth_available = False
+
+    class AuthComponents:  # type: ignore[no-redef]
+        """Stub AuthComponents used when enterprise is not installed."""
+
+        enabled: bool = False
+        api_key_store = None
+        role_store = None
+        tap_store = None
+
+    class NullAuthComponents(AuthComponents):  # type: ignore[no-redef]
+        """Null/noop auth implementation used when enterprise is not installed."""
+
+        enabled: bool = False
+
+    def bootstrap_auth(config=None, **kwargs) -> AuthComponents:  # type: ignore[misc]
+        """Return noop auth components when enterprise is not installed."""
+        return NullAuthComponents()
+
+    def parse_auth_config(raw: dict | None = None):  # type: ignore[misc]
+        """Return empty config when enterprise is not installed."""
+        return None
+
+
 from .cqrs import init_cqrs, init_auth_cqrs, init_saga, save_group_circuit_breakers
 from .discovery import _auto_add_volumes, _create_discovery_source, create_discovery_orchestrator
 from .event_handlers import init_event_handlers

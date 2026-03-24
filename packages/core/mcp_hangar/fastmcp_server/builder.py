@@ -24,7 +24,7 @@ from .protocols import (
 )
 
 if TYPE_CHECKING:
-    from ..server.auth_bootstrap import AuthComponents
+    from mcp_hangar.server.bootstrap import AuthComponents
     from .factory import MCPServerFactory
 
 
