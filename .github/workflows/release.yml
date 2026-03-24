@@ -63,7 +63,7 @@ jobs:
 
       - name: Validate version in pyproject.toml
         run: |
-          PYPROJECT_VERSION=$(grep -E '^version = "' packages/core/pyproject.toml | sed 's/version = "\(.*\)"/\1/')
+          PYPROJECT_VERSION=$(grep -E '^version = "' pyproject.toml | sed 's/version = "\(.*\)"/\1/')
           TAG_VERSION="${{ steps.extract.outputs.version }}"
 
           # For prereleases, strip suffix for comparison (e.g., 1.0.0-rc.1 -> 1.0.0)
@@ -74,7 +74,7 @@ jobs:
             echo "   pyproject.toml: ${PYPROJECT_VERSION}"
             echo "   Git tag: ${TAG_VERSION}"
             echo ""
-            echo "Please update packages/core/pyproject.toml version before tagging."
+            echo "Please update pyproject.toml version before tagging."
             exit 1
           fi
 
@@ -88,7 +88,7 @@ jobs:
     runs-on: ubuntu-latest
     defaults:
       run:
-        working-directory: packages/core
+        working-directory: .
     strategy:
       matrix:
         python-version: ["3.11", "3.12", "3.13", "3.14"]
@@ -153,7 +153,7 @@ jobs:
     runs-on: ubuntu-latest
     defaults:
       run:
-        working-directory: packages/core
+        working-directory: .
     environment:
       name: ${{ needs.validate.outputs.is_prerelease == 'true' && 'testpypi' || 'pypi' }}
       url: ${{ needs.validate.outputs.is_prerelease == 'true' && 'https://test.pypi.org/p/mcp-hangar' || 'https://pypi.org/p/mcp-hangar' }}
@@ -186,13 +186,13 @@ jobs:
         uses: pypa/gh-action-pypi-publish@release/v1
         with:
           repository-url: https://test.pypi.org/legacy/
-          packages-dir: packages/core/dist/
+          packages-dir: dist/
 
       - name: Publish to PyPI (stable releases)
         if: needs.validate.outputs.is_prerelease == 'false'
         uses: pypa/gh-action-pypi-publish@release/v1
         with:
-          packages-dir: packages/core/dist/
+          packages-dir: dist/
 
   # Build and publish Docker images
   publish-docker:
@@ -232,7 +232,7 @@ jobs:
         uses: docker/build-push-action@v6
         with:
           context: .
-          file: packages/core/Dockerfile
+          file: Dockerfile
           push: true
           tags: ${{ steps.meta.outputs.tags }}
           labels: ${{ steps.meta.outputs.labels }}

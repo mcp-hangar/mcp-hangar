@@ -25,9 +25,9 @@ echo "Checking enterprise import boundary..."
 echo ""
 
 # Rule 1: DOMAIN layer must NEVER import from enterprise (hard rule)
-echo "Rule 1: packages/core/mcp_hangar/domain/ must not import from enterprise/"
+echo "Rule 1: src/mcp_hangar/domain/ must not import from enterprise/"
 DOMAIN_VIOLATIONS=$(grep -rn --include="*.py" "^from enterprise\|^import enterprise" \
-    packages/core/mcp_hangar/domain/ 2>/dev/null | \
+    src/mcp_hangar/domain/ 2>/dev/null | \
     grep -v "__pycache__" | \
     grep -v "domain/security/roles.py" || true)  # roles.py is a designated compatibility shim
 
@@ -45,7 +45,7 @@ echo ""
 # Rule 2: Unconditional (non-try-guarded) enterprise imports in non-bootstrap core files
 echo "Rule 2: Non-bootstrap core must not have unconditional enterprise imports"
 UNCONDITIONAL=$(grep -rn --include="*.py" "^from enterprise\|^import enterprise" \
-    packages/core/mcp_hangar/ 2>/dev/null | \
+    src/mcp_hangar/ 2>/dev/null | \
     grep -v "__pycache__" | \
     grep -v "server/bootstrap/" | \
     grep -v "infrastructure/auth/__init__.py" | \

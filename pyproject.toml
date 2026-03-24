@@ -1,43 +1,150 @@
-# Root pyproject.toml for shared tooling config
-# Actual package is in packages/core/
-
+[project]
+name = "mcp-hangar"
+version = "0.12.0"
+description = "Production-grade infrastructure for Model Context Protocol"
+readme = "README.md"
+license = {text = "MIT"}
+requires-python = ">=3.11"
+authors = [
+    {name = "Marcin Pyrka", email = "marcin@mcp-hangar.io"}
+]
+keywords = ["mcp", "model-context-protocol", "llm", "ai", "infrastructure"]
+classifiers = [
+    "Development Status :: 4 - Beta",
+    "Intended Audience :: Developers",
+    "License :: OSI Approved :: MIT License",
+    "Programming Language :: Python :: 3.11",
+    "Programming Language :: Python :: 3.12",
+    "Programming Language :: Python :: 3.13",
+]
+dependencies = [
+    "mcp>=1.0.0",
+    "structlog>=24.0.0",
+    "pydantic>=2.0.0",
+    "httpx>=0.25.0",
+    "prometheus-client>=0.19.0",
+    "pyjwt>=2.8.0",
+    "cryptography>=41.0.0",
+    "pyyaml>=6.0",
+    "docker>=7.1.0",
+    "aiosqlite>=0.19.0",
+    "typer>=0.12.0",
+    "rich>=13.0.0",
+    "questionary>=2.0.0",
+    "python-multipart>=0.0.22",
+    "protobuf>=6.33.5",
+]
+[project.optional-dependencies]
+dev = [
+    "pytest>=8.0.0",
+    "pytest-cov>=4.1.0",
+    "pytest-asyncio>=0.23.0",
+    "pytest-timeout>=2.2.0",
+    "ruff>=0.3.0",
+    "mypy>=1.8.0",
+    "hypothesis>=6.90.0",
+]
+langfuse = ["langfuse>=2.0.0"]
+opentelemetry = [
+    "opentelemetry-api>=1.22.0",
+    "opentelemetry-sdk>=1.22.0",
+    "opentelemetry-exporter-otlp>=1.22.0",
+]
+postgres = [
+    "asyncpg>=0.29.0",
+]
+[project.scripts]
+mcp-hangar = "mcp_hangar.server.cli:cli_main"
+[project.urls]
+Homepage = "https://mcp-hangar.io"
+Documentation = "https://docs.mcp-hangar.io"
+Repository = "https://github.com/mcp-hangar/mcp-hangar"
 [build-system]
 requires = ["hatchling"]
 build-backend = "hatchling.build"
-
-[project]
-name = "mcp-hangar-workspace"
-version = "0.12.0"
-description = "MCP-Hangar monorepo workspace - see packages/core for actual package"
-readme = "README.md"
-requires-python = ">=3.11"
-authors = [
-    { name = "MCP Hangar Contributors" }
-]
-
-[project.optional-dependencies]
-dev = [
-    "ruff>=0.3.0",
-    "mypy>=1.8.0",
-    "pre-commit>=3.5.0",
-]
-
+[tool.hatch.build.targets.wheel]
+packages = ["src/mcp_hangar"]
+[tool.hatch.build.targets.wheel.force-include]
+"src/mcp_hangar/py.typed" = "mcp_hangar/py.typed"
 [tool.ruff]
 line-length = 120
 target-version = "py311"
 extend-exclude = ["packages/operator", "site", "dist"]
-
 [tool.ruff.lint]
-select = ["E", "F", "I", "N", "W", "UP", "B", "C4", "SIM"]
-
-[tool.ruff.lint.isort]
-force-sort-within-sections = true
-order-by-type = false
-case-sensitive = false
-combine-as-imports = true
-known-first-party = ["mcp_hangar"]
-
+select = ["E", "F", "N", "W", "UP", "B", "BLE001", "C4", "SIM"]
+ignore = [
+    "B007",
+    "B011",
+    "B017",
+    "B024",
+    "B027",
+    "B904",
+    "C401",
+    "C416",
+    "N806",
+    "N818",
+    "SIM102",
+    "SIM103",
+    "SIM105",
+    "SIM108",
+    "SIM110",
+    "SIM117",
+    "SIM118",
+]
 [tool.mypy]
 python_version = "3.11"
-exclude = ["packages/operator", "site", "dist"]
-strict = true
+strict = false
+warn_return_any = false
+warn_unused_ignores = false
+disallow_untyped_defs = false
+disallow_incomplete_defs = false
+check_untyped_defs = false
+no_implicit_optional = false
+warn_redundant_casts = true
+warn_unused_configs = true
+show_error_codes = true
+ignore_missing_imports = true
+disable_error_code = [
+    "union-attr",
+    "arg-type",
+    "assignment",
+    "attr-defined",
+    "return-value",
+    "override",
+    "call-arg",
+    "var-annotated",
+    "valid-type",
+    "misc",
+    "index",
+    "operator",
+    "no-redef",
+    "abstract",
+    "typeddict-unknown-key",
+    "list-item",
+    "name-defined",
+]
+[[tool.mypy.overrides]]
+module = [
+    "docker.*",
+    "yaml.*",
+    "prometheus_client.*",
+    "kubernetes.*",
+    "asyncpg.*",
+    "psycopg2.*",
+    "langfuse.*",
+    "opentelemetry.*",
+    "watchdog.*",
+    "aiohttp.*",
+    "httpx.*",
+    "structlog.*",
+]
+ignore_missing_imports = true
+[tool.pytest.ini_options]
+testpaths = ["tests"]
+asyncio_mode = "auto"
+addopts = "-v --cov=mcp_hangar --cov-report=term-missing"
+pythonpath = ["src", "."]
+[dependency-groups]
+dev = [
+    "vulture>=2.14",
+]

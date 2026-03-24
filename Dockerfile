@@ -1,5 +1,5 @@
 # Build from the repository root:
-#   docker build -f packages/core/Dockerfile -t mcp-hangar .
+#   docker build -t mcp-hangar .
 #
 # Stage 1: Build the React/Vite UI
 FROM node:20-slim AS ui-builder
@@ -13,8 +13,8 @@ RUN npm run build
 FROM python:3.11-slim AS py-builder
 WORKDIR /app
 RUN pip install --no-cache-dir hatch
-COPY packages/core/pyproject.toml packages/core/README.md ./
-COPY packages/core/mcp_hangar ./mcp_hangar
+COPY pyproject.toml README.md ./
+COPY src/mcp_hangar ./src/mcp_hangar
 RUN hatch build
 
 # Stage 3: Final runtime image

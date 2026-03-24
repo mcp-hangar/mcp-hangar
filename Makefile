@@ -3,7 +3,6 @@
 .PHONY: all clean test lint build publish help dev dev-backend dev-frontend
 
 VERSION ?= $(shell git describe --tags --always --dirty)
-PACKAGES := core operator helm-charts
 
 ##@ General
 
@@ -31,7 +30,7 @@ all: lint test build ## Run lint, test, build for all packages
 lint: lint-core lint-operator lint-helm ## Lint all packages
 
 lint-core: ## Lint Python core
-	cd packages/core && ruff check mcp_hangar && ruff format --check mcp_hangar
+	ruff check src/mcp_hangar && ruff format --check src/mcp_hangar
 
 lint-operator: ## Lint Go operator
 	cd packages/operator && golangci-lint run || echo "golangci-lint not installed, skipping"
@@ -43,7 +42,7 @@ lint-helm: ## Lint Helm charts
 test: test-core test-operator ## Run tests for all packages
 
 test-core: ## Test Python core
-	cd packages/core && pytest
+	pytest
 
 test-operator: ## Test Go operator
 	cd packages/operator && make test || echo "Go tests skipped"
@@ -51,7 +50,7 @@ test-operator: ## Test Go operator
 build: build-core build-operator build-helm ## Build all packages
 
 build-core: ## Build Python package
-	cd packages/core && pip install hatch && hatch build
+	pip install hatch && hatch build
 
 build-operator: ## Build Go binary
 	cd packages/operator && make build || echo "Go build skipped"
@@ -66,7 +65,7 @@ build-helm: ## Package Helm charts
 docker: docker-core docker-operator ## Build all Docker images
 
 docker-core: ## Build core Docker image
-	docker build -t ghcr.io/mcp-hangar/mcp-hangar:$(VERSION) packages/core
+	docker build -t ghcr.io/mcp-hangar/mcp-hangar:$(VERSION) .
 
 docker-operator: ## Build operator Docker image
 	docker build -t ghcr.io/mcp-hangar/mcp-hangar-operator:$(VERSION) packages/operator
@@ -80,7 +79,7 @@ docker-push: ## Push all Docker images
 publish: publish-core publish-operator publish-helm ## Publish all packages
 
 publish-core: ## Publish to PyPI
-	cd packages/core && hatch publish
+	hatch publish
 
 publish-operator: docker-operator ## Push operator image
 	docker push ghcr.io/mcp-hangar/mcp-hangar-operator:$(VERSION)
@@ -95,6 +94,11 @@ release: ## Create a release (use VERSION=x.y.z)
 	@if [ -z "$(VERSION)" ]; then echo "VERSION required"; exit 1; fi
 	git tag -a v$(VERSION) -m "Release v$(VERSION)"
 	git push origin v$(VERSION)
+
+##@ CI
+
+check-boundary: ## Check enterprise import boundary
+	bash scripts/check_enterprise_boundary.sh
 
 ##@ Documentation
 
@@ -119,7 +123,6 @@ quickstart-down: ## Stop quickstart demo
 
 clean: ## Clean build artifacts
 	rm -rf dist/
-	rm -rf packages/core/dist/
 	rm -rf packages/operator/bin/
 	find . -type d -name __pycache__ -exec rm -rf {} + 2>/dev/null || true
 	find . -type d -name .pytest_cache -exec rm -rf {} + 2>/dev/null || true
@@ -127,13 +130,10 @@ clean: ## Clean build artifacts
 
 ##@ Development Setup
 
-setup: setup-core setup-operator setup-subprojects ## Setup development environment
+setup: setup-core setup-operator ## Setup development environment
 
 setup-core: ## Setup Python development environment
-	cd packages/core && pip install -e ".[dev]"
+	pip install -e ".[dev]"
 
 setup-operator: ## Setup Go development environment
 	cd packages/operator && go mod download
-
-setup-subprojects: ## Setup subproject AI assistant configs (GSD symlinks)
-	bash scripts/setup-subproject-symlinks.sh
