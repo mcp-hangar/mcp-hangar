@@ -244,3 +244,75 @@ class IApiKeyStore(Protocol):
             ValueError: If key not found, already revoked, or already has pending rotation.
         """
         ...
+
+
+class NullAuthenticator:
+    """No-op authenticator. Returns anonymous system principal for all requests.
+
+    Used when enterprise auth is not installed or during testing.
+    """
+
+    _ANONYMOUS: Principal | None = None
+
+    @classmethod
+    def _get_anonymous_principal(cls) -> Principal:
+        """Get or create the anonymous system principal."""
+        if cls._ANONYMOUS is None:
+            from ..value_objects import PrincipalId, PrincipalType
+
+            cls._ANONYMOUS = Principal(
+                id=PrincipalId("anonymous"),
+                type=PrincipalType.SYSTEM,
+            )
+        return cls._ANONYMOUS
+
+    def authenticate(self, request: AuthRequest) -> Principal:
+        """Return anonymous system principal for any request."""
+        return self._get_anonymous_principal()
+
+    def supports(self, request: AuthRequest) -> bool:
+        """Accept all requests."""
+        return True
+
+
+class NullApiKeyStore:
+    """No-op API key store. All operations are no-ops or return empty results.
+
+    Used when enterprise auth is not installed or during testing.
+    """
+
+    def get_principal_for_key(self, key_hash: str) -> Principal | None:
+        """No keys exist -- always returns None."""
+        return None
+
+    def create_key(
+        self,
+        principal_id: str,
+        name: str,
+        expires_at: datetime | None = None,
+        groups: frozenset[str] | None = None,
+        tenant_id: str | None = None,
+    ) -> str:
+        """No-op: raise NotImplementedError (no key storage without enterprise)."""
+        raise NotImplementedError("API key creation requires enterprise auth module")
+
+    def revoke_key(self, key_id: str) -> bool:
+        """No keys to revoke."""
+        return False
+
+    def list_keys(self, principal_id: str) -> list[ApiKeyMetadata]:
+        """No keys exist."""
+        return []
+
+    def count_keys(self, principal_id: str) -> int:
+        """No keys exist."""
+        return 0
+
+    def rotate_key(
+        self,
+        key_id: str,
+        grace_period_seconds: float = 86400,
+        rotated_by: str = "system",
+    ) -> str:
+        """No-op: raise NotImplementedError (no key storage without enterprise)."""
+        raise NotImplementedError("API key rotation requires enterprise auth module")
