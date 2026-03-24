@@ -26,6 +26,8 @@ from .capabilities import (
     ProviderCapabilities,
     ResourceCapabilities,
     ToolCapabilities,
+    ViolationSeverity,
+    ViolationType,
 )
 
 # Log value objects

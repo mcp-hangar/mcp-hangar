@@ -12,13 +12,17 @@ import json
 from hypothesis import HealthCheck, given, settings, strategies as st
 
 from mcp_hangar.domain.events import (
+    CapabilityViolationDetected,
     CircuitBreakerStateChanged,
     DomainEvent,
     DiscoveryCycleCompleted,
     DiscoverySourceHealthChanged,
+    EgressBlocked,
     HealthCheckFailed,
     HealthCheckPassed,
     ProviderApproved,
+    ProviderCapabilityQuarantined,
+    ProviderCapabilityQuarantineReleased,
     ProviderDegraded,
     ProviderDiscovered,
     ProviderDiscoveryConfigChanged,
@@ -78,7 +82,7 @@ _MINIMAL_EVENTS: dict[str, DomainEvent] = {
         provider_name="p1",
         source_type="filesystem",
         reason="unknown_mode",
-        validation_result="fail",
+        validation_result="invalid",
     ),
     "ProviderApproved": ProviderApproved(provider_name="p1", source_type="filesystem", approved_by="auto"),
     "DiscoveryCycleCompleted": DiscoveryCycleCompleted(
@@ -91,6 +95,28 @@ _MINIMAL_EVENTS: dict[str, DomainEvent] = {
     ),
     "DiscoverySourceHealthChanged": DiscoverySourceHealthChanged(source_type="filesystem", is_healthy=True),
     "CircuitBreakerStateChanged": CircuitBreakerStateChanged(provider_id="p1", old_state="closed", new_state="open"),
+    # Capability enforcement
+    "CapabilityViolationDetected": CapabilityViolationDetected(
+        provider_id="p1",
+        violation_type="egress_undeclared",
+        violation_detail="Connection to 192.168.1.100:9200",
+        enforcement_action="alert",
+    ),
+    "EgressBlocked": EgressBlocked(
+        provider_id="p1",
+        destination_host="evil.example.com",
+        destination_port=443,
+        protocol="https",
+    ),
+    "ProviderCapabilityQuarantined": ProviderCapabilityQuarantined(
+        provider_id="p1",
+        reason="3 violations in 60s",
+        violation_count=3,
+    ),
+    "ProviderCapabilityQuarantineReleased": ProviderCapabilityQuarantineReleased(
+        provider_id="p1",
+        released_by="ops@example.com",
+    ),
 }
 
 

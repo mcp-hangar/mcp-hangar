@@ -9,13 +9,17 @@ import json
 from typing import Any
 
 from mcp_hangar.domain.events import (
+    CapabilityViolationDetected,
     CircuitBreakerStateChanged,
     DiscoveryCycleCompleted,
     DiscoverySourceHealthChanged,
     DomainEvent,
+    EgressBlocked,
     HealthCheckFailed,
     HealthCheckPassed,
     ProviderApproved,
+    ProviderCapabilityQuarantined,
+    ProviderCapabilityQuarantineReleased,
     ProviderDegraded,
     ProviderDiscovered,
     ProviderDiscoveryConfigChanged,
@@ -60,6 +64,11 @@ EVENT_TYPE_MAP: dict[str, type[DomainEvent]] = {
     "ProviderApproved": ProviderApproved,
     "DiscoveryCycleCompleted": DiscoveryCycleCompleted,
     "DiscoverySourceHealthChanged": DiscoverySourceHealthChanged,
+    # Capability enforcement
+    "CapabilityViolationDetected": CapabilityViolationDetected,
+    "EgressBlocked": EgressBlocked,
+    "ProviderCapabilityQuarantined": ProviderCapabilityQuarantined,
+    "ProviderCapabilityQuarantineReleased": ProviderCapabilityQuarantineReleased,
 }
 
 EVENT_VERSION_MAP: dict[str, int] = {
@@ -86,6 +95,11 @@ EVENT_VERSION_MAP: dict[str, int] = {
     "ProviderApproved": 1,
     "DiscoveryCycleCompleted": 1,
     "DiscoverySourceHealthChanged": 1,
+    # Capability enforcement
+    "CapabilityViolationDetected": 2,
+    "EgressBlocked": 1,
+    "ProviderCapabilityQuarantined": 1,
+    "ProviderCapabilityQuarantineReleased": 1,
 }
 
 

@@ -44,7 +44,33 @@ Example configuration:
 from __future__ import annotations
 
 from dataclasses import dataclass, field
+from enum import Enum
 from typing import Any
+
+
+class ViolationType(Enum):
+    """Types of capability violations detected by the enforcement engine."""
+
+    EGRESS_DENIED = "egress_denied"
+    CAPABILITY_DRIFT = "capability_drift"
+    UNDECLARED_TOOL = "undeclared_tool"
+    SCHEMA_MISMATCH = "schema_mismatch"
+    QUARANTINE_TRIGGERED = "quarantine_triggered"
+
+    def __str__(self) -> str:
+        return self.value
+
+
+class ViolationSeverity(Enum):
+    """Severity levels for capability violations."""
+
+    CRITICAL = "critical"
+    HIGH = "high"
+    MEDIUM = "medium"
+    LOW = "low"
+
+    def __str__(self) -> str:
+        return self.value
 
 
 @dataclass(frozen=True)

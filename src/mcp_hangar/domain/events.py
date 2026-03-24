@@ -977,7 +977,8 @@ class CapabilityViolationDetected(DomainEvent):
     violation_detail: str
     enforcement_action: str
     destination: str | None = None
-    schema_version: int = 1
+    severity: str = "high"
+    schema_version: int = 2
 
     def __post_init__(self):
         super().__init__()
@@ -1011,7 +1012,7 @@ class EgressBlocked(DomainEvent):
 
 
 @dataclass
-class ProviderQuarantined(DomainEvent):
+class ProviderCapabilityQuarantined(DomainEvent):
     """Published when a provider is quarantined due to capability violations.
 
     A quarantined provider stops serving new requests until the operator
@@ -1034,8 +1035,8 @@ class ProviderQuarantined(DomainEvent):
 
 
 @dataclass
-class ProviderQuarantineReleased(DomainEvent):
-    """Published when a quarantined provider is released by the operator.
+class ProviderCapabilityQuarantineReleased(DomainEvent):
+    """Published when a capability-quarantined provider is released by the operator.
 
     Attributes:
         provider_id: Provider released from quarantine.

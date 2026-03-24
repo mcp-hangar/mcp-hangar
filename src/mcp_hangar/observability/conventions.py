@@ -111,6 +111,9 @@ class Enforcement:
     #: Number of violations accumulated for this provider in this session.
     VIOLATION_COUNT = "mcp.enforcement.violation_count"
 
+    #: Severity level of a violation ("critical", "high", "medium", "low").
+    VIOLATION_SEVERITY = "mcp.enforcement.violation_severity"
+
 
 class Audit:
     """Attributes for identity-aware audit trail entries."""

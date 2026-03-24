@@ -4,8 +4,8 @@ from mcp_hangar.domain.events import (
     CapabilityDeclarationMissing,
     CapabilityViolationDetected,
     EgressBlocked,
-    ProviderQuarantined,
-    ProviderQuarantineReleased,
+    ProviderCapabilityQuarantined,
+    ProviderCapabilityQuarantineReleased,
     ToolSchemaDriftDetected,
 )
 
@@ -66,9 +66,9 @@ class TestEgressBlocked:
         assert event.enforcement_source == "iptables"
 
 
-class TestProviderQuarantined:
+class TestProviderCapabilityQuarantined:
     def test_creates_with_reason(self) -> None:
-        event = ProviderQuarantined(
+        event = ProviderCapabilityQuarantined(
             provider_id="rogue-provider",
             reason="3 egress violations in 60s",
             violation_count=3,
@@ -77,9 +77,9 @@ class TestProviderQuarantined:
         assert "egress" in event.reason
 
 
-class TestProviderQuarantineReleased:
+class TestProviderCapabilityQuarantineReleased:
     def test_creates_with_operator(self) -> None:
-        event = ProviderQuarantineReleased(
+        event = ProviderCapabilityQuarantineReleased(
             provider_id="rogue-provider",
             released_by="ops@example.com",
         )
