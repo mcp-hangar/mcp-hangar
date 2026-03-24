@@ -6,7 +6,7 @@
 
 - **Milestone:** v0.13.0 -- Kubernetes Enforcement Foundation + Licensing
 - **Target date:** 2026-04-15
-- **Active phase:** Phase 1 (Kubernetes Enforcement)
+- **Active phase:** Phase 32 (Trace Context Propagation) -- Plan 32-01 complete, 2 plans remaining
 - **Current version:** v0.12.0
 
 ## Active P0 Work Items
@@ -30,7 +30,7 @@
 - [x] MCP-aware OTEL semantic conventions -- Plan 31-01 complete (conventions wired into tracing.py, set_governance_attributes helper added)
 - [x] MCP-aware OTEL semantic conventions -- Plan 31-02 complete (OTEL span added to TracedProviderService.invoke_tool)
 - [x] MCP-aware OTEL semantic conventions -- Plan 31-03 complete (InMemorySpanExporter integration test, 6 real SDK tests)
-- [ ] End-to-end trace context propagation (agent -> Hangar -> provider) -- Phase 32, ready to start
+- [ ] End-to-end trace context propagation (agent -> Hangar -> provider) -- Phase 32 (1/3 plans complete: 32-01 extract_trace_context in BatchExecutor)
 
 ### Hardening
 - [ ] CI security scanning (Trivy/Grype on images, Semgrep on source)
@@ -43,6 +43,7 @@
 
 ## Recently Completed
 
+- Phase 32-01: extract_trace_context wired into BatchExecutor._execute_call, CallSpec.metadata field added (2026-03-24)
 - Phase 31 complete: all 3 plans delivered -- conventions wired, OTEL span in TracedProviderService, InMemorySpanExporter integration test (34 total tests) (2026-03-24)
 - Phase 31-02: OTEL span added to TracedProviderService.invoke_tool with governance attributes (2026-03-24)
 - Phase 31-01: Wired conventions.py constants into tracing.py, added set_governance_attributes() helper (2026-03-24)
