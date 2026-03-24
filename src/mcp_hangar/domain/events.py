@@ -1096,3 +1096,28 @@ class CapabilityDeclarationMissing(DomainEvent):
 
     def __post_init__(self):
         super().__init__()
+
+
+# ---------------------------------------------------------------------------
+# Behavioral Profiling Events
+# ---------------------------------------------------------------------------
+
+
+@dataclass
+class BehavioralModeChanged(DomainEvent):
+    """Published when a provider's behavioral profiling mode changes.
+
+    Attributes:
+        provider_id: Provider whose mode changed.
+        old_mode: Previous mode value (learning, enforcing, disabled).
+        new_mode: New mode value (learning, enforcing, disabled).
+        schema_version: Event schema version.
+    """
+
+    provider_id: str
+    old_mode: str
+    new_mode: str
+    schema_version: int = 1
+
+    def __post_init__(self):
+        super().__init__()

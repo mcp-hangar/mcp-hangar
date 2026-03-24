@@ -73,6 +73,9 @@ from .tool_access_policy import ToolAccessPolicy
 # Truncation
 from .truncation import ContinuationId, TruncationConfig
 
+# Behavioral profiling
+from .behavioral import BehavioralMode, NetworkObservation
+
 # Discovery
 from .discovery import DiscoverySourceSpec
 
@@ -125,4 +128,7 @@ __all__ = [
     "LogLine",
     # Discovery
     "DiscoverySourceSpec",
+    # Behavioral profiling
+    "BehavioralMode",
+    "NetworkObservation",
 ]
