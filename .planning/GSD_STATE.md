@@ -6,7 +6,7 @@
 
 - **Milestone:** v7.0 -- Kubernetes Enforcement Foundation + Licensing
 - **Target date:** 2026-04-15
-- **Active phase:** Phase 39 (NetworkPolicy Generation) -- plan 02 complete, plan 03 next
+- **Active phase:** Phase 39 (NetworkPolicy Generation) -- plans 01+02 complete, plan 03 next
 - **Current version:** v0.12.0
 - **Last completed milestone:** v6.0 (OTEL Foundation) -- shipped 2026-03-24
 
@@ -44,6 +44,7 @@
 
 ## Recently Completed
 
+- Phase 39 plan 01 complete: NetworkPolicyBuilder pure function -- TDD with 15 tests, default-deny egress + DNS/loopback/CIDR/host-only rules (2026-03-24)
 - Phase 39 plan 02 complete: Docker capabilities-aware network mode -- binary deny/allow enforcement via egress rules, 8 unit tests (2026-03-24)
 - **Phase 38 (Capability Declaration Schema) complete** -- 3 plans, 40 tests, Python VOs + CRD types + examples (2026-03-24)
 - Phase 38 plan 03 complete: from_dict round-trip tests, ProviderConfig integration tests, ConfigurationError boundary tests, quickstart + K8s example configs (2026-03-24)
