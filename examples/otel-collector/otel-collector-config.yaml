@@ -1,0 +1,58 @@
+# OpenTelemetry Collector configuration for MCP Hangar governance telemetry.
+#
+# Pipeline:
+#   OTLP receiver <- Hangar (spans, metrics, audit logs)
+#   Batch processor (reduce OTLP calls)
+#   Exporters: Prometheus (metrics), logging (spans + logs to stdout)
+
+receivers:
+  otlp:
+    protocols:
+      grpc:
+        endpoint: 0.0.0.0:4317
+      http:
+        endpoint: 0.0.0.0:4318
+
+processors:
+  batch:
+    timeout: 5s
+    send_batch_size: 512
+
+  # Add MCP Hangar resource attributes to all telemetry
+  resource:
+    attributes:
+      - key: service.namespace
+        value: mcp-hangar
+        action: upsert
+
+exporters:
+  # Prometheus exporter: exposes /metrics endpoint for scraping
+  prometheus:
+    endpoint: 0.0.0.0:8889
+    namespace: mcp_hangar
+    # Forward MCP governance attributes as Prometheus labels
+    const_labels:
+      source: otel-collector
+
+  # Console exporter: prints spans and audit logs to stdout (debug)
+  logging:
+    verbosity: normal
+    sampling_initial: 5
+    sampling_thereafter: 200
+
+service:
+  pipelines:
+    traces:
+      receivers: [otlp]
+      processors: [batch]
+      exporters: [logging]
+
+    metrics:
+      receivers: [otlp]
+      processors: [batch, resource]
+      exporters: [prometheus]
+
+    logs:
+      receivers: [otlp]
+      processors: [batch]
+      exporters: [logging]
