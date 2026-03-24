@@ -20,6 +20,7 @@ from ....domain.events import BatchCallCompleted, BatchInvocationCompleted, Batc
 from ....domain.services import get_tool_access_resolver
 from ....infrastructure.single_flight import SingleFlight
 from ....logging_config import get_logger
+from ....observability.tracing import extract_trace_context, get_tracer
 from ....metrics import (
     BATCH_CALLS_TOTAL,
     BATCH_CANCELLATIONS_TOTAL,
@@ -344,6 +345,12 @@ class BatchExecutor:
         """
         ctx = get_context()
         call_start = time.perf_counter()
+
+        # Extract W3C TraceContext from call metadata for distributed tracing.
+        # If the agent passed traceparent, spans created for this call become
+        # children of the agent's trace rather than new root spans.
+        metadata = call.metadata or {}
+        parent_context = extract_trace_context(metadata)
 
         # Check cancellation before starting
         if cancel_event.is_set():
