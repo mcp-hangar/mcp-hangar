@@ -6,6 +6,8 @@ PRODUCT_ARCHITECTURE.md Phase 1 (P0).
 
 import pytest
 
+from mcp_hangar.domain.exceptions import ConfigurationError
+from mcp_hangar.domain.model.provider_config import ProviderConfig
 from mcp_hangar.domain.value_objects.capabilities import (
     EgressRule,
     EnvironmentCapabilities,
@@ -283,3 +285,99 @@ class TestProviderCapabilitiesOnProvider:
         provider = Provider(provider_id="test", mode="subprocess", capabilities=cap)
         assert provider.capabilities is not None
         assert provider.capabilities.enforcement_mode == "quarantine"
+
+
+class TestFromDictRoundTrip:
+    """Tests for from_dict() round-trip equivalence with direct construction."""
+
+    def test_from_dict_round_trip_matches_direct_construction(self) -> None:
+        """Verify from_dict produces same result as direct construction."""
+        direct = ProviderCapabilities(
+            network=NetworkCapabilities(
+                egress=(EgressRule(host="api.openai.com", port=443, protocol="https"),),
+                dns_allowed=True,
+                loopback_allowed=False,
+            ),
+            enforcement_mode="alert",
+        )
+        from_dict_result = ProviderCapabilities.from_dict(
+            {
+                "network": {
+                    "egress": [{"host": "api.openai.com", "port": 443, "protocol": "https"}],
+                    "dns_allowed": True,
+                    "loopback_allowed": False,
+                },
+                "enforcement_mode": "alert",
+            }
+        )
+        assert direct == from_dict_result
+
+
+class TestProviderConfigCapabilities:
+    """Tests for capabilities field on ProviderConfig (Phase 38 wiring)."""
+
+    def test_config_from_dict_with_capabilities(self) -> None:
+        config = ProviderConfig.from_dict(
+            "test-provider",
+            {
+                "mode": "subprocess",
+                "command": ["python", "-m", "test_server"],
+                "capabilities": {
+                    "network": {"egress": [{"host": "api.openai.com", "port": 443}]},
+                    "enforcement_mode": "alert",
+                },
+            },
+        )
+        assert config.capabilities is not None
+        assert config.capabilities.network.egress[0].host == "api.openai.com"
+        assert config.capabilities.enforcement_mode == "alert"
+
+    def test_config_from_dict_without_capabilities(self) -> None:
+        config = ProviderConfig.from_dict(
+            "test-provider",
+            {
+                "mode": "subprocess",
+                "command": ["python", "-m", "test_server"],
+            },
+        )
+        assert config.capabilities is None
+
+    def test_config_from_dict_with_empty_capabilities(self) -> None:
+        config = ProviderConfig.from_dict(
+            "test-provider",
+            {
+                "mode": "subprocess",
+                "command": ["python", "-m", "test_server"],
+                "capabilities": {},
+            },
+        )
+        # Empty dict: from_dict({}) returns default ProviderCapabilities
+        # But ProviderConfig.from_dict treats falsy capabilities_data as None
+        # (capabilities_data is {}, which is falsy)
+        # So capabilities should be None
+        assert config.capabilities is None
+
+
+class TestConfigurationErrorWrapping:
+    """Tests that server/config.py wraps ValueError into ConfigurationError.
+
+    These tests verify the boundary behavior: domain VOs raise ValueError,
+    server/config.py catches and wraps into ConfigurationError.
+    """
+
+    def test_invalid_capabilities_raises_configuration_error(self) -> None:
+        """Verify that malformed capabilities in config raises ConfigurationError, not ValueError."""
+        from mcp_hangar.server.config import _load_provider_config
+
+        # This should raise ConfigurationError (wrapping ValueError from invalid enforcement_mode)
+        with pytest.raises(ConfigurationError):
+            _load_provider_config(
+                "bad-provider",
+                {
+                    "mode": "subprocess",
+                    "command": ["echo", "test"],
+                    "capabilities": {
+                        "enforcement_mode": "nonexistent_mode",
+                    },
+                },
+            )
