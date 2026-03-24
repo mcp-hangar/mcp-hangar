@@ -29,6 +29,10 @@ const (
 	ProviderStateDead         ProviderState = "Dead"
 )
 
+// MaxViolationRecords is the maximum number of violation records kept in status.
+// Prevents CRD status size explosion (etcd ~1.5MB limit).
+const MaxViolationRecords = 100
+
 // MCPProviderSpec defines the desired state of MCPProvider
 type MCPProviderSpec struct {
 	// Mode is the provider execution mode (container or remote)
@@ -538,6 +542,10 @@ type MCPProviderStatus struct {
 	// Capabilities is the observed/normalized capabilities (mirrors spec for Phase 38, enriched in Phase 39)
 	// +optional
 	Capabilities *ProviderCapabilities `json:"capabilities,omitempty"`
+
+	// Violations records detected capability violations (most recent MaxViolationRecords entries)
+	// +optional
+	Violations []ViolationRecord `json:"violations,omitempty"`
 }
 
 // Condition represents a condition of a resource
@@ -560,6 +568,33 @@ type Condition struct {
 
 	// ObservedGeneration represents the generation observed
 	ObservedGeneration int64 `json:"observedGeneration,omitempty"`
+}
+
+// ViolationRecord represents a detected capability violation.
+// Stored in MCPProviderStatus.Violations for audit and visibility via kubectl.
+type ViolationRecord struct {
+	// Type of violation: egress_denied, capability_drift, undeclared_tool, schema_mismatch, quarantine_triggered
+	// +kubebuilder:validation:Enum=egress_denied;capability_drift;undeclared_tool;schema_mismatch;quarantine_triggered
+	Type string `json:"type"`
+
+	// Detail is a human-readable description of the violation
+	// +optional
+	Detail string `json:"detail,omitempty"`
+
+	// Severity: critical, high, medium, low
+	// +kubebuilder:validation:Enum=critical;high;medium;low
+	Severity string `json:"severity"`
+
+	// Action is the enforcement action taken: alert, block, quarantine
+	// +kubebuilder:validation:Enum=alert;block;quarantine
+	Action string `json:"action"`
+
+	// Destination is the network destination (for egress violations)
+	// +optional
+	Destination string `json:"destination,omitempty"`
+
+	// Timestamp is when the violation was detected
+	Timestamp metav1.Time `json:"timestamp"`
 }
 
 // +kubebuilder:object:root=true

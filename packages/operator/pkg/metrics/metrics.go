@@ -141,6 +141,17 @@ var (
 		},
 		[]string{"operation"},
 	)
+
+	// CapabilityViolationsTotal tracks capability violations detected by the operator
+	CapabilityViolationsTotal = prometheus.NewCounterVec(
+		prometheus.CounterOpts{
+			Namespace: "mcp",
+			Subsystem: "operator",
+			Name:      "capability_violations_total",
+			Help:      "Total number of capability violations detected by the operator",
+		},
+		[]string{"namespace", "name", "violation_type"},
+	)
 )
 
 func init() {
@@ -158,6 +169,7 @@ func init() {
 		DiscoverySyncDuration,
 		HangarClientErrors,
 		HangarClientLatency,
+		CapabilityViolationsTotal,
 	)
 }
 
@@ -197,4 +209,9 @@ func ClearGroupMetrics(namespace, name string) {
 func ClearDiscoveryMetrics(namespace, name string) {
 	DiscoverySourceCount.DeleteLabelValues(namespace, name)
 	DiscoverySyncDuration.DeleteLabelValues(namespace, name)
+}
+
+// RecordViolation increments the capability violation counter
+func RecordViolation(namespace, name, violationType string) {
+	CapabilityViolationsTotal.WithLabelValues(namespace, name, violationType).Inc()
 }

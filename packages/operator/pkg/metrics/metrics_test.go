@@ -90,6 +90,28 @@ func TestCRDCount(t *testing.T) {
 	assert.Equal(t, float64(3), testutil.ToFloat64(CRDCount.WithLabelValues("MCPDiscoverySource")))
 }
 
+func TestCapabilityViolationsTotal(t *testing.T) {
+	CapabilityViolationsTotal.Reset()
+
+	CapabilityViolationsTotal.WithLabelValues("default", "test-provider", "egress_denied").Inc()
+	CapabilityViolationsTotal.WithLabelValues("default", "test-provider", "egress_denied").Inc()
+	CapabilityViolationsTotal.WithLabelValues("default", "test-provider", "capability_drift").Inc()
+
+	assert.Equal(t, float64(2), testutil.ToFloat64(CapabilityViolationsTotal.WithLabelValues("default", "test-provider", "egress_denied")))
+	assert.Equal(t, float64(1), testutil.ToFloat64(CapabilityViolationsTotal.WithLabelValues("default", "test-provider", "capability_drift")))
+}
+
+func TestRecordViolation(t *testing.T) {
+	CapabilityViolationsTotal.Reset()
+
+	RecordViolation("default", "test-provider", "undeclared_tool")
+	RecordViolation("default", "test-provider", "undeclared_tool")
+	RecordViolation("staging", "other-provider", "schema_mismatch")
+
+	assert.Equal(t, float64(2), testutil.ToFloat64(CapabilityViolationsTotal.WithLabelValues("default", "test-provider", "undeclared_tool")))
+	assert.Equal(t, float64(1), testutil.ToFloat64(CapabilityViolationsTotal.WithLabelValues("staging", "other-provider", "schema_mismatch")))
+}
+
 func TestMetricsRegistered(t *testing.T) {
 	// Verify all metrics are registered
 	metrics := []prometheus.Collector{
@@ -99,6 +121,7 @@ func TestMetricsRegistered(t *testing.T) {
 		ProviderToolsCount,
 		ProviderHealthCheckFailures,
 		CRDCount,
+		CapabilityViolationsTotal,
 	}
 
 	for _, metric := range metrics {
