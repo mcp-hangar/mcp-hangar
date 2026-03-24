@@ -6,7 +6,7 @@
 
 - **Milestone:** v7.0 -- Kubernetes Enforcement Foundation + Licensing
 - **Target date:** 2026-04-15
-- **Active phase:** Phase 38 (Capability Declaration Schema) -- ready to plan
+- **Active phase:** Phase 38 (Capability Declaration Schema) -- plan 02 of 03 complete
 - **Current version:** v0.12.0
 - **Last completed milestone:** v6.0 (OTEL Foundation) -- shipped 2026-03-24
 
@@ -44,6 +44,8 @@
 
 ## Recently Completed
 
+- Phase 38 plan 02 complete: MCPProvider CRD ProviderCapabilities Go structs + reconciler spec-to-status propagation (2026-03-24)
+- Phase 38 plan 01 complete: ProviderCapabilities.from_dict() factory, capabilities wired into Provider aggregate + ProviderConfig + server/config.py (2026-03-24)
 - Phase 37 verified: 4/4 success criteria PASS -- CI boundary enforcement + license documentation complete (2026-03-24)
 - Phase 37 plan 01 complete: Enterprise import boundary check added to pr-validation.yml as universal merge gate (2026-03-24)
 - Phase 37 plan 02 complete: License documentation -- README, CONTRIBUTING, pyproject.toml updated for dual-license model (2026-03-24)
