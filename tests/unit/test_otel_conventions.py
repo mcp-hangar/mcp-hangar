@@ -5,11 +5,7 @@ from mcp_hangar.observability.conventions import Audit, Behavioral, Enforcement,
 
 def _public_str_attrs(cls: type) -> list[str]:
     """Return only the public string constants defined on a conventions class."""
-    return [
-        v
-        for k, v in vars(cls).items()
-        if isinstance(v, str) and not k.startswith("_")
-    ]
+    return [v for k, v in vars(cls).items() if isinstance(v, str) and not k.startswith("_")]
 
 
 class TestConventionNamespacing:
@@ -83,3 +79,100 @@ class TestMetricNames:
 
     def test_quarantined_metric(self) -> None:
         assert Metrics.PROVIDERS_QUARANTINED == "mcp_hangar_providers_quarantined"
+
+
+class TestSetGovernanceAttributes:
+    """Tests for the set_governance_attributes convenience helper."""
+
+    def test_sets_required_provider_and_tool_attributes(self) -> None:
+        """set_governance_attributes sets provider.id and tool.name."""
+        from unittest.mock import MagicMock
+
+        from mcp_hangar.observability.conventions import set_governance_attributes
+
+        span = MagicMock()
+        set_governance_attributes(span, provider_id="math", tool_name="add")
+
+        calls = {call.args[0]: call.args[1] for call in span.set_attribute.call_args_list}
+        assert calls[Provider.ID] == "math"
+        assert calls[MCP.TOOL_NAME] == "add"
+
+    def test_does_not_set_none_values(self) -> None:
+        """None arguments must not produce empty span attributes."""
+        from unittest.mock import MagicMock
+
+        from mcp_hangar.observability.conventions import set_governance_attributes
+
+        span = MagicMock()
+        set_governance_attributes(span, provider_id="p", tool_name="t", user_id=None, session_id=None)
+
+        set_keys = {call.args[0] for call in span.set_attribute.call_args_list}
+        assert MCP.USER_ID not in set_keys
+        assert MCP.SESSION_ID not in set_keys
+
+    def test_sets_optional_identity_attributes_when_provided(self) -> None:
+        from unittest.mock import MagicMock
+
+        from mcp_hangar.observability.conventions import set_governance_attributes
+
+        span = MagicMock()
+        set_governance_attributes(
+            span,
+            provider_id="p",
+            tool_name="t",
+            user_id="alice",
+            session_id="sess-1",
+            group_id="group-a",
+        )
+        calls = {call.args[0]: call.args[1] for call in span.set_attribute.call_args_list}
+        assert calls[MCP.USER_ID] == "alice"
+        assert calls[MCP.SESSION_ID] == "sess-1"
+        assert calls[Provider.GROUP_ID] == "group-a"
+
+    def test_sets_enforcement_attributes_when_provided(self) -> None:
+        from unittest.mock import MagicMock
+
+        from mcp_hangar.observability.conventions import set_governance_attributes
+
+        span = MagicMock()
+        set_governance_attributes(
+            span,
+            provider_id="p",
+            tool_name="t",
+            policy_result="deny",
+            enforcement_action="block",
+        )
+        calls = {call.args[0]: call.args[1] for call in span.set_attribute.call_args_list}
+        assert calls[Enforcement.POLICY_RESULT] == "deny"
+        assert calls[Enforcement.ACTION] == "block"
+
+
+class TestTracingUsesConventionConstants:
+    """Verify tracing.py imports and uses convention constants (not raw strings)."""
+
+    def test_tracing_imports_conventions(self) -> None:
+        import ast
+        import pathlib
+
+        src = pathlib.Path("src/mcp_hangar/observability/tracing.py").read_text()
+        tree = ast.parse(src)
+        imports = [node for node in ast.walk(tree) if isinstance(node, (ast.Import, ast.ImportFrom))]
+        import_strs = [ast.unparse(node) for node in imports]
+        assert any("conventions" in imp for imp in import_strs), "tracing.py must import from conventions.py"
+
+    def test_no_raw_mcp_provider_id_string_in_tracing(self) -> None:
+        import pathlib
+
+        src = pathlib.Path("src/mcp_hangar/observability/tracing.py").read_text()
+        # raw string literal should not appear -- the constant Provider.ID should be used instead
+        assert '"mcp.provider.id"' not in src, (
+            "tracing.py must use Provider.ID constant, not raw string 'mcp.provider.id'"
+        )
+
+    def test_no_raw_mcp_tool_name_string_in_tracing(self) -> None:
+        import pathlib
+
+        src = pathlib.Path("src/mcp_hangar/observability/tracing.py").read_text()
+        assert '"mcp.tool.name"' not in src, (
+            "tracing.py must use MCP.TOOL_NAME constant, not raw string 'mcp.tool.name'"
+        )
