@@ -1067,6 +1067,14 @@ spec:
                   tools:
                     description: Tools defines tool schema constraints
                     properties:
+                      expectedTools:
+                        description: |-
+                          ExpectedTools is the list of tool names the provider is expected to expose.
+                          Used for runtime drift detection: tools present at runtime but not in this
+                          list trigger a schema_mismatch violation.
+                        items:
+                          type: string
+                        type: array
                       maxCount:
                         description: MaxCount is the maximum number of tools the provider
                           may advertise (0 = unlimited)
@@ -1576,6 +1584,14 @@ spec:
                   tools:
                     description: Tools defines tool schema constraints
                     properties:
+                      expectedTools:
+                        description: |-
+                          ExpectedTools is the list of tool names the provider is expected to expose.
+                          Used for runtime drift detection: tools present at runtime but not in this
+                          list trigger a schema_mismatch violation.
+                        items:
+                          type: string
+                        type: array
                       maxCount:
                         description: MaxCount is the maximum number of tools the provider
                           may advertise (0 = unlimited)
@@ -1679,8 +1695,68 @@ spec:
                 description: ToolsCount is the number of exposed tools
                 format: int32
                 type: integer
+              violations:
+                description: Violations records detected capability violations (most
+                  recent MaxViolationRecords entries)
+                items:
+                  description: |-
+                    ViolationRecord represents a detected capability violation.
+                    Stored in MCPProviderStatus.Violations for audit and visibility via kubectl.
+                  properties:
+                    action:
+                      description: 'Action is the enforcement action taken: alert,
+                        block, quarantine'
+                      enum:
+                      - alert
+                      - block
+                      - quarantine
+                      type: string
+                    destination:
+                      description: Destination is the network destination (for egress
+                        violations)
+                      type: string
+                    detail:
+                      description: Detail is a human-readable description of the violation
+                      type: string
+                    severity:
+                      description: 'Severity: critical, high, medium, low'
+                      enum:
+                      - critical
+                      - high
+                      - medium
+                      - low
+                      type: string
+                    timestamp:
+                      description: Timestamp is when the violation was detected
+                      format: date-time
+                      type: string
+                    type:
+                      description: 'Type of violation: egress_denied, capability_drift,
+                        undeclared_tool, schema_mismatch, quarantine_triggered'
+                      enum:
+                      - egress_denied
+                      - capability_drift
+                      - undeclared_tool
+                      - schema_mismatch
+                      - quarantine_triggered
+                      type: string
+                  required:
+                  - action
+                  - severity
+                  - timestamp
+                  - type
+                  type: object
+                type: array
             type: object
         type: object
+        x-kubernetes-validations:
+        - message: 'wildcard egress (host: ''*'') requires annotation hangar.io/allow-unrestricted-egress:
+            "true"'
+          rule: '!has(self.spec.capabilities) || !has(self.spec.capabilities.network)
+            || !has(self.spec.capabilities.network.egress) || !self.spec.capabilities.network.egress.exists(e,
+            e.host == ''*'') || (has(self.metadata.annotations) && (''hangar.io/allow-unrestricted-egress''
+            in self.metadata.annotations) && self.metadata.annotations[''hangar.io/allow-unrestricted-egress'']
+            == ''true'')'
     served: true
     storage: true
     subresources:

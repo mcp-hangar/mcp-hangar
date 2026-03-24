@@ -478,6 +478,12 @@ type ToolCapabilitiesSpec struct {
 	// +kubebuilder:default=true
 	// +optional
 	SchemaDriftAlert *bool `json:"schemaDriftAlert,omitempty"`
+
+	// ExpectedTools is the list of tool names the provider is expected to expose.
+	// Used for runtime drift detection: tools present at runtime but not in this
+	// list trigger a schema_mismatch violation.
+	// +optional
+	ExpectedTools []string `json:"expectedTools,omitempty"`
 }
 
 // ResourceCapabilitiesSpec declares resource consumption expectations (soft limits)
@@ -606,6 +612,7 @@ type ViolationRecord struct {
 // +kubebuilder:printcolumn:name="Ready",type=string,JSONPath=`.status.conditions[?(@.type=="Ready")].status`
 // +kubebuilder:printcolumn:name="Age",type=date,JSONPath=`.metadata.creationTimestamp`
 // +kubebuilder:resource:shortName=mcpp;provider,categories=mcp
+// +kubebuilder:validation:XValidation:rule="!has(self.spec.capabilities) || !has(self.spec.capabilities.network) || !has(self.spec.capabilities.network.egress) || !self.spec.capabilities.network.egress.exists(e, e.host == '*') || (has(self.metadata.annotations) && ('hangar.io/allow-unrestricted-egress' in self.metadata.annotations) && self.metadata.annotations['hangar.io/allow-unrestricted-egress'] == 'true')",message="wildcard egress (host: '*') requires annotation hangar.io/allow-unrestricted-egress: \"true\""
 
 // MCPProvider is the Schema for the mcpproviders API
 type MCPProvider struct {
@@ -661,38 +668,12 @@ func (p *MCPProvider) GetPodName() string {
 
 // SetCondition sets or updates a condition
 func (s *MCPProviderStatus) SetCondition(condType string, status metav1.ConditionStatus, reason, message string) {
-	now := metav1.Now()
-
-	for i, c := range s.Conditions {
-		if c.Type == condType {
-			if c.Status != status {
-				s.Conditions[i].LastTransitionTime = now
-			}
-			s.Conditions[i].Status = status
-			s.Conditions[i].Reason = reason
-			s.Conditions[i].Message = message
-			return
-		}
-	}
-
-	// Add new condition
-	s.Conditions = append(s.Conditions, Condition{
-		Type:               condType,
-		Status:             status,
-		LastTransitionTime: now,
-		Reason:             reason,
-		Message:            message,
-	})
+	SetConditionOnSlice(&s.Conditions, condType, status, reason, message)
 }
 
 // GetCondition returns the condition with the given type
 func (s *MCPProviderStatus) GetCondition(condType string) *Condition {
-	for i := range s.Conditions {
-		if s.Conditions[i].Type == condType {
-			return &s.Conditions[i]
-		}
-	}
-	return nil
+	return GetConditionFromSlice(s.Conditions, condType)
 }
 
 // IsReady returns true if the Ready condition is True
