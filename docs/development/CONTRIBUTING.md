@@ -321,9 +321,26 @@ git checkout main
 git cherry-pick <commit-hash>
 ```
 
-## License
+## Licensing
 
-MIT
+MCP Hangar uses a dual-license model:
+
+| Directory | License | CLA Required |
+|-----------|---------|--------------|
+| `src/mcp_hangar/` | MIT | No |
+| `packages/operator/` | MIT | No |
+| `packages/helm-charts/` | MIT | No |
+| `packages/ui/` | MIT | No |
+| `tests/`, `docs/`, `examples/`, `monitoring/` | MIT | No |
+| `enterprise/` | BSL 1.1 | **Yes** |
+
+### Contributing to enterprise/
+
+Contributions to `enterprise/` require agreeing to the [Contributor License Agreement](../../CLA.md). Include this statement in your PR description:
+
+> I have read and agree to the MCP Hangar Contributor License Agreement (CLA.md). My contribution to enterprise/ is my original work and I grant the rights described therein.
+
+See [CLA.md](../../CLA.md) for full terms. Core (MIT) contributions do not require a CLA.
 
 ## Code of Conduct
 
