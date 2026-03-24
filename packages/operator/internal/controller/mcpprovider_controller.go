@@ -36,6 +36,7 @@ const (
 	ConditionDegraded             = "Degraded"
 	ConditionAvailable            = "Available"
 	ConditionNetworkPolicyApplied = "NetworkPolicyApplied"
+	ConditionViolationDetected    = "ViolationDetected"
 
 	// Requeue intervals
 	defaultRequeueAfter = 30 * time.Second
@@ -44,16 +45,18 @@ const (
 	coldRequeueAfter    = 10 * time.Minute
 
 	// Event reasons
-	ReasonCreated   = "Created"
-	ReasonUpdated   = "Updated"
-	ReasonDeleted   = "Deleted"
-	ReasonFailed    = "Failed"
-	ReasonReady     = "Ready"
-	ReasonDegraded  = "Degraded"
-	ReasonStarting  = "Starting"
-	ReasonStopping  = "Stopping"
-	ReasonHealthy   = "Healthy"
-	ReasonUnhealthy = "Unhealthy"
+	ReasonCreated           = "Created"
+	ReasonUpdated           = "Updated"
+	ReasonDeleted           = "Deleted"
+	ReasonFailed            = "Failed"
+	ReasonReady             = "Ready"
+	ReasonDegraded          = "Degraded"
+	ReasonStarting          = "Starting"
+	ReasonStopping          = "Stopping"
+	ReasonHealthy           = "Healthy"
+	ReasonUnhealthy         = "Unhealthy"
+	ReasonViolationDetected = "ViolationDetected"
+	ReasonViolationCleared  = "ViolationCleared"
 )
 
 // MCPProviderReconciler reconciles a MCPProvider object
@@ -201,6 +204,14 @@ func (r *MCPProviderReconciler) reconcileContainerProvider(ctx context.Context, 
 		// Non-blocking: log error but continue with Pod reconciliation
 		r.Recorder.Event(mcpProvider, corev1.EventTypeWarning, "NetworkPolicyFailed",
 			fmt.Sprintf("Failed to reconcile NetworkPolicy: %v", err))
+	}
+
+	// Reconcile violation detection (after NetworkPolicy, before Pod lifecycle)
+	if err := r.reconcileViolationDetection(ctx, mcpProvider); err != nil {
+		logger.Error(err, "Failed to reconcile violation detection")
+		// Non-blocking: log error but continue with Pod reconciliation
+		r.Recorder.Event(mcpProvider, corev1.EventTypeWarning, "ViolationDetectionFailed",
+			fmt.Sprintf("Failed to detect violations: %v", err))
 	}
 
 	// Build desired Pod spec
@@ -568,6 +579,91 @@ func (r *MCPProviderReconciler) reconcileNetworkPolicy(ctx context.Context, mcpP
 
 	mcpProvider.Status.SetCondition(ConditionNetworkPolicyApplied, metav1.ConditionTrue,
 		"PolicyApplied", fmt.Sprintf("NetworkPolicy %s applied", desired.Name))
+	return nil
+}
+
+// reconcileViolationDetection checks for capability violations and records them.
+// Violations are appended to status.Violations (capped at MaxViolationRecords).
+// Does not call Status().Update() -- caller handles that.
+func (r *MCPProviderReconciler) reconcileViolationDetection(ctx context.Context, mcpProvider *mcpv1alpha1.MCPProvider) error {
+	if mcpProvider.Spec.Capabilities == nil {
+		return nil
+	}
+
+	logger := log.FromContext(ctx)
+	now := metav1.Now()
+	enforcementMode := mcpProvider.Spec.Capabilities.EnforcementMode
+	if enforcementMode == "" {
+		enforcementMode = "alert"
+	}
+
+	var newViolations []mcpv1alpha1.ViolationRecord
+
+	// Detection 1: NetworkPolicy drift -- capabilities declare network egress
+	// but NetworkPolicyApplied condition is not True
+	if mcpProvider.Spec.Capabilities.Network != nil && len(mcpProvider.Spec.Capabilities.Network.Egress) > 0 {
+		npCond := mcpProvider.Status.GetCondition(ConditionNetworkPolicyApplied)
+		if npCond == nil || npCond.Status != metav1.ConditionTrue {
+			newViolations = append(newViolations, mcpv1alpha1.ViolationRecord{
+				Type:      "capability_drift",
+				Detail:    "Network capabilities declared but NetworkPolicy not applied",
+				Severity:  "high",
+				Action:    enforcementMode,
+				Timestamp: now,
+			})
+		}
+	}
+
+	// Detection 2: Tool count drift -- more tools than declared maximum
+	if mcpProvider.Spec.Capabilities.Tools != nil && mcpProvider.Spec.Capabilities.Tools.MaxCount > 0 {
+		if mcpProvider.Status.ToolsCount > mcpProvider.Spec.Capabilities.Tools.MaxCount {
+			newViolations = append(newViolations, mcpv1alpha1.ViolationRecord{
+				Type:      "undeclared_tool",
+				Detail:    fmt.Sprintf("Provider exposes %d tools but max declared is %d", mcpProvider.Status.ToolsCount, mcpProvider.Spec.Capabilities.Tools.MaxCount),
+				Severity:  "medium",
+				Action:    enforcementMode,
+				Timestamp: now,
+			})
+		}
+	}
+
+	if len(newViolations) == 0 {
+		// Clear condition if it was previously set
+		cond := mcpProvider.Status.GetCondition(ConditionViolationDetected)
+		if cond != nil && cond.Status == metav1.ConditionTrue {
+			mcpProvider.Status.SetCondition(ConditionViolationDetected, metav1.ConditionFalse,
+				"NoViolations", "No capability violations detected")
+			r.Recorder.Event(mcpProvider, corev1.EventTypeNormal, ReasonViolationCleared,
+				"No capability violations detected")
+		}
+		return nil
+	}
+
+	// Record violations
+	for _, v := range newViolations {
+		logger.Info("Capability violation detected",
+			"provider", mcpProvider.Name,
+			"type", v.Type,
+			"severity", v.Severity,
+			"action", v.Action,
+			"detail", v.Detail,
+		)
+		metrics.RecordViolation(mcpProvider.Namespace, mcpProvider.Name, v.Type)
+		r.Recorder.Event(mcpProvider, corev1.EventTypeWarning, ReasonViolationDetected,
+			fmt.Sprintf("Capability violation: %s - %s", v.Type, v.Detail))
+	}
+
+	// Append to status, cap at MaxViolationRecords
+	mcpProvider.Status.Violations = append(mcpProvider.Status.Violations, newViolations...)
+	if len(mcpProvider.Status.Violations) > mcpv1alpha1.MaxViolationRecords {
+		overflow := len(mcpProvider.Status.Violations) - mcpv1alpha1.MaxViolationRecords
+		mcpProvider.Status.Violations = mcpProvider.Status.Violations[overflow:]
+	}
+
+	// Set condition
+	mcpProvider.Status.SetCondition(ConditionViolationDetected, metav1.ConditionTrue,
+		"ViolationsFound", fmt.Sprintf("%d new violation(s) detected", len(newViolations)))
+
 	return nil
 }
 
