@@ -68,6 +68,22 @@ except ImportError:
         return None
 
 
+# Behavioral profiling components: load from enterprise when available, else noop.
+try:
+    from enterprise.behavioral.bootstrap import bootstrap_behavioral
+
+    _enterprise_behavioral_available = True
+except ImportError:
+    _enterprise_behavioral_available = False
+
+    def bootstrap_behavioral(db_path: str = "data/events.db", config: dict | None = None):  # type: ignore[misc]
+        """Return NullBehavioralProfiler when enterprise is not installed."""
+        from mcp_hangar.domain.contracts.behavioral import NullBehavioralProfiler
+
+        logger.info("behavioral_profiling_disabled", reason="enterprise_module_not_available")
+        return NullBehavioralProfiler()
+
+
 from .cqrs import init_cqrs, init_auth_cqrs, init_saga, save_group_circuit_breakers
 from .discovery import _auto_add_volumes, _create_discovery_source, create_discovery_orchestrator
 from .event_handlers import init_event_handlers
@@ -132,6 +148,9 @@ class ApplicationContext:
 
     discovery_registry: "DiscoveryRegistry | None" = None
     """Discovery source registry (wraps DiscoveryOrchestrator)."""
+
+    behavioral_profiler: Any = None
+    """Behavioral profiler (enterprise) or NullBehavioralProfiler."""
 
     @property
     def providers(self) -> dict[str, Any]:
@@ -312,6 +331,13 @@ def bootstrap(
     )
     init_auth_cqrs(runtime, auth_components)
 
+    # Initialize behavioral profiling
+    behavioral_config = full_config.get("behavioral", {})
+    behavioral_profiler = bootstrap_behavioral(
+        db_path=full_config.get("event_store", {}).get("path", "data/events.db"),
+        config=behavioral_config,
+    )
+
     # Initialize retry configuration
     init_retry_config(full_config)
 
@@ -392,6 +418,7 @@ def bootstrap(
         saga_state_store=saga_state_store,
         catalog_repository=catalog_repo,
         discovery_registry=discovery_registry,
+        behavioral_profiler=behavioral_profiler,
     )
 
     # Update application context for tools to access
