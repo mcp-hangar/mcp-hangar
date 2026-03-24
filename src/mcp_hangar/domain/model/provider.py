@@ -11,8 +11,9 @@ if TYPE_CHECKING:
 
 from ..contracts.log_buffer import IProviderLogBuffer
 from ..contracts.metrics_publisher import IMetricsPublisher, NullMetricsPublisher
-from ..value_objects.capabilities import ProviderCapabilities
+from ..value_objects.capabilities import ProviderCapabilities, ViolationSeverity, ViolationType
 from ..events import (
+    CapabilityViolationDetected,
     HealthCheckFailed,
     HealthCheckPassed,
     ProviderDegraded,
@@ -839,6 +840,55 @@ class Provider(AggregateRoot):
         )
 
         logger.info(f"provider_started: {self.provider_id}, mode={self._mode.value}, tools={self._tools.count()}")
+
+        # Runtime capability drift check -- after READY, before lock release
+        self._verify_capability_drift()
+
+    def _verify_capability_drift(self) -> None:
+        """Check runtime tools against declared expected_tools.
+
+        Only flags undeclared runtime tools (tools present at runtime but NOT
+        in expected_tools). Missing expected tools are not violations per
+        CONTEXT.md decisions.
+
+        Called inside _finalize_start() after READY transition, under lock.
+        Records events via _record_event() (no I/O -- just appends to list).
+        In block mode, transitions to DEAD immediately.
+        """
+        if self._capabilities is None:
+            return
+        expected = set(self._capabilities.tools.expected_tools)
+        if not expected:
+            return  # No expected_tools declared -- skip check
+
+        actual = set(self._tools.list_names())
+        undeclared = actual - expected
+
+        if not undeclared:
+            return
+
+        violation_detail = f"Undeclared runtime tools: {sorted(undeclared)}"
+        enforcement = self._capabilities.enforcement_mode
+
+        self._record_event(
+            CapabilityViolationDetected(
+                provider_id=self.provider_id,
+                violation_type=ViolationType.SCHEMA_MISMATCH.value,
+                violation_detail=violation_detail,
+                enforcement_action=enforcement,
+                severity=ViolationSeverity.HIGH.value,
+            )
+        )
+
+        logger.warning(
+            "capability_drift_detected",
+            provider_id=self.provider_id,
+            undeclared_tools=sorted(undeclared),
+            enforcement_mode=enforcement,
+        )
+
+        if enforcement == "block":
+            self._transition_to(ProviderState.DEAD)
 
     def _handle_start_failure(self, error: Exception | None) -> None:
         """Handle start failure (must hold lock)."""

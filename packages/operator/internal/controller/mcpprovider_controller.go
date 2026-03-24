@@ -4,6 +4,7 @@ package controller
 import (
 	"context"
 	"fmt"
+	"strconv"
 	"time"
 
 	corev1 "k8s.io/api/core/v1"
@@ -45,18 +46,19 @@ const (
 	coldRequeueAfter    = 10 * time.Minute
 
 	// Event reasons
-	ReasonCreated           = "Created"
-	ReasonUpdated           = "Updated"
-	ReasonDeleted           = "Deleted"
-	ReasonFailed            = "Failed"
-	ReasonReady             = "Ready"
-	ReasonDegraded          = "Degraded"
-	ReasonStarting          = "Starting"
-	ReasonStopping          = "Stopping"
-	ReasonHealthy           = "Healthy"
-	ReasonUnhealthy         = "Unhealthy"
-	ReasonViolationDetected = "ViolationDetected"
-	ReasonViolationCleared  = "ViolationCleared"
+	ReasonCreated                   = "Created"
+	ReasonUpdated                   = "Updated"
+	ReasonDeleted                   = "Deleted"
+	ReasonFailed                    = "Failed"
+	ReasonReady                     = "Ready"
+	ReasonDegraded                  = "Degraded"
+	ReasonStarting                  = "Starting"
+	ReasonStopping                  = "Stopping"
+	ReasonHealthy                   = "Healthy"
+	ReasonUnhealthy                 = "Unhealthy"
+	ReasonViolationDetected         = "ViolationDetected"
+	ReasonViolationCleared          = "ViolationCleared"
+	ReasonUnrestrictedEgressAllowed = "UnrestrictedEgressAllowed"
 )
 
 // MCPProviderReconciler reconciles a MCPProvider object
@@ -214,6 +216,9 @@ func (r *MCPProviderReconciler) reconcileContainerProvider(ctx context.Context, 
 			fmt.Sprintf("Failed to detect violations: %v", err))
 	}
 
+	// Audit wildcard egress override usage (emits Warning event for audit trail)
+	r.reconcileEgressAudit(ctx, mcpProvider)
+
 	// Build desired Pod spec
 	desiredPod, err := provider.BuildPodForProvider(mcpProvider)
 	if err != nil {
@@ -239,6 +244,26 @@ func (r *MCPProviderReconciler) reconcileContainerProvider(ctx context.Context, 
 		return r.handlePodNotFound(ctx, mcpProvider, desiredPod)
 	} else if err != nil {
 		return ctrl.Result{}, err
+	}
+
+	// Detect spec drift: if the provider generation changed since the Pod was
+	// created, delete the stale Pod and let the next reconcile recreate it.
+	if r.podSpecDrifted(mcpProvider, existingPod) {
+		logger.Info("Provider spec changed, recreating Pod",
+			"provider", mcpProvider.Name,
+			"podGeneration", existingPod.Annotations[provider.AnnotationGeneration],
+			"providerGeneration", mcpProvider.Generation)
+		if err := r.Delete(ctx, existingPod); err != nil && !errors.IsNotFound(err) {
+			return ctrl.Result{}, err
+		}
+		mcpProvider.Status.State = mcpv1alpha1.ProviderStateInitializing
+		mcpProvider.Status.SetCondition(ConditionProgressing, metav1.ConditionTrue, "SpecChanged", "Provider spec changed, recreating Pod")
+		if err := r.Status().Update(ctx, mcpProvider); err != nil {
+			return ctrl.Result{}, err
+		}
+		r.Recorder.Event(mcpProvider, corev1.EventTypeNormal, ReasonUpdated, "Spec changed, recreating Pod")
+		metrics.ProviderRestarts.WithLabelValues(mcpProvider.Namespace, mcpProvider.Name).Inc()
+		return ctrl.Result{RequeueAfter: defaultRequeueAfter}, nil
 	}
 
 	// Pod exists - sync status
@@ -667,6 +692,27 @@ func (r *MCPProviderReconciler) reconcileViolationDetection(ctx context.Context,
 	return nil
 }
 
+// reconcileEgressAudit emits a Warning event when a provider uses wildcard egress
+// with the explicit override annotation. This provides an audit trail without
+// blocking admission (the CEL rule handles rejection; this covers the allowed override case).
+func (r *MCPProviderReconciler) reconcileEgressAudit(_ context.Context, mcpProvider *mcpv1alpha1.MCPProvider) {
+	if mcpProvider.Spec.Capabilities == nil ||
+		mcpProvider.Spec.Capabilities.Network == nil {
+		return
+	}
+	for _, rule := range mcpProvider.Spec.Capabilities.Network.Egress {
+		if rule.Host == "*" {
+			ann := mcpProvider.GetAnnotations()
+			if ann != nil && ann["hangar.io/allow-unrestricted-egress"] == "true" {
+				r.Recorder.Event(mcpProvider, corev1.EventTypeWarning,
+					ReasonUnrestrictedEgressAllowed,
+					"Provider uses wildcard egress with explicit override annotation")
+			}
+			return
+		}
+	}
+}
+
 // deleteNetworkPolicyIfExists deletes the NetworkPolicy for a provider if it exists.
 func (r *MCPProviderReconciler) deleteNetworkPolicyIfExists(ctx context.Context, mcpProvider *mcpv1alpha1.MCPProvider) error {
 	npName := networkpolicy.NetworkPolicyName(mcpProvider.Name)
@@ -681,6 +727,21 @@ func (r *MCPProviderReconciler) deleteNetworkPolicyIfExists(ctx context.Context,
 	}
 
 	return r.Delete(ctx, existing)
+}
+
+// podSpecDrifted returns true if the running Pod was built from an older
+// provider spec (detected via the generation annotation set by the Pod builder).
+// In Kubernetes, .metadata.generation is only incremented when .spec changes,
+// so finalizer or status updates do not trigger false drift.
+func (r *MCPProviderReconciler) podSpecDrifted(mcpProvider *mcpv1alpha1.MCPProvider, pod *corev1.Pod) bool {
+	actual, ok := pod.Annotations[provider.AnnotationGeneration]
+	if !ok {
+		// Pod has no generation annotation -- was created before drift detection
+		// existed. Skip to avoid infinite recreate loops.
+		return false
+	}
+	expected := strconv.FormatInt(mcpProvider.Generation, 10)
+	return actual != expected
 }
 
 // reconcileDelete handles provider deletion
@@ -712,12 +773,7 @@ func (r *MCPProviderReconciler) reconcileDelete(ctx context.Context, mcpProvider
 	}
 
 	// Clean up metrics
-	metrics.ProviderState.DeleteLabelValues(mcpProvider.Namespace, mcpProvider.Name, "Cold")
-	metrics.ProviderState.DeleteLabelValues(mcpProvider.Namespace, mcpProvider.Name, "Initializing")
-	metrics.ProviderState.DeleteLabelValues(mcpProvider.Namespace, mcpProvider.Name, "Ready")
-	metrics.ProviderState.DeleteLabelValues(mcpProvider.Namespace, mcpProvider.Name, "Degraded")
-	metrics.ProviderState.DeleteLabelValues(mcpProvider.Namespace, mcpProvider.Name, "Dead")
-	metrics.ProviderToolsCount.DeleteLabelValues(mcpProvider.Namespace, mcpProvider.Name)
+	metrics.ClearProviderMetrics(mcpProvider.Namespace, mcpProvider.Name)
 
 	// Remove finalizer
 	controllerutil.RemoveFinalizer(mcpProvider, finalizerName)

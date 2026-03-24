@@ -75,6 +75,15 @@ class ProviderRecoverySaga(EventTriggeredSaga):
 
         Initiates recovery by scheduling a restart with backoff.
         """
+        # Skip auto-recovery for capability violations (block mode kills provider)
+        if hasattr(event, "reason") and event.reason.startswith("capability_violation:"):
+            logger.info(
+                "provider_degraded_capability_violation",
+                provider_id=event.provider_id,
+                reason=event.reason,
+            )
+            return []
+
         provider_id = event.provider_id
 
         # Initialize retry state if needed
