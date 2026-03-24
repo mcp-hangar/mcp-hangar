@@ -332,3 +332,63 @@ class IToolAccessPolicyStore(Protocol):
             List of (scope, target_id, allow_list, deny_list) tuples.
         """
         ...
+
+
+@dataclass
+class PolicyEvaluationResult:
+    """Result of a tool access policy evaluation.
+
+    Attributes:
+        allowed: Whether the tool invocation is permitted.
+        reason: Human-readable explanation of the decision.
+        policy_id: Identifier of the policy that made the decision (for audit).
+    """
+
+    allowed: bool
+    reason: str = ""
+    policy_id: str | None = None
+
+    @classmethod
+    def allow(cls, reason: str = "", policy_id: str | None = None) -> "PolicyEvaluationResult":
+        """Create an allow result."""
+        return cls(allowed=True, reason=reason, policy_id=policy_id)
+
+    @classmethod
+    def deny(cls, reason: str = "", policy_id: str | None = None) -> "PolicyEvaluationResult":
+        """Create a deny result."""
+        return cls(allowed=False, reason=reason, policy_id=policy_id)
+
+
+@runtime_checkable
+class IToolAccessPolicyEnforcer(Protocol):
+    """Runtime enforcement of tool access policies.
+
+    Evaluates whether a principal can invoke a specific tool on a provider,
+    considering all applicable policies (provider-level, group-level, member-level).
+
+    This is the enforcement contract -- distinct from IToolAccessPolicyStore which
+    handles policy storage/retrieval. Enterprise RBAC implements this with
+    identity-aware policy resolution. Core provides a config-driven implementation
+    using ToolAccessPolicy value objects.
+    """
+
+    @abstractmethod
+    def evaluate(
+        self,
+        principal: Principal,
+        provider_id: str,
+        tool_name: str,
+        context: dict[str, Any] | None = None,
+    ) -> PolicyEvaluationResult:
+        """Evaluate whether a tool invocation is allowed.
+
+        Args:
+            principal: The authenticated principal requesting access.
+            provider_id: ID of the provider owning the tool.
+            tool_name: Name of the tool being invoked.
+            context: Optional additional context (group membership, etc.).
+
+        Returns:
+            PolicyEvaluationResult with decision and reason.
+        """
+        ...
