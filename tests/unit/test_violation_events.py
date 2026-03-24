@@ -165,3 +165,120 @@ class TestCapabilityViolationDetectedSeverity:
 class TestEnforcementViolationSeverity:
     def test_violation_severity_attribute_defined(self) -> None:
         assert Enforcement.VIOLATION_SEVERITY == "mcp.enforcement.violation_severity"
+
+
+# ============================================================================
+# CAPABILITY_VIOLATIONS_TOTAL Prometheus counter
+# ============================================================================
+
+
+class TestCapabilityViolationsCounter:
+    def test_counter_exists_in_metrics_module(self) -> None:
+        from mcp_hangar.metrics import CAPABILITY_VIOLATIONS_TOTAL
+
+        assert CAPABILITY_VIOLATIONS_TOTAL is not None
+        assert CAPABILITY_VIOLATIONS_TOTAL.name == "mcp_hangar_capability_violations"
+
+    def test_counter_has_correct_labels(self) -> None:
+        from mcp_hangar.metrics import CAPABILITY_VIOLATIONS_TOTAL
+
+        assert CAPABILITY_VIOLATIONS_TOTAL.label_names == ["provider", "violation_type"]
+
+    def test_record_capability_violation_increments_counter(self) -> None:
+        from mcp_hangar.metrics import CAPABILITY_VIOLATIONS_TOTAL, record_capability_violation
+
+        # Clear any prior state
+        CAPABILITY_VIOLATIONS_TOTAL._values.clear()
+        CAPABILITY_VIOLATIONS_TOTAL._created.clear()
+
+        record_capability_violation("test-provider", "egress_denied")
+
+        samples = CAPABILITY_VIOLATIONS_TOTAL.collect()
+        assert len(samples) == 1
+        assert samples[0].value == 1.0
+        assert samples[0].labels == {"provider": "test-provider", "violation_type": "egress_denied"}
+
+    def test_record_capability_violation_twice_increments_to_two(self) -> None:
+        from mcp_hangar.metrics import CAPABILITY_VIOLATIONS_TOTAL, record_capability_violation
+
+        # Clear any prior state
+        CAPABILITY_VIOLATIONS_TOTAL._values.clear()
+        CAPABILITY_VIOLATIONS_TOTAL._created.clear()
+
+        record_capability_violation("test-provider", "egress_denied")
+        record_capability_violation("test-provider", "egress_denied")
+
+        samples = CAPABILITY_VIOLATIONS_TOTAL.collect()
+        assert len(samples) == 1
+        assert samples[0].value == 2.0
+
+
+# ============================================================================
+# MetricsEventHandler violation event routing
+# ============================================================================
+
+
+class TestMetricsEventHandlerViolationRouting:
+    def test_handles_capability_violation_detected(self) -> None:
+        from mcp_hangar.application.event_handlers.metrics_handler import MetricsEventHandler
+        from mcp_hangar.metrics import CAPABILITY_VIOLATIONS_TOTAL
+
+        # Clear any prior state
+        CAPABILITY_VIOLATIONS_TOTAL._values.clear()
+        CAPABILITY_VIOLATIONS_TOTAL._created.clear()
+
+        handler = MetricsEventHandler()
+        event = CapabilityViolationDetected(
+            provider_id="math",
+            violation_type="capability_drift",
+            violation_detail="Tool schema changed",
+            enforcement_action="alert",
+        )
+        handler.handle(event)
+
+        samples = CAPABILITY_VIOLATIONS_TOTAL.collect()
+        assert len(samples) == 1
+        assert samples[0].labels == {"provider": "math", "violation_type": "capability_drift"}
+        assert samples[0].value == 1.0
+
+    def test_handles_egress_blocked(self) -> None:
+        from mcp_hangar.application.event_handlers.metrics_handler import MetricsEventHandler
+        from mcp_hangar.metrics import CAPABILITY_VIOLATIONS_TOTAL
+
+        # Clear any prior state
+        CAPABILITY_VIOLATIONS_TOTAL._values.clear()
+        CAPABILITY_VIOLATIONS_TOTAL._created.clear()
+
+        handler = MetricsEventHandler()
+        event = EgressBlocked(
+            provider_id="rogue",
+            destination_host="evil.com",
+            destination_port=443,
+            protocol="tcp",
+        )
+        handler.handle(event)
+
+        samples = CAPABILITY_VIOLATIONS_TOTAL.collect()
+        assert len(samples) == 1
+        assert samples[0].labels == {"provider": "rogue", "violation_type": "egress_denied"}
+        assert samples[0].value == 1.0
+
+    def test_existing_events_still_handled(self) -> None:
+        """Ensure adding violation handling does not break existing event routing."""
+        from mcp_hangar.application.event_handlers.metrics_handler import MetricsEventHandler
+        from mcp_hangar.domain.events import ProviderStarted
+
+        handler = MetricsEventHandler()
+        event = ProviderStarted(
+            provider_id="math",
+            mode="subprocess",
+            tools_count=5,
+            startup_duration_ms=100,
+        )
+        # Should not raise
+        handler.handle(event)
+
+        # Verify in-memory metrics were updated
+        metrics = handler.get_metrics("math")
+        assert metrics is not None
+        assert metrics.provider_id == "math"

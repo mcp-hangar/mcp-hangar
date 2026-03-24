@@ -903,6 +903,16 @@ TOOL_ACCESS_POLICY_ACTIVE = Gauge(
     labels=["provider"],
 )
 
+# -----------------------------------------------------------------------------
+# Capability Enforcement Metrics
+# -----------------------------------------------------------------------------
+
+CAPABILITY_VIOLATIONS_TOTAL = Counter(
+    name="mcp_hangar_capability_violations",
+    description="Total number of capability violations detected",
+    labels=["provider", "violation_type"],
+)
+
 
 # =============================================================================
 # Register All Metrics
@@ -996,6 +1006,13 @@ def _register_all_metrics():
         [
             CIRCUIT_BREAKER_STATE,
             EVENTS_COMPACTED_TOTAL,
+        ]
+    )
+
+    # Capability enforcement metrics
+    metrics.extend(
+        [
+            CAPABILITY_VIOLATIONS_TOTAL,
         ]
     )
 
@@ -1148,6 +1165,16 @@ def record_events_compacted(stream_id: str, count: int) -> None:
     """
     if count > 0:
         EVENTS_COMPACTED_TOTAL.inc(count, stream_id=stream_id)
+
+
+def record_capability_violation(provider: str, violation_type: str) -> None:
+    """Record a capability violation detection.
+
+    Args:
+        provider: Provider ID that triggered the violation.
+        violation_type: Type of violation (egress_denied, capability_drift, etc.).
+    """
+    CAPABILITY_VIOLATIONS_TOTAL.inc(provider=provider, violation_type=violation_type)
 
 
 # =============================================================================

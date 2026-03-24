@@ -9,8 +9,10 @@ from dataclasses import dataclass, field
 import time
 
 from mcp_hangar.domain.events import (
+    CapabilityViolationDetected,
     CircuitBreakerStateChanged,
     DomainEvent,
+    EgressBlocked,
     HealthCheckFailed,
     HealthCheckPassed,
     ProviderDegraded,
@@ -101,6 +103,10 @@ class MetricsEventHandler:
             self._handle_provider_degraded(event)
         elif isinstance(event, CircuitBreakerStateChanged):
             self._handle_circuit_breaker_state_changed(event)
+        elif isinstance(event, CapabilityViolationDetected):
+            self._handle_capability_violation(event)
+        elif isinstance(event, EgressBlocked):
+            self._handle_egress_blocked(event)
 
     def _handle_provider_started(self, event: ProviderStarted) -> None:
         """Handle provider started event."""
@@ -196,6 +202,20 @@ class MetricsEventHandler:
     def _handle_circuit_breaker_state_changed(self, event: CircuitBreakerStateChanged) -> None:
         """Handle circuit breaker state changed event."""
         prometheus_metrics.update_circuit_breaker_state(event.provider_id, event.new_state)
+
+    def _handle_capability_violation(self, event: CapabilityViolationDetected) -> None:
+        """Handle capability violation detected event."""
+        prometheus_metrics.record_capability_violation(
+            provider=event.provider_id,
+            violation_type=event.violation_type,
+        )
+
+    def _handle_egress_blocked(self, event: EgressBlocked) -> None:
+        """Handle egress blocked event."""
+        prometheus_metrics.record_capability_violation(
+            provider=event.provider_id,
+            violation_type="egress_denied",
+        )
 
     def get_metrics(self, provider_id: str) -> ProviderMetrics | None:
         """
