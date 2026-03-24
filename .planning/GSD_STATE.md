@@ -4,11 +4,11 @@
 
 ## Current Focus
 
-- **Milestone:** v7.0 -- Kubernetes Enforcement Foundation + Licensing
-- **Target date:** 2026-04-15
-- **Active phase:** Phase 39 (NetworkPolicy Generation) -- COMPLETE (3/3 plans done), Phase 40 next
+- **Milestone:** v8.0 -- Behavioral Profiling Alpha
+- **Target date:** 2026-05-15
+- **Active phase:** Phase 42 (Behavioral Profiling Contracts + Core Infrastructure) -- plan 01 complete, plans 02-03 ready
 - **Current version:** v0.12.0
-- **Last completed milestone:** v6.0 (OTEL Foundation) -- shipped 2026-03-24
+- **Last completed milestone:** v7.0 (K8s Enforcement + Licensing) -- shipped 2026-03-24
 
 ## Active P0 Work Items
 
@@ -22,10 +22,10 @@
 ### Kubernetes Enforcement (Phase 1 core)
 - [x] Capability declaration schema (`capabilities` config block in provider config + CRD)
 - [x] NetworkPolicy generation from capabilities (operator)
-- [ ] Operator enforcement loop (capability enforcement + violation signaling)
-- [ ] Admission/policy integration (reject unsafe specs before runtime)
-- [ ] Runtime capability verification (declared vs observed)
-- [ ] Violation signals (denied egress, capability drift, policy rejection)
+- [x] Operator enforcement loop (capability enforcement + violation signaling)
+- [x] Admission/policy integration (reject unsafe specs before runtime) -- CEL wildcard egress rule + tests complete (41-01, 41-03)
+- [x] Runtime capability verification (declared vs observed) -- ExpectedTools CRD field + Python drift detection + enforcement + tests complete (41-01, 41-02, 41-03)
+- [x] Violation signals (denied egress, capability drift, policy rejection)
 
 ### OTEL (cross-cutting) -- COMPLETE (Milestone v6.0, shipped 2026-03-24)
 - [x] MCP-aware OTEL semantic conventions (Phases 31)
@@ -44,6 +44,16 @@
 
 ## Recently Completed
 
+- **Phase 42 plan 01 complete** -- MIT behavioral profiling contracts: IBehavioralProfiler, IBaselineStore, IDeviationDetector Protocols, BehavioralMode enum, NetworkObservation VO, BehavioralModeChanged event, NullBehavioralProfiler, 26 tests (2026-03-25)
+- **Phase 42 context gathered** -- 4 gray areas discussed (mode transitions, observation data model, contract scope, license gating), 42-CONTEXT.md written (2026-03-25)
+- **Phase 41 (Admission + Runtime Capability Verification) complete** -- 3 plans, 20 Go tests (7 CEL admission + 1 envtest + 3 egress audit + 9 from earlier plans) + 9 Python tests (7 drift + 2 saga), 4/4 SC verified (2026-03-24)
+- Phase 41 plan 03 complete: Go CEL admission validation + egress audit tests (11 tests), Python runtime drift + saga filter tests (9 tests) (2026-03-24)
+- Phase 41 plan 02 complete: expected_tools on ToolCapabilities, _verify_capability_drift() in Provider aggregate, alert/block enforcement wiring, saga capability_violation: filter (2026-03-24)
+- Phase 41 plan 01 complete: CEL XValidation wildcard egress rule, ExpectedTools CRD field, reconcileEgressAudit Warning event (2026-03-24)
+- **Phase 40 (Operator Enforcement Loop + Violation Signals) complete** -- 3 plans, 66 tests (28 unit Python + 15 integration Python + 12 unit Go + 11 integration Go), verified 4/4 SC (2026-03-24)
+- Phase 40 plan 01 complete: ViolationType/ViolationSeverity VOs, ProviderCapabilityQuarantined rename, severity field on CapabilityViolationDetected, OTEL VIOLATION_SEVERITY attribute, Prometheus counter + MetricsEventHandler bridge (2026-03-24)
+- Phase 40 plan 02 complete: ViolationRecord CRD struct, CapabilityViolationsTotal Go metric, reconcileViolationDetection (NP drift + tool drift), ring-buffer capping (2026-03-24)
+- Phase 40 plan 03 complete: Cross-language integration tests -- Python violation signal chain (15 tests) + Go violation detection round-trip (11 tests) (2026-03-24)
 - Phase 39 plan 03 complete: Reconciler integration -- reconcileNetworkPolicy with CRUD lifecycle, OwnerReference GC, 6 fake-client tests (2026-03-24)
 - Phase 39 plan 01 complete: NetworkPolicyBuilder pure function -- TDD with 15 tests, default-deny egress + DNS/loopback/CIDR/host-only rules (2026-03-24)
 - Phase 39 plan 02 complete: Docker capabilities-aware network mode -- binary deny/allow enforcement via egress rules, 8 unit tests (2026-03-24)
@@ -85,7 +95,7 @@
 | Milestone | PyPI | Theme | File |
 |-----------|------|-------|------|
 | v6.0 | v0.13.0 / v0.14.0 | OpenTelemetry Foundation (COMPLETE) | `.planning/milestones/v6.0-otel-foundation-ROADMAP.md` |
-| v7.0 | v0.13.0 | K8s Enforcement + Licensing | `.planning/milestones/v7.0-k8s-enforcement-licensing-ROADMAP.md` |
+| v7.0 | v0.13.0 | K8s Enforcement + Licensing (COMPLETE) | `.planning/milestones/v7.0-k8s-enforcement-licensing-ROADMAP.md` |
 | v8.0 | v0.14.0 | Behavioral Profiling Alpha | `.planning/milestones/v8.0-behavioral-profiling-ROADMAP.md` |
 | v9.0 | v0.15.0 | Identity Propagation & Audit | `.planning/milestones/v9.0-identity-audit-ROADMAP.md` |
 | v10.0 | v0.16.0 | Semantic Analysis Alpha | `.planning/milestones/v10.0-semantic-analysis-ROADMAP.md` |
