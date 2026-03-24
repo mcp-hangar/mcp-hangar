@@ -13,7 +13,7 @@ Usage:
     tracer = get_tracer(__name__)
 
     with tracer.start_as_current_span("operation") as span:
-        span.set_attribute("provider.id", provider_id)
+        span.set_attribute(Provider.ID, provider_id)  # use conventions.Provider.ID
         # ... do work
 """
 

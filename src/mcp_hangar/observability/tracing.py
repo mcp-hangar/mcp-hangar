@@ -31,6 +31,7 @@ import os
 from typing import Any, TypeVar
 
 from mcp_hangar.logging_config import get_logger
+from mcp_hangar.observability.conventions import Enforcement, MCP, Provider
 
 logger = get_logger(__name__)
 
@@ -283,16 +284,16 @@ def trace_tool_invocation(
                 kind=trace.SpanKind.CLIENT if OTEL_AVAILABLE else None,
             ) as span:
                 # Set standard attributes
-                span.set_attribute("mcp.provider.id", provider_id)
-                span.set_attribute("mcp.tool.name", tool_name)
+                span.set_attribute(Provider.ID, provider_id)
+                span.set_attribute(MCP.TOOL_NAME, tool_name)
                 span.set_attribute("mcp.timeout_seconds", timeout)
 
                 try:
                     result = func(*args, **kwargs)
-                    span.set_attribute("mcp.result.success", True)
+                    span.set_attribute(MCP.TOOL_STATUS, "success")
                     return result
                 except Exception as e:  # noqa: BLE001 -- fault-barrier: tracing must not crash tool invocation; re-raises original
-                    span.set_attribute("mcp.result.success", False)
+                    span.set_attribute(MCP.TOOL_STATUS, "error")
                     span.set_attribute("mcp.error.type", type(e).__name__)
                     span.set_attribute("mcp.error.message", str(e)[:500])
                     span.record_exception(e)
