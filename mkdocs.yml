@@ -105,6 +105,8 @@ nav:
       - Dashboard UI: guides/DASHBOARD.md
       - Log Streaming: guides/LOG_STREAMING.md
       - WebSockets: guides/WEBSOCKETS.md
+  - Observability:
+      - OpenTelemetry Integrations: observability/otel-integrations.md
   - Development:
       - Contributing: development/CONTRIBUTING.md
       - Release Process: runbooks/RELEASE.md
