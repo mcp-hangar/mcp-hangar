@@ -191,14 +191,21 @@ class ToolCapabilities:
             Use 0 for unlimited.
         schema_drift_alert: Whether to alert when the tool schema changes
             between restarts.
+        expected_tools: Declared tool names the provider is expected to expose.
+            Empty tuple means no drift check. Only undeclared runtime tools
+            (present at runtime but not in expected_tools) are violations;
+            missing expected tools are not flagged.
     """
 
     max_count: int = 0
     schema_drift_alert: bool = True
+    expected_tools: tuple[str, ...] = field(default_factory=tuple)
 
     def __post_init__(self) -> None:
         if self.max_count < 0:
             raise ValueError("ToolCapabilities.max_count cannot be negative")
+        # Ensure tuple even if constructed with list (same pattern as NetworkCapabilities.__post_init__)
+        object.__setattr__(self, "expected_tools", tuple(self.expected_tools))
 
 
 @dataclass(frozen=True)
@@ -334,6 +341,7 @@ class ProviderCapabilities:
         tools = ToolCapabilities(
             max_count=tools_data.get("max_count", 0),
             schema_drift_alert=tools_data.get("schema_drift_alert", True),
+            expected_tools=tuple(tools_data.get("expected_tools", [])),
         )
 
         # Parse resource capabilities
