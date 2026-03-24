@@ -352,6 +352,42 @@ class BatchExecutor:
         metadata = call.metadata or {}
         parent_context = extract_trace_context(metadata)
 
+        # Create a span for this batch call, parented to the agent's trace
+        # context when traceparent was provided. This links the Hangar span
+        # to the upstream agent trace for end-to-end distributed tracing.
+        tracer = get_tracer(__name__)
+        span_ctx_kwargs = {}
+        if parent_context is not None:
+            span_ctx_kwargs["context"] = parent_context
+        with tracer.start_as_current_span(
+            f"batch.call.{call.tool}",
+            **span_ctx_kwargs,
+        ) as span:
+            span.set_attribute("mcp.provider.id", call.provider)
+            span.set_attribute("mcp.tool.name", call.tool)
+            span.set_attribute("batch.call.id", call.call_id)
+            return self._execute_call_inner(
+                call,
+                cancel_event,
+                global_timeout,
+                batch_start_time,
+                ctx,
+                call_start,
+            )
+
+    def _execute_call_inner(
+        self,
+        call: CallSpec,
+        cancel_event: threading.Event,
+        global_timeout: float,
+        batch_start_time: float,
+        ctx: Any,
+        call_start: float,
+    ) -> CallResult:
+        """Inner execution logic for a single batch call (runs inside trace span).
+
+        Separated from _execute_call so the span wraps the full call lifecycle.
+        """
         # Check cancellation before starting
         if cancel_event.is_set():
             return CallResult(
