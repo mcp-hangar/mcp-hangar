@@ -132,6 +132,11 @@ type MCPProviderSpec struct {
 	// Observability configures observability features
 	// +optional
 	Observability *ObservabilityConfig `json:"observability,omitempty"`
+
+	// Capabilities declares what resources the MCP server needs.
+	// Used by the operator for NetworkPolicy generation and enforcement.
+	// +optional
+	Capabilities *ProviderCapabilities `json:"capabilities,omitempty"`
 }
 
 // HealthCheckConfig defines health check settings
@@ -360,6 +365,129 @@ type MetricsConfig struct {
 	Port    int32 `json:"port,omitempty"`
 }
 
+// ProviderCapabilities declares what resources an MCP server needs.
+// The operator uses this to generate NetworkPolicy, enforce Pod Security Standards,
+// and verify runtime behavior matches declarations.
+type ProviderCapabilities struct {
+	// Network defines allowed network access
+	// +optional
+	Network *NetworkCapabilitiesSpec `json:"network,omitempty"`
+
+	// Filesystem defines allowed filesystem access
+	// +optional
+	Filesystem *FilesystemCapabilitiesSpec `json:"filesystem,omitempty"`
+
+	// Environment defines required/optional environment variables
+	// +optional
+	Environment *EnvironmentCapabilitiesSpec `json:"environment,omitempty"`
+
+	// Tools defines tool schema constraints
+	// +optional
+	Tools *ToolCapabilitiesSpec `json:"tools,omitempty"`
+
+	// Resources defines resource consumption expectations (soft limits for behavioral profiling)
+	// +optional
+	Resources *ResourceCapabilitiesSpec `json:"resources,omitempty"`
+
+	// EnforcementMode controls how violations are handled: alert, block, or quarantine.
+	// +kubebuilder:validation:Enum=alert;block;quarantine
+	// +kubebuilder:default=alert
+	// +optional
+	EnforcementMode string `json:"enforcementMode,omitempty"`
+}
+
+// NetworkCapabilitiesSpec declares network access requirements
+type NetworkCapabilitiesSpec struct {
+	// Egress is the list of allowed outbound destinations
+	// +optional
+	Egress []EgressRuleSpec `json:"egress,omitempty"`
+
+	// DNSAllowed controls whether DNS queries are permitted
+	// +kubebuilder:default=true
+	// +optional
+	DNSAllowed *bool `json:"dnsAllowed,omitempty"`
+
+	// LoopbackAllowed controls whether localhost connections are permitted
+	// +optional
+	LoopbackAllowed *bool `json:"loopbackAllowed,omitempty"`
+}
+
+// EgressRuleSpec defines a single allowed outbound destination
+type EgressRuleSpec struct {
+	// Host is a hostname or glob pattern (e.g. "api.example.com" or "*.internal.corp")
+	// +kubebuilder:validation:MinLength=1
+	Host string `json:"host"`
+
+	// Port is the TCP port (0 = any port)
+	// +kubebuilder:validation:Minimum=0
+	// +kubebuilder:validation:Maximum=65535
+	// +kubebuilder:default=443
+	// +optional
+	Port int32 `json:"port,omitempty"`
+
+	// Protocol is the application protocol hint
+	// +kubebuilder:validation:Enum=https;http;grpc;tcp;any
+	// +kubebuilder:default=https
+	// +optional
+	Protocol string `json:"protocol,omitempty"`
+
+	// CIDR is an IP range (alternative to host, for K8s-native rules)
+	// +optional
+	CIDR string `json:"cidr,omitempty"`
+}
+
+// FilesystemCapabilitiesSpec declares filesystem access requirements
+type FilesystemCapabilitiesSpec struct {
+	// ReadPaths lists allowed read-only mount paths
+	// +optional
+	ReadPaths []string `json:"readPaths,omitempty"`
+
+	// WritePaths lists allowed read-write mount paths
+	// +optional
+	WritePaths []string `json:"writePaths,omitempty"`
+
+	// TempAllowed controls whether /tmp writes are permitted
+	// +kubebuilder:default=true
+	// +optional
+	TempAllowed *bool `json:"tempAllowed,omitempty"`
+}
+
+// EnvironmentCapabilitiesSpec declares environment variable requirements
+type EnvironmentCapabilitiesSpec struct {
+	// Required lists environment variables the provider must have
+	// +optional
+	Required []string `json:"required,omitempty"`
+
+	// Optional lists environment variables the provider may use
+	// +optional
+	Optional []string `json:"optional,omitempty"`
+}
+
+// ToolCapabilitiesSpec declares tool schema constraints
+type ToolCapabilitiesSpec struct {
+	// MaxCount is the maximum number of tools the provider may advertise (0 = unlimited)
+	// +kubebuilder:validation:Minimum=0
+	// +optional
+	MaxCount int32 `json:"maxCount,omitempty"`
+
+	// SchemaDriftAlert enables alerting when tool schema changes between restarts
+	// +kubebuilder:default=true
+	// +optional
+	SchemaDriftAlert *bool `json:"schemaDriftAlert,omitempty"`
+}
+
+// ResourceCapabilitiesSpec declares resource consumption expectations (soft limits)
+type ResourceCapabilitiesSpec struct {
+	// MaxMemoryMB is the maximum expected memory usage in MiB (0 = unlimited)
+	// +kubebuilder:validation:Minimum=0
+	// +optional
+	MaxMemoryMB int32 `json:"maxMemoryMB,omitempty"`
+
+	// MaxCPUPercent is the maximum expected CPU utilization percent (0 = unlimited)
+	// +optional
+	MaxCPUPercent string `json:"maxCPUPercent,omitempty"`
+}
+
 // MCPProviderStatus defines the observed state of MCPProvider
 type MCPProviderStatus struct {
 	// State is the current provider state
@@ -406,6 +534,10 @@ type MCPProviderStatus struct {
 
 	// Conditions represent the latest available observations
 	Conditions []Condition `json:"conditions,omitempty"`
+
+	// Capabilities is the observed/normalized capabilities (mirrors spec for Phase 38, enriched in Phase 39)
+	// +optional
+	Capabilities *ProviderCapabilities `json:"capabilities,omitempty"`
 }
 
 // Condition represents a condition of a resource

@@ -1,0 +1,312 @@
+---
+apiVersion: apiextensions.k8s.io/v1
+kind: CustomResourceDefinition
+metadata:
+  annotations:
+    controller-gen.kubebuilder.io/version: v0.17.2
+  name: mcpprovidergroups.mcp-hangar.io
+spec:
+  group: mcp-hangar.io
+  names:
+    categories:
+    - mcp
+    kind: MCPProviderGroup
+    listKind: MCPProviderGroupList
+    plural: mcpprovidergroups
+    shortNames:
+    - mcppg
+    - providergroup
+    singular: mcpprovidergroup
+  scope: Namespaced
+  versions:
+  - additionalPrinterColumns:
+    - jsonPath: .spec.strategy
+      name: Strategy
+      type: string
+    - jsonPath: .status.providerCount
+      name: Providers
+      type: integer
+    - jsonPath: .status.readyCount
+      name: Ready
+      type: integer
+    - jsonPath: .status.degradedCount
+      name: Degraded
+      type: integer
+    - jsonPath: .metadata.creationTimestamp
+      name: Age
+      type: date
+    name: v1alpha1
+    schema:
+      openAPIV3Schema:
+        description: MCPProviderGroup is the Schema for the mcpprovidergroups API
+        properties:
+          apiVersion:
+            description: |-
+              APIVersion defines the versioned schema of this representation of an object.
+              Servers should convert recognized schemas to the latest internal value, and
+              may reject unrecognized values.
+              More info: https://git.k8s.io/community/contributors/devel/sig-architecture/api-conventions.md#resources
+            type: string
+          kind:
+            description: |-
+              Kind is a string value representing the REST resource this object represents.
+              Servers may infer this from the endpoint the client submits requests to.
+              Cannot be updated.
+              In CamelCase.
+              More info: https://git.k8s.io/community/contributors/devel/sig-architecture/api-conventions.md#types-kinds
+            type: string
+          metadata:
+            type: object
+          spec:
+            description: MCPProviderGroupSpec defines the desired state of MCPProviderGroup
+            properties:
+              circuitBreaker:
+                description: CircuitBreaker configures group-level circuit breaker
+                properties:
+                  enabled:
+                    default: false
+                    description: Enabled enables group circuit breaker
+                    type: boolean
+                  failureThreshold:
+                    default: 10
+                    description: FailureThreshold before opening circuit
+                    format: int32
+                    type: integer
+                  resetTimeout:
+                    default: 1m
+                    description: ResetTimeout before attempting recovery
+                    type: string
+                type: object
+              failover:
+                description: Failover configures failover behavior
+                properties:
+                  enabled:
+                    default: true
+                    description: Enabled enables automatic failover
+                    type: boolean
+                  maxRetries:
+                    default: 2
+                    description: MaxRetries is the maximum retry attempts
+                    format: int32
+                    maximum: 10
+                    minimum: 0
+                    type: integer
+                  retryDelay:
+                    default: 1s
+                    description: RetryDelay is the delay between retries
+                    type: string
+                  retryOn:
+                    default:
+                    - timeout
+                    - connection_error
+                    description: RetryOn lists conditions that trigger retry
+                    items:
+                      type: string
+                    type: array
+                type: object
+              healthPolicy:
+                description: HealthPolicy defines group health requirements
+                properties:
+                  minHealthyCount:
+                    description: MinHealthyCount is minimum healthy provider count
+                      (overrides percentage)
+                    format: int32
+                    type: integer
+                  minHealthyPercentage:
+                    default: 50
+                    description: MinHealthyPercentage is minimum healthy providers
+                      percentage
+                    format: int32
+                    maximum: 100
+                    minimum: 0
+                    type: integer
+                  unhealthyThreshold:
+                    default: 3
+                    description: UnhealthyThreshold is consecutive failures before
+                      marking unhealthy
+                    format: int32
+                    minimum: 1
+                    type: integer
+                type: object
+              selector:
+                description: Selector selects MCPProviders to include in the group
+                properties:
+                  matchExpressions:
+                    description: matchExpressions is a list of label selector requirements.
+                      The requirements are ANDed.
+                    items:
+                      description: |-
+                        A label selector requirement is a selector that contains values, a key, and an operator that
+                        relates the key and values.
+                      properties:
+                        key:
+                          description: key is the label key that the selector applies
+                            to.
+                          type: string
+                        operator:
+                          description: |-
+                            operator represents a key's relationship to a set of values.
+                            Valid operators are In, NotIn, Exists and DoesNotExist.
+                          type: string
+                        values:
+                          description: |-
+                            values is an array of string values. If the operator is In or NotIn,
+                            the values array must be non-empty. If the operator is Exists or DoesNotExist,
+                            the values array must be empty. This array is replaced during a strategic
+                            merge patch.
+                          items:
+                            type: string
+                          type: array
+                      required:
+                      - key
+                      - operator
+                      type: object
+                    type: array
+                  matchLabels:
+                    additionalProperties:
+                      type: string
+                    description: |-
+                      matchLabels is a map of {key,value} pairs. A single {key,value} in the matchLabels
+                      map is equivalent to an element of matchExpressions, whose key field is "key", the
+                      operator is "In", and the values array contains only "value". The requirements are ANDed.
+                    type: object
+                type: object
+                x-kubernetes-map-type: atomic
+              sessionAffinity:
+                description: SessionAffinity configures session stickiness
+                properties:
+                  enabled:
+                    default: false
+                    description: Enabled enables session affinity
+                    type: boolean
+                  header:
+                    description: Header is the header name for Header affinity type
+                    type: string
+                  ttl:
+                    default: 10m
+                    description: TTL is the session TTL
+                    type: string
+                  type:
+                    default: ClientIP
+                    description: Type is the affinity type (ClientIP or Header)
+                    enum:
+                    - ClientIP
+                    - Header
+                    type: string
+                type: object
+              strategy:
+                default: RoundRobin
+                description: Strategy is the load balancing strategy
+                enum:
+                - RoundRobin
+                - LeastConnections
+                - Random
+                - Weighted
+                - Failover
+                type: string
+            required:
+            - selector
+            type: object
+          status:
+            description: MCPProviderGroupStatus defines the observed state of MCPProviderGroup
+            properties:
+              activeStrategy:
+                description: ActiveStrategy is the currently active strategy
+                type: string
+              coldCount:
+                description: ColdCount is the number of cold providers
+                format: int32
+                type: integer
+              conditions:
+                description: Conditions represent the latest available observations
+                items:
+                  description: Condition represents a condition of a resource
+                  properties:
+                    lastTransitionTime:
+                      description: LastTransitionTime is the last time the condition
+                        transitioned
+                      format: date-time
+                      type: string
+                    message:
+                      description: Message is a human-readable description
+                      type: string
+                    observedGeneration:
+                      description: ObservedGeneration represents the generation observed
+                      format: int64
+                      type: integer
+                    reason:
+                      description: Reason is a machine-readable reason
+                      type: string
+                    status:
+                      description: Status of the condition
+                      enum:
+                      - "True"
+                      - "False"
+                      - Unknown
+                      type: string
+                    type:
+                      description: Type of condition
+                      type: string
+                  required:
+                  - status
+                  - type
+                  type: object
+                type: array
+              deadCount:
+                description: DeadCount is the number of dead providers
+                format: int32
+                type: integer
+              degradedCount:
+                description: DegradedCount is the number of degraded providers
+                format: int32
+                type: integer
+              observedGeneration:
+                description: ObservedGeneration is the generation observed by controller
+                format: int64
+                type: integer
+              providerCount:
+                description: ProviderCount is total providers in group
+                format: int32
+                type: integer
+              providers:
+                description: Providers contains provider member details
+                items:
+                  description: ProviderMemberStatus defines the status of a group
+                    member
+                  properties:
+                    activeConnections:
+                      description: ActiveConnections for least connections strategy
+                      format: int32
+                      type: integer
+                    lastHealthCheck:
+                      description: LastHealthCheck time
+                      format: date-time
+                      type: string
+                    name:
+                      description: Name of the provider
+                      type: string
+                    namespace:
+                      description: Namespace of the provider
+                      type: string
+                    state:
+                      description: State of the provider
+                      type: string
+                    weight:
+                      description: Weight for weighted load balancing
+                      format: int32
+                      type: integer
+                  required:
+                  - name
+                  - namespace
+                  type: object
+                type: array
+              readyCount:
+                description: ReadyCount is the number of ready providers
+                format: int32
+                type: integer
+            type: object
+        type: object
+    served: true
+    storage: true
+    subresources:
+      status: {}
