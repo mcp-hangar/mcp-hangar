@@ -61,6 +61,31 @@ spec:
       drop:
         - ALL
 
+  # Capability declaration: what resources this provider needs.
+  # The operator uses this to generate NetworkPolicy and enforce access.
+  capabilities:
+    network:
+      # SQLite provider needs no external network access
+      egress: []
+      dnsAllowed: false
+      loopbackAllowed: false
+    filesystem:
+      readPaths:
+        - /data
+      writePaths:
+        - /data
+      tempAllowed: true
+    environment:
+      required:
+        - SQLITE_DB_PATH
+    tools:
+      maxCount: 10
+      schemaDriftAlert: true
+    resources:
+      maxMemoryMB: 512
+      maxCPUPercent: 50
+    enforcementMode: alert
+
 ---
 # PVC for SQLite data
 apiVersion: v1
