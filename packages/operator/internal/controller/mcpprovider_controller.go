@@ -7,6 +7,8 @@ import (
 	"time"
 
 	corev1 "k8s.io/api/core/v1"
+	networkingv1 "k8s.io/api/networking/v1"
+	"k8s.io/apimachinery/pkg/api/equality"
 	"k8s.io/apimachinery/pkg/api/errors"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/apimachinery/pkg/runtime"
@@ -20,6 +22,7 @@ import (
 	mcpv1alpha1 "github.com/mcp-hangar/mcp-hangar/operator/api/v1alpha1"
 	"github.com/mcp-hangar/mcp-hangar/operator/pkg/hangar"
 	"github.com/mcp-hangar/mcp-hangar/operator/pkg/metrics"
+	"github.com/mcp-hangar/mcp-hangar/operator/pkg/networkpolicy"
 	"github.com/mcp-hangar/mcp-hangar/operator/pkg/provider"
 )
 
@@ -28,10 +31,11 @@ const (
 	finalizerName = "mcp-hangar.io/finalizer"
 
 	// Condition types
-	ConditionReady       = "Ready"
-	ConditionProgressing = "Progressing"
-	ConditionDegraded    = "Degraded"
-	ConditionAvailable   = "Available"
+	ConditionReady                = "Ready"
+	ConditionProgressing          = "Progressing"
+	ConditionDegraded             = "Degraded"
+	ConditionAvailable            = "Available"
+	ConditionNetworkPolicyApplied = "NetworkPolicyApplied"
 
 	// Requeue intervals
 	defaultRequeueAfter = 30 * time.Second
@@ -94,6 +98,7 @@ func DefaultReconcilerConfig() *ReconcilerConfig {
 // +kubebuilder:rbac:groups="",resources=configmaps,verbs=get;list;watch
 // +kubebuilder:rbac:groups="",resources=serviceaccounts,verbs=get;list;watch
 // +kubebuilder:rbac:groups="",resources=events,verbs=create;patch
+// +kubebuilder:rbac:groups=networking.k8s.io,resources=networkpolicies,verbs=get;list;watch;create;update;patch;delete
 
 // Reconcile performs the reconciliation loop for MCPProvider
 func (r *MCPProviderReconciler) Reconcile(ctx context.Context, req ctrl.Request) (ctrl.Result, error) {
@@ -188,6 +193,14 @@ func (r *MCPProviderReconciler) reconcileContainerProvider(ctx context.Context, 
 		}
 		r.Recorder.Event(mcpProvider, corev1.EventTypeWarning, ReasonFailed, "Container mode requires image")
 		return ctrl.Result{}, nil
+	}
+
+	// Reconcile NetworkPolicy (independent of Pod lifecycle)
+	if err := r.reconcileNetworkPolicy(ctx, mcpProvider); err != nil {
+		logger.Error(err, "Failed to reconcile NetworkPolicy")
+		// Non-blocking: log error but continue with Pod reconciliation
+		r.Recorder.Event(mcpProvider, corev1.EventTypeWarning, "NetworkPolicyFailed",
+			fmt.Sprintf("Failed to reconcile NetworkPolicy: %v", err))
 	}
 
 	// Build desired Pod spec
@@ -431,6 +444,7 @@ func (r *MCPProviderReconciler) handlePodFailed(ctx context.Context, mcpProvider
 }
 
 // reconcileRemoteProvider handles remote-mode providers
+// Note: NetworkPolicy is not reconciled for remote providers (no pods to target)
 func (r *MCPProviderReconciler) reconcileRemoteProvider(ctx context.Context, mcpProvider *mcpv1alpha1.MCPProvider) (ctrl.Result, error) {
 	logger := log.FromContext(ctx)
 
@@ -495,6 +509,84 @@ func (r *MCPProviderReconciler) reconcileRemoteProvider(ctx context.Context, mcp
 	return ctrl.Result{RequeueAfter: readyRequeueAfter}, nil
 }
 
+// reconcileNetworkPolicy ensures the NetworkPolicy for a provider matches its capabilities.
+// Creates, updates, or deletes the NetworkPolicy as needed.
+func (r *MCPProviderReconciler) reconcileNetworkPolicy(ctx context.Context, mcpProvider *mcpv1alpha1.MCPProvider) error {
+	logger := log.FromContext(ctx)
+
+	desired := networkpolicy.BuildNetworkPolicy(mcpProvider)
+
+	if desired == nil {
+		// No capabilities declared -- delete existing policy if any, clear condition
+		if err := r.deleteNetworkPolicyIfExists(ctx, mcpProvider); err != nil {
+			return err
+		}
+		mcpProvider.Status.SetCondition(ConditionNetworkPolicyApplied, metav1.ConditionFalse,
+			"NoPolicyNeeded", "No network capabilities declared")
+		return nil
+	}
+
+	// Set OwnerReference so K8s GC deletes NetworkPolicy when MCPProvider is deleted
+	if err := controllerutil.SetControllerReference(mcpProvider, desired, r.Scheme); err != nil {
+		return fmt.Errorf("failed to set owner reference on NetworkPolicy: %w", err)
+	}
+
+	// Check if NetworkPolicy already exists
+	existing := &networkingv1.NetworkPolicy{}
+	npKey := types.NamespacedName{Name: desired.Name, Namespace: desired.Namespace}
+	err := r.Get(ctx, npKey, existing)
+
+	if errors.IsNotFound(err) {
+		// Create
+		logger.Info("Creating NetworkPolicy for provider",
+			"networkPolicy", desired.Name, "provider", mcpProvider.Name)
+		if err := r.Create(ctx, desired); err != nil {
+			return fmt.Errorf("failed to create NetworkPolicy: %w", err)
+		}
+		r.Recorder.Event(mcpProvider, corev1.EventTypeNormal, "NetworkPolicyCreated",
+			fmt.Sprintf("Created NetworkPolicy %s", desired.Name))
+		mcpProvider.Status.SetCondition(ConditionNetworkPolicyApplied, metav1.ConditionTrue,
+			"PolicyApplied", fmt.Sprintf("NetworkPolicy %s created", desired.Name))
+		return nil
+	} else if err != nil {
+		return fmt.Errorf("failed to get NetworkPolicy: %w", err)
+	}
+
+	// Update if spec changed
+	if !equality.Semantic.DeepEqual(existing.Spec, desired.Spec) {
+		logger.Info("Updating NetworkPolicy for provider",
+			"networkPolicy", desired.Name, "provider", mcpProvider.Name)
+		existing.Spec = desired.Spec
+		existing.Labels = desired.Labels
+		existing.Annotations = desired.Annotations
+		if err := r.Update(ctx, existing); err != nil {
+			return fmt.Errorf("failed to update NetworkPolicy: %w", err)
+		}
+		r.Recorder.Event(mcpProvider, corev1.EventTypeNormal, "NetworkPolicyUpdated",
+			fmt.Sprintf("Updated NetworkPolicy %s", desired.Name))
+	}
+
+	mcpProvider.Status.SetCondition(ConditionNetworkPolicyApplied, metav1.ConditionTrue,
+		"PolicyApplied", fmt.Sprintf("NetworkPolicy %s applied", desired.Name))
+	return nil
+}
+
+// deleteNetworkPolicyIfExists deletes the NetworkPolicy for a provider if it exists.
+func (r *MCPProviderReconciler) deleteNetworkPolicyIfExists(ctx context.Context, mcpProvider *mcpv1alpha1.MCPProvider) error {
+	npName := networkpolicy.NetworkPolicyName(mcpProvider.Name)
+	existing := &networkingv1.NetworkPolicy{}
+	npKey := types.NamespacedName{Name: npName, Namespace: mcpProvider.Namespace}
+
+	err := r.Get(ctx, npKey, existing)
+	if errors.IsNotFound(err) {
+		return nil // Nothing to delete
+	} else if err != nil {
+		return err
+	}
+
+	return r.Delete(ctx, existing)
+}
+
 // reconcileDelete handles provider deletion
 func (r *MCPProviderReconciler) reconcileDelete(ctx context.Context, mcpProvider *mcpv1alpha1.MCPProvider) (ctrl.Result, error) {
 	logger := log.FromContext(ctx)
@@ -548,5 +640,6 @@ func (r *MCPProviderReconciler) SetupWithManager(mgr ctrl.Manager) error {
 	return ctrl.NewControllerManagedBy(mgr).
 		For(&mcpv1alpha1.MCPProvider{}).
 		Owns(&corev1.Pod{}).
+		Owns(&networkingv1.NetworkPolicy{}).
 		Complete(r)
 }
