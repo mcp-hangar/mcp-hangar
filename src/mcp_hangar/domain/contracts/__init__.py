@@ -14,6 +14,12 @@ from .authentication import (
     NullApiKeyStore,
     NullAuthenticator,
 )
+from .behavioral import (
+    IBehavioralProfiler,
+    IBaselineStore,
+    IDeviationDetector,
+    NullBehavioralProfiler,
+)
 from .command import CommandHandler
 from .event_bus import IEventBus
 from .runtime_store import IRuntimeProviderStore
@@ -60,6 +66,11 @@ __all__ = [
     "ITokenValidator",
     "NullApiKeyStore",
     "NullAuthenticator",
+    # Behavioral profiling contracts
+    "IBehavioralProfiler",
+    "IBaselineStore",
+    "IDeviationDetector",
+    "NullBehavioralProfiler",
     # Authorization contracts
     "AuthorizationRequest",
     "AuthorizationResult",

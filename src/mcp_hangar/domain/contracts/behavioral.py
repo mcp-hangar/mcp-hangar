@@ -1,0 +1,167 @@
+"""Behavioral profiling contracts (ports) for the domain layer.
+
+These protocols define the interfaces for behavioral profiling components.
+Enterprise layer provides concrete implementations; MIT core ships with
+NullBehavioralProfiler (always DISABLED).
+
+Contracts:
+    IBehavioralProfiler -- Facade for behavioral profiling (mode, observations).
+    IBaselineStore -- Persistence for observation baselines and mode state.
+    IDeviationDetector -- Compares observations against learned baselines.
+
+Null implementation:
+    NullBehavioralProfiler -- No-op implementation for MIT core.
+"""
+
+from __future__ import annotations
+
+from abc import abstractmethod
+from typing import Any, Protocol, runtime_checkable
+
+
+@runtime_checkable
+class IBehavioralProfiler(Protocol):
+    """Facade for behavioral profiling of a provider.
+
+    Manages the profiling mode and routes observations to the appropriate
+    subsystem (baseline store in LEARNING, deviation detector in ENFORCING).
+
+    In MIT core, only NullBehavioralProfiler is available (always DISABLED).
+    Enterprise module provides a real implementation.
+    """
+
+    @abstractmethod
+    def get_mode(self, provider_id: str) -> "BehavioralMode":
+        """Get the current behavioral profiling mode for a provider.
+
+        Args:
+            provider_id: Identifier of the provider.
+
+        Returns:
+            Current BehavioralMode for the provider.
+        """
+        ...
+
+    @abstractmethod
+    def set_mode(self, provider_id: str, mode: "BehavioralMode") -> None:
+        """Set the behavioral profiling mode for a provider.
+
+        Args:
+            provider_id: Identifier of the provider.
+            mode: New BehavioralMode to set.
+        """
+        ...
+
+    @abstractmethod
+    def record_observation(self, observation: "NetworkObservation") -> None:
+        """Record a network observation from a provider.
+
+        In LEARNING mode, stores the observation for baseline building.
+        In ENFORCING mode, checks against baseline for deviations.
+        In DISABLED mode, this is a no-op.
+
+        Args:
+            observation: The network observation to record.
+        """
+        ...
+
+
+@runtime_checkable
+class IBaselineStore(Protocol):
+    """Persistence for observation baselines and mode state.
+
+    Stores aggregated network observations during the LEARNING phase
+    and provides baseline data for the ENFORCING phase.
+    """
+
+    @abstractmethod
+    def record_observation(self, observation: "NetworkObservation") -> None:
+        """Store an observation for baseline building.
+
+        Args:
+            observation: The network observation to store.
+        """
+        ...
+
+    @abstractmethod
+    def get_observations(self, provider_id: str) -> list[dict[str, Any]]:
+        """Retrieve baseline observation records for a provider.
+
+        Args:
+            provider_id: Identifier of the provider.
+
+        Returns:
+            List of observation records as dicts.
+        """
+        ...
+
+    @abstractmethod
+    def get_mode(self, provider_id: str) -> "BehavioralMode":
+        """Get the persisted behavioral mode for a provider.
+
+        Args:
+            provider_id: Identifier of the provider.
+
+        Returns:
+            Current persisted BehavioralMode.
+        """
+        ...
+
+    @abstractmethod
+    def set_mode(
+        self,
+        provider_id: str,
+        mode: "BehavioralMode",
+        learning_duration_hours: int = 72,
+    ) -> None:
+        """Persist the behavioral mode with timing metadata.
+
+        Args:
+            provider_id: Identifier of the provider.
+            mode: New BehavioralMode to persist.
+            learning_duration_hours: Duration of the learning phase in hours.
+        """
+        ...
+
+
+@runtime_checkable
+class IDeviationDetector(Protocol):
+    """Compares network observations against a learned baseline.
+
+    Returns a list of detected deviations when an observation does not
+    match the expected behavioral profile.
+    """
+
+    @abstractmethod
+    def check_observation(self, observation: "NetworkObservation") -> list[dict[str, Any]]:
+        """Check an observation against the baseline.
+
+        Args:
+            observation: The network observation to check.
+
+        Returns:
+            List of deviation dicts. Empty list means no deviation detected.
+        """
+        ...
+
+
+class NullBehavioralProfiler:
+    """No-op behavioral profiler. Always returns DISABLED mode.
+
+    Used when enterprise behavioral profiling is not installed.
+    Satisfies the IBehavioralProfiler protocol at runtime.
+    """
+
+    def get_mode(self, provider_id: str) -> "BehavioralMode":
+        """Return DISABLED for any provider -- profiling not active."""
+        from ..value_objects.behavioral import BehavioralMode
+
+        return BehavioralMode.DISABLED
+
+    def set_mode(self, provider_id: str, mode: "BehavioralMode") -> None:
+        """No-op -- profiling mode cannot be changed without enterprise module."""
+        pass
+
+    def record_observation(self, observation: "NetworkObservation") -> None:
+        """No-op -- observations are discarded without enterprise module."""
+        pass
