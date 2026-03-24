@@ -6,7 +6,7 @@
 
 - **Milestone:** v0.13.0 -- Kubernetes Enforcement Foundation + Licensing
 - **Target date:** 2026-04-15
-- **Active phase:** Phase 33 (OTLP Completeness for Security Events) -- Plan 01 complete, Plan 02 next
+- **Active phase:** Phase 33 (OTLP Completeness for Security Events) -- Plans 01-02 complete, Plan 03 next
 - **Current version:** v0.12.0
 
 ## Active P0 Work Items
@@ -32,6 +32,7 @@
 - [x] MCP-aware OTEL semantic conventions -- Plan 31-03 complete (InMemorySpanExporter integration test, 6 real SDK tests)
 - [x] End-to-end trace context propagation (agent -> Hangar -> provider) -- Phase 32 complete (3/3 plans: inbound extraction, outbound injection, e2e test)
 - [x] OTLP audit exporter -- Plan 33-01 complete (IAuditExporter port, OTLPAuditExporter, NullAuditExporter, 5 tests)
+- [x] OTLP audit event handler -- Plan 33-02 complete (OTLPAuditEventHandler wired to ToolInvocationCompleted/Failed + ProviderStateChanged, bootstrap registration)
 
 ### Hardening
 - [ ] CI security scanning (Trivy/Grype on images, Semgrep on source)
@@ -44,6 +45,7 @@
 
 ## Recently Completed
 
+- Phase 33-02: OTLPAuditEventHandler bridges domain events to IAuditExporter, registered in bootstrap with OTLP endpoint detection (2026-03-24)
 - Phase 33-01: IAuditExporter port + OTLPAuditExporter infrastructure adapter for OTLP log record export of security events (2026-03-24)
 - Phase 32 complete: all 3 plans delivered -- extract_trace_context in BatchExecutor, inject_trace_context in HttpClient, e2e InMemorySpanExporter test (2026-03-24)
 - Phase 32-02: inject_trace_context wired into HttpClient.call() for outbound W3C TraceContext propagation (2026-03-24)
