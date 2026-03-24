@@ -8,6 +8,7 @@ from ....stdio_client import StdioClient
 from ...exceptions import ProviderStartError, ValidationError
 from ...security.input_validator import InputValidator
 from ...security.sanitizer import Sanitizer
+from ...value_objects.capabilities import ProviderCapabilities
 from .base import ProviderLauncher
 
 logger = get_logger(__name__)
@@ -130,21 +131,44 @@ class DockerLauncher(ProviderLauncher):
         self,
         image: str,
         env: dict[str, str] | None = None,
+        capabilities: ProviderCapabilities | None = None,
     ) -> list[str]:
         """
         Build secure Docker/Podman run command.
 
+        When ``capabilities`` is provided, its ``network.egress`` list drives network
+        mode selection, overriding the legacy ``enable_network`` constructor flag:
+
+        * Empty egress (no declared destinations) -> ``--network none`` (deny all).
+        * Non-empty egress (at least one destination) -> default bridge network.
+
+        Note: Docker provides *binary* enforcement only (deny-all or allow-all).
+        Unlike Kubernetes NetworkPolicy, Docker ``--network`` flags cannot restrict
+        traffic to specific CIDRs or ports. Per-destination filtering requires K8s.
+
         Args:
             image: Docker image to run
             env: Environment variables for container
+            capabilities: Optional provider capability declaration. When present,
+                network.egress drives network mode selection.
 
         Returns:
             Complete container run command as list
         """
         cmd = [self._runtime, "run", "--rm", "-i"]
 
-        # Security options
-        if not self._enable_network:
+        # Network isolation: capabilities override the legacy enable_network flag
+        network_deny = False
+        if capabilities is not None and capabilities.network is not None:
+            # Capabilities-driven: deny if no egress destinations declared
+            if not capabilities.network.egress:
+                network_deny = True
+            # else: egress declared -> allow network (bridge)
+        elif not self._enable_network:
+            # Legacy fallback: use constructor flag
+            network_deny = True
+
+        if network_deny:
             cmd.extend(["--network", "none"])
 
         if self._memory_limit:
@@ -179,6 +203,7 @@ class DockerLauncher(ProviderLauncher):
         self,
         image: str,
         env: dict[str, str] | None = None,
+        capabilities: ProviderCapabilities | None = None,
     ) -> StdioClient:
         """
         Launch a Docker provider with security validation.
@@ -186,6 +211,8 @@ class DockerLauncher(ProviderLauncher):
         Args:
             image: Docker image name and tag
             env: Environment variables to pass to container
+            capabilities: Optional provider capability declaration. When present,
+                network.egress drives network mode (overrides enable_network flag).
 
         Returns:
             StdioClient connected to the Docker container
@@ -208,7 +235,7 @@ class DockerLauncher(ProviderLauncher):
                 raise ValidationError(message=f"Environment validation failed: {errors}", field="env")
 
         # Build secure command
-        cmd = self._build_docker_command(image, env)
+        cmd = self._build_docker_command(image, env, capabilities=capabilities)
 
         # Log launch
         logger.info(f"Launching Docker container: {image}")
