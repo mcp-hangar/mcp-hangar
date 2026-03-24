@@ -18,6 +18,8 @@ import time
 from typing import Any
 
 from ..ports.observability import ObservabilityPort, TraceContext
+from ...observability.conventions import MCP, Provider, set_governance_attributes
+from ...observability.tracing import get_tracer
 
 logger = logging.getLogger(__name__)
 
@@ -78,7 +80,7 @@ class TracedProviderService:
         user_id: str | None = None,
         session_id: str | None = None,
     ) -> dict[str, Any]:
-        """Invoke a tool with full tracing.
+        """Invoke a tool with full tracing (OTEL span + ObservabilityPort span).
 
         Args:
             provider_id: Provider identifier.
@@ -97,34 +99,49 @@ class TracedProviderService:
             ToolNotFoundError: If tool doesn't exist.
             ToolInvocationError: If invocation fails.
         """
-        trace_context = None
-        if trace_id or user_id or session_id:
-            trace_context = TraceContext(
-                trace_id=trace_id or "",
+        tracer = get_tracer(__name__)
+
+        with tracer.start_as_current_span(f"tool.invoke.{tool_name}") as otel_span:
+            set_governance_attributes(
+                otel_span,
+                provider_id=provider_id,
+                tool_name=tool_name,
                 user_id=user_id,
                 session_id=session_id,
             )
 
-        span = self._observability.start_tool_span(
-            provider_name=provider_id,
-            tool_name=tool_name,
-            input_params=arguments,
-            trace_context=trace_context,
-        )
+            # ObservabilityPort span (Langfuse / partner backend)
+            trace_context = None
+            if trace_id or user_id or session_id:
+                trace_context = TraceContext(
+                    trace_id=trace_id or "",
+                    user_id=user_id,
+                    session_id=session_id,
+                )
 
-        try:
-            result = self._service.invoke_tool(
-                provider_id=provider_id,
+            obs_span = self._observability.start_tool_span(
+                provider_name=provider_id,
                 tool_name=tool_name,
-                arguments=arguments,
-                timeout=timeout,
+                input_params=arguments,
+                trace_context=trace_context,
             )
-            span.end_success(output=result)
-            return result
 
-        except Exception as e:  # noqa: BLE001 -- fault-barrier: record error in trace span, then re-raise
-            span.end_error(error=e)
-            raise
+            try:
+                result = self._service.invoke_tool(
+                    provider_id=provider_id,
+                    tool_name=tool_name,
+                    arguments=arguments,
+                    timeout=timeout,
+                )
+                otel_span.set_attribute(MCP.TOOL_STATUS, "success")
+                obs_span.end_success(output=result)
+                return result
+
+            except Exception as e:  # noqa: BLE001 -- fault-barrier: record error in both spans, then re-raise
+                otel_span.set_attribute(MCP.TOOL_STATUS, "error")
+                otel_span.record_exception(e)
+                obs_span.end_error(error=e)
+                raise
 
     def health_check(
         self,
