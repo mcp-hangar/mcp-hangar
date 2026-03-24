@@ -392,3 +392,109 @@ class IToolAccessPolicyEnforcer(Protocol):
             PolicyEvaluationResult with decision and reason.
         """
         ...
+
+
+class NullAuthorizer:
+    """No-op authorizer. Allows all requests.
+
+    Used when enterprise RBAC is not installed or during testing.
+    """
+
+    def authorize(self, request: AuthorizationRequest) -> AuthorizationResult:
+        """Allow all requests when no RBAC is configured."""
+        return AuthorizationResult.allow(reason="No RBAC configured (null authorizer)")
+
+
+class NullRoleStore:
+    """No-op role store. Returns empty results for all queries.
+
+    Used when enterprise RBAC is not installed or during testing.
+    """
+
+    def get_role(self, role_name: str) -> Role | None:
+        """No roles defined."""
+        return None
+
+    def get_roles_for_principal(
+        self,
+        principal_id: str,
+        scope: str = "*",
+    ) -> list[Role]:
+        """No roles assigned."""
+        return []
+
+    def assign_role(
+        self,
+        principal_id: str,
+        role_name: str,
+        scope: str = "global",
+    ) -> None:
+        """No-op: role assignment requires enterprise RBAC."""
+
+    def revoke_role(
+        self,
+        principal_id: str,
+        role_name: str,
+        scope: str = "global",
+    ) -> None:
+        """No-op: role revocation requires enterprise RBAC."""
+
+    def list_all_roles(self) -> list[Role]:
+        """No custom roles defined."""
+        return []
+
+    def delete_role(self, role_name: str) -> None:
+        """No-op: role deletion requires enterprise RBAC."""
+
+    def update_role(
+        self,
+        role_name: str,
+        permissions: list[Permission],
+        description: str | None = None,
+    ) -> Role:
+        """No-op: raise NotImplementedError (no role management without enterprise)."""
+        raise NotImplementedError("Role management requires enterprise RBAC module")
+
+
+class NullToolAccessPolicyStore:
+    """No-op tool access policy store. Returns None for all lookups.
+
+    Used when enterprise policy storage is not installed or during testing.
+    """
+
+    def set_policy(
+        self,
+        scope: str,
+        target_id: str,
+        allow_list: list[str],
+        deny_list: list[str],
+    ) -> None:
+        """No-op: policy storage requires enterprise module."""
+
+    def get_policy(self, scope: str, target_id: str) -> ToolAccessPolicy | None:
+        """No policies stored."""
+        return None
+
+    def clear_policy(self, scope: str, target_id: str) -> None:
+        """No-op."""
+
+    def list_all_policies(self) -> list[tuple[str, str, list[str], list[str]]]:
+        """No policies stored."""
+        return []
+
+
+class NullToolAccessPolicyEnforcer:
+    """No-op policy enforcer. Allows all tool invocations.
+
+    Used when enterprise policy enforcement is not installed or during testing.
+    """
+
+    def evaluate(
+        self,
+        principal: Principal,
+        provider_id: str,
+        tool_name: str,
+        context: dict[str, Any] | None = None,
+    ) -> PolicyEvaluationResult:
+        """Allow all tool invocations when no policy enforcement is configured."""
+        return PolicyEvaluationResult.allow(reason="No policy enforcement configured (null enforcer)")

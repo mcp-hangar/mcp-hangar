@@ -5,7 +5,15 @@ depends on. Implementations are provided by the infrastructure layer.
 """
 
 from .catalog import McpCatalogRepository
-from .authentication import ApiKeyMetadata, AuthRequest, IApiKeyStore, IAuthenticator, ITokenValidator
+from .authentication import (
+    ApiKeyMetadata,
+    AuthRequest,
+    IApiKeyStore,
+    IAuthenticator,
+    ITokenValidator,
+    NullApiKeyStore,
+    NullAuthenticator,
+)
 from .command import CommandHandler
 from .event_bus import IEventBus
 from .runtime_store import IRuntimeProviderStore
@@ -17,6 +25,10 @@ from .authorization import (
     IRoleStore,
     IToolAccessPolicyEnforcer,
     IToolAccessPolicyStore,
+    NullAuthorizer,
+    NullRoleStore,
+    NullToolAccessPolicyEnforcer,
+    NullToolAccessPolicyStore,
     PolicyEvaluationResult,
 )
 from .event_store import ConcurrencyError, IDurableEventStore, IEventStore, NullEventStore, StreamNotFoundError
@@ -46,6 +58,8 @@ __all__ = [
     "IApiKeyStore",
     "IAuthenticator",
     "ITokenValidator",
+    "NullApiKeyStore",
+    "NullAuthenticator",
     # Authorization contracts
     "AuthorizationRequest",
     "AuthorizationResult",
@@ -54,6 +68,10 @@ __all__ = [
     "IRoleStore",
     "IToolAccessPolicyEnforcer",
     "IToolAccessPolicyStore",
+    "NullAuthorizer",
+    "NullRoleStore",
+    "NullToolAccessPolicyEnforcer",
+    "NullToolAccessPolicyStore",
     "PolicyEvaluationResult",
     # Command handler
     "CommandHandler",
