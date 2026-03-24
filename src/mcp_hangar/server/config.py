@@ -17,6 +17,7 @@ import yaml
 
 from ..domain.model import LoadBalancerStrategy, Provider, ProviderGroup
 from ..domain.security.input_validator import validate_provider_id
+from ..domain.value_objects.capabilities import ProviderCapabilities
 from ..logging_config import get_logger
 
 # Backward compatibility - config populates these collections
@@ -270,6 +271,23 @@ def _load_provider_config(provider_id: str, spec_dict: dict[str, Any]) -> Provid
         # Interpolate environment variables in secrets
         auth_config = _interpolate_env_vars(auth_config)
 
+    # Parse capabilities declaration
+    capabilities_data = spec_dict.get("capabilities")
+    capabilities = None
+    if capabilities_data is not None:
+        try:
+            capabilities = ProviderCapabilities.from_dict(capabilities_data)
+        except (ValueError, TypeError) as e:
+            from ..domain.exceptions import ConfigurationError
+
+            raise ConfigurationError(f"Invalid capabilities for provider '{provider_id}': {e}") from e
+    else:
+        logger.warning(
+            "provider_no_capabilities_declared",
+            provider_id=provider_id,
+            hint="Add a 'capabilities' block to declare resource requirements",
+        )
+
     provider = Provider(
         provider_id=provider_id,
         mode=spec_dict.get("mode", "subprocess"),
@@ -294,6 +312,8 @@ def _load_provider_config(provider_id: str, spec_dict: dict[str, Any]) -> Provid
         auth=auth_config,
         tls=spec_dict.get("tls"),
         http=spec_dict.get("http"),
+        # Capability declarations
+        capabilities=capabilities,
     )
     PROVIDERS[provider_id] = provider
 

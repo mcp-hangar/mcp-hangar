@@ -9,6 +9,7 @@ from dataclasses import dataclass, field
 from typing import Any
 
 from ..value_objects import HealthCheckInterval, IdleTTL, ProviderMode, ToolAccessPolicy
+from ..value_objects.capabilities import ProviderCapabilities
 
 logger = logging.getLogger(__name__)
 
@@ -154,6 +155,9 @@ class ProviderConfig:
     # Tool access policy (controls which tools are visible/invocable)
     tools_access: ToolsConfig | None = None
 
+    # Capability declarations (Phase 38: network, filesystem, environment, tools, resources)
+    capabilities: ProviderCapabilities | None = None
+
     def __post_init__(self) -> None:
         """Normalize mode to ProviderMode enum."""
         if isinstance(self.mode, str):
@@ -237,6 +241,10 @@ class ProviderConfig:
                         deny_list=deny_list,
                     )
 
+        # Parse capabilities declaration
+        capabilities_data = data.get("capabilities")
+        capabilities = ProviderCapabilities.from_dict(capabilities_data) if capabilities_data else None
+
         return cls(
             provider_id=provider_id,
             mode=mode,
@@ -251,6 +259,7 @@ class ProviderConfig:
             ),
             tools=predefined_tools,
             tools_access=tools_access_config,
+            capabilities=capabilities,
         )
 
     def get_command(self) -> list[str] | None:
