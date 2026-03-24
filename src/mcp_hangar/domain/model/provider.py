@@ -11,6 +11,7 @@ if TYPE_CHECKING:
 
 from ..contracts.log_buffer import IProviderLogBuffer
 from ..contracts.metrics_publisher import IMetricsPublisher, NullMetricsPublisher
+from ..value_objects.capabilities import ProviderCapabilities
 from ..events import (
     HealthCheckFailed,
     HealthCheckPassed,
@@ -102,6 +103,8 @@ class Provider(AggregateRoot):
         # Dependencies
         metrics_publisher: IMetricsPublisher | None = None,
         log_buffer: IProviderLogBuffer | None = None,
+        # Capability declarations (Phase 38)
+        capabilities: ProviderCapabilities | None = None,
     ):
         super().__init__()
 
@@ -149,6 +152,9 @@ class Provider(AggregateRoot):
         # Dependencies (Dependency Inversion Principle)
         self._metrics_publisher = metrics_publisher or NullMetricsPublisher()
         self._log_buffer = log_buffer
+
+        # Capability declarations (Phase 38)
+        self._capabilities = capabilities
 
         # State
         self._state = ProviderState.COLD
@@ -272,6 +278,7 @@ class Provider(AggregateRoot):
             tls=tls,
             http=http,
             metrics_publisher=metrics_publisher,
+            capabilities=getattr(config, "capabilities", None),
         )
 
     @staticmethod
@@ -394,6 +401,11 @@ class Provider(AggregateRoot):
     def lock(self) -> "TrackedLock | threading.RLock":
         """Get the internal lock (for backward compatibility)."""
         return self._lock
+
+    @property
+    def capabilities(self) -> ProviderCapabilities | None:
+        """Declared capabilities for this provider."""
+        return self._capabilities
 
     def set_log_buffer(self, buffer: "IProviderLogBuffer") -> None:
         """Inject or replace the log buffer for this provider.
@@ -1244,6 +1256,8 @@ class Provider(AggregateRoot):
             spec["network"] = self._network
         if not self._read_only:
             spec["read_only"] = False
+        if self._capabilities is not None:
+            spec["capabilities"] = self._capabilities  # Phase 38: serialization in future plan
         return spec
 
     def update_config(

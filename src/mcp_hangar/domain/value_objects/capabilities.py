@@ -44,6 +44,7 @@ Example configuration:
 from __future__ import annotations
 
 from dataclasses import dataclass, field
+from typing import Any
 
 
 @dataclass(frozen=True)
@@ -237,8 +238,7 @@ class ProviderCapabilities:
         allowed_modes = {"alert", "block", "quarantine"}
         if self.enforcement_mode not in allowed_modes:
             raise ValueError(
-                f"ProviderCapabilities.enforcement_mode must be one of {allowed_modes}, "
-                f"got {self.enforcement_mode!r}"
+                f"ProviderCapabilities.enforcement_mode must be one of {allowed_modes}, got {self.enforcement_mode!r}"
             )
 
     @classmethod
@@ -253,6 +253,77 @@ class ProviderCapabilities:
             network=NetworkCapabilities.deny_all(),
             filesystem=FilesystemCapabilities.none(),
             enforcement_mode="block",
+        )
+
+    @classmethod
+    def from_dict(cls, config: dict[str, Any] | None) -> ProviderCapabilities:
+        """Create ProviderCapabilities from a YAML configuration dict.
+
+        Args:
+            config: Parsed capabilities dict from YAML, or None for defaults.
+
+        Returns:
+            ProviderCapabilities with parsed sub-objects.
+
+        Raises:
+            ValueError: If any sub-object validation fails (e.g. empty host,
+                invalid port, unknown enforcement_mode).
+        """
+        if not config:
+            return cls()  # Default: unconstrained, alert mode
+
+        # Parse network capabilities
+        network_data = config.get("network", {})
+        egress_rules = tuple(
+            EgressRule(
+                host=rule.get("host", ""),
+                port=rule.get("port", 443),
+                protocol=rule.get("protocol", "https"),
+            )
+            for rule in network_data.get("egress", [])
+        )
+        network = NetworkCapabilities(
+            egress=egress_rules,
+            dns_allowed=network_data.get("dns_allowed", True),
+            loopback_allowed=network_data.get("loopback_allowed", False),
+        )
+
+        # Parse filesystem capabilities
+        fs_data = config.get("filesystem", {})
+        filesystem = FilesystemCapabilities(
+            read_paths=tuple(fs_data.get("read_paths", [])),
+            write_paths=tuple(fs_data.get("write_paths", [])),
+            temp_allowed=fs_data.get("temp_allowed", True),
+        )
+
+        # Parse environment capabilities
+        env_data = config.get("environment", {})
+        environment = EnvironmentCapabilities(
+            required=tuple(env_data.get("required", [])),
+            optional=tuple(env_data.get("optional", [])),
+        )
+
+        # Parse tool capabilities
+        tools_data = config.get("tools", {})
+        tools = ToolCapabilities(
+            max_count=tools_data.get("max_count", 0),
+            schema_drift_alert=tools_data.get("schema_drift_alert", True),
+        )
+
+        # Parse resource capabilities
+        res_data = config.get("resources", {})
+        resources = ResourceCapabilities(
+            max_memory_mb=res_data.get("max_memory_mb", 0),
+            max_cpu_percent=res_data.get("max_cpu_percent", 0.0),
+        )
+
+        return cls(
+            network=network,
+            filesystem=filesystem,
+            environment=environment,
+            tools=tools,
+            resources=resources,
+            enforcement_mode=config.get("enforcement_mode", "alert"),
         )
 
     def has_egress_rules(self) -> bool:
