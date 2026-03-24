@@ -12,6 +12,12 @@ import pytest
 
 from mcp_hangar.domain.value_objects.behavioral import BehavioralMode, NetworkObservation
 from mcp_hangar.domain.events import BehavioralModeChanged
+from mcp_hangar.domain.contracts.behavioral import (
+    IBehavioralProfiler,
+    IBaselineStore,
+    IDeviationDetector,
+    NullBehavioralProfiler,
+)
 
 
 # -- BehavioralMode enum --
@@ -178,3 +184,93 @@ class TestBehavioralModeChanged:
             new_mode="learning",
         )
         assert isinstance(event, DomainEvent)
+
+
+# -- IBehavioralProfiler Protocol --
+
+
+class TestIBehavioralProfiler:
+    def test_is_runtime_checkable(self) -> None:
+        assert hasattr(IBehavioralProfiler, "__protocol_attrs__") or hasattr(IBehavioralProfiler, "__abstractmethods__")
+        # runtime_checkable allows isinstance checks
+        assert isinstance(NullBehavioralProfiler(), IBehavioralProfiler)
+
+
+# -- IBaselineStore Protocol --
+
+
+class TestIBaselineStore:
+    def test_is_runtime_checkable(self) -> None:
+        # Verify Protocol is defined and runtime_checkable
+        assert hasattr(IBaselineStore, "__protocol_attrs__") or hasattr(IBaselineStore, "__abstractmethods__")
+
+
+# -- IDeviationDetector Protocol --
+
+
+class TestIDeviationDetector:
+    def test_is_runtime_checkable(self) -> None:
+        # Verify Protocol is defined and runtime_checkable
+        assert hasattr(IDeviationDetector, "__protocol_attrs__") or hasattr(IDeviationDetector, "__abstractmethods__")
+
+
+# -- NullBehavioralProfiler --
+
+
+class TestNullBehavioralProfiler:
+    def test_satisfies_ibehavioralprofiler_protocol(self) -> None:
+        profiler = NullBehavioralProfiler()
+        assert isinstance(profiler, IBehavioralProfiler)
+
+    def test_get_mode_returns_disabled_for_any_provider(self) -> None:
+        profiler = NullBehavioralProfiler()
+        assert profiler.get_mode("math") == BehavioralMode.DISABLED
+        assert profiler.get_mode("weather") == BehavioralMode.DISABLED
+        assert profiler.get_mode("") == BehavioralMode.DISABLED
+
+    def test_set_mode_is_noop(self) -> None:
+        profiler = NullBehavioralProfiler()
+        # Should not raise
+        profiler.set_mode("math", BehavioralMode.LEARNING)
+        # Still returns DISABLED after set
+        assert profiler.get_mode("math") == BehavioralMode.DISABLED
+
+    def test_record_observation_is_noop(self) -> None:
+        profiler = NullBehavioralProfiler()
+        obs = NetworkObservation(
+            timestamp=1234567890.0,
+            provider_id="math",
+            destination_host="api.openai.com",
+            destination_port=443,
+            protocol="https",
+            direction="outbound",
+        )
+        # Should not raise
+        profiler.record_observation(obs)
+
+
+# -- Contracts importable from mcp_hangar.domain.contracts --
+
+
+class TestBehavioralContractReExports:
+    def test_all_contracts_importable_from_domain_contracts(self) -> None:
+        from mcp_hangar.domain.contracts import (
+            IBehavioralProfiler as ReExportedProfiler,
+            IBaselineStore as ReExportedStore,
+            IDeviationDetector as ReExportedDetector,
+            NullBehavioralProfiler as ReExportedNull,
+        )
+
+        assert ReExportedProfiler is IBehavioralProfiler
+        assert ReExportedStore is IBaselineStore
+        assert ReExportedDetector is IDeviationDetector
+        assert ReExportedNull is NullBehavioralProfiler
+
+    def test_value_objects_importable_from_domain_value_objects(self) -> None:
+        from mcp_hangar.domain.value_objects import (
+            BehavioralMode as ReExportedMode,
+            NetworkObservation as ReExportedObs,
+        )
+
+        assert ReExportedMode is BehavioralMode
+        assert ReExportedObs is NetworkObservation
