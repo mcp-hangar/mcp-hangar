@@ -12,8 +12,7 @@ import (
 	mcpv1alpha1 "github.com/mcp-hangar/mcp-hangar/operator/api/v1alpha1"
 )
 
-func boolPtr(b bool) *bool                           { return &b }
-func protocolPtr(p corev1.Protocol) *corev1.Protocol { return &p }
+func boolPtr(b bool) *bool { return &b }
 
 // --- NetworkPolicyName ---
 
