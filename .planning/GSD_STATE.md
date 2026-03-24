@@ -6,7 +6,7 @@
 
 - **Milestone:** v8.0 -- Behavioral Profiling Alpha
 - **Target date:** 2026-05-15
-- **Active phase:** Phase 42 (Behavioral Profiling Contracts + Core Infrastructure) -- plan 01 complete, plans 02-03 ready
+- **Active phase:** Phase 42 (Behavioral Profiling Contracts + Core Infrastructure) -- plans 01-02 complete, plan 03 ready
 - **Current version:** v0.12.0
 - **Last completed milestone:** v7.0 (K8s Enforcement + Licensing) -- shipped 2026-03-24
 
@@ -44,6 +44,7 @@
 
 ## Recently Completed
 
+- **Phase 42 plan 02 complete** -- BSL SQLite-backed BaselineStore: UPSERT observation aggregation, BehavioralMode persistence, thread-safe Lock, 9 tests (2026-03-25)
 - **Phase 42 plan 01 complete** -- MIT behavioral profiling contracts: IBehavioralProfiler, IBaselineStore, IDeviationDetector Protocols, BehavioralMode enum, NetworkObservation VO, BehavioralModeChanged event, NullBehavioralProfiler, 26 tests (2026-03-25)
 - **Phase 42 context gathered** -- 4 gray areas discussed (mode transitions, observation data model, contract scope, license gating), 42-CONTEXT.md written (2026-03-25)
 - **Phase 41 (Admission + Runtime Capability Verification) complete** -- 3 plans, 20 Go tests (7 CEL admission + 1 envtest + 3 egress audit + 9 from earlier plans) + 9 Python tests (7 drift + 2 saga), 4/4 SC verified (2026-03-24)
