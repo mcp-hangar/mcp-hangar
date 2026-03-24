@@ -310,6 +310,15 @@ func (r *MCPProviderReconciler) syncPodStatus(ctx context.Context, mcpProvider *
 
 	// Update status
 	mcpProvider.Status.PodName = pod.Name
+
+	// Propagate capabilities from spec to status (Phase 38).
+	// Phase 39 may enrich status.capabilities with resolved IPs and computed fields.
+	if mcpProvider.Spec.Capabilities != nil {
+		mcpProvider.Status.Capabilities = mcpProvider.Spec.Capabilities.DeepCopy()
+	} else {
+		mcpProvider.Status.Capabilities = nil
+	}
+
 	if err := r.Status().Update(ctx, mcpProvider); err != nil {
 		return ctrl.Result{}, err
 	}
@@ -470,6 +479,14 @@ func (r *MCPProviderReconciler) reconcileRemoteProvider(ctx context.Context, mcp
 
 	mcpProvider.Status.Endpoint = endpoint
 	metrics.SetProviderState(mcpProvider.Namespace, mcpProvider.Name, string(mcpProvider.Status.State))
+
+	// Propagate capabilities from spec to status (Phase 38).
+	// Phase 39 may enrich status.capabilities with resolved IPs and computed fields.
+	if mcpProvider.Spec.Capabilities != nil {
+		mcpProvider.Status.Capabilities = mcpProvider.Spec.Capabilities.DeepCopy()
+	} else {
+		mcpProvider.Status.Capabilities = nil
+	}
 
 	if err := r.Status().Update(ctx, mcpProvider); err != nil {
 		return ctrl.Result{}, err
