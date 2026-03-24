@@ -155,3 +155,36 @@ class TestNullBehavioralProfilerFallback:
         obs = _make_observation()
         # Should not raise
         null.record_observation(obs)
+
+
+class TestServerBootstrapWiring:
+    """Test that server bootstrap wires behavioral profiler into ApplicationContext."""
+
+    def test_application_context_has_behavioral_profiler_field(self) -> None:
+        """ApplicationContext dataclass must have behavioral_profiler field."""
+        from mcp_hangar.server.bootstrap import ApplicationContext
+
+        # Check that the field exists (dataclass field inspection)
+        import dataclasses
+
+        field_names = [f.name for f in dataclasses.fields(ApplicationContext)]
+        assert "behavioral_profiler" in field_names
+
+    def test_bootstrap_with_no_behavioral_config(self) -> None:
+        """Bootstrap with empty config (no behavioral section) must not break."""
+        from mcp_hangar.server.bootstrap import bootstrap
+
+        ctx = bootstrap(config_dict={"providers": {}})
+        try:
+            # behavioral_profiler should be set (either real or null)
+            assert ctx.behavioral_profiler is not None
+            assert isinstance(ctx.behavioral_profiler, IBehavioralProfiler)
+        finally:
+            ctx.shutdown()
+
+    def test_enterprise_behavioral_available_flag(self) -> None:
+        """When enterprise.behavioral.bootstrap is importable, flag is True."""
+        from mcp_hangar.server.bootstrap import _enterprise_behavioral_available
+
+        # Since enterprise module is available in test environment
+        assert _enterprise_behavioral_available is True
