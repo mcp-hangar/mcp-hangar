@@ -26,6 +26,7 @@ import httpx
 from . import metrics as prometheus_metrics
 from .domain.exceptions import ClientError
 from .logging_config import get_logger
+from .observability.tracing import inject_trace_context
 
 logger = get_logger(__name__)
 
@@ -317,9 +318,15 @@ class HttpClient:
         provider_label = self._provider_id or self._host
 
         try:
+            # Propagate W3C TraceContext to the remote provider.
+            # Enables end-to-end distributed tracing: agent -> Hangar -> provider.
+            trace_headers: dict[str, str] = {}
+            inject_trace_context(trace_headers)
+
             response = self._client.post(
                 url,
                 json=request_body,
+                headers=trace_headers if trace_headers else None,
                 timeout=timeout,
             )
 
