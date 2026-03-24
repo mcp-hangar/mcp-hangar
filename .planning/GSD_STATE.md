@@ -29,8 +29,8 @@
 ### OTEL (cross-cutting)
 - [x] MCP-aware OTEL semantic conventions -- Plan 31-01 complete (conventions wired into tracing.py, set_governance_attributes helper added)
 - [x] MCP-aware OTEL semantic conventions -- Plan 31-02 complete (OTEL span added to TracedProviderService.invoke_tool)
-- [ ] MCP-aware OTEL semantic conventions -- Plan 31-03 remaining (InMemorySpanExporter integration test)
-- [ ] End-to-end trace context propagation (agent -> Hangar -> provider)
+- [x] MCP-aware OTEL semantic conventions -- Plan 31-03 complete (InMemorySpanExporter integration test, 6 real SDK tests)
+- [ ] End-to-end trace context propagation (agent -> Hangar -> provider) -- Phase 32, ready to start
 
 ### Hardening
 - [ ] CI security scanning (Trivy/Grype on images, Semgrep on source)
@@ -43,6 +43,7 @@
 
 ## Recently Completed
 
+- Phase 31 complete: all 3 plans delivered -- conventions wired, OTEL span in TracedProviderService, InMemorySpanExporter integration test (34 total tests) (2026-03-24)
 - Phase 31-02: OTEL span added to TracedProviderService.invoke_tool with governance attributes (2026-03-24)
 - Phase 31-01: Wired conventions.py constants into tracing.py, added set_governance_attributes() helper (2026-03-24)
 - v0.12.0 released (Catalog API experimental, fuzz tests, config export)
