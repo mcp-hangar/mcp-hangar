@@ -188,3 +188,61 @@ class Metrics:
     EGRESS_BLOCKED_TOTAL = "mcp_hangar_egress_blocked_total"
     PROVIDERS_QUARANTINED = "mcp_hangar_providers_quarantined"
     TOOL_SCHEMA_DRIFTS_TOTAL = "mcp_hangar_tool_schema_drifts_total"
+
+
+# ---------------------------------------------------------------------------
+# Convenience helpers
+# ---------------------------------------------------------------------------
+
+
+def set_governance_attributes(
+    span: object,
+    *,
+    provider_id: str,
+    tool_name: str,
+    mode: str | None = None,
+    group_id: str | None = None,
+    user_id: str | None = None,
+    session_id: str | None = None,
+    agent_id: str | None = None,
+    policy_result: str | None = None,
+    enforcement_action: str | None = None,
+    cold_start: bool | None = None,
+) -> None:
+    """Set standard MCP governance attributes on an OTEL span in one call.
+
+    Only attributes with non-None values are set. This avoids polluting
+    OTLP backends with empty string attributes for optional governance fields.
+
+    Args:
+        span: OpenTelemetry span (or any object with set_attribute method).
+        provider_id: Required. Provider identifier.
+        tool_name: Required. Tool name as advertised by the provider.
+        mode: Optional. Provider mode ("subprocess", "docker", "remote").
+        group_id: Optional. Provider group identifier.
+        user_id: Optional. Human user identity.
+        session_id: Optional. MCP session identifier.
+        agent_id: Optional. Agent or client identifier.
+        policy_result: Optional. Policy evaluation result ("allow", "deny", "quarantine").
+        enforcement_action: Optional. Enforcement action taken.
+        cold_start: Optional. Whether this invocation triggered a cold start.
+    """
+    span.set_attribute(Provider.ID, provider_id)
+    span.set_attribute(MCP.TOOL_NAME, tool_name)
+
+    if mode is not None:
+        span.set_attribute(Provider.MODE, mode)
+    if group_id is not None:
+        span.set_attribute(Provider.GROUP_ID, group_id)
+    if user_id is not None:
+        span.set_attribute(MCP.USER_ID, user_id)
+    if session_id is not None:
+        span.set_attribute(MCP.SESSION_ID, session_id)
+    if agent_id is not None:
+        span.set_attribute(MCP.AGENT_ID, agent_id)
+    if policy_result is not None:
+        span.set_attribute(Enforcement.POLICY_RESULT, policy_result)
+    if enforcement_action is not None:
+        span.set_attribute(Enforcement.ACTION, enforcement_action)
+    if cold_start is not None:
+        span.set_attribute(MCP.COLD_START, str(cold_start).lower())
