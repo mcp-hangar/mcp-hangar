@@ -17,6 +17,17 @@ All types are re-exported here for backward compatibility.
 # Common / shared value objects
 from .common import CatalogItemId, CorrelationId, NamespaceId, ResourceScope, TenantId, ToolArguments, ToolName
 
+# Capability declarations (Phase 1 enforcement)
+from .capabilities import (
+    EgressRule,
+    EnvironmentCapabilities,
+    FilesystemCapabilities,
+    NetworkCapabilities,
+    ProviderCapabilities,
+    ResourceCapabilities,
+    ToolCapabilities,
+)
+
 # Log value objects
 from .log import LogLine
 

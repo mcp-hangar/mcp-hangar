@@ -940,3 +940,158 @@ class ToolAccessPolicyCleared(DomainEvent):
 
     def __post_init__(self):
         super().__init__()
+
+
+# ---------------------------------------------------------------------------
+# Capability enforcement events (Phase 1 — PRODUCT_ARCHITECTURE.md)
+# ---------------------------------------------------------------------------
+
+
+@dataclass
+class CapabilityViolationDetected(DomainEvent):
+    """Published when a provider exceeds its declared capabilities.
+
+    Emitted by the enforcement engine whenever runtime behavior deviates
+    from the capability declaration. The enforcement_action field records
+    what Hangar did in response (alert/block/quarantine).
+
+    Attributes:
+        provider_id: Provider that violated its capabilities.
+        violation_type: Category of violation. One of:
+            "egress_undeclared" -- outbound connection to undeclared destination.
+            "egress_blocked" -- blocked outbound connection.
+            "filesystem_write" -- write to path not in write_paths.
+            "filesystem_read" -- read from path not in read_paths.
+            "env_undeclared" -- access to undeclared environment variable.
+            "tool_count_exceeded" -- provider advertised more tools than declared.
+            "tool_schema_drift" -- tool schema changed between restarts.
+            "resource_limit_exceeded" -- memory or CPU exceeded declared limit.
+        violation_detail: Human-readable description with specifics.
+        enforcement_action: What Hangar did: "alert", "block", or "quarantine".
+        destination: For egress violations, the blocked/unexpected destination.
+        schema_version: Event schema version.
+    """
+
+    provider_id: str
+    violation_type: str
+    violation_detail: str
+    enforcement_action: str
+    destination: str | None = None
+    schema_version: int = 1
+
+    def __post_init__(self):
+        super().__init__()
+
+
+@dataclass
+class EgressBlocked(DomainEvent):
+    """Published when an outbound connection from a provider is blocked.
+
+    This is a specialization of CapabilityViolationDetected for the
+    common case of network egress enforcement.
+
+    Attributes:
+        provider_id: Provider whose egress was blocked.
+        destination_host: Blocked destination hostname or IP.
+        destination_port: Blocked destination port.
+        protocol: Connection protocol (tcp/udp/https/etc.).
+        enforcement_source: "networkpolicy" (K8s) or "iptables" (Docker).
+        schema_version: Event schema version.
+    """
+
+    provider_id: str
+    destination_host: str
+    destination_port: int
+    protocol: str
+    enforcement_source: str = "networkpolicy"
+    schema_version: int = 1
+
+    def __post_init__(self):
+        super().__init__()
+
+
+@dataclass
+class ProviderQuarantined(DomainEvent):
+    """Published when a provider is quarantined due to capability violations.
+
+    A quarantined provider stops serving new requests until the operator
+    reviews and releases it. Existing in-flight requests complete normally.
+
+    Attributes:
+        provider_id: Provider that was quarantined.
+        reason: Human-readable reason for quarantine.
+        violation_count: Number of violations that triggered quarantine.
+        schema_version: Event schema version.
+    """
+
+    provider_id: str
+    reason: str
+    violation_count: int = 1
+    schema_version: int = 1
+
+    def __post_init__(self):
+        super().__init__()
+
+
+@dataclass
+class ProviderQuarantineReleased(DomainEvent):
+    """Published when a quarantined provider is released by the operator.
+
+    Attributes:
+        provider_id: Provider released from quarantine.
+        released_by: Identity of the operator who released the provider.
+        schema_version: Event schema version.
+    """
+
+    provider_id: str
+    released_by: str
+    schema_version: int = 1
+
+    def __post_init__(self):
+        super().__init__()
+
+
+@dataclass
+class ToolSchemaDriftDetected(DomainEvent):
+    """Published when a provider's tool schema changes between restarts.
+
+    Schema drift may indicate a supply-chain attack, a mis-deployed image,
+    or an intentional but undeclared upgrade.
+
+    Attributes:
+        provider_id: Provider whose tool schema changed.
+        tools_added: Names of newly appeared tools.
+        tools_removed: Names of removed tools.
+        tools_changed: Names of tools with changed parameter schemas.
+        schema_version: Event schema version.
+    """
+
+    provider_id: str
+    tools_added: list[str]
+    tools_removed: list[str]
+    tools_changed: list[str]
+    schema_version: int = 1
+
+    def __post_init__(self):
+        super().__init__()
+
+
+@dataclass
+class CapabilityDeclarationMissing(DomainEvent):
+    """Published when a provider starts without a capability declaration.
+
+    In strict mode this prevents the provider from reaching READY state.
+    In alert mode it is a warning.
+
+    Attributes:
+        provider_id: Provider that is missing capability declarations.
+        enforcement_mode: Current enforcement mode ("alert" or "block").
+        schema_version: Event schema version.
+    """
+
+    provider_id: str
+    enforcement_mode: str = "alert"
+    schema_version: int = 1
+
+    def __post_init__(self):
+        super().__init__()

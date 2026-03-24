@@ -30,6 +30,7 @@ from mcp_hangar.observability.tracing import (
     trace_span,
     trace_tool_invocation,
 )
+from mcp_hangar.observability.conventions import Audit, Behavioral, Enforcement, Health, MCP, Metrics, Provider
 
 __all__ = [
     # Tracing
@@ -51,4 +52,12 @@ __all__ = [
     "HealthCheck",
     "HealthEndpoint",
     "get_health_endpoint",
+    # Semantic conventions
+    "MCP",
+    "Provider",
+    "Enforcement",
+    "Audit",
+    "Behavioral",
+    "Health",
+    "Metrics",
 ]

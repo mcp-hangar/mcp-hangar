@@ -102,3 +102,56 @@ jobs:
         uses: gitleaks/gitleaks-action@v2
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+
+  semgrep:
+    name: Semgrep SAST
+    runs-on: ubuntu-latest
+    permissions:
+      security-events: write
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Run Semgrep
+        uses: semgrep/semgrep-action@v1
+        with:
+          config: >-
+            p/python
+            p/secrets
+            p/owasp-top-ten
+        env:
+          SEMGREP_APP_TOKEN: ${{ secrets.SEMGREP_APP_TOKEN }}
+        continue-on-error: true  # Token optional; runs open rules without token
+
+  sbom:
+    name: SBOM Generation
+    runs-on: ubuntu-latest
+    if: github.event_name == 'pull_request' || github.event_name == 'workflow_dispatch'
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+
+      - name: Install dependencies
+        run: pip install -e .
+
+      - name: Generate Python SBOM (CycloneDX)
+        run: |
+          pip install cyclonedx-bom
+          cyclonedx-py environment --of json -o sbom-python.json
+
+      - name: Upload SBOM artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: sbom
+          path: sbom-python.json
+          retention-days: 90
+
+      - name: Audit frontend dependencies
+        run: |
+          cd packages/ui
+          npm audit --audit-level=high || true
