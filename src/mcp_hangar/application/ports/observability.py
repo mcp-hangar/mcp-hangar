@@ -16,7 +16,7 @@ Example usage:
 from abc import ABC, abstractmethod
 from dataclasses import dataclass, field
 import logging
-from typing import Any
+from typing import Any, Protocol
 
 logger = logging.getLogger(__name__)
 
@@ -234,4 +234,47 @@ class NullObservabilityAdapter(ObservabilityPort):
 
     def shutdown(self) -> None:
         """No-op shutdown."""
+        pass
+
+
+class IAuditExporter(Protocol):
+    """Port for exporting security-relevant events as OTLP log records.
+
+    Implementations:
+      - OTLPAuditExporter (infrastructure/observability/) -- MIT, exports via OTLP
+      - ComplianceExporter (enterprise/compliance/) -- BSL, exports CEF/LEEF/JSON-lines
+    """
+
+    def export_tool_invocation(
+        self,
+        provider_id: str,
+        tool_name: str,
+        status: str,
+        duration_ms: float,
+        user_id: str | None = None,
+        session_id: str | None = None,
+        error_type: str | None = None,
+    ) -> None:
+        """Export a tool invocation event as an audit log record."""
+        ...
+
+    def export_provider_state_change(
+        self,
+        provider_id: str,
+        from_state: str,
+        to_state: str,
+    ) -> None:
+        """Export a provider state transition as an audit log record."""
+        ...
+
+
+class NullAuditExporter:
+    """No-op audit exporter. Used when OTLP log export is not configured."""
+
+    def export_tool_invocation(self, *args: object, **kwargs: object) -> None:
+        """Discard the tool invocation event."""
+        pass
+
+    def export_provider_state_change(self, *args: object, **kwargs: object) -> None:
+        """Discard the state change event."""
         pass
