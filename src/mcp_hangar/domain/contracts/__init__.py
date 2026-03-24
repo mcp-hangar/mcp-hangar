@@ -9,8 +9,17 @@ from .authentication import ApiKeyMetadata, AuthRequest, IApiKeyStore, IAuthenti
 from .command import CommandHandler
 from .event_bus import IEventBus
 from .runtime_store import IRuntimeProviderStore
-from .authorization import AuthorizationRequest, AuthorizationResult, IAuthorizer, IPolicyEngine, IRoleStore
-from .event_store import ConcurrencyError, IEventStore, NullEventStore, StreamNotFoundError
+from .authorization import (
+    AuthorizationRequest,
+    AuthorizationResult,
+    IAuthorizer,
+    IPolicyEngine,
+    IRoleStore,
+    IToolAccessPolicyEnforcer,
+    IToolAccessPolicyStore,
+    PolicyEvaluationResult,
+)
+from .event_store import ConcurrencyError, IDurableEventStore, IEventStore, NullEventStore, StreamNotFoundError
 from .installer import InstalledPackage, IPackageInstaller
 from .log_buffer import IProviderLogBuffer
 from .metrics_publisher import IMetricsPublisher
@@ -43,12 +52,16 @@ __all__ = [
     "IAuthorizer",
     "IPolicyEngine",
     "IRoleStore",
+    "IToolAccessPolicyEnforcer",
+    "IToolAccessPolicyStore",
+    "PolicyEvaluationResult",
     # Command handler
     "CommandHandler",
     # Event bus
     "IEventBus",
     # Event store
     "ConcurrencyError",
+    "IDurableEventStore",
     "IEventStore",
     "NullEventStore",
     "StreamNotFoundError",

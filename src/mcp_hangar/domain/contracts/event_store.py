@@ -192,6 +192,41 @@ class IEventStore(ABC):
         """
 
 
+class IDurableEventStore(IEventStore):
+    """Extended event store interface for durable persistence backends.
+
+    Adds migration, maintenance, and connection management methods
+    that are specific to SQLite/Postgres backends. In-memory stores
+    do not implement this -- they implement IEventStore directly.
+
+    Enterprise persistence (SQLite/Postgres event stores) implements this.
+    Core retains InMemoryEventStore (IEventStore) and NullEventStore.
+    """
+
+    @abstractmethod
+    def migrate(self) -> None:
+        """Run database migrations to ensure schema is up to date.
+
+        Called during bootstrap. Implementations should be idempotent.
+        """
+
+    @abstractmethod
+    def close(self) -> None:
+        """Close database connections and release resources.
+
+        Called during graceful shutdown.
+        """
+
+    @abstractmethod
+    def get_storage_stats(self) -> dict[str, Any]:
+        """Return storage statistics for monitoring.
+
+        Returns:
+            Dict with keys like 'total_events', 'total_streams',
+            'storage_bytes', 'oldest_event_timestamp'.
+        """
+
+
 class NullEventStore(IEventStore):
     """Null object implementation - discards all events.
 
