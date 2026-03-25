@@ -78,6 +78,27 @@ def bootstrap_behavioral(
     return profiler
 
 
+def bootstrap_resource_monitor(
+    db_path: str = "data/events.db",
+    config: dict | None = None,
+) -> "ResourceStore":
+    """Create a configured ResourceStore instance.
+
+    Args:
+        db_path: Path to SQLite database file. Use ``":memory:"`` for testing.
+        config: Optional resource monitoring configuration dict (reserved
+            for future per-provider threshold overrides).
+
+    Returns:
+        Initialized ResourceStore for time-series resource sample storage.
+    """
+    from .resource_store import ResourceStore
+
+    store = ResourceStore(db_path=db_path)
+    logger.info("resource_store_bootstrapped", db_path=db_path)
+    return store
+
+
 def bootstrap_schema_tracker(db_path: str = "data/events.db") -> "SchemaTracker":
     """Create a configured SchemaTracker instance.
 

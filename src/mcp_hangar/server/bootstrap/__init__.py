@@ -97,6 +97,19 @@ except ImportError:
         return None
 
 
+# Resource monitor store: load from enterprise when available, else return None.
+try:
+    from enterprise.behavioral.bootstrap import bootstrap_resource_monitor
+
+    _enterprise_resource_monitor_available = True
+except ImportError:
+    _enterprise_resource_monitor_available = False
+
+    def bootstrap_resource_monitor(db_path: str = "data/events.db", config: dict | None = None):  # type: ignore[misc]
+        """Return None when enterprise is not installed."""
+        return None
+
+
 from .cqrs import init_cqrs, init_auth_cqrs, init_saga, save_group_circuit_breakers
 from .discovery import _auto_add_volumes, _create_discovery_source, create_discovery_orchestrator
 from .event_handlers import init_event_handlers
@@ -111,6 +124,7 @@ from .truncation import init_truncation
 from .workers import (
     create_background_workers,
     create_connection_log_worker,
+    create_resource_monitor_worker,
     GC_WORKER_INTERVAL_SECONDS,
     HEALTH_CHECK_INTERVAL_SECONDS,
 )
@@ -172,6 +186,9 @@ class ApplicationContext:
 
     schema_tracker: Any = None
     """Schema tracker (enterprise) or None when not available."""
+
+    resource_store: Any = None
+    """Resource store (enterprise) for time-series resource samples or None."""
 
     @property
     def providers(self) -> dict[str, Any]:
@@ -365,6 +382,12 @@ def bootstrap(
         db_path=full_config.get("event_store", {}).get("path", "data/events.db"),
     )
 
+    # Initialize resource store for resource usage profiling
+    resource_store = bootstrap_resource_monitor(
+        db_path=full_config.get("event_store", {}).get("path", "data/events.db"),
+        config=behavioral_config,
+    )
+
     # Register tool schema drift handler (ProviderStarted -> SchemaTracker -> ToolSchemaChanged)
     from mcp_hangar.application.event_handlers.tool_schema_change_handler import (
         ToolSchemaChangeHandler,
@@ -404,6 +427,8 @@ def bootstrap(
     workers = create_background_workers(
         profiler=behavioral_profiler,
         config=full_config,
+        resource_store=resource_store,
+        event_bus=runtime.event_bus,
     )
 
     # Add config reload worker if enabled
@@ -463,6 +488,7 @@ def bootstrap(
         discovery_registry=discovery_registry,
         behavioral_profiler=behavioral_profiler,
         schema_tracker=schema_tracker,
+        resource_store=resource_store,
     )
 
     # Update application context for tools to access
@@ -512,6 +538,7 @@ __all__ = [
     "shutdown_observability",
     "create_background_workers",
     "create_connection_log_worker",
+    "create_resource_monitor_worker",
     "create_discovery_orchestrator",
     "register_all_tools",
     "_ensure_data_dir",
