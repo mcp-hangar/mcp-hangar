@@ -6,7 +6,7 @@
 
 - **Milestone:** v8.0 -- Behavioral Profiling Alpha
 - **Target date:** 2026-05-15
-- **Active phase:** Phase 45 (Tool Schema Drift Detection) -- Plan 01 complete, 1/3 plans
+- **Active phase:** Phase 45 (Tool Schema Drift Detection) -- Plan 02 complete, 2/3 plans
 - **Last completed phase:** Phase 44 (Behavioral Deviation Detection) -- 3/3 plans, 7 commits, 28 tests, 4/4 SC verified (2026-03-25)
 - **Current version:** v0.12.0
 - **Last completed milestone:** v7.0 (K8s Enforcement + Licensing) -- shipped 2026-03-24
@@ -45,6 +45,7 @@
 
 ## Recently Completed
 
+- **Phase 45 plan 02 complete** -- MIT domain types + event handler: SchemaChangeType enum (ADDED/REMOVED/MODIFIED), ToolSchemaChanged per-tool domain event, Provider.get_tool_schemas() accessor, TOOL_SCHEMA_DRIFTS_TOTAL Prometheus counter, ToolSchemaChangeHandler bridging ProviderStarted to SchemaTracker with OTLP spans, bootstrap wiring, 2 commits (2026-03-25)
 - **Phase 45 plan 01 complete** -- BSL SchemaTracker with SQLite storage (BaselineStore pattern), compute_schema_hash SHA-256, check_and_store drift detection (ADDED/REMOVED/MODIFIED), first-seen returns empty (SC45-4), bootstrap_schema_tracker factory, ApplicationContext.schema_tracker field, 1 commit (2026-03-25)
 - **Phase 44 COMPLETE (Behavioral Deviation Detection)** -- 3 plans, 7 commits, 28 tests, 4/4 SC verified. DeviationType enum + BehavioralDeviationDetected event + DeviationDetector (3 rules: new destination, protocol drift, frequency anomaly) + ENFORCING refactoring + event handler bridge + config propagation + end-to-end verification (2026-03-25)
 - **Phase 44 plan 03 complete** -- Config parsing validation + end-to-end SC44-1 through SC44-4 verification, 8 tests, stale Phase 42 ENFORCING test fixed, 2 commits (2026-03-25)
