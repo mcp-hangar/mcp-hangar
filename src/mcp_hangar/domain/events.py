@@ -1151,3 +1151,31 @@ class BehavioralDeviationDetected(DomainEvent):
 
     def __post_init__(self):
         super().__init__()
+
+
+@dataclass
+class ToolSchemaChanged(DomainEvent):
+    """Published when a tool's schema changes between provider restarts.
+
+    Emitted by the schema drift detection subsystem when a provider's
+    tool fingerprints differ from the previously stored snapshot.
+    One event per changed tool (not one event per provider).
+
+    Attributes:
+        provider_id: Provider whose tool schema changed.
+        tool_name: Name of the tool that changed.
+        change_type: Type of change (added, removed, modified).
+        old_hash: Previous schema hash (None for ADDED).
+        new_hash: Current schema hash (None for REMOVED).
+        schema_version: Event schema version.
+    """
+
+    provider_id: str
+    tool_name: str
+    change_type: str  # SchemaChangeType.value
+    old_hash: str | None = None
+    new_hash: str | None = None
+    schema_version: int = 1
+
+    def __post_init__(self):
+        super().__init__()

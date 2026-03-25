@@ -1263,6 +1263,18 @@ class Provider(AggregateRoot):
         with self._lock:
             return self._tools.to_dict()
 
+    def get_tool_schemas(self) -> list[ToolSchema]:
+        """Return a copy of the current tool schemas.
+
+        Returns the tools known to this provider. Thread-safe: takes a
+        snapshot under lock and returns it.
+
+        Returns:
+            List of ToolSchema value objects.
+        """
+        with self._lock:
+            return list(self._tools.list_tools())
+
     def to_status_dict(self) -> dict[str, Any]:
         """Get status as dictionary (for registry.list)."""
         with self._lock:

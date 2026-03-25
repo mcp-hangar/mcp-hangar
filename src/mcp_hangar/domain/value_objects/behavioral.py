@@ -48,6 +48,22 @@ class DeviationType(Enum):
         return self.value
 
 
+class SchemaChangeType(Enum):
+    """Classification of tool schema changes between provider restarts.
+
+    ADDED: A new tool appeared that was not present in the previous snapshot.
+    REMOVED: A tool present in the previous snapshot is no longer advertised.
+    MODIFIED: A tool's input parameter schema changed (different hash).
+    """
+
+    ADDED = "added"
+    REMOVED = "removed"
+    MODIFIED = "modified"
+
+    def __str__(self) -> str:
+        return self.value
+
+
 @dataclass(frozen=True)
 class NetworkObservation:
     """Immutable record of an observed network connection from a provider.

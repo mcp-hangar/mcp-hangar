@@ -919,6 +919,12 @@ BEHAVIORAL_DEVIATIONS_TOTAL = Counter(
     labels=["provider", "deviation_type"],
 )
 
+TOOL_SCHEMA_DRIFTS_TOTAL = Counter(
+    name="mcp_hangar_tool_schema_drifts",
+    description="Total number of tool schema changes detected between provider restarts",
+    labels=["provider", "change_type"],
+)
+
 
 # =============================================================================
 # Register All Metrics
@@ -1020,6 +1026,7 @@ def _register_all_metrics():
         [
             CAPABILITY_VIOLATIONS_TOTAL,
             BEHAVIORAL_DEVIATIONS_TOTAL,
+            TOOL_SCHEMA_DRIFTS_TOTAL,
         ]
     )
 
@@ -1192,6 +1199,16 @@ def record_behavioral_deviation(provider: str, deviation_type: str) -> None:
         deviation_type: Type of deviation (new_destination, frequency_anomaly, etc.).
     """
     BEHAVIORAL_DEVIATIONS_TOTAL.inc(provider=provider, deviation_type=deviation_type)
+
+
+def record_tool_schema_drift(provider: str, change_type: str) -> None:
+    """Record a tool schema change detection.
+
+    Args:
+        provider: Provider ID whose tool schema changed.
+        change_type: Type of change (added, removed, modified).
+    """
+    TOOL_SCHEMA_DRIFTS_TOTAL.inc(provider=provider, change_type=change_type)
 
 
 # =============================================================================
