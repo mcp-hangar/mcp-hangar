@@ -365,6 +365,19 @@ def bootstrap(
         db_path=full_config.get("event_store", {}).get("path", "data/events.db"),
     )
 
+    # Register tool schema drift handler (ProviderStarted -> SchemaTracker -> ToolSchemaChanged)
+    from mcp_hangar.application.event_handlers.tool_schema_change_handler import (
+        ToolSchemaChangeHandler,
+    )
+    from mcp_hangar.domain.events import ProviderStarted
+
+    tool_schema_handler = ToolSchemaChangeHandler(
+        schema_tracker=schema_tracker,
+        providers=PROVIDERS,
+        event_bus=runtime.event_bus,
+    )
+    runtime.event_bus.subscribe(ProviderStarted, tool_schema_handler.handle)
+
     # Initialize retry configuration
     init_retry_config(full_config)
 
