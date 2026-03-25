@@ -110,6 +110,19 @@ except ImportError:
         return None
 
 
+# Report generator: load from enterprise when available, else return None.
+try:
+    from enterprise.behavioral.bootstrap import bootstrap_report_generator
+
+    _enterprise_report_generator_available = True
+except ImportError:
+    _enterprise_report_generator_available = False
+
+    def bootstrap_report_generator(db_path: str = "data/events.db", **kwargs):  # type: ignore[misc]
+        """Return None when enterprise is not installed."""
+        return None
+
+
 from .cqrs import init_cqrs, init_auth_cqrs, init_saga, save_group_circuit_breakers
 from .discovery import _auto_add_volumes, _create_discovery_source, create_discovery_orchestrator
 from .event_handlers import init_event_handlers
@@ -189,6 +202,9 @@ class ApplicationContext:
 
     resource_store: Any = None
     """Resource store (enterprise) for time-series resource samples or None."""
+
+    report_generator: Any = None
+    """Report generator (enterprise) for behavioral JSON/PDF reports or None."""
 
     @property
     def providers(self) -> dict[str, Any]:
@@ -388,6 +404,13 @@ def bootstrap(
         config=behavioral_config,
     )
 
+    # Initialize behavioral report generator
+    report_generator = bootstrap_report_generator(
+        db_path=full_config.get("event_store", {}).get("path", "data/events.db"),
+        schema_tracker=schema_tracker,
+        resource_store=resource_store,
+    )
+
     # Register tool schema drift handler (ProviderStarted -> SchemaTracker -> ToolSchemaChanged)
     from mcp_hangar.application.event_handlers.tool_schema_change_handler import (
         ToolSchemaChangeHandler,
@@ -489,6 +512,7 @@ def bootstrap(
         behavioral_profiler=behavioral_profiler,
         schema_tracker=schema_tracker,
         resource_store=resource_store,
+        report_generator=report_generator,
     )
 
     # Update application context for tools to access
@@ -499,6 +523,7 @@ def bootstrap(
     ctx.catalog_repository = catalog_repo
     ctx.discovery_registry = discovery_registry
     ctx.full_config = full_config  # Store for config round-trip serialization
+    ctx.report_generator = report_generator  # Enterprise behavioral report generator
 
     return context
 

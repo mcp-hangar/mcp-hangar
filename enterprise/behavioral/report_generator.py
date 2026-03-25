@@ -136,7 +136,7 @@ class BehavioralReportGenerator:
         # Section 3: Resource Usage
         self._render_resource_section(pdf, report["resource_usage"])
 
-        return pdf.output()
+        return bytes(pdf.output())
 
     def _render_network_section(self, pdf: FPDF, destinations: list[dict[str, Any]]) -> None:
         """Render the Network Destinations section into the PDF."""

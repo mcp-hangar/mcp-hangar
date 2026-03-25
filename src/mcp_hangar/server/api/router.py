@@ -33,6 +33,15 @@ def create_api_router() -> Starlette:
     from .system import system_routes
     from .ws import ws_routes
 
+    # Behavioral report routes are part of enterprise tier.
+    # Extend provider_routes so they share a single /providers Mount.
+    try:
+        from enterprise.behavioral.api.reports import behavioral_report_routes
+
+        provider_routes.extend(behavioral_report_routes)
+    except ImportError:
+        pass
+
     routes = [
         Mount("/providers", routes=provider_routes),
         Mount("/groups", routes=group_routes),

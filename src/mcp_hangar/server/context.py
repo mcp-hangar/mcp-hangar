@@ -133,6 +133,7 @@ class ApplicationContext:
     catalog_repository: Optional["McpCatalogRepository"] = None
     discovery_registry: Optional["DiscoveryRegistry"] = None
     auth_components: Optional["AuthComponents"] = None
+    report_generator: Any = None
 
     @property
     def repository(self) -> "IProviderRepository":
