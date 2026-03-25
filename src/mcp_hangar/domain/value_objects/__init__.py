@@ -79,6 +79,9 @@ from .behavioral import BehavioralMode, NetworkObservation
 # Discovery
 from .discovery import DiscoverySourceSpec
 
+# License
+from .license import LicenseTier
+
 __all__ = [
     # Security
     "PrincipalType",
@@ -131,4 +134,6 @@ __all__ = [
     # Behavioral profiling
     "BehavioralMode",
     "NetworkObservation",
+    # License
+    "LicenseTier",
 ]
