@@ -7,14 +7,12 @@ signatures.  Invalid, missing, or expired keys always fall back to
 LicenseTier.COMMUNITY so the server can start unconditionally.
 """
 
-from __future__ import annotations
-
 import base64
 import hashlib
 import hmac
 import json
 import time
-from dataclasses import dataclass, field
+from dataclasses import dataclass
 
 import structlog
 
