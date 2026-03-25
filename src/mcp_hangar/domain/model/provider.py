@@ -683,6 +683,7 @@ class Provider(AggregateRoot):
                 "network": self._network,
                 "read_only": self._read_only,
                 "user": self._user,
+                "provider_id": self.provider_id,
             }
 
         if self._mode.value in ("container", "podman"):
@@ -697,6 +698,7 @@ class Provider(AggregateRoot):
                 "network": self._network,
                 "read_only": self._read_only,
                 "user": self._user,
+                "provider_id": self.provider_id,
             }
 
         if self._mode == ProviderMode.REMOTE:

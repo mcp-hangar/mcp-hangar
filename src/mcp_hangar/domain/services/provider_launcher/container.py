@@ -43,6 +43,7 @@ class ContainerConfig:
     read_only: bool = True
     drop_capabilities: bool = False  # Disabled: causes issues with native modules (e.g., better-sqlite3)
     user: str | None = None  # Run as specific user
+    provider_id: str | None = None  # Provider identity for container discovery
 
 
 class ContainerLauncher(ProviderLauncher):
@@ -368,6 +369,10 @@ class ContainerLauncher(ProviderLauncher):
         if config.command:
             cmd.extend(["--entrypoint", config.command[0]])
 
+        # Provider identity label for container discovery
+        if config.provider_id:
+            cmd.extend(["--label", f"mcp-hangar.provider-id={config.provider_id}"])
+
         # Image
         cmd.append(config.image)
 
@@ -394,6 +399,7 @@ class ContainerLauncher(ProviderLauncher):
         network: str = "none",
         read_only: bool = True,
         user: str | None = None,
+        provider_id: str | None = None,
     ) -> StdioClient:
         """
         Launch a container provider.
@@ -409,6 +415,7 @@ class ContainerLauncher(ProviderLauncher):
             network: Network mode ("none", "bridge", "host")
             read_only: Mount root filesystem read-only
             user: User to run as (UID:GID or username)
+            provider_id: Provider identity for container label injection
 
         Returns:
             StdioClient connected to the container
@@ -448,6 +455,7 @@ class ContainerLauncher(ProviderLauncher):
             network=network,
             read_only=read_only,
             user=user,
+            provider_id=provider_id,
         )
 
         # Build command

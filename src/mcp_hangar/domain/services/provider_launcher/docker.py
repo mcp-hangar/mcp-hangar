@@ -132,6 +132,7 @@ class DockerLauncher(ProviderLauncher):
         image: str,
         env: dict[str, str] | None = None,
         capabilities: ProviderCapabilities | None = None,
+        provider_id: str | None = None,
     ) -> list[str]:
         """
         Build secure Docker/Podman run command.
@@ -194,6 +195,10 @@ class DockerLauncher(ProviderLauncher):
                 # Docker -e format
                 cmd.extend(["-e", f"{key}={sanitized}"])
 
+        # Provider identity label for container discovery
+        if provider_id:
+            cmd.extend(["--label", f"mcp-hangar.provider-id={provider_id}"])
+
         # Image name
         cmd.append(image)
 
@@ -204,6 +209,7 @@ class DockerLauncher(ProviderLauncher):
         image: str,
         env: dict[str, str] | None = None,
         capabilities: ProviderCapabilities | None = None,
+        provider_id: str | None = None,
     ) -> StdioClient:
         """
         Launch a Docker provider with security validation.
@@ -235,7 +241,7 @@ class DockerLauncher(ProviderLauncher):
                 raise ValidationError(message=f"Environment validation failed: {errors}", field="env")
 
         # Build secure command
-        cmd = self._build_docker_command(image, env, capabilities=capabilities)
+        cmd = self._build_docker_command(image, env, capabilities=capabilities, provider_id=provider_id)
 
         # Log launch
         logger.info(f"Launching Docker container: {image}")
