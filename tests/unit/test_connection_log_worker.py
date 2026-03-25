@@ -438,3 +438,108 @@ class TestEmptyProviders:
 
         docker_monitor.poll_connections.assert_not_called()
         profiler.record_observation.assert_not_called()
+
+
+# ---------------------------------------------------------------------------
+# Test: Bootstrap factory (create_connection_log_worker)
+# ---------------------------------------------------------------------------
+
+
+class TestCreateConnectionLogWorker:
+    """Tests for the bootstrap factory function."""
+
+    def test_returns_none_when_disabled(self):
+        from mcp_hangar.server.bootstrap.workers import create_connection_log_worker
+
+        config = {"behavioral": {"connection_logging": {"enabled": False}}}
+        result = create_connection_log_worker(
+            providers={},
+            profiler=_make_profiler(),
+            config=config,
+        )
+        assert result is None
+
+    def test_returns_none_when_enabled_key_missing(self):
+        from mcp_hangar.server.bootstrap.workers import create_connection_log_worker
+
+        # Default for enabled is False, so missing key means disabled
+        config = {"behavioral": {"connection_logging": {}}}
+        result = create_connection_log_worker(
+            providers={},
+            profiler=_make_profiler(),
+            config=config,
+        )
+        assert result is None
+
+    def test_returns_none_when_config_empty(self):
+        from mcp_hangar.server.bootstrap.workers import create_connection_log_worker
+
+        result = create_connection_log_worker(
+            providers={},
+            profiler=_make_profiler(),
+            config={},
+        )
+        assert result is None
+
+    def test_returns_worker_when_enabled(self):
+        from mcp_hangar.server.bootstrap.workers import create_connection_log_worker
+
+        config = {
+            "behavioral": {
+                "connection_logging": {
+                    "enabled": True,
+                    "interval_s": 15,
+                    "docker_enabled": True,
+                    "k8s_enabled": False,
+                    "k8s_namespace": "test-ns",
+                },
+            },
+        }
+        result = create_connection_log_worker(
+            providers={},
+            profiler=_make_profiler(),
+            config=config,
+        )
+        assert result is not None
+        assert result.task == "connection_log"
+
+    def test_returns_none_when_enterprise_import_fails(self):
+        from mcp_hangar.server.bootstrap.workers import create_connection_log_worker
+
+        config = {"behavioral": {"connection_logging": {"enabled": True}}}
+
+        with patch.dict("sys.modules", {"enterprise.behavioral.connection_log_worker": None}):
+            with patch(
+                "builtins.__import__",
+                side_effect=_import_error_for("enterprise.behavioral.connection_log_worker"),
+            ):
+                result = create_connection_log_worker(
+                    providers={},
+                    profiler=_make_profiler(),
+                    config=config,
+                )
+        assert result is None
+
+    def test_config_parsing_extracts_all_keys(self):
+        from enterprise.behavioral.connection_log_worker import ConnectionLogWorker
+        from mcp_hangar.server.bootstrap.workers import create_connection_log_worker
+
+        config = {
+            "behavioral": {
+                "connection_logging": {
+                    "enabled": True,
+                    "interval_s": 42,
+                    "docker_enabled": False,
+                    "k8s_enabled": True,
+                    "k8s_namespace": "custom-ns",
+                },
+            },
+        }
+        result = create_connection_log_worker(
+            providers={},
+            profiler=_make_profiler(),
+            config=config,
+        )
+        assert isinstance(result, ConnectionLogWorker)
+        assert result.interval_s == 42
+        assert result._k8s_namespace == "custom-ns"

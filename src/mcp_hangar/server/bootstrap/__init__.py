@@ -95,7 +95,12 @@ from .observability import init_observability, shutdown_observability
 from .retry_config import init_retry_config
 from .tools import register_all_tools
 from .truncation import init_truncation
-from .workers import create_background_workers, GC_WORKER_INTERVAL_SECONDS, HEALTH_CHECK_INTERVAL_SECONDS
+from .workers import (
+    create_background_workers,
+    create_connection_log_worker,
+    GC_WORKER_INTERVAL_SECONDS,
+    HEALTH_CHECK_INTERVAL_SECONDS,
+)
 
 if TYPE_CHECKING:
     from ...bootstrap.runtime import Runtime
@@ -361,7 +366,10 @@ def bootstrap(
     init_log_buffers(PROVIDERS)
 
     # Create background workers (not started)
-    workers = create_background_workers()
+    workers = create_background_workers(
+        profiler=behavioral_profiler,
+        config=full_config,
+    )
 
     # Add config reload worker if enabled
     reload_config = full_config.get("config_reload", {})
@@ -467,6 +475,7 @@ __all__ = [
     "init_truncation",
     "shutdown_observability",
     "create_background_workers",
+    "create_connection_log_worker",
     "create_discovery_orchestrator",
     "register_all_tools",
     "_ensure_data_dir",
