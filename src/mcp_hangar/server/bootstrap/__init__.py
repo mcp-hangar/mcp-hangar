@@ -21,6 +21,7 @@ Starting is handled by the lifecycle module.
 """
 
 import asyncio
+import os
 from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Any, TYPE_CHECKING
@@ -37,91 +38,8 @@ from ..config import load_config, load_configuration
 from ..context import get_context, init_context
 from ..state import get_runtime, GROUPS, PROVIDERS
 
-# Auth components: load from enterprise when available, else noop.
-try:
-    from enterprise.auth.bootstrap import AuthComponents, NullAuthComponents, bootstrap_auth
-    from enterprise.auth.config import parse_auth_config
-
-    _enterprise_auth_available = True
-except ImportError:
-    _enterprise_auth_available = False
-
-    class AuthComponents:  # type: ignore[no-redef]
-        """Stub AuthComponents used when enterprise is not installed."""
-
-        enabled: bool = False
-        api_key_store = None
-        role_store = None
-        tap_store = None
-
-    class NullAuthComponents(AuthComponents):  # type: ignore[no-redef]
-        """Null/noop auth implementation used when enterprise is not installed."""
-
-        enabled: bool = False
-
-    def bootstrap_auth(config=None, **kwargs) -> AuthComponents:  # type: ignore[misc]
-        """Return noop auth components when enterprise is not installed."""
-        return NullAuthComponents()
-
-    def parse_auth_config(raw: dict | None = None):  # type: ignore[misc]
-        """Return empty config when enterprise is not installed."""
-        return None
-
-
-# Behavioral profiling components: load from enterprise when available, else noop.
-try:
-    from enterprise.behavioral.bootstrap import bootstrap_behavioral
-
-    _enterprise_behavioral_available = True
-except ImportError:
-    _enterprise_behavioral_available = False
-
-    def bootstrap_behavioral(db_path: str = "data/events.db", config: dict | None = None, event_bus: Any = None):  # type: ignore[misc]
-        """Return NullBehavioralProfiler when enterprise is not installed."""
-        from mcp_hangar.domain.contracts.behavioral import NullBehavioralProfiler
-
-        logger.info("behavioral_profiling_disabled", reason="enterprise_module_not_available")
-        return NullBehavioralProfiler()
-
-
-# Schema tracker: load from enterprise when available, else return None.
-try:
-    from enterprise.behavioral.bootstrap import bootstrap_schema_tracker
-
-    _enterprise_schema_tracker_available = True
-except ImportError:
-    _enterprise_schema_tracker_available = False
-
-    def bootstrap_schema_tracker(db_path: str = "data/events.db"):  # type: ignore[misc]
-        """Return None when enterprise is not installed."""
-        return None
-
-
-# Resource monitor store: load from enterprise when available, else return None.
-try:
-    from enterprise.behavioral.bootstrap import bootstrap_resource_monitor
-
-    _enterprise_resource_monitor_available = True
-except ImportError:
-    _enterprise_resource_monitor_available = False
-
-    def bootstrap_resource_monitor(db_path: str = "data/events.db", config: dict | None = None):  # type: ignore[misc]
-        """Return None when enterprise is not installed."""
-        return None
-
-
-# Report generator: load from enterprise when available, else return None.
-try:
-    from enterprise.behavioral.bootstrap import bootstrap_report_generator
-
-    _enterprise_report_generator_available = True
-except ImportError:
-    _enterprise_report_generator_available = False
-
-    def bootstrap_report_generator(db_path: str = "data/events.db", **kwargs):  # type: ignore[misc]
-        """Return None when enterprise is not installed."""
-        return None
-
+from ...domain.value_objects.license import LicenseTier
+from .enterprise import EnterpriseComponents, load_enterprise_modules
 
 from .cqrs import init_cqrs, init_auth_cqrs, init_saga, save_group_circuit_breakers
 from .discovery import _auto_add_volumes, _create_discovery_source, create_discovery_orchestrator
@@ -170,8 +88,11 @@ class ApplicationContext:
     discovery_orchestrator: DiscoveryOrchestrator | None = None
     """Discovery orchestrator if enabled - not started."""
 
-    auth_components: AuthComponents | None = None
+    auth_components: Any = None
     """Authentication and authorization components."""
+
+    license_tier: LicenseTier = LicenseTier.COMMUNITY
+    """License tier governing enterprise module availability."""
 
     config: dict[str, Any] = field(default_factory=dict)
     """Full configuration dictionary."""
@@ -377,39 +298,56 @@ def bootstrap(
     rate_limit_mw = RateLimitMiddleware(rate_limiter=runtime.rate_limiter)
     runtime.command_bus.add_middleware(rate_limit_mw)
 
-    # Initialize authentication and authorization
-    auth_config = parse_auth_config(full_config.get("auth"))
-    auth_components = bootstrap_auth(
-        config=auth_config,
+    # Validate license key and determine tier
+    raw_license_key = os.environ.get("HANGAR_LICENSE_KEY")
+    license_tier = LicenseTier.COMMUNITY
+    try:
+        from enterprise.auth.license import LicenseValidator
+
+        result = LicenseValidator().validate(raw_license_key)
+        license_tier = result.tier
+        if result.grace_period:
+            logger.warning("license_grace_period", tier=license_tier.value, org=result.org)
+    except ImportError:
+        logger.debug("license_validator_not_available", reason="enterprise_not_installed")
+
+    logger.info("license_tier", tier=license_tier.value)
+
+    # Load enterprise modules based on license tier
+    enterprise = load_enterprise_modules(
+        tier=license_tier,
+        config=full_config,
+        event_bus=runtime.event_bus,
         event_publisher=lambda event: runtime.event_bus.publish(event),
     )
+
+    # Wire enterprise components with null fallbacks
+    auth_components = enterprise.auth_components
+    if auth_components is None:
+
+        class _StubAuthComponents:
+            """Stub auth components used when enterprise auth is not loaded."""
+
+            enabled = False
+            api_key_store = None
+            role_store = None
+            tap_store = None
+            authn_middleware = None
+            authz_middleware = None
+
+        auth_components = _StubAuthComponents()
+
     init_auth_cqrs(runtime, auth_components)
 
-    # Initialize behavioral profiling
-    behavioral_config = full_config.get("behavioral", {})
-    behavioral_profiler = bootstrap_behavioral(
-        db_path=full_config.get("event_store", {}).get("path", "data/events.db"),
-        config=behavioral_config,
-        event_bus=runtime.event_bus,
-    )
+    behavioral_profiler = enterprise.behavioral_profiler
+    if behavioral_profiler is None:
+        from mcp_hangar.domain.contracts.behavioral import NullBehavioralProfiler
 
-    # Initialize schema tracker for tool schema drift detection
-    schema_tracker = bootstrap_schema_tracker(
-        db_path=full_config.get("event_store", {}).get("path", "data/events.db"),
-    )
+        behavioral_profiler = NullBehavioralProfiler()
 
-    # Initialize resource store for resource usage profiling
-    resource_store = bootstrap_resource_monitor(
-        db_path=full_config.get("event_store", {}).get("path", "data/events.db"),
-        config=behavioral_config,
-    )
-
-    # Initialize behavioral report generator
-    report_generator = bootstrap_report_generator(
-        db_path=full_config.get("event_store", {}).get("path", "data/events.db"),
-        schema_tracker=schema_tracker,
-        resource_store=resource_store,
-    )
+    schema_tracker = enterprise.schema_tracker
+    resource_store = enterprise.resource_store
+    report_generator = enterprise.report_generator
 
     # Register tool schema drift handler (ProviderStarted -> SchemaTracker -> ToolSchemaChanged)
     from mcp_hangar.application.event_handlers.tool_schema_change_handler import (
@@ -502,6 +440,7 @@ def bootstrap(
         background_workers=workers,
         discovery_orchestrator=discovery_orchestrator,
         auth_components=auth_components,
+        license_tier=license_tier,
         config=full_config,
         load_provider_handler=load_handler,
         unload_provider_handler=unload_handler,
@@ -542,10 +481,46 @@ _register_all_tools = register_all_tools
 _create_background_workers = create_background_workers
 _create_discovery_orchestrator = create_discovery_orchestrator
 
+# Backward compatibility: enterprise auth shims for existing code and tests that
+# import these names from bootstrap.__init__.  The real implementations now live
+# in bootstrap/enterprise.py (MIT) and enterprise/auth/* (BSL).
+try:
+    from enterprise.auth.bootstrap import AuthComponents, NullAuthComponents, bootstrap_auth
+    from enterprise.auth.config import parse_auth_config
+
+    _enterprise_auth_available = True
+except ImportError:
+    _enterprise_auth_available = False
+
+    class AuthComponents:  # type: ignore[no-redef]
+        """Stub AuthComponents used when enterprise is not installed."""
+
+        enabled: bool = False
+        api_key_store = None
+        role_store = None
+        tap_store = None
+
+    class NullAuthComponents(AuthComponents):  # type: ignore[no-redef]
+        """Null/noop auth implementation used when enterprise is not installed."""
+
+        enabled: bool = False
+
+    def bootstrap_auth(config=None, **kwargs) -> AuthComponents:  # type: ignore[misc]
+        """Return noop auth components when enterprise is not installed."""
+        return NullAuthComponents()
+
+    def parse_auth_config(raw: dict | None = None):  # type: ignore[misc]
+        """Return empty config when enterprise is not installed."""
+        return None
+
+
 # Re-export for backward compatibility
 __all__ = [
     "ApplicationContext",
+    "EnterpriseComponents",
     "bootstrap",
+    "load_enterprise_modules",
+    "LicenseTier",
     "GC_WORKER_INTERVAL_SECONDS",
     "HEALTH_CHECK_INTERVAL_SECONDS",
     # Initialization functions (with and without underscore prefix)
@@ -581,4 +556,10 @@ __all__ = [
     "_register_all_tools",
     "_auto_add_volumes",
     "_create_discovery_source",
+    # Backward compatibility: enterprise auth shims
+    "AuthComponents",
+    "NullAuthComponents",
+    "bootstrap_auth",
+    "parse_auth_config",
+    "_enterprise_auth_available",
 ]
