@@ -1,4 +1,5 @@
 import { HangarApiError } from '../types/common'
+import { useAuthStore } from '../store/auth'
 
 const BASE_URL = '/api'
 
@@ -31,6 +32,11 @@ function normalizePath(path: string): string {
 async function request<T>(method: string, path: string, body?: unknown): Promise<T> {
   const url = `${BASE_URL}${normalizePath(path)}`
   const headers: Record<string, string> = { 'Content-Type': 'application/json' }
+
+  const apiKey = useAuthStore.getState().apiKey
+  if (apiKey) {
+    headers['X-API-Key'] = apiKey
+  }
 
   const response = await fetch(url, {
     method,
