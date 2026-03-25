@@ -6,7 +6,8 @@
 
 - **Milestone:** v8.0 -- Behavioral Profiling Alpha
 - **Target date:** 2026-05-15
-- **Active phase:** Phase 46 (Behavioral Report Export + Resource Profiling) -- NOT STARTED
+- **Active phase:** Phase 47 (License Key Infrastructure + Dashboard Auth Enforcement) -- not started
+- **Last completed phase:** Phase 46 (Behavioral Report Export + Resource Profiling) -- 3/3 plans, 7 commits, 28 tests, 3/3 SC verified (2026-03-25)
 - **Last completed phase:** Phase 45 (Tool Schema Drift Detection) -- 3/3 plans, 5 commits, 30 tests, 4/4 SC verified (2026-03-25)
 - **Current version:** v0.12.0
 - **Last completed milestone:** v7.0 (K8s Enforcement + Licensing) -- shipped 2026-03-24
@@ -45,6 +46,10 @@
 
 ## Recently Completed
 
+- **Phase 46 COMPLETE (Behavioral Report Export + Resource Profiling)** -- 3 plans, 7 commits, 28 tests, 3/3 SC verified. ResourceStore (SQLite time-series + baseline), BehavioralReportGenerator (JSON + PDF via fpdf2), REST endpoint with 403 gating, ResourceMonitorWorker (Docker stats + K8s metrics), comprehensive test coverage (2026-03-25)
+- **Phase 46 plan 03 complete** -- 28 tests across 3 files: ResourceStore CRUD/baseline/pruning (14), BehavioralReportGenerator JSON/PDF (9), REST endpoint 403/200/400 (5), all SC46-1 through SC46-3 verified, 2 commits (2026-03-25)
+- **Phase 46 plan 02 complete** -- BehavioralReportGenerator (JSON + PDF via fpdf2) + REST endpoint GET /providers/{id}/behavioral-report with enterprise 403 gating, bootstrap wiring, route injection via provider_routes.extend(), 2 commits (2026-03-25)
+- **Phase 46 plan 01 complete** -- MIT domain extensions (DeviationType RESOURCE_* variants, ResourceSample VO, IResourceStore/IResourceMonitor protocols, NullResourceMonitor) + BSL ResourceStore (SQLite time-series, baseline computation) + BSL ResourceMonitorWorker (Docker stats, K8s metrics, deviation events, Prometheus gauges) + bootstrap wiring, 30 tests, 3 commits (2026-03-25)
 - **Phase 45 COMPLETE (Tool Schema Drift Detection)** -- 3 plans, 5 commits, 30 tests, 4/4 SC verified. SchemaTracker + ToolSchemaChanged event + handler + comprehensive tests (2026-03-25)
 - **Phase 45 plan 03 complete** -- 30 unit tests covering SC45-1 through SC45-4 at SchemaTracker and handler levels, hash determinism, description immunity, mixed changes, provider isolation, error handling, Prometheus counter, 2 commits (2026-03-25)
 - **Phase 45 plan 02 complete** -- MIT domain types + event handler: SchemaChangeType enum (ADDED/REMOVED/MODIFIED), ToolSchemaChanged per-tool domain event, Provider.get_tool_schemas() accessor, TOOL_SCHEMA_DRIFTS_TOTAL Prometheus counter, ToolSchemaChangeHandler bridging ProviderStarted to SchemaTracker with OTLP spans, bootstrap wiring, 2 commits (2026-03-25)
