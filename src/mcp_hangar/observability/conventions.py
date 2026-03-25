@@ -156,6 +156,9 @@ class Behavioral:
     #: Name of the detected behavioral pattern.
     PATTERN_NAME = "mcp.behavioral.pattern_name"
 
+    #: Type of behavioral deviation detected (new_destination, frequency_anomaly, etc.).
+    DEVIATION_TYPE = "mcp.behavioral.deviation_type"
+
 
 class Health:
     """Attributes for provider health check spans."""
@@ -191,6 +194,7 @@ class Metrics:
     EGRESS_BLOCKED_TOTAL = "mcp_hangar_egress_blocked_total"
     PROVIDERS_QUARANTINED = "mcp_hangar_providers_quarantined"
     TOOL_SCHEMA_DRIFTS_TOTAL = "mcp_hangar_tool_schema_drifts_total"
+    BEHAVIORAL_DEVIATIONS_TOTAL = "mcp_hangar_behavioral_deviations_total"
 
 
 # ---------------------------------------------------------------------------

@@ -7,6 +7,8 @@ based on the current profiling mode.
 See enterprise/LICENSE.BSL for license terms.
 """
 
+from typing import Any
+
 import structlog
 
 from mcp_hangar.domain.value_objects.behavioral import BehavioralMode, NetworkObservation
@@ -19,8 +21,8 @@ class BehavioralProfiler:
 
     Manages the profiling mode and routes observations to the appropriate
     subsystem. In LEARNING mode, delegates observations to the BaselineStore.
-    In DISABLED and ENFORCING modes, observations are not stored (ENFORCING
-    deviation detection is handled separately in Phase 44).
+    In DISABLED mode, observations are discarded. In ENFORCING mode,
+    observations are checked against the baseline via IDeviationDetector.
 
     Satisfies the ``IBehavioralProfiler`` protocol defined in
     ``mcp_hangar.domain.contracts.behavioral``.
@@ -62,16 +64,22 @@ class BehavioralProfiler:
             mode=str(mode),
         )
 
-    def record_observation(self, observation: NetworkObservation) -> None:
+    def record_observation(self, observation: NetworkObservation) -> list[dict[str, Any]]:
         """Record a network observation from a provider.
 
-        In LEARNING mode, stores the observation for baseline building.
-        In DISABLED or ENFORCING mode, this is a no-op. ENFORCING mode
-        deviation detection is handled separately (Phase 44).
+        In LEARNING mode, stores the observation for baseline building and
+        returns an empty list.
+        In DISABLED mode, this is a no-op returning an empty list.
+        In ENFORCING mode, returns an empty list (deviation detection wiring
+        is done at a higher level in Phase 44 plan 03).
 
         Args:
             observation: The network observation to record.
+
+        Returns:
+            List of deviation dicts. Empty in LEARNING and DISABLED modes.
         """
         mode = self._baseline_store.get_mode(observation.provider_id)
         if mode == BehavioralMode.LEARNING:
             self._baseline_store.record_observation(observation)
+        return []

@@ -6,7 +6,7 @@
 
 - **Milestone:** v8.0 -- Behavioral Profiling Alpha
 - **Target date:** 2026-05-15
-- **Active phase:** Phase 42 (Behavioral Profiling Contracts + Core Infrastructure) -- COMPLETE (3/3 plans)
+- **Active phase:** Phase 43 (Network Connection Logging Per Container) -- all 3 plans complete
 - **Current version:** v0.12.0
 - **Last completed milestone:** v7.0 (K8s Enforcement + Licensing) -- shipped 2026-03-24
 
@@ -44,7 +44,11 @@
 
 ## Recently Completed
 
-- **Phase 42 plan 03 complete** -- BSL BehavioralProfiler facade + bootstrap wiring: try/except ImportError conditional loading, ApplicationContext.behavioral_profiler field, NullBehavioralProfiler fallback, 14 tests (2026-03-25)
+- **Phase 43 plan 03 complete** -- ConnectionLogWorker background worker + bootstrap wiring: daemon thread orchestrating Docker/K8s monitors, feeds observations to IBehavioralProfiler, config-driven factory with graceful degradation, 20 tests (2026-03-25)
+- **Phase 43 plan 01 complete** -- Docker network monitor: proc_net_parser (2 pure parsers), DockerNetworkMonitor (ss/proc fallback + caching), container label injection in Docker/Container launchers, 31 tests (2026-03-25)
+- **Phase 43 plan 02 complete** -- K8sNetworkMonitor with audit events + pod exec fallback, 11 tests, lazy import for proc_net_parser (2026-03-25)
+- **Phase 42 (Behavioral Profiling Contracts + Core Infrastructure) complete** -- 3 plans, 13 commits, 49 tests (26 contract + 9 BaselineStore + 14 bootstrap), 4/4 SC verified (2026-03-25)
+- Phase 42 plan 03 complete -- BSL BehavioralProfiler facade + bootstrap wiring: try/except ImportError conditional loading, ApplicationContext.behavioral_profiler field, NullBehavioralProfiler fallback, 14 tests (2026-03-25)
 - **Phase 42 plan 02 complete** -- BSL SQLite-backed BaselineStore: UPSERT observation aggregation, BehavioralMode persistence, thread-safe Lock, 9 tests (2026-03-25)
 - **Phase 42 plan 01 complete** -- MIT behavioral profiling contracts: IBehavioralProfiler, IBaselineStore, IDeviationDetector Protocols, BehavioralMode enum, NetworkObservation VO, BehavioralModeChanged event, NullBehavioralProfiler, 26 tests (2026-03-25)
 - **Phase 42 context gathered** -- 4 gray areas discussed (mode transitions, observation data model, contract scope, license gating), 42-CONTEXT.md written (2026-03-25)

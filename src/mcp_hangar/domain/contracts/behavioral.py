@@ -53,15 +53,21 @@ class IBehavioralProfiler(Protocol):
         ...
 
     @abstractmethod
-    def record_observation(self, observation: "NetworkObservation") -> None:
+    def record_observation(self, observation: "NetworkObservation") -> list[dict[str, Any]]:
         """Record a network observation from a provider.
 
-        In LEARNING mode, stores the observation for baseline building.
-        In ENFORCING mode, checks against baseline for deviations.
-        In DISABLED mode, this is a no-op.
+        In LEARNING mode, stores the observation for baseline building and
+        returns an empty list.
+        In ENFORCING mode, checks against baseline for deviations and returns
+        a list of deviation dicts.
+        In DISABLED mode, this is a no-op returning an empty list.
 
         Args:
             observation: The network observation to record.
+
+        Returns:
+            List of deviation dicts. Empty list when no deviations detected
+            or when not in ENFORCING mode.
         """
         ...
 
@@ -162,6 +168,10 @@ class NullBehavioralProfiler:
         """No-op -- profiling mode cannot be changed without enterprise module."""
         pass
 
-    def record_observation(self, observation: "NetworkObservation") -> None:
-        """No-op -- observations are discarded without enterprise module."""
-        pass
+    def record_observation(self, observation: "NetworkObservation") -> list[dict[str, Any]]:
+        """No-op -- observations are discarded without enterprise module.
+
+        Returns:
+            Empty list (no deviations possible without enterprise module).
+        """
+        return []

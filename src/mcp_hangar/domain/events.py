@@ -1121,3 +1121,33 @@ class BehavioralModeChanged(DomainEvent):
 
     def __post_init__(self):
         super().__init__()
+
+
+@dataclass
+class BehavioralDeviationDetected(DomainEvent):
+    """Published when the deviation detector flags abnormal provider behavior.
+
+    Emitted during ENFORCING mode when an observation does not match the
+    learned baseline profile. The deviation_type field classifies the
+    deviation (new_destination, frequency_anomaly, protocol_drift).
+
+    Follows the same pattern as CapabilityViolationDetected.
+
+    Attributes:
+        provider_id: Provider whose behavior deviated from baseline.
+        deviation_type: Category of deviation (value from DeviationType enum).
+        observed: Description of the observed behavior (e.g. "1.2.3.4:443/tcp").
+        baseline_expected: Description of the baseline expectation.
+        severity: Severity level ("critical", "high", "medium", "low").
+        schema_version: Event schema version.
+    """
+
+    provider_id: str
+    deviation_type: str
+    observed: str
+    baseline_expected: str
+    severity: str = "high"
+    schema_version: int = 1
+
+    def __post_init__(self):
+        super().__init__()

@@ -913,6 +913,12 @@ CAPABILITY_VIOLATIONS_TOTAL = Counter(
     labels=["provider", "violation_type"],
 )
 
+BEHAVIORAL_DEVIATIONS_TOTAL = Counter(
+    name="mcp_hangar_behavioral_deviations",
+    description="Total number of behavioral deviations detected",
+    labels=["provider", "deviation_type"],
+)
+
 
 # =============================================================================
 # Register All Metrics
@@ -1013,6 +1019,7 @@ def _register_all_metrics():
     metrics.extend(
         [
             CAPABILITY_VIOLATIONS_TOTAL,
+            BEHAVIORAL_DEVIATIONS_TOTAL,
         ]
     )
 
@@ -1175,6 +1182,16 @@ def record_capability_violation(provider: str, violation_type: str) -> None:
         violation_type: Type of violation (egress_denied, capability_drift, etc.).
     """
     CAPABILITY_VIOLATIONS_TOTAL.inc(provider=provider, violation_type=violation_type)
+
+
+def record_behavioral_deviation(provider: str, deviation_type: str) -> None:
+    """Record a behavioral deviation detection.
+
+    Args:
+        provider: Provider ID whose behavior deviated from baseline.
+        deviation_type: Type of deviation (new_destination, frequency_anomaly, etc.).
+    """
+    BEHAVIORAL_DEVIATIONS_TOTAL.inc(provider=provider, deviation_type=deviation_type)
 
 
 # =============================================================================

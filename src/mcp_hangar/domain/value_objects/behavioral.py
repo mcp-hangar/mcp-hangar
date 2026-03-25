@@ -2,6 +2,7 @@
 
 Defines the core data types for the behavioral profiling subsystem:
 - BehavioralMode: Operating mode enum (learning, enforcing, disabled)
+- DeviationType: Classification of behavioral deviations detected
 - NetworkObservation: Immutable record of an observed network connection
 
 These are MIT-licensed domain primitives used by both core and enterprise code.
@@ -22,6 +23,26 @@ class BehavioralMode(Enum):
     LEARNING = "learning"
     ENFORCING = "enforcing"
     DISABLED = "disabled"
+
+    def __str__(self) -> str:
+        return self.value
+
+
+class DeviationType(Enum):
+    """Classification of behavioral deviations detected during ENFORCING mode.
+
+    NEW_DESTINATION: Provider contacted a (host, port) pair not in the baseline.
+    FREQUENCY_ANOMALY: A destination is contacted at a rate significantly above
+        the provider's average destination rate.
+    PROTOCOL_DRIFT: A known (host, port) pair was contacted using a different
+        protocol than recorded in the baseline.
+    SCHEMA_DRIFT: Placeholder for future tool schema drift detection.
+    """
+
+    NEW_DESTINATION = "new_destination"
+    FREQUENCY_ANOMALY = "frequency_anomaly"
+    PROTOCOL_DRIFT = "protocol_drift"
+    SCHEMA_DRIFT = "schema_drift"
 
     def __str__(self) -> str:
         return self.value
