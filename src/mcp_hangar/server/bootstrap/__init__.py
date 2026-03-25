@@ -76,7 +76,7 @@ try:
 except ImportError:
     _enterprise_behavioral_available = False
 
-    def bootstrap_behavioral(db_path: str = "data/events.db", config: dict | None = None):  # type: ignore[misc]
+    def bootstrap_behavioral(db_path: str = "data/events.db", config: dict | None = None, event_bus: Any = None):  # type: ignore[misc]
         """Return NullBehavioralProfiler when enterprise is not installed."""
         from mcp_hangar.domain.contracts.behavioral import NullBehavioralProfiler
 
@@ -341,6 +341,7 @@ def bootstrap(
     behavioral_profiler = bootstrap_behavioral(
         db_path=full_config.get("event_store", {}).get("path", "data/events.db"),
         config=behavioral_config,
+        event_bus=runtime.event_bus,
     )
 
     # Initialize retry configuration

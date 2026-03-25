@@ -53,6 +53,15 @@ def init_event_handlers(runtime: "Runtime") -> None:
     runtime.event_bus.subscribe(ToolInvocationFailed, otlp_audit_handler.handle)
     runtime.event_bus.subscribe(ProviderStateChanged, otlp_audit_handler.handle)
 
+    # Behavioral deviation handler (OTLP spans + Prometheus counter)
+    from ...application.event_handlers.behavioral_deviation_handler import (
+        BehavioralDeviationEventHandler,
+    )
+    from ...domain.events import BehavioralDeviationDetected
+
+    behavioral_deviation_handler = BehavioralDeviationEventHandler()
+    runtime.event_bus.subscribe(BehavioralDeviationDetected, behavioral_deviation_handler.handle)
+
     # Knowledge base handler (PostgreSQL persistence)
     from ...application.event_handlers.knowledge_base_handler import KnowledgeBaseEventHandler
     from ...infrastructure.async_executor import async_executor
@@ -69,6 +78,7 @@ def init_event_handlers(runtime: "Runtime") -> None:
             "audit",
             "security",
             "otlp_audit",
+            "behavioral_deviation",
             "knowledge_base",
         ],
     )

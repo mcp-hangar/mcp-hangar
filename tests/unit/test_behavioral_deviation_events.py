@@ -237,9 +237,15 @@ class TestBehavioralDeviationEventHandler:
         """Handler ignores events that are not BehavioralDeviationDetected."""
         handler = BehavioralDeviationEventHandler()
 
-        # Create a mock non-matching event
-        non_deviation_event = MagicMock(spec=DomainEvent)
-        type(non_deviation_event).__class__ = type(DomainEvent)
+        # Use a real DomainEvent subclass that is NOT BehavioralDeviationDetected
+        from mcp_hangar.domain.events import ProviderStarted
+
+        non_deviation_event = ProviderStarted(
+            provider_id="test-provider",
+            mode="subprocess",
+            tools_count=3,
+            startup_duration_ms=100.0,
+        )
 
         with patch(
             "mcp_hangar.application.event_handlers.behavioral_deviation_handler.prometheus_metrics"
