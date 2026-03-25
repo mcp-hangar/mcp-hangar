@@ -6,7 +6,8 @@
 
 - **Milestone:** v8.0 -- Behavioral Profiling Alpha
 - **Target date:** 2026-05-15
-- **Active phase:** Phase 43 (Network Connection Logging Per Container) -- all 3 plans complete
+- **Active phase:** Phase 45 (Tool Schema Drift Detection) -- Plan 01 complete, 1/3 plans
+- **Last completed phase:** Phase 44 (Behavioral Deviation Detection) -- 3/3 plans, 7 commits, 28 tests, 4/4 SC verified (2026-03-25)
 - **Current version:** v0.12.0
 - **Last completed milestone:** v7.0 (K8s Enforcement + Licensing) -- shipped 2026-03-24
 
@@ -44,9 +45,16 @@
 
 ## Recently Completed
 
-- **Phase 43 plan 03 complete** -- ConnectionLogWorker background worker + bootstrap wiring: daemon thread orchestrating Docker/K8s monitors, feeds observations to IBehavioralProfiler, config-driven factory with graceful degradation, 20 tests (2026-03-25)
-- **Phase 43 plan 01 complete** -- Docker network monitor: proc_net_parser (2 pure parsers), DockerNetworkMonitor (ss/proc fallback + caching), container label injection in Docker/Container launchers, 31 tests (2026-03-25)
-- **Phase 43 plan 02 complete** -- K8sNetworkMonitor with audit events + pod exec fallback, 11 tests, lazy import for proc_net_parser (2026-03-25)
+- **Phase 45 plan 01 complete** -- BSL SchemaTracker with SQLite storage (BaselineStore pattern), compute_schema_hash SHA-256, check_and_store drift detection (ADDED/REMOVED/MODIFIED), first-seen returns empty (SC45-4), bootstrap_schema_tracker factory, ApplicationContext.schema_tracker field, 1 commit (2026-03-25)
+- **Phase 44 COMPLETE (Behavioral Deviation Detection)** -- 3 plans, 7 commits, 28 tests, 4/4 SC verified. DeviationType enum + BehavioralDeviationDetected event + DeviationDetector (3 rules: new destination, protocol drift, frequency anomaly) + ENFORCING refactoring + event handler bridge + config propagation + end-to-end verification (2026-03-25)
+- **Phase 44 plan 03 complete** -- Config parsing validation + end-to-end SC44-1 through SC44-4 verification, 8 tests, stale Phase 42 ENFORCING test fixed, 2 commits (2026-03-25)
+- **Phase 44 plan 02 complete** -- BehavioralProfiler ENFORCING refactoring (check-first-store-second), BehavioralDeviationEventHandler (OTLP + Prometheus bridge), bootstrap wiring with DeviationDetector + EventBus injection, 11 tests, 2 commits (2026-03-25)
+- **Phase 44 plan 01 complete** -- MIT domain types (DeviationType enum, BehavioralDeviationDetected event, OTEL conventions, Prometheus counter) + BSL DeviationDetector with 3 detection rules (new destination, protocol drift, frequency anomaly), 9 tests, 3 commits (2026-03-25)
+- **Phase 44 context gathered** -- 6 gray areas discussed (detection trigger, severity model, frequency thresholds, event emission, profiler refactoring, protocol drift), 44-CONTEXT.md written (2026-03-25)
+- **Phase 43 (Network Connection Logging Per Container) complete** -- 3 plans, 9 commits, 62 tests (31 Docker/parser + 11 K8s + 20 worker/bootstrap), 4/4 SC verified (2026-03-25)
+- Phase 43 plan 03 complete -- ConnectionLogWorker background worker + bootstrap wiring: daemon thread orchestrating Docker/K8s monitors, feeds observations to IBehavioralProfiler, config-driven factory with graceful degradation, 20 tests (2026-03-25)
+- Phase 43 plan 01 complete -- Docker network monitor: proc_net_parser (2 pure parsers), DockerNetworkMonitor (ss/proc fallback + caching), container label injection in Docker/Container launchers, 31 tests (2026-03-25)
+- Phase 43 plan 02 complete -- K8sNetworkMonitor with audit events + pod exec fallback, 11 tests, lazy import for proc_net_parser (2026-03-25)
 - **Phase 42 (Behavioral Profiling Contracts + Core Infrastructure) complete** -- 3 plans, 13 commits, 49 tests (26 contract + 9 BaselineStore + 14 bootstrap), 4/4 SC verified (2026-03-25)
 - Phase 42 plan 03 complete -- BSL BehavioralProfiler facade + bootstrap wiring: try/except ImportError conditional loading, ApplicationContext.behavioral_profiler field, NullBehavioralProfiler fallback, 14 tests (2026-03-25)
 - **Phase 42 plan 02 complete** -- BSL SQLite-backed BaselineStore: UPSERT observation aggregation, BehavioralMode persistence, thread-safe Lock, 9 tests (2026-03-25)
