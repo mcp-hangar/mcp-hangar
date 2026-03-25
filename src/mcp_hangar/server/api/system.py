@@ -1,6 +1,8 @@
 """System info endpoint handler for the REST API.
 
-Implements GET /system returning system-wide metrics, uptime, and version.
+Implements:
+- GET /system returning system-wide metrics, uptime, and version.
+- GET /system/me returning current user authentication status.
 """
 
 import time
@@ -48,7 +50,32 @@ async def get_system_info(request: Request) -> HangarJSONResponse:
     return HangarJSONResponse({"system": system_data})
 
 
+async def get_current_user(request: Request) -> HangarJSONResponse:
+    """Return current user auth status. Used by SPA to check authentication.
+
+    When auth middleware is active, request.state.auth is populated with the
+    authenticated principal. When auth is not enabled, request.state.auth
+    will be absent and the response indicates unauthenticated (no login required).
+
+    Returns:
+        JSON with authenticated status and optional principal info.
+    """
+    auth = getattr(request.state, "auth", None)
+    if auth is None:
+        return HangarJSONResponse({"authenticated": False, "principal": None})
+    return HangarJSONResponse(
+        {
+            "authenticated": True,
+            "principal": {
+                "id": str(auth.principal.id) if hasattr(auth, "principal") else "unknown",
+                "type": auth.principal.type.value if hasattr(auth.principal, "type") else "unknown",
+            },
+        }
+    )
+
+
 # Route definitions for mounting in the API router
 system_routes = [
     Route("/", get_system_info, methods=["GET"]),
+    Route("/me", get_current_user, methods=["GET"]),
 ]

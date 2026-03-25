@@ -187,9 +187,11 @@ class ServerLifecycle:
         ]
 
         # Create REST API router for /api/* endpoints
+        # Stdio mode: pass auth_components from context for consistency.
+        # Auth enforcement on REST API applies even in stdio mode when auth is configured.
         from ..server.api import create_api_router
 
-        api_app = create_api_router()
+        api_app = create_api_router(auth_components=getattr(self._context, "auth_components", None))
 
         # Mount health/metrics and REST API together in one Starlette app
         from starlette.routing import Mount

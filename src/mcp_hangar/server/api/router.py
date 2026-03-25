@@ -2,9 +2,12 @@
 
 Creates a Starlette application with:
 - CORSMiddleware configured from environment
+- Optional AuthMiddlewareHTTP for enterprise authentication
 - Exception handlers mapping domain errors to JSON error envelopes
 - Provider endpoint routes mounted at /providers
 """
+
+from typing import Any
 
 from starlette.applications import Starlette
 from starlette.middleware.cors import CORSMiddleware
@@ -14,11 +17,19 @@ from ...domain.exceptions import MCPError
 from .middleware import error_handler, get_cors_config
 
 
-def create_api_router() -> Starlette:
+def create_api_router(auth_components: Any = None) -> Starlette:
     """Create the REST API Starlette application.
 
     Returns a fully configured Starlette app with CORS middleware,
     error handlers, and all API endpoint routes mounted.
+
+    When auth_components is provided and enabled, the enterprise
+    AuthMiddlewareHTTP is mounted to protect all API routes.
+
+    Args:
+        auth_components: Optional enterprise auth components. When present
+            and auth_components.enabled is True, authentication middleware
+            is added to the application.
 
     Returns:
         Starlette application serving the REST API.
@@ -68,6 +79,16 @@ def create_api_router() -> Starlette:
     }
 
     app = Starlette(routes=routes, exception_handlers=exception_handlers)
+
+    # Auth middleware: mount when enterprise auth is enabled.
+    # Must be added BEFORE CORSMiddleware so CORS is outermost (handles OPTIONS preflight first).
+    if auth_components is not None and hasattr(auth_components, "enabled") and auth_components.enabled:
+        try:
+            from enterprise.auth.http_middleware import AuthMiddlewareHTTP
+
+            app.add_middleware(AuthMiddlewareHTTP, authn=auth_components.authn_middleware)
+        except ImportError:
+            pass  # Enterprise not installed, skip auth middleware
 
     cors_config = get_cors_config()
     app.add_middleware(CORSMiddleware, **cors_config)

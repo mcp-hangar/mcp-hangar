@@ -158,8 +158,8 @@ class MCPServerFactory:
         )
         aux_app = Starlette(routes=routes)
 
-        # Create REST API app
-        api_app = create_api_router()
+        # Create REST API app (pass auth_components for middleware mounting)
+        api_app = create_api_router(auth_components=self._auth_components)
 
         # Resolve UI static files directory (opt-in)
         ui_dist = resolve_ui_dist(self._config.ui_dist)
