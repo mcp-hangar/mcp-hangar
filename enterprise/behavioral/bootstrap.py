@@ -1,7 +1,8 @@
 """Behavioral profiling bootstrap -- BSL 1.1 licensed.
 
 Creates and configures the BehavioralProfiler with its backing BaselineStore,
-DeviationDetector, and optional EventBus integration.
+DeviationDetector, and optional EventBus integration. Also provides the
+bootstrap_schema_tracker factory for tool schema drift detection.
 Called from the server bootstrap pipeline when the enterprise module is available.
 
 See enterprise/LICENSE.BSL for license terms.
@@ -75,3 +76,19 @@ def bootstrap_behavioral(
     )
 
     return profiler
+
+
+def bootstrap_schema_tracker(db_path: str = "data/events.db") -> "SchemaTracker":
+    """Create a configured SchemaTracker instance.
+
+    Args:
+        db_path: Path to SQLite database file. Use ``":memory:"`` for testing.
+
+    Returns:
+        Initialized SchemaTracker sharing the same DB as BaselineStore.
+    """
+    from .schema_tracker import SchemaTracker
+
+    tracker = SchemaTracker(db_path=db_path)
+    logger.info("schema_tracker_bootstrapped", db_path=db_path)
+    return tracker

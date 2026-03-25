@@ -84,6 +84,19 @@ except ImportError:
         return NullBehavioralProfiler()
 
 
+# Schema tracker: load from enterprise when available, else return None.
+try:
+    from enterprise.behavioral.bootstrap import bootstrap_schema_tracker
+
+    _enterprise_schema_tracker_available = True
+except ImportError:
+    _enterprise_schema_tracker_available = False
+
+    def bootstrap_schema_tracker(db_path: str = "data/events.db"):  # type: ignore[misc]
+        """Return None when enterprise is not installed."""
+        return None
+
+
 from .cqrs import init_cqrs, init_auth_cqrs, init_saga, save_group_circuit_breakers
 from .discovery import _auto_add_volumes, _create_discovery_source, create_discovery_orchestrator
 from .event_handlers import init_event_handlers
@@ -156,6 +169,9 @@ class ApplicationContext:
 
     behavioral_profiler: Any = None
     """Behavioral profiler (enterprise) or NullBehavioralProfiler."""
+
+    schema_tracker: Any = None
+    """Schema tracker (enterprise) or None when not available."""
 
     @property
     def providers(self) -> dict[str, Any]:
@@ -344,6 +360,11 @@ def bootstrap(
         event_bus=runtime.event_bus,
     )
 
+    # Initialize schema tracker for tool schema drift detection
+    schema_tracker = bootstrap_schema_tracker(
+        db_path=full_config.get("event_store", {}).get("path", "data/events.db"),
+    )
+
     # Initialize retry configuration
     init_retry_config(full_config)
 
@@ -428,6 +449,7 @@ def bootstrap(
         catalog_repository=catalog_repo,
         discovery_registry=discovery_registry,
         behavioral_profiler=behavioral_profiler,
+        schema_tracker=schema_tracker,
     )
 
     # Update application context for tools to access

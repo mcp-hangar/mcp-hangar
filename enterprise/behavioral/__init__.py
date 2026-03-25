@@ -2,8 +2,9 @@
 
 Provides the BehavioralProfiler facade, SQLite-backed BaselineStore,
 DockerNetworkMonitor, K8sNetworkMonitor, and ConnectionLogWorker for
-container/pod connection observability, and bootstrap_behavioral() factory
-for conditional loading by the server bootstrap pipeline.
+container/pod connection observability, SchemaTracker for tool schema drift
+detection, and bootstrap_behavioral() factory for conditional loading by the
+server bootstrap pipeline.
 
 See enterprise/LICENSE.BSL for license terms.
 """
@@ -14,6 +15,7 @@ from .connection_log_worker import ConnectionLogWorker
 from .docker_network_monitor import DockerNetworkMonitor
 from .k8s_network_monitor import K8sNetworkMonitor
 from .profiler import BehavioralProfiler
+from .schema_tracker import SchemaTracker
 
 __all__ = [
     "BaselineStore",
@@ -21,5 +23,6 @@ __all__ = [
     "ConnectionLogWorker",
     "DockerNetworkMonitor",
     "K8sNetworkMonitor",
+    "SchemaTracker",
     "bootstrap_behavioral",
 ]
