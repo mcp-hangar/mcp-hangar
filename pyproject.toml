@@ -55,6 +55,9 @@ opentelemetry = [
 postgres = [
     "asyncpg>=0.29.0",
 ]
+enterprise = [
+    "fpdf2>=2.8.0",
+]
 [project.scripts]
 mcp-hangar = "mcp_hangar.server.cli:cli_main"
 [project.urls]

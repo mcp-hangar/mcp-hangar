@@ -99,6 +99,36 @@ def bootstrap_resource_monitor(
     return store
 
 
+def bootstrap_report_generator(
+    db_path: str = "data/events.db",
+    schema_tracker: Any = None,
+    resource_store: Any = None,
+) -> "BehavioralReportGenerator":
+    """Create a configured BehavioralReportGenerator instance.
+
+    Creates its own BaselineStore for read access (safe with SQLite WAL mode)
+    and wires in the provided schema_tracker and resource_store.
+
+    Args:
+        db_path: Path to SQLite database file. Use ``":memory:"`` for testing.
+        schema_tracker: Optional SchemaTracker for tool schema history.
+        resource_store: Optional ResourceStore for resource usage data.
+
+    Returns:
+        Initialized BehavioralReportGenerator.
+    """
+    from .report_generator import BehavioralReportGenerator
+
+    baseline_store = BaselineStore(db_path=db_path)
+    gen = BehavioralReportGenerator(
+        baseline_store=baseline_store,
+        schema_tracker=schema_tracker,
+        resource_store=resource_store,
+    )
+    logger.info("report_generator_bootstrapped", db_path=db_path)
+    return gen
+
+
 def bootstrap_schema_tracker(db_path: str = "data/events.db") -> "SchemaTracker":
     """Create a configured SchemaTracker instance.
 
