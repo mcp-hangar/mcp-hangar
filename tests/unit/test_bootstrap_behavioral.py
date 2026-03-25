@@ -85,7 +85,7 @@ class TestBehavioralProfilerDelegation:
         records = store.get_observations("test-provider")
         assert len(records) == 0
 
-    def test_profiler_ignores_in_enforcing_mode(self) -> None:
+    def test_profiler_stores_in_enforcing_mode(self) -> None:
         from enterprise.behavioral.baseline_store import BaselineStore
         from enterprise.behavioral.profiler import BehavioralProfiler
 
@@ -99,9 +99,9 @@ class TestBehavioralProfilerDelegation:
         obs = _make_observation("test-provider")
         profiler.record_observation(obs)
 
-        # Verify nothing stored (deviation detection is Phase 44)
+        # ENFORCING mode now stores after deviation check (Phase 44 refactoring)
         records = store.get_observations("test-provider")
-        assert len(records) == 0
+        assert len(records) == 1
 
     def test_profiler_get_mode_delegates_to_store(self) -> None:
         from enterprise.behavioral.baseline_store import BaselineStore
