@@ -6,7 +6,7 @@
 
 - **Milestone:** v8.0 -- Behavioral Profiling Alpha
 - **Target date:** 2026-05-15
-- **Active phase:** Phase 45 (Tool Schema Drift Detection) -- COMPLETE, 3/3 plans
+- **Active phase:** Phase 46 (Behavioral Report Export + Resource Profiling) -- NOT STARTED
 - **Last completed phase:** Phase 45 (Tool Schema Drift Detection) -- 3/3 plans, 5 commits, 30 tests, 4/4 SC verified (2026-03-25)
 - **Current version:** v0.12.0
 - **Last completed milestone:** v7.0 (K8s Enforcement + Licensing) -- shipped 2026-03-24

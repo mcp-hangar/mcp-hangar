@@ -60,10 +60,10 @@ Roadmap: `.planning/milestones/v6.0-otel-foundation-ROADMAP.md`.
 
 ---
 
-## v7.0: Kubernetes Enforcement Foundation + Licensing -- IN PROGRESS
+## v7.0: Kubernetes Enforcement Foundation + Licensing -- COMPLETE (2026-03-24)
 
 **PyPI:** v0.13.0
-**Phases:** 35-41 (3 of 7 complete: 35, 36, 37)
+**Phases:** 35-41 (7 of 7 complete)
 **Roadmap:** `.planning/milestones/v7.0-k8s-enforcement-licensing-ROADMAP.md`
 
 ### Licensing track (complete)
@@ -72,22 +72,29 @@ Roadmap: `.planning/milestones/v6.0-otel-foundation-ROADMAP.md`.
 - **Phase 36** (Enterprise Directory Migration) -- COMPLETE (2026-03-24): 4 plans, 16 boundary tests, enterprise/ structure verified
 - **Phase 37** (CI Import Boundary + License Verification) -- COMPLETE (2026-03-24): 2 plans, CI merge gate, dual-license docs
 
-### K8s enforcement track (not started)
+### K8s enforcement track (complete)
 
-- **Phase 38** (Capability Declaration Schema) -- next up
-- **Phase 39** (NetworkPolicy Generation)
-- **Phase 40** (Operator Enforcement Loop + Violation Signals)
-- **Phase 41** (Admission + Runtime Capability Verification)
+- **Phase 38** (Capability Declaration Schema) -- COMPLETE (2026-03-24): 3 plans, 40 tests, Python VO from_dict() + CRD types + example configs
+- **Phase 39** (NetworkPolicy Generation) -- COMPLETE (2026-03-24): 3 plans, 21 tests (15 builder + 6 reconciler), Go NetworkPolicyBuilder + reconciler integration + Docker binary enforcement
+- **Phase 40** (Operator Enforcement Loop + Violation Signals) -- COMPLETE (2026-03-24): 3 plans, 66 tests, ViolationType/ViolationSeverity VOs, Prometheus counters (Python + Go), reconcileViolationDetection, ViolationRecord CRD status, cross-language integration tests
+- **Phase 41** (Admission + Runtime Capability Verification) -- COMPLETE (2026-03-24): 3 plans, 20 tests (11 Go + 9 Python), CEL admission validation, ExpectedTools CRD field, runtime drift detection, enforcement modes, saga safety net, verified 4/4 SC
 
 ---
 
-## v8.0: Behavioral Profiling Alpha -- PLANNED
+## v8.0: Behavioral Profiling Alpha -- IN PROGRESS
 
 **PyPI:** v0.14.0
-**Phases:** 42-47
+**Phases:** 42-47 (4 of 6 complete)
 **Roadmap:** `.planning/milestones/v8.0-behavioral-profiling-ROADMAP.md`
 
 Network behavioral baseline, deviation detection, tool schema drift, resource profiling, behavioral reports, license key infrastructure, dashboard auth enforcement.
+
+### Completed phases
+
+- **Phase 42** (Behavioral Profiling Contracts + Core Infrastructure) -- COMPLETE (2026-03-25): 3 plans, 13 commits, 49 tests, Protocol contracts (IBehavioralProfiler/IBaselineStore/IDeviationDetector), BehavioralMode enum, NetworkObservation VO, SQLite BaselineStore, NullBehavioralProfiler, bootstrap wiring, behavioral config section, verified 4/4 SC
+- **Phase 43** (Network Connection Logging Per Container) -- COMPLETE (2026-03-25): 3 plans, 9 commits, 62 tests, Docker/K8s network monitors, ConnectionLogWorker background worker, proc_net_parser, verified 4/4 SC
+- **Phase 44** (Behavioral Deviation Detection) -- COMPLETE (2026-03-25): 3 plans, 7 commits, 28 tests, DeviationType enum, BehavioralDeviationDetected event, DeviationDetector (3 rules), ENFORCING refactoring, event handler bridge, verified 4/4 SC
+- **Phase 45** (Tool Schema Drift Detection) -- COMPLETE (2026-03-25): 3 plans, 8 commits, 30 tests, SchemaTracker with SQLite storage, ToolSchemaChanged event, ToolSchemaChangeHandler, Prometheus counter, verified 4/4 SC
 
 ---
 
