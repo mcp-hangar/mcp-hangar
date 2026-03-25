@@ -37,12 +37,18 @@ class DeviationType(Enum):
     PROTOCOL_DRIFT: A known (host, port) pair was contacted using a different
         protocol than recorded in the baseline.
     SCHEMA_DRIFT: Placeholder for future tool schema drift detection.
+    RESOURCE_CPU_SPIKE: Provider CPU usage significantly exceeds baseline mean.
+    RESOURCE_MEMORY_SPIKE: Provider memory usage significantly exceeds baseline mean.
+    RESOURCE_NETWORK_IO_SPIKE: Provider network I/O significantly exceeds baseline mean.
     """
 
     NEW_DESTINATION = "new_destination"
     FREQUENCY_ANOMALY = "frequency_anomaly"
     PROTOCOL_DRIFT = "protocol_drift"
     SCHEMA_DRIFT = "schema_drift"
+    RESOURCE_CPU_SPIKE = "resource_cpu_spike"
+    RESOURCE_MEMORY_SPIKE = "resource_memory_spike"
+    RESOURCE_NETWORK_IO_SPIKE = "resource_network_io_spike"
 
     def __str__(self) -> str:
         return self.value
@@ -94,3 +100,29 @@ class NetworkObservation:
             raise ValueError("NetworkObservation destination_host cannot be empty")
         if not (0 <= self.destination_port <= 65535):
             raise ValueError(f"NetworkObservation destination_port must be 0-65535, got {self.destination_port}")
+
+
+@dataclass(frozen=True)
+class ResourceSample:
+    """Immutable record of a resource usage sample from a provider container.
+
+    Captured by the ResourceMonitorWorker from Docker stats or K8s metrics
+    and fed into the resource profiling pipeline.
+
+    Attributes:
+        provider_id: Identifier of the provider.
+        sampled_at: ISO 8601 timestamp when the sample was taken.
+        cpu_percent: CPU usage percentage (0-100+, can exceed 100 on multi-core).
+        memory_bytes: Current memory usage in bytes.
+        memory_limit_bytes: Memory limit of the container in bytes.
+        network_rx_bytes: Cumulative network bytes received.
+        network_tx_bytes: Cumulative network bytes transmitted.
+    """
+
+    provider_id: str
+    sampled_at: str
+    cpu_percent: float
+    memory_bytes: int
+    memory_limit_bytes: int
+    network_rx_bytes: int
+    network_tx_bytes: int

@@ -175,3 +175,119 @@ class NullBehavioralProfiler:
             Empty list (no deviations possible without enterprise module).
         """
         return []
+
+
+@runtime_checkable
+class IResourceStore(Protocol):
+    """Persistence for time-series resource usage samples and computed baselines.
+
+    Stores CPU, memory, and network I/O samples during both LEARNING and
+    ENFORCING phases. Computes statistical baselines (mean + stddev) from
+    accumulated samples. Enterprise layer provides a SQLite-backed implementation.
+    """
+
+    @abstractmethod
+    def record_sample(self, sample: "ResourceSample") -> None:
+        """Persist a resource usage sample.
+
+        Args:
+            sample: The resource sample to store.
+        """
+        ...
+
+    @abstractmethod
+    def get_samples(self, provider_id: str, limit: int = 100) -> list[dict[str, Any]]:
+        """Retrieve recent resource samples for a provider.
+
+        Args:
+            provider_id: Identifier of the provider.
+            limit: Maximum number of samples to return (most recent first).
+
+        Returns:
+            List of sample records as dicts, ordered by sampled_at descending.
+        """
+        ...
+
+    @abstractmethod
+    def get_baseline(self, provider_id: str) -> dict[str, Any] | None:
+        """Retrieve the computed resource baseline for a provider.
+
+        Args:
+            provider_id: Identifier of the provider.
+
+        Returns:
+            Baseline dict with mean/stddev statistics, or None if not computed.
+        """
+        ...
+
+    @abstractmethod
+    def compute_and_store_baseline(self, provider_id: str) -> dict[str, Any] | None:
+        """Compute and persist a resource baseline from accumulated samples.
+
+        Requires a minimum number of samples (typically 10) to produce
+        a meaningful baseline. Returns None if insufficient data.
+
+        Args:
+            provider_id: Identifier of the provider.
+
+        Returns:
+            Baseline dict with mean/stddev statistics, or None if insufficient data.
+        """
+        ...
+
+    @abstractmethod
+    def prune(self, retention_days: int = 7) -> int:
+        """Delete resource samples older than retention period.
+
+        Args:
+            retention_days: Number of days to retain samples (default 7).
+
+        Returns:
+            Number of rows deleted.
+        """
+        ...
+
+
+@runtime_checkable
+class IResourceMonitor(Protocol):
+    """Background monitor collecting resource usage from provider containers.
+
+    Polls Docker containers or K8s pods for CPU, memory, and network I/O
+    metrics. Enterprise layer provides a real implementation; MIT core
+    ships with NullResourceMonitor.
+    """
+
+    @abstractmethod
+    def start(self) -> None:
+        """Start the resource monitor background thread."""
+        ...
+
+    @abstractmethod
+    def stop(self) -> None:
+        """Stop the resource monitor background thread."""
+        ...
+
+    @property
+    @abstractmethod
+    def running(self) -> bool:
+        """Whether the monitor is currently running."""
+        ...
+
+
+class NullResourceMonitor:
+    """No-op resource monitor. Always reports not running.
+
+    Used when enterprise resource monitoring is not installed.
+    Satisfies the IResourceMonitor protocol at runtime.
+    """
+
+    def start(self) -> None:
+        """No-op -- resource monitoring not available without enterprise module."""
+
+    def stop(self) -> None:
+        """No-op -- nothing to stop."""
+
+    @property
+    def running(self) -> bool:
+        """Always False -- monitor is never active without enterprise module."""
+        return False
