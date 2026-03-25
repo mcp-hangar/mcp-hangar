@@ -1,9 +1,13 @@
-"""Tests for Docker network monitor: /proc/net/tcp and ss output parsers.
+"""Tests for Docker network monitor: parsers, monitor, and container label injection.
 
 Tests cover:
 - parse_proc_net_tcp: hex IP decoding, port extraction, state filtering, loopback filtering
 - parse_ss_output: ESTAB line extraction, IPv6 bracket notation, loopback filtering
+- DockerNetworkMonitor: poll_connections, ss fallback, caching, error handling
+- Container label injection: DockerLauncher and ContainerLauncher --label flags
 """
+
+from unittest.mock import MagicMock, patch
 
 import pytest
 
@@ -262,3 +266,309 @@ class TestParseSsOutput:
         hosts = {r[0] for r in result}
         assert "93.184.216.34" in hosts
         assert "10.0.0.1" in hosts
+
+
+# ===========================================================================
+# Tests for DockerNetworkMonitor
+# ===========================================================================
+
+
+class TestDockerNetworkMonitorPollConnections:
+    """Tests for DockerNetworkMonitor.poll_connections."""
+
+    def test_poll_connections_returns_network_observations(self):
+        """poll_connections should return NetworkObservation records from container ss output."""
+        from enterprise.behavioral.docker_network_monitor import DockerNetworkMonitor
+
+        mock_client = MagicMock()
+        monitor = DockerNetworkMonitor.__new__(DockerNetworkMonitor)
+        monitor._client = mock_client
+        monitor._ss_available = {}
+
+        mock_container = MagicMock()
+        mock_container.short_id = "abc123"
+        mock_client.containers.list.return_value = [mock_container]
+
+        ss_output = (SS_OUTPUT_HEADER + "\n" + SS_OUTPUT_ESTAB).encode("utf-8")
+        mock_container.exec_run.return_value = (0, (ss_output, None))
+
+        results = monitor.poll_connections("my-provider")
+
+        assert len(results) == 1
+        obs = results[0]
+        assert obs.provider_id == "my-provider"
+        assert obs.destination_host == "93.184.216.34"
+        assert obs.destination_port == 443
+        assert obs.protocol == "tcp"
+        assert obs.direction == "outbound"
+
+    def test_poll_connections_finds_container_by_label(self):
+        """poll_connections should filter containers by mcp-hangar.provider-id label."""
+        from enterprise.behavioral.docker_network_monitor import DockerNetworkMonitor
+
+        mock_client = MagicMock()
+        monitor = DockerNetworkMonitor.__new__(DockerNetworkMonitor)
+        monitor._client = mock_client
+        monitor._ss_available = {}
+
+        mock_client.containers.list.return_value = []
+
+        results = monitor.poll_connections("my-provider")
+
+        mock_client.containers.list.assert_called_once_with(
+            filters={"label": "mcp-hangar.provider-id=my-provider", "status": "running"}
+        )
+        assert results == []
+
+    def test_poll_connections_returns_empty_list_when_no_container(self):
+        """poll_connections should return empty list when no container matches."""
+        from enterprise.behavioral.docker_network_monitor import DockerNetworkMonitor
+
+        mock_client = MagicMock()
+        monitor = DockerNetworkMonitor.__new__(DockerNetworkMonitor)
+        monitor._client = mock_client
+        monitor._ss_available = {}
+
+        mock_client.containers.list.return_value = []
+
+        results = monitor.poll_connections("missing-provider")
+        assert results == []
+
+    def test_poll_connections_returns_empty_list_when_exec_fails(self):
+        """poll_connections should return empty list when both ss and /proc/net/tcp exec fail."""
+        from enterprise.behavioral.docker_network_monitor import DockerNetworkMonitor
+
+        mock_client = MagicMock()
+        monitor = DockerNetworkMonitor.__new__(DockerNetworkMonitor)
+        monitor._client = mock_client
+        monitor._ss_available = {}
+
+        mock_container = MagicMock()
+        mock_container.short_id = "abc123"
+        mock_client.containers.list.return_value = [mock_container]
+
+        # Both exec_run calls raise an exception
+        mock_container.exec_run.side_effect = Exception("exec failed")
+
+        results = monitor.poll_connections("my-provider")
+        assert results == []
+
+
+class TestDockerNetworkMonitorSsFallback:
+    """Tests for ss-to-/proc/net/tcp fallback behavior."""
+
+    def test_falls_back_to_proc_net_tcp_when_ss_fails(self):
+        """When ss returns non-zero exit, should fall back to /proc/net/tcp."""
+        from enterprise.behavioral.docker_network_monitor import DockerNetworkMonitor
+
+        mock_client = MagicMock()
+        monitor = DockerNetworkMonitor.__new__(DockerNetworkMonitor)
+        monitor._client = mock_client
+        monitor._ss_available = {}
+
+        mock_container = MagicMock()
+        mock_container.short_id = "abc123"
+        mock_client.containers.list.return_value = [mock_container]
+
+        proc_content = (PROC_NET_TCP_HEADER + "\n" + PROC_NET_TCP_ESTABLISHED_TO_EXTERNAL).encode("utf-8")
+
+        # ss fails with non-zero exit, /proc/net/tcp succeeds
+        mock_container.exec_run.side_effect = [
+            (1, (None, None)),  # ss fails
+            (0, (proc_content, None)),  # /proc/net/tcp succeeds
+        ]
+
+        results = monitor.poll_connections("my-provider")
+
+        assert len(results) == 1
+        assert results[0].destination_host == "94.216.52.34"
+        assert results[0].destination_port == 443
+
+    def test_caches_ss_unavailability_per_container(self):
+        """After ss fails once, subsequent polls should skip ss for that container."""
+        from enterprise.behavioral.docker_network_monitor import DockerNetworkMonitor
+
+        mock_client = MagicMock()
+        monitor = DockerNetworkMonitor.__new__(DockerNetworkMonitor)
+        monitor._client = mock_client
+        monitor._ss_available = {}
+
+        mock_container = MagicMock()
+        mock_container.short_id = "abc123"
+        mock_client.containers.list.return_value = [mock_container]
+
+        proc_content = (PROC_NET_TCP_HEADER + "\n" + PROC_NET_TCP_ESTABLISHED_TO_EXTERNAL).encode("utf-8")
+
+        # First call: ss fails, fallback to /proc/net/tcp
+        mock_container.exec_run.side_effect = [
+            (1, (None, None)),  # ss fails
+            (0, (proc_content, None)),  # /proc/net/tcp
+        ]
+        monitor.poll_connections("my-provider")
+
+        # ss should now be cached as unavailable for this container
+        assert monitor._ss_available.get("abc123") is False
+
+        # Second call: should skip ss entirely and go directly to /proc/net/tcp
+        mock_container.exec_run.reset_mock()
+        mock_container.exec_run.side_effect = [
+            (0, (proc_content, None)),  # Only /proc/net/tcp
+        ]
+        results = monitor.poll_connections("my-provider")
+
+        assert len(results) == 1
+        # Should have called exec_run only once (skipping ss)
+        assert mock_container.exec_run.call_count == 1
+
+    def test_caches_ss_availability_when_ss_succeeds(self):
+        """When ss succeeds, the cache should mark it as available."""
+        from enterprise.behavioral.docker_network_monitor import DockerNetworkMonitor
+
+        mock_client = MagicMock()
+        monitor = DockerNetworkMonitor.__new__(DockerNetworkMonitor)
+        monitor._client = mock_client
+        monitor._ss_available = {}
+
+        mock_container = MagicMock()
+        mock_container.short_id = "abc123"
+        mock_client.containers.list.return_value = [mock_container]
+
+        ss_output = (SS_OUTPUT_HEADER + "\n" + SS_OUTPUT_ESTAB).encode("utf-8")
+        mock_container.exec_run.return_value = (0, (ss_output, None))
+
+        monitor.poll_connections("my-provider")
+
+        assert monitor._ss_available.get("abc123") is True
+
+
+# ===========================================================================
+# Tests for container label injection
+# ===========================================================================
+
+
+class TestDockerLauncherLabelInjection:
+    """Tests for DockerLauncher --label mcp-hangar.provider-id injection."""
+
+    def test_build_docker_command_includes_provider_id_label(self):
+        """_build_docker_command should include --label mcp-hangar.provider-id=X."""
+        from src.mcp_hangar.domain.services.provider_launcher.docker import DockerLauncher
+
+        launcher = DockerLauncher(runtime="docker")
+        cmd = launcher._build_docker_command("myimage:latest", provider_id="test-provider")
+
+        assert "--label" in cmd
+        label_idx = cmd.index("--label")
+        assert cmd[label_idx + 1] == "mcp-hangar.provider-id=test-provider"
+
+    def test_build_docker_command_omits_label_when_no_provider_id(self):
+        """_build_docker_command should NOT add --label when provider_id is None."""
+        from src.mcp_hangar.domain.services.provider_launcher.docker import DockerLauncher
+
+        launcher = DockerLauncher(runtime="docker")
+        cmd = launcher._build_docker_command("myimage:latest")
+
+        label_values = [cmd[i + 1] for i, v in enumerate(cmd) if v == "--label"]
+        provider_labels = [lv for lv in label_values if "mcp-hangar.provider-id" in lv]
+        assert provider_labels == []
+
+    def test_label_appears_before_image_in_command(self):
+        """The --label flag should appear before the image name in the command."""
+        from src.mcp_hangar.domain.services.provider_launcher.docker import DockerLauncher
+
+        launcher = DockerLauncher(runtime="docker")
+        cmd = launcher._build_docker_command("myimage:latest", provider_id="test-provider")
+
+        label_idx = cmd.index("--label")
+        image_idx = cmd.index("myimage:latest")
+        assert label_idx < image_idx
+
+
+class TestContainerLauncherLabelInjection:
+    """Tests for ContainerLauncher --label mcp-hangar.provider-id injection."""
+
+    def test_build_command_includes_provider_id_label(self):
+        """_build_command should include --label mcp-hangar.provider-id=X."""
+        from src.mcp_hangar.domain.services.provider_launcher.container import (
+            ContainerConfig,
+            ContainerLauncher,
+        )
+
+        launcher = ContainerLauncher.__new__(ContainerLauncher)
+        launcher._runtime = "docker"
+        launcher._sanitizer = MagicMock()
+        launcher._sanitizer.sanitize_environment_value.side_effect = lambda v: v
+
+        config = ContainerConfig(image="myimage:latest", provider_id="test-provider")
+        cmd = launcher._build_command(config)
+
+        assert "--label" in cmd
+        label_idx = cmd.index("--label")
+        assert cmd[label_idx + 1] == "mcp-hangar.provider-id=test-provider"
+
+    def test_build_command_omits_label_when_no_provider_id(self):
+        """_build_command should NOT add --label when provider_id is None."""
+        from src.mcp_hangar.domain.services.provider_launcher.container import (
+            ContainerConfig,
+            ContainerLauncher,
+        )
+
+        launcher = ContainerLauncher.__new__(ContainerLauncher)
+        launcher._runtime = "docker"
+        launcher._sanitizer = MagicMock()
+        launcher._sanitizer.sanitize_environment_value.side_effect = lambda v: v
+
+        config = ContainerConfig(image="myimage:latest")
+        cmd = launcher._build_command(config)
+
+        label_values = [cmd[i + 1] for i, v in enumerate(cmd) if v == "--label"]
+        provider_labels = [lv for lv in label_values if "mcp-hangar.provider-id" in lv]
+        assert provider_labels == []
+
+    def test_label_appears_before_image_in_command(self):
+        """The --label flag should appear before the image name in the command."""
+        from src.mcp_hangar.domain.services.provider_launcher.container import (
+            ContainerConfig,
+            ContainerLauncher,
+        )
+
+        launcher = ContainerLauncher.__new__(ContainerLauncher)
+        launcher._runtime = "docker"
+        launcher._sanitizer = MagicMock()
+        launcher._sanitizer.sanitize_environment_value.side_effect = lambda v: v
+
+        config = ContainerConfig(image="myimage:latest", provider_id="test-provider")
+        cmd = launcher._build_command(config)
+
+        label_idx = cmd.index("--label")
+        image_idx = cmd.index("myimage:latest")
+        assert label_idx < image_idx
+
+
+class TestProviderLaunchConfigIncludesProviderId:
+    """Tests for Provider._get_launch_config including provider_id."""
+
+    def test_docker_mode_includes_provider_id(self):
+        """_get_launch_config for DOCKER mode should include provider_id."""
+        from src.mcp_hangar.domain.model.provider import Provider
+
+        provider = Provider(
+            provider_id="my-docker-provider",
+            mode="docker",
+            image="myimage:latest",
+        )
+
+        config = provider._get_launch_config()
+        assert config.get("provider_id") == "my-docker-provider"
+
+    def test_container_mode_includes_provider_id(self):
+        """_get_launch_config for container mode should include provider_id."""
+        from src.mcp_hangar.domain.model.provider import Provider
+
+        provider = Provider(
+            provider_id="my-container-provider",
+            mode="container",
+            image="myimage:latest",
+        )
+
+        config = provider._get_launch_config()
+        assert config.get("provider_id") == "my-container-provider"
