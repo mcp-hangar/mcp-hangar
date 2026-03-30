@@ -48,6 +48,7 @@ class AuthMiddlewareHTTP(BaseHTTPMiddleware):
         super().__init__(app)
         self._authn = authn
         self._skip_paths = skip_paths or ["/health", "/ready", "/_ready", "/metrics"]
+        self._trusted_proxies: set[str] = set()
 
     async def dispatch(self, request: Request, call_next):
         """Process request through authentication middleware.

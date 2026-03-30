@@ -21,7 +21,7 @@ import yaml
 
 from ..logging_config import get_logger, setup_logging
 from .bootstrap import ApplicationContext, bootstrap
-from .cli_legacy import CLIConfig
+from .cli.cli_compat import CLIConfig
 from .config import load_config_from_file
 from .state import get_discovery_orchestrator, get_runtime_providers
 

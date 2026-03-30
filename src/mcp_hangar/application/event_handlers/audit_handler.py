@@ -15,7 +15,11 @@ logger = get_logger(__name__)
 
 @dataclass
 class AuditRecord:
-    """Represents an audit log entry."""
+    """Represents an audit log entry.
+
+    Identity fields capture the caller who triggered the action,
+    enabling identity-aware queries and compliance reporting.
+    """
 
     event_id: str
     event_type: str
@@ -23,6 +27,10 @@ class AuditRecord:
     provider_id: str | None
     data: dict[str, Any]
     recorded_at: datetime = field(default_factory=lambda: datetime.now(UTC))
+    caller_user_id: str | None = None
+    caller_agent_id: str | None = None
+    caller_session_id: str | None = None
+    caller_principal_type: str | None = None
 
     def to_dict(self) -> dict[str, Any]:
         """Convert audit record to dictionary."""
@@ -35,6 +43,10 @@ class AuditRecord:
             "provider_id": self.provider_id,
             "data": self.data,
             "recorded_at": self.recorded_at.isoformat(),
+            "caller_user_id": self.caller_user_id,
+            "caller_agent_id": self.caller_agent_id,
+            "caller_session_id": self.caller_session_id,
+            "caller_principal_type": self.caller_principal_type,
         }
 
     def to_json(self) -> str:
@@ -57,6 +69,7 @@ class AuditStore(ABC):
         event_type: str | None = None,
         since: datetime | None = None,
         limit: int = 100,
+        caller_user_id: str | None = None,
     ) -> list[AuditRecord]:
         """Query audit records."""
         pass
@@ -82,6 +95,7 @@ class InMemoryAuditStore(AuditStore):
         event_type: str | None = None,
         since: datetime | None = None,
         limit: int = 100,
+        caller_user_id: str | None = None,
     ) -> list[AuditRecord]:
         """Query audit records with optional filters."""
         results = []
@@ -95,6 +109,8 @@ class InMemoryAuditStore(AuditStore):
             if event_type and record.event_type != event_type:
                 continue
             if since and record.recorded_at < since:
+                continue
+            if caller_user_id and record.caller_user_id != caller_user_id:
                 continue
 
             results.append(record)
@@ -127,6 +143,7 @@ class LogAuditStore(AuditStore):
         event_type: str | None = None,
         since: datetime | None = None,
         limit: int = 100,
+        caller_user_id: str | None = None,
     ) -> list[AuditRecord]:
         """Query is not supported for log store."""
         raise NotImplementedError("Log audit store does not support queries")
@@ -173,6 +190,20 @@ class AuditEventHandler:
         # Extract provider_id if available
         provider_id = getattr(event, "provider_id", None)
 
+        # Extract identity_context from events that carry it
+        # (ToolInvocationRequested/Completed/Failed have identity_context field)
+        identity_context = getattr(event, "identity_context", None)
+        caller_user_id: str | None = None
+        caller_agent_id: str | None = None
+        caller_session_id: str | None = None
+        caller_principal_type: str | None = None
+
+        if isinstance(identity_context, dict):
+            caller_user_id = identity_context.get("user_id")
+            caller_agent_id = identity_context.get("agent_id")
+            caller_session_id = identity_context.get("session_id")
+            caller_principal_type = identity_context.get("principal_type")
+
         # Create audit record
         record = AuditRecord(
             event_id=event.event_id,
@@ -180,6 +211,10 @@ class AuditEventHandler:
             occurred_at=event.occurred_at,
             provider_id=provider_id,
             data=event.to_dict(),
+            caller_user_id=caller_user_id,
+            caller_agent_id=caller_agent_id,
+            caller_session_id=caller_session_id,
+            caller_principal_type=caller_principal_type,
         )
 
         try:
@@ -198,9 +233,16 @@ class AuditEventHandler:
         event_type: str | None = None,
         since: datetime | None = None,
         limit: int = 100,
+        caller_user_id: str | None = None,
     ) -> list[AuditRecord]:
         """Query audit records."""
-        return self._store.query(provider_id=provider_id, event_type=event_type, since=since, limit=limit)
+        return self._store.query(
+            provider_id=provider_id,
+            event_type=event_type,
+            since=since,
+            limit=limit,
+            caller_user_id=caller_user_id,
+        )
 
 
 # --- Global audit handler instance ---

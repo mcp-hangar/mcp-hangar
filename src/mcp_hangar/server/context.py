@@ -14,7 +14,6 @@ if TYPE_CHECKING:
     from ..application.discovery.discovery_registry import DiscoveryRegistry
     from ..application.sagas import GroupRebalanceSaga
     from ..bootstrap.runtime import Runtime
-    from ..domain.contracts.catalog import McpCatalogRepository
     from ..domain.model import Provider, ProviderGroup
     from ..domain.repository import IProviderRepository
     from mcp_hangar.server.bootstrap import AuthComponents
@@ -130,10 +129,8 @@ class ApplicationContext:
     group_rebalance_saga: Optional["GroupRebalanceSaga"] = None
     load_provider_handler: Optional["LoadProviderHandler"] = None
     unload_provider_handler: Optional["UnloadProviderHandler"] = None
-    catalog_repository: Optional["McpCatalogRepository"] = None
     discovery_registry: Optional["DiscoveryRegistry"] = None
     auth_components: Optional["AuthComponents"] = None
-    report_generator: Any = None
 
     @property
     def repository(self) -> "IProviderRepository":

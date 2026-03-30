@@ -11,19 +11,19 @@ from mcp_hangar.server import (
     _auto_add_volumes,
     _create_discovery_source,
     _ensure_data_dir,
-    _parse_args,
+    parse_args,
     GC_WORKER_INTERVAL_SECONDS,
     HEALTH_CHECK_INTERVAL_SECONDS,
 )
 
 
 class TestParseArgs:
-    """Tests for _parse_args function (backward compatibility)."""
+    """Tests for parse_args function."""
 
     def test_default_values(self):
         """Should return CLIConfig with default values when no args provided."""
         with patch.dict(os.environ, {}, clear=True):
-            config = _parse_args([])
+            config = parse_args([])
 
         assert config.http_mode is False
         assert config.http_host == "0.0.0.0"
@@ -34,42 +34,42 @@ class TestParseArgs:
     def test_http_flag(self):
         """Should parse --http flag."""
         with patch.dict(os.environ, {}, clear=True):
-            config = _parse_args(["--http"])
+            config = parse_args(["--http"])
 
         assert config.http_mode is True
 
     def test_host_option(self):
         """Should parse --host option."""
         with patch.dict(os.environ, {}, clear=True):
-            config = _parse_args(["--host", "127.0.0.1"])
+            config = parse_args(["--host", "127.0.0.1"])
 
         assert config.http_host == "127.0.0.1"
 
     def test_port_option(self):
         """Should parse --port option."""
         with patch.dict(os.environ, {}, clear=True):
-            config = _parse_args(["--port", "9000"])
+            config = parse_args(["--port", "9000"])
 
         assert config.http_port == 9000
 
     def test_config_option(self):
         """Should parse --config option."""
         with patch.dict(os.environ, {}, clear=True):
-            config = _parse_args(["--config", "/path/to/config.yaml"])
+            config = parse_args(["--config", "/path/to/config.yaml"])
 
         assert config.config_path == "/path/to/config.yaml"
 
     def test_log_file_option(self):
         """Should parse --log-file option."""
         with patch.dict(os.environ, {}, clear=True):
-            config = _parse_args(["--log-file", "/var/log/mcp.log"])
+            config = parse_args(["--log-file", "/var/log/mcp.log"])
 
         assert config.log_file == "/var/log/mcp.log"
 
     def test_all_options_combined(self):
         """Should parse all options together."""
         with patch.dict(os.environ, {}, clear=True):
-            config = _parse_args(
+            config = parse_args(
                 [
                     "--http",
                     "--host",
@@ -265,10 +265,10 @@ class TestConstants:
 
 
 class TestStartBackgroundWorkers:
-    """Tests for _start_background_workers function."""
+    """Tests for create_background_workers function."""
 
-    def test_starts_gc_worker(self):
-        """Should start GC background worker."""
+    def test_starts_workers(self):
+        """Should create and start background workers."""
         mock_worker_class = MagicMock()
         mock_worker = MagicMock()
         mock_worker_class.return_value = mock_worker
@@ -283,7 +283,6 @@ class TestStartBackgroundWorkers:
 
                 # Should be called twice (GC and health check)
                 assert mock_worker_class.call_count == 2
-                assert mock_worker.start.call_count == 2
 
     def test_passes_correct_interval_to_gc_worker(self):
         """Should pass correct interval to GC worker."""

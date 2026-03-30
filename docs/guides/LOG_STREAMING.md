@@ -95,20 +95,13 @@ Log capture is automatic for subprocess and Docker providers. No configuration i
 | Buffer type | Thread-safe ring buffer |
 | Persistence | In-memory only (lost on restart) |
 
-## Dashboard Integration
+## Client Integration
 
-The Dashboard UI includes a `LogViewer` component on the Provider Detail page. It:
+Log streaming can be consumed by any HTTP/WebSocket client:
 
-1. Fetches the initial buffer contents via `GET /api/providers/{id}/logs`.
-2. Opens a WebSocket connection for live updates.
-3. Displays logs with auto-scroll and timestamp formatting.
-4. Reconnects automatically on WebSocket disconnect.
-
-The `useProviderLogs` hook manages the REST + WebSocket lifecycle:
-
-```typescript
-const { logs, isConnected } = useProviderLogs(providerId);
-```
+1. Fetch the initial buffer contents via `GET /api/providers/{id}/logs`.
+2. Open a WebSocket connection for live updates.
+3. Handle reconnection on WebSocket disconnect.
 
 ## Supported Provider Modes
 

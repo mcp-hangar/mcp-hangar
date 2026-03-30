@@ -1,0 +1,9 @@
+# Documentation build dependencies
+# Install: pip install -r docs/requirements.txt
+# Build:   mkdocs build --strict
+# Serve:   mkdocs serve
+
+mkdocs-material>=9.5
+mkdocs-minify-plugin>=0.8
+mkdocstrings[python]>=0.24
+mkdocs-git-revision-date-localized-plugin>=1.2

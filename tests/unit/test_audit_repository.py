@@ -145,6 +145,116 @@ class TestInMemoryAuditRepository:
 
         assert len(results) == 10
 
+    @pytest.mark.asyncio
+    async def test_identity_fields_round_trip(self, repo: InMemoryAuditRepository):
+        """Test that identity fields are preserved through append and retrieval."""
+        entry = AuditEntry(
+            entity_id="tool-invoke-1",
+            entity_type="tool_invocation",
+            action=AuditAction.TOOL_INVOKED,
+            timestamp=datetime.now(UTC),
+            actor="agent",
+            caller_user_id="user-42",
+            caller_agent_id="agent-7",
+            caller_session_id="sess-abc",
+            caller_principal_type="api_key",
+            correlation_id="corr-456",
+        )
+        await repo.append(entry)
+
+        results = await repo.get_by_entity("tool-invoke-1")
+
+        assert len(results) == 1
+        result = results[0]
+        assert result.caller_user_id == "user-42"
+        assert result.caller_agent_id == "agent-7"
+        assert result.caller_session_id == "sess-abc"
+        assert result.caller_principal_type == "api_key"
+
+    @pytest.mark.asyncio
+    async def test_get_by_caller_returns_matching_entries(self, repo: InMemoryAuditRepository):
+        """Test get_by_caller filters by caller_user_id."""
+        now = datetime.now(UTC)
+        entry_user_a = AuditEntry(
+            entity_id="tool-1",
+            entity_type="tool_invocation",
+            action=AuditAction.TOOL_INVOKED,
+            timestamp=now,
+            actor="agent",
+            caller_user_id="user-a",
+        )
+        entry_user_b = AuditEntry(
+            entity_id="tool-2",
+            entity_type="tool_invocation",
+            action=AuditAction.TOOL_INVOKED,
+            timestamp=now,
+            actor="agent",
+            caller_user_id="user-b",
+        )
+        await repo.append(entry_user_a)
+        await repo.append(entry_user_b)
+
+        results = await repo.get_by_caller("user-a")
+
+        assert len(results) == 1
+        assert results[0].entity_id == "tool-1"
+        assert results[0].caller_user_id == "user-a"
+
+    @pytest.mark.asyncio
+    async def test_get_by_caller_with_action_filter(self, repo: InMemoryAuditRepository):
+        """Test get_by_caller respects optional action filter."""
+        now = datetime.now(UTC)
+        tool_entry = AuditEntry(
+            entity_id="tool-1",
+            entity_type="tool_invocation",
+            action=AuditAction.TOOL_INVOKED,
+            timestamp=now,
+            actor="agent",
+            caller_user_id="user-a",
+        )
+        start_entry = AuditEntry(
+            entity_id="provider-1",
+            entity_type="provider",
+            action=AuditAction.STARTED,
+            timestamp=now,
+            actor="agent",
+            caller_user_id="user-a",
+        )
+        await repo.append(tool_entry)
+        await repo.append(start_entry)
+
+        results = await repo.get_by_caller("user-a", action=AuditAction.TOOL_INVOKED)
+
+        assert len(results) == 1
+        assert results[0].action == AuditAction.TOOL_INVOKED
+
+    @pytest.mark.asyncio
+    async def test_get_by_caller_returns_empty_for_unknown_user(self, repo: InMemoryAuditRepository):
+        """Test get_by_caller returns empty list for nonexistent caller."""
+        results = await repo.get_by_caller("nonexistent-user")
+        assert results == []
+
+    @pytest.mark.asyncio
+    async def test_get_by_caller_respects_pagination(self, repo: InMemoryAuditRepository):
+        """Test get_by_caller supports limit and offset."""
+        now = datetime.now(UTC)
+        for i in range(5):
+            entry = AuditEntry(
+                entity_id=f"tool-{i}",
+                entity_type="tool_invocation",
+                action=AuditAction.TOOL_INVOKED,
+                timestamp=now + timedelta(seconds=i),
+                actor="agent",
+                caller_user_id="user-a",
+            )
+            await repo.append(entry)
+
+        page1 = await repo.get_by_caller("user-a", limit=2, offset=0)
+        page2 = await repo.get_by_caller("user-a", limit=2, offset=2)
+
+        assert len(page1) == 2
+        assert len(page2) == 2
+
 
 class TestSQLiteAuditRepository:
     """Tests for SQLite audit repository."""
@@ -307,3 +417,217 @@ class TestSQLiteAuditRepository:
         assert result.new_state == {"new": "config", "list": [1, 2, 3]}
         assert result.metadata["duration_ms"] == 150.5
         assert result.metadata["tools"] == ["tool1", "tool2"]
+
+    @pytest.mark.asyncio
+    async def test_identity_fields_round_trip(self, database: Database, repo: SQLiteAuditRepository):
+        """Test that identity fields survive SQLite insert and select."""
+        await database.initialize()
+        entry = AuditEntry(
+            entity_id="tool-invoke-1",
+            entity_type="tool_invocation",
+            action=AuditAction.TOOL_INVOKED,
+            timestamp=datetime.now(UTC),
+            actor="agent",
+            caller_user_id="user-42",
+            caller_agent_id="agent-7",
+            caller_session_id="sess-abc",
+            caller_principal_type="api_key",
+            metadata={"tool_name": "read_file"},
+            correlation_id="corr-789",
+        )
+
+        await repo.append(entry)
+
+        results = await repo.get_by_entity("tool-invoke-1")
+
+        assert len(results) == 1
+        result = results[0]
+        assert result.caller_user_id == "user-42"
+        assert result.caller_agent_id == "agent-7"
+        assert result.caller_session_id == "sess-abc"
+        assert result.caller_principal_type == "api_key"
+        assert result.action == AuditAction.TOOL_INVOKED
+        assert result.correlation_id == "corr-789"
+
+    @pytest.mark.asyncio
+    async def test_identity_fields_default_to_none(self, database: Database, repo: SQLiteAuditRepository):
+        """Test that entries without identity fields read back with None."""
+        await database.initialize()
+        entry = AuditEntry(
+            entity_id="provider-1",
+            entity_type="provider",
+            action=AuditAction.STARTED,
+            timestamp=datetime.now(UTC),
+            actor="system",
+        )
+
+        await repo.append(entry)
+
+        results = await repo.get_by_entity("provider-1")
+
+        assert len(results) == 1
+        result = results[0]
+        assert result.caller_user_id is None
+        assert result.caller_agent_id is None
+        assert result.caller_session_id is None
+        assert result.caller_principal_type is None
+
+    @pytest.mark.asyncio
+    async def test_get_by_caller(self, database: Database, repo: SQLiteAuditRepository):
+        """Test get_by_caller queries by caller_user_id in SQLite."""
+        await database.initialize()
+        now = datetime.now(UTC)
+
+        entry_user_a = AuditEntry(
+            entity_id="tool-1",
+            entity_type="tool_invocation",
+            action=AuditAction.TOOL_INVOKED,
+            timestamp=now,
+            actor="agent",
+            caller_user_id="user-a",
+            caller_agent_id="agent-1",
+        )
+        entry_user_b = AuditEntry(
+            entity_id="tool-2",
+            entity_type="tool_invocation",
+            action=AuditAction.TOOL_INVOKED,
+            timestamp=now,
+            actor="agent",
+            caller_user_id="user-b",
+        )
+        entry_no_caller = AuditEntry(
+            entity_id="provider-1",
+            entity_type="provider",
+            action=AuditAction.STARTED,
+            timestamp=now,
+            actor="system",
+        )
+
+        await repo.append(entry_user_a)
+        await repo.append(entry_user_b)
+        await repo.append(entry_no_caller)
+
+        results = await repo.get_by_caller("user-a")
+
+        assert len(results) == 1
+        assert results[0].entity_id == "tool-1"
+        assert results[0].caller_user_id == "user-a"
+        assert results[0].caller_agent_id == "agent-1"
+
+    @pytest.mark.asyncio
+    async def test_get_by_caller_with_action_filter(self, database: Database, repo: SQLiteAuditRepository):
+        """Test get_by_caller respects action filter in SQLite."""
+        await database.initialize()
+        now = datetime.now(UTC)
+
+        tool_entry = AuditEntry(
+            entity_id="tool-1",
+            entity_type="tool_invocation",
+            action=AuditAction.TOOL_INVOKED,
+            timestamp=now,
+            actor="agent",
+            caller_user_id="user-a",
+        )
+        start_entry = AuditEntry(
+            entity_id="provider-1",
+            entity_type="provider",
+            action=AuditAction.STARTED,
+            timestamp=now,
+            actor="agent",
+            caller_user_id="user-a",
+        )
+
+        await repo.append(tool_entry)
+        await repo.append(start_entry)
+
+        results = await repo.get_by_caller("user-a", action=AuditAction.TOOL_INVOKED)
+
+        assert len(results) == 1
+        assert results[0].action == AuditAction.TOOL_INVOKED
+
+    @pytest.mark.asyncio
+    async def test_get_by_caller_with_pagination(self, database: Database, repo: SQLiteAuditRepository):
+        """Test get_by_caller supports limit and offset in SQLite."""
+        await database.initialize()
+        now = datetime.now(UTC)
+
+        for i in range(5):
+            entry = AuditEntry(
+                entity_id=f"tool-{i}",
+                entity_type="tool_invocation",
+                action=AuditAction.TOOL_INVOKED,
+                timestamp=now + timedelta(seconds=i),
+                actor="agent",
+                caller_user_id="user-a",
+            )
+            await repo.append(entry)
+
+        page1 = await repo.get_by_caller("user-a", limit=2, offset=0)
+        page2 = await repo.get_by_caller("user-a", limit=2, offset=2)
+
+        assert len(page1) == 2
+        assert len(page2) == 2
+
+    @pytest.mark.asyncio
+    async def test_get_by_caller_returns_empty_for_unknown_user(
+        self, database: Database, repo: SQLiteAuditRepository
+    ):
+        """Test get_by_caller returns empty list for nonexistent caller."""
+        await database.initialize()
+
+        results = await repo.get_by_caller("nonexistent-user")
+
+        assert results == []
+
+    @pytest.mark.asyncio
+    async def test_identity_fields_in_time_range_query(self, database: Database, repo: SQLiteAuditRepository):
+        """Test that identity fields are returned in time range queries."""
+        await database.initialize()
+        now = datetime.now(UTC)
+
+        entry = AuditEntry(
+            entity_id="tool-1",
+            entity_type="tool_invocation",
+            action=AuditAction.TOOL_INVOKED,
+            timestamp=now,
+            actor="agent",
+            caller_user_id="user-42",
+            caller_agent_id="agent-7",
+            caller_session_id="sess-abc",
+            caller_principal_type="jwt",
+        )
+        await repo.append(entry)
+
+        results = await repo.get_by_time_range(
+            start=now - timedelta(hours=1),
+            end=now + timedelta(hours=1),
+        )
+
+        assert len(results) == 1
+        result = results[0]
+        assert result.caller_user_id == "user-42"
+        assert result.caller_agent_id == "agent-7"
+        assert result.caller_session_id == "sess-abc"
+        assert result.caller_principal_type == "jwt"
+
+    @pytest.mark.asyncio
+    async def test_identity_fields_in_correlation_query(self, database: Database, repo: SQLiteAuditRepository):
+        """Test that identity fields are returned in correlation ID queries."""
+        await database.initialize()
+        entry = AuditEntry(
+            entity_id="tool-1",
+            entity_type="tool_invocation",
+            action=AuditAction.TOOL_INVOKED,
+            timestamp=datetime.now(UTC),
+            actor="agent",
+            caller_user_id="user-99",
+            caller_agent_id="agent-5",
+            correlation_id="corr-identity-test",
+        )
+        await repo.append(entry)
+
+        results = await repo.get_by_correlation_id("corr-identity-test")
+
+        assert len(results) == 1
+        assert results[0].caller_user_id == "user-99"
+        assert results[0].caller_agent_id == "agent-5"

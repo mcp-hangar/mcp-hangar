@@ -27,6 +27,7 @@ class TestOTLPAuditEventHandler:
             tool_name="add",
             correlation_id="corr-1",
             duration_ms=10.5,
+            result_size_bytes=256,
         )
         handler.handle(event)
 
@@ -49,6 +50,7 @@ class TestOTLPAuditEventHandler:
             provider_id="math",
             tool_name="add",
             correlation_id="corr-2",
+            duration_ms=50.0,
             error_message="boom",
             error_type="ToolInvocationError",
         )
@@ -92,5 +94,6 @@ class TestOTLPAuditEventHandler:
             tool_name="t",
             correlation_id="corr-3",
             duration_ms=1.0,
+            result_size_bytes=0,
         )
         handler.handle(event)  # must not raise

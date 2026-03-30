@@ -1,4 +1,8 @@
-# Milestones
+# Milestones (mcp-hangar repo)
+
+> **NOTE:** Cross-repo milestone tracking has moved to `workspace/.planning/MILESTONES.md`.
+> This file tracks Python-specific phases and plans. For the full cross-repo picture, see
+> the workspace-level milestones.
 
 ## v5.0: Platform Management Console -- COMPLETE (2026-03-23)
 
@@ -81,10 +85,10 @@ Roadmap: `.planning/milestones/v6.0-otel-foundation-ROADMAP.md`.
 
 ---
 
-## v8.0: Behavioral Profiling Alpha -- IN PROGRESS
+## v8.0: Behavioral Profiling Alpha -- COMPLETE (2026-03-25)
 
 **PyPI:** v0.14.0
-**Phases:** 42-47 (4 of 6 complete)
+**Phases:** 42-47 (6 of 6 complete)
 **Roadmap:** `.planning/milestones/v8.0-behavioral-profiling-ROADMAP.md`
 
 Network behavioral baseline, deviation detection, tool schema drift, resource profiling, behavioral reports, license key infrastructure, dashboard auth enforcement.
@@ -95,16 +99,33 @@ Network behavioral baseline, deviation detection, tool schema drift, resource pr
 - **Phase 43** (Network Connection Logging Per Container) -- COMPLETE (2026-03-25): 3 plans, 9 commits, 62 tests, Docker/K8s network monitors, ConnectionLogWorker background worker, proc_net_parser, verified 4/4 SC
 - **Phase 44** (Behavioral Deviation Detection) -- COMPLETE (2026-03-25): 3 plans, 7 commits, 28 tests, DeviationType enum, BehavioralDeviationDetected event, DeviationDetector (3 rules), ENFORCING refactoring, event handler bridge, verified 4/4 SC
 - **Phase 45** (Tool Schema Drift Detection) -- COMPLETE (2026-03-25): 3 plans, 8 commits, 30 tests, SchemaTracker with SQLite storage, ToolSchemaChanged event, ToolSchemaChangeHandler, Prometheus counter, verified 4/4 SC
+- **Phase 46** (Behavioral Report Export + Resource Profiling) -- COMPLETE (2026-03-25): 3 plans, 7 commits, 28 tests, ResourceStore (SQLite time-series + baseline), ResourceMonitorWorker (Docker stats + K8s metrics), BehavioralReportGenerator (JSON + PDF via fpdf2), REST endpoint with 403 gating, verified 3/3 SC
+- **Phase 47** (License Key Infrastructure + Dashboard Auth Enforcement) -- COMPLETE (2026-03-25): 3 plans, 8 commits, 53 tests, LicenseTier enum + LicenseValidator (HMAC-SHA256, 7-day grace), EnterpriseComponents + load_enterprise_modules(), AuthMiddlewareHTTP on API router, /me endpoint, React AuthGuard + Zustand auth store, verified 4/4 SC
 
 ---
 
-## v9.0: Identity Propagation & Audit -- PLANNED
+## v9.0: Identity Propagation & Audit -- IN PROGRESS
 
 **PyPI:** v0.15.0
 **Phases:** 48-53
 **Roadmap:** `.planning/milestones/v9.0-identity-audit-ROADMAP.md`
+**Cross-repo tracking:** `workspace/.planning/MILESTONES.md` (tasks 9.1-9.30)
 
-Caller identity propagation, identity-aware audit trail, compliance export (CEF/LEEF/JSON-lines), cost attribution (FinOps), OTEL identity/policy attributes.
+### Completed (Python side, 2026-03-26)
+
+- **Phase 48 (partial):** CallerIdentity + IdentityContext VOs, IIdentityExtractor/IIdentityPropagator contracts, identity_context_var contextvar, ToolInvocation events carry identity, Provider.invoke_tool() reads identity, 23 unit tests
+- **Phase 49 (partial):** HeaderIdentityExtractor (HTTP headers), JWTIdentityExtractor (Bearer token), IdentityMiddleware (ASGI)
+
+### Completed (Go + Proto, 2026-03-26)
+
+Cross-repo identity pipeline implemented in agent, hangar-cloud, and proto. See `workspace/.planning/MILESTONES.md` tasks 9.9-9.13.
+
+### Remaining
+
+- Phase 50: Identity-aware audit trail (AuditRecord, SQLite, REST)
+- Phase 51: Compliance export (CEF/LEEF/JSON-lines)
+- Phase 52: Cost attribution (FinOps)
+- Phase 53: OTEL identity + cost attributes
 
 ---
 

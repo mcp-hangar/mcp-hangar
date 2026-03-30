@@ -1,6 +1,17 @@
 """Enterprise compliance export -- BSL 1.1 licensed.
 
-This module is a placeholder for future SIEM export functionality
-(CEF, LEEF, JSON-lines formats).
+SIEM export functionality for audit records. Currently supports CEF
+(Common Event Format), the standard for ArcSight, Splunk, QRadar, and
+other SIEM platforms.
+
 See enterprise/LICENSE.BSL for license terms.
 """
+
+from .cef_exporter import CEFExporter
+from .cef_formatter import format_audit_record, format_audit_records
+
+__all__ = [
+    "CEFExporter",
+    "format_audit_record",
+    "format_audit_records",
+]

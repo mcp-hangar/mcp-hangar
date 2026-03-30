@@ -46,7 +46,6 @@ from .discovery import _auto_add_volumes, _create_discovery_source, create_disco
 from .event_handlers import init_event_handlers
 from .event_store import init_event_store
 from .hot_loading import init_hot_loading
-from .knowledge_base import init_knowledge_base
 from .logs import init_log_buffers
 from .observability import init_observability, shutdown_observability
 from .retry_config import init_retry_config
@@ -54,15 +53,12 @@ from .tools import register_all_tools
 from .truncation import init_truncation
 from .workers import (
     create_background_workers,
-    create_connection_log_worker,
-    create_resource_monitor_worker,
     GC_WORKER_INTERVAL_SECONDS,
     HEALTH_CHECK_INTERVAL_SECONDS,
 )
 
 if TYPE_CHECKING:
     from ...bootstrap.runtime import Runtime
-    from ...domain.contracts.catalog import McpCatalogRepository
     from ...application.discovery.discovery_registry import DiscoveryRegistry
 
 logger = get_logger(__name__)
@@ -109,23 +105,8 @@ class ApplicationContext:
     saga_state_store: SagaStateStore | NullSagaStateStore | None = None
     """Saga state store for persisting saga state and circuit breakers."""
 
-    catalog_repository: "McpCatalogRepository | None" = None
-    """Static MCP provider catalog repository."""
-
     discovery_registry: "DiscoveryRegistry | None" = None
     """Discovery source registry (wraps DiscoveryOrchestrator)."""
-
-    behavioral_profiler: Any = None
-    """Behavioral profiler (enterprise) or NullBehavioralProfiler."""
-
-    schema_tracker: Any = None
-    """Schema tracker (enterprise) or None when not available."""
-
-    resource_store: Any = None
-    """Resource store (enterprise) for time-series resource samples or None."""
-
-    report_generator: Any = None
-    """Report generator (enterprise) for behavioral JSON/PDF reports or None."""
 
     @property
     def providers(self) -> dict[str, Any]:
@@ -192,37 +173,6 @@ def _ensure_data_dir() -> None:
             logger.warning("data_directory_creation_failed", error=str(e))
 
 
-def _init_catalog(full_config: dict[str, Any]) -> Any:
-    """Initialize the MCP provider catalog SQLite repository and seed it.
-
-    Creates the catalog table if it does not exist and loads builtin
-    entries from data/catalog_seed.yaml on first boot.
-
-    Args:
-        full_config: Full application configuration dictionary.
-
-    Returns:
-        SQLiteMcpCatalogRepository instance (or None on error).
-    """
-    from ...infrastructure.catalog.seed_loader import load_catalog_seed
-    from ...infrastructure.catalog.sqlite_catalog_repository import SQLiteMcpCatalogRepository
-    from ...infrastructure.persistence.database_common import SQLiteConfig
-
-    catalog_config = full_config.get("catalog", {})
-    db_path = catalog_config.get("db_path", "data/catalog.db")
-
-    try:
-        config = SQLiteConfig(path=db_path)
-        repo = SQLiteMcpCatalogRepository(config)
-        seed_path = Path("data/catalog_seed.yaml")
-        seeded = load_catalog_seed(repo, seed_path)
-        logger.info("catalog_initialized", db_path=db_path, seeded=seeded)
-        return repo
-    except Exception as e:  # noqa: BLE001 -- fault-barrier: catalog failure must not prevent bootstrap
-        logger.warning("catalog_init_failed", error=str(e))
-        return None
-
-
 def bootstrap(
     config_path: str | None = None,
     config_dict: dict[str, Any] | None = None,
@@ -239,10 +189,9 @@ def bootstrap(
     7. Initialize sagas
     8. Load configuration and providers
     9. Initialize retry configuration
-    10. Initialize knowledge base (if enabled)
-    11. Create MCP server with tools
-    12. Create background workers (DO NOT START)
-    13. Initialize discovery (if enabled, DO NOT START)
+    10. Create MCP server with tools
+    11. Create background workers (DO NOT START)
+    12. Initialize discovery (if enabled, DO NOT START)
 
     Args:
         config_path: Optional path to config.yaml
@@ -339,37 +288,8 @@ def bootstrap(
 
     init_auth_cqrs(runtime, auth_components)
 
-    behavioral_profiler = enterprise.behavioral_profiler
-    if behavioral_profiler is None:
-        from mcp_hangar.domain.contracts.behavioral import NullBehavioralProfiler
-
-        behavioral_profiler = NullBehavioralProfiler()
-
-    schema_tracker = enterprise.schema_tracker
-    resource_store = enterprise.resource_store
-    report_generator = enterprise.report_generator
-
-    # Register tool schema drift handler (ProviderStarted -> SchemaTracker -> ToolSchemaChanged)
-    from mcp_hangar.application.event_handlers.tool_schema_change_handler import (
-        ToolSchemaChangeHandler,
-    )
-    from mcp_hangar.domain.events import ProviderStarted
-
-    tool_schema_handler = ToolSchemaChangeHandler(
-        schema_tracker=schema_tracker,
-        providers=PROVIDERS,
-        event_bus=runtime.event_bus,
-    )
-    runtime.event_bus.subscribe(ProviderStarted, tool_schema_handler.handle)
-
     # Initialize retry configuration
     init_retry_config(full_config)
-
-    # Initialize knowledge base
-    init_knowledge_base(full_config)
-
-    # Initialize catalog repository and seed
-    catalog_repo = _init_catalog(full_config)
 
     # Initialize truncation system
     init_truncation(full_config)
@@ -385,12 +305,7 @@ def bootstrap(
     init_log_buffers(PROVIDERS)
 
     # Create background workers (not started)
-    workers = create_background_workers(
-        profiler=behavioral_profiler,
-        config=full_config,
-        resource_store=resource_store,
-        event_bus=runtime.event_bus,
-    )
+    workers = create_background_workers(config=full_config)
 
     # Add config reload worker if enabled
     reload_config = full_config.get("config_reload", {})
@@ -446,12 +361,7 @@ def bootstrap(
         unload_provider_handler=unload_handler,
         observability_adapter=observability_adapter,
         saga_state_store=saga_state_store,
-        catalog_repository=catalog_repo,
         discovery_registry=discovery_registry,
-        behavioral_profiler=behavioral_profiler,
-        schema_tracker=schema_tracker,
-        resource_store=resource_store,
-        report_generator=report_generator,
     )
 
     # Update application context for tools to access
@@ -459,10 +369,8 @@ def bootstrap(
     ctx.groups = GROUPS  # Wire shared GROUPS dict so API reads/writes use same instance
     ctx.load_provider_handler = load_handler
     ctx.unload_provider_handler = unload_handler
-    ctx.catalog_repository = catalog_repo
     ctx.discovery_registry = discovery_registry
     ctx.full_config = full_config  # Store for config round-trip serialization
-    ctx.report_generator = report_generator  # Enterprise behavioral report generator
 
     return context
 
@@ -473,7 +381,6 @@ _init_event_handlers = init_event_handlers
 _init_cqrs = init_cqrs
 _init_saga = init_saga
 _init_retry_config = init_retry_config
-_init_knowledge_base = init_knowledge_base
 _init_truncation = init_truncation
 _init_hot_loading = init_hot_loading
 _init_observability = init_observability
@@ -529,7 +436,6 @@ __all__ = [
     "init_event_handlers",
     "init_event_store",
     "init_hot_loading",
-    "init_knowledge_base",
     "init_log_buffers",
     "init_observability",
     "init_retry_config",
@@ -537,8 +443,6 @@ __all__ = [
     "init_truncation",
     "shutdown_observability",
     "create_background_workers",
-    "create_connection_log_worker",
-    "create_resource_monitor_worker",
     "create_discovery_orchestrator",
     "register_all_tools",
     "_ensure_data_dir",
@@ -546,7 +450,6 @@ __all__ = [
     "_init_event_handlers",
     "_init_event_store",
     "_init_hot_loading",
-    "_init_knowledge_base",
     "_init_observability",
     "_init_retry_config",
     "_init_saga",

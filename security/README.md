@@ -45,7 +45,7 @@ from their capability declaration.
 
 ## Operator Integration
 
-The Hangar operator (Go, `packages/operator/`) reads provider capability
+The Hangar operator (Go, `operator/` repo) reads provider capability
 declarations and reconciles:
 
 1. `NetworkPolicy` resources from `capabilities.network.egress`

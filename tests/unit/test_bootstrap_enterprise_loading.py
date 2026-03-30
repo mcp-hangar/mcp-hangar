@@ -44,10 +44,6 @@ class TestEnterpriseComponents:
         ec = EnterpriseComponents()
         assert ec.license_tier == LicenseTier.COMMUNITY
         assert ec.auth_components is None
-        assert ec.behavioral_profiler is None
-        assert ec.schema_tracker is None
-        assert ec.resource_store is None
-        assert ec.report_generator is None
 
     def test_enterprise_components_with_values(self):
         """Setting fields on EnterpriseComponents works correctly."""
@@ -55,18 +51,12 @@ class TestEnterpriseComponents:
         from mcp_hangar.server.bootstrap.enterprise import EnterpriseComponents
 
         mock_auth = MagicMock()
-        mock_profiler = MagicMock()
         ec = EnterpriseComponents(
             license_tier=LicenseTier.PRO,
             auth_components=mock_auth,
-            behavioral_profiler=mock_profiler,
         )
         assert ec.license_tier == LicenseTier.PRO
         assert ec.auth_components is mock_auth
-        assert ec.behavioral_profiler is mock_profiler
-        assert ec.schema_tracker is None
-        assert ec.resource_store is None
-        assert ec.report_generator is None
 
 
 # ---------------------------------------------------------------------------
@@ -85,10 +75,6 @@ class TestLoadEnterpriseModules:
         ec = load_enterprise_modules(LicenseTier.COMMUNITY, {})
         assert ec.license_tier == LicenseTier.COMMUNITY
         assert ec.auth_components is None
-        assert ec.behavioral_profiler is None
-        assert ec.schema_tracker is None
-        assert ec.resource_store is None
-        assert ec.report_generator is None
 
     def test_community_tier_logs_skip(self, caplog):
         """COMMUNITY tier logs 'enterprise_modules_skipped' at info level."""
@@ -113,10 +99,6 @@ class TestLoadEnterpriseModules:
         assert ec.license_tier == LicenseTier.PRO
         # All fields remain None because enterprise is not installed
         assert ec.auth_components is None
-        assert ec.behavioral_profiler is None
-        assert ec.schema_tracker is None
-        assert ec.resource_store is None
-        assert ec.report_generator is None
 
     def test_enterprise_tier_without_enterprise_installed(self, monkeypatch):
         """ENTERPRISE tier with enterprise package blocked falls back to None fields."""
@@ -128,24 +110,16 @@ class TestLoadEnterpriseModules:
         ec = load_enterprise_modules(LicenseTier.ENTERPRISE, {})
         assert ec.license_tier == LicenseTier.ENTERPRISE
         assert ec.auth_components is None
-        assert ec.behavioral_profiler is None
-        assert ec.schema_tracker is None
-        assert ec.resource_store is None
-        assert ec.report_generator is None
 
-    def test_pro_tier_with_enterprise_loads_auth_and_behavioral(self):
-        """PRO tier with enterprise installed populates auth and behavioral fields."""
+    def test_pro_tier_with_enterprise_loads_auth(self):
+        """PRO tier with enterprise installed populates auth fields."""
         from mcp_hangar.domain.value_objects.license import LicenseTier
         from mcp_hangar.server.bootstrap.enterprise import load_enterprise_modules
 
         ec = load_enterprise_modules(LicenseTier.PRO, {})
         assert ec.license_tier == LicenseTier.PRO
-        # With enterprise installed, auth and behavioral should be populated
+        # With enterprise installed, auth should be populated
         assert ec.auth_components is not None
-        assert ec.behavioral_profiler is not None
-        assert ec.schema_tracker is not None
-        assert ec.resource_store is not None
-        assert ec.report_generator is not None
 
     def test_enterprise_tier_with_enterprise_loads_all(self):
         """ENTERPRISE tier with enterprise installed populates all fields."""
@@ -155,10 +129,6 @@ class TestLoadEnterpriseModules:
         ec = load_enterprise_modules(LicenseTier.ENTERPRISE, {})
         assert ec.license_tier == LicenseTier.ENTERPRISE
         assert ec.auth_components is not None
-        assert ec.behavioral_profiler is not None
-        assert ec.schema_tracker is not None
-        assert ec.resource_store is not None
-        assert ec.report_generator is not None
 
 
 # ---------------------------------------------------------------------------

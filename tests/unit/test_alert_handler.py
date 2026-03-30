@@ -254,6 +254,7 @@ class TestAlertEventHandler:
             provider_id="test-provider",
             tool_name="add",
             correlation_id="corr-123",
+            duration_ms=50.0,
             error_message="timeout",
             error_type="TimeoutError",
         )
@@ -367,6 +368,7 @@ class TestAlertEventHandler:
                 provider_id="p2",
                 tool_name="add",
                 correlation_id="c1",
+                duration_ms=50.0,
                 error_message="timeout",
                 error_type="TimeoutError",
             )

@@ -79,6 +79,29 @@ stable contract that partner backends consume without Hangar-specific plugins.
 | `mcp.behavioral.pattern_step` | int | Sequence position in a detected multi-step pattern |
 | `mcp.behavioral.pattern_name` | string | Name of the detected behavioral pattern |
 
+### Risk attributes (semantic analysis)
+
+Attributes in the `mcp.risk.*` namespace carry detection rule match signals from the
+semantic analysis engine. The engine evaluates multi-step tool call sequences per
+agent session against detection rules (e.g. credential exfiltration, privilege
+escalation). Partner backends such as OpenLIT, Grafana, and SIEM tools can filter
+spans by `mcp.risk.severity = critical` to surface high-risk events.
+
+Requires the ENTERPRISE license tier. The `mcp.risk.score` and
+`mcp.risk.session_anomaly_score` attributes are populated when session anomaly
+scoring is enabled (planned for a future release).
+
+| Attribute | Type | Description |
+|-----------|------|-------------|
+| `mcp.risk.rule_id` | string | Matched detection rule identifier (e.g. `credential-exfiltration`) |
+| `mcp.risk.pattern_name` | string | Human-readable name of the matched detection pattern |
+| `mcp.risk.severity` | string | Severity: `critical`, `high`, `medium`, `low` |
+| `mcp.risk.response_action` | string | Recommended response: `alert`, `throttle`, `suspend`, `block` |
+| `mcp.risk.session_id` | string | Session ID where the match was detected |
+| `mcp.risk.matched_tools` | string | Comma-separated tool names that formed the matched sequence |
+| `mcp.risk.score` | float | Aggregate session risk score (0.0 = no risk, 1.0 = maximum risk) |
+| `mcp.risk.session_anomaly_score` | float | Per-session anomaly score relative to baseline behavior |
+
 ### Health attributes
 
 | Attribute | Type | Description |
@@ -99,6 +122,7 @@ stable contract that partner backends consume without Hangar-specific plugins.
 | `mcp_hangar_circuit_breaker_state` | Gauge | Circuit breaker state per provider |
 | `mcp_hangar_capability_violations_total` | Counter | Total capability violations |
 | `mcp_hangar_egress_blocked_total` | Counter | Total blocked egress attempts |
+| `mcp_hangar_detection_rule_matches_total` | Counter | Total detection rule matches (labels: `rule_id`, `severity`) |
 | `mcp_hangar_providers_quarantined` | Gauge | Providers currently quarantined |
 | `mcp_hangar_tool_schema_drifts_total` | Counter | Total tool schema drift detections |
 

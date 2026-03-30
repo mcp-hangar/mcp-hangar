@@ -205,8 +205,8 @@ class TestApiRouterWsMounts:
         mount_paths = [r.path for r in router.routes]
         assert "/ws" in mount_paths
 
-    def test_ws_mount_contains_events_and_state_routes(self):
-        """The /ws mount contains WebSocketRoute entries for /events and /state."""
+    def test_ws_mount_contains_events_route(self):
+        """The /ws mount contains WebSocketRoute entry for /events."""
         with patch("mcp_hangar.server.context.get_context"):
             from mcp_hangar.server.api.router import create_api_router
 
@@ -216,4 +216,3 @@ class TestApiRouterWsMounts:
 
         ws_route_paths = {r.path for r in ws_mount.routes}
         assert "/events" in ws_route_paths
-        assert "/state" in ws_route_paths

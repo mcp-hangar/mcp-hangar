@@ -21,14 +21,13 @@ Usage:
 from mcp.server.fastmcp import FastMCP
 
 # Public API imports
-from .bootstrap import (  # Internal functions exported for backward compatibility / testing
+from .bootstrap import (
     _auto_add_volumes,
     _create_background_workers,
     _create_discovery_source,
     _ensure_data_dir,
     _init_cqrs,
     _init_event_handlers,
-    _init_knowledge_base,
     _init_retry_config,
     _init_saga,
     _register_all_tools,
@@ -37,26 +36,11 @@ from .bootstrap import (  # Internal functions exported for backward compatibili
     GC_WORKER_INTERVAL_SECONDS,
     HEALTH_CHECK_INTERVAL_SECONDS,
 )
-from .cli_legacy import CLIConfig, parse_args
+from .cli.cli_compat import CLIConfig, parse_args
 from .config import load_config, load_config_from_file, load_configuration
 from .lifecycle import run_server, ServerLifecycle
 from .state import COMMAND_BUS, EVENT_BUS, get_runtime, GROUPS, PROVIDER_REPOSITORY, PROVIDERS, QUERY_BUS
 from .tools import hangar_list
-
-# Backward compatibility: expose _parse_args as alias
-_parse_args = parse_args
-
-
-# Backward compatibility: expose _start_background_workers
-def _start_background_workers() -> None:
-    """Start GC and health check background workers.
-
-    DEPRECATED: Use bootstrap() and ServerLifecycle instead.
-    This function is kept for backward compatibility only.
-    """
-    workers = _create_background_workers()
-    for worker in workers:
-        worker.start()
 
 
 def main():
@@ -110,7 +94,7 @@ __all__ = [
     "load_configuration",
     # Lifecycle
     "ServerLifecycle",
-    # State (backward compatibility)
+    # State
     "PROVIDERS",
     "GROUPS",
     "PROVIDER_REPOSITORY",
@@ -125,17 +109,14 @@ __all__ = [
     # Constants
     "GC_WORKER_INTERVAL_SECONDS",
     "HEALTH_CHECK_INTERVAL_SECONDS",
-    # Internal functions (backward compatibility / testing)
-    "_parse_args",
+    # Internal functions (testing)
     "_ensure_data_dir",
     "_init_event_handlers",
     "_init_cqrs",
     "_init_saga",
     "_init_retry_config",
-    "_init_knowledge_base",
     "_auto_add_volumes",
     "_create_discovery_source",
     "_create_background_workers",
-    "_start_background_workers",
     "_register_all_tools",
 ]

@@ -37,6 +37,10 @@ server_name_var: ContextVar[str | None] = ContextVar("server_name", default=None
 tool_name_var: ContextVar[str | None] = ContextVar("tool_name", default=None)
 user_id_var: ContextVar[str | None] = ContextVar("user_id", default=None)
 
+# Import moved here to avoid circular imports if any, though it's a value object
+from mcp_hangar.domain.value_objects.identity import IdentityContext
+identity_context_var: ContextVar[IdentityContext | None] = ContextVar("identity_context", default=None)
+
 
 def generate_request_id() -> str:
     """Generate a short unique request ID."""
@@ -47,12 +51,17 @@ def get_request_id() -> str | None:
     """Get the current request ID from context."""
     return request_id_var.get()
 
+def get_identity_context() -> IdentityContext | None:
+    """Get the current identity context."""
+    return identity_context_var.get()
+
 
 def bind_request_context(
     request_id: str | None = None,
     server_name: str | None = None,
     tool_name: str | None = None,
     user_id: str | None = None,
+    identity_context: IdentityContext | None = None,
     **extra: Any,
 ) -> str:
     """Bind contextual information to all logs in the current scope.
@@ -89,6 +98,8 @@ def bind_request_context(
         tool_name_var.set(tool_name)
     if user_id is not None:
         user_id_var.set(user_id)
+    if identity_context is not None:
+        identity_context_var.set(identity_context)
 
     # Build context dict for structlog
     context: dict[str, Any] = {"request_id": request_id}
@@ -98,6 +109,9 @@ def bind_request_context(
         context["tool"] = tool_name
     if user_id is not None:
         context["user_id"] = user_id
+    if identity_context is not None and identity_context.caller:
+        context["caller_agent_id"] = identity_context.caller.agent_id
+        context["caller_user_id"] = identity_context.caller.user_id
     context.update(extra)
 
     # Clear any previous context and bind new one
@@ -132,6 +146,7 @@ def clear_request_context() -> None:
     server_name_var.set(None)
     tool_name_var.set(None)
     user_id_var.set(None)
+    identity_context_var.set(None)
 
 
 class RequestContextManager:
@@ -149,12 +164,14 @@ class RequestContextManager:
         server_name: str | None = None,
         tool_name: str | None = None,
         user_id: str | None = None,
+        identity_context: IdentityContext | None = None,
         **extra: Any,
     ):
         self._request_id = request_id
         self._server_name = server_name
         self._tool_name = tool_name
         self._user_id = user_id
+        self._identity_context = identity_context
         self._extra = extra
         self.request_id: str | None = None
 
@@ -164,6 +181,7 @@ class RequestContextManager:
             server_name=self._server_name,
             tool_name=self._tool_name,
             user_id=self._user_id,
+            identity_context=self._identity_context,
             **self._extra,
         )
         return self

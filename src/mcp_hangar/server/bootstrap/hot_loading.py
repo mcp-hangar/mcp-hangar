@@ -34,7 +34,6 @@ def init_hot_loading(
         return None, None
 
     try:
-        from ...infrastructure.installers import BinaryInstaller, NpmInstaller, OciInstaller, PyPIInstaller
         from ...infrastructure.registry import RegistryCache, RegistryClient
 
         # Read config values
@@ -55,18 +54,11 @@ def init_hot_loading(
             cache=cache,
         )
 
-        npm_installer = NpmInstaller()
-        pypi_installer = PyPIInstaller()
-        oci_installer = OciInstaller()
-        binary_installer = BinaryInstaller()
-
-        installers = [pypi_installer, npm_installer, oci_installer, binary_installer]
-
         availability = RuntimeAvailability(
-            pypi=True,
-            npm=True,
-            oci=True,
-            binary=True,
+            pypi=False,
+            npm=False,
+            oci=False,
+            binary=False,
         )
         package_resolver = PackageResolver(availability)
 
@@ -81,7 +73,7 @@ def init_hot_loading(
             registry_client=registry_client,
             package_resolver=package_resolver,
             secrets_resolver=secrets_resolver,
-            installers=installers,
+            installers=[],
             runtime_store=runtime_store,
             event_bus=runtime.event_bus,
             provider_factory=provider_factory,

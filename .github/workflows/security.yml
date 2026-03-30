@@ -76,7 +76,7 @@ jobs:
         run: docker build -t mcp-hangar:scan .
 
       - name: Run Trivy vulnerability scanner
-        uses: aquasecurity/trivy-action@master
+        uses: aquasecurity/trivy-action@0.28.0
         with:
           image-ref: "mcp-hangar:scan"
           format: "sarif"
@@ -150,8 +150,3 @@ jobs:
           name: sbom
           path: sbom-python.json
           retention-days: 90
-
-      - name: Audit frontend dependencies
-        run: |
-          cd packages/ui
-          npm audit --audit-level=high || true

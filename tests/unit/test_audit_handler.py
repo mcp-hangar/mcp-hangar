@@ -65,6 +65,34 @@ class TestAuditRecord:
         assert d["provider_id"] == "test"
         assert d["data"] == {"reason": "idle"}
         assert "recorded_at" in d
+        assert d["caller_user_id"] is None
+        assert d["caller_agent_id"] is None
+        assert d["caller_session_id"] is None
+        assert d["caller_principal_type"] is None
+
+    def test_audit_record_with_identity(self):
+        """Test audit record with caller identity fields."""
+        now = datetime.now(UTC)
+        record = AuditRecord(
+            event_id="evt-id-1",
+            event_type="ToolInvocationCompleted",
+            occurred_at=now,
+            provider_id="math",
+            data={"tool_name": "add"},
+            caller_user_id="alice",
+            caller_agent_id="agent-007",
+            caller_session_id="sess-abc",
+            caller_principal_type="user",
+        )
+
+        assert record.caller_user_id == "alice"
+        assert record.caller_agent_id == "agent-007"
+        assert record.caller_session_id == "sess-abc"
+        assert record.caller_principal_type == "user"
+
+        d = record.to_dict()
+        assert d["caller_user_id"] == "alice"
+        assert d["caller_agent_id"] == "agent-007"
 
     def test_audit_record_to_json(self):
         """Test audit record to JSON conversion."""
@@ -316,6 +344,7 @@ class TestAuditEventHandler:
             tool_name="add",
             correlation_id="corr-123",
             duration_ms=150.0,
+            result_size_bytes=42,
         )
 
         handler.handle(event)
@@ -323,6 +352,108 @@ class TestAuditEventHandler:
         records = store.query()
         assert len(records) == 1
         assert records[0].data["duration_ms"] == 150.0
+
+    def test_handle_tool_invocation_completed_with_identity(self):
+        """Test that identity_context is extracted from ToolInvocationCompleted."""
+        store = InMemoryAuditStore()
+        handler = AuditEventHandler(store=store)
+
+        event = ToolInvocationCompleted(
+            provider_id="math",
+            tool_name="add",
+            correlation_id="corr-456",
+            duration_ms=100.0,
+            result_size_bytes=10,
+            identity_context={
+                "user_id": "alice",
+                "agent_id": "agent-007",
+                "session_id": "sess-abc",
+                "principal_type": "user",
+            },
+        )
+
+        handler.handle(event)
+
+        records = store.query()
+        assert len(records) == 1
+        assert records[0].caller_user_id == "alice"
+        assert records[0].caller_agent_id == "agent-007"
+        assert records[0].caller_session_id == "sess-abc"
+        assert records[0].caller_principal_type == "user"
+
+    def test_handle_tool_invocation_requested_with_identity(self):
+        """Test that identity_context is extracted from ToolInvocationRequested."""
+        store = InMemoryAuditStore()
+        handler = AuditEventHandler(store=store)
+
+        event = ToolInvocationRequested(
+            provider_id="test",
+            tool_name="add",
+            correlation_id="corr-789",
+            arguments={"a": 1},
+            identity_context={
+                "user_id": "bob",
+                "agent_id": None,
+                "session_id": "sess-xyz",
+                "principal_type": "service",
+            },
+        )
+
+        handler.handle(event)
+
+        records = store.query()
+        assert len(records) == 1
+        assert records[0].caller_user_id == "bob"
+        assert records[0].caller_principal_type == "service"
+
+    def test_handle_tool_invocation_failed_with_identity(self):
+        """Test that identity_context is extracted from ToolInvocationFailed."""
+        store = InMemoryAuditStore()
+        handler = AuditEventHandler(store=store)
+
+        event = ToolInvocationFailed(
+            provider_id="test",
+            tool_name="add",
+            correlation_id="corr-fail",
+            duration_ms=50.0,
+            error_message="timeout",
+            error_type="TimeoutError",
+            identity_context={
+                "user_id": "charlie",
+                "agent_id": "agent-x",
+                "session_id": None,
+                "principal_type": "user",
+            },
+        )
+
+        handler.handle(event)
+
+        records = store.query()
+        assert len(records) == 1
+        assert records[0].caller_user_id == "charlie"
+        assert records[0].caller_agent_id == "agent-x"
+        assert records[0].caller_session_id is None
+
+    def test_handle_event_without_identity_context(self):
+        """Test that events without identity_context get None for identity fields."""
+        store = InMemoryAuditStore()
+        handler = AuditEventHandler(store=store)
+
+        event = ProviderStarted(
+            provider_id="test",
+            mode="subprocess",
+            tools_count=3,
+            startup_duration_ms=200.0,
+        )
+
+        handler.handle(event)
+
+        records = store.query()
+        assert len(records) == 1
+        assert records[0].caller_user_id is None
+        assert records[0].caller_agent_id is None
+        assert records[0].caller_session_id is None
+        assert records[0].caller_principal_type is None
 
     def test_handle_tool_invocation_failed_event(self):
         """Test handling ToolInvocationFailed event."""
@@ -333,6 +464,7 @@ class TestAuditEventHandler:
             provider_id="test",
             tool_name="add",
             correlation_id="corr-123",
+            duration_ms=50.0,
             error_message="timeout",
             error_type="TimeoutError",
         )
@@ -461,6 +593,43 @@ class TestAuditEventHandler:
         p1_records = handler.query(provider_id="p1")
         assert len(p1_records) == 2
 
+    def test_query_by_caller_user_id(self):
+        """Test querying records filtered by caller_user_id."""
+        store = InMemoryAuditStore()
+        handler = AuditEventHandler(store=store)
+
+        handler.handle(ToolInvocationCompleted(
+            provider_id="math",
+            tool_name="add",
+            correlation_id="c1",
+            duration_ms=10.0,
+            result_size_bytes=5,
+            identity_context={"user_id": "alice", "agent_id": None, "session_id": None, "principal_type": "user"},
+        ))
+        handler.handle(ToolInvocationCompleted(
+            provider_id="math",
+            tool_name="sub",
+            correlation_id="c2",
+            duration_ms=20.0,
+            result_size_bytes=5,
+            identity_context={"user_id": "bob", "agent_id": None, "session_id": None, "principal_type": "user"},
+        ))
+        handler.handle(ToolInvocationCompleted(
+            provider_id="math",
+            tool_name="mul",
+            correlation_id="c3",
+            duration_ms=30.0,
+            result_size_bytes=5,
+            identity_context={"user_id": "alice", "agent_id": None, "session_id": None, "principal_type": "user"},
+        ))
+
+        alice_records = handler.query(caller_user_id="alice")
+        assert len(alice_records) == 2
+        assert all(r.caller_user_id == "alice" for r in alice_records)
+
+        bob_records = handler.query(caller_user_id="bob")
+        assert len(bob_records) == 1
+
     def test_include_event_types_filter(self):
         """Test filtering by included event types."""
         store = InMemoryAuditStore()
@@ -508,12 +677,14 @@ class TestAuditStoreInterface:
             def record(self, audit_record: AuditRecord) -> None:
                 self.records.append(audit_record)
 
-            def query(self, provider_id=None, event_type=None, since=None, limit=100):
+            def query(self, provider_id=None, event_type=None, since=None, limit=100, caller_user_id=None):
                 results = self.records.copy()
                 if provider_id:
                     results = [r for r in results if r.provider_id == provider_id]
                 if event_type:
                     results = [r for r in results if r.event_type == event_type]
+                if caller_user_id:
+                    results = [r for r in results if r.caller_user_id == caller_user_id]
                 return results[:limit]
 
         store = ListStore()

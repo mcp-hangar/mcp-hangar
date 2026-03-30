@@ -73,6 +73,7 @@ class PersistentAuditStore(AuditStore):
         event_type: str | None = None,
         since: datetime | None = None,
         limit: int = 100,
+        caller_user_id: str | None = None,
     ) -> list[AuditRecord]:
         """Query audit records.
 
@@ -81,12 +82,18 @@ class PersistentAuditStore(AuditStore):
             event_type: Filter by event type (entity_type in new model)
             since: Filter records after this time
             limit: Maximum records to return
+            caller_user_id: Filter by caller user ID
 
         Returns:
             List of audit records
         """
         try:
-            if provider_id:
+            if caller_user_id:
+                coro = self._repo.get_by_caller(
+                    caller_user_id=caller_user_id,
+                    limit=limit,
+                )
+            elif provider_id:
                 coro = self._repo.get_by_entity(
                     entity_id=provider_id,
                     entity_type="provider",
@@ -143,17 +150,24 @@ class PersistentAuditStore(AuditStore):
         else:
             timestamp = datetime.now(UTC)
 
+        # Use caller identity as actor if available, fall back to "system"
+        actor = record.caller_user_id or "system"
+
         return AuditEntry(
             entity_id=record.provider_id or "_unknown",
             entity_type="provider",
             action=action,
             timestamp=timestamp,
-            actor="system",
+            actor=actor,
             metadata={
                 "event_id": record.event_id,
                 "event_type": record.event_type,
                 "data": record.data,
             },
+            caller_user_id=record.caller_user_id,
+            caller_agent_id=record.caller_agent_id,
+            caller_session_id=record.caller_session_id,
+            caller_principal_type=record.caller_principal_type,
         )
 
     def _entry_to_record(self, entry: AuditEntry) -> AuditRecord:
@@ -176,6 +190,10 @@ class PersistentAuditStore(AuditStore):
             provider_id=entry.entity_id if entry.entity_id != "_unknown" else None,
             data=data,
             recorded_at=entry.timestamp,
+            caller_user_id=entry.caller_user_id,
+            caller_agent_id=entry.caller_agent_id,
+            caller_session_id=entry.caller_session_id,
+            caller_principal_type=entry.caller_principal_type,
         )
 
     def _map_event_to_action(self, event_type: str) -> AuditAction:
@@ -194,8 +212,9 @@ class PersistentAuditStore(AuditStore):
             "ProviderStateChanged": AuditAction.STATE_CHANGED,
             "ProviderRegistered": AuditAction.CREATED,
             "ProviderUnregistered": AuditAction.DELETED,
-            "ToolInvocationCompleted": AuditAction.UPDATED,
-            "ToolInvocationFailed": AuditAction.STATE_CHANGED,
+            "ToolInvocationRequested": AuditAction.TOOL_INVOKED,
+            "ToolInvocationCompleted": AuditAction.TOOL_INVOKED,
+            "ToolInvocationFailed": AuditAction.TOOL_INVOKED,
             "HealthCheckPassed": AuditAction.RECOVERED,
             "HealthCheckFailed": AuditAction.DEGRADED,
         }

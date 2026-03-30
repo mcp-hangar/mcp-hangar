@@ -1,82 +1,23 @@
 # OpenLIT via OTLP
 
-Short sketch for the MCP Hangar -> OpenTelemetry -> OpenLIT integration path.
+!!! note "This page has moved"
+    The full OpenLIT integration guide, including docker-compose recipes, MCP
+    attribute taxonomy, and getting-started instructions, is now part of the
+    unified OpenTelemetry integrations page:
 
-## Goal
+    **[OpenTelemetry Integrations -- OpenLIT section](../observability/otel-integrations.md#openlit)**
 
-Use OpenLIT as a visibility layer for Hangar telemetry.
+## Quick reference
 
-Hangar remains the runtime security and governance layer.
-OpenLIT remains a partner backend for traces, metrics, and logs.
+- **Example:** [`examples/openlit/`](https://github.com/mcp-hangar/mcp-hangar/tree/main/examples/openlit)
+- **Topology:** Agent -> Hangar (OTLP) -> OTEL Collector -> OpenLIT
+- **Key env var:** `OTEL_EXPORTER_OTLP_ENDPOINT=http://otel-collector:4317`
 
-## Topology
+## Integration stance
 
-```text
-Agent / MCP client
-        |
-        v
-   MCP Hangar
-        |
-        v
- OTLP / OTEL Collector
-        |
-        v
-    OpenLIT
-```
+Hangar exports governance telemetry via OTEL. OpenLIT visualizes it.
+Hangar does not try to become a generic AI observability platform.
+OpenLIT does not replace Hangar's runtime security enforcement.
 
-## Scope
-
-- OTLP export first
-- No native OpenLIT dependency in core
-- No product pivot into generic AI observability
-- Docs-first integration path
-
-## What to send
-
-- provider lifecycle events
-- tool invocation traces
-- health and state transitions
-- audit signals
-- policy and enforcement metadata
-- user / session / trace context
-
-## Key OTEL fields
-
-- `provider`
-- `tool`
-- `group`
-- `user`
-- `session`
-- `policy`
-- `enforcement_action`
-- `risk_signal`
-
-## Minimal Hangar config
-
-```yaml
-observability:
-  tracing:
-    enabled: true
-    otlp_endpoint: http://localhost:4317
-    service_name: mcp-hangar
-```
-
-## Minimal OpenLIT path
-
-- run OpenLIT
-- point Hangar OTLP to OpenLIT or an OTEL Collector
-- generate provider traffic
-- inspect traces and governance signals in OpenLIT
-
-## Expected outcome
-
-OpenLIT shows Hangar as an OTEL-emitting service with MCP-aware governance telemetry.
-
-## Later additions
-
-- full config example
-- OTEL Collector example
-- attribute taxonomy table
-- screenshots
-- troubleshooting
-- production deployment notes
+See [ROADMAP.md](https://github.com/mcp-hangar/mcp-hangar/blob/main/ROADMAP.md)
+for the full integration philosophy.

@@ -24,6 +24,7 @@ class AuditAction(Enum):
     STOPPED = "stopped"
     DEGRADED = "degraded"
     RECOVERED = "recovered"
+    TOOL_INVOKED = "tool_invoked"
 
 
 @dataclass(frozen=True)
@@ -32,6 +33,9 @@ class AuditEntry:
 
     Value object representing a single audit log entry.
     Immutability ensures audit trail integrity.
+
+    Identity fields capture the caller who triggered the action,
+    enabling identity-aware audit queries (e.g. "who invoked tool X?").
     """
 
     entity_id: str
@@ -43,6 +47,10 @@ class AuditEntry:
     new_state: dict[str, Any] | None = None
     metadata: dict[str, Any] = field(default_factory=dict)
     correlation_id: str | None = None
+    caller_user_id: str | None = None
+    caller_agent_id: str | None = None
+    caller_session_id: str | None = None
+    caller_principal_type: str | None = None
 
     def to_dict(self) -> dict[str, Any]:
         """Serialize to dictionary for storage."""
@@ -56,6 +64,10 @@ class AuditEntry:
             "new_state": self.new_state,
             "metadata": self.metadata,
             "correlation_id": self.correlation_id,
+            "caller_user_id": self.caller_user_id,
+            "caller_agent_id": self.caller_agent_id,
+            "caller_session_id": self.caller_session_id,
+            "caller_principal_type": self.caller_principal_type,
         }
 
     @classmethod
@@ -71,6 +83,10 @@ class AuditEntry:
             new_state=data.get("new_state"),
             metadata=data.get("metadata", {}),
             correlation_id=data.get("correlation_id"),
+            caller_user_id=data.get("caller_user_id"),
+            caller_agent_id=data.get("caller_agent_id"),
+            caller_session_id=data.get("caller_session_id"),
+            caller_principal_type=data.get("caller_principal_type"),
         )
 
 
@@ -292,6 +308,28 @@ class IAuditRepository(Protocol):
 
         Returns:
             List of related audit entries
+        """
+        ...
+
+    async def get_by_caller(
+        self,
+        caller_user_id: str,
+        action: AuditAction | None = None,
+        limit: int = 100,
+        offset: int = 0,
+    ) -> list[AuditEntry]:
+        """Get audit entries for a specific caller.
+
+        Enables identity-aware audit queries (e.g. "what did user X do?").
+
+        Args:
+            caller_user_id: Caller user identifier
+            action: Optional action filter
+            limit: Maximum entries to return
+            offset: Number of entries to skip
+
+        Returns:
+            List of audit entries, newest first
         """
         ...
 

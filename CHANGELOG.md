@@ -21,28 +21,12 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   - WebSocket infrastructure: `ws_events_endpoint`, `ws_state_endpoint`, connection manager with queue and filters
   - `EventBus.unsubscribe_from_all` for WebSocket lifecycle
 
-- **Dashboard UI** (Phases 13-16, 25-26, 28, 30):
-  - React 19 + TypeScript + Vite 6 frontend application (`packages/ui`)
-  - Dashboard page with metrics charts, state distribution, live event feed, and alerts
-  - Providers list and detail pages with start/stop actions
-  - Groups, Discovery, Config, and Topology pages
-  - RBAC management UI with tool access policy editor
-  - Catalog browser and discovery source management pages
-  - Config export UI with colored diff viewer and toast notifications
-  - ThemeToggle, PageContainer, Skeleton, and Drawer shared components
-  - Zustand WebSocket store with exponential backoff reconnection
-  - `useEventStream`, `useProviderState`, `useProviderLogs` hooks
-  - Metrics time-series chart and D3 force-graph topology visualization
-  - Auth page with API key and role management
-  - Multi-stage Docker build with UI static files baked in
-  - Static file serving and SPA fallback for production deployment
 
 - **Provider Log Streaming** (Phases 21-22):
   - `LogLine` value object, `IProviderLogBuffer` contract, and `ProviderLogBuffer` ring buffer
   - Live stderr-reader threads for subprocess and Docker providers
   - `GET /api/providers/{id}/logs` REST endpoint with `lines` parameter
   - `LogStreamBroadcaster` and `/ws/providers/{id}/logs` WebSocket endpoint
-  - `LogViewer` component and `useProviderLogs` hook in UI
 
 - **Provider/Group CRUD** (Phase 23):
   - Provider CRUD events, commands, and handlers (create, update, delete)

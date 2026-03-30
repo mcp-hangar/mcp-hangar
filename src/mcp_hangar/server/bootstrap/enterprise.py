@@ -25,10 +25,6 @@ class EnterpriseComponents:
 
     license_tier: LicenseTier = LicenseTier.COMMUNITY
     auth_components: Any = None
-    behavioral_profiler: Any = None
-    schema_tracker: Any = None
-    resource_store: Any = None
-    report_generator: Any = None
 
 
 def load_enterprise_modules(
@@ -40,9 +36,7 @@ def load_enterprise_modules(
     """Load enterprise modules based on the validated license tier.
 
     For COMMUNITY tier, no enterprise imports are attempted.  For PRO and
-    ENTERPRISE tiers, auth and behavioral modules are loaded when available.
-    Each import block is isolated so a single missing module does not prevent
-    others from loading.
+    ENTERPRISE tiers, auth modules are loaded when available.
 
     Args:
         tier: Validated license tier from LicenseValidator.
@@ -59,9 +53,6 @@ def load_enterprise_modules(
         logger.info("enterprise_modules_skipped", tier="community")
         return components
 
-    db_path = config.get("event_store", {}).get("path", "data/events.db")
-    behavioral_config = config.get("behavioral", {})
-
     # -- Auth modules (PRO and ENTERPRISE) --
     if tier.includes_auth():
         try:
@@ -76,57 +67,8 @@ def load_enterprise_modules(
         except ImportError:
             logger.warning("enterprise_auth_not_installed", tier=tier.value)
 
-    # -- Behavioral modules (PRO and ENTERPRISE) --
-    if tier.includes_behavioral():
-        # Behavioral profiler
-        try:
-            from enterprise.behavioral.bootstrap import bootstrap_behavioral
-
-            components.behavioral_profiler = bootstrap_behavioral(
-                db_path=db_path,
-                config=behavioral_config,
-                event_bus=event_bus,
-            )
-        except ImportError:
-            logger.warning("enterprise_behavioral_not_installed", tier=tier.value, component="profiler")
-
-        # Schema tracker
-        try:
-            from enterprise.behavioral.bootstrap import bootstrap_schema_tracker
-
-            components.schema_tracker = bootstrap_schema_tracker(db_path=db_path)
-        except ImportError:
-            logger.warning("enterprise_behavioral_not_installed", tier=tier.value, component="schema_tracker")
-
-        # Resource store
-        try:
-            from enterprise.behavioral.bootstrap import bootstrap_resource_monitor
-
-            components.resource_store = bootstrap_resource_monitor(
-                db_path=db_path,
-                config=behavioral_config,
-            )
-        except ImportError:
-            logger.warning("enterprise_behavioral_not_installed", tier=tier.value, component="resource_store")
-
-        # Report generator (depends on schema_tracker + resource_store)
-        try:
-            from enterprise.behavioral.bootstrap import bootstrap_report_generator
-
-            components.report_generator = bootstrap_report_generator(
-                db_path=db_path,
-                schema_tracker=components.schema_tracker,
-                resource_store=components.resource_store,
-            )
-        except ImportError:
-            logger.warning("enterprise_behavioral_not_installed", tier=tier.value, component="report_generator")
-
     loaded_flags = {
         "auth": components.auth_components is not None,
-        "behavioral": components.behavioral_profiler is not None,
-        "schema_tracker": components.schema_tracker is not None,
-        "resource_store": components.resource_store is not None,
-        "report_generator": components.report_generator is not None,
     }
     logger.info("enterprise_modules_loaded", tier=tier.value, **loaded_flags)
 

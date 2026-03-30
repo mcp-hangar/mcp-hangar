@@ -954,7 +954,11 @@ class Provider(AggregateRoot):
             ToolNotFoundError: If tool doesn't exist
             ToolInvocationError: If invocation fails
         """
+        from mcp_hangar.context import get_identity_context
+        
         correlation_id = str(CorrelationId())
+        idt_ctx = get_identity_context()
+        identity_context_dict = idt_ctx.to_dict() if idt_ctx else None
 
         # Lock cycle 1: Validation, ensure ready, check tool, maybe prepare refresh
         needs_refresh = False
@@ -981,6 +985,7 @@ class Provider(AggregateRoot):
                         tool_name=tool_name,
                         correlation_id=correlation_id,
                         arguments=arguments,
+                        identity_context=identity_context_dict,
                     )
                 )
 
@@ -1018,6 +1023,7 @@ class Provider(AggregateRoot):
                         tool_name=tool_name,
                         correlation_id=correlation_id,
                         arguments=arguments,
+                        identity_context=identity_context_dict,
                     )
                 )
         elif not tool_found:
@@ -1043,13 +1049,16 @@ class Provider(AggregateRoot):
             if invocation_error is not None:
                 self._health.record_failure()
 
+                duration_ms = (time.time() - start_time) * 1000
                 self._record_event(
                     ToolInvocationFailed(
                         provider_id=self.provider_id,
                         tool_name=tool_name,
                         correlation_id=correlation_id,
+                        duration_ms=duration_ms,
                         error_message=str(invocation_error),
                         error_type=type(invocation_error).__name__,
+                        identity_context=identity_context_dict,
                     )
                 )
 
@@ -1068,13 +1077,16 @@ class Provider(AggregateRoot):
                 error_msg = response["error"].get("message", "unknown")
                 self._health.record_invocation_failure()
 
+                duration_ms = (time.time() - start_time) * 1000
                 self._record_event(
                     ToolInvocationFailed(
                         provider_id=self.provider_id,
                         tool_name=tool_name,
                         correlation_id=correlation_id,
+                        duration_ms=duration_ms,
                         error_message=error_msg,
                         error_type=str(response["error"].get("code", "unknown")),
+                        identity_context=identity_context_dict,
                     )
                 )
 
@@ -1097,6 +1109,7 @@ class Provider(AggregateRoot):
                     correlation_id=correlation_id,
                     duration_ms=duration_ms,
                     result_size_bytes=len(str(result)),
+                    identity_context=identity_context_dict,
                 )
             )
 

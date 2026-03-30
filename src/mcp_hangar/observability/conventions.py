@@ -160,6 +160,45 @@ class Behavioral:
     DEVIATION_TYPE = "mcp.behavioral.deviation_type"
 
 
+class Risk:
+    """Attributes for semantic analysis risk signals (Phase 58 -- v10.0).
+
+    The ``mcp.risk.*`` namespace carries detection rule match signals from
+    the semantic analysis engine. Partner backends (OpenLIT, Grafana, SIEM)
+    can filter spans by ``mcp.risk.severity = critical`` to surface high-risk
+    events.
+    """
+
+    #: Matched detection rule identifier (e.g. "credential-exfiltration").
+    RULE_ID = "mcp.risk.rule_id"
+
+    #: Human-readable name of the matched detection pattern.
+    PATTERN_NAME = "mcp.risk.pattern_name"
+
+    #: Severity of the detection rule match ("critical", "high", "medium", "low").
+    SEVERITY = "mcp.risk.severity"
+
+    #: Recommended response action from the matched rule ("alert", "throttle", "suspend", "block").
+    RESPONSE_ACTION = "mcp.risk.response_action"
+
+    #: Session ID where the match was detected.
+    SESSION_ID = "mcp.risk.session_id"
+
+    #: Comma-separated list of tool names that formed the matched sequence.
+    MATCHED_TOOLS = "mcp.risk.matched_tools"
+
+    #: Aggregate risk score for the current session (float 0.0-1.0).
+    #: 0.0 = no risk signals, 1.0 = maximum risk. Computed by the scoring
+    #: engine (Phase 59+) from detection rule matches and behavioral signals.
+    #: Available when session anomaly scoring is enabled.
+    SCORE = "mcp.risk.score"
+
+    #: Per-session anomaly score (float 0.0-1.0). Measures how anomalous
+    #: the current session's call sequence is relative to baseline behavior.
+    #: Produced by the semantic analysis engine when scoring is active.
+    SESSION_ANOMALY_SCORE = "mcp.risk.session_anomaly_score"
+
+
 class Health:
     """Attributes for provider health check spans."""
 
@@ -195,6 +234,8 @@ class Metrics:
     PROVIDERS_QUARANTINED = "mcp_hangar_providers_quarantined"
     TOOL_SCHEMA_DRIFTS_TOTAL = "mcp_hangar_tool_schema_drifts_total"
     BEHAVIORAL_DEVIATIONS_TOTAL = "mcp_hangar_behavioral_deviations_total"
+    DETECTION_RULE_MATCHES_TOTAL = "mcp_hangar_detection_rule_matches_total"
+    ENFORCEMENT_ACTIONS_TOTAL = "mcp_hangar_enforcement_actions_total"
 
 
 # ---------------------------------------------------------------------------

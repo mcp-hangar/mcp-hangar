@@ -93,6 +93,35 @@ class InMemoryAuditRepository:
         with self._lock:
             self._entries.clear()
 
+    async def get_by_caller(
+        self,
+        caller_user_id: str,
+        action: AuditAction | None = None,
+        limit: int = 100,
+        offset: int = 0,
+    ) -> list[AuditEntry]:
+        """Get audit entries for a specific caller.
+
+        Enables identity-aware audit queries (e.g. "what did user X do?").
+
+        Args:
+            caller_user_id: Caller user identifier
+            action: Optional action filter
+            limit: Maximum entries to return
+            offset: Number of entries to skip
+
+        Returns:
+            List of audit entries, newest first
+        """
+        with self._lock:
+            filtered = [
+                e
+                for e in self._entries
+                if e.caller_user_id == caller_user_id and (action is None or e.action == action)
+            ]
+            filtered.sort(key=lambda e: e.timestamp, reverse=True)
+            return filtered[offset : offset + limit]
+
 
 class SQLiteAuditRepository:
     """SQLite implementation of audit repository.
@@ -124,8 +153,9 @@ class SQLiteAuditRepository:
                     """
                     INSERT INTO audit_log
                     (entity_id, entity_type, action, actor, timestamp,
-                     old_state_json, new_state_json, metadata_json, correlation_id)
-                    VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
+                     old_state_json, new_state_json, metadata_json, correlation_id,
+                     caller_user_id, caller_agent_id, caller_session_id, caller_principal_type)
+                    VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
                     """,
                     (
                         entry.entity_id,
@@ -137,6 +167,10 @@ class SQLiteAuditRepository:
                         json.dumps(entry.new_state) if entry.new_state else None,
                         json.dumps(entry.metadata) if entry.metadata else None,
                         entry.correlation_id,
+                        entry.caller_user_id,
+                        entry.caller_agent_id,
+                        entry.caller_session_id,
+                        entry.caller_principal_type,
                     ),
                 )
 
@@ -170,7 +204,8 @@ class SQLiteAuditRepository:
                     cursor = await conn.execute(
                         """
                         SELECT entity_id, entity_type, action, actor, timestamp,
-                               old_state_json, new_state_json, metadata_json, correlation_id
+                               old_state_json, new_state_json, metadata_json, correlation_id,
+                               caller_user_id, caller_agent_id, caller_session_id, caller_principal_type
                         FROM audit_log
                         WHERE entity_id = ? AND entity_type = ?
                         ORDER BY timestamp DESC
@@ -182,7 +217,8 @@ class SQLiteAuditRepository:
                     cursor = await conn.execute(
                         """
                         SELECT entity_id, entity_type, action, actor, timestamp,
-                               old_state_json, new_state_json, metadata_json, correlation_id
+                               old_state_json, new_state_json, metadata_json, correlation_id,
+                               caller_user_id, caller_agent_id, caller_session_id, caller_principal_type
                         FROM audit_log
                         WHERE entity_id = ?
                         ORDER BY timestamp DESC
@@ -222,7 +258,8 @@ class SQLiteAuditRepository:
             async with self._db.connection() as conn:
                 query = """
                     SELECT entity_id, entity_type, action, actor, timestamp,
-                           old_state_json, new_state_json, metadata_json, correlation_id
+                           old_state_json, new_state_json, metadata_json, correlation_id,
+                           caller_user_id, caller_agent_id, caller_session_id, caller_principal_type
                     FROM audit_log
                     WHERE timestamp BETWEEN ? AND ?
                 """
@@ -261,7 +298,8 @@ class SQLiteAuditRepository:
                 cursor = await conn.execute(
                     """
                     SELECT entity_id, entity_type, action, actor, timestamp,
-                           old_state_json, new_state_json, metadata_json, correlation_id
+                           old_state_json, new_state_json, metadata_json, correlation_id,
+                           caller_user_id, caller_agent_id, caller_session_id, caller_principal_type
                     FROM audit_log
                     WHERE correlation_id = ?
                     ORDER BY timestamp ASC
@@ -332,7 +370,8 @@ class SQLiteAuditRepository:
                 cursor = await conn.execute(
                     """
                     SELECT entity_id, entity_type, action, actor, timestamp,
-                           old_state_json, new_state_json, metadata_json, correlation_id
+                           old_state_json, new_state_json, metadata_json, correlation_id,
+                           caller_user_id, caller_agent_id, caller_session_id, caller_principal_type
                     FROM audit_log
                     WHERE entity_type = ? AND action = ?
                     ORDER BY timestamp DESC
@@ -347,6 +386,52 @@ class SQLiteAuditRepository:
         except Exception as e:  # noqa: BLE001 -- infra-boundary: re-raises as PersistenceError
             logger.error(f"Failed to get recent actions: {e}")
             raise PersistenceError(f"Failed to get recent actions: {e}") from e
+
+    async def get_by_caller(
+        self,
+        caller_user_id: str,
+        action: AuditAction | None = None,
+        limit: int = 100,
+        offset: int = 0,
+    ) -> list[AuditEntry]:
+        """Get audit entries for a specific caller.
+
+        Enables identity-aware audit queries (e.g. "what did user X do?").
+
+        Args:
+            caller_user_id: Caller user identifier
+            action: Optional action filter
+            limit: Maximum entries to return
+            offset: Number of entries to skip
+
+        Returns:
+            List of audit entries, newest first
+        """
+        try:
+            async with self._db.connection() as conn:
+                query = """
+                    SELECT entity_id, entity_type, action, actor, timestamp,
+                           old_state_json, new_state_json, metadata_json, correlation_id,
+                           caller_user_id, caller_agent_id, caller_session_id, caller_principal_type
+                    FROM audit_log
+                    WHERE caller_user_id = ?
+                """
+                params: list = [caller_user_id]
+
+                if action:
+                    query += " AND action = ?"
+                    params.append(action.value)
+
+                query += " ORDER BY timestamp DESC LIMIT ? OFFSET ?"
+                params.extend([limit, offset])
+
+                cursor = await conn.execute(query, params)
+                rows = await cursor.fetchall()
+                return [self._row_to_entry(row) for row in rows]
+
+        except Exception as e:  # noqa: BLE001 -- infra-boundary: re-raises as PersistenceError
+            logger.error(f"Failed to get audit entries by caller: {e}")
+            raise PersistenceError(f"Failed to get audit entries by caller: {e}") from e
 
     def _row_to_entry(self, row) -> AuditEntry:
         """Convert database row to AuditEntry.
@@ -367,4 +452,8 @@ class SQLiteAuditRepository:
             new_state=json.loads(row[6]) if row[6] else None,
             metadata=json.loads(row[7]) if row[7] else {},
             correlation_id=row[8],
+            caller_user_id=row[9] if len(row) > 9 else None,
+            caller_agent_id=row[10] if len(row) > 10 else None,
+            caller_session_id=row[11] if len(row) > 11 else None,
+            caller_principal_type=row[12] if len(row) > 12 else None,
         )

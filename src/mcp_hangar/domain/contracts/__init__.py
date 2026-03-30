@@ -4,7 +4,6 @@ This module defines contracts (abstract interfaces) that the domain layer
 depends on. Implementations are provided by the infrastructure layer.
 """
 
-from .catalog import McpCatalogRepository
 from .authentication import (
     ApiKeyMetadata,
     AuthRequest,
@@ -56,8 +55,6 @@ from .registry import IRegistryClient, PackageInfo, ServerDetails, ServerSummary
 from .response_cache import CacheRetrievalResult, IResponseCache, NullResponseCache
 
 __all__ = [
-    # Catalog contracts
-    "McpCatalogRepository",
     # Authentication contracts
     "ApiKeyMetadata",
     "AuthRequest",

@@ -57,12 +57,13 @@ _MINIMAL_EVENTS: dict[str, DomainEvent] = {
     "ProviderIdleDetected": ProviderIdleDetected(provider_id="p1", idle_duration_s=0.0, last_used_at=0.0),
     "ToolInvocationRequested": ToolInvocationRequested(provider_id="p1", tool_name="t", correlation_id="c1"),
     "ToolInvocationCompleted": ToolInvocationCompleted(
-        provider_id="p1", tool_name="t", correlation_id="c1", duration_ms=0.0
+        provider_id="p1", tool_name="t", correlation_id="c1", duration_ms=0.0, result_size_bytes=0
     ),
     "ToolInvocationFailed": ToolInvocationFailed(
         provider_id="p1",
         tool_name="t",
         correlation_id="c1",
+        duration_ms=0.0,
         error_message="e",
         error_type="RuntimeError",
     ),

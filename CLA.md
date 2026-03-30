@@ -9,7 +9,7 @@ This Contributor License Agreement ("CLA") governs contributions to the MCP Hang
 
 The project uses a dual-license model:
 
-- **Core** (`src/mcp_hangar/`, `packages/operator/`, `packages/helm-charts/`) — MIT License.
+- **Core** (`src/mcp_hangar/`) — MIT License.
   No CLA required for core contributions.
 - **Enterprise** (`enterprise/`) — Business Source License 1.1 (BSL 1.1).
   **CLA required for all enterprise/ contributions.**
@@ -83,8 +83,8 @@ manual confirmation in the PR description is sufficient.
 
 ## Core (MIT) Contributions
 
-Contributions to `src/mcp_hangar/`, `packages/operator/`, `packages/helm-charts/`,
-`packages/ui/`, `tests/`, `docs/`, `scripts/`, `monitoring/`, or `examples/` are governed
+Contributions to `src/mcp_hangar/`,
+`tests/`, `docs/`, `scripts/`, `monitoring/`, or `examples/` are governed
 exclusively by the [MIT License](LICENSE). No CLA is required.
 
 ---

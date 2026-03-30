@@ -8,10 +8,8 @@ MCP Hangar is organized as a monorepo:
 
 | Package | Description | Location |
 |---------|-------------|----------|
-| **Core** | Python library (PyPI: `mcp-hangar`) | `packages/core/` |
-| **Dashboard UI** | React management dashboard | `packages/ui/` |
-| **Kubernetes Operator** | Go-based K8s operator | `packages/operator/` |
-| **Helm Charts** | Deployment charts | `packages/helm-charts/` |
+| **Core** | Python library (PyPI: `mcp-hangar`) | `src/mcp_hangar/` |
+| **Enterprise** | BSL 1.1 licensed features | `enterprise/` |
 
 **Key concepts:**
 
@@ -27,7 +25,7 @@ MCP Hangar is organized as a monorepo:
 The Python core follows Domain-Driven Design with strict layer separation:
 
 ```
-packages/core/mcp_hangar/
+src/mcp_hangar/
 +-- domain/           Core business logic (NO external dependencies)
 |   +-- model/        Aggregates: Provider, ProviderGroup
 |   +-- events.py     Domain events
@@ -66,11 +64,6 @@ packages/core/mcp_hangar/
 
 ```
 +------------------------------------------------------------------+
-|                        Dashboard UI (React)                       |
-|          Providers | Groups | Discovery | Metrics | Logs          |
-+----------------------------------+-------------------------------+
-                                   | HTTP / WebSocket
-+----------------------------------v-------------------------------+
 |                    REST API (Starlette)                           |
 |   /api/providers  /api/groups  /api/discovery  /api/ws/*         |
 +----------------------------------+-------------------------------+

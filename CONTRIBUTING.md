@@ -9,8 +9,6 @@ MCP Hangar is a monorepo containing multiple packages:
 | Package | Language | Location |
 |---------|----------|----------|
 | Core | Python | `packages/core/` |
-| Kubernetes Operator | Go | `packages/operator/` |
-| Helm Charts | YAML | `packages/helm-charts/` |
 
 ## Quick Start
 

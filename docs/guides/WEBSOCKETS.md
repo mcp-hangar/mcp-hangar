@@ -78,7 +78,7 @@ A filtered view of the event stream that only includes `ProviderStateChanged` ev
 }
 ```
 
-This endpoint is used by the Dashboard to update provider state badges in real-time without polling.
+This endpoint can be used by clients to update provider state in real-time without polling.
 
 ## Log Stream (`/api/ws/providers/{id}/logs`)
 
@@ -115,11 +115,11 @@ Each WebSocket connection has an internal message queue (`WebSocketQueue`). If a
 2. Beyond the limit, oldest messages are dropped.
 3. The client receives a warning frame indicating dropped messages.
 
-## Dashboard Integration
+## Client Integration
 
-The Dashboard UI connects to WebSocket endpoints using custom hooks:
+WebSocket endpoints can be consumed by any WebSocket client:
 
-### `useWebSocket`
+### Example: `useWebSocket`
 
 Base hook with exponential backoff reconnection:
 
@@ -170,4 +170,4 @@ interface WebSocketStore {
 }
 ```
 
-This enables the Dashboard to show a global connection status indicator and reconnect all WebSocket connections after a network interruption.
+This enables clients to track connection status and reconnect all WebSocket connections after a network interruption.

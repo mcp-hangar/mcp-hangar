@@ -336,7 +336,6 @@ class TestBootstrap:
         mock_init_saga = MagicMock()
         mock_load_config = MagicMock(return_value={"discovery": {"enabled": False}})
         mock_init_retry = MagicMock()
-        mock_init_kb = MagicMock()
         mock_fastmcp = MagicMock()
         mock_reg_tools = MagicMock()
         mock_create_workers = MagicMock(return_value=[])
@@ -359,7 +358,6 @@ class TestBootstrap:
             patch("mcp_hangar.server.bootstrap.init_saga", mock_init_saga),
             patch("mcp_hangar.server.bootstrap.load_configuration", mock_load_config),
             patch("mcp_hangar.server.bootstrap.init_retry_config", mock_init_retry),
-            patch("mcp_hangar.server.bootstrap.init_knowledge_base", mock_init_kb),
             patch("mcp_hangar.server.bootstrap.init_event_store", mock_init_event_store),
             patch("mcp_hangar.server.bootstrap.init_hot_loading", mock_init_hot_loading),
             patch("mcp_hangar.server.bootstrap.FastMCP", mock_fastmcp),
@@ -385,7 +383,6 @@ class TestBootstrap:
             "init_saga": mock_init_saga,
             "load_config": mock_load_config,
             "init_retry": mock_init_retry,
-            "init_kb": mock_init_kb,
             "fastmcp": mock_fastmcp,
             "reg_tools": mock_reg_tools,
             "create_workers": mock_create_workers,

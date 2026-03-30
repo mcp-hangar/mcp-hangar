@@ -54,13 +54,12 @@ mcp-hangar init
 mcp-hangar serve
 ```
 
-### HTTP Mode with Dashboard
+### HTTP Mode
 
 ```bash
-# Start with REST API and Dashboard UI
+# Start with REST API
 mcp-hangar serve --http --port 8000
 
-# Dashboard: http://localhost:8000
 # REST API:  http://localhost:8000/api/
 ```
 
@@ -140,7 +139,6 @@ Single call. Parallel execution. All results returned together.
 
 **REST API.** Full CRUD for providers, groups, discovery, config, and auth. WebSocket streams for real-time events.
 
-**Dashboard UI.** Web-based management with provider state, log streaming, topology, metrics charts, and RBAC management.
 
 **RBAC.** Role-based access control with tool-level policies. API key authentication.
 
@@ -179,7 +177,6 @@ Same API. Same reliability. Different scale.
 
 - [Getting Started](https://mcp-hangar.io/getting-started/quickstart/)
 - [REST API Guide](https://mcp-hangar.io/guides/REST_API/)
-- [Dashboard UI](https://mcp-hangar.io/guides/DASHBOARD/)
 - [Configuration Reference](https://mcp-hangar.io/reference/configuration/)
 - [Observability Setup](https://mcp-hangar.io/guides/OBSERVABILITY/)
 - [Authentication & RBAC](https://mcp-hangar.io/guides/AUTHENTICATION/)

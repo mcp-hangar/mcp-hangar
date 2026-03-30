@@ -45,10 +45,10 @@ class ProviderStarted(DomainEvent):
 
 @dataclass
 class ProviderStopped(DomainEvent):
-    """Published when a provider stops."""
+    """Published when a provider is stopped."""
 
     provider_id: str
-    reason: str  # "shutdown", "idle", "error", "degraded"
+    reason: str
 
     def __post_init__(self):
         super().__init__()
@@ -105,6 +105,7 @@ class ToolInvocationRequested(DomainEvent):
     tool_name: str
     correlation_id: str
     arguments: dict[str, Any] = field(default_factory=dict)
+    identity_context: dict[str, Any] | None = None
 
     def __post_init__(self):
         super().__init__()
@@ -118,7 +119,8 @@ class ToolInvocationCompleted(DomainEvent):
     tool_name: str
     correlation_id: str
     duration_ms: float
-    result_size_bytes: int = 0
+    result_size_bytes: int
+    identity_context: dict[str, Any] | None = None
 
     def __post_init__(self):
         super().__init__()
@@ -131,8 +133,10 @@ class ToolInvocationFailed(DomainEvent):
     provider_id: str
     tool_name: str
     correlation_id: str
+    duration_ms: float
     error_message: str
     error_type: str
+    identity_context: dict[str, Any] | None = None
 
     def __post_init__(self):
         super().__init__()
@@ -1175,6 +1179,85 @@ class ToolSchemaChanged(DomainEvent):
     change_type: str  # SchemaChangeType.value
     old_hash: str | None = None
     new_hash: str | None = None
+    schema_version: int = 1
+
+    def __post_init__(self):
+        super().__init__()
+
+
+# ---------------------------------------------------------------------------
+# Semantic analysis events (Phase 57-59 -- v10.0 Semantic Analysis Alpha)
+# ---------------------------------------------------------------------------
+
+
+@dataclass
+class DetectionRuleMatched(DomainEvent):
+    """Published when a session's call sequence matches a detection rule.
+
+    Emitted by the semantic analysis engine after evaluating a session's
+    sliding window of tool invocations against the active rule set. One
+    event per rule match (a single invocation can trigger multiple rules).
+
+    This event is consumed by the DetectionRuleMatchedEventHandler which
+    increments Prometheus counters and creates OTLP spans.
+
+    Attributes:
+        rule_id: Unique identifier of the matched rule (e.g. "credential-exfiltration").
+        rule_name: Human-readable rule name.
+        severity: Detection severity ("critical", "high", "medium", "low").
+        session_id: Session that triggered the match.
+        provider_id: Provider involved in the final matching tool call.
+        matched_tools: Tuple of tool names that formed the matched sequence.
+        recommended_action: Response action from the rule ("alert", "throttle", "suspend", "block").
+        metadata: Additional match context (timestamps, args fingerprints, etc.).
+        schema_version: Event schema version.
+    """
+
+    rule_id: str
+    rule_name: str
+    severity: str
+    session_id: str
+    provider_id: str
+    matched_tools: tuple[str, ...] = field(default_factory=tuple)
+    recommended_action: str = "alert"
+    metadata: dict[str, Any] = field(default_factory=dict)
+    schema_version: int = 1
+
+    def __post_init__(self):
+        super().__init__()
+
+
+@dataclass
+class EnforcementActionTaken(DomainEvent):
+    """Published when an automated response action is executed for a rule match.
+
+    Emitted by the ResponseOrchestrator after executing an IResponseAction
+    (alert, throttle, suspend, block) in response to a DetectionRuleMatched
+    event. One event per action execution.
+
+    This event is consumed by the EnforcementActionTakenEventHandler which
+    increments Prometheus counters and creates OTLP spans with
+    ``mcp.enforcement.action`` attributes.
+
+    Attributes:
+        action: The response action type that was executed ("alert", "throttle",
+            "suspend", "block").
+        rule_id: Identifier of the detection rule that triggered this action.
+        session_id: Session that triggered the original detection.
+        provider_id: Provider involved in the matched sequence.
+        matched_tools: Tuple of tool names from the matched sequence.
+        detail: Human-readable description of the action taken.
+        metadata: Additional context (TTL, rate limit params, etc.).
+        schema_version: Event schema version.
+    """
+
+    action: str
+    rule_id: str
+    session_id: str
+    provider_id: str
+    matched_tools: tuple[str, ...] = field(default_factory=tuple)
+    detail: str = ""
+    metadata: dict[str, Any] = field(default_factory=dict)
     schema_version: int = 1
 
     def __post_init__(self):

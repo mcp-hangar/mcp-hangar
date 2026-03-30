@@ -187,6 +187,12 @@ class HttpClient:
         self._sse_thread: threading.Thread | None = None
         self._sse_running = False
 
+        # MCP Streamable HTTP session tracking.
+        # The server returns Mcp-Session-Id on initialize; all subsequent
+        # requests must include it so the server correlates them to the
+        # same session.
+        self._mcp_session_id: str | None = None
+
         # Client state
         self._closed = False
 
@@ -318,21 +324,29 @@ class HttpClient:
         provider_label = self._provider_id or self._host
 
         try:
-            # Propagate W3C TraceContext to the remote provider.
-            # Enables end-to-end distributed tracing: agent -> Hangar -> provider.
-            trace_headers: dict[str, str] = {}
-            inject_trace_context(trace_headers)
+            # Build per-request headers: W3C TraceContext + MCP session ID.
+            extra_headers: dict[str, str] = {}
+            inject_trace_context(extra_headers)
+            if self._mcp_session_id:
+                extra_headers["Mcp-Session-Id"] = self._mcp_session_id
 
             response = self._client.post(
                 url,
                 json=request_body,
-                headers=trace_headers if trace_headers else None,
+                headers=extra_headers if extra_headers else None,
                 timeout=timeout,
             )
 
             duration_s = time.time() - start_time
             duration_ms = duration_s * 1000
             status_code = str(response.status_code)
+
+            # Capture MCP session ID from response headers.
+            # The server sets this on initialize; we must echo it back on
+            # all subsequent requests per the Streamable HTTP spec.
+            session_id = response.headers.get("Mcp-Session-Id")
+            if session_id:
+                self._mcp_session_id = session_id
 
             # Record HTTP request metrics
             prometheus_metrics.HTTP_REQUESTS_TOTAL.inc(provider=provider_label, method=method, status_code=status_code)

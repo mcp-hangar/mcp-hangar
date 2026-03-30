@@ -66,17 +66,7 @@ fi
 
 echo ""
 
-# Rule 3: operator and helm-charts must never import enterprise
-echo "Rule 3: packages/operator/ and packages/helm-charts/ must not import from enterprise/"
-if grep -rn "from enterprise\|import enterprise" \
-    packages/operator/ packages/helm-charts/ 2>/dev/null | \
-    grep -v "__pycache__"; then
-    echo ""
-    echo "FAIL: operator/helm-charts import enterprise module(s)."
-    VIOLATIONS=$((VIOLATIONS + 1))
-else
-    echo "OK"
-fi
+# Rule 3: removed -- operator and helm-charts are now in separate repositories
 
 echo ""
 

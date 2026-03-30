@@ -49,8 +49,8 @@
 
 | Component           | License | Scope                                                                                                                      |
 |---------------------|---------|----------------------------------------------------------------------------------------------------------------------------|
-| Core control plane  | MIT     | `src/mcp_hangar/`, `packages/operator/`, `packages/helm-charts/`, `packages/ui/` (basic views)                             |
-| Enterprise features | BSL 1.1 | `enterprise/` — behavioral profiling, semantic analysis, identity propagation, compliance export, advanced dashboard views |
+| Core control plane  | MIT     | `src/mcp_hangar/` |
+| Enterprise features | BSL 1.1 | `enterprise/` — behavioral profiling, semantic analysis, identity propagation, compliance export |
 
 ### BSL parameters
 
@@ -79,16 +79,15 @@
 | Provider lifecycle, state machine, circuit breaker | MIT     | `src/`                                        | Core value, must be open for adoption                           |
 | Provider groups, load balancing, failover          | MIT     | `src/`                                        | Core value                                                      |
 | Health checks, Prometheus metrics, OTEL export     | MIT     | `src/`                                        | Observability foundation, enables partner integrations          |
-| K8s operator, CRDs, Helm charts                    | MIT     | `packages/operator/`, `packages/helm-charts/` | Adoption requires open operator                                 |
+| K8s operator, CRDs, Helm charts                    | MIT     | `operator/`, `helm-charts/` (separate repos)  | Adoption requires open operator                                 |
 | Capability declaration schema                      | MIT     | `src/`                                        | Foundational for enforcement, must be standard                  |
-| Network policy generation                          | MIT     | `src/` + `packages/operator/`                 | Core enforcement, open for trust                                |
+| Network policy generation                          | MIT     | `src/` + `operator/` (separate repo)          | Core enforcement, open for trust                                |
 | Violation signals and enforcement events           | MIT     | `src/`                                        | Core contract, partner backends consume these                   |
 | CLI, hot-reload, batch invocations                 | MIT     | `src/`                                        | Core DX                                                         |
 | Basic audit logging (stdout/file)                  | MIT     | `src/`                                        | Baseline visibility                                             |
 | REST API, WebSocket infrastructure                 | MIT     | `src/`                                        | API surface must be open                                        |
 | RBAC, API key auth, JWT/OIDC                       | **BSL** | `enterprise/auth/`                            | Enterprise value, commercial differentiator                     |
 | Tool Access Policies                               | **BSL** | `enterprise/policies/`                        | Governance feature, commercial differentiator                   |
-| Dashboard UI (full)                                | **BSL** | `enterprise/dashboard/`                       | Commercial differentiator. Basic status views stay in MIT core. |
 | Event sourcing persistence (SQLite/Postgres)       | **BSL** | `enterprise/persistence/`                     | Enterprise durability, commercial differentiator                |
 | Behavioral profiling and deviation detection       | **BSL** | `enterprise/behavioral/`                      | Core thesis of Enterprise tier                                  |
 | Caller identity propagation                        | **BSL** | `enterprise/identity/`                        | Enterprise value                                                |
@@ -131,7 +130,6 @@ Existing Pro/Enterprise features currently live in `src/`. They must move to `en
 | `src/mcp_hangar/domain/value_objects/tool_access_policy.py`                  | Keep interface in core, move enforcement to `enterprise/policies/`  | Policy enforcement                                   |
 | `src/mcp_hangar/infrastructure/persistence/event_store.py` (SQLite/Postgres) | `enterprise/persistence/`                                           | Durable event stores (in-memory stays in core)       |
 | `src/mcp_hangar/infrastructure/observability/langfuse_adapter.py`            | `enterprise/integrations/langfuse.py`                               | Langfuse integration                                 |
-| `packages/ui/`                                                               | `enterprise/dashboard/` (full app), keep basic status views in core | Dashboard UI                                         |
 
 **Migration steps:**
 
@@ -190,7 +188,6 @@ Core (MIT) contributions do not require a CLA.
 
 **Adds on top of Core:**
 
-- Dashboard UI (React 19 — metrics, topology, log viewer, config diff)
 - RBAC (5 built-in roles) + API key authentication with rotation
 - JWT/OIDC integration (Keycloak, Entra ID, Okta)
 - Tool Access Policies (glob-pattern allow/deny, 3-level merge)
@@ -311,34 +308,33 @@ Phases 1-2 are complete.
 
 ### Critical (before any public positioning as "security layer")
 
-| Area                              | Gap                                                                        | Action                                                                                                      | Target version |
-|-----------------------------------|----------------------------------------------------------------------------|-------------------------------------------------------------------------------------------------------------|----------------|
-| **Container network isolation**   | Docker providers can talk to anything                                      | Default-deny egress, explicit allowlist                                                                     | v0.13.0        |
-| **Capability declaration schema** | No formal way to declare what a server needs                               | New `capabilities` config block                                                                             | v0.13.0        |
-| **K8s NetworkPolicy generation**  | Operator doesn't create NetworkPolicies                                    | Auto-generate from CRD capabilities field                                                                   | v0.13.0        |
-| **Licensing boundary**            | All code in MIT, no commercial protection                                  | Migrate Pro/Enterprise features to `enterprise/` under BSL 1.1                                              | v0.13.0        |
-| **Behavioral baseline storage**   | No behavioral profiling exists                                             | Network connection logging per container                                                                    | v0.14.0        |
-| **Test coverage on auth**         | Auth stack is comprehensive but test density unclear                       | Audit test coverage, target 90%+ on auth paths                                                              | v0.13.0        |
-| **Security scanning in CI**       | Not visible in changelog                                                   | Trivy/Grype on container images, Semgrep on source                                                          | v0.13.0        |
-| **Dependency audit**              | Not visible                                                                | `pip-audit`, `npm audit` in CI, SBOM generation                                                             | v0.13.0        |
-| **OTEL semantic conventions**     | Governance telemetry is useful but not yet formalized as a stable contract | Define MCP-aware OTEL conventions for provider/tool/user/session/policy/enforcement attributes              | v0.13.0        |
-| **Trace context propagation**     | Cross-system traces depend on ad hoc correlation                           | Standardize agent → Hangar → provider trace propagation for audit and enforcement paths                     | v0.13.0        |
-| **Operator enforcement loop**     | Operator reconciles state, but not full governance posture                 | Make operator the primary engine for capability enforcement, NetworkPolicy rollout, and violation signaling | v0.13.0        |
-| **Admission/policy hooks**        | K8s integration is not yet policy-driven enough                            | Validate and reject unsafe specs before runtime using admission and policy integrations                     | v0.13.0        |
-| **Import boundary enforcement**   | No CI rule prevents core from importing enterprise                         | Add CI check: `src/` must never import from `enterprise/`                                                   | v0.13.0        |
+| Area                              | Gap                                                                        | Action                                                                                                      | Target version | Status |
+|-----------------------------------|----------------------------------------------------------------------------|-------------------------------------------------------------------------------------------------------------|----------------|--------|
+| **Container network isolation**   | Docker providers can talk to anything                                      | Default-deny egress, explicit allowlist                                                                     | v0.13.0        | |
+| **Capability declaration schema** | No formal way to declare what a server needs                               | New `capabilities` config block                                                                             | v0.13.0        | |
+| **K8s NetworkPolicy generation**  | Operator doesn't create NetworkPolicies                                    | Auto-generate from CRD capabilities field                                                                   | v0.13.0        | |
+| **Licensing boundary**            | All code in MIT, no commercial protection                                  | Migrate Pro/Enterprise features to `enterprise/` under BSL 1.1                                              | v0.13.0        | In progress (v7.0 Phase 36) |
+| **Behavioral baseline storage**   | No behavioral profiling exists                                             | Network connection logging per container                                                                    | v0.14.0        | |
+| **Test coverage on auth**         | Auth stack is comprehensive but test density unclear                       | Audit test coverage, target 90%+ on auth paths                                                              | v0.13.0        | |
+| **Security scanning in CI**       | Not visible in changelog                                                   | Trivy/Grype on container images, Semgrep on source                                                          | v0.13.0        | |
+| **Dependency audit**              | Not visible                                                                | `pip-audit`, `npm audit` in CI, SBOM generation                                                             | v0.13.0        | |
+| **OTEL semantic conventions**     | Governance telemetry is useful but not yet formalized as a stable contract | Define MCP-aware OTEL conventions for provider/tool/user/session/policy/enforcement attributes              | v0.13.0        | **DONE** (v6.0 Phase 31) |
+| **Trace context propagation**     | Cross-system traces depend on ad hoc correlation                           | Standardize agent -> Hangar -> provider trace propagation for audit and enforcement paths                   | v0.13.0        | **DONE** (v6.0 Phase 32) |
+| **Operator enforcement loop**     | Operator reconciles state, but not full governance posture                 | Make operator the primary engine for capability enforcement, NetworkPolicy rollout, and violation signaling | v0.13.0        | |
+| **Admission/policy hooks**        | K8s integration is not yet policy-driven enough                            | Validate and reject unsafe specs before runtime using admission and policy integrations                     | v0.13.0        | |
+| **Import boundary enforcement**   | No CI rule prevents core from importing enterprise                         | Add CI check: `src/` must never import from `enterprise/`                                                   | v0.13.0        | |
 
 ### Important (before first paying customer)
 
-| Area                           | Gap                                                                                | Action                                                                                       | Target version |
-|--------------------------------|------------------------------------------------------------------------------------|----------------------------------------------------------------------------------------------|----------------|
-| **Dashboard auth**             | Dashboard exists but auth integration unclear                                      | Dashboard must require auth, no anonymous access                                             | v0.14.0        |
-| **Helm chart security**        | Basic                                                                              | Pod Security Standards, network policies, RBAC scoping                                       | v0.14.0        |
-| **Upgrade path**               | No migration guide between versions                                                | Documented upgrade procedure, DB migration tooling                                           | v0.14.0        |
-| **Performance benchmarks**     | Batch benchmark exists, nothing else                                               | Latency overhead of proxy path, max providers per instance                                   | v0.14.0        |
-| **Error handling audit**       | Exception hygiene improved in v0.11.0                                              | Full audit of error surfaces exposed to users                                                | v0.14.0        |
-| **OTLP completeness**          | Traces exist, but partner story needs explicit completeness across telemetry types | Ensure security-relevant traces, metrics, and logs/audit signals are exportable through OTLP | v0.14.0        |
-| **Integration recipes**        | OTEL partner story is implied, not operationalized                                 | Publish reference deployments for OpenLIT, OTEL Collector, Langfuse, and Grafana             | v0.14.0        |
-| **License key infrastructure** | No mechanism to activate Pro/Enterprise                                            | Implement license key validation in bootstrap; enterprise modules load conditionally         | v0.14.0        |
+| Area                           | Gap                                                                                | Action                                                                                       | Target version | Status |
+|--------------------------------|------------------------------------------------------------------------------------|----------------------------------------------------------------------------------------------|----------------|--------|
+| **Helm chart security**        | Basic                                                                              | Pod Security Standards, network policies, RBAC scoping                                       | v0.14.0        | |
+| **Upgrade path**               | No migration guide between versions                                                | Documented upgrade procedure, DB migration tooling                                           | v0.14.0        | |
+| **Performance benchmarks**     | Batch benchmark exists, nothing else                                               | Latency overhead of proxy path, max providers per instance                                   | v0.14.0        | |
+| **Error handling audit**       | Exception hygiene improved in v0.11.0                                              | Full audit of error surfaces exposed to users                                                | v0.14.0        | |
+| **OTLP completeness**          | Traces exist, but partner story needs explicit completeness across telemetry types | Ensure security-relevant traces, metrics, and logs/audit signals are exportable through OTLP | v0.14.0        | **DONE** (v6.0 Phase 33) |
+| **Integration recipes**        | OTEL partner story is implied, not operationalized                                 | Publish reference deployments for OpenLIT, OTEL Collector, Langfuse, and Grafana             | v0.14.0        | **DONE** (v6.0 Phase 34) |
+| **License key infrastructure** | No mechanism to activate Pro/Enterprise                                            | Implement license key validation in bootstrap; enterprise modules load conditionally         | v0.14.0        | |
 
 ### Nice-to-have (H2 2026)
 
@@ -403,7 +399,6 @@ mcp-hangar/
 │   ├── auth/                  # RBAC, API key stores, JWT/OIDC, rate limiter, auth API
 │   ├── policies/              # Tool Access Policy enforcement
 │   ├── persistence/           # SQLite/Postgres event stores, durable saga state
-│   ├── dashboard/             # Full React 19 dashboard UI
 │   ├── behavioral/            # Network profiling, baseline, deviation detection
 │   ├── identity/              # Caller identity propagation, identity-aware audit
 │   ├── compliance/            # SIEM export (CEF, LEEF, JSON-lines)
@@ -433,7 +428,7 @@ mcp-hangar/
 ```
 # CI check (must pass on every PR)
 # Core must never depend on enterprise features
-if grep -rn "from enterprise" src/ packages/operator/ packages/helm-charts/; then
+if grep -rn "from enterprise" src/; then
   echo "FAIL: core imports enterprise module"
   exit 1
 fi

@@ -299,8 +299,8 @@ class TestEventSourcedProvider:
         """Test health reset on tool completion."""
         events = [
             ProviderStarted("p1", "subprocess", 5, 100.0),
-            ToolInvocationFailed("p1", "add", "c1", "error", "Error"),
-            ToolInvocationCompleted("p1", "add", "c2", 50.0),
+            ToolInvocationFailed("p1", "add", "c1", 0.0, "error", "Error"),
+            ToolInvocationCompleted("p1", "add", "c2", 50.0, 0),
         ]
 
         provider = EventSourcedProvider.from_events(provider_id="p1", mode="subprocess", events=events)
@@ -312,8 +312,8 @@ class TestEventSourcedProvider:
         """Test health tracking on tool failure."""
         events = [
             ProviderStarted("p1", "subprocess", 5, 100.0),
-            ToolInvocationFailed("p1", "add", "c1", "error1", "Error"),
-            ToolInvocationFailed("p1", "add", "c2", "error2", "Error"),
+            ToolInvocationFailed("p1", "add", "c1", 0.0, "error1", "Error"),
+            ToolInvocationFailed("p1", "add", "c2", 0.0, "error2", "Error"),
         ]
 
         provider = EventSourcedProvider.from_events(provider_id="p1", mode="subprocess", events=events)
@@ -402,7 +402,7 @@ class TestEventSourcedProvider:
         )
 
         events = [
-            ToolInvocationCompleted("p1", "add", "c1", 50.0),
+            ToolInvocationCompleted("p1", "add", "c1", 50.0, 0),
             ProviderStopped("p1", "idle"),
         ]
 
@@ -415,7 +415,7 @@ class TestEventSourcedProvider:
         """Test creating snapshot from provider."""
         events = [
             ProviderStarted("p1", "subprocess", 5, 100.0),
-            ToolInvocationCompleted("p1", "add", "c1", 50.0),
+            ToolInvocationCompleted("p1", "add", "c1", 50.0, 0),
         ]
 
         provider = EventSourcedProvider.from_events(
@@ -436,7 +436,7 @@ class TestEventSourcedProvider:
         """Test replaying to specific version (time travel)."""
         events = [
             ProviderStarted("p1", "subprocess", 5, 100.0),
-            ToolInvocationCompleted("p1", "add", "c1", 50.0),
+            ToolInvocationCompleted("p1", "add", "c1", 50.0, 0),
             ProviderStopped("p1", "idle"),
         ]
 
@@ -472,7 +472,7 @@ class TestEventSourcedProvider:
         """Test that version increments when events are applied."""
         events = [
             ProviderStarted("p1", "subprocess", 5, 100.0),
-            ToolInvocationCompleted("p1", "add", "c1", 50.0),
+            ToolInvocationCompleted("p1", "add", "c1", 50.0, 0),
             ProviderStopped("p1", "idle"),
         ]
 
@@ -484,9 +484,9 @@ class TestEventSourcedProvider:
         """Test complex sequence of events."""
         events = [
             ProviderStarted("p1", "subprocess", 5, 100.0),
-            ToolInvocationCompleted("p1", "add", "c1", 50.0),
-            ToolInvocationFailed("p1", "sub", "c2", "error", "Error"),
-            ToolInvocationFailed("p1", "sub", "c3", "error", "Error"),
+            ToolInvocationCompleted("p1", "add", "c1", 50.0, 0),
+            ToolInvocationFailed("p1", "sub", "c2", 0.0, "error", "Error"),
+            ToolInvocationFailed("p1", "sub", "c3", 0.0, "error", "Error"),
             HealthCheckPassed("p1", 30.0),
             ProviderDegraded("p1", 3, 3, "failures"),
             ProviderStopped("p1", "degraded"),

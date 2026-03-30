@@ -128,7 +128,7 @@ def test_logging_event_handler():
     event = ProviderStarted(provider_id="test", mode="subprocess", tools_count=3, startup_duration_ms=100.0)
     handler.handle(event)
 
-    event = ToolInvocationCompleted(provider_id="test", tool_name="add", correlation_id="abc123", duration_ms=50.0)
+    event = ToolInvocationCompleted(provider_id="test", tool_name="add", correlation_id="abc123", duration_ms=50.0, result_size_bytes=100)
     handler.handle(event)
 
 

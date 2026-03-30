@@ -15,10 +15,8 @@ MCP Hangar is a monorepo containing multiple packages:
 
 | Package | Description | Location |
 |---------|-------------|----------|
-| **Core** | Python library (PyPI: `mcp-hangar`) | `packages/core/` |
-| **Dashboard UI** | React management dashboard | `packages/ui/` |
-| **Kubernetes Operator** | Go-based K8s operator | `packages/operator/` |
-| **Helm Charts** | Deployment charts | `packages/helm-charts/` |
+| **Core** | Python library (PyPI: `mcp-hangar`) | `src/mcp_hangar/` |
+| **Enterprise** | BSL 1.1 licensed features | `enterprise/` |
 
 ## Features
 
@@ -28,7 +26,6 @@ MCP Hangar is a monorepo containing multiple packages:
 - **Health Monitoring** -- Circuit breaker pattern with automatic recovery
 - **Auto-Discovery** -- Detect providers from Docker labels, K8s annotations, filesystem
 - **REST API** -- Full CRUD API for providers, groups, discovery, config, and auth
-- **Dashboard UI** -- Web-based management interface with real-time updates
 - **Log Streaming** -- Live provider logs via REST and WebSocket
 - **RBAC** -- Role-based access control with tool-level policies
 - **Catalog** -- Browsable provider catalog with search and deploy
@@ -67,13 +64,12 @@ mcp-hangar init
 mcp-hangar serve
 ```
 
-### HTTP Mode with Dashboard
+### HTTP Mode
 
 ```bash
-# Start with REST API and Dashboard UI
+# Start with REST API
 mcp-hangar serve --http --port 8000
 
-# Dashboard: http://localhost:8000
 # REST API:  http://localhost:8000/api/
 ```
 
@@ -83,7 +79,6 @@ mcp-hangar serve --http --port 8000
 - [Quick Start Guide](getting-started/quickstart.md)
 - [Architecture Overview](architecture/OVERVIEW.md)
 - [REST API Guide](guides/REST_API.md)
-- [Dashboard UI Guide](guides/DASHBOARD.md)
 - [Container Guide](guides/CONTAINERS.md)
 - [Authentication & RBAC](guides/AUTHENTICATION.md)
 - [Observability](guides/OBSERVABILITY.md)

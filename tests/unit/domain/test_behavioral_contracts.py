@@ -266,11 +266,11 @@ class TestBehavioralContractReExports:
         assert ReExportedDetector is IDeviationDetector
         assert ReExportedNull is NullBehavioralProfiler
 
-    def test_value_objects_importable_from_domain_value_objects(self) -> None:
-        from mcp_hangar.domain.value_objects import (
-            BehavioralMode as ReExportedMode,
-            NetworkObservation as ReExportedObs,
+    def test_value_objects_importable_from_behavioral_module(self) -> None:
+        from mcp_hangar.domain.value_objects.behavioral import (
+            BehavioralMode as DirectMode,
+            NetworkObservation as DirectObs,
         )
 
-        assert ReExportedMode is BehavioralMode
-        assert ReExportedObs is NetworkObservation
+        assert DirectMode is BehavioralMode
+        assert DirectObs is NetworkObservation

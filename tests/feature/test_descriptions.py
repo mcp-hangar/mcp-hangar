@@ -74,7 +74,7 @@ def test_descriptions() -> None:
         no_description = []
 
         for provider in providers_list:
-            provider_id = provider.get("provider")
+            provider_id = provider.get("provider") or "(unknown)"
             description = provider.get("description")
 
             if description:
@@ -96,7 +96,8 @@ def test_descriptions() -> None:
 
         # Show example JSON
         if providers_list:
-            print(f"\n📝 Example response for '{providers_list[0]['provider']}':")
+            example_id = providers_list[0].get("provider") or "(unknown)"
+            print(f"\n📝 Example response for '{example_id}':")
             print(f"   {json.dumps(providers_list[0], indent=2)[:300]}...")
 
         return None

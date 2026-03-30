@@ -925,6 +925,22 @@ TOOL_SCHEMA_DRIFTS_TOTAL = Counter(
     labels=["provider", "change_type"],
 )
 
+# -----------------------------------------------------------------------------
+# Semantic Analysis Metrics (Phase 57)
+# -----------------------------------------------------------------------------
+
+DETECTION_RULE_MATCHES_TOTAL = Counter(
+    name="mcp_hangar_detection_rule_matches",
+    description="Total number of detection rule matches from semantic analysis",
+    labels=["rule_id", "severity"],
+)
+
+ENFORCEMENT_ACTIONS_TOTAL = Counter(
+    name="mcp_hangar_enforcement_actions",
+    description="Total number of automated enforcement actions taken in response to detection rule matches",
+    labels=["action", "rule_id"],
+)
+
 
 # =============================================================================
 # Register All Metrics
@@ -1029,6 +1045,10 @@ def _register_all_metrics():
             TOOL_SCHEMA_DRIFTS_TOTAL,
         ]
     )
+
+    # Semantic analysis metrics
+    metrics.append(DETECTION_RULE_MATCHES_TOTAL)
+    metrics.append(ENFORCEMENT_ACTIONS_TOTAL)
 
     for metric in metrics:
         REGISTRY.register(metric)
@@ -1209,6 +1229,26 @@ def record_tool_schema_drift(provider: str, change_type: str) -> None:
         change_type: Type of change (added, removed, modified).
     """
     TOOL_SCHEMA_DRIFTS_TOTAL.inc(provider=provider, change_type=change_type)
+
+
+def record_detection_rule_match(rule_id: str, severity: str) -> None:
+    """Record a detection rule match from semantic analysis.
+
+    Args:
+        rule_id: Identifier of the matched detection rule.
+        severity: Severity of the match (critical, high, medium, low).
+    """
+    DETECTION_RULE_MATCHES_TOTAL.inc(rule_id=rule_id, severity=severity)
+
+
+def record_enforcement_action(action: str, rule_id: str) -> None:
+    """Record an automated enforcement action taken for a detection rule match.
+
+    Args:
+        action: Response action type (alert, throttle, suspend, block).
+        rule_id: Identifier of the detection rule that triggered the action.
+    """
+    ENFORCEMENT_ACTIONS_TOTAL.inc(action=action, rule_id=rule_id)
 
 
 # =============================================================================

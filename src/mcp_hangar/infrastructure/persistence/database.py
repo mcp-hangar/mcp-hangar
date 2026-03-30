@@ -281,6 +281,26 @@ MIGRATIONS: list[tuple[str, str]] = [
             ON audit_log(actor, timestamp DESC);
         """,
     ),
+    (
+        "004_audit_identity_columns",
+        """
+        -- Identity columns for caller-aware audit trail
+        ALTER TABLE audit_log ADD COLUMN caller_user_id TEXT;
+        ALTER TABLE audit_log ADD COLUMN caller_agent_id TEXT;
+        ALTER TABLE audit_log ADD COLUMN caller_session_id TEXT;
+        ALTER TABLE audit_log ADD COLUMN caller_principal_type TEXT;
+
+        -- Index for identity-based queries (what did user X do?)
+        CREATE INDEX IF NOT EXISTS idx_audit_log_caller_user
+            ON audit_log(caller_user_id, timestamp DESC)
+            WHERE caller_user_id IS NOT NULL;
+
+        -- Index for agent-based queries
+        CREATE INDEX IF NOT EXISTS idx_audit_log_caller_agent
+            ON audit_log(caller_agent_id, timestamp DESC)
+            WHERE caller_agent_id IS NOT NULL;
+        """,
+    ),
 ]
 
 
