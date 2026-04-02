@@ -18,7 +18,7 @@ from mcp_hangar.infrastructure.event_bus import EventBus
 
 
 @dataclass
-class TestEvent(DomainEvent):
+class EventData(DomainEvent):
     """Minimal DomainEvent subclass used only in tests."""
 
     message: str = "test"
@@ -26,7 +26,7 @@ class TestEvent(DomainEvent):
 
     def to_dict(self) -> dict:
         return {
-            "event_type": "TestEvent",
+            "event_type": "EventData",
             "message": self.message,
         }
 
@@ -47,7 +47,7 @@ def test_subscribe_to_all_then_publish_handler_fires_once():
     calls: list[DomainEvent] = []
 
     bus.subscribe_to_all(calls.append)
-    bus.publish(TestEvent(message="hello"))
+    bus.publish(EventData(message="hello"))
 
     assert len(calls) == 1
     assert calls[0].to_dict()["message"] == "hello"
@@ -60,7 +60,7 @@ def test_unsubscribe_from_all_prevents_handler_from_firing():
 
     bus.subscribe_to_all(calls.append)
     bus.unsubscribe_from_all(calls.append)
-    bus.publish(TestEvent(message="ignored"))
+    bus.publish(EventData(message="ignored"))
 
     assert len(calls) == 0
 
@@ -83,7 +83,7 @@ def test_unsubscribe_one_of_two_handlers_only_remaining_fires():
     bus.subscribe_to_all(calls_a.append)
     bus.subscribe_to_all(calls_b.append)
     bus.unsubscribe_from_all(calls_a.append)
-    bus.publish(TestEvent(message="only_b"))
+    bus.publish(EventData(message="only_b"))
 
     assert len(calls_a) == 0
     assert len(calls_b) == 1
@@ -97,6 +97,6 @@ def test_resubscribe_after_unsubscribe_works():
     bus.subscribe_to_all(calls.append)
     bus.unsubscribe_from_all(calls.append)
     bus.subscribe_to_all(calls.append)
-    bus.publish(TestEvent(message="once"))
+    bus.publish(EventData(message="once"))
 
     assert len(calls) == 1

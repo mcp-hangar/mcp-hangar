@@ -287,14 +287,21 @@ class TestSecretsResolverFileErrors:
         provider_dir.mkdir()
         provider_file = provider_dir / "SECRET"
         provider_file.write_text("provider_val")
-        provider_file.chmod(0o000)
         (tmp_path / "SECRET").write_text("global_val")
         resolver = SecretsResolver(secrets_dir=tmp_path)
-        result = resolver.resolve(["SECRET"], "prov")
+
+        original_read_text = Path.read_text
+
+        def read_text_with_provider_error(self: Path, *args: object, **kwargs: object) -> str:
+            if self == provider_file:
+                raise PermissionError("provider file unreadable")
+            return original_read_text(self, *args, **kwargs)
+
+        with patch.object(Path, "read_text", autospec=True, side_effect=read_text_with_provider_error):
+            result = resolver.resolve(["SECRET"], "prov")
+
         # Should fall through to global file
         assert result.resolved["SECRET"] == "global_val"
-        # Restore permissions for cleanup
-        provider_file.chmod(0o644)
 
     def test_unreadable_global_file_results_in_missing(
         self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
@@ -304,12 +311,19 @@ class TestSecretsResolverFileErrors:
         monkeypatch.delenv("SECRET", raising=False)
         global_file = tmp_path / "SECRET"
         global_file.write_text("global_val")
-        global_file.chmod(0o000)
         resolver = SecretsResolver(secrets_dir=tmp_path)
-        result = resolver.resolve(["SECRET"], "prov")
+
+        original_read_text = Path.read_text
+
+        def read_text_with_global_error(self: Path, *args: object, **kwargs: object) -> str:
+            if self == global_file:
+                raise PermissionError("global file unreadable")
+            return original_read_text(self, *args, **kwargs)
+
+        with patch.object(Path, "read_text", autospec=True, side_effect=read_text_with_global_error):
+            result = resolver.resolve(["SECRET"], "prov")
+
         assert "SECRET" in result.missing
-        # Restore permissions for cleanup
-        global_file.chmod(0o644)
 
 
 class TestSecretsResolverMissingInstructions:

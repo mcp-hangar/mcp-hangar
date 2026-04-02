@@ -152,6 +152,7 @@ addopts = "-v --cov=mcp_hangar --cov-report=term-missing"
 pythonpath = ["src", "."]
 markers = [
     "benchmark: performance benchmarks (deselect with '-m not benchmark')",
+    "security: security-related tests",
 ]
 [dependency-groups]
 dev = [
