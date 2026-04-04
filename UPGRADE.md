@@ -337,7 +337,6 @@ compliance export, Langfuse integration) are moving from the core package to the
 | Tool access policy enforcement | `src/mcp_hangar/domain/value_objects/tool_access_policy.py` | `enterprise/policies/` (interface stays in core) |
 | SQLite/Postgres event stores | `src/mcp_hangar/infrastructure/persistence/event_store.py` | `enterprise/persistence/` |
 | Langfuse integration | `src/mcp_hangar/infrastructure/observability/langfuse_adapter.py` | `enterprise/integrations/langfuse.py` |
-| Dashboard UI | `packages/ui/` | `enterprise/dashboard/` |
 
 ### Impact on deployments
 
