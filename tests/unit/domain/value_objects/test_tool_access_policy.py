@@ -102,16 +102,18 @@ class TestToolAccessPolicyDenyList:
 
 
 class TestToolAccessPolicyAllowDenyPrecedence:
-    """Tests for allow_list vs deny_list precedence."""
+    """Tests for deny_list vs allow_list precedence."""
 
-    def test_allow_list_takes_precedence_over_deny_list(self):
-        """When both are defined, allow_list should take precedence (deny_list ignored)."""
+    def test_deny_list_takes_precedence_over_allow_list(self):
+        """When both are defined, deny_list should take precedence over allow_list."""
         policy = ToolAccessPolicy(
             allow_list=("get_*", "list_*"),
-            deny_list=("get_dashboard",),  # Should be ignored
+            deny_list=("get_dashboard",),
         )
-        # allow_list wins - get_dashboard matches get_* so it's allowed
-        assert policy.is_tool_allowed("get_dashboard")
+        # deny_list wins - get_dashboard is denied even though it matches get_*
+        assert not policy.is_tool_allowed("get_dashboard")
+        # Other get_* tools still allowed
+        assert policy.is_tool_allowed("get_alert_status")
         assert policy.is_tool_allowed("list_datasources")
         # These don't match allow_list, so blocked
         assert not policy.is_tool_allowed("delete_dashboard")

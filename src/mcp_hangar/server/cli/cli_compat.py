@@ -54,6 +54,12 @@ class CLIConfig:
     json_logs: bool
     """Whether to format logs as JSON."""
 
+    cloud_key: str | None = None
+    """License key for Hangar Cloud connectivity."""
+
+    cloud_url: str | None = None
+    """Hangar Cloud API endpoint override."""
+
 
 def parse_args(args: list[str] | None = None) -> CLIConfig:
     """Parse command line arguments.

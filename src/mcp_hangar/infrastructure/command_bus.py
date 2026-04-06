@@ -18,6 +18,7 @@ from typing import Any, TYPE_CHECKING
 from mcp_hangar.domain.contracts.command import CommandHandler  # noqa: F401 -- re-exported for backward compat
 from mcp_hangar.application.ports.bus import ICommandBus
 from mcp_hangar.logging_config import get_logger
+from mcp_hangar.observability.tracing import get_tracer
 
 if TYPE_CHECKING:
     from ..application.commands import Command
@@ -121,9 +122,13 @@ class CommandBus(ICommandBus):
 
         logger.debug("command_dispatching", command_type=command_type.__name__)
 
+        tracer = get_tracer(__name__)
+
         # Build middleware chain (innermost = handler.handle)
         def final_handler(cmd: "Command") -> Any:
-            return handler.handle(cmd)
+            with tracer.start_as_current_span(f"handler.{command_type.__name__}") as h_span:
+                h_span.set_attribute("command.type", command_type.__name__)
+                return handler.handle(cmd)
 
         # Wrap in middleware (reverse order so first-registered runs first)
         chain = final_handler
@@ -161,9 +166,13 @@ class RateLimitMiddleware(CommandBusMiddleware):
 
     def __call__(self, command: "Command", next_handler: Callable[["Command"], Any]) -> Any:
         """Check rate limit before dispatching command."""
-        # Use command type name as rate limit key for granularity
-        key = type(command).__name__
-        result = self._rate_limiter.consume(key)
+        tracer = get_tracer(__name__)
+        with tracer.start_as_current_span("rate_limit.check") as rl_span:
+            # Use command type name as rate limit key for granularity
+            key = type(command).__name__
+            rl_span.set_attribute("rate_limit.key", key)
+            result = self._rate_limiter.consume(key)
+            rl_span.set_attribute("rate_limit.allowed", result.allowed)
 
         if not result.allowed:
             # Update Prometheus metrics
@@ -181,7 +190,7 @@ class RateLimitMiddleware(CommandBusMiddleware):
 
             raise RateLimitExceeded(
                 limit=result.limit,
-                window_seconds=int(1.0 / result.limit) if result.limit else 1,
+                window_seconds=int(result.retry_after) if result.retry_after else 0,
             )
 
         # Update allowed metric

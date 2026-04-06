@@ -10,6 +10,7 @@ Provides parallel execution of batch invocations with:
 """
 
 from concurrent.futures import as_completed, ThreadPoolExecutor
+import asyncio
 import json
 import threading
 import time
@@ -20,7 +21,7 @@ from ....domain.events import BatchCallCompleted, BatchInvocationCompleted, Batc
 from ....domain.services import get_tool_access_resolver
 from ....infrastructure.single_flight import SingleFlight
 from ....logging_config import get_logger
-from ....observability.tracing import extract_trace_context, get_tracer
+from ....observability.tracing import extract_trace_context, get_tracer, trace_span
 from ....metrics import (
     BATCH_CALLS_TOTAL,
     BATCH_CANCELLATIONS_TOTAL,
@@ -87,6 +88,96 @@ class BatchExecutor:
 
         return truncation_manager.process_batch(batch_id, results)
 
+    def _check_approval_gate(
+        self,
+        call: CallSpec,
+        resolver: Any,
+        ctx: Any,
+    ) -> CallResult | None:
+        """Check if the tool requires approval and block until resolved.
+
+        Returns None if no approval is needed (continue execution).
+        Returns a CallResult if the tool was denied or timed out.
+        """
+        # Get effective policy for this provider (or fallback to _global)
+        policy = resolver.resolve_effective_policy(call.provider)
+        if policy.is_unrestricted():
+            # Check global policy fallback
+            policy = resolver.resolve_effective_policy("_global")
+            if policy.is_unrestricted():
+                return None
+
+        if not policy.requires_approval(call.tool):
+            return None
+
+        # Tool requires approval -- delegate to ApprovalGateService
+        gate_service = getattr(ctx, "approval_gate", None)
+        if gate_service is None:
+            logger.debug("approval_gate_not_configured", tool=call.tool)
+            return None
+
+        logger.info(
+            "approval_gate_blocking",
+            provider=call.provider,
+            tool=call.tool,
+            call_id=call.call_id,
+        )
+
+        try:
+            # ApprovalGateService.check() is async.  We cannot use
+            # run_coroutine_threadsafe on the main event loop because
+            # FastMCP calls sync tools directly on the event loop thread,
+            # which is blocked inside hangar_call() -> execute() right now.
+            #
+            # Instead we create a fresh per-thread event loop.  aiosqlite
+            # opens a new connection per call (no shared state), so this is
+            # safe.  The hold_registry uses asyncio.Event which is bound to
+            # whichever loop it is first awaited on -- here that's the
+            # per-thread loop.  The resolve() endpoint will need to signal
+            # the same hold_registry entry; we handle this by using
+            # threading.Event as the cross-loop signaling mechanism instead
+            # of asyncio.Event.
+            thread_loop = asyncio.new_event_loop()
+            try:
+                result = thread_loop.run_until_complete(
+                    gate_service.check(
+                        provider_id=call.provider,
+                        tool_name=call.tool,
+                        arguments=call.arguments,
+                        policy=policy,
+                        correlation_id=call.call_id,
+                    )
+                )
+            finally:
+                thread_loop.close()
+        except Exception as exc:
+            logger.warning("approval_gate_error", tool=call.tool, error=str(exc))
+            return CallResult(
+                index=call.index,
+                call_id=call.call_id,
+                success=False,
+                error=f"Approval gate error: {exc}",
+                error_type="ApprovalGateError",
+                elapsed_ms=0,
+            )
+
+        if result.approved and result.approval_id is None:
+            # not_required -- no approval was needed after detailed check
+            return None
+
+        if not result.approved:
+            return CallResult(
+                index=call.index,
+                call_id=call.call_id,
+                success=False,
+                error=result.reason or "Tool execution denied by approval gate",
+                error_type=result.error_code or "ApprovalDenied",
+                elapsed_ms=0,
+            )
+
+        # Approved -- continue execution
+        return None
+
     def execute(
         self,
         batch_id: str,
@@ -135,12 +226,22 @@ class BatchExecutor:
         else:
             effective_workers = max_concurrency
 
+        tracer = get_tracer(__name__)
+
         # Track active batches for metrics
         with self._active_lock:
             self._active_batches += 1
             BATCH_CONCURRENCY_GAUGE.set(self._active_batches)
 
         try:
+          with tracer.start_as_current_span("batch.execute") as batch_span:
+            batch_span.set_attribute("batch.id", batch_id)
+            batch_span.set_attribute("batch.call_count", len(calls))
+            batch_span.set_attribute("batch.max_concurrency", max_concurrency)
+            batch_span.set_attribute("batch.timeout", global_timeout)
+            batch_span.set_attribute("batch.fail_fast", fail_fast)
+            batch_span.set_attribute("batch.effective_workers", effective_workers)
+
             # Emit batch requested event
             providers = list(set(c.provider for c in calls))
             ctx.event_bus.publish(
@@ -240,6 +341,32 @@ class BatchExecutor:
                     cancel_event.set()
                     BATCH_CANCELLATIONS_TOTAL.inc(reason="timeout")
 
+            # After the ThreadPoolExecutor context manager exits (shutdown(wait=True)),
+            # some futures may have completed after as_completed timed out (e.g.
+            # approval-gated calls that were waiting for human decision).  Collect
+            # those results before marking anything as cancelled.
+            for future, index in futures.items():
+                if results[index] is not None:
+                    continue  # already collected
+                if future.done():
+                    try:
+                        result = future.result(timeout=0)
+                        results[index] = result
+                        if result.success:
+                            succeeded += 1
+                        else:
+                            failed += 1
+                    except Exception as e:  # noqa: BLE001
+                        results[index] = CallResult(
+                            index=index,
+                            call_id=calls[index].call_id,
+                            success=False,
+                            error=str(e),
+                            error_type=type(e).__name__,
+                            elapsed_ms=(time.perf_counter() - start_time) * 1000,
+                        )
+                        failed += 1
+
             # Fill in cancelled/timed out calls
             for i, result in enumerate(results):
                 if result is None:
@@ -291,6 +418,13 @@ class BatchExecutor:
                 cancelled=cancelled,
                 elapsed_ms=round(elapsed_ms, 2),
             )
+
+            # Record batch outcome on span
+            batch_span.set_attribute("batch.succeeded", succeeded)
+            batch_span.set_attribute("batch.failed", failed)
+            batch_span.set_attribute("batch.cancelled", cancelled)
+            batch_span.set_attribute("batch.result", result_status)
+            batch_span.set_attribute("batch.elapsed_ms", round(elapsed_ms, 2))
 
             # Apply batch-level truncation if enabled
             final_results = [r for r in results if r is not None]
@@ -436,59 +570,48 @@ class BatchExecutor:
         # Check tool access policy BEFORE starting provider or executing
         # This is config-driven filtering, identity-agnostic (runs before RBAC)
         resolver = get_tool_access_resolver()
-        if is_group:
-            group_obj = GROUPS.get(call.provider)
-            # For groups, we check against group policy
-            # Member-specific policy will be checked when member is selected
-            if not resolver.is_tool_allowed(
-                provider_id=call.provider,
-                tool_name=call.tool,
-                group_id=call.provider,
-            ):
-                logger.info(
-                    "tool_access_denied",
+        tracer = get_tracer(__name__)
+        with tracer.start_as_current_span("policy.check_access") as policy_span:
+            policy_span.set_attribute("mcp.provider.id", call.provider)
+            policy_span.set_attribute("mcp.tool.name", call.tool)
+            policy_span.set_attribute("policy.is_group", is_group)
+            if is_group:
+                group_obj = GROUPS.get(call.provider)
+                # For groups, we check against group policy
+                # Member-specific policy will be checked when member is selected
+                allowed = resolver.is_tool_allowed(
                     provider_id=call.provider,
-                    tool=call.tool,
-                    reason="tool_not_in_access_policy",
+                    tool_name=call.tool,
+                    group_id=call.provider,
                 )
-                TOOL_ACCESS_DENIED_TOTAL.inc(
-                    provider=call.provider,
-                    tool=call.tool,
-                    reason="tool_not_in_access_policy",
-                )
-                return CallResult(
-                    index=call.index,
-                    call_id=call.call_id,
-                    success=False,
-                    error="Tool not available for this provider",
-                    error_type="ToolAccessDeniedError",
-                    elapsed_ms=(time.perf_counter() - call_start) * 1000,
-                )
-        else:
-            # For standalone providers
-            if not resolver.is_tool_allowed(
-                provider_id=call.provider,
-                tool_name=call.tool,
-            ):
-                logger.info(
-                    "tool_access_denied",
+            else:
+                # For standalone providers
+                allowed = resolver.is_tool_allowed(
                     provider_id=call.provider,
-                    tool=call.tool,
-                    reason="tool_not_in_access_policy",
+                    tool_name=call.tool,
                 )
-                TOOL_ACCESS_DENIED_TOTAL.inc(
-                    provider=call.provider,
-                    tool=call.tool,
-                    reason="tool_not_in_access_policy",
-                )
-                return CallResult(
-                    index=call.index,
-                    call_id=call.call_id,
-                    success=False,
-                    error="Tool not available for this provider",
-                    error_type="ToolAccessDeniedError",
-                    elapsed_ms=(time.perf_counter() - call_start) * 1000,
-                )
+            policy_span.set_attribute("policy.allowed", allowed)
+
+        if not allowed:
+            logger.info(
+                "tool_access_denied",
+                provider_id=call.provider,
+                tool=call.tool,
+                reason="tool_not_in_access_policy",
+            )
+            TOOL_ACCESS_DENIED_TOTAL.inc(
+                provider=call.provider,
+                tool=call.tool,
+                reason="tool_not_in_access_policy",
+            )
+            return CallResult(
+                index=call.index,
+                call_id=call.call_id,
+                success=False,
+                error="Tool not available for this provider",
+                error_type="ToolAccessDeniedError",
+                elapsed_ms=(time.perf_counter() - call_start) * 1000,
+            )
 
         # Check circuit breaker / health degradation (for non-group providers)
         if not is_group and provider_obj:
@@ -503,22 +626,40 @@ class BatchExecutor:
                     elapsed_ms=(time.perf_counter() - call_start) * 1000,
                 )
 
+        # Approval gate: check if the tool requires human approval before execution.
+        # The policy is set by the agent via POST /api/agent/policy.
+        # Uses the resolver's effective policy (provider-specific or _global fallback).
+        with tracer.start_as_current_span("approval_gate.check") as approval_span:
+            approval_span.set_attribute("mcp.provider.id", call.provider)
+            approval_span.set_attribute("mcp.tool.name", call.tool)
+            approval_result = self._check_approval_gate(call, resolver, ctx)
+            if approval_result is not None:
+                approval_span.set_attribute("approval.result", approval_result.error_type or "denied")
+                approval_result.elapsed_ms = (time.perf_counter() - call_start) * 1000
+                return approval_result
+            approval_span.set_attribute("approval.result", "not_required")
+
         # Single-flight cold start (only for non-group providers)
         if not is_group and provider_obj and provider_obj.state.value == "cold":
-            try:
-                self._single_flight.do(
-                    call.provider,
-                    lambda: ctx.command_bus.send(StartProviderCommand(provider_id=call.provider)),
-                )
-            except Exception as e:  # noqa: BLE001 -- fault-barrier: provider start failure must return error result, not crash batch
-                return CallResult(
-                    index=call.index,
-                    call_id=call.call_id,
-                    success=False,
-                    error=f"Failed to start provider: {e}",
-                    error_type="ProviderStartError",
-                    elapsed_ms=(time.perf_counter() - call_start) * 1000,
-                )
+            with tracer.start_as_current_span("provider.cold_start") as cs_span:
+                cs_span.set_attribute("mcp.provider.id", call.provider)
+                try:
+                    self._single_flight.do(
+                        call.provider,
+                        lambda: ctx.command_bus.send(StartProviderCommand(provider_id=call.provider)),
+                    )
+                    cs_span.set_attribute("cold_start.result", "success")
+                except Exception as e:  # noqa: BLE001 -- fault-barrier: provider start failure must return error result, not crash batch
+                    cs_span.set_attribute("cold_start.result", "error")
+                    cs_span.record_exception(e)
+                    return CallResult(
+                        index=call.index,
+                        call_id=call.call_id,
+                        success=False,
+                        error=f"Failed to start provider: {e}",
+                        error_type="ProviderStartError",
+                        elapsed_ms=(time.perf_counter() - call_start) * 1000,
+                    )
 
         # Check cancellation after cold start
         if cancel_event.is_set():
@@ -534,19 +675,22 @@ class BatchExecutor:
         # Acquire concurrency slots (global + per-provider) before invocation.
         # This is where backpressure happens: if the global or provider semaphore
         # is full, this thread blocks until a slot frees up. Crucially, the call
-        # starts as soon as ANY slot is freed — it does not wait for an entire
+        # starts as soon as ANY slot is freed -- it does not wait for an entire
         # batch wave to complete (unlike sequential chunking).
         cm = self.concurrency_manager
-        with cm.acquire(call.provider) as wait_s:
-            if wait_s > 0.01:
-                logger.debug(
-                    "concurrency_slot_wait",
-                    call_id=call.call_id,
-                    provider=call.provider,
-                    wait_ms=round(wait_s * 1000, 2),
-                )
+        with tracer.start_as_current_span("concurrency.acquire") as conc_span:
+            conc_span.set_attribute("mcp.provider.id", call.provider)
+            with cm.acquire(call.provider) as wait_s:
+                conc_span.set_attribute("concurrency.wait_ms", round(wait_s * 1000, 2))
+                if wait_s > 0.01:
+                    logger.debug(
+                        "concurrency_slot_wait",
+                        call_id=call.call_id,
+                        provider=call.provider,
+                        wait_ms=round(wait_s * 1000, 2),
+                    )
 
-            return self._invoke_with_retry(call, cancel_event, effective_timeout, call_start, ctx)
+                return self._invoke_with_retry(call, cancel_event, effective_timeout, call_start, ctx)
 
     def _invoke_with_retry(
         self,
@@ -574,25 +718,39 @@ class BatchExecutor:
         """
 
         # Define the invocation operation for retry
+        tracer = get_tracer(__name__)
+
         def do_invoke() -> dict[str, Any]:
-            command = InvokeToolCommand(
-                provider_id=call.provider,
-                tool_name=call.tool,
-                arguments=call.arguments,
-                timeout=effective_timeout,
-            )
-            return ctx.command_bus.send(command)
+            with tracer.start_as_current_span("command.send.InvokeToolCommand") as cmd_span:
+                cmd_span.set_attribute("mcp.provider.id", call.provider)
+                cmd_span.set_attribute("mcp.tool.name", call.tool)
+                cmd_span.set_attribute("command.timeout", effective_timeout)
+                command = InvokeToolCommand(
+                    provider_id=call.provider,
+                    tool_name=call.tool,
+                    arguments=call.arguments,
+                    timeout=effective_timeout,
+                )
+                result = ctx.command_bus.send(command)
+                cmd_span.set_attribute("command.result", "success")
+                return result
 
         # Execute with retry if max_retries > 1
         retry_result: RetryResult | None = None
         if call.max_retries > 1:
-            policy = RetryPolicy(max_attempts=call.max_retries)
-            retry_result = retry_sync(
-                operation=do_invoke,
-                policy=policy,
-                provider=call.provider,
-                operation_name=call.tool,
-            )
+            with tracer.start_as_current_span("invoke_with_retry") as retry_span:
+                retry_span.set_attribute("retry.max_attempts", call.max_retries)
+                retry_span.set_attribute("mcp.provider.id", call.provider)
+                retry_span.set_attribute("mcp.tool.name", call.tool)
+                policy = RetryPolicy(max_attempts=call.max_retries)
+                retry_result = retry_sync(
+                    operation=do_invoke,
+                    policy=policy,
+                    provider=call.provider,
+                    operation_name=call.tool,
+                )
+                retry_span.set_attribute("retry.attempts", retry_result.attempt_count)
+                retry_span.set_attribute("retry.success", retry_result.success)
             if retry_result.success:
                 result = retry_result.result
             else:

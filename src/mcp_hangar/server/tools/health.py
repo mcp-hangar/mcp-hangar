@@ -322,9 +322,9 @@ def register_health_tools(mcp: FastMCP) -> None:
 
         # Group metrics
         for group in ctx.groups.values():
-            result["groups"][group.name] = {
+            result["groups"][group.id] = {
                 "state": group.state.value,
-                "strategy": group.strategy,
+                "strategy": group.strategy.value if hasattr(group.strategy, "value") else str(group.strategy),
                 "total_members": group.total_count,
                 "healthy_members": group.healthy_count,
             }

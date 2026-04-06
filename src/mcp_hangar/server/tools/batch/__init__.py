@@ -27,6 +27,7 @@ from mcp.server.fastmcp import FastMCP
 
 from ....logging_config import get_logger
 from ....metrics import BATCH_CALLS_TOTAL, BATCH_VALIDATION_FAILURES_TOTAL
+from ....observability.tracing import get_tracer
 from .concurrency import (
     ConcurrencyManager,
     DEFAULT_GLOBAL_CONCURRENCY,
@@ -170,85 +171,102 @@ def hangar_call(
     # Clamp max_attempts to valid range
     max_attempts = max(1, min(max_attempts, 10))
 
-    logger.info(
-        "hangar_call_requested",
-        batch_id=batch_id,
-        call_count=len(calls),
-        max_concurrency=max_concurrency,
-        timeout=timeout,
-        fail_fast=fail_fast,
-        max_attempts=max_attempts,
-    )
+    tracer = get_tracer(__name__)
+    with tracer.start_as_current_span("hangar_call") as root_span:
+        root_span.set_attribute("batch.id", batch_id)
+        root_span.set_attribute("batch.call_count", len(calls))
+        root_span.set_attribute("batch.max_concurrency", max_concurrency)
+        root_span.set_attribute("batch.timeout", timeout)
+        root_span.set_attribute("batch.fail_fast", fail_fast)
+        root_span.set_attribute("batch.max_attempts", max_attempts)
 
-    # Handle empty batch
-    if not calls:
-        logger.debug("hangar_call_empty", batch_id=batch_id)
-        return {
-            "batch_id": batch_id,
-            "success": True,
-            "total": 0,
-            "succeeded": 0,
-            "failed": 0,
-            "elapsed_ms": 0.0,
-            "results": [],
-        }
-
-    # Clamp values to limits
-    max_concurrency = max(1, min(max_concurrency, MAX_CONCURRENCY_LIMIT))
-    timeout = max(1.0, min(timeout, MAX_TIMEOUT))
-
-    # Eager validation
-    validation_errors = validate_batch(calls, max_concurrency, timeout)
-    if validation_errors:
-        BATCH_VALIDATION_FAILURES_TOTAL.inc()
-        BATCH_CALLS_TOTAL.inc(result="validation_error")
-        logger.warning(
-            "hangar_call_validation_failed",
+        logger.info(
+            "hangar_call_requested",
             batch_id=batch_id,
-            error_count=len(validation_errors),
+            call_count=len(calls),
+            max_concurrency=max_concurrency,
+            timeout=timeout,
+            fail_fast=fail_fast,
+            max_attempts=max_attempts,
         )
+
+        # Handle empty batch
+        if not calls:
+            logger.debug("hangar_call_empty", batch_id=batch_id)
+            return {
+                "batch_id": batch_id,
+                "success": True,
+                "total": 0,
+                "succeeded": 0,
+                "failed": 0,
+                "elapsed_ms": 0.0,
+                "results": [],
+            }
+
+        # Clamp values to limits
+        max_concurrency = max(1, min(max_concurrency, MAX_CONCURRENCY_LIMIT))
+        timeout = max(1.0, min(timeout, MAX_TIMEOUT))
+
+        # Eager validation
+        with tracer.start_as_current_span("hangar_call.validate") as val_span:
+            validation_errors = validate_batch(calls, max_concurrency, timeout)
+            val_span.set_attribute("validation.error_count", len(validation_errors))
+        if validation_errors:
+            BATCH_VALIDATION_FAILURES_TOTAL.inc()
+            BATCH_CALLS_TOTAL.inc(result="validation_error")
+            root_span.set_attribute("batch.result", "validation_error")
+            logger.warning(
+                "hangar_call_validation_failed",
+                batch_id=batch_id,
+                error_count=len(validation_errors),
+            )
+            return {
+                "batch_id": batch_id,
+                "success": False,
+                "error": "Validation failed",
+                "validation_errors": [
+                    {"index": e.index, "field": e.field, "message": e.message} for e in validation_errors
+                ],
+            }
+
+        # Build call specs with retry configuration
+        call_specs = [
+            CallSpec(
+                index=i,
+                call_id=str(uuid.uuid4()),
+                provider=call["provider"],
+                tool=call["tool"],
+                arguments=call["arguments"],
+                timeout=call.get("timeout"),
+                max_retries=max_attempts,  # Internal field uses max_retries
+            )
+            for i, call in enumerate(calls)
+        ]
+
+        # Execute batch -- the executor uses ThreadPoolExecutor internally
+        # for parallel call execution.
+        result = _executor.execute(
+            batch_id=batch_id,
+            calls=call_specs,
+            max_concurrency=max_concurrency,
+            global_timeout=timeout,
+            fail_fast=fail_fast,
+        )
+
+        root_span.set_attribute("batch.result", "success" if result.success else "failure")
+        root_span.set_attribute("batch.succeeded", result.succeeded)
+        root_span.set_attribute("batch.failed", result.failed)
+
+        # Convert to dict response
         return {
-            "batch_id": batch_id,
-            "success": False,
-            "error": "Validation failed",
-            "validation_errors": [
-                {"index": e.index, "field": e.field, "message": e.message} for e in validation_errors
-            ],
+            "batch_id": result.batch_id,
+            "success": result.success,
+            "total": result.total,
+            "succeeded": result.succeeded,
+            "failed": result.failed,
+            "elapsed_ms": round(result.elapsed_ms, 2),
+            "results": [format_result_dict(r) for r in result.results],
         }
-
-    # Build call specs with retry configuration
-    call_specs = [
-        CallSpec(
-            index=i,
-            call_id=str(uuid.uuid4()),
-            provider=call["provider"],
-            tool=call["tool"],
-            arguments=call["arguments"],
-            timeout=call.get("timeout"),
-            max_retries=max_attempts,  # Internal field uses max_retries
-        )
-        for i, call in enumerate(calls)
-    ]
-
-    # Execute batch
-    result = _executor.execute(
-        batch_id=batch_id,
-        calls=call_specs,
-        max_concurrency=max_concurrency,
-        global_timeout=timeout,
-        fail_fast=fail_fast,
-    )
-
-    # Convert to dict response
-    return {
-        "batch_id": result.batch_id,
-        "success": result.success,
-        "total": result.total,
-        "succeeded": result.succeeded,
-        "failed": result.failed,
-        "elapsed_ms": round(result.elapsed_ms, 2),
-        "results": [format_result_dict(r) for r in result.results],
-    }
 
 
 def register_batch_tools(mcp: FastMCP) -> None:

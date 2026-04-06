@@ -12,6 +12,7 @@ from mcp_hangar.domain.contracts.event_store import IEventStore, NullEventStore
 from mcp_hangar.domain.events import DomainEvent
 from mcp_hangar.infrastructure.lock_hierarchy import LockLevel, TrackedLock
 from mcp_hangar.logging_config import get_logger
+from mcp_hangar.observability.tracing import get_tracer
 
 logger = get_logger(__name__)
 
@@ -133,6 +134,7 @@ class EventBus(IEventBus):
         Args:
             event: The domain event to publish
         """
+        event_type_name = event.__class__.__name__
         with self._lock:
             # Get handlers for this specific event type
             specific_handlers = self._handlers.get(type(event), [])
@@ -140,32 +142,38 @@ class EventBus(IEventBus):
             all_handlers = self._handlers.get(DomainEvent, [])
             handlers = specific_handlers + all_handlers
 
-        logger.debug(
-            "event_publishing",
-            event_type=event.__class__.__name__,
-            handlers_count=len(handlers),
-        )
+        tracer = get_tracer(__name__)
+        with tracer.start_as_current_span(f"event.publish.{event_type_name}") as evt_span:
+            evt_span.set_attribute("event.type", event_type_name)
+            evt_span.set_attribute("event.handlers_count", len(handlers))
 
-        # Call handlers outside the lock
-        for handler in handlers:
-            try:
-                handler(event)
-            except Exception as e:  # noqa: BLE001 -- fault-barrier: handler errors must not break other handlers
-                logger.exception(
-                    "event_handler_error",
-                    event_type=event.__class__.__name__,
-                    error=str(e),
-                )
-                # Call error handlers
-                for error_handler in self._error_handlers:
-                    try:
-                        error_handler(e, event)
-                    except Exception as eh:  # noqa: BLE001 -- fault-barrier: error_handler failure must not break event publishing
-                        logger.exception(
-                            "event_error_handler_failed",
-                            event_type=event.__class__.__name__,
-                            error=str(eh),
-                        )
+            logger.debug(
+                "event_publishing",
+                event_type=event_type_name,
+                handlers_count=len(handlers),
+            )
+
+            # Call handlers outside the lock
+            for handler in handlers:
+                try:
+                    handler(event)
+                except Exception as e:  # noqa: BLE001 -- fault-barrier: handler errors must not break other handlers
+                    logger.exception(
+                        "event_handler_error",
+                        event_type=event_type_name,
+                        error=str(e),
+                    )
+                    evt_span.record_exception(e)
+                    # Call error handlers
+                    for error_handler in self._error_handlers:
+                        try:
+                            error_handler(e, event)
+                        except Exception as eh:  # noqa: BLE001 -- fault-barrier: error_handler failure must not break event publishing
+                            logger.exception(
+                                "event_error_handler_failed",
+                                event_type=event_type_name,
+                                error=str(eh),
+                            )
 
     def publish_to_stream(
         self,
@@ -195,15 +203,22 @@ class EventBus(IEventBus):
         if not events:
             return expected_version
 
-        # Persist first (fail fast if concurrency error)
-        new_version = self._event_store.append(stream_id, events, expected_version)
+        tracer = get_tracer(__name__)
+        with tracer.start_as_current_span("event_store.append") as store_span:
+            store_span.set_attribute("event_store.stream_id", stream_id)
+            store_span.set_attribute("event_store.events_count", len(events))
+            store_span.set_attribute("event_store.expected_version", expected_version)
 
-        logger.debug(
-            "events_persisted",
-            stream_id=stream_id,
-            events_count=len(events),
-            new_version=new_version,
-        )
+            # Persist first (fail fast if concurrency error)
+            new_version = self._event_store.append(stream_id, events, expected_version)
+            store_span.set_attribute("event_store.new_version", new_version)
+
+            logger.debug(
+                "events_persisted",
+                stream_id=stream_id,
+                events_count=len(events),
+                new_version=new_version,
+            )
 
         # Then publish to handlers
         for event in events:

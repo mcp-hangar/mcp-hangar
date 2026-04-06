@@ -7,6 +7,7 @@ from ...domain.model import Provider
 from ...domain.repository import IProviderRepository
 from ...domain.contracts.event_bus import IEventBus
 from ...logging_config import get_logger
+from ...observability.tracing import get_tracer
 
 logger = get_logger(__name__)
 
@@ -76,7 +77,12 @@ class ProviderService:
             ProviderNotFoundError: If provider doesn't exist
         """
         provider = self._get_provider(provider_id)
-        provider.ensure_ready()
+        tracer = get_tracer(__name__)
+        with tracer.start_as_current_span("provider.ensure_ready") as span:
+            span.set_attribute("mcp.provider.id", provider_id)
+            span.set_attribute("provider.state_before", provider.state.value)
+            provider.ensure_ready()
+            span.set_attribute("provider.state_after", provider.state.value)
         self._publish_events(provider)
 
         return {
@@ -154,7 +160,13 @@ class ProviderService:
             ToolInvocationError: If invocation fails
         """
         provider = self._get_provider(provider_id)
-        result = provider.invoke_tool(tool_name, arguments, timeout)
+        tracer = get_tracer(__name__)
+        with tracer.start_as_current_span("provider.invoke_tool") as span:
+            span.set_attribute("mcp.provider.id", provider_id)
+            span.set_attribute("mcp.tool.name", tool_name)
+            span.set_attribute("provider.timeout", timeout)
+            result = provider.invoke_tool(tool_name, arguments, timeout)
+            span.set_attribute("mcp.tool.status", "success")
         self._publish_events(provider)
 
         return result

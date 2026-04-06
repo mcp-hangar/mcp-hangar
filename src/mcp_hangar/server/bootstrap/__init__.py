@@ -108,6 +108,9 @@ class ApplicationContext:
     discovery_registry: "DiscoveryRegistry | None" = None
     """Discovery source registry (wraps DiscoveryOrchestrator)."""
 
+    approval_service: Any = None
+    """Enterprise approval gate service (when ENTERPRISE tier)."""
+
     @property
     def providers(self) -> dict[str, Any]:
         """Get providers dictionary for easy access."""
@@ -362,6 +365,7 @@ def bootstrap(
         observability_adapter=observability_adapter,
         saga_state_store=saga_state_store,
         discovery_registry=discovery_registry,
+        approval_service=enterprise.approval_service,
     )
 
     # Update application context for tools to access
@@ -371,6 +375,8 @@ def bootstrap(
     ctx.unload_provider_handler = unload_handler
     ctx.discovery_registry = discovery_registry
     ctx.full_config = full_config  # Store for config round-trip serialization
+    if enterprise.approval_service is not None:
+        ctx.approval_gate = enterprise.approval_service
 
     return context
 

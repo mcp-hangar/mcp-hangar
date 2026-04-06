@@ -19,10 +19,13 @@ Design notes:
 from __future__ import annotations
 
 import asyncio
-from collections.abc import Callable
+from collections.abc import Awaitable, Callable
 from dataclasses import dataclass
 from functools import wraps
-from typing import Any, TypeVar
+from typing import TYPE_CHECKING, Any, TypeVar
+
+if TYPE_CHECKING:
+    from enterprise.approvals.models import ApprovalResult
 
 from ...logging_config import get_logger
 
@@ -67,6 +70,7 @@ def mcp_tool_wrapper(
     validate: Callable[..., None] | None = None,
     error_mapper: Callable[[Exception], ToolErrorPayload] | None = None,
     on_error: Callable[[Exception, dict[str, Any]], None] | None = None,
+    check_approval: Callable[..., Awaitable[ApprovalResult]] | None = None,
 ) -> Callable[[F], F]:
     """Decorator to standardize MCP tool behavior.
 
@@ -80,6 +84,10 @@ def mcp_tool_wrapper(
         error_mapper: Optional callable mapping Exception -> ToolErrorPayload.
                       If omitted, a minimal default is used.
         on_error: Optional hook called on exception with (exc, context_dict).
+        check_approval: Optional async callable for human-in-the-loop approval.
+                        When provided, called after validation and before execution.
+                        If result is not approved, returns error payload immediately.
+                        None (default) means no approval check -- zero overhead.
 
     Returns:
         Decorated function.
@@ -100,6 +108,16 @@ def mcp_tool_wrapper(
                 # Validate inputs if provided.
                 if validate is not None:
                     validate(*args, **kwargs)
+
+                # Approval gate (may block until human decision or timeout).
+                if check_approval is not None:
+                    approval_result = await check_approval(*args, **kwargs)
+                    if not approval_result.approved:
+                        return {
+                            "error": approval_result.error_code,
+                            "approval_id": approval_result.approval_id,
+                            "message": approval_result.reason,
+                        }
 
                 try:
                     return await func(*args, **kwargs)

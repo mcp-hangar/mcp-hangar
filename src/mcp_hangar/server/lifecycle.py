@@ -193,6 +193,11 @@ class ServerLifecycle:
 
         api_app = create_api_router(auth_components=getattr(self._context, "auth_components", None))
 
+        # Wire enterprise approval service into Starlette app state.
+        approval_svc = getattr(self._context, "approval_service", None)
+        if approval_svc is not None:
+            api_app.state.approval_gate_service = approval_svc
+
         # Mount health/metrics and REST API together in one Starlette app
         from starlette.routing import Mount
 
@@ -480,6 +485,31 @@ def _setup_logging_from_config(cli_config: CLIConfig) -> None:
     setup_logging(level=log_level, json_format=json_format, log_file=log_file)
 
 
+def _resolve_cloud_config(cli_config: CLIConfig, full_config: dict) -> "CloudConfig | None":
+    """Build CloudConfig from CLI flags + config.yaml cloud: section.
+
+    CLI flags (--cloud-key, --cloud-url) take precedence over config.yaml.
+    Returns None when cloud connectivity is not requested.
+    """
+    from ..cloud.config import CloudConfig
+
+    # Start from config.yaml cloud: section
+    cloud_section = dict(full_config.get("cloud", {}))
+
+    # CLI --cloud-key overrides config
+    cli_key = getattr(cli_config, "cloud_key", None)
+    if cli_key:
+        cloud_section["license_key"] = cli_key
+        cloud_section["enabled"] = True
+
+    # CLI --cloud-url overrides config
+    cli_url = getattr(cli_config, "cloud_url", None)
+    if cli_url:
+        cloud_section["endpoint"] = cli_url
+
+    return CloudConfig.from_dict(cloud_section)
+
+
 def run_server(cli_config: CLIConfig) -> None:
     """Main entry point that ties everything together.
 
@@ -507,14 +537,26 @@ def run_server(cli_config: CLIConfig) -> None:
     # Bootstrap application
     context = bootstrap(cli_config.config_path)
 
+    # Initialize cloud connector if license key is provided (CLI flag or config)
+    cloud_connector = None
+    cloud_cfg = _resolve_cloud_config(cli_config, context.config)
+    if cloud_cfg is not None:
+        from ..cloud.connector import CloudConnector
+        from ..server.state import PROVIDERS
+        cloud_connector = CloudConnector(config=cloud_cfg, providers=PROVIDERS)
+        # Subscribe to all domain events (handler is synchronous, just pushes to buffer)
+        context.runtime.event_bus.subscribe_to_all(cloud_connector.on_event)
+
     # Create lifecycle manager
     lifecycle = ServerLifecycle(context)
-
-    # Setup signal handlers for graceful shutdown
     _setup_signal_handlers(lifecycle)
 
     # Start background components
     lifecycle.start()
+
+    # Start cloud connector (runs in dedicated daemon thread)
+    if cloud_connector is not None:
+        cloud_connector.start()
 
     # Log ready state
     provider_ids = list(context.runtime.repository.get_all_ids())
@@ -535,6 +577,8 @@ def run_server(cli_config: CLIConfig) -> None:
             lifecycle.run_stdio()
     finally:
         # Ensure cleanup on exit
+        if cloud_connector is not None:
+            cloud_connector.stop()
         lifecycle.shutdown()
 
 

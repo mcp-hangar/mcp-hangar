@@ -65,6 +65,22 @@ def serve_command(
             is_flag=True,
         ),
     ] = False,
+    cloud_key: Annotated[
+        str | None,
+        typer.Option(
+            "--cloud-key",
+            help="License key for Hangar Cloud connectivity",
+            envvar="MCP_CLOUD_KEY",
+        ),
+    ] = None,
+    cloud_url: Annotated[
+        str | None,
+        typer.Option(
+            "--cloud-url",
+            help="Hangar Cloud API endpoint",
+            envvar="MCP_CLOUD_URL",
+        ),
+    ] = None,
 ):
     """Start the MCP Hangar server.
 
@@ -95,6 +111,8 @@ def serve_command(
         log_file=log_file,
         log_level=log_level.upper(),
         json_logs=json_logs,
+        cloud_key=cloud_key,
+        cloud_url=cloud_url,
     )
 
     # Import and run the server

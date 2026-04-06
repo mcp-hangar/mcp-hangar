@@ -25,6 +25,7 @@ class EnterpriseComponents:
 
     license_tier: LicenseTier = LicenseTier.COMMUNITY
     auth_components: Any = None
+    approval_service: Any = None
 
 
 def load_enterprise_modules(
@@ -67,8 +68,24 @@ def load_enterprise_modules(
         except ImportError:
             logger.warning("enterprise_auth_not_installed", tier=tier.value)
 
+    # -- Approval gate (ENTERPRISE only) --
+    if tier == LicenseTier.ENTERPRISE:
+        try:
+            from enterprise.approvals.bootstrap import bootstrap_approvals
+            from ...infrastructure.persistence.database import Database, DatabaseConfig
+
+            approval_db = Database(DatabaseConfig(path="data/approvals.db"))
+            components.approval_service = bootstrap_approvals(
+                database=approval_db,
+                event_bus=event_bus,
+                config=config,
+            )
+        except ImportError:
+            logger.warning("enterprise_approvals_not_installed", tier=tier.value)
+
     loaded_flags = {
         "auth": components.auth_components is not None,
+        "approvals": components.approval_service is not None,
     }
     logger.info("enterprise_modules_loaded", tier=tier.value, **loaded_flags)
 

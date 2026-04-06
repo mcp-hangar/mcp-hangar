@@ -29,6 +29,10 @@ from mcp_hangar.domain.events import (
     ProviderStarted,
     ProviderStateChanged,
     ProviderStopped,
+    ToolApprovalDenied,
+    ToolApprovalExpired,
+    ToolApprovalGranted,
+    ToolApprovalRequested,
     ToolInvocationCompleted,
     ToolInvocationFailed,
     ToolInvocationRequested,
@@ -69,6 +73,11 @@ EVENT_TYPE_MAP: dict[str, type[DomainEvent]] = {
     "EgressBlocked": EgressBlocked,
     "ProviderCapabilityQuarantined": ProviderCapabilityQuarantined,
     "ProviderCapabilityQuarantineReleased": ProviderCapabilityQuarantineReleased,
+    # Approval Gate
+    "ToolApprovalRequested": ToolApprovalRequested,
+    "ToolApprovalGranted": ToolApprovalGranted,
+    "ToolApprovalDenied": ToolApprovalDenied,
+    "ToolApprovalExpired": ToolApprovalExpired,
 }
 
 EVENT_VERSION_MAP: dict[str, int] = {
@@ -100,6 +109,11 @@ EVENT_VERSION_MAP: dict[str, int] = {
     "EgressBlocked": 1,
     "ProviderCapabilityQuarantined": 1,
     "ProviderCapabilityQuarantineReleased": 1,
+    # Approval Gate
+    "ToolApprovalRequested": 1,
+    "ToolApprovalGranted": 1,
+    "ToolApprovalDenied": 1,
+    "ToolApprovalExpired": 1,
 }
 
 

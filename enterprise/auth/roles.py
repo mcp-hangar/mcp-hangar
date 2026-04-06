@@ -53,6 +53,10 @@ PERMISSION_DISCOVERY_READ = Permission("discovery", "read")
 PERMISSION_DISCOVERY_TRIGGER = Permission("discovery", "trigger")
 PERMISSION_DISCOVERY_APPROVE = Permission("discovery", "approve")
 
+# Approval gate permissions
+PERMISSION_APPROVAL_READ = Permission("approval", "read")
+PERMISSION_APPROVAL_RESOLVE = Permission("approval", "resolve")
+
 # Admin wildcard permission
 PERMISSION_ADMIN_ALL = Permission("*", "*")
 
@@ -90,6 +94,9 @@ PERMISSIONS: dict[str, Permission] = {
     "discovery:read": PERMISSION_DISCOVERY_READ,
     "discovery:trigger": PERMISSION_DISCOVERY_TRIGGER,
     "discovery:approve": PERMISSION_DISCOVERY_APPROVE,
+    # Approval
+    "approval:read": PERMISSION_APPROVAL_READ,
+    "approval:resolve": PERMISSION_APPROVAL_RESOLVE,
     # Admin
     "admin:*": PERMISSION_ADMIN_ALL,
 }
@@ -132,6 +139,8 @@ ROLE_PROVIDER_ADMIN = Role(
             PERMISSION_DISCOVERY_READ,
             PERMISSION_DISCOVERY_TRIGGER,
             PERMISSION_DISCOVERY_APPROVE,
+            PERMISSION_APPROVAL_READ,
+            PERMISSION_APPROVAL_RESOLVE,
         ]
     ),
 )
@@ -182,6 +191,7 @@ ROLE_AUDITOR = Role(
             PERMISSION_PROVIDER_LIST,
             PERMISSION_GROUP_LIST,
             PERMISSION_DISCOVERY_READ,
+            PERMISSION_APPROVAL_READ,
         ]
     ),
 )

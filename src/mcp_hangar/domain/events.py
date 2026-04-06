@@ -1262,3 +1262,66 @@ class EnforcementActionTaken(DomainEvent):
 
     def __post_init__(self):
         super().__init__()
+
+
+# =============================================================================
+# Approval Gate Events (v0.13.0 -- Human-in-the-Loop)
+# =============================================================================
+
+
+@dataclass
+class ToolApprovalRequested(DomainEvent):
+    """Published when a tool invocation is held pending human approval."""
+
+    approval_id: str
+    provider_id: str
+    tool_name: str
+    arguments_hash: str
+    channel: str
+    expires_at: str
+    correlation_id: str
+
+    def __post_init__(self):
+        super().__init__()
+
+
+@dataclass
+class ToolApprovalGranted(DomainEvent):
+    """Published when a held tool invocation is approved by a human."""
+
+    approval_id: str
+    provider_id: str
+    tool_name: str
+    decided_by: str
+    decided_at: str
+
+    def __post_init__(self):
+        super().__init__()
+
+
+@dataclass
+class ToolApprovalDenied(DomainEvent):
+    """Published when a held tool invocation is denied by a human."""
+
+    approval_id: str
+    provider_id: str
+    tool_name: str
+    decided_by: str
+    decided_at: str
+    reason: str | None = None
+
+    def __post_init__(self):
+        super().__init__()
+
+
+@dataclass
+class ToolApprovalExpired(DomainEvent):
+    """Published when a held tool invocation expires without a decision."""
+
+    approval_id: str
+    provider_id: str
+    tool_name: str
+    expired_at: str
+
+    def __post_init__(self):
+        super().__init__()

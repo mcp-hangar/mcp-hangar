@@ -41,6 +41,7 @@ def create_api_router(auth_components: Any = None) -> Starlette:
     from .system import system_routes
     from .tools import tools_routes
     from .ws import ws_routes
+    from .agent_policy import agent_policy_routes
 
     routes = [
         Mount("/providers", routes=provider_routes),
@@ -50,6 +51,7 @@ def create_api_router(auth_components: Any = None) -> Starlette:
         Mount("/system", routes=system_routes),
         Mount("/tools", routes=tools_routes),
         Mount("/ws", routes=ws_routes),
+        Mount("/agent/policy", routes=agent_policy_routes),
     ]
 
     # Auth routes are part of enterprise tier.
@@ -57,6 +59,14 @@ def create_api_router(auth_components: Any = None) -> Starlette:
         from enterprise.auth.api.routes import auth_routes
 
         routes.append(Mount("/auth", routes=auth_routes))
+    except ImportError:
+        pass
+
+    # Approval gate routes (enterprise tier).
+    try:
+        from enterprise.approvals.api.routes import approval_routes
+
+        routes.extend(approval_routes)
     except ImportError:
         pass
 

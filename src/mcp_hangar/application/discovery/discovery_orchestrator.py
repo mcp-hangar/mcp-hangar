@@ -17,6 +17,7 @@ from mcp_hangar.domain.discovery.discovered_provider import DiscoveredProvider
 from mcp_hangar.domain.discovery.discovery_service import DiscoveryCycleResult, DiscoveryService
 from mcp_hangar.domain.discovery.discovery_source import DiscoverySource
 from mcp_hangar.logging_config import get_logger
+from mcp_hangar.observability.tracing import get_tracer
 
 if TYPE_CHECKING:
     from mcp_hangar.domain.security.input_validator import InputValidator
@@ -244,12 +245,15 @@ class DiscoveryOrchestrator:
         start_time = time.perf_counter()
 
         result = DiscoveryCycleResult()
+        tracer = get_tracer(__name__)
 
-        try:
+        with tracer.start_as_current_span("discovery.cycle") as cycle_span:
+         try:
             # Run discovery on all sources
             cycle_result = await self._discovery_service.run_discovery_cycle()
             result.discovered_count = cycle_result.discovered_count
             result.source_results = cycle_result.source_results
+            cycle_span.set_attribute("discovery.discovered_count", result.discovered_count)
 
             # Process discovered providers through validation
             for provider in self._discovery_service.get_registered_providers().values():
@@ -266,14 +270,20 @@ class DiscoveryOrchestrator:
             result.deregistered_count = cycle_result.deregistered_count
             result.error_count = cycle_result.error_count
 
-        except Exception as e:  # noqa: BLE001 -- fault-barrier: cycle failure must not crash orchestrator
+         except Exception as e:  # noqa: BLE001 -- fault-barrier: cycle failure must not crash orchestrator
             logger.error(f"Discovery cycle failed: {e}")
             result.error_count += 1
             self._metrics.inc_errors(source="orchestrator", error_type=type(e).__name__)
+            cycle_span.record_exception(e)
 
-        # Calculate duration
-        duration_seconds = time.perf_counter() - start_time
-        result.duration_ms = duration_seconds * 1000
+         # Calculate duration
+         duration_seconds = time.perf_counter() - start_time
+         result.duration_ms = duration_seconds * 1000
+
+         cycle_span.set_attribute("discovery.registered_count", result.registered_count)
+         cycle_span.set_attribute("discovery.quarantined_count", result.quarantined_count)
+         cycle_span.set_attribute("discovery.error_count", result.error_count)
+         cycle_span.set_attribute("discovery.duration_ms", round(result.duration_ms, 2))
 
         # Update internal metrics
         self._metrics.observe_cycle_duration(duration_seconds)
@@ -317,67 +327,81 @@ class DiscoveryOrchestrator:
                 # Config changed, need to validate again
                 pass
 
-        # Validate command from untrusted discovery sources
-        command = provider.connection_info.get("command", [])
-        if command and self._input_validator:
-            validation_result = self._input_validator.validate_command(command)
-            if not validation_result.valid:
-                issues = "; ".join(i.message for i in validation_result.issues)
-                logger.warning(
-                    "discovered_provider_command_rejected",
-                    provider_name=provider.name,
-                    source=provider.source_type,
-                    command=command,
-                    reason=issues,
-                )
-                return "rejected"
+        tracer = get_tracer(__name__)
+        with tracer.start_as_current_span("discovery.process_provider") as prov_span:
+            prov_span.set_attribute("discovery.provider_name", provider.name)
+            prov_span.set_attribute("discovery.source_type", provider.source_type)
 
-        # Validate provider
-        validation_report = await self._validator.validate(provider)
+            # Validate command from untrusted discovery sources
+            command = provider.connection_info.get("command", [])
+            if command and self._input_validator:
+                validation_result = self._input_validator.validate_command(command)
+                if not validation_result.valid:
+                    issues = "; ".join(i.message for i in validation_result.issues)
+                    logger.warning(
+                        "discovered_provider_command_rejected",
+                        provider_name=provider.name,
+                        source=provider.source_type,
+                        command=command,
+                        reason=issues,
+                    )
+                    prov_span.set_attribute("discovery.result", "rejected")
+                    return "rejected"
 
-        self._metrics.observe_validation_duration(
-            source=provider.source_type,
-            duration_seconds=validation_report.duration_ms / 1000,
-        )
+            # Validate provider
+            validation_report = await self._validator.validate(provider)
 
-        if not validation_report.is_passed:
-            # Handle validation failure
-            logger.warning(f"Provider '{provider.name}' failed validation: {validation_report.reason}")
-
-            self._metrics.inc_validation_failures(
+            self._metrics.observe_validation_duration(
                 source=provider.source_type,
-                validation_type=validation_report.result.value,
+                duration_seconds=validation_report.duration_ms / 1000,
             )
+            prov_span.set_attribute("discovery.validation_passed", validation_report.is_passed)
 
-            if self.config.security.quarantine_on_failure:
-                self._lifecycle_manager.quarantine(provider, validation_report.reason)
-                self._metrics.inc_quarantine(reason=validation_report.result.value)
-                main_metrics.record_discovery_quarantine(reason=validation_report.result.value)
-                return "quarantined"
+            if not validation_report.is_passed:
+                # Handle validation failure
+                logger.warning(f"Provider '{provider.name}' failed validation: {validation_report.reason}")
 
-            return "skipped"
+                self._metrics.inc_validation_failures(
+                    source=provider.source_type,
+                    validation_type=validation_report.result.value,
+                )
 
-        # Register with main registry
-        if self.on_register:
-            try:
-                success = await self.on_register(provider)
-                if not success:
-                    logger.warning(f"Control plane rejected provider: {provider.name}")
-                    return "skipped"
-            except Exception as e:  # noqa: BLE001 -- fault-barrier: registration callback failure must not crash discovery
-                logger.error(f"Error registering provider {provider.name}: {e}")
+                if self.config.security.quarantine_on_failure:
+                    self._lifecycle_manager.quarantine(provider, validation_report.reason)
+                    self._metrics.inc_quarantine(reason=validation_report.result.value)
+                    main_metrics.record_discovery_quarantine(reason=validation_report.result.value)
+                    prov_span.set_attribute("discovery.result", "quarantined")
+                    return "quarantined"
+
+                prov_span.set_attribute("discovery.result", "skipped")
                 return "skipped"
 
-        # Track in lifecycle manager
-        if existing:
-            self._lifecycle_manager.update_provider(provider)
-            self._metrics.inc_registrations(source=provider.source_type)
-            return "updated"
-        else:
-            self._lifecycle_manager.add_provider(provider)
-            self._validator.record_registration(provider)
-            self._metrics.inc_registrations(source=provider.source_type)
-            return "registered"
+            # Register with main registry
+            if self.on_register:
+                try:
+                    success = await self.on_register(provider)
+                    if not success:
+                        logger.warning(f"Control plane rejected provider: {provider.name}")
+                        prov_span.set_attribute("discovery.result", "skipped")
+                        return "skipped"
+                except Exception as e:  # noqa: BLE001 -- fault-barrier: registration callback failure must not crash discovery
+                    logger.error(f"Error registering provider {provider.name}: {e}")
+                    prov_span.set_attribute("discovery.result", "skipped")
+                    prov_span.record_exception(e)
+                    return "skipped"
+
+            # Track in lifecycle manager
+            if existing:
+                self._lifecycle_manager.update_provider(provider)
+                self._metrics.inc_registrations(source=provider.source_type)
+                prov_span.set_attribute("discovery.result", "updated")
+                return "updated"
+            else:
+                self._lifecycle_manager.add_provider(provider)
+                self._validator.record_registration(provider)
+                self._metrics.inc_registrations(source=provider.source_type)
+                prov_span.set_attribute("discovery.result", "registered")
+                return "registered"
 
     async def _handle_deregister(self, name: str, reason: str) -> None:
         """Handle provider deregistration.

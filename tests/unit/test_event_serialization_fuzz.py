@@ -32,6 +32,10 @@ from mcp_hangar.domain.events import (
     ProviderStarted,
     ProviderStateChanged,
     ProviderStopped,
+    ToolApprovalDenied,
+    ToolApprovalExpired,
+    ToolApprovalGranted,
+    ToolApprovalRequested,
     ToolInvocationCompleted,
     ToolInvocationFailed,
     ToolInvocationRequested,
@@ -117,6 +121,37 @@ _MINIMAL_EVENTS: dict[str, DomainEvent] = {
     "ProviderCapabilityQuarantineReleased": ProviderCapabilityQuarantineReleased(
         provider_id="p1",
         released_by="ops@example.com",
+    ),
+    # Approval gate
+    "ToolApprovalRequested": ToolApprovalRequested(
+        approval_id="a1",
+        provider_id="p1",
+        tool_name="t",
+        arguments_hash="abc",
+        channel="dashboard",
+        expires_at="2025-01-01T00:00:00+00:00",
+        correlation_id="c1",
+    ),
+    "ToolApprovalGranted": ToolApprovalGranted(
+        approval_id="a1",
+        provider_id="p1",
+        tool_name="t",
+        decided_by="user@example.com",
+        decided_at="2025-01-01T00:00:00+00:00",
+    ),
+    "ToolApprovalDenied": ToolApprovalDenied(
+        approval_id="a1",
+        provider_id="p1",
+        tool_name="t",
+        decided_by="user@example.com",
+        decided_at="2025-01-01T00:00:00+00:00",
+        reason="too risky",
+    ),
+    "ToolApprovalExpired": ToolApprovalExpired(
+        approval_id="a1",
+        provider_id="p1",
+        tool_name="t",
+        expired_at="2025-01-01T00:00:00+00:00",
     ),
 }
 
