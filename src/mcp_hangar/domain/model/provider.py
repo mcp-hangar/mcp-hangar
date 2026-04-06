@@ -955,7 +955,7 @@ class Provider(AggregateRoot):
             ToolInvocationError: If invocation fails
         """
         from mcp_hangar.context import get_identity_context
-        
+
         correlation_id = str(CorrelationId())
         idt_ctx = get_identity_context()
         identity_context_dict = idt_ctx.to_dict() if idt_ctx else None

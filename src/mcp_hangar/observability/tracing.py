@@ -31,7 +31,7 @@ import os
 from typing import Any, TypeVar
 
 from mcp_hangar.logging_config import get_logger
-from mcp_hangar.observability.conventions import Enforcement, MCP, Provider
+from mcp_hangar.observability.conventions import MCP, Provider
 
 logger = get_logger(__name__)
 

@@ -118,12 +118,12 @@ class NetworkCapabilities:
         object.__setattr__(self, "egress", tuple(self.egress))
 
     @classmethod
-    def deny_all(cls) -> "NetworkCapabilities":
+    def deny_all(cls) -> NetworkCapabilities:
         """No egress allowed — most restrictive preset."""
         return cls(egress=(), dns_allowed=False, loopback_allowed=False)
 
     @classmethod
-    def allow_all(cls) -> "NetworkCapabilities":
+    def allow_all(cls) -> NetworkCapabilities:
         """Unrestricted egress — least restrictive preset. Use only for development."""
         return cls(
             egress=(EgressRule(host="*", port=0, protocol="any"),),
@@ -151,12 +151,12 @@ class FilesystemCapabilities:
         object.__setattr__(self, "write_paths", tuple(self.write_paths))
 
     @classmethod
-    def read_only(cls, *paths: str) -> "FilesystemCapabilities":
+    def read_only(cls, *paths: str) -> FilesystemCapabilities:
         """Read-only access to the given paths."""
         return cls(read_paths=paths, write_paths=(), temp_allowed=False)
 
     @classmethod
-    def none(cls) -> "FilesystemCapabilities":
+    def none(cls) -> FilesystemCapabilities:
         """No filesystem access beyond the container root."""
         return cls(read_paths=(), write_paths=(), temp_allowed=False)
 
@@ -275,12 +275,12 @@ class ProviderCapabilities:
             )
 
     @classmethod
-    def default(cls) -> "ProviderCapabilities":
+    def default(cls) -> ProviderCapabilities:
         """Default capabilities: alert-mode, no egress restrictions declared."""
         return cls(enforcement_mode="alert")
 
     @classmethod
-    def strict(cls) -> "ProviderCapabilities":
+    def strict(cls) -> ProviderCapabilities:
         """Strict preset: deny-all egress, no filesystem writes, block on violation."""
         return cls(
             network=NetworkCapabilities.deny_all(),

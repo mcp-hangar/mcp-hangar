@@ -21,7 +21,7 @@ from ....domain.events import BatchCallCompleted, BatchInvocationCompleted, Batc
 from ....domain.services import get_tool_access_resolver
 from ....infrastructure.single_flight import SingleFlight
 from ....logging_config import get_logger
-from ....observability.tracing import extract_trace_context, get_tracer, trace_span
+from ....observability.tracing import extract_trace_context, get_tracer
 from ....metrics import (
     BATCH_CALLS_TOTAL,
     BATCH_CANCELLATIONS_TOTAL,

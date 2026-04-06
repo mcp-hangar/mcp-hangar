@@ -8,7 +8,6 @@ MIT licensed -- part of core observability infrastructure.
 
 import time
 
-from ...application.ports.observability import IAuditExporter
 from ...logging_config import get_logger
 from ...observability.conventions import MCP, Provider
 

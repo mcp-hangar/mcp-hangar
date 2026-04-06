@@ -31,7 +31,7 @@ class IBehavioralProfiler(Protocol):
     """
 
     @abstractmethod
-    def get_mode(self, provider_id: str) -> "BehavioralMode":
+    def get_mode(self, provider_id: str) -> BehavioralMode:
         """Get the current behavioral profiling mode for a provider.
 
         Args:
@@ -43,7 +43,7 @@ class IBehavioralProfiler(Protocol):
         ...
 
     @abstractmethod
-    def set_mode(self, provider_id: str, mode: "BehavioralMode") -> None:
+    def set_mode(self, provider_id: str, mode: BehavioralMode) -> None:
         """Set the behavioral profiling mode for a provider.
 
         Args:
@@ -53,7 +53,7 @@ class IBehavioralProfiler(Protocol):
         ...
 
     @abstractmethod
-    def record_observation(self, observation: "NetworkObservation") -> list[dict[str, Any]]:
+    def record_observation(self, observation: NetworkObservation) -> list[dict[str, Any]]:
         """Record a network observation from a provider.
 
         In LEARNING mode, stores the observation for baseline building and
@@ -81,7 +81,7 @@ class IBaselineStore(Protocol):
     """
 
     @abstractmethod
-    def record_observation(self, observation: "NetworkObservation") -> None:
+    def record_observation(self, observation: NetworkObservation) -> None:
         """Store an observation for baseline building.
 
         Args:
@@ -102,7 +102,7 @@ class IBaselineStore(Protocol):
         ...
 
     @abstractmethod
-    def get_mode(self, provider_id: str) -> "BehavioralMode":
+    def get_mode(self, provider_id: str) -> BehavioralMode:
         """Get the persisted behavioral mode for a provider.
 
         Args:
@@ -117,7 +117,7 @@ class IBaselineStore(Protocol):
     def set_mode(
         self,
         provider_id: str,
-        mode: "BehavioralMode",
+        mode: BehavioralMode,
         learning_duration_hours: int = 72,
     ) -> None:
         """Persist the behavioral mode with timing metadata.
@@ -139,7 +139,7 @@ class IDeviationDetector(Protocol):
     """
 
     @abstractmethod
-    def check_observation(self, observation: "NetworkObservation") -> list[dict[str, Any]]:
+    def check_observation(self, observation: NetworkObservation) -> list[dict[str, Any]]:
         """Check an observation against the baseline.
 
         Args:
@@ -158,17 +158,17 @@ class NullBehavioralProfiler:
     Satisfies the IBehavioralProfiler protocol at runtime.
     """
 
-    def get_mode(self, provider_id: str) -> "BehavioralMode":
+    def get_mode(self, provider_id: str) -> BehavioralMode:
         """Return DISABLED for any provider -- profiling not active."""
         from ..value_objects.behavioral import BehavioralMode
 
         return BehavioralMode.DISABLED
 
-    def set_mode(self, provider_id: str, mode: "BehavioralMode") -> None:
+    def set_mode(self, provider_id: str, mode: BehavioralMode) -> None:
         """No-op -- profiling mode cannot be changed without enterprise module."""
         pass
 
-    def record_observation(self, observation: "NetworkObservation") -> list[dict[str, Any]]:
+    def record_observation(self, observation: NetworkObservation) -> list[dict[str, Any]]:
         """No-op -- observations are discarded without enterprise module.
 
         Returns:
@@ -187,7 +187,7 @@ class IResourceStore(Protocol):
     """
 
     @abstractmethod
-    def record_sample(self, sample: "ResourceSample") -> None:
+    def record_sample(self, sample: ResourceSample) -> None:
         """Persist a resource usage sample.
 
         Args:

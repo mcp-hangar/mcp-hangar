@@ -74,7 +74,7 @@ class CloudConnector:
 
     # -- event handler (called synchronously from event bus thread) ---------
 
-    def on_event(self, event: "DomainEvent") -> None:
+    def on_event(self, event: DomainEvent) -> None:
         """Synchronous handler wired to ``event_bus.subscribe_to_all``."""
         etype = type(event).__name__
         if etype not in _FORWARDED_EVENT_TYPES:
@@ -273,7 +273,7 @@ class CloudConnector:
         """Sleep that wakes up early when stop is requested."""
         try:
             await asyncio.wait_for(self._stop_event.wait(), timeout=seconds)
-        except asyncio.TimeoutError:
+        except TimeoutError:
             pass
 
     @property

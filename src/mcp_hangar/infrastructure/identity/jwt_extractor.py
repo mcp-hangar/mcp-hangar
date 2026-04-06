@@ -14,7 +14,7 @@ The JWT claims mapping is configurable:
 
 from __future__ import annotations
 
-from typing import Any, Dict
+from typing import Any
 
 import structlog
 
@@ -67,7 +67,7 @@ class JWTIdentityExtractor:
 
     def extract(
         self,
-        metadata: list[tuple[str, str]] | Dict[str, str] | None,
+        metadata: list[tuple[str, str]] | dict[str, str] | None,
     ) -> IdentityContext | None:
         """Extract identity from JWT in Authorization header.
 
@@ -159,7 +159,7 @@ class JWTIdentityExtractor:
 
     @staticmethod
     def _normalize_headers(
-        metadata: list[tuple[str, str]] | Dict[str, str],
+        metadata: list[tuple[str, str]] | dict[str, str],
     ) -> dict[str, str]:
         """Normalize metadata to lowercase-keyed dict."""
         if isinstance(metadata, dict):
