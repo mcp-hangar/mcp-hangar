@@ -53,7 +53,7 @@ async def hangar_approve_prompt(
             policy=policy,
             correlation_id="",
         )
-    except Exception:
+    except (RuntimeError, OSError, ValueError, TimeoutError):
         logger.warning("approve_prompt_check_failed", exc_info=True)
         return {"behavior": "allow"}
 

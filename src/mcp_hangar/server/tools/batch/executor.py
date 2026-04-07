@@ -150,7 +150,7 @@ class BatchExecutor:
                 )
             finally:
                 thread_loop.close()
-        except Exception as exc:
+        except (RuntimeError, OSError, ValueError, TimeoutError) as exc:
             logger.warning("approval_gate_error", tool=call.tool, error=str(exc))
             return CallResult(
                 index=call.index,

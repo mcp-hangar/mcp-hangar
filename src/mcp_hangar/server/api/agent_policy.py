@@ -47,7 +47,7 @@ async def push_policy(request: Request) -> HangarJSONResponse:
 
     try:
         body = await request.json()
-    except Exception:
+    except (ValueError, TypeError):
         return HangarJSONResponse({"error": "invalid JSON"}, status_code=400)
 
     tool_policies = body.get("tool_policies", [])

@@ -39,7 +39,7 @@ async def list_all_tools(request: Request) -> HangarJSONResponse:
                     "description": td.get("description", ""),
                     "input_schema": str(td.get("inputSchema", "")),
                 })
-        except Exception:
+        except (RuntimeError, OSError, ValueError, TimeoutError):
             logger.debug("tools_fetch_skipped", provider_id=p.provider_id)
     return HangarJSONResponse({"tools": all_tools})
 

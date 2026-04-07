@@ -12,6 +12,8 @@ import threading
 import time
 from typing import Any, TYPE_CHECKING
 
+import httpx
+
 from .buffer import EventBuffer
 from .client import CloudClient
 from .config import CloudConfig
@@ -81,7 +83,7 @@ class CloudConnector:
             return
         try:
             payload = event.to_dict()
-        except Exception:
+        except (AttributeError, TypeError, ValueError):
             payload = {"event_type": etype}
         self._buffer.push(payload)
 
@@ -103,7 +105,7 @@ class CloudConnector:
         future = asyncio.run_coroutine_threadsafe(self._async_stop(), self._loop)
         try:
             future.result(timeout=10.0)
-        except Exception:
+        except (TimeoutError, RuntimeError, OSError):
             pass
         # Stop the event loop
         self._loop.call_soon_threadsafe(self._loop.stop)
@@ -119,7 +121,7 @@ class CloudConnector:
         asyncio.set_event_loop(self._loop)
         try:
             self._loop.run_until_complete(self._async_main())
-        except Exception as exc:
+        except (RuntimeError, OSError) as exc:
             logger.error("cloud_connector_loop_error", error=str(exc))
         finally:
             self._loop.close()
@@ -152,7 +154,7 @@ class CloudConnector:
             batch = self._buffer.drain(500)
             if batch and hasattr(self, "_client"):
                 await self._client.send_events(batch)
-        except Exception:
+        except (httpx.HTTPError, OSError):
             pass
         if hasattr(self, "_client"):
             await self._client.deregister()
@@ -168,7 +170,7 @@ class CloudConnector:
                 await client.register()
                 self._connected = True
                 return
-            except Exception as exc:
+            except (httpx.HTTPError, OSError) as exc:
                 self._connected = False
                 logger.warning(
                     "cloud_register_failed",
@@ -187,7 +189,7 @@ class CloudConnector:
                 uptime = time.monotonic() - self._started_at
                 await client.heartbeat(pcount, hcount, uptime)
                 self._connected = True
-            except Exception as exc:
+            except (httpx.HTTPError, OSError) as exc:
                 self._connected = False
                 logger.debug("cloud_heartbeat_failed", error=str(exc))
             await self._interruptible_sleep(self._cfg.heartbeat_interval_s)
@@ -205,7 +207,7 @@ class CloudConnector:
             return
         try:
             await client.send_events(batch)
-        except Exception as exc:
+        except (httpx.HTTPError, OSError) as exc:
             logger.debug("cloud_event_flush_failed", error=str(exc), batch_size=len(batch))
             # Push back into buffer (best-effort, may lose some if buffer is full)
             for ev in batch:
@@ -224,7 +226,7 @@ class CloudConnector:
         try:
             snapshots = self._build_provider_snapshots()
             await client.sync_state(snapshots)
-        except Exception as exc:
+        except (httpx.HTTPError, OSError) as exc:
             logger.debug("cloud_state_sync_failed", error=str(exc))
 
     # -- helpers ------------------------------------------------------------
@@ -236,7 +238,7 @@ class CloudConnector:
             try:
                 if hasattr(p, "state") and str(p.state) == "ready":
                     healthy += 1
-            except Exception:
+            except (AttributeError, TypeError):
                 pass
         return total, healthy
 
@@ -246,11 +248,11 @@ class CloudConnector:
             snap: dict[str, Any] = {"id": pid}
             try:
                 snap["status"] = str(p.state).upper() if hasattr(p, "state") else "UNKNOWN"
-            except Exception:
+            except (AttributeError, TypeError):
                 snap["status"] = "UNKNOWN"
             try:
                 snap["mode"] = str(p.mode) if hasattr(p, "mode") else "unknown"
-            except Exception:
+            except (AttributeError, TypeError):
                 snap["mode"] = "unknown"
             try:
                 if hasattr(p, "tools"):
@@ -260,11 +262,11 @@ class CloudConnector:
                     snap["tools"] = list(p.tool_names)
                 else:
                     snap["tools"] = []
-            except Exception:
+            except (AttributeError, TypeError):
                 snap["tools"] = []
             try:
                 snap["health"] = "healthy" if str(p.state) == "ready" else "unhealthy"
-            except Exception:
+            except (AttributeError, TypeError):
                 snap["health"] = "unknown"
             snapshots.append(snap)
         return snapshots

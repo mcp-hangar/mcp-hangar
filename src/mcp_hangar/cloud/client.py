@@ -26,9 +26,9 @@ def _get_version() -> str:
     global _VERSION
     if _VERSION is None:
         try:
-            from importlib.metadata import version
+            from importlib.metadata import PackageNotFoundError, version
             _VERSION = version("mcp-hangar")
-        except Exception:
+        except (ImportError, PackageNotFoundError):
             _VERSION = "unknown"
     return _VERSION
 
@@ -136,7 +136,7 @@ class CloudClient:
                     "status": "shutting_down",
                 },
             )
-        except Exception:
+        except (httpx.HTTPError, OSError):
             pass  # best-effort
 
     @property
