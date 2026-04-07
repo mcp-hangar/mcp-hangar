@@ -137,8 +137,8 @@ class CloudClient:
                     "status": "shutting_down",
                 },
             )
-        except (httpx.HTTPError, OSError):
-            pass  # best-effort
+        except Exception:  # noqa: BLE001 – best-effort shutdown; swallow any error
+            pass
 
     @property
     def agent_id(self) -> str | None:
