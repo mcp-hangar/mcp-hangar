@@ -28,18 +28,18 @@ async def list_all_tools(request: Request) -> HangarJSONResponse:
     all_tools = []
     for p in providers:
         try:
-            tools = await dispatch_query(
-                GetProviderToolsQuery(provider_id=p.provider_id)
-            )
+            tools = await dispatch_query(GetProviderToolsQuery(provider_id=p.provider_id))
             for t in tools:
                 td = t.to_dict()
-                all_tools.append({
-                    "provider_id": p.provider_id,
-                    "tool_name": td.get("name", ""),
-                    "description": td.get("description", ""),
-                    "input_schema": str(td.get("inputSchema", "")),
-                })
-        except Exception:
+                all_tools.append(
+                    {
+                        "provider_id": p.provider_id,
+                        "tool_name": td.get("name", ""),
+                        "description": td.get("description", ""),
+                        "input_schema": str(td.get("inputSchema", "")),
+                    }
+                )
+        except (RuntimeError, OSError, ValueError, TimeoutError):
             logger.debug("tools_fetch_skipped", provider_id=p.provider_id)
     return HangarJSONResponse({"tools": all_tools})
 
@@ -47,5 +47,3 @@ async def list_all_tools(request: Request) -> HangarJSONResponse:
 tools_routes = [
     Route("/", list_all_tools, methods=["GET"]),
 ]
-
-

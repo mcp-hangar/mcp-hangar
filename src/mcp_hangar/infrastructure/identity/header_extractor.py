@@ -7,7 +7,6 @@ Suitable for trusted environments where a gateway has already validated identity
 
 from __future__ import annotations
 
-from typing import Dict
 
 import structlog
 
@@ -56,7 +55,7 @@ class HeaderIdentityExtractor:
 
     def extract(
         self,
-        metadata: list[tuple[str, str]] | Dict[str, str] | None,
+        metadata: list[tuple[str, str]] | dict[str, str] | None,
     ) -> IdentityContext | None:
         """Extract identity context from header metadata.
 
@@ -106,11 +105,10 @@ class HeaderIdentityExtractor:
 
     @staticmethod
     def _normalize_headers(
-        metadata: list[tuple[str, str]] | Dict[str, str],
+        metadata: list[tuple[str, str]] | dict[str, str],
     ) -> dict[str, str]:
         """Normalize metadata to a lowercase-keyed dict."""
         if isinstance(metadata, dict):
             return {k.lower(): v for k, v in metadata.items()}
         # list of tuples (gRPC metadata style)
         return {k.lower(): v for k, v in metadata}
-

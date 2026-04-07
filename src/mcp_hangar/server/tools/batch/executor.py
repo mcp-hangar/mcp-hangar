@@ -21,7 +21,7 @@ from ....domain.events import BatchCallCompleted, BatchInvocationCompleted, Batc
 from ....domain.services import get_tool_access_resolver
 from ....infrastructure.single_flight import SingleFlight
 from ....logging_config import get_logger
-from ....observability.tracing import extract_trace_context, get_tracer, trace_span
+from ....observability.tracing import extract_trace_context, get_tracer
 from ....metrics import (
     BATCH_CALLS_TOTAL,
     BATCH_CANCELLATIONS_TOTAL,
@@ -150,7 +150,7 @@ class BatchExecutor:
                 )
             finally:
                 thread_loop.close()
-        except Exception as exc:
+        except (RuntimeError, OSError, ValueError, TimeoutError) as exc:
             logger.warning("approval_gate_error", tool=call.tool, error=str(exc))
             return CallResult(
                 index=call.index,
@@ -234,91 +234,132 @@ class BatchExecutor:
             BATCH_CONCURRENCY_GAUGE.set(self._active_batches)
 
         try:
-          with tracer.start_as_current_span("batch.execute") as batch_span:
-            batch_span.set_attribute("batch.id", batch_id)
-            batch_span.set_attribute("batch.call_count", len(calls))
-            batch_span.set_attribute("batch.max_concurrency", max_concurrency)
-            batch_span.set_attribute("batch.timeout", global_timeout)
-            batch_span.set_attribute("batch.fail_fast", fail_fast)
-            batch_span.set_attribute("batch.effective_workers", effective_workers)
+            with tracer.start_as_current_span("batch.execute") as batch_span:
+                batch_span.set_attribute("batch.id", batch_id)
+                batch_span.set_attribute("batch.call_count", len(calls))
+                batch_span.set_attribute("batch.max_concurrency", max_concurrency)
+                batch_span.set_attribute("batch.timeout", global_timeout)
+                batch_span.set_attribute("batch.fail_fast", fail_fast)
+                batch_span.set_attribute("batch.effective_workers", effective_workers)
 
-            # Emit batch requested event
-            providers = list(set(c.provider for c in calls))
-            ctx.event_bus.publish(
-                BatchInvocationRequested(
+                # Emit batch requested event
+                providers = list(set(c.provider for c in calls))
+                ctx.event_bus.publish(
+                    BatchInvocationRequested(
+                        batch_id=batch_id,
+                        call_count=len(calls),
+                        providers=providers,
+                        max_concurrency=max_concurrency,
+                        timeout=global_timeout,
+                        fail_fast=fail_fast,
+                    )
+                )
+
+                logger.debug(
+                    "batch_dispatch_start",
                     batch_id=batch_id,
                     call_count=len(calls),
-                    providers=providers,
-                    max_concurrency=max_concurrency,
-                    timeout=global_timeout,
-                    fail_fast=fail_fast,
+                    effective_workers=effective_workers,
+                    global_limit=global_limit if global_limit > 0 else "unlimited",
+                    provider_count=len(providers),
                 )
-            )
 
-            logger.debug(
-                "batch_dispatch_start",
-                batch_id=batch_id,
-                call_count=len(calls),
-                effective_workers=effective_workers,
-                global_limit=global_limit if global_limit > 0 else "unlimited",
-                provider_count=len(providers),
-            )
+                # Execute calls in thread pool — all submitted at once, semaphores
+                # provide backpressure (not sequential chunking)
+                with ThreadPoolExecutor(max_workers=effective_workers) as executor:
+                    futures = {
+                        executor.submit(
+                            self._execute_call,
+                            call,
+                            cancel_event,
+                            global_timeout,
+                            start_time,
+                        ): call.index
+                        for call in calls
+                    }
 
-            # Execute calls in thread pool — all submitted at once, semaphores
-            # provide backpressure (not sequential chunking)
-            with ThreadPoolExecutor(max_workers=effective_workers) as executor:
-                futures = {
-                    executor.submit(
-                        self._execute_call,
-                        call,
-                        cancel_event,
-                        global_timeout,
-                        start_time,
-                    ): call.index
-                    for call in calls
-                }
+                    try:
+                        for future in as_completed(futures, timeout=global_timeout):
+                            index = futures[future]
+                            try:
+                                result = future.result()
+                                results[index] = result
 
-                try:
-                    for future in as_completed(futures, timeout=global_timeout):
-                        index = futures[future]
-                        try:
-                            result = future.result()
-                            results[index] = result
-
-                            # Emit per-call event
-                            ctx.event_bus.publish(
-                                BatchCallCompleted(
-                                    batch_id=batch_id,
-                                    call_id=result.call_id,
-                                    call_index=result.index,
-                                    provider_id=calls[index].provider,
-                                    tool_name=calls[index].tool,
-                                    success=result.success,
-                                    elapsed_ms=result.elapsed_ms,
-                                    error_type=result.error_type,
-                                )
-                            )
-
-                            if result.success:
-                                succeeded += 1
-                            else:
-                                failed += 1
-                                if fail_fast:
-                                    logger.debug(
-                                        "batch_fail_fast_triggered",
+                                # Emit per-call event
+                                ctx.event_bus.publish(
+                                    BatchCallCompleted(
                                         batch_id=batch_id,
-                                        failed_index=index,
+                                        call_id=result.call_id,
+                                        call_index=result.index,
+                                        provider_id=calls[index].provider,
+                                        tool_name=calls[index].tool,
+                                        success=result.success,
+                                        elapsed_ms=result.elapsed_ms,
+                                        error_type=result.error_type,
                                     )
+                                )
+
+                                if result.success:
+                                    succeeded += 1
+                                else:
+                                    failed += 1
+                                    if fail_fast:
+                                        logger.debug(
+                                            "batch_fail_fast_triggered",
+                                            batch_id=batch_id,
+                                            failed_index=index,
+                                        )
+                                        cancel_event.set()
+                                        BATCH_CANCELLATIONS_TOTAL.inc(reason="fail_fast")
+                                        break
+
+                            except Exception as e:  # noqa: BLE001 -- fault-barrier: future exception handling for batch result collection
+                                # Future raised exception
+                                call = calls[index]
+                                results[index] = CallResult(
+                                    index=index,
+                                    call_id=call.call_id,
+                                    success=False,
+                                    error=str(e),
+                                    error_type=type(e).__name__,
+                                    elapsed_ms=(time.perf_counter() - start_time) * 1000,
+                                )
+                                failed += 1
+
+                                if fail_fast:
                                     cancel_event.set()
                                     BATCH_CANCELLATIONS_TOTAL.inc(reason="fail_fast")
                                     break
 
-                        except Exception as e:  # noqa: BLE001 -- fault-barrier: future exception handling for batch result collection
-                            # Future raised exception
-                            call = calls[index]
+                    except TimeoutError:
+                        # Global timeout exceeded
+                        logger.warning(
+                            "batch_global_timeout",
+                            batch_id=batch_id,
+                            timeout=global_timeout,
+                        )
+                        cancel_event.set()
+                        BATCH_CANCELLATIONS_TOTAL.inc(reason="timeout")
+
+                # After the ThreadPoolExecutor context manager exits (shutdown(wait=True)),
+                # some futures may have completed after as_completed timed out (e.g.
+                # approval-gated calls that were waiting for human decision).  Collect
+                # those results before marking anything as cancelled.
+                for future, index in futures.items():
+                    if results[index] is not None:
+                        continue  # already collected
+                    if future.done():
+                        try:
+                            result = future.result(timeout=0)
+                            results[index] = result
+                            if result.success:
+                                succeeded += 1
+                            else:
+                                failed += 1
+                        except Exception as e:  # noqa: BLE001
                             results[index] = CallResult(
                                 index=index,
-                                call_id=call.call_id,
+                                call_id=calls[index].call_id,
                                 success=False,
                                 error=str(e),
                                 error_type=type(e).__name__,
@@ -326,120 +367,79 @@ class BatchExecutor:
                             )
                             failed += 1
 
-                            if fail_fast:
-                                cancel_event.set()
-                                BATCH_CANCELLATIONS_TOTAL.inc(reason="fail_fast")
-                                break
-
-                except TimeoutError:
-                    # Global timeout exceeded
-                    logger.warning(
-                        "batch_global_timeout",
-                        batch_id=batch_id,
-                        timeout=global_timeout,
-                    )
-                    cancel_event.set()
-                    BATCH_CANCELLATIONS_TOTAL.inc(reason="timeout")
-
-            # After the ThreadPoolExecutor context manager exits (shutdown(wait=True)),
-            # some futures may have completed after as_completed timed out (e.g.
-            # approval-gated calls that were waiting for human decision).  Collect
-            # those results before marking anything as cancelled.
-            for future, index in futures.items():
-                if results[index] is not None:
-                    continue  # already collected
-                if future.done():
-                    try:
-                        result = future.result(timeout=0)
-                        results[index] = result
-                        if result.success:
-                            succeeded += 1
-                        else:
-                            failed += 1
-                    except Exception as e:  # noqa: BLE001
-                        results[index] = CallResult(
-                            index=index,
-                            call_id=calls[index].call_id,
+                # Fill in cancelled/timed out calls
+                for i, result in enumerate(results):
+                    if result is None:
+                        call = calls[i]
+                        results[i] = CallResult(
+                            index=i,
+                            call_id=call.call_id,
                             success=False,
-                            error=str(e),
-                            error_type=type(e).__name__,
+                            error="Cancelled" if cancel_event.is_set() else "Timeout",
+                            error_type="CancellationError" if cancel_event.is_set() else "TimeoutError",
                             elapsed_ms=(time.perf_counter() - start_time) * 1000,
                         )
-                        failed += 1
+                        cancelled += 1
 
-            # Fill in cancelled/timed out calls
-            for i, result in enumerate(results):
-                if result is None:
-                    call = calls[i]
-                    results[i] = CallResult(
-                        index=i,
-                        call_id=call.call_id,
-                        success=False,
-                        error="Cancelled" if cancel_event.is_set() else "Timeout",
-                        error_type="CancellationError" if cancel_event.is_set() else "TimeoutError",
-                        elapsed_ms=(time.perf_counter() - start_time) * 1000,
+                elapsed_ms = (time.perf_counter() - start_time) * 1000
+                success = failed == 0 and cancelled == 0
+
+                # Determine result status for metrics
+                if success:
+                    result_status = "success"
+                elif succeeded > 0:
+                    result_status = "partial"
+                else:
+                    result_status = "failure"
+
+                # Record metrics
+                BATCH_CALLS_TOTAL.inc(result=result_status)
+                BATCH_SIZE_HISTOGRAM.observe(len(calls))
+                BATCH_DURATION_SECONDS.observe(elapsed_ms / 1000)
+
+                # Emit completion event
+                ctx.event_bus.publish(
+                    BatchInvocationCompleted(
+                        batch_id=batch_id,
+                        total=len(calls),
+                        succeeded=succeeded,
+                        failed=failed,
+                        elapsed_ms=elapsed_ms,
+                        cancelled=cancelled,
                     )
-                    cancelled += 1
+                )
 
-            elapsed_ms = (time.perf_counter() - start_time) * 1000
-            success = failed == 0 and cancelled == 0
-
-            # Determine result status for metrics
-            if success:
-                result_status = "success"
-            elif succeeded > 0:
-                result_status = "partial"
-            else:
-                result_status = "failure"
-
-            # Record metrics
-            BATCH_CALLS_TOTAL.inc(result=result_status)
-            BATCH_SIZE_HISTOGRAM.observe(len(calls))
-            BATCH_DURATION_SECONDS.observe(elapsed_ms / 1000)
-
-            # Emit completion event
-            ctx.event_bus.publish(
-                BatchInvocationCompleted(
+                logger.info(
+                    "batch_completed",
                     batch_id=batch_id,
                     total=len(calls),
                     succeeded=succeeded,
                     failed=failed,
+                    cancelled=cancelled,
+                    elapsed_ms=round(elapsed_ms, 2),
+                )
+
+                # Record batch outcome on span
+                batch_span.set_attribute("batch.succeeded", succeeded)
+                batch_span.set_attribute("batch.failed", failed)
+                batch_span.set_attribute("batch.cancelled", cancelled)
+                batch_span.set_attribute("batch.result", result_status)
+                batch_span.set_attribute("batch.elapsed_ms", round(elapsed_ms, 2))
+
+                # Apply batch-level truncation if enabled
+                final_results = [r for r in results if r is not None]
+                final_results = self._apply_batch_truncation(batch_id, final_results)
+
+                return BatchResult(
+                    batch_id=batch_id,
+                    success=success,
+                    total=len(calls),
+                    succeeded=succeeded,
+                    failed=failed,
                     elapsed_ms=elapsed_ms,
+                    results=final_results,
                     cancelled=cancelled,
                 )
-            )
-
-            logger.info(
-                "batch_completed",
-                batch_id=batch_id,
-                total=len(calls),
-                succeeded=succeeded,
-                failed=failed,
-                cancelled=cancelled,
-                elapsed_ms=round(elapsed_ms, 2),
-            )
-
-            # Record batch outcome on span
-            batch_span.set_attribute("batch.succeeded", succeeded)
-            batch_span.set_attribute("batch.failed", failed)
-            batch_span.set_attribute("batch.cancelled", cancelled)
-            batch_span.set_attribute("batch.result", result_status)
-            batch_span.set_attribute("batch.elapsed_ms", round(elapsed_ms, 2))
-
-            # Apply batch-level truncation if enabled
-            final_results = [r for r in results if r is not None]
-            final_results = self._apply_batch_truncation(batch_id, final_results)
-
-            return BatchResult(
-                batch_id=batch_id,
-                success=success,
-                total=len(calls),
-                succeeded=succeeded,
-                failed=failed,
-                elapsed_ms=elapsed_ms,
-                results=final_results,
-                cancelled=cancelled,
-            )
 
         finally:
             with self._active_lock:

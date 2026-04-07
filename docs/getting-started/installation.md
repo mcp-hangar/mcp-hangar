@@ -53,7 +53,6 @@ pip install -e ".[dev]"
 make setup
 ```
 
-
 ## Docker
 
 ```bash

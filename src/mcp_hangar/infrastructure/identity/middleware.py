@@ -7,7 +7,8 @@ Intercepts incoming HTTP requests, extracts CallerIdentity from headers
 
 from __future__ import annotations
 
-from typing import Any, Callable
+from typing import Any
+from collections.abc import Callable
 
 import structlog
 
@@ -59,4 +60,3 @@ class IdentityMiddleware:
             await self.app(scope, receive, send)
         finally:
             identity_context_var.reset(token)
-

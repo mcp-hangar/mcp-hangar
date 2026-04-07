@@ -139,7 +139,6 @@ Single call. Parallel execution. All results returned together.
 
 **REST API.** Full CRUD for providers, groups, discovery, config, and auth. WebSocket streams for real-time events.
 
-
 **RBAC.** Role-based access control with tool-level policies. API key authentication.
 
 **Multi-provider.** Subprocess, Docker, remote HTTP -- mix them in a single batch call.

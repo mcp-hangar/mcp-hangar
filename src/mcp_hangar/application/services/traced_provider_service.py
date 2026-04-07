@@ -18,7 +18,7 @@ import time
 from typing import Any
 
 from ..ports.observability import ObservabilityPort, TraceContext
-from ...observability.conventions import MCP, Provider, set_governance_attributes
+from ...observability.conventions import MCP, set_governance_attributes
 from ...observability.tracing import get_tracer
 
 logger = logging.getLogger(__name__)

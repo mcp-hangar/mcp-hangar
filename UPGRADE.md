@@ -178,7 +178,7 @@ kind: MCPProvider
 
 **Applies to:** all versions
 
-### Prefix migration: HANGAR_* to MCP_*
+### Prefix migration: HANGAR\_\* to MCP\_\*
 
 The canonical environment variable prefix is `MCP_*`. The old `HANGAR_*` prefix
 is not supported in v1.0.

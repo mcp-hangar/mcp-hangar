@@ -26,7 +26,7 @@ from .config import load_config_from_file
 from .state import get_discovery_orchestrator, get_runtime_providers
 
 if TYPE_CHECKING:
-    pass
+    from ..cloud.config import CloudConfig
 
 logger = get_logger(__name__)
 
@@ -543,6 +543,7 @@ def run_server(cli_config: CLIConfig) -> None:
     if cloud_cfg is not None:
         from ..cloud.connector import CloudConnector
         from ..server.state import PROVIDERS
+
         cloud_connector = CloudConnector(config=cloud_cfg, providers=PROVIDERS)
         # Subscribe to all domain events (handler is synchronous, just pushes to buffer)
         context.runtime.event_bus.subscribe_to_all(cloud_connector.on_event)

@@ -5,6 +5,7 @@ from typing import Any, Literal
 
 PrincipalType = Literal["user", "service", "anonymous"]
 
+
 @dataclass(frozen=True)
 class CallerIdentity:
     """Represents the identity of the caller triggering a tool invocation."""
@@ -18,6 +19,7 @@ class CallerIdentity:
         """Validate identity consistency."""
         if self.principal_type in ("user", "service") and not self.user_id:
             raise ValueError(f"user_id cannot be None when principal_type is '{self.principal_type}'")
+
 
 @dataclass(frozen=True)
 class IdentityContext:
@@ -35,4 +37,3 @@ class IdentityContext:
             "principal_type": self.caller.principal_type,
             "correlation_id": self.correlation_id,
         }
-

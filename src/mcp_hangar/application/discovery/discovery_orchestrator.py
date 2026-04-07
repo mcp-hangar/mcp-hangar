@@ -248,42 +248,42 @@ class DiscoveryOrchestrator:
         tracer = get_tracer(__name__)
 
         with tracer.start_as_current_span("discovery.cycle") as cycle_span:
-         try:
-            # Run discovery on all sources
-            cycle_result = await self._discovery_service.run_discovery_cycle()
-            result.discovered_count = cycle_result.discovered_count
-            result.source_results = cycle_result.source_results
-            cycle_span.set_attribute("discovery.discovered_count", result.discovered_count)
+            try:
+                # Run discovery on all sources
+                cycle_result = await self._discovery_service.run_discovery_cycle()
+                result.discovered_count = cycle_result.discovered_count
+                result.source_results = cycle_result.source_results
+                cycle_span.set_attribute("discovery.discovered_count", result.discovered_count)
 
-            # Process discovered providers through validation
-            for provider in self._discovery_service.get_registered_providers().values():
-                validation_result = await self._process_provider(provider)
+                # Process discovered providers through validation
+                for provider in self._discovery_service.get_registered_providers().values():
+                    validation_result = await self._process_provider(provider)
 
-                if validation_result == "registered":
-                    result.registered_count += 1
-                elif validation_result == "updated":
-                    result.updated_count += 1
-                elif validation_result == "quarantined":
-                    result.quarantined_count += 1
+                    if validation_result == "registered":
+                        result.registered_count += 1
+                    elif validation_result == "updated":
+                        result.updated_count += 1
+                    elif validation_result == "quarantined":
+                        result.quarantined_count += 1
 
-            # Check for deregistrations
-            result.deregistered_count = cycle_result.deregistered_count
-            result.error_count = cycle_result.error_count
+                # Check for deregistrations
+                result.deregistered_count = cycle_result.deregistered_count
+                result.error_count = cycle_result.error_count
 
-         except Exception as e:  # noqa: BLE001 -- fault-barrier: cycle failure must not crash orchestrator
-            logger.error(f"Discovery cycle failed: {e}")
-            result.error_count += 1
-            self._metrics.inc_errors(source="orchestrator", error_type=type(e).__name__)
-            cycle_span.record_exception(e)
+            except Exception as e:  # noqa: BLE001 -- fault-barrier: cycle failure must not crash orchestrator
+                logger.error(f"Discovery cycle failed: {e}")
+                result.error_count += 1
+                self._metrics.inc_errors(source="orchestrator", error_type=type(e).__name__)
+                cycle_span.record_exception(e)
 
-         # Calculate duration
-         duration_seconds = time.perf_counter() - start_time
-         result.duration_ms = duration_seconds * 1000
+            # Calculate duration
+            duration_seconds = time.perf_counter() - start_time
+            result.duration_ms = duration_seconds * 1000
 
-         cycle_span.set_attribute("discovery.registered_count", result.registered_count)
-         cycle_span.set_attribute("discovery.quarantined_count", result.quarantined_count)
-         cycle_span.set_attribute("discovery.error_count", result.error_count)
-         cycle_span.set_attribute("discovery.duration_ms", round(result.duration_ms, 2))
+            cycle_span.set_attribute("discovery.registered_count", result.registered_count)
+            cycle_span.set_attribute("discovery.quarantined_count", result.quarantined_count)
+            cycle_span.set_attribute("discovery.error_count", result.error_count)
+            cycle_span.set_attribute("discovery.duration_ms", round(result.duration_ms, 2))
 
         # Update internal metrics
         self._metrics.observe_cycle_duration(duration_seconds)
