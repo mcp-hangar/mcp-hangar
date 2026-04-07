@@ -27,6 +27,7 @@ def _get_version() -> str:
     if _VERSION is None:
         try:
             from importlib.metadata import PackageNotFoundError, version
+
             _VERSION = version("mcp-hangar")
         except (ImportError, PackageNotFoundError):
             _VERSION = "unknown"

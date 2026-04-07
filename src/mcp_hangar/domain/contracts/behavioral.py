@@ -16,7 +16,10 @@ Null implementation:
 from __future__ import annotations
 
 from abc import abstractmethod
-from typing import Any, Protocol, runtime_checkable
+from typing import Any, Protocol, TYPE_CHECKING, runtime_checkable
+
+if TYPE_CHECKING:
+    from ..value_objects.behavioral import BehavioralMode, NetworkObservation, ResourceSample
 
 
 @runtime_checkable

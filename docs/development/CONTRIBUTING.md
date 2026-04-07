@@ -331,7 +331,7 @@ git checkout main
 git cherry-pick <commit-hash>
 ```
 
-## Licensing
+## Licensing Model
 
 MCP Hangar uses a dual-license model:
 
@@ -340,7 +340,6 @@ MCP Hangar uses a dual-license model:
 | `src/mcp_hangar/` | MIT | No |
 | `tests/`, `docs/`, `examples/`, `monitoring/` | MIT | No |
 | `enterprise/` | BSL 1.1 | **Yes** |
-
 
 ### Contributing to enterprise/
 

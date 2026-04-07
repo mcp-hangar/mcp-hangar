@@ -21,7 +21,6 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   - WebSocket infrastructure: `ws_events_endpoint`, `ws_state_endpoint`, connection manager with queue and filters
   - `EventBus.unsubscribe_from_all` for WebSocket lifecycle
 
-
 - **Provider Log Streaming** (Phases 21-22):
   - `LogLine` value object, `IProviderLogBuffer` contract, and `ProviderLogBuffer` ring buffer
   - Live stderr-reader threads for subprocess and Docker providers

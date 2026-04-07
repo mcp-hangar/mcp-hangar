@@ -79,11 +79,13 @@ A tool on `deny_list` is always blocked -- even if also on `approval_list`.
 **Steps:**
 
 1. Start mcp-hangar:
+
    ```bash
    cd mcp-hangar && uv run mcp-hangar
    ```
 
 2. Start the dashboard:
+
    ```bash
    cd hangar-app && npm run dev
    ```
@@ -93,6 +95,7 @@ A tool on `deny_list` is always blocked -- even if also on `approval_list`.
 4. Navigate to **Approvals** in the sidebar (under Governance)
 
 5. From an MCP client (e.g., Claude Code), invoke a tool matching the `approval_list` pattern:
+
    ```
    delete_dashboard(id="dash-123")
    ```
@@ -130,12 +133,14 @@ A tool on `deny_list` is always blocked -- even if also on `approval_list`.
 ### 3.4 Deny-List Override
 
 1. Configure a tool that matches BOTH `deny_list` and `approval_list`:
+
    ```yaml
    deny_list:
      - "admin_*"
    approval_list:
      - "admin_*"
    ```
+
 2. Invoke `admin_reset()`
 
 **Expected Result:** Tool is blocked immediately (deny_list wins). No approval request is created.
@@ -143,9 +148,11 @@ A tool on `deny_list` is always blocked -- even if also on `approval_list`.
 ### 3.5 Sensitive Argument Redaction
 
 1. Invoke a tool with sensitive arguments:
+
    ```
    connect_database(host="localhost", password="secret123", api_token="tok_abc")
    ```
+
 2. Check the approval card in the dashboard
 
 **Expected Result:** Arguments show `password: "[REDACTED]"` and `api_token: "[REDACTED]"`, while `host` shows the actual value.
@@ -215,6 +222,7 @@ curl -s -o /dev/null -w "%{http_code}" -X POST \
 2. Invoke a tool matching `approval_list`
 
 **Expected:** Slack message appears with:
+
 - Header: "Approval Required"
 - Provider and tool name
 - Sanitized arguments in a code block
@@ -263,6 +271,7 @@ After each approval action, verify events in the event store/log:
 | Timeout  | `ToolApprovalExpired`    |
 
 Check via:
+
 ```bash
 # If event store exposed via API:
 curl -s http://localhost:8080/api/events?type=ToolApprovalRequested | jq

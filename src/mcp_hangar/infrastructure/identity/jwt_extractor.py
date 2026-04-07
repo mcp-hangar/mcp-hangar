@@ -165,4 +165,3 @@ class JWTIdentityExtractor:
         if isinstance(metadata, dict):
             return {k.lower(): v for k, v in metadata.items()}
         return {k.lower(): v for k, v in metadata}
-

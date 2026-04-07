@@ -17,15 +17,25 @@ jobs:
     steps:
       - uses: actions/checkout@v4
 
+      - name: Check if Helm charts exist
+        id: check
+        run: |
+          if [ ! -d "packages/helm-charts/mcp-hangar" ]; then
+            echo "skip=true" >> "$GITHUB_OUTPUT"
+          fi
+
       - name: Set up Helm
+        if: steps.check.outputs.skip != 'true'
         uses: azure/setup-helm@v3
         with:
           version: v3.14.0
 
       - name: Lint mcp-hangar
+        if: steps.check.outputs.skip != 'true'
         run: helm lint packages/helm-charts/mcp-hangar
 
       - name: Lint mcp-hangar-operator
+        if: steps.check.outputs.skip != 'true'
         run: helm lint packages/helm-charts/mcp-hangar-operator
 
   template:
@@ -33,15 +43,25 @@ jobs:
     steps:
       - uses: actions/checkout@v4
 
+      - name: Check if Helm charts exist
+        id: check
+        run: |
+          if [ ! -d "packages/helm-charts/mcp-hangar" ]; then
+            echo "skip=true" >> "$GITHUB_OUTPUT"
+          fi
+
       - name: Set up Helm
+        if: steps.check.outputs.skip != 'true'
         uses: azure/setup-helm@v3
         with:
           version: v3.14.0
 
       - name: Template mcp-hangar
+        if: steps.check.outputs.skip != 'true'
         run: helm template mcp-hangar packages/helm-charts/mcp-hangar
 
       - name: Template mcp-hangar-operator
+        if: steps.check.outputs.skip != 'true'
         run: helm template mcp-hangar-operator packages/helm-charts/mcp-hangar-operator
 
   kubeval:
@@ -50,22 +70,33 @@ jobs:
     steps:
       - uses: actions/checkout@v4
 
+      - name: Check if Helm charts exist
+        id: check
+        run: |
+          if [ ! -d "packages/helm-charts/mcp-hangar" ]; then
+            echo "skip=true" >> "$GITHUB_OUTPUT"
+          fi
+
       - name: Set up Helm
+        if: steps.check.outputs.skip != 'true'
         uses: azure/setup-helm@v3
         with:
           version: v3.14.0
 
       - name: Install kubeval
+        if: steps.check.outputs.skip != 'true'
         run: |
           wget https://github.com/instrumenta/kubeval/releases/latest/download/kubeval-linux-amd64.tar.gz
           tar xf kubeval-linux-amd64.tar.gz
           sudo mv kubeval /usr/local/bin/
 
       - name: Validate mcp-hangar
+        if: steps.check.outputs.skip != 'true'
         run: |
           helm template mcp-hangar packages/helm-charts/mcp-hangar | kubeval --strict
 
       - name: Validate mcp-hangar-operator
+        if: steps.check.outputs.skip != 'true'
         run: |
           helm template mcp-hangar-operator packages/helm-charts/mcp-hangar-operator \
             --skip-crds | kubeval --strict
@@ -78,21 +109,32 @@ jobs:
     steps:
       - uses: actions/checkout@v4
 
+      - name: Check if Helm charts exist
+        id: check
+        run: |
+          if [ ! -d "packages/helm-charts/mcp-hangar" ]; then
+            echo "skip=true" >> "$GITHUB_OUTPUT"
+          fi
+
       - name: Set up Helm
+        if: steps.check.outputs.skip != 'true'
         uses: azure/setup-helm@v3
         with:
           version: v3.14.0
 
       - name: Login to GHCR
+        if: steps.check.outputs.skip != 'true'
         run: |
           echo "${{ secrets.GITHUB_TOKEN }}" | helm registry login ghcr.io -u ${{ github.actor }} --password-stdin
 
       - name: Package and push mcp-hangar
+        if: steps.check.outputs.skip != 'true'
         run: |
           helm package packages/helm-charts/mcp-hangar
           helm push mcp-hangar-*.tgz oci://ghcr.io/${{ github.repository_owner }}/charts
 
       - name: Package and push mcp-hangar-operator
+        if: steps.check.outputs.skip != 'true'
         run: |
           helm package packages/helm-charts/mcp-hangar-operator
           helm push mcp-hangar-operator-*.tgz oci://ghcr.io/${{ github.repository_owner }}/charts

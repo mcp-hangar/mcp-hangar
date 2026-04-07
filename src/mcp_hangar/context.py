@@ -31,14 +31,14 @@ import uuid
 
 import structlog
 
+from mcp_hangar.domain.value_objects.identity import IdentityContext
+
 # Context variables for request-scoped data
 request_id_var: ContextVar[str | None] = ContextVar("request_id", default=None)
 server_name_var: ContextVar[str | None] = ContextVar("server_name", default=None)
 tool_name_var: ContextVar[str | None] = ContextVar("tool_name", default=None)
 user_id_var: ContextVar[str | None] = ContextVar("user_id", default=None)
 
-# Import moved here to avoid circular imports if any, though it's a value object
-from mcp_hangar.domain.value_objects.identity import IdentityContext
 identity_context_var: ContextVar[IdentityContext | None] = ContextVar("identity_context", default=None)
 
 
@@ -50,6 +50,7 @@ def generate_request_id() -> str:
 def get_request_id() -> str | None:
     """Get the current request ID from context."""
     return request_id_var.get()
+
 
 def get_identity_context() -> IdentityContext | None:
     """Get the current identity context."""

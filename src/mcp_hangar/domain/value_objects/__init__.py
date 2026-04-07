@@ -130,4 +130,14 @@ __all__ = [
     "DiscoverySourceSpec",
     # License
     "LicenseTier",
+    # Capabilities
+    "EgressRule",
+    "EnvironmentCapabilities",
+    "FilesystemCapabilities",
+    "NetworkCapabilities",
+    "ProviderCapabilities",
+    "ResourceCapabilities",
+    "ToolCapabilities",
+    "ViolationSeverity",
+    "ViolationType",
 ]

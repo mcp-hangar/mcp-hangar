@@ -60,4 +60,3 @@ class IdentityMiddleware:
             await self.app(scope, receive, send)
         finally:
             identity_context_var.reset(token)
-

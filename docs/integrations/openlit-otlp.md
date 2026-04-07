@@ -4,7 +4,6 @@
     The full OpenLIT integration guide, including docker-compose recipes, MCP
     attribute taxonomy, and getting-started instructions, is now part of the
     unified OpenTelemetry integrations page:
-
     **[OpenTelemetry Integrations -- OpenLIT section](../observability/otel-integrations.md#openlit)**
 
 ## Quick reference

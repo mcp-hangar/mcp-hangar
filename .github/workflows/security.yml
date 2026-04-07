@@ -76,7 +76,7 @@ jobs:
         run: docker build -t mcp-hangar:scan .
 
       - name: Run Trivy vulnerability scanner
-        uses: aquasecurity/trivy-action@0.28.0
+        uses: aquasecurity/trivy-action@v0.28.0
         with:
           image-ref: "mcp-hangar:scan"
           format: "sarif"
@@ -102,6 +102,7 @@ jobs:
         uses: gitleaks/gitleaks-action@v2
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          GITLEAKS_LICENSE: ${{ secrets.GITLEAKS_LICENSE }}
 
   semgrep:
     name: Semgrep SAST

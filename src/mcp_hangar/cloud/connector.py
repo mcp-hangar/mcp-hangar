@@ -91,9 +91,7 @@ class CloudConnector:
 
     def start(self) -> None:
         """Spawn the cloud connector thread."""
-        self._thread = threading.Thread(
-            target=self._run_loop, daemon=True, name="cloud-connector"
-        )
+        self._thread = threading.Thread(target=self._run_loop, daemon=True, name="cloud-connector")
         self._thread.start()
         logger.info("cloud_connector_thread_started")
 

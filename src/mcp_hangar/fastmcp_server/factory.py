@@ -162,9 +162,7 @@ class MCPServerFactory:
 
         # Create auth-aware combined app
         if self._config.auth_enabled and self._auth_components:
-            return create_auth_combined_app(
-                aux_app, mcp_app, self._auth_components, self._config, api_app
-            )
+            return create_auth_combined_app(aux_app, mcp_app, self._auth_components, self._config, api_app)
         else:
             return create_combined_asgi_app(aux_app, mcp_app, api_app)
 

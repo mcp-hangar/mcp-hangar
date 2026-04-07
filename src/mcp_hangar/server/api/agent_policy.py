@@ -54,9 +54,7 @@ async def push_policy(request: Request) -> HangarJSONResponse:
     version = body.get("version", 0)
 
     if not isinstance(tool_policies, list):
-        return HangarJSONResponse(
-            {"error": "tool_policies must be a list"}, status_code=400
-        )
+        return HangarJSONResponse({"error": "tool_policies must be a list"}, status_code=400)
 
     resolver = get_tool_access_resolver()
 
@@ -103,7 +101,6 @@ async def push_policy(request: Request) -> HangarJSONResponse:
 
         if pid == "*":
             # Global policy: apply to all known providers
-            all_providers = resolver._provider_policies.copy()
             # Also set a special "_global" key for the executor to check
             resolver.set_provider_policy("_global", policy)
             applied_count += 1
@@ -118,11 +115,13 @@ async def push_policy(request: Request) -> HangarJSONResponse:
         providers_updated=applied_count,
     )
 
-    return HangarJSONResponse({
-        "status": "ok",
-        "version": version,
-        "applied": applied_count,
-    })
+    return HangarJSONResponse(
+        {
+            "status": "ok",
+            "version": version,
+            "applied": applied_count,
+        }
+    )
 
 
 agent_policy_routes = [

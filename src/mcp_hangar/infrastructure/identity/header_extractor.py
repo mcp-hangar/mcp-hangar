@@ -112,4 +112,3 @@ class HeaderIdentityExtractor:
             return {k.lower(): v for k, v in metadata.items()}
         # list of tuples (gRPC metadata style)
         return {k.lower(): v for k, v in metadata}
-
