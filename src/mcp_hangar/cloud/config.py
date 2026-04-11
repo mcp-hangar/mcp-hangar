@@ -19,6 +19,8 @@ class CloudConfig:
     buffer_max_size: int = 10_000
     connect_timeout_s: float = 10.0
     request_timeout_s: float = 30.0
+    max_registration_attempts: int = 10
+    dormant_probe_interval_s: int = 300
 
     @staticmethod
     def from_dict(d: dict) -> "CloudConfig | None":
@@ -40,4 +42,6 @@ class CloudConfig:
             heartbeat_interval_s=int(d.get("heartbeat_interval_s", CloudConfig.heartbeat_interval_s)),
             state_sync_interval_s=int(d.get("state_sync_interval_s", CloudConfig.state_sync_interval_s)),
             buffer_max_size=int(d.get("buffer_max_size", CloudConfig.buffer_max_size)),
+            max_registration_attempts=int(d.get("max_registration_attempts", CloudConfig.max_registration_attempts)),
+            dormant_probe_interval_s=int(d.get("dormant_probe_interval_s", CloudConfig.dormant_probe_interval_s)),
         )

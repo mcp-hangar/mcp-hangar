@@ -51,6 +51,15 @@ _FORWARDED_EVENT_TYPES: set[str] = {
 
 _RETRY_DELAYS = [1, 2, 4, 8, 16, 32, 60]  # exponential backoff ceiling at 60s
 
+# Keys stripped from event payloads before forwarding to cloud.
+# Tool arguments may contain secrets, PII, or credentials supplied by users.
+# Error messages may leak internal paths or sensitive context.
+_REDACTED_KEYS: frozenset[str] = frozenset({
+    "arguments",
+    "error_message",
+    "identity_context",
+})
+
 
 class CloudConnector:
     """Lightweight cloud connector for standalone mcp-hangar instances.
@@ -73,6 +82,7 @@ class CloudConnector:
         self._loop: asyncio.AbstractEventLoop | None = None
         self._thread: threading.Thread | None = None
         self._connected = False
+        self._dormant = False
 
     # -- event handler (called synchronously from event bus thread) ---------
 
@@ -85,7 +95,7 @@ class CloudConnector:
             payload = event.to_dict()
         except (AttributeError, TypeError, ValueError):
             payload = {"event_type": etype}
-        self._buffer.push(payload)
+        self._buffer.push(_redact_event_payload(payload))
 
     # -- thread lifecycle ---------------------------------------------------
 
@@ -130,7 +140,17 @@ class CloudConnector:
         self._client = client
         self._stop_event = asyncio.Event()
 
-        await self._register_with_retry(client)
+        registered = await self._register_with_retry(client)
+        if not registered:
+            self._dormant = True
+            logger.error(
+                "cloud_connector_dormant",
+                reason="registration_failed",
+                max_attempts=self._cfg.max_registration_attempts,
+                probe_interval_s=self._cfg.dormant_probe_interval_s,
+            )
+            await self._dormant_probe_loop(client)
+            return
 
         tasks = [
             asyncio.create_task(self._heartbeat_loop(client), name="cloud-hb"),
@@ -162,21 +182,61 @@ class CloudConnector:
 
     # -- registration -------------------------------------------------------
 
-    async def _register_with_retry(self, client: CloudClient) -> None:
+    async def _register_with_retry(self, client: CloudClient) -> bool:
+        """Attempt registration up to max_registration_attempts times.
+
+        Returns True on success, False when all attempts are exhausted.
+        """
+        max_attempts = self._cfg.max_registration_attempts
         for attempt, delay in enumerate(_retry_with_backoff()):
+            if attempt >= max_attempts:
+                return False
+            if self._stop_event.is_set():
+                return False
             try:
                 await client.register()
                 self._connected = True
-                return
+                return True
             except (httpx.HTTPError, OSError) as exc:
                 self._connected = False
                 logger.warning(
                     "cloud_register_failed",
                     attempt=attempt + 1,
+                    remaining=max_attempts - attempt - 1,
                     error=str(exc),
                     retry_in=delay,
                 )
                 await self._interruptible_sleep(delay)
+        return False
+
+    # -- dormant probe (cloud unreachable) ----------------------------------
+
+    async def _dormant_probe_loop(self, client: CloudClient) -> None:
+        """Periodically retry registration after entering dormant mode.
+
+        On success, exits dormant mode and starts normal worker loops.
+        """
+        while not self._stop_event.is_set():
+            await self._interruptible_sleep(self._cfg.dormant_probe_interval_s)
+            if self._stop_event.is_set():
+                return
+            try:
+                await client.register()
+                self._connected = True
+                self._dormant = False
+                logger.info("cloud_connector_recovered")
+                tasks = [
+                    asyncio.create_task(self._heartbeat_loop(client), name="cloud-hb"),
+                    asyncio.create_task(self._event_flush_loop(client), name="cloud-ev"),
+                    asyncio.create_task(self._state_sync_loop(client), name="cloud-ss"),
+                ]
+                await self._stop_event.wait()
+                for t in tasks:
+                    t.cancel()
+                await asyncio.gather(*tasks, return_exceptions=True)
+                return
+            except (httpx.HTTPError, OSError):
+                pass
 
     # -- heartbeat ----------------------------------------------------------
 
@@ -279,6 +339,15 @@ class CloudConnector:
     @property
     def connected(self) -> bool:
         return self._connected
+
+    @property
+    def dormant(self) -> bool:
+        return self._dormant
+
+
+def _redact_event_payload(payload: dict[str, Any]) -> dict[str, Any]:
+    """Strip sensitive fields from an event payload before cloud forwarding."""
+    return {k: v for k, v in payload.items() if k not in _REDACTED_KEYS}
 
 
 def _retry_with_backoff():

@@ -30,6 +30,8 @@ class TestCloudConfig:
             "heartbeat_interval_s": 15,
             "state_sync_interval_s": 120,
             "buffer_max_size": 5000,
+            "max_registration_attempts": 3,
+            "dormant_probe_interval_s": 600,
         })
         assert cfg is not None
         assert cfg.endpoint == "https://custom.example.com"
@@ -37,6 +39,13 @@ class TestCloudConfig:
         assert cfg.heartbeat_interval_s == 15
         assert cfg.state_sync_interval_s == 120
         assert cfg.buffer_max_size == 5000
+        assert cfg.max_registration_attempts == 3
+        assert cfg.dormant_probe_interval_s == 600
+
+    def test_defaults_for_new_fields(self):
+        cfg = CloudConfig(license_key="test")
+        assert cfg.max_registration_attempts == 10
+        assert cfg.dormant_probe_interval_s == 300
 
     def test_frozen(self):
         cfg = CloudConfig(license_key="test")
