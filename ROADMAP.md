@@ -1,7 +1,7 @@
 # MCP Hangar Roadmap
 
-> **Last updated:** 2026-03-27
-> **Status:** v1.0.0 -- all engineering complete
+> **Last updated:** 2026-04-11
+> **Status:** v1.0.0 release candidate
 > **Maintainer:** [@mapyr](https://github.com/mapyr)
 
 ## Vision

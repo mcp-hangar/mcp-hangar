@@ -34,7 +34,7 @@ kubectl get crds | grep mcp-hangar.io
 
 ```bash
 # Add Helm repository
-helm repo add mcp-hangar https://mcp-hangar.github.io/mcp-hangar
+helm repo add mcp-hangar https://mcp-hangar.io/charts
 helm repo update
 
 # Install operator
