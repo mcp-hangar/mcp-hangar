@@ -1,6 +1,6 @@
 [project]
 name = "mcp-hangar"
-version = "0.12.0"
+version = "1.0.0"
 description = "Production-grade infrastructure for Model Context Protocol"
 readme = "README.md"
 license = {text = "MIT"}
@@ -10,7 +10,7 @@ authors = [
 ]
 keywords = ["mcp", "model-context-protocol", "llm", "ai", "infrastructure"]
 classifiers = [
-    "Development Status :: 4 - Beta",
+    "Development Status :: 5 - Production/Stable",
     "Intended Audience :: Developers",
     "License :: OSI Approved :: MIT License",
     "Programming Language :: Python :: 3.11",
@@ -63,7 +63,7 @@ mcp-hangar = "mcp_hangar.server.cli:cli_main"
 
 [project.urls]
 Homepage = "https://mcp-hangar.io"
-Documentation = "https://docs.mcp-hangar.io"
+Documentation = "https://mcp-hangar.io/getting-started/quickstart/"
 Repository = "https://github.com/mcp-hangar/mcp-hangar"
 
 [build-system]

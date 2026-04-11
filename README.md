@@ -4,20 +4,15 @@
 [![Python 3.11+](https://img.shields.io/badge/python-3.11+-blue.svg)](https://www.python.org/downloads/)
 [![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](https://opensource.org/licenses/MIT)
 
-**Parallel MCP tool execution. One interface. 50x faster.**
+**Production-grade infrastructure for Model Context Protocol.**
 
-## The Problem
-
-Your AI agent calls 5 tools sequentially. Each takes 200ms. That's 1 second of waiting.
-
-Hangar runs them in parallel. 200ms total. Same results, 50x faster.
+MCP Hangar is a control plane for MCP servers. It manages provider lifecycle, parallel tool execution, security governance, and observability -- so you don't have to.
 
 ## Quick Start
 
 **30 seconds to working MCP providers:**
 
 ```bash
-# Install, configure, and start - zero interaction
 curl -sSL https://mcp-hangar.io/install.sh | bash && mcp-hangar init -y && mcp-hangar serve
 ```
 
@@ -34,13 +29,12 @@ The `init -y` flag uses sensible defaults:
 
 - Detects available runtimes (uvx preferred, npx fallback)
 - Configures starter bundle: filesystem, fetch, memory
+- Runs a smoke test to verify providers start correctly
 - Updates Claude Desktop config automatically
 
 </details>
 
 ### Manual Setup
-
-If you prefer step-by-step:
 
 ```bash
 # 1. Install
@@ -57,15 +51,33 @@ mcp-hangar serve
 ### HTTP Mode
 
 ```bash
-# Start with REST API
+# Start with HTTP transport and REST API
 mcp-hangar serve --http --port 8000
 
 # REST API:  http://localhost:8000/api/
 ```
 
-### Custom Configuration
+## What It Does
 
-Create `~/.config/mcp-hangar/config.yaml`:
+**Parallel execution.** Your AI agent calls 5 tools sequentially -- each takes 200ms, that's 1 second of waiting. `hangar_call` runs them in parallel. 200ms total.
+
+```
+hangar_call(calls=[
+    {"provider": "github", "tool": "search_repos", "arguments": {"query": "mcp"}},
+    {"provider": "slack", "tool": "post_message", "arguments": {"channel": "#dev"}},
+    {"provider": "internal-api", "tool": "get_status", "arguments": {}}
+])
+```
+
+Single MCP tool call. Parallel execution. All results returned together.
+
+**Lifecycle management.** Lazy loading, health checks, automatic restart, graceful shutdown. Providers start on first use, stay warm while active, shut down after idle TTL.
+
+**Single-flight cold starts.** When 10 parallel calls hit a cold provider, it initializes once -- not 10 times.
+
+**Circuit breaker.** One failing provider doesn't kill your batch. Automatic isolation and recovery.
+
+## Configuration
 
 ```yaml
 providers:
@@ -74,17 +86,29 @@ providers:
     command: [uvx, mcp-server-github]
     env:
       GITHUB_TOKEN: ${GITHUB_TOKEN}
+
   slack:
     mode: subprocess
     command: [uvx, mcp-server-slack]
+
   internal-api:
     mode: remote
     endpoint: "http://localhost:8080"
+
+  custom-server:
+    mode: docker
+    image: my-registry/mcp-server:latest
+    container:
+      command: ["python", "-m", "custom_entrypoint"]
 ```
 
-Claude Desktop is auto-configured by `mcp-hangar init`. Manual setup:
+### Claude Desktop Integration
 
-**Add to Claude Desktop** (`~/Library/Application Support/Claude/claude_desktop_config.json`):
+`mcp-hangar init` auto-configures Claude Desktop. For manual setup, add to your Claude Desktop config:
+
+**macOS:** `~/Library/Application Support/Claude/claude_desktop_config.json`
+**Linux:** `~/.config/Claude/claude_desktop_config.json`
+**Windows:** `%APPDATA%\Claude\claude_desktop_config.json`
 
 ```json
 {
@@ -99,51 +123,51 @@ Claude Desktop is auto-configured by `mcp-hangar init`. Manual setup:
 
 Restart Claude Desktop. Done.
 
-## One Interface
+## Python API
+
+For programmatic use (scripts, pipelines, custom integrations):
 
 ```python
-hangar_call([
-    {"provider": "github", "tool": "search_repos", "arguments": {"query": "mcp"}},
-    {"provider": "slack", "tool": "post_message", "arguments": {"channel": "#dev"}},
-    {"provider": "internal-api", "tool": "get_status", "arguments": {}}
-])
+from mcp_hangar import Hangar, HangarConfig
+
+# Async
+async with Hangar.from_config("config.yaml") as hangar:
+    result = await hangar.invoke("math", "add", {"a": 1, "b": 2})
+
+# Sync wrapper
+from mcp_hangar import SyncHangar
+
+with SyncHangar.from_config("config.yaml") as hangar:
+    result = hangar.invoke("math", "add", {"a": 1, "b": 2})
+
+# Programmatic config
+config = (
+    HangarConfig()
+    .add_provider("math", command=["python", "-m", "math_server"])
+    .add_provider("fetch", mode="docker", image="mcp/fetch:latest")
+    .build()
+)
+hangar = Hangar(config)
 ```
 
-Single call. Parallel execution. All results returned together.
+## Security & Governance (1.0)
 
-## Benchmarks
+- **Capability declaration.** Declare what each provider can access (network, filesystem, environment). Violations are detected and reported.
+- **Behavioral profiling.** Baseline provider behavior, detect deviations (new destinations, protocol drift, frequency anomalies). Learning and enforcing modes.
+- **Tool schema drift detection.** Track tool schema changes across provider updates.
+- **Network connection monitoring.** `/proc/net/tcp` parsing, Docker and Kubernetes monitors with audit events.
+- **RBAC.** Role-based access control with tool-level policies. API key and JWT/OIDC authentication.
+- **Approval gate.** Human-in-the-loop approval for sensitive tool calls.
 
-| Scenario | Sequential | Hangar | Speedup |
-|----------|-----------|--------|---------|
-| 15 tools, 2 providers | ~20s | 380ms | 50x |
-| 50 concurrent requests | ~15s | 1.3s | 10x |
-| Cold start + batch | ~5s | <500ms | 10x |
+## Observability
 
-100% success rate. <10ms framework overhead.
+- **OpenTelemetry.** Distributed tracing with W3C trace context propagation across providers.
+- **Prometheus metrics.** Provider state, tool calls, health checks, circuit breaker, concurrency, batch execution.
+- **Grafana dashboards.** Pre-built overview and per-provider deep dive dashboards.
+- **Structured logging.** Correlation IDs across parallel calls. JSON log format for production.
+- **Audit trail.** Event-sourced audit log with OTLP export for security-relevant events.
 
-## Why It's Fast
-
-**Single-flight cold starts.** When 10 parallel calls hit a cold provider, it initializes once -- not 10 times.
-
-**Automatic concurrency.** Configurable parallelism with backpressure. No thundering herd.
-
-**Provider pooling.** Hot providers stay warm. Cold providers spin up on demand, shut down after idle TTL.
-
-## Production Ready
-
-**Lifecycle management.** Lazy loading, health checks, automatic restart, graceful shutdown.
-
-**Circuit breaker.** One failing provider doesn't kill your batch. Automatic isolation and recovery.
-
-**Observability.** Correlation IDs across parallel calls. OpenTelemetry traces, Prometheus metrics.
-
-**REST API.** Full CRUD for providers, groups, discovery, config, and auth. WebSocket streams for real-time events.
-
-**RBAC.** Role-based access control with tool-level policies. API key authentication.
-
-**Multi-provider.** Subprocess, Docker, remote HTTP -- mix them in a single batch call.
-
-## Configuration
+## Advanced Configuration
 
 ```yaml
 providers:
@@ -153,36 +177,42 @@ providers:
     idle_ttl_s: 300              # Shutdown after 5min idle
     health_check_interval_s: 60  # Check health every minute
     max_consecutive_failures: 3  # Circuit breaker threshold
+    max_concurrency: 5           # Per-provider concurrency limit
+    tools:
+      deny_list: [delete_*]      # Tool access filtering
 
-  docker-provider:
-    mode: docker
-    image: my-registry/mcp-server:latest
-    network: bridge
+execution:
+  max_concurrency: 50            # Global concurrency limit
+  default_provider_concurrency: 10
 
-  remote-provider:
-    mode: remote
-    endpoint: "https://api.example.com/mcp"
+truncation:
+  enabled: true
+  max_batch_size_bytes: 950000   # Under Claude's 1MB limit
+
+config_reload:
+  enabled: true                  # Live config reload via file watch
 ```
 
-## Works Everywhere
+## Scales With You
 
 - **Home lab:** 2 providers, zero config complexity
-- **Team setup:** Shared providers, Docker containers
-- **Enterprise:** 50+ providers, observability stack, Kubernetes
+- **Team setup:** Shared providers, Docker containers, hot-reload
+- **Enterprise:** 50+ providers, behavioral profiling, RBAC, approval gates, Kubernetes operator
 
 Same API. Same reliability. Different scale.
 
 ## Documentation
 
 - [Getting Started](https://mcp-hangar.io/getting-started/quickstart/)
-- [REST API Guide](https://mcp-hangar.io/guides/REST_API/)
 - [Configuration Reference](https://mcp-hangar.io/reference/configuration/)
+- [REST API Guide](https://mcp-hangar.io/guides/REST_API/)
 - [Observability Setup](https://mcp-hangar.io/guides/OBSERVABILITY/)
 - [Authentication & RBAC](https://mcp-hangar.io/guides/AUTHENTICATION/)
+- [Cookbook](https://mcp-hangar.io/cookbook/)
 
 ## License
 
-Core (`src/`, `packages/`) is MIT licensed. Enterprise features (`enterprise/`) are BSL 1.1 licensed.
+Core (`src/`) is MIT licensed. Enterprise features (`enterprise/`) are BSL 1.1 licensed.
 
 See [LICENSE](LICENSE) for MIT terms and [enterprise/LICENSE.BSL](enterprise/LICENSE.BSL) for BSL terms.
 
