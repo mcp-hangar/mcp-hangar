@@ -1,6 +1,14 @@
 MIT License
 
-Copyright (c) 2025 mapyr
+Copyright (c) 2025 Marcin Pyrka
+
+Scope: This MIT License applies to all files in this repository EXCEPT those
+under the enterprise/ directory. Files under enterprise/ are licensed under
+the Business Source License 1.1. See enterprise/LICENSE.BSL for full terms.
+
+In summary:
+  packages/core/      -- MIT (this license)
+  enterprise/         -- BSL 1.1 (see enterprise/LICENSE.BSL)
 
 Permission is hereby granted, free of charge, to any person obtaining a copy
 of this software and associated documentation files (the "Software"), to deal

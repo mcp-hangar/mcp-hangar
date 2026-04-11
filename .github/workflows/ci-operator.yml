@@ -21,13 +21,23 @@ jobs:
     steps:
       - uses: actions/checkout@v4
 
+      - name: Check if operator directory exists
+        id: check
+        run: |
+          if [ ! -d "packages/operator" ]; then
+            echo "skip=true" >> "$GITHUB_OUTPUT"
+          fi
+        working-directory: ${{ github.workspace }}
+
       - name: Set up Go
+        if: steps.check.outputs.skip != 'true'
         uses: actions/setup-go@v5
         with:
           go-version: '1.23'
           cache-dependency-path: packages/operator/go.sum
 
       - name: golangci-lint
+        if: steps.check.outputs.skip != 'true'
         uses: golangci/golangci-lint-action@v6
         with:
           working-directory: packages/operator
@@ -39,16 +49,27 @@ jobs:
     steps:
       - uses: actions/checkout@v4
 
+      - name: Check if operator directory exists
+        id: check
+        run: |
+          if [ ! -d "packages/operator" ]; then
+            echo "skip=true" >> "$GITHUB_OUTPUT"
+          fi
+        working-directory: ${{ github.workspace }}
+
       - name: Set up Go
+        if: steps.check.outputs.skip != 'true'
         uses: actions/setup-go@v5
         with:
           go-version: '1.23'
           cache-dependency-path: packages/operator/go.sum
 
       - name: Run tests
+        if: steps.check.outputs.skip != 'true'
         run: make test
 
       - name: Upload coverage
+        if: steps.check.outputs.skip != 'true'
         uses: codecov/codecov-action@v4
         with:
           files: packages/operator/coverage.out
@@ -61,13 +82,23 @@ jobs:
     steps:
       - uses: actions/checkout@v4
 
+      - name: Check if operator directory exists
+        id: check
+        run: |
+          if [ ! -d "packages/operator" ]; then
+            echo "skip=true" >> "$GITHUB_OUTPUT"
+          fi
+        working-directory: ${{ github.workspace }}
+
       - name: Set up Go
+        if: steps.check.outputs.skip != 'true'
         uses: actions/setup-go@v5
         with:
           go-version: '1.23'
           cache-dependency-path: packages/operator/go.sum
 
       - name: Build
+        if: steps.check.outputs.skip != 'true'
         run: make build
 
   # Docker job disabled - requires organization package write permissions
@@ -107,16 +138,27 @@ jobs:
     steps:
       - uses: actions/checkout@v4
 
+      - name: Check if operator directory exists
+        id: check
+        run: |
+          if [ ! -d "packages/operator" ]; then
+            echo "skip=true" >> "$GITHUB_OUTPUT"
+          fi
+        working-directory: ${{ github.workspace }}
+
       - name: Set up Go
+        if: steps.check.outputs.skip != 'true'
         uses: actions/setup-go@v5
         with:
           go-version: '1.23'
           cache-dependency-path: packages/operator/go.sum
 
       - name: Generate manifests
+        if: steps.check.outputs.skip != 'true'
         run: make manifests
 
       - name: Check for changes
+        if: steps.check.outputs.skip != 'true'
         run: |
           git diff --exit-code config/crd/bases/ || \
             (echo "CRDs out of sync. Run 'make manifests' and commit." && exit 1)

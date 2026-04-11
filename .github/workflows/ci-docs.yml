@@ -31,7 +31,7 @@ jobs:
           globs: |
             docs/**/*.md
             *.md
-            packages/core/*.md
+            *.md
 
   build:
     runs-on: ubuntu-latest
@@ -46,7 +46,7 @@ jobs:
           python-version: '3.11'
 
       - name: Install MkDocs
-        run: pip install mkdocs-material mkdocs-minify-plugin "mkdocstrings[python]" mkdocs-git-revision-date-localized-plugin
+        run: pip install -r docs/requirements.txt
 
       - name: Build docs
         run: mkdocs build --strict

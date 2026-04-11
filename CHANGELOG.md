@@ -7,6 +7,93 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [1.0.0] - 2026-04-11
+
+First stable release. All public APIs are now covered by semantic versioning guarantees.
+
+### Added
+
+- **Enterprise Module System** (Phases 47, BSL 1.1):
+  - `LicenseTier` enum (COMMUNITY, PRO, ENTERPRISE) with `LicenseValidator` HMAC-SHA256 key validation
+  - `EnterpriseComponents` dataclass and `load_enterprise_modules()` bootstrap integration
+  - License tier gating: enterprise features activate based on license key; all failure modes fall back to COMMUNITY
+  - HMAC signing secret configurable via `HANGAR_LICENSE_HMAC_SECRET` environment variable (no longer hardcoded)
+
+- **Capability Declaration and Enforcement** (Phases 38-41):
+  - `ProviderCapabilities` value object with network, filesystem, environment, tool, and resource declarations
+  - `from_dict()` factory and config.yaml integration for capability blocks
+  - Kubernetes CRD types for capabilities with reconciler propagation to status
+  - `NetworkPolicyBuilder` pure function generating Kubernetes NetworkPolicy from declared egress rules
+  - Docker capabilities-aware network mode in `DockerLauncher`
+  - `ViolationType` and `ViolationSeverity` enums with Prometheus violations counter
+  - `ViolationRecord` CRD type and `ViolationDetected` condition in operator reconciler
+  - CEL admission validation and `ExpectedTools` field in MCPProvider CRD
+  - Wildcard egress override audit warning event
+
+- **Behavioral Profiling** (Phases 42-44):
+  - `IBehavioralProfiler`, `IBaselineStore`, `IDeviationDetector` contracts with null implementations
+  - `BehavioralMode` enum, `NetworkObservation` value object, `BehavioralModeChanged` event
+  - SQLite-backed `BaselineStore` for behavioral profiling data
+  - `BehavioralProfiler` facade with enterprise bootstrap conditional loading
+  - `DeviationDetector` with 3 detection rules (new destination, protocol drift, frequency anomaly)
+  - ENFORCING mode support with event handler integration
+
+- **Network Connection Monitoring** (Phase 43):
+  - `/proc/net/tcp` and `ss` output parsers for connection tracking
+  - `DockerNetworkMonitor` with container label injection
+  - `K8sNetworkMonitor` with audit events and pod exec fallback
+  - `ConnectionLogWorker` with monitor orchestration, bootstrap wiring, and config parsing
+
+- **Tool Schema Drift Detection** (Phase 45):
+  - MIT domain types for tool schema change tracking
+  - `SchemaTracker` BSL class with SQLite storage and bootstrap wiring
+  - `ToolSchemaChangeHandler` with event-driven schema diff detection
+
+- **Resource Monitoring** (Phase 46):
+  - `ResourceStore` with CRUD, baseline tracking, and pruning
+  - `ResourceMonitorWorker` with bootstrap wiring and config integration
+  - `BehavioralReportGenerator` with JSON and PDF export (via fpdf2)
+  - Behavioral report REST endpoint with enterprise 403 gating
+
+- **OpenTelemetry Governance Telemetry** (Phases 31-34):
+  - `set_governance_attributes()` helper with MCP semantic convention constants
+  - OTEL span integration in `TracedProviderService.invoke_tool`
+  - W3C trace context extraction in `BatchExecutor` and injection in `HttpClient`
+  - `OTLPAuditExporter` for security-relevant domain events with bootstrap wiring
+  - OpenLIT integration recipe and OTEL Collector reference deployment example
+
+- **Authorization Contracts** (Phase 35):
+  - `IToolAccessPolicyEnforcer` protocol with `PolicyEvaluationResult`
+  - `IDurableEventStore` ABC for persistent event storage
+  - `NullAuthenticator`, `NullApiKeyStore` implementations for COMMUNITY tier
+  - BSL 1.1 docstrings on all enterprise placeholder modules
+
+- **Cloud Connector** (uplink to hangar-cloud SaaS):
+  - Event payload redaction: tool arguments, error messages, and identity context stripped before cloud transmission
+  - Bounded retry with dormant mode: registration stops after `max_registration_attempts`, then probes periodically
+  - `CloudConfig` extended with `max_registration_attempts` and `dormant_probe_interval_s`
+
+- **Approval Gate** (human-in-the-loop):
+  - `mcp_tool_wrapper` decorator with optional `check_approval` async callback
+  - Approval result with `approved`, `error_code`, `approval_id`, `reason` fields
+
+- **Project Structure**:
+  - Migrated from `packages/core/` to standard `src/mcp_hangar/` layout
+  - Enterprise features separated into `enterprise/` directory under BSL 1.1
+  - Enterprise import boundary enforced by `scripts/check_enterprise_boundary.sh`
+
+### Changed
+
+- **Development Status**: Promoted from Beta to Production/Stable
+- **HMAC secret**: License key signing secret now read from `HANGAR_LICENSE_HMAC_SECRET` environment variable with dev-only fallback
+- **Documentation URLs**: Consolidated to `mcp-hangar.io` (removed stale `github.io` references)
+
+### Fixed
+
+- Cloud connector: tool arguments no longer leak to cloud telemetry endpoint
+- Cloud connector: infinite retry loop on failed registration replaced with bounded retry + dormant mode
+- Docker Compose quickstart example: removed deprecated `version` key
+
 ## [0.12.0] - 2026-03-23
 
 ### Added
@@ -21,28 +108,11 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   - WebSocket infrastructure: `ws_events_endpoint`, `ws_state_endpoint`, connection manager with queue and filters
   - `EventBus.unsubscribe_from_all` for WebSocket lifecycle
 
-- **Dashboard UI** (Phases 13-16, 25-26, 28, 30):
-  - React 19 + TypeScript + Vite 6 frontend application (`packages/ui`)
-  - Dashboard page with metrics charts, state distribution, live event feed, and alerts
-  - Providers list and detail pages with start/stop actions
-  - Groups, Discovery, Config, and Topology pages
-  - RBAC management UI with tool access policy editor
-  - Catalog browser and discovery source management pages
-  - Config export UI with colored diff viewer and toast notifications
-  - ThemeToggle, PageContainer, Skeleton, and Drawer shared components
-  - Zustand WebSocket store with exponential backoff reconnection
-  - `useEventStream`, `useProviderState`, `useProviderLogs` hooks
-  - Metrics time-series chart and D3 force-graph topology visualization
-  - Auth page with API key and role management
-  - Multi-stage Docker build with UI static files baked in
-  - Static file serving and SPA fallback for production deployment
-
 - **Provider Log Streaming** (Phases 21-22):
   - `LogLine` value object, `IProviderLogBuffer` contract, and `ProviderLogBuffer` ring buffer
   - Live stderr-reader threads for subprocess and Docker providers
   - `GET /api/providers/{id}/logs` REST endpoint with `lines` parameter
   - `LogStreamBroadcaster` and `/ws/providers/{id}/logs` WebSocket endpoint
-  - `LogViewer` component and `useProviderLogs` hook in UI
 
 - **Provider/Group CRUD** (Phase 23):
   - Provider CRUD events, commands, and handlers (create, update, delete)
@@ -478,7 +548,6 @@ truncation:
   - `registry_group_rebalance` -> `hangar_group_rebalance`
 
 - Updated error hints and recovery messages to use new tool names
-- Updated SYSTEM_PROMPT.md with correct tool names and documentation
 - Updated docs/guides/DISCOVERY.md with new tool names
 
 ### Refactoring
@@ -704,7 +773,6 @@ All metrics renamed from `mcp_registry_*` to `mcp_hangar_*`:
 ### Documentation
 
 - Updated all documentation to use "control plane" terminology
-- Updated SYSTEM_PROMPT.md with new tool names
 - Updated Grafana dashboards with new metric names
 - Updated copilot-instructions.md with new metric names
 

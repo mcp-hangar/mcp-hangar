@@ -9,5 +9,7 @@ RUN pip install --no-cache-dir mcp
 COPY server.py /app/server.py
 COPY __init__.py /app/__init__.py
 
-# Run the provider
+EXPOSE 8080
+
+# Run the provider (defaults to streamable-http on :8080)
 CMD ["python", "server.py"]

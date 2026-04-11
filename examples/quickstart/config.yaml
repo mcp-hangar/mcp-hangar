@@ -1,0 +1,37 @@
+logging:
+  level: INFO
+  json_format: true
+
+providers:
+  openai-proxy:
+    mode: docker
+    image: my-org/openai-mcp:latest
+    command: ["python", "-m", "openai_mcp_server"]
+    idle_ttl_s: 300
+
+    # Capability declaration (Phase 38): what resources this provider needs.
+    # Used by the operator for NetworkPolicy generation and enforcement.
+    capabilities:
+      network:
+        egress:
+          - host: api.openai.com
+            port: 443
+            protocol: https
+        dns_allowed: true
+      filesystem:
+        read_paths:
+          - /data/knowledge-base
+        write_paths: []
+        temp_allowed: true
+      environment:
+        required:
+          - OPENAI_API_KEY
+        optional:
+          - LOG_LEVEL
+      tools:
+        max_count: 50
+        schema_drift_alert: true
+      resources:
+        max_memory_mb: 512
+        max_cpu_percent: 50
+      enforcement_mode: alert

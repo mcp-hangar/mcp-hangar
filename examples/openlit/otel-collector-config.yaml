@@ -1,0 +1,38 @@
+# OpenTelemetry Collector configuration for MCP Hangar -> OpenLIT pipeline.
+#
+# Pipeline:
+#   OTLP receiver <- Hangar (spans, metrics, audit logs)
+#   Batch processor (reduce OTLP calls)
+#   OTLP exporter -> OpenLIT (receives all telemetry)
+
+receivers:
+  otlp:
+    protocols:
+      grpc:
+        endpoint: 0.0.0.0:4317
+
+processors:
+  batch:
+    timeout: 5s
+
+exporters:
+  # Forward all telemetry to OpenLIT
+  otlp/openlit:
+    endpoint: openlit:4317
+    tls:
+      insecure: true
+
+service:
+  pipelines:
+    traces:
+      receivers: [otlp]
+      processors: [batch]
+      exporters: [otlp/openlit]
+    metrics:
+      receivers: [otlp]
+      processors: [batch]
+      exporters: [otlp/openlit]
+    logs:
+      receivers: [otlp]
+      processors: [batch]
+      exporters: [otlp/openlit]

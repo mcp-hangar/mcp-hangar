@@ -1,5 +1,3 @@
-version: "3.8"
-
 services:
   mcp-hangar:
     image: ghcr.io/mcp-hangar/mcp-hangar:latest

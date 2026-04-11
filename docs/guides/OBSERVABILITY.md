@@ -370,7 +370,14 @@ curl -s http://localhost:9090/api/v1/alerts | jq '.data.alerts[] | select(.state
 
 ### OpenTelemetry Integration
 
-MCP Hangar supports distributed tracing via OpenTelemetry:
+MCP Hangar supports distributed tracing via OpenTelemetry. Every tool invocation
+produces an OTEL span carrying MCP governance attributes (`mcp.provider.id`,
+`mcp.tool.name`, `mcp.tool.status`, enforcement context, and identity context
+when available).
+
+For the full MCP attribute taxonomy, partner backend recipes (OTEL Collector,
+OpenLIT, Langfuse, Grafana), and reference docker-compose setups, see:
+**[OpenTelemetry Integrations](../observability/otel-integrations.md)**.
 
 ```python
 from mcp_hangar.observability import init_tracing, trace_span
@@ -387,15 +394,59 @@ with trace_span("process_request", {"request.id": req_id}) as span:
     result = do_work()
 ```
 
+### MCP Governance Attributes on Spans
+
+`TracedProviderService` automatically creates an OTEL span for each tool invocation
+with standard MCP governance attributes via `set_governance_attributes()`:
+
+```python
+from mcp_hangar.observability.conventions import Provider, MCP, set_governance_attributes
+
+# set_governance_attributes(span, ...) sets all applicable attributes in one call.
+# None values are omitted -- no empty strings pollute OTLP backends.
+set_governance_attributes(
+    span,
+    provider_id="math",
+    tool_name="add",
+    user_id="alice",           # optional
+    session_id="sess-42",      # optional
+    policy_result="allow",     # optional
+    enforcement_action=None,   # omitted from span
+)
+```
+
+### OTLP Audit Export
+
+Security-relevant domain events (tool invocations, provider state transitions) are
+automatically exported as OTLP log records when `OTEL_EXPORTER_OTLP_ENDPOINT` is
+set. This is handled by `OTLPAuditExporter` and `OTLPAuditEventHandler` -- no
+additional configuration needed.
+
+Events exported:
+
+- `ToolInvocationCompleted` / `ToolInvocationFailed` -- with provider, tool, status, duration
+- `ProviderStateChanged` -- with provider, from_state, to_state
+
 ### Environment Variables
 
 | Variable | Default | Description |
 |----------|---------|-------------|
 | `MCP_TRACING_ENABLED` | `true` | Enable/disable tracing |
-| `OTEL_EXPORTER_OTLP_ENDPOINT` | `http://localhost:4317` | OTLP collector endpoint |
+| `OTEL_EXPORTER_OTLP_ENDPOINT` | `http://localhost:4317` | OTLP collector endpoint (also activates OTLP audit export) |
 | `OTEL_SERVICE_NAME` | `mcp-hangar` | Service name in traces |
 
 ### Trace Context Propagation
+
+W3C TraceContext is automatically propagated across agent -> Hangar -> provider
+boundaries:
+
+- **Inbound:** `BatchExecutor` extracts `traceparent` from call metadata, creating
+  child spans linked to the agent's root trace.
+- **Outbound:** `HttpClient` injects `traceparent` into outbound HTTP headers when
+  calling remote providers.
+- **Stdio:** Not supported (JSON-RPC over stdin/stdout has no header mechanism).
+
+Manual propagation is also available:
 
 ```python
 from mcp_hangar.observability import inject_trace_context, extract_trace_context

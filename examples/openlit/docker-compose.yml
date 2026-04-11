@@ -1,0 +1,55 @@
+# MCP Hangar + OpenTelemetry Collector + OpenLIT
+#
+# Governance telemetry pipeline:
+#   Hangar (OTLP) -> OTEL Collector -> OpenLIT
+#
+# MCP spans visible in OpenLIT trace explorer with governance attributes:
+#   mcp.provider.id, mcp.tool.name, mcp.tool.status, mcp.user.id, etc.
+#
+# Usage:
+#   docker-compose up
+#   Open OpenLIT at http://localhost:3000
+#
+# Ports:
+#   3000 - OpenLIT dashboard
+#   4317 - OTEL Collector OTLP gRPC receiver
+#   8080 - Hangar HTTP API
+
+services:
+  mcp-hangar:
+    image: ghcr.io/mcp-hangar/mcp-hangar:latest
+    ports:
+      - "8080:8080"
+    environment:
+      MCP_MODE: http
+      MCP_HTTP_PORT: "8080"
+      OTEL_EXPORTER_OTLP_ENDPOINT: http://otel-collector:4317
+      OTEL_SERVICE_NAME: mcp-hangar
+      MCP_TRACING_ENABLED: "true"
+    volumes:
+      - ./config.yaml:/app/config.yaml:ro
+    depends_on:
+      - otel-collector
+
+  otel-collector:
+    image: otel/opentelemetry-collector-contrib:0.96.0
+    ports:
+      - "4317:4317"
+    volumes:
+      - ./otel-collector-config.yaml:/etc/otel-collector-config.yaml:ro
+    command: ["--config=/etc/otel-collector-config.yaml"]
+    depends_on:
+      - openlit
+
+  openlit:
+    image: ghcr.io/openlit/openlit:latest
+    ports:
+      - "3000:3000"   # OpenLIT dashboard
+      - "4319:4317"   # OpenLIT OTLP gRPC receiver (internal, collector forwards here)
+    environment:
+      SQLITE_DATABASE_URL: file:/app/client/data/openlit.db
+    volumes:
+      - openlit-data:/app/client/data
+
+volumes:
+  openlit-data:

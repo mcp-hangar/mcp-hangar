@@ -6,36 +6,41 @@
 git clone https://github.com/mcp-hangar/mcp-hangar.git
 cd mcp-hangar
 
-# Python core development
-cd packages/core
+# Install with dev dependencies
 pip install -e ".[dev]"
 
 # Or use root Makefile
-cd ../..
 make setup
 ```
 
 ## Monorepo Structure
 
-MCP Hangar is a monorepo with multiple packages:
+MCP Hangar is a monorepo:
 
 ```
 mcp-hangar/
+├── src/mcp_hangar/          # Python package (PyPI: mcp-hangar) -- MIT
+├── enterprise/              # BSL 1.1 licensed features
+│   ├── auth/                # RBAC, API key, JWT/OIDC
+│   ├── behavioral/          # Network profiling, deviation detection
+│   ├── identity/            # Caller identity propagation, audit
+│   ├── compliance/          # SIEM export (CEF, LEEF, JSON-lines)
+│   ├── persistence/         # SQLite/Postgres event stores
+│   ├── semantic/            # Pattern engine, detection rules
+│   └── integrations/        # Langfuse adapter
+├── tests/                   # Python tests
 ├── packages/
-│   ├── core/                # Python package (PyPI: mcp-hangar)
-│   │   ├── mcp_hangar/      # Main Python code
-│   │   ├── tests/           # Python tests
-│   │   └── pyproject.toml   # Python package config
 │   ├── operator/            # Kubernetes operator (Go)
 │   │   ├── api/             # CRD definitions
 │   │   ├── cmd/             # Main entrypoints
 │   │   ├── internal/        # Controller logic
 │   │   └── go.mod           # Go module config
+│   ├── ui/                  # React dashboard
 │   └── helm-charts/         # Helm charts
 │       ├── mcp-hangar/      # Core Helm chart
 │       └── mcp-hangar-operator/  # Operator Helm chart
 ├── docs/                    # MkDocs documentation
-├── examples/                # Quick starts & demos
+├── examples/                # Quick starts, OTEL recipes
 ├── monitoring/              # Grafana, Prometheus configs
 └── Makefile                 # Root orchestration
 ```
@@ -43,34 +48,42 @@ mcp-hangar/
 ## Python Core Structure
 
 ```
-packages/core/mcp_hangar/
+src/mcp_hangar/
 ├── domain/           # DDD domain layer
 │   ├── model/        # Aggregates, entities
 │   ├── services/     # Domain services
 │   ├── events.py     # Domain events
+│   ├── contracts/    # Interfaces consumed by enterprise/
 │   └── exceptions.py
 ├── application/      # Application layer
 │   ├── commands/     # CQRS commands
 │   ├── queries/      # CQRS queries
+│   ├── ports/        # Port interfaces consumed by enterprise/
 │   └── sagas/
 ├── infrastructure/   # Infrastructure adapters
+│   └── observability/  # OTLPAuditExporter
+├── observability/    # Conventions, tracing, metrics, health
 ├── server/           # MCP server module
-│   ├── __init__.py   # Main entry point
+│   ├── bootstrap/    # DI composition root
 │   ├── config.py     # Configuration loading
 │   ├── state.py      # Global state management
 │   └── tools/        # MCP tool implementations
-├── observability/    # Metrics, tracing, health
 ├── stdio_client.py   # JSON-RPC client
 └── gc.py             # Background workers
 ```
 
+## Licensing
+
+- **Core** (`src/`) -- MIT. No CLA required.
+- **Enterprise** (`enterprise/`) -- BSL 1.1. CLA required for contributions. See [CLA.md](../cla.md).
+- Core must **never** import from `enterprise/`. CI enforces this boundary.
+
 ## Code Style
 
 ```bash
-cd packages/core
-ruff check mcp_hangar tests --fix
-ruff format mcp_hangar tests
-mypy mcp_hangar
+ruff check src tests --fix
+ruff format src tests
+mypy src/mcp_hangar
 ```
 
 ### Conventions
@@ -99,7 +112,6 @@ def invoke_tool(
 ## Testing
 
 ```bash
-cd packages/core
 pytest -v -m "not slow"
 pytest --cov=mcp_hangar --cov-report=html
 
@@ -131,7 +143,6 @@ def test_tool_invocation():
 4. Run checks:
 
    ```bash
-   cd packages/core
    pytest -v -m "not slow"
    pre-commit run --all-files
    ```
@@ -234,8 +245,7 @@ The workflow will:
 #### Option 2: Manual
 
 ```bash
-# 1. Update version in packages/core/pyproject.toml
-cd packages/core
+# 1. Update version in pyproject.toml
 sed -i '' 's/version = ".*"/version = "1.2.0"/' pyproject.toml
 
 # 2. Update CHANGELOG.md - move Unreleased items to new version section
@@ -273,7 +283,7 @@ pip install --index-url https://test.pypi.org/simple/ mcp-hangar==1.0.0rc1
 
 Before releasing, ensure:
 
-- [ ] All tests pass locally: `cd packages/core && pytest -v`
+- [ ] All tests pass locally: `pytest -v`
 - [ ] Linting passes: `pre-commit run --all-files`
 - [ ] CHANGELOG.md is updated with all notable changes
 - [ ] Documentation is updated for new features
@@ -321,9 +331,23 @@ git checkout main
 git cherry-pick <commit-hash>
 ```
 
-## License
+## Licensing Model
 
-MIT
+MCP Hangar uses a dual-license model:
+
+| Directory | License | CLA Required |
+|-----------|---------|--------------|
+| `src/mcp_hangar/` | MIT | No |
+| `tests/`, `docs/`, `examples/`, `monitoring/` | MIT | No |
+| `enterprise/` | BSL 1.1 | **Yes** |
+
+### Contributing to enterprise/
+
+Contributions to `enterprise/` require agreeing to the [Contributor License Agreement](../cla.md). Include this statement in your PR description:
+
+> I have read and agree to the MCP Hangar Contributor License Agreement (CLA.md). My contribution to enterprise/ is my original work and I grant the rights described therein.
+
+See [CLA.md](../cla.md) for full terms. Core (MIT) contributions do not require a CLA.
 
 ## Code of Conduct
 

@@ -2,7 +2,7 @@
 # Deployed automatically to GitHub Pages on push to main
 
 site_name: MCP Hangar
-site_description: Production-grade hot-load registry for MCP providers
+site_description: Runtime security and governance layer for MCP servers
 site_url: https://mcp-hangar.io
 repo_url: https://github.com/mcp-hangar/mcp-hangar
 repo_name: mcp-hangar/mcp-hangar
@@ -42,6 +42,8 @@ theme:
 
 plugins:
   - search
+  - minify:
+      minify_html: true
   - mkdocstrings:
       handlers:
         python:
@@ -102,18 +104,22 @@ nav:
       - Provider Groups: guides/PROVIDER_GROUPS.md
       - Facade API: guides/FACADE_API.md
       - REST API: guides/REST_API.md
-      - Dashboard UI: guides/DASHBOARD.md
       - Log Streaming: guides/LOG_STREAMING.md
       - WebSockets: guides/WEBSOCKETS.md
+  - Observability:
+      - OpenTelemetry Integrations: observability/otel-integrations.md
+      - OpenLIT OTLP: integrations/openlit-otlp.md
   - Development:
       - Contributing: development/CONTRIBUTING.md
       - Release Process: runbooks/RELEASE.md
+      - Contributor License Agreement: cla.md
   - Reference:
       - CLI: reference/cli.md
       - Configuration: reference/configuration.md
       - REST API: reference/rest-api.md
       - MCP Tools: reference/tools.md
       - Hot-Reload: reference/hot-reload.md
+      - Upgrade Guide: upgrade.md
       - Changelog: changelog.md
       - Security: security.md
       - Auth Security Audit: security/AUTH_SECURITY_AUDIT.md

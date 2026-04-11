@@ -1,0 +1,52 @@
+{
+  "defaultAction": "SCMP_ACT_ERRNO",
+  "architectures": ["SCMP_ARCH_X86_64", "SCMP_ARCH_AARCH64"],
+  "syscalls": [
+    {
+      "names": [
+        "accept", "accept4", "access", "arch_prctl",
+        "bind", "brk",
+        "capget", "capset", "chdir", "chmod", "chown", "clock_gettime", "clock_nanosleep", "clone",
+        "close", "connect", "copy_file_range",
+        "dup", "dup2", "dup3",
+        "epoll_create", "epoll_create1", "epoll_ctl", "epoll_pwait", "epoll_wait",
+        "eventfd", "eventfd2", "execve", "exit", "exit_group",
+        "faccessat", "faccessat2", "fadvise64", "fallocate", "fchmod", "fchmodat",
+        "fchown", "fchownat", "fcntl", "fdatasync", "fgetxattr",
+        "flock", "fork", "fsetxattr", "fstat", "fstatfs", "fsync",
+        "ftruncate", "futex", "getcwd", "getdents", "getdents64",
+        "getegid", "geteuid", "getgid", "getgroups", "getpeername",
+        "getpid", "getppid", "getrandom", "getrlimit", "getrusage",
+        "getsockname", "getsockopt", "gettid", "gettimeofday", "getuid",
+        "ioctl", "ioprio_get", "ioprio_set",
+        "kill",
+        "lgetxattr", "link", "linkat", "listen", "lseek", "lstat",
+        "madvise", "memfd_create", "mkdir", "mkdirat", "mmap", "mprotect",
+        "mremap", "munmap",
+        "nanosleep", "newfstatat",
+        "open", "openat",
+        "pause", "pipe", "pipe2", "poll", "ppoll", "prctl", "pread64",
+        "preadv", "preadv2", "prlimit64", "pselect6",
+        "pwrite64", "pwritev", "pwritev2",
+        "read", "readlink", "readlinkat", "readv", "recvfrom", "recvmsg",
+        "rename", "renameat", "renameat2", "restart_syscall", "rmdir",
+        "rt_sigaction", "rt_sigprocmask", "rt_sigreturn", "rt_sigsuspend",
+        "sched_getaffinity", "sched_getparam", "sched_getscheduler",
+        "sched_yield", "select",
+        "sendfile", "sendmsg", "sendto",
+        "set_robust_list", "set_tid_address",
+        "setgid", "setgroups", "setitimer", "setsid", "setsockopt",
+        "setuid", "sigaltstack", "socket", "socketpair",
+        "stat", "statfs", "statx", "symlink", "symlinkat",
+        "sysinfo",
+        "tgkill", "timerfd_create", "timerfd_settime",
+        "truncate",
+        "umask", "uname", "unlink", "unlinkat", "utime", "utimensat", "utimes",
+        "vfork",
+        "wait4", "waitid",
+        "write", "writev"
+      ],
+      "action": "SCMP_ACT_ALLOW"
+    }
+  ]
+}

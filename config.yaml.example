@@ -61,6 +61,39 @@ providers:
   #   network: bridge
   #   idle_ttl_s: 180
   #   max_concurrency: 5    # Protect slow provider with lower limit
+  #
+  #   # Capability declaration (Phase 1 enforcement — PRODUCT_ARCHITECTURE.md)
+  #   # Declares what this provider needs. Hangar enforces at runtime:
+  #   #   - alert: log violations and emit events
+  #   #   - block: deny the violating action
+  #   #   - quarantine: stop serving new requests on violation
+  #   capabilities:
+  #     enforcement_mode: alert       # alert | block | quarantine
+  #     network:
+  #       dns_allowed: true
+  #       loopback_allowed: false
+  #       egress:
+  #         - host: "*.example.com"   # Glob patterns supported
+  #           port: 443
+  #           protocol: https
+  #         - host: "api.openai.com"
+  #           port: 443
+  #           protocol: https
+  #     filesystem:
+  #       read_paths: []
+  #       write_paths: []
+  #       temp_allowed: true
+  #     environment:
+  #       required:
+  #         - OPENAI_API_KEY
+  #       optional:
+  #         - LOG_LEVEL
+  #     tools:
+  #       max_count: 20
+  #       schema_drift_alert: true
+  #     resources:
+  #       max_memory_mb: 256
+  #       max_cpu_percent: 25.0
 
   # Provider Group
   # math-cluster:

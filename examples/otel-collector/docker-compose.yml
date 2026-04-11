@@ -1,0 +1,57 @@
+# MCP Hangar + OpenTelemetry Collector + Prometheus
+#
+# Demonstrates OTLP governance telemetry export:
+#   Hangar emits spans, metrics, and audit logs via OTLP
+#   OTEL Collector receives them and exports to Prometheus + console
+#
+# Usage:
+#   export OTEL_EXPORTER_OTLP_ENDPOINT=http://otel-collector:4317
+#   docker-compose up
+#
+# Ports:
+#   4317 - OTEL Collector OTLP gRPC receiver
+#   9090 - Prometheus UI
+#   8080 - Hangar HTTP API
+
+services:
+  mcp-hangar:
+    image: ghcr.io/mcp-hangar/mcp-hangar:latest
+    ports:
+      - "8080:8080"
+    environment:
+      MCP_MODE: http
+      MCP_HTTP_PORT: "8080"
+      OTEL_EXPORTER_OTLP_ENDPOINT: http://otel-collector:4317
+      OTEL_SERVICE_NAME: mcp-hangar
+      MCP_TRACING_ENABLED: "true"
+      MCP_LOG_LEVEL: INFO
+    volumes:
+      - ./config.yaml:/app/config.yaml:ro
+    depends_on:
+      - otel-collector
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:8080/health"]
+      interval: 10s
+      timeout: 5s
+      retries: 3
+
+  otel-collector:
+    image: otel/opentelemetry-collector-contrib:0.96.0
+    ports:
+      - "4317:4317"   # OTLP gRPC receiver
+      - "4318:4318"   # OTLP HTTP receiver
+      - "8888:8888"   # Collector self-metrics
+      - "8889:8889"   # Prometheus exporter
+    volumes:
+      - ./otel-collector-config.yaml:/etc/otel-collector-config.yaml:ro
+    command: ["--config=/etc/otel-collector-config.yaml"]
+
+  prometheus:
+    image: prom/prometheus:v2.50.0
+    ports:
+      - "9090:9090"
+    volumes:
+      - ./prometheus.yml:/etc/prometheus/prometheus.yml:ro
+    command:
+      - "--config.file=/etc/prometheus/prometheus.yml"
+      - "--storage.tsdb.path=/prometheus"

@@ -1,8 +1,17 @@
 """Simple math provider for testing the MCP registry."""
 
+import os
+
 from mcp.server.fastmcp import FastMCP
 
-mcp = FastMCP("math-provider")
+# Disable DNS rebinding protection so the provider accepts requests
+# from any host within the container network (e.g. math-provider:8080).
+mcp = FastMCP(
+    "math-provider",
+    host=os.environ.get("MCP_HOST", "0.0.0.0"),
+    port=int(os.environ.get("MCP_PORT", "8080")),
+    transport_security=None,
+)
 
 
 @mcp.tool(name="add")
@@ -86,8 +95,16 @@ def power(base: float, exponent: float) -> dict:
 
 
 def main():
-    """Run the math provider server."""
-    mcp.run()
+    """Run the math provider server.
+
+    Defaults to streamable HTTP transport on 0.0.0.0:8080.
+    Override with MCP_TRANSPORT=stdio for subprocess mode.
+    """
+    transport = os.environ.get("MCP_TRANSPORT", "streamable-http")
+    if transport == "stdio":
+        mcp.run(transport="stdio")
+    else:
+        mcp.run(transport="streamable-http")
 
 
 if __name__ == "__main__":

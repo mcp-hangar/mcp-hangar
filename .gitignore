@@ -21,9 +21,8 @@ mcp-config.json
 # Data directories (user-specific, may contain sensitive data)
 data/
 
-# Monorepo build artifacts
+# Build artifacts
 packages/core/dist/
-packages/operator/bin/
 
 *.py[codz]
 *$py.class
@@ -240,9 +239,6 @@ logs/
 .DS_Store
 *.DS_Store
 
-# Operator build artifacts
-operator/bin/
-packages/operator/operator
 
 # Coverage reports (already in htmlcov but just to be safe)
 htmlcov/
@@ -255,3 +251,4 @@ coverage.xml
 **/.claude/
 .opencode/
 **/.opencode/
+coverage_html/
