@@ -11,6 +11,7 @@ import base64
 import hashlib
 import hmac
 import json
+import os
 import time
 from dataclasses import dataclass
 
@@ -20,9 +21,27 @@ from mcp_hangar.domain.value_objects.license import LicenseTier
 
 logger = structlog.get_logger(__name__)
 
-_HMAC_SECRET = b"hangar-v1-license-signing-key"
+_DEFAULT_HMAC_SECRET = b"hangar-v1-license-signing-key"
 _GRACE_PERIOD_DAYS = 7
 _PREFIX = "hk_v1_"
+
+
+def _load_hmac_secret() -> bytes:
+    """Load HMAC signing secret from environment or fall back to default.
+
+    In production, set HANGAR_LICENSE_HMAC_SECRET to a strong random value
+    (hex-encoded, e.g. output of ``openssl rand -hex 32``).
+
+    The default value is only suitable for development and testing.
+    """
+    env_value = os.environ.get("HANGAR_LICENSE_HMAC_SECRET")
+    if env_value:
+        return env_value.encode()
+    logger.warning(
+        "license_hmac_using_default_secret",
+        hint="Set HANGAR_LICENSE_HMAC_SECRET for production deployments",
+    )
+    return _DEFAULT_HMAC_SECRET
 
 
 @dataclass
@@ -51,6 +70,9 @@ class LicenseValidator:
     starts.  A 7-day grace period allows expired keys to keep their tier
     temporarily.
     """
+
+    def __init__(self, *, hmac_secret: bytes | None = None) -> None:
+        self._hmac_secret = hmac_secret or _load_hmac_secret()
 
     def validate(self, raw_key: str | None) -> LicenseValidationResult:
         """Validate a license key and return the resolved tier.
@@ -82,7 +104,7 @@ class LicenseValidator:
         # -- Signature verification --
         received_sig = payload.pop("signature", "")
         payload_bytes = json.dumps(payload, sort_keys=True).encode()
-        expected_sig = hmac.new(_HMAC_SECRET, payload_bytes, hashlib.sha256).hexdigest()
+        expected_sig = hmac.new(self._hmac_secret, payload_bytes, hashlib.sha256).hexdigest()
 
         if not hmac.compare_digest(received_sig, expected_sig):
             logger.warning("invalid_license_key", reason="bad_signature")
