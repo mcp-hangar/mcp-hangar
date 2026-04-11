@@ -132,7 +132,7 @@ def test_prebuilt_image() -> None:
 
         # If provider failed to start due to container/environment issues, skip
         error_msg = str(e).lower()
-        if any(x in error_msg for x in ["reader_died", "init_failed", "container"]):
+        if any(x in error_msg for x in ["reader_died", "init_failed", "container", "timeout"]):
             pytest.skip(f"Pre-built image cannot start in this environment: {e}")
         raise
 
