@@ -358,3 +358,53 @@ class TestToolAccessResolverPolicySummary:
         assert summary["unrestricted"] is False
         assert summary["has_allow_list"] is True
         assert summary["has_deny_list"] is False
+
+
+class TestToolAccessResolverGlobalPolicy:
+    """Tests for _global policy fallback (agent-pushed global deny/allow)."""
+
+    def test_global_deny_applies_to_provider_without_policy(self, resolver):
+        resolver.set_provider_policy("_global", ToolAccessPolicy(deny_list=("delete_*",)))
+
+        assert not resolver.is_tool_allowed("any-provider", "delete_something")
+        assert resolver.is_tool_allowed("any-provider", "get_something")
+
+    def test_global_allow_list_applies_to_provider_without_policy(self, resolver):
+        resolver.set_provider_policy("_global", ToolAccessPolicy(allow_list=("get_*", "list_*")))
+
+        assert resolver.is_tool_allowed("any-provider", "get_data")
+        assert not resolver.is_tool_allowed("any-provider", "delete_data")
+
+    def test_provider_policy_merges_with_global(self, resolver):
+        resolver.set_provider_policy("_global", ToolAccessPolicy(deny_list=("delete_*",)))
+        resolver.set_provider_policy("grafana", ToolAccessPolicy(deny_list=("create_alert_*",)))
+
+        assert not resolver.is_tool_allowed("grafana", "delete_dashboard")
+        assert not resolver.is_tool_allowed("grafana", "create_alert_rule")
+        assert resolver.is_tool_allowed("grafana", "get_dashboard")
+
+    def test_global_deny_cannot_be_overridden_by_provider_allow(self, resolver):
+        resolver.set_provider_policy("_global", ToolAccessPolicy(deny_list=("rm_*",)))
+        resolver.set_provider_policy("dangerous", ToolAccessPolicy(allow_list=("rm_prod", "rm_staging")))
+
+        assert not resolver.is_tool_allowed("dangerous", "rm_prod")
+        assert not resolver.is_tool_allowed("dangerous", "rm_staging")
+
+    def test_global_allow_list_intersects_with_provider_allow_list(self, resolver):
+        resolver.set_provider_policy("_global", ToolAccessPolicy(allow_list=("get_*", "add")))
+        resolver.set_provider_policy("math", ToolAccessPolicy(allow_list=("add", "multiply")))
+
+        assert resolver.is_tool_allowed("math", "add")
+        assert not resolver.is_tool_allowed("math", "multiply")
+        assert not resolver.is_tool_allowed("math", "get_data")
+
+    def test_no_policy_without_global_is_still_unrestricted(self, resolver):
+        policy = resolver.resolve_effective_policy("provider-with-no-policy")
+        assert policy.is_unrestricted()
+
+    def test_global_approval_list_applies_to_provider_without_policy(self, resolver):
+        resolver.set_provider_policy("_global", ToolAccessPolicy(approval_list=("power_*",)))
+        policy = resolver.resolve_effective_policy("any-provider")
+
+        assert policy.requires_approval("power_delete")
+        assert not policy.requires_approval("get_data")

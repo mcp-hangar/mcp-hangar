@@ -185,9 +185,23 @@ class ToolAccessResolver:
         """Compute effective policy by merging all applicable levels.
 
         Must be called with lock held.
+
+        Resolution order (highest priority last, i.e. narrower wins):
+          _global -> provider -> group -> member
+
+        The _global policy (keyed as "_global") is set by the agent when a
+        cloud policy uses provider_id="*".  It acts as a floor: if no
+        provider-specific policy exists the global policy is used instead; if
+        a provider-specific policy exists the two are merged so the narrower
+        of the two wins (deny union, allow intersection).
         """
-        # Start with provider policy
-        provider_policy = self._provider_policies.get(provider_id, ToolAccessPolicy())
+        explicit_provider_policy = self._provider_policies.get(provider_id)
+        global_policy = self._provider_policies.get("_global", ToolAccessPolicy())
+
+        if explicit_provider_policy is None:
+            provider_policy = global_policy
+        else:
+            provider_policy = ToolAccessPolicy.merge(global_policy, explicit_provider_policy)
 
         # If no group context, just return provider policy
         if not group_id or not member_id:
