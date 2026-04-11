@@ -221,7 +221,7 @@ class DeleteProviderHandler(CommandHandler):
 
         # Stop provider if it is in a running state (not COLD or DEAD).
         # I/O (shutdown) is done outside the repository lock to respect
-        # the no-I/O-under-lock rule from CLAUDE.md.
+        # the no-I/O-under-lock rule.
         if provider.state not in (ProviderState.COLD, ProviderState.DEAD):
             provider.shutdown()
             # Publish any lifecycle events emitted by shutdown()
