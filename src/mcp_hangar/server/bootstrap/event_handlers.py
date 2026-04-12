@@ -4,6 +4,7 @@ import os
 from typing import TYPE_CHECKING
 
 from ...application.event_handlers import (
+    DetectionEnforcementHandler,
     LoggingEventHandler,
     MetricsEventHandler,
     get_alert_handler,
@@ -11,7 +12,7 @@ from ...application.event_handlers import (
 )
 from ...application.event_handlers.audit_event_handler import OTLPAuditEventHandler
 from ...application.ports.observability import NullAuditExporter
-from ...domain.events import ProviderStateChanged, ToolInvocationCompleted, ToolInvocationFailed
+from ...domain.events import DetectionRuleMatched, ProviderStateChanged, ToolInvocationCompleted, ToolInvocationFailed
 from ...logging_config import get_logger
 
 if TYPE_CHECKING:
@@ -53,6 +54,12 @@ def init_event_handlers(runtime: "Runtime") -> None:
     runtime.event_bus.subscribe(ToolInvocationFailed, otlp_audit_handler.handle)
     runtime.event_bus.subscribe(ProviderStateChanged, otlp_audit_handler.handle)
 
+    detection_enforcement_handler = DetectionEnforcementHandler(
+        event_bus=runtime.event_bus,
+        command_bus=runtime.command_bus,
+    )
+    runtime.event_bus.subscribe(DetectionRuleMatched, detection_enforcement_handler.handle)
+
     logger.info(
         "event_handlers_registered",
         handlers=[
@@ -62,5 +69,6 @@ def init_event_handlers(runtime: "Runtime") -> None:
             "audit",
             "security",
             "otlp_audit",
+            "detection_enforcement",
         ],
     )

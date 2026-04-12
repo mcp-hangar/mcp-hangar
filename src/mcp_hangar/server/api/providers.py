@@ -4,6 +4,8 @@ Implements GET/POST endpoints for provider CRUD operations,
 routing through the CQRS dispatch helpers.
 """
 
+# pyright: reportAny=false, reportUnknownMemberType=false
+
 import json
 
 from starlette.requests import Request
@@ -93,6 +95,20 @@ async def stop_provider(request: Request) -> HangarJSONResponse:
     return HangarJSONResponse(result)
 
 
+async def block_provider(request: Request) -> HangarJSONResponse:
+    """Block a provider permanently for detection enforcement.
+
+    Path params:
+        provider_id: Provider identifier.
+
+    Returns:
+        JSON with provider block result.
+    """
+    provider_id = request.path_params["provider_id"]
+    await dispatch_command(StopProviderCommand(provider_id=provider_id, reason="detection_enforcement:block"))
+    return HangarJSONResponse({"provider_id": provider_id, "blocked": True})
+
+
 async def get_provider_tools(request: Request) -> HangarJSONResponse:
     """Get tool list for a provider.
 
@@ -146,7 +162,7 @@ async def get_provider_logs(request: Request) -> HangarJSONResponse:
 
     buffer = get_log_buffer(provider_id)
     if buffer is None:
-        log_dicts: list[dict] = []
+        log_dicts: list[dict[str, object]] = []
     else:
         log_dicts = [line.to_dict() for line in buffer.tail(lines)]
 
@@ -289,6 +305,7 @@ provider_routes = [
     Route("/{provider_id:str}", delete_provider, methods=["DELETE"]),
     Route("/{provider_id:str}/start", start_provider, methods=["POST"]),
     Route("/{provider_id:str}/stop", stop_provider, methods=["POST"]),
+    Route("/{provider_id:str}/block", block_provider, methods=["POST"]),
     Route("/{provider_id:str}/tools", get_provider_tools, methods=["GET"]),
     Route("/{provider_id:str}/health", get_provider_health, methods=["GET"]),
     Route("/{provider_id:str}/logs", get_provider_logs, methods=["GET"]),

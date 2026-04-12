@@ -7,11 +7,13 @@ Creates a Starlette application with:
 - Provider endpoint routes mounted at /providers
 """
 
+# pyright: reportAny=false, reportExplicitAny=false
+
 from typing import Any
 
 from starlette.applications import Starlette
 from starlette.middleware.cors import CORSMiddleware
-from starlette.routing import Mount
+from starlette.routing import BaseRoute, Mount
 
 from ...domain.exceptions import MCPError
 from .middleware import error_handler, get_cors_config
@@ -38,13 +40,15 @@ def create_api_router(auth_components: Any = None) -> Starlette:
     from .discovery import discovery_routes
     from .groups import group_routes
     from .providers import provider_routes
+    from .sessions import session_routes
     from .system import system_routes
     from .tools import tools_routes
     from .ws import ws_routes
     from .agent_policy import agent_policy_routes
 
-    routes = [
+    routes: list[BaseRoute] = [
         Mount("/providers", routes=provider_routes),
+        Mount("/sessions", routes=session_routes),
         Mount("/groups", routes=group_routes),
         Mount("/discovery", routes=discovery_routes),
         Mount("/config", routes=config_routes),

@@ -26,6 +26,8 @@ logger = get_logger(__name__)
 
 # Domain event types that should be forwarded to the cloud.
 _FORWARDED_EVENT_TYPES: set[str] = {
+    "DetectionRuleMatched",
+    "EnforcementActionTaken",
     "ToolInvocationRequested",
     "ToolInvocationCompleted",
     "ToolInvocationFailed",
@@ -54,11 +56,13 @@ _RETRY_DELAYS = [1, 2, 4, 8, 16, 32, 60]  # exponential backoff ceiling at 60s
 # Keys stripped from event payloads before forwarding to cloud.
 # Tool arguments may contain secrets, PII, or credentials supplied by users.
 # Error messages may leak internal paths or sensitive context.
-_REDACTED_KEYS: frozenset[str] = frozenset({
-    "arguments",
-    "error_message",
-    "identity_context",
-})
+_REDACTED_KEYS: frozenset[str] = frozenset(
+    {
+        "arguments",
+        "error_message",
+        "identity_context",
+    }
+)
 
 
 class CloudConnector:

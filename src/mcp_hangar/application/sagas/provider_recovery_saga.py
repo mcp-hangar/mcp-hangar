@@ -1,5 +1,7 @@
 """Provider Recovery Saga - automatically recover degraded providers."""
 
+# pyright: reportUnannotatedClassAttribute=false, reportMissingTypeArgument=false, reportImplicitOverride=false, reportUnknownMemberType=false, reportUnknownVariableType=false, reportUnknownArgumentType=false, reportImplicitStringConcatenation=false, reportUnusedCallResult=false, reportUnusedParameter=false, reportUnknownParameterType=false, reportExplicitAny=false
+
 import time
 
 from typing import Any
@@ -84,6 +86,14 @@ class ProviderRecoverySaga(EventTriggeredSaga):
             )
             return []
 
+        if hasattr(event, "reason") and event.reason.startswith("detection_enforcement:"):
+            logger.info(
+                "provider_degraded_detection_enforcement",
+                provider_id=event.provider_id,
+                reason=event.reason,
+            )
+            return []
+
         provider_id = event.provider_id
 
         # Initialize retry state if needed
@@ -154,7 +164,7 @@ class ProviderRecoverySaga(EventTriggeredSaga):
         provider_id = event.provider_id
 
         # Only clear state for intentional stops
-        if event.reason in ("shutdown", "idle", "user_request"):
+        if event.reason in ("shutdown", "idle", "user_request", "detection_enforcement:block"):
             self._retry_state.pop(provider_id, None)
 
         return []

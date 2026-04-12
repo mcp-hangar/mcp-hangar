@@ -18,6 +18,7 @@ from .audit_handler import (
     LogAuditStore,
     reset_audit_handler,
 )
+from .detection_handler import DetectionEnforcementHandler
 from .logging_handler import LoggingEventHandler
 from .metrics_handler import MetricsEventHandler
 from .security_handler import (
@@ -55,6 +56,8 @@ __all__ = [
     "LogAuditStore",
     "get_audit_handler",
     "reset_audit_handler",
+    # Detection enforcement
+    "DetectionEnforcementHandler",
     # Security
     "SecurityEventHandler",
     "SecurityEvent",
