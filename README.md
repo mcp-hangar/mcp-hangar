@@ -203,12 +203,12 @@ Same API. Same reliability. Different scale.
 
 ## Documentation
 
-- [Getting Started](https://mcp-hangar.io/getting-started/quickstart/)
+- [Getting Started](https://www.mcp-hangar.io/docs/oss/getting-started/quickstart)
 - [Configuration Reference](https://mcp-hangar.io/reference/configuration/)
-- [REST API Guide](https://mcp-hangar.io/guides/REST_API/)
-- [Observability Setup](https://mcp-hangar.io/guides/OBSERVABILITY/)
-- [Authentication & RBAC](https://mcp-hangar.io/guides/AUTHENTICATION/)
-- [Cookbook](https://mcp-hangar.io/cookbook/)
+- [REST API Guide](https://www.mcp-hangar.io/docs/oss/reference/configuration)
+- [Observability Setup](https://www.mcp-hangar.io/docs/oss/guides/OBSERVABILITY)
+- [Authentication & RBAC](https://www.mcp-hangar.io/docs/oss/guides/AUTHENTICATION)
+- [Cookbook](https://www.mcp-hangar.io/docs/oss/cookbook/)
 
 ## License
 
