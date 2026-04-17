@@ -1,28 +1,16 @@
-"""Base provider launcher interface."""
+"""Deprecated provider launcher import shim."""
 
-from abc import ABC, abstractmethod
+from __future__ import annotations
 
-from ....stdio_client import StdioClient
+import warnings
 
+from mcp_hangar.infrastructure.launchers.base import ProviderLauncher
 
-class ProviderLauncher(ABC):
-    """
-    Abstract interface for launching providers.
+warnings.warn(
+    "mcp_hangar.domain.services.provider_launcher.base is deprecated; import from "
+    "mcp_hangar.infrastructure.launchers.base instead.",
+    DeprecationWarning,
+    stacklevel=2,
+)
 
-    This is a domain service interface that defines how providers are started.
-    Implementations handle the specific infrastructure details (subprocess, docker, etc.)
-    """
-
-    @abstractmethod
-    def launch(self, *args, **kwargs) -> StdioClient:
-        """
-        Launch a provider and return a connected client.
-
-        Returns:
-            StdioClient connected to the launched provider
-
-        Raises:
-            ProviderStartError: If the provider fails to start
-            ValidationError: If inputs fail security validation
-        """
-        pass
+__all__ = ["ProviderLauncher"]

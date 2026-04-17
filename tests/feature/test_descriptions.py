@@ -18,10 +18,8 @@ from mcp_hangar.server import (  # noqa: E402
     hangar_list,
     load_config,
     load_config_from_file,
-    PROVIDER_REPOSITORY,
-    PROVIDERS,
-    QUERY_BUS,
 )
+from mcp_hangar.server.state import get_runtime  # noqa: E402
 
 
 def test_descriptions() -> None:
@@ -32,7 +30,8 @@ def test_descriptions() -> None:
 
     # Register query handlers
     print("\n🔧 Registering query handlers...")
-    register_query_handlers(QUERY_BUS, PROVIDER_REPOSITORY)
+    runtime = get_runtime()
+    register_query_handlers(runtime.query_bus, runtime.repository)
     print("   ✅ Query handlers registered")
 
     # Load config
@@ -44,7 +43,7 @@ def test_descriptions() -> None:
 
     provider_config = config.get("providers", {})
     load_config(provider_config)
-    print(f"   ✅ Loaded {len(PROVIDERS.keys())} providers")
+    print(f"   ✅ Loaded {len(runtime.repository.get_all_ids())} providers")
 
     # Check descriptions in config
     print("\n🔍 Checking descriptions in config...")

@@ -7,7 +7,7 @@ from ...application.services.package_resolver import PackageResolver, RuntimeAva
 from ...application.services.secrets_resolver import SecretsResolver
 from ...domain.model import Provider
 from ...logging_config import get_logger
-from ..state import get_runtime_providers, PROVIDER_REPOSITORY
+from ..state import get_runtime, get_runtime_providers
 
 if TYPE_CHECKING:
     from ...bootstrap.runtime import Runtime
@@ -77,7 +77,7 @@ def init_hot_loading(
             runtime_store=runtime_store,
             event_bus=runtime.event_bus,
             provider_factory=provider_factory,
-            provider_repository=PROVIDER_REPOSITORY,
+            provider_repository=get_runtime().repository,
         )
 
         unload_handler = UnloadProviderHandler(

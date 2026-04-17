@@ -489,15 +489,25 @@ class TestCORSConfig:
         assert len(config["allow_origins"]) > 0
 
     def test_get_cors_config_includes_all_methods(self):
-        """get_cors_config includes allow_methods=['*']."""
+        """get_cors_config includes explicit allow_methods (not wildcard)."""
         from mcp_hangar.server.api.middleware import get_cors_config
 
         config = get_cors_config()
-        assert config.get("allow_methods") == ["*"]
+        methods = config.get("allow_methods")
+        assert isinstance(methods, list)
+        assert "GET" in methods
+        assert "POST" in methods
+        assert "OPTIONS" in methods
+        # Wildcard is not allowed (security hardening K-4)
+        assert "*" not in methods
 
     def test_get_cors_config_includes_all_headers(self):
-        """get_cors_config includes allow_headers=['*']."""
+        """get_cors_config includes explicit allow_headers (not wildcard)."""
         from mcp_hangar.server.api.middleware import get_cors_config
 
         config = get_cors_config()
-        assert config.get("allow_headers") == ["*"]
+        headers = config.get("allow_headers")
+        assert isinstance(headers, list)
+        assert len(headers) > 0
+        # Wildcard is not allowed (security hardening K-4)
+        assert "*" not in headers

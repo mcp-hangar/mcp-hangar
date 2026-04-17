@@ -1,15 +1,19 @@
+# pyright: reportAny=false, reportExplicitAny=false, reportUnusedParameter=false
+
 """API middleware for error handling, CORS, and CQRS dispatch helpers.
 
 Provides:
 - error_handler: Converts domain exceptions to JSON error envelopes
 - dispatch_query: Async wrapper for query bus calls via run_in_threadpool
 - dispatch_command: Async wrapper for command bus calls via run_in_threadpool
-- get_cors_config: CORS configuration from environment
+- get_cors_config: Validated CORS configuration from environment
 """
 
 import logging
 import os
+import re
 from typing import Any
+from urllib.parse import urlparse
 
 from starlette.concurrency import run_in_threadpool
 from starlette.requests import Request
@@ -32,6 +36,16 @@ from ..context import get_context
 from .serializers import HangarJSONResponse
 
 logger = logging.getLogger(__name__)
+
+_ALLOWED_METHODS = ["GET", "POST", "PUT", "PATCH", "DELETE", "OPTIONS"]
+_ALLOWED_HEADERS = [
+    "Authorization",
+    "Content-Type",
+    "X-API-Key",
+    "X-Correlation-ID",
+    "X-Requested-With",
+]
+_ORIGIN_RE = re.compile(r"^https?://[^*\s]+$")
 
 # Mapping of exception types to HTTP status codes.
 # More specific types must come before their base classes.
@@ -135,25 +149,50 @@ async def dispatch_command(command: Any) -> Any:
     return await run_in_threadpool(ctx.command_bus.send, command)
 
 
+def _validate_origin(origin: str) -> str | None:
+    """Return the origin if valid, or None otherwise.
+
+    Logs a warning on rejection.
+    """
+    origin = origin.strip()
+    if not _ORIGIN_RE.match(origin):
+        logger.warning("cors_origin_rejected origin=%s reason=%s", origin, "invalid format or wildcard")
+        return None
+    parsed = urlparse(origin)
+    if not parsed.hostname:
+        logger.warning("cors_origin_rejected origin=%s reason=%s", origin, "no hostname")
+        return None
+    return origin
+
+
 def get_cors_config() -> dict[str, Any]:
     """Get CORS configuration from environment variables.
 
     Reads MCP_CORS_ORIGINS (comma-separated) from the environment.
-    Defaults to localhost development origins when not set.
+    Each origin must have a scheme (http:// or https://) and no wildcards.
+    Defaults to http://localhost:5173 when MCP_CORS_ORIGINS is not set.
+
+    allow_credentials is False by default. Set MCP_CORS_CREDENTIALS=true
+    to enable (requires explicit non-wildcard origins).
 
     Returns:
         Dict of CORSMiddleware kwargs.
     """
     cors_origins_env = os.environ.get("MCP_CORS_ORIGINS", "")
     if cors_origins_env.strip():
-        allow_origins = [o.strip() for o in cors_origins_env.split(",") if o.strip()]
+        raw = [o.strip() for o in cors_origins_env.split(",") if o.strip()]
+        allow_origins = [o for o in (_validate_origin(o) for o in raw) if o is not None]
+        if not allow_origins:
+            logger.warning("cors_all_origins_rejected fallback=%s", "http://localhost:5173")
+            allow_origins = ["http://localhost:5173"]
     else:
-        # Default: allow Vite dev server origin
         allow_origins = ["http://localhost:5173"]
+
+    allow_credentials = os.environ.get("MCP_CORS_CREDENTIALS", "false").lower() == "true"
 
     return {
         "allow_origins": allow_origins,
-        "allow_methods": ["*"],
-        "allow_headers": ["*"],
-        "allow_credentials": True,
+        "allow_methods": _ALLOWED_METHODS,
+        "allow_headers": _ALLOWED_HEADERS,
+        "allow_credentials": allow_credentials,
     }

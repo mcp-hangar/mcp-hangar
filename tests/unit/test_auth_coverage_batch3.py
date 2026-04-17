@@ -10,7 +10,7 @@ Covers:
 
 import asyncio
 import json
-from dataclasses import dataclass
+from dataclasses import FrozenInstanceError, dataclass
 from types import SimpleNamespace
 from typing import Any
 from unittest.mock import AsyncMock, MagicMock, Mock, patch
@@ -77,8 +77,8 @@ class TestAuthContext:
         from enterprise.auth.infrastructure.middleware import AuthContext
 
         ctx = AuthContext(principal=_make_principal(), auth_method="api_key")
-        with pytest.raises(AttributeError):
-            ctx.auth_method = "something_else"  # type: ignore[misc]
+        with pytest.raises((AttributeError, FrozenInstanceError)):
+            setattr(ctx, "auth_method", "something_else")
 
 
 # ===========================================================================
@@ -463,6 +463,7 @@ class TestAuthMiddlewareHTTP:
     async def test_successful_auth_attaches_context_to_request_state(self):
         from enterprise.auth.http_middleware import AuthMiddlewareHTTP
         from enterprise.auth.infrastructure.middleware import AuthContext
+        from mcp_hangar.infrastructure.identity import TrustedProxyResolver
 
         principal = _make_principal("user:alice")
         auth_ctx = AuthContext(principal=principal, auth_method="jwt")
@@ -493,7 +494,7 @@ class TestAuthMiddlewareHTTP:
 
         assert response.status_code == 401
         call_next.assert_not_called()
-        body = json.loads(response.body)
+        body = json.loads(bytes(response.body))
         assert body["error"] == "authentication_failed"
         assert "WWW-Authenticate" in response.headers
 
@@ -512,7 +513,7 @@ class TestAuthMiddlewareHTTP:
         response = await mw.dispatch(request, call_next)
 
         assert response.status_code == 403
-        body = json.loads(response.body)
+        body = json.loads(bytes(response.body))
         assert body["error"] == "access_denied"
         assert body["principal_id"] == "user:bob"
         assert body["action"] == "write"
@@ -569,6 +570,7 @@ class TestAuthMiddlewareHTTP:
     async def test_trusted_proxy_x_forwarded_for(self):
         from enterprise.auth.http_middleware import AuthMiddlewareHTTP
         from enterprise.auth.infrastructure.middleware import AuthContext
+        from mcp_hangar.infrastructure.identity import TrustedProxyResolver
 
         authn = Mock()
         captured_request = []
@@ -582,7 +584,7 @@ class TestAuthMiddlewareHTTP:
 
         app = Mock()
         mw = AuthMiddlewareHTTP(app, authn=authn)
-        mw._trusted_proxies = {"10.0.0.1"}
+        mw._trusted_proxies = TrustedProxyResolver(frozenset({"10.0.0.1"}))
         request = self._make_request(
             path="/api/test",
             client_host="10.0.0.1",
@@ -680,9 +682,7 @@ class TestRequireAuth:
         from enterprise.auth.infrastructure.middleware import AuthContext
 
         request = Mock()
-        request.state = SimpleNamespace(
-            auth=AuthContext(principal=Principal.anonymous(), auth_method="anonymous")
-        )
+        request.state = SimpleNamespace(auth=AuthContext(principal=Principal.anonymous(), auth_method="anonymous"))
 
         with pytest.raises(MissingCredentialsError, match="Authentication required"):
             require_auth(request)
@@ -844,8 +844,8 @@ class TestIdentityMiddleware:
 
         captured_headers = []
 
-        def capture_extract(headers):
-            captured_headers.append(headers)
+        def capture_extract(headers, source_ip=None):
+            captured_headers.append((headers, source_ip))
             return None
 
         extractor = Mock()
@@ -866,8 +866,9 @@ class TestIdentityMiddleware:
         await mw(scope, AsyncMock(), AsyncMock())
 
         assert len(captured_headers) == 1
-        assert captured_headers[0]["content-type"] == "application/json"
-        assert captured_headers[0]["authorization"] == "Bearer xyz"
+        assert captured_headers[0][0]["content-type"] == "application/json"
+        assert captured_headers[0][0]["authorization"] == "Bearer xyz"
+        assert captured_headers[0][1] is None
 
 
 # ===========================================================================
@@ -931,11 +932,13 @@ class TestAuthRoutes:
     async def test_create_api_key_with_expires_at(self):
         from enterprise.auth.api.routes import create_api_key
 
-        request = self._make_request(body={
-            "principal_id": "user:bob",
-            "name": "temp-key",
-            "expires_at": "2026-12-31T23:59:59+00:00",
-        })
+        request = self._make_request(
+            body={
+                "principal_id": "user:bob",
+                "name": "temp-key",
+                "expires_at": "2026-12-31T23:59:59+00:00",
+            }
+        )
 
         with patch("enterprise.auth.api.routes.dispatch_command", new_callable=AsyncMock) as mock_dispatch:
             mock_dispatch.return_value = {"key_id": "k2"}
@@ -1016,12 +1019,14 @@ class TestAuthRoutes:
     async def test_assign_role_dispatches_command(self):
         from enterprise.auth.api.routes import assign_role
 
-        request = self._make_request(body={
-            "principal_id": "user:alice",
-            "role_name": "admin",
-            "scope": "tenant:acme",
-            "assigned_by": "superadmin",
-        })
+        request = self._make_request(
+            body={
+                "principal_id": "user:alice",
+                "role_name": "admin",
+                "scope": "tenant:acme",
+                "assigned_by": "superadmin",
+            }
+        )
 
         with patch("enterprise.auth.api.routes.dispatch_command", new_callable=AsyncMock) as mock_dispatch:
             mock_dispatch.return_value = {"assigned": True}
@@ -1039,10 +1044,12 @@ class TestAuthRoutes:
     async def test_revoke_role_dispatches_command(self):
         from enterprise.auth.api.routes import revoke_role
 
-        request = self._make_request(body={
-            "principal_id": "user:bob",
-            "role_name": "viewer",
-        })
+        request = self._make_request(
+            body={
+                "principal_id": "user:bob",
+                "role_name": "viewer",
+            }
+        )
 
         with patch("enterprise.auth.api.routes.dispatch_command", new_callable=AsyncMock) as mock_dispatch:
             mock_dispatch.return_value = {"revoked": True}
@@ -1075,11 +1082,13 @@ class TestAuthRoutes:
     async def test_create_custom_role_dispatches_command(self):
         from enterprise.auth.api.routes import create_custom_role
 
-        request = self._make_request(body={
-            "role_name": "deployer",
-            "description": "Can deploy",
-            "permissions": ["provider:write:*"],
-        })
+        request = self._make_request(
+            body={
+                "role_name": "deployer",
+                "description": "Can deploy",
+                "permissions": ["provider:write:*"],
+            }
+        )
 
         with patch("enterprise.auth.api.routes.dispatch_command", new_callable=AsyncMock) as mock_dispatch:
             mock_dispatch.return_value = {"role_name": "deployer"}
@@ -1219,7 +1228,7 @@ class TestAuthRoutes:
         request = self._make_request()
         response = await list_permissions(request)
 
-        body = json.loads(response.body)
+        body = json.loads(bytes(response.body))
         assert "permissions" in body
         assert len(body["permissions"]) > 0
         # Each entry should have resource_type and actions
@@ -1233,12 +1242,14 @@ class TestAuthRoutes:
     async def test_check_permission_with_action_fields(self):
         from enterprise.auth.api.routes import check_permission
 
-        request = self._make_request(body={
-            "principal_id": "user:alice",
-            "action": "invoke",
-            "resource_type": "tool",
-            "resource_id": "math",
-        })
+        request = self._make_request(
+            body={
+                "principal_id": "user:alice",
+                "action": "invoke",
+                "resource_type": "tool",
+                "resource_id": "math",
+            }
+        )
 
         with patch("enterprise.auth.api.routes.dispatch_query", new_callable=AsyncMock) as mock_dispatch:
             mock_dispatch.return_value = {"allowed": True}
@@ -1254,10 +1265,12 @@ class TestAuthRoutes:
     async def test_check_permission_with_combined_permission_string(self):
         from enterprise.auth.api.routes import check_permission
 
-        request = self._make_request(body={
-            "principal_id": "user:bob",
-            "permission": "provider:read:math",
-        })
+        request = self._make_request(
+            body={
+                "principal_id": "user:bob",
+                "permission": "provider:read:math",
+            }
+        )
 
         with patch("enterprise.auth.api.routes.dispatch_query", new_callable=AsyncMock) as mock_dispatch:
             mock_dispatch.return_value = {"allowed": False}
@@ -1272,10 +1285,12 @@ class TestAuthRoutes:
     async def test_check_permission_with_partial_permission_string(self):
         from enterprise.auth.api.routes import check_permission
 
-        request = self._make_request(body={
-            "principal_id": "user:bob",
-            "permission": "provider:read",
-        })
+        request = self._make_request(
+            body={
+                "principal_id": "user:bob",
+                "permission": "provider:read",
+            }
+        )
 
         with patch("enterprise.auth.api.routes.dispatch_query", new_callable=AsyncMock) as mock_dispatch:
             mock_dispatch.return_value = {"allowed": True}
@@ -1318,7 +1333,7 @@ class TestAuthRoutes:
 
         response = await set_tool_access_policy(request)
         assert response.status_code == 400
-        body = json.loads(response.body)
+        body = json.loads(bytes(response.body))
         assert "ValidationError" in body["error"]["code"]
 
     # --- get_tool_access_policy ---

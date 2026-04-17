@@ -78,13 +78,15 @@ class CloudConnector:
       4. ``stop()``  -- flushes remaining events, deregisters, closes HTTP
     """
 
-    def __init__(self, config: CloudConfig, providers: dict[str, Any]) -> None:
+    def __init__(self, config: CloudConfig, providers: Any) -> None:
         self._cfg = config
         self._providers = providers  # reference to PROVIDERS dict
         self._buffer = EventBuffer(max_size=config.buffer_max_size)
         self._started_at: float = time.monotonic()
         self._loop: asyncio.AbstractEventLoop | None = None
         self._thread: threading.Thread | None = None
+        self._client: CloudClient | None = None
+        self._stop_event: asyncio.Event | None = None
         self._connected = False
         self._dormant = False
 
@@ -171,18 +173,21 @@ class CloudConnector:
 
     async def _async_stop(self) -> None:
         """Flush remaining events and deregister."""
+        client = self._client
+        stop_event = self._stop_event
+
         # Best-effort final flush
         try:
             batch = self._buffer.drain(500)
-            if batch and hasattr(self, "_client"):
-                await self._client.send_events(batch)
+            if batch and client is not None:
+                await client.send_events(batch)
         except (httpx.HTTPError, OSError):
             pass
-        if hasattr(self, "_client"):
-            await self._client.deregister()
-            await self._client.close()
-        if hasattr(self, "_stop_event"):
-            self._stop_event.set()
+        if client is not None:
+            await client.deregister()
+            await client.close()
+        if stop_event is not None:
+            stop_event.set()
 
     # -- registration -------------------------------------------------------
 
@@ -192,10 +197,14 @@ class CloudConnector:
         Returns True on success, False when all attempts are exhausted.
         """
         max_attempts = self._cfg.max_registration_attempts
+        stop_event = self._stop_event
+        if stop_event is None:
+            return False
+
         for attempt, delay in enumerate(_retry_with_backoff()):
             if attempt >= max_attempts:
                 return False
-            if self._stop_event.is_set():
+            if stop_event.is_set():
                 return False
             try:
                 await client.register()
@@ -220,9 +229,13 @@ class CloudConnector:
 
         On success, exits dormant mode and starts normal worker loops.
         """
-        while not self._stop_event.is_set():
+        stop_event = self._stop_event
+        if stop_event is None:
+            return
+
+        while not stop_event.is_set():
             await self._interruptible_sleep(self._cfg.dormant_probe_interval_s)
-            if self._stop_event.is_set():
+            if stop_event.is_set():
                 return
             try:
                 await client.register()
@@ -234,7 +247,7 @@ class CloudConnector:
                     asyncio.create_task(self._event_flush_loop(client), name="cloud-ev"),
                     asyncio.create_task(self._state_sync_loop(client), name="cloud-ss"),
                 ]
-                await self._stop_event.wait()
+                await stop_event.wait()
                 for t in tasks:
                     t.cancel()
                 await asyncio.gather(*tasks, return_exceptions=True)
@@ -245,7 +258,11 @@ class CloudConnector:
     # -- heartbeat ----------------------------------------------------------
 
     async def _heartbeat_loop(self, client: CloudClient) -> None:
-        while not self._stop_event.is_set():
+        stop_event = self._stop_event
+        if stop_event is None:
+            return
+
+        while not stop_event.is_set():
             try:
                 pcount, hcount = self._provider_counts()
                 uptime = time.monotonic() - self._started_at
@@ -259,7 +276,11 @@ class CloudConnector:
     # -- event flush --------------------------------------------------------
 
     async def _event_flush_loop(self, client: CloudClient) -> None:
-        while not self._stop_event.is_set():
+        stop_event = self._stop_event
+        if stop_event is None:
+            return
+
+        while not stop_event.is_set():
             await self._interruptible_sleep(self._cfg.batch_interval_s)
             await self._flush_events(client)
 
@@ -280,7 +301,11 @@ class CloudConnector:
     async def _state_sync_loop(self, client: CloudClient) -> None:
         # Initial sync right after registration
         await self._sync_state(client)
-        while not self._stop_event.is_set():
+        stop_event = self._stop_event
+        if stop_event is None:
+            return
+
+        while not stop_event.is_set():
             await self._interruptible_sleep(self._cfg.state_sync_interval_s)
             await self._sync_state(client)
 
@@ -335,8 +360,13 @@ class CloudConnector:
 
     async def _interruptible_sleep(self, seconds: float) -> None:
         """Sleep that wakes up early when stop is requested."""
+        stop_event = self._stop_event
+        if stop_event is None:
+            await asyncio.sleep(seconds)
+            return
+
         try:
-            await asyncio.wait_for(self._stop_event.wait(), timeout=seconds)
+            await asyncio.wait_for(stop_event.wait(), timeout=seconds)
         except TimeoutError:
             pass
 

@@ -10,8 +10,6 @@ from typing import Annotated
 
 import typer
 
-from ..main import GlobalOptions
-
 
 def serve_command(
     ctx: typer.Context,
@@ -65,6 +63,14 @@ def serve_command(
             is_flag=True,
         ),
     ] = False,
+    unsafe_no_auth: Annotated[
+        bool,
+        typer.Option(
+            "--unsafe-no-auth",
+            help="Allow non-loopback HTTP binding without authentication (unsafe)",
+            is_flag=True,
+        ),
+    ] = False,
     cloud_key: Annotated[
         str | None,
         typer.Option(
@@ -93,7 +99,7 @@ def serve_command(
         mcp-hangar --config config.yaml serve
     """
     # Get global options
-    global_opts: GlobalOptions = ctx.obj
+    global_opts = ctx.obj
 
     # Build CLIConfig for backward compatibility with existing server code
     from ..cli_compat import CLIConfig
@@ -111,6 +117,7 @@ def serve_command(
         log_file=log_file,
         log_level=log_level.upper(),
         json_logs=json_logs,
+        unsafe_no_auth=unsafe_no_auth,
         cloud_key=cloud_key,
         cloud_url=cloud_url,
     )

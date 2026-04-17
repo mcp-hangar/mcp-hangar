@@ -1,14 +1,15 @@
 """Subscription filter parsing and matching for WebSocket event streams."""
 
-from typing import Any
+# pyright: reportUnknownArgumentType=false, reportUnknownVariableType=false
 
 from ....domain.events import DomainEvent
 
 
-def parse_subscription_filters(msg: dict | None) -> dict[str, list[str]]:
+def parse_subscription_filters(msg: dict[str, object] | None) -> dict[str, list[str]]:
     """Parse subscription filter config from a client message.
 
     Recognized keys:
+    - "type": optional "subscribe" control message for initial negotiation
     - "event_types": list[str] -- only deliver events whose event_type is in this list
     - "provider_ids": list[str] -- only deliver events whose provider_id is in this list
 
@@ -22,6 +23,9 @@ def parse_subscription_filters(msg: dict | None) -> dict[str, list[str]]:
     """
     if not msg:
         return {}
+    msg_type = msg.get("type")
+    if msg_type not in (None, "subscribe"):
+        return {}
     result: dict[str, list[str]] = {}
     if "event_types" in msg and isinstance(msg["event_types"], list):
         result["event_types"] = [str(v) for v in msg["event_types"]]
@@ -30,7 +34,7 @@ def parse_subscription_filters(msg: dict | None) -> dict[str, list[str]]:
     return result
 
 
-def matches_filters(event: DomainEvent, filters: dict[str, Any]) -> bool:
+def matches_filters(event: DomainEvent, filters: dict[str, list[str]]) -> bool:
     """Determine whether an event passes the given subscription filters.
 
     An event passes if it satisfies ALL active filters (AND semantics):

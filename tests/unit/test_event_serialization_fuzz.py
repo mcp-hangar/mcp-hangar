@@ -1,3 +1,5 @@
+# pyright: reportUnknownParameterType=false, reportMissingTypeArgument=false, reportUnknownArgumentType=false, reportUnusedCallResult=false
+
 """Property-based fuzz tests for EventSerializer and UpcasterChain.
 
 Tests:
@@ -8,6 +10,7 @@ Tests:
 """
 
 import json
+from datetime import UTC, datetime
 
 from hypothesis import HealthCheck, given, settings, strategies as st
 
@@ -20,6 +23,7 @@ from mcp_hangar.domain.events import (
     EgressBlocked,
     HealthCheckFailed,
     HealthCheckPassed,
+    PolicyPushRejected,
     ProviderApproved,
     ProviderCapabilityQuarantined,
     ProviderCapabilityQuarantineReleased,
@@ -121,6 +125,11 @@ _MINIMAL_EVENTS: dict[str, DomainEvent] = {
     "ProviderCapabilityQuarantineReleased": ProviderCapabilityQuarantineReleased(
         provider_id="p1",
         released_by="ops@example.com",
+    ),
+    "PolicyPushRejected": PolicyPushRejected(
+        principal_id="anonymous",
+        reason="authentication_required",
+        timestamp=datetime(2025, 1, 1, tzinfo=UTC),
     ),
     # Approval gate
     "ToolApprovalRequested": ToolApprovalRequested(

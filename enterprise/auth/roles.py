@@ -9,6 +9,7 @@ only the permissions needed for its intended purpose.
 """
 
 from mcp_hangar.domain.value_objects import Permission, Role
+from mcp_hangar.domain.value_objects import security as core_security
 
 # =============================================================================
 # Predefined Permissions
@@ -57,6 +58,15 @@ PERMISSION_DISCOVERY_APPROVE = Permission("discovery", "approve")
 PERMISSION_APPROVAL_READ = Permission("approval", "read")
 PERMISSION_APPROVAL_RESOLVE = Permission("approval", "resolve")
 
+# Policy management permissions
+PERMISSION_POLICY_WRITE = core_security.PERMISSION_POLICY_WRITE
+
+# Fine-grained API permissions
+PERMISSION_PROVIDERS_READ = core_security.PERMISSION_PROVIDERS_READ
+PERMISSION_PROVIDERS_WRITE = core_security.PERMISSION_PROVIDERS_WRITE
+PERMISSION_PROVIDERS_LIFECYCLE = core_security.PERMISSION_PROVIDERS_LIFECYCLE
+PERMISSION_CONFIG_RELOAD = core_security.PERMISSION_CONFIG_RELOAD
+
 # Admin wildcard permission
 PERMISSION_ADMIN_ALL = Permission("*", "*")
 
@@ -97,6 +107,13 @@ PERMISSIONS: dict[str, Permission] = {
     # Approval
     "approval:read": PERMISSION_APPROVAL_READ,
     "approval:resolve": PERMISSION_APPROVAL_RESOLVE,
+    # Policy
+    "policy:write": PERMISSION_POLICY_WRITE,
+    # Fine-grained API
+    "providers:read": PERMISSION_PROVIDERS_READ,
+    "providers:write": PERMISSION_PROVIDERS_WRITE,
+    "providers:lifecycle": PERMISSION_PROVIDERS_LIFECYCLE,
+    "config:reload": PERMISSION_CONFIG_RELOAD,
     # Admin
     "admin:*": PERMISSION_ADMIN_ALL,
 }
@@ -109,7 +126,16 @@ PERMISSIONS: dict[str, Permission] = {
 ROLE_ADMIN = Role(
     name="admin",
     description="Full administrative access to all resources",
-    permissions=frozenset([PERMISSION_ADMIN_ALL]),
+    permissions=frozenset(
+        [
+            PERMISSION_ADMIN_ALL,
+            PERMISSION_PROVIDERS_READ,
+            PERMISSION_PROVIDERS_WRITE,
+            PERMISSION_PROVIDERS_LIFECYCLE,
+            PERMISSION_POLICY_WRITE,
+            PERMISSION_CONFIG_RELOAD,
+        ]
+    ),
 )
 
 ROLE_PROVIDER_ADMIN = Role(
@@ -150,6 +176,9 @@ ROLE_DEVELOPER = Role(
     description="Invoke tools and view providers",
     permissions=frozenset(
         [
+            PERMISSION_PROVIDERS_READ,
+            PERMISSION_PROVIDERS_WRITE,
+            PERMISSION_PROVIDERS_LIFECYCLE,
             PERMISSION_PROVIDER_READ,
             PERMISSION_PROVIDER_LIST,
             PERMISSION_PROVIDER_START,  # Can start providers on-demand
@@ -170,6 +199,7 @@ ROLE_VIEWER = Role(
     description="Read-only access to providers and tools",
     permissions=frozenset(
         [
+            PERMISSION_PROVIDERS_READ,
             PERMISSION_PROVIDER_READ,
             PERMISSION_PROVIDER_LIST,
             PERMISSION_TOOL_LIST,
@@ -209,6 +239,8 @@ ROLE_SERVICE_ACCOUNT = Role(
     ),
 )
 
+ROLE_AGENT = core_security.AGENT_ROLE
+
 # Role registry for easy lookup
 BUILTIN_ROLES: dict[str, Role] = {
     "admin": ROLE_ADMIN,
@@ -217,6 +249,7 @@ BUILTIN_ROLES: dict[str, Role] = {
     "viewer": ROLE_VIEWER,
     "auditor": ROLE_AUDITOR,
     "service-account": ROLE_SERVICE_ACCOUNT,
+    "agent": ROLE_AGENT,
 }
 
 

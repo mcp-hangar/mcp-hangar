@@ -6,12 +6,17 @@ singleton registry, and injects it into the Provider aggregate via
 Provider.set_log_buffer().
 """
 
+from __future__ import annotations
+
+from collections.abc import Mapping
+
+from ...domain.model import Provider
 from ...logging_config import get_logger
 
 logger = get_logger(__name__)
 
 
-def init_log_buffers(providers: dict) -> None:
+def init_log_buffers(providers: Mapping[str, Provider]) -> None:
     """Create and wire log buffers for all loaded providers.
 
     For each provider in *providers*:
@@ -24,8 +29,9 @@ def init_log_buffers(providers: dict) -> None:
     This function is idempotent -- calling it again replaces existing buffers.
 
     Args:
-        providers: Dict mapping provider_id -> Provider aggregate instance.
-            Typically the module-level ``PROVIDERS`` dict from ``server.state``.
+        providers: Dict-like mapping of provider_id -> Provider aggregate instance.
+            Typically the shared runtime repository from
+            ``server.bootstrap.composition.get_runtime()``.
     """
     # Import lazily to avoid circular imports between bootstrap sub-modules.
     from ...infrastructure.persistence.log_buffer import ProviderLogBuffer, set_log_buffer

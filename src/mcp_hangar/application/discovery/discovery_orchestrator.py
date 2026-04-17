@@ -144,7 +144,7 @@ class DiscoveryOrchestrator:
 
         # Discovery loop state
         self._running = False
-        self._discovery_task: asyncio.Task | None = None
+        self._discovery_task: asyncio.Task[None] | None = None
         self._last_cycle: datetime | None = None
 
     def add_source(self, source: DiscoverySource) -> None:
@@ -335,7 +335,19 @@ class DiscoveryOrchestrator:
             # Validate command from untrusted discovery sources
             command = provider.connection_info.get("command", [])
             if command and self._input_validator:
-                validation_result = self._input_validator.validate_command(command)
+                try:
+                    validation_result = self._input_validator.validate_command(command)
+                except ValueError as exc:
+                    logger.warning(
+                        "discovered_provider_command_rejected",
+                        provider_name=provider.name,
+                        source=provider.source_type,
+                        command=command,
+                        reason=str(exc),
+                    )
+                    prov_span.set_attribute("discovery.result", "rejected")
+                    return "rejected"
+
                 if not validation_result.valid:
                     issues = "; ".join(i.message for i in validation_result.issues)
                     logger.warning(
@@ -520,7 +532,7 @@ class DiscoveryOrchestrator:
         for status in statuses:
             main_metrics.update_discovery_source(
                 source_type=status.source_type,
-                mode=status.mode,
+                mode=status.mode.value,
                 is_healthy=status.is_healthy,
                 providers_count=status.providers_count,
             )

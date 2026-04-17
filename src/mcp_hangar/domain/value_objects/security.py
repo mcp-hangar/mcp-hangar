@@ -1,3 +1,5 @@
+# pyright: reportImplicitOverride=false
+
 """Security-related value objects for authentication and authorization.
 
 Contains:
@@ -74,7 +76,7 @@ class Principal:
     type: PrincipalType
     tenant_id: str | None = None
     groups: frozenset[str] = frozenset()
-    metadata: dict | None = None
+    metadata: dict[str, object] | None = None
 
     def __post_init__(self) -> None:
         # Ensure metadata is a new dict copy to maintain immutability semantics
@@ -237,3 +239,17 @@ class Role:
 
     def __str__(self) -> str:
         return self.name
+
+
+PERMISSION_PROVIDERS_READ = Permission(resource_type="providers", action="read")
+PERMISSION_PROVIDERS_WRITE = Permission(resource_type="providers", action="write")
+PERMISSION_PROVIDERS_LIFECYCLE = Permission(resource_type="providers", action="lifecycle")
+PERMISSION_POLICY_WRITE = Permission(resource_type="policy", action="write")
+PERMISSION_CONFIG_RELOAD = Permission(resource_type="config", action="reload")
+
+
+AGENT_ROLE = Role(
+    name="agent",
+    permissions=frozenset([PERMISSION_POLICY_WRITE]),
+    description="Push runtime tool access policies from hangar-agent",
+)

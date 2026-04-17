@@ -6,6 +6,7 @@ on low-level modules, both depend on abstractions.
 """
 
 from dataclasses import dataclass, field
+from typing import cast
 from typing import Any, Optional, Protocol, runtime_checkable, TYPE_CHECKING
 
 if TYPE_CHECKING:
@@ -16,7 +17,6 @@ if TYPE_CHECKING:
     from ..bootstrap.runtime import Runtime
     from ..domain.model import Provider, ProviderGroup
     from ..domain.repository import IProviderRepository
-    from mcp_hangar.server.bootstrap import AuthComponents
 
 
 # =============================================================================
@@ -130,7 +130,8 @@ class ApplicationContext:
     load_provider_handler: Optional["LoadProviderHandler"] = None
     unload_provider_handler: Optional["UnloadProviderHandler"] = None
     discovery_registry: Optional["DiscoveryRegistry"] = None
-    auth_components: Optional["AuthComponents"] = None
+    auth_components: Any | None = None
+    approval_gate: Any | None = None
 
     @property
     def repository(self) -> "IProviderRepository":
@@ -176,7 +177,7 @@ class ApplicationContext:
         from .state import get_runtime_providers
 
         runtime_store = get_runtime_providers()
-        return runtime_store.get_provider(provider_id)
+        return cast(Optional["Provider"], runtime_store.get_provider(provider_id))
 
     def provider_exists(self, provider_id: str) -> bool:
         """Check if a provider exists.

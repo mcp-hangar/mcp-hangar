@@ -11,6 +11,7 @@ from __future__ import annotations
 import structlog
 
 from mcp_hangar.domain.value_objects.identity import CallerIdentity, IdentityContext
+from mcp_hangar.infrastructure.identity.trusted_proxy import TrustedProxyResolver
 
 logger = structlog.get_logger(__name__)
 
@@ -46,16 +47,22 @@ class HeaderIdentityExtractor:
         session_id_header: str = HEADER_SESSION_ID,
         principal_type_header: str = HEADER_PRINCIPAL_TYPE,
         correlation_id_header: str = HEADER_CORRELATION_ID,
+        trusted_proxies: TrustedProxyResolver | None = None,
     ) -> None:
         self._user_id_header = user_id_header.lower()
         self._agent_id_header = agent_id_header.lower()
         self._session_id_header = session_id_header.lower()
         self._principal_type_header = principal_type_header.lower()
         self._correlation_id_header = correlation_id_header.lower()
+        self._trusted_proxies = trusted_proxies
+
+        if self._trusted_proxies is None:
+            logger.warning("header_identity_no_trusted_proxies")
 
     def extract(
         self,
         metadata: list[tuple[str, str]] | dict[str, str] | None,
+        source_ip: str | None = None,
     ) -> IdentityContext | None:
         """Extract identity context from header metadata.
 
@@ -80,6 +87,15 @@ class HeaderIdentityExtractor:
         # If no identity headers present at all, return None
         if not user_id and not agent_id and not session_id:
             return None
+
+        if self._trusted_proxies is not None:
+            if source_ip is None:
+                logger.warning("header_identity_source_ip_missing")
+                return None
+
+            if not self._trusted_proxies.is_trusted(source_ip):
+                logger.warning("header_identity_untrusted_source", source_ip=source_ip)
+                return None
 
         # Validate principal_type
         if principal_type not in ("user", "service", "anonymous"):

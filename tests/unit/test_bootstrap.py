@@ -73,6 +73,7 @@ class TestApplicationContext:
         mock_mcp = MagicMock()
         mock_worker = MagicMock()
         mock_orchestrator = MagicMock()
+        mock_runtime.repository.items.return_value = []
 
         ctx = ApplicationContext(
             runtime=mock_runtime,
@@ -81,20 +82,7 @@ class TestApplicationContext:
             discovery_orchestrator=mock_orchestrator,
         )
 
-        # Use sys.modules to get the actual module
-        import mcp_hangar.server.bootstrap  # noqa: F401
-
-        bootstrap_mod = sys.modules["mcp_hangar.server.bootstrap"]
-
-        mock_providers = MagicMock()
-        mock_providers.items.return_value = []
-
-        original_providers = bootstrap_mod.PROVIDERS
-        bootstrap_mod.PROVIDERS = mock_providers
-        try:
-            ctx.shutdown()
-        finally:
-            bootstrap_mod.PROVIDERS = original_providers
+        ctx.shutdown()
 
         mock_worker.stop.assert_called_once()
 
@@ -105,6 +93,7 @@ class TestApplicationContext:
         mock_worker = MagicMock()
         mock_worker.stop.side_effect = Exception("Worker error")
         mock_worker.task = "gc"
+        mock_runtime.repository.items.return_value = []
 
         ctx = ApplicationContext(
             runtime=mock_runtime,
@@ -112,20 +101,7 @@ class TestApplicationContext:
             background_workers=[mock_worker],
         )
 
-        # Use sys.modules to get the actual module
-        import mcp_hangar.server.bootstrap  # noqa: F401
-
-        bootstrap_mod = sys.modules["mcp_hangar.server.bootstrap"]
-
-        mock_providers = MagicMock()
-        mock_providers.items.return_value = []
-
-        original_providers = bootstrap_mod.PROVIDERS
-        bootstrap_mod.PROVIDERS = mock_providers
-        try:
-            ctx.shutdown()
-        finally:
-            bootstrap_mod.PROVIDERS = original_providers
+        ctx.shutdown()
 
 
 class TestEnsureDataDir:
@@ -163,7 +139,8 @@ class TestCreateBackgroundWorkers:
 
         with patch("mcp_hangar.server.bootstrap.workers.BackgroundWorker", mock_worker_class):
             with patch("mcp_hangar.server.bootstrap.workers.MetricsSnapshotWorker", mock_snapshot_class):
-                with patch("mcp_hangar.server.bootstrap.workers.PROVIDERS", {}):
+                with patch("mcp_hangar.server.bootstrap.workers.get_runtime") as mock_get_runtime:
+                    mock_get_runtime.return_value.repository = {}
                     from mcp_hangar.server.bootstrap import _create_background_workers
 
                     workers = _create_background_workers()
@@ -178,7 +155,8 @@ class TestCreateBackgroundWorkers:
         mock_worker_class.return_value = mock_worker
 
         with patch("mcp_hangar.server.bootstrap.workers.BackgroundWorker", mock_worker_class):
-            with patch("mcp_hangar.server.bootstrap.workers.PROVIDERS", {}):
+            with patch("mcp_hangar.server.bootstrap.workers.get_runtime") as mock_get_runtime:
+                mock_get_runtime.return_value.repository = {}
                 from mcp_hangar.server.bootstrap import _create_background_workers
 
                 _workers = _create_background_workers()  # noqa: F841
@@ -191,7 +169,8 @@ class TestCreateBackgroundWorkers:
         mock_worker_class = MagicMock()
 
         with patch("mcp_hangar.server.bootstrap.workers.BackgroundWorker", mock_worker_class):
-            with patch("mcp_hangar.server.bootstrap.workers.PROVIDERS", {}):
+            with patch("mcp_hangar.server.bootstrap.workers.get_runtime") as mock_get_runtime:
+                mock_get_runtime.return_value.repository = {}
                 from mcp_hangar.server.bootstrap import _create_background_workers
 
                 _create_background_workers()
@@ -211,7 +190,8 @@ class TestCreateBackgroundWorkers:
         mock_worker_class = MagicMock()
 
         with patch("mcp_hangar.server.bootstrap.workers.BackgroundWorker", mock_worker_class):
-            with patch("mcp_hangar.server.bootstrap.workers.PROVIDERS", {}):
+            with patch("mcp_hangar.server.bootstrap.workers.get_runtime") as mock_get_runtime:
+                mock_get_runtime.return_value.repository = {}
                 from mcp_hangar.server.bootstrap import _create_background_workers
 
                 _create_background_workers()
@@ -339,8 +319,7 @@ class TestBootstrap:
         mock_fastmcp = MagicMock()
         mock_reg_tools = MagicMock()
         mock_create_workers = MagicMock(return_value=[])
-        mock_providers = MagicMock()
-        mock_providers.keys.return_value = []
+        mock_runtime.repository.keys.return_value = []
         mock_init_event_store = MagicMock()
         mock_init_hot_loading = MagicMock(return_value=(None, None))
         mock_parse_auth = MagicMock(return_value={})
@@ -363,7 +342,6 @@ class TestBootstrap:
             patch("mcp_hangar.server.bootstrap.FastMCP", mock_fastmcp),
             patch("mcp_hangar.server.bootstrap.register_all_tools", mock_reg_tools),
             patch("mcp_hangar.server.bootstrap.create_background_workers", mock_create_workers),
-            patch("mcp_hangar.server.bootstrap.PROVIDERS", mock_providers),
             patch("mcp_hangar.server.bootstrap.GROUPS", {}),
             patch("mcp_hangar.server.bootstrap.parse_auth_config", mock_parse_auth),
             patch("mcp_hangar.server.bootstrap.bootstrap_auth", mock_bootstrap_auth),

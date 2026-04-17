@@ -1,3 +1,5 @@
+# pyright: reportAny=false, reportExplicitAny=false, reportUnannotatedClassAttribute=false
+
 """Event serialization for persistence.
 
 Handles conversion of domain events to/from JSON for storage in event store.
@@ -17,6 +19,7 @@ from mcp_hangar.domain.events import (
     EgressBlocked,
     HealthCheckFailed,
     HealthCheckPassed,
+    PolicyPushRejected,
     ProviderApproved,
     ProviderCapabilityQuarantined,
     ProviderCapabilityQuarantineReleased,
@@ -73,6 +76,8 @@ EVENT_TYPE_MAP: dict[str, type[DomainEvent]] = {
     "EgressBlocked": EgressBlocked,
     "ProviderCapabilityQuarantined": ProviderCapabilityQuarantined,
     "ProviderCapabilityQuarantineReleased": ProviderCapabilityQuarantineReleased,
+    # Policy push
+    "PolicyPushRejected": PolicyPushRejected,
     # Approval Gate
     "ToolApprovalRequested": ToolApprovalRequested,
     "ToolApprovalGranted": ToolApprovalGranted,
@@ -109,6 +114,8 @@ EVENT_VERSION_MAP: dict[str, int] = {
     "EgressBlocked": 1,
     "ProviderCapabilityQuarantined": 1,
     "ProviderCapabilityQuarantineReleased": 1,
+    # Policy push
+    "PolicyPushRejected": 1,
     # Approval Gate
     "ToolApprovalRequested": 1,
     "ToolApprovalGranted": 1,

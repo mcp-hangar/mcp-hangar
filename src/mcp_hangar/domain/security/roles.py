@@ -1,3 +1,5 @@
+# pyright: reportAssignmentType=false, reportConstantRedefinition=false, reportUnusedParameter=false
+
 """Built-in roles stub for core domain.
 
 Role definitions have been moved to ``enterprise/auth/roles.py``
@@ -16,6 +18,7 @@ try:
         list_builtin_roles,
         list_permissions,
         PERMISSIONS,
+        ROLE_AGENT,
         ROLE_ADMIN,
         ROLE_AUDITOR,
         ROLE_DEVELOPER,
@@ -29,6 +32,7 @@ except ImportError:
     PERMISSIONS: dict[str, "Permission"] = {}
 
     ROLE_ADMIN = None
+    ROLE_AGENT = None
     ROLE_AUDITOR = None
     ROLE_DEVELOPER = None
     ROLE_PROVIDER_ADMIN = None
@@ -54,6 +58,7 @@ except ImportError:
 __all__ = [
     "BUILTIN_ROLES",
     "PERMISSIONS",
+    "ROLE_AGENT",
     "ROLE_ADMIN",
     "ROLE_AUDITOR",
     "ROLE_DEVELOPER",

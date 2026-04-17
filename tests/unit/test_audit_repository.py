@@ -104,6 +104,8 @@ class TestInMemoryAuditRepository:
     async def test_get_by_correlation_id(self, repo: InMemoryAuditRepository, audit_entry: AuditEntry):
         """Test filtering by correlation ID."""
         await repo.append(audit_entry)
+        correlation_id = audit_entry.correlation_id
+        assert correlation_id is not None
 
         # Add unrelated entry
         other_entry = AuditEntry(
@@ -116,7 +118,7 @@ class TestInMemoryAuditRepository:
         )
         await repo.append(other_entry)
 
-        results = await repo.get_by_correlation_id(audit_entry.correlation_id)
+        results = await repo.get_by_correlation_id(correlation_id)
 
         assert len(results) == 1
         assert results[0].correlation_id == "corr-123"
@@ -419,6 +421,35 @@ class TestSQLiteAuditRepository:
         assert result.metadata["tools"] == ["tool1", "tool2"]
 
     @pytest.mark.asyncio
+    async def test_append_masks_sensitive_state_before_storage(self, database: Database, repo: SQLiteAuditRepository):
+        """Test audit state secrets are masked before persistence."""
+        await database.initialize()
+        entry = AuditEntry(
+            entity_id="provider-1",
+            entity_type="provider",
+            action=AuditAction.UPDATED,
+            timestamp=datetime.now(UTC),
+            actor="system",
+            old_state={"env": {"GITHUB_TOKEN": "ghp_abc123", "PORT": "8080"}},
+            new_state={"env": {"GITHUB_TOKEN": "ghp_abc123", "PORT": "8080"}},
+        )
+
+        await repo.append(entry)
+
+        results = await repo.get_by_entity("provider-1")
+
+        assert len(results) == 1
+        result = results[0]
+        assert result.old_state is not None
+        assert result.new_state is not None
+        assert result.old_state["env"]["PORT"] == "8080"
+        assert result.new_state["env"]["PORT"] == "8080"
+        assert result.old_state["env"]["GITHUB_TOKEN"] != "ghp_abc123"
+        assert result.new_state["env"]["GITHUB_TOKEN"] != "ghp_abc123"
+        assert "*" in result.old_state["env"]["GITHUB_TOKEN"]
+        assert "*" in result.new_state["env"]["GITHUB_TOKEN"]
+
+    @pytest.mark.asyncio
     async def test_identity_fields_round_trip(self, database: Database, repo: SQLiteAuditRepository):
         """Test that identity fields survive SQLite insert and select."""
         await database.initialize()
@@ -569,9 +600,7 @@ class TestSQLiteAuditRepository:
         assert len(page2) == 2
 
     @pytest.mark.asyncio
-    async def test_get_by_caller_returns_empty_for_unknown_user(
-        self, database: Database, repo: SQLiteAuditRepository
-    ):
+    async def test_get_by_caller_returns_empty_for_unknown_user(self, database: Database, repo: SQLiteAuditRepository):
         """Test get_by_caller returns empty list for nonexistent caller."""
         await database.initialize()
 

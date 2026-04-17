@@ -2,10 +2,8 @@
 
 Uses ApplicationContext for dependency injection (DIP).
 
-Note: This module uses PROVIDERS and GROUPS from state.py for backward
-compatibility. The config is loaded during startup before context is
-fully initialized, so we populate the global collections which are then
-shared with ApplicationContext.
+Configuration mutates the shared runtime repository and group registry during
+startup so the rest of the server observes the same provider state.
 """
 
 import os
@@ -15,17 +13,21 @@ from typing import Any
 
 import yaml
 
+from ..domain.exceptions import ConfigurationError
 from ..domain.model import LoadBalancerStrategy, Provider, ProviderGroup
 from ..domain.security.input_validator import validate_provider_id
 from ..domain.value_objects.capabilities import ProviderCapabilities
 from ..logging_config import get_logger
 
-# Backward compatibility - config populates these collections
-# which are then shared with ApplicationContext
-from .state import get_group_rebalance_saga, GROUPS, PROVIDERS
+from .state import get_group_rebalance_saga, get_runtime, GROUPS
 from .tools.batch.concurrency import DEFAULT_GLOBAL_CONCURRENCY, DEFAULT_PROVIDER_CONCURRENCY, init_concurrency_manager
 
 logger = get_logger(__name__)
+
+
+def _provider_repository():
+    """Return the shared provider repository."""
+    return get_runtime().repository
 
 
 # Environment variable pattern: ${VAR_NAME} or ${VAR_NAME:-default}
@@ -50,7 +52,7 @@ def _interpolate_env_vars(config: dict[str, Any]) -> dict[str, Any]:
     def interpolate_value(value: Any) -> Any:
         if isinstance(value, str):
 
-            def replace_env_var(match: re.Match) -> str:
+            def replace_env_var(match: re.Match[str]) -> str:
                 var_name = match.group(1)
                 default = match.group(2)
                 env_value = os.environ.get(var_name)
@@ -58,12 +60,12 @@ def _interpolate_env_vars(config: dict[str, Any]) -> dict[str, Any]:
                     return env_value
                 if default is not None:
                     return default
-                logger.warning(
-                    "env_var_not_found",
-                    var_name=var_name,
-                    using_empty=True,
+                raise ConfigurationError(
+                    f"Required environment variable '${{{var_name}}}' is not set and has no default. "
+                    f"Use '${{{var_name}:-default}}' to provide a default value, "
+                    f"or '${{{var_name}:-}}' to explicitly allow an empty value.",
+                    details={"var_name": var_name},
                 )
-                return ""
 
             return _ENV_VAR_PATTERN.sub(replace_env_var, value)
         elif isinstance(value, dict):
@@ -165,8 +167,12 @@ def _load_group_members(
 
         # Use already-loaded provider if it exists (defined in top-level providers section).
         # Only create a new one from member_spec if not found.
-        if member_id in PROVIDERS:
-            member_provider = PROVIDERS[member_id]
+        repository = _provider_repository()
+        if repository.exists(member_id):
+            member_provider = repository.get(member_id)
+            if member_provider is None:
+                logger.warning("group_member_missing_after_exists_check", group_id=group_id, member_id=member_id)
+                continue
             logger.debug(
                 "group_member_resolved_from_providers",
                 group_id=group_id,
@@ -315,7 +321,7 @@ def _load_provider_config(provider_id: str, spec_dict: dict[str, Any]) -> Provid
         # Capability declarations
         capabilities=capabilities,
     )
-    PROVIDERS[provider_id] = provider
+    _provider_repository().add(provider_id, provider)
 
     # Register tool access policy if configured
     if tools_access_policy is not None:

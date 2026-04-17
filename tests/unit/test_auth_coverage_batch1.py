@@ -13,6 +13,7 @@ Targets uncovered branches in:
 import os
 import re
 import time
+from typing import cast
 from unittest.mock import patch
 
 import pytest
@@ -216,9 +217,8 @@ class TestInputValidatorExtended:
 
     def test_command_allowed_commands_whitelist(self):
         v = InputValidator(allowed_commands=["python"])
-        result = v.validate_command(["node", "app.js"])
-        assert not result.valid
-        assert any("allowed" in i.message.lower() for i in result.errors)
+        with pytest.raises(ValueError, match="allowed command list"):
+            v.validate_command(["node", "app.js"])
 
     def test_command_absolute_path_warning(self):
         v = InputValidator(allow_absolute_paths=False)
@@ -924,7 +924,7 @@ class TestSanitizerExtended:
 
     def test_sanitize_command_argument_non_string(self):
         s = Sanitizer()
-        result = s.sanitize_command_argument(42)
+        result = s.sanitize_command_argument(cast(str, cast(object, 42)))
         assert result == "42"
 
     def test_sanitize_command_argument_truncation(self):
@@ -960,7 +960,7 @@ class TestSanitizerExtended:
 
     def test_sanitize_environment_value_non_string(self):
         s = Sanitizer()
-        result = s.sanitize_environment_value(42)
+        result = s.sanitize_environment_value(cast(str, cast(object, 42)))
         assert result == "42"
 
     def test_sanitize_environment_value_truncation(self):
@@ -1001,7 +1001,7 @@ class TestSanitizerExtended:
 
     def test_sanitize_path_non_string(self):
         s = Sanitizer()
-        result = s.sanitize_path(42)
+        result = s.sanitize_path(cast(str, cast(object, 42)))
         assert result == "42"
 
     def test_sanitize_path_unicode_normalization(self):
@@ -1022,7 +1022,7 @@ class TestSanitizerExtended:
 
     def test_sanitize_log_message_non_string(self):
         s = Sanitizer()
-        result = s.sanitize_log_message(42)
+        result = s.sanitize_log_message(cast(str, cast(object, 42)))
         assert "42" in result
 
     def test_sanitize_log_message_crlf(self):
@@ -1063,7 +1063,7 @@ class TestSanitizerExtended:
 
     def test_escape_html(self):
         s = Sanitizer()
-        assert s.escape_html('<script>alert("xss")</script>') == '&lt;script&gt;alert(&quot;xss&quot;)&lt;/script&gt;'
+        assert s.escape_html('<script>alert("xss")</script>') == "&lt;script&gt;alert(&quot;xss&quot;)&lt;/script&gt;"
 
     def test_mask_value_empty(self):
         s = Sanitizer()
@@ -1222,6 +1222,7 @@ class TestRolesStub:
 
     def test_get_builtin_role(self):
         from mcp_hangar.domain.security.roles import get_builtin_role
+
         # Should return a Role or None
         result = get_builtin_role("nonexistent_role")
         # If enterprise roles exist it returns None for unknown; if fallback, always None
@@ -1229,6 +1230,7 @@ class TestRolesStub:
 
     def test_list_functions(self):
         from mcp_hangar.domain.security.roles import list_builtin_roles, list_permissions
+
         roles = list_builtin_roles()
         perms = list_permissions()
         assert isinstance(roles, list)
@@ -1236,7 +1238,8 @@ class TestRolesStub:
 
     def test_get_permission(self):
         from mcp_hangar.domain.security.roles import get_permission
+
         # get_permission takes a single key string, e.g. "providers:read"
         result = get_permission("providers:read")
         # Returns Permission or None
-        assert result is None or hasattr(result, "resource")
+        assert result is None or hasattr(result, "resource_type")

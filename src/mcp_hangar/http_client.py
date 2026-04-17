@@ -254,7 +254,7 @@ class HttpClient:
             headers=headers,
             verify=verify,
             transport=transport,
-            follow_redirects=True,
+            follow_redirects=False,  # SSRF prevention: redirects must be validated explicitly
         )
 
     def _build_headers(self) -> dict[str, str]:

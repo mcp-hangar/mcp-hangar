@@ -60,10 +60,9 @@ class DetectionEnforcementHandler:
             logger.exception("detection_enforcement_handler_error", error=str(exc))
 
     def _suspend_session(self, session_id: str, rule_id: str) -> None:
-        from ...server.api.sessions import _sessions_lock, _suspended_sessions
+        from ...server.api.sessions import _suspended_sessions
 
-        with _sessions_lock:
-            _suspended_sessions.add(session_id)
+        _suspended_sessions.add(session_id)
 
         logger.info("enforcement_session_suspended", session_id=session_id, rule_id=rule_id)
 

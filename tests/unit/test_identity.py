@@ -1,5 +1,7 @@
 """Tests for identity value objects, extractors, and propagation."""
 
+from dataclasses import FrozenInstanceError
+
 import pytest
 from mcp_hangar.domain.value_objects.identity import CallerIdentity, IdentityContext
 from mcp_hangar.infrastructure.identity.header_extractor import HeaderIdentityExtractor
@@ -62,8 +64,8 @@ class TestCallerIdentity:
             session_id=None,
             principal_type="user",
         )
-        with pytest.raises(AttributeError):
-            identity.user_id = "u2"  # type: ignore[misc]
+        with pytest.raises((AttributeError, FrozenInstanceError)):
+            setattr(identity, "user_id", "u2")
 
 
 class TestIdentityContext:
@@ -108,13 +110,15 @@ class TestHeaderIdentityExtractor:
 
     def test_extract_from_dict(self):
         extractor = HeaderIdentityExtractor()
-        ctx = extractor.extract({
-            "x-user-id": "user-42",
-            "x-agent-id": "agent-1",
-            "x-session-id": "sess-1",
-            "x-principal-type": "user",
-            "x-correlation-id": "corr-123",
-        })
+        ctx = extractor.extract(
+            {
+                "x-user-id": "user-42",
+                "x-agent-id": "agent-1",
+                "x-session-id": "sess-1",
+                "x-principal-type": "user",
+                "x-correlation-id": "corr-123",
+            }
+        )
         assert ctx is not None
         assert ctx.caller.user_id == "user-42"
         assert ctx.caller.agent_id == "agent-1"
@@ -125,10 +129,12 @@ class TestHeaderIdentityExtractor:
     def test_extract_from_tuple_list(self):
         """gRPC metadata comes as list of tuples."""
         extractor = HeaderIdentityExtractor()
-        ctx = extractor.extract([
-            ("X-User-Id", "user-1"),
-            ("X-Agent-Id", "agent-2"),
-        ])
+        ctx = extractor.extract(
+            [
+                ("X-User-Id", "user-1"),
+                ("X-Agent-Id", "agent-2"),
+            ]
+        )
         assert ctx is not None
         assert ctx.caller.user_id == "user-1"
         assert ctx.caller.agent_id == "agent-2"
@@ -145,19 +151,23 @@ class TestHeaderIdentityExtractor:
 
     def test_case_insensitive_headers(self):
         extractor = HeaderIdentityExtractor()
-        ctx = extractor.extract({
-            "X-USER-ID": "bob",
-            "X-AGENT-ID": "a1",
-        })
+        ctx = extractor.extract(
+            {
+                "X-USER-ID": "bob",
+                "X-AGENT-ID": "a1",
+            }
+        )
         assert ctx is not None
         assert ctx.caller.user_id == "bob"
 
     def test_invalid_principal_type_falls_back(self):
         extractor = HeaderIdentityExtractor()
-        ctx = extractor.extract({
-            "x-agent-id": "a1",
-            "x-principal-type": "invalid_type",
-        })
+        ctx = extractor.extract(
+            {
+                "x-agent-id": "a1",
+                "x-principal-type": "invalid_type",
+            }
+        )
         assert ctx is not None
         assert ctx.caller.principal_type == "anonymous"
 
@@ -166,10 +176,12 @@ class TestHeaderIdentityExtractor:
             user_id_header="X-Custom-User",
             agent_id_header="X-Custom-Agent",
         )
-        ctx = extractor.extract({
-            "X-Custom-User": "u1",
-            "X-Custom-Agent": "a1",
-        })
+        ctx = extractor.extract(
+            {
+                "X-Custom-User": "u1",
+                "X-Custom-Agent": "a1",
+            }
+        )
         assert ctx is not None
         assert ctx.caller.user_id == "u1"
         assert ctx.caller.agent_id == "a1"
@@ -181,6 +193,22 @@ class TestHeaderIdentityExtractor:
         assert ctx.caller.user_id is None
         assert ctx.caller.agent_id == "a1"
         assert ctx.caller.principal_type == "anonymous"
+
+    def test_trusted_proxy_allows_header_identity(self):
+        from mcp_hangar.infrastructure.identity.trusted_proxy import TrustedProxyResolver
+
+        extractor = HeaderIdentityExtractor(trusted_proxies=TrustedProxyResolver(frozenset({"10.0.0.0/8"})))
+        ctx = extractor.extract({"x-user-id": "alice"}, source_ip="10.1.2.3")
+
+        assert ctx is not None
+        assert ctx.caller.user_id == "alice"
+
+    def test_untrusted_source_rejects_header_identity(self):
+        from mcp_hangar.infrastructure.identity.trusted_proxy import TrustedProxyResolver
+
+        extractor = HeaderIdentityExtractor(trusted_proxies=TrustedProxyResolver(frozenset({"10.0.0.0/8"})))
+
+        assert extractor.extract({"x-user-id": "alice"}, source_ip="203.0.113.9") is None
 
 
 class TestJWTIdentityExtractor:
@@ -296,4 +324,3 @@ class TestIdentityContextvar:
 
         clear_request_context()
         assert get_identity_context() is None
-

@@ -11,6 +11,7 @@ import json
 from starlette.requests import Request
 from starlette.routing import Route
 
+from ...domain.exceptions import MissingCredentialsError
 from ...application.commands.commands import StartProviderCommand, StopProviderCommand
 from ...application.commands.crud_commands import (
     CreateProviderCommand,
@@ -25,8 +26,31 @@ from ...application.queries.queries import (
     ListProvidersQuery,
 )
 from ...infrastructure.persistence.log_buffer import get_log_buffer
+from ..context import get_context
 from .middleware import dispatch_command, dispatch_query
 from .serializers import HangarJSONResponse
+
+
+def _check_permission(request: Request, resource_type: str, action: str) -> None:
+    context = get_context()
+    auth_components = getattr(context, "auth_components", None)
+    authz_middleware = getattr(auth_components, "authz_middleware", None)
+
+    if authz_middleware is None:
+        return
+
+    auth_context = getattr(request.state, "auth", None)
+    principal = getattr(auth_context, "principal", None)
+
+    if principal is None or principal.is_anonymous():
+        raise MissingCredentialsError("Authentication required")
+
+    authz_middleware.authorize(
+        principal=principal,
+        action=action,
+        resource_type=resource_type,
+        resource_id="*",
+    )
 
 
 async def list_providers(request: Request) -> HangarJSONResponse:
@@ -38,6 +62,7 @@ async def list_providers(request: Request) -> HangarJSONResponse:
     Returns:
         JSON with {"providers": [...]} array of provider summaries.
     """
+    _check_permission(request, resource_type="providers", action="read")
     state = request.query_params.get("state")
     result = await dispatch_query(ListProvidersQuery(state_filter=state))
     return HangarJSONResponse({"providers": [p.to_dict() for p in result]})
@@ -52,6 +77,7 @@ async def get_provider(request: Request) -> HangarJSONResponse:
     Returns:
         JSON with provider details including tools and health.
     """
+    _check_permission(request, resource_type="providers", action="read")
     provider_id = request.path_params["provider_id"]
     result = await dispatch_query(GetProviderQuery(provider_id=provider_id))
     return HangarJSONResponse(result.to_dict())
@@ -66,6 +92,7 @@ async def start_provider(request: Request) -> HangarJSONResponse:
     Returns:
         JSON with start result.
     """
+    _check_permission(request, resource_type="providers", action="lifecycle")
     provider_id = request.path_params["provider_id"]
     result = await dispatch_command(StartProviderCommand(provider_id=provider_id))
     return HangarJSONResponse(result)
@@ -83,6 +110,7 @@ async def stop_provider(request: Request) -> HangarJSONResponse:
     Returns:
         JSON with stop result.
     """
+    _check_permission(request, resource_type="providers", action="lifecycle")
     provider_id = request.path_params["provider_id"]
     reason = "user_request"
     try:
@@ -104,6 +132,7 @@ async def block_provider(request: Request) -> HangarJSONResponse:
     Returns:
         JSON with provider block result.
     """
+    _check_permission(request, resource_type="providers", action="lifecycle")
     provider_id = request.path_params["provider_id"]
     await dispatch_command(StopProviderCommand(provider_id=provider_id, reason="detection_enforcement:block"))
     return HangarJSONResponse({"provider_id": provider_id, "blocked": True})
@@ -118,6 +147,7 @@ async def get_provider_tools(request: Request) -> HangarJSONResponse:
     Returns:
         JSON with {"tools": [...]} array of tool info.
     """
+    _check_permission(request, resource_type="providers", action="read")
     provider_id = request.path_params["provider_id"]
     result = await dispatch_query(GetProviderToolsQuery(provider_id=provider_id))
     return HangarJSONResponse({"tools": [t.to_dict() for t in result]})
@@ -132,6 +162,7 @@ async def get_provider_health(request: Request) -> HangarJSONResponse:
     Returns:
         JSON with health status information.
     """
+    _check_permission(request, resource_type="providers", action="read")
     provider_id = request.path_params["provider_id"]
     result = await dispatch_query(GetProviderHealthQuery(provider_id=provider_id))
     return HangarJSONResponse(result.to_dict())
@@ -150,6 +181,7 @@ async def get_provider_logs(request: Request) -> HangarJSONResponse:
         Returns an empty list if the provider exists but has no log buffer yet.
         Returns 404 if the provider is not registered.
     """
+    _check_permission(request, resource_type="providers", action="read")
     provider_id = request.path_params["provider_id"]
     try:
         lines = int(request.query_params.get("lines", 100))
@@ -181,6 +213,7 @@ async def get_provider_tool_history(request: Request) -> HangarJSONResponse:
     Returns:
         JSON with {"provider_id": ..., "history": [...], "total": int}.
     """
+    _check_permission(request, resource_type="providers", action="read")
     provider_id = request.path_params["provider_id"]
     try:
         limit = int(request.query_params.get("limit", 100))
@@ -223,21 +256,27 @@ async def create_provider(request: Request) -> HangarJSONResponse:
     Raises:
         ValidationError: If provider_id already exists (-> 422).
     """
+    _check_permission(request, resource_type="providers", action="write")
     body = await request.json()
-    result = await dispatch_command(
-        CreateProviderCommand(
-            provider_id=body["provider_id"],
-            mode=body["mode"],
-            command=body.get("command"),
-            image=body.get("image"),
-            endpoint=body.get("endpoint"),
-            env=body.get("env", {}),
-            idle_ttl_s=body.get("idle_ttl_s", 300),
-            health_check_interval_s=body.get("health_check_interval_s", 60),
-            description=body.get("description"),
-            source="api",
+    try:
+        result = await dispatch_command(
+            CreateProviderCommand(
+                provider_id=body["provider_id"],
+                mode=body["mode"],
+                command=body.get("command"),
+                image=body.get("image"),
+                endpoint=body.get("endpoint"),
+                env=body.get("env", {}),
+                idle_ttl_s=body.get("idle_ttl_s", 300),
+                health_check_interval_s=body.get("health_check_interval_s", 60),
+                description=body.get("description"),
+                source="api",
+            )
         )
-    )
+    except ValueError as exc:
+        if str(exc) == "SSRF blocked: endpoint resolves to private address":
+            return HangarJSONResponse({"error": "ssrf_blocked"}, status_code=400)
+        raise
     return HangarJSONResponse(result, status_code=201)
 
 
@@ -259,6 +298,7 @@ async def update_provider(request: Request) -> HangarJSONResponse:
     Raises:
         ProviderNotFoundError: If provider does not exist (-> 404).
     """
+    _check_permission(request, resource_type="providers", action="write")
     provider_id = request.path_params["provider_id"]
     body = await request.json()
     result = await dispatch_command(
@@ -286,6 +326,7 @@ async def delete_provider(request: Request) -> HangarJSONResponse:
     Raises:
         ProviderNotFoundError: If provider does not exist (-> 404).
     """
+    _check_permission(request, resource_type="providers", action="lifecycle")
     provider_id = request.path_params["provider_id"]
     result = await dispatch_command(
         DeleteProviderCommand(
@@ -301,7 +342,7 @@ provider_routes = [
     Route("/", list_providers, methods=["GET"]),
     Route("/", create_provider, methods=["POST"]),
     Route("/{provider_id:str}", get_provider, methods=["GET"]),
-    Route("/{provider_id:str}", update_provider, methods=["PUT"]),
+    Route("/{provider_id:str}", update_provider, methods=["PUT", "PATCH"]),
     Route("/{provider_id:str}", delete_provider, methods=["DELETE"]),
     Route("/{provider_id:str}/start", start_provider, methods=["POST"]),
     Route("/{provider_id:str}/stop", stop_provider, methods=["POST"]),

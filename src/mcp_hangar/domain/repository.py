@@ -6,11 +6,11 @@ allowing the persistence mechanism to change without affecting business code.
 """
 
 from abc import ABC, abstractmethod
+from collections.abc import Callable
 import threading
-from typing import Any, TYPE_CHECKING
+from typing import Any
 
-if TYPE_CHECKING:
-    from ..infrastructure.lock_hierarchy import TrackedLock
+from mcp_hangar.domain.contracts.lock import ILock
 
 # Type alias for provider-like objects (Provider aggregate)
 ProviderLike = Any
@@ -128,23 +128,23 @@ class InMemoryProviderRepository(IProviderRepository):
     - Safe for concurrent access from multiple threads
     """
 
-    def __init__(self):
+    def __init__(self, lock_factory: Callable[[], ILock] = threading.Lock):
         """Initialize empty in-memory repository."""
         self._providers: dict[str, ProviderLike] = {}
-        # Lock hierarchy level: REPOSITORY (31)
-        # Safe to acquire after: PROVIDER, PROVIDER_GROUP, EVENT_BUS
-        # Safe to acquire before: SAGA_MANAGER, STDIO_CLIENT
-        self._lock = self._create_lock()
+        self._lock: ILock = self._create_lock(lock_factory)
 
     @staticmethod
-    def _create_lock() -> "TrackedLock | threading.RLock":
-        """Create lock with hierarchy tracking."""
+    def _create_lock(lock_factory: Callable[[], ILock]) -> ILock:
+        """Create repository lock, preserving tracked-lock defaults."""
+        if lock_factory is not threading.Lock:
+            return lock_factory()
+
         try:
             from ..infrastructure.lock_hierarchy import LockLevel, TrackedLock
 
             return TrackedLock(LockLevel.REPOSITORY, "InMemoryProviderRepository")
         except ImportError:
-            return threading.RLock()
+            return lock_factory()
 
     def add(self, provider_id: str, provider: ProviderLike) -> None:
         """Add or update a provider in the repository.

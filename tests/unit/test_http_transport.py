@@ -289,7 +289,7 @@ class TestHttpLauncher:
 
     def test_validate_endpoint_valid_https(self):
         """Should accept valid HTTPS endpoint."""
-        from mcp_hangar.domain.services.provider_launcher import HttpLauncher
+        from mcp_hangar.infrastructure.launchers import HttpLauncher
 
         launcher = HttpLauncher()
         # Should not raise
@@ -297,7 +297,7 @@ class TestHttpLauncher:
 
     def test_validate_endpoint_valid_http(self):
         """Should accept valid HTTP endpoint."""
-        from mcp_hangar.domain.services.provider_launcher import HttpLauncher
+        from mcp_hangar.infrastructure.launchers import HttpLauncher
 
         launcher = HttpLauncher()
         launcher._validate_endpoint("http://localhost:8080")
@@ -305,7 +305,7 @@ class TestHttpLauncher:
     def test_validate_endpoint_missing_scheme(self):
         """Should reject endpoint without scheme."""
         from mcp_hangar.domain.exceptions import ValidationError
-        from mcp_hangar.domain.services.provider_launcher import HttpLauncher
+        from mcp_hangar.infrastructure.launchers import HttpLauncher
 
         launcher = HttpLauncher()
         with pytest.raises(ValidationError, match="scheme"):
@@ -314,7 +314,7 @@ class TestHttpLauncher:
     def test_validate_endpoint_invalid_scheme(self):
         """Should reject endpoint with unsupported scheme."""
         from mcp_hangar.domain.exceptions import ValidationError
-        from mcp_hangar.domain.services.provider_launcher import HttpLauncher
+        from mcp_hangar.infrastructure.launchers import HttpLauncher
 
         launcher = HttpLauncher()
         with pytest.raises(ValidationError, match="Unsupported endpoint scheme"):
@@ -323,7 +323,7 @@ class TestHttpLauncher:
     def test_validate_endpoint_empty(self):
         """Should reject empty endpoint."""
         from mcp_hangar.domain.exceptions import ValidationError
-        from mcp_hangar.domain.services.provider_launcher import HttpLauncher
+        from mcp_hangar.infrastructure.launchers import HttpLauncher
 
         launcher = HttpLauncher()
         with pytest.raises(ValidationError, match="required"):
@@ -332,7 +332,7 @@ class TestHttpLauncher:
     @patch("mcp_hangar.http_client.HttpClient")
     def test_launch_creates_http_client(self, mock_client_class):
         """Should create HttpClient with correct configuration."""
-        from mcp_hangar.domain.services.provider_launcher import HttpLauncher
+        from mcp_hangar.infrastructure.launchers import HttpLauncher
 
         mock_client = Mock()
         mock_client_class.return_value = mock_client
@@ -349,7 +349,7 @@ class TestHttpLauncher:
     @patch("mcp_hangar.http_client.HttpClient")
     def test_launch_with_tls_config(self, mock_client_class):
         """Should pass TLS configuration to HttpClient."""
-        from mcp_hangar.domain.services.provider_launcher import HttpLauncher
+        from mcp_hangar.infrastructure.launchers import HttpLauncher
 
         mock_client = Mock()
         mock_client_class.return_value = mock_client
@@ -371,21 +371,21 @@ class TestGetLauncher:
 
     def test_get_launcher_remote(self):
         """Should return HttpLauncher for remote mode."""
-        from mcp_hangar.domain.services.provider_launcher import get_launcher, HttpLauncher
+        from mcp_hangar.infrastructure.launchers import get_launcher, HttpLauncher
 
         launcher = get_launcher("remote")
         assert isinstance(launcher, HttpLauncher)
 
     def test_get_launcher_subprocess(self):
         """Should return SubprocessLauncher for subprocess mode."""
-        from mcp_hangar.domain.services.provider_launcher import get_launcher, SubprocessLauncher
+        from mcp_hangar.infrastructure.launchers import get_launcher, SubprocessLauncher
 
         launcher = get_launcher("subprocess")
         assert isinstance(launcher, SubprocessLauncher)
 
     def test_get_launcher_invalid_mode(self):
         """Should raise ValueError for invalid mode."""
-        from mcp_hangar.domain.services.provider_launcher import get_launcher
+        from mcp_hangar.infrastructure.launchers import get_launcher
 
         with pytest.raises(ValueError, match="unsupported_mode"):
             get_launcher("invalid_mode")

@@ -113,18 +113,20 @@ class TestLoadConfig:
     @pytest.fixture(autouse=True)
     def reset_globals(self):
         """Reset global state before and after each test."""
-        from mcp_hangar.server.state import GROUPS, PROVIDERS
+        from mcp_hangar.server.state import get_runtime, GROUPS
+
+        repository = get_runtime().repository
 
         # Store original state
-        original_providers = dict(PROVIDERS._repo._providers) if hasattr(PROVIDERS, "_repo") else {}
+        original_providers = repository.get_all()
         original_groups = dict(GROUPS)
 
         yield
 
         # Restore original state
-        if hasattr(PROVIDERS, "_repo"):
-            PROVIDERS._repo._providers.clear()
-            PROVIDERS._repo._providers.update(original_providers)
+        repository.clear()
+        for provider_id, provider in original_providers.items():
+            repository.add(provider_id, provider)
         GROUPS.clear()
         GROUPS.update(original_groups)
 
@@ -139,9 +141,9 @@ class TestLoadConfig:
 
         load_config(config)
 
-        from mcp_hangar.server.state import PROVIDERS
+        from mcp_hangar.server.state import get_runtime
 
-        assert "test-subprocess" in PROVIDERS
+        assert get_runtime().repository.exists("test-subprocess")
 
     def test_loads_container_provider(self):
         """Should load container provider configuration."""
@@ -154,9 +156,9 @@ class TestLoadConfig:
 
         load_config(config)
 
-        from mcp_hangar.server.state import PROVIDERS
+        from mcp_hangar.server.state import get_runtime
 
-        assert "test-container" in PROVIDERS
+        assert get_runtime().repository.exists("test-container")
 
     def test_skips_invalid_provider_id(self):
         """Should skip providers with invalid IDs."""
@@ -180,11 +182,12 @@ class TestLoadConfig:
 
         load_config(config)
 
-        from mcp_hangar.server.state import PROVIDERS
+        from mcp_hangar.server.state import get_runtime
 
-        assert "provider1" in PROVIDERS
-        assert "provider2" in PROVIDERS
-        assert "provider3" in PROVIDERS
+        repository = get_runtime().repository
+        assert repository.exists("provider1")
+        assert repository.exists("provider2")
+        assert repository.exists("provider3")
 
 
 class TestLoadConfiguration:

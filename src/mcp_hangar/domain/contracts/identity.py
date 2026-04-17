@@ -7,7 +7,11 @@ from mcp_hangar.domain.value_objects.identity import IdentityContext
 class IIdentityExtractor(Protocol):
     """Extracts identity from raw request metadata/headers."""
 
-    def extract(self, metadata: list[tuple[str, str]] | dict[str, str] | None) -> IdentityContext | None:
+    def extract(
+        self,
+        metadata: list[tuple[str, str]] | dict[str, str] | None,
+        source_ip: str | None = None,
+    ) -> IdentityContext | None:
         """Extract identity context. Returns None if not present or unauthenticated."""
         ...
 

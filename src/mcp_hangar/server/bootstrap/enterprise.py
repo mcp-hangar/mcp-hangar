@@ -1,15 +1,15 @@
 """Enterprise module loading, gated by license tier.
 
-This module centralizes all enterprise package imports into a single
-``load_enterprise_modules()`` function.  The caller provides the validated
-:class:`LicenseTier` and receives an :class:`EnterpriseComponents` container
-whose fields are ``None`` for any modules that are unavailable (wrong tier or
-package not installed).
-
-MIT licensed -- all ``enterprise.*`` imports MUST be inside ``try/except
-ImportError`` blocks so the CI import-boundary check passes.
+This module discovers enterprise bootstrap loaders through Python entry points
+instead of importing ``enterprise.*`` modules directly from core code. The
+caller provides the validated :class:`LicenseTier` and receives an
+:class:`EnterpriseComponents` container whose fields are ``None`` when no
+enterprise plugin is installed.
 """
 
+# pyright: reportExplicitAny=false, reportAny=false, reportMissingTypeArgument=false, reportUnknownParameterType=false, reportUnknownVariableType=false
+
+import importlib.metadata
 from dataclasses import dataclass
 from typing import Any
 
@@ -17,6 +17,7 @@ from ...domain.value_objects.license import LicenseTier
 from ...logging_config import get_logger
 
 logger = get_logger(__name__)
+ENTERPRISE_ENTRY_POINT_GROUP = "mcp_hangar.enterprise"
 
 
 @dataclass
@@ -28,9 +29,17 @@ class EnterpriseComponents:
     approval_service: Any = None
 
 
+def _merge_enterprise_components(base: EnterpriseComponents, loaded: EnterpriseComponents) -> None:
+    """Merge plugin-provided enterprise components into the result container."""
+    if loaded.auth_components is not None:
+        base.auth_components = loaded.auth_components
+    if loaded.approval_service is not None:
+        base.approval_service = loaded.approval_service
+
+
 def load_enterprise_modules(
     tier: LicenseTier,
-    config: dict,
+    config: dict[str, Any],
     event_bus: Any = None,
     event_publisher: Any = None,
 ) -> EnterpriseComponents:
@@ -54,39 +63,31 @@ def load_enterprise_modules(
         logger.info("enterprise_modules_skipped", tier="community")
         return components
 
-    # -- Auth modules (PRO and ENTERPRISE) --
-    if tier.includes_auth():
-        try:
-            from enterprise.auth.bootstrap import bootstrap_auth
-            from enterprise.auth.config import parse_auth_config
+    entry_points = tuple(importlib.metadata.entry_points(group=ENTERPRISE_ENTRY_POINT_GROUP))
+    if not entry_points:
+        logger.info("enterprise_modules_unavailable", tier=tier.value, reason="no_entry_points_registered")
+        return components
 
-            auth_config = parse_auth_config(config.get("auth"))
-            components.auth_components = bootstrap_auth(
-                config=auth_config,
-                event_publisher=event_publisher,
+    for entry_point in entry_points:
+        loader = entry_point.load()
+        loaded_components = loader(tier, config, event_bus, event_publisher)
+        if not isinstance(loaded_components, EnterpriseComponents):
+            msg = (
+                f"Enterprise loader '{entry_point.name}' returned {type(loaded_components).__name__}; "
+                "expected EnterpriseComponents"
             )
-        except ImportError:
-            logger.warning("enterprise_auth_not_installed", tier=tier.value)
-
-    # -- Approval gate (ENTERPRISE only) --
-    if tier == LicenseTier.ENTERPRISE:
-        try:
-            from enterprise.approvals.bootstrap import bootstrap_approvals
-            from ...infrastructure.persistence.database import Database, DatabaseConfig
-
-            approval_db = Database(DatabaseConfig(path="data/approvals.db"))
-            components.approval_service = bootstrap_approvals(
-                database=approval_db,
-                event_bus=event_bus,
-                config=config,
-            )
-        except ImportError:
-            logger.warning("enterprise_approvals_not_installed", tier=tier.value)
+            raise TypeError(msg)
+        _merge_enterprise_components(components, loaded_components)
 
     loaded_flags = {
         "auth": components.auth_components is not None,
         "approvals": components.approval_service is not None,
     }
-    logger.info("enterprise_modules_loaded", tier=tier.value, **loaded_flags)
+    logger.info(
+        "enterprise_modules_loaded",
+        tier=tier.value,
+        entry_points=[entry_point.name for entry_point in entry_points],
+        **loaded_flags,
+    )
 
     return components

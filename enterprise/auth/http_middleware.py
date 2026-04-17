@@ -1,21 +1,41 @@
-"""Starlette/FastAPI middleware for authentication.
+"""Enterprise HTTP authentication adapter.
 
-Integrates auth middleware with HTTP frameworks.
+This middleware is the HTTP-facing auth enforcement path for enterprise API
+requests. It reuses the core ``mcp_hangar.infrastructure.identity`` request
+normalization helpers to extract headers/source IP consistently with
+``IdentityMiddleware``, then performs authentication and stores the resulting
+``AuthContext`` on ``request.state`` for downstream authorization checks.
 """
 
+# pyright: reportImplicitOverride=false
+
+from __future__ import annotations
+
 from starlette.middleware.base import BaseHTTPMiddleware
+from starlette.middleware.base import RequestResponseEndpoint
 from starlette.requests import Request
-from starlette.responses import JSONResponse
+from starlette.responses import JSONResponse, Response
+from starlette.types import ASGIApp
 
 from mcp_hangar.domain.contracts.authentication import AuthRequest
 from mcp_hangar.domain.exceptions import AccessDeniedError, AuthenticationError
-from enterprise.auth.infrastructure.middleware import AuthenticationMiddleware
+from mcp_hangar.domain.value_objects import Principal
+from mcp_hangar.infrastructure.identity import TrustedProxyResolver, normalize_http_headers, resolve_source_ip
+from mcp_hangar.logging_config import get_logger
+from enterprise.auth.infrastructure.middleware import AuthContext, AuthenticationMiddleware
+
+logger = get_logger(__name__)
 
 
 class AuthMiddlewareHTTP(BaseHTTPMiddleware):
-    """Starlette middleware for HTTP authentication.
+    """Starlette middleware for enterprise HTTP authentication.
 
-    Authenticates incoming requests and attaches auth context to request.state.
+    This middleware shares request metadata extraction with
+    ``mcp_hangar.infrastructure.identity.middleware.IdentityMiddleware`` so
+    there is a single normalization path. It then adds enterprise-specific
+    authentication enforcement and attaches ``request.state.auth`` for
+    downstream authorization.
+
     Skips authentication for configured paths (health, metrics, etc.).
 
     Usage:
@@ -32,12 +52,16 @@ class AuthMiddlewareHTTP(BaseHTTPMiddleware):
             principal = auth_context.principal
     """
 
+    _authn: AuthenticationMiddleware
+    _skip_paths: list[str]
+    _trusted_proxies: TrustedProxyResolver
+
     def __init__(
         self,
-        app,
+        app: ASGIApp,
         authn: AuthenticationMiddleware,
         skip_paths: list[str] | None = None,
-    ):
+    ) -> None:
         """Initialize the HTTP auth middleware.
 
         Args:
@@ -48,9 +72,9 @@ class AuthMiddlewareHTTP(BaseHTTPMiddleware):
         super().__init__(app)
         self._authn = authn
         self._skip_paths = skip_paths or ["/health", "/ready", "/_ready", "/metrics"]
-        self._trusted_proxies: set[str] = set()
+        self._trusted_proxies = TrustedProxyResolver()
 
-    async def dispatch(self, request: Request, call_next):
+    async def dispatch(self, request: Request, call_next: RequestResponseEndpoint) -> Response:
         """Process request through authentication middleware.
 
         Args:
@@ -105,29 +129,25 @@ class AuthMiddlewareHTTP(BaseHTTPMiddleware):
         Returns:
             AuthRequest for the authentication middleware.
         """
-        # Get client IP from socket
-        source_ip = "unknown"
-        if request.client:
-            source_ip = request.client.host
-
-        # Only trust X-Forwarded-For if request comes from a trusted proxy
-        # This prevents IP spoofing attacks
-        if source_ip in self._trusted_proxies:
-            forwarded_for = request.headers.get("x-forwarded-for")
-            if forwarded_for:
-                # Take the first IP in the chain (original client)
-                # Note: In a chain of proxies, you may need to take a different position
-                source_ip = forwarded_for.split(",")[0].strip()
+        headers = normalize_http_headers(request.headers)
+        source_ip = (
+            resolve_source_ip(
+                headers=headers,
+                client_host=request.client.host if request.client else None,
+                trusted_proxies=self._trusted_proxies,
+            )
+            or "unknown"
+        )
 
         return AuthRequest(
-            headers=dict(request.headers),
+            headers=headers,
             source_ip=source_ip,
             method=request.method,
             path=request.url.path,
         )
 
 
-def get_principal_from_request(request: Request):
+def get_principal_from_request(request: Request) -> Principal | None:
     """Get authenticated principal from request.
 
     Helper function to extract principal from request state.
@@ -140,11 +160,11 @@ def get_principal_from_request(request: Request):
     """
     auth_context = getattr(request.state, "auth", None)
     if auth_context:
-        return auth_context.principal
+        return auth_context.principal if isinstance(auth_context, AuthContext) else None
     return None
 
 
-def require_auth(request: Request):
+def require_auth(request: Request) -> Principal:
     """Require authentication for a request.
 
     Helper function that raises if request is not authenticated.

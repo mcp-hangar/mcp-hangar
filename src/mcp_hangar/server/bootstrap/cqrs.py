@@ -14,7 +14,7 @@ from ...infrastructure.saga_manager import get_saga_manager
 from ...logging_config import get_logger
 from ..config import ServerConfigLoader
 from ..context import get_context
-from ..state import GROUPS, RUNTIME_PROVIDERS, set_group_rebalance_saga
+from ..state import get_runtime, GROUPS, RUNTIME_PROVIDERS, set_group_rebalance_saga
 
 if TYPE_CHECKING:
     from ...bootstrap.runtime import Runtime
@@ -36,11 +36,12 @@ def init_cqrs(
             discovery source management handlers.
     """
     from ...application.commands.crud_handlers import register_crud_handlers
-    from ..state import PROVIDER_REPOSITORY
+
+    repository = get_runtime().repository
 
     register_command_handlers(
         runtime.command_bus,
-        PROVIDER_REPOSITORY,
+        repository,
         runtime.event_bus,
         current_config_path,
         config_loader=ServerConfigLoader(),
@@ -49,11 +50,11 @@ def init_cqrs(
     )
     register_query_handlers(
         runtime.query_bus,
-        PROVIDER_REPOSITORY,
+        repository,
         runtime_store=RUNTIME_PROVIDERS,
         event_store=get_event_store(),
     )
-    register_crud_handlers(runtime.command_bus, PROVIDER_REPOSITORY, runtime.event_bus, GROUPS)
+    register_crud_handlers(runtime.command_bus, repository, runtime.event_bus, GROUPS)
 
     if discovery_registry is not None:
         from ...application.commands.discovery_handlers import register_discovery_handlers

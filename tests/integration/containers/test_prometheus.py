@@ -18,7 +18,6 @@ class TestMetricsFormat:
     """Tests for Prometheus metrics format (unit tests, no container needed)."""
 
     def test_counter_and_gauge_exported(self) -> None:
-        """Counter and Gauge metrics are exported in Prometheus format."""
         from mcp_hangar.metrics import Counter, Gauge, REGISTRY
 
         test_counter = Counter(
@@ -26,23 +25,28 @@ class TestMetricsFormat:
             description="Test counter",
             labels=["method"],
         )
-        test_counter.inc(labels={"method": "GET"})
-        test_counter.inc(labels={"method": "POST"})
-
         test_gauge = Gauge(
             name="test_prom_active_connections",
             description="Test gauge",
             labels=["service"],
         )
-        test_gauge.set(5, labels={"service": "api"})
 
-        metrics_output = REGISTRY.get_metrics_output()
+        REGISTRY.register(test_counter)
+        REGISTRY.register(test_gauge)
+        try:
+            test_counter.inc(labels={"method": "GET"})
+            test_counter.inc(labels={"method": "POST"})
+            test_gauge.set(5, labels={"service": "api"})
 
-        assert "test_prom_requests_total" in metrics_output
-        assert "test_prom_active_connections" in metrics_output
+            metrics_output = REGISTRY.get_metrics_output()
+
+            assert "test_prom_requests_total" in metrics_output
+            assert "test_prom_active_connections" in metrics_output
+        finally:
+            REGISTRY.unregister("test_prom_requests_total")
+            REGISTRY.unregister("test_prom_active_connections")
 
     def test_histogram_buckets_exported(self) -> None:
-        """Histogram buckets are correctly exported."""
         from mcp_hangar.metrics import Histogram, REGISTRY
 
         test_histogram = Histogram(
@@ -52,12 +56,16 @@ class TestMetricsFormat:
             buckets=(0.1, 0.5, 1.0, 5.0),
         )
 
-        test_histogram.observe(0.05, labels={"operation": "fast"})
-        test_histogram.observe(2.0, labels={"operation": "slow"})
+        REGISTRY.register(test_histogram)
+        try:
+            test_histogram.observe(0.05, labels={"operation": "fast"})
+            test_histogram.observe(2.0, labels={"operation": "slow"})
 
-        metrics_output = REGISTRY.get_metrics_output()
+            metrics_output = REGISTRY.get_metrics_output()
 
-        assert "test_prom_latency_seconds_bucket" in metrics_output
+            assert "test_prom_latency_seconds_bucket" in metrics_output
+        finally:
+            REGISTRY.unregister("test_prom_latency_seconds")
 
 
 class TestPrometheusServerIntegration:
@@ -68,8 +76,6 @@ class TestPrometheusServerIntegration:
         prometheus_container: dict,
         http_client,
     ) -> None:
-        """Prometheus API is accessible and responds correctly."""
-        # Test runtime info
         response = http_client.get(f"{prometheus_container['url']}/api/v1/status/runtimeinfo")
 
         if response.status_code != 200:
@@ -78,7 +84,6 @@ class TestPrometheusServerIntegration:
         data = response.json()
         assert data["status"] == "success"
 
-        # Test query API
         response = http_client.get(
             f"{prometheus_container['url']}/api/v1/query",
             params={"query": "up"},
@@ -86,7 +91,6 @@ class TestPrometheusServerIntegration:
         assert response.status_code == 200
         assert response.json()["status"] == "success"
 
-        # Test targets API
         response = http_client.get(f"{prometheus_container['url']}/api/v1/targets")
         assert response.status_code == 200
 
@@ -95,13 +99,11 @@ class TestObservabilityMetrics:
     """Tests for MCP Hangar observability metrics (unit tests)."""
 
     def test_observability_metrics_recorded(self) -> None:
-        """Observability metrics are recorded correctly."""
         from mcp_hangar.metrics import REGISTRY
         from mcp_hangar.observability.metrics import get_observability_metrics
 
         metrics = get_observability_metrics()
 
-        # Record various metrics
         metrics.retry_attempts.inc(
             labels={
                 "provider": "prom-test",

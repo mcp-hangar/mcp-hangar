@@ -39,8 +39,15 @@ from .bootstrap import (
 from .cli.cli_compat import CLIConfig, parse_args
 from .config import load_config, load_config_from_file, load_configuration
 from .lifecycle import run_server, ServerLifecycle
-from .state import COMMAND_BUS, EVENT_BUS, get_runtime, GROUPS, PROVIDER_REPOSITORY, PROVIDERS, QUERY_BUS
+from .state import get_runtime, GROUPS
 from .tools import hangar_list
+
+if False:
+    COMMAND_BUS = None
+    EVENT_BUS = None
+    PROVIDER_REPOSITORY = None
+    PROVIDERS = None
+    QUERY_BUS = None
 
 
 def main():
@@ -75,6 +82,24 @@ def cli_main():
 # FastMCP server instance for backward compatibility
 # Note: This is lazily created by bootstrap() now
 mcp = FastMCP("mcp-hangar")
+
+_STATE_EXPORTS = {
+    "PROVIDERS",
+    "PROVIDER_REPOSITORY",
+    "COMMAND_BUS",
+    "QUERY_BUS",
+    "EVENT_BUS",
+}
+
+
+def __getattr__(name: str):
+    """Lazily re-export deprecated state symbols."""
+    if name in _STATE_EXPORTS:
+        from . import state as _state
+
+        return getattr(_state, name)
+    msg = f"module {__name__!r} has no attribute {name!r}"
+    raise AttributeError(msg)
 
 
 __all__ = [

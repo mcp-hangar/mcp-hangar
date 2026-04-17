@@ -4,7 +4,7 @@ from typing import Any
 
 from ...gc import BackgroundWorker, MetricsSnapshotWorker
 from ...logging_config import get_logger
-from ..state import PROVIDERS
+from ..state import get_runtime
 
 logger = get_logger(__name__)
 
@@ -19,7 +19,7 @@ METRICS_SNAPSHOT_INTERVAL_SECONDS = 60
 
 
 def create_background_workers(
-    config: dict | None = None,
+    config: dict[str, Any] | None = None,
 ) -> list[BackgroundWorker | MetricsSnapshotWorker]:
     """Create (but don't start) background workers.
 
@@ -29,14 +29,16 @@ def create_background_workers(
     Returns:
         List of worker instances (not started).
     """
+    providers = get_runtime().repository
+
     gc_worker = BackgroundWorker(
-        PROVIDERS,
+        providers,
         interval_s=GC_WORKER_INTERVAL_SECONDS,
         task="gc",
     )
 
     health_worker = BackgroundWorker(
-        PROVIDERS,
+        providers,
         interval_s=HEALTH_CHECK_INTERVAL_SECONDS,
         task="health_check",
     )

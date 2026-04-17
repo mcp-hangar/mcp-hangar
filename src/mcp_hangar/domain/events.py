@@ -1,3 +1,5 @@
+# pyright: reportExplicitAny=false
+
 """Domain events for MCP Hangar.
 
 Events capture important business occurrences and allow decoupled reactions.
@@ -5,6 +7,7 @@ Events capture important business occurrences and allow decoupled reactions.
 
 from abc import ABC
 from dataclasses import dataclass, field
+from datetime import datetime
 import time
 from typing import Any
 import uuid
@@ -371,6 +374,18 @@ class AuthorizationGranted(DomainEvent):
 
 
 @dataclass
+class PolicyPushRejected(DomainEvent):
+    """Published when a policy push request is rejected."""
+
+    principal_id: str
+    reason: str
+    timestamp: datetime
+
+    def __post_init__(self):
+        super().__init__()
+
+
+@dataclass
 class RoleAssigned(DomainEvent):
     """Published when a role is assigned to a principal.
 
@@ -557,8 +572,8 @@ class QuotaUpdated(DomainEvent):
     """Published when tenant quotas are updated."""
 
     tenant_id: str
-    old_quotas: dict
-    new_quotas: dict
+    old_quotas: dict[str, Any]
+    new_quotas: dict[str, Any]
     updated_by: str
 
     def __post_init__(self):

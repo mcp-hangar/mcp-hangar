@@ -9,10 +9,13 @@ import json
 import threading
 
 from ...domain.contracts.persistence import AuditAction, AuditEntry, PersistenceError
+from ...domain.security.secrets import SecretsMask
 from ...logging_config import get_logger
 from .database import Database
 
 logger = get_logger(__name__)
+
+_AUDIT_SECRETS_MASK = SecretsMask()
 
 
 class InMemoryAuditRepository:
@@ -84,7 +87,7 @@ class InMemoryAuditRepository:
     async def get_by_correlation_id(self, correlation_id: str) -> list[AuditEntry]:
         """Get all audit entries for a correlation ID."""
         with self._lock:
-            filtered = [e for e in self._entries if e.correlation_id == correlation_id]
+            filtered = [e for e in self._entries if e.correlation_id is not None and e.correlation_id == correlation_id]
             filtered.sort(key=lambda e: e.timestamp)
             return filtered
 
@@ -163,8 +166,12 @@ class SQLiteAuditRepository:
                         entry.action.value,
                         entry.actor,
                         entry.timestamp.isoformat(),
-                        json.dumps(entry.old_state) if entry.old_state else None,
-                        json.dumps(entry.new_state) if entry.new_state else None,
+                        json.dumps(_AUDIT_SECRETS_MASK.mask_dict(entry.old_state, recursive=True))
+                        if entry.old_state
+                        else None,
+                        json.dumps(_AUDIT_SECRETS_MASK.mask_dict(entry.new_state, recursive=True))
+                        if entry.new_state
+                        else None,
                         json.dumps(entry.metadata) if entry.metadata else None,
                         entry.correlation_id,
                         entry.caller_user_id,
@@ -263,7 +270,7 @@ class SQLiteAuditRepository:
                     FROM audit_log
                     WHERE timestamp BETWEEN ? AND ?
                 """
-                params: list = [start.isoformat(), end.isoformat()]
+                params: list[str | int] = [start.isoformat(), end.isoformat()]
 
                 if entity_type:
                     query += " AND entity_type = ?"
@@ -416,7 +423,7 @@ class SQLiteAuditRepository:
                     FROM audit_log
                     WHERE caller_user_id = ?
                 """
-                params: list = [caller_user_id]
+                params: list[str | int] = [caller_user_id]
 
                 if action:
                     query += " AND action = ?"

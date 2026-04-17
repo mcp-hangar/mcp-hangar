@@ -119,8 +119,10 @@ class ProviderRuntime(
     - domain aggregate: `mcp_hangar.domain.model.Provider`
     """
 
-    # No additional members beyond the composed protocols.
-    ...
+    @property
+    def provider_id(self) -> Any:
+        """Stable provider identifier used by runtime management code."""
+        ...
 
 
 @runtime_checkable

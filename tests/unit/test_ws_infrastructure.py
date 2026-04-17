@@ -129,7 +129,7 @@ def test_event_queue_put_threadsafe_delivers_via_loop():
 
 
 def test_event_queue_full_queue_does_not_raise():
-    """put_threadsafe into a full queue is silently dropped (no exception propagated)."""
+    """put_threadsafe into a full queue drops oldest and keeps newest event."""
 
     async def _check():
         esq = EventStreamQueue()
@@ -140,11 +140,31 @@ def test_event_queue_full_queue_does_not_raise():
         event2 = _FakeEvent(event_type="B")
         esq.put_threadsafe(event1, loop)
         await asyncio.sleep(0)  # let first event land
-        esq.put_threadsafe(event2, loop)  # should be silently dropped
+        esq.put_threadsafe(event2, loop)  # should evict event1
         await asyncio.sleep(0)
-        # Only event1 in queue; event2 was dropped.
+        # Only event2 remains in queue; event1 was dropped.
         assert esq.queue.qsize() == 1
-        assert esq.queue.get_nowait() is event1
+        assert esq.queue.get_nowait() is event2
+
+    _run(_check())
+
+
+def test_event_queue_full_queue_invokes_drop_callback():
+    """Drop callback receives evicted and incoming events on overflow."""
+
+    async def _check():
+        drops = []
+        esq = EventStreamQueue(maxsize=1, on_drop=lambda dropped, new: drops.append((dropped, new)))
+        loop = asyncio.get_event_loop()
+        event1 = _FakeEvent(event_type="A")
+        event2 = _FakeEvent(event_type="B")
+
+        esq.put_threadsafe(event1, loop)
+        await asyncio.sleep(0)
+        esq.put_threadsafe(event2, loop)
+        await asyncio.sleep(0)
+
+        assert drops == [(event1, event2)]
 
     _run(_check())
 
