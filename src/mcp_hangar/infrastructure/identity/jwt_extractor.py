@@ -1,3 +1,4 @@
+# pyright: reportAny=false, reportExplicitAny=false, reportUnannotatedClassAttribute=false
 """JWT-based identity extractor.
 
 Extracts caller identity from a JWT (JSON Web Token) in the Authorization
@@ -40,6 +41,9 @@ class JWTIdentityExtractor:
     (soft dependency — identity features degrade gracefully).
     """
 
+    _HS_FAMILY = frozenset({"HS256", "HS384", "HS512"})
+    _ASYM_FAMILY = frozenset({"RS256", "RS384", "RS512", "ES256", "ES384", "ES512", "PS256", "PS384", "PS512"})
+
     def __init__(
         self,
         *,
@@ -56,6 +60,7 @@ class JWTIdentityExtractor:
     ) -> None:
         self._secret_or_key = secret_or_key
         self._algorithms = algorithms or ["HS256"]
+        self._validate_algorithms(self._algorithms, self._secret_or_key)
         self._audience = audience
         self._issuer = issuer
         # Claim mapping
@@ -68,6 +73,7 @@ class JWTIdentityExtractor:
     def extract(
         self,
         metadata: list[tuple[str, str]] | dict[str, str] | None,
+        source_ip: str | None = None,
     ) -> IdentityContext | None:
         """Extract identity from JWT in Authorization header.
 
@@ -165,3 +171,29 @@ class JWTIdentityExtractor:
         if isinstance(metadata, dict):
             return {k.lower(): v for k, v in metadata.items()}
         return {k.lower(): v for k, v in metadata}
+
+    @staticmethod
+    def _validate_algorithms(algorithms: list[str], secret_or_key: str | bytes) -> None:
+        """Guard against JWT algorithm confusion attacks.
+
+        Raises ValueError if symmetric and asymmetric algorithm families are mixed.
+        For asymmetric keys, removes HS* algorithms automatically.
+        """
+        hs = [a for a in algorithms if a in JWTIdentityExtractor._HS_FAMILY]
+        asym = [a for a in algorithms if a in JWTIdentityExtractor._ASYM_FAMILY]
+        if hs and asym:
+            raise ValueError(
+                "Mixed JWT algorithm families are not allowed: "
+                f"symmetric={hs}, asymmetric={asym}. "
+                "Use only HS* or only RS*/ES*/PS* algorithms."
+            )
+
+        key_str = secret_or_key if isinstance(secret_or_key, str) else secret_or_key.decode("latin-1", errors="replace")
+        is_asym_key = "-----BEGIN" in key_str
+        if is_asym_key and hs:
+            logger.warning(
+                "jwt_asym_key_with_hs_algo",
+                algorithms=hs,
+                hint="Using a PEM asymmetric key with HS* algorithms is a security risk. Switch to RS256/ES256.",
+            )
+            algorithms[:] = [algorithm for algorithm in algorithms if algorithm not in JWTIdentityExtractor._HS_FAMILY]
