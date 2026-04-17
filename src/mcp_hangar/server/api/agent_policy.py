@@ -1,3 +1,5 @@
+# pyright: reportAny=false, reportExplicitAny=false
+
 """Agent policy push endpoint.
 
 Accepts tool policy bundles from the hangar-agent and applies them
@@ -6,16 +8,22 @@ are enforced.
 
 Endpoint:
   POST /agent/policy  -- Push a tool policy bundle from the agent
-
-The agent authenticates via the X-Hangar-Agent-Internal header.
 """
+
+from datetime import UTC, datetime
+from typing import TypedDict, cast
 
 from starlette.requests import Request
 from starlette.routing import Route
 
+from ...domain.events import PolicyPushRejected
+from ...domain.exceptions import AccessDeniedError, MissingCredentialsError
 from ...domain.services import get_tool_access_resolver
+from ...domain.value_objects.security import Principal
 from ...domain.value_objects import ToolAccessPolicy
+from ...infrastructure.event_bus import get_event_bus
 from ...logging_config import get_logger
+from ..context import get_context
 from .serializers import HangarJSONResponse
 
 logger = get_logger(__name__)
@@ -25,6 +33,73 @@ _ACTION_REQUIRE_APPROVAL = "require_approval"
 _ACTION_DENY = "deny"
 _ACTION_AUDIT = "audit"
 _ACTION_ALLOW = "allow"
+
+
+class PolicyPushBody(TypedDict, total=False):
+    version: int
+    tool_policies: list[object]
+
+
+class PolicyItem(TypedDict, total=False):
+    provider_id: str
+    action: str
+    tool_name: str
+    approval_timeout_seconds: int
+
+
+class PolicyEntry(TypedDict):
+    allow: list[str]
+    deny: list[str]
+    approval: list[str]
+    timeout: int
+
+
+def _publish_policy_push_rejected(principal_id: str, reason: str) -> None:
+    get_event_bus().publish(
+        PolicyPushRejected(
+            principal_id=principal_id,
+            reason=reason,
+            timestamp=datetime.now(UTC),
+        )
+    )
+
+
+def _require_authenticated_principal(request: Request) -> Principal:
+    auth_context = getattr(request.state, "auth", None)
+    principal = getattr(auth_context, "principal", None)
+
+    if principal is None or principal.is_anonymous():
+        _publish_policy_push_rejected("anonymous", "authentication_required")
+        raise MissingCredentialsError("Authentication required")
+
+    return principal
+
+
+def _authorize_policy_write(principal: Principal) -> None:
+    context = get_context()
+    auth_components = getattr(context, "auth_components", None)
+    authz_middleware = getattr(auth_components, "authz_middleware", None)
+
+    if authz_middleware is not None:
+        try:
+            authz_middleware.authorize(
+                principal=principal,
+                action="write",
+                resource_type="policy",
+                resource_id="*",
+            )
+        except AccessDeniedError:
+            _publish_policy_push_rejected(principal.id.value, "policy_write_permission_required")
+            raise
+        return
+
+    _publish_policy_push_rejected(principal.id.value, "authorization_unavailable")
+    raise AccessDeniedError(
+        principal_id=principal.id.value,
+        action="write",
+        resource="policy:*",
+        reason="policy:write permission required",
+    )
 
 
 async def push_policy(request: Request) -> HangarJSONResponse:
@@ -41,32 +116,35 @@ async def push_policy(request: Request) -> HangarJSONResponse:
             ]
         }
     """
-    # Only accept from agent (internal header)
-    if request.headers.get("x-hangar-agent-internal") != "true":
-        return HangarJSONResponse({"error": "forbidden"}, status_code=403)
+    principal = _require_authenticated_principal(request)
+    _authorize_policy_write(principal)
 
     try:
         body = await request.json()
     except (ValueError, TypeError):
         return HangarJSONResponse({"error": "invalid JSON"}, status_code=400)
 
-    tool_policies = body.get("tool_policies", [])
-    version = body.get("version", 0)
+    if not isinstance(body, dict):
+        return HangarJSONResponse({"error": "invalid JSON"}, status_code=400)
 
-    if not isinstance(tool_policies, list):
-        return HangarJSONResponse({"error": "tool_policies must be a list"}, status_code=400)
+    payload = cast(PolicyPushBody, cast(object, body))
+    tool_policies = payload.get("tool_policies", [])
+    version = payload.get("version", 0)
 
     resolver = get_tool_access_resolver()
 
     # Group policies by provider_id
     # provider_id="*" means global (applies to all providers)
-    per_provider: dict[str, dict] = {}  # provider_id -> {allow, deny, approval, timeout, channel}
+    per_provider: dict[str, PolicyEntry] = {}  # provider_id -> {allow, deny, approval, timeout}
 
     for tp in tool_policies:
-        pid = tp.get("provider_id", "*")
-        action = tp.get("action", "allow")
-        tool_name = tp.get("tool_name", "*")
-        timeout = tp.get("approval_timeout_seconds", 300)
+        if not isinstance(tp, dict):
+            continue
+        item = cast(PolicyItem, cast(object, tp))
+        pid = item.get("provider_id", "*")
+        action = item.get("action", "allow")
+        tool_name = item.get("tool_name", "*")
+        timeout = item.get("approval_timeout_seconds", 300)
 
         if pid not in per_provider:
             per_provider[pid] = {

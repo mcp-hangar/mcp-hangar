@@ -7,6 +7,7 @@ Validation happens early to prevent invalid data from propagating through the sy
 
 from dataclasses import dataclass, field
 from enum import Enum
+import os
 import re
 from typing import Any
 
@@ -120,6 +121,26 @@ DOCKER_IMAGE_PATTERN = re.compile(
 # Environment variable key: standard env var pattern
 ENV_KEY_PATTERN = re.compile(r"^[a-zA-Z_][a-zA-Z0-9_]*$")
 
+# Allowed subprocess executables. Unknown commands are denied by default.
+ALLOWED_COMMANDS = frozenset(
+    {
+        "bun",
+        "deno",
+        "docker",
+        "node",
+        "npx",
+        "podman",
+        "python",
+        "python3",
+        "python3.11",
+        "python3.12",
+        "python3.13",
+        "python3.14",
+        "uv",
+        "uvx",
+    }
+)
+
 # Dangerous command patterns (potential injection)
 DANGEROUS_PATTERNS = [
     re.compile(r";\s*"),  # Command chaining
@@ -165,6 +186,7 @@ class InputValidator:
     MAX_ENV_VALUE_LENGTH = 32_768  # 32KB
     MIN_TIMEOUT = 0.1
     MAX_TIMEOUT = 3600.0  # 1 hour
+    ALLOWED_COMMANDS = ALLOWED_COMMANDS
 
     def __init__(
         self,
@@ -177,33 +199,34 @@ class InputValidator:
 
         Args:
             allow_absolute_paths: Whether to allow absolute paths in commands
-            allowed_commands: Whitelist of allowed command executables (if set, only these are allowed)
-            blocked_commands: Blacklist of blocked command executables
+            allowed_commands: Allowed command executables. Defaults to the built-in allow-list,
+                or MCP_ALLOWED_COMMANDS env override when set.
+            blocked_commands: Deprecated compatibility argument. Ignored.
         """
         self.allow_absolute_paths = allow_absolute_paths
-        self.allowed_commands = set(allowed_commands) if allowed_commands else None
-        self.blocked_commands = set(
-            blocked_commands
-            or [
-                "rm",
-                "rmdir",
-                "del",
-                "format",  # Destructive
-                "sudo",
-                "su",
-                "doas",  # Privilege escalation
-                "curl",
-                "wget",
-                "nc",
-                "netcat",  # Network tools (potential exfiltration)
-                "bash",
-                "sh",
-                "zsh",
-                "fish",  # Shells (unless explicitly allowed)
-                "eval",
-                "exec",  # Dangerous builtins
-            ]
+        self.allowed_commands = self._resolve_allowed_commands(allowed_commands)
+        self.blocked_commands = frozenset(
+            self._normalize_command_name(command) for command in (blocked_commands or []) if command.strip()
         )
+
+    @classmethod
+    def _resolve_allowed_commands(cls, allowed_commands: list[str] | None) -> frozenset[str]:
+        """Resolve allowed commands from explicit config, env override, or defaults."""
+        if allowed_commands is not None:
+            return frozenset(cls._normalize_command_name(command) for command in allowed_commands if command.strip())
+
+        env_commands = os.getenv("MCP_ALLOWED_COMMANDS")
+        if env_commands is not None:
+            return frozenset(
+                cls._normalize_command_name(command) for command in env_commands.split(",") if command.strip()
+            )
+
+        return cls.ALLOWED_COMMANDS
+
+    @staticmethod
+    def _normalize_command_name(command: str) -> str:
+        """Normalize a configured executable name for allow-list matching."""
+        return os.path.basename(command.strip())
 
     def validate_provider_id(self, provider_id: Any) -> ValidationResult:
         """
@@ -426,7 +449,10 @@ class InputValidator:
         - Must be a non-empty list of strings
         - First element is the executable
         - No dangerous patterns in arguments
-        - Executable must not be in blocklist
+        - Executable must be in the allow-list
+
+        Raises:
+            ValueError: If the executable is not in the allow-list
         """
         result = ValidationResult(valid=True)
 
@@ -472,24 +498,10 @@ class InputValidator:
         # Validate executable (first element)
         if command and isinstance(command[0], str):
             executable = command[0]
-
-            # Extract base name for checking
-            import os
-
             base_name = os.path.basename(executable)
 
-            # Check against blocklist
-            if base_name in self.blocked_commands:
-                result.add_error("command[0]", f"Executable '{base_name}' is not allowed", executable)
-
-            # Check against allowlist if set
-            if self.allowed_commands is not None:
-                if base_name not in self.allowed_commands:
-                    result.add_error(
-                        "command[0]",
-                        f"Executable '{base_name}' is not in the allowed list",
-                        executable,
-                    )
+            if base_name not in self.allowed_commands:
+                raise ValueError(f"Executable '{base_name}' is not in the allowed command list")
 
             # Check for absolute paths if not allowed
             if not self.allow_absolute_paths and executable.startswith("/"):

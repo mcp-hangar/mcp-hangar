@@ -3,16 +3,22 @@
 Creates a Starlette application with:
 - CORSMiddleware configured from environment
 - Optional AuthMiddlewareHTTP for enterprise authentication
+- TrustedHostMiddleware for host header validation
 - Exception handlers mapping domain errors to JSON error envelopes
 - Provider endpoint routes mounted at /providers
+
+Middleware ordering note: CORS is outermost for OPTIONS preflight handling,
+auth runs inside CORS, and TrustedHostMiddleware is innermost.
 """
 
 # pyright: reportAny=false, reportExplicitAny=false
 
+import os
 from typing import Any
 
 from starlette.applications import Starlette
 from starlette.middleware.cors import CORSMiddleware
+from starlette.middleware.trustedhost import TrustedHostMiddleware
 from starlette.routing import BaseRoute, Mount
 
 from ...domain.exceptions import MCPError
@@ -81,8 +87,13 @@ def create_api_router(auth_components: Any = None) -> Starlette:
 
     app = Starlette(routes=routes, exception_handlers=exception_handlers)
 
+    # TrustedHostMiddleware blocks unexpected Host headers (DNS rebinding protection).
+    _trusted_hosts_env = os.environ.get("MCP_TRUSTED_HOSTS", "localhost,127.0.0.1,::1,testserver")
+    trusted_hosts = [h.strip() for h in _trusted_hosts_env.split(",") if h.strip()]
+    app.add_middleware(TrustedHostMiddleware, allowed_hosts=trusted_hosts)
+
     # Auth middleware: mount when enterprise auth is enabled.
-    # Must be added BEFORE CORSMiddleware so CORS is outermost (handles OPTIONS preflight first).
+    # Must be inside CORSMiddleware so CORS remains outermost (handles OPTIONS preflight first).
     if auth_components is not None and hasattr(auth_components, "enabled") and auth_components.enabled:
         try:
             from enterprise.auth.http_middleware import AuthMiddlewareHTTP

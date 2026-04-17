@@ -10,6 +10,7 @@ Provides security primitives including:
 """
 
 from .input_validator import (
+    ALLOWED_COMMANDS,
     InputValidator,
     validate_arguments,
     validate_command,
@@ -29,6 +30,7 @@ from .roles import (
     list_builtin_roles,
     list_permissions,
     PERMISSIONS,
+    ROLE_AGENT,
     ROLE_ADMIN,
     ROLE_AUDITOR,
     ROLE_DEVELOPER,
@@ -46,6 +48,7 @@ from .secrets import is_sensitive_key, mask_sensitive_value, SecretsMask, Secure
 
 __all__ = [
     # Input Validation
+    "ALLOWED_COMMANDS",
     "InputValidator",
     "ValidationResult",
     "validate_provider_id",
@@ -77,6 +80,7 @@ __all__ = [
     # Roles & Permissions
     "BUILTIN_ROLES",
     "PERMISSIONS",
+    "ROLE_AGENT",
     "ROLE_ADMIN",
     "ROLE_DEVELOPER",
     "ROLE_PROVIDER_ADMIN",

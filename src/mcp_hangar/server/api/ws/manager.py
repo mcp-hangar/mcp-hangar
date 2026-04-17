@@ -2,11 +2,15 @@
 
 import asyncio
 import threading
-from typing import Any
+from collections.abc import Callable
+from typing import TypeAlias
 
 from ....logging_config import get_logger
 
 logger = get_logger(__name__)
+
+QueueEvent: TypeAlias = object
+DropCallback: TypeAlias = Callable[[QueueEvent, QueueEvent], None]
 
 
 class WebSocketConnectionManager:
@@ -17,10 +21,10 @@ class WebSocketConnectionManager:
 
     def __init__(self) -> None:
         """Initialize connection manager with empty connection registry."""
-        self._connections: dict[str, Any] = {}
+        self._connections: dict[str, object | None] = {}
         self._lock = threading.Lock()
 
-    def register(self, connection_id: str, metadata: Any = None) -> None:
+    def register(self, connection_id: str, metadata: object | None = None) -> None:
         """Register an active WebSocket connection.
 
         Args:
@@ -55,24 +59,33 @@ class EventStreamQueue:
     handler (running on whatever thread publishes the event) calls put_threadsafe()
     to schedule delivery onto the connection's asyncio event loop without blocking.
 
-    Slow consumers: events are silently dropped when the queue is full (maxsize=100).
-    This prevents a slow/dead client from back-pressuring the EventBus.
+    Slow consumers: the oldest queued event is dropped when the queue is full.
+    This prevents a slow/dead client from back-pressuring the EventBus while
+    preserving the most recent events.
     """
 
-    def __init__(self) -> None:
-        """Initialize with a bounded asyncio queue (maxsize=100)."""
-        self._queue: asyncio.Queue = asyncio.Queue(maxsize=100)
+    def __init__(self, maxsize: int = 1024, on_drop: DropCallback | None = None) -> None:
+        """Initialize with a bounded asyncio queue.
+
+        Args:
+            maxsize: Maximum queue size before backpressure shedding starts.
+            on_drop: Optional callback invoked with ``(dropped_event, new_event)``
+                when the oldest event is discarded to make room for the new one.
+        """
+        self._queue: asyncio.Queue[QueueEvent] = asyncio.Queue(maxsize=maxsize)
+        self._on_drop: DropCallback | None = on_drop
 
     @property
-    def queue(self) -> asyncio.Queue:
+    def queue(self) -> asyncio.Queue[QueueEvent]:
         """The underlying asyncio.Queue for use in async WebSocket loops."""
         return self._queue
 
-    def put_threadsafe(self, event: Any, loop: asyncio.AbstractEventLoop) -> None:
+    def put_threadsafe(self, event: QueueEvent, loop: asyncio.AbstractEventLoop) -> None:
         """Schedule event delivery onto the asyncio event loop from any thread.
 
         Safe to call from any thread, including EventBus handler threads.
-        Silently drops the event if the queue is already full.
+        When the queue is already full, drops the oldest queued event so the
+        newest event can be delivered.
 
         Note: call_soon_threadsafe returns immediately -- it does not raise QueueFull.
         The drop must happen inside the scheduled callback. We wrap put_nowait in a
@@ -88,9 +101,13 @@ class EventStreamQueue:
             try:
                 self._queue.put_nowait(event)
             except asyncio.QueueFull:
+                dropped_event = self._queue.get_nowait()
+                self._queue.put_nowait(event)
+                if self._on_drop is not None:
+                    self._on_drop(dropped_event, event)
                 logger.debug("ws_event_queue_full_drop", event_type=event_type)
 
-        loop.call_soon_threadsafe(_safe_put)
+        _ = loop.call_soon_threadsafe(_safe_put)
 
 
 # Module-level singleton used by endpoint handlers.
