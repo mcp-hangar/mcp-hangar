@@ -348,11 +348,10 @@ class ContainerLauncher(ProviderLauncher):
                 if relax and mode == "rw":
                     try:
                         if os.path.isdir(host_path):
-                            # Make directory traversable and writable for container UID/GID.
-                            # 0o777 is intentionally permissive for CI stability; do not
-                            # enable this in production environments.
-                            os.chmod(host_path, 0o777)
-                            logger.info(f"Relaxed volume permissions (chmod 777): {host_path}")
+                            # Make directory traversable and writable for owner/group in CI.
+                            # Keep "others" read/execute only to avoid world-writable perms.
+                            os.chmod(host_path, 0o775)
+                            logger.info(f"Relaxed volume permissions (chmod 775): {host_path}")
                     except OSError as e:
                         logger.warning(f"Could not relax volume permissions for {host_path}: {e}")
 
