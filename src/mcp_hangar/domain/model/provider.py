@@ -612,7 +612,7 @@ class Provider(AggregateRoot):
 
     def _create_client(self) -> Any:
         """Create and return the appropriate client based on mode."""
-        from ..services.provider_launcher import get_launcher
+        from mcp_hangar.infrastructure.launchers import get_launcher
 
         launcher = get_launcher(self._mode.value)
         config = self._get_launch_config()

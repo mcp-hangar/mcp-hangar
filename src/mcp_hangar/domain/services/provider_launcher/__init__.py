@@ -1,18 +1,25 @@
-"""Provider launcher implementations.
+"""Deprecated provider launcher import shim."""
 
-Security-hardened launchers with:
-- Input validation
-- Command injection prevention
-- Secure environment handling
-- Audit logging
-"""
+from __future__ import annotations
 
-from .base import ProviderLauncher
-from .container import ContainerConfig, ContainerLauncher
-from .docker import DockerLauncher
-from .factory import get_launcher
-from .http import HttpLauncher
-from .subprocess import SubprocessLauncher
+import warnings
+
+from mcp_hangar.infrastructure.launchers import (
+    ContainerConfig,
+    ContainerLauncher,
+    DockerLauncher,
+    get_launcher,
+    HttpLauncher,
+    ProviderLauncher,
+    SubprocessLauncher,
+)
+
+warnings.warn(
+    "mcp_hangar.domain.services.provider_launcher is deprecated; import from "
+    "mcp_hangar.infrastructure.launchers instead.",
+    DeprecationWarning,
+    stacklevel=2,
+)
 
 __all__ = [
     # Base
