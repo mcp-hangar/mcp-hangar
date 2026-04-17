@@ -24,7 +24,7 @@ import asyncio
 import os
 from dataclasses import dataclass, field
 from pathlib import Path
-from typing import Any, TYPE_CHECKING
+from typing import Any, cast, TYPE_CHECKING
 
 from mcp.server.fastmcp import FastMCP
 
@@ -36,7 +36,7 @@ from ...gc import BackgroundWorker
 from ...logging_config import get_logger
 from ..config import load_config, load_configuration
 from ..context import get_context, init_context
-from ..state import get_runtime, GROUPS, PROVIDERS
+from ..state import get_runtime, GROUPS
 
 from ...domain.value_objects.license import LicenseTier
 from .enterprise import EnterpriseComponents, load_enterprise_modules
@@ -56,6 +56,8 @@ from .workers import (
     GC_WORKER_INTERVAL_SECONDS,
     HEALTH_CHECK_INTERVAL_SECONDS,
 )
+
+WorkerLike = BackgroundWorker | Any
 
 if TYPE_CHECKING:
     from ...bootstrap.runtime import Runtime
@@ -78,7 +80,7 @@ class ApplicationContext:
     mcp_server: FastMCP
     """FastMCP server instance with registered tools."""
 
-    background_workers: list[BackgroundWorker] = field(default_factory=list)
+    background_workers: list[WorkerLike] = field(default_factory=list)
     """Background workers (GC, health check) - not started."""
 
     discovery_orchestrator: DiscoveryOrchestrator | None = None
@@ -112,9 +114,9 @@ class ApplicationContext:
     """Enterprise approval gate service (when ENTERPRISE tier)."""
 
     @property
-    def providers(self) -> dict[str, Any]:
-        """Get providers dictionary for easy access."""
-        return PROVIDERS
+    def providers(self):
+        """Get providers mapping for easy access."""
+        return self.runtime.repository
 
     def shutdown(self) -> None:
         """Graceful shutdown of all components.
@@ -149,7 +151,7 @@ class ApplicationContext:
                 logger.warning("circuit_breaker_save_failed", error=str(e))
 
         # Stop all providers
-        for provider_id, provider in PROVIDERS.items():
+        for provider_id, provider in self.runtime.repository.items():
             try:
                 provider.stop()
             except Exception as e:  # noqa: BLE001 -- fault-barrier: shutdown must complete even if individual provider stop fails
@@ -247,7 +249,7 @@ def bootstrap(
     # Add rate limit middleware to command bus
     from ...infrastructure.command_bus import RateLimitMiddleware
 
-    rate_limit_mw = RateLimitMiddleware(rate_limiter=runtime.rate_limiter)
+    rate_limit_mw = RateLimitMiddleware(rate_limiter=cast(Any, runtime.rate_limiter))
     runtime.command_bus.add_middleware(rate_limit_mw)
 
     # Validate license key and determine tier
@@ -304,11 +306,11 @@ def bootstrap(
     mcp_server = FastMCP("mcp-registry")
     register_all_tools(mcp_server)
 
-    # Wire log buffers to providers (must run after load_config populates PROVIDERS)
-    init_log_buffers(PROVIDERS)
+    # Wire log buffers to providers after configuration populates the shared repository.
+    init_log_buffers(runtime.repository)
 
     # Create background workers (not started)
-    workers = create_background_workers(config=full_config)
+    workers: list[WorkerLike] = create_background_workers(config=full_config)
 
     # Add config reload worker if enabled
     reload_config = full_config.get("config_reload", {})
@@ -342,7 +344,7 @@ def bootstrap(
         logger.info("discovery_registry_created")
 
     # Log ready state
-    provider_ids = list(PROVIDERS.keys())
+    provider_ids = list(runtime.repository.keys())
     group_ids = list(GROUPS.keys())
     logger.info(
         "bootstrap_complete",
@@ -398,8 +400,17 @@ _create_discovery_orchestrator = create_discovery_orchestrator
 # import these names from bootstrap.__init__.  The real implementations now live
 # in bootstrap/enterprise.py (MIT) and enterprise/auth/* (BSL).
 try:
-    from enterprise.auth.bootstrap import AuthComponents, NullAuthComponents, bootstrap_auth
-    from enterprise.auth.config import parse_auth_config
+    from enterprise.auth.bootstrap import (
+        AuthComponents as _EnterpriseAuthComponents,
+        NullAuthComponents as _EnterpriseNullAuthComponents,
+        bootstrap_auth as _enterprise_bootstrap_auth,
+    )
+    from enterprise.auth.config import parse_auth_config as _enterprise_parse_auth_config
+
+    AuthComponents = cast(Any, _EnterpriseAuthComponents)
+    NullAuthComponents = cast(Any, _EnterpriseNullAuthComponents)
+    bootstrap_auth = cast(Any, _enterprise_bootstrap_auth)
+    parse_auth_config = cast(Any, _enterprise_parse_auth_config)
 
     _enterprise_auth_available = True
 except ImportError:
@@ -422,7 +433,7 @@ except ImportError:
         """Return noop auth components when enterprise is not installed."""
         return NullAuthComponents()
 
-    def parse_auth_config(raw: dict | None = None):  # type: ignore[misc]
+    def parse_auth_config(raw: dict[str, Any] | None = None):  # type: ignore[misc]
         """Return empty config when enterprise is not installed."""
         return None
 

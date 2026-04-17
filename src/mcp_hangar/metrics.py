@@ -362,6 +362,9 @@ class CollectorRegistry:
         """Get collector by name."""
         return self._collectors.get(name)
 
+    def get_metrics_output(self) -> str:
+        return self.collect()
+
     def collect(self) -> str:
         """Generate Prometheus exposition format output."""
         lines = []

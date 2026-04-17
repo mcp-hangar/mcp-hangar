@@ -1,14 +1,16 @@
 """Discovery orchestrator initialization."""
 
+from __future__ import annotations
+
 from pathlib import Path
-from typing import Any
+from typing import Any, cast
 
 from ...application.discovery import DiscoveryConfig, DiscoveryOrchestrator
 from ...domain.discovery import DiscoveryMode
 from ...domain.model import Provider
 from ...domain.security.input_validator import InputValidator
 from ...logging_config import get_logger
-from ..state import PROVIDERS, set_discovery_orchestrator
+from ..state import get_runtime, set_discovery_orchestrator
 
 logger = get_logger(__name__)
 
@@ -29,7 +31,8 @@ def create_discovery_orchestrator(config: dict[str, Any]) -> DiscoveryOrchestrat
 
     logger.info("discovery_initializing")
 
-    static_providers = set(PROVIDERS.keys())
+    repository = get_runtime().repository
+    static_providers = set(repository.get_all_ids())
     orchestrator_config = DiscoveryConfig.from_dict(discovery_config)
     orchestrator = DiscoveryOrchestrator(
         config=orchestrator_config,
@@ -146,7 +149,7 @@ async def _on_provider_register(provider) -> bool:
             )
             return False
 
-        provider_kwargs = {
+        provider_kwargs: dict[str, Any] = {
             "provider_id": provider.name,
             "mode": provider_mode,
             "description": f"Discovered from {provider.source_type}",
@@ -197,8 +200,8 @@ async def _on_provider_register(provider) -> bool:
 
         provider_kwargs["env"] = conn_info.get("env", {})
 
-        new_provider = Provider(**provider_kwargs)
-        PROVIDERS[provider.name] = new_provider
+        new_provider = Provider(**cast(Any, provider_kwargs))
+        get_runtime().repository.add(provider.name, new_provider)
         logger.info(
             "discovery_registered_provider",
             provider_name=provider.name,
@@ -222,11 +225,12 @@ async def _on_provider_deregister(name: str, reason: str):
         reason: Reason for deregistration.
     """
     try:
-        if name in PROVIDERS:
-            provider = PROVIDERS.get(name)
+        repository = get_runtime().repository
+        if repository.exists(name):
+            provider = repository.get(name)
             if provider:
                 provider.stop()
-            del PROVIDERS._repo._providers[name]
+            _ = repository.remove(name)
             logger.info(
                 "discovery_deregistered_provider",
                 provider_name=name,
@@ -240,7 +244,7 @@ async def _on_provider_deregister(name: str, reason: str):
         )
 
 
-def _auto_add_volumes(provider_name: str) -> list:
+def _auto_add_volumes(provider_name: str) -> list[str]:
     """Auto-add persistent volumes for known stateful providers.
 
     Args:

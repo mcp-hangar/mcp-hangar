@@ -54,6 +54,9 @@ class CLIConfig:
     json_logs: bool
     """Whether to format logs as JSON."""
 
+    unsafe_no_auth: bool = False
+    """Allow non-loopback HTTP binding without authentication enabled."""
+
     cloud_key: str | None = None
     """License key for Hangar Cloud connectivity."""
 
@@ -149,6 +152,11 @@ Environment Variables:
         action="store_true",
         help="Format logs as JSON",
     )
+    parser.add_argument(
+        "--unsafe-no-auth",
+        action="store_true",
+        help="Allow non-loopback HTTP binding without authentication (unsafe)",
+    )
 
     parsed = parser.parse_args(args)
 
@@ -175,6 +183,7 @@ Environment Variables:
         log_file=parsed.log_file,
         log_level=log_level,
         json_logs=json_logs,
+        unsafe_no_auth=parsed.unsafe_no_auth,
     )
 
 

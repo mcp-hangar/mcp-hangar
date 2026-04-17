@@ -12,13 +12,16 @@ The lifecycle flow:
 """
 
 import asyncio
+import ipaddress
 from pathlib import Path
 import signal
 import sys
 from typing import TYPE_CHECKING
+from urllib.parse import parse_qs
 
 import yaml
 
+from ..infrastructure.identity import TrustedProxyResolver
 from ..logging_config import get_logger, setup_logging
 from .bootstrap import ApplicationContext, bootstrap
 from .cli.cli_compat import CLIConfig
@@ -29,6 +32,18 @@ if TYPE_CHECKING:
     from ..cloud.config import CloudConfig
 
 logger = get_logger(__name__)
+
+
+def _is_loopback_host(host: str) -> bool:
+    """Return whether a bind host resolves to loopback-only."""
+    normalized_host = host.strip().lower()
+    if normalized_host in {"127.0.0.1", "::1", "localhost"}:
+        return True
+
+    try:
+        return ipaddress.ip_address(normalized_host).is_loopback
+    except ValueError:
+        return False
 
 
 class ServerLifecycle:
@@ -103,7 +118,7 @@ class ServerLifecycle:
             )
             sys.exit(1)
 
-    def run_http(self, host: str, port: int) -> None:
+    def run_http(self, host: str, port: int, unsafe_no_auth: bool = False) -> None:
         """Run MCP server in HTTP mode. Blocks until exit.
 
         This mode is compatible with LM Studio and other MCP HTTP clients.
@@ -116,6 +131,21 @@ class ServerLifecycle:
             port: Port to bind to.
         """
         import uvicorn
+
+        auth_components = self._context.auth_components
+        auth_enabled = bool(auth_components and auth_components.enabled)
+        if not auth_enabled and not _is_loopback_host(host):
+            message = "Refusing to start HTTP on non-loopback without authentication. Use --unsafe-no-auth to override."
+            if not unsafe_no_auth:
+                logger.error("http_auth_required_for_non_loopback", host=host, port=port, message=message)
+                raise SystemExit(1)
+
+            logger.warning(
+                "http_auth_disabled_non_loopback_override",
+                host=host,
+                port=port,
+                message=message,
+            )
 
         logger.info("starting_http_server", host=host, port=port)
 
@@ -135,7 +165,7 @@ class ServerLifecycle:
         from starlette.routing import Route
 
         from ..metrics import get_metrics
-        from ..server.state import PROVIDERS
+        from .bootstrap.composition import get_runtime
 
         _start_time = time.time()
         _startup_complete = False
@@ -146,8 +176,9 @@ class ServerLifecycle:
 
         def readiness_endpoint(request):
             """Readiness check - can we handle traffic?"""
-            ready_count = sum(1 for p in PROVIDERS.values() if p.state.value == "ready")
-            total_count = len(PROVIDERS)
+            repository = get_runtime().repository
+            ready_count = sum(1 for p in repository.get_all().values() if p.state.value == "ready")
+            total_count = repository.count()
             is_ready = ready_count > 0 or total_count == 0
             return JSONResponse(
                 {
@@ -214,7 +245,6 @@ class ServerLifecycle:
             await mcp_app(scope, receive, send)
 
         # Apply authentication middleware if enabled
-        auth_components = self._context.auth_components
         if auth_components and auth_components.enabled:
             starlette_app = self._create_auth_app(combined_app, auth_components)
             logger.info("http_auth_enabled")
@@ -327,12 +357,11 @@ class ServerLifecycle:
 
         # Paths to skip authentication (health checks, metrics)
         skip_paths = frozenset(["/health/live", "/health/ready", "/health/startup", "/metrics"])
-        # Default trusted proxies (should be configured in production)
-        trusted_proxies = frozenset(["127.0.0.1", "::1"])
+        trusted_proxy_resolver = TrustedProxyResolver()
 
         async def auth_app(scope, receive, send):
             """ASGI app with authentication middleware."""
-            if scope["type"] != "http":
+            if scope["type"] not in ("http", "websocket"):
                 await inner_app(scope, receive, send)
                 return
 
@@ -348,12 +377,19 @@ class ServerLifecycle:
             for key, value in scope.get("headers", []):
                 headers[key.decode("latin-1").lower()] = value.decode("latin-1")
 
+            if scope["type"] == "websocket":
+                raw_query_string = scope.get("query_string", b"")
+                query_params = parse_qs(raw_query_string.decode("latin-1"))
+                token = query_params.get("token", [None])[0]
+                if token and "authorization" not in headers and "x-api-key" not in headers:
+                    headers["authorization"] = token if token.lower().startswith("bearer ") else f"Bearer {token}"
+
             # Get client IP
             client = scope.get("client")
             source_ip = client[0] if client else "unknown"
 
             # Trust X-Forwarded-For only from trusted proxies
-            if source_ip in trusted_proxies:
+            if client and trusted_proxy_resolver.is_trusted(source_ip):
                 forwarded_for = headers.get("x-forwarded-for")
                 if forwarded_for:
                     source_ip = forwarded_for.split(",")[0].strip()
@@ -362,7 +398,7 @@ class ServerLifecycle:
             auth_request = AuthRequest(
                 headers=headers,
                 source_ip=source_ip,
-                method=scope.get("method", ""),
+                method=scope.get("method", "GET" if scope["type"] == "websocket" else ""),
                 path=path,
             )
 
@@ -377,6 +413,11 @@ class ServerLifecycle:
                 await inner_app(scope, receive, send)
 
             except AuthenticationError as e:
+                if scope["type"] == "websocket":
+                    logger.warning("ws_authentication_failed", path=path, source_ip=source_ip, message=e.message)
+                    await send({"type": "websocket.close", "code": 1008, "reason": e.message})
+                    return
+
                 response = JSONResponse(
                     status_code=401,
                     content={
@@ -388,6 +429,11 @@ class ServerLifecycle:
                 await response(scope, receive, send)
 
             except AccessDeniedError as e:
+                if scope["type"] == "websocket":
+                    logger.warning("ws_access_denied", path=path, source_ip=source_ip, message=str(e))
+                    await send({"type": "websocket.close", "code": 1008, "reason": str(e)})
+                    return
+
                 response = JSONResponse(
                     status_code=403,
                     content={
@@ -485,7 +531,7 @@ def _setup_logging_from_config(cli_config: CLIConfig) -> None:
     setup_logging(level=log_level, json_format=json_format, log_file=log_file)
 
 
-def _resolve_cloud_config(cli_config: CLIConfig, full_config: dict) -> "CloudConfig | None":
+def _resolve_cloud_config(cli_config: CLIConfig, full_config: dict[str, object]) -> "CloudConfig | None":
     """Build CloudConfig from CLI flags + config.yaml cloud: section.
 
     CLI flags (--cloud-key, --cloud-url) take precedence over config.yaml.
@@ -494,7 +540,10 @@ def _resolve_cloud_config(cli_config: CLIConfig, full_config: dict) -> "CloudCon
     from ..cloud.config import CloudConfig
 
     # Start from config.yaml cloud: section
-    cloud_section = dict(full_config.get("cloud", {}))
+    raw_cloud_section = full_config.get("cloud", {})
+    cloud_section: dict[str, object] = {}
+    if isinstance(raw_cloud_section, dict):
+        cloud_section = {str(key): value for key, value in raw_cloud_section.items()}
 
     # CLI --cloud-key overrides config
     cli_key = getattr(cli_config, "cloud_key", None)
@@ -542,9 +591,8 @@ def run_server(cli_config: CLIConfig) -> None:
     cloud_cfg = _resolve_cloud_config(cli_config, context.config)
     if cloud_cfg is not None:
         from ..cloud.connector import CloudConnector
-        from ..server.state import PROVIDERS
 
-        cloud_connector = CloudConnector(config=cloud_cfg, providers=PROVIDERS)
+        cloud_connector = CloudConnector(config=cloud_cfg, providers=context.runtime.repository)
         # Subscribe to all domain events (handler is synchronous, just pushes to buffer)
         context.runtime.event_bus.subscribe_to_all(cloud_connector.on_event)
 
@@ -573,7 +621,7 @@ def run_server(cli_config: CLIConfig) -> None:
     # Run server in appropriate mode
     try:
         if cli_config.http_mode:
-            lifecycle.run_http(cli_config.http_host, cli_config.http_port)
+            lifecycle.run_http(cli_config.http_host, cli_config.http_port, unsafe_no_auth=cli_config.unsafe_no_auth)
         else:
             lifecycle.run_stdio()
     finally:

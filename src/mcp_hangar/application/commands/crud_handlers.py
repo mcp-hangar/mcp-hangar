@@ -15,7 +15,8 @@ from ...domain.exceptions import ProviderNotFoundError, ValidationError
 from ...domain.model.provider import Provider
 from ...domain.model.provider_group import GroupDeleted, ProviderGroup
 from ...domain.repository import IProviderRepository
-from ...domain.value_objects import LoadBalancerStrategy, ProviderState
+from ...domain.security.ssrf import validate_no_ssrf
+from ...domain.value_objects import LoadBalancerStrategy, ProviderMode, ProviderState
 from ...domain.contracts.command import CommandHandler
 from ...logging_config import get_logger
 from .crud_commands import (
@@ -68,6 +69,9 @@ class CreateProviderHandler(CommandHandler):
         """
         if self._repository.exists(command.provider_id):
             raise ValidationError(f"Provider already exists: {command.provider_id}")
+
+        if ProviderMode.normalize(command.mode) == ProviderMode.REMOTE and command.endpoint is not None:
+            validate_no_ssrf(command.endpoint)
 
         provider = Provider(
             provider_id=command.provider_id,
