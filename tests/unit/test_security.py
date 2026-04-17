@@ -198,16 +198,18 @@ class TestInputValidator:
             ["python", "| cat /etc/passwd"],
             ["python", "$(whoami)"],
             ["python", "`id`"],
-            ["sh", "-c", "malicious"],
-            ["bash", "-c", "evil"],
         ]
         for cmd in injection_attempts:
             result = validate_command(cmd)
             # Should either reject the command or flag dangerous patterns
             assert not result.valid or len(result.warnings) > 0, f"Expected {cmd} to be flagged"
 
-    def test_blocked_commands(self):
-        """Test that dangerous commands are blocked."""
+        for cmd in (["sh", "-c", "malicious"], ["bash", "-c", "evil"]):
+            with pytest.raises(ValueError):
+                validate_command(cmd)
+
+    def test_unknown_commands_are_denied(self):
+        """Test that commands outside the allow-list are denied."""
         blocked = [
             ["rm", "-rf", "/"],
             ["sudo", "anything"],
@@ -216,8 +218,8 @@ class TestInputValidator:
         ]
         validator = InputValidator()
         for cmd in blocked:
-            result = validator.validate_command(cmd)
-            assert not result.valid, f"Expected {cmd} to be blocked"
+            with pytest.raises(ValueError):
+                validator.validate_command(cmd)
 
     def test_valid_docker_image(self):
         """Test validation of valid Docker images."""
@@ -525,6 +527,7 @@ class TestSecretsManagement:
 
         # Masked access for sensitive keys
         masked = env.get_masked("MY_SECRET")
+        assert masked is not None
         assert "secret123" not in masked
         assert "*" in masked
 
@@ -721,7 +724,7 @@ class TestSecureProviderLauncher:
 
     def test_launcher_blocks_dangerous_commands(self):
         """Test that dangerous commands are blocked."""
-        from mcp_hangar.domain.services.provider_launcher import SubprocessLauncher
+        from mcp_hangar.infrastructure.launchers import SubprocessLauncher
 
         launcher = SubprocessLauncher()
 
@@ -732,12 +735,12 @@ class TestSecureProviderLauncher:
         ]
 
         for cmd in dangerous_commands:
-            with pytest.raises(ValidationError):
+            with pytest.raises(ValueError):
                 launcher._validate_command(cmd)
 
     def test_launcher_allows_python(self):
         """Test that Python commands are allowed."""
-        from mcp_hangar.domain.services.provider_launcher import SubprocessLauncher
+        from mcp_hangar.infrastructure.launchers import SubprocessLauncher
 
         launcher = SubprocessLauncher()
 
@@ -747,7 +750,7 @@ class TestSecureProviderLauncher:
 
     def test_launcher_filters_sensitive_env(self):
         """Test that sensitive env vars are filtered."""
-        from mcp_hangar.domain.services.provider_launcher import SubprocessLauncher
+        from mcp_hangar.infrastructure.launchers import SubprocessLauncher
 
         launcher = SubprocessLauncher(
             inherit_env=True,
@@ -771,7 +774,7 @@ class TestSecureProviderLauncher:
 
     def test_docker_launcher_validates_image(self):
         """Test Docker launcher validates image names."""
-        from mcp_hangar.domain.services.provider_launcher import DockerLauncher
+        from mcp_hangar.infrastructure.launchers import DockerLauncher
 
         launcher = DockerLauncher()
 
@@ -784,7 +787,7 @@ class TestSecureProviderLauncher:
 
     def test_docker_launcher_security_flags(self):
         """Test Docker launcher adds security flags."""
-        from mcp_hangar.domain.services.provider_launcher import DockerLauncher
+        from mcp_hangar.infrastructure.launchers import DockerLauncher
 
         launcher = DockerLauncher(
             enable_network=False,
@@ -814,8 +817,7 @@ class TestSecureProviderLauncher:
     def test_container_launcher_network_modes(self, network_mode, expected_flag):
         """Test ContainerLauncher correctly sets network modes."""
         from unittest.mock import patch
-
-        from mcp_hangar.domain.services.provider_launcher import ContainerConfig, ContainerLauncher
+        from mcp_hangar.infrastructure.launchers import ContainerConfig, ContainerLauncher
 
         with patch.object(ContainerLauncher, "_detect_runtime", return_value="docker"):
             launcher = ContainerLauncher(runtime="docker")
@@ -897,7 +899,7 @@ class TestIntegrationSecurity:
 
     def test_end_to_end_secure_launch_simulation(self):
         """Test end-to-end secure launch simulation (without actually launching)."""
-        from mcp_hangar.domain.services.provider_launcher import SubprocessLauncher
+        from mcp_hangar.infrastructure.launchers import SubprocessLauncher
 
         launcher = SubprocessLauncher()
 

@@ -70,6 +70,7 @@ class TestParseArgsDefaults:
         assert config.log_file is None
         assert config.log_level == "INFO"
         assert config.json_logs is False
+        assert config.unsafe_no_auth is False
 
     def test_parse_args_returns_cli_config(self):
         """parse_args should return a CLIConfig instance."""
@@ -205,6 +206,13 @@ class TestParseArgsLogging:
             config = parse_args([])
 
         assert config.json_logs is False
+
+    def test_parse_args_unsafe_no_auth_flag(self):
+        """--unsafe-no-auth enables insecure non-loopback binding override."""
+        with patch.dict(os.environ, {}, clear=True):
+            config = parse_args(["--unsafe-no-auth"])
+
+        assert config.unsafe_no_auth is True
 
 
 class TestParseArgsCombined:

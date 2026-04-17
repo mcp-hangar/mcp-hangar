@@ -8,7 +8,7 @@ import pytest
 
 sys.path.insert(0, str(Path(__file__).parent.parent.parent))
 
-from mcp_hangar.domain.services.provider_launcher import ContainerLauncher  # noqa: E402
+from mcp_hangar.infrastructure.launchers import ContainerLauncher  # noqa: E402
 
 
 @pytest.mark.slow

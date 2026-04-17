@@ -163,7 +163,7 @@ class TestStartStderrReader:
 class TestDockerLauncherStderrPipe:
     def test_docker_launcher_uses_stderr_pipe(self):
         """DockerLauncher must pass stderr=PIPE not DEVNULL."""
-        from mcp_hangar.domain.services.provider_launcher.docker import DockerLauncher
+        from mcp_hangar.infrastructure.launchers.docker import DockerLauncher
 
         launcher = DockerLauncher(runtime="docker")
         captured_kwargs: dict = {}
@@ -191,7 +191,7 @@ class TestDockerLauncherStderrPipe:
 class TestSubprocessLauncherStderrPipe:
     def test_subprocess_launcher_uses_stderr_pipe(self):
         """SubprocessLauncher must pass stderr=PIPE."""
-        from mcp_hangar.domain.services.provider_launcher.subprocess import SubprocessLauncher
+        from mcp_hangar.infrastructure.launchers.subprocess import SubprocessLauncher
 
         launcher = SubprocessLauncher()
         captured_kwargs: dict = {}
@@ -212,7 +212,7 @@ class TestSubprocessLauncherStderrPipe:
 class TestContainerLauncherStderrPipe:
     def test_container_launcher_uses_stderr_pipe(self):
         """ContainerLauncher with inherit_stderr=False must pass stderr=PIPE."""
-        from mcp_hangar.domain.services.provider_launcher.container import ContainerLauncher
+        from mcp_hangar.infrastructure.launchers.container import ContainerLauncher
 
         captured_kwargs: dict = {}
 

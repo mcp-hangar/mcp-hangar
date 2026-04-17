@@ -3,9 +3,10 @@
 Tests cover server lifecycle management: start, run, shutdown.
 """
 
+import asyncio
 import signal
 import sys
-from unittest.mock import MagicMock, patch
+from unittest.mock import AsyncMock, MagicMock, patch
 
 import pytest
 
@@ -77,6 +78,7 @@ class TestServerLifecycle:
     def test_lifecycle_start_with_discovery(self):
         """start() should start discovery orchestrator if present."""
         mock_runtime = MagicMock()
+        mock_runtime.repository.get_all_ids.return_value = []
         mock_mcp = MagicMock()
         mock_orchestrator = MagicMock()
         mock_orchestrator.get_stats.return_value = {"sources_count": 2}
@@ -179,6 +181,66 @@ class TestServerLifecycle:
                 lifecycle.run_http("localhost", 8000)
         finally:
             del sys.modules["uvicorn"]
+
+    def test_run_http_refuses_non_loopback_without_auth(self, mock_context):
+        """run_http() should refuse non-loopback binding when auth is disabled."""
+        mock_context.auth_components = None
+        lifecycle = ServerLifecycle(mock_context)
+
+        with pytest.raises(SystemExit) as exc_info:
+            lifecycle.run_http("0.0.0.0", 8000)
+
+        assert exc_info.value.code == 1
+
+    def test_create_auth_app_rejects_websocket_without_credentials(self, mock_context):
+        """Auth wrapper should close websocket with 1008 on auth failure."""
+        from mcp_hangar.domain.exceptions import MissingCredentialsError
+
+        auth_components = MagicMock()
+        auth_components.authn_middleware.authenticate.side_effect = MissingCredentialsError()
+        inner_app = AsyncMock()
+        lifecycle = ServerLifecycle(mock_context)
+        auth_app = lifecycle._create_auth_app(inner_app, auth_components)
+
+        sent_messages = []
+
+        async def send(message):
+            sent_messages.append(message)
+
+        scope = {
+            "type": "websocket",
+            "path": "/api/ws/events",
+            "headers": [],
+            "client": ("127.0.0.1", 1234),
+            "query_string": b"",
+        }
+
+        asyncio.run(auth_app(scope, AsyncMock(), send))
+
+        inner_app.assert_not_called()
+        assert sent_messages == [{"type": "websocket.close", "code": 1008, "reason": "No credentials provided"}]
+
+    def test_create_auth_app_adds_bearer_token_from_websocket_query(self, mock_context):
+        """Auth wrapper should map websocket ?token= to Authorization header."""
+        auth_components = MagicMock()
+        auth_components.authn_middleware.authenticate.return_value = {"principal": "ok"}
+        inner_app = AsyncMock()
+        lifecycle = ServerLifecycle(mock_context)
+        auth_app = lifecycle._create_auth_app(inner_app, auth_components)
+
+        scope = {
+            "type": "websocket",
+            "path": "/api/ws/events",
+            "headers": [],
+            "client": ("127.0.0.1", 1234),
+            "query_string": b"token=test-token",
+        }
+
+        asyncio.run(auth_app(scope, AsyncMock(), AsyncMock()))
+
+        auth_request = auth_components.authn_middleware.authenticate.call_args.args[0]
+        assert auth_request.headers["authorization"] == "Bearer test-token"
+        inner_app.assert_awaited_once()
 
 
 class TestSetupSignalHandlers:
@@ -286,7 +348,9 @@ class TestRunServer:
         run_server(http_config)
 
         mock_dependencies["lifecycle_instance"].start.assert_called_once()
-        mock_dependencies["lifecycle_instance"].run_http.assert_called_once_with("localhost", 9000)
+        mock_dependencies["lifecycle_instance"].run_http.assert_called_once_with(
+            "localhost", 9000, unsafe_no_auth=False
+        )
         mock_dependencies["lifecycle_instance"].run_stdio.assert_not_called()
 
     def test_run_server_setup_logging(self, mock_cli_config, mock_dependencies):

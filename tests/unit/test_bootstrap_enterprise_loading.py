@@ -1,31 +1,20 @@
-"""Tests for enterprise module loading consolidation.
+"""Tests for entry point-based enterprise bootstrap loading."""
 
-Verifies that:
-- EnterpriseComponents dataclass holds all enterprise module instances.
-- load_enterprise_modules() gates loading based on LicenseTier.
-- COMMUNITY tier skips all enterprise imports.
-- PRO/ENTERPRISE tiers attempt imports with graceful fallback.
-- Bootstrap reads HANGAR_LICENSE_KEY and wires license_tier into ApplicationContext.
-"""
+# pyright: reportAny=false, reportMissingParameterType=false, reportPrivateLocalImportUsage=false, reportUnannotatedClassAttribute=false, reportUnknownArgumentType=false, reportUnknownLambdaType=false, reportUnknownMemberType=false, reportUnknownParameterType=false, reportUnknownVariableType=false, reportUnusedCallResult=false
 
 import logging
-import sys
 from unittest.mock import MagicMock
 
 import pytest
 
 
-# ---------------------------------------------------------------------------
-# Helpers
-# ---------------------------------------------------------------------------
+class _FakeEntryPoint:
+    def __init__(self, name: str, loader):
+        self.name = name
+        self._loader = loader
 
-
-def _block_enterprise_modules(monkeypatch: pytest.MonkeyPatch) -> None:
-    """Block all enterprise.* imports by setting them to None in sys.modules."""
-    enterprise_keys = [key for key in sys.modules if key == "enterprise" or key.startswith("enterprise.")]
-    for key in enterprise_keys:
-        monkeypatch.setitem(sys.modules, key, None)
-    monkeypatch.setitem(sys.modules, "enterprise", None)
+    def load(self):
+        return self._loader
 
 
 # ---------------------------------------------------------------------------
@@ -88,47 +77,95 @@ class TestLoadEnterpriseModules:
         # so we check the function returned correctly (tested above) and
         # trust the structlog call is there from code review.
 
-    def test_pro_tier_without_enterprise_installed(self, monkeypatch):
-        """PRO tier with enterprise package blocked falls back to None fields."""
-        _block_enterprise_modules(monkeypatch)
-
+    def test_pro_tier_without_registered_entry_points(self, monkeypatch):
+        """PRO tier without entry points falls back to empty enterprise components."""
         from mcp_hangar.domain.value_objects.license import LicenseTier
-        from mcp_hangar.server.bootstrap.enterprise import load_enterprise_modules
+        from mcp_hangar.server.bootstrap import enterprise as enterprise_bootstrap
 
-        ec = load_enterprise_modules(LicenseTier.PRO, {})
+        monkeypatch.setattr(enterprise_bootstrap.importlib.metadata, "entry_points", lambda **kwargs: ())
+
+        ec = enterprise_bootstrap.load_enterprise_modules(LicenseTier.PRO, {})
         assert ec.license_tier == LicenseTier.PRO
-        # All fields remain None because enterprise is not installed
         assert ec.auth_components is None
+        assert ec.approval_service is None
 
-    def test_enterprise_tier_without_enterprise_installed(self, monkeypatch):
-        """ENTERPRISE tier with enterprise package blocked falls back to None fields."""
-        _block_enterprise_modules(monkeypatch)
-
+    def test_enterprise_tier_without_registered_entry_points(self, monkeypatch):
+        """ENTERPRISE tier without entry points falls back to empty enterprise components."""
         from mcp_hangar.domain.value_objects.license import LicenseTier
-        from mcp_hangar.server.bootstrap.enterprise import load_enterprise_modules
+        from mcp_hangar.server.bootstrap import enterprise as enterprise_bootstrap
+
+        monkeypatch.setattr(enterprise_bootstrap.importlib.metadata, "entry_points", lambda **kwargs: ())
+
+        ec = enterprise_bootstrap.load_enterprise_modules(LicenseTier.ENTERPRISE, {})
+        assert ec.license_tier == LicenseTier.ENTERPRISE
+        assert ec.auth_components is None
+        assert ec.approval_service is None
+
+    def test_pro_tier_with_registered_loader_populates_auth(self, monkeypatch):
+        """PRO tier uses registered enterprise loader callables."""
+        from mcp_hangar.domain.value_objects.license import LicenseTier
+        from mcp_hangar.server.bootstrap import enterprise as enterprise_bootstrap
+        from mcp_hangar.server.bootstrap.enterprise import EnterpriseComponents, load_enterprise_modules
+
+        auth_components = MagicMock()
+
+        def loader(tier, config, event_bus, event_publisher):
+            assert tier == LicenseTier.PRO
+            assert config == {"auth": {"enabled": True}}
+            assert event_bus == "bus"
+            assert event_publisher == "publisher"
+            return EnterpriseComponents(license_tier=tier, auth_components=auth_components)
+
+        monkeypatch.setattr(
+            enterprise_bootstrap.importlib.metadata,
+            "entry_points",
+            lambda **kwargs: (_FakeEntryPoint("enterprise-auth", loader),),
+        )
+
+        ec = load_enterprise_modules(
+            LicenseTier.PRO,
+            {"auth": {"enabled": True}},
+            event_bus="bus",
+            event_publisher="publisher",
+        )
+        assert ec.license_tier == LicenseTier.PRO
+        assert ec.auth_components is auth_components
+        assert ec.approval_service is None
+
+    def test_multiple_registered_loaders_merge_components(self, monkeypatch):
+        """Multiple enterprise loaders can contribute different component types."""
+        from mcp_hangar.domain.value_objects.license import LicenseTier
+        from mcp_hangar.server.bootstrap import enterprise as enterprise_bootstrap
+        from mcp_hangar.server.bootstrap.enterprise import EnterpriseComponents, load_enterprise_modules
+
+        auth_components = MagicMock()
+        approval_service = MagicMock()
+
+        monkeypatch.setattr(
+            enterprise_bootstrap.importlib.metadata,
+            "entry_points",
+            lambda **kwargs: (
+                _FakeEntryPoint(
+                    "enterprise-auth",
+                    lambda tier, config, event_bus, event_publisher: EnterpriseComponents(
+                        license_tier=tier,
+                        auth_components=auth_components,
+                    ),
+                ),
+                _FakeEntryPoint(
+                    "enterprise-approvals",
+                    lambda tier, config, event_bus, event_publisher: EnterpriseComponents(
+                        license_tier=tier,
+                        approval_service=approval_service,
+                    ),
+                ),
+            ),
+        )
 
         ec = load_enterprise_modules(LicenseTier.ENTERPRISE, {})
         assert ec.license_tier == LicenseTier.ENTERPRISE
-        assert ec.auth_components is None
-
-    def test_pro_tier_with_enterprise_loads_auth(self):
-        """PRO tier with enterprise installed populates auth fields."""
-        from mcp_hangar.domain.value_objects.license import LicenseTier
-        from mcp_hangar.server.bootstrap.enterprise import load_enterprise_modules
-
-        ec = load_enterprise_modules(LicenseTier.PRO, {})
-        assert ec.license_tier == LicenseTier.PRO
-        # With enterprise installed, auth should be populated
-        assert ec.auth_components is not None
-
-    def test_enterprise_tier_with_enterprise_loads_all(self):
-        """ENTERPRISE tier with enterprise installed populates all fields."""
-        from mcp_hangar.domain.value_objects.license import LicenseTier
-        from mcp_hangar.server.bootstrap.enterprise import load_enterprise_modules
-
-        ec = load_enterprise_modules(LicenseTier.ENTERPRISE, {})
-        assert ec.license_tier == LicenseTier.ENTERPRISE
-        assert ec.auth_components is not None
+        assert ec.auth_components is auth_components
+        assert ec.approval_service is approval_service
 
 
 # ---------------------------------------------------------------------------
@@ -153,10 +190,14 @@ class TestBootstrapLicenseTier:
     def test_license_tier_logged_at_startup(self, caplog):
         """Verify 'enterprise_modules_loaded' or 'enterprise_modules_skipped' is logged."""
         from mcp_hangar.domain.value_objects.license import LicenseTier
-        from mcp_hangar.server.bootstrap.enterprise import load_enterprise_modules
+        from mcp_hangar.server.bootstrap import enterprise as enterprise_bootstrap
 
-        with caplog.at_level(logging.DEBUG):
-            load_enterprise_modules(LicenseTier.PRO, {})
+        with pytest.MonkeyPatch.context() as monkeypatch:
+            caplog.clear()
+            monkeypatch.setattr(enterprise_bootstrap.importlib.metadata, "entry_points", lambda **kwargs: ())
+
+            with caplog.at_level(logging.DEBUG):
+                enterprise_bootstrap.load_enterprise_modules(LicenseTier.PRO, {})
 
         # The function should log about enterprise modules (loaded or skipped)
         # structlog may not always pass through to caplog, so this is a best-effort check

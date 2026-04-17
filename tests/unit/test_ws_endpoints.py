@@ -5,8 +5,11 @@ The async endpoints are driven via asyncio.run() or loop.run_until_complete().
 """
 
 import asyncio
-import json
+from collections.abc import Awaitable
+from typing import Any
 from unittest.mock import AsyncMock, MagicMock, patch
+
+from starlette.websockets import WebSocketDisconnect
 
 
 # ---------------------------------------------------------------------------
@@ -14,7 +17,7 @@ from unittest.mock import AsyncMock, MagicMock, patch
 # ---------------------------------------------------------------------------
 
 
-def make_ws_mock(receive_sequence: list = None) -> MagicMock:
+def make_ws_mock(receive_sequence: list[object] | None = None) -> MagicMock:
     """Build an AsyncMock WebSocket that returns items from receive_sequence.
 
     Each call to receive_json() pops from the sequence; TimeoutError is raised
@@ -25,6 +28,9 @@ def make_ws_mock(receive_sequence: list = None) -> MagicMock:
     ws.send_text = AsyncMock()
     ws.send_json = AsyncMock()
     ws.close = AsyncMock()
+    ws.headers = {}
+    ws.scope = {}
+    ws.url = MagicMock(path="/ws/events", query="")
     if receive_sequence is None:
         receive_sequence = []
 
@@ -52,7 +58,7 @@ def make_ws_mock(receive_sequence: list = None) -> MagicMock:
 class TestWsEventsEndpoint:
     """Tests for the /ws/events WebSocket handler."""
 
-    def _run(self, coro):
+    def _run(self, coro: Awaitable[object]) -> object:
         return asyncio.run(coro)
 
     def test_connect_subscribes_to_event_bus(self):
@@ -64,8 +70,6 @@ class TestWsEventsEndpoint:
         mock_bus.unsubscribe_from_all = MagicMock()
 
         # Queue that will receive one event and then cause disconnect
-        from starlette.websockets import WebSocketDisconnect
-
         async def run():
             ws = make_ws_mock(receive_sequence=[asyncio.TimeoutError])
             # Make wait_for time out immediately (no idle wait needed in test)
@@ -83,6 +87,25 @@ class TestWsEventsEndpoint:
                             pass
 
             mock_bus.subscribe_to_all.assert_called_once()
+
+        self._run(run())
+
+    def test_rejects_ws_origin_before_accept(self):
+        """Origin mismatch closes with policy violation before accept."""
+        from mcp_hangar.server.api.ws.events import ws_events_endpoint
+
+        async def run():
+            ws = make_ws_mock()
+            ws.headers = {"origin": "https://evil.example"}
+
+            with patch(
+                "mcp_hangar.server.api.ws.events.get_cors_config",
+                return_value={"allow_origins": ["https://ok.example"]},
+            ):
+                await ws_events_endpoint(ws)
+
+            ws.accept.assert_not_called()
+            ws.close.assert_called_once_with(code=1008)
 
         self._run(run())
 
@@ -115,8 +138,6 @@ class TestWsEventsEndpoint:
         mock_bus = MagicMock()
         mock_bus.subscribe_to_all = MagicMock(side_effect=subscribe_side_effect)
         mock_bus.unsubscribe_from_all = MagicMock()
-
-        from starlette.websockets import WebSocketDisconnect
 
         async def run():
             ws = make_ws_mock()
@@ -170,7 +191,6 @@ class TestWsEventsEndpoint:
     def test_disconnect_triggers_unsubscribe_and_unregister(self):
         """On WebSocketDisconnect, unsubscribe_from_all and unregister are called."""
         from mcp_hangar.server.api.ws.events import ws_events_endpoint
-        from starlette.websockets import WebSocketDisconnect
 
         mock_bus = MagicMock()
         mock_bus.subscribe_to_all = MagicMock()
@@ -208,10 +228,46 @@ class TestWsEventsEndpoint:
 
         self._run(run())
 
+    def test_connection_uses_bounded_queue_with_drop_callback(self):
+        """Endpoint configures bounded backpressure queue and logs drops."""
+        from mcp_hangar.server.api.ws.events import ws_events_endpoint
+
+        mock_bus = MagicMock()
+        mock_bus.subscribe_to_all = MagicMock()
+        mock_bus.unsubscribe_from_all = MagicMock()
+
+        captured_kwargs = {}
+        mock_queue = MagicMock()
+        mock_queue.queue.get = AsyncMock(side_effect=WebSocketDisconnect)
+        mock_queue.put_threadsafe = MagicMock()
+
+        def make_queue(*args: object, **kwargs: Any) -> MagicMock:
+            captured_kwargs.update(kwargs)
+            return mock_queue
+
+        async def run():
+            ws = make_ws_mock()
+
+            with patch("mcp_hangar.server.api.ws.events.get_event_bus", return_value=mock_bus):
+                with patch("mcp_hangar.server.api.ws.events.connection_manager") as mock_cm:
+                    mock_cm.register = MagicMock()
+                    mock_cm.unregister = MagicMock()
+                    with patch("mcp_hangar.server.api.ws.events.EventStreamQueue", side_effect=make_queue):
+                        await ws_events_endpoint(ws)
+
+            assert captured_kwargs["maxsize"] == 1024
+            assert callable(captured_kwargs["on_drop"])
+            dropped_event = type("DroppedEvent", (), {})()
+            new_event = type("NewEvent", (), {})()
+            with patch("mcp_hangar.server.api.ws.events.logger") as mock_logger:
+                captured_kwargs["on_drop"](dropped_event, new_event)
+            mock_logger.warning.assert_called_once()
+
+        self._run(run())
+
     def test_idle_timeout_sends_ping(self):
         """After 30s idle (TimeoutError on queue.get), sends {type: ping}."""
         from mcp_hangar.server.api.ws.events import ws_events_endpoint
-        from starlette.websockets import WebSocketDisconnect
 
         mock_bus = MagicMock()
         mock_bus.subscribe_to_all = MagicMock()
@@ -287,4 +343,3 @@ class TestWsEventsEndpoint:
             mock_cm.unregister.assert_called_once()
 
         self._run(run())
-

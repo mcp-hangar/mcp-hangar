@@ -8,9 +8,7 @@ When capabilities are provided, they override the legacy enable_network construc
 When no capabilities are provided, the existing enable_network behavior is preserved.
 """
 
-from unittest.mock import patch
-
-from mcp_hangar.domain.services.provider_launcher.docker import DockerLauncher
+from mcp_hangar.infrastructure.launchers.docker import DockerLauncher
 from mcp_hangar.domain.value_objects.capabilities import (
     EgressRule,
     NetworkCapabilities,

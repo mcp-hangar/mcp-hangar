@@ -1,3 +1,5 @@
+# pyright: reportArgumentType=false, reportMissingTypeArgument=false
+
 """Auth coverage batch 7 -- LicenseValidator, SecretsResolver, auth config,
 roles stub fallbacks, JWTIdentityExtractor uncovered branches, and
 OutputRedactor remaining edge cases.
@@ -212,9 +214,7 @@ class TestSecretsResolverEnvVars:
 
 
 class TestSecretsResolverFiles:
-    def test_resolves_from_provider_specific_file(
-        self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
-    ) -> None:
+    def test_resolves_from_provider_specific_file(self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
         from mcp_hangar.application.services.secrets_resolver import SecretsResolver
 
         monkeypatch.delenv("PROVIDER_SECRET", raising=False)
@@ -226,9 +226,7 @@ class TestSecretsResolverFiles:
         assert result.resolved["PROVIDER_SECRET"] == "file_val"
         assert result.sources["PROVIDER_SECRET"] == "file"
 
-    def test_resolves_from_global_file(
-        self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
-    ) -> None:
+    def test_resolves_from_global_file(self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
         from mcp_hangar.application.services.secrets_resolver import SecretsResolver
 
         monkeypatch.delenv("GLOBAL_SECRET", raising=False)
@@ -238,9 +236,7 @@ class TestSecretsResolverFiles:
         assert result.resolved["GLOBAL_SECRET"] == "global_val"
         assert result.sources["GLOBAL_SECRET"] == "file"
 
-    def test_missing_secret(
-        self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
-    ) -> None:
+    def test_missing_secret(self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
         from mcp_hangar.application.services.secrets_resolver import SecretsResolver
 
         monkeypatch.delenv("NOPE", raising=False)
@@ -249,9 +245,7 @@ class TestSecretsResolverFiles:
         assert "NOPE" in result.missing
         assert result.all_resolved is False
 
-    def test_provider_file_takes_precedence_over_global(
-        self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
-    ) -> None:
+    def test_provider_file_takes_precedence_over_global(self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
         from mcp_hangar.application.services.secrets_resolver import SecretsResolver
 
         monkeypatch.delenv("SECRET", raising=False)
@@ -263,9 +257,7 @@ class TestSecretsResolverFiles:
         result = resolver.resolve(["SECRET"], "prov")
         assert result.resolved["SECRET"] == "provider"
 
-    def test_env_takes_precedence_over_file(
-        self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
-    ) -> None:
+    def test_env_takes_precedence_over_file(self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
         from mcp_hangar.application.services.secrets_resolver import SecretsResolver
 
         monkeypatch.setenv("SECRET", "from_env")
@@ -303,9 +295,7 @@ class TestSecretsResolverFileErrors:
         # Should fall through to global file
         assert result.resolved["SECRET"] == "global_val"
 
-    def test_unreadable_global_file_results_in_missing(
-        self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
-    ) -> None:
+    def test_unreadable_global_file_results_in_missing(self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
         from mcp_hangar.application.services.secrets_resolver import SecretsResolver
 
         monkeypatch.delenv("SECRET", raising=False)
@@ -331,9 +321,7 @@ class TestSecretsResolverMissingInstructions:
         from mcp_hangar.application.services.secrets_resolver import SecretsResolver
 
         resolver = SecretsResolver(secrets_dir=Path("/tmp/test"))
-        text = resolver.get_missing_instructions(
-            ["API_KEY", "DB_PASS"], "my-provider"
-        )
+        text = resolver.get_missing_instructions(["API_KEY", "DB_PASS"], "my-provider")
         assert "API_KEY" in text
         assert "DB_PASS" in text
         assert "my-provider" in text
@@ -486,9 +474,7 @@ class TestParseAuthConfigFull:
 
 
 class TestParseAuthConfigEnvOverride:
-    def test_jwt_max_token_lifetime_env_override(
-        self, monkeypatch: pytest.MonkeyPatch
-    ) -> None:
+    def test_jwt_max_token_lifetime_env_override(self, monkeypatch: pytest.MonkeyPatch) -> None:
         from enterprise.auth.config import parse_auth_config
 
         monkeypatch.setenv("MCP_JWT_MAX_TOKEN_LIFETIME", "1800")
@@ -682,9 +668,7 @@ class TestJWTExtractorTokenDecoding:
         import jwt as pyjwt
 
         ext = self._make_extractor()
-        token = pyjwt.encode(
-            {"sub": "user1", "exp": 1}, "test-secret", algorithm="HS256"
-        )
+        token = pyjwt.encode({"sub": "user1", "exp": 1}, "test-secret", algorithm="HS256")
         result = ext.extract({"authorization": f"Bearer {token}"})
         assert result is None
 
@@ -706,12 +690,8 @@ class TestJWTExtractorTokenDecoding:
         assert result is None
 
     def test_valid_token_with_audience_and_issuer(self) -> None:
-        ext = self._make_extractor(
-            audience="my-aud", issuer="my-iss"
-        )
-        token = self._make_token(
-            {"sub": "user1", "aud": "my-aud", "iss": "my-iss"}
-        )
+        ext = self._make_extractor(audience="my-aud", issuer="my-iss")
+        token = self._make_token({"sub": "user1", "aud": "my-aud", "iss": "my-iss"})
         result = ext.extract({"authorization": f"Bearer {token}"})
         assert result is not None
         assert result.caller.user_id == "user1"
@@ -756,9 +736,7 @@ class TestJWTExtractorClaimsToContext:
 
     def test_agent_id_and_session_id_populated(self) -> None:
         ext = self._make_extractor()
-        token = self._make_token(
-            {"sub": "u1", "agent_id": "a1", "sid": "s1", "jti": "corr1"}
-        )
+        token = self._make_token({"sub": "u1", "agent_id": "a1", "sid": "s1", "jti": "corr1"})
         ctx = ext.extract({"authorization": f"Bearer {token}"})
         assert ctx is not None
         assert ctx.caller.agent_id == "a1"

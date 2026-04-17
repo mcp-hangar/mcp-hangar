@@ -19,6 +19,7 @@ We have implemented the Command Query Responsibility Segregation (CQRS) pattern 
 ### Write-side: Commands
 
 Commands represent a user's intent to change the system state.
+
 - **CommandBus**: The central dispatcher (`mcp_hangar.infrastructure.command_bus.CommandBus`) routes commands to exactly one handler.
 - **Handlers**: Command handlers (`mcp_hangar.application.commands.handlers.py`) encapsulate the orchestration of domain logic, typically interacting with an aggregate root.
 - **Middleware**: The `CommandBus` supports a middleware pipeline (`CommandBusMiddleware`) for cross-cutting concerns like tracing and rate limiting (`RateLimitMiddleware`).
@@ -26,6 +27,7 @@ Commands represent a user's intent to change the system state.
 ### Read-side: Queries
 
 Queries are read-only requests for data with no side effects.
+
 - **QueryBus**: Dispatches queries to their respective handlers (`mcp_hangar.infrastructure.query_bus.QueryBus`).
 - **Read Models**: Queries return denormalized projections or DTOs rather than domain aggregates, optimized for specific UI or API needs.
 - **Isolation**: Read logic is completely separate from domain logic, ensuring that expensive queries cannot interfere with the integrity of state transitions.

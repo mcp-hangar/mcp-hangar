@@ -116,26 +116,19 @@ class TestEnsureDataDir:
 
     def test_handles_oserror_gracefully(self, tmp_path, monkeypatch):
         """Should handle OSError gracefully."""
-        import sys
+        import importlib
 
-        import mcp_hangar.server.bootstrap  # noqa: F401
+        bootstrap_mod = importlib.import_module("mcp_hangar.server.bootstrap")
 
-        bootstrap_mod = sys.modules["mcp_hangar.server.bootstrap"]
         monkeypatch.chdir(tmp_path)
-
-        original_path = bootstrap_mod.Path
 
         mock_data_dir = MagicMock()
         mock_data_dir.exists.return_value = False
         mock_data_dir.mkdir.side_effect = OSError("Permission denied")
         mock_path = MagicMock(return_value=mock_data_dir)
-        bootstrap_mod.Path = mock_path
-
-        try:
+        with patch.object(bootstrap_mod, "Path", mock_path):
             # Should not raise
             bootstrap_mod._ensure_data_dir()
-        finally:
-            bootstrap_mod.Path = original_path
 
 
 class TestCreateDiscoverySource:
@@ -274,7 +267,8 @@ class TestStartBackgroundWorkers:
         mock_worker_class.return_value = mock_worker
 
         with patch("mcp_hangar.server.bootstrap.workers.BackgroundWorker", mock_worker_class):
-            with patch("mcp_hangar.server.bootstrap.workers.PROVIDERS", {}):
+            with patch("mcp_hangar.server.bootstrap.workers.get_runtime") as mock_get_runtime:
+                mock_get_runtime.return_value.repository = {}
                 from mcp_hangar.server.bootstrap import _create_background_workers
 
                 workers = _create_background_workers()
@@ -291,7 +285,8 @@ class TestStartBackgroundWorkers:
         mock_worker_class.return_value = mock_worker
 
         with patch("mcp_hangar.server.bootstrap.workers.BackgroundWorker", mock_worker_class):
-            with patch("mcp_hangar.server.bootstrap.workers.PROVIDERS", {}):
+            with patch("mcp_hangar.server.bootstrap.workers.get_runtime") as mock_get_runtime:
+                mock_get_runtime.return_value.repository = {}
                 from mcp_hangar.server.bootstrap import _create_background_workers
 
                 _create_background_workers()

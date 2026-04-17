@@ -1,76 +1,41 @@
 """Tests for server/state.py module."""
 
+import warnings
+from unittest.mock import MagicMock
+
 import pytest
 
+from mcp_hangar.server import state
 from mcp_hangar.server.state import (
     get_discovery_orchestrator,
     get_group_rebalance_saga,
     get_runtime,
     GROUPS,
-    ProviderDict,
-    PROVIDERS,
     set_discovery_orchestrator,
     set_group_rebalance_saga,
 )
 
 
-class TestProviderDict:
-    """Tests for ProviderDict wrapper class."""
+class TestDeprecatedRuntimeExports:
+    """Tests for deprecated lazy runtime exports."""
 
-    def test_getitem_raises_keyerror_for_missing(self):
-        """Should raise KeyError for missing provider."""
-        pd = ProviderDict(get_runtime().repository)
+    def test_providers_resolves_repository_with_deprecation_warning(self):
+        """PROVIDERS should lazily resolve to the runtime repository."""
+        with warnings.catch_warnings(record=True) as caught:
+            warnings.simplefilter("always")
+            providers = state.PROVIDERS
 
-        with pytest.raises(KeyError):
-            _ = pd["nonexistent-provider"]
+        assert providers is get_runtime().repository
+        assert any(item.category is DeprecationWarning for item in caught)
 
-    def test_contains_returns_false_for_missing(self):
-        """Should return False for missing provider."""
-        pd = ProviderDict(get_runtime().repository)
+    def test_provider_repository_resolves_lazily(self):
+        """PROVIDER_REPOSITORY should lazily resolve to the repository."""
+        with warnings.catch_warnings(record=True) as caught:
+            warnings.simplefilter("always")
+            repository = state.PROVIDER_REPOSITORY
 
-        assert "nonexistent-provider" not in pd
-
-    def test_get_returns_default_for_missing(self):
-        """Should return default value for missing provider."""
-        pd = ProviderDict(get_runtime().repository)
-
-        result = pd.get("nonexistent", "default-value")
-        assert result == "default-value"
-
-    def test_get_returns_none_for_missing_without_default(self):
-        """Should return None for missing provider without default."""
-        pd = ProviderDict(get_runtime().repository)
-
-        result = pd.get("nonexistent")
-        assert result is None
-
-    def test_len_returns_count(self):
-        """Should return number of providers."""
-        pd = ProviderDict(get_runtime().repository)
-
-        # Should be 0 or more
-        assert len(pd) >= 0
-
-    def test_items_returns_iterable(self):
-        """Should return iterable of items."""
-        pd = ProviderDict(get_runtime().repository)
-
-        items = list(pd.items())
-        assert isinstance(items, list)
-
-    def test_keys_returns_iterable(self):
-        """Should return iterable of keys."""
-        pd = ProviderDict(get_runtime().repository)
-
-        keys = list(pd.keys())
-        assert isinstance(keys, list)
-
-    def test_values_returns_iterable(self):
-        """Should return iterable of values."""
-        pd = ProviderDict(get_runtime().repository)
-
-        values = list(pd.values())
-        assert isinstance(values, list)
+        assert repository is get_runtime().repository
+        assert any(item.category is DeprecationWarning for item in caught)
 
 
 class TestGetRuntime:
@@ -107,7 +72,7 @@ class TestDiscoveryOrchestrator:
 
     def test_set_and_get(self):
         """Should set and get orchestrator."""
-        mock_orchestrator = object()
+        mock_orchestrator = MagicMock()
         set_discovery_orchestrator(mock_orchestrator)
 
         result = get_discovery_orchestrator()
@@ -130,7 +95,7 @@ class TestGroupRebalanceSaga:
 
     def test_set_and_get(self):
         """Should set and get saga."""
-        mock_saga = object()
+        mock_saga = MagicMock()
         set_group_rebalance_saga(mock_saga)
 
         result = get_group_rebalance_saga()
@@ -142,10 +107,6 @@ class TestGroupRebalanceSaga:
 
 class TestGlobalState:
     """Tests for global state variables."""
-
-    def test_providers_is_provider_dict(self):
-        """PROVIDERS should be a ProviderDict."""
-        assert isinstance(PROVIDERS, ProviderDict)
 
     def test_groups_is_dict(self):
         """GROUPS should be a dict."""
