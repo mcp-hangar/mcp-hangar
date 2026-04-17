@@ -7,6 +7,40 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [1.0.1] - 2026-04-17
+
+Security hardening release addressing findings from the April 2026 security audit.
+
+### Added
+
+- **SSRF Protection**: Block remote provider endpoints resolving to private/link-local addresses (10.0.0.0/8, 127.0.0.0/8, 169.254.0.0/16, etc.)
+- **Trusted Proxy Resolver**: `TrustedProxyResolver` with CIDR support, configurable via `MCP_TRUSTED_PROXIES` env var
+- **Granular RBAC Permissions**: `policy:write`, `providers:read`, `providers:write`, `providers:lifecycle`, `config:reload` permissions with `agent` role for hangar-agent tokens
+- **Command Allow-List**: Default-deny `ALLOWED_COMMANDS` (node, python, docker, uv, etc.) replaces the old blocklist approach; configurable via `MCP_ALLOWED_COMMANDS` env var
+- **WebSocket Origin Validation**: Validates `Origin` header against CORS config before accepting WebSocket connections
+- **WebSocket Backpressure**: Per-connection bounded queue (maxsize=1024) with subscriber limit (max 100)
+- **Domain Contracts**: `IProviderLauncher`, `LaunchResult`, `ILock` protocols for DDD boundary enforcement
+- **ADR Documents**: ADR-001 (CQRS), ADR-002 (Event Sourcing), ADR-003 (Sagas)
+- **Security Tests**: `tests/security/test_critical.py` and new unit tests for SSRF, trusted proxy, JWT extractor, RBAC, WS auth
+
+### Changed
+
+- **Launcher Architecture**: Provider launchers moved from `domain/services/provider_launcher/` to `infrastructure/launchers/`; old paths are deprecation shims
+- **Server State**: Eager globals replaced with lazy-initialized `server/bootstrap/composition.py`; `ProviderDict` wrapper removed
+- **Enterprise Module Loading**: Uses `importlib.metadata` entry points instead of direct enterprise imports
+- **CORS Defaults**: `allow_credentials=False`, explicit methods and headers instead of wildcards
+- **Identity Extraction**: `IIdentityExtractor.extract()` now accepts `source_ip` for trusted proxy validation
+- **Enterprise HTTP Middleware**: Unified request metadata extraction with core `IdentityMiddleware`
+- **CloudConnector**: Replaced `hasattr()` checks with explicit `None` initialization and guards
+
+### Security
+
+- Command execution restricted to allow-list only (default-deny)
+- SSRF validation on remote provider endpoint URLs
+- Trusted proxy CIDR resolution prevents IP spoofing via `X-Forwarded-For`
+- JWT algorithm confusion guard for mixed symmetric/asymmetric families
+- WebSocket CSWSH protection via Origin validation
+
 ## [1.0.0] - 2026-04-11
 
 First stable release. All public APIs are now covered by semantic versioning guarantees.

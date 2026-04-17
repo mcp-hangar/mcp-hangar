@@ -1,6 +1,6 @@
 [project]
 name = "mcp-hangar"
-version = "1.0.0"
+version = "1.0.1"
 description = "Production-grade infrastructure for Model Context Protocol"
 readme = "README.md"
 license = {text = "MIT"}
