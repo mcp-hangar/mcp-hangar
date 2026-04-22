@@ -104,7 +104,8 @@ class NetworkObservation:
         **kwargs: object,
     ) -> None:
         legacy_id = kwargs.pop("provider_id", None)
-        resolved_id = mcp_server_id if mcp_server_id is not None else (legacy_id if isinstance(legacy_id, str) else None)
+        legacy_str = legacy_id if isinstance(legacy_id, str) else None
+        resolved_id = mcp_server_id if mcp_server_id is not None else legacy_str
         if resolved_id is None:
             raise TypeError("Missing required argument: mcp_server_id")
         if kwargs:
