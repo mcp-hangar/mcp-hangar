@@ -1,0 +1,3 @@
+- Set httpx client follow_redirects default to False in src/mcp_hangar/http_client.py for SSRF prevention.
+- Agent policy push endpoint now reads request.state.auth and uses authz_middleware policy:write checks instead of trusting a spoofable header; rejection publishes PolicyPushRejected.
+- Added core policy authorization primitives: PERMISSION_POLICY_WRITE and AGENT_ROLE, with enterprise role registry exposing policy:write for RBAC assignment.

@@ -1,21 +1,21 @@
-"""HTTP provider launcher implementation."""
+"""HTTP mcp_server launcher implementation."""
 
 from collections.abc import Mapping
 from typing import cast
 
 from mcp_hangar.logging_config import get_logger
-from mcp_hangar.domain.exceptions import ProviderStartError, ValidationError
+from mcp_hangar.domain.exceptions import McpServerStartError, ValidationError
 from mcp_hangar.domain.security.input_validator import InputValidator
-from .base import ProviderLauncher
+from .base import McpServerLauncher
 
 logger = get_logger(__name__)
 
 
-class HttpLauncher(ProviderLauncher):
+class HttpLauncher(McpServerLauncher):
     """
-    Launcher for remote HTTP-based MCP providers.
+    Launcher for remote HTTP-based MCP mcp_servers.
 
-    Connects to MCP providers exposed via HTTP/HTTPS endpoints.
+    Connects to MCP mcp_servers exposed via HTTP/HTTPS endpoints.
     Supports:
     - Multiple authentication schemes (none, API key, bearer token, basic)
     - SSE (Server-Sent Events) streaming
@@ -23,7 +23,7 @@ class HttpLauncher(ProviderLauncher):
     - Connection pooling and retry logic
 
     Note: This launcher does not start a process - it creates a client
-    that connects to an already-running remote provider.
+    that connects to an already-running remote mcp_server.
     """
 
     def __init__(
@@ -95,20 +95,20 @@ class HttpLauncher(ProviderLauncher):
         http_config: Mapping[str, object] | None = None,
     ):
         """
-        Create an HTTP client for a remote MCP provider.
+        Create an HTTP client for a remote MCP mcp_server.
 
         Args:
-            endpoint: HTTP/HTTPS URL of the MCP provider.
+            endpoint: HTTP/HTTPS URL of the MCP mcp_server.
             auth_config: Authentication configuration dict.
             tls_config: TLS configuration dict.
             http_config: HTTP transport configuration dict.
 
         Returns:
-            HttpClient connected to the remote provider.
+            HttpClient connected to the remote mcp_server.
 
         Raises:
             ValidationError: If inputs fail validation.
-            ProviderStartError: If connection cannot be established.
+            McpServerStartError: If connection cannot be established.
         """
         # Validate endpoint
         self._validate_endpoint(endpoint)
@@ -168,7 +168,7 @@ class HttpLauncher(ProviderLauncher):
             )
 
         logger.info(
-            f"Connecting to HTTP provider: {endpoint}",
+            f"Connecting to HTTP mcp_server: {endpoint}",
             auth_type=auth.auth_type.value,
             verify_ssl=http_cfg.verify_ssl,
         )
@@ -181,8 +181,8 @@ class HttpLauncher(ProviderLauncher):
             )
             return client
         except (OSError, ConnectionError, TimeoutError) as e:
-            raise ProviderStartError(
-                provider_id="unknown",
-                reason=f"Failed to connect to HTTP provider: {e}",
+            raise McpServerStartError(
+                mcp_server_id="unknown",
+                reason=f"Failed to connect to HTTP mcp_server: {e}",
                 details={"endpoint": endpoint},
             ) from e

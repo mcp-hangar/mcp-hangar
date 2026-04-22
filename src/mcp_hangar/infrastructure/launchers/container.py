@@ -1,8 +1,8 @@
-"""Container (Docker/Podman) provider launcher implementation.
+"""Container (Docker/Podman) mcp_server launcher implementation.
 
 Note on CI volume mounts:
 Some CI environments mount the workspace with restrictive permissions that can
-cause containerized providers to fail writing to bind-mounted directories. We
+cause containerized mcp_servers to fail writing to bind-mounted directories. We
 support an opt-in behavior to chmod mounted host directories to be writable
 before launching containers (see MCP_CI_RELAX_VOLUME_PERMS).
 
@@ -20,17 +20,17 @@ import subprocess
 
 from mcp_hangar.logging_config import get_logger
 from mcp_hangar.stdio_client import StdioClient
-from mcp_hangar.domain.exceptions import ProviderStartError, ValidationError
+from mcp_hangar.domain.exceptions import McpServerStartError, ValidationError
 from mcp_hangar.domain.security.input_validator import InputValidator
 from mcp_hangar.domain.security.sanitizer import Sanitizer
-from .base import ProviderLauncher
+from .base import McpServerLauncher
 
 logger = get_logger(__name__)
 
 
 @dataclass
 class ContainerConfig:
-    """Configuration for container-based provider launch."""
+    """Configuration for container-based mcp_server launch."""
 
     image: str
     command: list[str] | None = None  # Override container entrypoint
@@ -43,10 +43,10 @@ class ContainerConfig:
     read_only: bool = True
     drop_capabilities: bool = False  # Disabled: causes issues with native modules (e.g., better-sqlite3)
     user: str | None = None  # Run as specific user
-    provider_id: str | None = None  # Provider identity for container discovery
+    mcp_server_id: str | None = None  # McpServer identity for container discovery
 
 
-class ContainerLauncher(ProviderLauncher):
+class ContainerLauncher(McpServerLauncher):
     """
     Unified launcher for Docker/Podman containers.
 
@@ -136,20 +136,20 @@ class ContainerLauncher(ProviderLauncher):
             Runtime command name (full path if needed)
 
         Raises:
-            ProviderStartError: If no runtime found
+            McpServerStartError: If no runtime found
         """
         runtime_path = self._find_runtime(preference)
         if runtime_path:
             return runtime_path
 
         if preference != "auto":
-            raise ProviderStartError(
-                provider_id="container_launcher",
+            raise McpServerStartError(
+                mcp_server_id="container_launcher",
                 reason=f"Container runtime '{preference}' not found in PATH",
             )
 
-        raise ProviderStartError(
-            provider_id="container_launcher",
+        raise McpServerStartError(
+            mcp_server_id="container_launcher",
             reason="No container runtime found. Install podman or docker.",
         )
 
@@ -295,7 +295,7 @@ class ContainerLauncher(ProviderLauncher):
 
         # Security options
         #
-        # Even with a read-write root filesystem, some providers rely on standard
+        # Even with a read-write root filesystem, some mcp_servers rely on standard
         # writable temp locations like /tmp during startup. In hardened modes,
         # /tmp may not exist or may not be writable depending on the image.
         #
@@ -368,9 +368,9 @@ class ContainerLauncher(ProviderLauncher):
         if config.command:
             cmd.extend(["--entrypoint", config.command[0]])
 
-        # Provider identity label for container discovery
-        if config.provider_id:
-            cmd.extend(["--label", f"mcp-hangar.provider-id={config.provider_id}"])
+        # McpServer identity label for container discovery
+        if config.mcp_server_id:
+            cmd.extend(["--label", f"mcp-hangar.mcp_server-id={config.mcp_server_id}"])
 
         # Image
         cmd.append(config.image)
@@ -398,10 +398,10 @@ class ContainerLauncher(ProviderLauncher):
         network: str = "none",
         read_only: bool = True,
         user: str | None = None,
-        provider_id: str | None = None,
+        mcp_server_id: str | None = None,
     ) -> StdioClient:
         """
-        Launch a container provider.
+        Launch a container mcp_server.
 
         Args:
             image: Container image name and tag
@@ -414,13 +414,13 @@ class ContainerLauncher(ProviderLauncher):
             network: Network mode ("none", "bridge", "host")
             read_only: Mount root filesystem read-only
             user: User to run as (UID:GID or username)
-            provider_id: Provider identity for container label injection
+            mcp_server_id: McpServer identity for container label injection
 
         Returns:
             StdioClient connected to the container
 
         Raises:
-            ProviderStartError: If container fails to start
+            McpServerStartError: If container fails to start
             ValidationError: If inputs fail validation
         """
         if not image:
@@ -454,7 +454,7 @@ class ContainerLauncher(ProviderLauncher):
             network=network,
             read_only=read_only,
             user=user,
-            provider_id=provider_id,
+            mcp_server_id=mcp_server_id,
         )
 
         # Build command
@@ -484,14 +484,14 @@ class ContainerLauncher(ProviderLauncher):
             )
             return StdioClient(process)
         except FileNotFoundError as e:
-            raise ProviderStartError(
-                provider_id="unknown",
+            raise McpServerStartError(
+                mcp_server_id="unknown",
                 reason=f"{self._runtime} not found. Is it installed and in PATH?",
                 details={"image": image},
             ) from e
         except (OSError, subprocess.SubprocessError) as e:
-            raise ProviderStartError(
-                provider_id="unknown",
+            raise McpServerStartError(
+                mcp_server_id="unknown",
                 reason=f"container_spawn_failed: {e}",
                 details={"image": image, "runtime": self._runtime},
             ) from e

@@ -63,7 +63,7 @@ echo "Token: $TOKEN"
 ### Call MCP-Hangar with the token
 
 ```bash
-# List providers (requires viewer role or higher)
+# List mcp_servers (requires viewer role or higher)
 curl -H "Authorization: Bearer $TOKEN" http://localhost:9000/mcp
 
 # Without auth (should fail with 401)

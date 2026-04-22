@@ -115,7 +115,7 @@ async def run_conflict_resolver():
     from mcp_hangar.domain.discovery import ConflictResolution, ConflictResolver, DiscoveredProvider
 
     # Test static always wins
-    resolver = ConflictResolver(static_providers={"my-static-provider"})
+    resolver = ConflictResolver(static_mcp_servers={"my-static-provider"})
 
     provider = DiscoveredProvider.create(
         name="my-static-provider",
@@ -322,7 +322,7 @@ async def run_discovery_orchestrator():
     # Create orchestrator
     config = DiscoveryConfig(enabled=True, refresh_interval_s=30, auto_register=True)
 
-    orchestrator = DiscoveryOrchestrator(config=config, static_providers={"static-provider"})
+    orchestrator = DiscoveryOrchestrator(config=config, static_mcp_servers={"static-provider"})
 
     orchestrator.add_source(MockSource())
 
@@ -424,11 +424,11 @@ async def run_lifecycle_manager():
         connection_info={"port": 8080},
     )
 
-    manager.add_provider(provider)
+    manager.add_mcp_server(provider)
 
     print_result(
         "Provider added to lifecycle tracking",
-        manager.get_provider("lifecycle-test") is not None,
+        manager.get_mcp_server("lifecycle-test") is not None,
         f"stats={manager.get_stats()}",
     )
 

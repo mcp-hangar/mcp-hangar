@@ -1,7 +1,7 @@
 """Metrics history store for time-series metric snapshots.
 
-Records per-provider metric snapshots every 60 seconds into SQLite,
-supports querying by provider, metric name, and time range, and prunes
+Records per-mcp_server metric snapshots every 60 seconds into SQLite,
+supports querying by mcp_server, metric name, and time range, and prunes
 old data based on a configurable retention window.
 """
 
@@ -26,13 +26,13 @@ _MIGRATIONS: list[dict] = [
         "sql": """
             CREATE TABLE IF NOT EXISTS metric_snapshots (
                 id          INTEGER PRIMARY KEY AUTOINCREMENT,
-                provider_id TEXT    NOT NULL,
+                mcp_server_id TEXT    NOT NULL,
                 metric_name TEXT    NOT NULL,
                 value       REAL    NOT NULL,
                 recorded_at REAL    NOT NULL
             );
             CREATE INDEX IF NOT EXISTS idx_metric_snapshots_lookup
-                ON metric_snapshots (provider_id, metric_name, recorded_at);
+                ON metric_snapshots (mcp_server_id, metric_name, recorded_at);
         """,
     },
 ]
@@ -47,13 +47,13 @@ class MetricPoint:
     """A single time-series data point.
 
     Attributes:
-        provider_id: Provider this metric belongs to.
+        mcp_server_id: McpServer this metric belongs to.
         metric_name: Name of the metric (e.g. ``tool_calls_total``).
         value: Numeric value.
         recorded_at: Unix timestamp (seconds since epoch) when the snapshot was taken.
     """
 
-    provider_id: str
+    mcp_server_id: str
     metric_name: str
     value: float
     recorded_at: float
@@ -65,11 +65,11 @@ class MetricPoint:
 
 
 class MetricsHistoryStore:
-    """SQLite-backed store for per-provider metric snapshots.
+    """SQLite-backed store for per-mcp_server metric snapshots.
 
     Provides:
     - :meth:`record_snapshot` — persist a batch of :class:`MetricPoint` rows.
-    - :meth:`query` — retrieve points filtered by provider, metric, and time range.
+    - :meth:`query` — retrieve points filtered by mcp_server, metric, and time range.
     - :meth:`prune` — delete rows older than the retention window.
 
     Thread-safety: relies on :class:`SQLiteConnectionFactory` which uses
@@ -111,16 +111,16 @@ class MetricsHistoryStore:
         """
         if not points:
             return
-        rows = [(p.provider_id, p.metric_name, p.value, p.recorded_at) for p in points]
+        rows = [(p.mcp_server_id, p.metric_name, p.value, p.recorded_at) for p in points]
         with self._conn() as conn:
             conn.executemany(
-                "INSERT INTO metric_snapshots (provider_id, metric_name, value, recorded_at) VALUES (?, ?, ?, ?)",
+                "INSERT INTO metric_snapshots (mcp_server_id, metric_name, value, recorded_at) VALUES (?, ?, ?, ?)",
                 rows,
             )
 
     def query(
         self,
-        provider_id: str | None = None,
+        mcp_server_id: str | None = None,
         metric_name: str | None = None,
         from_ts: float | None = None,
         to_ts: float | None = None,
@@ -129,7 +129,7 @@ class MetricsHistoryStore:
         """Query stored metric history.
 
         Args:
-            provider_id: Filter by provider.  ``None`` returns all providers.
+            mcp_server_id: Filter by mcp_server.  ``None`` returns all mcp_servers.
             metric_name: Filter by metric name.  ``None`` returns all metrics.
             from_ts: Start of time range (unix timestamp, inclusive).
             to_ts: End of time range (unix timestamp, inclusive).
@@ -142,9 +142,9 @@ class MetricsHistoryStore:
         conditions: list[str] = []
         params: list = []
 
-        if provider_id is not None:
-            conditions.append("provider_id = ?")
-            params.append(provider_id)
+        if mcp_server_id is not None:
+            conditions.append("mcp_server_id = ?")
+            params.append(mcp_server_id)
         if metric_name is not None:
             conditions.append("metric_name = ?")
             params.append(metric_name)
@@ -157,7 +157,7 @@ class MetricsHistoryStore:
 
         where = ("WHERE " + " AND ".join(conditions)) if conditions else ""
         sql = (
-            f"SELECT provider_id, metric_name, value, recorded_at "
+            f"SELECT mcp_server_id, metric_name, value, recorded_at "
             f"FROM metric_snapshots {where} "
             f"ORDER BY recorded_at ASC "
             f"LIMIT ?"
@@ -168,7 +168,7 @@ class MetricsHistoryStore:
             cursor = conn.execute(sql, params)
             rows = cursor.fetchall()
 
-        return [MetricPoint(provider_id=r[0], metric_name=r[1], value=r[2], recorded_at=r[3]) for r in rows]
+        return [MetricPoint(mcp_server_id=r[0], metric_name=r[1], value=r[2], recorded_at=r[3]) for r in rows]
 
     def prune(self) -> int:
         """Delete metric snapshots older than the retention window.

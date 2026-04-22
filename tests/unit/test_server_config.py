@@ -14,7 +14,7 @@ class TestLoadConfigFromFile:
         """Should load configuration from valid YAML file."""
         config_file = tmp_path / "config.yaml"
         config_data = {
-            "providers": {
+            "mcp_servers": {
                 "test-provider": {
                     "mode": "subprocess",
                     "command": ["python", "server.py"],
@@ -25,8 +25,8 @@ class TestLoadConfigFromFile:
 
         result = load_config_from_file(str(config_file))
 
-        assert "providers" in result
-        assert "test-provider" in result["providers"]
+        assert "mcp_servers" in result
+        assert "test-provider" in result["mcp_servers"]
 
     def test_raises_for_missing_file(self):
         """Should raise FileNotFoundError for missing file."""
@@ -46,7 +46,7 @@ class TestLoadConfigFromFile:
         config_file = tmp_path / "config.yaml"
         config_file.write_text(yaml.dump({"logging": {"level": "INFO"}}))
 
-        with pytest.raises(ValueError, match="missing 'providers' section"):
+        with pytest.raises(ValueError, match="missing 'mcp_servers' section"):
             load_config_from_file(str(config_file))
 
     def test_raises_for_empty_config(self, tmp_path):
@@ -61,7 +61,7 @@ class TestLoadConfigFromFile:
         """Should handle complex configuration with all sections."""
         config_file = tmp_path / "config.yaml"
         config_data = {
-            "providers": {
+            "mcp_servers": {
                 "provider1": {"mode": "subprocess", "command": ["cmd1"]},
                 "provider2": {"mode": "container", "image": "image:tag"},
             },
@@ -73,7 +73,7 @@ class TestLoadConfigFromFile:
 
         result = load_config_from_file(str(config_file))
 
-        assert len(result["providers"]) == 2
+        assert len(result["mcp_servers"]) == 2
         assert result["logging"]["level"] == "DEBUG"
         assert result["discovery"]["enabled"] is True
 
@@ -125,8 +125,8 @@ class TestLoadConfig:
 
         # Restore original state
         repository.clear()
-        for provider_id, provider in original_providers.items():
-            repository.add(provider_id, provider)
+        for mcp_server_id, provider in original_providers.items():
+            repository.add(mcp_server_id, provider)
         GROUPS.clear()
         GROUPS.update(original_groups)
 
@@ -160,7 +160,7 @@ class TestLoadConfig:
 
         assert get_runtime().repository.exists("test-container")
 
-    def test_skips_invalid_provider_id(self):
+    def test_skips_invalid_mcp_server_id(self):
         """Should skip providers with invalid IDs."""
         config = {
             "": {  # Empty ID - invalid
@@ -196,24 +196,24 @@ class TestLoadConfiguration:
     def test_loads_from_default_path_when_exists(self, tmp_path, monkeypatch):
         """Should load from default config.yaml when it exists."""
         config_file = tmp_path / "config.yaml"
-        config_data = {"providers": {"test": {"mode": "subprocess", "command": ["cmd"]}}}
+        config_data = {"mcp_servers": {"test": {"mode": "subprocess", "command": ["cmd"]}}}
         config_file.write_text(yaml.dump(config_data))
 
         monkeypatch.chdir(tmp_path)
 
         result = load_configuration(None)
 
-        assert "providers" in result or result == {}
+        assert "mcp_servers" in result or result == {}
 
     def test_loads_from_specified_path(self, tmp_path):
         """Should load from specified config path."""
         config_file = tmp_path / "custom.yaml"
-        config_data = {"providers": {"custom": {"mode": "subprocess", "command": ["cmd"]}}}
+        config_data = {"mcp_servers": {"custom": {"mode": "subprocess", "command": ["cmd"]}}}
         config_file.write_text(yaml.dump(config_data))
 
         result = load_configuration(str(config_file))
 
-        assert "providers" in result
+        assert "mcp_servers" in result
 
     def test_returns_empty_dict_when_no_config(self, tmp_path, monkeypatch):
         """Should return empty dict when no config file exists."""
@@ -222,12 +222,12 @@ class TestLoadConfiguration:
 
         result = load_configuration(None)
 
-        assert result == {} or "providers" in result
+        assert result == {} or "mcp_servers" in result
 
     def test_respects_mcp_config_env_var(self, tmp_path, monkeypatch):
         """Should respect MCP_CONFIG environment variable."""
         config_file = tmp_path / "env-config.yaml"
-        config_data = {"providers": {"env-provider": {"mode": "subprocess", "command": ["cmd"]}}}
+        config_data = {"mcp_servers": {"env-provider": {"mode": "subprocess", "command": ["cmd"]}}}
         config_file.write_text(yaml.dump(config_data))
 
         monkeypatch.setenv("MCP_CONFIG", str(config_file))
@@ -236,4 +236,4 @@ class TestLoadConfiguration:
         result = load_configuration(None)
 
         # Should load from env var path
-        assert "providers" in result or result == {}
+        assert "mcp_servers" in result or result == {}

@@ -77,9 +77,9 @@ class TestConfigFileManager:
         providers = [get_provider("fetch"), get_provider("memory")]
         providers = [p for p in providers if p is not None]
 
-        config_str = manager.generate_initial_config(providers=providers, configs={})
+        config_str = manager.generate_initial_config(mcp_servers=providers, configs={})
 
-        assert "providers:" in config_str
+        assert "mcp_servers:" in config_str
         assert "fetch:" in config_str
         assert "memory:" in config_str
         assert "mode: subprocess" in config_str
@@ -90,10 +90,7 @@ class TestConfigFileManager:
         provider = get_provider("filesystem")
         assert provider is not None
 
-        config_str = manager.generate_initial_config(
-            providers=[provider],
-            configs={"filesystem": {"path": "/home/user/documents"}},
-        )
+        config_str = manager.generate_initial_config(mcp_servers=[provider], configs={"filesystem": {"path": "/home/user/documents"}},)
 
         assert "/home/user/documents" in config_str
         assert "args:" in config_str
@@ -104,10 +101,7 @@ class TestConfigFileManager:
         provider = get_provider("github")
         assert provider is not None
 
-        config_str = manager.generate_initial_config(
-            providers=[provider],
-            configs={"github": {"use_env": "GITHUB_TOKEN"}},
-        )
+        config_str = manager.generate_initial_config(mcp_servers=[provider], configs={"github": {"use_env": "GITHUB_TOKEN"}},)
 
         assert "env:" in config_str
         assert "GITHUB_TOKEN" in config_str
@@ -118,7 +112,7 @@ class TestConfigFileManager:
         provider = get_provider("fetch")
         assert provider is not None
 
-        config_str = manager.generate_initial_config(providers=[provider], configs={})
+        config_str = manager.generate_initial_config(mcp_servers=[provider], configs={})
 
         assert "health_check:" in config_str
         assert "enabled: true" in config_str
@@ -129,7 +123,7 @@ class TestConfigFileManager:
         provider = get_provider("fetch")
         assert provider is not None
 
-        config_str = manager.generate_initial_config(providers=[provider], configs={})
+        config_str = manager.generate_initial_config(mcp_servers=[provider], configs={})
 
         assert "logging:" in config_str
         assert "level: INFO" in config_str

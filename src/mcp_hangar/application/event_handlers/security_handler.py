@@ -24,9 +24,9 @@ from typing import Any
 from ...domain.events import (
     DomainEvent,
     HealthCheckFailed,
-    ProviderDegraded,
-    ProviderStarted,
-    ProviderStopped,
+    McpServerDegraded,
+    McpServerStarted,
+    McpServerStopped,
     ToolInvocationCompleted,
     ToolInvocationFailed,
 )
@@ -50,14 +50,14 @@ class SecurityEventType(Enum):
     VALIDATION_FAILED = "validation_failed"
     INJECTION_ATTEMPT = "injection_attempt"
 
-    # Provider security
-    PROVIDER_START_BLOCKED = "provider_start_blocked"
+    # McpServer security
+    PROVIDER_START_BLOCKED = "mcp_server_start_blocked"
     SUSPICIOUS_COMMAND = "suspicious_command"
     UNAUTHORIZED_TOOL = "unauthorized_tool"
 
     # Health and availability
     REPEATED_FAILURES = "repeated_failures"
-    PROVIDER_COMPROMISE_SUSPECTED = "provider_compromise_suspected"
+    PROVIDER_COMPROMISE_SUSPECTED = "mcp_server_compromise_suspected"
 
     # Configuration
     CONFIG_CHANGE = "config_change"
@@ -84,7 +84,7 @@ class SecurityEvent:
     timestamp: datetime = field(default_factory=lambda: datetime.now(UTC))
 
     # Context
-    provider_id: str | None = None
+    mcp_server_id: str | None = None
     tool_name: str | None = None
     source_ip: str | None = None
     user_id: str | None = None
@@ -111,7 +111,7 @@ class SecurityEvent:
             "severity": self.severity.value,
             "message": self.message,
             "timestamp": self.timestamp.isoformat(),
-            "provider_id": self.provider_id,
+            "mcp_server_id": self.mcp_server_id,
             "tool_name": self.tool_name,
             "source_ip": self.source_ip,
             "user_id": self.user_id,
@@ -175,7 +175,7 @@ class InMemorySecuritySink(SecurityEventSink):
         self,
         event_type: SecurityEventType | None = None,
         severity: SecuritySeverity | None = None,
-        provider_id: str | None = None,
+        mcp_server_id: str | None = None,
         since: datetime | None = None,
         limit: int = 100,
     ) -> list[SecurityEvent]:
@@ -190,7 +190,7 @@ class InMemorySecuritySink(SecurityEventSink):
                     continue
                 if severity and event.severity != severity:
                     continue
-                if provider_id and event.provider_id != provider_id:
+                if mcp_server_id and event.mcp_server_id != mcp_server_id:
                     continue
                 if since and event.timestamp < since:
                     continue
@@ -289,7 +289,7 @@ class SecurityEventHandler:
         self._enable_anomaly_detection = enable_anomaly_detection
 
         # Tracking for anomaly detection
-        self._failure_counts: dict[str, list[float]] = {}  # provider_id -> timestamps
+        self._failure_counts: dict[str, list[float]] = {}  # mcp_server_id -> timestamps
         self._lock = threading.Lock()
 
     def handle(self, event: DomainEvent) -> None:
@@ -301,9 +301,9 @@ class SecurityEventHandler:
         """
         # Dispatch to specific handlers
         handlers = {
-            ProviderStarted: self._handle_provider_started,
-            ProviderStopped: self._handle_provider_stopped,
-            ProviderDegraded: self._handle_provider_degraded,
+            McpServerStarted: self._handle_mcp_server_started,
+            McpServerStopped: self._handle_mcp_server_stopped,
+            McpServerDegraded: self._handle_mcp_server_degraded,
             ToolInvocationCompleted: self._handle_tool_invocation_completed,
             ToolInvocationFailed: self._handle_tool_invocation_failed,
             HealthCheckFailed: self._handle_health_check_failed,
@@ -317,15 +317,15 @@ class SecurityEventHandler:
         if self._enable_anomaly_detection:
             self._check_anomalies(event)
 
-    def _handle_provider_started(self, event: ProviderStarted) -> None:
-        """Handle provider start event."""
-        # Log provider starts for audit trail
+    def _handle_mcp_server_started(self, event: McpServerStarted) -> None:
+        """Handle mcp_server start event."""
+        # Log mcp_server starts for audit trail
         self._emit(
             SecurityEvent(
                 event_type=SecurityEventType.ACCESS_GRANTED,
                 severity=SecuritySeverity.INFO,
-                message=f"Provider started: {event.provider_id}",
-                provider_id=event.provider_id,
+                message=f"McpServer started: {event.mcp_server_id}",
+                mcp_server_id=event.mcp_server_id,
                 details={
                     "mode": event.mode,
                     "tools_count": event.tools_count,
@@ -335,14 +335,14 @@ class SecurityEventHandler:
             )
         )
 
-    def _handle_provider_stopped(self, event: ProviderStopped) -> None:
-        """Handle provider stop event."""
-        # Clear failure tracking for this provider
+    def _handle_mcp_server_stopped(self, event: McpServerStopped) -> None:
+        """Handle mcp_server stop event."""
+        # Clear failure tracking for this mcp_server
         with self._lock:
-            self._failure_counts.pop(event.provider_id, None)
+            self._failure_counts.pop(event.mcp_server_id, None)
 
-    def _handle_provider_degraded(self, event: ProviderDegraded) -> None:
-        """Handle provider degradation event."""
+    def _handle_mcp_server_degraded(self, event: McpServerDegraded) -> None:
+        """Handle mcp_server degradation event."""
         severity = SecuritySeverity.MEDIUM
         if event.consecutive_failures >= self.CRITICAL_FAILURE_THRESHOLD:
             severity = SecuritySeverity.HIGH
@@ -351,8 +351,8 @@ class SecurityEventHandler:
             SecurityEvent(
                 event_type=SecurityEventType.REPEATED_FAILURES,
                 severity=severity,
-                message=f"Provider degraded after {event.consecutive_failures} consecutive failures",
-                provider_id=event.provider_id,
+                message=f"McpServer degraded after {event.consecutive_failures} consecutive failures",
+                mcp_server_id=event.mcp_server_id,
                 details={
                     "consecutive_failures": event.consecutive_failures,
                     "total_failures": event.total_failures,
@@ -371,7 +371,7 @@ class SecurityEventHandler:
                     event_type=SecurityEventType.ACCESS_GRANTED,
                     severity=SecuritySeverity.LOW,
                     message=f"Slow tool invocation: {event.tool_name}",
-                    provider_id=event.provider_id,
+                    mcp_server_id=event.mcp_server_id,
                     tool_name=event.tool_name,
                     details={
                         "duration_ms": event.duration_ms,
@@ -382,14 +382,14 @@ class SecurityEventHandler:
 
     def _handle_tool_invocation_failed(self, event: ToolInvocationFailed) -> None:
         """Handle failed tool invocation."""
-        self._record_failure(event.provider_id)
+        self._record_failure(event.mcp_server_id)
 
         self._emit(
             SecurityEvent(
                 event_type=SecurityEventType.ACCESS_DENIED,
                 severity=SecuritySeverity.LOW,
                 message=f"Tool invocation failed: {event.tool_name}",
-                provider_id=event.provider_id,
+                mcp_server_id=event.mcp_server_id,
                 tool_name=event.tool_name,
                 details={
                     "error": event.error_message,
@@ -400,15 +400,15 @@ class SecurityEventHandler:
 
     def _handle_health_check_failed(self, event: HealthCheckFailed) -> None:
         """Handle health check failure."""
-        self._record_failure(event.provider_id)
+        self._record_failure(event.mcp_server_id)
 
         if event.consecutive_failures >= self.FAILURE_THRESHOLD:
             self._emit(
                 SecurityEvent(
                     event_type=SecurityEventType.REPEATED_FAILURES,
                     severity=SecuritySeverity.MEDIUM,
-                    message="Multiple health check failures for provider",
-                    provider_id=event.provider_id,
+                    message="Multiple health check failures for mcp_server",
+                    mcp_server_id=event.mcp_server_id,
                     details={
                         "consecutive_failures": event.consecutive_failures,
                         "error": event.error_message,
@@ -417,36 +417,36 @@ class SecurityEventHandler:
                 )
             )
 
-    def _record_failure(self, provider_id: str) -> None:
+    def _record_failure(self, mcp_server_id: str) -> None:
         """Record a failure for anomaly detection."""
         now = time.time()
         with self._lock:
-            if provider_id not in self._failure_counts:
-                self._failure_counts[provider_id] = []
+            if mcp_server_id not in self._failure_counts:
+                self._failure_counts[mcp_server_id] = []
 
             # Add current failure
-            self._failure_counts[provider_id].append(now)
+            self._failure_counts[mcp_server_id].append(now)
 
             # Clean old entries
             cutoff = now - self.TIME_WINDOW_S
-            self._failure_counts[provider_id] = [t for t in self._failure_counts[provider_id] if t > cutoff]
+            self._failure_counts[mcp_server_id] = [t for t in self._failure_counts[mcp_server_id] if t > cutoff]
 
     def _check_anomalies(self, event: DomainEvent) -> None:
         """Check for anomalous patterns across events."""
-        provider_id = getattr(event, "provider_id", None)
-        if not provider_id:
+        mcp_server_id = getattr(event, "mcp_server_id", None)
+        if not mcp_server_id:
             return
 
         with self._lock:
-            failures = self._failure_counts.get(provider_id, [])
+            failures = self._failure_counts.get(mcp_server_id, [])
 
         if len(failures) >= self.CRITICAL_FAILURE_THRESHOLD:
             self._emit(
                 SecurityEvent(
                     event_type=SecurityEventType.PROVIDER_COMPROMISE_SUSPECTED,
                     severity=SecuritySeverity.HIGH,
-                    message="High failure rate detected for provider (possible attack or compromise)",
-                    provider_id=provider_id,
+                    message="High failure rate detected for mcp_server (possible attack or compromise)",
+                    mcp_server_id=mcp_server_id,
                     details={
                         "failures_in_window": len(failures),
                         "window_seconds": self.TIME_WINDOW_S,
@@ -465,7 +465,7 @@ class SecurityEventHandler:
 
     def log_rate_limit_exceeded(
         self,
-        provider_id: str | None = None,
+        mcp_server_id: str | None = None,
         limit: int = 0,
         window_seconds: int = 0,
         source_ip: str | None = None,
@@ -476,7 +476,7 @@ class SecurityEventHandler:
                 event_type=SecurityEventType.RATE_LIMIT_EXCEEDED,
                 severity=SecuritySeverity.MEDIUM,
                 message="Rate limit exceeded",
-                provider_id=provider_id,
+                mcp_server_id=mcp_server_id,
                 source_ip=source_ip,
                 details={
                     "limit": limit,
@@ -489,7 +489,7 @@ class SecurityEventHandler:
         self,
         field: str,
         message: str,
-        provider_id: str | None = None,
+        mcp_server_id: str | None = None,
         value: str | None = None,
     ) -> None:
         """Log a validation failure."""
@@ -508,7 +508,7 @@ class SecurityEventHandler:
                 event_type=SecurityEventType.VALIDATION_FAILED,
                 severity=severity,
                 message=f"Validation failed: {message}",
-                provider_id=provider_id,
+                mcp_server_id=mcp_server_id,
                 details=details,
             )
         )
@@ -517,7 +517,7 @@ class SecurityEventHandler:
         self,
         field: str,
         pattern: str,
-        provider_id: str | None = None,
+        mcp_server_id: str | None = None,
         source_ip: str | None = None,
     ) -> None:
         """Log a potential injection attempt."""
@@ -526,7 +526,7 @@ class SecurityEventHandler:
                 event_type=SecurityEventType.INJECTION_ATTEMPT,
                 severity=SecuritySeverity.HIGH,
                 message=f"Potential injection attempt detected in {field}",
-                provider_id=provider_id,
+                mcp_server_id=mcp_server_id,
                 source_ip=source_ip,
                 details={
                     "field": field,
@@ -538,7 +538,7 @@ class SecurityEventHandler:
     def log_suspicious_command(
         self,
         command: list[str],
-        provider_id: str | None = None,
+        mcp_server_id: str | None = None,
         reason: str = "",
     ) -> None:
         """Log a suspicious command execution attempt."""
@@ -550,7 +550,7 @@ class SecurityEventHandler:
                 event_type=SecurityEventType.SUSPICIOUS_COMMAND,
                 severity=SecuritySeverity.HIGH,
                 message=f"Suspicious command blocked: {reason}",
-                provider_id=provider_id,
+                mcp_server_id=mcp_server_id,
                 details={
                     "command_preview": safe_command,
                     "reason": reason,
@@ -561,7 +561,7 @@ class SecurityEventHandler:
     def log_config_change(
         self,
         change_type: str,
-        provider_id: str | None = None,
+        mcp_server_id: str | None = None,
         user_id: str | None = None,
         details: dict[str, Any] | None = None,
     ) -> None:
@@ -571,7 +571,7 @@ class SecurityEventHandler:
                 event_type=SecurityEventType.CONFIG_CHANGE,
                 severity=SecuritySeverity.INFO,
                 message=f"Configuration changed: {change_type}",
-                provider_id=provider_id,
+                mcp_server_id=mcp_server_id,
                 user_id=user_id,
                 details=details or {},
             )

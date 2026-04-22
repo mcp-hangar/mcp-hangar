@@ -6,30 +6,30 @@
 
 **Production-grade infrastructure for Model Context Protocol.**
 
-MCP Hangar is a control plane for MCP servers. It manages provider lifecycle, parallel tool execution, security governance, and observability -- so you don't have to.
+MCP Hangar is a control plane for MCP servers. It manages MCP server lifecycle, parallel tool execution, security governance, and observability -- so you don't have to.
 
 ## Quick Start
 
-**30 seconds to working MCP providers:**
+**30 seconds to working MCP servers:**
 
 ```bash
 curl -sSL https://mcp-hangar.io/install.sh | bash && mcp-hangar init -y && mcp-hangar serve
 ```
 
-That's it. Filesystem, fetch, and memory providers are now available to Claude.
+That's it. Filesystem, fetch, and memory MCP servers are now available to Claude.
 
 <details>
 <summary>What just happened?</summary>
 
 1. **Install** - Downloaded and installed `mcp-hangar` via pip/uv
-2. **Init** - Created `~/.config/mcp-hangar/config.yaml` with starter providers
+2. **Init** - Created `~/.config/mcp-hangar/config.yaml` with starter MCP servers
 3. **Serve** - Started the MCP server (stdio mode for Claude Desktop)
 
 The `init -y` flag uses sensible defaults:
 
 - Detects available runtimes (uvx preferred, npx fallback)
 - Configures starter bundle: filesystem, fetch, memory
-- Runs a smoke test to verify providers start correctly
+- Runs a smoke test to verify MCP servers start correctly
 - Updates Claude Desktop config automatically
 
 </details>
@@ -63,24 +63,24 @@ mcp-hangar serve --http --port 8000
 
 ```
 hangar_call(calls=[
-    {"provider": "github", "tool": "search_repos", "arguments": {"query": "mcp"}},
-    {"provider": "slack", "tool": "post_message", "arguments": {"channel": "#dev"}},
-    {"provider": "internal-api", "tool": "get_status", "arguments": {}}
+    {"mcp_server": "github", "tool": "search_repos", "arguments": {"query": "mcp"}},
+    {"mcp_server": "slack", "tool": "post_message", "arguments": {"channel": "#dev"}},
+    {"mcp_server": "internal-api", "tool": "get_status", "arguments": {}}
 ])
 ```
 
 Single MCP tool call. Parallel execution. All results returned together.
 
-**Lifecycle management.** Lazy loading, health checks, automatic restart, graceful shutdown. Providers start on first use, stay warm while active, shut down after idle TTL.
+**Lifecycle management.** Lazy loading, health checks, automatic restart, graceful shutdown. MCP servers start on first use, stay warm while active, shut down after idle TTL.
 
-**Single-flight cold starts.** When 10 parallel calls hit a cold provider, it initializes once -- not 10 times.
+**Single-flight cold starts.** When 10 parallel calls hit a cold MCP server, it initializes once -- not 10 times.
 
-**Circuit breaker.** One failing provider doesn't kill your batch. Automatic isolation and recovery.
+**Circuit breaker.** One failing MCP server doesn't kill your batch. Automatic isolation and recovery.
 
 ## Configuration
 
 ```yaml
-providers:
+mcp_servers:
   github:
     mode: subprocess
     command: [uvx, mcp-server-github]
@@ -143,8 +143,8 @@ with SyncHangar.from_config("config.yaml") as hangar:
 # Programmatic config
 config = (
     HangarConfig()
-    .add_provider("math", command=["python", "-m", "math_server"])
-    .add_provider("fetch", mode="docker", image="mcp/fetch:latest")
+    .add_mcp_server("math", command=["python", "-m", "math_server"])
+    .add_mcp_server("fetch", mode="docker", image="mcp/fetch:latest")
     .build()
 )
 hangar = Hangar(config)
@@ -152,38 +152,38 @@ hangar = Hangar(config)
 
 ## Security & Governance (1.0)
 
-- **Capability declaration.** Declare what each provider can access (network, filesystem, environment). Violations are detected and reported.
-- **Behavioral profiling.** Baseline provider behavior, detect deviations (new destinations, protocol drift, frequency anomalies). Learning and enforcing modes.
-- **Tool schema drift detection.** Track tool schema changes across provider updates.
+- **Capability declaration.** Declare what each MCP server can access (network, filesystem, environment). Violations are detected and reported.
+- **Behavioral profiling.** Baseline MCP server behavior, detect deviations (new destinations, protocol drift, frequency anomalies). Learning and enforcing modes.
+- **Tool schema drift detection.** Track tool schema changes across MCP server updates.
 - **Network connection monitoring.** `/proc/net/tcp` parsing, Docker and Kubernetes monitors with audit events.
 - **RBAC.** Role-based access control with tool-level policies. API key and JWT/OIDC authentication.
 - **Approval gate.** Human-in-the-loop approval for sensitive tool calls.
 
 ## Observability
 
-- **OpenTelemetry.** Distributed tracing with W3C trace context propagation across providers.
-- **Prometheus metrics.** Provider state, tool calls, health checks, circuit breaker, concurrency, batch execution.
-- **Grafana dashboards.** Pre-built overview and per-provider deep dive dashboards.
+- **OpenTelemetry.** Distributed tracing with W3C trace context propagation across MCP servers.
+- **Prometheus metrics.** MCP server state, tool calls, health checks, circuit breaker, concurrency, batch execution.
+- **Grafana dashboards.** Pre-built overview and per-MCP server deep dive dashboards.
 - **Structured logging.** Correlation IDs across parallel calls. JSON log format for production.
 - **Audit trail.** Event-sourced audit log with OTLP export for security-relevant events.
 
 ## Advanced Configuration
 
 ```yaml
-providers:
-  fast-provider:
+mcp_servers:
+  fast-mcp-server:
     mode: subprocess
     command: ["python", "fast.py"]
     idle_ttl_s: 300              # Shutdown after 5min idle
     health_check_interval_s: 60  # Check health every minute
     max_consecutive_failures: 3  # Circuit breaker threshold
-    max_concurrency: 5           # Per-provider concurrency limit
+    max_concurrency: 5           # Per-MCP server concurrency limit
     tools:
       deny_list: [delete_*]      # Tool access filtering
 
 execution:
   max_concurrency: 50            # Global concurrency limit
-  default_provider_concurrency: 10
+  default_mcp_server_concurrency: 10
 
 truncation:
   enabled: true
@@ -195,9 +195,9 @@ config_reload:
 
 ## Scales With You
 
-- **Home lab:** 2 providers, zero config complexity
-- **Team setup:** Shared providers, Docker containers, hot-reload
-- **Enterprise:** 50+ providers, behavioral profiling, RBAC, approval gates, Kubernetes operator
+- **Home lab:** 2 MCP servers, zero config complexity
+- **Team setup:** Shared MCP servers, Docker containers, hot-reload
+- **Enterprise:** 50+ MCP servers, behavioral profiling, RBAC, approval gates, Kubernetes operator
 
 Same API. Same reliability. Different scale.
 

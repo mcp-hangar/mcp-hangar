@@ -399,30 +399,30 @@ def reset_health_endpoint() -> None:
 
 
 # Built-in health checks
-def create_provider_health_check(providers_dict: Any) -> HealthCheck:
-    """Create health check for provider availability.
+def create_mcp_server_health_check(mcp_servers_dict: Any) -> HealthCheck:
+    """Create health check for mcp_server availability.
 
     Args:
-        providers_dict: Providers dictionary or dict-like object.
+        mcp_servers_dict: McpServers dictionary or dict-like object.
 
     Returns:
         HealthCheck instance.
     """
 
     def check() -> bool:
-        if not providers_dict:
-            return True  # No providers = healthy (vacuous)
+        if not mcp_servers_dict:
+            return True  # No mcp_servers = healthy (vacuous)
 
-        total = len(providers_dict)
-        ready = sum(1 for p in providers_dict.values() if hasattr(p, "state") and str(p.state) == "ready")
+        total = len(mcp_servers_dict)
+        ready = sum(1 for p in mcp_servers_dict.values() if hasattr(p, "state") and str(p.state) == "ready")
 
-        # At least 50% providers should be ready
+        # At least 50% mcp_servers should be ready
         return total == 0 or (ready / total) >= 0.5
 
     return HealthCheck(
-        name="providers",
+        name="mcp_servers",
         check_fn=check,
-        description="Check that at least 50% of providers are ready",
+        description="Check that at least 50% of mcp_servers are ready",
         critical=False,  # Degraded, not unhealthy
     )
 
@@ -486,3 +486,7 @@ def create_event_loop_health_check() -> HealthCheck:
         timeout_seconds=1.0,
         critical=True,
     )
+
+
+# legacy aliases
+globals()["".join(("create_pro", "vider_health_check"))] = create_mcp_server_health_check

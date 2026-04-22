@@ -1578,7 +1578,7 @@ class TestCreateCustomRoleHandler:
         result = handler.handle(CreateCustomRoleCommand(
             role_name="custom-role",
             description="Custom",
-            permissions=frozenset(["provider:read", "tool:invoke"]),
+            permissions=frozenset(["mcp_server:read", "tool:invoke"]),
             created_by="admin",
         ))
 
@@ -1594,7 +1594,7 @@ class TestCreateCustomRoleHandler:
         mock_store = Mock()
         handler = CreateCustomRoleHandler(mock_store, event_bus=None)
         result = handler.handle(CreateCustomRoleCommand(
-            role_name="custom-role", permissions=frozenset(["provider:read"]),
+            role_name="custom-role", permissions=frozenset(["mcp_server:read"]),
         ))
         assert result["created"] is True
 
@@ -1698,7 +1698,7 @@ class TestSetToolAccessPolicyHandler:
 
         assert result["set"] is True
         mock_tap_store.set_policy.assert_called_once()
-        mock_resolver.set_provider_policy.assert_called_once()
+        mock_resolver.set_mcp_server_policy.assert_called_once()
         mock_event_bus.publish.assert_called_once()
 
     def test_handle_group_scope(self):

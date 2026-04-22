@@ -4,9 +4,9 @@ import threading
 import time
 from unittest.mock import MagicMock, patch
 
-from mcp_hangar.domain.events import ProviderStopped
+from mcp_hangar.domain.events import McpServerStopped
 from mcp_hangar.domain.exceptions import CannotStartProviderError, ProviderStartError
-from mcp_hangar.domain.model import Provider, ProviderState
+from mcp_hangar.domain.model import McpServer, ProviderState
 from mcp_hangar.domain.model.provider import VALID_TRANSITIONS
 from mcp_hangar.domain.value_objects import ProviderMode
 
@@ -16,26 +16,23 @@ class TestProviderInitialization:
 
     def test_create_subprocess_provider(self):
         """Test creating a subprocess provider."""
-        provider = Provider(
-            provider_id="test-provider",
-            mode="subprocess",
-            command=["python", "-m", "test"],
-        )
+        provider = McpServer(mcp_server_id="test-provider", mode="subprocess",
+        command=["python", "-m", "test"],)
 
-        assert provider.provider_id == "test-provider"
+        assert provider.mcp_server_id == "test-provider"
         assert provider.mode == ProviderMode.SUBPROCESS
         assert provider.state == ProviderState.COLD
 
     def test_create_docker_provider(self):
         """Test creating a docker provider."""
-        provider = Provider(provider_id="docker-provider", mode="docker", image="test:latest")
+        provider = McpServer(mcp_server_id="docker-provider", mode="docker", image="test:latest")
 
-        assert provider.provider_id == "docker-provider"
+        assert provider.mcp_server_id == "docker-provider"
         assert provider.mode == ProviderMode.DOCKER
 
     def test_provider_initial_state(self):
         """Test provider initial state."""
-        provider = Provider(provider_id="test", mode="subprocess", command=["test"])
+        provider = McpServer(mcp_server_id="test", mode="subprocess", command=["test"])
 
         assert provider.state == ProviderState.COLD
         assert provider.is_alive is False
@@ -45,25 +42,19 @@ class TestProviderInitialization:
 
     def test_provider_with_env_vars(self):
         """Test provider with environment variables."""
-        provider = Provider(
-            provider_id="test",
-            mode="subprocess",
-            command=["test"],
-            env={"KEY": "value"},
-        )
+        provider = McpServer(mcp_server_id="test", mode="subprocess",
+        command=["test"],
+        env={"KEY": "value"},)
 
         assert provider._env == {"KEY": "value"}
 
     def test_provider_with_custom_config(self):
         """Test provider with custom configuration."""
-        provider = Provider(
-            provider_id="test",
-            mode="subprocess",
-            command=["test"],
-            idle_ttl_s=600,
-            health_check_interval_s=120,
-            max_consecutive_failures=5,
-        )
+        provider = McpServer(mcp_server_id="test", mode="subprocess",
+        command=["test"],
+        idle_ttl_s=600,
+        health_check_interval_s=120,
+        max_consecutive_failures=5,)
 
         assert provider._idle_ttl.seconds == 600
         assert provider._health_check_interval.seconds == 120
@@ -94,19 +85,19 @@ class TestAggregateRoot:
 
     def test_record_event(self):
         """Test recording domain events."""
-        provider = Provider(provider_id="test", mode="subprocess", command=["test"])
+        provider = McpServer(mcp_server_id="test", mode="subprocess", command=["test"])
 
         # Provider records events during operations
         assert provider.has_uncommitted_events() is False
 
     def test_collect_events_clears_list(self):
         """Test that collecting events clears the internal list."""
-        provider = Provider(provider_id="test", mode="subprocess", command=["test"])
+        provider = McpServer(mcp_server_id="test", mode="subprocess", command=["test"])
 
         # Manually record an event for testing
-        from mcp_hangar.domain.events import ProviderStopped
+        from mcp_hangar.domain.events import McpServerStopped
 
-        provider._record_event(ProviderStopped(provider_id="test", reason="test"))
+        provider._record_event(McpServerStopped(mcp_server_id="test", reason="test"))
 
         assert provider.has_uncommitted_events() is True
 
@@ -116,7 +107,7 @@ class TestAggregateRoot:
 
     def test_version_tracking(self):
         """Test version is tracked correctly."""
-        provider = Provider(provider_id="test", mode="subprocess", command=["test"])
+        provider = McpServer(mcp_server_id="test", mode="subprocess", command=["test"])
 
         initial_version = provider.version
         provider._increment_version()
@@ -127,25 +118,25 @@ class TestAggregateRoot:
 class TestProviderProperties:
     """Test Provider properties."""
 
-    def test_provider_id_property(self):
-        """Test provider_id property returns string."""
-        provider = Provider(provider_id="test-provider", mode="subprocess", command=["test"])
+    def test_mcp_server_id_property(self):
+        """Test mcp_server_id property returns string."""
+        provider = McpServer(mcp_server_id="test-provider", mode="subprocess", command=["test"])
 
-        assert provider.provider_id == "test-provider"
-        assert isinstance(provider.provider_id, str)
+        assert provider.mcp_server_id == "test-provider"
+        assert isinstance(provider.mcp_server_id, str)
 
     def test_id_property_returns_value_object(self):
         """Test id property returns ProviderId value object."""
         from mcp_hangar.domain.value_objects import ProviderId
 
-        provider = Provider(provider_id="test-provider", mode="subprocess", command=["test"])
+        provider = McpServer(mcp_server_id="test-provider", mode="subprocess", command=["test"])
 
         assert isinstance(provider.id, ProviderId)
         assert str(provider.id) == "test-provider"
 
     def test_state_property(self):
         """Test state property is thread-safe."""
-        provider = Provider(provider_id="test", mode="subprocess", command=["test"])
+        provider = McpServer(mcp_server_id="test", mode="subprocess", command=["test"])
 
         # Should acquire lock and return state
         state = provider.state
@@ -153,34 +144,34 @@ class TestProviderProperties:
 
     def test_is_alive_property(self):
         """Test is_alive property."""
-        provider = Provider(provider_id="test", mode="subprocess", command=["test"])
+        provider = McpServer(mcp_server_id="test", mode="subprocess", command=["test"])
 
         assert provider.is_alive is False
 
     def test_idle_time_property(self):
         """Test idle_time property."""
-        provider = Provider(provider_id="test", mode="subprocess", command=["test"])
+        provider = McpServer(mcp_server_id="test", mode="subprocess", command=["test"])
 
         # No last_used set
         assert provider.idle_time == 0.0
 
     def test_is_idle_property(self):
         """Test is_idle property."""
-        provider = Provider(provider_id="test", mode="subprocess", command=["test"])
+        provider = McpServer(mcp_server_id="test", mode="subprocess", command=["test"])
 
         # Not ready, so not idle
         assert provider.is_idle is False
 
     def test_meta_property(self):
         """Test meta property returns copy."""
-        provider = Provider(provider_id="test", mode="subprocess", command=["test"])
+        provider = McpServer(mcp_server_id="test", mode="subprocess", command=["test"])
 
         meta = provider.meta
         assert isinstance(meta, dict)
 
     def test_lock_property(self):
         """Test lock property for backward compatibility."""
-        provider = Provider(provider_id="test", mode="subprocess", command=["test"])
+        provider = McpServer(mcp_server_id="test", mode="subprocess", command=["test"])
 
         # RLock is a factory function, check for lock-like interface
         lock = provider.lock
@@ -195,21 +186,21 @@ class TestProviderShutdown:
 
     def test_shutdown_cold_provider(self):
         """Test shutdown of cold provider."""
-        provider = Provider(provider_id="test", mode="subprocess", command=["test"])
+        provider = McpServer(mcp_server_id="test", mode="subprocess", command=["test"])
 
         provider.shutdown()
 
         assert provider.state == ProviderState.COLD
         events = provider.collect_events()
 
-        # Should have ProviderStopped event
-        stopped_events = [e for e in events if isinstance(e, ProviderStopped)]
+        # Should have McpServerStopped event
+        stopped_events = [e for e in events if isinstance(e, McpServerStopped)]
         assert len(stopped_events) == 1
         assert stopped_events[0].reason == "shutdown"
 
     def test_shutdown_clears_tools(self):
         """Test that shutdown clears tool catalog."""
-        provider = Provider(provider_id="test", mode="subprocess", command=["test"])
+        provider = McpServer(mcp_server_id="test", mode="subprocess", command=["test"])
 
         # Add a tool manually for testing
         from mcp_hangar.domain.model.tool_catalog import ToolSchema
@@ -226,15 +217,12 @@ class TestProviderStatusDict:
 
     def test_to_status_dict(self):
         """Test status dictionary generation."""
-        provider = Provider(
-            provider_id="test-provider",
-            mode="subprocess",
-            command=["python", "-m", "test"],
-        )
+        provider = McpServer(mcp_server_id="test-provider", mode="subprocess",
+        command=["python", "-m", "test"],)
 
         status = provider.to_status_dict()
 
-        assert status["provider"] == "test-provider"
+        assert status["mcp_server"] == "test-provider"
         assert status["state"] == "cold"
         assert status["alive"] is False
         assert status["mode"] == "subprocess"
@@ -243,7 +231,7 @@ class TestProviderStatusDict:
 
     def test_to_status_dict_includes_tools(self):
         """Test status dict includes cached tools."""
-        provider = Provider(provider_id="test", mode="subprocess", command=["test"])
+        provider = McpServer(mcp_server_id="test", mode="subprocess", command=["test"])
 
         from mcp_hangar.domain.model.tool_catalog import ToolSchema
 
@@ -259,7 +247,7 @@ class TestProviderCompatibility:
 
     def test_get_tool_names(self):
         """Test get_tool_names method."""
-        provider = Provider(provider_id="test", mode="subprocess", command=["test"])
+        provider = McpServer(mcp_server_id="test", mode="subprocess", command=["test"])
 
         from mcp_hangar.domain.model.tool_catalog import ToolSchema
 
@@ -272,7 +260,7 @@ class TestProviderCompatibility:
 
     def test_get_tools_dict(self):
         """Test get_tools_dict method."""
-        provider = Provider(provider_id="test", mode="subprocess", command=["test"])
+        provider = McpServer(mcp_server_id="test", mode="subprocess", command=["test"])
 
         from mcp_hangar.domain.model.tool_catalog import ToolSchema
 
@@ -291,7 +279,7 @@ class TestProviderThreadSafety:
 
     def test_concurrent_property_access(self):
         """Test concurrent access to properties."""
-        provider = Provider(provider_id="test", mode="subprocess", command=["test"])
+        provider = McpServer(mcp_server_id="test", mode="subprocess", command=["test"])
 
         results = []
         errors = []
@@ -317,7 +305,7 @@ class TestProviderThreadSafety:
 
     def test_concurrent_shutdown(self):
         """Test concurrent shutdown calls."""
-        provider = Provider(provider_id="test", mode="subprocess", command=["test"])
+        provider = McpServer(mcp_server_id="test", mode="subprocess", command=["test"])
 
         errors = []
 
@@ -343,12 +331,12 @@ class TestEnsureReadyConcurrency:
     def _make_provider(self, **kwargs):
         """Create a provider with default test settings."""
         defaults = {
-            "provider_id": "test",
+            "mcp_server_id": "test",
             "mode": "subprocess",
             "command": ["python", "-m", "test"],
         }
         defaults.update(kwargs)
-        return Provider(**defaults)
+        return McpServer(**defaults)
 
     def test_concurrent_ensure_ready_only_one_create_client(self):
         """Two threads calling ensure_ready() on COLD provider -- only one _create_client() call."""
@@ -508,7 +496,7 @@ class TestEnsureReadyConcurrency:
                 if not ready_event.wait(timeout=0.5):
                     waiter_errors.append(
                         CannotStartProviderError(
-                            provider.provider_id,
+                            provider.mcp_server_id,
                             "startup_timeout: timed out waiting for provider to start",
                             0.5,
                         )
@@ -595,12 +583,9 @@ class TestProviderPredefinedTools:
                 "inputSchema": {"type": "object"},
             },
         ]
-        provider = Provider(
-            provider_id="test",
-            mode="subprocess",
-            command=["test"],
-            tools=tools,
-        )
+        provider = McpServer(mcp_server_id="test", mode="subprocess",
+        command=["test"],
+        tools=tools,)
 
         assert provider.state == ProviderState.COLD
         assert provider.has_tools is True
@@ -611,11 +596,8 @@ class TestProviderPredefinedTools:
 
     def test_create_provider_without_predefined_tools(self):
         """Test creating a provider without pre-defined tools."""
-        provider = Provider(
-            provider_id="test",
-            mode="subprocess",
-            command=["test"],
-        )
+        provider = McpServer(mcp_server_id="test", mode="subprocess",
+        command=["test"],)
 
         assert provider.state == ProviderState.COLD
         assert provider.has_tools is False
@@ -638,12 +620,9 @@ class TestProviderPredefinedTools:
                 },
             },
         ]
-        provider = Provider(
-            provider_id="test",
-            mode="subprocess",
-            command=["test"],
-            tools=tools,
-        )
+        provider = McpServer(mcp_server_id="test", mode="subprocess",
+        command=["test"],
+        tools=tools,)
 
         tool = provider.tools.get("calculate")
         assert tool is not None
@@ -655,12 +634,9 @@ class TestProviderPredefinedTools:
 
     def test_predefined_tools_with_empty_list(self):
         """Test provider with empty tools list."""
-        provider = Provider(
-            provider_id="test",
-            mode="subprocess",
-            command=["test"],
-            tools=[],
-        )
+        provider = McpServer(mcp_server_id="test", mode="subprocess",
+        command=["test"],
+        tools=[],)
 
         assert provider.has_tools is False
         assert provider.tools_predefined is False  # Empty list = no predefined tools
@@ -672,11 +648,8 @@ class TestInvokeToolRefresh:
 
     def _make_ready_provider(self):
         """Create a provider in READY state with a mock client."""
-        provider = Provider(
-            provider_id="test",
-            mode="subprocess",
-            command=["python", "-m", "test"],
-        )
+        provider = McpServer(mcp_server_id="test", mode="subprocess",
+        command=["python", "-m", "test"],)
         mock_client = MagicMock()
         mock_client.is_alive.return_value = True
 

@@ -1,4 +1,4 @@
-"""HTTP client for MCP-over-HTTP providers.
+"""HTTP client for MCP-over-HTTP mcp_servers.
 
 Thread-safe HTTP client with:
 - SSE (Server-Sent Events) streaming support
@@ -32,7 +32,7 @@ logger = get_logger(__name__)
 
 
 class AuthType(Enum):
-    """Authentication type for HTTP providers."""
+    """Authentication type for HTTP mcp_servers."""
 
     NONE = "none"
     API_KEY = "api_key"
@@ -45,7 +45,7 @@ class AuthType(Enum):
 
 @dataclass(frozen=True)
 class AuthConfig:
-    """Authentication configuration for HTTP providers.
+    """Authentication configuration for HTTP mcp_servers.
 
     Immutable value object containing auth credentials.
     Secrets should be passed via environment variable interpolation.
@@ -146,7 +146,7 @@ class PendingHttpRequest:
 
 class HttpClient:
     """
-    Thread-safe HTTP client for MCP-over-HTTP providers.
+    Thread-safe HTTP client for MCP-over-HTTP mcp_servers.
 
     Implements the same interface as StdioClient for consistency.
     Supports both standard request/response and SSE streaming patterns.
@@ -157,21 +157,21 @@ class HttpClient:
         endpoint: str,
         auth_config: AuthConfig | None = None,
         http_config: HttpClientConfig | None = None,
-        provider_id: str | None = None,
+        mcp_server_id: str | None = None,
     ):
         """
-        Initialize HTTP client for a remote MCP provider.
+        Initialize HTTP client for a remote MCP mcp_server.
 
         Args:
-            endpoint: Base URL of the MCP provider (e.g., https://mcp.example.com)
+            endpoint: Base URL of the MCP mcp_server (e.g., https://mcp.example.com)
             auth_config: Authentication configuration
             http_config: HTTP client configuration
-            provider_id: Optional provider ID for metrics labeling
+            mcp_server_id: Optional mcp_server ID for metrics labeling
         """
         self._endpoint = endpoint.rstrip("/")
         self._auth_config = auth_config or AuthConfig()
         self._http_config = http_config or HttpClientConfig()
-        self._provider_id = provider_id
+        self._mcp_server_id = mcp_server_id
 
         # Parse endpoint URL
         self._scheme, self._host, self._port, self._base_path = self._parse_endpoint(endpoint)
@@ -320,8 +320,8 @@ class HttpClient:
 
         start_time = time.time()
 
-        # Get provider label for metrics (use provider_id or extract from host)
-        provider_label = self._provider_id or self._host
+        # Get mcp_server label for metrics (use mcp_server_id or extract from host)
+        mcp_server_label = self._mcp_server_id or self._host
 
         try:
             # Build per-request headers: W3C TraceContext + MCP session ID.
@@ -349,8 +349,12 @@ class HttpClient:
                 self._mcp_session_id = session_id
 
             # Record HTTP request metrics
-            prometheus_metrics.HTTP_REQUESTS_TOTAL.inc(provider=provider_label, method=method, status_code=status_code)
-            prometheus_metrics.HTTP_REQUEST_DURATION_SECONDS.observe(duration_s, provider=provider_label, method=method)
+            prometheus_metrics.HTTP_REQUESTS_TOTAL.inc(
+                mcp_server=mcp_server_label, method=method, status_code=status_code
+            )
+            prometheus_metrics.HTTP_REQUEST_DURATION_SECONDS.observe(
+                duration_s, mcp_server=mcp_server_label, method=method
+            )
 
             # Check for SSE response (streaming)
             content_type = response.headers.get("Content-Type", "")
@@ -367,7 +371,7 @@ class HttpClient:
             )
 
             if response.status_code >= 400:
-                prometheus_metrics.HTTP_ERRORS_TOTAL.inc(provider=provider_label, error_type=f"http_{status_code}")
+                prometheus_metrics.HTTP_ERRORS_TOTAL.inc(mcp_server=mcp_server_label, error_type=f"http_{status_code}")
                 return {
                     "error": {
                         "code": -32000,
@@ -380,7 +384,7 @@ class HttpClient:
                 result = response.json()
                 return result
             except json.JSONDecodeError as e:
-                prometheus_metrics.HTTP_ERRORS_TOTAL.inc(provider=provider_label, error_type="json_decode_error")
+                prometheus_metrics.HTTP_ERRORS_TOTAL.inc(mcp_server=mcp_server_label, error_type="json_decode_error")
                 return {
                     "error": {
                         "code": -32700,
@@ -398,8 +402,10 @@ class HttpClient:
                 duration_ms=duration_ms,
             )
             # Record timeout error
-            prometheus_metrics.HTTP_ERRORS_TOTAL.inc(provider=provider_label, error_type="timeout")
-            prometheus_metrics.HTTP_REQUEST_DURATION_SECONDS.observe(duration_s, provider=provider_label, method=method)
+            prometheus_metrics.HTTP_ERRORS_TOTAL.inc(mcp_server=mcp_server_label, error_type="timeout")
+            prometheus_metrics.HTTP_REQUEST_DURATION_SECONDS.observe(
+                duration_s, mcp_server=mcp_server_label, method=method
+            )
             raise TimeoutError(f"timeout: {method} after {timeout}s") from e
 
         except httpx.ConnectError as e:
@@ -412,7 +418,7 @@ class HttpClient:
                 duration_ms=duration_ms,
             )
             # Record connection error
-            prometheus_metrics.HTTP_ERRORS_TOTAL.inc(provider=provider_label, error_type="connection_refused")
+            prometheus_metrics.HTTP_ERRORS_TOTAL.inc(mcp_server=mcp_server_label, error_type="connection_refused")
             raise ClientError(f"connection_failed: {e}") from e
 
         except Exception as e:  # noqa: BLE001 -- infra-boundary: unexpected HTTP errors wrapped as ClientError
@@ -425,7 +431,7 @@ class HttpClient:
                 duration_ms=duration_ms,
             )
             # Record generic error
-            prometheus_metrics.HTTP_ERRORS_TOTAL.inc(provider=provider_label, error_type="request_failed")
+            prometheus_metrics.HTTP_ERRORS_TOTAL.inc(mcp_server=mcp_server_label, error_type="request_failed")
             raise ClientError(f"request_failed: {e}") from e
 
     def _parse_sse_body(self, body: str, request_id: str) -> dict[str, Any]:

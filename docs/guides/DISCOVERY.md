@@ -1,6 +1,6 @@
-# Provider Discovery
+# MCP Server Discovery
 
-Auto-discover MCP providers from Docker, Kubernetes, filesystem, or Python entrypoints.
+Auto-discover MCP servers from Docker, Kubernetes, filesystem, or Python entrypoints.
 
 ## Configuration
 
@@ -31,11 +31,11 @@ Container labels:
 ```yaml
 # docker-compose.yml
 services:
-  my-provider:
+  my-mcp-server:
     image: my-mcp-server:latest
     labels:
       mcp.hangar.enabled: "true"
-      mcp.hangar.name: "my-provider"
+      mcp.hangar.name: "my-mcp-server"
       mcp.hangar.mode: "http"
       mcp.hangar.port: "8080"
 ```
@@ -54,8 +54,8 @@ services:
 sources:
   - type: kubernetes
     mode: authoritative
-    namespaces: [mcp-providers]
-    label_selector: "app.kubernetes.io/component=mcp-provider"
+    namespaces: [mcp-servers]
+    label_selector: "app.kubernetes.io/component=mcp-server"
     in_cluster: true
 ```
 
@@ -78,15 +78,15 @@ metadata:
 sources:
   - type: filesystem
     mode: additive
-    path: /etc/mcp-hangar/providers.d/
+    path: /etc/mcp-hangar/mcp_servers.d/
     pattern: "*.yaml"
     watch: true
 ```
 
-Provider file:
+MCP Server file:
 
 ```yaml
-# /etc/mcp-hangar/providers.d/custom.yaml
+# /etc/mcp-hangar/mcp_servers.d/custom.yaml
 name: custom-tool
 enabled: true
 mode: subprocess
@@ -101,13 +101,13 @@ connection:
 sources:
   - type: entrypoint
     mode: additive
-    group: mcp.providers
+    group: mcp.mcp_servers
 ```
 
 ```toml
 # pyproject.toml
-[project.entry-points."mcp.providers"]
-my_provider = "my_package.server:create_server"
+[project.entry-points."mcp.mcp_servers"]
+my_mcp_server = "my_package.server:create_server"
 ```
 
 ```python
@@ -123,7 +123,7 @@ def create_server():
 
 | Mode | Behavior |
 |------|----------|
-| `additive` | Only adds providers, never removes |
+| `additive` | Only adds MCP servers, never removes |
 | `authoritative` | Adds and removes (for dynamic environments) |
 
 ## Security
@@ -131,11 +131,11 @@ def create_server():
 ```yaml
 discovery:
   security:
-    max_providers_per_source: 100
+    max_mcp_servers_per_source: 100
     max_registration_rate: 10  # per minute
     require_health_check: true
     quarantine_on_failure: true
-    allowed_namespaces: [mcp-providers]
+    allowed_namespaces: [mcp-servers]
     denied_namespaces: [kube-system, default]
 ```
 
@@ -145,8 +145,8 @@ discovery:
 |------|-------------|
 | `hangar_discover` | Trigger discovery cycle |
 | `hangar_sources` | List sources with status |
-| `hangar_quarantine` | List quarantined providers |
-| `hangar_approve` | Approve quarantined provider |
+| `hangar_quarantine` | List quarantined MCP servers |
+| `hangar_approve` | Approve quarantined MCP server |
 
 ## Conflict Resolution
 
@@ -158,7 +158,7 @@ discovery:
 
 | Metric | Description |
 |--------|-------------|
-| `mcp_hangar_discovery_providers_total` | Providers per source |
+| `mcp_hangar_discovery_providers_total` | MCP servers per source |
 | `mcp_hangar_discovery_registrations_total` | New registrations |
 | `mcp_hangar_discovery_errors_total` | Errors by source |
 | `mcp_hangar_discovery_latency_seconds` | Cycle duration |

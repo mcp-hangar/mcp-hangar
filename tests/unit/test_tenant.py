@@ -30,7 +30,7 @@ class TestTenant:
 
         assert tenant.tenant_id.value == "test-team"
         assert tenant.status == TenantStatus.ACTIVE
-        assert tenant.quotas.max_providers == 50
+        assert tenant.quotas.max_mcp_servers == 50
         assert tenant.quotas.max_namespaces == 10
 
         events = tenant.collect_events()
@@ -41,7 +41,7 @@ class TestTenant:
     def test_create_tenant_with_custom_quotas(self):
         """Tenant can be created with custom quotas."""
         quotas = TenantQuotas(
-            max_providers=100,
+            max_mcp_servers=100,
             max_namespaces=20,
             max_tool_invocations_per_hour=20000,
         )
@@ -54,7 +54,7 @@ class TestTenant:
             quotas=quotas,
         )
 
-        assert tenant.quotas.max_providers == 100
+        assert tenant.quotas.max_mcp_servers == 100
         assert tenant.quotas.max_namespaces == 20
         assert tenant.quotas.max_tool_invocations_per_hour == 20000
 
@@ -108,14 +108,14 @@ class TestTenant:
             owner_principal_id="user:admin@example.com",
         )
 
-        result = tenant.check_quota("providers", requested_amount=1)
+        result = tenant.check_quota("mcp_servers", requested_amount=1)
 
         assert result.allowed is True
-        assert result.remaining == 50  # Default max_providers
+        assert result.remaining == 50  # Default max_mcp_servers
 
     def test_quota_check_blocks_when_exceeded(self):
         """Exceeding quota returns not allowed."""
-        quotas = TenantQuotas(max_providers=5)
+        quotas = TenantQuotas(max_mcp_servers=5)
         tenant = Tenant(
             tenant_id=TenantId("test-team"),
             name="test-team",
@@ -125,10 +125,10 @@ class TestTenant:
         )
 
         # Simulate usage up to limit
-        tenant._usage.provider_count = 5
+        tenant._usage.mcp_server_count = 5
         tenant.collect_events()
 
-        result = tenant.check_quota("providers", requested_amount=1)
+        result = tenant.check_quota("mcp_servers", requested_amount=1)
 
         assert result.allowed is False
         assert result.current == 5
@@ -139,7 +139,7 @@ class TestTenant:
 
     def test_quota_check_warns_at_threshold(self):
         """80% usage triggers warning event."""
-        quotas = TenantQuotas(max_providers=10)
+        quotas = TenantQuotas(max_mcp_servers=10)
         tenant = Tenant(
             tenant_id=TenantId("test-team"),
             name="test-team",
@@ -149,10 +149,10 @@ class TestTenant:
         )
 
         # Simulate usage at 80%
-        tenant._usage.provider_count = 8
+        tenant._usage.mcp_server_count = 8
         tenant.collect_events()
 
-        result = tenant.check_quota("providers", requested_amount=1)
+        result = tenant.check_quota("mcp_servers", requested_amount=1)
 
         assert result.allowed is True  # Still within limit
         assert result.at_warning is True
@@ -178,8 +178,8 @@ class TestTenant:
         tenant.record_usage("cold_start", 2)
         assert tenant.usage.cold_starts_last_hour == 2
 
-        tenant.record_usage("provider_start", 3)
-        assert tenant.usage.concurrent_providers == 3
+        tenant.record_usage("mcp_server_start", 3)
+        assert tenant.usage.concurrent_mcp_servers == 3
 
     def test_add_namespace_updates_count(self):
         """Adding namespace updates usage counter."""
@@ -225,13 +225,13 @@ class TestTenant:
         )
         tenant.collect_events()
 
-        new_quotas = TenantQuotas(max_providers=100)
+        new_quotas = TenantQuotas(max_mcp_servers=100)
         tenant.update_quotas(new_quotas, "admin")
 
         events = tenant.collect_events()
         assert len(events) == 1
         assert isinstance(events[0], QuotaUpdated)
-        assert events[0].new_quotas["max_providers"] == 100
+        assert events[0].new_quotas["max_mcp_servers"] == 100
 
 
 class TestNamespace:
@@ -249,7 +249,7 @@ class TestNamespace:
 
         assert namespace.namespace_id.value == "dev-env"
         assert namespace.tenant_id.value == "test-team"
-        assert namespace.provider_count == 0
+        assert namespace.mcp_server_count == 0
 
         events = namespace.collect_events()
         assert len(events) == 1
@@ -265,12 +265,12 @@ class TestNamespace:
             created_by="user:admin@example.com",
         )
 
-        namespace.add_provider("provider-1")
-        namespace.add_provider("provider-2")
+        namespace.add_mcp_server("provider-1")
+        namespace.add_mcp_server("provider-2")
 
-        assert namespace.provider_count == 2
-        assert "provider-1" in namespace.providers
-        assert "provider-2" in namespace.providers
+        assert namespace.mcp_server_count == 2
+        assert "provider-1" in namespace.mcp_servers
+        assert "provider-2" in namespace.mcp_servers
 
     def test_remove_provider_updates_set(self):
         """Removing provider updates provider set."""
@@ -281,14 +281,14 @@ class TestNamespace:
             display_name="Development Environment",
             created_by="user:admin@example.com",
         )
-        namespace.add_provider("provider-1")
-        namespace.add_provider("provider-2")
+        namespace.add_mcp_server("provider-1")
+        namespace.add_mcp_server("provider-2")
 
-        namespace.remove_provider("provider-1")
+        namespace.remove_mcp_server("provider-1")
 
-        assert namespace.provider_count == 1
-        assert "provider-1" not in namespace.providers
-        assert "provider-2" in namespace.providers
+        assert namespace.mcp_server_count == 1
+        assert "provider-1" not in namespace.mcp_servers
+        assert "provider-2" in namespace.mcp_servers
 
     def test_effective_quota_without_override(self):
         """Effective quota returns tenant quota when no override."""
@@ -300,13 +300,13 @@ class TestNamespace:
             created_by="user:admin@example.com",
         )
 
-        effective = namespace.get_effective_quota("max_providers", tenant_quota=50)
+        effective = namespace.get_effective_quota("max_mcp_servers", tenant_quota=50)
 
         assert effective == 50
 
     def test_effective_quota_with_override(self):
         """Effective quota uses override when set."""
-        overrides = NamespaceQuotaOverrides(max_providers=30)
+        overrides = NamespaceQuotaOverrides(max_mcp_servers=30)
         namespace = Namespace(
             namespace_id=NamespaceId("dev-env"),
             tenant_id=TenantId("test-team"),
@@ -316,13 +316,13 @@ class TestNamespace:
             quota_overrides=overrides,
         )
 
-        effective = namespace.get_effective_quota("max_providers", tenant_quota=50)
+        effective = namespace.get_effective_quota("max_mcp_servers", tenant_quota=50)
 
         assert effective == 30  # Override is lower
 
     def test_effective_quota_capped_at_tenant_limit(self):
         """Override cannot exceed tenant quota."""
-        overrides = NamespaceQuotaOverrides(max_providers=100)
+        overrides = NamespaceQuotaOverrides(max_mcp_servers=100)
         namespace = Namespace(
             namespace_id=NamespaceId("dev-env"),
             tenant_id=TenantId("test-team"),
@@ -332,7 +332,7 @@ class TestNamespace:
             quota_overrides=overrides,
         )
 
-        effective = namespace.get_effective_quota("max_providers", tenant_quota=50)
+        effective = namespace.get_effective_quota("max_mcp_servers", tenant_quota=50)
 
         assert effective == 50  # Capped at tenant limit
 

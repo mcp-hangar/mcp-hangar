@@ -1,7 +1,7 @@
 """Tool access resolver domain service.
 
-Resolves effective tool access policy for any provider/group/member combination.
-Handles the three-level merge: provider -> group -> member.
+Resolves effective tool access policy for any mcp_server/group/member combination.
+Handles the three-level merge: mcp_server -> group -> member.
 Caches effective policies per-member for performance.
 """
 
@@ -19,9 +19,9 @@ logger = logging.getLogger(__name__)
 
 
 class ToolAccessResolver:
-    """Resolves effective tool access policy for any provider/group/member combination.
+    """Resolves effective tool access policy for any mcp_server/group/member combination.
 
-    Handles the three-level merge: provider -> group -> member.
+    Handles the three-level merge: mcp_server -> group -> member.
     Caches effective policies per-member for performance.
     Invalidates cache on config reload.
 
@@ -32,34 +32,38 @@ class ToolAccessResolver:
         """Initialize the resolver with empty caches."""
         self._lock = threading.RLock()
         # Cache key format:
-        # - "provider:{provider_id}" for standalone providers
+        # - "mcp_server:{mcp_server_id}" for standalone mcp_servers
         # - "group:{group_id}:member:{member_id}" for group members
         self._policy_cache: dict[str, ToolAccessPolicy] = {}
 
         # Policy sources - set by external config loader
-        # Maps provider_id -> ToolAccessPolicy
-        self._provider_policies: dict[str, ToolAccessPolicy] = {}
+        # Maps mcp_server_id -> ToolAccessPolicy
+        self._mcp_server_policies: dict[str, ToolAccessPolicy] = {}
         # Maps group_id -> ToolAccessPolicy
         self._group_policies: dict[str, ToolAccessPolicy] = {}
         # Maps (group_id, member_id) -> ToolAccessPolicy
         self._member_policies: dict[tuple[str, str], ToolAccessPolicy] = {}
-        # Maps (group_id, member_id) -> provider_id (for resolving member's provider)
-        self._member_provider_mapping: dict[tuple[str, str], str] = {}
+        # Maps (group_id, member_id) -> mcp_server_id (for resolving member's mcp_server)
+        self._member_mcp_server_mapping: dict[tuple[str, str], str] = {}
 
-    def set_provider_policy(self, provider_id: str, policy: ToolAccessPolicy) -> None:
-        """Set the tool access policy for a provider.
+    def set_mcp_server_policy(self, mcp_server_id: str, policy: ToolAccessPolicy) -> None:
+        """Set the tool access policy for a mcp_server.
 
         Args:
-            provider_id: Provider identifier.
+            mcp_server_id: McpServer identifier.
             policy: Tool access policy to apply.
         """
         with self._lock:
             if policy.is_unrestricted():
-                self._provider_policies.pop(provider_id, None)
+                self._mcp_server_policies.pop(mcp_server_id, None)
             else:
-                self._provider_policies[provider_id] = policy
-            # Invalidate cache for this provider
-            self._invalidate_provider_cache(provider_id)
+                self._mcp_server_policies[mcp_server_id] = policy
+            # Invalidate cache for this mcp_server
+            self._invalidate_mcp_server_cache(mcp_server_id)
+
+    def set_provider_policy(self, provider_id: str, policy: ToolAccessPolicy) -> None:
+        """Legacy alias for set_mcp_server_policy."""
+        self.set_mcp_server_policy(provider_id, policy)
 
     def set_group_policy(self, group_id: str, policy: ToolAccessPolicy) -> None:
         """Set the tool access policy for a group.
@@ -81,6 +85,7 @@ class ToolAccessResolver:
         group_id: str,
         member_id: str,
         policy: ToolAccessPolicy,
+        mcp_server_id: str | None = None,
         provider_id: str | None = None,
     ) -> None:
         """Set the tool access policy for a specific group member.
@@ -89,8 +94,9 @@ class ToolAccessResolver:
             group_id: Group identifier.
             member_id: Member identifier within the group.
             policy: Tool access policy for this member.
-            provider_id: The provider_id this member maps to (for policy inheritance).
+            mcp_server_id: The mcp_server_id this member maps to (for policy inheritance).
         """
+        resolved_mcp_server_id = mcp_server_id or provider_id
         key = (group_id, member_id)
         with self._lock:
             if policy.is_unrestricted():
@@ -98,22 +104,26 @@ class ToolAccessResolver:
             else:
                 self._member_policies[key] = policy
 
-            if provider_id:
-                self._member_provider_mapping[key] = provider_id
+            if resolved_mcp_server_id:
+                self._member_mcp_server_mapping[key] = resolved_mcp_server_id
 
             # Invalidate cache for this member
             cache_key = f"group:{group_id}:member:{member_id}"
             self._policy_cache.pop(cache_key, None)
 
-    def remove_provider_policy(self, provider_id: str) -> None:
-        """Remove tool access policy for a provider.
+    def remove_mcp_server_policy(self, mcp_server_id: str) -> None:
+        """Remove tool access policy for a mcp_server.
 
         Args:
-            provider_id: Provider identifier.
+            mcp_server_id: McpServer identifier.
         """
         with self._lock:
-            self._provider_policies.pop(provider_id, None)
-            self._invalidate_provider_cache(provider_id)
+            self._mcp_server_policies.pop(mcp_server_id, None)
+            self._invalidate_mcp_server_cache(mcp_server_id)
+
+    def remove_provider_policy(self, provider_id: str) -> None:
+        """Legacy alias for remove_mcp_server_policy."""
+        self.remove_mcp_server_policy(provider_id)
 
     def remove_group_policy(self, group_id: str) -> None:
         """Remove tool access policy for a group.
@@ -135,23 +145,23 @@ class ToolAccessResolver:
         key = (group_id, member_id)
         with self._lock:
             self._member_policies.pop(key, None)
-            self._member_provider_mapping.pop(key, None)
+            self._member_mcp_server_mapping.pop(key, None)
             cache_key = f"group:{group_id}:member:{member_id}"
             self._policy_cache.pop(cache_key, None)
 
     def resolve_effective_policy(
         self,
-        provider_id: str,
+        mcp_server_id: str,
         group_id: str | None = None,
         member_id: str | None = None,
     ) -> ToolAccessPolicy:
         """Get the effective tool access policy for a specific context.
 
-        For standalone providers: returns provider-level policy.
-        For group members: merges provider -> group -> member policies.
+        For standalone mcp_servers: returns mcp_server-level policy.
+        For group members: merges mcp_server -> group -> member policies.
 
         Args:
-            provider_id: Provider identifier.
+            mcp_server_id: McpServer identifier.
             group_id: Optional group identifier (for group member context).
             member_id: Optional member identifier (for group member context).
 
@@ -162,7 +172,7 @@ class ToolAccessResolver:
         if group_id and member_id:
             cache_key = f"group:{group_id}:member:{member_id}"
         else:
-            cache_key = f"provider:{provider_id}"
+            cache_key = f"mcp_server:{mcp_server_id}"
 
         # Check cache first
         with self._lock:
@@ -170,7 +180,7 @@ class ToolAccessResolver:
                 return self._policy_cache[cache_key]
 
             # Compute effective policy
-            effective = self._compute_effective_policy(provider_id, group_id, member_id)
+            effective = self._compute_effective_policy(mcp_server_id, group_id, member_id)
 
             # Cache it
             self._policy_cache[cache_key] = effective
@@ -178,7 +188,7 @@ class ToolAccessResolver:
 
     def _compute_effective_policy(
         self,
-        provider_id: str,
+        mcp_server_id: str,
         group_id: str | None,
         member_id: str | None,
     ) -> ToolAccessPolicy:
@@ -187,25 +197,25 @@ class ToolAccessResolver:
         Must be called with lock held.
 
         Resolution order (highest priority last, i.e. narrower wins):
-          _global -> provider -> group -> member
+          _global -> mcp_server -> group -> member
 
         The _global policy (keyed as "_global") is set by the agent when a
-        cloud policy uses provider_id="*".  It acts as a floor: if no
-        provider-specific policy exists the global policy is used instead; if
-        a provider-specific policy exists the two are merged so the narrower
+        cloud policy uses mcp_server_id="*".  It acts as a floor: if no
+        mcp_server-specific policy exists the global policy is used instead; if
+        a mcp_server-specific policy exists the two are merged so the narrower
         of the two wins (deny union, allow intersection).
         """
-        explicit_provider_policy = self._provider_policies.get(provider_id)
-        global_policy = self._provider_policies.get("_global", ToolAccessPolicy())
+        explicit_mcp_server_policy = self._mcp_server_policies.get(mcp_server_id)
+        global_policy = self._mcp_server_policies.get("_global", ToolAccessPolicy())
 
-        if explicit_provider_policy is None:
-            provider_policy = global_policy
+        if explicit_mcp_server_policy is None:
+            mcp_server_policy = global_policy
         else:
-            provider_policy = ToolAccessPolicy.merge(global_policy, explicit_provider_policy)
+            mcp_server_policy = ToolAccessPolicy.merge(global_policy, explicit_mcp_server_policy)
 
-        # If no group context, just return provider policy
+        # If no group context, just return mcp_server policy
         if not group_id or not member_id:
-            return provider_policy
+            return mcp_server_policy
 
         # Get group policy
         group_policy = self._group_policies.get(group_id, ToolAccessPolicy())
@@ -214,22 +224,22 @@ class ToolAccessResolver:
         member_key = (group_id, member_id)
         member_policy = self._member_policies.get(member_key, ToolAccessPolicy())
 
-        # If member maps to a different provider, also get that provider's policy
-        mapped_provider_id = self._member_provider_mapping.get(member_key)
-        if mapped_provider_id and mapped_provider_id != provider_id:
-            mapped_provider_policy = self._provider_policies.get(mapped_provider_id, ToolAccessPolicy())
-            # Merge mapped provider policy with base provider policy
-            provider_policy = ToolAccessPolicy.merge(provider_policy, mapped_provider_policy)
+        # If member maps to a different mcp_server, also get that mcp_server's policy
+        mapped_mcp_server_id = self._member_mcp_server_mapping.get(member_key)
+        if mapped_mcp_server_id and mapped_mcp_server_id != mcp_server_id:
+            mapped_mcp_server_policy = self._mcp_server_policies.get(mapped_mcp_server_id, ToolAccessPolicy())
+            # Merge mapped mcp_server policy with base mcp_server policy
+            mcp_server_policy = ToolAccessPolicy.merge(mcp_server_policy, mapped_mcp_server_policy)
 
-        # Three-level merge: provider -> group -> member
-        step1 = ToolAccessPolicy.merge(provider_policy, group_policy)
+        # Three-level merge: mcp_server -> group -> member
+        step1 = ToolAccessPolicy.merge(mcp_server_policy, group_policy)
         step2 = ToolAccessPolicy.merge(step1, member_policy)
 
         return step2
 
     def is_tool_allowed(
         self,
-        provider_id: str,
+        mcp_server_id: str,
         tool_name: str,
         group_id: str | None = None,
         member_id: str | None = None,
@@ -237,7 +247,7 @@ class ToolAccessResolver:
         """Quick check if a specific tool is allowed in context.
 
         Args:
-            provider_id: Provider identifier.
+            mcp_server_id: McpServer identifier.
             tool_name: Name of the tool to check.
             group_id: Optional group identifier.
             member_id: Optional member identifier.
@@ -245,12 +255,12 @@ class ToolAccessResolver:
         Returns:
             True if the tool is allowed, False otherwise.
         """
-        policy = self.resolve_effective_policy(provider_id, group_id, member_id)
+        policy = self.resolve_effective_policy(mcp_server_id, group_id, member_id)
         return policy.is_tool_allowed(tool_name)
 
     def filter_tools(
         self,
-        provider_id: str,
+        mcp_server_id: str,
         tools: list[ToolSchema],
         group_id: str | None = None,
         member_id: str | None = None,
@@ -258,7 +268,7 @@ class ToolAccessResolver:
         """Filter tool schemas to only those allowed by policy.
 
         Args:
-            provider_id: Provider identifier.
+            mcp_server_id: McpServer identifier.
             tools: List of ToolSchema objects to filter.
             group_id: Optional group identifier.
             member_id: Optional member identifier.
@@ -266,7 +276,7 @@ class ToolAccessResolver:
         Returns:
             List of ToolSchema objects that are allowed by the effective policy.
         """
-        policy = self.resolve_effective_policy(provider_id, group_id, member_id)
+        policy = self.resolve_effective_policy(mcp_server_id, group_id, member_id)
 
         if policy.is_unrestricted():
             return tools
@@ -275,7 +285,7 @@ class ToolAccessResolver:
 
     def filter_tool_dicts(
         self,
-        provider_id: str,
+        mcp_server_id: str,
         tools: list[dict[str, Any]],
         group_id: str | None = None,
         member_id: str | None = None,
@@ -283,7 +293,7 @@ class ToolAccessResolver:
         """Filter tool dictionaries to only those allowed by policy.
 
         Args:
-            provider_id: Provider identifier.
+            mcp_server_id: McpServer identifier.
             tools: List of tool dictionaries with 'name' key.
             group_id: Optional group identifier.
             member_id: Optional member identifier.
@@ -291,43 +301,43 @@ class ToolAccessResolver:
         Returns:
             List of tool dictionaries that are allowed by the effective policy.
         """
-        policy = self.resolve_effective_policy(provider_id, group_id, member_id)
+        policy = self.resolve_effective_policy(mcp_server_id, group_id, member_id)
 
         if policy.is_unrestricted():
             return tools
 
         return [t for t in tools if policy.is_tool_allowed(t.get("name", ""))]
 
-    def invalidate_cache(self, provider_id: str | None = None) -> None:
+    def invalidate_cache(self, mcp_server_id: str | None = None) -> None:
         """Invalidate cached effective policies.
 
         Called on config reload or policy change.
-        If provider_id is None, invalidates all caches.
+        If mcp_server_id is None, invalidates all caches.
 
         Args:
-            provider_id: Optional provider_id to invalidate. None invalidates all.
+            mcp_server_id: Optional mcp_server_id to invalidate. None invalidates all.
         """
         with self._lock:
-            if provider_id is None:
+            if mcp_server_id is None:
                 self._policy_cache.clear()
                 logger.debug("tool_access_cache_invalidated_all")
             else:
-                self._invalidate_provider_cache(provider_id)
-                logger.debug("tool_access_cache_invalidated", provider_id=provider_id)
+                self._invalidate_mcp_server_cache(mcp_server_id)
+                logger.debug("tool_access_cache_invalidated", mcp_server_id=mcp_server_id)
 
-    def _invalidate_provider_cache(self, provider_id: str) -> None:
-        """Invalidate cache entries related to a provider.
+    def _invalidate_mcp_server_cache(self, mcp_server_id: str) -> None:
+        """Invalidate cache entries related to a mcp_server.
 
         Must be called with lock held.
         """
-        # Remove direct provider cache
-        cache_key = f"provider:{provider_id}"
+        # Remove direct mcp_server cache
+        cache_key = f"mcp_server:{mcp_server_id}"
         self._policy_cache.pop(cache_key, None)
 
-        # Remove any member caches that reference this provider
+        # Remove any member caches that reference this mcp_server
         keys_to_remove = []
-        for member_key, mapped_provider in self._member_provider_mapping.items():
-            if mapped_provider == provider_id:
+        for member_key, mapped_mcp_server in self._member_mcp_server_mapping.items():
+            if mapped_mcp_server == mcp_server_id:
                 group_id, member_id = member_key
                 keys_to_remove.append(f"group:{group_id}:member:{member_id}")
 
@@ -343,17 +353,17 @@ class ToolAccessResolver:
         for key in keys_to_remove:
             self._policy_cache.pop(key, None)
 
-    def get_policy_summary(self, provider_id: str) -> dict[str, Any]:
-        """Get a summary of the policy for a provider (for observability).
+    def get_policy_summary(self, mcp_server_id: str) -> dict[str, Any]:
+        """Get a summary of the policy for a mcp_server (for observability).
 
         Args:
-            provider_id: Provider identifier.
+            mcp_server_id: McpServer identifier.
 
         Returns:
             Dictionary with policy status information.
         """
         with self._lock:
-            policy = self._provider_policies.get(provider_id)
+            policy = self._mcp_server_policies.get(mcp_server_id)
             if policy is None:
                 return {
                     "active": False,
@@ -373,10 +383,10 @@ class ToolAccessResolver:
         """
         with self._lock:
             self._policy_cache.clear()
-            self._provider_policies.clear()
+            self._mcp_server_policies.clear()
             self._group_policies.clear()
             self._member_policies.clear()
-            self._member_provider_mapping.clear()
+            self._member_mcp_server_mapping.clear()
 
 
 # Global singleton instance

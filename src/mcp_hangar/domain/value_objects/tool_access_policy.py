@@ -1,7 +1,7 @@
 """Tool access policy value object for controlling tool visibility and invocation.
 
 This module implements config-driven tool filtering that controls which tools
-are visible and invocable per provider, per group, and per group member.
+are visible and invocable per mcp_server, per group, and per group member.
 This is Phase 0 of governance - static, identity-agnostic policy that becomes
 the foundation RBAC builds on top of.
 
@@ -18,7 +18,7 @@ Precedence (high to low):
 Merge semantics (for scope resolution):
 - Each level can only REMOVE tools, never add back tools that a broader scope removed
 - approval_list can only grow across scopes, never shrink
-- Security flows downhill: provider -> group -> member
+- Security flows downhill: mcp_server -> group -> member
 """
 
 from dataclasses import dataclass, field
@@ -137,7 +137,7 @@ class ToolAccessPolicy:
             for ALL possible tool lists
 
         Args:
-            broader: The broader scope policy (e.g., provider-level).
+            broader: The broader scope policy (e.g., mcp_server-level).
             narrower: The narrower scope policy (e.g., group-level or member-level).
 
         Returns:

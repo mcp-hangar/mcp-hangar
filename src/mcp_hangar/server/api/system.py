@@ -21,12 +21,12 @@ _START_TIME = time.time()
 async def get_system_info(request: Request) -> HangarJSONResponse:
     """Return system info including metrics, uptime, and version.
 
-    Dispatches GetSystemMetricsQuery for current provider/tool metrics,
+    Dispatches GetSystemMetricsQuery for current mcp_server/tool metrics,
     then augments with uptime and package version.
 
     Returns:
         JSON with {"system": {...}} containing:
-            - All SystemMetrics fields (total_providers, providers_by_state, etc.)
+            - All SystemMetrics fields (total_mcp_servers, mcp_servers_by_state, etc.)
             - uptime_seconds: seconds since server process started
             - version: installed mcp-hangar package version
     """

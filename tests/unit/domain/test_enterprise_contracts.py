@@ -240,7 +240,7 @@ class TestNullToolAccessPolicyEnforcer:
         enforcer = NullToolAccessPolicyEnforcer()
         result = enforcer.evaluate(
             principal=_make_principal(),
-            provider_id="math",
+            mcp_server_id="math",
             tool_name="add",
         )
         assert isinstance(result, PolicyEvaluationResult)
@@ -250,7 +250,7 @@ class TestNullToolAccessPolicyEnforcer:
         enforcer = NullToolAccessPolicyEnforcer()
         result = enforcer.evaluate(
             principal=_make_principal(),
-            provider_id="math",
+            mcp_server_id="math",
             tool_name="divide",
             context={"group": "default"},
         )
@@ -321,28 +321,22 @@ class TestNullAuditExporter:
         exporter = NullAuditExporter()
         # Verify method existence and callability (IAuditExporter is not runtime_checkable)
         assert hasattr(exporter, "export_tool_invocation")
-        assert hasattr(exporter, "export_provider_state_change")
+        assert hasattr(exporter, "export_mcp_server_state_change")
         assert callable(exporter.export_tool_invocation)
-        assert callable(exporter.export_provider_state_change)
+        assert callable(exporter.export_mcp_server_state_change)
 
     def test_export_tool_invocation_is_noop(self) -> None:
         exporter = NullAuditExporter()
         # Should not raise
-        exporter.export_tool_invocation(
-            provider_id="math",
-            tool_name="add",
-            status="success",
-            duration_ms=10.0,
-        )
+        exporter.export_tool_invocation(mcp_server_id="math", tool_name="add",
+        status="success",
+        duration_ms=10.0,)
 
-    def test_export_provider_state_change_is_noop(self) -> None:
+    def test_export_mcp_server_state_change_is_noop(self) -> None:
         exporter = NullAuditExporter()
         # Should not raise
-        exporter.export_provider_state_change(
-            provider_id="math",
-            from_state="COLD",
-            to_state="INITIALIZING",
-        )
+        exporter.export_mcp_server_state_change(mcp_server_id="math", from_state="COLD",
+        to_state="INITIALIZING",)
 
 
 # -- Complete inventory check --
@@ -377,4 +371,4 @@ class TestEnterpriseContractInventory:
         # IAuditExporter (Protocol, not runtime_checkable -- check methods)
         exporter = NullAuditExporter()
         assert hasattr(exporter, "export_tool_invocation")
-        assert hasattr(exporter, "export_provider_state_change")
+        assert hasattr(exporter, "export_mcp_server_state_change")

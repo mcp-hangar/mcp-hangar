@@ -30,7 +30,7 @@ class TestTraceContextExtraction:
         return CallSpec(
             index=0,
             call_id="test-call-1",
-            provider="math",
+            mcp_server="math",
             tool="add",
             arguments={"a": 1},
             metadata=metadata,
@@ -44,8 +44,8 @@ class TestTraceContextExtraction:
         """extract_trace_context is called when call metadata has traceparent."""
         # Setup mock context to avoid real provider lookups
         mock_ctx = MagicMock()
-        mock_ctx.get_provider.return_value = None
-        mock_ctx.provider_exists.return_value = False
+        mock_ctx.get_mcp_server.return_value = None
+        mock_ctx.mcp_server_exists.return_value = False
         mock_get_context.return_value = mock_ctx
 
         from mcp_hangar.server.tools.batch.executor import BatchExecutor
@@ -74,8 +74,8 @@ class TestTraceContextExtraction:
     ) -> None:
         """extract_trace_context is called with empty dict when metadata is empty."""
         mock_ctx = MagicMock()
-        mock_ctx.get_provider.return_value = None
-        mock_ctx.provider_exists.return_value = False
+        mock_ctx.get_mcp_server.return_value = None
+        mock_ctx.mcp_server_exists.return_value = False
         mock_get_context.return_value = mock_ctx
 
         from mcp_hangar.server.tools.batch.executor import BatchExecutor
@@ -101,8 +101,8 @@ class TestTraceContextExtraction:
     ) -> None:
         """extract_trace_context is called with {} when metadata is None."""
         mock_ctx = MagicMock()
-        mock_ctx.get_provider.return_value = None
-        mock_ctx.provider_exists.return_value = False
+        mock_ctx.get_mcp_server.return_value = None
+        mock_ctx.mcp_server_exists.return_value = False
         mock_get_context.return_value = mock_ctx
 
         from mcp_hangar.server.tools.batch.executor import BatchExecutor

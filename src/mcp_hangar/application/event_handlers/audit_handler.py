@@ -24,13 +24,17 @@ class AuditRecord:
     event_id: str
     event_type: str
     occurred_at: datetime
-    provider_id: str | None
+    mcp_server_id: str | None
     data: dict[str, Any]
     recorded_at: datetime = field(default_factory=lambda: datetime.now(UTC))
     caller_user_id: str | None = None
     caller_agent_id: str | None = None
     caller_session_id: str | None = None
     caller_principal_type: str | None = None
+
+    @property
+    def provider_id(self) -> str | None:
+        return self.mcp_server_id
 
     def to_dict(self) -> dict[str, Any]:
         """Convert audit record to dictionary."""
@@ -40,7 +44,8 @@ class AuditRecord:
             "occurred_at": (
                 self.occurred_at.isoformat() if isinstance(self.occurred_at, datetime) else str(self.occurred_at)
             ),
-            "provider_id": self.provider_id,
+            "mcp_server_id": self.mcp_server_id,
+            "provider_id": self.mcp_server_id,
             "data": self.data,
             "recorded_at": self.recorded_at.isoformat(),
             "caller_user_id": self.caller_user_id,
@@ -65,11 +70,12 @@ class AuditStore(ABC):
     @abstractmethod
     def query(
         self,
-        provider_id: str | None = None,
+        mcp_server_id: str | None = None,
         event_type: str | None = None,
         since: datetime | None = None,
         limit: int = 100,
         caller_user_id: str | None = None,
+        provider_id: str | None = None,
     ) -> list[AuditRecord]:
         """Query audit records."""
         pass
@@ -91,20 +97,23 @@ class InMemoryAuditStore(AuditStore):
 
     def query(
         self,
-        provider_id: str | None = None,
+        mcp_server_id: str | None = None,
         event_type: str | None = None,
         since: datetime | None = None,
         limit: int = 100,
         caller_user_id: str | None = None,
+        provider_id: str | None = None,
     ) -> list[AuditRecord]:
         """Query audit records with optional filters."""
+        if mcp_server_id is None:
+            mcp_server_id = provider_id
         results = []
         for record in reversed(self._records):  # Most recent first
             if len(results) >= limit:
                 break
 
             # Apply filters
-            if provider_id and record.provider_id != provider_id:
+            if mcp_server_id and record.mcp_server_id != mcp_server_id:
                 continue
             if event_type and record.event_type != event_type:
                 continue
@@ -139,11 +148,12 @@ class LogAuditStore(AuditStore):
 
     def query(
         self,
-        provider_id: str | None = None,
+        mcp_server_id: str | None = None,
         event_type: str | None = None,
         since: datetime | None = None,
         limit: int = 100,
         caller_user_id: str | None = None,
+        provider_id: str | None = None,
     ) -> list[AuditRecord]:
         """Query is not supported for log store."""
         raise NotImplementedError("Log audit store does not support queries")
@@ -187,8 +197,8 @@ class AuditEventHandler:
         if event_type in self._exclude:
             return
 
-        # Extract provider_id if available
-        provider_id = getattr(event, "provider_id", None)
+        # Extract mcp_server_id if available
+        mcp_server_id = getattr(event, "mcp_server_id", None)
 
         # Extract identity_context from events that carry it
         # (ToolInvocationRequested/Completed/Failed have identity_context field)
@@ -209,7 +219,7 @@ class AuditEventHandler:
             event_id=event.event_id,
             event_type=event_type,
             occurred_at=event.occurred_at,
-            provider_id=provider_id,
+            mcp_server_id=mcp_server_id,
             data=event.to_dict(),
             caller_user_id=caller_user_id,
             caller_agent_id=caller_agent_id,
@@ -229,15 +239,18 @@ class AuditEventHandler:
 
     def query(
         self,
-        provider_id: str | None = None,
+        mcp_server_id: str | None = None,
         event_type: str | None = None,
         since: datetime | None = None,
         limit: int = 100,
         caller_user_id: str | None = None,
+        provider_id: str | None = None,
     ) -> list[AuditRecord]:
         """Query audit records."""
+        if mcp_server_id is None:
+            mcp_server_id = provider_id
         return self._store.query(
-            provider_id=provider_id,
+            mcp_server_id=mcp_server_id,
             event_type=event_type,
             since=since,
             limit=limit,

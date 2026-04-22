@@ -1,10 +1,10 @@
-"""Provider-related value objects.
+"""McpServer-related value objects.
 
 Contains:
-- ProviderState - lifecycle state machine
-- ProviderMode - execution modes
-- ProviderId - unique identifier
-- ProviderConfig - complete configuration
+- McpServerState - lifecycle state machine
+- McpServerMode - execution modes
+- McpServerId - unique identifier
+- McpServerConfig - complete configuration
 - LoadBalancerStrategy, GroupState - group-related enums
 - GroupId, MemberWeight, MemberPriority - group value objects
 """
@@ -15,10 +15,10 @@ import re
 from typing import Any
 
 
-class ProviderState(Enum):
-    """Provider lifecycle states.
+class McpServerState(Enum):
+    """McpServer lifecycle states.
 
-    Represents the finite state machine for provider lifecycle management.
+    Represents the finite state machine for mcp_server lifecycle management.
 
     State machine transitions:
         - COLD -> INITIALIZING (on start)
@@ -28,11 +28,11 @@ class ProviderState(Enum):
         - DEAD -> INITIALIZING (on retry) | DEGRADED (on max failures)
 
     Attributes:
-        COLD: Provider is not running, no resources allocated.
-        INITIALIZING: Provider is starting up, handshake in progress.
-        READY: Provider is running and accepting requests.
-        DEGRADED: Provider has failures but may recover after backoff.
-        DEAD: Provider has failed fatally and requires manual intervention or retry.
+        COLD: McpServer is not running, no resources allocated.
+        INITIALIZING: McpServer is starting up, handshake in progress.
+        READY: McpServer is running and accepting requests.
+        DEGRADED: McpServer has failures but may recover after backoff.
+        DEAD: McpServer has failed fatally and requires manual intervention or retry.
     """
 
     COLD = "cold"
@@ -47,38 +47,38 @@ class ProviderState(Enum):
 
     @property
     def can_accept_requests(self) -> bool:
-        """Check if provider can accept tool invocation requests.
+        """Check if mcp_server can accept tool invocation requests.
 
         Returns:
-            True if provider is in READY state, False otherwise.
+            True if mcp_server is in READY state, False otherwise.
         """
-        return self == ProviderState.READY
+        return self == McpServerState.READY
 
     @property
     def can_start(self) -> bool:
-        """Check if provider can be started from this state.
+        """Check if mcp_server can be started from this state.
 
         Returns:
-            True if provider can transition to INITIALIZING, False otherwise.
+            True if mcp_server can transition to INITIALIZING, False otherwise.
         """
-        return self in (ProviderState.COLD, ProviderState.DEAD, ProviderState.DEGRADED)
+        return self in (McpServerState.COLD, McpServerState.DEAD, McpServerState.DEGRADED)
 
 
-class ProviderMode(Enum):
-    """Mode for running a provider."""
+class McpServerMode(Enum):
+    """Mode for running a mcp_server."""
 
     SUBPROCESS = "subprocess"
     DOCKER = "docker"
     CONTAINER = "container"  # Alias for docker mode
     REMOTE = "remote"
-    GROUP = "group"  # Provider group with load balancing
+    GROUP = "group"  # McpServer group with load balancing
 
     def __str__(self) -> str:
         return self.value
 
     @classmethod
-    def normalize(cls, value: "str | ProviderMode") -> "ProviderMode":
-        """Normalize mode value to ProviderMode enum."""
+    def normalize(cls, value: "str | McpServerMode") -> "McpServerMode":
+        """Normalize mode value to McpServerMode enum."""
         if isinstance(value, cls):
             return value
         # Handle string values - return corresponding enum
@@ -86,7 +86,7 @@ class ProviderMode(Enum):
 
 
 class LoadBalancerStrategy(Enum):
-    """Load balancing strategy for provider groups."""
+    """Load balancing strategy for mcp_server groups."""
 
     ROUND_ROBIN = "round_robin"
     WEIGHTED_ROUND_ROBIN = "weighted_round_robin"
@@ -99,7 +99,7 @@ class LoadBalancerStrategy(Enum):
 
 
 class GroupState(Enum):
-    """Provider group lifecycle states."""
+    """McpServer group lifecycle states."""
 
     INACTIVE = "inactive"  # No members started
     PARTIAL = "partial"  # Some members healthy, below min_healthy
@@ -115,44 +115,44 @@ class GroupState(Enum):
         return self in (GroupState.HEALTHY, GroupState.PARTIAL)
 
 
-class ProviderId:
-    """Unique identifier for a provider.
+class McpServerId:
+    """Unique identifier for a mcp_server.
 
-    Validates and encapsulates provider identity with strict rules:
+    Validates and encapsulates mcp_server identity with strict rules:
     - Non-empty string
     - Alphanumeric, hyphens, underscores only
     - Max 64 characters
 
     Attributes:
-        value: The validated provider identifier string.
+        value: The validated mcp_server identifier string.
 
     Raises:
         ValueError: If the provided value violates validation rules.
 
     Example:
-        >>> provider_id = ProviderId("my-provider-1")
-        >>> str(provider_id)
-        'my-provider-1'
+        >>> mcp_server_id = McpServerId("my-mcp_server-1")
+        >>> str(mcp_server_id)
+        'my-mcp_server-1'
     """
 
     _VALID_PATTERN = re.compile(r"^[a-zA-Z0-9_-]+$")
     _MAX_LENGTH = 64
 
     def __init__(self, value: str):
-        """Initialize ProviderId with validation.
+        """Initialize McpServerId with validation.
 
         Args:
-            value: The provider identifier string to validate.
+            value: The mcp_server identifier string to validate.
 
         Raises:
             ValueError: If value is empty, too long, or contains invalid characters.
         """
         if not value:
-            raise ValueError("ProviderId cannot be empty")
+            raise ValueError("McpServerId cannot be empty")
         if len(value) > self._MAX_LENGTH:
-            raise ValueError(f"ProviderId cannot exceed {self._MAX_LENGTH} characters")
+            raise ValueError(f"McpServerId cannot exceed {self._MAX_LENGTH} characters")
         if not self._VALID_PATTERN.match(value):
-            raise ValueError("ProviderId must contain only alphanumeric characters, hyphens, and underscores")
+            raise ValueError("McpServerId must contain only alphanumeric characters, hyphens, and underscores")
         self._value = value
 
     @property
@@ -164,12 +164,12 @@ class ProviderId:
         return self._value
 
     def __repr__(self) -> str:
-        return f"ProviderId('{self._value}')"
+        return f"McpServerId('{self._value}')"
 
     def __eq__(self, other) -> bool:
         if isinstance(other, str):
             return self._value == other
-        if not isinstance(other, ProviderId):
+        if not isinstance(other, McpServerId):
             return False
         return self._value == other._value
 
@@ -178,10 +178,10 @@ class ProviderId:
 
 
 class GroupId:
-    """Unique identifier for a provider group.
+    """Unique identifier for a mcp_server group.
 
     Rules:
-    - Same rules as ProviderId
+    - Same rules as McpServerId
     - Non-empty string
     - Alphanumeric, hyphens, underscores only
     - Max 64 characters
@@ -324,10 +324,10 @@ class MemberPriority:
         return NotImplemented
 
 
-# Import config classes for ProviderConfig
+# Import config classes for McpServerConfig
 # This import is placed here (after all basic types are defined) to avoid circular imports
-# between provider.py and config.py. The config module only depends on basic types,
-# while ProviderConfig (below) depends on config classes.
+# between mcp_server.py and config.py. The config module only depends on basic types,
+# while McpServerConfig (below) depends on config classes.
 from .config import (  # noqa: E402
     CommandLine,
     DockerImage,
@@ -340,14 +340,14 @@ from .config import (  # noqa: E402
 
 
 @dataclass(frozen=True)
-class ProviderConfig:
-    """Complete configuration for a provider.
+class McpServerConfig:
+    """Complete configuration for a mcp_server.
 
     Encapsulates all configuration options in a validated, immutable object.
     """
 
-    provider_id: ProviderId
-    mode: ProviderMode
+    mcp_server_id: McpServerId
+    mode: McpServerMode
     command: CommandLine | None = None
     image: DockerImage | None = None
     endpoint: Endpoint | None = None
@@ -358,7 +358,7 @@ class ProviderConfig:
 
     def __init__(
         self,
-        provider_id: str,
+        mcp_server_id: str,
         mode: str,
         command: list[str] | None = None,
         image: str | None = None,
@@ -368,31 +368,31 @@ class ProviderConfig:
         health_check_interval_s: int = 60,
         max_consecutive_failures: int = 3,
     ):
-        # Validate and convert provider_id
-        object.__setattr__(self, "provider_id", ProviderId(provider_id))
+        # Validate and convert mcp_server_id
+        object.__setattr__(self, "mcp_server_id", McpServerId(mcp_server_id))
 
         # Validate and convert mode
         try:
-            object.__setattr__(self, "mode", ProviderMode(mode))
+            object.__setattr__(self, "mode", McpServerMode(mode))
         except ValueError as e:
-            raise ValueError(f"Invalid provider mode: {mode}. Must be one of: subprocess, docker, remote") from e
+            raise ValueError(f"Invalid mcp_server mode: {mode}. Must be one of: subprocess, docker, remote") from e
 
         # Validate mode-specific configuration
-        resolved_mode = ProviderMode(mode)
+        resolved_mode = McpServerMode(mode)
 
-        if resolved_mode == ProviderMode.SUBPROCESS:
+        if resolved_mode == McpServerMode.SUBPROCESS:
             if not command:
                 raise ValueError("Subprocess mode requires 'command' configuration")
             object.__setattr__(self, "command", CommandLine.from_list(command))
             object.__setattr__(self, "image", None)
             object.__setattr__(self, "endpoint", None)
-        elif resolved_mode == ProviderMode.DOCKER:
+        elif resolved_mode == McpServerMode.DOCKER:
             if not image:
                 raise ValueError("Docker mode requires 'image' configuration")
             object.__setattr__(self, "command", None)
             object.__setattr__(self, "image", DockerImage(image))
             object.__setattr__(self, "endpoint", None)
-        elif resolved_mode == ProviderMode.REMOTE:
+        elif resolved_mode == McpServerMode.REMOTE:
             if not endpoint:
                 raise ValueError("Remote mode requires 'endpoint' configuration")
             object.__setattr__(self, "command", None)
@@ -414,7 +414,7 @@ class ProviderConfig:
     def to_dict(self) -> dict[str, Any]:
         """Convert to dictionary representation."""
         result = {
-            "provider_id": str(self.provider_id),
+            "mcp_server_id": str(self.mcp_server_id),
             "mode": str(self.mode),
             "idle_ttl_s": self.idle_ttl.seconds,
             "health_check_interval_s": self.health_check_interval.seconds,
@@ -431,3 +431,10 @@ class ProviderConfig:
             result["env"] = self.env.to_dict()
 
         return result
+
+
+# legacy aliases
+ProviderState = McpServerState
+ProviderMode = McpServerMode
+ProviderId = McpServerId
+ProviderConfig = McpServerConfig

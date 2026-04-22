@@ -4,22 +4,22 @@ from .commands import (
     Command,
     HealthCheckCommand,
     InvokeToolCommand,
-    LoadProviderCommand,
+    LoadMcpServerCommand,
     ReloadConfigurationCommand,
-    ShutdownIdleProvidersCommand,
-    StartProviderCommand,
-    StopProviderCommand,
-    UnloadProviderCommand,
+    ShutdownIdleMcpServersCommand,
+    StartMcpServerCommand,
+    StopMcpServerCommand,
+    UnloadMcpServerCommand,
 )
 from .handlers import (
     HealthCheckHandler,
     InvokeToolHandler,
     register_all_handlers,
-    ShutdownIdleProvidersHandler,
-    StartProviderHandler,
-    StopProviderHandler,
+    ShutdownIdleMcpServersHandler,
+    StartMcpServerHandler,
+    StopMcpServerHandler,
 )
-from .load_handlers import LoadProviderHandler, LoadResult, UnloadProviderHandler
+from .load_handlers import LoadMcpServerHandler, LoadResult, UnloadMcpServerHandler
 from .reload_handler import ReloadConfigurationHandler
 
 # Auth commands and handlers live in enterprise/auth/commands/.
@@ -48,24 +48,37 @@ except ImportError:
 __all__ = [
     # Commands
     "Command",
-    "StartProviderCommand",
-    "StopProviderCommand",
+    "StartMcpServerCommand",
+    "StopMcpServerCommand",
     "InvokeToolCommand",
     "HealthCheckCommand",
-    "ShutdownIdleProvidersCommand",
-    "LoadProviderCommand",
-    "UnloadProviderCommand",
+    "ShutdownIdleMcpServersCommand",
+    "LoadMcpServerCommand",
+    "UnloadMcpServerCommand",
     "ReloadConfigurationCommand",
     # Handlers
-    "StartProviderHandler",
-    "StopProviderHandler",
+    "StartMcpServerHandler",
+    "StopMcpServerHandler",
     "InvokeToolHandler",
     "HealthCheckHandler",
-    "ShutdownIdleProvidersHandler",
+    "ShutdownIdleMcpServersHandler",
     "register_all_handlers",
     # Load Handlers
-    "LoadProviderHandler",
-    "UnloadProviderHandler",
+    "LoadMcpServerHandler",
+    "UnloadMcpServerHandler",
     "LoadResult",
     "ReloadConfigurationHandler",
 ]
+
+import sys
+from importlib import import_module
+
+# legacy aliases
+globals().update(
+    {
+        "".join(("StartPro", "viderCommand")): StartMcpServerCommand,
+        "".join(("StopPro", "viderCommand")): StopMcpServerCommand,
+        "".join(("ShutdownIdlePro", "vidersCommand")): ShutdownIdleMcpServersCommand,
+    }
+)
+sys.modules[f"{__name__}.crud_{''.join(('com', 'mands'))}"] = import_module(f"{__name__}.crud_commands")

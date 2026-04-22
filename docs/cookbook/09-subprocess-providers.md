@@ -1,9 +1,9 @@
-# 09 -- Subprocess Providers
+# 09 -- Subprocess MCP servers
 
 > **Prerequisite:** [01 -- HTTP Gateway](01-http-gateway.md)
 > **You will need:** Running Hangar, Python 3.11+
 > **Time:** 5 minutes
-> **Adds:** Run MCP providers as local subprocesses via stdin/stdout
+> **Adds:** Run MCP servers as local subprocesses via stdin/stdout
 
 ## The Problem
 
@@ -12,8 +12,8 @@ You have a Python MCP server package. You don't want to run it as a separate HTT
 ## The Config
 
 ```yaml
-# config.yaml -- Recipe 09: Subprocess Providers
-providers:
+# config.yaml -- Recipe 09: Subprocess MCP servers
+mcp_servers:
   math:
     mode: subprocess                     # NEW: subprocess mode
     command: [python, -m, math_server]   # NEW: command to run
@@ -32,7 +32,7 @@ providers:
    mcp-hangar serve
    ```
 
-2. Check status -- provider is COLD (not yet started):
+2. Check status -- MCP server is COLD (not yet started):
 
    ```bash
    mcp-hangar status
@@ -52,7 +52,7 @@ providers:
    Result: 3
    ```
 
-4. Check status again -- provider is now READY:
+4. Check status again -- MCP server is now READY:
 
    ```bash
    mcp-hangar status
@@ -74,7 +74,7 @@ providers:
 
 ## What Just Happened
 
-Subprocess providers communicate via JSON-RPC over stdin/stdout. Hangar starts the process on first tool call, keeps it running while active, and stops it after the idle TTL expires. The `StdioClient` manages message correlation, timeouts, and process lifecycle.
+Subprocess MCP servers communicate via JSON-RPC over stdin/stdout. Hangar starts the process on first tool call, keeps it running while active, and stops it after the idle TTL expires. The `StdioClient` manages message correlation, timeouts, and process lifecycle.
 
 Stderr output is captured into a ring buffer and available via the [Log Streaming](../guides/LOG_STREAMING.md) API.
 
@@ -83,12 +83,12 @@ Stderr output is captured into a ring buffer and available via the [Log Streamin
 | Key | Type | Default | Description |
 |-----|------|---------|-------------|
 | `mode` | string | -- | Set to `subprocess` |
-| `command` | list[string] | -- | Command and arguments to start the provider |
+| `command` | list[string] | -- | Command and arguments to start the MCP server |
 | `idle_ttl_s` | int | `300` | Seconds of inactivity before auto-stop |
 | `env` | dict | `{}` | Environment variables for the subprocess |
 
 ## What's Next
 
-Subprocesses are great for development. For isolation in production, run providers in containers.
+Subprocesses are great for development. For isolation in production, run MCP servers in containers.
 
 --> [10 -- Discovery: Docker](10-discovery-docker.md)

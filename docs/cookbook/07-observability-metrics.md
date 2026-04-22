@@ -7,13 +7,13 @@
 
 ## The Problem
 
-You have providers running. You don't know how many tool calls they handle, how long calls take, or whether health checks are passing. When something breaks at 3 AM, you need data, not guesses.
+You have MCP servers running. You don't know how many tool calls they handle, how long calls take, or whether health checks are passing. When something breaks at 3 AM, you need data, not guesses.
 
 ## The Config
 
 ```yaml
 # config.yaml -- Recipe 07: Observability Metrics
-providers:
+mcp_servers:
   my-mcp:
     mode: remote
     endpoint: "http://localhost:8080"
@@ -40,9 +40,9 @@ No config changes needed -- metrics are always available at `/metrics` on the HT
    ```
    # HELP mcp_hangar_tool_calls_total Total tool invocations
    # TYPE mcp_hangar_tool_calls_total counter
-   mcp_hangar_tool_calls_total{provider="my-mcp",tool="my-tool"} 0
-   # HELP mcp_hangar_provider_state Current provider state
-   # TYPE mcp_hangar_provider_state gauge
+   mcp_hangar_tool_calls_total{mcp_server="my-mcp",tool="my-tool"} 0
+   # HELP mcp_hangar_mcp_server_state Current mcp_server state
+   # TYPE mcp_hangar_mcp_server_state gauge
    ```
 
 3. Start the monitoring stack:
@@ -57,7 +57,7 @@ No config changes needed -- metrics are always available at `/metrics` on the HT
 5. Make some tool calls and watch the metrics update in real time:
 
    ```bash
-   curl -X POST http://localhost:8000/api/providers/my-mcp/start
+   curl -X POST http://localhost:8000/api/mcp_servers/my-mcp/start
    ```
 
 ## What Just Happened
@@ -66,12 +66,12 @@ Hangar exposes Prometheus-format metrics at `/metrics`. The monitoring stack in 
 
 | Metric | Type | What it tells you |
 |--------|------|-------------------|
-| `mcp_hangar_tool_calls_total` | Counter | Total tool invocations per provider/tool |
-| `mcp_hangar_tool_call_duration_seconds` | Histogram | Latency distribution per provider/tool |
-| `mcp_hangar_provider_state` | Gauge | Current state per provider (1 = active) |
-| `mcp_hangar_cold_starts_total` | Counter | Cold start count per provider/mode |
-| `mcp_hangar_health_checks` | Counter | Health check results per provider |
-| `mcp_hangar_circuit_breaker_state` | Gauge | Circuit breaker state per provider |
+| `mcp_hangar_tool_calls_total` | Counter | Total tool invocations per MCP server/tool |
+| `mcp_hangar_tool_call_duration_seconds` | Histogram | Latency distribution per MCP server/tool |
+| `mcp_hangar_mcp_server_state` | Gauge | Current state per MCP server (1 = active) |
+| `mcp_hangar_cold_starts_total` | Counter | Cold start count per MCP server/mode |
+| `mcp_hangar_health_checks` | Counter | Health check results per MCP server |
+| `mcp_hangar_circuit_breaker_state` | Gauge | Circuit breaker state per MCP server |
 
 ## Key Config Reference
 

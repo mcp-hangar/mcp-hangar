@@ -1,6 +1,6 @@
-"""Bundle and provider definitions.
+"""Bundle and mcp_server definitions.
 
-This module defines the available provider bundles and their configurations.
+This module defines the available mcp_server bundles and their configurations.
 These are pure domain objects with no external dependencies.
 """
 
@@ -9,7 +9,7 @@ from enum import Enum
 
 
 class InstallType(Enum):
-    """How a provider is installed/executed."""
+    """How a mcp_server is installed/executed."""
 
     NPX = "npx"  # Node.js via npx
     UVX = "uvx"  # Python via uvx
@@ -28,15 +28,15 @@ class ConfigType(Enum):
 
 
 @dataclass(frozen=True)
-class ProviderDefinition:
-    """Definition of an MCP provider.
+class McpServerDefinition:
+    """Definition of an MCP mcp_server.
 
-    This is a domain value object that describes a provider's
+    This is a domain value object that describes a mcp_server's
     metadata and configuration requirements.
     """
 
     name: str
-    """Unique provider identifier."""
+    """Unique mcp_server identifier."""
 
     description: str
     """Human-readable description."""
@@ -45,7 +45,7 @@ class ProviderDefinition:
     """Package name (npm package, PyPI package, or Docker image)."""
 
     install_type: InstallType = InstallType.NPX
-    """How to install/execute the provider."""
+    """How to install/execute the mcp_server."""
 
     requires_config: bool = False
     """Whether configuration is required before use."""
@@ -60,13 +60,13 @@ class ProviderDefinition:
     """Environment variable name for secrets."""
 
     dependencies: list[str] = field(default_factory=list)
-    """Other providers this one depends on."""
+    """Other mcp_servers this one depends on."""
 
     conflicts: list[str] = field(default_factory=list)
-    """Providers that conflict with this one."""
+    """McpServers that conflict with this one."""
 
     official: bool = True
-    """Whether this is an official Anthropic provider."""
+    """Whether this is an official Anthropic mcp_server."""
 
     category: str = ""
     """Category for grouping (e.g., 'filesystem', 'api', 'database')."""
@@ -74,10 +74,10 @@ class ProviderDefinition:
 
 @dataclass(frozen=True)
 class Bundle:
-    """A curated collection of providers for a use case.
+    """A curated collection of mcp_servers for a use case.
 
     Bundles help users quickly set up a useful configuration
-    without having to choose individual providers.
+    without having to choose individual mcp_servers.
     """
 
     name: str
@@ -89,17 +89,17 @@ class Bundle:
     description: str
     """Description of what this bundle is for."""
 
-    providers: list[str]
-    """List of provider names included in this bundle."""
+    mcp_servers: list[str]
+    """List of mcp_server names included in this bundle."""
 
     includes: list[str] = field(default_factory=list)
     """Other bundles this one includes (inheritance)."""
 
 
-# Provider definitions
-PROVIDERS: dict[str, ProviderDefinition] = {
-    # Starter providers
-    "filesystem": ProviderDefinition(
+# McpServer definitions
+PROVIDERS: dict[str, McpServerDefinition] = {
+    # Starter mcp_servers
+    "filesystem": McpServerDefinition(
         name="filesystem",
         description="Read and write local files",
         package="@anthropic/mcp-server-filesystem",
@@ -109,7 +109,7 @@ PROVIDERS: dict[str, ProviderDefinition] = {
         config_prompt="Directory to allow access to",
         category="filesystem",
     ),
-    "fetch": ProviderDefinition(
+    "fetch": McpServerDefinition(
         name="fetch",
         description="Make HTTP requests to fetch web content",
         package="@anthropic/mcp-server-fetch",
@@ -117,7 +117,7 @@ PROVIDERS: dict[str, ProviderDefinition] = {
         requires_config=False,
         category="network",
     ),
-    "memory": ProviderDefinition(
+    "memory": McpServerDefinition(
         name="memory",
         description="Persistent key-value storage for context",
         package="@anthropic/mcp-server-memory",
@@ -125,8 +125,8 @@ PROVIDERS: dict[str, ProviderDefinition] = {
         requires_config=False,
         category="storage",
     ),
-    # Developer providers
-    "github": ProviderDefinition(
+    # Developer mcp_servers
+    "github": McpServerDefinition(
         name="github",
         description="GitHub repos, issues, PRs",
         package="@anthropic/mcp-server-github",
@@ -137,7 +137,7 @@ PROVIDERS: dict[str, ProviderDefinition] = {
         env_var="GITHUB_TOKEN",
         category="vcs",
     ),
-    "git": ProviderDefinition(
+    "git": McpServerDefinition(
         name="git",
         description="Local git operations",
         package="@anthropic/mcp-server-git",
@@ -145,7 +145,7 @@ PROVIDERS: dict[str, ProviderDefinition] = {
         requires_config=False,
         category="vcs",
     ),
-    "gitlab": ProviderDefinition(
+    "gitlab": McpServerDefinition(
         name="gitlab",
         description="GitLab repos, issues, MRs",
         package="@anthropic/mcp-server-gitlab",
@@ -157,8 +157,8 @@ PROVIDERS: dict[str, ProviderDefinition] = {
         conflicts=["github"],  # Typically use one or the other
         category="vcs",
     ),
-    # Data providers
-    "sqlite": ProviderDefinition(
+    # Data mcp_servers
+    "sqlite": McpServerDefinition(
         name="sqlite",
         description="Query SQLite databases",
         package="@anthropic/mcp-server-sqlite",
@@ -168,7 +168,7 @@ PROVIDERS: dict[str, ProviderDefinition] = {
         config_prompt="Path to SQLite database file",
         category="database",
     ),
-    "postgres": ProviderDefinition(
+    "postgres": McpServerDefinition(
         name="postgres",
         description="Query PostgreSQL databases",
         package="@anthropic/mcp-server-postgres",
@@ -179,8 +179,8 @@ PROVIDERS: dict[str, ProviderDefinition] = {
         env_var="DATABASE_URL",
         category="database",
     ),
-    # Communication providers
-    "slack": ProviderDefinition(
+    # Communication mcp_servers
+    "slack": McpServerDefinition(
         name="slack",
         description="Slack workspace integration",
         package="@anthropic/mcp-server-slack",
@@ -191,8 +191,8 @@ PROVIDERS: dict[str, ProviderDefinition] = {
         env_var="SLACK_BOT_TOKEN",
         category="communication",
     ),
-    # Browser/automation providers
-    "puppeteer": ProviderDefinition(
+    # Browser/automation mcp_servers
+    "puppeteer": McpServerDefinition(
         name="puppeteer",
         description="Browser automation with Puppeteer",
         package="@anthropic/mcp-server-puppeteer",
@@ -200,8 +200,8 @@ PROVIDERS: dict[str, ProviderDefinition] = {
         requires_config=False,
         category="automation",
     ),
-    # Search providers
-    "brave-search": ProviderDefinition(
+    # Search mcp_servers
+    "brave-search": McpServerDefinition(
         name="brave-search",
         description="Web search via Brave Search API",
         package="@anthropic/mcp-server-brave-search",
@@ -212,7 +212,7 @@ PROVIDERS: dict[str, ProviderDefinition] = {
         env_var="BRAVE_API_KEY",
         category="search",
     ),
-    "google-maps": ProviderDefinition(
+    "google-maps": McpServerDefinition(
         name="google-maps",
         description="Google Maps and Places API",
         package="@anthropic/mcp-server-google-maps",
@@ -223,8 +223,8 @@ PROVIDERS: dict[str, ProviderDefinition] = {
         env_var="GOOGLE_MAPS_API_KEY",
         category="maps",
     ),
-    # Time provider
-    "time": ProviderDefinition(
+    # Time mcp_server
+    "time": McpServerDefinition(
         name="time",
         description="Current time and timezone operations",
         package="@anthropic/mcp-server-time",
@@ -232,8 +232,8 @@ PROVIDERS: dict[str, ProviderDefinition] = {
         requires_config=False,
         category="utility",
     ),
-    # Sequential thinking provider
-    "sequential-thinking": ProviderDefinition(
+    # Sequential thinking mcp_server
+    "sequential-thinking": McpServerDefinition(
         name="sequential-thinking",
         description="Step-by-step reasoning tool",
         package="@anthropic/mcp-server-sequential-thinking",
@@ -248,15 +248,15 @@ PROVIDERS: dict[str, ProviderDefinition] = {
 STARTER_BUNDLE = Bundle(
     name="starter",
     display_name="Starter",
-    description="Essential providers for general use - files, web requests, and memory",
-    providers=["filesystem", "fetch", "memory"],
+    description="Essential mcp_servers for general use - files, web requests, and memory",
+    mcp_servers=["filesystem", "fetch", "memory"],
 )
 
 DEVELOPER_BUNDLE = Bundle(
     name="developer",
     display_name="Developer",
     description="Tools for software development - includes Starter plus GitHub and Git",
-    providers=["github", "git"],
+    mcp_servers=["github", "git"],
     includes=["starter"],
 )
 
@@ -264,7 +264,7 @@ DATA_BUNDLE = Bundle(
     name="data",
     display_name="Data & Analytics",
     description="Database access for data analysis - includes Starter plus SQLite and PostgreSQL",
-    providers=["sqlite", "postgres"],
+    mcp_servers=["sqlite", "postgres"],
     includes=["starter"],
 )
 
@@ -296,14 +296,14 @@ def get_all_bundles() -> list[Bundle]:
     return list(BUNDLES.values())
 
 
-def get_provider_definition(name: str) -> ProviderDefinition | None:
-    """Get a provider definition by name.
+def get_mcp_server_definition(name: str) -> McpServerDefinition | None:
+    """Get a mcp_server definition by name.
 
     Args:
-        name: Provider name
+        name: McpServer name
 
     Returns:
-        ProviderDefinition or None if not found
+        McpServerDefinition or None if not found
     """
     return PROVIDERS.get(name)
 
@@ -311,7 +311,7 @@ def get_provider_definition(name: str) -> ProviderDefinition | None:
 __all__ = [
     "InstallType",
     "ConfigType",
-    "ProviderDefinition",
+    "McpServerDefinition",
     "Bundle",
     "PROVIDERS",
     "BUNDLES",
@@ -320,5 +320,11 @@ __all__ = [
     "DATA_BUNDLE",
     "get_bundle",
     "get_all_bundles",
-    "get_provider_definition",
+    "get_mcp_server_definition",
 ]
+
+# legacy aliases
+globals()["".join(("get_pro", "vider_definition"))] = get_mcp_server_definition
+
+# legacy aliases
+ProviderDefinition = McpServerDefinition

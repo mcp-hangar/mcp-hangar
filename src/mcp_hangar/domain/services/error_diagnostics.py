@@ -1,4 +1,4 @@
-"""Error diagnostics service for provider startup failures.
+"""Error diagnostics service for mcp_server startup failures.
 
 Provides:
 - get_suggestion_for_error: Generate actionable suggestions based on error patterns
@@ -14,10 +14,10 @@ _STDERR_PATTERNS: list[tuple[str, str]] = [
     ("modulenotfounderror", "Install missing Python dependencies. Check your virtual environment is activated."),
     ("no module named", "Install missing Python dependencies. Check your virtual environment is activated."),
     ("importerror", "Check that all required packages are installed and import paths are correct."),
-    ("syntaxerror", "Fix the syntax error in the provider code before starting."),
+    ("syntaxerror", "Fix the syntax error in the mcp_server code before starting."),
     # Permission/file errors
-    ("permissionerror", "Check file permissions. Ensure the provider script is executable."),
-    ("permission denied", "Check file permissions. Ensure the provider script is executable."),
+    ("permissionerror", "Check file permissions. Ensure the mcp_server script is executable."),
+    ("permission denied", "Check file permissions. Ensure the mcp_server script is executable."),
     ("filenotfounderror", "Check that all referenced files and paths exist."),
     ("no such file or directory", "Check that all referenced files and paths exist."),
     # Network errors
@@ -25,11 +25,11 @@ _STDERR_PATTERNS: list[tuple[str, str]] = [
     ("connection refused", "The target service is not running or not accepting connections."),
     ("timeout", "The operation timed out. Check network connectivity and service availability."),
     # Memory errors
-    ("out of memory", "The provider ran out of memory. Consider increasing memory limits."),
-    ("memoryerror", "The provider ran out of memory. Consider increasing memory limits."),
+    ("out of memory", "The mcp_server ran out of memory. Consider increasing memory limits."),
+    ("memoryerror", "The mcp_server ran out of memory. Consider increasing memory limits."),
     # MCP protocol errors
-    ("jsonrpc", "MCP protocol error. Check that the provider implements the MCP protocol correctly."),
-    ("json-rpc", "MCP protocol error. Check that the provider implements the MCP protocol correctly."),
+    ("jsonrpc", "MCP protocol error. Check that the mcp_server implements the MCP protocol correctly."),
+    ("json-rpc", "MCP protocol error. Check that the mcp_server implements the MCP protocol correctly."),
 ]
 
 # Container-specific patterns (require secondary pattern match)
@@ -44,12 +44,12 @@ _CONTAINER_PATTERNS: list[tuple[str, str, str]] = [
 
 # Exit code to suggestion mapping
 _EXIT_CODE_SUGGESTIONS: dict[int, str] = {
-    1: "General error. Check the provider logs for more details.",
-    2: "Command line usage error. Verify the provider command and arguments.",
+    1: "General error. Check the mcp_server logs for more details.",
+    2: "Command line usage error. Verify the mcp_server command and arguments.",
     126: "Command not executable. Check file permissions (chmod +x).",
     127: "Command not found. Check that the command exists and PATH is correct.",
     137: "Process was killed (OOM or SIGKILL). Consider increasing memory limits.",
-    139: "Segmentation fault. This indicates a bug in the provider code.",
+    139: "Segmentation fault. This indicates a bug in the mcp_server code.",
 }
 
 
@@ -61,7 +61,7 @@ def get_suggestion_for_error(
     Generate actionable suggestion based on error patterns.
 
     Analyzes stderr content and exit codes to provide helpful guidance
-    for troubleshooting provider startup failures.
+    for troubleshooting mcp_server startup failures.
 
     Args:
         stderr: Captured stderr output from the failed process

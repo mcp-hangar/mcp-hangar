@@ -1,7 +1,7 @@
 """Discovery endpoint handlers for the REST API.
 
 Implements GET/POST endpoints for auto-discovery management:
-sources, pending providers, quarantined providers, approve/reject.
+sources, pending mcp_servers, quarantined mcp_servers, approve/reject.
 """
 
 from starlette.requests import Request
@@ -14,28 +14,28 @@ from ...application.commands.discovery_commands import (
     TriggerSourceScanCommand,
     UpdateDiscoverySourceCommand,
 )
-from ...domain.exceptions import ProviderNotFoundError
+from ...domain.exceptions import McpServerNotFoundError
 from ..context import get_context
 from .middleware import dispatch_command
 from .serializers import HangarJSONResponse
 
 
-class DiscoveryNotConfigured(ProviderNotFoundError):
+class DiscoveryNotConfigured(McpServerNotFoundError):
     """Raised when discovery is requested but not configured.
 
-    Extends ProviderNotFoundError so the middleware maps it to HTTP 404.
+    Extends McpServerNotFoundError so the middleware maps it to HTTP 404.
     Named DiscoveryNotConfigured so that type(exc).__name__ == "DiscoveryNotConfigured"
     in the API error envelope.
     """
 
     def __init__(self) -> None:
-        # Bypass ProviderNotFoundError.__init__ to set our own message
+        # Bypass McpServerNotFoundError.__init__ to set our own message
         from ...domain.exceptions import MCPError
 
         MCPError.__init__(
             self,
             message="Auto-discovery is not configured on this server.",
-            provider_id="",
+            mcp_server_id="",
             operation="discovery",
         )
 
@@ -71,10 +71,10 @@ async def list_sources(request: Request) -> HangarJSONResponse:
 
 
 async def list_pending(request: Request) -> HangarJSONResponse:
-    """List providers pending approval.
+    """List mcp_servers pending approval.
 
     Returns:
-        JSON with {"pending": [...]} array of discovered provider dicts.
+        JSON with {"pending": [...]} array of discovered mcp_server dicts.
 
     Raises:
         DiscoveryNotConfiguredError: If discovery is not configured.
@@ -82,15 +82,15 @@ async def list_pending(request: Request) -> HangarJSONResponse:
     from starlette.concurrency import run_in_threadpool
 
     orchestrator = _require_orchestrator()
-    pending = await run_in_threadpool(orchestrator.get_pending_providers)
+    pending = await run_in_threadpool(orchestrator.get_pending_mcp_servers)
     return HangarJSONResponse({"pending": [p.to_dict() for p in pending]})
 
 
 async def list_quarantined(request: Request) -> HangarJSONResponse:
-    """List quarantined providers.
+    """List quarantined mcp_servers.
 
     Returns:
-        JSON with {"quarantined": {...}} dict of quarantined provider info.
+        JSON with {"quarantined": {...}} dict of quarantined mcp_server info.
 
     Raises:
         DiscoveryNotConfiguredError: If discovery is not configured.
@@ -102,11 +102,11 @@ async def list_quarantined(request: Request) -> HangarJSONResponse:
     return HangarJSONResponse({"quarantined": quarantined})
 
 
-async def approve_provider(request: Request) -> HangarJSONResponse:
-    """Approve a pending provider for registration.
+async def approve_mcp_server(request: Request) -> HangarJSONResponse:
+    """Approve a pending mcp_server for registration.
 
     Path params:
-        name: Provider name to approve.
+        name: McpServer name to approve.
 
     Returns:
         JSON with approval result from orchestrator.
@@ -116,15 +116,15 @@ async def approve_provider(request: Request) -> HangarJSONResponse:
     """
     name = request.path_params["name"]
     orchestrator = _require_orchestrator()
-    result = await orchestrator.approve_provider(name)
+    result = await orchestrator.approve_mcp_server(name)
     return HangarJSONResponse(result)
 
 
-async def reject_provider(request: Request) -> HangarJSONResponse:
-    """Reject a pending or quarantined provider.
+async def reject_mcp_server(request: Request) -> HangarJSONResponse:
+    """Reject a pending or quarantined mcp_server.
 
     Path params:
-        name: Provider name to reject.
+        name: McpServer name to reject.
 
     Returns:
         JSON with rejection result from orchestrator.
@@ -134,7 +134,7 @@ async def reject_provider(request: Request) -> HangarJSONResponse:
     """
     name = request.path_params["name"]
     orchestrator = _require_orchestrator()
-    result = await orchestrator.reject_provider(name)
+    result = await orchestrator.reject_mcp_server(name)
     return HangarJSONResponse(result)
 
 
@@ -181,7 +181,7 @@ async def update_source(request: Request) -> HangarJSONResponse:
         JSON with {"source_id": ..., "updated": true}.
 
     Raises:
-        ProviderNotFoundError: If source_id is not registered (-> 404).
+        McpServerNotFoundError: If source_id is not registered (-> 404).
     """
     source_id = request.path_params["source_id"]
     body = await request.json()
@@ -206,7 +206,7 @@ async def deregister_source(request: Request) -> HangarJSONResponse:
         JSON with {"source_id": ..., "deregistered": true}.
 
     Raises:
-        ProviderNotFoundError: If source_id is not registered (-> 404).
+        McpServerNotFoundError: If source_id is not registered (-> 404).
     """
     source_id = request.path_params["source_id"]
     result = await dispatch_command(DeregisterDiscoverySourceCommand(source_id=source_id))
@@ -220,10 +220,10 @@ async def trigger_scan(request: Request) -> HangarJSONResponse:
         source_id: UUID of the source to scan.
 
     Returns:
-        JSON with {"source_id": ..., "scan_triggered": true, "providers_found": int}.
+        JSON with {"source_id": ..., "scan_triggered": true, "mcp_servers_found": int}.
 
     Raises:
-        ProviderNotFoundError: If source_id is not registered (-> 404).
+        McpServerNotFoundError: If source_id is not registered (-> 404).
     """
     source_id = request.path_params["source_id"]
     result = await dispatch_command(TriggerSourceScanCommand(source_id=source_id))
@@ -243,7 +243,7 @@ async def toggle_source(request: Request) -> HangarJSONResponse:
         JSON with {"source_id": ..., "enabled": bool}.
 
     Raises:
-        ProviderNotFoundError: If source_id is not registered (-> 404).
+        McpServerNotFoundError: If source_id is not registered (-> 404).
     """
     source_id = request.path_params["source_id"]
     body = await request.json()
@@ -262,8 +262,8 @@ discovery_routes = [
     Route("/sources", list_sources, methods=["GET"]),
     Route("/pending", list_pending, methods=["GET"]),
     Route("/quarantined", list_quarantined, methods=["GET"]),
-    Route("/approve/{name:str}", approve_provider, methods=["POST"]),
-    Route("/reject/{name:str}", reject_provider, methods=["POST"]),
+    Route("/approve/{name:str}", approve_mcp_server, methods=["POST"]),
+    Route("/reject/{name:str}", reject_mcp_server, methods=["POST"]),
     # Discovery source management (DISC-02)
     Route("/sources", register_source, methods=["POST"]),
     Route("/sources/{source_id:str}", update_source, methods=["PUT"]),

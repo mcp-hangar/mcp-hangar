@@ -1,4 +1,4 @@
-"""Tool catalog value object for providers."""
+"""Tool catalog value object for mcp_servers."""
 
 from dataclasses import dataclass
 from typing import Any
@@ -7,7 +7,7 @@ from typing import Any
 @dataclass(frozen=True)
 class ToolSchema:
     """
-    Schema for a tool provided by a provider.
+    Schema for a tool provided by a mcp_server.
 
     Immutable value object containing tool metadata.
     """
@@ -31,7 +31,7 @@ class ToolSchema:
 
 class ToolCatalog:
     """
-    Catalog of tools provided by a provider.
+    Catalog of tools provided by a mcp_server.
 
     This is a mutable collection that can be updated when tools are
     discovered or refreshed. Thread safety is handled by the aggregate.
@@ -79,7 +79,7 @@ class ToolCatalog:
         """
         Update catalog from a list of tool dictionaries.
 
-        This is typically used when refreshing tools from a provider response.
+        This is typically used when refreshing tools from a mcp_server response.
         """
         self._tools.clear()
         for t in tool_list:

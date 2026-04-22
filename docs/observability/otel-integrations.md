@@ -1,7 +1,7 @@
 # OpenTelemetry Integrations
 
 Hangar is the **runtime governance layer** for MCP servers. It is not an observability
-platform. Hangar exports governance telemetry -- enforcement decisions, provider
+platform. Hangar exports governance telemetry -- enforcement decisions, MCP server
 lifecycle events, capability violations, and identity-aware audit trails -- through
 the OpenTelemetry (OTEL) interoperability contract. Partner backends visualize it.
 
@@ -20,23 +20,23 @@ Every span, metric, and audit log emitted by Hangar carries MCP-specific attribu
 defined in `src/mcp_hangar/observability/conventions.py`. These attributes form a
 stable contract that partner backends consume without Hangar-specific plugins.
 
-### Provider attributes
+### MCP Server attributes
 
 | Attribute | Type | Description |
 |-----------|------|-------------|
-| `mcp.provider.id` | string | Unique provider identifier (e.g. `math-server`) |
-| `mcp.provider.mode` | string | Operational mode: `subprocess`, `docker`, `remote` |
-| `mcp.provider.state` | string | Lifecycle state: `COLD`, `INITIALIZING`, `READY`, `DEGRADED`, `DEAD` |
-| `mcp.provider.group_id` | string | Provider group membership |
-| `mcp.provider.image` | string | Container image reference (docker mode) |
-| `mcp.provider.has_capabilities` | string | Whether provider declares capabilities (`true`/`false`) |
-| `mcp.provider.enforcement_mode` | string | Declared enforcement mode: `alert`, `block`, `quarantine` |
+| `mcp.server.id` | string | Unique MCP server identifier (e.g. `math-server`) |
+| `mcp.server.mode` | string | Operational mode: `subprocess`, `docker`, `remote` |
+| `mcp.server.state` | string | Lifecycle state: `COLD`, `INITIALIZING`, `READY`, `DEGRADED`, `DEAD` |
+| `mcp.server.group_id` | string | MCP Server group membership |
+| `mcp.server.image` | string | Container image reference (docker mode) |
+| `mcp.server.has_capabilities` | string | Whether MCP server declares capabilities (`true`/`false`) |
+| `mcp.server.enforcement_mode` | string | Declared enforcement mode: `alert`, `block`, `quarantine` |
 
 ### Tool invocation attributes
 
 | Attribute | Type | Description |
 |-----------|------|-------------|
-| `mcp.tool.name` | string | Tool name as advertised by the provider |
+| `mcp.tool.name` | string | Tool name as advertised by the MCP server |
 | `mcp.tool.duration_ms` | float | Call duration in milliseconds |
 | `mcp.tool.status` | string | Result: `success`, `error`, `timeout`, `blocked` |
 | `mcp.tool.cold_start` | string | Whether this call triggered a cold start (`true`/`false`) |
@@ -56,7 +56,7 @@ stable contract that partner backends consume without Hangar-specific plugins.
 | `mcp.enforcement.action` | string | Action taken: `none`, `alert`, `block`, `quarantine`, `rate_limit` |
 | `mcp.enforcement.violation_type` | string | Violation category: `egress_undeclared`, `tool_schema_drift`, `resource_limit_exceeded` |
 | `mcp.enforcement.egress_destination` | string | Destination involved in egress violation (host:port) |
-| `mcp.enforcement.violation_count` | int | Accumulated violations for this provider in this session |
+| `mcp.enforcement.violation_count` | int | Accumulated violations for this MCP server in this session |
 
 ### Audit attributes
 
@@ -116,14 +116,14 @@ scoring is enabled (planned for a future release).
 |--------|------|-------------|
 | `mcp_hangar_tool_calls_total` | Counter | Total tool invocations |
 | `mcp_hangar_tool_call_duration_seconds` | Histogram | Tool call latency distribution |
-| `mcp_hangar_provider_state` | Gauge | Current provider lifecycle state |
+| `mcp_hangar_mcp_server_state` | Gauge | Current MCP server lifecycle state |
 | `mcp_hangar_cold_starts_total` | Counter | Total cold starts |
 | `mcp_hangar_health_checks_total` | Counter | Total health checks |
-| `mcp_hangar_circuit_breaker_state` | Gauge | Circuit breaker state per provider |
+| `mcp_hangar_circuit_breaker_state` | Gauge | Circuit breaker state per MCP server |
 | `mcp_hangar_capability_violations_total` | Counter | Total capability violations |
 | `mcp_hangar_egress_blocked_total` | Counter | Total blocked egress attempts |
 | `mcp_hangar_detection_rule_matches_total` | Counter | Total detection rule matches (labels: `rule_id`, `severity`) |
-| `mcp_hangar_providers_quarantined` | Gauge | Providers currently quarantined |
+| `mcp_hangar_providers_quarantined` | Gauge | MCP servers currently quarantined |
 | `mcp_hangar_tool_schema_drifts_total` | Counter | Total tool schema drift detections |
 
 ---
@@ -167,9 +167,9 @@ debugging. Replace the `logging` exporter with your production backend.
 
 ### What flows through the collector
 
-- **Traces:** Tool invocation spans carrying `mcp.provider.id`, `mcp.tool.name`,
+- **Traces:** Tool invocation spans carrying `mcp.server.id`, `mcp.tool.name`,
   `mcp.tool.status`, and enforcement attributes.
-- **Logs:** Audit log records for tool invocation events and provider state
+- **Logs:** Audit log records for tool invocation events and MCP server state
   transitions, exported by `OTLPAuditExporter`.
 - **Metrics:** Prometheus metrics scraped from Hangar's `/metrics` endpoint or
   forwarded through the collector's Prometheus exporter.
@@ -206,14 +206,14 @@ MCP_TRACING_ENABLED=true
 
 In the OpenLIT trace explorer, filter on MCP governance attributes:
 
-- **By provider:** `mcp.provider.id = "math-server"`
+- **By MCP server:** `mcp.server.id = "math-server"`
 - **By tool:** `mcp.tool.name = "add"`
 - **By user:** `mcp.user.id = "alice"`
 - **By enforcement action:** `mcp.enforcement.action = "block"`
 - **By violation type:** `mcp.enforcement.violation_type = "egress_undeclared"`
 
-Provider lifecycle events (COLD, INITIALIZING, READY, DEGRADED, DEAD) appear as
-audit log records with `mcp.provider.state` attributes.
+MCP Server lifecycle events (COLD, INITIALIZING, READY, DEGRADED, DEAD) appear as
+audit log records with `mcp.server.state` attributes.
 
 ---
 
@@ -224,7 +224,7 @@ counting, user session tracking, and evaluation workflows. It complements the
 OTEL governance telemetry path -- Langfuse handles LLM observability while OTEL
 handles governance observability.
 
-- **OTEL path:** Enforcement decisions, capability violations, provider lifecycle,
+- **OTEL path:** Enforcement decisions, capability violations, MCP server lifecycle,
   audit trails. Exported via OTLP to any OTEL-compatible backend.
 - **Langfuse path:** Tool call input/output, token counts, user session traces.
   Exported via the `LangfuseObservabilityAdapter`.
@@ -263,7 +263,7 @@ observability:
 | Langfuse concept | Hangar mapping |
 |------------------|----------------|
 | Trace | One MCP session (`mcp.session.id`) |
-| Span | Provider tool invocation |
+| Span | MCP Server tool invocation |
 | Generation | Tool call with input/output |
 | User | `mcp.user.id` from identity propagation |
 
@@ -282,8 +282,8 @@ exporter.
 Pre-built Grafana dashboards are available in the [`monitoring/`](https://github.com/mcp-hangar/mcp-hangar/tree/main/monitoring)
 directory:
 
-- **Overview dashboard:** Provider states, tool call rates, error rates
-- **Provider details dashboard:** Per-provider metrics, health check history
+- **Overview dashboard:** MCP server states, tool call rates, error rates
+- **MCP Server details dashboard:** Per-MCP server metrics, health check history
 - **Alerts dashboard:** Circuit breaker state, violation counts
 
 ### Getting started
@@ -310,14 +310,14 @@ mcp-hangar serve --http --port 8000
 ### Key Prometheus queries
 
 ```promql
-# Tool call rate per provider (last 5 minutes)
+# Tool call rate per mcp_server (last 5 minutes)
 rate(mcp_hangar_tool_calls_total[5m])
 
 # 95th percentile tool call latency
 histogram_quantile(0.95, rate(mcp_hangar_tool_call_duration_seconds_bucket[5m]))
 
-# Providers currently in DEGRADED state
-mcp_hangar_provider_state{state="DEGRADED"} == 1
+# MCP servers currently in DEGRADED state
+mcp_hangar_mcp_server_state{state="DEGRADED"} == 1
 
 # Circuit breaker open count
 mcp_hangar_circuit_breaker_state == 1

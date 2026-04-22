@@ -10,13 +10,13 @@ from typing import cast
 from typing import Any, Optional, Protocol, runtime_checkable, TYPE_CHECKING
 
 if TYPE_CHECKING:
-    from ..application.commands.load_handlers import LoadProviderHandler, UnloadProviderHandler
+    from ..application.commands.load_handlers import LoadMcpServerHandler, UnloadMcpServerHandler
     from ..application.discovery import DiscoveryOrchestrator
     from ..application.discovery.discovery_registry import DiscoveryRegistry
     from ..application.sagas import GroupRebalanceSaga
     from ..bootstrap.runtime import Runtime
-    from ..domain.model import Provider, ProviderGroup
-    from ..domain.repository import IProviderRepository
+    from ..domain.model import McpServer, McpServerGroup
+    from ..domain.repository import IMcpServerRepository
 
 
 # =============================================================================
@@ -95,7 +95,7 @@ class ISecurityHandler(Protocol):
         self,
         field: str,
         message: str,
-        provider_id: str | None = None,
+        mcp_server_id: str | None = None,
         value: str | None = None,
     ) -> None:
         """Log validation failure."""
@@ -116,26 +116,26 @@ class ApplicationContext:
 
     Attributes:
         runtime: The application runtime with all infrastructure
-        groups: Provider groups for load balancing
+        groups: McpServer groups for load balancing
         discovery_orchestrator: Optional discovery service
         group_rebalance_saga: Optional saga for group rebalancing
         full_config: Full configuration dictionary loaded at startup (for config serialization)
     """
 
     runtime: "Runtime"
-    groups: dict[str, "ProviderGroup"] = field(default_factory=dict)
+    groups: dict[str, "McpServerGroup"] = field(default_factory=dict)
     full_config: dict[str, Any] = field(default_factory=dict)
     discovery_orchestrator: Optional["DiscoveryOrchestrator"] = None
     group_rebalance_saga: Optional["GroupRebalanceSaga"] = None
-    load_provider_handler: Optional["LoadProviderHandler"] = None
-    unload_provider_handler: Optional["UnloadProviderHandler"] = None
+    load_mcp_server_handler: Optional["LoadMcpServerHandler"] = None
+    unload_mcp_server_handler: Optional["UnloadMcpServerHandler"] = None
     discovery_registry: Optional["DiscoveryRegistry"] = None
     auth_components: Any | None = None
     approval_gate: Any | None = None
 
     @property
-    def repository(self) -> "IProviderRepository":
-        """Get the provider repository."""
+    def repository(self) -> "IMcpServerRepository":
+        """Get the mcp_server repository."""
         return self.runtime.repository
 
     @property
@@ -163,38 +163,38 @@ class ApplicationContext:
         """Get the security handler."""
         return self.runtime.security_handler
 
-    def get_provider(self, provider_id: str) -> Optional["Provider"]:
-        """Get a provider by ID.
+    def get_mcp_server(self, mcp_server_id: str) -> Optional["McpServer"]:
+        """Get a mcp_server by ID.
 
-        Checks both static repository and runtime (hot-loaded) providers.
+        Checks both static repository and runtime (hot-loaded) mcp_servers.
         """
         # First check static repository
-        provider = self.runtime.repository.get(provider_id)
-        if provider is not None:
-            return provider
+        mcp_server = self.runtime.repository.get(mcp_server_id)
+        if mcp_server is not None:
+            return mcp_server
 
-        # Then check runtime (hot-loaded) providers
-        from .state import get_runtime_providers
+        # Then check runtime (hot-loaded) mcp_servers
+        from .state import get_runtime_mcp_servers
 
-        runtime_store = get_runtime_providers()
-        return cast(Optional["Provider"], runtime_store.get_provider(provider_id))
+        runtime_store = get_runtime_mcp_servers()
+        return cast(Optional["McpServer"], runtime_store.get_mcp_server(mcp_server_id))
 
-    def provider_exists(self, provider_id: str) -> bool:
-        """Check if a provider exists.
+    def mcp_server_exists(self, mcp_server_id: str) -> bool:
+        """Check if a mcp_server exists.
 
-        Checks both static repository and runtime (hot-loaded) providers.
+        Checks both static repository and runtime (hot-loaded) mcp_servers.
         """
         # First check static repository
-        if self.runtime.repository.exists(provider_id):
+        if self.runtime.repository.exists(mcp_server_id):
             return True
 
-        # Then check runtime (hot-loaded) providers
-        from .state import get_runtime_providers
+        # Then check runtime (hot-loaded) mcp_servers
+        from .state import get_runtime_mcp_servers
 
-        runtime_store = get_runtime_providers()
-        return runtime_store.exists(provider_id)
+        runtime_store = get_runtime_mcp_servers()
+        return runtime_store.exists(mcp_server_id)
 
-    def get_group(self, group_id: str) -> Optional["ProviderGroup"]:
+    def get_group(self, group_id: str) -> Optional["McpServerGroup"]:
         """Get a group by ID."""
         return self.groups.get(group_id)
 

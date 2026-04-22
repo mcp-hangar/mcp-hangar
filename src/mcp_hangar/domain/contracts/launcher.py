@@ -1,4 +1,4 @@
-"""Launcher contracts for provider startup infrastructure."""
+"""Launcher contracts for mcp_server startup infrastructure."""
 
 from __future__ import annotations
 
@@ -11,13 +11,13 @@ LaunchResult = StdioClient | HttpClient
 
 
 @runtime_checkable
-class IProviderLauncher(Protocol):
+class IMcpServerLauncher(Protocol):
     """Structural contract for infrastructure launchers."""
 
     def launch(self, *args: object, **kwargs: object) -> LaunchResult:
-        """Launch a provider transport client from provider config."""
+        """Launch a mcp_server transport client from mcp_server config."""
         ...
 
-    def stop(self, provider_id: str) -> None:
-        """Stop a launched provider, if the launcher tracks it."""
+    def stop(self, mcp_server_id: str) -> None:
+        """Stop a launched mcp_server, if the launcher tracks it."""
         ...

@@ -134,7 +134,7 @@ class TestRetrySyncExecution:
         operation = MagicMock(return_value={"result": "success"})
         policy = RetryPolicy(max_attempts=3)
 
-        result = retry_sync(operation, policy, provider="test")
+        result = retry_sync(operation, policy, mcp_server="test")
 
         assert result.success is True
         assert result.result == {"result": "success"}
@@ -153,7 +153,7 @@ class TestRetrySyncExecution:
             return {"result": "success"}
 
         policy = RetryPolicy(max_attempts=3, initial_delay=0.01)
-        result = retry_sync(failing_then_success, policy, provider="test")
+        result = retry_sync(failing_then_success, policy, mcp_server="test")
 
         assert result.success is True
         assert len(result.attempts) == 2  # 2 failures before success
@@ -163,7 +163,7 @@ class TestRetrySyncExecution:
         operation = MagicMock(side_effect=TransientError(message="Always fails"))
         policy = RetryPolicy(max_attempts=3, initial_delay=0.01)
 
-        result = retry_sync(operation, policy, provider="test")
+        result = retry_sync(operation, policy, mcp_server="test")
 
         assert result.success is False
         assert result.final_error is not None
@@ -174,7 +174,7 @@ class TestRetrySyncExecution:
         operation = MagicMock(side_effect=ConfigurationError(message="Bad config"))
         policy = RetryPolicy(max_attempts=3, retry_on=["Timeout"])
 
-        result = retry_sync(operation, policy, provider="test")
+        result = retry_sync(operation, policy, mcp_server="test")
 
         assert result.success is False
         operation.assert_called_once()  # No retries
@@ -241,7 +241,7 @@ class TestRetryConfigStore:
                 "default_policy": {
                     "max_attempts": 5,
                 },
-                "per_provider": {
+                "per_mcp_server": {
                     "sqlite": {
                         "max_attempts": 10,
                     },
@@ -324,11 +324,11 @@ class TestWithRetryDecorator:
 class TestRetryConfigStoreAdvanced:
     """Advanced tests for RetryConfigStore."""
 
-    def test_set_provider_policy(self):
+    def test_set_mcp_server_policy(self):
         """Test setting provider-specific policy."""
         store = get_retry_store()
         policy = RetryPolicy(max_attempts=10)
-        store.set_provider_policy("custom-provider", policy)
+        store.set_mcp_server_policy("custom-provider", policy)
 
         retrieved = store.get_policy("custom-provider")
         assert retrieved.max_attempts == 10
@@ -355,7 +355,7 @@ class TestRetrySyncAdvanced:
         result = retry_sync(
             failing_then_success,
             policy=policy,
-            provider="test-provider",
+            mcp_server="test-provider",
             operation_name="test-op",
             on_retry=on_retry_callback,
         )

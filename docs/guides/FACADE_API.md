@@ -2,7 +2,7 @@
 
 # Facade API
 
-Programmatic Python interface to MCP Hangar for embedding provider management in applications and services.
+Programmatic Python interface to MCP Hangar for embedding MCP server management in applications and services.
 
 ## Quick Start
 
@@ -32,7 +32,7 @@ Three ways to create a Hangar instance:
 
 ### From YAML Config File
 
-Load provider definitions from a `config.yaml` file:
+Load MCP server definitions from a `config.yaml` file:
 
 === "Async"
 
@@ -48,7 +48,7 @@ Load provider definitions from a `config.yaml` file:
 
 ### From Builder (Programmatic)
 
-Use the `HangarConfig` builder to define providers in code:
+Use the `HangarConfig` builder to define MCP servers in code:
 
 === "Async"
 
@@ -57,8 +57,8 @@ Use the `HangarConfig` builder to define providers in code:
 
     config = (
         HangarConfig()
-        .add_provider("math", mode="subprocess", command=["python", "-m", "math_server"])
-        .add_provider("fetch", mode="remote", url="https://fetch.example.com/mcp")
+        .add_mcp_server("math", mode="subprocess", command=["python", "-m", "math_server"])
+        .add_mcp_server("fetch", mode="remote", url="https://fetch.example.com/mcp")
         .max_concurrency(30)
         .build()
     )
@@ -73,8 +73,8 @@ Use the `HangarConfig` builder to define providers in code:
 
     config = (
         HangarConfig()
-        .add_provider("math", mode="subprocess", command=["python", "-m", "math_server"])
-        .add_provider("fetch", mode="remote", url="https://fetch.example.com/mcp")
+        .add_mcp_server("math", mode="subprocess", command=["python", "-m", "math_server"])
+        .add_mcp_server("fetch", mode="remote", url="https://fetch.example.com/mcp")
         .max_concurrency(30)
         .build()
     )
@@ -101,23 +101,23 @@ The `HangarConfig` builder provides a fluent API for programmatic configuration.
 | Method | Returns | Description |
 |--------|---------|-------------|
 | `HangarConfig()` | `HangarConfig` | Create an empty config builder |
-| `.add_provider(name, ...)` | `self` | Add a provider definition |
+| `.add_mcp_server(name, ...)` | `self` | Add a MCP server definition |
 | `.enable_discovery(...)` | `self` | Enable discovery sources |
 | `.max_concurrency(value)` | `self` | Set thread pool size for `invoke()` |
 | `.set_intervals(...)` | `self` | Set background worker intervals |
 | `.build()` | `HangarConfigData` | Build and validate the configuration |
 | `.to_dict()` | `dict` | Convert to YAML-compatible dict format |
 
-### `.add_provider()` Parameters
+### `.add_mcp_server()` Parameters
 
 | Parameter | Type | Default | Description |
 |-----------|------|---------|-------------|
-| `name` | `str` | required | Unique provider identifier |
-| `mode` | `str` | `"subprocess"` | Provider mode: `subprocess`, `docker`, or `remote` |
+| `name` | `str` | required | Unique MCP server identifier |
+| `mode` | `str` | `"subprocess"` | MCP Server mode: `subprocess`, `docker`, or `remote` |
 | `command` | `list[str] \| None` | `None` | Command for subprocess mode (required for subprocess) |
 | `image` | `str \| None` | `None` | Docker image for docker mode (required for docker) |
 | `url` | `str \| None` | `None` | HTTP endpoint for remote mode (required for remote) |
-| `env` | `dict \| None` | `None` | Environment variables for the provider process |
+| `env` | `dict \| None` | `None` | Environment variables for the MCP server process |
 | `idle_ttl_s` | `int` | `300` | Seconds before auto-shutdown when idle |
 
 ### `.enable_discovery()` Parameters
@@ -126,7 +126,7 @@ The `HangarConfig` builder provides a fluent API for programmatic configuration.
 |-----------|------|---------|-------------|
 | `docker` | `bool` | `False` | Enable Docker label discovery |
 | `kubernetes` | `bool` | `False` | Enable Kubernetes annotation discovery |
-| `filesystem` | `list[str] \| None` | `None` | Filesystem paths to scan for provider YAML files |
+| `filesystem` | `list[str] \| None` | `None` | Filesystem paths to scan for MCP server YAML files |
 
 ### `.max_concurrency()` Parameter
 
@@ -148,24 +148,24 @@ from mcp_hangar import HangarConfig
 
 config = (
     HangarConfig()
-    .add_provider(
+    .add_mcp_server(
         "math",
         mode="subprocess",
         command=["python", "-m", "math_server"],
         idle_ttl_s=600,
     )
-    .add_provider(
+    .add_mcp_server(
         "llm",
         mode="remote",
         url="https://llm-api.example.com/mcp",
         env={"API_KEY": "${LLM_API_KEY}"},
     )
-    .add_provider(
+    .add_mcp_server(
         "sandbox",
         mode="docker",
         image="mcp-sandbox:latest",
     )
-    .enable_discovery(docker=True, filesystem=["/etc/mcp/providers/"])
+    .enable_discovery(docker=True, filesystem=["/etc/mcp/mcp_servers/"])
     .max_concurrency(50)
     .set_intervals(gc_interval_s=60, health_check_interval_s=30)
     .build()
@@ -173,9 +173,9 @@ config = (
 ```
 
 !!! warning
-    Calling `.build()` freezes the configuration. Subsequent calls to `.add_provider()` or other builder methods raise `ConfigurationError`. Calling `.build()` again also raises `ConfigurationError`.
+    Calling `.build()` freezes the configuration. Subsequent calls to `.add_mcp_server()` or other builder methods raise `ConfigurationError`. Calling `.build()` again also raises `ConfigurationError`.
 
-Validation errors (empty provider name, invalid mode, missing mode-specific parameters) raise `ConfigurationError` with a descriptive message.
+Validation errors (empty MCP server name, invalid mode, missing mode-specific parameters) raise `ConfigurationError` with a descriptive message.
 
 ## API Reference
 
@@ -184,10 +184,10 @@ Validation errors (empty provider name, invalid mode, missing mode-specific para
 === "Async (Hangar)"
 
     ```python
-    # Start -- bootstraps providers and background workers
+    # Start -- bootstraps mcp_servers and background workers
     await hangar.start()
 
-    # Stop -- stops all providers and workers
+    # Stop -- stops all mcp_servers and workers
     await hangar.stop()
 
     # Context manager (recommended) -- auto-calls start/stop
@@ -215,7 +215,7 @@ Validation errors (empty provider name, invalid mode, missing mode-specific para
 
     ```python
     result = await hangar.invoke(
-        provider_name="math",
+        mcp_server_name="math",
         tool_name="add",
         arguments={"a": 1, "b": 2},
         timeout_s=30.0,  # default: 30.0
@@ -226,7 +226,7 @@ Validation errors (empty provider name, invalid mode, missing mode-specific para
 
     ```python
     result = hangar.invoke(
-        provider_name="math",
+        mcp_server_name="math",
         tool_name="add",
         arguments={"a": 1, "b": 2},
         timeout_s=30.0,
@@ -235,38 +235,38 @@ Validation errors (empty provider name, invalid mode, missing mode-specific para
 
 | Parameter | Type | Default | Description |
 |-----------|------|---------|-------------|
-| `provider_name` | `str` | required | Provider to invoke |
-| `tool_name` | `str` | required | Tool name on the provider |
+| `mcp_server_name` | `str` | required | MCP Server to invoke |
+| `tool_name` | `str` | required | Tool name on the MCP server |
 | `arguments` | `dict \| None` | `None` | Tool arguments |
 | `timeout_s` | `float` | `30.0` | Invocation timeout in seconds |
 
-Cold providers are auto-started on first invocation.
+Cold MCP servers are auto-started on first invocation.
 
-### Provider Management
+### MCP Server Management
 
 === "Async (Hangar)"
 
     ```python
-    # Start a specific provider
-    await hangar.start_provider("math")
+    # Start a specific mcp_server
+    await hangar.start_mcp_server("math")
 
-    # Stop a specific provider
-    await hangar.stop_provider("math")
+    # Stop a specific mcp_server
+    await hangar.stop_mcp_server("math")
 
-    # Get provider state snapshot
-    info: ProviderInfo = await hangar.get_provider("math")
+    # Get mcp_server state snapshot
+    info: ProviderInfo = await hangar.get_mcp_server("math")
 
-    # List all providers
-    providers: list[ProviderInfo] = await hangar.list_providers()
+    # List all mcp_servers
+    mcp_servers: list[ProviderInfo] = await hangar.list_mcp_servers()
     ```
 
 === "Sync (SyncHangar)"
 
     ```python
-    hangar.start_provider("math")
-    hangar.stop_provider("math")
-    info: ProviderInfo = hangar.get_provider("math")
-    providers: list[ProviderInfo] = hangar.list_providers()
+    hangar.start_mcp_server("math")
+    hangar.stop_mcp_server("math")
+    info: ProviderInfo = hangar.get_mcp_server("math")
+    mcp_servers: list[ProviderInfo] = hangar.list_mcp_servers()
     ```
 
 ### Health
@@ -274,10 +274,10 @@ Cold providers are auto-started on first invocation.
 === "Async (Hangar)"
 
     ```python
-    # Health summary for all providers
+    # Health summary for all mcp_servers
     summary: HealthSummary = await hangar.health()
 
-    # Health check for a specific provider
+    # Health check for a specific mcp_server
     is_healthy: bool = await hangar.health_check("math")
     ```
 
@@ -292,16 +292,16 @@ Cold providers are auto-started on first invocation.
 
 ### ProviderInfo
 
-Frozen dataclass representing a provider state snapshot.
+Frozen dataclass representing a MCP server state snapshot.
 
 | Field | Type | Description |
 |-------|------|-------------|
-| `name` | `str` | Provider name |
+| `name` | `str` | MCP Server name |
 | `state` | `str` | Current state: `cold`, `ready`, `degraded`, `dead` |
-| `mode` | `str` | Provider mode: `subprocess`, `docker`, `remote` |
+| `mode` | `str` | MCP Server mode: `subprocess`, `docker`, `remote` |
 | `tools` | `list[str]` | Available tool names |
 | `last_used` | `float \| None` | Last invocation timestamp (epoch seconds) |
-| `error` | `str \| None` | Error message if provider is in error state |
+| `error` | `str \| None` | Error message if MCP server is in error state |
 
 | Property | Type | Description |
 |----------|------|-------------|
@@ -314,14 +314,14 @@ Frozen dataclass with aggregate health information.
 
 | Field | Type | Description |
 |-------|------|-------------|
-| `providers` | `dict[str, str]` | Mapping of provider name to state |
-| `ready_count` | `int` | Number of providers in `ready` state |
-| `total_count` | `int` | Total number of providers |
+| `MCP servers` | `dict[str, str]` | Mapping of MCP server name to state |
+| `ready_count` | `int` | Number of MCP servers in `ready` state |
+| `total_count` | `int` | Total number of MCP servers |
 
 | Property | Type | Description |
 |----------|------|-------------|
-| `all_ready` | `bool` | `True` if all providers are ready |
-| `any_ready` | `bool` | `True` if at least one provider is ready |
+| `all_ready` | `bool` | `True` if all MCP servers are ready |
+| `any_ready` | `bool` | `True` if at least one MCP server is ready |
 
 ### HangarConfigData
 
@@ -329,7 +329,7 @@ Dataclass holding the built configuration.
 
 | Field | Type | Default | Description |
 |-------|------|---------|-------------|
-| `providers` | `dict[str, dict]` | `{}` | Provider definitions |
+| `MCP servers` | `dict[str, dict]` | `{}` | MCP Server definitions |
 | `discovery` | `DiscoverySpec` | default | Discovery configuration |
 | `gc_interval_s` | `int` | `30` | Garbage collection interval |
 | `health_check_interval_s` | `int` | `10` | Health check interval |
@@ -367,11 +367,11 @@ async def lifespan(app: FastAPI):
 
 app = FastAPI(lifespan=lifespan)
 
-@app.post("/invoke/{provider}/{tool}")
-async def invoke_tool(provider: str, tool: str, request: Request):
+@app.post("/invoke/{mcp_server}/{tool}")
+async def invoke_tool(mcp_server: str, tool: str, request: Request):
     hangar: Hangar = request.app.state.hangar
     body = await request.json()
-    result = await hangar.invoke(provider, tool, body.get("arguments"))
+    result = await hangar.invoke(mcp_server, tool, body.get("arguments"))
     return {"result": result}
 
 @app.get("/health")
@@ -382,7 +382,7 @@ async def health(request: Request):
         "status": "healthy" if summary.all_ready else "degraded",
         "ready": summary.ready_count,
         "total": summary.total_count,
-        "providers": summary.providers,
+        "mcp_servers": summary.mcp_servers,
     }
 ```
 
@@ -403,9 +403,9 @@ The Facade API raises specific exceptions for different failure modes:
 | Exception | When Raised |
 |-----------|-------------|
 | `ConfigurationError` | Invalid configuration, Hangar not started, builder already built |
-| `ProviderNotFoundError` | Provider name does not exist in configuration |
-| `ToolNotFoundError` | Tool name not found on the specified provider |
-| `ToolInvocationError` | Tool execution failed on the provider side |
+| `ProviderNotFoundError` | MCP Server name does not exist in configuration |
+| `ToolNotFoundError` | Tool name not found on the specified MCP server |
+| `ToolInvocationError` | Tool execution failed on the MCP server side |
 | `TimeoutError` | Invocation exceeded `timeout_s` |
 
 All exceptions include descriptive messages. Catch specific exceptions for targeted error handling:
@@ -422,9 +422,9 @@ try:
 except ToolInvocationError as e:
     print(f"Tool failed: {e}")
 except ProviderNotFoundError as e:
-    print(f"Provider not found: {e}")
+    print(f"McpServer not found: {e}")
 except TimeoutError:
     print("Invocation timed out")
 ```
 
-For available tool names on a provider, see the [MCP Tools Reference](../reference/tools.md).
+For available tool names on a MCP server, see the [MCP Tools Reference](../reference/tools.md).

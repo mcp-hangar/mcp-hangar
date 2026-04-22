@@ -5,7 +5,7 @@ Tests tenant isolation, quota enforcement, and cross-aggregate interactions.
 
 import pytest
 
-from mcp_hangar.domain.events import NamespaceCreated, QuotaExceeded, TenantCreated
+from mcp_hangar.domain.events import NamespaceCreated, QuotaExceeded, QuotaWarningThresholdReached, TenantCreated
 from mcp_hangar.domain.model.namespace import Namespace, NamespaceQuotaOverrides
 from mcp_hangar.domain.model.tenant import Tenant, TenantQuotas, TenantStatus
 from mcp_hangar.domain.value_objects import NamespaceId, Principal, PrincipalId, PrincipalType, TenantId
@@ -97,7 +97,7 @@ class TestQuotaEnforcement:
 
     def test_quota_enforcement_blocks_excess_providers(self):
         """Creating provider beyond quota is blocked."""
-        quotas = TenantQuotas(max_providers=2)
+        quotas = TenantQuotas(max_mcp_servers=2)
         tenant = Tenant(
             tenant_id=TenantId("test-team"),
             name="test-team",
@@ -107,12 +107,12 @@ class TestQuotaEnforcement:
         )
 
         # Simulate 2 providers created
-        tenant.record_usage("provider_create", 1)
-        tenant.record_usage("provider_create", 1)
-        assert tenant.usage.provider_count == 2
+        tenant.record_usage("mcp_server_create", 1)
+        tenant.record_usage("mcp_server_create", 1)
+        assert tenant.usage.mcp_server_count == 2
 
         # Third provider should be blocked
-        result = tenant.check_quota("providers", requested_amount=1)
+        result = tenant.check_quota("mcp_servers", requested_amount=1)
         assert result.allowed is False
 
         # Events should include QuotaExceeded
@@ -122,7 +122,7 @@ class TestQuotaEnforcement:
 
     def test_quota_enforcement_allows_within_limit(self):
         """Operations within quota are allowed."""
-        quotas = TenantQuotas(max_providers=10)
+        quotas = TenantQuotas(max_mcp_servers=10)
         tenant = Tenant(
             tenant_id=TenantId("test-team"),
             name="test-team",
@@ -133,14 +133,14 @@ class TestQuotaEnforcement:
 
         # Create 5 providers
         for _ in range(5):
-            result = tenant.check_quota("providers", requested_amount=1)
+            result = tenant.check_quota("mcp_servers", requested_amount=1)
             assert result.allowed is True
-            tenant.record_usage("provider_create", 1)
+            tenant.record_usage("mcp_server_create", 1)
 
-        assert tenant.usage.provider_count == 5
+        assert tenant.usage.mcp_server_count == 5
 
         # Can still create more
-        result = tenant.check_quota("providers", requested_amount=1)
+        result = tenant.check_quota("mcp_servers", requested_amount=1)
         assert result.allowed is True
 
     def test_quota_enforcement_per_namespace(self):
@@ -150,11 +150,11 @@ class TestQuotaEnforcement:
             name="test-team",
             display_name="Test Team",
             owner_principal_id="user:admin@example.com",
-            quotas=TenantQuotas(max_providers=100),
+            quotas=TenantQuotas(max_mcp_servers=100),
         )
 
         # Namespace with stricter quota
-        namespace_overrides = NamespaceQuotaOverrides(max_providers=5)
+        namespace_overrides = NamespaceQuotaOverrides(max_mcp_servers=5)
         namespace = Namespace(
             namespace_id=NamespaceId("dev"),
             tenant_id=tenant.tenant_id,
@@ -165,7 +165,7 @@ class TestQuotaEnforcement:
         )
 
         # Effective quota is namespace override
-        effective = namespace.get_effective_quota("max_providers", tenant.quotas.max_providers)
+        effective = namespace.get_effective_quota("max_mcp_servers", tenant.quotas.max_mcp_servers)
         assert effective == 5  # Not 100
 
     def test_quota_enforcement_on_tool_invocations(self):
@@ -191,7 +191,7 @@ class TestQuotaEnforcement:
 
     def test_quota_warning_at_80_percent(self):
         """Warning is emitted at 80% quota usage."""
-        quotas = TenantQuotas(max_providers=10)
+        quotas = TenantQuotas(max_mcp_servers=10)
         tenant = Tenant(
             tenant_id=TenantId("test-team"),
             name="test-team",
@@ -202,18 +202,16 @@ class TestQuotaEnforcement:
 
         # Use up to 8 providers (80%)
         for _ in range(8):
-            tenant.record_usage("provider_create", 1)
+            tenant.record_usage("mcp_server_create", 1)
 
         tenant.collect_events()  # Clear events
 
         # Next check should trigger warning
-        result = tenant.check_quota("providers", requested_amount=1)
+        result = tenant.check_quota("mcp_servers", requested_amount=1)
         assert result.at_warning is True
         assert result.percentage_used == 80.0
 
         events = tenant.collect_events()
-        from mcp_hangar.domain.events import QuotaWarningThresholdReached
-
         warning_events = [e for e in events if isinstance(e, QuotaWarningThresholdReached)]
         assert len(warning_events) == 1
         assert warning_events[0].percentage == 80
@@ -266,7 +264,7 @@ class TestSuspendedTenantBehavior:
         assert tenant.is_active()
 
         # Can now operate normally
-        result = tenant.check_quota("providers", requested_amount=1)
+        result = tenant.check_quota("mcp_servers", requested_amount=1)
         assert result.allowed is True
 
 
@@ -308,14 +306,14 @@ class TestCrossAggregateInteractions:
         )
 
         # Add providers to namespace
-        namespace.add_provider("provider-1")
-        namespace.add_provider("provider-2")
+        namespace.add_mcp_server("provider-1")
+        namespace.add_mcp_server("provider-2")
 
-        assert namespace.provider_count == 2
+        assert namespace.mcp_server_count == 2
 
         # Tenant should also track (via service layer)
-        tenant.record_usage("provider_create", 2)
-        assert tenant.usage.provider_count == 2
+        tenant.record_usage("mcp_server_create", 2)
+        assert tenant.usage.mcp_server_count == 2
 
     def test_namespace_deletion_updates_tenant(self):
         """Deleting namespace decrements tenant's namespace count."""
@@ -353,16 +351,16 @@ class TestCrossAggregateInteractions:
         )
 
         # Create providers
-        namespace.add_provider("provider-1")
-        namespace.add_provider("provider-2")
-        tenant.record_usage("provider_create", 2)
+        namespace.add_mcp_server("provider-1")
+        namespace.add_mcp_server("provider-2")
+        tenant.record_usage("mcp_server_create", 2)
 
         # Delete one
         namespace.remove_provider("provider-1")
-        tenant.record_usage("provider_delete", 1)
+        tenant.record_usage("mcp_server_delete", 1)
 
-        assert namespace.provider_count == 1
-        assert tenant.usage.provider_count == 1
+        assert namespace.mcp_server_count == 1
+        assert tenant.usage.mcp_server_count == 1
 
 
 class TestEventSourcing:
@@ -399,7 +397,7 @@ class TestEventSourcing:
 
     def test_quota_exceeded_emits_event(self):
         """Quota exceeded produces event for alerting."""
-        quotas = TenantQuotas(max_providers=1)
+        quotas = TenantQuotas(max_mcp_servers=1)
         tenant = Tenant(
             tenant_id=TenantId("test-team"),
             name="test-team",
@@ -408,17 +406,17 @@ class TestEventSourcing:
             quotas=quotas,
         )
 
-        tenant.record_usage("provider_create", 1)
+        tenant.record_usage("mcp_server_create", 1)
         tenant.collect_events()
 
         # Exceed quota
-        result = tenant.check_quota("providers", requested_amount=1)
+        result = tenant.check_quota("mcp_servers", requested_amount=1)
         assert result.allowed is False
 
         events = tenant.collect_events()
         quota_events = [e for e in events if isinstance(e, QuotaExceeded)]
         assert len(quota_events) == 1
-        assert quota_events[0].resource_type == "providers"
+        assert quota_events[0].resource_type == "mcp_servers"
         assert quota_events[0].limit == 1
 
     def test_namespace_creation_emits_event(self):

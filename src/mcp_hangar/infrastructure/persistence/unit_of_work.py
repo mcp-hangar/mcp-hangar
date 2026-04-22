@@ -10,15 +10,15 @@ from typing import Any
 
 import aiosqlite
 
-from ...domain.contracts.persistence import AuditAction, AuditEntry, PersistenceError, ProviderConfigSnapshot
+from ...domain.contracts.persistence import AuditAction, AuditEntry, PersistenceError, McpServerConfigSnapshot
 from ...logging_config import get_logger
 from .database import Database
 
 logger = get_logger(__name__)
 
 
-class TransactionalProviderConfigRepository:
-    """Provider config repository that operates within a transaction.
+class TransactionalMcpServerConfigRepository:
+    """McpServer config repository that operates within a transaction.
 
     Uses a shared connection for transactional consistency.
     """
@@ -31,11 +31,11 @@ class TransactionalProviderConfigRepository:
         """
         self._conn = conn
 
-    async def save(self, config: ProviderConfigSnapshot) -> None:
-        """Save provider configuration within transaction."""
+    async def save(self, config: McpServerConfigSnapshot) -> None:
+        """Save mcp_server configuration within transaction."""
         cursor = await self._conn.execute(
-            "SELECT version FROM provider_configs WHERE provider_id = ?",
-            (config.provider_id,),
+            "SELECT version FROM mcp_server_configs WHERE mcp_server_id = ?",
+            (config.mcp_server_id,),
         )
         row = await cursor.fetchone()
 
@@ -45,12 +45,12 @@ class TransactionalProviderConfigRepository:
         if row is None:
             await self._conn.execute(
                 """
-                INSERT INTO provider_configs
-                (provider_id, mode, config_json, enabled, version, created_at, updated_at)
+                INSERT INTO mcp_server_configs
+                (mcp_server_id, mode, config_json, enabled, version, created_at, updated_at)
                 VALUES (?, ?, ?, ?, 1, ?, ?)
                 """,
                 (
-                    config.provider_id,
+                    config.mcp_server_id,
                     config.mode,
                     config_json,
                     1 if config.enabled else 0,
@@ -61,25 +61,25 @@ class TransactionalProviderConfigRepository:
         else:
             await self._conn.execute(
                 """
-                UPDATE provider_configs
+                UPDATE mcp_server_configs
                 SET mode = ?, config_json = ?, enabled = ?,
                     version = version + 1, updated_at = ?
-                WHERE provider_id = ?
+                WHERE mcp_server_id = ?
                 """,
                 (
                     config.mode,
                     config_json,
                     1 if config.enabled else 0,
                     now,
-                    config.provider_id,
+                    config.mcp_server_id,
                 ),
             )
 
-    async def get(self, provider_id: str) -> ProviderConfigSnapshot | None:
-        """Retrieve provider configuration within transaction."""
+    async def get(self, mcp_server_id: str) -> McpServerConfigSnapshot | None:
+        """Retrieve mcp_server configuration within transaction."""
         cursor = await self._conn.execute(
-            "SELECT config_json FROM provider_configs WHERE provider_id = ?",
-            (provider_id,),
+            "SELECT config_json FROM mcp_server_configs WHERE mcp_server_id = ?",
+            (mcp_server_id,),
         )
         row = await cursor.fetchone()
 
@@ -87,41 +87,41 @@ class TransactionalProviderConfigRepository:
             return None
 
         config_data = json.loads(row[0])
-        return ProviderConfigSnapshot.from_dict(config_data)
+        return McpServerConfigSnapshot.from_dict(config_data)
 
-    async def get_all(self) -> list[ProviderConfigSnapshot]:
-        """Retrieve all provider configurations within transaction."""
-        cursor = await self._conn.execute("SELECT config_json FROM provider_configs WHERE enabled = 1")
+    async def get_all(self) -> list[McpServerConfigSnapshot]:
+        """Retrieve all mcp_server configurations within transaction."""
+        cursor = await self._conn.execute("SELECT config_json FROM mcp_server_configs WHERE enabled = 1")
         rows = await cursor.fetchall()
 
         configs = []
         for row in rows:
             try:
                 config_data = json.loads(row[0])
-                configs.append(ProviderConfigSnapshot.from_dict(config_data))
+                configs.append(McpServerConfigSnapshot.from_dict(config_data))
             except (json.JSONDecodeError, KeyError, TypeError) as e:
                 logger.warning("invalid_config_snapshot", error=str(e), raw_data=row[0][:100])
                 continue
 
         return configs
 
-    async def delete(self, provider_id: str) -> bool:
-        """Delete provider configuration within transaction."""
+    async def delete(self, mcp_server_id: str) -> bool:
+        """Delete mcp_server configuration within transaction."""
         result = await self._conn.execute(
             """
-            UPDATE provider_configs
+            UPDATE mcp_server_configs
             SET enabled = 0, updated_at = ?
-            WHERE provider_id = ? AND enabled = 1
+            WHERE mcp_server_id = ? AND enabled = 1
             """,
-            (datetime.now(UTC).isoformat(), provider_id),
+            (datetime.now(UTC).isoformat(), mcp_server_id),
         )
         return result.rowcount > 0
 
-    async def exists(self, provider_id: str) -> bool:
-        """Check if provider exists within transaction."""
+    async def exists(self, mcp_server_id: str) -> bool:
+        """Check if mcp_server exists within transaction."""
         cursor = await self._conn.execute(
-            "SELECT 1 FROM provider_configs WHERE provider_id = ? AND enabled = 1",
-            (provider_id,),
+            "SELECT 1 FROM mcp_server_configs WHERE mcp_server_id = ? AND enabled = 1",
+            (mcp_server_id,),
         )
         row = await cursor.fetchone()
         return row is not None
@@ -265,12 +265,12 @@ class TransactionalAuditRepository:
 class SQLiteUnitOfWork:
     """SQLite implementation of Unit of Work pattern.
 
-    Manages transactions across provider config and audit repositories,
+    Manages transactions across mcp_server config and audit repositories,
     ensuring atomic commits or rollbacks.
 
     Usage:
         async with SQLiteUnitOfWork(database) as uow:
-            await uow.providers.save(config)
+            await uow.mcp_servers.save(config)
             await uow.audit.append(entry)
             await uow.commit()
     """
@@ -283,7 +283,7 @@ class SQLiteUnitOfWork:
         """
         self._db = database
         self._conn: aiosqlite.Connection | None = None
-        self._providers: TransactionalProviderConfigRepository | None = None
+        self._mcp_servers: TransactionalMcpServerConfigRepository | None = None
         self._audit: TransactionalAuditRepository | None = None
         self._committed = False
 
@@ -300,7 +300,7 @@ class SQLiteUnitOfWork:
         await self._conn.execute("PRAGMA foreign_keys = ON")
 
         # Create transactional repositories
-        self._providers = TransactionalProviderConfigRepository(self._conn)
+        self._mcp_servers = TransactionalMcpServerConfigRepository(self._conn)
         self._audit = TransactionalAuditRepository(self._conn)
 
         logger.debug("UnitOfWork: Transaction started")
@@ -336,11 +336,11 @@ class SQLiteUnitOfWork:
             logger.debug("UnitOfWork: Transaction rolled back")
 
     @property
-    def providers(self) -> TransactionalProviderConfigRepository:
-        """Access provider config repository within transaction."""
-        if self._providers is None:
+    def mcp_servers(self) -> TransactionalMcpServerConfigRepository:
+        """Access mcp_server config repository within transaction."""
+        if self._mcp_servers is None:
             raise PersistenceError("UnitOfWork not entered - use 'async with'")
-        return self._providers
+        return self._mcp_servers
 
     @property
     def audit(self) -> TransactionalAuditRepository:
@@ -358,16 +358,16 @@ class InMemoryUnitOfWork:
 
     def __init__(
         self,
-        providers,  # InMemoryProviderConfigRepository
+        mcp_servers,  # InMemoryMcpServerConfigRepository
         audit,  # InMemoryAuditRepository
     ):
         """Initialize with in-memory repositories.
 
         Args:
-            providers: In-memory provider config repository
+            mcp_servers: In-memory mcp_server config repository
             audit: In-memory audit repository
         """
-        self._providers = providers
+        self._mcp_servers = mcp_servers
         self._audit = audit
         self._snapshot: dict[str, Any] | None = None
 
@@ -375,8 +375,8 @@ class InMemoryUnitOfWork:
         """Begin transaction by taking snapshot."""
         # Take snapshot for potential rollback
         self._snapshot = {
-            "providers": dict(self._providers._configs),
-            "provider_versions": dict(self._providers._versions),
+            "mcp_servers": dict(self._mcp_servers._configs),
+            "mcp_server_versions": dict(self._mcp_servers._versions),
             "audit": list(self._audit._entries),
         }
         return self
@@ -394,14 +394,14 @@ class InMemoryUnitOfWork:
     async def rollback(self) -> None:
         """Rollback to snapshot state."""
         if self._snapshot:
-            self._providers._configs = self._snapshot["providers"]
-            self._providers._versions = self._snapshot["provider_versions"]
+            self._mcp_servers._configs = self._snapshot["mcp_servers"]
+            self._mcp_servers._versions = self._snapshot["mcp_server_versions"]
             self._audit._entries = self._snapshot["audit"]
 
     @property
-    def providers(self):
-        """Access provider config repository."""
-        return self._providers
+    def mcp_servers(self):
+        """Access mcp_server config repository."""
+        return self._mcp_servers
 
     @property
     def audit(self):

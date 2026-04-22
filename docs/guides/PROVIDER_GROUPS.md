@@ -1,16 +1,16 @@
-# Provider Groups
+# MCP Server Groups
 
-Aggregate multiple providers behind a single virtual provider with load balancing, health tracking, and circuit breaker protection.
+Aggregate multiple MCP servers behind a single virtual MCP server with load balancing, health tracking, and circuit breaker protection.
 
 ## Overview
 
-Provider Groups allow you to treat multiple MCP providers as a single logical unit. MCP clients interact with the group as if it were one provider -- the group handles member selection, health monitoring, and failover automatically.
+MCP Server Groups allow you to treat multiple MCP servers as a single logical unit. MCP clients interact with the group as if it were one MCP server -- the group handles member selection, health monitoring, and failover automatically.
 
 **Use groups when you need:**
 
-- **High availability** -- If one provider fails, requests route to healthy members
-- **Load distribution** -- Spread requests across multiple providers using configurable strategies
-- **Failover** -- Designate primary and backup providers with priority-based routing
+- **High availability** -- If one MCP server fails, requests route to healthy members
+- **Load distribution** -- Spread requests across multiple MCP servers using configurable strategies
+- **Failover** -- Designate primary and backup MCP servers with priority-based routing
 - **Capacity scaling** -- Add members to increase throughput without changing client configuration
 
 ### Group States
@@ -24,16 +24,16 @@ Provider Groups allow you to treat multiple MCP providers as a single logical un
 
 ## Configuration
 
-Groups are defined in `config.yaml` alongside regular providers. Set `mode: group` to create a group.
+Groups are defined in `config.yaml` alongside regular MCP servers. Set `mode: group` to create a group.
 
 ```yaml
-providers:
+mcp_servers:
   llm-pool:
     mode: group
     strategy: round_robin
     min_healthy: 1
     auto_start: true
-    description: "LLM provider pool with failover"
+    description: "LLM mcp_server pool with failover"
     members:
       - id: llm-1
         mode: subprocess
@@ -50,9 +50,9 @@ providers:
 | `min_healthy` | `int` | `1` | Minimum healthy members for `healthy` state |
 | `auto_start` | `bool` | `true` | Auto-start members when the group is added |
 | `description` | `str` | -- | Human-readable description |
-| `members` | `list[dict]` | `[]` | Member provider configurations |
+| `members` | `list[dict]` | `[]` | Member MCP server configurations |
 
-Each member entry accepts the same keys as a regular provider (`mode`, `command`, `image`, `endpoint`, `env`, `idle_ttl_s`, etc.) plus group-specific keys:
+Each member entry accepts the same keys as a regular MCP server (`mode`, `command`, `image`, `endpoint`, `env`, `idle_ttl_s`, etc.) plus group-specific keys:
 
 | Key | Type | Default | Range | Description |
 |-----|------|---------|-------|-------------|
@@ -69,7 +69,7 @@ For the full YAML schema, see the [Configuration Reference](../reference/configu
 Distributes requests sequentially across all healthy members. Each member receives an equal share of traffic.
 
 ```yaml
-providers:
+mcp_servers:
   api-pool:
     mode: group
     strategy: round_robin
@@ -95,7 +95,7 @@ Requests cycle through members in order: api-1, api-2, api-3, api-1, api-2, ... 
 Distributes requests proportionally based on member weights using the Nginx smooth weighted round-robin algorithm. Higher weight means more requests.
 
 ```yaml
-providers:
+mcp_servers:
   compute-pool:
     mode: group
     strategy: weighted_round_robin
@@ -120,7 +120,7 @@ With weights 80 and 20, `large-instance` receives approximately 4 out of every 5
 Selects the member with the oldest `last_selected_at` timestamp, effectively routing to the least recently used member. This approximates least-connections behavior by distributing requests to the member that has been idle the longest.
 
 ```yaml
-providers:
+mcp_servers:
   db-pool:
     mode: group
     strategy: least_connections
@@ -146,7 +146,7 @@ No weight or priority configuration applies. When multiple members have the same
 Selects a random healthy member using weighted probability. Members with higher weight have a proportionally higher chance of being selected.
 
 ```yaml
-providers:
+mcp_servers:
   search-pool:
     mode: group
     strategy: random
@@ -171,7 +171,7 @@ With weights 70 and 30, `search-primary` has a 70% probability of being selected
 Selects the healthy member with the lowest priority number. This creates a primary/backup pattern where backup members only receive traffic when higher-priority members are unavailable.
 
 ```yaml
-providers:
+mcp_servers:
   llm-failover:
     mode: group
     strategy: priority
@@ -193,7 +193,7 @@ providers:
 
 All requests go to `local-llm` (priority 1) while it is healthy. If `local-llm` becomes unhealthy, requests route to `cloud-llm` (priority 50). If both are down, `fallback-llm` (priority 99) handles traffic. When `local-llm` recovers and passes health checks, it resumes as the primary.
 
-**Choose priority when** you have a preferred provider and want others to serve only as backups.
+**Choose priority when** you have a preferred MCP server and want others to serve only as backups.
 
 ## Health Policy
 
@@ -205,7 +205,7 @@ The group tracks each member's health independently based on consecutive success
 | `health.healthy_threshold` | `1` | Consecutive successes before a member is re-added to rotation |
 
 ```yaml
-providers:
+mcp_servers:
   resilient-pool:
     mode: group
     strategy: round_robin
@@ -232,10 +232,10 @@ providers:
 3. When `consecutive_failures >= unhealthy_threshold`, the member is removed from rotation
 4. While removed, the member continues to receive health checks
 5. Each successful health check increments `consecutive_successes` and resets `consecutive_failures`
-6. When `consecutive_successes >= healthy_threshold` AND the provider state is `READY`, the member re-enters rotation
+6. When `consecutive_successes >= healthy_threshold` AND the MCP server state is `READY`, the member re-enters rotation
 
 !!! note
-    A member must reach the `READY` provider state to re-enter rotation. Health check successes alone are not sufficient -- the underlying provider process must be fully initialized.
+    A member must reach the `READY` MCP server state to re-enter rotation. Health check successes alone are not sufficient -- the underlying MCP server process must be fully initialized.
 
 The `hangar_group_rebalance` tool can be used to manually trigger a health re-evaluation of all members, re-adding recovered members and removing failed ones.
 
@@ -249,7 +249,7 @@ The group-level circuit breaker protects against cascading failures by halting a
 | `circuit_breaker.reset_timeout_s` | `60.0` | Seconds before the circuit auto-resets |
 
 ```yaml
-providers:
+mcp_servers:
   protected-pool:
     mode: group
     strategy: weighted_round_robin
@@ -297,14 +297,14 @@ Tool access filtering controls which tools are visible when invoking a group or 
 
 ### Policy Hierarchy
 
-1. **Provider-level** -- Applied to the provider's own tool list
+1. **MCP Server-level** -- Applied to the MCP server's own tool list
 2. **Group-level** -- Applied to the group as a whole
 3. **Member-level** -- Applied per member within the group
 
 ### Configuration
 
 ```yaml
-providers:
+mcp_servers:
   secure-pool:
     mode: group
     strategy: round_robin
@@ -326,11 +326,11 @@ providers:
           deny_list: []
 ```
 
-Individual providers can also define tool access policies:
+Individual MCP servers can also define tool access policies:
 
 ```yaml
-providers:
-  restricted-provider:
+mcp_servers:
+  restricted-mcp-server:
     mode: subprocess
     command: [python, -m, server]
     tools:

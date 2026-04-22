@@ -219,7 +219,7 @@ class TestGetSystem:
             data = response.json()
             assert "system" in data
 
-    def test_returns_provider_counts(self, api_client):
+    def test_returns_mcp_server_counts(self, api_client):
         """GET /system returns total_providers and providers_by_state."""
         with patch(
             "mcp_hangar.server.api.system.dispatch_query",
@@ -288,7 +288,7 @@ class TestRouterIntegration:
             new_callable=AsyncMock,
             return_value=[],
         ):
-            response = api_client.get("/providers/")
+            response = api_client.get("/mcp_servers/")
             # Just verify we don't get a 404 routing error
             assert response.status_code != 404
 
@@ -335,7 +335,7 @@ class TestDiffConfig:
         with (
             patch(
                 "mcp_hangar.server.api.config.serialize_full_config",
-                return_value={"providers": {}},
+                return_value={"mcp_servers": {}},
             ),
             patch(
                 "mcp_hangar.server.config.load_config_from_file",
@@ -350,7 +350,7 @@ class TestDiffConfig:
         with (
             patch(
                 "mcp_hangar.server.api.config.serialize_full_config",
-                return_value={"providers": {}},
+                return_value={"mcp_servers": {}},
             ),
             patch(
                 "mcp_hangar.server.config.load_config_from_file",
@@ -366,7 +366,7 @@ class TestDiffConfig:
         with (
             patch(
                 "mcp_hangar.server.api.config.serialize_full_config",
-                return_value={"providers": {}},
+                return_value={"mcp_servers": {}},
             ),
             patch(
                 "mcp_hangar.server.config.load_config_from_file",
@@ -380,7 +380,7 @@ class TestDiffConfig:
 
     def test_no_diff_when_configs_match(self, api_client):
         """GET /config/diff reports has_diff False when on-disk matches in-memory."""
-        config_dict = {"providers": {"p": {"mode": "subprocess", "command": ["python"]}}}
+        config_dict = {"mcp_servers": {"p": {"mode": "subprocess", "command": ["python"]}}}
         with (
             patch(
                 "mcp_hangar.server.api.config.serialize_full_config",
@@ -398,8 +398,8 @@ class TestDiffConfig:
 
     def test_has_diff_true_when_configs_differ(self, api_client):
         """GET /config/diff reports has_diff True when configs differ."""
-        on_disk = {"providers": {"old": {"mode": "subprocess", "command": ["python"]}}}
-        in_memory = {"providers": {"new": {"mode": "subprocess", "command": ["node"]}}}
+        on_disk = {"mcp_servers": {"old": {"mode": "subprocess", "command": ["python"]}}}
+        in_memory = {"mcp_servers": {"new": {"mode": "subprocess", "command": ["node"]}}}
         with (
             patch(
                 "mcp_hangar.server.api.config.serialize_full_config",
@@ -420,7 +420,7 @@ class TestDiffConfig:
         with (
             patch(
                 "mcp_hangar.server.api.config.serialize_full_config",
-                return_value={"providers": {}},
+                return_value={"mcp_servers": {}},
             ),
             patch(
                 "mcp_hangar.server.config.load_config_from_file",
@@ -433,7 +433,7 @@ class TestDiffConfig:
 
     def test_in_memory_matches_serialized_config(self, api_client):
         """GET /config/diff in_memory key contains the serialized in-memory providers."""
-        in_memory = {"providers": {"p": {"mode": "subprocess"}}}
+        in_memory = {"mcp_servers": {"p": {"mode": "subprocess"}}}
         with (
             patch(
                 "mcp_hangar.server.api.config.serialize_full_config",
@@ -446,4 +446,4 @@ class TestDiffConfig:
         ):
             response = api_client.get("/config/diff")
         data = response.json()
-        assert "p" in data["in_memory"]["providers"]
+        assert "p" in data["in_memory"]["mcp_servers"]

@@ -14,9 +14,9 @@ from mcp_hangar.application.event_handlers.alert_handler import (
 )
 from mcp_hangar.domain.events import (
     HealthCheckFailed,
-    ProviderDegraded,
-    ProviderStarted,
-    ProviderStopped,
+    McpServerDegraded,
+    McpServerStarted,
+    McpServerStopped,
     ToolInvocationFailed,
 )
 
@@ -29,15 +29,15 @@ class TestAlert:
         alert = Alert(
             level="critical",
             message="Provider died",
-            provider_id="test-provider",
-            event_type="ProviderDegraded",
+            mcp_server_id="test-provider",
+            event_type="McpServerDegraded",
             details={"error": "connection lost"},
         )
 
         assert alert.level == "critical"
         assert alert.message == "Provider died"
-        assert alert.provider_id == "test-provider"
-        assert alert.event_type == "ProviderDegraded"
+        assert alert.mcp_server_id == "test-provider"
+        assert alert.event_type == "McpServerDegraded"
         assert alert.details == {"error": "connection lost"}
         assert isinstance(alert.timestamp, datetime)
 
@@ -46,16 +46,16 @@ class TestAlert:
         alert = Alert(
             level="warning",
             message="Provider degraded",
-            provider_id="test",
-            event_type="ProviderDegraded",
+            mcp_server_id="test",
+            event_type="McpServerDegraded",
             details={},
         )
 
         d = alert.to_dict()
 
         assert d["level"] == "warning"
-        assert d["event_type"] == "ProviderDegraded"
-        assert d["provider_id"] == "test"
+        assert d["event_type"] == "McpServerDegraded"
+        assert d["mcp_server_id"] == "test"
         assert d["message"] == "Provider degraded"
         assert "timestamp" in d
         assert d["details"] == {}
@@ -71,8 +71,8 @@ class TestLogAlertSink:
         alert = Alert(
             level="critical",
             message="Test alert",
-            provider_id="test",
-            event_type="ProviderDegraded",
+            mcp_server_id="test",
+            event_type="McpServerDegraded",
             details={},
         )
 
@@ -87,8 +87,8 @@ class TestLogAlertSink:
         alert = Alert(
             level="warning",
             message="Test warning",
-            provider_id="test",
-            event_type="ProviderDegraded",
+            mcp_server_id="test",
+            event_type="McpServerDegraded",
             details={},
         )
 
@@ -103,7 +103,7 @@ class TestLogAlertSink:
         alert = Alert(
             level="info",
             message="Test info",
-            provider_id="test",
+            mcp_server_id="test",
             event_type="ToolInvocationFailed",
             details={},
         )
@@ -124,8 +124,8 @@ class TestCallbackAlertSink:
         alert = Alert(
             level="critical",
             message="Test alert",
-            provider_id="test",
-            event_type="ProviderDegraded",
+            mcp_server_id="test",
+            event_type="McpServerDegraded",
             details={},
         )
 
@@ -145,15 +145,15 @@ class TestCallbackAlertSink:
         alert = Alert(
             level="warning",
             message="Degraded",
-            provider_id="p1",
-            event_type="ProviderDegraded",
+            mcp_server_id="p1",
+            event_type="McpServerDegraded",
             details={"failures": 3},
         )
 
         sink.send(alert)
 
         assert len(received_alerts) == 1
-        assert received_alerts[0].provider_id == "p1"
+        assert received_alerts[0].mcp_server_id == "p1"
         assert received_alerts[0].details["failures"] == 3
 
 
@@ -177,37 +177,31 @@ class TestAlertEventHandler:
         assert handler._sinks[0] is custom_sink
 
     def test_handle_provider_degraded_event_warning(self):
-        """Test handling ProviderDegraded event with low failures creates warning alert."""
+        """Test handling McpServerDegraded event with low failures creates warning alert."""
         alerts = []
         sink = CallbackAlertSink(alerts.append)
         handler = AlertEventHandler(sinks=[sink], degradation_threshold=5)
 
-        event = ProviderDegraded(
-            provider_id="test-provider",
-            consecutive_failures=2,
-            total_failures=5,
-            reason="timeout",
-        )
+        event = McpServerDegraded(mcp_server_id="test-provider", consecutive_failures=2,
+        total_failures=5,
+        reason="timeout",)
 
         handler.handle(event)
 
         assert len(alerts) == 1
         assert alerts[0].level == "warning"
-        assert alerts[0].event_type == "ProviderDegraded"
-        assert alerts[0].provider_id == "test-provider"
+        assert alerts[0].event_type == "McpServerDegraded"
+        assert alerts[0].mcp_server_id == "test-provider"
 
     def test_handle_provider_degraded_event_critical(self):
-        """Test handling ProviderDegraded event with high failures creates critical alert."""
+        """Test handling McpServerDegraded event with high failures creates critical alert."""
         alerts = []
         sink = CallbackAlertSink(alerts.append)
         handler = AlertEventHandler(sinks=[sink], degradation_threshold=3)
 
-        event = ProviderDegraded(
-            provider_id="test-provider",
-            consecutive_failures=5,
-            total_failures=10,
-            reason="timeout",
-        )
+        event = McpServerDegraded(mcp_server_id="test-provider", consecutive_failures=5,
+        total_failures=10,
+        reason="timeout",)
 
         handler.handle(event)
 
@@ -215,31 +209,31 @@ class TestAlertEventHandler:
         assert alerts[0].level == "critical"
 
     def test_handle_provider_stopped_unexpected(self):
-        """Test handling ProviderStopped with unexpected reason creates warning."""
+        """Test handling McpServerStopped with unexpected reason creates warning."""
         alerts = []
         sink = CallbackAlertSink(alerts.append)
         handler = AlertEventHandler(sinks=[sink])
 
-        event = ProviderStopped(provider_id="test-provider", reason="error")
+        event = McpServerStopped(mcp_server_id="test-provider", reason="error")
 
         handler.handle(event)
 
         assert len(alerts) == 1
         assert alerts[0].level == "warning"
-        assert alerts[0].event_type == "ProviderStopped"
+        assert alerts[0].event_type == "McpServerStopped"
 
     def test_handle_provider_stopped_normal_no_alert(self):
-        """Test ProviderStopped with normal reason doesn't trigger alerts."""
+        """Test McpServerStopped with normal reason doesn't trigger alerts."""
         alerts = []
         sink = CallbackAlertSink(alerts.append)
         handler = AlertEventHandler(sinks=[sink])
 
         # shutdown is normal
-        event = ProviderStopped(provider_id="test-provider", reason="shutdown")
+        event = McpServerStopped(mcp_server_id="test-provider", reason="shutdown")
         handler.handle(event)
 
         # idle is normal
-        event2 = ProviderStopped(provider_id="test-provider", reason="idle")
+        event2 = McpServerStopped(mcp_server_id="test-provider", reason="idle")
         handler.handle(event2)
 
         assert len(alerts) == 0
@@ -250,14 +244,11 @@ class TestAlertEventHandler:
         sink = CallbackAlertSink(alerts.append)
         handler = AlertEventHandler(sinks=[sink])
 
-        event = ToolInvocationFailed(
-            provider_id="test-provider",
-            tool_name="add",
-            correlation_id="corr-123",
-            duration_ms=50.0,
-            error_message="timeout",
-            error_type="TimeoutError",
-        )
+        event = ToolInvocationFailed(mcp_server_id="test-provider", tool_name="add",
+        correlation_id="corr-123",
+        duration_ms=50.0,
+        error_message="timeout",
+        error_type="TimeoutError",)
 
         handler.handle(event)
 
@@ -271,11 +262,8 @@ class TestAlertEventHandler:
         sink = CallbackAlertSink(alerts.append)
         handler = AlertEventHandler(sinks=[sink], health_failure_threshold=5)
 
-        event = HealthCheckFailed(
-            provider_id="test-provider",
-            consecutive_failures=2,
-            error_message="connection refused",
-        )
+        event = HealthCheckFailed(mcp_server_id="test-provider", consecutive_failures=2,
+        error_message="connection refused",)
 
         handler.handle(event)
 
@@ -287,11 +275,8 @@ class TestAlertEventHandler:
         sink = CallbackAlertSink(alerts.append)
         handler = AlertEventHandler(sinks=[sink], health_failure_threshold=3)
 
-        event = HealthCheckFailed(
-            provider_id="test-provider",
-            consecutive_failures=5,
-            error_message="connection refused",
-        )
+        event = HealthCheckFailed(mcp_server_id="test-provider", consecutive_failures=5,
+        error_message="connection refused",)
 
         handler.handle(event)
 
@@ -305,13 +290,10 @@ class TestAlertEventHandler:
         sink = CallbackAlertSink(alerts.append)
         handler = AlertEventHandler(sinks=[sink])
 
-        # ProviderStarted is not an alertable event
-        event = ProviderStarted(
-            provider_id="test-provider",
-            mode="subprocess",
-            tools_count=5,
-            startup_duration_ms=100.0,
-        )
+        # McpServerStarted is not an alertable event
+        event = McpServerStarted(mcp_server_id="test-provider", mode="subprocess",
+        tools_count=5,
+        startup_duration_ms=100.0,)
 
         handler.handle(event)
 
@@ -323,7 +305,7 @@ class TestAlertEventHandler:
         sink = CallbackAlertSink(alerts.append)
         handler = AlertEventHandler(sinks=[sink], degradation_threshold=1)
 
-        event = ProviderDegraded(provider_id="test", consecutive_failures=2, total_failures=5, reason="error")
+        event = McpServerDegraded(mcp_server_id="test", consecutive_failures=2, total_failures=5, reason="error")
 
         handler.handle(event)
 
@@ -335,12 +317,9 @@ class TestAlertEventHandler:
         sink = CallbackAlertSink(alerts.append)
         handler = AlertEventHandler(sinks=[sink])
 
-        event = ProviderDegraded(
-            provider_id="test",
-            consecutive_failures=5,
-            total_failures=10,
-            reason="timeout",
-        )
+        event = McpServerDegraded(mcp_server_id="test", consecutive_failures=5,
+        total_failures=10,
+        reason="timeout",)
 
         handler.handle(event)
 
@@ -356,27 +335,21 @@ class TestAlertEventHandler:
         handler = AlertEventHandler(sinks=[sink])
 
         handler.handle(
-            ProviderDegraded(
-                provider_id="p1",
-                consecutive_failures=3,
-                total_failures=5,
-                reason="error",
-            )
+            McpServerDegraded(mcp_server_id="p1", consecutive_failures=3,
+            total_failures=5,
+            reason="error",)
         )
         handler.handle(
-            ToolInvocationFailed(
-                provider_id="p2",
-                tool_name="add",
-                correlation_id="c1",
-                duration_ms=50.0,
-                error_message="timeout",
-                error_type="TimeoutError",
-            )
+            ToolInvocationFailed(mcp_server_id="p2", tool_name="add",
+            correlation_id="c1",
+            duration_ms=50.0,
+            error_message="timeout",
+            error_type="TimeoutError",)
         )
 
         assert len(alerts) == 2
-        assert alerts[0].provider_id == "p1"
-        assert alerts[1].provider_id == "p2"
+        assert alerts[0].mcp_server_id == "p1"
+        assert alerts[1].mcp_server_id == "p2"
 
     def test_alerts_sent_property(self):
         """Test alerts_sent property returns list of sent alerts."""
@@ -385,28 +358,22 @@ class TestAlertEventHandler:
         handler = AlertEventHandler(sinks=[sink])
 
         handler.handle(
-            ProviderDegraded(
-                provider_id="p1",
-                consecutive_failures=3,
-                total_failures=5,
-                reason="error",
-            )
+            McpServerDegraded(mcp_server_id="p1", consecutive_failures=3,
+            total_failures=5,
+            reason="error",)
         )
 
         assert len(handler.alerts_sent) == 1
-        assert handler.alerts_sent[0].provider_id == "p1"
+        assert handler.alerts_sent[0].mcp_server_id == "p1"
 
     def test_clear_alerts(self):
         """Test clear_alerts clears the sent alerts list."""
         handler = AlertEventHandler()
 
         handler.handle(
-            ProviderDegraded(
-                provider_id="p1",
-                consecutive_failures=3,
-                total_failures=5,
-                reason="error",
-            )
+            McpServerDegraded(mcp_server_id="p1", consecutive_failures=3,
+            total_failures=5,
+            reason="error",)
         )
 
         assert len(handler.alerts_sent) == 1
@@ -442,7 +409,7 @@ class TestAlertSinkInterface:
         alert = Alert(
             level="critical",
             message="Test",
-            provider_id="p1",
+            mcp_server_id="p1",
             event_type="Test",
             details={},
         )
@@ -450,4 +417,4 @@ class TestAlertSinkInterface:
         sink.send(alert)
 
         assert len(sink.alerts) == 1
-        assert sink.alerts[0]["provider_id"] == "p1"
+        assert sink.alerts[0]["mcp_server_id"] == "p1"

@@ -19,7 +19,7 @@ def _policy_payload() -> dict[str, object]:
         "version": 1,
         "tool_policies": [
             {
-                "provider_id": "*",
+                "mcp_server_id": "*",
                 "tool_name": "power",
                 "action": "require_approval",
                 "approval_timeout_seconds": 300,
@@ -67,7 +67,7 @@ class TestAgentPolicyEndpoint:
             resource_type="policy",
             resource_id="*",
         )
-        resolver.set_provider_policy.assert_called_once()
+        resolver.set_mcp_server_policy.assert_called_once()
         event_bus.publish.assert_not_called()
 
     def test_missing_auth_returns_401(self, monkeypatch) -> None:
@@ -102,7 +102,7 @@ class TestAgentPolicyEndpoint:
         response = client.post("/agent/policy/", json=_policy_payload())
 
         assert response.status_code == 403
-        resolver.set_provider_policy.assert_not_called()
+        resolver.set_mcp_server_policy.assert_not_called()
         published_event = event_bus.publish.call_args.args[0]
         assert published_event.principal_id == "service:agent"
         assert published_event.reason == "policy_write_permission_required"

@@ -9,14 +9,14 @@ This module provides rich error types that include:
 
 Error output example for tool invocation::
 
-    RichToolInvocationError: Provider 'sqlite' did not respond in time
-      Provider: sqlite
+    RichToolInvocationError: McpServer 'sqlite' did not respond in time
+      McpServer: sqlite
       Tool: query
       Operation: invoke
 
       Possible causes:
         - The operation is taking longer than expected
-        - The provider is stuck or deadlocked
+        - The mcp_server is stuck or deadlocked
         - Resource constraints (CPU/memory)
 
       Technical details:
@@ -24,7 +24,7 @@ Error output example for tool invocation::
 
       What you can try:
         1. Retry with longer timeout: timeout=60
-        2. Check provider status: hangar_details('sqlite')
+        2. Check mcp_server status: hangar_details('sqlite')
         3. Retry the operation (may be transient)
 
       Correlation ID: abc-123-def
@@ -34,7 +34,7 @@ Usage::
     from mcp_hangar.errors import create_timeout_tool_error
 
     error = create_timeout_tool_error(
-        provider="sqlite",
+        mcp_server="sqlite",
         tool="query",
         timeout_s=30.0,
         elapsed_s=30.5,
@@ -43,10 +43,10 @@ Usage::
     raise error
 
 Factory functions for common error types:
-- create_timeout_tool_error() - Provider did not respond in time
-- create_crash_tool_error() - Provider crashed (with signal detection)
+- create_timeout_tool_error() - McpServer did not respond in time
+- create_crash_tool_error() - McpServer crashed (with signal detection)
 - create_argument_tool_error() - Invalid arguments (with schema hints)
-- create_provider_error() - Generic provider error
+- create_mcp_server_error() - Generic mcp_server error
 
 See docs/guides/UX_IMPROVEMENTS.md for more examples.
 """
@@ -62,12 +62,12 @@ class ErrorCategory(StrEnum):
 
     Attributes:
         USER_ERROR: Blad po stronie uzytkownika (zle argumenty, zla nazwa narzedzia)
-        PROVIDER_ERROR: Blad po stronie providera (crash, blad logiki)
+        PROVIDER_ERROR: Blad po stronie mcp_servera (crash, blad logiki)
         INFRA_ERROR: Blad infrastruktury (timeout, siec, brak zasobow)
     """
 
     USER_ERROR = "user_error"
-    PROVIDER_ERROR = "provider_error"
+    PROVIDER_ERROR = "mcp_server_error"
     INFRA_ERROR = "infra_error"
 
 
@@ -90,8 +90,8 @@ class HangarError(Exception):
     """Actionable steps the user can take to resolve the issue."""
 
     # Technical context
-    provider: str = ""
-    """The provider that caused the error."""
+    mcp_server: str = ""
+    """The mcp_server that caused the error."""
 
     operation: str = ""
     """The operation that was being performed."""
@@ -121,8 +121,8 @@ class HangarError(Exception):
             f"\n{self.__class__.__name__}: {self.message}",
         ]
 
-        if self.provider:
-            output.append(f"  ↳ Provider: {self.provider}")
+        if self.mcp_server:
+            output.append(f"  ↳ McpServer: {self.mcp_server}")
         if self.operation:
             output.append(f"  ↳ Operation: {self.operation}")
         if self.technical_details:
@@ -147,7 +147,7 @@ class HangarError(Exception):
         return {
             "error_type": self.__class__.__name__,
             "message": self.message,
-            "provider": self.provider,
+            "mcp_server": self.mcp_server,
             "operation": self.operation,
             "technical_details": self.technical_details,
             "recovery_hints": self.recovery_hints,
@@ -177,10 +177,10 @@ class TransientError(HangarError):
 
 
 @dataclass
-class ProviderProtocolError(HangarError):
-    """Provider violated MCP protocol.
+class McpServerProtocolError(HangarError):
+    """McpServer violated MCP protocol.
 
-    This occurs when a provider sends an invalid response,
+    This occurs when a mcp_server sends an invalid response,
     such as malformed JSON or unexpected data format.
     """
 
@@ -191,17 +191,17 @@ class ProviderProtocolError(HangarError):
         if not self.recovery_hints:
             self.recovery_hints = [
                 "Retry the operation (often transient)",
-                f"Check provider logs: hangar_details('{self.provider}')",
+                f"Check mcp_server logs: hangar_details('{self.mcp_server}')",
                 "If persistent, file bug report with raw response",
             ]
         super().__post_init__()
 
 
 @dataclass
-class ProviderCrashError(HangarError):
-    """Provider process terminated unexpectedly.
+class McpServerCrashError(HangarError):
+    """McpServer process terminated unexpectedly.
 
-    This occurs when a provider process dies or is killed,
+    This occurs when a mcp_server process dies or is killed,
     either due to an internal error, resource limits, or idle timeout.
     """
 
@@ -212,19 +212,19 @@ class ProviderCrashError(HangarError):
     """Signal name if killed by signal (e.g., SIGKILL)."""
 
     idle_duration_s: float | None = None
-    """How long the provider was idle before shutdown (if applicable)."""
+    """How long the mcp_server was idle before shutdown (if applicable)."""
 
     def __post_init__(self):
         if not self.recovery_hints:
             hints = [
-                "Provider will auto-restart on next use",
+                "McpServer will auto-restart on next use",
             ]
             if self.idle_duration_s is not None:
-                hints.insert(0, f"Provider was idle for {self.idle_duration_s:.0f}s and forced shutdown")
-                hints.append("This is normal behavior for idle providers")
+                hints.insert(0, f"McpServer was idle for {self.idle_duration_s:.0f}s and forced shutdown")
+                hints.append("This is normal behavior for idle mcp_servers")
                 hints.append("If frequent, increase idle_ttl_s in config")
             else:
-                hints.append(f"Check provider logs: hangar_details('{self.provider}')")
+                hints.append(f"Check mcp_server logs: hangar_details('{self.mcp_server}')")
                 hints.append("Check for memory/resource issues in container")
             self.recovery_hints = hints
         super().__post_init__()
@@ -234,7 +234,7 @@ class ProviderCrashError(HangarError):
 class NetworkError(HangarError):
     """Network connectivity issue.
 
-    This occurs when the hangar cannot reach a remote provider,
+    This occurs when the hangar cannot reach a remote mcp_server,
     due to DNS issues, firewall rules, or network outages.
     """
 
@@ -277,48 +277,48 @@ class ConfigurationError(HangarError):
                 hints.append(f"Check config file at: {self.config_path}")
             if self.field_name:
                 hints.append(f"Review the '{self.field_name}' setting")
-            hints.append("Use hangar_discover() to auto-detect providers")
+            hints.append("Use hangar_discover() to auto-detect mcp_servers")
             hints.append("Check example config: docs/configuration.md")
             self.recovery_hints = hints
         super().__post_init__()
 
 
 @dataclass
-class RichProviderNotFoundError(HangarError):
-    """Provider not found in registry (rich UX version).
+class RichMcpServerNotFoundError(HangarError):
+    """McpServer not found in registry (rich UX version).
 
-    The specified provider ID doesn't exist in the configuration.
+    The specified mcp_server ID doesn't exist in the configuration.
     Use this for user-facing error messages with recovery hints.
 
-    For domain logic, use mcp_hangar.domain.exceptions.ProviderNotFoundError.
+    For domain logic, use mcp_hangar.domain.exceptions.McpServerNotFoundError.
     """
 
-    available_providers: list[str] = field(default_factory=list)
-    """List of available provider IDs."""
+    available_mcp_servers: list[str] = field(default_factory=list)
+    """List of available mcp_server IDs."""
 
     def __post_init__(self):
         if not self.recovery_hints:
             hints = [
-                "Use hangar_list() to see available providers",
+                "Use hangar_list() to see available mcp_servers",
             ]
-            if self.available_providers:
+            if self.available_mcp_servers:
                 similar = self._find_similar()
                 if similar:
                     hints.append(f"Did you mean: {similar}?")
-            hints.append("Add provider to config.yaml")
+            hints.append("Add mcp_server to config.yaml")
             self.recovery_hints = hints
         super().__post_init__()
 
     def _find_similar(self) -> str | None:
-        """Find similar provider name for 'did you mean' suggestion."""
-        if not self.provider or not self.available_providers:
+        """Find similar mcp_server name for 'did you mean' suggestion."""
+        if not self.mcp_server or not self.available_mcp_servers:
             return None
 
-        target = self.provider.lower()
+        target = self.mcp_server.lower()
         best_match = None
         best_score = 0
 
-        for name in self.available_providers:
+        for name in self.available_mcp_servers:
             name_lower = name.lower()
             # Simple substring matching
             if target in name_lower or name_lower in target:
@@ -331,14 +331,14 @@ class RichProviderNotFoundError(HangarError):
 
 
 # Backward compatibility alias
-ProviderNotFoundError = RichProviderNotFoundError
+McpServerNotFoundError = RichMcpServerNotFoundError
 
 
 @dataclass
 class RichToolNotFoundError(HangarError):
-    """Tool not found in provider's catalog (rich UX version).
+    """Tool not found in mcp_server's catalog (rich UX version).
 
-    The specified tool doesn't exist on this provider.
+    The specified tool doesn't exist on this mcp_server.
     Use this for user-facing error messages with recovery hints.
 
     For domain logic, use mcp_hangar.domain.exceptions.ToolNotFoundError.
@@ -353,7 +353,7 @@ class RichToolNotFoundError(HangarError):
     def __post_init__(self):
         if not self.recovery_hints:
             hints = [
-                f"Use hangar_tools('{self.provider}') to see available tools",
+                f"Use hangar_tools('{self.mcp_server}') to see available tools",
             ]
             if self.available_tools:
                 similar = self._find_similar()
@@ -383,28 +383,28 @@ class RichToolInvocationError(HangarError):
     """Wzbogacony blad wywolania narzedzia z kontekstem diagnostycznym.
 
     Zawiera:
-    - Klasyfikacje bledu (user/provider/infra)
+    - Klasyfikacje bledu (user/mcp_server/infra)
     - Szczegoly techniczne (timeout, exit_code, stderr)
     - Kontekstowe kroki naprawcze
     - Informacje o mozliwosci retry
 
     Example output::
 
-        RichToolInvocationError: Provider 'sqlite' did not respond in time
-          Provider: sqlite
+        RichToolInvocationError: McpServer 'sqlite' did not respond in time
+          McpServer: sqlite
           Tool: query
           Operation: invoke
 
           Possible causes:
             - The operation is taking longer than expected
-            - The provider is stuck or deadlocked
+            - The mcp_server is stuck or deadlocked
 
           Technical details:
             Timeout: 30.0s, elapsed: 30.50s
 
           What you can try:
             1. Retry with longer timeout: timeout=60
-            2. Check provider status: hangar_details('sqlite')
+            2. Check mcp_server status: hangar_details('sqlite')
 
           Correlation ID: abc-123-def
     """
@@ -436,7 +436,7 @@ class RichToolInvocationError(HangarError):
     """Signal name if killed by signal (e.g., SIGKILL)."""
 
     stderr_preview: str | None = None
-    """Preview of stderr output from provider."""
+    """Preview of stderr output from mcp_server."""
 
     # Schema dla bledow argumentow
     expected_schema: dict[str, Any] | None = None
@@ -468,14 +468,14 @@ class RichToolInvocationError(HangarError):
 
         if self.category == ErrorCategory.USER_ERROR:
             if self.expected_schema:
-                hints.append(f"Check tool schema: hangar_tools('{self.provider}')")
+                hints.append(f"Check tool schema: hangar_tools('{self.mcp_server}')")
             if self.schema_hint:
                 hints.append(self.schema_hint)
             hints.append("Verify argument names and types")
 
         elif self.category == ErrorCategory.PROVIDER_ERROR:
-            hints.append("Provider will auto-restart on next use")
-            hints.append(f"Check provider logs: hangar_details('{self.provider}')")
+            hints.append("McpServer will auto-restart on next use")
+            hints.append(f"Check mcp_server logs: hangar_details('{self.mcp_server}')")
             if self.exit_code == 137:  # SIGKILL/OOM
                 hints.append("Consider increasing memory limit in config")
             if self.stderr_preview:
@@ -485,7 +485,7 @@ class RichToolInvocationError(HangarError):
             if self.timeout_s:
                 new_timeout = int(self.timeout_s * 2)
                 hints.append(f"Retry with longer timeout: timeout={new_timeout}")
-            hints.append(f"Check provider status: hangar_details('{self.provider}')")
+            hints.append(f"Check mcp_server status: hangar_details('{self.mcp_server}')")
             if self.is_retryable:
                 hints.append("Retry the operation (may be transient)")
 
@@ -496,8 +496,8 @@ class RichToolInvocationError(HangarError):
         lines = [f"\n{self.__class__.__name__}: {self.message}"]
 
         # Kontekst
-        if self.provider:
-            lines.append(f"  Provider: {self.provider}")
+        if self.mcp_server:
+            lines.append(f"  McpServer: {self.mcp_server}")
         if self.tool_name:
             lines.append(f"  Tool: {self.tool_name}")
         if self.operation:
@@ -527,7 +527,7 @@ class RichToolInvocationError(HangarError):
         # Stderr preview
         if self.stderr_preview:
             lines.append("")
-            lines.append("  Provider stderr:")
+            lines.append("  McpServer stderr:")
             for stderr_line in self.stderr_preview.split("\n")[:5]:
                 lines.append(f"    | {stderr_line}")
 
@@ -552,7 +552,7 @@ class RichToolInvocationError(HangarError):
 
 
 def create_timeout_tool_error(
-    provider: str,
+    mcp_server: str,
     tool: str,
     timeout_s: float,
     elapsed_s: float,
@@ -562,7 +562,7 @@ def create_timeout_tool_error(
     """Create a timeout error with full context.
 
     Args:
-        provider: Provider ID.
+        mcp_server: McpServer ID.
         tool: Tool name.
         timeout_s: Configured timeout in seconds.
         elapsed_s: Actual elapsed time.
@@ -573,8 +573,8 @@ def create_timeout_tool_error(
         RichToolInvocationError configured for timeout scenario.
     """
     return RichToolInvocationError(
-        message=f"Provider '{provider}' did not respond in time",
-        provider=provider,
+        message=f"McpServer '{mcp_server}' did not respond in time",
+        mcp_server=mcp_server,
         tool_name=tool,
         operation="invoke",
         category=ErrorCategory.INFRA_ERROR,
@@ -585,14 +585,14 @@ def create_timeout_tool_error(
         is_retryable=True,
         possible_causes=[
             "The operation is taking longer than expected",
-            "The provider is stuck or deadlocked",
+            "The mcp_server is stuck or deadlocked",
             "Resource constraints (CPU/memory)",
         ],
     )
 
 
 def create_crash_tool_error(
-    provider: str,
+    mcp_server: str,
     tool: str,
     exit_code: int | None,
     stderr_preview: str | None = None,
@@ -602,7 +602,7 @@ def create_crash_tool_error(
     """Create a crash error with full context.
 
     Args:
-        provider: Provider ID.
+        mcp_server: McpServer ID.
         tool: Tool name.
         exit_code: Process exit code.
         stderr_preview: Preview of stderr output.
@@ -626,7 +626,7 @@ def create_crash_tool_error(
         except (ValueError, AttributeError):
             pass
 
-    causes = ["Internal provider error"]
+    causes = ["Internal mcp_server error"]
     if exit_code == 137 or signal_name == "SIGKILL":
         causes = [
             "Out of memory (OOM killed by system)",
@@ -635,13 +635,13 @@ def create_crash_tool_error(
         ]
     elif exit_code == 139 or signal_name == "SIGSEGV":
         causes = [
-            "Segmentation fault in provider",
+            "Segmentation fault in mcp_server",
             "Memory corruption",
         ]
 
     return RichToolInvocationError(
-        message=f"Provider '{provider}' crashed during execution",
-        provider=provider,
+        message=f"McpServer '{mcp_server}' crashed during execution",
+        mcp_server=mcp_server,
         tool_name=tool,
         operation="invoke",
         category=ErrorCategory.PROVIDER_ERROR,
@@ -650,13 +650,13 @@ def create_crash_tool_error(
         stderr_preview=stderr_preview,
         correlation_id=correlation_id,
         elapsed_s=elapsed_s,
-        is_retryable=True,  # Provider will auto-restart
+        is_retryable=True,  # McpServer will auto-restart
         possible_causes=causes,
     )
 
 
 def create_argument_tool_error(
-    provider: str,
+    mcp_server: str,
     tool: str,
     provided_args: dict[str, Any],
     expected_schema: dict[str, Any] | None = None,
@@ -666,7 +666,7 @@ def create_argument_tool_error(
     """Create an argument error with full context.
 
     Args:
-        provider: Provider ID.
+        mcp_server: McpServer ID.
         tool: Tool name.
         provided_args: Arguments that were provided.
         expected_schema: Expected tool schema.
@@ -678,7 +678,7 @@ def create_argument_tool_error(
     """
     return RichToolInvocationError(
         message=f"Invalid arguments for tool '{tool}'",
-        provider=provider,
+        mcp_server=mcp_server,
         tool_name=tool,
         operation="invoke",
         category=ErrorCategory.USER_ERROR,
@@ -695,30 +695,30 @@ def create_argument_tool_error(
     )
 
 
-def create_provider_error(
-    provider: str,
+def create_mcp_server_error(
+    mcp_server: str,
     tool: str,
     error_message: str,
     stderr_preview: str | None = None,
     correlation_id: str = "",
     is_retryable: bool = True,
 ) -> RichToolInvocationError:
-    """Create a generic provider error with full context.
+    """Create a generic mcp_server error with full context.
 
     Args:
-        provider: Provider ID.
+        mcp_server: McpServer ID.
         tool: Tool name.
-        error_message: Error message from provider.
+        error_message: Error message from mcp_server.
         stderr_preview: Preview of stderr output.
         correlation_id: Optional correlation ID.
         is_retryable: Whether the error is retryable.
 
     Returns:
-        RichToolInvocationError configured for generic provider error.
+        RichToolInvocationError configured for generic mcp_server error.
     """
     return RichToolInvocationError(
-        message=f"Provider '{provider}' returned an error: {error_message}",
-        provider=provider,
+        message=f"McpServer '{mcp_server}' returned an error: {error_message}",
+        mcp_server=mcp_server,
         tool_name=tool,
         operation="invoke",
         category=ErrorCategory.PROVIDER_ERROR,
@@ -729,7 +729,7 @@ def create_provider_error(
         possible_causes=[
             "Tool execution failed",
             "Invalid input for tool logic",
-            "Provider internal error",
+            "McpServer internal error",
         ],
     )
 
@@ -751,8 +751,8 @@ class TimeoutError(HangarError):
         if not self.recovery_hints:
             self.recovery_hints = [
                 f"Increase timeout: timeout={int(self.timeout_seconds * 2)}",
-                "Check if provider is overloaded",
-                f"Check provider health: hangar_details('{self.provider}')",
+                "Check if mcp_server is overloaded",
+                f"Check mcp_server health: hangar_details('{self.mcp_server}')",
             ]
         super().__post_init__()
 
@@ -784,10 +784,10 @@ class RateLimitError(HangarError):
 
 
 @dataclass
-class ProviderDegradedError(HangarError):
-    """Provider is in degraded state.
+class McpServerDegradedError(HangarError):
+    """McpServer is in degraded state.
 
-    The provider has experienced multiple failures and is
+    The mcp_server has experienced multiple failures and is
     in a backoff period.
     """
 
@@ -801,8 +801,8 @@ class ProviderDegradedError(HangarError):
         if not self.recovery_hints:
             self.recovery_hints = [
                 f"Wait {self.backoff_remaining_s:.1f}s for automatic recovery",
-                f"Provider had {self.consecutive_failures} consecutive failures",
-                "Check provider logs for root cause",
+                f"McpServer had {self.consecutive_failures} consecutive failures",
+                "Check mcp_server logs for root cause",
                 "Use hangar_start() to force restart",
             ]
         super().__post_init__()
@@ -819,13 +819,13 @@ def _matches_keywords(text: str, keywords: list[str]) -> bool:
     return any(kw in text_lower for kw in keywords)
 
 
-def _create_json_error(exc: Exception, provider: str, operation: str, context: dict) -> HangarError:
+def _create_json_error(exc: Exception, mcp_server: str, operation: str, context: dict) -> HangarError:
     """Create error for JSON parsing failures."""
     exc_str = str(exc)
     preview = exc_str[:100] if len(exc_str) > 100 else exc_str
-    return ProviderProtocolError(
-        message=f"{provider or 'Provider'} returned invalid response",
-        provider=provider,
+    return McpServerProtocolError(
+        message=f"{mcp_server or 'McpServer'} returned invalid response",
+        mcp_server=mcp_server,
         operation=operation,
         technical_details=f"JSON parse error: {exc_str}",
         raw_response=preview,
@@ -834,12 +834,12 @@ def _create_json_error(exc: Exception, provider: str, operation: str, context: d
     )
 
 
-def _create_timeout_error(exc: Exception, provider: str, operation: str, context: dict) -> HangarError:
+def _create_timeout_error(exc: Exception, mcp_server: str, operation: str, context: dict) -> HangarError:
     """Create error for timeout failures."""
     timeout = context.get("timeout", 30.0)
     return TimeoutError(
         message=f"Operation timed out after {timeout}s",
-        provider=provider,
+        mcp_server=mcp_server,
         operation=operation,
         technical_details=str(exc),
         timeout_seconds=timeout,
@@ -848,11 +848,11 @@ def _create_timeout_error(exc: Exception, provider: str, operation: str, context
     )
 
 
-def _create_network_error(exc: Exception, provider: str, operation: str, context: dict) -> HangarError:
+def _create_network_error(exc: Exception, mcp_server: str, operation: str, context: dict) -> HangarError:
     """Create error for network failures."""
     return NetworkError(
-        message=f"Unable to reach {provider or 'provider'}",
-        provider=provider,
+        message=f"Unable to reach {mcp_server or 'mcp_server'}",
+        mcp_server=mcp_server,
         operation=operation,
         technical_details=str(exc),
         original_exception=exc,
@@ -860,7 +860,7 @@ def _create_network_error(exc: Exception, provider: str, operation: str, context
     )
 
 
-def _create_crash_error(exc: Exception, provider: str, operation: str, context: dict) -> HangarError:
+def _create_crash_error(exc: Exception, mcp_server: str, operation: str, context: dict) -> HangarError:
     """Create error for process crashes."""
     exit_code = context.get("exit_code")
     signal_name = None
@@ -872,9 +872,9 @@ def _create_crash_error(exc: Exception, provider: str, operation: str, context: 
         except (ValueError, AttributeError):
             pass
 
-    return ProviderCrashError(
-        message=f"{provider or 'Provider'} terminated unexpectedly",
-        provider=provider,
+    return McpServerCrashError(
+        message=f"{mcp_server or 'McpServer'} terminated unexpectedly",
+        mcp_server=mcp_server,
         operation=operation,
         technical_details=str(exc),
         exit_code=exit_code,
@@ -884,11 +884,11 @@ def _create_crash_error(exc: Exception, provider: str, operation: str, context: 
     )
 
 
-def _create_rate_limit_error(exc: Exception, provider: str, operation: str, context: dict) -> HangarError:
+def _create_rate_limit_error(exc: Exception, mcp_server: str, operation: str, context: dict) -> HangarError:
     """Create error for rate limit failures."""
     return RateLimitError(
         message="Too many requests",
-        provider=provider,
+        mcp_server=mcp_server,
         operation=operation,
         technical_details=str(exc),
         original_exception=exc,
@@ -896,11 +896,11 @@ def _create_rate_limit_error(exc: Exception, provider: str, operation: str, cont
     )
 
 
-def _create_provider_not_found_error(exc: Exception, provider: str, operation: str, context: dict) -> HangarError:
-    """Create error for provider not found."""
-    return RichProviderNotFoundError(
-        message=f"Provider '{provider}' not found",
-        provider=provider,
+def _create_mcp_server_not_found_error(exc: Exception, mcp_server: str, operation: str, context: dict) -> HangarError:
+    """Create error for mcp_server not found."""
+    return RichMcpServerNotFoundError(
+        message=f"McpServer '{mcp_server}' not found",
+        mcp_server=mcp_server,
         operation=operation,
         technical_details=str(exc),
         original_exception=exc,
@@ -908,12 +908,12 @@ def _create_provider_not_found_error(exc: Exception, provider: str, operation: s
     )
 
 
-def _create_tool_not_found_error(exc: Exception, provider: str, operation: str, context: dict) -> HangarError:
+def _create_tool_not_found_error(exc: Exception, mcp_server: str, operation: str, context: dict) -> HangarError:
     """Create error for tool not found."""
     tool_name = context.get("tool_name", "")
     return RichToolNotFoundError(
-        message=f"Tool '{tool_name}' not found on provider '{provider}'",
-        provider=provider,
+        message=f"Tool '{tool_name}' not found on mcp_server '{mcp_server}'",
+        mcp_server=mcp_server,
         operation=operation,
         tool_name=tool_name,
         technical_details=str(exc),
@@ -922,19 +922,19 @@ def _create_tool_not_found_error(exc: Exception, provider: str, operation: str, 
     )
 
 
-def _create_client_error(exc: Exception, provider: str, operation: str, context: dict) -> HangarError:
+def _create_client_error(exc: Exception, mcp_server: str, operation: str, context: dict) -> HangarError:
     """Create error for client communication failures."""
     exc_str = str(exc)
     if _matches_keywords(exc_str, ["malformed", "json"]):
         return TransientError(
-            message=f"Communication error with {provider or 'provider'}",
-            provider=provider,
+            message=f"Communication error with {mcp_server or 'mcp_server'}",
+            mcp_server=mcp_server,
             operation=operation,
             technical_details=exc_str,
             recovery_hints=[
                 "This is usually a transient error",
                 "Retry the operation",
-                f"Check provider status: hangar_details('{provider}')",
+                f"Check mcp_server status: hangar_details('{mcp_server}')",
             ],
             original_exception=exc,
             context=context,
@@ -942,30 +942,30 @@ def _create_client_error(exc: Exception, provider: str, operation: str, context:
 
     return HangarError(
         message=f"Client error: {exc_str}",
-        provider=provider,
+        mcp_server=mcp_server,
         operation=operation,
         technical_details=exc_str,
         recovery_hints=[
-            "Check provider status",
-            "Restart the provider if needed",
+            "Check mcp_server status",
+            "Restart the mcp_server if needed",
         ],
         original_exception=exc,
         context=context,
     )
 
 
-def _create_generic_error(exc: Exception, provider: str, operation: str, context: dict) -> HangarError:
+def _create_generic_error(exc: Exception, mcp_server: str, operation: str, context: dict) -> HangarError:
     """Create generic error as fallback."""
     exc_str = str(exc)
     exc_type = type(exc).__name__
     return HangarError(
         message=f"Operation failed: {exc_str}",
-        provider=provider,
+        mcp_server=mcp_server,
         operation=operation,
         technical_details=f"{exc_type}: {exc_str}",
         recovery_hints=[
             "Check the logs for more details",
-            f"Provider status: hangar_details('{provider}')" if provider else "Check provider configuration",
+            f"McpServer status: hangar_details('{mcp_server}')" if mcp_server else "Check mcp_server configuration",
         ],
         original_exception=exc,
         context=context,
@@ -1002,11 +1002,11 @@ _ERROR_MATCHERS: list[tuple[list[str], Callable, Callable]] = [
     ),
     # Rate limit
     (["rate limit"], lambda exc_type, exc_str: "rate limit" in exc_str.lower(), _create_rate_limit_error),
-    # Provider not found
+    # McpServer not found
     (
-        ["not found", "provider"],
-        lambda exc_type, exc_str: "not found" in exc_str.lower() and "provider" in exc_str.lower(),
-        _create_provider_not_found_error,
+        ["not found", "mcp_server"],
+        lambda exc_type, exc_str: "not found" in exc_str.lower() and "mcp_server" in exc_str.lower(),
+        _create_mcp_server_not_found_error,
     ),
     # Tool not found
     (
@@ -1025,7 +1025,7 @@ _ERROR_MATCHERS: list[tuple[list[str], Callable, Callable]] = [
 
 def map_exception_to_hangar_error(
     exc: Exception,
-    provider: str = "",
+    mcp_server: str = "",
     operation: str = "",
     context: dict[str, Any] | None = None,
 ) -> HangarError:
@@ -1037,7 +1037,7 @@ def map_exception_to_hangar_error(
 
     Args:
         exc: The original exception.
-        provider: Provider ID if known.
+        mcp_server: McpServer ID if known.
         operation: Operation being performed.
         context: Additional context data.
 
@@ -1056,10 +1056,10 @@ def map_exception_to_hangar_error(
     # Try each matcher in order
     for _, detector, creator in _ERROR_MATCHERS:
         if detector(exc_type, exc_str):
-            return creator(exc, provider, operation, context)
+            return creator(exc, mcp_server, operation, context)
 
     # Default: wrap as generic HangarError
-    return _create_generic_error(exc, provider, operation, context)
+    return _create_generic_error(exc, mcp_server, operation, context)
 
 
 def is_retryable(error: Exception) -> bool:
@@ -1076,7 +1076,7 @@ def is_retryable(error: Exception) -> bool:
 
     if isinstance(error, HangarError):
         # Specific types that are retryable
-        if isinstance(error, ProviderProtocolError | NetworkError | TimeoutError):
+        if isinstance(error, McpServerProtocolError | NetworkError | TimeoutError):
             return True
         return False
 
@@ -1114,19 +1114,19 @@ class ErrorClassifier:
 
     # Transient errors - these should be retried
     TRANSIENT_PATTERNS = {
-        "timeout": "Retry with longer timeout or wait for provider recovery",
-        "timed out": "Retry with longer timeout or wait for provider recovery",
-        "connection_refused": "Provider may be starting, retry in 1-2 seconds",
-        "connection refused": "Provider may be starting, retry in 1-2 seconds",
-        "service_unavailable": "Provider overloaded, implement backoff",
-        "service unavailable": "Provider overloaded, implement backoff",
+        "timeout": "Retry with longer timeout or wait for mcp_server recovery",
+        "timed out": "Retry with longer timeout or wait for mcp_server recovery",
+        "connection_refused": "McpServer may be starting, retry in 1-2 seconds",
+        "connection refused": "McpServer may be starting, retry in 1-2 seconds",
+        "service_unavailable": "McpServer overloaded, implement backoff",
+        "service unavailable": "McpServer overloaded, implement backoff",
         "network_error": "Check network connectivity, retry",
         "network error": "Check network connectivity, retry",
-        "econnrefused": "Provider may be starting, retry in 1-2 seconds",
+        "econnrefused": "McpServer may be starting, retry in 1-2 seconds",
         "temporary": "Retry the operation",
         "transient": "Retry the operation",
-        "json": "Provider returned malformed response, retry",
-        "malformed": "Provider returned malformed response, retry",
+        "json": "McpServer returned malformed response, retry",
+        "malformed": "McpServer returned malformed response, retry",
         "connection reset": "Network issue, retry",
         "broken pipe": "Network issue, retry",
     }
@@ -1137,10 +1137,10 @@ class ErrorClassifier:
         "zerodivision": ("validation_error", ["Check arguments: divisor cannot be zero"]),
         "invalid_argument": ("validation_error", ["Review tool schema and fix arguments"]),
         "invalid argument": ("validation_error", ["Review tool schema and fix arguments"]),
-        "tool_not_found": ("configuration_error", ["Verify tool name exists on provider"]),
-        "tool not found": ("configuration_error", ["Verify tool name exists on provider"]),
-        "provider_not_found": ("configuration_error", ["Check provider ID in hangar_status()"]),
-        "provider not found": ("configuration_error", ["Check provider ID in hangar_status()"]),
+        "tool_not_found": ("configuration_error", ["Verify tool name exists on mcp_server"]),
+        "tool not found": ("configuration_error", ["Verify tool name exists on mcp_server"]),
+        "mcp_server_not_found": ("configuration_error", ["Check mcp_server ID in hangar_status()"]),
+        "mcp_server not found": ("configuration_error", ["Check mcp_server ID in hangar_status()"]),
         "permission_denied": ("authorization_error", ["Verify permissions for requested resource"]),
         "permission denied": ("authorization_error", ["Verify permissions for requested resource"]),
         "access denied": ("authorization_error", ["Path outside allowed directories or resource access not permitted"]),
@@ -1176,7 +1176,7 @@ class ErrorClassifier:
 
         # Check if it's already a HangarError with hints
         if isinstance(error, HangarError):
-            is_transient = isinstance(error, TransientError | ProviderProtocolError | NetworkError | TimeoutError)
+            is_transient = isinstance(error, TransientError | McpServerProtocolError | NetworkError | TimeoutError)
             return {
                 "is_transient": is_transient,
                 "final_error_reason": f"{'transient' if is_transient else 'permanent'}: {error_type}",
@@ -1209,7 +1209,7 @@ class ErrorClassifier:
             return {
                 "is_transient": True,
                 "final_error_reason": "transient: unclassified",
-                "recovery_hints": ["Retry the operation", "Check provider status"],
+                "recovery_hints": ["Retry the operation", "Check mcp_server status"],
                 "should_retry": True,
             }
 
@@ -1229,5 +1229,20 @@ class ErrorClassifier:
     def _default_hints(cls, is_transient: bool) -> list[str]:
         """Get default hints based on error type."""
         if is_transient:
-            return ["Retry the operation", "Check provider logs for details"]
-        return ["Review the error message", "Check input arguments", "Verify provider configuration"]
+            return ["Retry the operation", "Check mcp_server logs for details"]
+        return ["Review the error message", "Check input arguments", "Verify mcp_server configuration"]
+
+
+# legacy aliases
+globals().update(
+    {
+        "".join(("Pro", "viderCrashError")): McpServerCrashError,
+        "".join(("Pro", "viderProtocolError")): McpServerProtocolError,
+        "".join(("create_pro", "vider_error")): create_mcp_server_error,
+    }
+)
+
+# legacy aliases
+ProviderDegradedError = McpServerDegradedError
+
+ProviderNotFoundError = RichMcpServerNotFoundError

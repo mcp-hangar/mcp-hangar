@@ -51,7 +51,7 @@ class _FakeStateWithValue:
 class TestNormalizeState:
     """_normalize_state converts loose state representations to ProviderState."""
 
-    def test_provider_state_enum_passes_through_unchanged(self):
+    def test_mcp_server_state_enum_passes_through_unchanged(self):
         for state in ProviderState:
             result = _normalize_state(state)
             assert result is state
@@ -129,22 +129,22 @@ class TestClassifyProviderHealthOtherStates:
     def test_degraded_state_returns_health_degraded(self):
         result = classify_provider_health(state=ProviderState.DEGRADED, consecutive_failures=0)
         assert result.status == HealthStatus.DEGRADED
-        assert result.reason == "provider_state_degraded"
+        assert result.reason == "mcp_server_state_degraded"
 
     def test_dead_state_returns_unhealthy(self):
         result = classify_provider_health(state=ProviderState.DEAD, consecutive_failures=0)
         assert result.status == HealthStatus.UNHEALTHY
-        assert result.reason == "provider_state_dead"
+        assert result.reason == "mcp_server_state_dead"
 
     def test_cold_state_returns_unknown(self):
         result = classify_provider_health(state=ProviderState.COLD, consecutive_failures=0)
         assert result.status == HealthStatus.UNKNOWN
-        assert result.reason == "provider_state_cold"
+        assert result.reason == "mcp_server_state_cold"
 
     def test_initializing_state_returns_unknown(self):
         result = classify_provider_health(state=ProviderState.INITIALIZING, consecutive_failures=0)
         assert result.status == HealthStatus.UNKNOWN
-        assert result.reason == "provider_state_initializing"
+        assert result.reason == "mcp_server_state_initializing"
 
     def test_string_state_ready_works(self):
         result = classify_provider_health(state="ready", consecutive_failures=0)
@@ -153,7 +153,7 @@ class TestClassifyProviderHealthOtherStates:
     def test_string_state_dead_works(self):
         result = classify_provider_health(state="dead", consecutive_failures=2)
         assert result.status == HealthStatus.UNHEALTHY
-        assert result.reason == "provider_state_dead"
+        assert result.reason == "mcp_server_state_dead"
 
 
 class TestClassifyProviderHealthFromProvider:
@@ -227,7 +227,7 @@ class TestProviderHealthClassification:
     def test_classification_is_frozen_and_immutable(self):
         classification = ProviderHealthClassification(
             status=HealthStatus.UNKNOWN,
-            reason="provider_state_cold",
+            reason="mcp_server_state_cold",
             consecutive_failures=0,
         )
         with pytest.raises(Exception):

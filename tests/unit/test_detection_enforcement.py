@@ -9,7 +9,7 @@ from unittest.mock import Mock, patch
 import pytest
 from starlette.testclient import TestClient
 
-from mcp_hangar.application.commands.commands import StopProviderCommand
+from mcp_hangar.application.commands.commands import StopMcpServerCommand
 from mcp_hangar.application.event_handlers import DetectionEnforcementHandler
 from mcp_hangar.application.ports import ICommandBus
 from mcp_hangar.domain.contracts.event_bus import IEventBus
@@ -64,7 +64,7 @@ def _detection_event(action: str) -> DetectionRuleMatched:
         rule_name="Credential exfiltration",
         severity="critical",
         session_id="session-123",
-        provider_id="provider-456",
+        mcp_server_id="provider-456",
         matched_tools=("read", "webfetch"),
         recommended_action=action,
     )
@@ -96,13 +96,13 @@ class TestDetectionEnforcementHandler:
 
         assert len(command_bus.commands) == 1
         command = command_bus.commands[0]
-        assert isinstance(command, StopProviderCommand)
-        assert command.provider_id == "provider-456"
+        assert isinstance(command, StopMcpServerCommand)
+        assert command.mcp_server_id == "provider-456"
         assert command.reason == "detection_enforcement:block"
         assert len(event_bus.published) == 1
         published = event_bus.published[0]
         assert isinstance(published, EnforcementActionTaken)
-        assert published.action == "block_provider"
+        assert published.action == "block_mcp_server"
 
     def test_alert_action_does_nothing(self):
         event_bus = RecordingEventBus()
@@ -150,11 +150,11 @@ class TestBlockProviderEndpoint:
 
         with patch("mcp_hangar.server.api.middleware.get_context", return_value=mock_context):
             client = TestClient(create_api_router(), raise_server_exceptions=False)
-            response = client.post("/providers/provider-456/block", json={"reason": "ignored"})
+            response = client.post("/mcp_servers/provider-456/block", json={"reason": "ignored"})
 
         assert response.status_code == 200
-        assert response.json() == {"provider_id": "provider-456", "blocked": True}
+        assert response.json() == {"mcp_server_id": "provider-456", "blocked": True}
         command = mock_context.command_bus.send.call_args.args[0]
-        assert isinstance(command, StopProviderCommand)
-        assert command.provider_id == "provider-456"
+        assert isinstance(command, StopMcpServerCommand)
+        assert command.mcp_server_id == "provider-456"
         assert command.reason == "detection_enforcement:block"

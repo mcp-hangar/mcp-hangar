@@ -40,7 +40,7 @@ observability:
 | Langfuse concept | Hangar mapping |
 |-----------------|----------------|
 | Trace | One MCP session (session_id) |
-| Span | Provider tool invocation |
+| Span | MCP Server tool invocation |
 | Generation | Tool call with input/output |
 | User | user_id from identity propagation |
 

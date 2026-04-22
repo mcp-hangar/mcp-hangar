@@ -8,7 +8,7 @@ from mcp_hangar.server.validation import (
     tool_error_hook,
     tool_error_mapper,
     validate_arguments_input,
-    validate_provider_id_input,
+    validate_mcp_server_id_input,
     validate_timeout_input,
     validate_tool_name_input,
 )
@@ -56,7 +56,7 @@ class TestToolErrorHook:
     def test_hook_does_not_raise(self):
         """Hook should not raise exceptions."""
         exc = ValueError("test")
-        context = {"provider_id": "test-provider"}
+        context = {"mcp_server_id": "test-provider"}
 
         # Should not raise
         tool_error_hook(exc, context)
@@ -71,7 +71,7 @@ class TestToolErrorHook:
 
 
 class TestValidateProviderIdInput:
-    """Tests for validate_provider_id_input function."""
+    """Tests for validate_mcp_server_id_input function."""
 
     @pytest.fixture(autouse=True)
     def reset_context_fixture(self):
@@ -80,28 +80,28 @@ class TestValidateProviderIdInput:
         yield
         reset_context()
 
-    def test_valid_provider_id_does_not_raise(self):
+    def test_valid_mcp_server_id_does_not_raise(self):
         """Valid provider ID should not raise."""
         # Should not raise
-        validate_provider_id_input("valid-provider-id")
+        validate_mcp_server_id_input("valid-provider-id")
 
-    def test_valid_provider_id_with_underscores(self):
+    def test_valid_mcp_server_id_with_underscores(self):
         """Provider ID with underscores should be valid."""
-        validate_provider_id_input("my_provider_123")
+        validate_mcp_server_id_input("my_provider_123")
 
-    def test_invalid_provider_id_raises(self):
+    def test_invalid_mcp_server_id_raises(self):
         """Invalid provider ID should raise ValueError."""
         with pytest.raises(ValueError) as exc_info:
-            validate_provider_id_input("../../../etc/passwd")
+            validate_mcp_server_id_input("../../../etc/passwd")
 
-        assert "invalid_provider_id" in str(exc_info.value)
+        assert "invalid_mcp_server_id" in str(exc_info.value)
 
-    def test_empty_provider_id_raises(self):
+    def test_empty_mcp_server_id_raises(self):
         """Empty provider ID should raise ValueError."""
         with pytest.raises(ValueError) as exc_info:
-            validate_provider_id_input("")
+            validate_mcp_server_id_input("")
 
-        assert "invalid_provider_id" in str(exc_info.value)
+        assert "invalid_mcp_server_id" in str(exc_info.value)
 
 
 class TestValidateToolNameInput:

@@ -17,7 +17,7 @@ class ApprovalState(str, Enum):
     EXPIRED = "expired"
 
 
-@dataclass
+@dataclass(init=False)
 class ApprovalRequest:
     """Aggregate tracking a single tool approval lifecycle.
 
@@ -37,6 +37,45 @@ class ApprovalRequest:
     decided_at: datetime | None = None
     reason: str | None = None
     correlation_id: str = ""
+
+    def __init__(
+        self,
+        approval_id: str,
+        tool_name: str,
+        arguments: dict[str, Any],
+        arguments_hash: str,
+        requested_at: datetime,
+        expires_at: datetime,
+        state: ApprovalState,
+        channel: str,
+        provider_id: str | None = None,
+        mcp_server_id: str | None = None,
+        decided_by: str | None = None,
+        decided_at: datetime | None = None,
+        reason: str | None = None,
+        correlation_id: str = "",
+    ) -> None:
+        resolved_provider_id = mcp_server_id or provider_id
+        if resolved_provider_id is None:
+            raise TypeError("Missing required argument: mcp_server_id")
+
+        self.approval_id = approval_id
+        self.provider_id = resolved_provider_id
+        self.tool_name = tool_name
+        self.arguments = arguments
+        self.arguments_hash = arguments_hash
+        self.requested_at = requested_at
+        self.expires_at = expires_at
+        self.state = state
+        self.channel = channel
+        self.decided_by = decided_by
+        self.decided_at = decided_at
+        self.reason = reason
+        self.correlation_id = correlation_id
+
+    @property
+    def mcp_server_id(self) -> str:
+        return self.provider_id
 
     def is_terminal(self) -> bool:
         return self.state in (

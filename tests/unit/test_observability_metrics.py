@@ -102,10 +102,10 @@ class TestObservabilityMetrics:
         metrics.cold_start_completed("provider")
         # Should not raise
 
-    def test_update_provider_resources(self):
+    def test_update_mcp_server_resources(self):
         """Should update resource metrics."""
         metrics = get_observability_metrics()
-        metrics.update_provider_resources(
+        metrics.update_mcp_server_resources(
             "provider",
             memory_bytes=1024 * 1024 * 100,
             cpu_percent=25.5,

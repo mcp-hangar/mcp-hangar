@@ -75,12 +75,12 @@ class MCPServerFactoryBuilder:
         """Set core control plane functions.
 
         Args:
-            list_fn: Function to list providers.
-            start_fn: Function to start a provider.
-            stop_fn: Function to stop a provider.
+            list_fn: Function to list mcp_servers.
+            start_fn: Function to start a mcp_server.
+            stop_fn: Function to stop a mcp_server.
             invoke_fn: Function to invoke a tool.
             tools_fn: Function to get tool schemas.
-            details_fn: Function to get provider details.
+            details_fn: Function to get mcp_server details.
             health_fn: Function to get control plane health.
 
         Returns:
@@ -108,9 +108,9 @@ class MCPServerFactoryBuilder:
 
         Args:
             discover_fn: Async function to trigger discovery.
-            discovered_fn: Function to list discovered providers.
-            quarantine_fn: Function to list quarantined providers.
-            approve_fn: Async function to approve a provider.
+            discovered_fn: Function to list discovered mcp_servers.
+            quarantine_fn: Function to list quarantined mcp_servers.
+            approve_fn: Async function to approve a mcp_server.
             sources_fn: Function to list discovery sources.
             metrics_fn: Function to get metrics.
 

@@ -1,16 +1,17 @@
 """Tests for Query Bus infrastructure."""
 
+from typing import cast
 from unittest.mock import Mock
 
 import pytest
 
 from mcp_hangar.infrastructure.query_bus import (
     get_query_bus,
-    GetProviderHealthQuery,
-    GetProviderQuery,
-    GetProviderToolsQuery,
+    GetMcpServerHealthQuery,
+    GetMcpServerQuery,
+    GetMcpServerToolsQuery,
     GetSystemMetricsQuery,
-    ListProvidersQuery,
+    ListMcpServersQuery,
     Query,
     QueryBus,
     QueryHandler,
@@ -21,34 +22,34 @@ class TestQueries:
     """Test Query classes."""
 
     def test_list_providers_query(self):
-        """Test ListProvidersQuery creation."""
-        query = ListProvidersQuery()
+        """Test ListMcpServersQuery creation."""
+        query = ListMcpServersQuery()
 
         assert query.state_filter is None
 
     def test_list_providers_query_with_filter(self):
-        """Test ListProvidersQuery with state filter."""
-        query = ListProvidersQuery(state_filter="ready")
+        """Test ListMcpServersQuery with state filter."""
+        query = ListMcpServersQuery(state_filter="ready")
 
         assert query.state_filter == "ready"
 
     def test_get_provider_query(self):
-        """Test GetProviderQuery creation."""
-        query = GetProviderQuery(provider_id="test-provider")
+        """Test GetMcpServerQuery creation."""
+        query = GetMcpServerQuery(mcp_server_id="test-provider")
 
-        assert query.provider_id == "test-provider"
+        assert query.mcp_server_id == "test-provider"
 
     def test_get_provider_tools_query(self):
-        """Test GetProviderToolsQuery creation."""
-        query = GetProviderToolsQuery(provider_id="test-provider")
+        """Test GetMcpServerToolsQuery creation."""
+        query = GetMcpServerToolsQuery(mcp_server_id="test-provider")
 
-        assert query.provider_id == "test-provider"
+        assert query.mcp_server_id == "test-provider"
 
     def test_get_provider_health_query(self):
-        """Test GetProviderHealthQuery creation."""
-        query = GetProviderHealthQuery(provider_id="test-provider")
+        """Test GetMcpServerHealthQuery creation."""
+        query = GetMcpServerHealthQuery(mcp_server_id="test-provider")
 
-        assert query.provider_id == "test-provider"
+        assert query.mcp_server_id == "test-provider"
 
     def test_get_system_metrics_query(self):
         """Test GetSystemMetricsQuery creation."""
@@ -65,9 +66,9 @@ class TestQueryBus:
         bus = QueryBus()
         handler = Mock(spec=QueryHandler)
 
-        bus.register(ListProvidersQuery, handler)
+        bus.register(ListMcpServersQuery, handler)
 
-        assert ListProvidersQuery in bus._handlers
+        assert ListMcpServersQuery in bus._handlers
 
     def test_register_multiple_handlers(self):
         """Test registering multiple handlers for different queries."""
@@ -75,8 +76,8 @@ class TestQueryBus:
         handler1 = Mock(spec=QueryHandler)
         handler2 = Mock(spec=QueryHandler)
 
-        bus.register(ListProvidersQuery, handler1)
-        bus.register(GetProviderQuery, handler2)
+        bus.register(ListMcpServersQuery, handler1)
+        bus.register(GetMcpServerQuery, handler2)
 
         assert len(bus._handlers) == 2
 
@@ -86,9 +87,9 @@ class TestQueryBus:
         handler = Mock(spec=QueryHandler)
         handler.handle.return_value = [{"id": "p1"}, {"id": "p2"}]
 
-        bus.register(ListProvidersQuery, handler)
+        bus.register(ListMcpServersQuery, handler)
 
-        query = ListProvidersQuery()
+        query = ListMcpServersQuery()
         result = bus.execute(query)
 
         handler.handle.assert_called_once_with(query)
@@ -97,7 +98,7 @@ class TestQueryBus:
     def test_execute_query_without_handler_raises(self):
         """Test executing unregistered query raises ValueError."""
         bus = QueryBus()
-        query = ListProvidersQuery()
+        query = ListMcpServersQuery()
 
         with pytest.raises(ValueError):
             bus.execute(query)
@@ -106,14 +107,14 @@ class TestQueryBus:
         """Test execute returns the handler's result."""
         bus = QueryBus()
         handler = Mock(spec=QueryHandler)
-        handler.handle.return_value = {"provider_id": "test", "state": "ready"}
+        handler.handle.return_value = {"mcp_server_id": "test", "state": "ready"}
 
-        bus.register(GetProviderQuery, handler)
+        bus.register(GetMcpServerQuery, handler)
 
-        query = GetProviderQuery(provider_id="test")
+        query = GetMcpServerQuery(mcp_server_id="test")
         result = bus.execute(query)
 
-        assert result == {"provider_id": "test", "state": "ready"}
+        assert result == {"mcp_server_id": "test", "state": "ready"}
 
     def test_handler_exception_propagates(self):
         """Test that handler exceptions propagate."""
@@ -121,9 +122,9 @@ class TestQueryBus:
         handler = Mock(spec=QueryHandler)
         handler.handle.side_effect = ValueError("Provider not found")
 
-        bus.register(GetProviderQuery, handler)
+        bus.register(GetMcpServerQuery, handler)
 
-        query = GetProviderQuery(provider_id="nonexistent")
+        query = GetMcpServerQuery(mcp_server_id="nonexistent")
 
         with pytest.raises(ValueError, match="Provider not found"):
             bus.execute(query)
@@ -140,7 +141,7 @@ class TestQueryBus:
         bus = QueryBus()
         handler = Mock(spec=QueryHandler)
 
-        bus.register(ListProvidersQuery, handler)
+        bus.register(ListMcpServersQuery, handler)
 
         assert len(bus._handlers) == 1
 
@@ -167,11 +168,7 @@ class TestQueryHandlerInterface:
     def test_handler_without_handle_raises(self):
         """Test that incomplete handler raises TypeError."""
         with pytest.raises(TypeError):
-
-            class IncompleteHandler(QueryHandler):
-                pass
-
-            IncompleteHandler()
+            type("IncompleteHandler", (QueryHandler,), {})()
 
 
 class TestQueryIntegration:
@@ -188,9 +185,9 @@ class TestQueryIntegration:
                     {"id": "p2", "state": "cold"},
                 ]
 
-        bus.register(ListProvidersQuery, TestHandler())
+        bus.register(ListMcpServersQuery, TestHandler())
 
-        query = ListProvidersQuery()
+        query = ListMcpServersQuery()
         result = bus.execute(query)
 
         assert len(result) == 2
@@ -205,14 +202,15 @@ class TestQueryIntegration:
                 return [{"id": "p1"}, {"id": "p2"}]
 
         class GetHandler(QueryHandler):
-            def handle(self, query):
-                return {"id": query.provider_id, "details": True}
+            def handle(self, query: Query):
+                typed_query = cast(GetMcpServerQuery, query)
+                return {"id": typed_query.mcp_server_id, "details": True}
 
-        bus.register(ListProvidersQuery, ListHandler())
-        bus.register(GetProviderQuery, GetHandler())
+        bus.register(ListMcpServersQuery, ListHandler())
+        bus.register(GetMcpServerQuery, GetHandler())
 
-        list_result = bus.execute(ListProvidersQuery())
-        get_result = bus.execute(GetProviderQuery(provider_id="test"))
+        list_result = bus.execute(ListMcpServersQuery())
+        get_result = bus.execute(GetMcpServerQuery(mcp_server_id="test"))
 
         assert len(list_result) == 2
         assert get_result["id"] == "test"
@@ -223,24 +221,25 @@ class TestQueryIntegration:
         bus = QueryBus()
 
         class FilterHandler(QueryHandler):
-            def handle(self, query):
+            def handle(self, query: Query):
+                typed_query = cast(ListMcpServersQuery, query)
                 all_providers = [
                     {"id": "p1", "state": "ready"},
                     {"id": "p2", "state": "cold"},
                     {"id": "p3", "state": "ready"},
                 ]
-                if query.state_filter:
-                    return [p for p in all_providers if p["state"] == query.state_filter]
+                if typed_query.state_filter:
+                    return [p for p in all_providers if p["state"] == typed_query.state_filter]
                 return all_providers
 
-        bus.register(ListProvidersQuery, FilterHandler())
+        bus.register(ListMcpServersQuery, FilterHandler())
 
         # No filter
-        all_result = bus.execute(ListProvidersQuery())
+        all_result = bus.execute(ListMcpServersQuery())
         assert len(all_result) == 3
 
         # With filter
-        ready_result = bus.execute(ListProvidersQuery(state_filter="ready"))
+        ready_result = bus.execute(ListMcpServersQuery(state_filter="ready"))
         assert len(ready_result) == 2
         assert all(p["state"] == "ready" for p in ready_result)
 
@@ -256,9 +255,9 @@ class TestQueryIntegration:
                 return self._data.copy()
 
         handler = DataHandler()
-        bus.register(GetProviderQuery, handler)
+        bus.register(GetMcpServerQuery, handler)
 
-        query = GetProviderQuery(provider_id="test")
+        query = GetMcpServerQuery(mcp_server_id="test")
         result = bus.execute(query)
 
         # Modifying result shouldn't affect internal state

@@ -7,13 +7,13 @@
 
 ## The Problem
 
-You know a tool call was slow. You don't know whether the delay was in Hangar (routing, cold start) or in the provider itself. You need end-to-end traces that break down each phase.
+You know a tool call was slow. You don't know whether the delay was in Hangar (routing, cold start) or in the MCP server itself. You need end-to-end traces that break down each phase.
 
 ## The Config
 
 ```yaml
 # config.yaml -- Recipe 08: Langfuse Tracing
-providers:
+mcp_servers:
   my-mcp:
     mode: remote
     endpoint: "http://localhost:8080"
@@ -46,17 +46,17 @@ observability:                           # NEW: Langfuse tracing
 3. Make a tool call:
 
    ```bash
-   curl -X POST http://localhost:8000/api/providers/my-mcp/start
+   curl -X POST http://localhost:8000/api/mcp_servers/my-mcp/start
    ```
 
 4. Open Langfuse dashboard and find the trace. You see spans for:
    - `hangar.tool_invocation` -- overall call
-   - `hangar.cold_start` -- provider initialization (if cold)
-   - `hangar.provider_call` -- actual provider communication
+   - `hangar.cold_start` -- MCP server initialization (if cold)
+   - `hangar.mcp_server_call` -- actual MCP server communication
 
 ## What Just Happened
 
-The `TracedProviderService` wraps tool invocations with Langfuse spans via the `LangfuseObservabilityAdapter`. Each tool call creates a trace with child spans for cold start (if needed) and the actual provider call. Correlation IDs link Hangar traces to provider-side traces.
+The `TracedProviderService` wraps tool invocations with Langfuse spans via the `LangfuseObservabilityAdapter`. Each tool call creates a trace with child spans for cold start (if needed) and the actual MCP server call. Correlation IDs link Hangar traces to MCP server-side traces.
 
 ## Key Config Reference
 
@@ -69,6 +69,6 @@ The `TracedProviderService` wraps tool invocations with Langfuse spans via the `
 
 ## What's Next
 
-You've set up external observability. Now try running providers as local subprocesses instead of remote HTTP.
+You've set up external observability. Now try running MCP servers as local subprocesses instead of remote HTTP.
 
---> [09 -- Subprocess Providers](09-subprocess-providers.md)
+--> [09 -- Subprocess MCP servers](09-subprocess-MCP servers.md)

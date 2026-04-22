@@ -12,7 +12,7 @@ from ...application.event_handlers import (
 )
 from ...application.event_handlers.audit_event_handler import OTLPAuditEventHandler
 from ...application.ports.observability import NullAuditExporter
-from ...domain.events import DetectionRuleMatched, ProviderStateChanged, ToolInvocationCompleted, ToolInvocationFailed
+from ...domain.events import DetectionRuleMatched, McpServerStateChanged, ToolInvocationCompleted, ToolInvocationFailed
 from ...logging_config import get_logger
 
 if TYPE_CHECKING:
@@ -52,7 +52,7 @@ def init_event_handlers(runtime: "Runtime") -> None:
     otlp_audit_handler = OTLPAuditEventHandler(audit_exporter=otlp_audit_exporter)
     runtime.event_bus.subscribe(ToolInvocationCompleted, otlp_audit_handler.handle)
     runtime.event_bus.subscribe(ToolInvocationFailed, otlp_audit_handler.handle)
-    runtime.event_bus.subscribe(ProviderStateChanged, otlp_audit_handler.handle)
+    runtime.event_bus.subscribe(McpServerStateChanged, otlp_audit_handler.handle)
 
     detection_enforcement_handler = DetectionEnforcementHandler(
         event_bus=runtime.event_bus,

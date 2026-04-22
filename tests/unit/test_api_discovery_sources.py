@@ -38,19 +38,19 @@ def mock_context():
         if isinstance(command, UpdateDiscoverySourceCommand):
             if command.source_id == "known-id":
                 return {"source_id": "known-id", "updated": True}
-            raise ProviderNotFoundError(provider_id=command.source_id)
+            raise ProviderNotFoundError(mcp_server_id=command.source_id)
         if isinstance(command, DeregisterDiscoverySourceCommand):
             if command.source_id == "known-id":
                 return {"source_id": "known-id", "deregistered": True}
-            raise ProviderNotFoundError(provider_id=command.source_id)
+            raise ProviderNotFoundError(mcp_server_id=command.source_id)
         if isinstance(command, TriggerSourceScanCommand):
             if command.source_id == "known-id":
-                return {"source_id": "known-id", "scan_triggered": True, "providers_found": 2}
-            raise ProviderNotFoundError(provider_id=command.source_id)
+                return {"source_id": "known-id", "scan_triggered": True, "mcp_servers_found": 2}
+            raise ProviderNotFoundError(mcp_server_id=command.source_id)
         if isinstance(command, ToggleDiscoverySourceCommand):
             if command.source_id == "known-id":
                 return {"source_id": "known-id", "enabled": command.enabled}
-            raise ProviderNotFoundError(provider_id=command.source_id)
+            raise ProviderNotFoundError(mcp_server_id=command.source_id)
         raise ValueError(f"Unexpected command: {type(command)}")
 
     command_bus.send.side_effect = send_command
@@ -161,11 +161,11 @@ class TestDeregisterDiscoverySourceEndpoint:
 class TestTriggerScanEndpoint:
     """Tests for POST /discovery/sources/{source_id}/scan."""
 
-    def test_returns_200_with_providers_found(self, api_client):
-        """POST /discovery/sources/known-id/scan returns HTTP 200 with providers_found."""
+    def test_returns_200_with_mcp_servers_found(self, api_client):
+        """POST /discovery/sources/known-id/scan returns HTTP 200 with mcp_servers_found."""
         response = api_client.post("/discovery/sources/known-id/scan")
         assert response.status_code == 200
-        assert response.json()["providers_found"] == 2
+        assert response.json()["mcp_servers_found"] == 2
 
     def test_returns_404_for_unknown_source(self, api_client):
         """POST /discovery/sources/unknown/scan returns HTTP 404."""

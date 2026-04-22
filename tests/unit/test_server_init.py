@@ -187,7 +187,7 @@ class TestCreateDiscoverySource:
         """Should create Entrypoint source with correct config."""
         config = {
             "mode": "additive",
-            "group": "mcp.providers",
+            "group": "mcp.mcp_servers",
         }
 
         result = _create_discovery_source("entrypoint", config)
@@ -314,7 +314,7 @@ class TestRegisterAllTools:
         mock_load = MagicMock()
 
         with patch("mcp_hangar.server.bootstrap.tools.register_hangar_tools", mock_hangar):
-            with patch("mcp_hangar.server.bootstrap.tools.register_provider_tools", mock_provider):
+            with patch("mcp_hangar.server.bootstrap.tools.register_mcp_server_tools", mock_provider):
                 with patch("mcp_hangar.server.bootstrap.tools.register_health_tools", mock_health):
                     with patch("mcp_hangar.server.bootstrap.tools.register_discovery_tools", mock_discovery):
                         with patch("mcp_hangar.server.bootstrap.tools.register_group_tools", mock_group):

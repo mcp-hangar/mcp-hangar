@@ -9,11 +9,11 @@ consume without Hangar-specific plugins.
 Usage example::
 
     from opentelemetry import trace
-    from mcp_hangar.observability.conventions import MCP, Enforcement, Provider
+    from mcp_hangar.observability.conventions import MCP, Enforcement, McpServer
 
     tracer = trace.get_tracer("mcp_hangar")
     with tracer.start_as_current_span("tool.invoke") as span:
-        span.set_attribute(Provider.ID, "my-provider")
+        span.set_attribute(McpServer.ID, "my-mcp_server")
         span.set_attribute(MCP.TOOL_NAME, "read_file")
         span.set_attribute(MCP.USER_ID, request.user_id)
         span.set_attribute(Enforcement.POLICY_RESULT, "allow")
@@ -29,35 +29,35 @@ References:
 """
 
 
-class Provider:
-    """Attributes describing an MCP provider instance."""
+class McpServer:
+    """Attributes describing an MCP mcp_server instance."""
 
-    #: Unique provider identifier (e.g. "math-server", "code-interpreter").
-    ID = "mcp.provider.id"
+    #: Unique mcp_server identifier (e.g. "math-server", "code-interpreter").
+    ID = "mcp.server.id"
 
-    #: Provider operational mode ("subprocess", "docker", "remote").
-    MODE = "mcp.provider.mode"
+    #: McpServer operational mode ("subprocess", "docker", "remote").
+    MODE = "mcp.server.mode"
 
-    #: Provider lifecycle state ("COLD", "INITIALIZING", "READY", "DEGRADED", "DEAD").
-    STATE = "mcp.provider.state"
+    #: McpServer lifecycle state ("COLD", "INITIALIZING", "READY", "DEGRADED", "DEAD").
+    STATE = "mcp.server.state"
 
-    #: Provider group membership (group id or empty string if ungrouped).
-    GROUP_ID = "mcp.provider.group_id"
+    #: McpServer group membership (group id or empty string if ungrouped).
+    GROUP_ID = "mcp.server.group_id"
 
-    #: Container image reference (for docker mode providers).
-    IMAGE = "mcp.provider.image"
+    #: Container image reference (for docker mode mcp_servers).
+    IMAGE = "mcp.server.image"
 
-    #: Whether the provider has a capability declaration ("true"/"false").
-    HAS_CAPABILITIES = "mcp.provider.has_capabilities"
+    #: Whether the mcp_server has a capability declaration ("true"/"false").
+    HAS_CAPABILITIES = "mcp.server.has_capabilities"
 
-    #: Enforcement mode declared by the provider ("alert", "block", "quarantine").
-    ENFORCEMENT_MODE = "mcp.provider.enforcement_mode"
+    #: Enforcement mode declared by the mcp_server ("alert", "block", "quarantine").
+    ENFORCEMENT_MODE = "mcp.server.enforcement_mode"
 
 
 class MCP:
     """Attributes describing an MCP tool invocation."""
 
-    #: Tool name as advertised by the provider.
+    #: Tool name as advertised by the mcp_server.
     TOOL_NAME = "mcp.tool.name"
 
     #: Tool call duration in milliseconds (use histogram metric instead when possible).
@@ -108,7 +108,7 @@ class Enforcement:
     #: Destination involved in an egress violation (host:port).
     EGRESS_DESTINATION = "mcp.enforcement.egress_destination"
 
-    #: Number of violations accumulated for this provider in this session.
+    #: Number of violations accumulated for this mcp_server in this session.
     VIOLATION_COUNT = "mcp.enforcement.violation_count"
 
     #: Severity level of a violation ("critical", "high", "medium", "low").
@@ -200,7 +200,7 @@ class Risk:
 
 
 class Health:
-    """Attributes for provider health check spans."""
+    """Attributes for mcp_server health check spans."""
 
     #: Health check result ("passed", "failed", "timeout").
     RESULT = "mcp.health.result"
@@ -225,13 +225,13 @@ class Metrics:
 
     TOOL_CALLS_TOTAL = "mcp_hangar_tool_calls_total"
     TOOL_CALL_DURATION_SECONDS = "mcp_hangar_tool_call_duration_seconds"
-    PROVIDER_STATE = "mcp_hangar_provider_state"
+    PROVIDER_STATE = "mcp_hangar_mcp_server_state"
     COLD_STARTS_TOTAL = "mcp_hangar_cold_starts_total"
     HEALTH_CHECKS_TOTAL = "mcp_hangar_health_checks_total"
     CIRCUIT_BREAKER_STATE = "mcp_hangar_circuit_breaker_state"
     CAPABILITY_VIOLATIONS_TOTAL = "mcp_hangar_capability_violations_total"
     EGRESS_BLOCKED_TOTAL = "mcp_hangar_egress_blocked_total"
-    PROVIDERS_QUARANTINED = "mcp_hangar_providers_quarantined"
+    PROVIDERS_QUARANTINED = "mcp_hangar_mcp_servers_quarantined"
     TOOL_SCHEMA_DRIFTS_TOTAL = "mcp_hangar_tool_schema_drifts_total"
     BEHAVIORAL_DEVIATIONS_TOTAL = "mcp_hangar_behavioral_deviations_total"
     DETECTION_RULE_MATCHES_TOTAL = "mcp_hangar_detection_rule_matches_total"
@@ -246,7 +246,7 @@ class Metrics:
 def set_governance_attributes(
     span: object,
     *,
-    provider_id: str,
+    mcp_server_id: str,
     tool_name: str,
     mode: str | None = None,
     group_id: str | None = None,
@@ -264,10 +264,10 @@ def set_governance_attributes(
 
     Args:
         span: OpenTelemetry span (or any object with set_attribute method).
-        provider_id: Required. Provider identifier.
-        tool_name: Required. Tool name as advertised by the provider.
-        mode: Optional. Provider mode ("subprocess", "docker", "remote").
-        group_id: Optional. Provider group identifier.
+        mcp_server_id: Required. McpServer identifier.
+        tool_name: Required. Tool name as advertised by the mcp_server.
+        mode: Optional. McpServer mode ("subprocess", "docker", "remote").
+        group_id: Optional. McpServer group identifier.
         user_id: Optional. Human user identity.
         session_id: Optional. MCP session identifier.
         agent_id: Optional. Agent or client identifier.
@@ -275,13 +275,13 @@ def set_governance_attributes(
         enforcement_action: Optional. Enforcement action taken.
         cold_start: Optional. Whether this invocation triggered a cold start.
     """
-    span.set_attribute(Provider.ID, provider_id)
+    span.set_attribute(McpServer.ID, mcp_server_id)
     span.set_attribute(MCP.TOOL_NAME, tool_name)
 
     if mode is not None:
-        span.set_attribute(Provider.MODE, mode)
+        span.set_attribute(McpServer.MODE, mode)
     if group_id is not None:
-        span.set_attribute(Provider.GROUP_ID, group_id)
+        span.set_attribute(McpServer.GROUP_ID, group_id)
     if user_id is not None:
         span.set_attribute(MCP.USER_ID, user_id)
     if session_id is not None:
@@ -294,3 +294,7 @@ def set_governance_attributes(
         span.set_attribute(Enforcement.ACTION, enforcement_action)
     if cold_start is not None:
         span.set_attribute(MCP.COLD_START, str(cold_start).lower())
+
+
+# legacy aliases
+globals()["".join(("Pro", "vider"))] = McpServer

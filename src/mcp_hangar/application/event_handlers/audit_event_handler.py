@@ -1,6 +1,6 @@
 """OTLP audit event handler -- bridges domain events to IAuditExporter.
 
-Subscribes to tool invocation and provider state events. Forwards them
+Subscribes to tool invocation and mcp_server state events. Forwards them
 to IAuditExporter (OTLPAuditExporter in production, NullAuditExporter
 when OTLP not configured).
 
@@ -8,7 +8,7 @@ MIT licensed -- part of core event handler infrastructure.
 """
 
 from ...domain.events import (
-    ProviderStateChanged,
+    McpServerStateChanged,
     ToolInvocationCompleted,
     ToolInvocationFailed,
 )
@@ -40,26 +40,26 @@ class OTLPAuditEventHandler:
 
         Args:
             event: A domain event. Handles ToolInvocationCompleted,
-                ToolInvocationFailed, ProviderStateChanged. Ignores all others.
+                ToolInvocationFailed, McpServerStateChanged. Ignores all others.
         """
         if isinstance(event, ToolInvocationCompleted):
             self._exporter.export_tool_invocation(
-                provider_id=event.provider_id,
+                mcp_server_id=event.mcp_server_id,
                 tool_name=event.tool_name,
                 status="success",
                 duration_ms=event.duration_ms,
             )
         elif isinstance(event, ToolInvocationFailed):
             self._exporter.export_tool_invocation(
-                provider_id=event.provider_id,
+                mcp_server_id=event.mcp_server_id,
                 tool_name=event.tool_name,
                 status="error",
                 duration_ms=0.0,
                 error_type=event.error_type,
             )
-        elif isinstance(event, ProviderStateChanged):
-            self._exporter.export_provider_state_change(
-                provider_id=event.provider_id,
+        elif isinstance(event, McpServerStateChanged):
+            self._exporter.export_mcp_server_state_change(
+                mcp_server_id=event.mcp_server_id,
                 from_state=event.old_state,
                 to_state=event.new_state,
             )

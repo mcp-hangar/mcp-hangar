@@ -1,23 +1,22 @@
 """Tests for domain events and event bus."""
 
+import pytest
+
 from mcp_hangar.application.event_handlers import LoggingEventHandler, MetricsEventHandler
-from mcp_hangar.domain.events import ProviderStarted, ProviderStopped, ToolInvocationCompleted
+from mcp_hangar.domain.events import McpServerStarted, McpServerStopped, ToolInvocationCompleted
 from mcp_hangar.infrastructure.event_bus import EventBus, get_event_bus, reset_event_bus
 
 
 def test_event_to_dict():
     """Test that events can be serialized to dict."""
-    event = ProviderStarted(
-        provider_id="test_provider",
-        mode="subprocess",
-        tools_count=5,
-        startup_duration_ms=123.45,
-    )
+    event = McpServerStarted(mcp_server_id="test_provider", mode="subprocess",
+    tools_count=5,
+    startup_duration_ms=123.45,)
 
     event_dict = event.to_dict()
 
-    assert event_dict["event_type"] == "ProviderStarted"
-    assert event_dict["provider_id"] == "test_provider"
+    assert event_dict["event_type"] == "McpServerStarted"
+    assert event_dict["mcp_server_id"] == "test_provider"
     assert event_dict["mode"] == "subprocess"
     assert event_dict["tools_count"] == 5
     assert event_dict["startup_duration_ms"] == 123.45
@@ -34,10 +33,10 @@ def test_event_bus_subscribe_and_publish():
         received_events.append(event)
 
     # Subscribe to specific event type
-    bus.subscribe(ProviderStarted, handler)
+    bus.subscribe(McpServerStarted, handler)
 
     # Publish event
-    event = ProviderStarted(provider_id="test", mode="subprocess", tools_count=3, startup_duration_ms=100.0)
+    event = McpServerStarted(mcp_server_id="test", mode="subprocess", tools_count=3, startup_duration_ms=100.0)
     bus.publish(event)
 
     # Verify handler was called
@@ -58,11 +57,11 @@ def test_event_bus_multiple_subscribers():
         handler2_events.append(event)
 
     # Both subscribe to same event type
-    bus.subscribe(ProviderStarted, handler1)
-    bus.subscribe(ProviderStarted, handler2)
+    bus.subscribe(McpServerStarted, handler1)
+    bus.subscribe(McpServerStarted, handler2)
 
     # Publish event
-    event = ProviderStarted(provider_id="test", mode="subprocess", tools_count=3, startup_duration_ms=100.0)
+    event = McpServerStarted(mcp_server_id="test", mode="subprocess", tools_count=3, startup_duration_ms=100.0)
     bus.publish(event)
 
     # Both handlers should have received it
@@ -82,16 +81,16 @@ def test_event_bus_subscribe_to_all():
     bus.subscribe_to_all(handler)
 
     # Publish different event types
-    event1 = ProviderStarted(provider_id="test", mode="subprocess", tools_count=3, startup_duration_ms=100.0)
-    event2 = ProviderStopped(provider_id="test", reason="shutdown")
+    event1 = McpServerStarted(mcp_server_id="test", mode="subprocess", tools_count=3, startup_duration_ms=100.0)
+    event2 = McpServerStopped(mcp_server_id="test", reason="shutdown")
 
     bus.publish(event1)
     bus.publish(event2)
 
     # Handler should have received both
     assert len(received_events) == 2
-    assert isinstance(received_events[0], ProviderStarted)
-    assert isinstance(received_events[1], ProviderStopped)
+    assert isinstance(received_events[0], McpServerStarted)
+    assert isinstance(received_events[1], McpServerStopped)
 
 
 def test_event_bus_error_handling():
@@ -108,11 +107,11 @@ def test_event_bus_error_handling():
         handler2_called.append(True)
 
     # Subscribe both handlers
-    bus.subscribe(ProviderStarted, failing_handler)
-    bus.subscribe(ProviderStarted, working_handler)
+    bus.subscribe(McpServerStarted, failing_handler)
+    bus.subscribe(McpServerStarted, working_handler)
 
     # Publish event
-    event = ProviderStarted(provider_id="test", mode="subprocess", tools_count=3, startup_duration_ms=100.0)
+    event = McpServerStarted(mcp_server_id="test", mode="subprocess", tools_count=3, startup_duration_ms=100.0)
     bus.publish(event)
 
     # Both should have been called despite the error
@@ -125,10 +124,10 @@ def test_logging_event_handler():
     handler = LoggingEventHandler()
 
     # Should not raise errors
-    event = ProviderStarted(provider_id="test", mode="subprocess", tools_count=3, startup_duration_ms=100.0)
+    event = McpServerStarted(mcp_server_id="test", mode="subprocess", tools_count=3, startup_duration_ms=100.0)
     handler.handle(event)
 
-    event = ToolInvocationCompleted(provider_id="test", tool_name="add", correlation_id="abc123", duration_ms=50.0, result_size_bytes=100)
+    event = ToolInvocationCompleted(mcp_server_id="test", tool_name="add", correlation_id="abc123", duration_ms=50.0, result_size_bytes=100)
     handler.handle(event)
 
 
@@ -137,18 +136,16 @@ def test_metrics_event_handler():
     handler = MetricsEventHandler()
 
     # Simulate tool invocation completion
-    event = ToolInvocationCompleted(
-        provider_id="test_provider",
-        tool_name="add",
-        correlation_id="abc123",
-        duration_ms=50.0,
-        result_size_bytes=100,
-    )
+    event = ToolInvocationCompleted(mcp_server_id="test_provider", tool_name="add",
+    correlation_id="abc123",
+    duration_ms=50.0,
+    result_size_bytes=100,)
     handler.handle(event)
 
     # Verify metrics were collected
     metrics = handler.get_metrics("test_provider")
-    assert metrics is not None
+    if metrics is None:
+        pytest.fail("expected metrics for test_provider")
     assert metrics.total_invocations == 1
     assert metrics.successful_invocations == 1
     assert metrics.average_latency_ms == 50.0
@@ -160,16 +157,15 @@ def test_metrics_handler_multiple_invocations():
 
     # Simulate multiple invocations
     for i in range(10):
-        event = ToolInvocationCompleted(
-            provider_id="test_provider",
-            tool_name="add",
-            correlation_id=f"corr_{i}",
-            duration_ms=float(i * 10),
-            result_size_bytes=100,
-        )
+        event = ToolInvocationCompleted(mcp_server_id="test_provider", tool_name="add",
+        correlation_id=f"corr_{i}",
+        duration_ms=float(i * 10),
+        result_size_bytes=100,)
         handler.handle(event)
 
     metrics = handler.get_metrics("test_provider")
+    if metrics is None:
+        pytest.fail("expected metrics for test_provider")
     assert metrics.total_invocations == 10
     assert metrics.successful_invocations == 10
     assert metrics.failed_invocations == 0
@@ -195,15 +191,15 @@ def test_event_bus_unsubscribe():
         received_events.append(event)
 
     # Subscribe and publish
-    bus.subscribe(ProviderStarted, handler)
-    event1 = ProviderStarted(provider_id="test", mode="subprocess", tools_count=3, startup_duration_ms=100.0)
+    bus.subscribe(McpServerStarted, handler)
+    event1 = McpServerStarted(mcp_server_id="test", mode="subprocess", tools_count=3, startup_duration_ms=100.0)
     bus.publish(event1)
 
     assert len(received_events) == 1
 
     # Unsubscribe and publish again
-    bus.unsubscribe(ProviderStarted, handler)
-    event2 = ProviderStarted(provider_id="test2", mode="subprocess", tools_count=5, startup_duration_ms=200.0)
+    bus.unsubscribe(McpServerStarted, handler)
+    event2 = McpServerStarted(mcp_server_id="test2", mode="subprocess", tools_count=5, startup_duration_ms=200.0)
     bus.publish(event2)
 
     # Should still be 1 (handler not called second time)
@@ -218,11 +214,11 @@ def test_event_bus_clear():
     def handler(event):
         received_events.append(event)
 
-    bus.subscribe(ProviderStarted, handler)
+    bus.subscribe(McpServerStarted, handler)
     bus.clear()
 
     # Publish after clear
-    event = ProviderStarted(provider_id="test", mode="subprocess", tools_count=3, startup_duration_ms=100.0)
+    event = McpServerStarted(mcp_server_id="test", mode="subprocess", tools_count=3, startup_duration_ms=100.0)
     bus.publish(event)
 
     # Handler should not have been called

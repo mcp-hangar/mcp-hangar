@@ -13,14 +13,14 @@ mcp-hangar serve --http --port 8000
 The REST API is available at `http://localhost:8000/api/`.
 
 ```bash
-# List all providers
-curl http://localhost:8000/api/providers
+# List all mcp_servers
+curl http://localhost:8000/api/mcp_servers
 
 # Get system info
 curl http://localhost:8000/api/system
 
-# Start a provider
-curl -X POST http://localhost:8000/api/providers/math/start
+# Start a mcp_server
+curl -X POST http://localhost:8000/api/mcp_servers/math/start
 ```
 
 ## Authentication
@@ -28,7 +28,7 @@ curl -X POST http://localhost:8000/api/providers/math/start
 When authentication is enabled, pass your API key in the `X-API-Key` header:
 
 ```bash
-curl -H "X-API-Key: mcp_your_key_here" http://localhost:8000/api/providers
+curl -H "X-API-Key: mcp_your_key_here" http://localhost:8000/api/mcp_servers
 ```
 
 See the [Authentication guide](AUTHENTICATION.md) for setup instructions.
@@ -40,32 +40,32 @@ All endpoints return JSON. Error responses follow the envelope format:
 ```json
 {
   "error": "ProviderNotFoundError",
-  "message": "Provider 'unknown' not found",
+  "message": "MCP Server 'unknown' not found",
   "status_code": 404
 }
 ```
 
-### Providers
+### MCP servers
 
 | Method | Path | Description |
 |--------|------|-------------|
-| `GET` | `/api/providers` | List all providers (optional `?state=ready` filter) |
-| `POST` | `/api/providers` | Create a new provider |
-| `GET` | `/api/providers/{id}` | Get provider details |
-| `PUT` | `/api/providers/{id}` | Update provider configuration |
-| `DELETE` | `/api/providers/{id}` | Delete a provider (stops it first) |
-| `POST` | `/api/providers/{id}/start` | Start a provider |
-| `POST` | `/api/providers/{id}/stop` | Stop a provider |
-| `GET` | `/api/providers/{id}/tools` | List provider tools |
-| `GET` | `/api/providers/{id}/health` | Get health status |
-| `GET` | `/api/providers/{id}/logs` | Get buffered log lines (`?lines=100`) |
-| `GET` | `/api/providers/{id}/tools/history` | Tool invocation history |
+| `GET` | `/api/mcp_servers` | List all MCP servers (optional `?state=ready` filter) |
+| `POST` | `/api/mcp_servers` | Create a new MCP server |
+| `GET` | `/api/mcp_servers/{id}` | Get MCP server details |
+| `PUT` | `/api/mcp_servers/{id}` | Update MCP server configuration |
+| `DELETE` | `/api/mcp_servers/{id}` | Delete a MCP server (stops it first) |
+| `POST` | `/api/mcp_servers/{id}/start` | Start a MCP server |
+| `POST` | `/api/mcp_servers/{id}/stop` | Stop a MCP server |
+| `GET` | `/api/mcp_servers/{id}/tools` | List MCP server tools |
+| `GET` | `/api/mcp_servers/{id}/health` | Get health status |
+| `GET` | `/api/mcp_servers/{id}/logs` | Get buffered log lines (`?lines=100`) |
+| `GET` | `/api/mcp_servers/{id}/tools/history` | Tool invocation history |
 
 ### Groups
 
 | Method | Path | Description |
 |--------|------|-------------|
-| `GET` | `/api/groups` | List all provider groups |
+| `GET` | `/api/groups` | List all MCP server groups |
 | `POST` | `/api/groups` | Create a new group |
 | `GET` | `/api/groups/{id}` | Get group details |
 | `PUT` | `/api/groups/{id}` | Update group configuration |
@@ -84,10 +84,10 @@ All endpoints return JSON. Error responses follow the envelope format:
 | `DELETE` | `/api/discovery/sources/{id}` | Remove a source |
 | `POST` | `/api/discovery/sources/{id}/scan` | Trigger immediate scan |
 | `PUT` | `/api/discovery/sources/{id}/enable` | Enable/disable a source |
-| `GET` | `/api/discovery/pending` | List providers pending approval |
-| `GET` | `/api/discovery/quarantined` | List quarantined providers |
-| `POST` | `/api/discovery/approve/{name}` | Approve a pending provider |
-| `POST` | `/api/discovery/reject/{name}` | Reject a pending provider |
+| `GET` | `/api/discovery/pending` | List MCP servers pending approval |
+| `GET` | `/api/discovery/quarantined` | List quarantined MCP servers |
+| `POST` | `/api/discovery/approve/{name}` | Approve a pending MCP server |
+| `POST` | `/api/discovery/reject/{name}` | Reject a pending MCP server |
 
 ### Catalog
 
@@ -97,7 +97,7 @@ All endpoints return JSON. Error responses follow the envelope format:
 | `GET` | `/api/catalog/{id}` | Get a catalog entry |
 | `POST` | `/api/catalog` | Add a custom catalog entry |
 | `DELETE` | `/api/catalog/{id}` | Remove a catalog entry |
-| `POST` | `/api/catalog/{id}/deploy` | Deploy a catalog entry as a live provider |
+| `POST` | `/api/catalog/{id}/deploy` | Deploy a catalog entry as a live MCP server |
 
 ### Configuration
 
@@ -133,16 +133,16 @@ All endpoints return JSON. Error responses follow the envelope format:
 | `GET` | `/api/auth/principals` | List principals |
 | `GET` | `/api/auth/principals/{id}/roles` | List roles for a principal |
 | `POST` | `/api/auth/check-permission` | Check if a principal has permission |
-| `GET` | `/api/auth/policies/{provider}/{tool}` | Get tool access policy |
-| `PUT` | `/api/auth/policies/{provider}/{tool}` | Set tool access policy |
-| `DELETE` | `/api/auth/policies/{provider}/{tool}` | Clear tool access policy |
+| `GET` | `/api/auth/policies/{MCP server}/{tool}` | Get tool access policy |
+| `PUT` | `/api/auth/policies/{MCP server}/{tool}` | Set tool access policy |
+| `DELETE` | `/api/auth/policies/{MCP server}/{tool}` | Clear tool access policy |
 
 ### Observability
 
 | Method | Path | Description |
 |--------|------|-------------|
 | `GET` | `/api/observability/metrics` | Prometheus metrics + JSON summary |
-| `GET` | `/api/observability/audit` | Audit log (`?provider_id=`, `?event_type=`, `?limit=`) |
+| `GET` | `/api/observability/audit` | Audit log (`?mcp_server_id=`, `?event_type=`, `?limit=`) |
 | `GET` | `/api/observability/security` | Security events |
 | `GET` | `/api/observability/alerts` | Alert history (`?level=`) |
 | `GET` | `/api/observability/metrics/history` | Time-series metrics snapshots |
@@ -158,29 +158,29 @@ All endpoints return JSON. Error responses follow the envelope format:
 | Path | Description |
 |------|-------------|
 | `/api/ws/events` | Real-time domain event stream |
-| `/api/ws/state` | Provider state change stream |
-| `/api/ws/providers/{id}/logs` | Live log stream for a provider |
+| `/api/ws/state` | MCP server state change stream |
+| `/api/ws/MCP servers/{id}/logs` | Live log stream for a MCP server |
 
 See the [WebSockets guide](WEBSOCKETS.md) for connection details.
 
 ## Examples
 
-### Create a Provider
+### Create a MCP Server
 
 ```bash
-curl -X POST http://localhost:8000/api/providers \
+curl -X POST http://localhost:8000/api/mcp_servers \
   -H "Content-Type: application/json" \
   -d '{
-    "provider_id": "my-llm",
+    "mcp_server_id": "my-llm",
     "mode": "subprocess",
     "command": ["python", "-m", "llm_server"],
     "idle_ttl_s": 600,
-    "description": "LLM inference provider"
+    "description": "LLM inference mcp_server"
   }'
 ```
 
 ```json
-{"provider_id": "my-llm", "created": true}
+{"mcp_server_id": "my-llm", "created": true}
 ```
 
 ### Create a Group with Members

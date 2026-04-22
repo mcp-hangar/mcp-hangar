@@ -31,17 +31,17 @@ _FORWARDED_EVENT_TYPES: set[str] = {
     "ToolInvocationRequested",
     "ToolInvocationCompleted",
     "ToolInvocationFailed",
-    "ProviderStarted",
-    "ProviderStopped",
-    "ProviderDegraded",
-    "ProviderStateChanged",
+    "McpServerStarted",
+    "McpServerStopped",
+    "McpServerDegraded",
+    "McpServerStateChanged",
     "HealthCheckPassed",
     "HealthCheckFailed",
     "CircuitBreakerStateChanged",
-    "ProviderDiscovered",
-    "ProviderDiscoveryLost",
-    "ProviderQuarantined",
-    "ProviderApproved",
+    "McpServerDiscovered",
+    "McpServerDiscoveryLost",
+    "McpServerQuarantined",
+    "McpServerApproved",
     "CapabilityViolationDetected",
     "EgressBlocked",
     "ToolSchemaDriftDetected",
@@ -78,9 +78,9 @@ class CloudConnector:
       4. ``stop()``  -- flushes remaining events, deregisters, closes HTTP
     """
 
-    def __init__(self, config: CloudConfig, providers: Any) -> None:
+    def __init__(self, config: CloudConfig, mcp_servers: Any = None, providers: Any = None) -> None:
         self._cfg = config
-        self._providers = providers  # reference to PROVIDERS dict
+        self._mcp_servers = mcp_servers if mcp_servers is not None else providers  # reference to PROVIDERS dict
         self._buffer = EventBuffer(max_size=config.buffer_max_size)
         self._started_at: float = time.monotonic()
         self._loop: asyncio.AbstractEventLoop | None = None
@@ -264,7 +264,7 @@ class CloudConnector:
 
         while not stop_event.is_set():
             try:
-                pcount, hcount = self._provider_counts()
+                pcount, hcount = self._mcp_server_counts()
                 uptime = time.monotonic() - self._started_at
                 await client.heartbeat(pcount, hcount, uptime)
                 self._connected = True
@@ -311,17 +311,17 @@ class CloudConnector:
 
     async def _sync_state(self, client: CloudClient) -> None:
         try:
-            snapshots = self._build_provider_snapshots()
+            snapshots = self._build_mcp_server_snapshots()
             await client.sync_state(snapshots)
         except (httpx.HTTPError, OSError) as exc:
             logger.debug("cloud_state_sync_failed", error=str(exc))
 
     # -- helpers ------------------------------------------------------------
 
-    def _provider_counts(self) -> tuple[int, int]:
-        total = len(self._providers)
+    def _mcp_server_counts(self) -> tuple[int, int]:
+        total = len(self._mcp_servers)
         healthy = 0
-        for p in self._providers.values():
+        for p in self._mcp_servers.values():
             try:
                 if hasattr(p, "state") and str(p.state) == "ready":
                     healthy += 1
@@ -329,9 +329,9 @@ class CloudConnector:
                 pass
         return total, healthy
 
-    def _build_provider_snapshots(self) -> list[dict[str, Any]]:
+    def _build_mcp_server_snapshots(self) -> list[dict[str, Any]]:
         snapshots: list[dict[str, Any]] = []
-        for pid, p in self._providers.items():
+        for pid, p in self._mcp_servers.items():
             snap: dict[str, Any] = {"id": pid}
             try:
                 snap["status"] = str(p.state).upper() if hasattr(p, "state") else "UNKNOWN"

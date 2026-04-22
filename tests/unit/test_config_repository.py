@@ -1,10 +1,10 @@
-"""Tests for persistence layer - provider config repository."""
+"""Tests for persistence layer - mcp_server config repository."""
 
 import asyncio
 
 import pytest
 
-from mcp_hangar.domain.contracts.persistence import ProviderConfigSnapshot
+from mcp_hangar.domain.contracts.persistence import McpServerConfigSnapshot
 from mcp_hangar.infrastructure.persistence import (
     Database,
     DatabaseConfig,
@@ -14,10 +14,10 @@ from mcp_hangar.infrastructure.persistence import (
 
 
 @pytest.fixture
-def config_snapshot() -> ProviderConfigSnapshot:
-    """Create a test provider configuration snapshot."""
-    return ProviderConfigSnapshot(
-        provider_id="test-provider",
+def config_snapshot() -> McpServerConfigSnapshot:
+    """Create a test mcp_server configuration snapshot."""
+    return McpServerConfigSnapshot(
+        mcp_server_id="test-provider",
         mode="subprocess",
         command=["python", "-m", "test_server"],
         env={"TEST_VAR": "value"},
@@ -41,15 +41,15 @@ class TestInMemoryProviderConfigRepository:
     async def test_save_and_get(
         self,
         repo: InMemoryProviderConfigRepository,
-        config_snapshot: ProviderConfigSnapshot,
+        config_snapshot: McpServerConfigSnapshot,
     ):
         """Test saving and retrieving a configuration."""
         await repo.save(config_snapshot)
 
-        result = await repo.get(config_snapshot.provider_id)
+        result = await repo.get(config_snapshot.mcp_server_id)
 
         assert result is not None
-        assert result.provider_id == config_snapshot.provider_id
+        assert result.mcp_server_id == config_snapshot.mcp_server_id
         assert result.mode == config_snapshot.mode
         assert result.command == config_snapshot.command
 
@@ -63,9 +63,9 @@ class TestInMemoryProviderConfigRepository:
     async def test_get_all(self, repo: InMemoryProviderConfigRepository):
         """Test getting all configurations."""
         configs = [
-            ProviderConfigSnapshot(provider_id="provider-1", mode="subprocess"),
-            ProviderConfigSnapshot(provider_id="provider-2", mode="docker"),
-            ProviderConfigSnapshot(provider_id="provider-3", mode="remote"),
+            McpServerConfigSnapshot(mcp_server_id="provider-1", mode="subprocess"),
+            McpServerConfigSnapshot(mcp_server_id="provider-2", mode="docker"),
+            McpServerConfigSnapshot(mcp_server_id="provider-3", mode="remote"),
         ]
 
         for config in configs:
@@ -74,22 +74,22 @@ class TestInMemoryProviderConfigRepository:
         all_configs = await repo.get_all()
 
         assert len(all_configs) == 3
-        ids = {c.provider_id for c in all_configs}
+        ids = {c.mcp_server_id for c in all_configs}
         assert ids == {"provider-1", "provider-2", "provider-3"}
 
     @pytest.mark.asyncio
     async def test_delete(
         self,
         repo: InMemoryProviderConfigRepository,
-        config_snapshot: ProviderConfigSnapshot,
+        config_snapshot: McpServerConfigSnapshot,
     ):
         """Test deleting a configuration."""
         await repo.save(config_snapshot)
 
-        deleted = await repo.delete(config_snapshot.provider_id)
+        deleted = await repo.delete(config_snapshot.mcp_server_id)
 
         assert deleted is True
-        assert await repo.get(config_snapshot.provider_id) is None
+        assert await repo.get(config_snapshot.mcp_server_id) is None
 
     @pytest.mark.asyncio
     async def test_delete_nonexistent(self, repo: InMemoryProviderConfigRepository):
@@ -101,37 +101,42 @@ class TestInMemoryProviderConfigRepository:
     async def test_exists(
         self,
         repo: InMemoryProviderConfigRepository,
-        config_snapshot: ProviderConfigSnapshot,
+        config_snapshot: McpServerConfigSnapshot,
     ):
         """Test checking if configuration exists."""
-        assert await repo.exists(config_snapshot.provider_id) is False
+        assert await repo.exists(config_snapshot.mcp_server_id) is False
 
         await repo.save(config_snapshot)
 
-        assert await repo.exists(config_snapshot.provider_id) is True
+        assert await repo.exists(config_snapshot.mcp_server_id) is True
 
     @pytest.mark.asyncio
     async def test_update_preserves_created_at(
         self,
         repo: InMemoryProviderConfigRepository,
-        config_snapshot: ProviderConfigSnapshot,
+        config_snapshot: McpServerConfigSnapshot,
     ):
         """Test that updating preserves created_at timestamp."""
         await repo.save(config_snapshot)
-        first = await repo.get(config_snapshot.provider_id)
+        first = await repo.get(config_snapshot.mcp_server_id)
+        assert first is not None
+        assert first.created_at is not None
         created_at = first.created_at
 
         # Wait a bit and update
         await asyncio.sleep(0.01)
 
-        updated = ProviderConfigSnapshot(
-            provider_id=config_snapshot.provider_id,
+        updated = McpServerConfigSnapshot(
+            mcp_server_id=config_snapshot.mcp_server_id,
             mode="docker",  # Changed mode
             image="test-image",
         )
         await repo.save(updated)
 
-        result = await repo.get(config_snapshot.provider_id)
+        result = await repo.get(config_snapshot.mcp_server_id)
+        assert result is not None
+        assert result.created_at is not None
+        assert result.updated_at is not None
 
         assert result.created_at == created_at
         assert result.updated_at > created_at
@@ -156,16 +161,16 @@ class TestSQLiteProviderConfigRepository:
         self,
         database: Database,
         repo: SQLiteProviderConfigRepository,
-        config_snapshot: ProviderConfigSnapshot,
+        config_snapshot: McpServerConfigSnapshot,
     ):
         """Test saving and retrieving a configuration."""
         await database.initialize()
         await repo.save(config_snapshot)
 
-        result = await repo.get(config_snapshot.provider_id)
+        result = await repo.get(config_snapshot.mcp_server_id)
 
         assert result is not None
-        assert result.provider_id == config_snapshot.provider_id
+        assert result.mcp_server_id == config_snapshot.mcp_server_id
         assert result.mode == config_snapshot.mode
         assert result.command == config_snapshot.command
         assert result.env == config_snapshot.env
@@ -181,77 +186,77 @@ class TestSQLiteProviderConfigRepository:
     async def test_get_all_enabled_only(self, database: Database, repo: SQLiteProviderConfigRepository):
         """Test get_all returns only enabled configurations."""
         await database.initialize()
-        enabled_config = ProviderConfigSnapshot(provider_id="enabled-provider", mode="subprocess", enabled=True)
+        enabled_config = McpServerConfigSnapshot(mcp_server_id="enabled-provider", mode="subprocess", enabled=True)
         await repo.save(enabled_config)
 
         # Delete (soft delete)
         await repo.delete("enabled-provider")
 
         # Re-add another
-        new_config = ProviderConfigSnapshot(provider_id="new-provider", mode="subprocess", enabled=True)
+        new_config = McpServerConfigSnapshot(mcp_server_id="new-provider", mode="subprocess", enabled=True)
         await repo.save(new_config)
 
         all_configs = await repo.get_all()
 
         assert len(all_configs) == 1
-        assert all_configs[0].provider_id == "new-provider"
+        assert all_configs[0].mcp_server_id == "new-provider"
 
     @pytest.mark.asyncio
     async def test_soft_delete(
         self,
         database: Database,
         repo: SQLiteProviderConfigRepository,
-        config_snapshot: ProviderConfigSnapshot,
+        config_snapshot: McpServerConfigSnapshot,
     ):
         """Test soft delete marks config as disabled."""
         await database.initialize()
         await repo.save(config_snapshot)
 
-        deleted = await repo.delete(config_snapshot.provider_id)
+        deleted = await repo.delete(config_snapshot.mcp_server_id)
 
         assert deleted is True
         # Should not be visible via normal get
-        assert await repo.exists(config_snapshot.provider_id) is False
+        assert await repo.exists(config_snapshot.mcp_server_id) is False
 
     @pytest.mark.asyncio
     async def test_hard_delete(
         self,
         database: Database,
         repo: SQLiteProviderConfigRepository,
-        config_snapshot: ProviderConfigSnapshot,
+        config_snapshot: McpServerConfigSnapshot,
     ):
         """Test hard delete permanently removes configuration."""
         await database.initialize()
         await repo.save(config_snapshot)
 
-        deleted = await repo.hard_delete(config_snapshot.provider_id)
+        deleted = await repo.hard_delete(config_snapshot.mcp_server_id)
 
         assert deleted is True
-        assert await repo.get(config_snapshot.provider_id) is None
+        assert await repo.get(config_snapshot.mcp_server_id) is None
 
     @pytest.mark.asyncio
     async def test_version_increment(
         self,
         database: Database,
         repo: SQLiteProviderConfigRepository,
-        config_snapshot: ProviderConfigSnapshot,
+        config_snapshot: McpServerConfigSnapshot,
     ):
         """Test version increments on update."""
         await database.initialize()
         await repo.save(config_snapshot)
 
-        result1 = await repo.get_with_version(config_snapshot.provider_id)
+        result1 = await repo.get_with_version(config_snapshot.mcp_server_id)
         assert result1 is not None
         _, version1 = result1
 
         # Update
-        updated = ProviderConfigSnapshot(
-            provider_id=config_snapshot.provider_id,
+        updated = McpServerConfigSnapshot(
+            mcp_server_id=config_snapshot.mcp_server_id,
             mode="docker",
         )
         await repo.save(updated)
 
-        result2 = await repo.get_with_version(config_snapshot.provider_id)
+        result2 = await repo.get_with_version(config_snapshot.mcp_server_id)
         assert result2 is not None
         _, version2 = result2
 
@@ -262,13 +267,13 @@ class TestSQLiteProviderConfigRepository:
         self,
         database: Database,
         repo: SQLiteProviderConfigRepository,
-        config_snapshot: ProviderConfigSnapshot,
+        config_snapshot: McpServerConfigSnapshot,
     ):
         """Test updating last_started_at timestamp."""
         await database.initialize()
         await repo.save(config_snapshot)
 
-        await repo.update_last_started(config_snapshot.provider_id)
+        await repo.update_last_started(config_snapshot.mcp_server_id)
 
         # No error means success (we can't easily verify the timestamp)
 
@@ -277,12 +282,12 @@ class TestSQLiteProviderConfigRepository:
         self,
         database: Database,
         repo: SQLiteProviderConfigRepository,
-        config_snapshot: ProviderConfigSnapshot,
+        config_snapshot: McpServerConfigSnapshot,
     ):
         """Test updating consecutive failure count."""
         await database.initialize()
         await repo.save(config_snapshot)
 
-        await repo.update_failure_count(config_snapshot.provider_id, 5)
+        await repo.update_failure_count(config_snapshot.mcp_server_id, 5)
 
         # No error means success

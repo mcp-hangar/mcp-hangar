@@ -15,10 +15,10 @@ from mcp_hangar.domain.events import (
     EgressBlocked,
     HealthCheckFailed,
     HealthCheckPassed,
-    ProviderDegraded,
-    ProviderStarted,
-    ProviderStateChanged,
-    ProviderStopped,
+    McpServerDegraded,
+    McpServerStarted,
+    McpServerStateChanged,
+    McpServerStopped,
     ToolInvocationCompleted,
     ToolInvocationFailed,
 )
@@ -26,10 +26,10 @@ from mcp_hangar import metrics as prometheus_metrics
 
 
 @dataclass
-class ProviderMetrics:
-    """Metrics for a single provider."""
+class McpServerMetrics:
+    """Metrics for a single mcp_server."""
 
-    provider_id: str
+    mcp_server_id: str
     total_invocations: int = 0
     successful_invocations: int = 0
     failed_invocations: int = 0
@@ -73,7 +73,7 @@ class MetricsEventHandler:
 
     def __init__(self):
         """Initialize the metrics handler."""
-        self._metrics: dict[str, ProviderMetrics] = defaultdict(lambda: ProviderMetrics(""))
+        self._metrics: dict[str, McpServerMetrics] = defaultdict(lambda: McpServerMetrics(""))
         self._started_at = time.time()
 
     def handle(self, event: DomainEvent) -> None:
@@ -85,11 +85,11 @@ class MetricsEventHandler:
         Args:
             event: The domain event to process
         """
-        if isinstance(event, ProviderStarted):
-            self._handle_provider_started(event)
-        elif isinstance(event, ProviderStopped):
-            self._handle_provider_stopped(event)
-        elif isinstance(event, ProviderStateChanged):
+        if isinstance(event, McpServerStarted):
+            self._handle_mcp_server_started(event)
+        elif isinstance(event, McpServerStopped):
+            self._handle_mcp_server_stopped(event)
+        elif isinstance(event, McpServerStateChanged):
             self._handle_state_changed(event)
         elif isinstance(event, ToolInvocationCompleted):
             self._handle_tool_completed(event)
@@ -99,8 +99,8 @@ class MetricsEventHandler:
             self._handle_health_passed(event)
         elif isinstance(event, HealthCheckFailed):
             self._handle_health_failed(event)
-        elif isinstance(event, ProviderDegraded):
-            self._handle_provider_degraded(event)
+        elif isinstance(event, McpServerDegraded):
+            self._handle_mcp_server_degraded(event)
         elif isinstance(event, CircuitBreakerStateChanged):
             self._handle_circuit_breaker_state_changed(event)
         elif isinstance(event, CapabilityViolationDetected):
@@ -108,29 +108,29 @@ class MetricsEventHandler:
         elif isinstance(event, EgressBlocked):
             self._handle_egress_blocked(event)
 
-    def _handle_provider_started(self, event: ProviderStarted) -> None:
-        """Handle provider started event."""
-        metrics = self._metrics[event.provider_id]
-        metrics.provider_id = event.provider_id
+    def _handle_mcp_server_started(self, event: McpServerStarted) -> None:
+        """Handle mcp_server started event."""
+        metrics = self._metrics[event.mcp_server_id]
+        metrics.mcp_server_id = event.mcp_server_id
 
         # Update Prometheus metrics
-        prometheus_metrics.record_provider_start(event.provider_id, success=True)
-        prometheus_metrics.update_provider_state(event.provider_id, "ready", mode=event.mode)
+        prometheus_metrics.record_mcp_server_start(event.mcp_server_id, success=True)
+        prometheus_metrics.update_mcp_server_state(event.mcp_server_id, "ready", mode=event.mode)
 
-    def _handle_provider_stopped(self, event: ProviderStopped) -> None:
-        """Handle provider stopped event."""
+    def _handle_mcp_server_stopped(self, event: McpServerStopped) -> None:
+        """Handle mcp_server stopped event."""
         # Update Prometheus metrics
-        prometheus_metrics.record_provider_stop(event.provider_id, reason=event.reason)
-        prometheus_metrics.update_provider_state(event.provider_id, "cold")
+        prometheus_metrics.record_mcp_server_stop(event.mcp_server_id, reason=event.reason)
+        prometheus_metrics.update_mcp_server_state(event.mcp_server_id, "cold")
 
-    def _handle_state_changed(self, event: ProviderStateChanged) -> None:
-        """Handle provider state changed event."""
+    def _handle_state_changed(self, event: McpServerStateChanged) -> None:
+        """Handle mcp_server state changed event."""
         # Update Prometheus metrics
-        prometheus_metrics.update_provider_state(event.provider_id, event.new_state)
+        prometheus_metrics.update_mcp_server_state(event.mcp_server_id, event.new_state)
 
     def _handle_tool_completed(self, event: ToolInvocationCompleted) -> None:
         """Handle tool invocation completed event."""
-        metrics = self._metrics[event.provider_id]
+        metrics = self._metrics[event.mcp_server_id]
         metrics.total_invocations += 1
         metrics.successful_invocations += 1
         metrics.total_duration_ms += event.duration_ms
@@ -143,7 +143,7 @@ class MetricsEventHandler:
         # Update Prometheus metrics
         duration_s = event.duration_ms / 1000.0
         prometheus_metrics.observe_tool_call(
-            provider=event.provider_id,
+            mcp_server=event.mcp_server_id,
             tool=event.tool_name,
             duration=duration_s,
             success=True,
@@ -151,13 +151,13 @@ class MetricsEventHandler:
 
     def _handle_tool_failed(self, event: ToolInvocationFailed) -> None:
         """Handle tool invocation failed event."""
-        metrics = self._metrics[event.provider_id]
+        metrics = self._metrics[event.mcp_server_id]
         metrics.total_invocations += 1
         metrics.failed_invocations += 1
 
         # Update Prometheus metrics
         prometheus_metrics.observe_tool_call(
-            provider=event.provider_id,
+            mcp_server=event.mcp_server_id,
             tool=event.tool_name,
             duration=0.0,  # Duration unknown for failures
             success=False,
@@ -166,13 +166,13 @@ class MetricsEventHandler:
 
     def _handle_health_passed(self, event: HealthCheckPassed) -> None:
         """Handle health check passed event."""
-        metrics = self._metrics[event.provider_id]
+        metrics = self._metrics[event.mcp_server_id]
         metrics.health_checks_passed += 1
 
         # Update Prometheus metrics
         duration_s = event.duration_ms / 1000.0
         prometheus_metrics.observe_health_check(
-            provider=event.provider_id,
+            mcp_server=event.mcp_server_id,
             duration=duration_s,
             healthy=True,
             consecutive_failures=0,
@@ -180,61 +180,61 @@ class MetricsEventHandler:
 
     def _handle_health_failed(self, event: HealthCheckFailed) -> None:
         """Handle health check failed event."""
-        metrics = self._metrics[event.provider_id]
+        metrics = self._metrics[event.mcp_server_id]
         metrics.health_checks_failed += 1
 
         # Update Prometheus metrics
         prometheus_metrics.observe_health_check(
-            provider=event.provider_id,
+            mcp_server=event.mcp_server_id,
             duration=0.0,  # Duration unknown for failures
             healthy=False,
             consecutive_failures=event.consecutive_failures,
         )
 
-    def _handle_provider_degraded(self, event: ProviderDegraded) -> None:
-        """Handle provider degraded event."""
-        metrics = self._metrics[event.provider_id]
+    def _handle_mcp_server_degraded(self, event: McpServerDegraded) -> None:
+        """Handle mcp_server degraded event."""
+        metrics = self._metrics[event.mcp_server_id]
         metrics.degradation_count += 1
 
         # Update Prometheus metrics
-        prometheus_metrics.update_provider_state(event.provider_id, "degraded")
+        prometheus_metrics.update_mcp_server_state(event.mcp_server_id, "degraded")
 
     def _handle_circuit_breaker_state_changed(self, event: CircuitBreakerStateChanged) -> None:
         """Handle circuit breaker state changed event."""
-        prometheus_metrics.update_circuit_breaker_state(event.provider_id, event.new_state)
+        prometheus_metrics.update_circuit_breaker_state(event.mcp_server_id, event.new_state)
 
     def _handle_capability_violation(self, event: CapabilityViolationDetected) -> None:
         """Handle capability violation detected event."""
         prometheus_metrics.record_capability_violation(
-            provider=event.provider_id,
+            mcp_server=event.mcp_server_id,
             violation_type=event.violation_type,
         )
 
     def _handle_egress_blocked(self, event: EgressBlocked) -> None:
         """Handle egress blocked event."""
         prometheus_metrics.record_capability_violation(
-            provider=event.provider_id,
+            mcp_server=event.mcp_server_id,
             violation_type="egress_denied",
         )
 
-    def get_metrics(self, provider_id: str) -> ProviderMetrics | None:
+    def get_metrics(self, mcp_server_id: str) -> McpServerMetrics | None:
         """
-        Get metrics for a specific provider.
+        Get metrics for a specific mcp_server.
 
         Args:
-            provider_id: The provider ID
+            mcp_server_id: The mcp_server ID
 
         Returns:
-            ProviderMetrics if available, None otherwise
+            McpServerMetrics if available, None otherwise
         """
-        return self._metrics.get(provider_id)
+        return self._metrics.get(mcp_server_id)
 
-    def get_all_metrics(self) -> dict[str, ProviderMetrics]:
+    def get_all_metrics(self) -> dict[str, McpServerMetrics]:
         """
-        Get metrics for all providers.
+        Get metrics for all mcp_servers.
 
         Returns:
-            Dictionary of provider_id -> ProviderMetrics
+            Dictionary of mcp_server_id -> McpServerMetrics
         """
         return dict(self._metrics)
 

@@ -38,7 +38,7 @@
   visibility layer** around Hangar.
 - Hangar exports telemetry to them; Hangar does **not** try to become a generic AI observability platform.
 - OpenTelemetry is the **interoperability contract**: Hangar should emit MCP-aware governance telemetry with stable
-  attributes for provider, tool, group, user, session, policy, and enforcement outcomes.
+  attributes for MCP server, tool, group, user, session, policy, and enforcement outcomes.
 - Product investment stays focused on runtime governance, verification, identity-aware audit, and enforcement.
 
 ---
@@ -76,8 +76,8 @@
 
 | Feature                                            | License | Directory                                     | Rationale                                                       |
 |----------------------------------------------------|---------|-----------------------------------------------|-----------------------------------------------------------------|
-| Provider lifecycle, state machine, circuit breaker | MIT     | `src/`                                        | Core value, must be open for adoption                           |
-| Provider groups, load balancing, failover          | MIT     | `src/`                                        | Core value                                                      |
+| MCP Server lifecycle, state machine, circuit breaker | MIT     | `src/`                                        | Core value, must be open for adoption                           |
+| MCP Server groups, load balancing, failover          | MIT     | `src/`                                        | Core value                                                      |
 | Health checks, Prometheus metrics, OTEL export     | MIT     | `src/`                                        | Observability foundation, enables partner integrations          |
 | K8s operator, CRDs, Helm charts                    | MIT     | `operator/`, `helm-charts/` (separate repos)  | Adoption requires open operator                                 |
 | Capability declaration schema                      | MIT     | `src/`                                        | Foundational for enforcement, must be standard                  |
@@ -162,14 +162,14 @@ Core (MIT) contributions do not require a CLA.
 
 **Includes:**
 
-- Provider lifecycle management (state machine, health checks, circuit breaker)
-- Provider groups (load balancing, failover)
-- Docker and Kubernetes provider modes
+- MCP Server lifecycle management (state machine, health checks, circuit breaker)
+- MCP Server groups (load balancing, failover)
+- Docker and Kubernetes MCP server modes
 - Hot-reload configuration
 - Batch invocations with single-flight
 - Prometheus metrics (full set)
 - OpenTelemetry tracing export to partner backends (OpenLIT, Langfuse, Grafana stack, OTEL Collector)
-- MCP-aware OTEL attribute taxonomy for governance telemetry (provider/tool/user/session/policy context)
+- MCP-aware OTEL attribute taxonomy for governance telemetry (MCP server/tool/user/session/policy context)
 - Capability declaration schema and network policy generation
 - Violation signals and enforcement events
 - Basic audit logging (stdout/file)
@@ -194,7 +194,7 @@ Core (MIT) contributions do not require a CLA.
 - Event sourcing persistence (SQLite, Postgres)
 - Langfuse LLM observability integration
 - Tool schema drift detection
-- Behavioral reports (per-provider)
+- Behavioral reports (per-MCP server)
 - Config export/backup
 
 ### Tier 2: Hangar Enterprise (BSL 1.1, custom commercial terms)
@@ -211,7 +211,7 @@ Core (MIT) contributions do not require a CLA.
 - Call sequence pattern engine (semantic analysis)
 - Pre-built detection rule packs
 - Compliance export (CEF, LEEF, JSON-lines for SIEM)
-- Cost attribution (FinOps per user/agent/provider)
+- Cost attribution (FinOps per user/agent/MCP server)
 - Multi-cluster federation (H2 2026)
 - SSO / SCIM user provisioning
 - Priority support + SLA
@@ -249,7 +249,7 @@ The runtime security thesis requires:
 | Image provenance           | ✅ cosign/notation verification    | ❌ No equivalent                     |
 | Behavioral baseline        | ✅ Isolated network namespace      | ❌ Cannot distinguish server traffic |
 
-**Decision:** Stdio providers remain supported for development and simple setups only. New security and governance work
+**Decision:** Stdio MCP servers remain supported for development and simple setups only. New security and governance work
 targets Kubernetes first, then Docker where practical. Documentation and product direction lead with operator-driven
 Kubernetes deployment; Docker remains the compatibility and local-development path.
 
@@ -267,14 +267,14 @@ Kubernetes deployment; Docker remains the compatibility and local-development pa
 | Helm chart hardening         | Basic                      | CIS benchmark aligned, OPA/Kyverno policies shipped                               | P1       |
 | Upgrade strategy             | Not defined                | CRD versioning, conversion webhooks, migration guide                              | P2       |
 
-### Docker provider hardening priorities
+### Docker MCP server hardening priorities
 
 Docker remains important, but primarily as the compatibility path below Kubernetes. Hardening work here should follow
 patterns proven in the Kubernetes path rather than drive the roadmap.
 
 | Item                  | Current state                   | Target state                                                  | Priority |
 |-----------------------|---------------------------------|---------------------------------------------------------------|----------|
-| Network isolation     | `none/bridge/host` option       | Default: dedicated bridge per provider, explicit egress rules | P0       |
+| Network isolation     | `none/bridge/host` option       | Default: dedicated bridge per MCP server, explicit egress rules | P0       |
 | Default security opts | Dropped caps, no-new-privileges | + seccomp profile, read-only root, tmpfs for /tmp             | P0       |
 | Egress allowlist      | Not implemented                 | Config-driven outbound destination allowlist, deny all else   | P0       |
 | DNS monitoring        | Not implemented                 | Capture DNS queries per container for behavioral baseline     | P1       |
@@ -296,7 +296,7 @@ Phases 1-2 are complete.
 | Response truncation / continuation cache                                                       | Shipped (v0.6.3)         | **Maintain.** Bug fixes only.                 | Solid feature, complete, no further investment needed.                                               |
 | Saga compensation                                                                              | Shipped with persistence | **Maintain.**                                 | Infrastructure piece, done.                                                                          |
 | Binary installer                                                                               | Shipped in v0.6.0        | **Deprioritize.** Docker/K8s path is primary. | Binary installs don't benefit from container security.                                               |
-| Stdio provider enhancements                                                                    | Working                  | **Freeze.** No security features for stdio.   | Cannot enforce network/filesystem policies on bare subprocess.                                       |
+| Stdio MCP server enhancements                                                                    | Working                  | **Freeze.** No security features for stdio.   | Cannot enforce network/filesystem policies on bare subprocess.                                       |
 | Stdio governance/security investment                                                           | Supported path only      | **Stop expanding.** Maintenance only.         | Kubernetes operator, policies, and cluster-native controls are the only serious growth path.         |
 | `mcp-hangar init` interactive flow                                                             | Polished (v0.6.6)        | **Maintain.**                                 | Good DX, complete for now.                                                                           |
 | Redis cache backend                                                                            | Shipped                  | **Maintain.**                                 | Works, no further investment.                                                                        |
@@ -310,7 +310,7 @@ Phases 1-2 are complete.
 
 | Area                              | Gap                                                                        | Action                                                                                                      | Target version | Status |
 |-----------------------------------|----------------------------------------------------------------------------|-------------------------------------------------------------------------------------------------------------|----------------|--------|
-| **Container network isolation**   | Docker providers can talk to anything                                      | Default-deny egress, explicit allowlist                                                                     | v0.13.0        | |
+| **Container network isolation**   | Docker MCP servers can talk to anything                                      | Default-deny egress, explicit allowlist                                                                     | v0.13.0        | |
 | **Capability declaration schema** | No formal way to declare what a server needs                               | New `capabilities` config block                                                                             | v0.13.0        | |
 | **K8s NetworkPolicy generation**  | Operator doesn't create NetworkPolicies                                    | Auto-generate from CRD capabilities field                                                                   | v0.13.0        | |
 | **Licensing boundary**            | All code in MIT, no commercial protection                                  | Migrate Pro/Enterprise features to `enterprise/` under BSL 1.1                                              | v0.13.0        | In progress (v7.0 Phase 36) |
@@ -318,8 +318,8 @@ Phases 1-2 are complete.
 | **Test coverage on auth**         | Auth stack is comprehensive but test density unclear                       | Audit test coverage, target 90%+ on auth paths                                                              | v0.13.0        | |
 | **Security scanning in CI**       | Not visible in changelog                                                   | Trivy/Grype on container images, Semgrep on source                                                          | v0.13.0        | |
 | **Dependency audit**              | Not visible                                                                | `pip-audit`, `npm audit` in CI, SBOM generation                                                             | v0.13.0        | |
-| **OTEL semantic conventions**     | Governance telemetry is useful but not yet formalized as a stable contract | Define MCP-aware OTEL conventions for provider/tool/user/session/policy/enforcement attributes              | v0.13.0        | **DONE** (v6.0 Phase 31) |
-| **Trace context propagation**     | Cross-system traces depend on ad hoc correlation                           | Standardize agent -> Hangar -> provider trace propagation for audit and enforcement paths                   | v0.13.0        | **DONE** (v6.0 Phase 32) |
+| **OTEL semantic conventions**     | Governance telemetry is useful but not yet formalized as a stable contract | Define MCP-aware OTEL conventions for MCP server/tool/user/session/policy/enforcement attributes              | v0.13.0        | **DONE** (v6.0 Phase 31) |
+| **Trace context propagation**     | Cross-system traces depend on ad hoc correlation                           | Standardize agent -> Hangar -> MCP server trace propagation for audit and enforcement paths                   | v0.13.0        | **DONE** (v6.0 Phase 32) |
 | **Operator enforcement loop**     | Operator reconciles state, but not full governance posture                 | Make operator the primary engine for capability enforcement, NetworkPolicy rollout, and violation signaling | v0.13.0        | |
 | **Admission/policy hooks**        | K8s integration is not yet policy-driven enough                            | Validate and reject unsafe specs before runtime using admission and policy integrations                     | v0.13.0        | |
 | **Import boundary enforcement**   | No CI rule prevents core from importing enterprise                         | Add CI check: `src/` must never import from `enterprise/`                                                   | v0.13.0        | |
@@ -330,7 +330,7 @@ Phases 1-2 are complete.
 |--------------------------------|------------------------------------------------------------------------------------|----------------------------------------------------------------------------------------------|----------------|--------|
 | **Helm chart security**        | Basic                                                                              | Pod Security Standards, network policies, RBAC scoping                                       | v0.14.0        | |
 | **Upgrade path**               | No migration guide between versions                                                | Documented upgrade procedure, DB migration tooling                                           | v0.14.0        | |
-| **Performance benchmarks**     | Batch benchmark exists, nothing else                                               | Latency overhead of proxy path, max providers per instance                                   | v0.14.0        | |
+| **Performance benchmarks**     | Batch benchmark exists, nothing else                                               | Latency overhead of proxy path, max MCP servers per instance                                   | v0.14.0        | |
 | **Error handling audit**       | Exception hygiene improved in v0.11.0                                              | Full audit of error surfaces exposed to users                                                | v0.14.0        | |
 | **OTLP completeness**          | Traces exist, but partner story needs explicit completeness across telemetry types | Ensure security-relevant traces, metrics, and logs/audit signals are exportable through OTLP | v0.14.0        | **DONE** (v6.0 Phase 33) |
 | **Integration recipes**        | OTEL partner story is implied, not operationalized                                 | Publish reference deployments for OpenLIT, OTEL Collector, Langfuse, and Grafana             | v0.14.0        | **DONE** (v6.0 Phase 34) |
@@ -340,7 +340,7 @@ Phases 1-2 are complete.
 
 | Area                               | Gap             | Action                                             |
 |------------------------------------|-----------------|----------------------------------------------------|
-| Cosign/notation image verification | Not implemented | Add to container provider startup path             |
+| Cosign/notation image verification | Not implemented | Add to container MCP server startup path             |
 | Seccomp profiles                   | Not shipped     | Create and ship default MCP server seccomp profile |
 | Multi-cluster federation           | Not implemented | Design doc first, implement when demand validated  |
 | SCIM provisioning                  | Not implemented | Enterprise tier only                               |
@@ -361,7 +361,7 @@ Phases 1-2 are complete.
 
 - [ ] All P0 items from Phases 1-3 complete and tested
 - [ ] K8s operator passes CIS benchmark (scoped)
-- [ ] Docker provider default-deny egress enforced
+- [ ] Docker MCP server default-deny egress enforced
 - [ ] Auth stack test coverage ≥ 90%
 - [ ] CI: Trivy, Semgrep, pip-audit, npm-audit green
 - [ ] Upgrade path documented from v0.12 → v1.0
@@ -414,7 +414,7 @@ mcp-hangar/
 │
 ├── security/                  # Seccomp profiles, AppArmor, NetworkPolicy templates, detection rules
 ├── benchmarks/                # Performance benchmark suite
-├── docker/                    # Provider container images
+├── docker/                    # MCP Server container images
 ├── docs/                      # MkDocs documentation
 │   └── internal/
 │       └── PRODUCT_ARCHITECTURE.md  # This document
@@ -443,7 +443,7 @@ fi
 | **Composio**             | No runtime behavior verification. Auth is their auth, not yours. No audit trail export. No K8s operator.                                                                                                                                                                    |
 | **Smithery**             | "Config data is ephemeral" — zero runtime security. No governance. Community-submitted servers are unvetted.                                                                                                                                                                |
 | **Glama**                | "Logging/traceability" is a bullet point, not a product. No behavioral profiling. No capability enforcement.                                                                                                                                                                |
-| **OpenLIT**              | Excellent AI observability and MCP telemetry partner. Missing: provider lifecycle control, runtime enforcement, failover/group management, capability verification, and MCP-native governance semantics. We should integrate through OTEL, not imitate the product surface. |
+| **OpenLIT**              | Excellent AI observability and MCP telemetry partner. Missing: MCP server lifecycle control, runtime enforcement, failover/group management, capability verification, and MCP-native governance semantics. We should integrate through OTEL, not imitate the product surface. |
 | **MCP Gateway Registry** | Closest to us. Has audit logs, RBAC, OTLP telemetry. Missing: behavioral profiling, capability verification, semantic analysis, identity propagation. Their OTLP is generic; ours is MCP-aware.                                                                             |
 | **CData Connect AI**     | Enterprise wrapper. Governance = their dashboard. No open source. No protocol-level understanding.                                                                                                                                                                          |
 

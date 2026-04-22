@@ -20,17 +20,17 @@ class PrometheusMetricsPublisher(IMetricsPublisher):
 
             self._metrics = metrics
 
-    def record_cold_start(self, provider_id: str, duration_s: float, mode: str) -> None:
+    def record_cold_start(self, mcp_server_id: str, duration_s: float, mode: str) -> None:
         """Record a cold start event."""
         self._ensure_metrics()
-        self._metrics.record_cold_start(provider_id, duration_s, mode)
+        self._metrics.record_cold_start(mcp_server_id, duration_s, mode)
 
-    def begin_cold_start(self, provider_id: str) -> None:
+    def begin_cold_start(self, mcp_server_id: str) -> None:
         """Mark the beginning of a cold start."""
         self._ensure_metrics()
-        self._metrics.cold_start_begin(provider_id)
+        self._metrics.cold_start_begin(mcp_server_id)
 
-    def end_cold_start(self, provider_id: str) -> None:
+    def end_cold_start(self, mcp_server_id: str) -> None:
         """Mark the end of a cold start."""
         self._ensure_metrics()
-        self._metrics.cold_start_end(provider_id)
+        self._metrics.cold_start_end(mcp_server_id)

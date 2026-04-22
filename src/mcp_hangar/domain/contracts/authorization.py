@@ -21,7 +21,7 @@ class AuthorizationRequest:
     Attributes:
         principal: The authenticated principal requesting access.
         action: The action being requested (create, read, update, delete, invoke, etc.).
-        resource_type: Type of resource (provider, tool, config, audit, metrics).
+        resource_type: Type of resource (mcp_server, tool, config, audit, metrics).
         resource_id: Specific resource identifier or '*' for any.
         context: Additional context for policy evaluation (rate limits, time, etc.).
     """
@@ -280,7 +280,7 @@ class IToolAccessPolicyStore(Protocol):
     """Persistent storage for tool access policies.
 
     Stores per-scope tool access policies that survive server restarts.
-    Scope values: "provider", "group", "member".
+    Scope values: "mcp_server", "group", "member".
     """
 
     @abstractmethod
@@ -294,8 +294,8 @@ class IToolAccessPolicyStore(Protocol):
         """Persist a tool access policy for a scope/target combination.
 
         Args:
-            scope: "provider", "group", or "member".
-            target_id: Identifier of the provider, group, or member.
+            scope: "mcp_server", "group", or "member".
+            target_id: Identifier of the mcp_server, group, or member.
             allow_list: Tool name patterns to allow.
             deny_list: Tool name patterns to deny.
         """
@@ -363,8 +363,8 @@ class PolicyEvaluationResult:
 class IToolAccessPolicyEnforcer(Protocol):
     """Runtime enforcement of tool access policies.
 
-    Evaluates whether a principal can invoke a specific tool on a provider,
-    considering all applicable policies (provider-level, group-level, member-level).
+    Evaluates whether a principal can invoke a specific tool on a mcp_server,
+    considering all applicable policies (mcp_server-level, group-level, member-level).
 
     This is the enforcement contract -- distinct from IToolAccessPolicyStore which
     handles policy storage/retrieval. Enterprise RBAC implements this with
@@ -376,7 +376,7 @@ class IToolAccessPolicyEnforcer(Protocol):
     def evaluate(
         self,
         principal: Principal,
-        provider_id: str,
+        mcp_server_id: str,
         tool_name: str,
         context: dict[str, Any] | None = None,
     ) -> PolicyEvaluationResult:
@@ -384,7 +384,7 @@ class IToolAccessPolicyEnforcer(Protocol):
 
         Args:
             principal: The authenticated principal requesting access.
-            provider_id: ID of the provider owning the tool.
+            mcp_server_id: ID of the mcp_server owning the tool.
             tool_name: Name of the tool being invoked.
             context: Optional additional context (group membership, etc.).
 
@@ -492,9 +492,10 @@ class NullToolAccessPolicyEnforcer:
     def evaluate(
         self,
         principal: Principal,
-        provider_id: str,
         tool_name: str,
+        mcp_server_id: str | None = None,
         context: dict[str, Any] | None = None,
+        **kwargs: Any,
     ) -> PolicyEvaluationResult:
         """Allow all tool invocations when no policy enforcement is configured."""
         return PolicyEvaluationResult.allow(reason="No policy enforcement configured (null enforcer)")

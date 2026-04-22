@@ -12,7 +12,7 @@ from mcp_hangar.infrastructure.launchers.docker import DockerLauncher
 from mcp_hangar.domain.value_objects.capabilities import (
     EgressRule,
     NetworkCapabilities,
-    ProviderCapabilities,
+    McpServerCapabilities,
 )
 
 
@@ -46,7 +46,7 @@ class TestDockerLauncherNetworkMode:
 
     def test_capabilities_empty_egress_denies_network(self) -> None:
         """Capabilities with empty egress -> --network none (deny all)."""
-        caps = ProviderCapabilities(
+        caps = McpServerCapabilities(
             network=NetworkCapabilities(egress=()),
         )
         launcher = self._make_launcher(enable_network=True)  # enable_network should be overridden
@@ -57,7 +57,7 @@ class TestDockerLauncherNetworkMode:
 
     def test_capabilities_with_egress_allows_network(self) -> None:
         """Capabilities with egress rules -> no --network none (allow bridge)."""
-        caps = ProviderCapabilities(
+        caps = McpServerCapabilities(
             network=NetworkCapabilities(
                 egress=(EgressRule(host="api.openai.com", port=443, protocol="https"),),
             ),
@@ -73,7 +73,7 @@ class TestDockerLauncherNetworkMode:
 
     def test_capabilities_override_enable_network_flag(self) -> None:
         """Capabilities win over enable_network=True: empty egress -> deny."""
-        caps = ProviderCapabilities(
+        caps = McpServerCapabilities(
             network=NetworkCapabilities(egress=()),
         )
         launcher = self._make_launcher(enable_network=True)
@@ -84,7 +84,7 @@ class TestDockerLauncherNetworkMode:
 
     def test_capabilities_default_network_has_empty_egress(self) -> None:
         """Default ProviderCapabilities has NetworkCapabilities with empty egress -> deny."""
-        caps = ProviderCapabilities()  # Default: network has empty egress tuple
+        caps = McpServerCapabilities()  # Default: network has empty egress tuple
         launcher = self._make_launcher(enable_network=True)
         cmd = launcher._build_docker_command("test:latest", capabilities=caps)
         assert "--network" in cmd
@@ -93,7 +93,7 @@ class TestDockerLauncherNetworkMode:
 
     def test_capabilities_with_multiple_egress_rules(self) -> None:
         """Multiple egress rules still allow network access."""
-        caps = ProviderCapabilities(
+        caps = McpServerCapabilities(
             network=NetworkCapabilities(
                 egress=(
                     EgressRule(host="api.openai.com", port=443),
@@ -112,7 +112,7 @@ class TestDockerLauncherNetworkMode:
 
     def test_command_still_contains_security_options(self) -> None:
         """Capabilities-aware path still includes other security flags."""
-        caps = ProviderCapabilities(
+        caps = McpServerCapabilities(
             network=NetworkCapabilities(egress=()),
         )
         launcher = self._make_launcher()

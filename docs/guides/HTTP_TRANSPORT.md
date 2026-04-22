@@ -1,12 +1,12 @@
-# HTTP Transport for Remote Providers
+# HTTP Transport for Remote MCP servers
 
-MCP Hangar supports connecting to remote MCP providers exposed via HTTP/HTTPS endpoints. This enables integration with MCP servers deployed as standalone HTTP services in enterprise environments.
+MCP Hangar supports connecting to remote MCP servers exposed via HTTP/HTTPS endpoints. This enables integration with MCP servers deployed as standalone HTTP services in enterprise environments.
 
 ## Overview
 
-HTTP transport allows MCP Hangar to act as a gateway to remote MCP providers, providing:
+HTTP transport allows MCP Hangar to act as a gateway to remote MCP servers, providing:
 
-- **Unified interface**: Same API for local and remote providers
+- **Unified interface**: Same API for local and remote MCP servers
 - **Authentication**: Support for API keys, Bearer tokens, and Basic auth
 - **TLS/HTTPS**: Full support for custom CA certificates
 - **Connection management**: Automatic retries, timeouts, and connection pooling
@@ -14,14 +14,14 @@ HTTP transport allows MCP Hangar to act as a gateway to remote MCP providers, pr
 
 ## Configuration
 
-### Basic Remote Provider
+### Basic Remote MCP Server
 
 ```yaml
-providers:
+mcp_servers:
   remote-math:
     mode: remote
     endpoint: https://mcp-server.example.com/mcp
-    description: "Remote math provider"
+    description: "Remote math mcp_server"
 ```
 
 ### Authentication Options
@@ -29,8 +29,8 @@ providers:
 #### No Authentication
 
 ```yaml
-providers:
-  public-provider:
+mcp_servers:
+  public-mcp-server:
     mode: remote
     endpoint: http://localhost:8080/mcp
 ```
@@ -38,8 +38,8 @@ providers:
 #### API Key Authentication
 
 ```yaml
-providers:
-  api-key-provider:
+mcp_servers:
+  api-key-mcp-server:
     mode: remote
     endpoint: https://api.example.com/mcp
     auth:
@@ -51,8 +51,8 @@ providers:
 #### Bearer Token Authentication
 
 ```yaml
-providers:
-  bearer-provider:
+mcp_servers:
+  bearer-mcp-server:
     mode: remote
     endpoint: https://secure.example.com/mcp
     auth:
@@ -63,8 +63,8 @@ providers:
 #### Basic Authentication
 
 ```yaml
-providers:
-  basic-auth-provider:
+mcp_servers:
+  basic-auth-mcp-server:
     mode: remote
     endpoint: https://internal.example.com/mcp
     auth:
@@ -78,8 +78,8 @@ providers:
 #### Custom CA Certificate
 
 ```yaml
-providers:
-  private-provider:
+mcp_servers:
+  private-mcp-server:
     mode: remote
     endpoint: https://private.example.com:8443/mcp
     tls:
@@ -90,8 +90,8 @@ providers:
 #### Disable SSL Verification (Development Only!)
 
 ```yaml
-providers:
-  dev-provider:
+mcp_servers:
+  dev-mcp-server:
     mode: remote
     endpoint: https://dev.example.com/mcp
     tls:
@@ -101,8 +101,8 @@ providers:
 ### HTTP Transport Options
 
 ```yaml
-providers:
-  tuned-provider:
+mcp_servers:
+  tuned-mcp-server:
     mode: remote
     endpoint: https://api.example.com/mcp
     http:
@@ -125,8 +125,8 @@ Configuration values support environment variable interpolation using the `${VAR
 Example:
 
 ```yaml
-providers:
-  secure-provider:
+mcp_servers:
+  secure-mcp-server:
     mode: remote
     endpoint: ${MCP_ENDPOINT:-https://localhost:8080/mcp}
     auth:
@@ -136,9 +136,9 @@ providers:
 
 ## SSE Streaming Support
 
-HTTP transport supports Server-Sent Events (SSE) for streaming responses from MCP providers. This is automatically detected based on the `Content-Type` header.
+HTTP transport supports Server-Sent Events (SSE) for streaming responses from MCP servers. This is automatically detected based on the `Content-Type` header.
 
-When a provider responds with `Content-Type: text/event-stream`, the client:
+When a MCP server responds with `Content-Type: text/event-stream`, the client:
 
 1. Opens an SSE connection
 2. Reads events until the response for the request ID is received
@@ -146,10 +146,10 @@ When a provider responds with `Content-Type: text/event-stream`, the client:
 
 ## Health Checks
 
-Remote providers support the same health check mechanism as local providers:
+Remote MCP servers support the same health check mechanism as local MCP servers:
 
 ```yaml
-providers:
+mcp_servers:
   remote-with-health:
     mode: remote
     endpoint: https://api.example.com/mcp
@@ -165,7 +165,7 @@ HTTP transport exposes the following metrics:
 
 | Metric | Type | Description |
 |--------|------|-------------|
-| `mcp_hangar_http_requests_total` | Counter | Total HTTP requests by provider, method, status |
+| `mcp_hangar_http_requests_total` | Counter | Total HTTP requests by MCP server, method, status |
 | `mcp_hangar_http_request_duration_seconds` | Histogram | Request latency |
 | `mcp_hangar_http_errors_total` | Counter | HTTP errors by type |
 | `mcp_hangar_http_retries_total` | Counter | Retry attempts |
@@ -177,15 +177,15 @@ HTTP transport exposes the following metrics:
 
 ### Connection Errors
 
-When a remote provider is unavailable:
+When a remote MCP server is unavailable:
 
-1. The provider transitions to `DEAD` or `DEGRADED` state
+1. The MCP server transitions to `DEAD` or `DEGRADED` state
 2. Backoff with exponential retry is applied
 3. Health checks continue to monitor recovery
 
 ### Authentication Failures
 
-HTTP 401/403 responses are logged and cause provider degradation. Check:
+HTTP 401/403 responses are logged and cause MCP server degradation. Check:
 
 1. Credentials in environment variables
 2. Token expiration
@@ -193,12 +193,12 @@ HTTP 401/403 responses are logged and cause provider degradation. Check:
 
 ### Timeout Handling
 
-Timeouts are configurable per-provider:
+Timeouts are configurable per-MCP server:
 
 - `connect_timeout`: Time to establish connection
 - `read_timeout`: Time to receive response
 
-On timeout, the request fails and the provider health is affected.
+On timeout, the request fails and the MCP server health is affected.
 
 ## Security Considerations
 
@@ -210,7 +210,7 @@ On timeout, the request fails and the provider health is affected.
 ## Example: Complete Configuration
 
 ```yaml
-providers:
+mcp_servers:
   production-math:
     mode: remote
     endpoint: https://mcp-math.production.example.com/mcp

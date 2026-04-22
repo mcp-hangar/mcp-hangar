@@ -19,7 +19,7 @@ class TestConfigReloadWorkerIntegration:
         """Create temporary config file."""
         with tempfile.NamedTemporaryFile(mode="w", suffix=".yaml", delete=False) as f:
             config = {
-                "providers": {
+                "mcp_servers": {
                     "test-provider": {
                         "mode": "subprocess",
                         "command": ["python", "-m", "test_server"],

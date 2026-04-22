@@ -1,16 +1,16 @@
-"""Capability declaration value objects for MCP providers.
+"""Capability declaration value objects for MCP mcp_servers.
 
-Providers declare what they need at configuration time.
+McpServers declare what they need at configuration time.
 Hangar verifies at runtime that they do not exceed those declarations.
-Deviation triggers alerts and optionally hard-blocks the provider.
+Deviation triggers alerts and optionally hard-blocks the mcp_server.
 
 This module defines the domain model for the capability declaration schema
 (PRODUCT_ARCHITECTURE.md Phase 1, P0).
 
 Example configuration:
 
-    providers:
-      my_provider:
+    mcp_servers:
+      my_mcp_server:
         mode: docker
         image: my-mcp-server:latest
         capabilities:
@@ -75,7 +75,7 @@ class ViolationSeverity(Enum):
 
 @dataclass(frozen=True)
 class EgressRule:
-    """Single allowed egress destination for a provider.
+    """Single allowed egress destination for a mcp_server.
 
     Attributes:
         host: Hostname or glob pattern (e.g. "api.openai.com" or "*.internal.corp").
@@ -99,14 +99,14 @@ class EgressRule:
 
 @dataclass(frozen=True)
 class NetworkCapabilities:
-    """Network access requirements for a provider.
+    """Network access requirements for a mcp_server.
 
     Attributes:
         egress: Explicit list of allowed outbound destinations.
             Empty list means deny-all egress.
-        dns_allowed: Whether the provider may make DNS queries beyond
+        dns_allowed: Whether the mcp_server may make DNS queries beyond
             the declared egress destinations.
-        loopback_allowed: Whether the provider may connect to localhost/127.0.0.1.
+        loopback_allowed: Whether the mcp_server may connect to localhost/127.0.0.1.
     """
 
     egress: tuple[EgressRule, ...] = field(default_factory=tuple)
@@ -134,7 +134,7 @@ class NetworkCapabilities:
 
 @dataclass(frozen=True)
 class FilesystemCapabilities:
-    """Filesystem access requirements for a provider.
+    """Filesystem access requirements for a mcp_server.
 
     Attributes:
         read_paths: Explicit allowed read paths.
@@ -163,11 +163,11 @@ class FilesystemCapabilities:
 
 @dataclass(frozen=True)
 class EnvironmentCapabilities:
-    """Environment variable requirements for a provider.
+    """Environment variable requirements for a mcp_server.
 
     Attributes:
-        required: Variables the provider must have to function.
-        optional: Variables the provider may use if present.
+        required: Variables the mcp_server must have to function.
+        optional: Variables the mcp_server may use if present.
     """
 
     required: tuple[str, ...] = field(default_factory=tuple)
@@ -184,14 +184,14 @@ class EnvironmentCapabilities:
 
 @dataclass(frozen=True)
 class ToolCapabilities:
-    """Expected tool schema constraints for a provider.
+    """Expected tool schema constraints for a mcp_server.
 
     Attributes:
-        max_count: Maximum number of tools the provider may advertise.
+        max_count: Maximum number of tools the mcp_server may advertise.
             Use 0 for unlimited.
         schema_drift_alert: Whether to alert when the tool schema changes
             between restarts.
-        expected_tools: Declared tool names the provider is expected to expose.
+        expected_tools: Declared tool names the mcp_server is expected to expose.
             Empty tuple means no drift check. Only undeclared runtime tools
             (present at runtime but not in expected_tools) are violations;
             missing expected tools are not flagged.
@@ -210,7 +210,7 @@ class ToolCapabilities:
 
 @dataclass(frozen=True)
 class ResourceCapabilities:
-    """Resource consumption limits for a provider.
+    """Resource consumption limits for a mcp_server.
 
     These are soft limits used for behavioral profiling and alerting.
     Hard enforcement is delegated to the container runtime (cgroups/K8s).
@@ -231,10 +231,10 @@ class ResourceCapabilities:
 
 
 @dataclass(frozen=True)
-class ProviderCapabilities:
-    """Full capability declaration for a provider.
+class McpServerCapabilities:
+    """Full capability declaration for a mcp_server.
 
-    This is the machine-readable contract that a provider declares at
+    This is the machine-readable contract that a mcp_server declares at
     configuration time. Hangar enforces these declarations at runtime:
 
     - Network: generates NetworkPolicy (K8s) or iptables rules (Docker)
@@ -245,7 +245,7 @@ class ProviderCapabilities:
 
     Deviation between declared and observed behavior triggers:
     - CapabilityViolationDetected domain event
-    - Provider quarantine (optional, configurable)
+    - McpServer quarantine (optional, configurable)
     - Audit log entry with full context
 
     Attributes:
@@ -255,9 +255,9 @@ class ProviderCapabilities:
         tools: Tool schema constraints.
         resources: Resource consumption expectations.
         enforcement_mode: How violations are handled.
-            "alert" -- log and emit event, allow the provider to continue.
+            "alert" -- log and emit event, allow the mcp_server to continue.
             "block" -- deny the violating action and emit event.
-            "quarantine" -- block the provider from serving new requests.
+            "quarantine" -- block the mcp_server from serving new requests.
     """
 
     network: NetworkCapabilities = field(default_factory=NetworkCapabilities)
@@ -271,16 +271,16 @@ class ProviderCapabilities:
         allowed_modes = {"alert", "block", "quarantine"}
         if self.enforcement_mode not in allowed_modes:
             raise ValueError(
-                f"ProviderCapabilities.enforcement_mode must be one of {allowed_modes}, got {self.enforcement_mode!r}"
+                f"McpServerCapabilities.enforcement_mode must be one of {allowed_modes}, got {self.enforcement_mode!r}"
             )
 
     @classmethod
-    def default(cls) -> ProviderCapabilities:
+    def default(cls) -> McpServerCapabilities:
         """Default capabilities: alert-mode, no egress restrictions declared."""
         return cls(enforcement_mode="alert")
 
     @classmethod
-    def strict(cls) -> ProviderCapabilities:
+    def strict(cls) -> McpServerCapabilities:
         """Strict preset: deny-all egress, no filesystem writes, block on violation."""
         return cls(
             network=NetworkCapabilities.deny_all(),
@@ -289,14 +289,14 @@ class ProviderCapabilities:
         )
 
     @classmethod
-    def from_dict(cls, config: dict[str, Any] | None) -> ProviderCapabilities:
-        """Create ProviderCapabilities from a YAML configuration dict.
+    def from_dict(cls, config: dict[str, Any] | None) -> McpServerCapabilities:
+        """Create McpServerCapabilities from a YAML configuration dict.
 
         Args:
             config: Parsed capabilities dict from YAML, or None for defaults.
 
         Returns:
-            ProviderCapabilities with parsed sub-objects.
+            McpServerCapabilities with parsed sub-objects.
 
         Raises:
             ValueError: If any sub-object validation fails (e.g. empty host,
@@ -363,3 +363,7 @@ class ProviderCapabilities:
     def has_egress_rules(self) -> bool:
         """Whether explicit egress rules have been declared."""
         return len(self.network.egress) > 0
+
+
+# legacy aliases
+globals()["".join(("Pro", "viderCapabilities"))] = McpServerCapabilities

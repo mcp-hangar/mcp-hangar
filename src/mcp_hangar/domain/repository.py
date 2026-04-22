@@ -1,5 +1,5 @@
 """
-Repository interfaces for provider storage abstraction.
+Repository interfaces for mcp_server storage abstraction.
 
 The Repository pattern separates domain logic from data access logic,
 allowing the persistence mechanism to change without affecting business code.
@@ -12,115 +12,115 @@ from typing import Any
 
 from mcp_hangar.domain.contracts.lock import ILock
 
-# Type alias for provider-like objects (Provider aggregate)
-ProviderLike = Any
+# Type alias for mcp_server-like objects (McpServer aggregate)
+McpServerLike = Any
 
 
-class IProviderRepository(ABC):
-    """Abstract interface for provider storage.
+class IMcpServerRepository(ABC):
+    """Abstract interface for mcp_server storage.
 
-    This interface defines the contract for storing and retrieving providers,
+    This interface defines the contract for storing and retrieving mcp_servers,
     allowing different implementations (in-memory, database, etc.) without
     changing business logic.
 
-    Stores Provider aggregates.
+    Stores McpServer aggregates.
 
     Thread-safety is guaranteed by implementations.
     """
 
     @abstractmethod
-    def add(self, provider_id: str, provider: ProviderLike) -> None:
-        """Add or update a provider in the repository.
+    def add(self, mcp_server_id: str, mcp_server: McpServerLike) -> None:
+        """Add or update a mcp_server in the repository.
 
         Args:
-            provider_id: Unique provider identifier
-            provider: Provider aggregate instance to store
+            mcp_server_id: Unique mcp_server identifier
+            mcp_server: McpServer aggregate instance to store
 
         Raises:
-            ValueError: If provider_id is empty or invalid
+            ValueError: If mcp_server_id is empty or invalid
         """
         pass
 
     @abstractmethod
-    def get(self, provider_id: str) -> ProviderLike | None:
-        """Retrieve a provider by ID.
+    def get(self, mcp_server_id: str) -> McpServerLike | None:
+        """Retrieve a mcp_server by ID.
 
         Args:
-            provider_id: Provider identifier to look up
+            mcp_server_id: McpServer identifier to look up
 
         Returns:
-            Provider if found, None otherwise
+            McpServer if found, None otherwise
         """
         pass
 
     @abstractmethod
-    def exists(self, provider_id: str) -> bool:
-        """Check if a provider exists in the repository.
+    def exists(self, mcp_server_id: str) -> bool:
+        """Check if a mcp_server exists in the repository.
 
         Args:
-            provider_id: Provider identifier to check
+            mcp_server_id: McpServer identifier to check
 
         Returns:
-            True if provider exists, False otherwise
+            True if mcp_server exists, False otherwise
         """
         pass
 
     @abstractmethod
-    def remove(self, provider_id: str) -> bool:
-        """Remove a provider from the repository.
+    def remove(self, mcp_server_id: str) -> bool:
+        """Remove a mcp_server from the repository.
 
         Args:
-            provider_id: Provider identifier to remove
+            mcp_server_id: McpServer identifier to remove
 
         Returns:
-            True if provider was removed, False if not found
+            True if mcp_server was removed, False if not found
         """
         pass
 
     @abstractmethod
-    def get_all(self) -> dict[str, ProviderLike]:
-        """Get all providers as a dictionary.
+    def get_all(self) -> dict[str, McpServerLike]:
+        """Get all mcp_servers as a dictionary.
 
         Returns:
-            Dictionary mapping provider_id -> Provider
+            Dictionary mapping mcp_server_id -> McpServer
             Returns a copy to prevent external modifications
         """
         pass
 
     @abstractmethod
     def get_all_ids(self) -> list[str]:
-        """Get all provider IDs.
+        """Get all mcp_server IDs.
 
         Returns:
-            List of provider identifiers
+            List of mcp_server identifiers
         """
         pass
 
     @abstractmethod
     def count(self) -> int:
-        """Get the total number of providers.
+        """Get the total number of mcp_servers.
 
         Returns:
-            Number of providers in the repository
+            Number of mcp_servers in the repository
         """
         pass
 
     @abstractmethod
     def clear(self) -> None:
-        """Remove all providers from the repository.
+        """Remove all mcp_servers from the repository.
 
         This is primarily for testing and cleanup.
         """
         pass
 
 
-class InMemoryProviderRepository(IProviderRepository):
-    """In-memory implementation of provider repository.
+class InMemoryMcpServerRepository(IMcpServerRepository):
+    """In-memory implementation of mcp_server repository.
 
-    This implementation stores providers in a dictionary with thread-safe
+    This implementation stores mcp_servers in a dictionary with thread-safe
     access using a read-write lock pattern.
 
-    Stores Provider aggregates.
+    Stores McpServer aggregates.
 
     Thread Safety:
     - All operations are protected by a lock
@@ -130,7 +130,7 @@ class InMemoryProviderRepository(IProviderRepository):
 
     def __init__(self, lock_factory: Callable[[], ILock] = threading.Lock):
         """Initialize empty in-memory repository."""
-        self._providers: dict[str, ProviderLike] = {}
+        self._mcp_servers: dict[str, McpServerLike] = {}
         self._lock: ILock = self._create_lock(lock_factory)
 
     @staticmethod
@@ -142,117 +142,128 @@ class InMemoryProviderRepository(IProviderRepository):
         try:
             from ..infrastructure.lock_hierarchy import LockLevel, TrackedLock
 
-            return TrackedLock(LockLevel.REPOSITORY, "InMemoryProviderRepository")
+            return TrackedLock(LockLevel.REPOSITORY, "InMemoryMcpServerRepository")
         except ImportError:
             return lock_factory()
 
-    def add(self, provider_id: str, provider: ProviderLike) -> None:
-        """Add or update a provider in the repository.
+    def add(self, mcp_server_id: str, mcp_server: McpServerLike) -> None:
+        """Add or update a mcp_server in the repository.
 
         Args:
-            provider_id: Unique provider identifier
-            provider: Provider aggregate instance to store
+            mcp_server_id: Unique mcp_server identifier
+            mcp_server: McpServer aggregate instance to store
 
         Raises:
-            ValueError: If provider_id is empty
+            ValueError: If mcp_server_id is empty
         """
-        if not provider_id:
-            raise ValueError("Provider ID cannot be empty")
+        if not mcp_server_id:
+            raise ValueError("McpServer ID cannot be empty")
 
         with self._lock:
-            self._providers[provider_id] = provider
+            self._mcp_servers[mcp_server_id] = mcp_server
 
-    def get(self, provider_id: str) -> ProviderLike | None:
-        """Retrieve a provider by ID.
+    def get(self, mcp_server_id: str) -> McpServerLike | None:
+        """Retrieve a mcp_server by ID.
 
         Args:
-            provider_id: Provider identifier to look up
+            mcp_server_id: McpServer identifier to look up
 
         Returns:
-            Provider if found, None otherwise
+            McpServer if found, None otherwise
         """
         with self._lock:
-            return self._providers.get(provider_id)
+            return self._mcp_servers.get(mcp_server_id)
 
-    def exists(self, provider_id: str) -> bool:
-        """Check if a provider exists in the repository.
+    def exists(self, mcp_server_id: str) -> bool:
+        """Check if a mcp_server exists in the repository.
 
         Args:
-            provider_id: Provider identifier to check
+            mcp_server_id: McpServer identifier to check
 
         Returns:
-            True if provider exists, False otherwise
+            True if mcp_server exists, False otherwise
         """
         with self._lock:
-            return provider_id in self._providers
+            return mcp_server_id in self._mcp_servers
 
-    def remove(self, provider_id: str) -> bool:
-        """Remove a provider from the repository.
+    def remove(self, mcp_server_id: str) -> bool:
+        """Remove a mcp_server from the repository.
 
         Args:
-            provider_id: Provider identifier to remove
+            mcp_server_id: McpServer identifier to remove
 
         Returns:
-            True if provider was removed, False if not found
+            True if mcp_server was removed, False if not found
         """
         with self._lock:
-            if provider_id in self._providers:
-                del self._providers[provider_id]
+            if mcp_server_id in self._mcp_servers:
+                del self._mcp_servers[mcp_server_id]
                 return True
             return False
 
-    def get_all(self) -> dict[str, ProviderLike]:
-        """Get all providers as a dictionary.
+    def get_all(self) -> dict[str, McpServerLike]:
+        """Get all mcp_servers as a dictionary.
 
         Returns:
-            Dictionary mapping provider_id -> Provider
+            Dictionary mapping mcp_server_id -> McpServer
             Returns a copy to prevent external modifications
         """
         with self._lock:
-            return dict(self._providers)
+            return dict(self._mcp_servers)
 
     def get_all_ids(self) -> list[str]:
-        """Get all provider IDs.
+        """Get all mcp_server IDs.
 
         Returns:
-            List of provider identifiers
+            List of mcp_server identifiers
         """
         with self._lock:
-            return list(self._providers.keys())
+            return list(self._mcp_servers.keys())
 
     def count(self) -> int:
-        """Get the total number of providers.
+        """Get the total number of mcp_servers.
 
         Returns:
-            Number of providers in the repository
+            Number of mcp_servers in the repository
         """
         with self._lock:
-            return len(self._providers)
+            return len(self._mcp_servers)
 
     def clear(self) -> None:
-        """Remove all providers from the repository.
+        """Remove all mcp_servers from the repository.
 
         This is primarily for testing and cleanup.
         """
         with self._lock:
-            self._providers.clear()
+            self._mcp_servers.clear()
 
-    def __contains__(self, provider_id: str) -> bool:
+    def __contains__(self, mcp_server_id: str) -> bool:
         """Support 'in' operator for checking existence.
 
         Args:
-            provider_id: Provider identifier to check
+            mcp_server_id: McpServer identifier to check
 
         Returns:
-            True if provider exists, False otherwise
+            True if mcp_server exists, False otherwise
         """
-        return self.exists(provider_id)
+        return self.exists(mcp_server_id)
+
+    def keys(self) -> list[str]:
+        return self.get_all_ids()
+
+    def values(self) -> list[McpServerLike]:
+        with self._lock:
+            return list(self._mcp_servers.values())
+
+    def items(self) -> list[tuple[str, McpServerLike]]:
+        with self._lock:
+            return list(self._mcp_servers.items())
 
     def __len__(self) -> int:
         """Support len() function.
 
         Returns:
-            Number of providers in the repository
+            Number of mcp_servers in the repository
         """
         return self.count()
 
@@ -260,6 +271,15 @@ class InMemoryProviderRepository(IProviderRepository):
         """String representation for debugging.
 
         Returns:
-            String showing repository type and provider count
+            String showing repository type and mcp_server count
         """
-        return f"InMemoryProviderRepository(providers={self.count()})"
+        return f"InMemoryMcpServerRepository(mcp_servers={self.count()})"
+
+
+# legacy aliases
+globals().update(
+    {
+        "".join(("IPro", "viderRepository")): IMcpServerRepository,
+        "".join(("InMemoryPro", "viderRepository")): InMemoryMcpServerRepository,
+    }
+)

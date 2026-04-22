@@ -2,9 +2,9 @@
 
 Each module implements a subcommand:
 - init: Interactive setup wizard
-- status: Provider health dashboard
-- add: Add providers from registry
-- remove: Remove providers
+- status: McpServer health dashboard
+- add: Add mcp_servers from registry
+- remove: Remove mcp_servers
 - serve: Start the MCP server
 - completion: Shell completion scripts
 """

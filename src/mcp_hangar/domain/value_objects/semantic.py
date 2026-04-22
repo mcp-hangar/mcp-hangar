@@ -53,7 +53,7 @@ class CallSequenceEvent:
 
     Attributes:
         tool_name: Name of the invoked tool (e.g., "read_file").
-        provider_id: Provider that executed the tool.
+        mcp_server_id: McpServer that executed the tool.
         args_fingerprint: Deterministic hash of the tool arguments.
             Used for argument-level matching without storing raw arguments.
         timestamp: Unix timestamp of the invocation (seconds since epoch).
@@ -63,7 +63,7 @@ class CallSequenceEvent:
     """
 
     tool_name: str
-    provider_id: str
+    mcp_server_id: str
     args_fingerprint: str
     timestamp: float
     session_id: str
@@ -121,10 +121,10 @@ class PatternMatchResult:
         return None
 
     @property
-    def provider_id(self) -> str | None:
-        """Provider ID from the first matched event, if available."""
+    def mcp_server_id(self) -> str | None:
+        """McpServer ID from the first matched event, if available."""
         if self.matched_events:
-            return self.matched_events[0].provider_id
+            return self.matched_events[0].mcp_server_id
         return None
 
     @property

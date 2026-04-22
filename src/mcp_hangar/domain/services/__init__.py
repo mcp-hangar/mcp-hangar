@@ -5,8 +5,8 @@ from __future__ import annotations
 from typing import TYPE_CHECKING
 
 # Re-export exception from canonical location for convenience
-from ..exceptions import ProviderStartError
-from ..contracts.launcher import IProviderLauncher, LaunchResult
+from ..exceptions import McpServerStartError
+from ..contracts.launcher import IMcpServerLauncher, LaunchResult
 from .audit_service import AuditService
 from .error_diagnostics import collect_startup_diagnostics, get_suggestion_for_error
 from .image_builder import BuildConfig, get_image_builder, ImageBuilder
@@ -22,7 +22,7 @@ if TYPE_CHECKING:
         ContainerLauncher,
         DockerLauncher,
         HttpLauncher,
-        ProviderLauncher,
+        McpServerLauncher,
         SubprocessLauncher,
         get_launcher,
     )
@@ -35,10 +35,10 @@ def __getattr__(name: str) -> object:
         "DockerLauncher",
         "get_launcher",
         "HttpLauncher",
-        "ProviderLauncher",
+        "McpServerLauncher",
         "SubprocessLauncher",
     }:
-        from . import provider_launcher as launcher_module
+        from . import mcp_server_launcher as launcher_module
 
         return getattr(launcher_module, name)
     raise AttributeError(f"module {__name__!r} has no attribute {name!r}")
@@ -46,9 +46,9 @@ def __getattr__(name: str) -> object:
 
 __all__ = [
     "AuditService",
-    "IProviderLauncher",
+    "IMcpServerLauncher",
     "LaunchResult",
-    "ProviderLauncher",
+    "McpServerLauncher",
     "SubprocessLauncher",
     "DockerLauncher",
     "ContainerLauncher",
@@ -58,7 +58,7 @@ __all__ = [
     "ImageBuilder",
     "BuildConfig",
     "get_image_builder",
-    "ProviderStartError",
+    "McpServerStartError",
     "collect_startup_diagnostics",
     "get_suggestion_for_error",
     "ToolAccessResolver",

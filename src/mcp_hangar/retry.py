@@ -5,7 +5,7 @@ including:
 
 - Configurable retry policies
 - Exponential, linear, and constant backoff strategies
-- Per-provider retry configuration
+- Per-mcp_server retry configuration
 - Circuit breaker integration
 
 Usage example::
@@ -18,7 +18,7 @@ Usage example::
     )
 
     @with_retry(policy)
-    def call_provider():
+    def call_mcp_server():
         return risky_operation()
 
 See docs/guides/UX_IMPROVEMENTS.md for more examples.
@@ -72,9 +72,9 @@ class RetryPolicy:
             "Timeout",
             "TimeoutError",
             "ConnectionError",
-            "ProviderNotResponding",
+            "McpServerNotResponding",
             "TransientError",
-            "ProviderProtocolError",
+            "McpServerProtocolError",
             "NetworkError",
         ]
     )
@@ -94,9 +94,9 @@ class RetryPolicy:
             "Timeout",
             "TimeoutError",
             "ConnectionError",
-            "ProviderNotResponding",
+            "McpServerNotResponding",
             "TransientError",
-            "ProviderProtocolError",
+            "McpServerProtocolError",
             "NetworkError",
         ]
 
@@ -239,7 +239,7 @@ def should_retry(error: Exception, policy: RetryPolicy) -> bool:
 async def retry_async(
     operation: Callable[[], Any],
     policy: RetryPolicy,
-    provider: str = "",
+    mcp_server: str = "",
     operation_name: str = "",
     on_retry: Callable[[int, Exception, float], None] | None = None,
 ) -> RetryResult:
@@ -248,7 +248,7 @@ async def retry_async(
     Args:
         operation: Async callable to execute
         policy: Retry policy to use
-        provider: Provider name for logging
+        mcp_server: McpServer name for logging
         operation_name: Operation name for logging
         on_retry: Optional callback(attempt, error, delay) called before each retry
 
@@ -273,7 +273,7 @@ async def retry_async(
             if attempts:  # Had retries
                 logger.info(
                     "retry_succeeded",
-                    provider=provider,
+                    mcp_server=mcp_server,
                     operation=operation_name,
                     attempt=attempt + 1,
                     total_attempts=len(attempts) + 1,
@@ -315,7 +315,7 @@ async def retry_async(
                 # Log retry
                 logger.info(
                     "retry_attempt_failed",
-                    provider=provider,
+                    mcp_server=mcp_server,
                     operation=operation_name,
                     attempt=attempt + 1,
                     max_attempts=policy.max_attempts,
@@ -339,7 +339,7 @@ async def retry_async(
                 if attempts:
                     logger.warning(
                         "retry_exhausted",
-                        provider=provider,
+                        mcp_server=mcp_server,
                         operation=operation_name,
                         total_attempts=len(attempts) + 1,
                         final_error_type=error_type,
@@ -359,7 +359,7 @@ async def retry_async(
 def retry_sync(
     operation: Callable[[], T],
     policy: RetryPolicy,
-    provider: str = "",
+    mcp_server: str = "",
     operation_name: str = "",
     on_retry: Callable[[int, Exception, float], None] | None = None,
 ) -> RetryResult:
@@ -368,7 +368,7 @@ def retry_sync(
     Args:
         operation: Callable to execute
         policy: Retry policy to use
-        provider: Provider name for logging
+        mcp_server: McpServer name for logging
         operation_name: Operation name for logging
         on_retry: Optional callback(attempt, error, delay) called before each retry
 
@@ -389,7 +389,7 @@ def retry_sync(
             if attempts:
                 logger.info(
                     "retry_succeeded",
-                    provider=provider,
+                    mcp_server=mcp_server,
                     operation=operation_name,
                     attempt=attempt + 1,
                     total_attempts=len(attempts) + 1,
@@ -428,7 +428,7 @@ def retry_sync(
 
                 logger.info(
                     "retry_attempt_failed",
-                    provider=provider,
+                    mcp_server=mcp_server,
                     operation=operation_name,
                     attempt=attempt + 1,
                     max_attempts=policy.max_attempts,
@@ -449,7 +449,7 @@ def retry_sync(
                 if attempts:
                     logger.warning(
                         "retry_exhausted",
-                        provider=provider,
+                        mcp_server=mcp_server,
                         operation=operation_name,
                         total_attempts=len(attempts) + 1,
                         final_error_type=error_type,
@@ -471,34 +471,34 @@ def retry_sync(
 
 
 class RetryConfigStore:
-    """Stores retry configurations per provider.
+    """Stores retry configurations per mcp_server.
 
     Allows loading retry policies from config.yaml and
-    retrieving them for specific providers.
+    retrieving them for specific mcp_servers.
     """
 
     _default_policy: RetryPolicy
-    _provider_policies: dict[str, RetryPolicy]
+    _mcp_server_policies: dict[str, RetryPolicy]
 
     def __init__(self):
         self._default_policy = RetryPolicy()
-        self._provider_policies = {}
+        self._mcp_server_policies = {}
 
     def set_default(self, policy: RetryPolicy) -> None:
         """Set the default retry policy."""
         self._default_policy = policy
 
-    def set_provider_policy(self, provider_id: str, policy: RetryPolicy) -> None:
-        """Set retry policy for a specific provider."""
-        self._provider_policies[provider_id] = policy
+    def set_mcp_server_policy(self, mcp_server_id: str, policy: RetryPolicy) -> None:
+        """Set retry policy for a specific mcp_server."""
+        self._mcp_server_policies[mcp_server_id] = policy
 
-    def get_policy(self, provider_id: str) -> RetryPolicy:
-        """Get retry policy for a provider.
+    def get_policy(self, mcp_server_id: str) -> RetryPolicy:
+        """Get retry policy for a mcp_server.
 
-        Returns provider-specific policy if configured,
+        Returns mcp_server-specific policy if configured,
         otherwise returns default policy.
         """
-        return self._provider_policies.get(provider_id, self._default_policy)
+        return self._mcp_server_policies.get(mcp_server_id, self._default_policy)
 
     def load_from_config(self, config: dict[str, Any]) -> None:
         """Load retry configuration from config dictionary.
@@ -509,7 +509,7 @@ class RetryConfigStore:
                 max_attempts: 3
                 backoff: exponential
                 ...
-              per_provider:
+              per_mcp_server:
                 sqlite:
                   max_attempts: 5
                 fetch:
@@ -527,17 +527,17 @@ class RetryConfigStore:
                 backoff=self._default_policy.backoff.value,
             )
 
-        # Load per-provider policies
-        per_provider = retry_config.get("per_provider", {})
-        for provider_id, provider_config in per_provider.items():
+        # Load per-mcp_server policies
+        per_mcp_server = retry_config.get("per_mcp_server", {})
+        for mcp_server_id, mcp_server_config in per_mcp_server.items():
             # Merge with default
             merged = self._default_policy.to_dict()
-            merged.update(provider_config)
-            self._provider_policies[provider_id] = RetryPolicy.from_dict(merged)
+            merged.update(mcp_server_config)
+            self._mcp_server_policies[mcp_server_id] = RetryPolicy.from_dict(merged)
             logger.info(
-                "retry_provider_policy_loaded",
-                provider=provider_id,
-                max_attempts=self._provider_policies[provider_id].max_attempts,
+                "retry_mcp_server_policy_loaded",
+                mcp_server=mcp_server_id,
+                max_attempts=self._mcp_server_policies[mcp_server_id].max_attempts,
             )
 
 
@@ -550,9 +550,9 @@ def get_retry_store() -> RetryConfigStore:
     return _retry_store
 
 
-def get_retry_policy(provider_id: str) -> RetryPolicy:
-    """Get retry policy for a provider."""
-    return _retry_store.get_policy(provider_id)
+def get_retry_policy(mcp_server_id: str) -> RetryPolicy:
+    """Get retry policy for a mcp_server."""
+    return _retry_store.get_policy(mcp_server_id)
 
 
 # =============================================================================
@@ -562,14 +562,14 @@ def get_retry_policy(provider_id: str) -> RetryPolicy:
 
 def with_retry(
     policy: RetryPolicy | None = None,
-    provider: str = "",
+    mcp_server: str = "",
     operation: str = "",
 ):
     """Decorator to add retry logic to a function.
 
     Args:
         policy: Retry policy (uses default if None)
-        provider: Provider name for logging
+        mcp_server: McpServer name for logging
         operation: Operation name for logging
 
     Usage:
@@ -587,7 +587,7 @@ def with_retry(
             result = await retry_async(
                 lambda: func(*args, **kwargs),
                 policy=p,
-                provider=provider,
+                mcp_server=mcp_server,
                 operation_name=operation or func.__name__,
             )
             if result.success:
@@ -600,7 +600,7 @@ def with_retry(
             result = retry_sync(
                 lambda: func(*args, **kwargs),
                 policy=p,
-                provider=provider,
+                mcp_server=mcp_server,
                 operation_name=operation or func.__name__,
             )
             if result.success:

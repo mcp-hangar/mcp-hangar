@@ -24,7 +24,7 @@ if TYPE_CHECKING:
 
 @runtime_checkable
 class IBehavioralProfiler(Protocol):
-    """Facade for behavioral profiling of a provider.
+    """Facade for behavioral profiling of a mcp_server.
 
     Manages the profiling mode and routes observations to the appropriate
     subsystem (baseline store in LEARNING, deviation detector in ENFORCING).
@@ -34,30 +34,30 @@ class IBehavioralProfiler(Protocol):
     """
 
     @abstractmethod
-    def get_mode(self, provider_id: str) -> BehavioralMode:
-        """Get the current behavioral profiling mode for a provider.
+    def get_mode(self, mcp_server_id: str) -> BehavioralMode:
+        """Get the current behavioral profiling mode for a mcp_server.
 
         Args:
-            provider_id: Identifier of the provider.
+            mcp_server_id: Identifier of the mcp_server.
 
         Returns:
-            Current BehavioralMode for the provider.
+            Current BehavioralMode for the mcp_server.
         """
         ...
 
     @abstractmethod
-    def set_mode(self, provider_id: str, mode: BehavioralMode) -> None:
-        """Set the behavioral profiling mode for a provider.
+    def set_mode(self, mcp_server_id: str, mode: BehavioralMode) -> None:
+        """Set the behavioral profiling mode for a mcp_server.
 
         Args:
-            provider_id: Identifier of the provider.
+            mcp_server_id: Identifier of the mcp_server.
             mode: New BehavioralMode to set.
         """
         ...
 
     @abstractmethod
     def record_observation(self, observation: NetworkObservation) -> list[dict[str, Any]]:
-        """Record a network observation from a provider.
+        """Record a network observation from a mcp_server.
 
         In LEARNING mode, stores the observation for baseline building and
         returns an empty list.
@@ -93,11 +93,11 @@ class IBaselineStore(Protocol):
         ...
 
     @abstractmethod
-    def get_observations(self, provider_id: str) -> list[dict[str, Any]]:
-        """Retrieve baseline observation records for a provider.
+    def get_observations(self, mcp_server_id: str) -> list[dict[str, Any]]:
+        """Retrieve baseline observation records for a mcp_server.
 
         Args:
-            provider_id: Identifier of the provider.
+            mcp_server_id: Identifier of the mcp_server.
 
         Returns:
             List of observation records as dicts.
@@ -105,11 +105,11 @@ class IBaselineStore(Protocol):
         ...
 
     @abstractmethod
-    def get_mode(self, provider_id: str) -> BehavioralMode:
-        """Get the persisted behavioral mode for a provider.
+    def get_mode(self, mcp_server_id: str) -> BehavioralMode:
+        """Get the persisted behavioral mode for a mcp_server.
 
         Args:
-            provider_id: Identifier of the provider.
+            mcp_server_id: Identifier of the mcp_server.
 
         Returns:
             Current persisted BehavioralMode.
@@ -119,14 +119,14 @@ class IBaselineStore(Protocol):
     @abstractmethod
     def set_mode(
         self,
-        provider_id: str,
+        mcp_server_id: str,
         mode: BehavioralMode,
         learning_duration_hours: int = 72,
     ) -> None:
         """Persist the behavioral mode with timing metadata.
 
         Args:
-            provider_id: Identifier of the provider.
+            mcp_server_id: Identifier of the mcp_server.
             mode: New BehavioralMode to persist.
             learning_duration_hours: Duration of the learning phase in hours.
         """
@@ -161,13 +161,13 @@ class NullBehavioralProfiler:
     Satisfies the IBehavioralProfiler protocol at runtime.
     """
 
-    def get_mode(self, provider_id: str) -> BehavioralMode:
-        """Return DISABLED for any provider -- profiling not active."""
+    def get_mode(self, mcp_server_id: str) -> BehavioralMode:
+        """Return DISABLED for any mcp_server -- profiling not active."""
         from ..value_objects.behavioral import BehavioralMode
 
         return BehavioralMode.DISABLED
 
-    def set_mode(self, provider_id: str, mode: BehavioralMode) -> None:
+    def set_mode(self, mcp_server_id: str, mode: BehavioralMode) -> None:
         """No-op -- profiling mode cannot be changed without enterprise module."""
         pass
 
@@ -199,11 +199,11 @@ class IResourceStore(Protocol):
         ...
 
     @abstractmethod
-    def get_samples(self, provider_id: str, limit: int = 100) -> list[dict[str, Any]]:
-        """Retrieve recent resource samples for a provider.
+    def get_samples(self, mcp_server_id: str, limit: int = 100) -> list[dict[str, Any]]:
+        """Retrieve recent resource samples for a mcp_server.
 
         Args:
-            provider_id: Identifier of the provider.
+            mcp_server_id: Identifier of the mcp_server.
             limit: Maximum number of samples to return (most recent first).
 
         Returns:
@@ -212,11 +212,11 @@ class IResourceStore(Protocol):
         ...
 
     @abstractmethod
-    def get_baseline(self, provider_id: str) -> dict[str, Any] | None:
-        """Retrieve the computed resource baseline for a provider.
+    def get_baseline(self, mcp_server_id: str) -> dict[str, Any] | None:
+        """Retrieve the computed resource baseline for a mcp_server.
 
         Args:
-            provider_id: Identifier of the provider.
+            mcp_server_id: Identifier of the mcp_server.
 
         Returns:
             Baseline dict with mean/stddev statistics, or None if not computed.
@@ -224,14 +224,14 @@ class IResourceStore(Protocol):
         ...
 
     @abstractmethod
-    def compute_and_store_baseline(self, provider_id: str) -> dict[str, Any] | None:
+    def compute_and_store_baseline(self, mcp_server_id: str) -> dict[str, Any] | None:
         """Compute and persist a resource baseline from accumulated samples.
 
         Requires a minimum number of samples (typically 10) to produce
         a meaningful baseline. Returns None if insufficient data.
 
         Args:
-            provider_id: Identifier of the provider.
+            mcp_server_id: Identifier of the mcp_server.
 
         Returns:
             Baseline dict with mean/stddev statistics, or None if insufficient data.
@@ -253,7 +253,7 @@ class IResourceStore(Protocol):
 
 @runtime_checkable
 class IResourceMonitor(Protocol):
-    """Background monitor collecting resource usage from provider containers.
+    """Background monitor collecting resource usage from mcp_server containers.
 
     Polls Docker containers or K8s pods for CPU, memory, and network I/O
     metrics. Enterprise layer provides a real implementation; MIT core

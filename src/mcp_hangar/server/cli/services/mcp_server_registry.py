@@ -1,16 +1,16 @@
-"""Provider registry - unified provider definitions for CLI commands.
+"""McpServer registry - unified mcp_server definitions for CLI commands.
 
-Consolidates provider metadata previously duplicated across init.py and add.py.
+Consolidates mcp_server metadata previously duplicated across init.py and add.py.
 """
 
 from dataclasses import dataclass
 
-from .dependency_detector import DependencyStatus, detect_dependencies, is_provider_available
+from .dependency_detector import DependencyStatus, detect_dependencies, is_mcp_server_available
 
 
 @dataclass(frozen=True)
-class ProviderDefinition:
-    """Definition of an MCP provider."""
+class McpServerDefinition:
+    """Definition of an MCP mcp_server."""
 
     name: str
     description: str
@@ -25,9 +25,9 @@ class ProviderDefinition:
     official: bool = True
 
     def is_available(self, deps: DependencyStatus | None = None) -> bool:
-        """Check if this provider can be installed with current dependencies.
+        """Check if this mcp_server can be installed with current dependencies.
 
-        A provider is available if:
+        A mcp_server is available if:
         - Primary install_type runtime is available, OR
         - uvx_package exists and uvx is available
         """
@@ -35,17 +35,17 @@ class ProviderDefinition:
             deps = detect_dependencies()
 
         # Check primary runtime
-        if is_provider_available(self.install_type, deps):
+        if is_mcp_server_available(self.install_type, deps):
             return True
 
-        # Check uvx fallback for npx providers
+        # Check uvx fallback for npx mcp_servers
         if self.install_type == "npx" and self.uvx_package and deps.uvx.available:
             return True
 
         return False
 
     def get_unavailable_reason(self, deps: DependencyStatus | None = None) -> str | None:
-        """Get reason why provider is unavailable, or None if available."""
+        """Get reason why mcp_server is unavailable, or None if available."""
         if self.is_available(deps):
             return None
 
@@ -64,7 +64,7 @@ class ProviderDefinition:
         if deps is None:
             deps = detect_dependencies()
 
-        # For npx providers with uvx alternative, prefer uvx
+        # For npx mcp_servers with uvx alternative, prefer uvx
         if self.install_type == "npx" and self.uvx_package:
             if deps.uvx.available:
                 return "uvx"
@@ -86,11 +86,11 @@ class ProviderDefinition:
         return self.package
 
 
-# All known providers with their configurations
+# All known mcp_servers with their configurations
 # uvx_package maps to PyPI packages that provide equivalent functionality
-_PROVIDERS: list[ProviderDefinition] = [
+_PROVIDERS: list[McpServerDefinition] = [
     # Starter (recommended for everyone)
-    ProviderDefinition(
+    McpServerDefinition(
         name="filesystem",
         description="Read and write local files",
         package="@modelcontextprotocol/server-filesystem",
@@ -100,14 +100,14 @@ _PROVIDERS: list[ProviderDefinition] = [
         config_prompt="Directory to allow access to",
         config_type="path",
     ),
-    ProviderDefinition(
+    McpServerDefinition(
         name="fetch",
         description="Make HTTP requests to fetch web content",
         package="@modelcontextprotocol/server-fetch",
         uvx_package="mcp-server-fetch",
         category="Starter",
     ),
-    ProviderDefinition(
+    McpServerDefinition(
         name="memory",
         description="Persistent key-value storage for context",
         package="@modelcontextprotocol/server-memory",
@@ -115,7 +115,7 @@ _PROVIDERS: list[ProviderDefinition] = [
         category="Starter",
     ),
     # Developer Tools
-    ProviderDefinition(
+    McpServerDefinition(
         name="github",
         description="GitHub repos, issues, PRs",
         package="@modelcontextprotocol/server-github",
@@ -126,7 +126,7 @@ _PROVIDERS: list[ProviderDefinition] = [
         config_type="secret",
         env_var="GITHUB_TOKEN",
     ),
-    ProviderDefinition(
+    McpServerDefinition(
         name="git",
         description="Local git operations",
         package="@modelcontextprotocol/server-git",
@@ -134,7 +134,7 @@ _PROVIDERS: list[ProviderDefinition] = [
         category="Developer Tools",
     ),
     # Data & Databases
-    ProviderDefinition(
+    McpServerDefinition(
         name="sqlite",
         description="Query SQLite databases",
         package="@modelcontextprotocol/server-sqlite",
@@ -144,7 +144,7 @@ _PROVIDERS: list[ProviderDefinition] = [
         config_prompt="Path to SQLite database file",
         config_type="path",
     ),
-    ProviderDefinition(
+    McpServerDefinition(
         name="postgres",
         description="Query PostgreSQL databases",
         package="@modelcontextprotocol/server-postgres",
@@ -156,7 +156,7 @@ _PROVIDERS: list[ProviderDefinition] = [
         env_var="DATABASE_URL",
     ),
     # Integrations
-    ProviderDefinition(
+    McpServerDefinition(
         name="slack",
         description="Slack workspace integration",
         package="@modelcontextprotocol/server-slack",
@@ -167,14 +167,14 @@ _PROVIDERS: list[ProviderDefinition] = [
         config_type="secret",
         env_var="SLACK_BOT_TOKEN",
     ),
-    ProviderDefinition(
+    McpServerDefinition(
         name="puppeteer",
         description="Browser automation",
         package="@modelcontextprotocol/server-puppeteer",
         uvx_package=None,  # No Python equivalent - requires Node.js
         category="Integrations",
     ),
-    ProviderDefinition(
+    McpServerDefinition(
         name="brave-search",
         description="Brave Search API",
         package="@modelcontextprotocol/server-brave-search",
@@ -185,7 +185,7 @@ _PROVIDERS: list[ProviderDefinition] = [
         config_type="secret",
         env_var="BRAVE_API_KEY",
     ),
-    ProviderDefinition(
+    McpServerDefinition(
         name="google-maps",
         description="Google Maps API",
         package="@modelcontextprotocol/server-google-maps",
@@ -198,7 +198,7 @@ _PROVIDERS: list[ProviderDefinition] = [
     ),
 ]
 
-# Provider bundles for quick setup
+# McpServer bundles for quick setup
 PROVIDER_BUNDLES: dict[str, list[str]] = {
     "starter": ["filesystem", "fetch", "memory"],
     "developer": ["filesystem", "fetch", "memory", "github", "git"],
@@ -206,74 +206,74 @@ PROVIDER_BUNDLES: dict[str, list[str]] = {
 }
 
 # Build lookup dict for fast access
-_PROVIDERS_BY_NAME: dict[str, ProviderDefinition] = {p.name: p for p in _PROVIDERS}
+_PROVIDERS_BY_NAME: dict[str, McpServerDefinition] = {p.name: p for p in _PROVIDERS}
 
 
-def get_all_providers() -> list[ProviderDefinition]:
-    """Get all known providers."""
+def get_all_mcp_servers() -> list[McpServerDefinition]:
+    """Get all known mcp_servers."""
     return list(_PROVIDERS)
 
 
-def get_provider(name: str) -> ProviderDefinition | None:
-    """Get a provider by name."""
+def get_mcp_server(name: str) -> McpServerDefinition | None:
+    """Get a mcp_server by name."""
     return _PROVIDERS_BY_NAME.get(name)
 
 
-def get_providers_by_category() -> dict[str, list[ProviderDefinition]]:
-    """Get providers grouped by category."""
-    result: dict[str, list[ProviderDefinition]] = {}
-    for provider in _PROVIDERS:
-        if provider.category not in result:
-            result[provider.category] = []
-        result[provider.category].append(provider)
+def get_mcp_servers_by_category() -> dict[str, list[McpServerDefinition]]:
+    """Get mcp_servers grouped by category."""
+    result: dict[str, list[McpServerDefinition]] = {}
+    for mcp_server in _PROVIDERS:
+        if mcp_server.category not in result:
+            result[mcp_server.category] = []
+        result[mcp_server.category].append(mcp_server)
     return result
 
 
-def search_providers(query: str) -> list[ProviderDefinition]:
-    """Search providers by name or description.
+def search_mcp_servers(query: str) -> list[McpServerDefinition]:
+    """Search mcp_servers by name or description.
 
     Args:
         query: Search query string
 
     Returns:
-        List of matching providers
+        List of matching mcp_servers
     """
     query_lower = query.lower()
     return [p for p in _PROVIDERS if query_lower in p.name.lower() or query_lower in p.description.lower()]
 
 
-def get_available_providers(deps: DependencyStatus | None = None) -> list[ProviderDefinition]:
-    """Get providers that can be installed with current dependencies.
+def get_available_mcp_servers(deps: DependencyStatus | None = None) -> list[McpServerDefinition]:
+    """Get mcp_servers that can be installed with current dependencies.
 
     Args:
         deps: Optional pre-detected dependencies
 
     Returns:
-        List of available providers
+        List of available mcp_servers
     """
     if deps is None:
         deps = detect_dependencies()
     return [p for p in _PROVIDERS if p.is_available(deps)]
 
 
-def get_unavailable_providers(deps: DependencyStatus | None = None) -> list[ProviderDefinition]:
-    """Get providers that cannot be installed due to missing dependencies.
+def get_unavailable_mcp_servers(deps: DependencyStatus | None = None) -> list[McpServerDefinition]:
+    """Get mcp_servers that cannot be installed due to missing dependencies.
 
     Args:
         deps: Optional pre-detected dependencies
 
     Returns:
-        List of unavailable providers
+        List of unavailable mcp_servers
     """
     if deps is None:
         deps = detect_dependencies()
     return [p for p in _PROVIDERS if not p.is_available(deps)]
 
 
-def get_providers_by_category_filtered(
+def get_mcp_servers_by_category_filtered(
     deps: DependencyStatus | None = None,
-) -> tuple[dict[str, list[ProviderDefinition]], dict[str, list[ProviderDefinition]]]:
-    """Get providers grouped by category, split into available and unavailable.
+) -> tuple[dict[str, list[McpServerDefinition]], dict[str, list[McpServerDefinition]]]:
+    """Get mcp_servers grouped by category, split into available and unavailable.
 
     Args:
         deps: Optional pre-detected dependencies
@@ -284,19 +284,19 @@ def get_providers_by_category_filtered(
     if deps is None:
         deps = detect_dependencies()
 
-    available: dict[str, list[ProviderDefinition]] = {}
-    unavailable: dict[str, list[ProviderDefinition]] = {}
+    available: dict[str, list[McpServerDefinition]] = {}
+    unavailable: dict[str, list[McpServerDefinition]] = {}
 
-    for provider in _PROVIDERS:
-        category = provider.category
-        if provider.is_available(deps):
+    for mcp_server in _PROVIDERS:
+        category = mcp_server.category
+        if mcp_server.is_available(deps):
             if category not in available:
                 available[category] = []
-            available[category].append(provider)
+            available[category].append(mcp_server)
         else:
             if category not in unavailable:
                 unavailable[category] = []
-            unavailable[category].append(provider)
+            unavailable[category].append(mcp_server)
 
     return available, unavailable
 
@@ -305,14 +305,14 @@ def filter_bundle_by_availability(
     bundle_name: str,
     deps: DependencyStatus | None = None,
 ) -> tuple[list[str], list[str]]:
-    """Filter a bundle to only include available providers.
+    """Filter a bundle to only include available mcp_servers.
 
     Args:
         bundle_name: Name of the bundle
         deps: Optional pre-detected dependencies
 
     Returns:
-        Tuple of (available_providers, unavailable_providers)
+        Tuple of (available_mcp_servers, unavailable_mcp_servers)
     """
     if bundle_name not in PROVIDER_BUNDLES:
         return [], []
@@ -320,15 +320,26 @@ def filter_bundle_by_availability(
     if deps is None:
         deps = detect_dependencies()
 
-    bundle_providers = PROVIDER_BUNDLES[bundle_name]
+    bundle_mcp_servers = PROVIDER_BUNDLES[bundle_name]
     available = []
     unavailable = []
 
-    for name in bundle_providers:
-        provider = get_provider(name)
-        if provider and provider.is_available(deps):
+    for name in bundle_mcp_servers:
+        mcp_server = get_mcp_server(name)
+        if mcp_server and mcp_server.is_available(deps):
             available.append(name)
         else:
             unavailable.append(name)
 
     return available, unavailable
+
+
+# legacy aliases
+ProviderDefinition = McpServerDefinition
+get_provider = get_mcp_server
+get_all_providers = get_all_mcp_servers
+search_providers = search_mcp_servers
+get_providers_by_category = get_mcp_servers_by_category
+get_providers_by_category_filtered = get_mcp_servers_by_category_filtered
+get_available_providers = get_available_mcp_servers
+get_unavailable_providers = get_unavailable_mcp_servers

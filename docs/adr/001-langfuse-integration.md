@@ -6,11 +6,11 @@
 
 ## Context
 
-MCP Hangar manages tool invocations from LLM applications through MCP providers. Operators need end-to-end visibility into these invocations to:
+MCP Hangar manages tool invocations from LLM applications through MCP servers. Operators need end-to-end visibility into these invocations to:
 
 1. Debug production issues (latency, errors, timeouts)
-2. Track costs per provider/tool/user
-3. Correlate provider degradation with LLM response quality
+2. Track costs per MCP server/tool/user
+3. Correlate MCP server degradation with LLM response quality
 4. Run quality evaluations on tool outputs
 
 Existing observability (Prometheus metrics, OpenTelemetry traces) provides infrastructure-level visibility but lacks LLM-specific context like trace correlation with prompts and cost attribution.
@@ -66,7 +66,7 @@ Traces can be correlated with external LLM applications by passing `trace_id`, `
 
 ```python
 result = traced_service.invoke_tool(
-    provider_id="math",
+    mcp_server_id="math",
     tool_name="add",
     arguments={"a": 1, "b": 2},
     trace_id="langfuse-trace-from-llm-app",
@@ -77,9 +77,9 @@ result = traced_service.invoke_tool(
 
 ### Positive
 
-- **End-to-end visibility**: Operators can trace from LLM prompt to provider response
-- **Cost attribution**: Clear breakdown of costs per provider/tool/user
-- **Quality correlation**: Ability to correlate provider health with output quality
+- **End-to-end visibility**: Operators can trace from LLM prompt to MCP server response
+- **Cost attribution**: Clear breakdown of costs per MCP server/tool/user
+- **Quality correlation**: Ability to correlate MCP server health with output quality
 - **Non-invasive**: Existing code unchanged; tracing is opt-in
 - **Testable**: `NullObservabilityAdapter` makes testing easy
 

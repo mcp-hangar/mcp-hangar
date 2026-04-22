@@ -1,6 +1,6 @@
-# Container Providers
+# Container MCP servers
 
-Run MCP providers in Docker or Podman containers.
+Run MCP servers in Docker or Podman containers.
 
 ## Quick Start
 
@@ -18,7 +18,7 @@ mkdir -p data/sqlite data/memory data/filesystem
 ## Configuration
 
 ```yaml
-providers:
+mcp_servers:
   sqlite:
     mode: container
     image: localhost/mcp-sqlite:latest
@@ -48,12 +48,12 @@ providers:
 
 #### Network Modes
 
-- **`none`** (default): No network access. Most secure, use for providers that don't need external connectivity.
+- **`none`** (default): No network access. Most secure, use for MCP servers that don't need external connectivity.
 - **`bridge`**: Isolated bridge network. Container can reach external services but is isolated from host network.
-- **`host`**: Share host network namespace. Required when provider needs to connect to services on localhost or has complex networking requirements.
+- **`host`**: Share host network namespace. Required when MCP server needs to connect to services on localhost or has complex networking requirements.
 
 ```yaml
-# Provider that needs to connect to local Prometheus/VictoriaMetrics
+# MCP Server that needs to connect to local Prometheus/VictoriaMetrics
 prometheus:
   mode: docker
   image: ghcr.io/pab1it0/prometheus-mcp-server:latest
@@ -65,7 +65,7 @@ prometheus:
 ### Custom Build
 
 ```yaml
-providers:
+mcp_servers:
   custom:
     mode: container
     build:
@@ -90,10 +90,10 @@ sqlite:
 Tools: `query`, `execute`, `list-tables`, `describe-table`, `create-table`
 
 ```python
-hangar_call(calls=[{"provider": "sqlite", "tool": "execute",
+hangar_call(calls=[{"mcp_server": "sqlite", "tool": "execute",
                     "arguments": {"sql": "CREATE TABLE users (id INTEGER PRIMARY KEY, name TEXT)"}}])
 
-hangar_call(calls=[{"provider": "sqlite", "tool": "query",
+hangar_call(calls=[{"mcp_server": "sqlite", "tool": "query",
                     "arguments": {"sql": "SELECT * FROM users"}}])
 ```
 
@@ -110,7 +110,7 @@ memory:
 Tools: `create_entities`, `create_relations`, `search_nodes`, `read_graph`
 
 ```python
-hangar_call(calls=[{"provider": "memory", "tool": "create_entities",
+hangar_call(calls=[{"mcp_server": "memory", "tool": "create_entities",
                     "arguments": {"entities": [
                         {"name": "Alice", "entityType": "Person", "observations": ["Engineer"]}
                     ]}}])
@@ -140,7 +140,7 @@ fetch:
 Tools: `fetch`
 
 ```python
-hangar_call(calls=[{"provider": "fetch", "tool": "fetch",
+hangar_call(calls=[{"mcp_server": "fetch", "tool": "fetch",
                     "arguments": {"url": "https://api.example.com/data"}}])
 ```
 

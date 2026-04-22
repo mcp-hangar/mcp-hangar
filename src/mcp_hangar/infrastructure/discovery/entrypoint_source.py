@@ -1,18 +1,18 @@
 """Python Entrypoint Discovery Source.
 
-Discovers MCP providers from Python package entry points.
+Discovers MCP mcp_servers from Python package entry points.
 Uses the standard entry_points mechanism from importlib.metadata.
 
-Entry Point Group: mcp.providers
+Entry Point Group: mcp.mcp_servers
 
 Example pyproject.toml:
-    [project.entry-points."mcp.providers"]
-    my_provider = "my_package.mcp_server:create_server"
+    [project.entry-points."mcp.mcp_servers"]
+    my_mcp_server = "my_package.mcp_server:create_server"
 """
 
 from typing import Any
 
-from mcp_hangar.domain.discovery.discovered_provider import DiscoveredProvider
+from mcp_hangar.domain.discovery.discovered_mcp_server import DiscoveredMcpServer
 from mcp_hangar.domain.discovery.discovery_source import DiscoveryMode, DiscoverySource
 
 from ...logging_config import get_logger
@@ -35,7 +35,7 @@ except ImportError:
 
 
 class EntrypointDiscoverySource(DiscoverySource):
-    """Discover MCP providers from Python package entry points.
+    """Discover MCP mcp_servers from Python package entry points.
 
     Scans installed Python packages for entry points in the specified group.
     Each entry point should reference a factory function that creates an MCP server.
@@ -46,7 +46,7 @@ class EntrypointDiscoverySource(DiscoverySource):
 
     Example:
         # In pyproject.toml
-        [project.entry-points."mcp.providers"]
+        [project.entry-points."mcp.mcp_servers"]
         my_tools = "my_package.server:create_server"
 
         # In my_package/server.py
@@ -60,7 +60,7 @@ class EntrypointDiscoverySource(DiscoverySource):
             }
     """
 
-    DEFAULT_GROUP = "mcp.providers"
+    DEFAULT_GROUP = "mcp.mcp_servers"
 
     def __init__(
         self,
@@ -71,9 +71,9 @@ class EntrypointDiscoverySource(DiscoverySource):
         """Initialize entrypoint discovery source.
 
         Args:
-            group: Entry point group name (default: mcp.providers)
+            group: Entry point group name (default: mcp.mcp_servers)
             mode: Discovery mode (default: additive)
-            default_ttl: Default TTL for discovered providers
+            default_ttl: Default TTL for discovered mcp_servers
         """
         super().__init__(mode)
 
@@ -90,13 +90,13 @@ class EntrypointDiscoverySource(DiscoverySource):
     def source_type(self) -> str:
         return "entrypoint"
 
-    async def discover(self) -> list[DiscoveredProvider]:
-        """Discover providers from Python entry points.
+    async def discover(self) -> list[DiscoveredMcpServer]:
+        """Discover mcp_servers from Python entry points.
 
         Returns:
-            List of discovered providers
+            List of discovered mcp_servers
         """
-        providers = []
+        mcp_servers = []
 
         try:
             # Get entry points for our group
@@ -115,10 +115,10 @@ class EntrypointDiscoverySource(DiscoverySource):
 
             for ep in group_eps:
                 try:
-                    provider = await self._load_entrypoint(ep)
-                    if provider:
-                        providers.append(provider)
-                        await self.on_provider_discovered(provider)
+                    mcp_server = await self._load_entrypoint(ep)
+                    if mcp_server:
+                        mcp_servers.append(mcp_server)
+                        await self.on_mcp_server_discovered(mcp_server)
                 except Exception as e:  # noqa: BLE001 -- infra-boundary: skip individual entrypoint on load failure
                     logger.error(f"Failed to load entry point {ep.name}: {e}")
 
@@ -126,17 +126,17 @@ class EntrypointDiscoverySource(DiscoverySource):
             logger.error(f"Entry point discovery failed: {e}")
             raise
 
-        logger.debug(f"Entrypoint discovery found {len(providers)} providers")
-        return providers
+        logger.debug(f"Entrypoint discovery found {len(mcp_servers)} mcp_servers")
+        return mcp_servers
 
-    async def _load_entrypoint(self, ep: EntryPoint) -> DiscoveredProvider | None:
+    async def _load_entrypoint(self, ep: EntryPoint) -> DiscoveredMcpServer | None:
         """Load and parse an entry point.
 
         Args:
             ep: Entry point to load
 
         Returns:
-            DiscoveredProvider or None if invalid
+            DiscoveredMcpServer or None if invalid
         """
         try:
             # Load the entry point
@@ -152,22 +152,22 @@ class EntrypointDiscoverySource(DiscoverySource):
             else:
                 config = factory
 
-            # Build provider from config or defaults
-            return self._build_provider(ep, config)
+            # Build mcp_server from config or defaults
+            return self._build_mcp_server(ep, config)
 
         except Exception as e:  # noqa: BLE001 -- infra-boundary: skip entrypoint group on error
             logger.error(f"Error loading entry point {ep.name}: {e}")
             return None
 
-    def _build_provider(self, ep: EntryPoint, config: dict[str, Any] | None) -> DiscoveredProvider:
-        """Build provider from entry point and optional config.
+    def _build_mcp_server(self, ep: EntryPoint, config: dict[str, Any] | None) -> DiscoveredMcpServer:
+        """Build mcp_server from entry point and optional config.
 
         Args:
             ep: Entry point
             config: Optional configuration from factory
 
         Returns:
-            DiscoveredProvider instance
+            DiscoveredMcpServer instance
         """
         config = config or {}
 
@@ -217,7 +217,7 @@ class EntrypointDiscoverySource(DiscoverySource):
 
         ttl = config.get("ttl", self.default_ttl)
 
-        return DiscoveredProvider.create(
+        return DiscoveredMcpServer.create(
             name=name,
             source_type=self.source_type,
             mode=mode,

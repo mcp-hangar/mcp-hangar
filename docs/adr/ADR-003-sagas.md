@@ -6,7 +6,7 @@
 
 ## Context
 
-MCP Hangar needs to manage complex, long-running processes that span multiple domain aggregates or even external services (e.g., K8s resources). These operations, such as provider failover or recovery, cannot be handled as a single atomic transaction. Traditional distributed transactions (2PC) are not scalable and add significant complexity to a system where individual components may fail or restart independently.
+MCP Hangar needs to manage complex, long-running processes that span multiple domain aggregates or even external services (e.g., K8s resources). These operations, such as MCP server failover or recovery, cannot be handled as a single atomic transaction. Traditional distributed transactions (2PC) are not scalable and add significant complexity to a system where individual components may fail or restart independently.
 
 ## Decision
 
@@ -16,9 +16,9 @@ We have implemented the Saga pattern to manage distributed, multi-step business 
 
 We support three primary saga types:
 
-1. **Provider Failover Saga** (`mcp_hangar.application.sagas.provider_failover_saga.ProviderFailoverSaga`): Orchestrates primary-to-backup provider transitions in three steps (start backup, await primary, failback).
-2. **Provider Recovery Saga** (`mcp_hangar.application.sagas.provider_recovery_saga.ProviderRecoverySaga`): Automatically restarts degraded providers with backoff.
-3. **Group Rebalance Saga** (`mcp_hangar.application.sagas.group_rebalance_saga.GroupRebalanceSaga`): Manages load balancing and re-distribution of providers within a group.
+1. **MCP Server Failover Saga** (`mcp_hangar.application.sagas.mcp_server_failover_saga.ProviderFailoverSaga`): Orchestrates primary-to-backup MCP server transitions in three steps (start backup, await primary, failback).
+2. **MCP Server Recovery Saga** (`mcp_hangar.application.sagas.mcp_server_recovery_saga.ProviderRecoverySaga`): Automatically restarts degraded MCP servers with backoff.
+3. **Group Rebalance Saga** (`mcp_hangar.application.sagas.group_rebalance_saga.GroupRebalanceSaga`): Manages load balancing and re-distribution of MCP servers within a group.
 
 ### Implementation Details
 

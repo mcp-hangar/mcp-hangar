@@ -72,7 +72,7 @@ def bind_request_context(
 
     Args:
         request_id: Unique identifier for the request. Auto-generated if not provided.
-        server_name: Name of the target server/provider.
+        server_name: Name of the target server/mcp_server.
         tool_name: Name of the tool being invoked.
         user_id: Optional user identifier for attribution.
         **extra: Additional key-value pairs to include in log context.

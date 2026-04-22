@@ -82,15 +82,15 @@ class CloudClient:
 
     # -- heartbeat ----------------------------------------------------------
 
-    async def heartbeat(self, provider_count: int, healthy_count: int, uptime_s: float) -> None:
+    async def heartbeat(self, mcp_server_count: int, healthy_count: int, uptime_s: float) -> None:
         """POST /api/uplink/{id}/heartbeat"""
         if not self._agent_id:
             return
         resp = await self._http.post(
             f"/api/uplink/{self._agent_id}/heartbeat",
             json={
-                "provider_count": provider_count,
-                "healthy_providers": healthy_count,
+                "mcp_server_count": mcp_server_count,
+                "healthy_mcp_servers": healthy_count,
                 "uptime_seconds": int(uptime_s),
                 "status": "online",
             },
@@ -111,13 +111,13 @@ class CloudClient:
 
     # -- state sync ---------------------------------------------------------
 
-    async def sync_state(self, providers: list[dict[str, Any]]) -> None:
+    async def sync_state(self, mcp_servers: list[dict[str, Any]]) -> None:
         """PUT /api/uplink/{id}/state"""
         if not self._agent_id:
             return
         resp = await self._http.put(
             f"/api/uplink/{self._agent_id}/state",
-            json={"providers": providers},
+            json={"mcp_servers": mcp_servers},
         )
         resp.raise_for_status()
 
@@ -131,8 +131,8 @@ class CloudClient:
             await self._http.post(
                 f"/api/uplink/{self._agent_id}/heartbeat",
                 json={
-                    "provider_count": 0,
-                    "healthy_providers": 0,
+                    "mcp_server_count": 0,
+                    "healthy_mcp_servers": 0,
                     "uptime_seconds": 0,
                     "status": "shutting_down",
                 },

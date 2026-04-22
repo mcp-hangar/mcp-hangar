@@ -1,6 +1,6 @@
 """Conflict Resolver for Discovery.
 
-Resolves conflicts between static configuration and discovered providers,
+Resolves conflicts between static configuration and discovered mcp_servers,
 as well as conflicts between multiple discovery sources.
 
 Critical Design Decision: Static configuration ALWAYS wins over discovery.
@@ -11,21 +11,21 @@ from dataclasses import dataclass
 from enum import Enum
 
 from ...logging_config import get_logger
-from .discovered_provider import DiscoveredProvider
+from .discovered_mcp_server import DiscoveredMcpServer
 
 logger = get_logger(__name__)
 
 
 class ConflictResolution(Enum):
-    """Resolution outcome for discovered providers."""
+    """Resolution outcome for discovered mcp_servers."""
 
     STATIC_WINS = "static_wins"  # Static config takes precedence
     DISCOVERY_WINS = "discovery_wins"  # Never used, but defined for clarity
     SOURCE_PRIORITY = "source_priority"  # Higher priority source wins
-    REGISTERED = "registered"  # New provider registered
-    REJECTED = "rejected"  # Provider rejected
-    UNCHANGED = "unchanged"  # Provider unchanged, just update last_seen
-    UPDATED = "updated"  # Provider config changed, updating
+    REGISTERED = "registered"  # New mcp_server registered
+    REJECTED = "rejected"  # McpServer rejected
+    UNCHANGED = "unchanged"  # McpServer unchanged, just update last_seen
+    UPDATED = "updated"  # McpServer config changed, updating
 
     def __str__(self) -> str:
         return self.value
@@ -37,17 +37,17 @@ class ConflictResult:
 
     Attributes:
         resolution: The type of resolution applied
-        winner: The provider that won (if any)
+        winner: The mcp_server that won (if any)
         reason: Human-readable explanation
     """
 
     resolution: ConflictResolution
-    winner: DiscoveredProvider | None
+    winner: DiscoveredMcpServer | None
     reason: str
 
     @property
     def should_register(self) -> bool:
-        """Check if provider should be registered."""
+        """Check if mcp_server should be registered."""
         return self.resolution in (
             ConflictResolution.REGISTERED,
             ConflictResolution.UPDATED,
@@ -65,13 +65,13 @@ class ConflictResult:
 
 
 class ConflictResolver:
-    """Resolves conflicts between static config and discovered providers.
+    """Resolves conflicts between static config and discovered mcp_servers.
 
     Resolution Rules:
         1. Static + Discovery conflict: Static wins. Discovery ignored. Warning logged.
         2. Multiple sources discover same name: First source wins (priority order).
-        3. Discovery finds new provider: Auto-register if mode=additive.
-        4. Provider disappears from source: If mode=authoritative, deregister after TTL.
+        3. Discovery finds new mcp_server: Auto-register if mode=additive.
+        4. McpServer disappears from source: If mode=authoritative, deregister after TTL.
 
     Source Priority (lower = higher priority):
         - static: 0 (Always wins)
@@ -90,45 +90,45 @@ class ConflictResolver:
         "entrypoint": 4,
     }
 
-    def __init__(self, static_providers: set[str] | None = None):
+    def __init__(self, static_mcp_servers: set[str] | None = None):
         """Initialize conflict resolver.
 
         Args:
-            static_providers: Set of provider names from static config
+            static_mcp_servers: Set of mcp_server names from static config
         """
-        self.static_providers = static_providers or set()
-        self._registered: dict[str, DiscoveredProvider] = {}
+        self.static_mcp_servers = static_mcp_servers or set()
+        self._registered: dict[str, DiscoveredMcpServer] = {}
 
-    def add_static_provider(self, name: str) -> None:
-        """Add a provider name to the static providers set.
+    def add_static_mcp_server(self, name: str) -> None:
+        """Add a mcp_server name to the static mcp_servers set.
 
         Args:
-            name: Provider name from static configuration
+            name: McpServer name from static configuration
         """
-        self.static_providers.add(name)
+        self.static_mcp_servers.add(name)
 
-    def remove_static_provider(self, name: str) -> None:
-        """Remove a provider name from the static providers set.
+    def remove_static_mcp_server(self, name: str) -> None:
+        """Remove a mcp_server name from the static mcp_servers set.
 
         Args:
-            name: Provider name to remove
+            name: McpServer name to remove
         """
-        self.static_providers.discard(name)
+        self.static_mcp_servers.discard(name)
 
-    def resolve(self, provider: DiscoveredProvider) -> ConflictResult:
-        """Determine if provider should be registered.
+    def resolve(self, mcp_server: DiscoveredMcpServer) -> ConflictResult:
+        """Determine if mcp_server should be registered.
 
         Args:
-            provider: Discovered provider to resolve
+            mcp_server: Discovered mcp_server to resolve
 
         Returns:
             ConflictResult with resolution decision
         """
         # Rule 1: Static always wins
-        if provider.name in self.static_providers:
+        if mcp_server.name in self.static_mcp_servers:
             logger.warning(
-                f"Provider '{provider.name}' conflicts with static config. "
-                f"Static wins. Discovery from {provider.source_type} ignored."
+                f"McpServer '{mcp_server.name}' conflicts with static config. "
+                f"Static wins. Discovery from {mcp_server.source_type} ignored."
             )
             return ConflictResult(
                 resolution=ConflictResolution.STATIC_WINS,
@@ -136,46 +136,46 @@ class ConflictResolver:
                 reason="Static configuration takes precedence",
             )
 
-        # Rule 2: Check existing registered providers
-        existing = self._registered.get(provider.name)
+        # Rule 2: Check existing registered mcp_servers
+        existing = self._registered.get(mcp_server.name)
         if existing:
             # Same source, same fingerprint = no change
-            if existing.source_type == provider.source_type and existing.fingerprint == provider.fingerprint:
+            if existing.source_type == mcp_server.source_type and existing.fingerprint == mcp_server.fingerprint:
                 return ConflictResult(
                     resolution=ConflictResolution.UNCHANGED,
-                    winner=provider.with_updated_seen_time(),
-                    reason="Provider unchanged, updating last_seen",
+                    winner=mcp_server.with_updated_seen_time(),
+                    reason="McpServer unchanged, updating last_seen",
                 )
 
             # Same source, different fingerprint = config changed
-            if existing.source_type == provider.source_type:
+            if existing.source_type == mcp_server.source_type:
                 logger.info(
-                    f"Provider '{provider.name}' config changed "
-                    f"(fingerprint {existing.fingerprint} -> {provider.fingerprint})"
+                    f"McpServer '{mcp_server.name}' config changed "
+                    f"(fingerprint {existing.fingerprint} -> {mcp_server.fingerprint})"
                 )
                 return ConflictResult(
                     resolution=ConflictResolution.UPDATED,
-                    winner=provider,
-                    reason="Provider configuration updated",
+                    winner=mcp_server,
+                    reason="McpServer configuration updated",
                 )
 
             # Different source = check priority
             existing_priority = self.SOURCE_PRIORITY.get(existing.source_type, 99)
-            new_priority = self.SOURCE_PRIORITY.get(provider.source_type, 99)
+            new_priority = self.SOURCE_PRIORITY.get(mcp_server.source_type, 99)
 
             if new_priority < existing_priority:
                 logger.info(
-                    f"Provider '{provider.name}' from {provider.source_type} "
+                    f"McpServer '{mcp_server.name}' from {mcp_server.source_type} "
                     f"overrides {existing.source_type} (higher priority)"
                 )
                 return ConflictResult(
                     resolution=ConflictResolution.SOURCE_PRIORITY,
-                    winner=provider,
-                    reason=f"{provider.source_type} has higher priority than {existing.source_type}",
+                    winner=mcp_server,
+                    reason=f"{mcp_server.source_type} has higher priority than {existing.source_type}",
                 )
             else:
                 logger.debug(
-                    f"Provider '{provider.name}' from {provider.source_type} "
+                    f"McpServer '{mcp_server.name}' from {mcp_server.source_type} "
                     f"rejected (lower priority than {existing.source_type})"
                 )
                 return ConflictResult(
@@ -184,70 +184,70 @@ class ConflictResolver:
                     reason=f"Existing source {existing.source_type} has higher priority",
                 )
 
-        # No conflict - new provider
-        logger.info(f"New provider discovered: {provider.name} from {provider.source_type}")
+        # No conflict - new mcp_server
+        logger.info(f"New mcp_server discovered: {mcp_server.name} from {mcp_server.source_type}")
         return ConflictResult(
             resolution=ConflictResolution.REGISTERED,
-            winner=provider,
-            reason="New provider registered",
+            winner=mcp_server,
+            reason="New mcp_server registered",
         )
 
-    def register(self, provider: DiscoveredProvider) -> None:
-        """Mark provider as registered.
+    def register(self, mcp_server: DiscoveredMcpServer) -> None:
+        """Mark mcp_server as registered.
 
         Args:
-            provider: Provider to register
+            mcp_server: McpServer to register
         """
-        self._registered[provider.name] = provider
-        logger.debug(f"Registered provider: {provider.name}")
+        self._registered[mcp_server.name] = mcp_server
+        logger.debug(f"Registered mcp_server: {mcp_server.name}")
 
-    def update(self, provider: DiscoveredProvider) -> None:
-        """Update registered provider.
+    def update(self, mcp_server: DiscoveredMcpServer) -> None:
+        """Update registered mcp_server.
 
         Args:
-            provider: Provider with updated configuration
+            mcp_server: McpServer with updated configuration
         """
-        self._registered[provider.name] = provider
-        logger.debug(f"Updated provider: {provider.name}")
+        self._registered[mcp_server.name] = mcp_server
+        logger.debug(f"Updated mcp_server: {mcp_server.name}")
 
-    def deregister(self, name: str) -> DiscoveredProvider | None:
-        """Remove provider from registry.
+    def deregister(self, name: str) -> DiscoveredMcpServer | None:
+        """Remove mcp_server from registry.
 
         Args:
-            name: Provider name to deregister
+            name: McpServer name to deregister
 
         Returns:
-            The removed provider, or None if not found
+            The removed mcp_server, or None if not found
         """
-        provider = self._registered.pop(name, None)
-        if provider:
-            logger.info(f"Deregistered provider: {name}")
-        return provider
+        mcp_server = self._registered.pop(name, None)
+        if mcp_server:
+            logger.info(f"Deregistered mcp_server: {name}")
+        return mcp_server
 
-    def get_registered(self, name: str) -> DiscoveredProvider | None:
-        """Get a registered provider by name.
+    def get_registered(self, name: str) -> DiscoveredMcpServer | None:
+        """Get a registered mcp_server by name.
 
         Args:
-            name: Provider name
+            name: McpServer name
 
         Returns:
-            The registered provider, or None if not found
+            The registered mcp_server, or None if not found
         """
         return self._registered.get(name)
 
-    def get_all_registered(self) -> dict[str, DiscoveredProvider]:
-        """Get all registered providers.
+    def get_all_registered(self) -> dict[str, DiscoveredMcpServer]:
+        """Get all registered mcp_servers.
 
         Returns:
-            Dictionary of name -> DiscoveredProvider
+            Dictionary of name -> DiscoveredMcpServer
         """
         return dict(self._registered)
 
     def is_registered(self, name: str) -> bool:
-        """Check if a provider is registered.
+        """Check if a mcp_server is registered.
 
         Args:
-            name: Provider name
+            name: McpServer name
 
         Returns:
             True if registered

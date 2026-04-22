@@ -416,7 +416,7 @@ class SetToolAccessPolicyHandler(CommandHandler):
             deny_list=tuple(command.deny_list),
         )
         if command.scope == "provider":
-            resolver.set_provider_policy(command.target_id, policy)
+            resolver.set_mcp_server_policy(command.target_id, policy)
         elif command.scope == "group":
             resolver.set_group_policy(command.target_id, policy)
         elif command.scope == "member":

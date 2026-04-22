@@ -4,7 +4,7 @@ import tempfile
 
 import pytest
 
-from mcp_hangar.domain.events import ProviderStarted, ProviderStateChanged, ProviderStopped
+from mcp_hangar.domain.events import McpServerStarted, McpServerStateChanged, McpServerStopped
 from mcp_hangar.infrastructure.event_store import (
     ConcurrencyError,
     EventStoreSnapshot,
@@ -22,15 +22,15 @@ class TestStoredEvent:
         event = StoredEvent(
             stream_id="provider-1",
             version=1,
-            event_type="ProviderStarted",
+            event_type="McpServerStarted",
             event_id="evt-123",
             occurred_at=1234567890.0,
-            data={"provider_id": "provider-1", "mode": "subprocess"},
+            data={"mcp_server_id": "provider-1", "mode": "subprocess"},
         )
 
         assert event.stream_id == "provider-1"
         assert event.version == 1
-        assert event.event_type == "ProviderStarted"
+        assert event.event_type == "McpServerStarted"
         assert event.event_id == "evt-123"
 
     def test_stored_event_to_dict(self):
@@ -77,12 +77,9 @@ class TestInMemoryEventStore:
         """Test appending events to a new stream."""
         store = InMemoryEventStore()
 
-        event = ProviderStarted(
-            provider_id="p1",
-            mode="subprocess",
-            tools_count=5,
-            startup_duration_ms=100.0,
-        )
+        event = McpServerStarted(mcp_server_id="p1", mode="subprocess",
+        tools_count=5,
+        startup_duration_ms=100.0,)
 
         version = store.append("p1", [event], expected_version=-1)
 
@@ -94,8 +91,8 @@ class TestInMemoryEventStore:
         store = InMemoryEventStore()
 
         events = [
-            ProviderStarted("p1", "subprocess", 5, 100.0),
-            ProviderStateChanged("p1", "cold", "ready"),
+            McpServerStarted("p1", "subprocess", 5, 100.0),
+            McpServerStateChanged("p1", "cold", "ready"),
         ]
 
         version = store.append("p1", events, expected_version=-1)
@@ -107,11 +104,11 @@ class TestInMemoryEventStore:
         store = InMemoryEventStore()
 
         # First event
-        event1 = ProviderStarted("p1", "subprocess", 5, 100.0)
+        event1 = McpServerStarted("p1", "subprocess", 5, 100.0)
         store.append("p1", [event1], expected_version=-1)
 
         # Second event
-        event2 = ProviderStopped("p1", "idle")
+        event2 = McpServerStopped("p1", "idle")
         version = store.append("p1", [event2], expected_version=0)
 
         assert version == 1
@@ -120,11 +117,11 @@ class TestInMemoryEventStore:
         """Test that wrong expected version raises ConcurrencyError."""
         store = InMemoryEventStore()
 
-        event = ProviderStarted("p1", "subprocess", 5, 100.0)
+        event = McpServerStarted("p1", "subprocess", 5, 100.0)
         store.append("p1", [event], expected_version=-1)
 
         # Try to append with wrong expected version
-        event2 = ProviderStopped("p1", "idle")
+        event2 = McpServerStopped("p1", "idle")
 
         with pytest.raises(ConcurrencyError) as exc:
             store.append("p1", [event2], expected_version=5)
@@ -137,27 +134,27 @@ class TestInMemoryEventStore:
         store = InMemoryEventStore()
 
         events = [
-            ProviderStarted("p1", "subprocess", 5, 100.0),
-            ProviderStateChanged("p1", "cold", "ready"),
-            ProviderStopped("p1", "idle"),
+            McpServerStarted("p1", "subprocess", 5, 100.0),
+            McpServerStateChanged("p1", "cold", "ready"),
+            McpServerStopped("p1", "idle"),
         ]
         store.append("p1", events, expected_version=-1)
 
         loaded = store.load("p1")
 
         assert len(loaded) == 3
-        assert loaded[0].event_type == "ProviderStarted"
-        assert loaded[1].event_type == "ProviderStateChanged"
-        assert loaded[2].event_type == "ProviderStopped"
+        assert loaded[0].event_type == "McpServerStarted"
+        assert loaded[1].event_type == "McpServerStateChanged"
+        assert loaded[2].event_type == "McpServerStopped"
 
     def test_load_from_version(self):
         """Test loading events from specific version."""
         store = InMemoryEventStore()
 
         events = [
-            ProviderStarted("p1", "subprocess", 5, 100.0),
-            ProviderStateChanged("p1", "cold", "ready"),
-            ProviderStopped("p1", "idle"),
+            McpServerStarted("p1", "subprocess", 5, 100.0),
+            McpServerStateChanged("p1", "cold", "ready"),
+            McpServerStopped("p1", "idle"),
         ]
         store.append("p1", events, expected_version=-1)
 
@@ -171,9 +168,9 @@ class TestInMemoryEventStore:
         store = InMemoryEventStore()
 
         events = [
-            ProviderStarted("p1", "subprocess", 5, 100.0),
-            ProviderStateChanged("p1", "cold", "ready"),
-            ProviderStopped("p1", "idle"),
+            McpServerStarted("p1", "subprocess", 5, 100.0),
+            McpServerStateChanged("p1", "cold", "ready"),
+            McpServerStopped("p1", "idle"),
         ]
         store.append("p1", events, expected_version=-1)
 
@@ -196,7 +193,7 @@ class TestInMemoryEventStore:
 
         assert store.get_version("p1") == -1
 
-        event = ProviderStarted("p1", "subprocess", 5, 100.0)
+        event = McpServerStarted("p1", "subprocess", 5, 100.0)
         store.append("p1", [event], expected_version=-1)
 
         assert store.get_version("p1") == 0
@@ -205,8 +202,8 @@ class TestInMemoryEventStore:
         """Test getting all stream IDs."""
         store = InMemoryEventStore()
 
-        store.append("p1", [ProviderStarted("p1", "subprocess", 1, 100.0)], -1)
-        store.append("p2", [ProviderStarted("p2", "docker", 2, 200.0)], -1)
+        store.append("p1", [McpServerStarted("p1", "subprocess", 1, 100.0)], -1)
+        store.append("p2", [McpServerStarted("p2", "docker", 2, 200.0)], -1)
 
         ids = store.get_all_stream_ids()
 
@@ -218,7 +215,7 @@ class TestInMemoryEventStore:
 
         assert not store.stream_exists("p1")
 
-        store.append("p1", [ProviderStarted("p1", "subprocess", 1, 100.0)], -1)
+        store.append("p1", [McpServerStarted("p1", "subprocess", 1, 100.0)], -1)
 
         assert store.stream_exists("p1")
 
@@ -229,18 +226,18 @@ class TestInMemoryEventStore:
 
         store.subscribe(lambda e: received.append(e))
 
-        event = ProviderStarted("p1", "subprocess", 5, 100.0)
+        event = McpServerStarted("p1", "subprocess", 5, 100.0)
         store.append("p1", [event], expected_version=-1)
 
         assert len(received) == 1
-        assert received[0].event_type == "ProviderStarted"
+        assert received[0].event_type == "McpServerStarted"
 
     def test_clear_store(self):
         """Test clearing the store."""
         store = InMemoryEventStore()
 
-        store.append("p1", [ProviderStarted("p1", "subprocess", 1, 100.0)], -1)
-        store.append("p2", [ProviderStarted("p2", "docker", 2, 200.0)], -1)
+        store.append("p1", [McpServerStarted("p1", "subprocess", 1, 100.0)], -1)
+        store.append("p2", [McpServerStarted("p2", "docker", 2, 200.0)], -1)
 
         store.clear()
 
@@ -256,8 +253,8 @@ class TestInMemoryEventStore:
         store.append(
             "p1",
             [
-                ProviderStarted("p1", "subprocess", 1, 100.0),
-                ProviderStopped("p1", "idle"),
+                McpServerStarted("p1", "subprocess", 1, 100.0),
+                McpServerStopped("p1", "idle"),
             ],
             -1,
         )
@@ -273,20 +270,20 @@ class TestFileEventStore:
         with tempfile.TemporaryDirectory() as tmpdir:
             store = FileEventStore(tmpdir)
 
-            event = ProviderStarted("p1", "subprocess", 5, 100.0)
+            event = McpServerStarted("p1", "subprocess", 5, 100.0)
             store.append("p1", [event], expected_version=-1)
 
             loaded = store.load("p1")
 
             assert len(loaded) == 1
-            assert loaded[0].event_type == "ProviderStarted"
+            assert loaded[0].event_type == "McpServerStarted"
 
     def test_persistence_across_instances(self):
         """Test that events persist across store instances."""
         with tempfile.TemporaryDirectory() as tmpdir:
             # First instance - write
             store1 = FileEventStore(tmpdir)
-            event = ProviderStarted("p1", "subprocess", 5, 100.0)
+            event = McpServerStarted("p1", "subprocess", 5, 100.0)
             store1.append("p1", [event], expected_version=-1)
 
             # Second instance - read
@@ -294,14 +291,14 @@ class TestFileEventStore:
             loaded = store2.load("p1")
 
             assert len(loaded) == 1
-            assert loaded[0].event_type == "ProviderStarted"
+            assert loaded[0].event_type == "McpServerStarted"
 
     def test_concurrency_check(self):
         """Test optimistic concurrency in file store."""
         with tempfile.TemporaryDirectory() as tmpdir:
             store = FileEventStore(tmpdir)
 
-            event = ProviderStarted("p1", "subprocess", 5, 100.0)
+            event = McpServerStarted("p1", "subprocess", 5, 100.0)
             store.append("p1", [event], expected_version=-1)
 
             with pytest.raises(ConcurrencyError):

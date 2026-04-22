@@ -54,7 +54,7 @@ class TestPostgresProviderConfigPersistence:
                 """
                 CREATE TABLE IF NOT EXISTS provider_configs (
                     id SERIAL PRIMARY KEY,
-                    provider_id TEXT UNIQUE NOT NULL,
+                    mcp_server_id TEXT UNIQUE NOT NULL,
                     config JSONB NOT NULL,
                     created_at TIMESTAMP DEFAULT NOW()
                 )
@@ -64,35 +64,35 @@ class TestPostgresProviderConfigPersistence:
             # Create
             await conn.execute(
                 """
-                INSERT INTO provider_configs (provider_id, config)
+                INSERT INTO provider_configs (mcp_server_id, config)
                 VALUES ($1, $2)
-                ON CONFLICT (provider_id) DO UPDATE SET config = $2
+                ON CONFLICT (mcp_server_id) DO UPDATE SET config = $2
             """,
                 "crud-test",
                 '{"mode": "subprocess"}',
             )
 
             # Read
-            row = await conn.fetchrow("SELECT config FROM provider_configs WHERE provider_id = $1", "crud-test")
+            row = await conn.fetchrow("SELECT config FROM provider_configs WHERE mcp_server_id = $1", "crud-test")
             assert row is not None
             assert "subprocess" in row["config"]
 
             # Update
             await conn.execute(
                 """
-                UPDATE provider_configs SET config = $2 WHERE provider_id = $1
+                UPDATE provider_configs SET config = $2 WHERE mcp_server_id = $1
             """,
                 "crud-test",
                 '{"mode": "container"}',
             )
 
-            row = await conn.fetchrow("SELECT config FROM provider_configs WHERE provider_id = $1", "crud-test")
+            row = await conn.fetchrow("SELECT config FROM provider_configs WHERE mcp_server_id = $1", "crud-test")
             assert "container" in row["config"]
 
             # Delete
-            await conn.execute("DELETE FROM provider_configs WHERE provider_id = $1", "crud-test")
+            await conn.execute("DELETE FROM provider_configs WHERE mcp_server_id = $1", "crud-test")
 
-            row = await conn.fetchrow("SELECT config FROM provider_configs WHERE provider_id = $1", "crud-test")
+            row = await conn.fetchrow("SELECT config FROM provider_configs WHERE mcp_server_id = $1", "crud-test")
             assert row is None
 
             await conn.close()
@@ -162,7 +162,7 @@ class TestPostgresAuditLog:
                 CREATE TABLE IF NOT EXISTS audit_log (
                     id SERIAL PRIMARY KEY,
                     event_type TEXT NOT NULL,
-                    provider_id TEXT,
+                    mcp_server_id TEXT,
                     details JSONB,
                     created_at TIMESTAMP DEFAULT NOW()
                 )
@@ -172,7 +172,7 @@ class TestPostgresAuditLog:
             # Insert audit entry
             await conn.execute(
                 """
-                INSERT INTO audit_log (event_type, provider_id, details)
+                INSERT INTO audit_log (event_type, mcp_server_id, details)
                 VALUES ($1, $2, $3)
             """,
                 "TOOL_INVOKED",
@@ -186,7 +186,7 @@ class TestPostgresAuditLog:
             )
 
             # Query by provider
-            rows = await conn.fetch("SELECT * FROM audit_log WHERE provider_id = $1", "audit-test")
+            rows = await conn.fetch("SELECT * FROM audit_log WHERE mcp_server_id = $1", "audit-test")
             assert len(rows) >= 1
             assert rows[0]["event_type"] == "TOOL_INVOKED"
 

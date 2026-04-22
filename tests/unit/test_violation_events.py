@@ -4,9 +4,9 @@ from mcp_hangar.domain.value_objects.capabilities import ViolationType, Violatio
 from mcp_hangar.domain.events import (
     CapabilityViolationDetected,
     EgressBlocked,
-    ProviderCapabilityQuarantined,
-    ProviderCapabilityQuarantineReleased,
-    ProviderQuarantined,
+    McpServerCapabilityQuarantined,
+    McpServerCapabilityQuarantineReleased,
+    McpServerQuarantined,
 )
 from mcp_hangar.observability.conventions import Enforcement
 
@@ -68,40 +68,40 @@ class TestViolationSeverity:
 
 class TestProviderCapabilityQuarantined:
     def test_is_importable_and_has_expected_fields(self) -> None:
-        event = ProviderCapabilityQuarantined(
-            provider_id="rogue-provider",
+        event = McpServerCapabilityQuarantined(
+            mcp_server_id="rogue-provider",
             reason="3 egress violations in 60s",
             violation_count=3,
         )
-        assert event.provider_id == "rogue-provider"
+        assert event.mcp_server_id == "rogue-provider"
         assert event.reason == "3 egress violations in 60s"
         assert event.violation_count == 3
         assert event.schema_version == 1
 
     def test_discovery_provider_quarantined_still_exists(self) -> None:
         """The original discovery-related ProviderQuarantined must stay intact."""
-        event = ProviderQuarantined(
-            provider_name="my-provider",
+        event = McpServerQuarantined(
+            mcp_server_name="my-provider",
             source_type="filesystem",
             reason="validation failed",
             validation_result="invalid config",
         )
-        assert event.provider_name == "my-provider"
+        assert event.mcp_server_name == "my-provider"
         assert event.source_type == "filesystem"
         assert event.reason == "validation failed"
         assert event.validation_result == "invalid config"
 
     def test_discovery_and_capability_quarantined_are_distinct_classes(self) -> None:
-        assert ProviderQuarantined is not ProviderCapabilityQuarantined
+        assert McpServerQuarantined is not McpServerCapabilityQuarantined
 
 
 class TestProviderCapabilityQuarantineReleased:
     def test_is_importable_and_has_expected_fields(self) -> None:
-        event = ProviderCapabilityQuarantineReleased(
-            provider_id="rogue-provider",
+        event = McpServerCapabilityQuarantineReleased(
+            mcp_server_id="rogue-provider",
             released_by="ops@example.com",
         )
-        assert event.provider_id == "rogue-provider"
+        assert event.mcp_server_id == "rogue-provider"
         assert event.released_by == "ops@example.com"
         assert event.schema_version == 1
 
@@ -114,7 +114,7 @@ class TestProviderCapabilityQuarantineReleased:
 class TestCapabilityViolationDetectedSeverity:
     def test_has_severity_field_with_default(self) -> None:
         event = CapabilityViolationDetected(
-            provider_id="math",
+            mcp_server_id="math",
             violation_type="egress_undeclared",
             violation_detail="Blocked connection",
             enforcement_action="alert",
@@ -123,7 +123,7 @@ class TestCapabilityViolationDetectedSeverity:
 
     def test_severity_can_be_overridden(self) -> None:
         event = CapabilityViolationDetected(
-            provider_id="math",
+            mcp_server_id="math",
             violation_type="egress_undeclared",
             violation_detail="Blocked connection",
             enforcement_action="alert",
@@ -133,7 +133,7 @@ class TestCapabilityViolationDetectedSeverity:
 
     def test_schema_version_is_2(self) -> None:
         event = CapabilityViolationDetected(
-            provider_id="math",
+            mcp_server_id="math",
             violation_type="egress_undeclared",
             violation_detail="Blocked",
             enforcement_action="alert",
@@ -142,13 +142,13 @@ class TestCapabilityViolationDetectedSeverity:
 
     def test_all_expected_fields_present(self) -> None:
         event = CapabilityViolationDetected(
-            provider_id="math",
+            mcp_server_id="math",
             violation_type="egress_undeclared",
             violation_detail="Connection to 192.168.1.100:9200",
             enforcement_action="alert",
             destination="192.168.1.100:9200",
         )
-        assert event.provider_id == "math"
+        assert event.mcp_server_id == "math"
         assert event.violation_type == "egress_undeclared"
         assert event.violation_detail == "Connection to 192.168.1.100:9200"
         assert event.enforcement_action == "alert"
@@ -182,7 +182,7 @@ class TestCapabilityViolationsCounter:
     def test_counter_has_correct_labels(self) -> None:
         from mcp_hangar.metrics import CAPABILITY_VIOLATIONS_TOTAL
 
-        assert CAPABILITY_VIOLATIONS_TOTAL.label_names == ["provider", "violation_type"]
+        assert CAPABILITY_VIOLATIONS_TOTAL.label_names == ["mcp_server", "violation_type"]
 
     def test_record_capability_violation_increments_counter(self) -> None:
         from mcp_hangar.metrics import CAPABILITY_VIOLATIONS_TOTAL, record_capability_violation
@@ -196,7 +196,7 @@ class TestCapabilityViolationsCounter:
         samples = CAPABILITY_VIOLATIONS_TOTAL.collect()
         assert len(samples) == 1
         assert samples[0].value == 1.0
-        assert samples[0].labels == {"provider": "test-provider", "violation_type": "egress_denied"}
+        assert samples[0].labels == {"mcp_server": "test-provider", "violation_type": "egress_denied"}
 
     def test_record_capability_violation_twice_increments_to_two(self) -> None:
         from mcp_hangar.metrics import CAPABILITY_VIOLATIONS_TOTAL, record_capability_violation
@@ -229,7 +229,7 @@ class TestMetricsEventHandlerViolationRouting:
 
         handler = MetricsEventHandler()
         event = CapabilityViolationDetected(
-            provider_id="math",
+            mcp_server_id="math",
             violation_type="capability_drift",
             violation_detail="Tool schema changed",
             enforcement_action="alert",
@@ -238,7 +238,7 @@ class TestMetricsEventHandlerViolationRouting:
 
         samples = CAPABILITY_VIOLATIONS_TOTAL.collect()
         assert len(samples) == 1
-        assert samples[0].labels == {"provider": "math", "violation_type": "capability_drift"}
+        assert samples[0].labels == {"mcp_server": "math", "violation_type": "capability_drift"}
         assert samples[0].value == 1.0
 
     def test_handles_egress_blocked(self) -> None:
@@ -251,7 +251,7 @@ class TestMetricsEventHandlerViolationRouting:
 
         handler = MetricsEventHandler()
         event = EgressBlocked(
-            provider_id="rogue",
+            mcp_server_id="rogue",
             destination_host="evil.com",
             destination_port=443,
             protocol="tcp",
@@ -260,17 +260,17 @@ class TestMetricsEventHandlerViolationRouting:
 
         samples = CAPABILITY_VIOLATIONS_TOTAL.collect()
         assert len(samples) == 1
-        assert samples[0].labels == {"provider": "rogue", "violation_type": "egress_denied"}
+        assert samples[0].labels == {"mcp_server": "rogue", "violation_type": "egress_denied"}
         assert samples[0].value == 1.0
 
     def test_existing_events_still_handled(self) -> None:
         """Ensure adding violation handling does not break existing event routing."""
         from mcp_hangar.application.event_handlers.metrics_handler import MetricsEventHandler
-        from mcp_hangar.domain.events import ProviderStarted
+        from mcp_hangar.domain.events import McpServerStarted
 
         handler = MetricsEventHandler()
-        event = ProviderStarted(
-            provider_id="math",
+        event = McpServerStarted(
+            mcp_server_id="math",
             mode="subprocess",
             tools_count=5,
             startup_duration_ms=100,
@@ -281,4 +281,4 @@ class TestMetricsEventHandlerViolationRouting:
         # Verify in-memory metrics were updated
         metrics = handler.get_metrics("math")
         assert metrics is not None
-        assert metrics.provider_id == "math"
+        assert metrics.mcp_server_id == "math"

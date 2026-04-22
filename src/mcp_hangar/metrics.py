@@ -470,62 +470,62 @@ PROCESS_START_TIME = Gauge(
 )
 
 # -----------------------------------------------------------------------------
-# Provider Lifecycle Metrics
+# McpServer Lifecycle Metrics
 # -----------------------------------------------------------------------------
 
 PROVIDER_INFO = Gauge(
-    name="mcp_hangar_provider_info",
-    description="Provider configuration info (always 1, labels contain metadata)",
-    labels=["provider", "mode"],
+    name="mcp_hangar_mcp_server_info",
+    description="McpServer configuration info (always 1, labels contain metadata)",
+    labels=["mcp_server", "mode"],
 )
 
 PROVIDER_STATE_CURRENT = Gauge(
-    name="mcp_hangar_provider_state",
-    description="Current provider state (0=cold, 1=initializing, 2=ready, 3=degraded, 4=dead)",
-    labels=["provider"],
+    name="mcp_hangar_mcp_server_state",
+    description="Current mcp_server state (0=cold, 1=initializing, 2=ready, 3=degraded, 4=dead)",
+    labels=["mcp_server"],
 )
 
 PROVIDER_UP = Gauge(
-    name="mcp_hangar_provider_up",
-    description="Whether provider is up and ready (1=up, 0=down)",
-    labels=["provider"],
+    name="mcp_hangar_mcp_server_up",
+    description="Whether mcp_server is up and ready (1=up, 0=down)",
+    labels=["mcp_server"],
 )
 
 PROVIDER_INITIALIZED = Gauge(
-    name="mcp_hangar_provider_initialized",
-    description="Whether provider has been initialized at least once (1=yes, 0=no/cold)",
-    labels=["provider"],
+    name="mcp_hangar_mcp_server_initialized",
+    description="Whether mcp_server has been initialized at least once (1=yes, 0=no/cold)",
+    labels=["mcp_server"],
 )
 
 PROVIDER_LAST_STATE_CHANGE_SECONDS = Gauge(
-    name="mcp_hangar_provider_last_state_change_timestamp_seconds",
-    description="Unix timestamp of last provider state change",
-    labels=["provider"],
+    name="mcp_hangar_mcp_server_last_state_change_timestamp_seconds",
+    description="Unix timestamp of last mcp_server state change",
+    labels=["mcp_server"],
 )
 
 PROVIDER_STARTS_TOTAL = Counter(
-    name="mcp_hangar_provider_starts",
-    description="Total number of provider start attempts",
-    labels=["provider", "result"],  # result: success, failure
+    name="mcp_hangar_mcp_server_starts",
+    description="Total number of mcp_server start attempts",
+    labels=["mcp_server", "result"],  # result: success, failure
 )
 
 PROVIDER_STOPS_TOTAL = Counter(
-    name="mcp_hangar_provider_stops",
-    description="Total number of provider stops",
-    labels=["provider", "reason"],  # reason: idle, manual, error, gc
+    name="mcp_hangar_mcp_server_stops",
+    description="Total number of mcp_server stops",
+    labels=["mcp_server", "reason"],  # reason: idle, manual, error, gc
 )
 
 PROVIDER_COLD_START_SECONDS = Histogram(
-    name="mcp_hangar_provider_cold_start_seconds",
+    name="mcp_hangar_mcp_server_cold_start_seconds",
     description="Time from cold start to ready state (critical UX metric)",
-    labels=["provider", "mode"],
+    labels=["mcp_server", "mode"],
     buckets=(0.1, 0.25, 0.5, 1.0, 2.0, 3.0, 5.0, 10.0, 15.0, 30.0, 60.0),
 )
 
 PROVIDER_COLD_START_IN_PROGRESS = Gauge(
-    name="mcp_hangar_provider_cold_start_in_progress",
-    description="Number of providers currently in cold start",
-    labels=["provider"],
+    name="mcp_hangar_mcp_server_cold_start_in_progress",
+    description="Number of mcp_servers currently in cold start",
+    labels=["mcp_server"],
 )
 
 # -----------------------------------------------------------------------------
@@ -535,20 +535,20 @@ PROVIDER_COLD_START_IN_PROGRESS = Gauge(
 TOOL_CALLS_TOTAL = Counter(
     name="mcp_hangar_tool_calls",
     description="Total number of tool calls",
-    labels=["provider", "tool", "status"],  # status: success, error
+    labels=["mcp_server", "tool", "status"],  # status: success, error
 )
 
 TOOL_CALL_DURATION_SECONDS = Histogram(
     name="mcp_hangar_tool_call_duration_seconds",
     description="Duration of tool calls in seconds",
-    labels=["provider", "tool"],
+    labels=["mcp_server", "tool"],
     buckets=Histogram.LATENCY_BUCKETS,
 )
 
 TOOL_CALL_ERRORS_TOTAL = Counter(
     name="mcp_hangar_tool_call_errors",
     description="Total number of tool call errors by error type",
-    labels=["provider", "tool", "error_type"],
+    labels=["mcp_server", "tool", "error_type"],
 )
 
 # -----------------------------------------------------------------------------
@@ -558,20 +558,20 @@ TOOL_CALL_ERRORS_TOTAL = Counter(
 HEALTH_CHECK_TOTAL = Counter(
     name="mcp_hangar_health_checks",
     description="Total number of health check executions",
-    labels=["provider", "result"],  # result: cold, healthy, unhealthy
+    labels=["mcp_server", "result"],  # result: cold, healthy, unhealthy
 )
 
 HEALTH_CHECK_DURATION_SECONDS = Histogram(
     name="mcp_hangar_health_check_duration_seconds",
     description="Duration of health checks in seconds",
-    labels=["provider"],
+    labels=["mcp_server"],
     buckets=(0.001, 0.005, 0.01, 0.025, 0.05, 0.1, 0.25, 0.5, 1.0),
 )
 
 HEALTH_CHECK_CONSECUTIVE_FAILURES = Gauge(
     name="mcp_hangar_health_check_consecutive_failures",
     description="Number of consecutive health check failures",
-    labels=["provider"],
+    labels=["mcp_server"],
 )
 
 # -----------------------------------------------------------------------------
@@ -580,20 +580,20 @@ HEALTH_CHECK_CONSECUTIVE_FAILURES = Gauge(
 
 CONNECTIONS_ACTIVE = Gauge(
     name="mcp_hangar_connections_active",
-    description="Number of active connections to providers",
-    labels=["provider"],
+    description="Number of active connections to mcp_servers",
+    labels=["mcp_server"],
 )
 
 CONNECTIONS_TOTAL = Counter(
     name="mcp_hangar_connections",
     description="Total number of connections established",
-    labels=["provider", "result"],
+    labels=["mcp_server", "result"],
 )
 
 CONNECTION_DURATION_SECONDS = Histogram(
     name="mcp_hangar_connection_duration_seconds",
-    description="Duration of provider connections in seconds",
-    labels=["provider"],
+    description="Duration of mcp_server connections in seconds",
+    labels=["mcp_server"],
     buckets=(1, 5, 10, 30, 60, 300, 600, 1800, 3600),
 )
 
@@ -604,19 +604,19 @@ CONNECTION_DURATION_SECONDS = Histogram(
 MESSAGES_SENT_TOTAL = Counter(
     name="mcp_hangar_messages_sent",
     description="Total number of JSON-RPC messages sent",
-    labels=["provider", "method"],
+    labels=["mcp_server", "method"],
 )
 
 MESSAGES_RECEIVED_TOTAL = Counter(
     name="mcp_hangar_messages_received",
     description="Total number of JSON-RPC messages received",
-    labels=["provider", "type"],  # values: response, notification, error
+    labels=["mcp_server", "type"],  # values: response, notification, error
 )
 
 MESSAGE_SIZE_BYTES = Histogram(
     name="mcp_hangar_message_size_bytes",
     description="Size of JSON-RPC messages in bytes",
-    labels=["provider", "direction"],  # direction: sent, received
+    labels=["mcp_server", "direction"],  # direction: sent, received
     buckets=Histogram.SIZE_BUCKETS,
 )
 
@@ -636,8 +636,8 @@ GC_CYCLE_DURATION_SECONDS = Histogram(
 )
 
 GC_PROVIDERS_COLLECTED_TOTAL = Counter(
-    name="mcp_hangar_gc_providers_collected",
-    description="Total number of providers collected by GC",
+    name="mcp_hangar_gc_mcp_servers_collected",
+    description="Total number of mcp_servers collected by GC",
     labels=["reason"],  # reason: idle, dead, error
 )
 
@@ -648,7 +648,7 @@ GC_PROVIDERS_COLLECTED_TOTAL = Counter(
 ERRORS_TOTAL = Counter(
     name="mcp_hangar_errors",
     description="Total number of errors by type and component",
-    labels=["component", "error_type"],  # component: provider, tool, health, gc, server
+    labels=["component", "error_type"],  # component: mcp_server, tool, health, gc, server
 )
 
 # -----------------------------------------------------------------------------
@@ -684,8 +684,8 @@ DISCOVERY_SOURCES_HEALTHY = Gauge(
 )
 
 DISCOVERY_PROVIDERS_TOTAL = Gauge(
-    name="mcp_hangar_discovery_providers",
-    description="Number of discovered providers",
+    name="mcp_hangar_discovery_mcp_servers",
+    description="Number of discovered mcp_servers",
     labels=["source_type", "status"],  # status: discovered, registered, quarantined
 )
 
@@ -704,13 +704,13 @@ DISCOVERY_CYCLE_DURATION_SECONDS = Histogram(
 
 DISCOVERY_REGISTRATIONS_TOTAL = Counter(
     name="mcp_hangar_discovery_registrations",
-    description="Total provider registrations from discovery",
+    description="Total mcp_server registrations from discovery",
     labels=["source_type"],
 )
 
 DISCOVERY_DEREGISTRATIONS_TOTAL = Counter(
     name="mcp_hangar_discovery_deregistrations",
-    description="Total provider deregistrations from discovery",
+    description="Total mcp_server deregistrations from discovery",
     labels=["source_type", "reason"],  # reason: ttl_expired, source_removed, manual
 )
 
@@ -722,7 +722,7 @@ DISCOVERY_CONFLICTS_TOTAL = Counter(
 
 DISCOVERY_QUARANTINE_TOTAL = Counter(
     name="mcp_hangar_discovery_quarantine",
-    description="Total providers quarantined",
+    description="Total mcp_servers quarantined",
     labels=["reason"],  # reason: health_check_failed, validation_failed, rate_limited
 )
 
@@ -739,50 +739,50 @@ DISCOVERY_LAST_CYCLE_TIMESTAMP = Gauge(
 )
 
 # -----------------------------------------------------------------------------
-# HTTP Transport Metrics (for remote providers)
+# HTTP Transport Metrics (for remote mcp_servers)
 # -----------------------------------------------------------------------------
 
 HTTP_REQUESTS_TOTAL = Counter(
     name="mcp_hangar_http_requests",
-    description="Total number of HTTP requests to remote providers",
-    labels=["provider", "method", "status_code"],
+    description="Total number of HTTP requests to remote mcp_servers",
+    labels=["mcp_server", "method", "status_code"],
 )
 
 HTTP_REQUEST_DURATION_SECONDS = Histogram(
     name="mcp_hangar_http_request_duration_seconds",
-    description="Duration of HTTP requests to remote providers in seconds",
-    labels=["provider", "method"],
+    description="Duration of HTTP requests to remote mcp_servers in seconds",
+    labels=["mcp_server", "method"],
     buckets=Histogram.LATENCY_BUCKETS,
 )
 
 HTTP_ERRORS_TOTAL = Counter(
     name="mcp_hangar_http_errors",
     description="Total number of HTTP errors by type",
-    labels=["provider", "error_type"],  # error_type: connection_refused, timeout, auth_failed, ssl_error
+    labels=["mcp_server", "error_type"],  # error_type: connection_refused, timeout, auth_failed, ssl_error
 )
 
 HTTP_RETRIES_TOTAL = Counter(
     name="mcp_hangar_http_retries",
     description="Total number of HTTP request retries",
-    labels=["provider", "retry_reason"],  # retry_reason: 502, 503, 504, connection_error
+    labels=["mcp_server", "retry_reason"],  # retry_reason: 502, 503, 504, connection_error
 )
 
 HTTP_CONNECTION_POOL_SIZE = Gauge(
     name="mcp_hangar_http_connection_pool_size",
     description="Current number of connections in HTTP connection pool",
-    labels=["provider"],
+    labels=["mcp_server"],
 )
 
 HTTP_SSE_STREAMS_ACTIVE = Gauge(
     name="mcp_hangar_http_sse_streams_active",
-    description="Number of active SSE streams to remote providers",
-    labels=["provider"],
+    description="Number of active SSE streams to remote mcp_servers",
+    labels=["mcp_server"],
 )
 
 HTTP_SSE_EVENTS_TOTAL = Counter(
     name="mcp_hangar_http_sse_events",
-    description="Total number of SSE events received from remote providers",
-    labels=["provider", "event_type"],  # event_type: message, notification, error
+    description="Total number of SSE events received from remote mcp_servers",
+    labels=["mcp_server", "event_type"],  # event_type: message, notification, error
 )
 
 # -----------------------------------------------------------------------------
@@ -826,7 +826,7 @@ BATCH_TRUNCATIONS_TOTAL = Counter(
 BATCH_CIRCUIT_BREAKER_REJECTIONS_TOTAL = Counter(
     name="mcp_hangar_batch_circuit_breaker_rejections",
     description="Total calls rejected due to circuit breaker in batches",
-    labels=["provider"],
+    labels=["mcp_server"],
 )
 
 BATCH_CANCELLATIONS_TOTAL = Counter(
@@ -845,22 +845,22 @@ BATCH_INFLIGHT_CALLS = Gauge(
 )
 
 BATCH_INFLIGHT_CALLS_PER_PROVIDER = Gauge(
-    name="mcp_hangar_batch_inflight_calls_per_provider",
-    description="Number of MCP tool calls currently in flight per provider",
-    labels=["provider"],
+    name="mcp_hangar_batch_inflight_calls_per_mcp_server",
+    description="Number of MCP tool calls currently in flight per mcp_server",
+    labels=["mcp_server"],
 )
 
 BATCH_CONCURRENCY_WAIT_SECONDS = Histogram(
     name="mcp_hangar_batch_concurrency_wait_seconds",
     description="Time spent waiting for a concurrency slot",
-    labels=["provider"],
+    labels=["mcp_server"],
     buckets=(0.001, 0.005, 0.01, 0.025, 0.05, 0.1, 0.25, 0.5, 1.0, 2.5, 5.0),
 )
 
 BATCH_CONCURRENCY_QUEUED_TOTAL = Counter(
     name="mcp_hangar_batch_concurrency_queued",
     description="Total calls that had to wait for a concurrency slot",
-    labels=["provider"],
+    labels=["mcp_server"],
 )
 
 
@@ -870,8 +870,8 @@ BATCH_CONCURRENCY_QUEUED_TOTAL = Counter(
 
 CIRCUIT_BREAKER_STATE = Gauge(
     name="mcp_hangar_circuit_breaker_state",
-    description="Current circuit breaker state per provider and state (1=active, 0=inactive)",
-    labels=["provider", "state"],
+    description="Current circuit breaker state per mcp_server and state (1=active, 0=inactive)",
+    labels=["mcp_server", "state"],
 )
 
 # -----------------------------------------------------------------------------
@@ -891,19 +891,19 @@ EVENTS_COMPACTED_TOTAL = Counter(
 TOOL_ACCESS_DENIED_TOTAL = Counter(
     name="mcp_hangar_tool_access_denied",
     description="Total tool invocations denied by access policy",
-    labels=["provider", "tool", "reason"],  # reason: tool_not_in_access_policy
+    labels=["mcp_server", "tool", "reason"],  # reason: tool_not_in_access_policy
 )
 
 TOOLS_FILTERED_TOTAL = Gauge(
     name="mcp_hangar_tools_filtered",
-    description="Number of tools filtered by access policy per provider",
-    labels=["provider"],
+    description="Number of tools filtered by access policy per mcp_server",
+    labels=["mcp_server"],
 )
 
 TOOL_ACCESS_POLICY_ACTIVE = Gauge(
     name="mcp_hangar_tool_access_policy_active",
-    description="Whether tool access policy is active (1) or unrestricted (0) per provider",
-    labels=["provider"],
+    description="Whether tool access policy is active (1) or unrestricted (0) per mcp_server",
+    labels=["mcp_server"],
 )
 
 # -----------------------------------------------------------------------------
@@ -913,19 +913,19 @@ TOOL_ACCESS_POLICY_ACTIVE = Gauge(
 CAPABILITY_VIOLATIONS_TOTAL = Counter(
     name="mcp_hangar_capability_violations",
     description="Total number of capability violations detected",
-    labels=["provider", "violation_type"],
+    labels=["mcp_server", "violation_type"],
 )
 
 BEHAVIORAL_DEVIATIONS_TOTAL = Counter(
     name="mcp_hangar_behavioral_deviations",
     description="Total number of behavioral deviations detected",
-    labels=["provider", "deviation_type"],
+    labels=["mcp_server", "deviation_type"],
 )
 
 TOOL_SCHEMA_DRIFTS_TOTAL = Counter(
     name="mcp_hangar_tool_schema_drifts",
-    description="Total number of tool schema changes detected between provider restarts",
-    labels=["provider", "change_type"],
+    description="Total number of tool schema changes detected between mcp_server restarts",
+    labels=["mcp_server", "change_type"],
 )
 
 # -----------------------------------------------------------------------------
@@ -1080,17 +1080,17 @@ def init_metrics(version: str = "1.0.0"):
     PROCESS_START_TIME.set(time.time())
 
 
-def observe_tool_call(provider: str, tool: str, duration: float, success: bool, error_type: str = None):
+def observe_tool_call(mcp_server: str, tool: str, duration: float, success: bool, error_type: str = None):
     """Record a tool call observation."""
     status = "success" if success else "error"
-    TOOL_CALLS_TOTAL.inc(provider=provider, tool=tool, status=status)
-    TOOL_CALL_DURATION_SECONDS.observe(duration, provider=provider, tool=tool)
+    TOOL_CALLS_TOTAL.inc(mcp_server=mcp_server, tool=tool, status=status)
+    TOOL_CALL_DURATION_SECONDS.observe(duration, mcp_server=mcp_server, tool=tool)
     if not success and error_type:
-        TOOL_CALL_ERRORS_TOTAL.inc(provider=provider, tool=tool, error_type=error_type)
+        TOOL_CALL_ERRORS_TOTAL.inc(mcp_server=mcp_server, tool=tool, error_type=error_type)
 
 
 def observe_health_check(
-    provider: str,
+    mcp_server: str,
     duration: float,
     healthy: bool,
     is_cold: bool = False,
@@ -1099,10 +1099,10 @@ def observe_health_check(
     """Record a health check observation.
 
     Args:
-        provider: Provider ID
+        mcp_server: McpServer ID
         duration: Health check duration in seconds
         healthy: Whether the check passed (only meaningful if not cold)
-        is_cold: Whether provider is in cold state (not started yet)
+        is_cold: Whether mcp_server is in cold state (not started yet)
         consecutive_failures: Number of consecutive failures
     """
     if is_cold:
@@ -1112,56 +1112,56 @@ def observe_health_check(
     else:
         result = "unhealthy"
 
-    HEALTH_CHECK_TOTAL.inc(provider=provider, result=result)
-    HEALTH_CHECK_DURATION_SECONDS.observe(duration, provider=provider)
-    HEALTH_CHECK_CONSECUTIVE_FAILURES.set(consecutive_failures, provider=provider)
+    HEALTH_CHECK_TOTAL.inc(mcp_server=mcp_server, result=result)
+    HEALTH_CHECK_DURATION_SECONDS.observe(duration, mcp_server=mcp_server)
+    HEALTH_CHECK_CONSECUTIVE_FAILURES.set(consecutive_failures, mcp_server=mcp_server)
 
 
-def update_provider_state(provider: str, state: str, mode: str = "subprocess"):
-    """Update provider state metrics."""
+def update_mcp_server_state(mcp_server: str, state: str, mode: str = "subprocess"):
+    """Update mcp_server state metrics."""
     state_map = {"cold": 0, "initializing": 1, "ready": 2, "degraded": 3, "dead": 4}
-    PROVIDER_STATE_CURRENT.set(state_map.get(state, 0), provider=provider)
-    PROVIDER_UP.set(1 if state == "ready" else 0, provider=provider)
-    PROVIDER_INITIALIZED.set(0 if state == "cold" else 1, provider=provider)
-    PROVIDER_INFO.set(1, provider=provider, mode=mode)
-    PROVIDER_LAST_STATE_CHANGE_SECONDS.set(time.time(), provider=provider)
+    PROVIDER_STATE_CURRENT.set(state_map.get(state, 0), mcp_server=mcp_server)
+    PROVIDER_UP.set(1 if state == "ready" else 0, mcp_server=mcp_server)
+    PROVIDER_INITIALIZED.set(0 if state == "cold" else 1, mcp_server=mcp_server)
+    PROVIDER_INFO.set(1, mcp_server=mcp_server, mode=mode)
+    PROVIDER_LAST_STATE_CHANGE_SECONDS.set(time.time(), mcp_server=mcp_server)
 
 
-def record_provider_start(provider: str, success: bool):
-    """Record a provider start attempt."""
+def record_mcp_server_start(mcp_server: str, success: bool):
+    """Record a mcp_server start attempt."""
     result = "success" if success else "failure"
-    PROVIDER_STARTS_TOTAL.inc(provider=provider, result=result)
+    PROVIDER_STARTS_TOTAL.inc(mcp_server=mcp_server, result=result)
     if success:
-        PROVIDER_INITIALIZED.set(1, provider=provider)
+        PROVIDER_INITIALIZED.set(1, mcp_server=mcp_server)
 
 
-def record_provider_stop(provider: str, reason: str):
-    """Record a provider stop."""
-    PROVIDER_STOPS_TOTAL.inc(provider=provider, reason=reason)
+def record_mcp_server_stop(mcp_server: str, reason: str):
+    """Record a mcp_server stop."""
+    PROVIDER_STOPS_TOTAL.inc(mcp_server=mcp_server, reason=reason)
 
 
-def record_cold_start(provider: str, duration: float, mode: str = "subprocess"):
+def record_cold_start(mcp_server: str, duration: float, mode: str = "subprocess"):
     """Record cold start duration - the critical UX metric.
 
-    This measures time from user request to provider ready state.
+    This measures time from user request to mcp_server ready state.
     High values here directly impact user experience.
 
     Args:
-        provider: Provider ID
+        mcp_server: McpServer ID
         duration: Time in seconds from start to ready
-        mode: Provider mode (subprocess, docker, etc.)
+        mode: McpServer mode (subprocess, docker, etc.)
     """
-    PROVIDER_COLD_START_SECONDS.observe(duration, provider=provider, mode=mode)
+    PROVIDER_COLD_START_SECONDS.observe(duration, mcp_server=mcp_server, mode=mode)
 
 
-def cold_start_begin(provider: str):
+def cold_start_begin(mcp_server: str):
     """Mark beginning of cold start (for in-progress tracking)."""
-    PROVIDER_COLD_START_IN_PROGRESS.set(1, provider=provider)
+    PROVIDER_COLD_START_IN_PROGRESS.set(1, mcp_server=mcp_server)
 
 
-def cold_start_end(provider: str):
+def cold_start_end(mcp_server: str):
     """Mark end of cold start."""
-    PROVIDER_COLD_START_IN_PROGRESS.set(0, provider=provider)
+    PROVIDER_COLD_START_IN_PROGRESS.set(0, mcp_server=mcp_server)
 
 
 def record_gc_cycle(duration: float, collected: dict[str, int] = None):
@@ -1179,18 +1179,18 @@ def record_error(component: str, error_type: str):
     ERRORS_TOTAL.inc(component=component, error_type=error_type)
 
 
-def update_circuit_breaker_state(provider: str, new_state: str) -> None:
-    """Update circuit breaker state gauge for a provider.
+def update_circuit_breaker_state(mcp_server: str, new_state: str) -> None:
+    """Update circuit breaker state gauge for a mcp_server.
 
     Sets the active state label to 1 and all others to 0 so that
     PromQL can filter by state label.
 
     Args:
-        provider: Provider ID.
+        mcp_server: McpServer ID.
         new_state: New circuit breaker state value (closed, open, half_open).
     """
     for state in ("closed", "open", "half_open"):
-        CIRCUIT_BREAKER_STATE.set(1.0 if state == new_state else 0.0, provider=provider, state=state)
+        CIRCUIT_BREAKER_STATE.set(1.0 if state == new_state else 0.0, mcp_server=mcp_server, state=state)
 
 
 def record_events_compacted(stream_id: str, count: int) -> None:
@@ -1204,34 +1204,34 @@ def record_events_compacted(stream_id: str, count: int) -> None:
         EVENTS_COMPACTED_TOTAL.inc(count, stream_id=stream_id)
 
 
-def record_capability_violation(provider: str, violation_type: str) -> None:
+def record_capability_violation(mcp_server: str, violation_type: str) -> None:
     """Record a capability violation detection.
 
     Args:
-        provider: Provider ID that triggered the violation.
+        mcp_server: McpServer ID that triggered the violation.
         violation_type: Type of violation (egress_denied, capability_drift, etc.).
     """
-    CAPABILITY_VIOLATIONS_TOTAL.inc(provider=provider, violation_type=violation_type)
+    CAPABILITY_VIOLATIONS_TOTAL.inc(mcp_server=mcp_server, violation_type=violation_type)
 
 
-def record_behavioral_deviation(provider: str, deviation_type: str) -> None:
+def record_behavioral_deviation(mcp_server: str, deviation_type: str) -> None:
     """Record a behavioral deviation detection.
 
     Args:
-        provider: Provider ID whose behavior deviated from baseline.
+        mcp_server: McpServer ID whose behavior deviated from baseline.
         deviation_type: Type of deviation (new_destination, frequency_anomaly, etc.).
     """
-    BEHAVIORAL_DEVIATIONS_TOTAL.inc(provider=provider, deviation_type=deviation_type)
+    BEHAVIORAL_DEVIATIONS_TOTAL.inc(mcp_server=mcp_server, deviation_type=deviation_type)
 
 
-def record_tool_schema_drift(provider: str, change_type: str) -> None:
+def record_tool_schema_drift(mcp_server: str, change_type: str) -> None:
     """Record a tool schema change detection.
 
     Args:
-        provider: Provider ID whose tool schema changed.
+        mcp_server: McpServer ID whose tool schema changed.
         change_type: Type of change (added, removed, modified).
     """
-    TOOL_SCHEMA_DRIFTS_TOTAL.inc(provider=provider, change_type=change_type)
+    TOOL_SCHEMA_DRIFTS_TOTAL.inc(mcp_server=mcp_server, change_type=change_type)
 
 
 def record_detection_rule_match(rule_id: str, severity: str) -> None:
@@ -1259,18 +1259,18 @@ def record_enforcement_action(action: str, rule_id: str) -> None:
 # =============================================================================
 
 
-def update_discovery_source(source_type: str, mode: str, is_healthy: bool, providers_count: int):
+def update_discovery_source(source_type: str, mode: str, is_healthy: bool, mcp_servers_count: int):
     """Update discovery source metrics.
 
     Args:
         source_type: Type of source (filesystem, docker, kubernetes, entrypoint)
         mode: Discovery mode (additive, authoritative)
         is_healthy: Whether the source is healthy
-        providers_count: Number of providers discovered by this source
+        mcp_servers_count: Number of mcp_servers discovered by this source
     """
     DISCOVERY_SOURCES_TOTAL.set(1, source_type=source_type, mode=mode)
     DISCOVERY_SOURCES_HEALTHY.set(1 if is_healthy else 0, source_type=source_type)
-    DISCOVERY_PROVIDERS_TOTAL.set(providers_count, source_type=source_type, status="discovered")
+    DISCOVERY_PROVIDERS_TOTAL.set(mcp_servers_count, source_type=source_type, status="discovered")
 
 
 def record_discovery_cycle(
@@ -1285,27 +1285,27 @@ def record_discovery_cycle(
     Args:
         source_type: Type of source
         duration: Duration of the cycle in seconds
-        discovered: Number of providers discovered
-        registered: Number of providers registered
-        quarantined: Number of providers quarantined
+        discovered: Number of mcp_servers discovered
+        registered: Number of mcp_servers registered
+        quarantined: Number of mcp_servers quarantined
     """
     DISCOVERY_CYCLES_TOTAL.inc(source_type=source_type)
     DISCOVERY_CYCLE_DURATION_SECONDS.observe(duration, source_type=source_type)
     DISCOVERY_LAST_CYCLE_TIMESTAMP.set(time.time(), source_type=source_type)
 
-    # Update provider counts
+    # Update mcp_server counts
     DISCOVERY_PROVIDERS_TOTAL.set(discovered, source_type=source_type, status="discovered")
     DISCOVERY_PROVIDERS_TOTAL.set(registered, source_type=source_type, status="registered")
     DISCOVERY_PROVIDERS_TOTAL.set(quarantined, source_type=source_type, status="quarantined")
 
 
 def record_discovery_registration(source_type: str):
-    """Record a provider registration from discovery."""
+    """Record a mcp_server registration from discovery."""
     DISCOVERY_REGISTRATIONS_TOTAL.inc(source_type=source_type)
 
 
 def record_discovery_deregistration(source_type: str, reason: str):
-    """Record a provider deregistration from discovery.
+    """Record a mcp_server deregistration from discovery.
 
     Args:
         source_type: Type of source
@@ -1324,7 +1324,7 @@ def record_discovery_conflict(conflict_type: str):
 
 
 def record_discovery_quarantine(reason: str):
-    """Record a provider quarantine.
+    """Record a mcp_server quarantine.
 
     Args:
         reason: Reason for quarantine (health_check_failed, validation_failed, rate_limited)

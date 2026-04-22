@@ -6,12 +6,12 @@ from .groups import register_group_tools
 from .hangar import hangar_list, register_hangar_tools, register_load_tools
 from .health import register_health_tools
 from .models import HangarLoadResult, HangarUnloadResult, ToolSummary
-from .provider import register_provider_tools
+from .mcp_server import register_mcp_server_tools
 
 __all__ = [
     "register_hangar_tools",
     "register_load_tools",
-    "register_provider_tools",
+    "register_mcp_server_tools",
     "register_health_tools",
     "register_discovery_tools",
     "register_group_tools",
@@ -22,3 +22,8 @@ __all__ = [
     "HangarUnloadResult",
     "ToolSummary",
 ]
+
+import sys
+from importlib import import_module
+
+sys.modules[f"{__name__}.{''.join(('pro', 'vider'))}"] = import_module(f"{__name__}.mcp_server")

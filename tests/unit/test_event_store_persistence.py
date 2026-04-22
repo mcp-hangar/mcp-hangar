@@ -9,7 +9,7 @@ import threading
 import pytest
 
 from mcp_hangar.domain.contracts.event_store import ConcurrencyError, NullEventStore
-from mcp_hangar.domain.events import ProviderStarted, ProviderStateChanged, ProviderStopped, ToolInvocationCompleted
+from mcp_hangar.domain.events import McpServerStarted, McpServerStateChanged, McpServerStopped, ToolInvocationCompleted
 from mcp_hangar.infrastructure.persistence import InMemoryEventStore, SQLiteEventStore
 
 
@@ -18,12 +18,9 @@ class TestNullEventStore:
 
     def test_append_returns_incremented_version(self):
         store = NullEventStore()
-        event = ProviderStarted(
-            provider_id="test",
-            mode="subprocess",
-            tools_count=5,
-            startup_duration_ms=100.0,
-        )
+        event = McpServerStarted(mcp_server_id="test", mode="subprocess",
+        tools_count=5,
+        startup_duration_ms=100.0,)
 
         version = store.append("stream:test", [event], expected_version=-1)
 
@@ -59,130 +56,94 @@ class TestInMemoryEventStorePersistence:
         return InMemoryEventStore()
 
     def test_append_to_new_stream(self, store: InMemoryEventStore):
-        event = ProviderStarted(
-            provider_id="math",
-            mode="subprocess",
-            tools_count=3,
-            startup_duration_ms=50.0,
-        )
+        event = McpServerStarted(mcp_server_id="math", mode="subprocess",
+        tools_count=3,
+        startup_duration_ms=50.0,)
 
-        version = store.append("provider:math", [event], expected_version=-1)
+        version = store.append("mcp_server:math", [event], expected_version=-1)
 
         assert version == 0
-        assert store.get_stream_version("provider:math") == 0
+        assert store.get_stream_version("mcp_server:math") == 0
 
     def test_append_multiple_events(self, store: InMemoryEventStore):
         events = [
-            ProviderStarted(
-                provider_id="math",
-                mode="subprocess",
-                tools_count=3,
-                startup_duration_ms=50.0,
-            ),
-            ProviderStateChanged(
-                provider_id="math",
-                old_state="COLD",
-                new_state="INITIALIZING",
-            ),
+            McpServerStarted(mcp_server_id="math", mode="subprocess",
+            tools_count=3,
+            startup_duration_ms=50.0,),
+            McpServerStateChanged(mcp_server_id="math", old_state="COLD",
+            new_state="INITIALIZING",),
         ]
 
-        version = store.append("provider:math", events, expected_version=-1)
+        version = store.append("mcp_server:math", events, expected_version=-1)
 
         assert version == 1  # 0-indexed: event 0 and event 1
         assert store.get_event_count() == 2
 
     def test_append_with_wrong_version_raises_concurrency_error(self, store: InMemoryEventStore):
-        event = ProviderStarted(
-            provider_id="math",
-            mode="subprocess",
-            tools_count=3,
-            startup_duration_ms=50.0,
-        )
-        store.append("provider:math", [event], expected_version=-1)
+        event = McpServerStarted(mcp_server_id="math", mode="subprocess",
+        tools_count=3,
+        startup_duration_ms=50.0,)
+        store.append("mcp_server:math", [event], expected_version=-1)
 
         with pytest.raises(ConcurrencyError) as exc_info:
-            store.append("provider:math", [event], expected_version=-1)
+            store.append("mcp_server:math", [event], expected_version=-1)
 
-        assert exc_info.value.stream_id == "provider:math"
+        assert exc_info.value.stream_id == "mcp_server:math"
         assert exc_info.value.expected == -1
         assert exc_info.value.actual == 0
 
     def test_read_stream_returns_events_in_order(self, store: InMemoryEventStore):
         events = [
-            ProviderStarted(
-                provider_id="math",
-                mode="subprocess",
-                tools_count=3,
-                startup_duration_ms=50.0,
-            ),
-            ProviderStateChanged(
-                provider_id="math",
-                old_state="COLD",
-                new_state="INITIALIZING",
-            ),
-            ProviderStateChanged(
-                provider_id="math",
-                old_state="INITIALIZING",
-                new_state="READY",
-            ),
+            McpServerStarted(mcp_server_id="math", mode="subprocess",
+            tools_count=3,
+            startup_duration_ms=50.0,),
+            McpServerStateChanged(mcp_server_id="math", old_state="COLD",
+            new_state="INITIALIZING",),
+            McpServerStateChanged(mcp_server_id="math", old_state="INITIALIZING",
+            new_state="READY",),
         ]
-        store.append("provider:math", events, expected_version=-1)
+        store.append("mcp_server:math", events, expected_version=-1)
 
-        read_events = store.read_stream("provider:math")
+        read_events = store.read_stream("mcp_server:math")
 
         assert len(read_events) == 3
-        assert isinstance(read_events[0], ProviderStarted)
-        assert isinstance(read_events[1], ProviderStateChanged)
+        assert isinstance(read_events[0], McpServerStarted)
+        assert isinstance(read_events[1], McpServerStateChanged)
         assert read_events[1].new_state == "INITIALIZING"
         assert read_events[2].new_state == "READY"
 
     def test_read_stream_from_version(self, store: InMemoryEventStore):
         events = [
-            ProviderStarted(
-                provider_id="math",
-                mode="subprocess",
-                tools_count=3,
-                startup_duration_ms=50.0,
-            ),
-            ProviderStateChanged(
-                provider_id="math",
-                old_state="COLD",
-                new_state="INITIALIZING",
-            ),
-            ProviderStateChanged(
-                provider_id="math",
-                old_state="INITIALIZING",
-                new_state="READY",
-            ),
+            McpServerStarted(mcp_server_id="math", mode="subprocess",
+            tools_count=3,
+            startup_duration_ms=50.0,),
+            McpServerStateChanged(mcp_server_id="math", old_state="COLD",
+            new_state="INITIALIZING",),
+            McpServerStateChanged(mcp_server_id="math", old_state="INITIALIZING",
+            new_state="READY",),
         ]
-        store.append("provider:math", events, expected_version=-1)
+        store.append("mcp_server:math", events, expected_version=-1)
 
-        read_events = store.read_stream("provider:math", from_version=1)
+        read_events = store.read_stream("mcp_server:math", from_version=1)
 
         assert len(read_events) == 2
         assert read_events[0].new_state == "INITIALIZING"
 
     def test_read_nonexistent_stream_returns_empty(self, store: InMemoryEventStore):
-        events = store.read_stream("provider:nonexistent")
+        events = store.read_stream("mcp_server:nonexistent")
 
         assert events == []
 
     def test_read_all_returns_global_order(self, store: InMemoryEventStore):
-        event1 = ProviderStarted(
-            provider_id="math",
-            mode="subprocess",
-            tools_count=3,
-            startup_duration_ms=50.0,
-        )
-        event2 = ProviderStarted(
-            provider_id="sqlite",
-            mode="docker",
-            tools_count=5,
-            startup_duration_ms=100.0,
-        )
+        event1 = McpServerStarted(mcp_server_id="math", mode="subprocess",
+        tools_count=3,
+        startup_duration_ms=50.0,)
+        event2 = McpServerStarted(mcp_server_id="sqlite", mode="docker",
+        tools_count=5,
+        startup_duration_ms=100.0,)
 
-        store.append("provider:math", [event1], expected_version=-1)
-        store.append("provider:sqlite", [event2], expected_version=-1)
+        store.append("mcp_server:math", [event1], expected_version=-1)
+        store.append("mcp_server:sqlite", [event2], expected_version=-1)
 
         all_events = list(store.read_all())
 
@@ -191,38 +152,32 @@ class TestInMemoryEventStorePersistence:
         pos2, stream2, ev2 = all_events[1]
 
         assert pos1 == 1
-        assert stream1 == "provider:math"
+        assert stream1 == "mcp_server:math"
         assert pos2 == 2
-        assert stream2 == "provider:sqlite"
+        assert stream2 == "mcp_server:sqlite"
 
     def test_read_all_with_limit(self, store: InMemoryEventStore):
         for i in range(10):
-            event = ProviderStarted(
-                provider_id=f"provider-{i}",
-                mode="subprocess",
-                tools_count=i,
-                startup_duration_ms=float(i),
-            )
-            store.append(f"provider:{i}", [event], expected_version=-1)
+            event = McpServerStarted(mcp_server_id=f"provider-{i}", mode="subprocess",
+            tools_count=i,
+            startup_duration_ms=float(i),)
+            store.append(f"mcp_server:{i}", [event], expected_version=-1)
 
         all_events = list(store.read_all(limit=5))
 
         assert len(all_events) == 5
 
     def test_clear_removes_all_events(self, store: InMemoryEventStore):
-        event = ProviderStarted(
-            provider_id="math",
-            mode="subprocess",
-            tools_count=3,
-            startup_duration_ms=50.0,
-        )
-        store.append("provider:math", [event], expected_version=-1)
+        event = McpServerStarted(mcp_server_id="math", mode="subprocess",
+        tools_count=3,
+        startup_duration_ms=50.0,)
+        store.append("mcp_server:math", [event], expected_version=-1)
 
         store.clear()
 
         assert store.get_event_count() == 0
         assert store.get_stream_count() == 0
-        assert store.get_stream_version("provider:math") == -1
+        assert store.get_stream_version("mcp_server:math") == -1
 
 
 class TestSQLiteEventStorePersistence:
@@ -234,101 +189,77 @@ class TestSQLiteEventStorePersistence:
         return SQLiteEventStore(":memory:")
 
     def test_append_to_new_stream(self, store: SQLiteEventStore):
-        event = ProviderStarted(
-            provider_id="math",
-            mode="subprocess",
-            tools_count=3,
-            startup_duration_ms=50.0,
-        )
+        event = McpServerStarted(mcp_server_id="math", mode="subprocess",
+        tools_count=3,
+        startup_duration_ms=50.0,)
 
-        version = store.append("provider:math", [event], expected_version=-1)
+        version = store.append("mcp_server:math", [event], expected_version=-1)
 
         assert version == 0
-        assert store.get_stream_version("provider:math") == 0
+        assert store.get_stream_version("mcp_server:math") == 0
 
     def test_append_multiple_events(self, store: SQLiteEventStore):
         events = [
-            ProviderStarted(
-                provider_id="math",
-                mode="subprocess",
-                tools_count=3,
-                startup_duration_ms=50.0,
-            ),
-            ProviderStateChanged(
-                provider_id="math",
-                old_state="COLD",
-                new_state="INITIALIZING",
-            ),
+            McpServerStarted(mcp_server_id="math", mode="subprocess",
+            tools_count=3,
+            startup_duration_ms=50.0,),
+            McpServerStateChanged(mcp_server_id="math", old_state="COLD",
+            new_state="INITIALIZING",),
         ]
 
-        version = store.append("provider:math", events, expected_version=-1)
+        version = store.append("mcp_server:math", events, expected_version=-1)
 
         assert version == 1
         assert store.get_event_count() == 2
 
     def test_optimistic_concurrency_check(self, store: SQLiteEventStore):
-        event = ProviderStarted(
-            provider_id="math",
-            mode="subprocess",
-            tools_count=3,
-            startup_duration_ms=50.0,
-        )
-        store.append("provider:math", [event], expected_version=-1)
+        event = McpServerStarted(mcp_server_id="math", mode="subprocess",
+        tools_count=3,
+        startup_duration_ms=50.0,)
+        store.append("mcp_server:math", [event], expected_version=-1)
 
         # Try appending with wrong version
         with pytest.raises(ConcurrencyError) as exc_info:
-            store.append("provider:math", [event], expected_version=-1)
+            store.append("mcp_server:math", [event], expected_version=-1)
 
-        assert exc_info.value.stream_id == "provider:math"
+        assert exc_info.value.stream_id == "mcp_server:math"
         assert exc_info.value.expected == -1
         assert exc_info.value.actual == 0
 
     def test_sequential_appends_with_correct_versions(self, store: SQLiteEventStore):
-        event1 = ProviderStarted(
-            provider_id="math",
-            mode="subprocess",
-            tools_count=3,
-            startup_duration_ms=50.0,
-        )
-        event2 = ProviderStateChanged(
-            provider_id="math",
-            old_state="COLD",
-            new_state="READY",
-        )
-        event3 = ProviderStopped(provider_id="math", reason="shutdown")
+        event1 = McpServerStarted(mcp_server_id="math", mode="subprocess",
+        tools_count=3,
+        startup_duration_ms=50.0,)
+        event2 = McpServerStateChanged(mcp_server_id="math", old_state="COLD",
+        new_state="READY",)
+        event3 = McpServerStopped(mcp_server_id="math", reason="shutdown")
 
-        v1 = store.append("provider:math", [event1], expected_version=-1)
-        v2 = store.append("provider:math", [event2], expected_version=v1)
-        v3 = store.append("provider:math", [event3], expected_version=v2)
+        v1 = store.append("mcp_server:math", [event1], expected_version=-1)
+        v2 = store.append("mcp_server:math", [event2], expected_version=v1)
+        v3 = store.append("mcp_server:math", [event3], expected_version=v2)
 
         assert v1 == 0
         assert v2 == 1
         assert v3 == 2
-        assert store.get_stream_version("provider:math") == 2
+        assert store.get_stream_version("mcp_server:math") == 2
 
     def test_read_stream_deserializes_events(self, store: SQLiteEventStore):
         events = [
-            ProviderStarted(
-                provider_id="math",
-                mode="subprocess",
-                tools_count=3,
-                startup_duration_ms=50.0,
-            ),
-            ToolInvocationCompleted(
-                provider_id="math",
-                tool_name="add",
-                correlation_id="corr-123",
-                duration_ms=10.5,
-                result_size_bytes=256,
-            ),
+            McpServerStarted(mcp_server_id="math", mode="subprocess",
+            tools_count=3,
+            startup_duration_ms=50.0,),
+            ToolInvocationCompleted(mcp_server_id="math", tool_name="add",
+            correlation_id="corr-123",
+            duration_ms=10.5,
+            result_size_bytes=256,),
         ]
-        store.append("provider:math", events, expected_version=-1)
+        store.append("mcp_server:math", events, expected_version=-1)
 
-        read_events = store.read_stream("provider:math")
+        read_events = store.read_stream("mcp_server:math")
 
         assert len(read_events) == 2
-        assert isinstance(read_events[0], ProviderStarted)
-        assert read_events[0].provider_id == "math"
+        assert isinstance(read_events[0], McpServerStarted)
+        assert read_events[0].mcp_server_id == "math"
         assert read_events[0].tools_count == 3
 
         assert isinstance(read_events[1], ToolInvocationCompleted)
@@ -336,21 +267,15 @@ class TestSQLiteEventStorePersistence:
         assert read_events[1].duration_ms == 10.5
 
     def test_read_all_across_streams(self, store: SQLiteEventStore):
-        event1 = ProviderStarted(
-            provider_id="math",
-            mode="subprocess",
-            tools_count=3,
-            startup_duration_ms=50.0,
-        )
-        event2 = ProviderStarted(
-            provider_id="sqlite",
-            mode="docker",
-            tools_count=5,
-            startup_duration_ms=100.0,
-        )
+        event1 = McpServerStarted(mcp_server_id="math", mode="subprocess",
+        tools_count=3,
+        startup_duration_ms=50.0,)
+        event2 = McpServerStarted(mcp_server_id="sqlite", mode="docker",
+        tools_count=5,
+        startup_duration_ms=100.0,)
 
-        store.append("provider:math", [event1], expected_version=-1)
-        store.append("provider:sqlite", [event2], expected_version=-1)
+        store.append("mcp_server:math", [event1], expected_version=-1)
+        store.append("mcp_server:sqlite", [event2], expected_version=-1)
 
         all_events = list(store.read_all())
 
@@ -360,50 +285,41 @@ class TestSQLiteEventStorePersistence:
 
     def test_persistence_across_connections(self, tmp_path: Path):
         db_path = tmp_path / "events.db"
-        event = ProviderStarted(
-            provider_id="math",
-            mode="subprocess",
-            tools_count=3,
-            startup_duration_ms=50.0,
-        )
+        event = McpServerStarted(mcp_server_id="math", mode="subprocess",
+        tools_count=3,
+        startup_duration_ms=50.0,)
 
         # Write with first connection
         store1 = SQLiteEventStore(db_path)
-        store1.append("provider:math", [event], expected_version=-1)
+        store1.append("mcp_server:math", [event], expected_version=-1)
 
         # Read with new connection
         store2 = SQLiteEventStore(db_path)
-        events = store2.read_stream("provider:math")
+        events = store2.read_stream("mcp_server:math")
 
         assert len(events) == 1
-        assert events[0].provider_id == "math"
+        assert events[0].mcp_server_id == "math"
 
     def test_get_all_stream_ids(self, store: SQLiteEventStore):
-        event1 = ProviderStarted(
-            provider_id="math",
-            mode="subprocess",
-            tools_count=3,
-            startup_duration_ms=50.0,
-        )
-        event2 = ProviderStarted(
-            provider_id="sqlite",
-            mode="docker",
-            tools_count=5,
-            startup_duration_ms=100.0,
-        )
+        event1 = McpServerStarted(mcp_server_id="math", mode="subprocess",
+        tools_count=3,
+        startup_duration_ms=50.0,)
+        event2 = McpServerStarted(mcp_server_id="sqlite", mode="docker",
+        tools_count=5,
+        startup_duration_ms=100.0,)
 
-        store.append("provider:math", [event1], expected_version=-1)
-        store.append("provider:sqlite", [event2], expected_version=-1)
+        store.append("mcp_server:math", [event1], expected_version=-1)
+        store.append("mcp_server:sqlite", [event2], expected_version=-1)
 
         stream_ids = store.get_all_stream_ids()
 
-        assert set(stream_ids) == {"provider:math", "provider:sqlite"}
+        assert set(stream_ids) == {"mcp_server:math", "mcp_server:sqlite"}
 
     def test_empty_events_list_returns_expected_version(self, store: SQLiteEventStore):
-        version = store.append("provider:math", [], expected_version=-1)
+        version = store.append("mcp_server:math", [], expected_version=-1)
 
         assert version == -1
-        assert store.get_stream_version("provider:math") == -1
+        assert store.get_stream_version("mcp_server:math") == -1
 
 
 class TestNullEventStoreSnapshots:
@@ -413,7 +329,7 @@ class TestNullEventStoreSnapshots:
         store = NullEventStore()
 
         # Should not raise
-        store.save_snapshot("stream:test", 5, {"provider_id": "test", "state": "READY"})
+        store.save_snapshot("stream:test", 5, {"mcp_server_id": "test", "state": "READY"})
 
     def test_load_snapshot_returns_none(self):
         store = NullEventStore()
@@ -424,7 +340,7 @@ class TestNullEventStoreSnapshots:
 
     def test_load_snapshot_returns_none_after_save(self):
         store = NullEventStore()
-        store.save_snapshot("stream:test", 5, {"provider_id": "test"})
+        store.save_snapshot("stream:test", 5, {"mcp_server_id": "test"})
 
         # NullEventStore discards snapshots
         result = store.load_snapshot("stream:test")
@@ -441,28 +357,28 @@ class TestSQLiteEventStoreSnapshots:
         return SQLiteEventStore(":memory:")
 
     def test_save_and_load_snapshot_roundtrip(self, store: SQLiteEventStore):
-        state = {"provider_id": "math", "mode": "subprocess", "state": "READY", "version": 5}
-        store.save_snapshot("provider:math", 5, state)
+        state = {"mcp_server_id": "math", "mode": "subprocess", "state": "READY", "version": 5}
+        store.save_snapshot("mcp_server:math", 5, state)
 
-        result = store.load_snapshot("provider:math")
+        result = store.load_snapshot("mcp_server:math")
 
         assert result is not None
         assert result["version"] == 5
         assert result["state"] == state
 
     def test_load_snapshot_returns_none_for_nonexistent_stream(self, store: SQLiteEventStore):
-        result = store.load_snapshot("provider:nonexistent")
+        result = store.load_snapshot("mcp_server:nonexistent")
 
         assert result is None
 
     def test_save_snapshot_replaces_previous(self, store: SQLiteEventStore):
-        state_v1 = {"provider_id": "math", "state": "READY", "version": 5}
-        state_v2 = {"provider_id": "math", "state": "DEGRADED", "version": 10}
+        state_v1 = {"mcp_server_id": "math", "state": "READY", "version": 5}
+        state_v2 = {"mcp_server_id": "math", "state": "DEGRADED", "version": 10}
 
-        store.save_snapshot("provider:math", 5, state_v1)
-        store.save_snapshot("provider:math", 10, state_v2)
+        store.save_snapshot("mcp_server:math", 5, state_v1)
+        store.save_snapshot("mcp_server:math", 10, state_v2)
 
-        result = store.load_snapshot("provider:math")
+        result = store.load_snapshot("mcp_server:math")
 
         assert result is not None
         assert result["version"] == 10
@@ -471,37 +387,31 @@ class TestSQLiteEventStoreSnapshots:
     def test_save_snapshot_inside_lock_scope(self, store: SQLiteEventStore):
         """Verify save_snapshot uses self._lock for version consistency."""
         # Append an event so stream version is 0
-        event = ProviderStarted(
-            provider_id="math",
-            mode="subprocess",
-            tools_count=3,
-            startup_duration_ms=50.0,
-        )
-        store.append("provider:math", [event], expected_version=-1)
+        event = McpServerStarted(mcp_server_id="math", mode="subprocess",
+        tools_count=3,
+        startup_duration_ms=50.0,)
+        store.append("mcp_server:math", [event], expected_version=-1)
 
         # Save snapshot at version 0
-        state = {"provider_id": "math", "state": "READY"}
-        store.save_snapshot("provider:math", 0, state)
+        state = {"mcp_server_id": "math", "state": "READY"}
+        store.save_snapshot("mcp_server:math", 0, state)
 
-        result = store.load_snapshot("provider:math")
+        result = store.load_snapshot("mcp_server:math")
         assert result is not None
         assert result["version"] == 0
 
     def test_snapshot_version_matches_stream_version(self, store: SQLiteEventStore):
         """Snapshot version should match stream version at save time."""
-        event = ProviderStarted(
-            provider_id="math",
-            mode="subprocess",
-            tools_count=3,
-            startup_duration_ms=50.0,
-        )
-        version = store.append("provider:math", [event], expected_version=-1)
+        event = McpServerStarted(mcp_server_id="math", mode="subprocess",
+        tools_count=3,
+        startup_duration_ms=50.0,)
+        version = store.append("mcp_server:math", [event], expected_version=-1)
 
-        state = {"provider_id": "math", "state": "READY"}
-        store.save_snapshot("provider:math", version, state)
+        state = {"mcp_server_id": "math", "state": "READY"}
+        store.save_snapshot("mcp_server:math", version, state)
 
-        snapshot = store.load_snapshot("provider:math")
-        stream_version = store.get_stream_version("provider:math")
+        snapshot = store.load_snapshot("mcp_server:math")
+        stream_version = store.get_stream_version("mcp_server:math")
 
         assert snapshot["version"] == stream_version
 
@@ -511,12 +421,12 @@ class TestSQLiteEventStoreSnapshots:
 
         # Save snapshot with first connection
         store1 = SQLiteEventStore(db_path)
-        state = {"provider_id": "math", "state": "READY", "version": 5}
-        store1.save_snapshot("provider:math", 5, state)
+        state = {"mcp_server_id": "math", "state": "READY", "version": 5}
+        store1.save_snapshot("mcp_server:math", 5, state)
 
         # Load snapshot with new connection
         store2 = SQLiteEventStore(db_path)
-        result = store2.load_snapshot("provider:math")
+        result = store2.load_snapshot("mcp_server:math")
 
         assert result is not None
         assert result["version"] == 5
@@ -524,14 +434,14 @@ class TestSQLiteEventStoreSnapshots:
 
     def test_snapshots_isolated_between_streams(self, store: SQLiteEventStore):
         """Snapshots for different streams are independent."""
-        state_math = {"provider_id": "math", "state": "READY"}
-        state_sqlite = {"provider_id": "sqlite", "state": "DEGRADED"}
+        state_math = {"mcp_server_id": "math", "state": "READY"}
+        state_sqlite = {"mcp_server_id": "sqlite", "state": "DEGRADED"}
 
-        store.save_snapshot("provider:math", 5, state_math)
-        store.save_snapshot("provider:sqlite", 10, state_sqlite)
+        store.save_snapshot("mcp_server:math", 5, state_math)
+        store.save_snapshot("mcp_server:sqlite", 10, state_sqlite)
 
-        math_snap = store.load_snapshot("provider:math")
-        sqlite_snap = store.load_snapshot("provider:sqlite")
+        math_snap = store.load_snapshot("mcp_server:math")
+        sqlite_snap = store.load_snapshot("mcp_server:sqlite")
 
         assert math_snap["version"] == 5
         assert math_snap["state"] == state_math
@@ -549,18 +459,15 @@ class TestEventStoreThreadSafety:
         def append_events(stream_id: str):
             try:
                 for i in range(100):
-                    event = ProviderStarted(
-                        provider_id=stream_id,
-                        mode="subprocess",
-                        tools_count=i,
-                        startup_duration_ms=float(i),
-                    )
+                    event = McpServerStarted(mcp_server_id=stream_id, mode="subprocess",
+                    tools_count=i,
+                    startup_duration_ms=float(i),)
                     current_version = store.get_stream_version(stream_id)
                     store.append(stream_id, [event], expected_version=current_version)
             except Exception as e:
                 errors.append(e)
 
-        threads = [threading.Thread(target=append_events, args=(f"provider:{i}",)) for i in range(5)]
+        threads = [threading.Thread(target=append_events, args=(f"mcp_server:{i}",)) for i in range(5)]
 
         for t in threads:
             t.start()
@@ -580,14 +487,11 @@ class TestEventStoreThreadSafety:
             for _ in range(10):
                 for attempt in range(100):  # Max retries
                     try:
-                        event = ProviderStarted(
-                            provider_id="shared",
-                            mode="subprocess",
-                            tools_count=1,
-                            startup_duration_ms=1.0,
-                        )
-                        version = store.get_stream_version("provider:shared")
-                        store.append("provider:shared", [event], expected_version=version)
+                        event = McpServerStarted(mcp_server_id="shared", mode="subprocess",
+                        tools_count=1,
+                        startup_duration_ms=1.0,)
+                        version = store.get_stream_version("mcp_server:shared")
+                        store.append("mcp_server:shared", [event], expected_version=version)
                         with lock:
                             success_count += 1
                         break

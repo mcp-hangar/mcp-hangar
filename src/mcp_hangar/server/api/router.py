@@ -5,7 +5,7 @@ Creates a Starlette application with:
 - Optional AuthMiddlewareHTTP for enterprise authentication
 - TrustedHostMiddleware for host header validation
 - Exception handlers mapping domain errors to JSON error envelopes
-- Provider endpoint routes mounted at /providers
+- McpServer endpoint routes mounted at /mcp_servers
 
 Middleware ordering note: CORS is outermost for OPTIONS preflight handling,
 auth runs inside CORS, and TrustedHostMiddleware is innermost.
@@ -45,7 +45,7 @@ def create_api_router(auth_components: Any = None) -> Starlette:
     from .config import config_routes
     from .discovery import discovery_routes
     from .groups import group_routes
-    from .providers import provider_routes
+    from .mcp_servers import mcp_server_routes
     from .sessions import session_routes
     from .system import system_routes
     from .tools import tools_routes
@@ -53,7 +53,7 @@ def create_api_router(auth_components: Any = None) -> Starlette:
     from .agent_policy import agent_policy_routes
 
     routes: list[BaseRoute] = [
-        Mount("/providers", routes=provider_routes),
+        Mount("/mcp_servers", routes=mcp_server_routes),
         Mount("/sessions", routes=session_routes),
         Mount("/groups", routes=group_routes),
         Mount("/discovery", routes=discovery_routes),

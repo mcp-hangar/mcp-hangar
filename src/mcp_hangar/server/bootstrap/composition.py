@@ -13,8 +13,8 @@ import warnings
 from ...application.discovery import DiscoveryOrchestrator
 from ...application.sagas import GroupRebalanceSaga
 from ...bootstrap.runtime import create_runtime
-from ...domain.model import ProviderGroup
-from ...infrastructure.runtime_store import RuntimeProviderStore
+from ...domain.model import McpServerGroup
+from ...infrastructure.runtime_store import RuntimeMcpServerStore
 
 if TYPE_CHECKING:
     from ...bootstrap.runtime import Runtime
@@ -46,11 +46,11 @@ if TYPE_CHECKING:
     RATE_LIMITER: object
     SECURITY_HANDLER: object
 
-# Provider Groups storage
-GROUPS: dict[str, ProviderGroup] = {}
+# McpServer Groups storage
+GROUPS: dict[str, McpServerGroup] = {}
 
-# Runtime (hot-loaded) providers storage
-RUNTIME_PROVIDERS: RuntimeProviderStore = RuntimeProviderStore()
+# Runtime (hot-loaded) mcp_servers storage
+RUNTIME_PROVIDERS: RuntimeMcpServerStore = RuntimeMcpServerStore()
 
 # Saga and discovery instances (initialized in main())
 _group_rebalance_saga: GroupRebalanceSaga | None = None
@@ -105,8 +105,8 @@ def get_group_rebalance_saga() -> GroupRebalanceSaga | None:
     return _group_rebalance_saga
 
 
-def get_runtime_providers() -> RuntimeProviderStore:
-    """Get the runtime providers store."""
+def get_runtime_mcp_servers() -> RuntimeMcpServerStore:
+    """Get the runtime mcp_servers store."""
     return RUNTIME_PROVIDERS
 
 
@@ -125,7 +125,7 @@ __all__ = [
     "get_discovery_orchestrator",
     "get_group_rebalance_saga",
     "get_runtime",
-    "get_runtime_providers",
+    "get_runtime_mcp_servers",
     "set_discovery_orchestrator",
     "set_group_rebalance_saga",
 ]

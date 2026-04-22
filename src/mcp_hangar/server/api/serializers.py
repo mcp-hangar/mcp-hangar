@@ -3,8 +3,8 @@
 Provides:
 - HangarJSONEncoder: Custom JSON encoder handling datetime, Enum, set, and to_dict objects
 - HangarJSONResponse: JSONResponse subclass using HangarJSONEncoder
-- serialize_provider_summary: Convert ProviderSummary to JSON-safe dict
-- serialize_provider_details: Convert ProviderDetails to JSON-safe dict
+- serialize_mcp_server_summary: Convert McpServerSummary to JSON-safe dict
+- serialize_mcp_server_details: Convert McpServerDetails to JSON-safe dict
 - serialize_tool_info: Convert ToolInfo to JSON-safe dict
 - serialize_health_info: Convert HealthInfo to JSON-safe dict
 """
@@ -17,10 +17,10 @@ from typing import Any, TYPE_CHECKING
 from starlette.responses import JSONResponse
 
 if TYPE_CHECKING:
-    from ...application.read_models.provider_views import (
+    from ...application.read_models.mcp_server_views import (
         HealthInfo,
-        ProviderDetails,
-        ProviderSummary,
+        McpServerDetails,
+        McpServerSummary,
         ToolInfo,
     )
 
@@ -81,11 +81,11 @@ class HangarJSONResponse(JSONResponse):
         ).encode("utf-8")
 
 
-def serialize_provider_summary(summary: "ProviderSummary") -> dict[str, Any]:
-    """Convert ProviderSummary read model to JSON-safe dict.
+def serialize_mcp_server_summary(summary: "McpServerSummary") -> dict[str, Any]:
+    """Convert McpServerSummary read model to JSON-safe dict.
 
     Args:
-        summary: ProviderSummary read model instance.
+        summary: McpServerSummary read model instance.
 
     Returns:
         JSON-safe dictionary representation.
@@ -93,11 +93,11 @@ def serialize_provider_summary(summary: "ProviderSummary") -> dict[str, Any]:
     return summary.to_dict()
 
 
-def serialize_provider_details(details: "ProviderDetails") -> dict[str, Any]:
-    """Convert ProviderDetails read model to JSON-safe dict.
+def serialize_mcp_server_details(details: "McpServerDetails") -> dict[str, Any]:
+    """Convert McpServerDetails read model to JSON-safe dict.
 
     Args:
-        details: ProviderDetails read model instance.
+        details: McpServerDetails read model instance.
 
     Returns:
         JSON-safe dictionary representation.

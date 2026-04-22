@@ -4,7 +4,7 @@ This module provides a formal lock ordering system to prevent deadlocks.
 All locks in the system should be acquired in ascending order of their level.
 
 Lock Hierarchy (acquire in ascending order):
-    Level 10-19: Domain aggregates (Provider, ProviderGroup)
+    Level 10-19: Domain aggregates (McpServer, McpServerGroup)
     Level 20-29: Infrastructure buses (EventBus, CommandBus, QueryBus)
     Level 30-39: Persistence (EventStore, Repository)
     Level 40-49: Orchestration (SagaManager)
@@ -13,10 +13,10 @@ Lock Hierarchy (acquire in ascending order):
 Rule: Never acquire a lock at level N while holding a lock at level >= N.
 
 Example valid acquisition order:
-    Provider._lock (10) -> EventBus._lock (20) -> StdioClient.pending_lock (50)
+    McpServer._lock (10) -> EventBus._lock (20) -> StdioClient.pending_lock (50)
 
 Example INVALID (would deadlock):
-    StdioClient.pending_lock (50) -> Provider._lock (10)  # WRONG!
+    StdioClient.pending_lock (50) -> McpServer._lock (10)  # WRONG!
 """
 
 import threading
@@ -143,7 +143,7 @@ class TrackedLock:
         # Lock hierarchy level: PROVIDER (10)
         # Safe to acquire after: (none - top level)
         # Safe to acquire before: EVENT_BUS, EVENT_STORE, STDIO_CLIENT
-        self._lock = TrackedLock(LockLevel.PROVIDER, f"Provider:{provider_id}")
+        self._lock = TrackedLock(LockLevel.PROVIDER, f"McpServer:{mcp_server_id}")
 
         # Usage:
         with self._lock:
@@ -155,7 +155,7 @@ class TrackedLock:
 
         Args:
             level: Lock hierarchy level from LockLevel enum.
-            name: Human-readable name for debugging (e.g., "Provider:math").
+            name: Human-readable name for debugging (e.g., "McpServer:math").
             reentrant: If True, use RLock (reentrant). If False, use Lock.
         """
         self._level = int(level)

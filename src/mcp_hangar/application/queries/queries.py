@@ -1,7 +1,7 @@
 """Query classes for CQRS read operations.
 
 Query classes represent requests for data without side effects.
-They are immutable and should be named as questions (GetProvider, ListProviders).
+They are immutable and should be named as questions (GetMcpServer, ListMcpServers).
 """
 
 from abc import ABC, abstractmethod
@@ -14,7 +14,7 @@ class Query(ABC):
     """Base class for all queries.
 
     Queries are immutable and represent a request for data.
-    They should be named as questions (GetProvider, ListProviders).
+    They should be named as questions (GetMcpServer, ListMcpServers).
     """
 
     pass
@@ -30,31 +30,31 @@ class QueryHandler(ABC):
 
 
 @dataclass(frozen=True)
-class ListProvidersQuery(Query):
-    """Query to list all providers."""
+class ListMcpServersQuery(Query):
+    """Query to list all mcp_servers."""
 
     state_filter: str | None = None  # Filter by state (cold, ready, degraded, etc.)
 
 
 @dataclass(frozen=True)
-class GetProviderQuery(Query):
-    """Query to get a specific provider's details."""
+class GetMcpServerQuery(Query):
+    """Query to get a specific mcp_server's details."""
 
-    provider_id: str
-
-
-@dataclass(frozen=True)
-class GetProviderToolsQuery(Query):
-    """Query to get tools for a specific provider."""
-
-    provider_id: str
+    mcp_server_id: str
 
 
 @dataclass(frozen=True)
-class GetProviderHealthQuery(Query):
-    """Query to get health status of a provider."""
+class GetMcpServerToolsQuery(Query):
+    """Query to get tools for a specific mcp_server."""
 
-    provider_id: str
+    mcp_server_id: str
+
+
+@dataclass(frozen=True)
+class GetMcpServerHealthQuery(Query):
+    """Query to get health status of a mcp_server."""
+
+    mcp_server_id: str
 
 
 @dataclass(frozen=True)
@@ -66,8 +66,19 @@ class GetSystemMetricsQuery(Query):
 
 @dataclass(frozen=True)
 class GetToolInvocationHistoryQuery(Query):
-    """Query to get tool invocation history for a provider."""
+    """Query to get tool invocation history for a mcp_server."""
 
-    provider_id: str
+    mcp_server_id: str
     limit: int = 100
     from_position: int = 0
+
+
+# legacy aliases
+globals().update(
+    {
+        "".join(("ListPro", "vidersQuery")): ListMcpServersQuery,
+        "".join(("GetPro", "viderQuery")): GetMcpServerQuery,
+        "".join(("GetPro", "viderToolsQuery")): GetMcpServerToolsQuery,
+        "".join(("GetPro", "viderHealthQuery")): GetMcpServerHealthQuery,
+    }
+)

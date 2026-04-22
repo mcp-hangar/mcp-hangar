@@ -14,12 +14,12 @@ from mcp_hangar.fastmcp_server import HangarFunctions, MCPServerFactory, MCPServ
 def mock_registry():
     """Create mock registry functions."""
     return HangarFunctions(
-        list=Mock(return_value={"providers": []}),
+        list=Mock(return_value={"mcp_servers": []}),
         start=Mock(return_value={"status": "started"}),
         stop=Mock(return_value={"status": "stopped"}),
         invoke=Mock(return_value={"result": 42}),
         tools=Mock(return_value={"tools": []}),
-        details=Mock(return_value={"provider": "test"}),
+        details=Mock(return_value={"mcp_server": "test"}),
         health=Mock(return_value={"status": "healthy"}),
     )
 
@@ -28,12 +28,12 @@ def mock_registry():
 def mock_registry_with_discovery():
     """Create mock registry functions with discovery."""
     return HangarFunctions(
-        list=Mock(return_value={"providers": []}),
+        list=Mock(return_value={"mcp_servers": []}),
         start=Mock(return_value={"status": "started"}),
         stop=Mock(return_value={"status": "stopped"}),
         invoke=Mock(return_value={"result": 42}),
         tools=Mock(return_value={"tools": []}),
-        details=Mock(return_value={"provider": "test"}),
+        details=Mock(return_value={"mcp_server": "test"}),
         health=Mock(return_value={"status": "healthy"}),
         discover=AsyncMock(return_value={"discovered": 0}),
         discovered=Mock(return_value={"pending": []}),
@@ -221,7 +221,7 @@ class TestMCPServerFactoryReadinessChecks:
     def test_readiness_checks_handle_health_error(self):
         """Readiness checks handle health() exception."""
         registry = HangarFunctions(
-            list=Mock(return_value={"providers": []}),
+            list=Mock(return_value={"mcp_servers": []}),
             start=Mock(),
             stop=Mock(),
             invoke=Mock(),
@@ -239,7 +239,7 @@ class TestMCPServerFactoryReadinessChecks:
     def test_readiness_checks_invalid_list_response(self):
         """Readiness checks detect invalid list response."""
         registry = HangarFunctions(
-            list=Mock(return_value={"invalid": "response"}),  # Missing "providers"
+            list=Mock(return_value={"invalid": "response"}),  # Missing "mcp_servers"
             start=Mock(),
             stop=Mock(),
             invoke=Mock(),
@@ -255,7 +255,7 @@ class TestMCPServerFactoryReadinessChecks:
     def test_readiness_checks_invalid_health_response(self):
         """Readiness checks detect invalid health response."""
         registry = HangarFunctions(
-            list=Mock(return_value={"providers": []}),
+            list=Mock(return_value={"mcp_servers": []}),
             start=Mock(),
             stop=Mock(),
             invoke=Mock(),
@@ -278,7 +278,7 @@ class TestMCPServerFactoryMetrics:
 
         with pytest.MonkeyPatch().context() as m:
             mock_update = Mock()
-            m.setattr("mcp_hangar.metrics.update_provider_state", mock_update)
+            m.setattr("mcp_hangar.metrics.update_mcp_server_state", mock_update)
 
             factory._update_metrics()
 

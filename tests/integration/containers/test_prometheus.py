@@ -111,10 +111,10 @@ class TestObservabilityMetrics:
                 "attempt_number": "1",
             }
         )
-        metrics.circuit_breaker_state.set(0, labels={"provider": "prom-test"})
+        metrics.circuit_breaker_state.set(0, labels={"mcp_server": "prom-test"})
         metrics.cold_start_phase_duration.observe(
             0.5,
-            labels={"provider": "prom-test", "phase": "connect"},
+            labels={"mcp_server": "prom-test", "phase": "connect"},
         )
         metrics.availability_ratio.set(0.95)
         metrics.error_budget_remaining.set(0.8)

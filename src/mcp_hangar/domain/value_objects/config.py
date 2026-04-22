@@ -1,4 +1,4 @@
-"""Configuration value objects for providers.
+"""Configuration value objects for mcp_servers.
 
 Contains:
 - CommandLine - subprocess command configuration
@@ -21,7 +21,7 @@ from urllib.parse import urlparse
 
 @dataclass(frozen=True)
 class CommandLine:
-    """Command line with arguments for subprocess providers.
+    """Command line with arguments for subprocess mcp_servers.
 
     Rules:
     - Non-empty command list
@@ -135,7 +135,7 @@ class Endpoint:
 
 @dataclass(frozen=True)
 class EnvironmentVariables:
-    """Environment variables for provider execution.
+    """Environment variables for mcp_server execution.
 
     Rules:
     - Keys are non-empty strings
@@ -178,7 +178,7 @@ class EnvironmentVariables:
 
 @dataclass(frozen=True)
 class IdleTTL:
-    """Time-to-live for idle providers in seconds.
+    """Time-to-live for idle mcp_servers in seconds.
 
     Rules:
     - Positive integer
@@ -282,7 +282,7 @@ class TimeoutSeconds:
 
 
 class HttpAuthType(Enum):
-    """Authentication type for HTTP providers.
+    """Authentication type for HTTP mcp_servers.
 
     Attributes:
         NONE: No authentication required.
@@ -311,7 +311,7 @@ class HttpAuthType(Enum):
 
 @dataclass(frozen=True)
 class HttpAuthConfig:
-    """Authentication configuration for HTTP providers.
+    """Authentication configuration for HTTP mcp_servers.
 
     Immutable value object containing auth credentials.
     Secrets should be passed via environment variable interpolation.
@@ -418,7 +418,7 @@ class HttpTlsConfig:
 
 @dataclass(frozen=True)
 class HttpTransportConfig:
-    """Complete HTTP transport configuration for remote providers.
+    """Complete HTTP transport configuration for remote mcp_servers.
 
     Attributes:
         connect_timeout: Connection timeout in seconds.

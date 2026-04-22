@@ -1,65 +1,65 @@
-"""Bundle resolution - Resolve bundle selections to provider lists.
+"""Bundle resolution - Resolve bundle selections to mcp_server lists.
 
 This module handles the logic of resolving bundle selections to a flat
-list of providers, handling dependencies, conflicts, and deduplication.
+list of mcp_servers, handling dependencies, conflicts, and deduplication.
 """
 
 from dataclasses import dataclass, field
 
-from .definitions import Bundle, BUNDLES, get_bundle, get_provider_definition, PROVIDERS
+from .definitions import Bundle, BUNDLES, get_bundle, get_mcp_server_definition, PROVIDERS
 
 
 @dataclass
 class ResolutionResult:
     """Result of bundle resolution.
 
-    Contains the resolved list of providers and any warnings
+    Contains the resolved list of mcp_servers and any warnings
     or conflicts that were encountered.
     """
 
-    providers: list[str]
-    """List of resolved provider names in dependency order."""
+    mcp_servers: list[str]
+    """List of resolved mcp_server names in dependency order."""
 
     warnings: list[str] = field(default_factory=list)
     """Warnings encountered during resolution."""
 
     conflicts: list[tuple[str, str]] = field(default_factory=list)
-    """Pairs of conflicting providers that were both requested."""
+    """Pairs of conflicting mcp_servers that were both requested."""
 
     missing_deps: list[tuple[str, str]] = field(default_factory=list)
-    """Missing dependencies as (provider, missing_dep) pairs."""
+    """Missing dependencies as (mcp_server, missing_dep) pairs."""
 
 
 class BundleResolver:
-    """Resolves bundle and provider selections to a concrete provider list.
+    """Resolves bundle and mcp_server selections to a concrete mcp_server list.
 
     Handles:
     - Bundle inheritance (includes)
-    - Provider dependencies
-    - Provider conflicts
+    - McpServer dependencies
+    - McpServer conflicts
     - Deduplication
     - Explicit additions and removals
     """
 
     def __init__(self):
         self._bundles = BUNDLES
-        self._providers = PROVIDERS
+        self._mcp_servers = PROVIDERS
 
     def resolve(
         self,
         bundles: list[str] | None = None,
-        providers: list[str] | None = None,
+        mcp_servers: list[str] | None = None,
         without: list[str] | None = None,
     ) -> ResolutionResult:
-        """Resolve bundle and provider selections.
+        """Resolve bundle and mcp_server selections.
 
         Args:
             bundles: List of bundle names to include
-            providers: Additional providers to add explicitly
-            without: Providers to exclude from the result
+            mcp_servers: Additional mcp_servers to add explicitly
+            without: McpServers to exclude from the result
 
         Returns:
-            ResolutionResult with resolved providers and any issues
+            ResolutionResult with resolved mcp_servers and any issues
 
         Example:
             resolver = BundleResolver()
@@ -67,87 +67,87 @@ class BundleResolver:
                 bundles=["starter", "data"],
                 without=["memory"],
             )
-            # result.providers = ["filesystem", "fetch", "sqlite", "postgres"]
+            # result.mcp_servers = ["filesystem", "fetch", "sqlite", "postgres"]
         """
-        result = ResolutionResult(providers=[])
+        result = ResolutionResult(mcp_servers=[])
 
-        # Collect all providers from bundles
-        bundle_providers: set[str] = set()
+        # Collect all mcp_servers from bundles
+        bundle_mcp_servers: set[str] = set()
         if bundles:
             for bundle_name in bundles:
                 bundle = get_bundle(bundle_name)
                 if bundle:
-                    self._expand_bundle(bundle, bundle_providers, result)
+                    self._expand_bundle(bundle, bundle_mcp_servers, result)
                 else:
                     result.warnings.append(f"Unknown bundle: {bundle_name}")
 
-        # Add explicit providers
-        explicit_providers: set[str] = set()
-        if providers:
-            for name in providers:
-                if name in self._providers:
-                    explicit_providers.add(name)
+        # Add explicit mcp_servers
+        explicit_mcp_servers: set[str] = set()
+        if mcp_servers:
+            for name in mcp_servers:
+                if name in self._mcp_servers:
+                    explicit_mcp_servers.add(name)
                 else:
-                    result.warnings.append(f"Unknown provider: {name}")
+                    result.warnings.append(f"Unknown mcp_server: {name}")
 
-        # Combine all providers
-        all_providers = bundle_providers | explicit_providers
+        # Combine all mcp_servers
+        all_mcp_servers = bundle_mcp_servers | explicit_mcp_servers
 
         # Remove exclusions
         excluded: set[str] = set()
         if without:
             excluded = set(without)
-            all_providers -= excluded
+            all_mcp_servers -= excluded
 
         # Check for conflicts
-        self._check_conflicts(all_providers, result)
+        self._check_conflicts(all_mcp_servers, result)
 
         # Resolve dependencies
-        ordered = self._resolve_dependencies(all_providers, excluded, result)
+        ordered = self._resolve_dependencies(all_mcp_servers, excluded, result)
 
-        result.providers = ordered
+        result.mcp_servers = ordered
         return result
 
     def _expand_bundle(
         self,
         bundle: Bundle,
-        providers: set[str],
+        mcp_servers: set[str],
         result: ResolutionResult,
     ) -> None:
         """Recursively expand a bundle including its includes.
 
         Args:
             bundle: Bundle to expand
-            providers: Set to add providers to
+            mcp_servers: Set to add mcp_servers to
             result: Resolution result for warnings
         """
         # First, expand included bundles
         for included_name in bundle.includes:
             included = get_bundle(included_name)
             if included:
-                self._expand_bundle(included, providers, result)
+                self._expand_bundle(included, mcp_servers, result)
             else:
                 result.warnings.append(f"Bundle '{bundle.name}' includes unknown bundle: {included_name}")
 
-        # Then add this bundle's providers
-        providers.update(bundle.providers)
+        # Then add this bundle's mcp_servers
+        mcp_servers.update(bundle.mcp_servers)
 
     def _check_conflicts(
         self,
-        providers: set[str],
+        mcp_servers: set[str],
         result: ResolutionResult,
     ) -> None:
-        """Check for conflicting providers.
+        """Check for conflicting mcp_servers.
 
         Args:
-            providers: Set of provider names
+            mcp_servers: Set of mcp_server names
             result: Resolution result to add conflicts to
         """
-        for name in providers:
-            definition = get_provider_definition(name)
+        for name in mcp_servers:
+            definition = get_mcp_server_definition(name)
             if definition:
                 for conflict in definition.conflicts:
-                    if conflict in providers:
+                    if conflict in mcp_servers:
                         # Only report each conflict once
                         pair = tuple(sorted([name, conflict]))
                         if pair not in result.conflicts:
@@ -155,38 +155,38 @@ class BundleResolver:
 
     def _resolve_dependencies(
         self,
-        providers: set[str],
+        mcp_servers: set[str],
         excluded: set[str],
         result: ResolutionResult,
     ) -> list[str]:
-        """Resolve dependencies and return ordered provider list.
+        """Resolve dependencies and return ordered mcp_server list.
 
         Uses topological sort to ensure dependencies come before
         dependents in the returned list.
 
         Args:
-            providers: Set of provider names
-            excluded: Providers that were explicitly excluded
+            mcp_servers: Set of mcp_server names
+            excluded: McpServers that were explicitly excluded
             result: Resolution result for warnings
 
         Returns:
-            Ordered list of providers
+            Ordered list of mcp_servers
         """
         # Check for missing dependencies
-        all_needed: set[str] = set(providers)
-        for name in providers:
-            definition = get_provider_definition(name)
+        all_needed: set[str] = set(mcp_servers)
+        for name in mcp_servers:
+            definition = get_mcp_server_definition(name)
             if definition:
                 for dep in definition.dependencies:
-                    if dep not in providers:
+                    if dep not in mcp_servers:
                         if dep in excluded:
-                            result.warnings.append(f"Provider '{name}' depends on excluded provider '{dep}'")
+                            result.warnings.append(f"McpServer '{name}' depends on excluded mcp_server '{dep}'")
                             result.missing_deps.append((name, dep))
-                        elif dep in self._providers:
+                        elif dep in self._mcp_servers:
                             # Auto-add dependency
                             all_needed.add(dep)
                         else:
-                            result.warnings.append(f"Provider '{name}' has unknown dependency: {dep}")
+                            result.warnings.append(f"McpServer '{name}' has unknown dependency: {dep}")
                             result.missing_deps.append((name, dep))
 
         # Simple topological sort
@@ -195,41 +195,41 @@ class BundleResolver:
         ordered: list[str] = []
         remaining = set(all_needed)
 
-        # First pass: providers with no dependencies
+        # First pass: mcp_servers with no dependencies
         for name in sorted(remaining):
-            definition = get_provider_definition(name)
+            definition = get_mcp_server_definition(name)
             if not definition or not definition.dependencies:
                 ordered.append(name)
 
         remaining -= set(ordered)
 
-        # Second pass: providers with dependencies (sorted for determinism)
+        # Second pass: mcp_servers with dependencies (sorted for determinism)
         ordered.extend(sorted(remaining))
 
         return ordered
 
-    def get_bundle_providers(self, bundle_name: str) -> list[str]:
-        """Get the list of providers for a bundle (including inherited).
+    def get_bundle_mcp_servers(self, bundle_name: str) -> list[str]:
+        """Get the list of mcp_servers for a bundle (including inherited).
 
         Args:
             bundle_name: Name of the bundle
 
         Returns:
-            List of provider names, or empty list if bundle not found
+            List of mcp_server names, or empty list if bundle not found
         """
         bundle = get_bundle(bundle_name)
         if not bundle:
             return []
 
-        providers: set[str] = set()
-        result = ResolutionResult(providers=[])
-        self._expand_bundle(bundle, providers, result)
-        return sorted(providers)
+        mcp_servers: set[str] = set()
+        result = ResolutionResult(mcp_servers=[])
+        self._expand_bundle(bundle, mcp_servers, result)
+        return sorted(mcp_servers)
 
 
 def resolve_bundles(
     bundles: list[str] | None = None,
-    providers: list[str] | None = None,
+    mcp_servers: list[str] | None = None,
     without: list[str] | None = None,
 ) -> ResolutionResult:
     """Convenience function to resolve bundles.
@@ -238,14 +238,14 @@ def resolve_bundles(
 
     Args:
         bundles: List of bundle names
-        providers: Additional providers to add
-        without: Providers to exclude
+        mcp_servers: Additional mcp_servers to add
+        without: McpServers to exclude
 
     Returns:
-        ResolutionResult with resolved providers
+        ResolutionResult with resolved mcp_servers
     """
     resolver = BundleResolver()
-    return resolver.resolve(bundles=bundles, providers=providers, without=without)
+    return resolver.resolve(bundles=bundles, mcp_servers=mcp_servers, without=without)
 
 
 __all__ = [

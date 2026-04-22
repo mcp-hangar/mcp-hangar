@@ -102,9 +102,9 @@ class TestCombinedAppRouting:
         api_app.assert_not_called()
 
     def test_http_api_providers_still_goes_to_api_app(self):
-        """Regression: http scope on /api/providers/ still goes to api_app."""
+        """Regression: http scope on /api/mcp_servers/ still goes to api_app."""
         app, aux_app, mcp_app, api_app = self._make_combined_app()
-        scope = _http_scope("/api/providers/")
+        scope = _http_scope("/api/mcp_servers/")
 
         async def run():
             await app(scope, AsyncMock(), AsyncMock())

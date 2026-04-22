@@ -100,7 +100,7 @@ class TestNullObservabilityAdapter:
         adapter = NullObservabilityAdapter()
 
         span = adapter.start_tool_span(
-            provider_name="math",
+            mcp_server_name="math",
             tool_name="add",
             input_params={"a": 1, "b": 2},
         )
@@ -113,7 +113,7 @@ class TestNullObservabilityAdapter:
         context = TraceContext(trace_id="trace-123", user_id="user-456")
 
         span = adapter.start_tool_span(
-            provider_name="math",
+            mcp_server_name="math",
             tool_name="add",
             input_params={"a": 1, "b": 2},
             trace_context=context,
@@ -137,7 +137,7 @@ class TestNullObservabilityAdapter:
         adapter = NullObservabilityAdapter()
         # Should not raise
         adapter.record_health_check(
-            provider_name="math",
+            mcp_server_name="math",
             healthy=True,
             latency_ms=10.5,
         )

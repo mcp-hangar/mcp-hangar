@@ -176,7 +176,7 @@ class MCPServerFactory:
 
         @mcp.tool()
         def hangar_list(state_filter: str = None) -> dict:
-            """List all managed providers with lifecycle state and metadata.
+            """List all managed mcp_servers with lifecycle state and metadata.
 
             Args:
                 state_filter: Optional filter by state (cold, ready, degraded, dead)
@@ -184,66 +184,66 @@ class MCPServerFactory:
             return hgr.list(state_filter=state_filter)
 
         @mcp.tool()
-        def hangar_start(provider: str) -> dict:
-            """Explicitly start a provider and discover tools.
+        def hangar_start(mcp_server: str) -> dict:
+            """Explicitly start a mcp_server and discover tools.
 
             Args:
-                provider: Provider ID to start
+                mcp_server: McpServer ID to start
             """
-            return hgr.start(provider=provider)
+            return hgr.start(mcp_server=mcp_server)
 
         @mcp.tool()
-        def hangar_stop(provider: str) -> dict:
-            """Stop a provider.
+        def hangar_stop(mcp_server: str) -> dict:
+            """Stop a mcp_server.
 
             Args:
-                provider: Provider ID to stop
+                mcp_server: McpServer ID to stop
             """
-            return hgr.stop(provider=provider)
+            return hgr.stop(mcp_server=mcp_server)
 
         @mcp.tool()
         def hangar_invoke(
-            provider: str,
+            mcp_server: str,
             tool: str,
             arguments: dict | None = None,
             timeout: float = 30.0,
         ) -> dict:
-            """Invoke a tool on a provider.
+            """Invoke a tool on a mcp_server.
 
             Args:
-                provider: Provider ID
+                mcp_server: McpServer ID
                 tool: Tool name to invoke
                 arguments: Tool arguments as dictionary (default: empty)
                 timeout: Timeout in seconds (default 30)
             """
             return hgr.invoke(
-                provider=provider,
+                mcp_server=mcp_server,
                 tool=tool,
                 arguments=arguments or {},
                 timeout=timeout,
             )
 
         @mcp.tool()
-        def hangar_tools(provider: str) -> dict:
-            """Get detailed tool schemas for a provider.
+        def hangar_tools(mcp_server: str) -> dict:
+            """Get detailed tool schemas for a mcp_server.
 
             Args:
-                provider: Provider ID
+                mcp_server: McpServer ID
             """
-            return hgr.tools(provider=provider)
+            return hgr.tools(mcp_server=mcp_server)
 
         @mcp.tool()
-        def hangar_details(provider: str) -> dict:
-            """Get detailed information about a provider.
+        def hangar_details(mcp_server: str) -> dict:
+            """Get detailed information about a mcp_server.
 
             Args:
-                provider: Provider ID
+                mcp_server: McpServer ID
             """
-            return hgr.details(provider=provider)
+            return hgr.details(mcp_server=mcp_server)
 
         @mcp.tool()
         def hangar_health() -> dict:
-            """Get control plane health status including provider counts and metrics."""
+            """Get control plane health status including mcp_server counts and metrics."""
             return hgr.health()
 
     def _register_discovery_tools(self, mcp: FastMCP) -> None:
@@ -259,7 +259,7 @@ class MCPServerFactory:
             """Trigger immediate discovery cycle.
 
             Runs discovery across all configured sources and returns
-            statistics about discovered, added, and quarantined providers.
+            statistics about discovered, added, and quarantined mcp_servers.
             """
             if hgr.discover is None:
                 return {"error": "Discovery not configured"}
@@ -267,9 +267,9 @@ class MCPServerFactory:
 
         @mcp.tool()
         def hangar_discovered() -> dict:
-            """List all discovered providers pending addition.
+            """List all discovered mcp_servers pending addition.
 
-            Shows providers found by discovery but not yet added,
+            Shows mcp_servers found by discovery but not yet added,
             typically due to auto_register=false or pending approval.
             """
             if hgr.discovered is None:
@@ -278,9 +278,9 @@ class MCPServerFactory:
 
         @mcp.tool()
         def hangar_quarantine() -> dict:
-            """List quarantined providers with failure reasons.
+            """List quarantined mcp_servers with failure reasons.
 
-            Shows providers that failed validation and are waiting
+            Shows mcp_servers that failed validation and are waiting
             for manual approval or rejection.
             """
             if hgr.quarantine is None:
@@ -288,15 +288,15 @@ class MCPServerFactory:
             return hgr.quarantine()
 
         @mcp.tool()
-        async def hangar_approve(provider: str) -> dict:
-            """Approve a quarantined provider for addition.
+        async def hangar_approve(mcp_server: str) -> dict:
+            """Approve a quarantined mcp_server for addition.
 
             Args:
-                provider: Name of the quarantined provider to approve
+                mcp_server: Name of the quarantined mcp_server to approve
             """
             if hgr.approve is None:
                 return {"error": "Discovery not configured"}
-            return await hgr.approve(provider=provider)
+            return await hgr.approve(mcp_server=mcp_server)
 
         @mcp.tool()
         def hangar_sources() -> dict:
@@ -316,7 +316,7 @@ class MCPServerFactory:
             Args:
                 format: Output format - "summary" (default), "prometheus", or "detailed"
 
-            Returns metrics including provider states, tool call counts, errors,
+            Returns metrics including mcp_server states, tool call counts, errors,
             discovery statistics, and performance data.
             """
             if hgr.metrics is None:
@@ -337,7 +337,7 @@ class MCPServerFactory:
         # Check hangar list
         try:
             data = self._hangar.list()
-            checks["hangar_list_ok"] = isinstance(data, dict) and "providers" in data
+            checks["hangar_list_ok"] = isinstance(data, dict) and "mcp_servers" in data
         except Exception as e:  # noqa: BLE001 -- fault-barrier: health check probe must return result not crash
             checks["hangar_list_ok"] = False
             checks["hangar_list_error"] = str(e)
@@ -353,16 +353,16 @@ class MCPServerFactory:
         return checks
 
     def _update_metrics(self) -> None:
-        """Update provider state metrics."""
-        from ..metrics import update_provider_state
+        """Update mcp_server state metrics."""
+        from ..metrics import update_mcp_server_state
 
         try:
             data = self._hangar.list()
-            if isinstance(data, dict) and "providers" in data:
-                for p in data.get("providers", []):
-                    pid = p.get("provider_id") or p.get("name") or p.get("id")
+            if isinstance(data, dict) and "mcp_servers" in data:
+                for p in data.get("mcp_servers", []):
+                    pid = p.get("mcp_server_id") or p.get("name") or p.get("id")
                     if pid:
-                        update_provider_state(
+                        update_mcp_server_state(
                             pid,
                             p.get("state", "cold"),
                             p.get("mode", "subprocess"),

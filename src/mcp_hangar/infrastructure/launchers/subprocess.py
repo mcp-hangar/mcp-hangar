@@ -1,4 +1,4 @@
-"""Subprocess provider launcher implementation."""
+"""Subprocess mcp_server launcher implementation."""
 
 import os
 import shutil
@@ -7,20 +7,20 @@ import sys
 
 from mcp_hangar.logging_config import get_logger
 from mcp_hangar.stdio_client import StdioClient
-from mcp_hangar.domain.exceptions import ProviderStartError, ValidationError
+from mcp_hangar.domain.exceptions import McpServerStartError, ValidationError
 from mcp_hangar.domain.security.input_validator import InputValidator
 from mcp_hangar.domain.security.sanitizer import Sanitizer
 from mcp_hangar.domain.security.secrets import is_sensitive_key
-from .base import ProviderLauncher
+from .base import McpServerLauncher
 
 logger = get_logger(__name__)
 
 
-class SubprocessLauncher(ProviderLauncher):
+class SubprocessLauncher(McpServerLauncher):
     """
-    Launch providers as local subprocesses.
+    Launch mcp_servers as local subprocesses.
 
-    This is the primary mode for running MCP providers locally.
+    This is the primary mode for running MCP mcp_servers locally.
     Security-hardened with:
     - Command validation
     - Argument sanitization
@@ -111,12 +111,12 @@ class SubprocessLauncher(ProviderLauncher):
                 details={"errors": [e.to_dict() for e in result.errors]},
             )
 
-    def _prepare_env(self, provider_env: dict[str, str] | None = None) -> dict[str, str]:
+    def _prepare_env(self, mcp_server_env: dict[str, str] | None = None) -> dict[str, str]:
         """
         Prepare secure environment for subprocess.
 
         Args:
-            provider_env: Provider-specific environment variables
+            mcp_server_env: McpServer-specific environment variables
 
         Returns:
             Sanitized environment dictionary
@@ -141,10 +141,10 @@ class SubprocessLauncher(ProviderLauncher):
 
                 result_env[key] = value
 
-        # Add provider-specific env vars (overrides inherited)
-        if provider_env:
+        # Add mcp_server-specific env vars (overrides inherited)
+        if mcp_server_env:
             # Sanitize values
-            for key, value in provider_env.items():
+            for key, value in mcp_server_env.items():
                 sanitized = self._sanitizer.sanitize_environment_value(value)
                 result_env[key] = sanitized
 
@@ -156,7 +156,7 @@ class SubprocessLauncher(ProviderLauncher):
         env: dict[str, str] | None = None,
     ) -> StdioClient:
         """
-        Launch a subprocess provider with security validation.
+        Launch a subprocess mcp_server with security validation.
 
         Args:
             command: Command and arguments to execute
@@ -166,7 +166,7 @@ class SubprocessLauncher(ProviderLauncher):
             StdioClient connected to the subprocess
 
         Raises:
-            ProviderStartError: If subprocess fails to start
+            McpServerStartError: If subprocess fails to start
             ValidationError: If inputs fail security validation
         """
         if not command:
@@ -211,20 +211,20 @@ class SubprocessLauncher(ProviderLauncher):
             )
             return StdioClient(process)
         except FileNotFoundError as e:
-            raise ProviderStartError(
-                provider_id="unknown",
+            raise McpServerStartError(
+                mcp_server_id="unknown",
                 reason=f"Command not found: {resolved_command[0] if resolved_command else ''}",
                 details={"command": safe_command},
             ) from e
         except PermissionError as e:
-            raise ProviderStartError(
-                provider_id="unknown",
+            raise McpServerStartError(
+                mcp_server_id="unknown",
                 reason=f"Permission denied: {resolved_command[0] if resolved_command else ''}",
                 details={"command": safe_command},
             ) from e
         except (OSError, subprocess.SubprocessError) as e:
-            raise ProviderStartError(
-                provider_id="unknown",
+            raise McpServerStartError(
+                mcp_server_id="unknown",
                 reason=f"subprocess_spawn_failed: {e}",
                 details={"command": safe_command},
             ) from e

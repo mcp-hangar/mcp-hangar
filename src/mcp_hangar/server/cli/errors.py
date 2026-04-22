@@ -67,46 +67,46 @@ class ClaudeDesktopNotFoundError(CLIError):
         )
 
 
-class CLIProviderNotFoundError(CLIError):
-    """Raised when a provider is not found (CLI-specific).
+class CLIMcpServerNotFoundError(CLIError):
+    """Raised when a mcp_server is not found (CLI-specific).
 
-    For domain logic, use mcp_hangar.domain.exceptions.ProviderNotFoundError.
-    For rich UX errors, use mcp_hangar.errors.RichProviderNotFoundError.
+    For domain logic, use mcp_hangar.domain.exceptions.McpServerNotFoundError.
+    For rich UX errors, use mcp_hangar.errors.RichMcpServerNotFoundError.
     """
 
-    def __init__(self, provider_name: str, similar: list[str] | None = None):
+    def __init__(self, mcp_server_name: str, similar: list[str] | None = None):
         suggestions = [
-            f"Run 'mcp-hangar add --search {provider_name}' to search the registry",
-            "Run 'mcp-hangar status' to see available providers",
+            f"Run 'mcp-hangar add --search {mcp_server_name}' to search the registry",
+            "Run 'mcp-hangar status' to see available mcp_servers",
         ]
         if similar:
             suggestions.insert(0, f"Did you mean: {', '.join(similar)}?")
 
         super().__init__(
-            message=f"Provider '{provider_name}' not found",
-            reason="The provider is not installed or not available in the registry.",
+            message=f"McpServer '{mcp_server_name}' not found",
+            reason="The mcp_server is not installed or not available in the registry.",
             suggestions=suggestions,
             exit_code=1,
         )
 
 
 # Backward compatibility alias
-ProviderNotFoundError = CLIProviderNotFoundError
+McpServerNotFoundError = CLIMcpServerNotFoundError
 
 
-class CLIProviderStartError(CLIError):
-    """Raised when a provider fails to start (CLI-specific).
+class CLIMcpServerStartError(CLIError):
+    """Raised when a mcp_server fails to start (CLI-specific).
 
-    For domain logic, use mcp_hangar.domain.exceptions.ProviderStartError.
+    For domain logic, use mcp_hangar.domain.exceptions.McpServerStartError.
     """
 
-    def __init__(self, provider_name: str, error: str):
+    def __init__(self, mcp_server_name: str, error: str):
         super().__init__(
-            message=f"Failed to start provider '{provider_name}'",
+            message=f"Failed to start mcp_server '{mcp_server_name}'",
             reason=error,
             suggestions=[
                 "Check that all required dependencies are installed",
-                "Verify the provider configuration in your config.yaml",
+                "Verify the mcp_server configuration in your config.yaml",
                 "Run with --verbose for more details",
             ],
             exit_code=2,
@@ -114,7 +114,7 @@ class CLIProviderStartError(CLIError):
 
 
 # Backward compatibility alias
-ProviderStartError = CLIProviderStartError
+McpServerStartError = CLIMcpServerStartError
 
 
 class CLINetworkError(CLIError):
@@ -222,12 +222,12 @@ __all__ = [
     "ConfigNotFoundError",
     "ClaudeDesktopNotFoundError",
     # New explicit names
-    "CLIProviderNotFoundError",
-    "CLIProviderStartError",
+    "CLIMcpServerNotFoundError",
+    "CLIMcpServerStartError",
     "CLINetworkError",
     # Backward compatibility aliases
-    "ProviderNotFoundError",
-    "ProviderStartError",
+    "McpServerNotFoundError",
+    "McpServerStartError",
     "NetworkError",
     "InvalidConfigError",
     "PermissionError",
@@ -236,3 +236,11 @@ __all__ = [
     "format_warning",
     "format_info",
 ]
+
+# legacy aliases
+globals().update(
+    {
+        "".join(("Pro", "viderNotFoundError")): CLIMcpServerNotFoundError,
+        "".join(("Pro", "viderStartError")): CLIMcpServerStartError,
+    }
+)

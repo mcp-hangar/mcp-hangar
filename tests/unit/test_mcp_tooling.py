@@ -54,23 +54,23 @@ class TestKeyGlobal:
         assert key_global("a", "b", "c") == "global"
 
     def test_ignores_keyword_args(self):
-        assert key_global(provider="acme", tool="call") == "global"
+        assert key_global(mcp_server="acme", tool="call") == "global"
 
 
 class TestKeyPerProvider:
-    """key_per_provider returns 'provider:{name}' scoped to the first positional arg."""
+    """key_per_provider returns 'mcp_server:{name}' scoped to the first positional arg."""
 
     def test_basic(self):
-        assert key_per_provider("acme") == "provider:acme"
+        assert key_per_provider("acme") == "mcp_server:acme"
 
     def test_ignores_extra_positional_args(self):
-        assert key_per_provider("acme", "ignored", "also-ignored") == "provider:acme"
+        assert key_per_provider("acme", "ignored", "also-ignored") == "mcp_server:acme"
 
     def test_ignores_keyword_args(self):
-        assert key_per_provider("beta", foo="bar") == "provider:beta"
+        assert key_per_provider("beta", foo="bar") == "mcp_server:beta"
 
     def test_different_provider_names(self):
-        assert key_per_provider("delta") == "provider:delta"
+        assert key_per_provider("delta") == "mcp_server:delta"
 
 
 class TestKeyHangarCall:

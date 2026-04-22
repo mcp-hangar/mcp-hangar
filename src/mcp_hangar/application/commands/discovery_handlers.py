@@ -3,7 +3,7 @@
 All handlers:
 - Receive DiscoveryRegistry via constructor (Dependency Inversion Principle)
 - Are thread-safe via threading.Lock
-- Raise ProviderNotFoundError on missing source_id (maps to HTTP 404 via middleware)
+- Raise McpServerNotFoundError on missing source_id (maps to HTTP 404 via middleware)
 - Return plain dicts for JSON serialization via HangarJSONResponse
 """
 
@@ -12,7 +12,7 @@ import uuid
 from typing import Any
 
 from ...domain.discovery.discovery_source import DiscoveryMode
-from ...domain.exceptions import ProviderNotFoundError
+from ...domain.exceptions import McpServerNotFoundError
 from ...domain.value_objects.discovery import DiscoverySourceSpec
 from ...domain.contracts.command import CommandHandler
 from ...logging_config import get_logger
@@ -98,7 +98,7 @@ class UpdateDiscoverySourceHandler(CommandHandler):
             Dict with source_id and updated flag.
 
         Raises:
-            ProviderNotFoundError: If source_id is not registered.
+            McpServerNotFoundError: If source_id is not registered.
         """
         kwargs: dict[str, Any] = {}
         if command.mode is not None:
@@ -111,7 +111,7 @@ class UpdateDiscoverySourceHandler(CommandHandler):
         try:
             self._registry.update_source(command.source_id, **kwargs)
         except KeyError:
-            raise ProviderNotFoundError(provider_id=command.source_id)
+            raise McpServerNotFoundError(mcp_server_id=command.source_id)
 
         logger.info("discovery_source_updated", source_id=command.source_id)
         return {"source_id": command.source_id, "updated": True}
@@ -121,7 +121,7 @@ class DeregisterDiscoverySourceHandler(CommandHandler):
     """Handler for DeregisterDiscoverySourceCommand.
 
     Removes a DiscoverySourceSpec from the registry.
-    Raises ProviderNotFoundError (HTTP 404) if the source_id is unknown.
+    Raises McpServerNotFoundError (HTTP 404) if the source_id is unknown.
     """
 
     def __init__(self, registry: DiscoveryRegistry) -> None:
@@ -143,12 +143,12 @@ class DeregisterDiscoverySourceHandler(CommandHandler):
             Dict with source_id and deregistered flag.
 
         Raises:
-            ProviderNotFoundError: If source_id is not registered.
+            McpServerNotFoundError: If source_id is not registered.
         """
         try:
             self._registry.unregister_source(command.source_id)
         except KeyError:
-            raise ProviderNotFoundError(provider_id=command.source_id)
+            raise McpServerNotFoundError(mcp_server_id=command.source_id)
         logger.info("discovery_source_deregistered", source_id=command.source_id)
         return {"source_id": command.source_id, "deregistered": True}
 
@@ -157,7 +157,7 @@ class TriggerSourceScanHandler(CommandHandler):
     """Handler for TriggerSourceScanCommand.
 
     Verifies the source exists, then triggers an immediate discovery scan via
-    DiscoveryOrchestrator.trigger_discovery(). Returns the number of providers
+    DiscoveryOrchestrator.trigger_discovery(). Returns the number of mcp_servers
     discovered in the scan cycle.
     """
 
@@ -177,31 +177,31 @@ class TriggerSourceScanHandler(CommandHandler):
             command: TriggerSourceScanCommand with source_id to scan.
 
         Returns:
-            Dict with source_id, scan_triggered flag, and providers_found count.
+            Dict with source_id, scan_triggered flag, and mcp_servers_found count.
 
         Raises:
-            ProviderNotFoundError: If source_id is not registered.
+            McpServerNotFoundError: If source_id is not registered.
         """
         spec = self._registry.get_source(command.source_id)
         if spec is None:
-            raise ProviderNotFoundError(provider_id=command.source_id)
+            raise McpServerNotFoundError(mcp_server_id=command.source_id)
 
         result = self._registry.orchestrator.trigger_discovery()
-        providers_found = (
-            result.get("providers_discovered", 0)
+        mcp_servers_found = (
+            result.get("mcp_servers_discovered", 0)
             if isinstance(result, dict)
-            else getattr(result, "providers_discovered", 0)
+            else getattr(result, "mcp_servers_discovered", 0)
         )
 
         logger.info(
             "discovery_scan_triggered",
             source_id=command.source_id,
-            providers_found=providers_found,
+            mcp_servers_found=mcp_servers_found,
         )
         return {
             "source_id": command.source_id,
             "scan_triggered": True,
-            "providers_found": providers_found,
+            "mcp_servers_found": mcp_servers_found,
         }
 
 
@@ -231,7 +231,7 @@ class ToggleDiscoverySourceHandler(CommandHandler):
             Dict with source_id and the resulting enabled state.
 
         Raises:
-            ProviderNotFoundError: If source_id is not registered.
+            McpServerNotFoundError: If source_id is not registered.
         """
         try:
             if command.enabled:
@@ -239,7 +239,7 @@ class ToggleDiscoverySourceHandler(CommandHandler):
             else:
                 spec = self._registry.disable_source(command.source_id)
         except KeyError:
-            raise ProviderNotFoundError(provider_id=command.source_id)
+            raise McpServerNotFoundError(mcp_server_id=command.source_id)
 
         logger.info(
             "discovery_source_toggled",

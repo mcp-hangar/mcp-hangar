@@ -1,19 +1,19 @@
 # 05 -- Load Balancing
 
 > **Prerequisite:** [04 -- Failover](04-failover.md)
-> **You will need:** Running Hangar with a provider group from recipe 04
+> **You will need:** Running Hangar with a MCP server group from recipe 04
 > **Time:** 5 minutes
-> **Adds:** Distribute requests evenly across multiple provider instances
+> **Adds:** Distribute requests evenly across multiple MCP server instances
 
 ## The Problem
 
-You have two providers in a failover group. All traffic goes to the primary -- the backup sits idle. You want to use both providers and spread the load.
+You have two MCP servers in a failover group. All traffic goes to the primary -- the backup sits idle. You want to use both MCP servers and spread the load.
 
 ## The Config
 
 ```yaml
 # config.yaml -- Recipe 05: Load Balancing
-providers:
+mcp_servers:
   my-mcp:
     mode: remote
     endpoint: "http://localhost:8080"
@@ -47,7 +47,7 @@ providers:
 
 ## Try It
 
-1. Start all three provider instances on ports 8080, 8081, 8082.
+1. Start all three MCP server instances on ports 8080, 8081, 8082.
 
 2. Start Hangar and verify the group:
 
@@ -105,6 +105,6 @@ Other available strategies:
 
 ## What's Next
 
-Your providers are balanced -- but what happens when one client sends 1000 requests per second? You need to protect your providers from overload.
+Your MCP servers are balanced -- but what happens when one client sends 1000 requests per second? You need to protect your MCP servers from overload.
 
 --> [06 -- Rate Limiting](06-rate-limiting.md)

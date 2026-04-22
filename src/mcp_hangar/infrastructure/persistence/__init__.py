@@ -5,14 +5,14 @@ using SQLite, in-memory storage, and other backends.
 """
 
 from .audit_repository import InMemoryAuditRepository, SQLiteAuditRepository
-from .config_repository import InMemoryProviderConfigRepository, SQLiteProviderConfigRepository
+from .config_repository import InMemoryMcpServerConfigRepository, SQLiteMcpServerConfigRepository
 from .database import Database, DatabaseConfig
 from .event_serializer import EventSerializationError, EventSerializer, register_event_type
 from .event_upcaster import IEventUpcaster, UpcasterChain
 from .in_memory_event_store import InMemoryEventStore
 from .log_buffer import (
     DEFAULT_MAX_LINES,
-    ProviderLogBuffer,
+    McpServerLogBuffer,
     clear_log_buffer_registry,
     get_log_buffer,
     get_or_create_log_buffer,
@@ -38,8 +38,8 @@ __all__ = [
     "IEventUpcaster",
     "InMemoryAuditRepository",
     "InMemoryEventStore",
-    "InMemoryProviderConfigRepository",
-    "ProviderLogBuffer",
+    "InMemoryMcpServerConfigRepository",
+    "McpServerLogBuffer",
     "RecoveryService",
     "UpcasterChain",
     "clear_log_buffer_registry",
@@ -49,6 +49,11 @@ __all__ = [
     "remove_log_buffer",
     "set_log_buffer",
     "SQLiteAuditRepository",
-    "SQLiteProviderConfigRepository",
+    "SQLiteMcpServerConfigRepository",
     "SQLiteUnitOfWork",
 ]
+
+# legacy aliases
+InMemoryProviderConfigRepository = InMemoryMcpServerConfigRepository
+SQLiteProviderConfigRepository = SQLiteMcpServerConfigRepository
+ProviderLogBuffer = McpServerLogBuffer

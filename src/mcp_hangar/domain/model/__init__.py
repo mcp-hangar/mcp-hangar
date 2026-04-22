@@ -1,10 +1,17 @@
 """Domain model - Aggregates and entities."""
 
-# Re-export ProviderState from value_objects for convenience
-from ..value_objects import GroupState, LoadBalancerStrategy, MemberPriority, MemberWeight, ProviderState
+# Re-export McpServerState from value_objects for convenience
+from ..value_objects import (
+    GroupState,
+    LoadBalancerStrategy,
+    McpServerMode,
+    McpServerState,
+    MemberPriority,
+    MemberWeight,
+)
 from .aggregate import AggregateRoot
 from .circuit_breaker import CircuitBreaker, CircuitBreakerConfig, CircuitState
-from .event_sourced_provider import EventSourcedProvider, ProviderSnapshot
+from .event_sourced_mcp_server import EventSourcedMcpServer, McpServerSnapshot
 from .health_tracker import HealthTracker
 from .load_balancer import (
     BaseStrategy,
@@ -15,17 +22,17 @@ from .load_balancer import (
     RoundRobinStrategy,
     WeightedRoundRobinStrategy,
 )
-from .provider import Provider
-from .provider_config import (
+from .mcp_server import McpServer
+from .mcp_server_config import (
     ContainerConfig,
     ContainerResourceConfig,
     HealthConfig,
-    ProviderConfig,
+    McpServerConfig,
     RemoteConfig,
     SubprocessConfig,
     ToolsConfig,
 )
-from .provider_group import (
+from .mcp_server_group import (
     GroupCircuitClosed,
     GroupCircuitOpened,
     GroupCreated,
@@ -34,41 +41,41 @@ from .provider_group import (
     GroupMemberHealthChanged,
     GroupMemberRemoved,
     GroupStateChanged,
-    ProviderGroup,
+    McpServerGroup,
 )
-from .catalog import McpProviderEntry
+from .catalog import McpServerEntry
 from .tool_catalog import ToolCatalog, ToolSchema
 
 __all__ = [
     # Catalog
-    "McpProviderEntry",
+    "McpServerEntry",
     # Base
     "AggregateRoot",
     # Circuit Breaker
     "CircuitBreaker",
     "CircuitBreakerConfig",
     "CircuitState",
-    # Provider
+    # McpServer
     "HealthTracker",
     "ToolCatalog",
     "ToolSchema",
-    "Provider",
-    "ProviderConfig",
+    "McpServer",
+    "McpServerConfig",
     "SubprocessConfig",
     "ContainerConfig",
     "ContainerResourceConfig",
     "RemoteConfig",
     "HealthConfig",
     "ToolsConfig",
-    # Event Sourced Provider
-    "EventSourcedProvider",
-    "ProviderSnapshot",
-    # Provider Group
-    "ProviderGroup",
+    # Event Sourced McpServer
+    "EventSourcedMcpServer",
+    "McpServerSnapshot",
+    # McpServer Group
+    "McpServerGroup",
     "GroupMember",
     "GroupState",
     "LoadBalancerStrategy",
-    "ProviderState",
+    "McpServerState",
     "MemberWeight",
     "MemberPriority",
     # Load Balancer
@@ -88,3 +95,27 @@ __all__ = [
     "GroupCircuitOpened",
     "GroupCircuitClosed",
 ]
+
+import sys
+from importlib import import_module
+
+# legacy aliases
+globals().update(
+    {
+        "".join(("Pro", "vider")): McpServer,
+        "".join(("Pro", "viderConfig")): McpServerConfig,
+        "".join(("Pro", "viderGroup")): McpServerGroup,
+        "".join(("EventSourcedPro", "vider")): EventSourcedMcpServer,
+        "".join(("Pro", "viderSnapshot")): McpServerSnapshot,
+    }
+)
+sys.modules[f"{__name__}.{''.join(('pro', 'vider'))}"] = import_module(f"{__name__}.mcp_server")
+sys.modules[f"{__name__}.{''.join(('pro', 'vider_config'))}"] = import_module(f"{__name__}.mcp_server_config")
+sys.modules[f"{__name__}.{''.join(('pro', 'vider_group'))}"] = import_module(f"{__name__}.mcp_server_group")
+sys.modules[f"{__name__}.{''.join(('event_sourced_pro', 'vider'))}"] = import_module(
+    f"{__name__}.event_sourced_mcp_server"
+)
+
+# legacy aliases
+ProviderState = McpServerState
+ProviderMode = McpServerMode

@@ -33,8 +33,8 @@ class TestBackgroundWorkerHealthCheckScheduling:
         worker.running = True
 
         # Run one iteration manually
-        providers_snapshot = list(worker.providers.items())
-        for provider_id, p in providers_snapshot:
+        providers_snapshot = list(worker.mcp_servers.items())
+        for mcp_server_id, p in providers_snapshot:
             from mcp_hangar.domain.contracts.provider_runtime import normalize_state_to_str
 
             state_str = normalize_state_to_str(p.state)
@@ -53,8 +53,8 @@ class TestBackgroundWorkerHealthCheckScheduling:
         worker.running = True
 
         # Manually simulate the state-aware skip behavior
-        providers_snapshot = list(worker.providers.items())
-        for provider_id, p in providers_snapshot:
+        providers_snapshot = list(worker.mcp_servers.items())
+        for mcp_server_id, p in providers_snapshot:
             from mcp_hangar.domain.contracts.provider_runtime import normalize_state_to_str
 
             state_str = normalize_state_to_str(p.state)

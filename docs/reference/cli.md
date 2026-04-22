@@ -1,6 +1,6 @@
 # CLI Reference
 
-MCP Hangar provides a comprehensive command-line interface for managing MCP providers.
+MCP Hangar provides a comprehensive command-line interface for managing MCP servers.
 
 ## Installation
 
@@ -34,9 +34,9 @@ These options are available for all commands:
 | Command | Description |
 |---------|-------------|
 | [`init`](#init) | Interactive setup wizard |
-| [`status`](#status) | Show provider health dashboard |
-| [`add`](#add) | Add provider from registry |
-| [`remove`](#remove) | Remove provider from configuration |
+| [`status`](#status) | Show MCP server health dashboard |
+| [`add`](#add) | Add MCP server from registry |
+| [`remove`](#remove) | Remove MCP server from configuration |
 | [`serve`](#serve) | Start the MCP server |
 | [`completion`](#completion) | Generate shell completion scripts |
 
@@ -44,7 +44,7 @@ These options are available for all commands:
 
 ## init
 
-Interactive setup wizard for MCP Hangar. Guides you through provider selection and configuration in under 5 minutes.
+Interactive setup wizard for MCP Hangar. Guides you through MCP server selection and configuration in under 5 minutes.
 
 ### Synopsis
 
@@ -57,16 +57,16 @@ mcp-hangar init [OPTIONS]
 | Option | Short | Type | Default | Description |
 |--------|-------|------|---------|-------------|
 | `--non-interactive` | `-y` | FLAG | false | Run without prompts, using defaults |
-| `--bundle` | `-b` | TEXT | - | Provider bundle to install |
-| `--providers` | - | TEXT | - | Comma-separated list of providers |
+| `--bundle` | `-b` | TEXT | - | MCP Server bundle to install |
+| `--MCP servers` | - | TEXT | - | Comma-separated list of MCP servers |
 | `--config-path` | - | PATH | - | Custom path for config file |
 | `--claude-config` | - | PATH | - | Custom path to Claude Desktop config |
 | `--skip-claude` | - | FLAG | false | Skip Claude Desktop config modification |
 | `--reset` | - | FLAG | false | Reset existing configuration |
 
-### Provider Bundles
+### MCP Server Bundles
 
-| Bundle | Providers | Use Case |
+| Bundle | MCP servers | Use Case |
 |--------|-----------|----------|
 | `starter` | filesystem, fetch, memory | General use, getting started |
 | `developer` | filesystem, fetch, memory, github, git | Software development |
@@ -81,8 +81,8 @@ mcp-hangar init
 # Install starter bundle
 mcp-hangar init --bundle starter
 
-# Install specific providers
-mcp-hangar init --providers filesystem,github,sqlite
+# Install specific mcp_servers
+mcp-hangar init --mcp-servers filesystem,github,sqlite
 
 # Non-interactive with developer bundle
 mcp-hangar init -y --bundle developer
@@ -97,7 +97,7 @@ mcp-hangar init --skip-claude
 ### What It Does
 
 1. Detects Claude Desktop installation
-2. Presents provider categories for selection
+2. Presents MCP server categories for selection
 3. Collects required configuration (API keys, paths)
 4. Generates `config.yaml` file
 5. Updates Claude Desktop configuration
@@ -107,7 +107,7 @@ mcp-hangar init --skip-claude
 
 ## status
 
-Display health dashboard of all configured providers with real-time updates.
+Display health dashboard of all configured MCP servers with real-time updates.
 
 ### Synopsis
 
@@ -119,7 +119,7 @@ mcp-hangar status [OPTIONS] [PROVIDER]
 
 | Argument | Required | Description |
 |----------|----------|-------------|
-| `PROVIDER` | No | Show detailed status for specific provider |
+| `PROVIDER` | No | Show detailed status for specific MCP server |
 
 ### Options
 
@@ -129,20 +129,20 @@ mcp-hangar status [OPTIONS] [PROVIDER]
 | `--interval` | `-i` | FLOAT | 2.0 | Update interval in seconds (with --watch) |
 | `--details` | `-d` | FLAG | false | Show additional columns (mode, memory, uptime) |
 
-### Provider States
+### MCP Server States
 
 | State | Indicator | Description |
 |-------|-----------|-------------|
-| READY | `OK` (green) | Provider is running and healthy |
-| COLD | `--` (dim) | Provider not started |
-| INITIALIZING | `..` (cyan) | Provider starting up |
-| DEGRADED | `!!` (yellow) | Provider has issues |
-| DEAD | `XX` (red) | Provider failed/crashed |
+| READY | `OK` (green) | MCP Server is running and healthy |
+| COLD | `--` (dim) | MCP Server not started |
+| INITIALIZING | `..` (cyan) | MCP Server starting up |
+| DEGRADED | `!!` (yellow) | MCP Server has issues |
+| DEAD | `XX` (red) | MCP Server failed/crashed |
 
 ### Examples
 
 ```bash
-# Show all providers
+# Show all mcp_servers
 mcp-hangar status
 
 # Watch mode with live updates
@@ -154,7 +154,7 @@ mcp-hangar status -w -i 0.5
 # Show detailed information
 mcp-hangar status --details
 
-# Single provider details
+# Single mcp_server details
 mcp-hangar status github
 
 # JSON output for scripting
@@ -165,13 +165,13 @@ mcp-hangar --json status
 
 **Standard view:**
 
-- Provider name
+- MCP Server name
 - State indicator
 - Tools count
 
 **Detailed view (`--details`):**
 
-- Provider name
+- MCP Server name
 - State indicator
 - Mode (subprocess/docker/remote)
 - Tools count
@@ -182,7 +182,7 @@ mcp-hangar --json status
 
 ## add
 
-Add a provider from the MCP Registry to your configuration.
+Add a MCP server from the MCP Registry to your configuration.
 
 ### Synopsis
 
@@ -194,7 +194,7 @@ mcp-hangar add [OPTIONS] NAME
 
 | Argument | Required | Description |
 |----------|----------|-------------|
-| `NAME` | Yes | Provider name or search query |
+| `NAME` | Yes | MCP Server name or search query |
 
 ### Options
 
@@ -204,9 +204,9 @@ mcp-hangar add [OPTIONS] NAME
 | `--yes` | `-y` | FLAG | false | Skip confirmation prompts |
 | `--no-reload` | - | FLAG | false | Don't hot-reload running server |
 
-### Available Providers
+### Available MCP servers
 
-| Provider | Description | Requires Config |
+| MCP Server | Description | Requires Config |
 |----------|-------------|-----------------|
 | `filesystem` | File system access | Yes (allowed paths) |
 | `fetch` | HTTP requests | No |
@@ -231,7 +231,7 @@ mcp-hangar add [OPTIONS] NAME
 # Add by exact name
 mcp-hangar add github
 
-# Search for providers
+# Search for mcp_servers
 mcp-hangar add --search database
 
 # Skip confirmation
@@ -243,7 +243,7 @@ mcp-hangar add postgres --no-reload
 
 ### Configuration Prompts
 
-When adding a provider that requires configuration, you'll be prompted for:
+When adding a MCP server that requires configuration, you'll be prompted for:
 
 - **Secrets** (API keys, tokens): Hidden input, stored securely
 - **Paths** (directories, files): Path validation
@@ -255,7 +255,7 @@ Environment variables are detected automatically. If `GITHUB_TOKEN` is set, you'
 
 ## remove
 
-Remove a provider from your configuration.
+Remove a MCP server from your configuration.
 
 ### Synopsis
 
@@ -267,14 +267,14 @@ mcp-hangar remove [OPTIONS] NAME
 
 | Argument | Required | Description |
 |----------|----------|-------------|
-| `NAME` | Yes | Provider name to remove |
+| `NAME` | Yes | MCP Server name to remove |
 
 ### Options
 
 | Option | Short | Type | Default | Description |
 |--------|-------|------|---------|-------------|
 | `--yes` | `-y` | FLAG | false | Skip confirmation prompt |
-| `--keep-running` | - | FLAG | false | Don't stop running provider instance |
+| `--keep-running` | - | FLAG | false | Don't stop running MCP server instance |
 
 ### Examples
 
@@ -291,7 +291,7 @@ mcp-hangar remove postgres --keep-running
 
 ### Behavior
 
-1. Validates provider exists in configuration
+1. Validates MCP server exists in configuration
 2. Prompts for confirmation (unless `-y`)
 3. Stops running instance (unless `--keep-running`)
 4. Removes from config.yaml
@@ -465,7 +465,7 @@ The CLI searches for configuration in this order:
 ### Example Configuration
 
 ```yaml
-providers:
+mcp_servers:
   filesystem:
     mode: subprocess
     command:
@@ -518,7 +518,7 @@ event_store:
 |------|---------|
 | 0 | Success |
 | 1 | User error (invalid input, missing file, permission denied) |
-| 2 | System error (network failure, provider crash) |
+| 2 | System error (network failure, MCP server crash) |
 | 130 | Interrupted by user (Ctrl+C) |
 
 ---

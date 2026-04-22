@@ -19,9 +19,9 @@ from mcp_hangar.domain.exceptions import (
     AccessDeniedError,
     AuthenticationError,
     MCPError,
-    ProviderDegradedError,
-    ProviderNotFoundError,
-    ProviderNotReadyError,
+    McpServerDegradedError,
+    McpServerNotFoundError,
+    McpServerNotReadyError,
     RateLimitExceeded,
     ToolNotFoundError,
     ToolTimeoutError,
@@ -37,7 +37,7 @@ from mcp_hangar.domain.exceptions import (
 class TestErrorHandler:
     """Tests for error handler mapping domain exceptions to HTTP status codes."""
 
-    def _make_scope(self, path: str = "/test") -> dict:
+    def _make_scope(self, path: str = "/test") -> dict[str, object]:
         """Create minimal ASGI scope for request construction."""
         return {
             "type": "http",
@@ -52,7 +52,7 @@ class TestErrorHandler:
         """ProviderNotFoundError maps to HTTP 404."""
         from mcp_hangar.server.api.middleware import error_handler
 
-        exc = ProviderNotFoundError("test-provider")
+        exc = McpServerNotFoundError("test-provider")
         scope = self._make_scope()
         request = Request(scope)
         response = await error_handler(request, exc)
@@ -85,7 +85,7 @@ class TestErrorHandler:
         """RateLimitExceeded maps to HTTP 429."""
         from mcp_hangar.server.api.middleware import error_handler
 
-        exc = RateLimitExceeded(provider_id="test", limit=100, window_seconds=60)
+        exc = RateLimitExceeded(mcp_server_id="test", limit=100, window_seconds=60)
         scope = self._make_scope()
         request = Request(scope)
         response = await error_handler(request, exc)
@@ -115,10 +115,10 @@ class TestErrorHandler:
 
     @pytest.mark.asyncio
     async def test_provider_degraded_returns_503(self):
-        """ProviderDegradedError maps to HTTP 503."""
+        """McpServerDegradedError maps to HTTP 503."""
         from mcp_hangar.server.api.middleware import error_handler
 
-        exc = ProviderDegradedError("test-provider", backoff_remaining=5.0)
+        exc = McpServerDegradedError("test-provider", backoff_remaining=5.0)
         scope = self._make_scope()
         request = Request(scope)
         response = await error_handler(request, exc)
@@ -140,7 +140,7 @@ class TestErrorHandler:
         """ProviderNotReadyError maps to HTTP 409."""
         from mcp_hangar.server.api.middleware import error_handler
 
-        exc = ProviderNotReadyError("test-provider", current_state="initializing")
+        exc = McpServerNotReadyError("test-provider", current_state="initializing")
         scope = self._make_scope()
         request = Request(scope)
         response = await error_handler(request, exc)
@@ -178,7 +178,7 @@ class TestErrorHandler:
         request = Request(scope)
         response = await error_handler(request, exc)
 
-        body = json.loads(response.body)
+        body = json.loads(bytes(response.body))
         # The internal message should not appear in response
         assert "password" not in json.dumps(body)
         assert "abc123" not in json.dumps(body)
@@ -188,12 +188,12 @@ class TestErrorHandler:
         """Error response follows {error: {code, message, details}} format."""
         from mcp_hangar.server.api.middleware import error_handler
 
-        exc = ProviderNotFoundError("my-provider")
+        exc = McpServerNotFoundError("my-provider")
         scope = self._make_scope()
         request = Request(scope)
         response = await error_handler(request, exc)
 
-        body = json.loads(response.body)
+        body = json.loads(bytes(response.body))
         assert "error" in body
         error = body["error"]
         assert "code" in error
@@ -205,25 +205,25 @@ class TestErrorHandler:
         """Error code equals exception class name."""
         from mcp_hangar.server.api.middleware import error_handler
 
-        exc = ProviderNotFoundError("my-provider")
+        exc = McpServerNotFoundError("my-provider")
         scope = self._make_scope()
         request = Request(scope)
         response = await error_handler(request, exc)
 
-        body = json.loads(response.body)
-        assert body["error"]["code"] == "ProviderNotFoundError"
+        body = json.loads(bytes(response.body))
+        assert body["error"]["code"] == "McpServerNotFoundError"
 
     @pytest.mark.asyncio
     async def test_error_message_contains_exception_message(self):
         """Error message contains the exception message."""
         from mcp_hangar.server.api.middleware import error_handler
 
-        exc = ProviderNotFoundError("my-provider")
+        exc = McpServerNotFoundError("my-provider")
         scope = self._make_scope()
         request = Request(scope)
         response = await error_handler(request, exc)
 
-        body = json.loads(response.body)
+        body = json.loads(bytes(response.body))
         assert "my-provider" in body["error"]["message"]
 
 
@@ -293,7 +293,7 @@ class TestDispatchHelpers:
         """dispatch_query returns the result from query_bus.execute."""
         from mcp_hangar.server.api.middleware import dispatch_query
 
-        expected_result = {"providers": ["a", "b"]}
+        expected_result = {"mcp_servers": ["a", "b"]}
         mock_query_bus = Mock()
         mock_query_bus.execute.return_value = expected_result
 
@@ -367,7 +367,7 @@ class TestHangarJSONResponse:
         from mcp_hangar.server.api.serializers import HangarJSONEncoder
 
         class MyObj:
-            def to_dict(self) -> dict:
+            def to_dict(self) -> dict[str, str]:
                 return {"key": "value"}
 
         result = json.dumps({"obj": MyObj()}, cls=HangarJSONEncoder)
@@ -380,7 +380,7 @@ class TestHangarJSONResponse:
 
         dt = datetime(2025, 1, 15, 10, 30, 0, tzinfo=UTC)
         response = HangarJSONResponse({"timestamp": dt})
-        body = json.loads(response.body)
+        body = json.loads(bytes(response.body))
         assert "2025-01-15" in body["timestamp"]
 
     def test_hangar_json_response_is_json_response(self):
@@ -401,33 +401,33 @@ class TestHangarJSONResponse:
 class TestSerializers:
     """Tests for provider object serializers."""
 
-    def test_serialize_provider_summary(self):
-        """serialize_provider_summary converts ProviderSummary to dict."""
-        from mcp_hangar.application.read_models.provider_views import ProviderSummary
-        from mcp_hangar.server.api.serializers import serialize_provider_summary
+    def test_serialize_mcp_server_summary(self):
+        """serialize_mcp_server_summary converts McpServerSummary to dict."""
+        from mcp_hangar.application.read_models.mcp_server_views import McpServerSummary
+        from mcp_hangar.server.api.serializers import serialize_mcp_server_summary
 
-        summary = ProviderSummary(
-            provider_id="test",
+        summary = McpServerSummary(
+            mcp_server_id="test",
             state="ready",
             mode="subprocess",
             is_alive=True,
             tools_count=3,
             health_status="healthy",
         )
-        result = serialize_provider_summary(summary)
+        result = serialize_mcp_server_summary(summary)
         assert isinstance(result, dict)
-        assert result["provider_id"] == "test"
+        assert result["mcp_server_id"] == "test"
         assert result["state"] == "ready"
         assert result["tools_count"] == 3
 
-    def test_serialize_provider_details(self):
-        """serialize_provider_details converts ProviderDetails to dict."""
-        from mcp_hangar.application.read_models.provider_views import (
+    def test_serialize_mcp_server_details(self):
+        """serialize_mcp_server_details converts McpServerDetails to dict."""
+        from mcp_hangar.application.read_models.mcp_server_views import (
             HealthInfo,
-            ProviderDetails,
+            McpServerDetails,
             ToolInfo,
         )
-        from mcp_hangar.server.api.serializers import serialize_provider_details
+        from mcp_hangar.server.api.serializers import serialize_mcp_server_details
 
         tool = ToolInfo(
             name="my_tool",
@@ -441,8 +441,8 @@ class TestSerializers:
             success_rate=0.9,
             can_retry=True,
         )
-        details = ProviderDetails(
-            provider_id="test",
+        details = McpServerDetails(
+            mcp_server_id="test",
             state="ready",
             mode="subprocess",
             is_alive=True,
@@ -450,9 +450,9 @@ class TestSerializers:
             health=health,
             idle_time=0.0,
         )
-        result = serialize_provider_details(details)
+        result = serialize_mcp_server_details(details)
         assert isinstance(result, dict)
-        assert result["provider_id"] == "test"
+        assert result["mcp_server_id"] == "test"
         assert len(result["tools"]) == 1
         assert result["tools"][0]["name"] == "my_tool"
         assert "health" in result

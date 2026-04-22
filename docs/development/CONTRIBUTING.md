@@ -93,7 +93,7 @@ mypy src/mcp_hangar
 | Classes | `PascalCase` |
 | Functions | `snake_case` |
 | Constants | `UPPER_SNAKE_CASE` |
-| Events | `PascalCase` + past tense (`ProviderStarted`) |
+| Events | `PascalCase` + past tense (`McpServerStarted`) |
 
 ### Type Hints
 
@@ -126,10 +126,10 @@ Target: >80% coverage on new code.
 ```python
 def test_tool_invocation():
     # Arrange
-    provider = Provider(provider_id="test", mode="subprocess", command=[...])
+    mcp_server = McpServer(mcp_server_id="test", mode="subprocess", command=[...])
 
     # Act
-    result = provider.invoke_tool("add", {"a": 1, "b": 2})
+    result = mcp_server.invoke_tool("add", {"a": 1, "b": 2})
 
     # Assert
     assert result["result"] == 3
@@ -170,14 +170,14 @@ Brief description.
 **Value Objects:**
 
 ```python
-provider_id = ProviderId("my-provider")  # Validated
+mcp_server_id = ProviderId("my-mcp-server")  # Validated
 ```
 
 **Events:**
 
 ```python
-provider.ensure_ready()
-for event in provider.collect_events():
+mcp_server.ensure_ready()
+for event in mcp_server.collect_events():
     event_bus.publish(event)
 ```
 
@@ -185,14 +185,14 @@ for event in provider.collect_events():
 
 ```python
 # Basic usage
-raise ProviderStartError(
-    provider_id="my-provider",
+raise McpServerStartError(
+    mcp_server_id="my-mcp-server",
     reason="Connection refused"
 )
 
 # With diagnostics (preferred)
-raise ProviderStartError(
-    provider_id="my-provider",
+raise McpServerStartError(
+    mcp_server_id="my-mcp-server",
     reason="MCP initialization failed: process crashed",
     stderr="ModuleNotFoundError: No module named 'requests'",
     exit_code=1,
@@ -201,15 +201,15 @@ raise ProviderStartError(
 
 # Get user-friendly message
 try:
-    provider.ensure_ready()
-except ProviderStartError as e:
+    mcp_server.ensure_ready()
+except McpServerStartError as e:
     print(e.get_user_message())
 ```
 
 **Logging:**
 
 ```python
-logger.info("provider_started: %s, mode=%s", provider_id, mode)
+logger.info("mcp_server_started: %s, mode=%s", mcp_server_id, mode)
 ```
 
 ## Releasing

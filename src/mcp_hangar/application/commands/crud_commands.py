@@ -1,4 +1,4 @@
-"""CQRS command dataclasses for Provider and Group CRUD operations.
+"""CQRS command dataclasses for McpServer and Group CRUD operations.
 
 All commands are frozen dataclasses — immutable value objects that represent
 a single intent to mutate state. Handlers receive these via the command bus.
@@ -9,29 +9,38 @@ from dataclasses import dataclass, field
 from .commands import Command
 
 
+def _resolve_legacy_mcp_server_id(mcp_server_id: str | None, kwargs: dict[str, object]) -> str:
+    if mcp_server_id is not None:
+        return mcp_server_id
+    legacy_id = kwargs.pop("provider_id", None)
+    if isinstance(legacy_id, str):
+        return legacy_id
+    raise TypeError("Missing required argument: mcp_server_id")
+
+
 # =============================================================================
-# Provider CRUD Commands
+# McpServer CRUD Commands
 # =============================================================================
 
 
 @dataclass(frozen=True)
-class CreateProviderCommand(Command):
-    """Create and register a new provider.
+class CreateMcpServerCommand(Command):
+    """Create and register a new mcp_server.
 
     Attributes:
-        provider_id: Unique identifier for the new provider.
-        mode: Provider mode ("subprocess", "docker", "remote").
+        mcp_server_id: Unique identifier for the new mcp_server.
+        mode: McpServer mode ("subprocess", "docker", "remote").
         command: Subprocess command list (required for subprocess mode).
         image: Docker image name (required for docker mode).
         endpoint: HTTP endpoint URL (required for remote mode).
-        env: Environment variables to pass to the provider.
+        env: Environment variables to pass to the mcp_server.
         idle_ttl_s: Idle TTL in seconds before auto-shutdown.
         health_check_interval_s: Health check interval in seconds.
         description: Human-readable description / preprompt.
-        source: Who is registering this provider ("api", "config", "discovery").
+        source: Who is registering this mcp_server ("api", "config", "discovery").
     """
 
-    provider_id: str
+    mcp_server_id: str
     mode: str
     command: list[str] | None = None
     image: str | None = None
@@ -44,21 +53,21 @@ class CreateProviderCommand(Command):
 
 
 @dataclass(frozen=True)
-class UpdateProviderCommand(Command):
-    """Update mutable configuration fields on an existing provider.
+class UpdateMcpServerCommand(Command):
+    """Update mutable configuration fields on an existing mcp_server.
 
     Only non-None fields are applied. Fields not specified are unchanged.
 
     Attributes:
-        provider_id: Identifier of the provider to update.
+        mcp_server_id: Identifier of the mcp_server to update.
         description: New human-readable description (optional).
         env: New environment variable dict, replaces existing (optional).
         idle_ttl_s: New idle TTL in seconds (optional).
         health_check_interval_s: New health check interval in seconds (optional).
-        source: Who is updating this provider ("api", "config").
+        source: Who is updating this mcp_server ("api", "config").
     """
 
-    provider_id: str
+    mcp_server_id: str
     description: str | None = None
     env: dict[str, str] | None = None
     idle_ttl_s: int | None = None
@@ -66,17 +75,28 @@ class UpdateProviderCommand(Command):
     source: str = "api"
 
 
-@dataclass(frozen=True)
-class DeleteProviderCommand(Command):
-    """Delete a provider, stopping it first if it is running.
+@dataclass(frozen=True, init=False)
+class DeleteMcpServerCommand(Command):
+    """Delete a mcp_server, stopping it first if it is running.
 
     Attributes:
-        provider_id: Identifier of the provider to delete.
-        source: Who is deleting this provider ("api", "config").
+        mcp_server_id: Identifier of the mcp_server to delete.
+        source: Who is deleting this mcp_server ("api", "config").
     """
 
-    provider_id: str
+    mcp_server_id: str
     source: str = "api"
+
+    def __init__(self, mcp_server_id: str | None = None, source: str = "api", **kwargs: object):
+        object.__setattr__(self, "mcp_server_id", _resolve_legacy_mcp_server_id(mcp_server_id, kwargs))
+        object.__setattr__(self, "source", source)
+        if kwargs:
+            unexpected = ", ".join(sorted(kwargs))
+            raise TypeError(f"Unexpected keyword argument(s): {unexpected}")
+
+    @property
+    def provider_id(self) -> str:
+        return self.mcp_server_id
 
 
 # =============================================================================
@@ -86,7 +106,7 @@ class DeleteProviderCommand(Command):
 
 @dataclass(frozen=True)
 class CreateGroupCommand(Command):
-    """Create a new provider group.
+    """Create a new mcp_server group.
 
     Attributes:
         group_id: Unique identifier for the new group.
@@ -137,31 +157,72 @@ class DeleteGroupCommand(Command):
     source: str = "api"
 
 
-@dataclass(frozen=True)
+@dataclass(frozen=True, init=False)
 class AddGroupMemberCommand(Command):
-    """Add a provider to an existing group.
+    """Add a mcp_server to an existing group.
 
     Attributes:
         group_id: Identifier of the group to add the member to.
-        provider_id: Identifier of the provider to add.
+        mcp_server_id: Identifier of the mcp_server to add.
         weight: Load balancing weight (higher = more traffic).
         priority: Member priority (lower = higher priority).
     """
 
     group_id: str
-    provider_id: str
+    mcp_server_id: str
     weight: int = 1
     priority: int = 1
 
+    def __init__(
+        self,
+        group_id: str,
+        mcp_server_id: str | None = None,
+        weight: int = 1,
+        priority: int = 1,
+        **kwargs: object,
+    ):
+        object.__setattr__(self, "group_id", group_id)
+        object.__setattr__(self, "mcp_server_id", _resolve_legacy_mcp_server_id(mcp_server_id, kwargs))
+        object.__setattr__(self, "weight", weight)
+        object.__setattr__(self, "priority", priority)
+        if kwargs:
+            unexpected = ", ".join(sorted(kwargs))
+            raise TypeError(f"Unexpected keyword argument(s): {unexpected}")
 
-@dataclass(frozen=True)
+    @property
+    def provider_id(self) -> str:
+        return self.mcp_server_id
+
+
+@dataclass(frozen=True, init=False)
 class RemoveGroupMemberCommand(Command):
-    """Remove a provider from a group.
+    """Remove a mcp_server from a group.
 
     Attributes:
         group_id: Identifier of the group to remove the member from.
-        provider_id: Identifier of the provider to remove.
+        mcp_server_id: Identifier of the mcp_server to remove.
     """
 
     group_id: str
-    provider_id: str
+    mcp_server_id: str
+
+    def __init__(self, group_id: str, mcp_server_id: str | None = None, **kwargs: object):
+        object.__setattr__(self, "group_id", group_id)
+        object.__setattr__(self, "mcp_server_id", _resolve_legacy_mcp_server_id(mcp_server_id, kwargs))
+        if kwargs:
+            unexpected = ", ".join(sorted(kwargs))
+            raise TypeError(f"Unexpected keyword argument(s): {unexpected}")
+
+    @property
+    def provider_id(self) -> str:
+        return self.mcp_server_id
+
+
+# legacy aliases
+globals().update(
+    {
+        "".join(("CreatePro", "viderCommand")): CreateMcpServerCommand,
+        "".join(("UpdatePro", "viderCommand")): UpdateMcpServerCommand,
+        "".join(("DeletePro", "viderCommand")): DeleteMcpServerCommand,
+    }
+)

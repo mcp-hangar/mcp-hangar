@@ -42,7 +42,7 @@ class IEventUpcaster(ABC):
     @property
     @abstractmethod
     def event_type(self) -> str:
-        """Event type this upcaster handles (e.g., 'ProviderStarted')."""
+        """Event type this upcaster handles (e.g., 'McpServerStarted')."""
 
     @property
     @abstractmethod

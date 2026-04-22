@@ -12,12 +12,12 @@ All responses are JSON. Error responses return:
 
 ---
 
-## Providers
+## MCP servers
 
-### List Providers
+### List MCP servers
 
 ```
-GET /providers?state={state}
+GET /mcp_servers?state={state}
 ```
 
 | Parameter | In | Type | Required | Description |
@@ -28,32 +28,32 @@ GET /providers?state={state}
 
 ```json
 {
-  "providers": [
+  "mcp_servers": [
     {
-      "provider": "math",
+      "mcp_server": "math",
       "state": "ready",
       "mode": "subprocess",
       "alive": true,
       "tools_count": 5,
       "health_status": "healthy",
       "tools_predefined": false,
-      "description": "Math computation provider"
+      "description": "Math computation mcp_server"
     }
   ]
 }
 ```
 
-### Create Provider
+### Create MCP Server
 
 ```
-POST /providers
+POST /mcp_servers
 ```
 
 **Request body:**
 
 | Field | Type | Required | Default | Description |
 |-------|------|----------|---------|-------------|
-| `provider_id` | string | Yes | -- | Unique identifier |
+| `mcp_server_id` | string | Yes | -- | Unique identifier |
 | `mode` | string | Yes | -- | `subprocess`, `docker`, or `remote` |
 | `command` | list[string] | For subprocess | -- | Command to run |
 | `image` | string | For docker | -- | Docker image |
@@ -69,23 +69,23 @@ POST /providers
 **Response 201:**
 
 ```json
-{"provider_id": "math", "created": true}
+{"mcp_server_id": "math", "created": true}
 ```
 
-### Get Provider
+### Get MCP Server
 
 ```
-GET /providers/{provider_id}
+GET /mcp_servers/{mcp_server_id}
 ```
 
-**Response 200:** Provider detail object with tools, health, and configuration.
+**Response 200:** MCP Server detail object with tools, health, and configuration.
 
-**Response 404:** Provider not found.
+**Response 404:** MCP Server not found.
 
-### Update Provider
+### Update MCP Server
 
 ```
-PUT /providers/{provider_id}
+PUT /mcp_servers/{mcp_server_id}
 ```
 
 **Request body (all fields optional):**
@@ -100,35 +100,35 @@ PUT /providers/{provider_id}
 **Response 200:**
 
 ```json
-{"provider_id": "math", "updated": true}
+{"mcp_server_id": "math", "updated": true}
 ```
 
-### Delete Provider
+### Delete MCP Server
 
 ```
-DELETE /providers/{provider_id}
+DELETE /mcp_servers/{mcp_server_id}
 ```
 
-Stops the provider if running, then removes it from the registry.
+Stops the MCP server if running, then removes it from the registry.
 
 **Response 200:**
 
 ```json
-{"provider_id": "math", "deleted": true}
+{"mcp_server_id": "math", "deleted": true}
 ```
 
-### Start Provider
+### Start MCP Server
 
 ```
-POST /providers/{provider_id}/start
+POST /mcp_servers/{mcp_server_id}/start
 ```
 
 **Response 200:** Start result object.
 
-### Stop Provider
+### Stop MCP Server
 
 ```
-POST /providers/{provider_id}/stop
+POST /mcp_servers/{mcp_server_id}/stop
 ```
 
 **Request body (optional):**
@@ -139,10 +139,10 @@ POST /providers/{provider_id}/stop
 
 **Response 200:** Stop result object.
 
-### Get Provider Tools
+### Get MCP Server Tools
 
 ```
-GET /providers/{provider_id}/tools
+GET /mcp_servers/{mcp_server_id}/tools
 ```
 
 **Response 200:**
@@ -155,18 +155,18 @@ GET /providers/{provider_id}/tools
 }
 ```
 
-### Get Provider Health
+### Get MCP Server Health
 
 ```
-GET /providers/{provider_id}/health
+GET /mcp_servers/{mcp_server_id}/health
 ```
 
 **Response 200:** Health status object with check history.
 
-### Get Provider Logs
+### Get MCP Server Logs
 
 ```
-GET /providers/{provider_id}/logs?lines={n}
+GET /mcp_servers/{mcp_server_id}/logs?lines={n}
 ```
 
 | Parameter | In | Type | Default | Range | Description |
@@ -178,9 +178,9 @@ GET /providers/{provider_id}/logs?lines={n}
 ```json
 {
   "logs": [
-    {"timestamp": "2026-03-23T10:15:30", "line": "...", "provider_id": "math", "stream": "stderr"}
+    {"timestamp": "2026-03-23T10:15:30", "line": "...", "mcp_server_id": "math", "stream": "stderr"}
   ],
-  "provider_id": "math",
+  "mcp_server_id": "math",
   "count": 42
 }
 ```
@@ -188,7 +188,7 @@ GET /providers/{provider_id}/logs?lines={n}
 ### Get Tool Invocation History
 
 ```
-GET /providers/{provider_id}/tools/history?limit={n}&from_position={pos}
+GET /mcp_servers/{mcp_server_id}/tools/history?limit={n}&from_position={pos}
 ```
 
 | Parameter | In | Type | Default | Range | Description |
@@ -200,7 +200,7 @@ GET /providers/{provider_id}/tools/history?limit={n}&from_position={pos}
 
 ```json
 {
-  "provider_id": "math",
+  "mcp_server_id": "math",
   "history": [...],
   "total": 42
 }
@@ -317,14 +317,14 @@ POST /groups/{group_id}/members
 
 | Field | Type | Required | Default | Description |
 |-------|------|----------|---------|-------------|
-| `member_id` | string | Yes | -- | Provider ID to add |
+| `member_id` | string | Yes | -- | MCP Server ID to add |
 | `weight` | int | No | `1` | Routing weight |
 | `priority` | int | No | `1` | Routing priority |
 
 **Response 201:**
 
 ```json
-{"group_id": "llm-pool", "provider_id": "llm-1", "added": true}
+{"group_id": "llm-pool", "mcp_server_id": "llm-1", "added": true}
 ```
 
 ### Remove Group Member
@@ -336,7 +336,7 @@ DELETE /groups/{group_id}/members/{member_id}
 **Response 200:**
 
 ```json
-{"group_id": "llm-pool", "provider_id": "llm-1", "removed": true}
+{"group_id": "llm-pool", "mcp_server_id": "llm-1", "removed": true}
 ```
 
 ---
@@ -411,7 +411,7 @@ POST /discovery/sources/{source_id}/scan
 **Response 200:**
 
 ```json
-{"source_id": "...", "scan_triggered": true, "providers_found": 3}
+{"source_id": "...", "scan_triggered": true, "mcp_servers_found": 3}
 ```
 
 ### Enable/Disable Source
@@ -432,7 +432,7 @@ PUT /discovery/sources/{source_id}/enable
 {"source_id": "...", "enabled": true}
 ```
 
-### List Pending Providers
+### List Pending MCP servers
 
 ```
 GET /discovery/pending
@@ -441,10 +441,10 @@ GET /discovery/pending
 **Response 200:**
 
 ```json
-{"pending": [{"name": "new-provider", "source": "docker", "mode": "remote", ...}]}
+{"pending": [{"name": "new-mcp-server", "source": "docker", "mode": "remote", ...}]}
 ```
 
-### List Quarantined Providers
+### List Quarantined MCP servers
 
 ```
 GET /discovery/quarantined
@@ -456,7 +456,7 @@ GET /discovery/quarantined
 {"quarantined": {...}}
 ```
 
-### Approve Provider
+### Approve MCP Server
 
 ```
 POST /discovery/approve/{name}
@@ -464,7 +464,7 @@ POST /discovery/approve/{name}
 
 **Response 200:** Approval result.
 
-### Reject Provider
+### Reject MCP Server
 
 ```
 POST /discovery/reject/{name}
@@ -511,9 +511,9 @@ POST /catalog
 
 | Field | Type | Required | Description |
 |-------|------|----------|-------------|
-| `name` | string | Yes | Provider name |
+| `name` | string | Yes | MCP Server name |
 | `description` | string | Yes | Short description |
-| `mode` | string | No | Default provider mode |
+| `mode` | string | No | Default MCP server mode |
 | `command` | list[string] | No | Default command |
 | `image` | string | No | Default Docker image |
 | `endpoint` | string | No | Default endpoint URL |
@@ -535,9 +535,9 @@ DELETE /catalog/{entry_id}
 POST /catalog/{entry_id}/deploy
 ```
 
-Registers the catalog entry as a live provider via the CQRS pipeline.
+Registers the catalog entry as a live MCP server via the CQRS pipeline.
 
-**Response 201:** Created provider result.
+**Response 201:** Created MCP server result.
 
 ---
 
@@ -554,7 +554,7 @@ Returns the current server configuration with sensitive fields stripped.
 **Response 200:**
 
 ```json
-{"config": {"providers": [...]}}
+{"config": {"mcp_servers": [...]}}
 ```
 
 ### Reload Config
@@ -587,7 +587,7 @@ Serializes current in-memory state to YAML.
 **Response 200:**
 
 ```json
-{"yaml": "providers:\n  math:\n    mode: subprocess\n    ..."}
+{"yaml": "mcp_servers:\n  math:\n    mode: subprocess\n    ..."}
 ```
 
 ### Backup Config
@@ -633,8 +633,8 @@ GET /system
 ```json
 {
   "system": {
-    "total_providers": 5,
-    "providers_by_state": {"ready": 3, "cold": 2},
+    "total_mcp_servers": 5,
+    "mcp_servers_by_state": {"ready": 3, "cold": 2},
     "total_tools": 15,
     "total_tool_calls": 42,
     "uptime_seconds": 3600.5,
@@ -765,19 +765,19 @@ POST /auth/check-permission
 **Request body:**
 
 ```json
-{"principal_id": "...", "permission": "providers:start"}
+{"principal_id": "...", "permission": "mcp_servers:start"}
 ```
 
 ### Get Tool Access Policy
 
 ```
-GET /auth/policies/{provider_id}/{tool_name}
+GET /auth/policies/{mcp_server_id}/{tool_name}
 ```
 
 ### Set Tool Access Policy
 
 ```
-PUT /auth/policies/{provider_id}/{tool_name}
+PUT /auth/policies/{mcp_server_id}/{tool_name}
 ```
 
 **Request body:**
@@ -789,7 +789,7 @@ PUT /auth/policies/{provider_id}/{tool_name}
 ### Clear Tool Access Policy
 
 ```
-DELETE /auth/policies/{provider_id}/{tool_name}
+DELETE /auth/policies/{mcp_server_id}/{tool_name}
 ```
 
 ---
@@ -811,7 +811,7 @@ GET /observability/metrics
 ### Audit Log
 
 ```
-GET /observability/audit?provider_id={id}&event_type={type}&limit={n}
+GET /observability/audit?mcp_server_id={id}&event_type={type}&limit={n}
 ```
 
 **Response 200:**
@@ -865,13 +865,13 @@ Deletes events preceding the latest snapshot for a given stream.
 **Request body:**
 
 ```json
-{"stream_id": "provider:math"}
+{"stream_id": "mcp_server:math"}
 ```
 
 **Response 200:**
 
 ```json
-{"compacted": {"stream_id": "provider:math", "events_deleted": 150}}
+{"compacted": {"stream_id": "mcp_server:math", "events_deleted": 150}}
 ```
 
 **Response 422:** Missing or empty `stream_id`.
@@ -896,14 +896,14 @@ Streams all domain events as JSON frames.
 ws://host:port/api/ws/state
 ```
 
-Streams `ProviderStateChanged` events only.
+Streams `McpServerStateChanged` events only.
 
-### Provider Log Stream
+### MCP Server Log Stream
 
 ```
-ws://host:port/api/ws/providers/{provider_id}/logs
+ws://host:port/api/ws/mcp_servers/{mcp_server_id}/logs
 ```
 
-Streams stderr log lines for a specific provider.
+Streams stderr log lines for a specific MCP server.
 
 See the [WebSockets guide](../guides/WEBSOCKETS.md) for connection details.

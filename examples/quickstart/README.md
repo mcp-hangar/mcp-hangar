@@ -36,10 +36,10 @@ docker compose logs -f mcp-hangar
 
 ## Configuration
 
-Edit `config.yaml` to add providers:
+Edit `config.yaml` to add MCP servers:
 
 ```yaml
-providers:
+mcp_servers:
   math:
     mode: subprocess
     command: ["python", "-m", "math_server"]
@@ -61,4 +61,4 @@ docker compose down -v
 
 - [Full Documentation](https://mcp-hangar.io)
 - [Kubernetes Guide](https://mcp-hangar.io/guides/KUBERNETES/)
-- [Container Providers](https://mcp-hangar.io/guides/CONTAINERS/)
+- [Container MCP servers](https://mcp-hangar.io/guides/CONTAINERS/)

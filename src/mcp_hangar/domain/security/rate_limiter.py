@@ -17,7 +17,7 @@ class RateLimitScope(Enum):
     """Scope for rate limiting."""
 
     GLOBAL = "global"  # Global rate limit
-    PER_PROVIDER = "provider"  # Per-provider rate limit
+    PER_PROVIDER = "mcp_server"  # Per-mcp_server rate limit
     PER_TOOL = "tool"  # Per-tool rate limit
     PER_CLIENT = "client"  # Per-client rate limit
 
@@ -308,7 +308,7 @@ class CompositeRateLimiter(RateLimiter):
     Composite rate limiter that combines multiple limiters.
 
     All limiters must allow the request for it to be allowed.
-    Useful for implementing both global and per-provider limits.
+    Useful for implementing both global and per-mcp_server limits.
     """
 
     def __init__(self, limiters: dict[str, RateLimiter]):

@@ -5,10 +5,10 @@ import threading
 import time
 from typing import Any, Literal
 
-from .domain.contracts.provider_runtime import normalize_state_to_str, ProviderMapping, ProviderRuntime
+from .domain.contracts.mcp_server_runtime import normalize_state_to_str, McpServerMapping, McpServerRuntime
 from .infrastructure.event_bus import get_event_bus
 from .logging_config import get_logger
-from .metrics import observe_health_check, record_error, record_gc_cycle, record_provider_stop
+from .metrics import observe_health_check, record_error, record_gc_cycle, record_mcp_server_stop
 
 logger = get_logger(__name__)
 
@@ -26,18 +26,18 @@ except ImportError:
 class BackgroundWorker:
     """Generic background worker for GC and health checks.
 
-    Expects provider storage that supports `.items()` (dict-like) returning
-    `(provider_id, provider)` pairs where `provider` satisfies the `ProviderRuntime`
+    Expects mcp_server storage that supports `.items()` (dict-like) returning
+    `(mcp_server_id, mcp_server)` pairs where `mcp_server` satisfies the `McpServerRuntime`
     contract.
 
     Works with:
-    - Provider aggregates
+    - McpServer aggregates
     - backward-compatibility wrappers (as long as they implement the contract)
     """
 
     def __init__(
         self,
-        providers: ProviderMapping,
+        mcp_servers: McpServerMapping,
         interval_s: int = 10,
         task: Literal["gc", "health_check"] = "gc",
         event_bus: Any | None = None,
@@ -46,12 +46,12 @@ class BackgroundWorker:
         Initialize background worker.
 
         Args:
-            providers: Dict-like mapping (provider_id -> ProviderRuntime).
+            mcp_servers: Dict-like mapping (mcp_server_id -> McpServerRuntime).
             interval_s: Interval between runs in seconds.
             task: Task type - either "gc" (garbage collection) or "health_check".
             event_bus: Optional event bus for publishing events (uses global if not provided).
         """
-        self.providers: ProviderMapping = providers
+        self.mcp_servers: McpServerMapping = mcp_servers
         self.interval_s = interval_s
         self.task = task
         self._event_bus = event_bus or get_event_bus()
@@ -74,12 +74,12 @@ class BackgroundWorker:
         self.running = False
         logger.info("background_worker_stopped", task=self.task)
 
-    def _publish_events(self, provider: ProviderRuntime) -> None:
-        """Publish all collected events from a provider.
+    def _publish_events(self, mcp_server: McpServerRuntime) -> None:
+        """Publish all collected events from a mcp_server.
 
-        ProviderRuntime is expected to support event collection.
+        McpServerRuntime is expected to support event collection.
         """
-        for event in provider.collect_events():
+        for event in mcp_server.collect_events():
             try:
                 self._event_bus.publish(event)
             except Exception:  # noqa: BLE001 -- fault-barrier: event publishing must not crash background worker
@@ -93,41 +93,41 @@ class BackgroundWorker:
             start_time = time.perf_counter()
             gc_collected = {"idle": 0, "dead": 0}
 
-            # Get snapshot of providers to avoid holding mapping lock (if any)
-            providers_snapshot = list(self.providers.items())
+            # Get snapshot of mcp_servers to avoid holding mapping lock (if any)
+            mcp_servers_snapshot = list(self.mcp_servers.items())
 
-            for provider_id, provider in providers_snapshot:
+            for mcp_server_id, mcp_server in mcp_servers_snapshot:
                 try:
                     if self.task == "gc":
-                        # Garbage collection - shutdown idle providers
-                        if provider.maybe_shutdown_idle():
-                            logger.info("gc_shutdown", provider_id=provider_id)
+                        # Garbage collection - shutdown idle mcp_servers
+                        if mcp_server.maybe_shutdown_idle():
+                            logger.info("gc_shutdown", mcp_server_id=mcp_server_id)
                             gc_collected["idle"] += 1
-                            record_provider_stop(provider_id, "idle")
+                            record_mcp_server_stop(mcp_server_id, "idle")
 
                     elif self.task == "health_check":
                         # State-aware health check scheduling
-                        state_str = normalize_state_to_str(provider.state)
+                        state_str = normalize_state_to_str(mcp_server.state)
 
-                        # Skip providers that are not started or starting up
+                        # Skip mcp_servers that are not started or starting up
                         if state_str in ("cold", "initializing"):
                             continue
 
-                        # Check per-provider timing -- skip if not due yet
+                        # Check per-mcp_server timing -- skip if not due yet
                         now = time.time()
-                        next_check = self._next_check_at.get(provider_id, 0.0)
+                        next_check = self._next_check_at.get(mcp_server_id, 0.0)
                         if now < next_check:
                             continue
 
                         # Perform health check
                         hc_start = time.perf_counter()
-                        is_healthy = provider.health_check()
+                        is_healthy = mcp_server.health_check()
                         hc_duration = time.perf_counter() - hc_start
 
-                        consecutive = int(getattr(provider.health, "consecutive_failures", 0))
+                        consecutive = int(getattr(mcp_server.health, "consecutive_failures", 0))
 
                         observe_health_check(
-                            provider=provider_id,
+                            mcp_server=mcp_server_id,
                             duration=hc_duration,
                             healthy=is_healthy,
                             is_cold=False,
@@ -135,12 +135,12 @@ class BackgroundWorker:
                         )
 
                         if not is_healthy:
-                            logger.warning("health_check_unhealthy", provider_id=provider_id)
+                            logger.warning("health_check_unhealthy", mcp_server_id=mcp_server_id)
 
                         # Calculate next check interval based on current state
                         # Re-read state after health check (it may have changed)
-                        current_state = normalize_state_to_str(provider.state)
-                        health_tracker = getattr(provider, "health", None)
+                        current_state = normalize_state_to_str(mcp_server.state)
+                        health_tracker = getattr(mcp_server, "health", None)
                         if health_tracker and hasattr(health_tracker, "get_health_check_interval"):
                             interval = health_tracker.get_health_check_interval(
                                 current_state, normal_interval=float(self.interval_s)
@@ -149,16 +149,16 @@ class BackgroundWorker:
                             interval = float(self.interval_s)
 
                         if interval > 0:
-                            self._next_check_at[provider_id] = now + interval
+                            self._next_check_at[mcp_server_id] = now + interval
 
                     # Publish any collected events
-                    self._publish_events(provider)
+                    self._publish_events(mcp_server)
 
-                except Exception as e:  # noqa: BLE001 -- fault-barrier: single provider failure must not crash background worker loop
+                except Exception as e:  # noqa: BLE001 -- fault-barrier: single mcp_server failure must not crash background worker loop
                     record_error("gc", type(e).__name__)
                     logger.exception(
                         "background_task_failed",
-                        provider_id=provider_id,
+                        mcp_server_id=mcp_server_id,
                         task=self.task,
                         error=str(e),
                     )
@@ -168,9 +168,9 @@ class BackgroundWorker:
                 duration = time.perf_counter() - start_time
                 record_gc_cycle(duration, gc_collected)
 
-            # Clean up stale entries from _next_check_at for removed providers
+            # Clean up stale entries from _next_check_at for removed mcp_servers
             if self.task == "health_check":
-                current_ids = {pid for pid, _ in providers_snapshot}
+                current_ids = {pid for pid, _ in mcp_servers_snapshot}
                 stale_ids = set(self._next_check_at) - current_ids
                 for stale_id in stale_ids:
                     del self._next_check_at[stale_id]
@@ -366,7 +366,7 @@ class ConfigReloadWorker:
 
 
 class MetricsSnapshotWorker:
-    """Background worker that periodically snapshots per-provider metrics to SQLite.
+    """Background worker that periodically snapshots per-mcp_server metrics to SQLite.
 
     Takes a live metric reading every ``interval_s`` seconds and persists the
     resulting :class:`~mcp_hangar.infrastructure.persistence.metrics_history_store.MetricPoint`
@@ -428,24 +428,24 @@ class MetricsSnapshotWorker:
 
         prometheus_text = get_metrics()
         now = time.time()
-        per_provider: dict[str, dict[str, float]] = {}
+        per_mcp_server: dict[str, dict[str, float]] = {}
 
         for line in prometheus_text.splitlines():
             if not line.strip() or line.startswith("#"):
                 continue
-            if 'provider="' not in line:
+            if 'mcp_server="' not in line:
                 continue
             try:
                 value = float(line.split()[-1])
-                parts = line.split('provider="')
-                provider_id = parts[1].split('"')[0]
-                if not provider_id:
+                parts = line.split('mcp_server="')
+                mcp_server_id = parts[1].split('"')[0]
+                if not mcp_server_id:
                     continue
             except (ValueError, IndexError):
                 continue
 
-            entry = per_provider.setdefault(
-                provider_id,
+            entry = per_mcp_server.setdefault(
+                mcp_server_id,
                 {
                     "tool_calls_total": 0.0,
                     "tool_call_errors": 0.0,
@@ -463,15 +463,15 @@ class MetricsSnapshotWorker:
                 entry["health_checks_total"] += value
                 if 'result="unhealthy"' in line:
                     entry["health_check_failures"] += value
-            elif line.startswith("mcp_hangar_provider_cold_start_seconds_count{"):
+            elif line.startswith("mcp_hangar_mcp_server_cold_start_seconds_count{"):
                 entry["cold_starts_total"] += value
 
         points: list[MetricPoint] = []
-        for provider_id, metrics in per_provider.items():
+        for mcp_server_id, metrics in per_mcp_server.items():
             for metric_name, metric_value in metrics.items():
                 points.append(
                     MetricPoint(
-                        provider_id=provider_id,
+                        mcp_server_id=mcp_server_id,
                         metric_name=metric_name,
                         value=metric_value,
                         recorded_at=now,
@@ -481,7 +481,7 @@ class MetricsSnapshotWorker:
         if points:
             store = get_metrics_history_store()
             store.record_snapshot(points)
-            logger.debug("metrics_snapshot_recorded", providers=len(per_provider), points=len(points))
+            logger.debug("metrics_snapshot_recorded", mcp_servers=len(per_mcp_server), points=len(points))
 
     def _prune(self) -> None:
         """Prune old metric history rows."""

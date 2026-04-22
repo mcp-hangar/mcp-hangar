@@ -5,17 +5,17 @@ This package provides infrastructure components for:
 - Query Bus: CQRS query dispatching
 - Event Bus: Publish/subscribe for domain events
 - Event Store: Append-only event persistence
-- Event Sourced Repository: Provider persistence via event sourcing
+- Event Sourced Repository: McpServer persistence via event sourcing
 - Saga Manager: Long-running business process orchestration
 - Lock Hierarchy: Thread safety with deadlock prevention
 
-Note: Command classes (StartProviderCommand, etc.) have been moved to
+Note: Command classes (StartMcpServerCommand, etc.) have been moved to
 application.commands to maintain proper layer separation.
 """
 
 from .command_bus import CommandBus, CommandHandler, get_command_bus, reset_command_bus
 from .event_bus import EventBus, EventHandler, get_event_bus, reset_event_bus
-from .event_sourced_repository import EventSourcedProviderRepository, ProviderConfigStore
+from .event_sourced_repository import EventSourcedMcpServerRepository, McpServerConfigStore
 from .event_store import (
     ConcurrencyError,
     EventStore,
@@ -30,7 +30,7 @@ from .launchers import (
     DockerLauncher,
     get_launcher,
     HttpLauncher,
-    ProviderLauncher,
+    McpServerLauncher,
     SubprocessLauncher,
 )
 from .lock_hierarchy import (
@@ -43,11 +43,11 @@ from .lock_hierarchy import (
 )
 from .query_bus import (
     get_query_bus,
-    GetProviderHealthQuery,
-    GetProviderQuery,
-    GetProviderToolsQuery,
+    GetMcpServerHealthQuery,
+    GetMcpServerQuery,
+    GetMcpServerToolsQuery,
     GetSystemMetricsQuery,
-    ListProvidersQuery,
+    ListMcpServersQuery,
     Query,
     QueryBus,
     QueryHandler,
@@ -70,10 +70,10 @@ __all__ = [
     "Query",
     "QueryBus",
     "QueryHandler",
-    "ListProvidersQuery",
-    "GetProviderQuery",
-    "GetProviderToolsQuery",
-    "GetProviderHealthQuery",
+    "ListMcpServersQuery",
+    "GetMcpServerQuery",
+    "GetMcpServerToolsQuery",
+    "GetMcpServerHealthQuery",
     "GetSystemMetricsQuery",
     "get_query_bus",
     "reset_query_bus",
@@ -85,7 +85,7 @@ __all__ = [
     "ConcurrencyError",
     "get_event_store",
     # Launchers
-    "ProviderLauncher",
+    "McpServerLauncher",
     "SubprocessLauncher",
     "DockerLauncher",
     "ContainerLauncher",
@@ -93,8 +93,8 @@ __all__ = [
     "HttpLauncher",
     "get_launcher",
     # Event Sourced Repository
-    "EventSourcedProviderRepository",
-    "ProviderConfigStore",
+    "EventSourcedMcpServerRepository",
+    "McpServerConfigStore",
     # Lock Hierarchy
     "LockLevel",
     "LockOrderViolation",

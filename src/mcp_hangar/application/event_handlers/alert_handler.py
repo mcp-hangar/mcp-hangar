@@ -6,7 +6,7 @@ from dataclasses import dataclass, field
 from datetime import datetime, UTC
 from typing import Any
 
-from ...domain.events import DomainEvent, HealthCheckFailed, ProviderDegraded, ProviderStopped, ToolInvocationFailed
+from ...domain.events import DomainEvent, HealthCheckFailed, McpServerDegraded, McpServerStopped, ToolInvocationFailed
 from ...logging_config import get_logger
 
 logger = get_logger(__name__)
@@ -18,17 +18,22 @@ class Alert:
 
     level: str  # critical, warning, info
     message: str
-    provider_id: str
+    mcp_server_id: str
     event_type: str
     timestamp: datetime = field(default_factory=lambda: datetime.now(UTC))
     details: dict[str, Any] = field(default_factory=dict)
+
+    @property
+    def provider_id(self) -> str:
+        return self.mcp_server_id
 
     def to_dict(self) -> dict[str, Any]:
         """Convert alert to dictionary."""
         return {
             "level": self.level,
             "message": self.message,
-            "provider_id": self.provider_id,
+            "mcp_server_id": self.mcp_server_id,
+            "provider_id": self.mcp_server_id,
             "event_type": self.event_type,
             "timestamp": self.timestamp.isoformat(),
             "details": self.details,
@@ -56,7 +61,7 @@ class LogAlertSink(AlertSink):
         }.get(alert.level, logger.info)
 
         log_method(
-            f"ALERT [{alert.level.upper()}] {alert.message} provider={alert.provider_id} event={alert.event_type}"
+            f"ALERT [{alert.level.upper()}] {alert.message} mcp_server={alert.mcp_server_id} event={alert.event_type}"
         )
 
 
@@ -76,8 +81,8 @@ class AlertEventHandler:
     Event handler that generates alerts for critical events.
 
     Monitors domain events and generates alerts when:
-    - Provider is degraded
-    - Provider stops unexpectedly
+    - McpServer is degraded
+    - McpServer stops unexpectedly
     - Tool invocation fails
     - Health check fails repeatedly
     """
@@ -103,24 +108,24 @@ class AlertEventHandler:
 
     def handle(self, event: DomainEvent) -> None:
         """Handle a domain event and potentially generate alerts."""
-        if isinstance(event, ProviderDegraded):
+        if isinstance(event, McpServerDegraded):
             self._handle_degraded(event)
-        elif isinstance(event, ProviderStopped):
+        elif isinstance(event, McpServerStopped):
             self._handle_stopped(event)
         elif isinstance(event, ToolInvocationFailed):
             self._handle_tool_failed(event)
         elif isinstance(event, HealthCheckFailed):
             self._handle_health_failed(event)
 
-    def _handle_degraded(self, event: ProviderDegraded) -> None:
-        """Handle provider degraded event."""
+    def _handle_degraded(self, event: McpServerDegraded) -> None:
+        """Handle mcp_server degraded event."""
         level = "critical" if event.consecutive_failures >= self._degradation_threshold else "warning"
 
         alert = Alert(
             level=level,
-            message=f"Provider degraded after {event.consecutive_failures} failures",
-            provider_id=event.provider_id,
-            event_type="ProviderDegraded",
+            message=f"McpServer degraded after {event.consecutive_failures} failures",
+            mcp_server_id=event.mcp_server_id,
+            event_type="McpServerDegraded",
             details={
                 "consecutive_failures": event.consecutive_failures,
                 "total_failures": event.total_failures,
@@ -129,15 +134,15 @@ class AlertEventHandler:
         )
         self._send_alert(alert)
 
-    def _handle_stopped(self, event: ProviderStopped) -> None:
-        """Handle provider stopped event."""
+    def _handle_stopped(self, event: McpServerStopped) -> None:
+        """Handle mcp_server stopped event."""
         # Only alert for unexpected stops (not shutdown or idle)
         if event.reason not in ("shutdown", "idle"):
             alert = Alert(
                 level="warning",
-                message=f"Provider stopped unexpectedly: {event.reason}",
-                provider_id=event.provider_id,
-                event_type="ProviderStopped",
+                message=f"McpServer stopped unexpectedly: {event.reason}",
+                mcp_server_id=event.mcp_server_id,
+                event_type="McpServerStopped",
                 details={"reason": event.reason},
             )
             self._send_alert(alert)
@@ -147,7 +152,7 @@ class AlertEventHandler:
         alert = Alert(
             level="warning",
             message=f"Tool invocation failed: {event.tool_name}",
-            provider_id=event.provider_id,
+            mcp_server_id=event.mcp_server_id,
             event_type="ToolInvocationFailed",
             details={
                 "tool_name": event.tool_name,
@@ -164,7 +169,7 @@ class AlertEventHandler:
             alert = Alert(
                 level="warning",
                 message=f"Health check failed {event.consecutive_failures} times",
-                provider_id=event.provider_id,
+                mcp_server_id=event.mcp_server_id,
                 event_type="HealthCheckFailed",
                 details={
                     "consecutive_failures": event.consecutive_failures,

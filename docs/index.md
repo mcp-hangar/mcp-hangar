@@ -7,7 +7,7 @@
 [![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](https://opensource.org/licenses/MIT)
 [![Documentation](https://img.shields.io/badge/docs-mcp--hangar.io-blue)](https://mcp-hangar.io)
 
-Production-grade MCP provider registry with lazy loading, health monitoring, and container support.
+Production-grade MCP server registry with lazy loading, health monitoring, and container support.
 
 ## Monorepo Structure
 
@@ -20,33 +20,33 @@ MCP Hangar is a monorepo containing multiple packages:
 
 ## Features
 
-- **Lazy Loading** -- Providers start only when invoked, tools visible immediately
+- **Lazy Loading** -- MCP servers start only when invoked, tools visible immediately
 - **Container Support** -- Docker/Podman with auto-detection
-- **Provider Groups** -- Load balancing with multiple strategies
+- **MCP Server Groups** -- Load balancing with multiple strategies
 - **Health Monitoring** -- Circuit breaker pattern with automatic recovery
-- **Auto-Discovery** -- Detect providers from Docker labels, K8s annotations, filesystem
-- **REST API** -- Full CRUD API for providers, groups, discovery, config, and auth
-- **Log Streaming** -- Live provider logs via REST and WebSocket
+- **Auto-Discovery** -- Detect MCP servers from Docker labels, K8s annotations, filesystem
+- **REST API** -- Full CRUD API for MCP servers, groups, discovery, config, and auth
+- **Log Streaming** -- Live MCP server logs via REST and WebSocket
 - **RBAC** -- Role-based access control with tool-level policies
-- **Catalog** -- Browsable provider catalog with search and deploy
+- **Catalog** -- Browsable MCP server catalog with search and deploy
 - **Automatic Retry** -- Built-in retry with exponential backoff for transient failures
 - **Real-Time Progress** -- See operation progress while waiting
 - **Rich Errors** -- Human-readable errors with recovery hints
-- **Kubernetes Native** -- CRDs for declarative provider management
+- **Kubernetes Native** -- CRDs for declarative MCP server management
 
 ## Quick Start
 
-**30 seconds to working MCP providers:**
+**30 seconds to working MCP servers:**
 
 ```bash
 curl -sSL https://mcp-hangar.io/install.sh | bash && mcp-hangar init -y && mcp-hangar serve
 ```
 
-That's it. Restart Claude Desktop and you have filesystem, fetch, and memory providers.
+That's it. Restart Claude Desktop and you have filesystem, fetch, and memory MCP servers.
 
 !!! info "What just happened?"
     **Install** - Downloaded and installed `mcp-hangar` via pip/uv.
-    **Init** - Created config with starter providers, updated Claude Desktop.
+    **Init** - Created config with starter MCP servers, updated Claude Desktop.
     **Serve** - Started the MCP server (stdio mode).
     The `init -y` flag uses sensible defaults: detects runtimes (uvx preferred),
     configures starter bundle (filesystem, fetch, memory), updates Claude Desktop.

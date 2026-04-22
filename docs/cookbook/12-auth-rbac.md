@@ -7,13 +7,13 @@
 
 ## The Problem
 
-Your Hangar instance is accessible to everyone on the network. You need to control who can invoke tools, start providers, or manage configuration. Different teams need different access levels.
+Your Hangar instance is accessible to everyone on the network. You need to control who can invoke tools, start MCP servers, or manage configuration. Different teams need different access levels.
 
 ## The Config
 
 ```yaml
 # config.yaml -- Recipe 12: Auth & RBAC
-providers:
+mcp_servers:
   my-mcp:
     mode: remote
     endpoint: "http://localhost:8080"
@@ -39,7 +39,7 @@ auth:                                    # NEW: authentication config
 2. Try an unauthenticated request -- it fails:
 
    ```bash
-   curl -s -o /dev/null -w "%{http_code}" http://localhost:8000/api/providers
+   curl -s -o /dev/null -w "%{http_code}" http://localhost:8000/api/mcp_servers
    ```
 
    ```
@@ -63,11 +63,11 @@ auth:                                    # NEW: authentication config
 4. Use the key:
 
    ```bash
-   curl -H "X-API-Key: mcp_aBcDeFg..." http://localhost:8000/api/providers
+   curl -H "X-API-Key: mcp_aBcDeFg..." http://localhost:8000/api/mcp_servers
    ```
 
    ```json
-   {"providers": [...]}
+   {"mcp_servers": [...]}
    ```
 
 5. Assign a role:
@@ -101,7 +101,7 @@ Built-in roles:
 | `developer` | Invoke tools, read status |
 | `viewer` | Read-only access |
 
-Tool access policies add fine-grained control per (principal, provider, tool) tuple.
+Tool access policies add fine-grained control per (principal, MCP server, tool) tuple.
 
 ## Key Config Reference
 

@@ -1,6 +1,6 @@
 """Recovery service for system startup.
 
-Responsible for loading persisted provider configurations and
+Responsible for loading persisted mcp_server configurations and
 restoring system state after restart.
 """
 
@@ -8,12 +8,12 @@ from dataclasses import dataclass, field
 from datetime import datetime, UTC
 from typing import Any
 
-from ...domain.contracts.persistence import AuditAction, AuditEntry, ProviderConfigSnapshot
-from ...domain.model import Provider
-from ...domain.repository import IProviderRepository
+from ...domain.contracts.persistence import AuditAction, AuditEntry, McpServerConfigSnapshot
+from ...domain.model import McpServer
+from ...domain.repository import IMcpServerRepository
 from ...logging_config import get_logger
 from .audit_repository import SQLiteAuditRepository
-from .config_repository import SQLiteProviderConfigRepository
+from .config_repository import SQLiteMcpServerConfigRepository
 from .database import Database
 
 logger = get_logger(__name__)
@@ -37,15 +37,15 @@ class RecoveryResult:
 class RecoveryService:
     """Service for recovering system state on startup.
 
-    Loads persisted provider configurations from the database
-    and registers them with the provider repository.
+    Loads persisted mcp_server configurations from the database
+    and registers them with the mcp_server repository.
     """
 
     def __init__(
         self,
         database: Database,
-        provider_repository: IProviderRepository,
-        config_repository: SQLiteProviderConfigRepository | None = None,
+        mcp_server_repository: IMcpServerRepository,
+        config_repository: SQLiteMcpServerConfigRepository | None = None,
         audit_repository: SQLiteAuditRepository | None = None,
         auto_start: bool = False,
     ):
@@ -53,26 +53,26 @@ class RecoveryService:
 
         Args:
             database: Database instance
-            provider_repository: Repository for registering recovered providers
+            mcp_server_repository: Repository for registering recovered mcp_servers
             config_repository: Optional config repository (created if not provided)
             audit_repository: Optional audit repository for logging recovery
-            auto_start: Whether to auto-start recovered providers
+            auto_start: Whether to auto-start recovered mcp_servers
         """
         self._db = database
-        self._provider_repo = provider_repository
-        self._config_repo = config_repository or SQLiteProviderConfigRepository(database)
+        self._mcp_server_repo = mcp_server_repository
+        self._config_repo = config_repository or SQLiteMcpServerConfigRepository(database)
         self._audit_repo = audit_repository or SQLiteAuditRepository(database)
         self._auto_start = auto_start
         self._last_recovery: RecoveryResult | None = None
 
-    async def recover_providers(self) -> list[str]:
-        """Recover all provider configurations from storage.
+    async def recover_mcp_servers(self) -> list[str]:
+        """Recover all mcp_server configurations from storage.
 
-        Loads saved configurations and registers Provider aggregates
-        with the provider repository.
+        Loads saved configurations and registers McpServer aggregates
+        with the mcp_server repository.
 
         Returns:
-            List of recovered provider IDs
+            List of recovered mcp_server IDs
         """
         result = RecoveryResult(started_at=datetime.now(UTC))
         start_time = datetime.now(UTC)
@@ -84,26 +84,26 @@ class RecoveryService:
             # Load all enabled configurations
             configs = await self._config_repo.get_all()
 
-            logger.info(f"Recovery: Found {len(configs)} provider configurations")
+            logger.info(f"Recovery: Found {len(configs)} mcp_server configurations")
 
             for config in configs:
                 try:
-                    # Create Provider aggregate from config
-                    provider = self._create_provider_from_config(config)
+                    # Create McpServer aggregate from config
+                    mcp_server = self._create_mcp_server_from_config(config)
 
                     # Register with repository
-                    self._provider_repo.add(config.provider_id, provider)
+                    self._mcp_server_repo.add(config.mcp_server_id, mcp_server)
 
                     result.recovered_count += 1
-                    result.recovered_ids.append(config.provider_id)
+                    result.recovered_ids.append(config.mcp_server_id)
 
-                    logger.debug(f"Recovery: Restored provider {config.provider_id}")
+                    logger.debug(f"Recovery: Restored mcp_server {config.mcp_server_id}")
 
-                except Exception as e:  # noqa: BLE001 -- infra-boundary: skip individual provider on recovery failure
+                except Exception as e:  # noqa: BLE001 -- infra-boundary: skip individual mcp_server on recovery failure
                     result.failed_count += 1
-                    result.failed_ids.append(config.provider_id)
-                    result.errors[config.provider_id] = str(e)
-                    logger.error(f"Recovery: Failed to restore provider {config.provider_id}: {e}")
+                    result.failed_ids.append(config.mcp_server_id)
+                    result.errors[config.mcp_server_id] = str(e)
+                    logger.error(f"Recovery: Failed to restore mcp_server {config.mcp_server_id}: {e}")
 
             # Record recovery in audit log
             await self._record_recovery_audit(result)
@@ -124,17 +124,17 @@ class RecoveryService:
 
         return result.recovered_ids
 
-    def _create_provider_from_config(self, config: ProviderConfigSnapshot) -> Provider:
-        """Create Provider aggregate from configuration snapshot.
+    def _create_mcp_server_from_config(self, config: McpServerConfigSnapshot) -> McpServer:
+        """Create McpServer aggregate from configuration snapshot.
 
         Args:
-            config: Provider configuration snapshot
+            config: McpServer configuration snapshot
 
         Returns:
-            Provider aggregate instance
+            McpServer aggregate instance
         """
-        return Provider(
-            provider_id=config.provider_id,
+        return McpServer(
+            mcp_server_id=config.mcp_server_id,
             mode=config.mode,
             command=config.command,
             image=config.image,
@@ -207,61 +207,61 @@ class RecoveryService:
             "errors": result.errors,
         }
 
-    async def recover_single_provider(self, provider_id: str) -> bool:
-        """Recover a single provider from storage.
+    async def recover_single_mcp_server(self, mcp_server_id: str) -> bool:
+        """Recover a single mcp_server from storage.
 
-        Useful for re-loading a specific provider without full recovery.
+        Useful for re-loading a specific mcp_server without full recovery.
 
         Args:
-            provider_id: Provider identifier to recover
+            mcp_server_id: McpServer identifier to recover
 
         Returns:
             True if recovered successfully, False otherwise
         """
         try:
-            config = await self._config_repo.get(provider_id)
+            config = await self._config_repo.get(mcp_server_id)
 
             if config is None:
-                logger.warning(f"Recovery: No config found for {provider_id}")
+                logger.warning(f"Recovery: No config found for {mcp_server_id}")
                 return False
 
-            provider = self._create_provider_from_config(config)
-            self._provider_repo.add(provider_id, provider)
+            mcp_server = self._create_mcp_server_from_config(config)
+            self._mcp_server_repo.add(mcp_server_id, mcp_server)
 
-            logger.info(f"Recovery: Single provider {provider_id} restored")
+            logger.info(f"Recovery: Single mcp_server {mcp_server_id} restored")
             return True
 
         except Exception as e:  # noqa: BLE001 -- infra-boundary: returns False on recovery failure
-            logger.error(f"Recovery: Failed to restore {provider_id}: {e}")
+            logger.error(f"Recovery: Failed to restore {mcp_server_id}: {e}")
             return False
 
-    async def save_provider_config(self, provider: Provider) -> None:
-        """Save a provider's configuration to persistent storage.
+    async def save_mcp_server_config(self, mcp_server: McpServer) -> None:
+        """Save a mcp_server's configuration to persistent storage.
 
-        Creates a snapshot of the current provider configuration
+        Creates a snapshot of the current mcp_server configuration
         and persists it for future recovery.
 
         Args:
-            provider: Provider to save configuration for
+            mcp_server: McpServer to save configuration for
         """
-        config = ProviderConfigSnapshot(
-            provider_id=provider.provider_id,
-            mode=provider.mode_str,
-            command=provider._command,
-            image=provider._image,
-            endpoint=provider._endpoint,
-            env=provider._env,
-            idle_ttl_s=provider._idle_ttl.seconds,
-            health_check_interval_s=provider._health_check_interval.seconds,
-            max_consecutive_failures=provider._health.max_consecutive_failures,
-            description=provider.description,
-            volumes=provider._volumes,
-            build=provider._build,
-            resources=provider._resources,
-            network=provider._network,
-            read_only=provider._read_only,
-            user=provider._user,
-            tools=([t.to_dict() for t in provider.tools] if provider._tools_predefined else None),
+        config = McpServerConfigSnapshot(
+            mcp_server_id=mcp_server.mcp_server_id,
+            mode=mcp_server.mode_str,
+            command=mcp_server._command,
+            image=mcp_server._image,
+            endpoint=mcp_server._endpoint,
+            env=mcp_server._env,
+            idle_ttl_s=mcp_server._idle_ttl.seconds,
+            health_check_interval_s=mcp_server._health_check_interval.seconds,
+            max_consecutive_failures=mcp_server._health.max_consecutive_failures,
+            description=mcp_server.description,
+            volumes=mcp_server._volumes,
+            build=mcp_server._build,
+            resources=mcp_server._resources,
+            network=mcp_server._network,
+            read_only=mcp_server._read_only,
+            user=mcp_server._user,
+            tools=([t.to_dict() for t in mcp_server.tools] if mcp_server._tools_predefined else None),
             enabled=True,
         )
 
@@ -270,8 +270,8 @@ class RecoveryService:
         # Record in audit log
         await self._audit_repo.append(
             AuditEntry(
-                entity_id=provider.provider_id,
-                entity_type="provider",
+                entity_id=mcp_server.mcp_server_id,
+                entity_type="mcp_server",
                 action=AuditAction.UPDATED,
                 timestamp=datetime.now(UTC),
                 actor="system",
@@ -279,29 +279,29 @@ class RecoveryService:
             )
         )
 
-        logger.debug(f"Saved config for provider: {provider.provider_id}")
+        logger.debug(f"Saved config for mcp_server: {mcp_server.mcp_server_id}")
 
-    async def delete_provider_config(self, provider_id: str) -> bool:
-        """Delete a provider's configuration from storage.
+    async def delete_mcp_server_config(self, mcp_server_id: str) -> bool:
+        """Delete a mcp_server's configuration from storage.
 
         Soft-deletes the configuration (marks as disabled).
 
         Args:
-            provider_id: Provider identifier
+            mcp_server_id: McpServer identifier
 
         Returns:
             True if deleted, False if not found
         """
         # Get current config for audit
-        old_config = await self._config_repo.get(provider_id)
+        old_config = await self._config_repo.get(mcp_server_id)
 
-        deleted = await self._config_repo.delete(provider_id)
+        deleted = await self._config_repo.delete(mcp_server_id)
 
         if deleted and old_config:
             await self._audit_repo.append(
                 AuditEntry(
-                    entity_id=provider_id,
-                    entity_type="provider",
+                    entity_id=mcp_server_id,
+                    entity_type="mcp_server",
                     action=AuditAction.DELETED,
                     timestamp=datetime.now(UTC),
                     actor="system",

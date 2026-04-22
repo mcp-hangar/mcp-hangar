@@ -26,38 +26,38 @@ from mcp_hangar.domain.value_objects import (
 # ProviderId Tests
 
 
-def test_provider_id_valid():
+def test_mcp_server_id_valid():
     """Test valid provider IDs."""
     pid = ProviderId("math-provider")
     assert pid.value == "math-provider"
     assert str(pid) == "math-provider"
 
 
-def test_provider_id_alphanumeric_underscore():
+def test_mcp_server_id_alphanumeric_underscore():
     """Test provider ID with alphanumeric and underscore."""
     pid = ProviderId("math_provider_123")
     assert pid.value == "math_provider_123"
 
 
-def test_provider_id_empty():
+def test_mcp_server_id_empty():
     """Test that empty provider ID raises ValueError."""
     with pytest.raises(ValueError, match="cannot be empty"):
         ProviderId("")
 
 
-def test_provider_id_too_long():
+def test_mcp_server_id_too_long():
     """Test that provider ID longer than 64 characters raises ValueError."""
     with pytest.raises(ValueError, match="cannot exceed 64 characters"):
         ProviderId("a" * 65)
 
 
-def test_provider_id_invalid_characters():
+def test_mcp_server_id_invalid_characters():
     """Test that provider ID with invalid characters raises ValueError."""
     with pytest.raises(ValueError, match="must contain only alphanumeric"):
         ProviderId("math provider")  # space not allowed
 
 
-def test_provider_id_equality():
+def test_mcp_server_id_equality():
     """Test provider ID equality."""
     pid1 = ProviderId("math-provider")
     pid2 = ProviderId("math-provider")
@@ -68,7 +68,7 @@ def test_provider_id_equality():
     assert pid1 == "math-provider"  # String comparison supported for convenience
 
 
-def test_provider_id_hashable():
+def test_mcp_server_id_hashable():
     """Test that provider ID is hashable."""
     pid1 = ProviderId("math-provider")
     pid2 = ProviderId("math-provider")

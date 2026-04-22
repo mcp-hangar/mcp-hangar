@@ -94,7 +94,7 @@ class TestInitDependencyDetection:
                     "init",
                     "-y",
                     "--skip-claude",
-                    "--providers",
+                    "--mcp_servers",
                     "filesystem,github",
                     "--config-path",
                     "/tmp/test-init3.yaml",

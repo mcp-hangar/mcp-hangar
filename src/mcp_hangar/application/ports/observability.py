@@ -7,7 +7,7 @@ Example usage:
     observability = get_observability_adapter(config)
     span = observability.start_tool_span("math", "add", {"a": 1, "b": 2})
     try:
-        result = provider.invoke(...)
+        result = mcp_server.invoke(...)
         span.end_success(result)
     except Exception as e:  # noqa: BLE001 -- fault-barrier: docstring example
         span.end_error(e)
@@ -26,7 +26,7 @@ class TraceContext:
     """Value object for trace context propagation across MCP calls.
 
     Enables correlation of traces from external LLM applications
-    through MCP Hangar to individual provider invocations.
+    through MCP Hangar to individual mcp_server invocations.
 
     Attributes:
         trace_id: Unique identifier for the trace.
@@ -108,7 +108,7 @@ class ObservabilityPort(ABC):
     @abstractmethod
     def start_tool_span(
         self,
-        provider_name: str,
+        mcp_server_name: str,
         tool_name: str,
         input_params: dict[str, Any],
         trace_context: TraceContext | None = None,
@@ -116,7 +116,7 @@ class ObservabilityPort(ABC):
         """Start a traced span for a tool invocation.
 
         Args:
-            provider_name: Name of the MCP provider.
+            mcp_server_name: Name of the MCP mcp_server.
             tool_name: Name of the tool being invoked.
             input_params: Input arguments for the tool.
             trace_context: Optional context for trace propagation.
@@ -136,11 +136,11 @@ class ObservabilityPort(ABC):
     ) -> None:
         """Record a score/metric on a trace.
 
-        Useful for recording provider health, latency, or quality metrics.
+        Useful for recording mcp_server health, latency, or quality metrics.
 
         Args:
             trace_id: The trace to attach the score to.
-            name: Score name (e.g., "provider_health", "latency_ms").
+            name: Score name (e.g., "mcp_server_health", "latency_ms").
             value: Numeric score value.
             comment: Optional description.
         """
@@ -149,7 +149,7 @@ class ObservabilityPort(ABC):
     @abstractmethod
     def record_health_check(
         self,
-        provider_name: str,
+        mcp_server_name: str,
         healthy: bool,
         latency_ms: float,
         trace_id: str | None = None,
@@ -157,7 +157,7 @@ class ObservabilityPort(ABC):
         """Record a health check result.
 
         Args:
-            provider_name: Name of the provider.
+            mcp_server_name: Name of the mcp_server.
             healthy: Whether the health check passed.
             latency_ms: Health check latency in milliseconds.
             trace_id: Optional trace to attach the result to.
@@ -200,10 +200,11 @@ class NullObservabilityAdapter(ObservabilityPort):
 
     def start_tool_span(
         self,
-        provider_name: str,
-        tool_name: str,
-        input_params: dict[str, Any],
+        mcp_server_name: str | None = None,
+        tool_name: str = "",
+        input_params: dict[str, Any] | None = None,
         trace_context: TraceContext | None = None,
+        **kwargs: Any,
     ) -> SpanHandle:
         """Return a no-op span handle."""
         return NullSpanHandle()
@@ -220,10 +221,11 @@ class NullObservabilityAdapter(ObservabilityPort):
 
     def record_health_check(
         self,
-        provider_name: str,
-        healthy: bool,
-        latency_ms: float,
+        mcp_server_name: str | None = None,
+        healthy: bool = False,
+        latency_ms: float = 0.0,
         trace_id: str | None = None,
+        **kwargs: Any,
     ) -> None:
         """Discard the health check result."""
         pass
@@ -247,7 +249,7 @@ class IAuditExporter(Protocol):
 
     def export_tool_invocation(
         self,
-        provider_id: str,
+        mcp_server_id: str,
         tool_name: str,
         status: str,
         duration_ms: float,
@@ -258,13 +260,13 @@ class IAuditExporter(Protocol):
         """Export a tool invocation event as an audit log record."""
         ...
 
-    def export_provider_state_change(
+    def export_mcp_server_state_change(
         self,
-        provider_id: str,
+        mcp_server_id: str,
         from_state: str,
         to_state: str,
     ) -> None:
-        """Export a provider state transition as an audit log record."""
+        """Export a mcp_server state transition as an audit log record."""
         ...
 
 
@@ -275,6 +277,10 @@ class NullAuditExporter:
         """Discard the tool invocation event."""
         pass
 
-    def export_provider_state_change(self, *args: object, **kwargs: object) -> None:
+    def export_mcp_server_state_change(self, *args: object, **kwargs: object) -> None:
         """Discard the state change event."""
         pass
+
+    def export_provider_state_change(self, *args: object, **kwargs: object) -> None:
+        """Legacy alias for provider-era audit export API."""
+        self.export_mcp_server_state_change(*args, **kwargs)

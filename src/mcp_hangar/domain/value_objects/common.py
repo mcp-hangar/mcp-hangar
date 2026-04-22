@@ -14,7 +14,7 @@ import uuid
 
 
 class ToolName:
-    """Name of a tool provided by a provider.
+    """Name of a tool provided by a mcp_server.
 
     Validates tool names with the following rules:
     - Non-empty string
@@ -231,7 +231,7 @@ class NamespaceId:
 class CatalogItemId:
     """Unique identifier for a catalog item.
 
-    Catalog items are provider templates that can be deployed.
+    Catalog items are mcp_server templates that can be deployed.
 
     Attributes:
         value: Identifier string (1-128 characters)

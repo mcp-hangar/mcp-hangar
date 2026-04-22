@@ -3,17 +3,17 @@
 > **Prerequisite:** [05 -- Load Balancing](05-load-balancing.md)
 > **You will need:** Running Hangar with a load-balanced group from recipe 05
 > **Time:** 5 minutes
-> **Adds:** Protect providers from request overload
+> **Adds:** Protect MCP servers from request overload
 
 ## The Problem
 
-A runaway client sends hundreds of requests per second. Your providers can handle 10 concurrent calls each. Without limits, they queue up, timeout, and cascade into health check failures.
+A runaway client sends hundreds of requests per second. Your MCP servers can handle 10 concurrent calls each. Without limits, they queue up, timeout, and cascade into health check failures.
 
 ## The Config
 
 ```yaml
 # config.yaml -- Recipe 06: Rate Limiting
-providers:
+mcp_servers:
   my-mcp:
     mode: remote
     endpoint: "http://localhost:8080"
@@ -65,7 +65,7 @@ export MCP_RATE_LIMIT_BURST=10       # NEW: allow short bursts up to 10
 
    ```bash
    for i in $(seq 1 5); do
-     curl -s http://localhost:8000/api/providers | jq .providers[0].state
+     curl -s http://localhost:8000/api/mcp_servers | jq .mcp_servers[0].state
    done
    ```
 
@@ -75,7 +75,7 @@ export MCP_RATE_LIMIT_BURST=10       # NEW: allow short bursts up to 10
 
    ```bash
    for i in $(seq 1 100); do
-     curl -s -o /dev/null -w "%{http_code}\n" http://localhost:8000/api/providers
+     curl -s -o /dev/null -w "%{http_code}\n" http://localhost:8000/api/mcp_servers
    done
    ```
 
@@ -93,7 +93,7 @@ export MCP_RATE_LIMIT_BURST=10       # NEW: allow short bursts up to 10
 
    ```bash
    sleep 60
-   curl -s -o /dev/null -w "%{http_code}\n" http://localhost:8000/api/providers
+   curl -s -o /dev/null -w "%{http_code}\n" http://localhost:8000/api/mcp_servers
    ```
 
    ```

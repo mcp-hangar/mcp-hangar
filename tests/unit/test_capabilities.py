@@ -7,13 +7,13 @@ PRODUCT_ARCHITECTURE.md Phase 1 (P0).
 import pytest
 
 from mcp_hangar.domain.exceptions import ConfigurationError
-from mcp_hangar.domain.model.provider_config import ProviderConfig
+from mcp_hangar.domain.model.mcp_server_config import McpServerConfig
 from mcp_hangar.domain.value_objects.capabilities import (
     EgressRule,
     EnvironmentCapabilities,
     FilesystemCapabilities,
     NetworkCapabilities,
-    ProviderCapabilities,
+    McpServerCapabilities,
     ResourceCapabilities,
     ToolCapabilities,
 )
@@ -125,32 +125,32 @@ class TestResourceCapabilities:
 
 class TestProviderCapabilities:
     def test_default_preset(self) -> None:
-        cap = ProviderCapabilities.default()
+        cap = McpServerCapabilities.default()
         assert cap.enforcement_mode == "alert"
 
     def test_strict_preset(self) -> None:
-        cap = ProviderCapabilities.strict()
+        cap = McpServerCapabilities.strict()
         assert cap.enforcement_mode == "block"
         assert cap.network.dns_allowed is False
         assert cap.filesystem.write_paths == ()
 
     def test_invalid_enforcement_mode_raises(self) -> None:
         with pytest.raises(ValueError, match="enforcement_mode must be one of"):
-            ProviderCapabilities(enforcement_mode="ignore")
+            McpServerCapabilities(enforcement_mode="ignore")
 
     def test_has_egress_rules_false_when_empty(self) -> None:
-        cap = ProviderCapabilities.default()
+        cap = McpServerCapabilities.default()
         assert cap.has_egress_rules() is False
 
     def test_has_egress_rules_true_when_declared(self) -> None:
         rule = EgressRule(host="api.openai.com", port=443)
-        cap = ProviderCapabilities(
+        cap = McpServerCapabilities(
             network=NetworkCapabilities(egress=(rule,)),
         )
         assert cap.has_egress_rules() is True
 
     def test_immutable(self) -> None:
-        cap = ProviderCapabilities.default()
+        cap = McpServerCapabilities.default()
         with pytest.raises((AttributeError, TypeError)):
             cap.enforcement_mode = "block"  # type: ignore[misc]
 
@@ -159,13 +159,13 @@ class TestProviderCapabilitiesFromDict:
     """Tests for ProviderCapabilities.from_dict() YAML deserialization factory."""
 
     def test_from_dict_none_returns_default(self) -> None:
-        cap = ProviderCapabilities.from_dict(None)
-        assert cap == ProviderCapabilities()
+        cap = McpServerCapabilities.from_dict(None)
+        assert cap == McpServerCapabilities()
         assert cap.enforcement_mode == "alert"
 
     def test_from_dict_empty_dict_returns_default(self) -> None:
-        cap = ProviderCapabilities.from_dict({})
-        assert cap == ProviderCapabilities()
+        cap = McpServerCapabilities.from_dict({})
+        assert cap == McpServerCapabilities()
 
     def test_from_dict_full_config(self) -> None:
         config = {
@@ -196,7 +196,7 @@ class TestProviderCapabilitiesFromDict:
             },
             "enforcement_mode": "block",
         }
-        cap = ProviderCapabilities.from_dict(config)
+        cap = McpServerCapabilities.from_dict(config)
 
         # Network
         assert len(cap.network.egress) == 2
@@ -234,7 +234,7 @@ class TestProviderCapabilitiesFromDict:
                 "egress": [{"host": "example.com"}],
             },
         }
-        cap = ProviderCapabilities.from_dict(config)
+        cap = McpServerCapabilities.from_dict(config)
         assert len(cap.network.egress) == 1
         assert cap.network.egress[0].port == 443  # default
         assert cap.network.egress[0].protocol == "https"  # default
@@ -243,11 +243,11 @@ class TestProviderCapabilitiesFromDict:
 
     def test_from_dict_invalid_enforcement_mode_raises(self) -> None:
         with pytest.raises(ValueError, match="enforcement_mode must be one of"):
-            ProviderCapabilities.from_dict({"enforcement_mode": "ignore"})
+            McpServerCapabilities.from_dict({"enforcement_mode": "ignore"})
 
     def test_from_dict_invalid_egress_empty_host_raises(self) -> None:
         with pytest.raises(ValueError, match="host cannot be empty"):
-            ProviderCapabilities.from_dict(
+            McpServerCapabilities.from_dict(
                 {
                     "network": {"egress": [{"host": "", "port": 443}]},
                 }
@@ -255,7 +255,7 @@ class TestProviderCapabilitiesFromDict:
 
     def test_from_dict_invalid_egress_bad_port_raises(self) -> None:
         with pytest.raises(ValueError, match="port must be 0-65535"):
-            ProviderCapabilities.from_dict(
+            McpServerCapabilities.from_dict(
                 {
                     "network": {"egress": [{"host": "example.com", "port": 99999}]},
                 }
@@ -266,23 +266,23 @@ class TestProviderCapabilitiesOnProvider:
     """Tests for capabilities parameter on Provider aggregate."""
 
     def test_provider_with_capabilities(self) -> None:
-        from mcp_hangar.domain.model.provider import Provider
+        from mcp_hangar.domain.model.provider import McpServer
 
-        cap = ProviderCapabilities.default()
-        provider = Provider(provider_id="test", mode="subprocess", capabilities=cap)
+        cap = McpServerCapabilities.default()
+        provider = McpServer(mcp_server_id="test", mode="subprocess", capabilities=cap)
         assert provider.capabilities is cap
 
     def test_provider_without_capabilities_defaults_to_none(self) -> None:
-        from mcp_hangar.domain.model.provider import Provider
+        from mcp_hangar.domain.model.provider import McpServer
 
-        provider = Provider(provider_id="test", mode="subprocess")
+        provider = McpServer(mcp_server_id="test", mode="subprocess")
         assert provider.capabilities is None
 
     def test_provider_capabilities_property_returns_stored_value(self) -> None:
-        from mcp_hangar.domain.model.provider import Provider
+        from mcp_hangar.domain.model.provider import McpServer
 
-        cap = ProviderCapabilities(enforcement_mode="quarantine")
-        provider = Provider(provider_id="test", mode="subprocess", capabilities=cap)
+        cap = McpServerCapabilities(enforcement_mode="quarantine")
+        provider = McpServer(mcp_server_id="test", mode="subprocess", capabilities=cap)
         assert provider.capabilities is not None
         assert provider.capabilities.enforcement_mode == "quarantine"
 
@@ -292,7 +292,7 @@ class TestFromDictRoundTrip:
 
     def test_from_dict_round_trip_matches_direct_construction(self) -> None:
         """Verify from_dict produces same result as direct construction."""
-        direct = ProviderCapabilities(
+        direct = McpServerCapabilities(
             network=NetworkCapabilities(
                 egress=(EgressRule(host="api.openai.com", port=443, protocol="https"),),
                 dns_allowed=True,
@@ -300,7 +300,7 @@ class TestFromDictRoundTrip:
             ),
             enforcement_mode="alert",
         )
-        from_dict_result = ProviderCapabilities.from_dict(
+        from_dict_result = McpServerCapabilities.from_dict(
             {
                 "network": {
                     "egress": [{"host": "api.openai.com", "port": 443, "protocol": "https"}],
@@ -317,7 +317,7 @@ class TestProviderConfigCapabilities:
     """Tests for capabilities field on ProviderConfig (Phase 38 wiring)."""
 
     def test_config_from_dict_with_capabilities(self) -> None:
-        config = ProviderConfig.from_dict(
+        config = McpServerConfig.from_dict(
             "test-provider",
             {
                 "mode": "subprocess",
@@ -333,7 +333,7 @@ class TestProviderConfigCapabilities:
         assert config.capabilities.enforcement_mode == "alert"
 
     def test_config_from_dict_without_capabilities(self) -> None:
-        config = ProviderConfig.from_dict(
+        config = McpServerConfig.from_dict(
             "test-provider",
             {
                 "mode": "subprocess",
@@ -343,7 +343,7 @@ class TestProviderConfigCapabilities:
         assert config.capabilities is None
 
     def test_config_from_dict_with_empty_capabilities(self) -> None:
-        config = ProviderConfig.from_dict(
+        config = McpServerConfig.from_dict(
             "test-provider",
             {
                 "mode": "subprocess",
@@ -367,11 +367,11 @@ class TestConfigurationErrorWrapping:
 
     def test_invalid_capabilities_raises_configuration_error(self) -> None:
         """Verify that malformed capabilities in config raises ConfigurationError, not ValueError."""
-        from mcp_hangar.server.config import _load_provider_config
+        from mcp_hangar.server.config import _load_mcp_server_config
 
         # This should raise ConfigurationError (wrapping ValueError from invalid enforcement_mode)
         with pytest.raises(ConfigurationError):
-            _load_provider_config(
+            _load_mcp_server_config(
                 "bad-provider",
                 {
                     "mode": "subprocess",

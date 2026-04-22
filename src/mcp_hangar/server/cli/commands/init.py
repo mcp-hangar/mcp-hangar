@@ -3,10 +3,10 @@
 This command provides the "5-minute experience" for new users:
 0. Detect available runtimes (npx, uvx, docker)
 1. Detect Claude Desktop installation
-2. Present provider selection with bundles (filtered by available deps)
+2. Present mcp_server selection with bundles (filtered by available deps)
 3. Collect required configuration
 4. Generate MCP Hangar config file
-5. Smoke test providers
+5. Smoke test mcp_servers
 6. Update Claude Desktop config
 7. Show completion summary with next steps
 """
@@ -31,10 +31,10 @@ from ..services import (
     detect_dependencies,
     filter_bundle_by_availability,
     get_install_instructions,
-    get_provider,
-    get_providers_by_category_filtered,
+    get_mcp_server,
+    get_mcp_servers_by_category_filtered,
     PROVIDER_BUNDLES,
-    ProviderDefinition,
+    McpServerDefinition,
     run_smoke_test,
 )
 
@@ -82,7 +82,7 @@ def _check_dependencies_or_exit(deps: DependencyStatus, non_interactive: bool) -
         return
 
     console.print("\n[bold red]No supported runtimes found![/bold red]\n")
-    console.print("MCP Hangar requires at least one of the following to run providers:\n")
+    console.print("MCP Hangar requires at least one of the following to run mcp_servers:\n")
 
     instructions = get_install_instructions(["npx", "uvx", "docker/podman"])
     for runtime, instruction in instructions.items():
@@ -92,15 +92,15 @@ def _check_dependencies_or_exit(deps: DependencyStatus, non_interactive: bool) -
     raise typer.Exit(1)
 
 
-def _prompt_provider_selection(deps: DependencyStatus) -> list[str]:
-    """Interactive provider selection with categories."""
-    available_cats, unavailable_cats = get_providers_by_category_filtered(deps)
+def _prompt_mcp_server_selection(deps: DependencyStatus) -> list[str]:
+    """Interactive mcp_server selection with categories."""
+    available_cats, unavailable_cats = get_mcp_servers_by_category_filtered(deps)
     selected = []
 
-    console.print("\n[bold]Select providers to enable:[/bold]")
+    console.print("\n[bold]Select mcp_servers to enable:[/bold]")
     console.print("[dim]Use arrow keys and space to select, Enter to confirm[/dim]\n")
 
-    for category, providers in available_cats.items():
+    for category, mcp_servers in available_cats.items():
         is_starter = category == "Starter"
         choices = [
             questionary.Choice(
@@ -108,7 +108,7 @@ def _prompt_provider_selection(deps: DependencyStatus) -> list[str]:
                 value=p.name,
                 checked=is_starter,
             )
-            for p in providers
+            for p in mcp_servers
         ]
 
         if choices:
@@ -124,49 +124,49 @@ def _prompt_provider_selection(deps: DependencyStatus) -> list[str]:
             selected.extend(category_selected)
 
     if unavailable_cats:
-        console.print("\n[dim]Unavailable providers (missing dependencies):[/dim]")
-        for category, providers in unavailable_cats.items():
-            for p in providers:
+        console.print("\n[dim]Unavailable mcp_servers (missing dependencies):[/dim]")
+        for category, mcp_servers in unavailable_cats.items():
+            for p in mcp_servers:
                 reason = p.get_unavailable_reason(deps)
                 console.print(f"  [dim]{p.name} - {p.description} ({reason})[/dim]")
 
     return selected
 
 
-def _collect_provider_config(provider: ProviderDefinition) -> dict | None:
-    """Collect configuration for a provider that requires it."""
-    if not provider.requires_config:
+def _collect_mcp_server_config(mcp_server: McpServerDefinition) -> dict | None:
+    """Collect configuration for a mcp_server that requires it."""
+    if not mcp_server.requires_config:
         return {}
 
-    if provider.env_var and os.environ.get(provider.env_var):
+    if mcp_server.env_var and os.environ.get(mcp_server.env_var):
         use_env = questionary.confirm(
-            f"{provider.name}: Use existing ${provider.env_var} environment variable?",
+            f"{mcp_server.name}: Use existing ${mcp_server.env_var} environment variable?",
             default=True,
         ).ask()
 
         if use_env:
-            return {"use_env": provider.env_var}
+            return {"use_env": mcp_server.env_var}
 
-    if provider.config_type == "secret":
-        console.print(f"\n[dim]For {provider.name}: {provider.config_prompt}[/dim]")
-        if provider.env_var:
-            console.print(f"[dim]Tip: You can also set ${provider.env_var} in your shell profile[/dim]")
+    if mcp_server.config_type == "secret":
+        console.print(f"\n[dim]For {mcp_server.name}: {mcp_server.config_prompt}[/dim]")
+        if mcp_server.env_var:
+            console.print(f"[dim]Tip: You can also set ${mcp_server.env_var} in your shell profile[/dim]")
 
         value = questionary.password(
-            f"{provider.config_prompt} (or press Enter to skip):",
+            f"{mcp_server.config_prompt} (or press Enter to skip):",
         ).ask()
 
         if not value:
-            msg = f"Skipping {provider.name} - configure later with 'mcp-hangar configure {provider.name}'"
+            msg = f"Skipping {mcp_server.name} - configure later with 'mcp-hangar configure {mcp_server.name}'"
             console.print(f"[yellow]{msg}[/yellow]")
             return None
 
-        return {"value": value, "env_var": provider.env_var}
+        return {"value": value, "env_var": mcp_server.env_var}
 
-    elif provider.config_type == "path":
+    elif mcp_server.config_type == "path":
         default_path = str(Path.home())
         value = questionary.path(
-            f"{provider.config_prompt}:",
+            f"{mcp_server.config_prompt}:",
             default=default_path,
             only_directories=True,
         ).ask()
@@ -177,37 +177,37 @@ def _collect_provider_config(provider: ProviderDefinition) -> dict | None:
         return {"path": str(Path(value).expanduser().resolve())}
 
     else:
-        value = questionary.text(f"{provider.config_prompt}:").ask()
+        value = questionary.text(f"{mcp_server.config_prompt}:").ask()
         return {"value": value} if value else None
 
 
 def _prompt_existing_config_action(
     config_mgr: ConfigFileManager,
-    selected_providers: list[str],
+    selected_mcp_servers: list[str],
 ) -> str:
     """Prompt user for action when config already exists.
 
     Args:
         config_mgr: ConfigFileManager instance.
-        selected_providers: List of provider names to be configured.
+        selected_mcp_servers: List of mcp_server names to be configured.
 
     Returns:
         One of ExistingConfigAction values.
     """
-    existing_providers = config_mgr.list_providers()
+    existing_mcp_servers = config_mgr.list_mcp_servers()
 
     console.print(f"  [yellow]Configuration exists at {config_mgr.config_path}[/yellow]")
-    console.print(f"  [dim]Existing providers: {', '.join(existing_providers) or '(none)'}[/dim]")
-    console.print(f"  [dim]New providers: {', '.join(selected_providers) or '(none)'}[/dim]")
+    console.print(f"  [dim]Existing mcp_servers: {', '.join(existing_mcp_servers) or '(none)'}[/dim]")
+    console.print(f"  [dim]New mcp_servers: {', '.join(selected_mcp_servers) or '(none)'}[/dim]")
 
-    # Check for overlapping providers
-    overlap = set(existing_providers) & set(selected_providers)
+    # Check for overlapping mcp_servers
+    overlap = set(existing_mcp_servers) & set(selected_mcp_servers)
     if overlap:
         console.print(f"  [dim]Overlapping (will be skipped in merge): {', '.join(overlap)}[/dim]")
 
     choices = [
         questionary.Choice(
-            title="Merge - Add new providers, keep existing ones",
+            title="Merge - Add new mcp_servers, keep existing ones",
             value=ExistingConfigAction.MERGE,
         ),
         questionary.Choice(
@@ -232,7 +232,7 @@ def _prompt_existing_config_action(
 
 
 def _show_completion_summary(
-    providers: list[str],
+    mcp_servers: list[str],
     hangar_config_path: Path,
     claude_config_path: Path | None,
     backup_path: Path | None,
@@ -245,18 +245,18 @@ def _show_completion_summary(
     table.add_column("Item", style="bold")
     table.add_column("Value")
 
-    table.add_row("Providers configured", str(len(providers)))
+    table.add_row("McpServers configured", str(len(mcp_servers)))
     table.add_row("MCP Hangar config", str(hangar_config_path))
     if claude_config_path:
         table.add_row("Claude Desktop config", str(claude_config_path))
     if backup_path:
         table.add_row("Backup created", str(backup_path))
 
-    if providers:
+    if mcp_servers:
         if smoke_test_passed:
-            table.add_row("Provider tests", "[green]All passed[/green]")
+            table.add_row("McpServer tests", "[green]All passed[/green]")
         else:
-            table.add_row("Provider tests", "[yellow]Some failed[/yellow]")
+            table.add_row("McpServer tests", "[yellow]Some failed[/yellow]")
 
     title = (
         "[bold green]Setup Complete[/bold green]"
@@ -267,20 +267,20 @@ def _show_completion_summary(
 
     console.print(Panel(table, title=title, border_style=border))
 
-    if providers:
-        console.print("\n[bold]Enabled providers:[/bold]")
-        for name in providers:
+    if mcp_servers:
+        console.print("\n[bold]Enabled mcp_servers:[/bold]")
+        for name in mcp_servers:
             console.print(f"  [green]+[/green] {name}")
 
     console.print("\n[bold]Next steps:[/bold]")
     if not smoke_test_passed:
-        console.print("  1. [bold]Review errors above[/bold] and fix provider configuration")
+        console.print("  1. [bold]Review errors above[/bold] and fix mcp_server configuration")
         console.print("  2. Run [bold]mcp-hangar serve[/bold] to test manually")
         console.print("  3. [bold]Restart Claude Desktop[/bold] when ready")
     else:
         console.print("  1. [bold]Restart Claude Desktop[/bold] to activate the new configuration")
-        console.print("  2. Run [bold]mcp-hangar status[/bold] to verify providers are healthy")
-        console.print("  3. Run [bold]mcp-hangar add <provider>[/bold] to add more providers later")
+        console.print("  2. Run [bold]mcp-hangar status[/bold] to verify mcp_servers are healthy")
+        console.print("  3. Run [bold]mcp-hangar add <mcp_server>[/bold] to add more mcp_servers later")
     console.print("\n[dim]Need help? Visit https://docs.mcp-hangar.io[/dim]")
 
 
@@ -293,11 +293,11 @@ def init_command(
     ] = False,
     bundle: Annotated[
         str | None,
-        typer.Option("--bundle", "-b", help="Provider bundle to install: starter, developer, data"),
+        typer.Option("--bundle", "-b", help="McpServer bundle to install: starter, developer, data"),
     ] = None,
-    providers_opt: Annotated[
+    mcp_servers_opt: Annotated[
         str | None,
-        typer.Option("--providers", help="Comma-separated list of providers to install"),
+        typer.Option("--mcp_servers", help="Comma-separated list of mcp_servers to install"),
     ] = None,
     config_path: Annotated[
         Path | None,
@@ -325,15 +325,15 @@ def init_command(
     This wizard will:
     - Detect available runtimes (npx, uvx, docker)
     - Detect your Claude Desktop installation
-    - Help you select which MCP providers to enable
+    - Help you select which MCP mcp_servers to enable
     - Create a configuration file
-    - Test providers to verify configuration
+    - Test mcp_servers to verify configuration
     - Update Claude Desktop to use MCP Hangar
 
     Examples:
         mcp-hangar init
         mcp-hangar init --bundle starter
-        mcp-hangar init --providers filesystem,github,sqlite
+        mcp-hangar init --mcp_servers filesystem,github,sqlite
         mcp-hangar init --non-interactive --bundle developer
     """
     global_opts: GlobalOptions = ctx.obj if ctx.obj else GlobalOptions()
@@ -363,7 +363,7 @@ def init_command(
             Panel(
                 "[bold]Welcome to MCP Hangar![/bold]\n\n"
                 "This wizard will help you set up MCP Hangar in just a few minutes.\n"
-                "MCP Hangar manages your MCP providers so Claude Desktop only needs\n"
+                "MCP Hangar manages your MCP mcp_servers so Claude Desktop only needs\n"
                 "to connect to a single process.",
                 title="MCP Hangar Setup",
                 border_style="blue",
@@ -392,31 +392,31 @@ def init_command(
                 raise typer.Abort()
             skip_claude = True
 
-    # Step 2: Provider selection
-    console.print("\n[bold]Step 2:[/bold] Selecting providers...")
+    # Step 2: McpServer selection
+    console.print("\n[bold]Step 2:[/bold] Selecting mcp_servers...")
 
-    selected_providers: list[str] = []
-    provider_configs: dict[str, dict] = {}
+    selected_mcp_servers: list[str] = []
+    mcp_server_configs: dict[str, dict] = {}
 
-    if providers_opt:
-        requested = [p.strip() for p in providers_opt.split(",")]
+    if mcp_servers_opt:
+        requested = [p.strip() for p in mcp_servers_opt.split(",")]
         available = []
         unavailable = []
 
         for name in requested:
-            provider = get_provider(name)
-            if provider is None:
-                console.print(f"  [yellow]Unknown provider: {name}[/yellow]")
-            elif not provider.is_available(deps):
-                reason = provider.get_unavailable_reason(deps)
+            mcp_server = get_mcp_server(name)
+            if mcp_server is None:
+                console.print(f"  [yellow]Unknown mcp_server: {name}[/yellow]")
+            elif not mcp_server.is_available(deps):
+                reason = mcp_server.get_unavailable_reason(deps)
                 console.print(f"  [yellow]Skipping {name} ({reason})[/yellow]")
                 unavailable.append(name)
             else:
                 available.append(name)
 
-        selected_providers = available
+        selected_mcp_servers = available
         if available:
-            console.print(f"  Using providers: {', '.join(available)}")
+            console.print(f"  Using mcp_servers: {', '.join(available)}")
         if unavailable:
             console.print(f"  [dim]Unavailable: {', '.join(unavailable)}[/dim]")
 
@@ -429,7 +429,7 @@ def init_command(
             )
 
         available, unavailable = filter_bundle_by_availability(bundle.lower(), deps)
-        selected_providers = available
+        selected_mcp_servers = available
 
         if available:
             console.print(f"  Using '{bundle}' bundle: {', '.join(available)}")
@@ -438,42 +438,42 @@ def init_command(
 
     elif non_interactive:
         available, unavailable = filter_bundle_by_availability("starter", deps)
-        selected_providers = available
+        selected_mcp_servers = available
 
         if available:
-            console.print(f"  Using default providers: {', '.join(available)}")
+            console.print(f"  Using default mcp_servers: {', '.join(available)}")
         if unavailable:
             console.print(f"  [yellow]Skipping ({', '.join(unavailable)}) - missing dependencies[/yellow]")
 
     else:
-        selected_providers = _prompt_provider_selection(deps)
+        selected_mcp_servers = _prompt_mcp_server_selection(deps)
 
-    if not selected_providers:
-        console.print("  [yellow]No providers selected[/yellow]")
+    if not selected_mcp_servers:
+        console.print("  [yellow]No mcp_servers selected[/yellow]")
         if not non_interactive:
             proceed = questionary.confirm("Continue with empty configuration?", default=False).ask()
             if not proceed:
                 raise typer.Abort()
 
-    # Step 3: Collect provider configurations
-    if selected_providers and not non_interactive:
-        console.print("\n[bold]Step 3:[/bold] Configuring providers...")
+    # Step 3: Collect mcp_server configurations
+    if selected_mcp_servers and not non_interactive:
+        console.print("\n[bold]Step 3:[/bold] Configuring mcp_servers...")
 
-        for name in list(selected_providers):
-            provider = get_provider(name)
-            if provider and provider.requires_config:
-                config = _collect_provider_config(provider)
+        for name in list(selected_mcp_servers):
+            mcp_server = get_mcp_server(name)
+            if mcp_server and mcp_server.requires_config:
+                config = _collect_mcp_server_config(mcp_server)
                 if config is None:
-                    selected_providers.remove(name)
+                    selected_mcp_servers.remove(name)
                 else:
-                    provider_configs[name] = config
+                    mcp_server_configs[name] = config
 
     # Step 4: Generate configuration files
     console.print("\n[bold]Step 4:[/bold] Generating configuration...")
 
     backup_path = None
-    merged_providers = False
-    final_providers = selected_providers  # Track what ends up in config
+    merged_mcp_servers = False
+    final_mcp_servers = selected_mcp_servers  # Track what ends up in config
 
     if config_mgr.exists() and not reset:
         if non_interactive:
@@ -484,29 +484,29 @@ def init_command(
             action = ExistingConfigAction.BACKUP_OVERWRITE
         else:
             # Interactive mode: prompt for action
-            action = _prompt_existing_config_action(config_mgr, selected_providers)
+            action = _prompt_existing_config_action(config_mgr, selected_mcp_servers)
 
         if action == ExistingConfigAction.ABORT:
             console.print("  [yellow]Aborted - existing configuration preserved[/yellow]")
             raise typer.Abort()
 
         elif action == ExistingConfigAction.MERGE:
-            # Merge new providers with existing
-            provider_defs = [get_provider(name) for name in selected_providers]
-            provider_defs = [p for p in provider_defs if p is not None]
+            # Merge new mcp_servers with existing
+            mcp_server_defs = [get_mcp_server(name) for name in selected_mcp_servers]
+            mcp_server_defs = [p for p in mcp_server_defs if p is not None]
 
             try:
-                added, skipped, total = config_mgr.merge_providers(provider_defs, provider_configs, deps)
+                added, skipped, total = config_mgr.merge_mcp_servers(mcp_server_defs, mcp_server_configs, deps)
 
                 if added:
                     console.print(f"  [green]Added:[/green] {', '.join(added)}")
                 if skipped:
                     console.print(f"  [dim]Skipped (already exist): {', '.join(skipped)}[/dim]")
                 console.print(f"  [green]Updated:[/green] {config_mgr.config_path}")
-                console.print(f"  [dim]Total providers: {len(total)}[/dim]")
+                console.print(f"  [dim]Total mcp_servers: {len(total)}[/dim]")
 
-                final_providers = total
-                merged_providers = True
+                final_mcp_servers = total
+                merged_mcp_servers = True
 
             except OSError as e:
                 raise PermissionError(str(config_mgr.config_path), "write") from e
@@ -518,32 +518,32 @@ def init_command(
                 if backup_path:
                     console.print(f"  [dim]Backed up to: {backup_path}[/dim]")
 
-            provider_defs = [get_provider(name) for name in selected_providers]
-            provider_defs = [p for p in provider_defs if p is not None]
+            mcp_server_defs = [get_mcp_server(name) for name in selected_mcp_servers]
+            mcp_server_defs = [p for p in mcp_server_defs if p is not None]
 
             try:
-                config_mgr.write_initial_config(provider_defs, provider_configs, deps)
+                config_mgr.write_initial_config(mcp_server_defs, mcp_server_configs, deps)
                 console.print(f"  [green]Created:[/green] {config_mgr.config_path}")
             except OSError as e:
                 raise PermissionError(str(config_mgr.config_path), "write") from e
 
     else:
         # No existing config or reset flag - write fresh config
-        provider_defs = [get_provider(name) for name in selected_providers]
-        provider_defs = [p for p in provider_defs if p is not None]
+        mcp_server_defs = [get_mcp_server(name) for name in selected_mcp_servers]
+        mcp_server_defs = [p for p in mcp_server_defs if p is not None]
 
         try:
-            config_mgr.write_initial_config(provider_defs, provider_configs, deps)
+            config_mgr.write_initial_config(mcp_server_defs, mcp_server_configs, deps)
             console.print(f"  [green]Created:[/green] {config_mgr.config_path}")
         except OSError as e:
             raise PermissionError(str(config_mgr.config_path), "write") from e
 
-    # Step 5: Smoke test providers
+    # Step 5: Smoke test mcp_servers
     smoke_test_passed = True
-    providers_to_test = final_providers if merged_providers else selected_providers
-    if providers_to_test and not skip_test:
-        console.print("\n[bold]Step 5:[/bold] Testing providers...")
-        console.print("  [dim]Starting each provider to verify configuration (max 10s)[/dim]\n")
+    mcp_servers_to_test = final_mcp_servers if merged_mcp_servers else selected_mcp_servers
+    if mcp_servers_to_test and not skip_test:
+        console.print("\n[bold]Step 5:[/bold] Testing mcp_servers...")
+        console.print("  [dim]Starting each mcp_server to verify configuration (max 10s)[/dim]\n")
 
         try:
             test_result = run_smoke_test(
@@ -554,13 +554,13 @@ def init_command(
 
             if test_result.all_passed:
                 console.print(
-                    f"\n  [green]All {test_result.passed_count} providers ready[/green] "
+                    f"\n  [green]All {test_result.passed_count} mcp_servers ready[/green] "
                     f"({test_result.total_duration_ms:.0f}ms)"
                 )
             else:
                 smoke_test_passed = False
                 console.print(
-                    f"\n  [yellow]{test_result.failed_count} of {len(test_result.results)} providers failed[/yellow]"
+                    f"\n  [yellow]{test_result.failed_count} of {len(test_result.results)} mcp_servers failed[/yellow]"
                 )
                 console.print("  [dim]Configuration saved - fix issues and run 'mcp-hangar status'[/dim]")
 
@@ -586,7 +586,7 @@ def init_command(
 
     # Step 7: Completion summary
     _show_completion_summary(
-        providers=selected_providers,
+        mcp_servers=selected_mcp_servers,
         hangar_config_path=config_mgr.config_path,
         claude_config_path=claude_mgr.config_path if not skip_claude else None,
         backup_path=claude_backup_path or backup_path,

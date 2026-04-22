@@ -68,7 +68,7 @@ auth:
 
 ### JWT/OIDC Authentication
 
-For enterprise SSO integration with providers like Okta, Auth0, Azure AD:
+For enterprise SSO integration with MCP servers like Okta, Auth0, Azure AD:
 
 ```yaml
 auth:
@@ -88,9 +88,9 @@ auth:
 | Role | Description | Permissions |
 |------|-------------|-------------|
 | `admin` | Full access | Everything |
-| `provider-admin` | Manage providers | provider:*, tool:invoke, tool:list |
-| `developer` | Use tools | provider:read/list, tool:invoke/list, provider:start |
-| `viewer` | Read-only | provider:read/list, tool:list, metrics:read |
+| `mcp_server_admin` | Manage MCP servers | MCP server:*, tool:invoke, tool:list |
+| `developer` | Use tools | MCP server:read/list, tool:invoke/list, MCP server:start |
+| `viewer` | Read-only | MCP server:read/list, tool:list, metrics:read |
 | `auditor` | Audit logs | audit:read, metrics:read |
 
 ### Assigning Roles

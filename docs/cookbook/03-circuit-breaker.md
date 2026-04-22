@@ -3,11 +3,11 @@
 > **Prerequisite:** [02 — Health Checks](02-health-checks.md)
 > **You will need:** Working setup from recipe 02
 > **Time:** 15 minutes
-> **Adds:** Provider groups with circuit breaker for fast-fail protection
+> **Adds:** MCP Server groups with circuit breaker for fast-fail protection
 
 ## The Problem
 
-Health checks from recipe 02 run every 30 seconds. Between checks, a flaky provider can accept requests, fail, get retried, fail again — wasting agent time and tokens on a provider that's clearly broken. Your provider responds to health checks (it's technically alive) but fails 80% of real tool calls. Intermittent failure. Health checks say READY. Agents suffer.
+Health checks from recipe 02 run every 30 seconds. Between checks, a flaky MCP server can accept requests, fail, get retried, fail again — wasting agent time and tokens on a MCP server that's clearly broken. Your MCP server responds to health checks (it's technically alive) but fails 80% of real tool calls. Intermittent failure. Health checks say READY. Agents suffer.
 
 Health checks tell you the patient is dead. Circuit breakers stop you from performing surgery on a corpse.
 
@@ -20,7 +20,7 @@ health_check:
   enabled: true
   interval_s: 30
 
-providers:
+mcp_servers:
   my-mcp:
     mode: remote
     endpoint: http://localhost:8080/sse
@@ -67,7 +67,7 @@ Save this as `~/.config/mcp-hangar/config.yaml` (or update your existing file).
      sleep 0.5
      echo '{"jsonrpc":"2.0","method":"notifications/initialized","params":{}}'
      sleep 0.5
-     echo '{"jsonrpc":"2.0","method":"tools/call","params":{"name":"hangar_call","arguments":{"provider":"my-mcp-group","tool":"fetch","arguments":{"url":"https://example.com"}}},"id":2}'
+     echo '{"jsonrpc":"2.0","method":"tools/call","params":{"name":"hangar_call","arguments":{"mcp_server":"my-mcp-group","tool":"fetch","arguments":{"url":"https://example.com"}}},"id":2}'
      sleep 3
    ) | mcp-hangar --config ~/.config/mcp-hangar/config.yaml serve 2>&1 | grep -E '"id":2|circuit'
    ```
@@ -78,14 +78,14 @@ Save this as `~/.config/mcp-hangar/config.yaml` (or update your existing file).
 
    Circuit breaker is CLOSED (normal operation). Call succeeded.
 
-3. Kill the provider to simulate failures
+3. Kill the MCP server to simulate failures
 
    ```bash
    ps aux | grep mcp-server | grep -v grep
    kill <PID>
    ```
 
-   Provider is now dead.
+   MCP Server is now dead.
 
 4. Call the tool 3 times to trip the circuit
 
@@ -97,7 +97,7 @@ Save this as `~/.config/mcp-hangar/config.yaml` (or update your existing file).
        sleep 0.5
        echo '{"jsonrpc":"2.0","method":"notifications/initialized","params":{}}'
        sleep 0.5
-       echo '{"jsonrpc":"2.0","method":"tools/call","params":{"name":"hangar_call","arguments":{"provider":"my-mcp-group","tool":"fetch","arguments":{"url":"https://example.com"}}},"id":2}'
+       echo '{"jsonrpc":"2.0","method":"tools/call","params":{"name":"hangar_call","arguments":{"mcp_server":"my-mcp-group","tool":"fetch","arguments":{"url":"https://example.com"}}},"id":2}'
        sleep 3
      ) | mcp-hangar --config ~/.config/mcp-hangar/config.yaml serve 2>&1 | grep -E 'error|circuit' | head -2
    done
@@ -105,9 +105,9 @@ Save this as `~/.config/mcp-hangar/config.yaml` (or update your existing file).
 
    ```
    Attempt 1...
-   WARNING  tool_call_failed provider=my-mcp-group error=Connection refused
+   WARNING  tool_call_failed mcp_server=my-mcp-group error=Connection refused
    Attempt 2...
-   WARNING  tool_call_failed provider=my-mcp-group error=Connection refused
+   WARNING  tool_call_failed mcp_server=my-mcp-group error=Connection refused
    Attempt 3...
    WARNING  circuit_breaker_opened group=my-mcp-group failures=3
    ```
@@ -122,7 +122,7 @@ Save this as `~/.config/mcp-hangar/config.yaml` (or update your existing file).
      sleep 0.5
      echo '{"jsonrpc":"2.0","method":"notifications/initialized","params":{}}'
      sleep 0.5
-     echo '{"jsonrpc":"2.0","method":"tools/call","params":{"name":"hangar_call","arguments":{"provider":"my-mcp-group","tool":"fetch","arguments":{"url":"https://example.com"}}},"id":2}'
+     echo '{"jsonrpc":"2.0","method":"tools/call","params":{"name":"hangar_call","arguments":{"mcp_server":"my-mcp-group","tool":"fetch","arguments":{"url":"https://example.com"}}},"id":2}'
      sleep 1
    ) | mcp-hangar --config ~/.config/mcp-hangar/config.yaml serve 2>&1 | grep -E 'circuit_open|rejected'
    ```
@@ -149,7 +149,7 @@ Save this as `~/.config/mcp-hangar/config.yaml` (or update your existing file).
 
    Circuit automatically transitions from OPEN to CLOSED after `reset_timeout_s`.
 
-7. Restart provider and verify recovery
+7. Restart MCP server and verify recovery
 
    ```bash
    uvx mcp-server-fetch &
@@ -160,7 +160,7 @@ Save this as `~/.config/mcp-hangar/config.yaml` (or update your existing file).
      sleep 0.5
      echo '{"jsonrpc":"2.0","method":"notifications/initialized","params":{}}'
      sleep 0.5
-     echo '{"jsonrpc":"2.0","method":"tools/call","params":{"name":"hangar_call","arguments":{"provider":"my-mcp-group","tool":"fetch","arguments":{"url":"https://example.com"}}},"id":2}'
+     echo '{"jsonrpc":"2.0","method":"tools/call","params":{"name":"hangar_call","arguments":{"mcp_server":"my-mcp-group","tool":"fetch","arguments":{"url":"https://example.com"}}},"id":2}'
      sleep 3
    ) | mcp-hangar --config ~/.config/mcp-hangar/config.yaml serve 2>&1 | grep -E '"id":2|success'
    ```
@@ -173,34 +173,34 @@ Save this as `~/.config/mcp-hangar/config.yaml` (or update your existing file).
 
 ## What Just Happened
 
-Hangar introduced **provider groups** — a logical grouping of one or more providers with shared policies. The group has a circuit breaker that tracks real tool call failures, not synthetic health probes.
+Hangar introduced **MCP server groups** — a logical grouping of one or more MCP servers with shared policies. The group has a circuit breaker that tracks real tool call failures, not synthetic health probes.
 
 **Circuit breaker states:**
 
 **CLOSED** (normal operation): All calls pass through to group members. The circuit breaker counts consecutive failures. When `failure_count` reaches `failure_threshold` (3), the circuit opens.
 
-**OPEN** (protecting): All calls are rejected immediately with a circuit-open error. No traffic reaches the provider — this is the protection. Instead of waiting 10+ seconds for connection timeout, Hangar fails in milliseconds. After `reset_timeout_s` (30 seconds), the circuit automatically closes and allows traffic again.
+**OPEN** (protecting): All calls are rejected immediately with a circuit-open error. No traffic reaches the MCP server — this is the protection. Instead of waiting 10+ seconds for connection timeout, Hangar fails in milliseconds. After `reset_timeout_s` (30 seconds), the circuit automatically closes and allows traffic again.
 
 **How this differs from health checks:**
 
-- **Health checks** (recipe 02): Periodic synthetic probe (`tools/list` every 30s). Detects "is the provider alive?"
-- **Circuit breaker** (recipe 03): Tracks real tool call failures in real-time. Detects "is the provider working?"
+- **Health checks** (recipe 02): Periodic synthetic probe (`tools/list` every 30s). Detects "is the MCP server alive?"
+- **Circuit breaker** (recipe 03): Tracks real tool call failures in real-time. Detects "is the MCP server working?"
 
-They complement each other. Health checks catch dead providers. Circuit breakers catch flaky providers that pass health checks but fail real requests. The circuit breaker trips instantly on the Nth failure — no waiting for the next health check cycle.
+They complement each other. Health checks catch dead MCP servers. Circuit breakers catch flaky MCP servers that pass health checks but fail real requests. The circuit breaker trips instantly on the Nth failure — no waiting for the next health check cycle.
 
 ## Key Config Reference
 
 | Key | Type | Default | Description |
 |-----|------|---------|-------------|
-| `providers.<name>.mode` | string | — | Set to `group` for provider groups |
-| `providers.<name>.strategy` | string | `round_robin` | Load balancing strategy |
-| `providers.<name>.min_healthy` | int | `1` | Minimum healthy members required |
-| `providers.<name>.circuit_breaker.failure_threshold` | int | `10` | Consecutive failures before circuit opens |
-| `providers.<name>.circuit_breaker.reset_timeout_s` | float | `60.0` | Seconds before circuit auto-closes |
-| `providers.<name>.members` | list | — | List of provider IDs or inline definitions |
+| `MCP servers.<name>.mode` | string | — | Set to `group` for MCP server groups |
+| `MCP servers.<name>.strategy` | string | `round_robin` | Load balancing strategy |
+| `MCP servers.<name>.min_healthy` | int | `1` | Minimum healthy members required |
+| `MCP servers.<name>.circuit_breaker.failure_threshold` | int | `10` | Consecutive failures before circuit opens |
+| `MCP servers.<name>.circuit_breaker.reset_timeout_s` | float | `60.0` | Seconds before circuit auto-closes |
+| `MCP servers.<name>.members` | list | — | List of MCP server IDs or inline definitions |
 
 ## What's Next
 
-Your single provider is protected — but it's still a single point of failure. When the circuit opens, agents get errors instead of results. What if there was a backup provider ready to take over automatically?
+Your single MCP server is protected — but it's still a single point of failure. When the circuit opens, agents get errors instead of results. What if there was a backup MCP server ready to take over automatically?
 
 → [04 — Failover](04-failover.md)

@@ -10,7 +10,7 @@ from ..tools import (
     register_hangar_tools,
     register_health_tools,
     register_load_tools,
-    register_provider_tools,
+    register_mcp_server_tools,
 )
 from ..tools.continuation import register_continuation_tools
 
@@ -25,7 +25,7 @@ def register_all_tools(mcp_server: FastMCP) -> None:
     """
     register_hangar_tools(mcp_server)
     register_load_tools(mcp_server)
-    register_provider_tools(mcp_server)
+    register_mcp_server_tools(mcp_server)
     register_health_tools(mcp_server)
     register_discovery_tools(mcp_server)
     register_group_tools(mcp_server)

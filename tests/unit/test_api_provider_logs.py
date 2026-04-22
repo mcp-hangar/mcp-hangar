@@ -1,13 +1,13 @@
-"""Tests for GET /providers/{provider_id}/logs REST endpoint (LOG-03)."""
+"""Tests for GET /mcp_servers/{mcp_server_id}/logs REST endpoint (LOG-03)."""
 
 from unittest.mock import Mock, patch
 
 import pytest
 from starlette.testclient import TestClient
 
-from mcp_hangar.application.queries.queries import GetProviderQuery
-from mcp_hangar.application.read_models.provider_views import HealthInfo, ProviderDetails, ToolInfo
-from mcp_hangar.domain.exceptions import ProviderNotFoundError
+from mcp_hangar.application.queries.queries import GetMcpServerQuery
+from mcp_hangar.application.read_models.mcp_server_views import HealthInfo, McpServerDetails, ToolInfo
+from mcp_hangar.domain.exceptions import McpServerNotFoundError
 from mcp_hangar.domain.value_objects.log import LogLine
 from mcp_hangar.infrastructure.persistence.log_buffer import (
     ProviderLogBuffer,
@@ -31,9 +31,9 @@ def clean_registry():
 
 @pytest.fixture
 def provider_details():
-    """Sample ProviderDetails for the 'math' provider."""
-    return ProviderDetails(
-        provider_id="math",
+    """Sample McpServerDetails for the 'math' mcp_server."""
+    return McpServerDetails(
+        mcp_server_id="math",
         state="ready",
         mode="subprocess",
         is_alive=True,
@@ -59,10 +59,10 @@ def mock_context(provider_details):
     query_bus = Mock()
 
     def execute_query(query):
-        if isinstance(query, GetProviderQuery):
-            if query.provider_id == "math":
+        if isinstance(query, GetMcpServerQuery):
+            if query.mcp_server_id == "math":
                 return provider_details
-            raise ProviderNotFoundError(query.provider_id)
+            raise McpServerNotFoundError(query.mcp_server_id)
         raise ValueError(f"Unexpected query: {type(query)}")
 
     query_bus.execute.side_effect = execute_query
@@ -87,29 +87,29 @@ def api_client(mock_context):
 # ---------------------------------------------------------------------------
 
 
-def _make_lines(provider_id: str, n: int) -> list[LogLine]:
-    """Create *n* LogLine objects for the given provider."""
-    return [LogLine(provider_id=provider_id, stream="stderr", content=f"line-{i}") for i in range(n)]
+def _make_lines(mcp_server_id: str, n: int) -> list[LogLine]:
+    """Create *n* LogLine objects for the given mcp_server."""
+    return [LogLine(mcp_server_id=mcp_server_id, stream="stderr", content=f"line-{i}") for i in range(n)]
 
 
 # ---------------------------------------------------------------------------
-# GET /providers/{id}/logs — happy path
+# GET /mcp_servers/{id}/logs — happy path
 # ---------------------------------------------------------------------------
 
 
 class TestGetProviderLogsHappyPath:
-    """Happy-path tests for GET /providers/{id}/logs."""
+    """Happy-path tests for GET /mcp_servers/{id}/logs."""
 
     def test_returns_200_when_provider_has_no_buffer(self, api_client):
         """Returns 200 with empty list when no buffer registered."""
-        response = api_client.get("/providers/math/logs")
+        response = api_client.get("/mcp_servers/math/logs")
         assert response.status_code == 200
 
     def test_response_shape_when_no_buffer(self, api_client):
-        """Response contains logs, provider_id, and count keys."""
-        response = api_client.get("/providers/math/logs")
+        """Response contains logs, mcp_server_id, and count keys."""
+        response = api_client.get("/mcp_servers/math/logs")
         data = response.json()
-        assert data == {"logs": [], "provider_id": "math", "count": 0}
+        assert data == {"logs": [], "mcp_server_id": "math", "count": 0}
 
     def test_returns_200_with_buffered_lines(self, api_client):
         """Returns 200 and includes log lines when buffer is populated."""
@@ -118,21 +118,21 @@ class TestGetProviderLogsHappyPath:
             buf.append(line)
         set_log_buffer("math", buf)
 
-        response = api_client.get("/providers/math/logs")
+        response = api_client.get("/mcp_servers/math/logs")
         assert response.status_code == 200
         data = response.json()
         assert data["count"] == 5
         assert len(data["logs"]) == 5
 
     def test_log_line_has_expected_fields(self, api_client):
-        """Each log entry contains provider_id, stream, content, recorded_at."""
+        """Each log entry contains mcp_server_id, stream, content, recorded_at."""
         buf = ProviderLogBuffer("math")
-        buf.append(LogLine(provider_id="math", stream="stderr", content="hello"))
+        buf.append(LogLine(mcp_server_id="math", stream="stderr", content="hello"))
         set_log_buffer("math", buf)
 
-        response = api_client.get("/providers/math/logs")
+        response = api_client.get("/mcp_servers/math/logs")
         entry = response.json()["logs"][0]
-        assert entry["provider_id"] == "math"
+        assert entry["mcp_server_id"] == "math"
         assert entry["stream"] == "stderr"
         assert entry["content"] == "hello"
         assert isinstance(entry["recorded_at"], float)
@@ -144,7 +144,7 @@ class TestGetProviderLogsHappyPath:
             buf.append(line)
         set_log_buffer("math", buf)
 
-        response = api_client.get("/providers/math/logs")
+        response = api_client.get("/mcp_servers/math/logs")
         data = response.json()
         assert data["count"] == 100
 
@@ -155,7 +155,7 @@ class TestGetProviderLogsHappyPath:
             buf.append(line)
         set_log_buffer("math", buf)
 
-        response = api_client.get("/providers/math/logs?lines=10")
+        response = api_client.get("/mcp_servers/math/logs?lines=10")
         data = response.json()
         assert data["count"] == 10
         assert len(data["logs"]) == 10
@@ -164,10 +164,10 @@ class TestGetProviderLogsHappyPath:
         """?lines=N returns the most recent N lines (tail semantics)."""
         buf = ProviderLogBuffer("math")
         for i in range(5):
-            buf.append(LogLine(provider_id="math", stream="stderr", content=f"line-{i}"))
+            buf.append(LogLine(mcp_server_id="math", stream="stderr", content=f"line-{i}"))
         set_log_buffer("math", buf)
 
-        response = api_client.get("/providers/math/logs?lines=3")
+        response = api_client.get("/mcp_servers/math/logs?lines=3")
         contents = [e["content"] for e in response.json()["logs"]]
         assert contents == ["line-2", "line-3", "line-4"]
 
@@ -178,18 +178,18 @@ class TestGetProviderLogsHappyPath:
             buf.append(line)
         set_log_buffer("math", buf)
 
-        response = api_client.get("/providers/math/logs?lines=1000")
+        response = api_client.get("/mcp_servers/math/logs?lines=1000")
         data = response.json()
         assert data["count"] == 20
 
-    def test_provider_id_in_response(self, api_client):
-        """Response always echoes back the provider_id."""
-        response = api_client.get("/providers/math/logs")
-        assert response.json()["provider_id"] == "math"
+    def test_mcp_server_id_in_response(self, api_client):
+        """Response always echoes back the mcp_server_id."""
+        response = api_client.get("/mcp_servers/math/logs")
+        assert response.json()["mcp_server_id"] == "math"
 
 
 # ---------------------------------------------------------------------------
-# GET /providers/{id}/logs — parameter clamping
+# GET /mcp_servers/{id}/logs — parameter clamping
 # ---------------------------------------------------------------------------
 
 
@@ -203,7 +203,7 @@ class TestGetProviderLogsParamClamping:
             buf.append(line)
         set_log_buffer("math", buf)
 
-        response = api_client.get("/providers/math/logs?lines=9999")
+        response = api_client.get("/mcp_servers/math/logs?lines=9999")
         data = response.json()
         assert data["count"] <= 1000
 
@@ -214,7 +214,7 @@ class TestGetProviderLogsParamClamping:
             buf.append(line)
         set_log_buffer("math", buf)
 
-        response = api_client.get("/providers/math/logs?lines=0")
+        response = api_client.get("/mcp_servers/math/logs?lines=0")
         data = response.json()
         assert data["count"] == 1
 
@@ -225,28 +225,28 @@ class TestGetProviderLogsParamClamping:
             buf.append(line)
         set_log_buffer("math", buf)
 
-        response = api_client.get("/providers/math/logs?lines=abc")
+        response = api_client.get("/mcp_servers/math/logs?lines=abc")
         data = response.json()
         assert data["count"] == 100
 
 
 # ---------------------------------------------------------------------------
-# GET /providers/{id}/logs — 404 for unknown providers
+# GET /mcp_servers/{id}/logs — 404 for unknown mcp_servers
 # ---------------------------------------------------------------------------
 
 
 class TestGetProviderLogsNotFound:
-    """Error path: unknown provider should yield 404."""
+    """Error path: unknown mcp_server should yield 404."""
 
     def test_returns_404_for_unknown_provider(self, api_client):
-        """GET /providers/unknown/logs returns HTTP 404."""
-        response = api_client.get("/providers/unknown/logs")
+        """GET /mcp_servers/unknown/logs returns HTTP 404."""
+        response = api_client.get("/mcp_servers/unknown/logs")
         assert response.status_code == 404
 
     def test_returns_error_envelope_for_unknown_provider(self, api_client):
         """Error response follows the standard envelope format."""
-        response = api_client.get("/providers/unknown/logs")
+        response = api_client.get("/mcp_servers/unknown/logs")
         data = response.json()
         assert "error" in data
-        assert data["error"]["code"] == "ProviderNotFoundError"
+        assert data["error"]["code"] == "McpServerNotFoundError"
         assert "message" in data["error"]

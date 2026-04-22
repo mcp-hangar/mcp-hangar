@@ -78,11 +78,12 @@ class ApprovalGateService:
 
     async def check(
         self,
-        provider_id: str,
         tool_name: str,
         arguments: dict[str, Any],
         policy: ToolAccessPolicy,
         correlation_id: str,
+        mcp_server_id: str | None = None,
+        provider_id: str | None = None,
     ) -> ApprovalResult:
         """Called from mcp_tool_wrapper check_approval hook.
 
@@ -93,12 +94,16 @@ class ApprovalGateService:
         5. Wait for resolution or timeout
         6. Publish outcome event, return result
         """
+        resolved_provider_id = provider_id or mcp_server_id
+        if resolved_provider_id is None:
+            raise TypeError("Missing required argument: mcp_server_id")
+
         if not policy.requires_approval(tool_name):
             return ApprovalResult.not_required()
 
         tracer = get_tracer(__name__)
         with tracer.start_as_current_span("approval_gate.flow") as gate_span:
-            gate_span.set_attribute("mcp.provider.id", provider_id)
+            gate_span.set_attribute("mcp.server.id", resolved_provider_id)
             gate_span.set_attribute("mcp.tool.name", tool_name)
             gate_span.set_attribute("approval.channel", policy.approval_channel)
             gate_span.set_attribute("approval.timeout_seconds", policy.approval_timeout_seconds)
@@ -112,7 +117,7 @@ class ApprovalGateService:
 
             request = ApprovalRequest(
                 approval_id=approval_id,
-                provider_id=provider_id,
+                provider_id=resolved_provider_id,
                 tool_name=tool_name,
                 arguments=sanitized_args,
                 arguments_hash=args_hash,
@@ -127,7 +132,7 @@ class ApprovalGateService:
 
             requested_event = ToolApprovalRequested(
                 approval_id=approval_id,
-                provider_id=provider_id,
+                provider_id=resolved_provider_id,
                 tool_name=tool_name,
                 arguments_hash=args_hash,
                 channel=policy.approval_channel,
@@ -163,13 +168,15 @@ class ApprovalGateService:
             if decision is True:
                 # State already updated by resolve() -- just reload for event data
                 updated = await self._repository.get(approval_id)
-                decided_by = updated.decided_by if updated else "unknown"
-                decided_at = updated.decided_at if updated else datetime.now(timezone.utc)
+                decided_by = updated.decided_by if updated and updated.decided_by is not None else "unknown"
+                decided_at = (
+                    updated.decided_at if updated and updated.decided_at is not None else datetime.now(timezone.utc)
+                )
 
                 await self._publish(
                     ToolApprovalGranted(
                         approval_id=approval_id,
-                        provider_id=provider_id,
+                        provider_id=resolved_provider_id,
                         tool_name=tool_name,
                         decided_by=decided_by,
                         decided_at=decided_at.isoformat(),
@@ -181,14 +188,16 @@ class ApprovalGateService:
             if decision is False:
                 # State already updated by resolve() -- just reload for event data
                 updated = await self._repository.get(approval_id)
-                decided_by = updated.decided_by if updated else "unknown"
-                decided_at = updated.decided_at if updated else datetime.now(timezone.utc)
+                decided_by = updated.decided_by if updated and updated.decided_by is not None else "unknown"
+                decided_at = (
+                    updated.decided_at if updated and updated.decided_at is not None else datetime.now(timezone.utc)
+                )
                 reason = updated.reason if updated else None
 
                 await self._publish(
                     ToolApprovalDenied(
                         approval_id=approval_id,
-                        provider_id=provider_id,
+                        provider_id=resolved_provider_id,
                         tool_name=tool_name,
                         decided_by=decided_by,
                         decided_at=decided_at.isoformat(),
@@ -207,7 +216,7 @@ class ApprovalGateService:
             await self._publish(
                 ToolApprovalExpired(
                     approval_id=approval_id,
-                    provider_id=provider_id,
+                    provider_id=resolved_provider_id,
                     tool_name=tool_name,
                     expired_at=expired_at.isoformat(),
                 )

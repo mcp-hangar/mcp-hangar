@@ -4,7 +4,7 @@ Ensures a function is only executed once for a given key, even with concurrent c
 Subsequent callers wait for the first execution to complete and share the result.
 
 This is useful for:
-- Provider cold starts: multiple batch calls to the same COLD provider should trigger
+- McpServer cold starts: multiple batch calls to the same COLD mcp_server should trigger
   only one startup, with other callers waiting for completion.
 - Expensive computations: avoid duplicate work when multiple requests need the same result.
 

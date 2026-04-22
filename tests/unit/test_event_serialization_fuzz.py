@@ -27,15 +27,15 @@ from mcp_hangar.domain.events import (
     ProviderApproved,
     ProviderCapabilityQuarantined,
     ProviderCapabilityQuarantineReleased,
-    ProviderDegraded,
+    McpServerDegraded,
     ProviderDiscovered,
     ProviderDiscoveryConfigChanged,
     ProviderDiscoveryLost,
     ProviderIdleDetected,
     ProviderQuarantined,
-    ProviderStarted,
-    ProviderStateChanged,
-    ProviderStopped,
+    McpServerStarted,
+    McpServerStateChanged,
+    McpServerStopped,
     ToolApprovalDenied,
     ToolApprovalExpired,
     ToolApprovalGranted,
@@ -58,42 +58,37 @@ from mcp_hangar.infrastructure.persistence.event_upcaster import (
 # ---------------------------------------------------------------------------
 
 _MINIMAL_EVENTS: dict[str, DomainEvent] = {
-    "ProviderStarted": ProviderStarted(provider_id="p1", mode="subprocess", tools_count=0, startup_duration_ms=0.0),
-    "ProviderStopped": ProviderStopped(provider_id="p1", reason="shutdown"),
-    "ProviderDegraded": ProviderDegraded(provider_id="p1", consecutive_failures=1, total_failures=1, reason="health"),
-    "ProviderStateChanged": ProviderStateChanged(provider_id="p1", old_state="COLD", new_state="INITIALIZING"),
-    "ProviderIdleDetected": ProviderIdleDetected(provider_id="p1", idle_duration_s=0.0, last_used_at=0.0),
-    "ToolInvocationRequested": ToolInvocationRequested(provider_id="p1", tool_name="t", correlation_id="c1"),
-    "ToolInvocationCompleted": ToolInvocationCompleted(
-        provider_id="p1", tool_name="t", correlation_id="c1", duration_ms=0.0, result_size_bytes=0
-    ),
-    "ToolInvocationFailed": ToolInvocationFailed(
-        provider_id="p1",
-        tool_name="t",
-        correlation_id="c1",
-        duration_ms=0.0,
-        error_message="e",
-        error_type="RuntimeError",
-    ),
-    "HealthCheckPassed": HealthCheckPassed(provider_id="p1", duration_ms=0.0),
-    "HealthCheckFailed": HealthCheckFailed(provider_id="p1", consecutive_failures=1, error_message="e"),
+    "McpServerStarted": McpServerStarted(mcp_server_id="p1", mode="subprocess", tools_count=0, startup_duration_ms=0.0),
+    "McpServerStopped": McpServerStopped(mcp_server_id="p1", reason="shutdown"),
+    "McpServerDegraded": McpServerDegraded(mcp_server_id="p1", consecutive_failures=1, total_failures=1, reason="health"),
+    "McpServerStateChanged": McpServerStateChanged(mcp_server_id="p1", old_state="COLD", new_state="INITIALIZING"),
+    "ProviderIdleDetected": ProviderIdleDetected(mcp_server_id="p1", idle_duration_s=0.0, last_used_at=0.0),
+    "ToolInvocationRequested": ToolInvocationRequested(mcp_server_id="p1", tool_name="t", correlation_id="c1"),
+    "ToolInvocationCompleted": ToolInvocationCompleted(mcp_server_id="p1", tool_name="t", correlation_id="c1", duration_ms=0.0, result_size_bytes=0),
+    "ToolInvocationFailed": ToolInvocationFailed(mcp_server_id="p1", tool_name="t",
+    correlation_id="c1",
+    duration_ms=0.0,
+    error_message="e",
+    error_type="RuntimeError",),
+    "HealthCheckPassed": HealthCheckPassed(mcp_server_id="p1", duration_ms=0.0),
+    "HealthCheckFailed": HealthCheckFailed(mcp_server_id="p1", consecutive_failures=1, error_message="e"),
     "ProviderDiscovered": ProviderDiscovered(
-        provider_name="p1", source_type="filesystem", mode="subprocess", fingerprint="abc"
+        mcp_server_name="p1", source_type="filesystem", mode="subprocess", fingerprint="abc"
     ),
-    "ProviderDiscoveryLost": ProviderDiscoveryLost(provider_name="p1", source_type="filesystem", reason="ttl_expired"),
+    "ProviderDiscoveryLost": ProviderDiscoveryLost(mcp_server_name="p1", source_type="filesystem", reason="ttl_expired"),
     "ProviderDiscoveryConfigChanged": ProviderDiscoveryConfigChanged(
-        provider_name="p1",
+        mcp_server_name="p1",
         source_type="filesystem",
         old_fingerprint="a",
         new_fingerprint="b",
     ),
     "ProviderQuarantined": ProviderQuarantined(
-        provider_name="p1",
+        mcp_server_name="p1",
         source_type="filesystem",
         reason="unknown_mode",
         validation_result="invalid",
     ),
-    "ProviderApproved": ProviderApproved(provider_name="p1", source_type="filesystem", approved_by="auto"),
+    "ProviderApproved": ProviderApproved(mcp_server_name="p1", source_type="filesystem", approved_by="auto"),
     "DiscoveryCycleCompleted": DiscoveryCycleCompleted(
         discovered_count=0,
         registered_count=0,
@@ -103,29 +98,17 @@ _MINIMAL_EVENTS: dict[str, DomainEvent] = {
         duration_ms=0.0,
     ),
     "DiscoverySourceHealthChanged": DiscoverySourceHealthChanged(source_type="filesystem", is_healthy=True),
-    "CircuitBreakerStateChanged": CircuitBreakerStateChanged(provider_id="p1", old_state="closed", new_state="open"),
+    "CircuitBreakerStateChanged": CircuitBreakerStateChanged(mcp_server_id="p1", old_state="closed", new_state="open"),
     # Capability enforcement
-    "CapabilityViolationDetected": CapabilityViolationDetected(
-        provider_id="p1",
-        violation_type="egress_undeclared",
-        violation_detail="Connection to 192.168.1.100:9200",
-        enforcement_action="alert",
-    ),
-    "EgressBlocked": EgressBlocked(
-        provider_id="p1",
-        destination_host="evil.example.com",
-        destination_port=443,
-        protocol="https",
-    ),
-    "ProviderCapabilityQuarantined": ProviderCapabilityQuarantined(
-        provider_id="p1",
-        reason="3 violations in 60s",
-        violation_count=3,
-    ),
-    "ProviderCapabilityQuarantineReleased": ProviderCapabilityQuarantineReleased(
-        provider_id="p1",
-        released_by="ops@example.com",
-    ),
+    "CapabilityViolationDetected": CapabilityViolationDetected(mcp_server_id="p1", violation_type="egress_undeclared",
+    violation_detail="Connection to 192.168.1.100:9200",
+    enforcement_action="alert",),
+    "EgressBlocked": EgressBlocked(mcp_server_id="p1", destination_host="evil.example.com",
+    destination_port=443,
+    protocol="https",),
+    "ProviderCapabilityQuarantined": ProviderCapabilityQuarantined(mcp_server_id="p1", reason="3 violations in 60s",
+    violation_count=3,),
+    "ProviderCapabilityQuarantineReleased": ProviderCapabilityQuarantineReleased(mcp_server_id="p1", released_by="ops@example.com",),
     "PolicyPushRejected": PolicyPushRejected(
         principal_id="anonymous",
         reason="authentication_required",
@@ -134,7 +117,7 @@ _MINIMAL_EVENTS: dict[str, DomainEvent] = {
     # Approval gate
     "ToolApprovalRequested": ToolApprovalRequested(
         approval_id="a1",
-        provider_id="p1",
+        mcp_server_id="p1",
         tool_name="t",
         arguments_hash="abc",
         channel="dashboard",
@@ -143,14 +126,14 @@ _MINIMAL_EVENTS: dict[str, DomainEvent] = {
     ),
     "ToolApprovalGranted": ToolApprovalGranted(
         approval_id="a1",
-        provider_id="p1",
+        mcp_server_id="p1",
         tool_name="t",
         decided_by="user@example.com",
         decided_at="2025-01-01T00:00:00+00:00",
     ),
     "ToolApprovalDenied": ToolApprovalDenied(
         approval_id="a1",
-        provider_id="p1",
+        mcp_server_id="p1",
         tool_name="t",
         decided_by="user@example.com",
         decided_at="2025-01-01T00:00:00+00:00",
@@ -158,7 +141,7 @@ _MINIMAL_EVENTS: dict[str, DomainEvent] = {
     ),
     "ToolApprovalExpired": ToolApprovalExpired(
         approval_id="a1",
-        provider_id="p1",
+        mcp_server_id="p1",
         tool_name="t",
         expired_at="2025-01-01T00:00:00+00:00",
     ),
@@ -203,7 +186,7 @@ class TestEventSerializerFuzz:
         serializer = EventSerializer()
         text = data.decode("utf-8", errors="replace")
         try:
-            serializer.deserialize("ProviderStarted", text)
+            serializer.deserialize("McpServerStarted", text)
         except EventSerializationError:
             pass  # Correct wrapped error
         # If no exception: deserialize succeeded, which is fine

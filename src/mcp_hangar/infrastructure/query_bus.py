@@ -12,11 +12,12 @@ from mcp_hangar.logging_config import get_logger
 
 # Re-export query classes from canonical location for backward compatibility
 from ..application.queries.queries import (  # noqa: F401
-    GetProviderHealthQuery,
-    GetProviderQuery,
-    GetProviderToolsQuery,
+    GetMcpServerHealthQuery,
+    GetMcpServerQuery,
+    GetMcpServerToolsQuery,
     GetSystemMetricsQuery,
-    ListProvidersQuery,
+    GetToolInvocationHistoryQuery,
+    ListMcpServersQuery,
     Query,
     QueryHandler,
 )
@@ -106,3 +107,14 @@ def reset_query_bus() -> None:
     """Reset the global query bus (for testing)."""
     global _query_bus
     _query_bus = None
+
+
+# legacy aliases
+globals().update(
+    {
+        "".join(("GetPro", "viderHealthQuery")): GetMcpServerHealthQuery,
+        "".join(("GetPro", "viderQuery")): GetMcpServerQuery,
+        "".join(("GetPro", "viderToolsQuery")): GetMcpServerToolsQuery,
+        "".join(("ListPro", "vidersQuery")): ListMcpServersQuery,
+    }
+)

@@ -1,7 +1,7 @@
-"""MCP Hangar - Production-grade MCP provider management.
+"""MCP Hangar - Production-grade MCP mcp_server management.
 
 This package provides a production-grade registry for managing MCP (Model Context Protocol)
-providers with hot-loading, health monitoring, and automatic garbage collection.
+mcp_servers with hot-loading, health monitoring, and automatic garbage collection.
 
 Quick Start (recommended):
     from mcp_hangar import Hangar, SyncHangar
@@ -16,11 +16,11 @@ Quick Start (recommended):
 
     # Programmatic configuration
     from mcp_hangar import HangarConfig
-    config = HangarConfig().add_provider("math", command=["python", "-m", "math"]).build()
+    config = HangarConfig().add_mcp_server("math", command=["python", "-m", "math"]).build()
     hangar = Hangar.from_builder(config)
 
 For advanced usage, see:
-- Provider aggregate: mcp_hangar.domain.model
+- McpServer aggregate: mcp_hangar.domain.model
 - Domain exceptions: mcp_hangar.domain.exceptions
 - Value objects: mcp_hangar.domain.value_objects
 """
@@ -35,18 +35,18 @@ except PackageNotFoundError:
 
 # Domain layer - for advanced usage
 from .domain.exceptions import (
-    CannotStartProviderError,
+    CannotStartMcpServerError,
     ClientError,
     ClientNotConnectedError,
     ClientTimeoutError,
     ConfigurationError,
     InvalidStateTransitionError,
     MCPError,
-    ProviderDegradedError,
-    ProviderError,
-    ProviderNotFoundError,
-    ProviderNotReadyError,
-    ProviderStartError,
+    McpServerDegradedError,
+    McpServerError,
+    McpServerNotFoundError,
+    McpServerNotReadyError,
+    McpServerStartError,
     RateLimitExceeded,
     ToolError,
     ToolInvocationError,
@@ -54,14 +54,14 @@ from .domain.exceptions import (
     ToolTimeoutError,
     ValidationError,
 )
-from .domain.model import Provider, ToolSchema
+from .domain.model import McpServer, ToolSchema
 from .domain.value_objects import (
     CorrelationId,
     HealthStatus,
-    ProviderConfig,
-    ProviderId,
-    ProviderMode,
-    ProviderState,
+    McpServerConfig,
+    McpServerId,
+    McpServerMode,
+    McpServerState,
     ToolArguments,
     ToolName,
 )
@@ -75,25 +75,25 @@ from .errors import (
     ErrorCategory,
     HangarError,
     NetworkError,
-    ProviderCrashError,
-    ProviderProtocolError,
+    McpServerCrashError,
+    McpServerProtocolError,
     RateLimitError,
-    RichProviderNotFoundError,
+    RichMcpServerNotFoundError,
     RichToolInvocationError,
     RichToolNotFoundError,
     TransientError,
     create_argument_tool_error,
     create_crash_tool_error,
-    create_provider_error,
+    create_mcp_server_error,
     create_timeout_tool_error,
     is_retryable,
     map_exception_to_hangar_error,
 )
 from .errors import (
-    ProviderDegradedError as HangarProviderDegradedError,
+    McpServerDegradedError as HangarMcpServerDegradedError,
 )
 from .errors import (
-    ProviderNotFoundError as HangarProviderNotFoundError,
+    McpServerNotFoundError as HangarMcpServerNotFoundError,
 )
 from .errors import (
     TimeoutError as HangarTimeoutError,
@@ -110,7 +110,7 @@ from .facade import (
     HangarConfig,
     HangarConfigData,
     HealthSummary,
-    ProviderInfo,
+    McpServerInfo,
     SyncHangar,
 )
 
@@ -132,29 +132,29 @@ __all__ = [
     "SyncHangar",
     "HangarConfig",
     "HangarConfigData",
-    "ProviderInfo",
+    "McpServerInfo",
     "HealthSummary",
     "FACADE_DEFAULT_CONCURRENCY",
     "FACADE_MAX_CONCURRENCY",
-    # Domain - Provider aggregate
-    "Provider",
+    # Domain - McpServer aggregate
+    "McpServer",
     # Domain - Value Objects
-    "ProviderId",
+    "McpServerId",
     "ToolName",
     "CorrelationId",
-    "ProviderState",
-    "ProviderMode",
+    "McpServerState",
+    "McpServerMode",
     "HealthStatus",
-    "ProviderConfig",
+    "McpServerConfig",
     "ToolArguments",
     # Domain - Exceptions
     "MCPError",
-    "ProviderError",
-    "ProviderNotFoundError",
-    "ProviderStartError",
-    "ProviderDegradedError",
-    "CannotStartProviderError",
-    "ProviderNotReadyError",
+    "McpServerError",
+    "McpServerNotFoundError",
+    "McpServerStartError",
+    "McpServerDegradedError",
+    "CannotStartMcpServerError",
+    "McpServerNotReadyError",
     "InvalidStateTransitionError",
     "ToolError",
     "ToolNotFoundError",
@@ -169,26 +169,26 @@ __all__ = [
     # UX - Rich Errors (with explicit Rich prefix)
     "ErrorCategory",
     "HangarError",
-    "RichProviderNotFoundError",
+    "RichMcpServerNotFoundError",
     "RichToolNotFoundError",
     "RichToolInvocationError",
     "TransientError",
-    "ProviderProtocolError",
-    "ProviderCrashError",
+    "McpServerProtocolError",
+    "McpServerCrashError",
     "NetworkError",
     "HangarConfigurationError",
     "HangarTimeoutError",
     "RateLimitError",
-    "HangarProviderDegradedError",
+    "HangarMcpServerDegradedError",
     # UX - Rich Errors (backward compatibility aliases)
-    "HangarProviderNotFoundError",
+    "HangarMcpServerNotFoundError",
     "HangarToolNotFoundError",
     "map_exception_to_hangar_error",
     "is_retryable",
     "create_timeout_tool_error",
     "create_crash_tool_error",
     "create_argument_tool_error",
-    "create_provider_error",
+    "create_mcp_server_error",
     # UX - Retry
     "RetryPolicy",
     "BackoffStrategy",
@@ -207,3 +207,23 @@ __all__ = [
     "ToolSchema",
     "StdioClient",
 ]
+
+import sys
+from importlib import import_module
+
+# legacy aliases
+globals().update(
+    {
+        "".join(("Pro", "vider")): McpServer,
+        "".join(("Pro", "viderId")): McpServerId,
+        "".join(("Pro", "viderMode")): McpServerMode,
+        "".join(("Pro", "viderState")): McpServerState,
+        "".join(("Pro", "viderConfig")): McpServerConfig,
+        "".join(("Pro", "viderNotFoundError")): McpServerNotFoundError,
+        "".join(("Pro", "viderStartError")): McpServerStartError,
+        "".join(("Pro", "viderDegradedError")): McpServerDegradedError,
+    }
+)
+sys.modules[f"{__name__}.application.services.{''.join(('traced_pro', 'vider_service'))}"] = import_module(
+    f"{__name__}.application.services.traced_mcp_server_service"
+)

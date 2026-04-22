@@ -1,6 +1,6 @@
 """Discovery Orchestrator.
 
-Main coordination component for provider discovery.
+Main coordination component for mcp_server discovery.
 Manages discovery sources, validation, and integration with the registry.
 """
 
@@ -13,7 +13,7 @@ from datetime import datetime, UTC
 from typing import TYPE_CHECKING, Any
 
 from mcp_hangar.domain.discovery.conflict_resolver import ConflictResolver
-from mcp_hangar.domain.discovery.discovered_provider import DiscoveredProvider
+from mcp_hangar.domain.discovery.discovered_mcp_server import DiscoveredMcpServer
 from mcp_hangar.domain.discovery.discovery_service import DiscoveryCycleResult, DiscoveryService
 from mcp_hangar.domain.discovery.discovery_source import DiscoverySource
 from mcp_hangar.logging_config import get_logger
@@ -39,7 +39,7 @@ class DiscoveryConfig:
     Attributes:
         enabled: Master switch for discovery
         refresh_interval_s: Interval between discovery cycles
-        auto_register: Whether to auto-register discovered providers
+        auto_register: Whether to auto-register discovered mcp_servers
         security: Security configuration
         lifecycle: Lifecycle configuration
     """
@@ -81,12 +81,12 @@ class DiscoveryConfig:
 
 
 # Type for registry registration callback
-RegistrationCallback = Callable[[DiscoveredProvider], Awaitable[bool]]
+RegistrationCallback = Callable[[DiscoveredMcpServer], Awaitable[bool]]
 DeregistrationCallback = Callable[[str, str], Awaitable[None]]
 
 
 class DiscoveryOrchestrator:
-    """Main coordination component for provider discovery.
+    """Main coordination component for mcp_server discovery.
 
     Orchestrates:
         - Multiple discovery sources
@@ -111,21 +111,21 @@ class DiscoveryOrchestrator:
     def __init__(
         self,
         config: DiscoveryConfig | None = None,
-        static_providers: set[str] | None = None,
+        static_mcp_servers: set[str] | None = None,
         input_validator: InputValidator | None = None,
     ):
         """Initialize discovery orchestrator.
 
         Args:
             config: Discovery configuration
-            static_providers: Set of static provider names (from config)
+            static_mcp_servers: Set of static mcp_server names (from config)
             input_validator: Optional InputValidator for command validation
         """
         self.config = config or DiscoveryConfig()
         self._input_validator = input_validator
 
         # Core components
-        self._conflict_resolver = ConflictResolver(static_providers)
+        self._conflict_resolver = ConflictResolver(static_mcp_servers)
         self._discovery_service = DiscoveryService(
             conflict_resolver=self._conflict_resolver,
             auto_register=self.config.auto_register,
@@ -167,13 +167,13 @@ class DiscoveryOrchestrator:
         """
         return self._discovery_service.unregister_source(source_type)
 
-    def set_static_providers(self, names: set[str]) -> None:
-        """Set static provider names (from config).
+    def set_static_mcp_servers(self, names: set[str]) -> None:
+        """Set static mcp_server names (from config).
 
         Args:
-            names: Set of static provider names
+            names: Set of static mcp_server names
         """
-        self._discovery_service.set_static_providers(names)
+        self._discovery_service.set_static_mcp_servers(names)
 
     async def start(self) -> None:
         """Start the discovery orchestrator."""
@@ -255,9 +255,9 @@ class DiscoveryOrchestrator:
                 result.source_results = cycle_result.source_results
                 cycle_span.set_attribute("discovery.discovered_count", result.discovered_count)
 
-                # Process discovered providers through validation
-                for provider in self._discovery_service.get_registered_providers().values():
-                    validation_result = await self._process_provider(provider)
+                # Process discovered mcp_servers through validation
+                for mcp_server in self._discovery_service.get_registered_mcp_servers().values():
+                    validation_result = await self._process_mcp_server(mcp_server)
 
                     if validation_result == "registered":
                         result.registered_count += 1
@@ -307,41 +307,41 @@ class DiscoveryOrchestrator:
 
         return result
 
-    async def _process_provider(self, provider: DiscoveredProvider) -> str:
-        """Process a discovered provider through validation.
+    async def _process_mcp_server(self, mcp_server: DiscoveredMcpServer) -> str:
+        """Process a discovered mcp_server through validation.
 
         Args:
-            provider: Provider to process
+            mcp_server: McpServer to process
 
         Returns:
             Status string: "registered", "updated", "quarantined", "skipped", "rejected"
         """
         # Check if already tracked
-        existing = self._lifecycle_manager.get_provider(provider.name)
+        existing = self._lifecycle_manager.get_mcp_server(mcp_server.name)
         if existing:
-            if existing.fingerprint == provider.fingerprint:
+            if existing.fingerprint == mcp_server.fingerprint:
                 # Just update last_seen
-                self._lifecycle_manager.update_seen(provider.name)
+                self._lifecycle_manager.update_seen(mcp_server.name)
                 return "skipped"
             else:
                 # Config changed, need to validate again
                 pass
 
         tracer = get_tracer(__name__)
-        with tracer.start_as_current_span("discovery.process_provider") as prov_span:
-            prov_span.set_attribute("discovery.provider_name", provider.name)
-            prov_span.set_attribute("discovery.source_type", provider.source_type)
+        with tracer.start_as_current_span("discovery.process_mcp_server") as prov_span:
+            prov_span.set_attribute("discovery.mcp_server_name", mcp_server.name)
+            prov_span.set_attribute("discovery.source_type", mcp_server.source_type)
 
             # Validate command from untrusted discovery sources
-            command = provider.connection_info.get("command", [])
+            command = mcp_server.connection_info.get("command", [])
             if command and self._input_validator:
                 try:
                     validation_result = self._input_validator.validate_command(command)
                 except ValueError as exc:
                     logger.warning(
-                        "discovered_provider_command_rejected",
-                        provider_name=provider.name,
-                        source=provider.source_type,
+                        "discovered_mcp_server_command_rejected",
+                        mcp_server_name=mcp_server.name,
+                        source=mcp_server.source_type,
                         command=command,
                         reason=str(exc),
                     )
@@ -351,35 +351,35 @@ class DiscoveryOrchestrator:
                 if not validation_result.valid:
                     issues = "; ".join(i.message for i in validation_result.issues)
                     logger.warning(
-                        "discovered_provider_command_rejected",
-                        provider_name=provider.name,
-                        source=provider.source_type,
+                        "discovered_mcp_server_command_rejected",
+                        mcp_server_name=mcp_server.name,
+                        source=mcp_server.source_type,
                         command=command,
                         reason=issues,
                     )
                     prov_span.set_attribute("discovery.result", "rejected")
                     return "rejected"
 
-            # Validate provider
-            validation_report = await self._validator.validate(provider)
+            # Validate mcp_server
+            validation_report = await self._validator.validate(mcp_server)
 
             self._metrics.observe_validation_duration(
-                source=provider.source_type,
+                source=mcp_server.source_type,
                 duration_seconds=validation_report.duration_ms / 1000,
             )
             prov_span.set_attribute("discovery.validation_passed", validation_report.is_passed)
 
             if not validation_report.is_passed:
                 # Handle validation failure
-                logger.warning(f"Provider '{provider.name}' failed validation: {validation_report.reason}")
+                logger.warning(f"McpServer '{mcp_server.name}' failed validation: {validation_report.reason}")
 
                 self._metrics.inc_validation_failures(
-                    source=provider.source_type,
+                    source=mcp_server.source_type,
                     validation_type=validation_report.result.value,
                 )
 
                 if self.config.security.quarantine_on_failure:
-                    self._lifecycle_manager.quarantine(provider, validation_report.reason)
+                    self._lifecycle_manager.quarantine(mcp_server, validation_report.reason)
                     self._metrics.inc_quarantine(reason=validation_report.result.value)
                     main_metrics.record_discovery_quarantine(reason=validation_report.result.value)
                     prov_span.set_attribute("discovery.result", "quarantined")
@@ -391,42 +391,42 @@ class DiscoveryOrchestrator:
             # Register with main registry
             if self.on_register:
                 try:
-                    success = await self.on_register(provider)
+                    success = await self.on_register(mcp_server)
                     if not success:
-                        logger.warning(f"Control plane rejected provider: {provider.name}")
+                        logger.warning(f"Control plane rejected mcp_server: {mcp_server.name}")
                         prov_span.set_attribute("discovery.result", "skipped")
                         return "skipped"
                 except Exception as e:  # noqa: BLE001 -- fault-barrier: registration callback failure must not crash discovery
-                    logger.error(f"Error registering provider {provider.name}: {e}")
+                    logger.error(f"Error registering mcp_server {mcp_server.name}: {e}")
                     prov_span.set_attribute("discovery.result", "skipped")
                     prov_span.record_exception(e)
                     return "skipped"
 
             # Track in lifecycle manager
             if existing:
-                self._lifecycle_manager.update_provider(provider)
-                self._metrics.inc_registrations(source=provider.source_type)
+                self._lifecycle_manager.update_mcp_server(mcp_server)
+                self._metrics.inc_registrations(source=mcp_server.source_type)
                 prov_span.set_attribute("discovery.result", "updated")
                 return "updated"
             else:
-                self._lifecycle_manager.add_provider(provider)
-                self._validator.record_registration(provider)
-                self._metrics.inc_registrations(source=provider.source_type)
+                self._lifecycle_manager.add_mcp_server(mcp_server)
+                self._validator.record_registration(mcp_server)
+                self._metrics.inc_registrations(source=mcp_server.source_type)
                 prov_span.set_attribute("discovery.result", "registered")
                 return "registered"
 
     async def _handle_deregister(self, name: str, reason: str) -> None:
-        """Handle provider deregistration.
+        """Handle mcp_server deregistration.
 
         Args:
-            name: Provider name
+            name: McpServer name
             reason: Reason for deregistration
         """
-        provider = self._lifecycle_manager.get_provider(name)
-        if provider:
-            self._validator.record_deregistration(provider)
-            self._metrics.inc_deregistrations(source=provider.source_type, reason=reason)
-            main_metrics.record_discovery_deregistration(source_type=provider.source_type, reason=reason)
+        mcp_server = self._lifecycle_manager.get_mcp_server(name)
+        if mcp_server:
+            self._validator.record_deregistration(mcp_server)
+            self._metrics.inc_deregistrations(source=mcp_server.source_type, reason=reason)
+            main_metrics.record_discovery_deregistration(source_type=mcp_server.source_type, reason=reason)
 
         if self.on_deregister:
             try:
@@ -445,79 +445,79 @@ class DiscoveryOrchestrator:
         result = await self.run_discovery_cycle()
         return result.to_dict()
 
-    def get_pending_providers(self) -> list[DiscoveredProvider]:
-        """Get providers pending registration.
+    def get_pending_mcp_servers(self) -> list[DiscoveredMcpServer]:
+        """Get mcp_servers pending registration.
 
         Returns:
-            List of pending providers
+            List of pending mcp_servers
         """
-        return self._discovery_service.get_pending_providers()
+        return self._discovery_service.get_pending_mcp_servers()
 
     def get_quarantined(self) -> dict[str, dict[str, Any]]:
-        """Get quarantined providers with reasons.
+        """Get quarantined mcp_servers with reasons.
 
         Returns:
-            Dictionary of name -> {provider, reason, quarantine_time}
+            Dictionary of name -> {mcp_server, reason, quarantine_time}
         """
         quarantined = self._lifecycle_manager.get_quarantined()
         return {
             name: {
-                "provider": provider.to_dict(),
+                "mcp_server": mcp_server.to_dict(),
                 "reason": reason,
                 "quarantine_time": qtime.isoformat(),
             }
-            for name, (provider, reason, qtime) in quarantined.items()
+            for name, (mcp_server, reason, qtime) in quarantined.items()
         }
 
-    async def approve_provider(self, name: str) -> dict[str, Any]:
-        """Approve a quarantined provider.
+    async def approve_mcp_server(self, name: str) -> dict[str, Any]:
+        """Approve a quarantined mcp_server.
 
         Args:
-            name: Provider name
+            name: McpServer name
 
         Returns:
             Result dictionary
         """
-        provider = self._lifecycle_manager.approve(name)
+        mcp_server = self._lifecycle_manager.approve(name)
 
-        if provider:
+        if mcp_server:
             # Register with main registry
             if self.on_register:
                 try:
-                    await self.on_register(provider)
+                    await self.on_register(mcp_server)
                 except Exception as e:  # noqa: BLE001 -- fault-barrier: registration callback failure must not crash approval
-                    logger.error(f"Error registering approved provider {name}: {e}")
-                    return {"approved": False, "provider": name, "error": str(e)}
+                    logger.error(f"Error registering approved mcp_server {name}: {e}")
+                    return {"approved": False, "mcp_server": name, "error": str(e)}
 
-            self._validator.record_registration(provider)
-            self._metrics.inc_registrations(source=provider.source_type)
+            self._validator.record_registration(mcp_server)
+            self._metrics.inc_registrations(source=mcp_server.source_type)
 
-            return {"approved": True, "provider": name, "status": "registered"}
+            return {"approved": True, "mcp_server": name, "status": "registered"}
 
         return {
             "approved": False,
-            "provider": name,
-            "error": "Provider not found in quarantine",
+            "mcp_server": name,
+            "error": "McpServer not found in quarantine",
         }
 
-    async def reject_provider(self, name: str) -> dict[str, Any]:
-        """Reject a quarantined provider.
+    async def reject_mcp_server(self, name: str) -> dict[str, Any]:
+        """Reject a quarantined mcp_server.
 
         Args:
-            name: Provider name
+            name: McpServer name
 
         Returns:
             Result dictionary
         """
-        provider = self._lifecycle_manager.reject(name)
+        mcp_server = self._lifecycle_manager.reject(name)
 
-        if provider:
-            return {"rejected": True, "provider": name}
+        if mcp_server:
+            return {"rejected": True, "mcp_server": name}
 
         return {
             "rejected": False,
-            "provider": name,
-            "error": "Provider not found in quarantine",
+            "mcp_server": name,
+            "error": "McpServer not found in quarantine",
         }
 
     async def get_sources_status(self) -> list[dict[str, Any]]:
@@ -534,7 +534,7 @@ class DiscoveryOrchestrator:
                 source_type=status.source_type,
                 mode=status.mode.value,
                 is_healthy=status.is_healthy,
-                providers_count=status.providers_count,
+                mcp_servers_count=status.mcp_servers_count,
             )
 
         return [s.to_dict() for s in statuses]

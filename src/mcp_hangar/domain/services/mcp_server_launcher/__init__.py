@@ -1,4 +1,4 @@
-"""Deprecated provider launcher import shim."""
+"""Deprecated mcp_server launcher import shim."""
 
 from __future__ import annotations
 
@@ -10,12 +10,12 @@ from mcp_hangar.infrastructure.launchers import (
     DockerLauncher,
     get_launcher,
     HttpLauncher,
-    ProviderLauncher,
+    McpServerLauncher,
     SubprocessLauncher,
 )
 
 warnings.warn(
-    "mcp_hangar.domain.services.provider_launcher is deprecated; import from "
+    "mcp_hangar.domain.services.mcp_server_launcher is deprecated; import from "
     "mcp_hangar.infrastructure.launchers instead.",
     DeprecationWarning,
     stacklevel=2,
@@ -23,7 +23,7 @@ warnings.warn(
 
 __all__ = [
     # Base
-    "ProviderLauncher",
+    "McpServerLauncher",
     # Implementations
     "SubprocessLauncher",
     "DockerLauncher",

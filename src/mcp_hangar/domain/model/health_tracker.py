@@ -1,4 +1,4 @@
-"""Health tracking entity for providers."""
+"""Health tracking entity for mcp_servers."""
 
 from dataclasses import dataclass, field
 import random
@@ -7,7 +7,7 @@ import time
 
 @dataclass
 class HealthTracker:
-    """Tracks health metrics for a provider.
+    """Tracks health metrics for a mcp_server.
 
     This is a mutable entity (not a value object) that encapsulates
     health-related business logic including:
@@ -125,7 +125,7 @@ class HealthTracker:
         self._total_invocations += 1
 
     def should_degrade(self) -> bool:
-        """Check if provider should transition to DEGRADED state.
+        """Check if mcp_server should transition to DEGRADED state.
 
         Returns:
             True when consecutive failures reach the threshold.
@@ -177,14 +177,14 @@ class HealthTracker:
         return min(60.0, max(0.0, base + jitter))
 
     def get_health_check_interval(self, state: str, normal_interval: float = 10.0) -> float:
-        """Get the health check interval based on provider state.
+        """Get the health check interval based on mcp_server state.
 
         Args:
-            state: Provider state string (cold, initializing, ready, degraded, dead).
-            normal_interval: Normal check interval for healthy providers.
+            state: McpServer state string (cold, initializing, ready, degraded, dead).
+            normal_interval: Normal check interval for healthy mcp_servers.
 
         Returns:
-            Seconds until next health check. 0.0 means skip this provider.
+            Seconds until next health check. 0.0 means skip this mcp_server.
         """
         if state in ("cold", "initializing"):
             return 0.0  # Skip -- not started or starting
@@ -193,7 +193,7 @@ class HealthTracker:
         if state == "degraded":
             return self._calculate_backoff()
         if state == "dead":
-            return 60.0  # Longer ceiling for dead providers
+            return 60.0  # Longer ceiling for dead mcp_servers
         return normal_interval  # Fallback
 
     def reset(self) -> None:

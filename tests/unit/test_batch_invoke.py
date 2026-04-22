@@ -161,7 +161,7 @@ class TestBatchValidation:
         mock_provider.has_tools = False
 
         mock_ctx = Mock()
-        mock_ctx.get_provider.side_effect = lambda k: mock_provider if k == "math" else None
+        mock_ctx.get_mcp_server.side_effect = lambda k: mock_provider if k == "math" else None
 
         with (
             patch("mcp_hangar.server.tools.batch.validator.get_context") as get_context,
@@ -179,14 +179,14 @@ class TestBatchValidation:
     def test_valid_batch(self, mock_providers):
         """Valid batch passes validation."""
         calls = [
-            {"provider": "math", "tool": "add", "arguments": {"a": 1, "b": 2}},
+            {"mcp_server": "math", "tool": "add", "arguments": {"a": 1, "b": 2}},
         ]
         errors = _validate_batch(calls, DEFAULT_MAX_CONCURRENCY, DEFAULT_TIMEOUT)
         assert errors == []
 
     def test_batch_size_exceeded(self, mock_providers):
         """Batch size exceeding limit fails."""
-        calls = [{"provider": "math", "tool": "add", "arguments": {}} for _ in range(MAX_CALLS_PER_BATCH + 1)]
+        calls = [{"mcp_server": "math", "tool": "add", "arguments": {}} for _ in range(MAX_CALLS_PER_BATCH + 1)]
         errors = _validate_batch(calls, DEFAULT_MAX_CONCURRENCY, DEFAULT_TIMEOUT)
 
         assert len(errors) == 1
@@ -195,7 +195,7 @@ class TestBatchValidation:
 
     def test_invalid_max_concurrency(self, mock_providers):
         """Invalid max_concurrency fails."""
-        calls = [{"provider": "math", "tool": "add", "arguments": {}}]
+        calls = [{"mcp_server": "math", "tool": "add", "arguments": {}}]
 
         # Too low
         errors = _validate_batch(calls, 0, DEFAULT_TIMEOUT)
@@ -207,7 +207,7 @@ class TestBatchValidation:
 
     def test_invalid_timeout(self, mock_providers):
         """Invalid timeout fails."""
-        calls = [{"provider": "math", "tool": "add", "arguments": {}}]
+        calls = [{"mcp_server": "math", "tool": "add", "arguments": {}}]
 
         # Too low
         errors = _validate_batch(calls, DEFAULT_MAX_CONCURRENCY, 0.5)
@@ -223,11 +223,11 @@ class TestBatchValidation:
         errors = _validate_batch(calls, DEFAULT_MAX_CONCURRENCY, DEFAULT_TIMEOUT)
 
         assert len(errors) == 1
-        assert errors[0].field == "provider"
+        assert errors[0].field == "mcp_server"
 
     def test_missing_tool(self, mock_providers):
         """Missing tool field fails."""
-        calls = [{"provider": "math", "arguments": {}}]
+        calls = [{"mcp_server": "math", "arguments": {}}]
         errors = _validate_batch(calls, DEFAULT_MAX_CONCURRENCY, DEFAULT_TIMEOUT)
 
         assert len(errors) == 1
@@ -235,7 +235,7 @@ class TestBatchValidation:
 
     def test_missing_arguments(self, mock_providers):
         """Missing arguments field fails."""
-        calls = [{"provider": "math", "tool": "add"}]
+        calls = [{"mcp_server": "math", "tool": "add"}]
         errors = _validate_batch(calls, DEFAULT_MAX_CONCURRENCY, DEFAULT_TIMEOUT)
 
         assert len(errors) == 1
@@ -243,17 +243,17 @@ class TestBatchValidation:
 
     def test_provider_not_found(self, mock_providers):
         """Non-existent provider fails."""
-        calls = [{"provider": "nonexistent", "tool": "add", "arguments": {}}]
+        calls = [{"mcp_server": "nonexistent", "tool": "add", "arguments": {}}]
         errors = _validate_batch(calls, DEFAULT_MAX_CONCURRENCY, DEFAULT_TIMEOUT)
 
         assert len(errors) == 1
-        assert errors[0].field == "provider"
+        assert errors[0].field == "mcp_server"
         assert "not found" in errors[0].message
 
     def test_invalid_per_call_timeout(self, mock_providers):
         """Invalid per-call timeout fails."""
         calls = [
-            {"provider": "math", "tool": "add", "arguments": {}, "timeout": -1},
+            {"mcp_server": "math", "tool": "add", "arguments": {}, "timeout": -1},
         ]
         errors = _validate_batch(calls, DEFAULT_MAX_CONCURRENCY, DEFAULT_TIMEOUT)
 
@@ -292,8 +292,8 @@ class TestBatchExecution:
         mock_provider.health.should_degrade.return_value = False
 
         # Configure context to return provider
-        mock_context.get_provider.side_effect = lambda k: mock_provider if k == "math" else None
-        mock_context.provider_exists.side_effect = lambda k: k == "math"
+        mock_context.get_mcp_server.side_effect = lambda k: mock_provider if k == "math" else None
+        mock_context.mcp_server_exists.side_effect = lambda k: k == "math"
 
         with (
             patch("mcp_hangar.server.tools.batch.validator.GROUPS") as groups,
@@ -306,7 +306,7 @@ class TestBatchExecution:
     def test_execute_single_call(self, mock_context, mock_providers_for_execution):
         """Single call executes successfully."""
         executor = BatchExecutor()
-        calls = [CallSpec(index=0, call_id="call-1", provider="math", tool="add", arguments={"a": 1})]
+        calls = [CallSpec(index=0, call_id="call-1", mcp_server="math", tool="add", arguments={"a": 1})]
 
         result = executor.execute(
             batch_id="batch-1",
@@ -325,7 +325,7 @@ class TestBatchExecution:
         """Multiple calls execute in parallel."""
         executor = BatchExecutor()
         calls = [
-            CallSpec(index=i, call_id=f"call-{i}", provider="math", tool="add", arguments={"a": i}) for i in range(5)
+            CallSpec(index=i, call_id=f"call-{i}", mcp_server="math", tool="add", arguments={"a": i}) for i in range(5)
         ]
 
         result = executor.execute(
@@ -359,7 +359,7 @@ class TestBatchExecution:
 
         executor = BatchExecutor()
         calls = [
-            CallSpec(index=i, call_id=f"call-{i}", provider="math", tool="add", arguments={"a": i}) for i in range(4)
+            CallSpec(index=i, call_id=f"call-{i}", mcp_server="math", tool="add", arguments={"a": i}) for i in range(4)
         ]
 
         result = executor.execute(
@@ -390,7 +390,7 @@ class TestBatchExecution:
 
         executor = BatchExecutor()
         calls = [
-            CallSpec(index=i, call_id=f"call-{i}", provider="math", tool="add", arguments={"a": i}) for i in range(5)
+            CallSpec(index=i, call_id=f"call-{i}", mcp_server="math", tool="add", arguments={"a": i}) for i in range(5)
         ]
 
         result = executor.execute(
@@ -412,7 +412,7 @@ class TestBatchExecution:
         mock_provider.health.should_degrade.return_value = True
 
         executor = BatchExecutor()
-        calls = [CallSpec(index=0, call_id="call-1", provider="math", tool="add", arguments={"a": 1})]
+        calls = [CallSpec(index=0, call_id="call-1", mcp_server="math", tool="add", arguments={"a": 1})]
 
         result = executor.execute(
             batch_id="batch-1",
@@ -429,7 +429,7 @@ class TestBatchExecution:
     def test_emits_domain_events(self, mock_context, mock_providers_for_execution):
         """Batch emits appropriate domain events."""
         executor = BatchExecutor()
-        calls = [CallSpec(index=0, call_id="call-1", provider="math", tool="add", arguments={"a": 1})]
+        calls = [CallSpec(index=0, call_id="call-1", mcp_server="math", tool="add", arguments={"a": 1})]
 
         executor.execute(
             batch_id="batch-1",
@@ -470,8 +470,8 @@ class TestHangarCallToolBasic:
         mock_provider.health.should_degrade.return_value = False
 
         # Configure context to return provider
-        ctx.get_provider.side_effect = lambda k: mock_provider if k == "math" else None
-        ctx.provider_exists.side_effect = lambda k: k == "math"
+        ctx.get_mcp_server.side_effect = lambda k: mock_provider if k == "math" else None
+        ctx.mcp_server_exists.side_effect = lambda k: k == "math"
 
         with (
             patch("mcp_hangar.server.tools.batch.validator.get_context", return_value=ctx),
@@ -498,8 +498,8 @@ class TestHangarCallToolBasic:
         """Simple batch executes successfully."""
         result = hangar_call(
             calls=[
-                {"provider": "math", "tool": "add", "arguments": {"a": 1, "b": 2}},
-                {"provider": "math", "tool": "multiply", "arguments": {"a": 3, "b": 4}},
+                {"mcp_server": "math", "tool": "add", "arguments": {"a": 1, "b": 2}},
+                {"mcp_server": "math", "tool": "multiply", "arguments": {"a": 3, "b": 4}},
             ]
         )
 
@@ -513,7 +513,7 @@ class TestHangarCallToolBasic:
         """Validation error returns proper response."""
         result = hangar_call(
             calls=[
-                {"provider": "nonexistent", "tool": "add", "arguments": {}},
+                {"mcp_server": "nonexistent", "tool": "add", "arguments": {}},
             ]
         )
 
@@ -525,7 +525,7 @@ class TestHangarCallToolBasic:
         """Results contain batch_id and call_id."""
         result = hangar_call(
             calls=[
-                {"provider": "math", "tool": "add", "arguments": {}},
+                {"mcp_server": "math", "tool": "add", "arguments": {}},
             ]
         )
 
@@ -536,9 +536,9 @@ class TestHangarCallToolBasic:
         """Results are in original call order."""
         result = hangar_call(
             calls=[
-                {"provider": "math", "tool": "add", "arguments": {"a": 1}},
-                {"provider": "math", "tool": "add", "arguments": {"a": 2}},
-                {"provider": "math", "tool": "add", "arguments": {"a": 3}},
+                {"mcp_server": "math", "tool": "add", "arguments": {"a": 1}},
+                {"mcp_server": "math", "tool": "add", "arguments": {"a": 2}},
+                {"mcp_server": "math", "tool": "add", "arguments": {"a": 3}},
             ]
         )
 
@@ -549,7 +549,7 @@ class TestHangarCallToolBasic:
         """Concurrency is clamped to limits."""
         # Should not raise
         result = hangar_call(
-            calls=[{"provider": "math", "tool": "add", "arguments": {}}],
+            calls=[{"mcp_server": "math", "tool": "add", "arguments": {}}],
             max_concurrency=100,  # Above limit
         )
         assert result["success"] is True
@@ -558,7 +558,7 @@ class TestHangarCallToolBasic:
         """Timeout is clamped to limits."""
         # Should not raise
         result = hangar_call(
-            calls=[{"provider": "math", "tool": "add", "arguments": {}}],
+            calls=[{"mcp_server": "math", "tool": "add", "arguments": {}}],
             timeout=1000.0,  # Above limit
         )
         assert result["success"] is True
@@ -588,8 +588,8 @@ class TestResponseTruncation:
         mock_provider.health.should_degrade.return_value = False
 
         # Configure context to return provider
-        ctx.get_provider.side_effect = lambda k: mock_provider if k == "math" else None
-        ctx.provider_exists.side_effect = lambda k: k == "math"
+        ctx.get_mcp_server.side_effect = lambda k: mock_provider if k == "math" else None
+        ctx.mcp_server_exists.side_effect = lambda k: k == "math"
 
         with (
             patch("mcp_hangar.server.tools.batch.validator.get_context", return_value=ctx),
@@ -605,7 +605,7 @@ class TestResponseTruncation:
         """Large responses are truncated."""
         result = hangar_call(
             calls=[
-                {"provider": "math", "tool": "add", "arguments": {}},
+                {"mcp_server": "math", "tool": "add", "arguments": {}},
             ]
         )
 
@@ -655,8 +655,8 @@ class TestCrossProviderBatch:
         }
 
         # Configure context to return appropriate provider
-        ctx.get_provider.side_effect = lambda k: providers.get(k)
-        ctx.provider_exists.side_effect = lambda k: k in providers
+        ctx.get_mcp_server.side_effect = lambda k: providers.get(k)
+        ctx.mcp_server_exists.side_effect = lambda k: k in providers
 
         with (
             patch("mcp_hangar.server.tools.batch.validator.get_context", return_value=ctx),
@@ -672,9 +672,9 @@ class TestCrossProviderBatch:
         """Batch with multiple different providers executes successfully."""
         result = hangar_call(
             calls=[
-                {"provider": "math", "tool": "add", "arguments": {"a": 1, "b": 2}},
-                {"provider": "filesystem", "tool": "read", "arguments": {"path": "/tmp"}},
-                {"provider": "fetch", "tool": "get", "arguments": {"url": "http://example.com"}},
+                {"mcp_server": "math", "tool": "add", "arguments": {"a": 1, "b": 2}},
+                {"mcp_server": "filesystem", "tool": "read", "arguments": {"path": "/tmp"}},
+                {"mcp_server": "fetch", "tool": "get", "arguments": {"url": "http://example.com"}},
             ]
         )
 
@@ -693,7 +693,7 @@ class TestCrossProviderBatch:
 
         def mock_send(cmd):
             call_count[0] += 1
-            if cmd.provider_id == "fetch":
+            if cmd.mcp_server_id == "fetch":
                 raise ValueError("Fetch failed")
             return {"result": 42}
 
@@ -701,9 +701,9 @@ class TestCrossProviderBatch:
 
         result = hangar_call(
             calls=[
-                {"provider": "math", "tool": "add", "arguments": {"a": 1}},
-                {"provider": "fetch", "tool": "get", "arguments": {"url": "http://fail.com"}},
-                {"provider": "filesystem", "tool": "read", "arguments": {"path": "/tmp"}},
+                {"mcp_server": "math", "tool": "add", "arguments": {"a": 1}},
+                {"mcp_server": "fetch", "tool": "get", "arguments": {"url": "http://fail.com"}},
+                {"mcp_server": "filesystem", "tool": "read", "arguments": {"path": "/tmp"}},
             ],
             fail_fast=False,
         )
@@ -717,8 +717,8 @@ class TestCrossProviderBatch:
         """Batch fails validation when provider is unknown."""
         result = hangar_call(
             calls=[
-                {"provider": "math", "tool": "add", "arguments": {}},
-                {"provider": "unknown_provider", "tool": "foo", "arguments": {}},
+                {"mcp_server": "math", "tool": "add", "arguments": {}},
+                {"mcp_server": "unknown_provider", "tool": "foo", "arguments": {}},
             ]
         )
 
@@ -737,9 +737,9 @@ class TestCrossProviderBatch:
 
         result = hangar_call(
             calls=[
-                {"provider": "math", "tool": "add", "arguments": {}},
-                {"provider": "fetch", "tool": "get", "arguments": {}},
-                {"provider": "filesystem", "tool": "read", "arguments": {}},
+                {"mcp_server": "math", "tool": "add", "arguments": {}},
+                {"mcp_server": "fetch", "tool": "get", "arguments": {}},
+                {"mcp_server": "filesystem", "tool": "read", "arguments": {}},
             ],
             max_concurrency=1,  # Sequential to ensure predictable order
         )
@@ -777,8 +777,8 @@ class TestHangarCallTool:
         mock_provider.health.should_degrade.return_value = False
 
         # Configure context to return provider
-        ctx.get_provider.side_effect = lambda k: mock_provider if k == "math" else None
-        ctx.provider_exists.side_effect = lambda k: k == "math"
+        ctx.get_mcp_server.side_effect = lambda k: mock_provider if k == "math" else None
+        ctx.mcp_server_exists.side_effect = lambda k: k == "math"
 
         with (
             patch("mcp_hangar.server.tools.batch.validator.get_context", return_value=ctx),
@@ -805,7 +805,7 @@ class TestHangarCallTool:
         """Single call executes successfully."""
         result = hangar_call(
             calls=[
-                {"provider": "math", "tool": "add", "arguments": {"a": 1, "b": 2}},
+                {"mcp_server": "math", "tool": "add", "arguments": {"a": 1, "b": 2}},
             ]
         )
 
@@ -820,7 +820,7 @@ class TestHangarCallTool:
         """Single call with max_attempts parameter."""
         result = hangar_call(
             calls=[
-                {"provider": "math", "tool": "add", "arguments": {"a": 1, "b": 2}},
+                {"mcp_server": "math", "tool": "add", "arguments": {"a": 1, "b": 2}},
             ],
             max_attempts=3,
         )
@@ -833,8 +833,8 @@ class TestHangarCallTool:
         """Multiple calls execute successfully."""
         result = hangar_call(
             calls=[
-                {"provider": "math", "tool": "add", "arguments": {"a": 1, "b": 2}},
-                {"provider": "math", "tool": "multiply", "arguments": {"a": 3, "b": 4}},
+                {"mcp_server": "math", "tool": "add", "arguments": {"a": 1, "b": 2}},
+                {"mcp_server": "math", "tool": "multiply", "arguments": {"a": 3, "b": 4}},
             ]
         )
 
@@ -848,14 +848,14 @@ class TestHangarCallTool:
         """max_attempts is clamped to valid range (1-10)."""
         # Too low - should clamp to 1
         result = hangar_call(
-            calls=[{"provider": "math", "tool": "add", "arguments": {}}],
+            calls=[{"mcp_server": "math", "tool": "add", "arguments": {}}],
             max_attempts=0,
         )
         assert result["success"] is True
 
         # Too high - should clamp to 10
         result = hangar_call(
-            calls=[{"provider": "math", "tool": "add", "arguments": {}}],
+            calls=[{"mcp_server": "math", "tool": "add", "arguments": {}}],
             max_attempts=100,
         )
         assert result["success"] is True
@@ -864,7 +864,7 @@ class TestHangarCallTool:
         """Validation error returns proper response."""
         result = hangar_call(
             calls=[
-                {"provider": "nonexistent", "tool": "add", "arguments": {}},
+                {"mcp_server": "nonexistent", "tool": "add", "arguments": {}},
             ]
         )
 
@@ -876,7 +876,7 @@ class TestHangarCallTool:
         """Results contain batch_id and call_id."""
         result = hangar_call(
             calls=[
-                {"provider": "math", "tool": "add", "arguments": {}},
+                {"mcp_server": "math", "tool": "add", "arguments": {}},
             ]
         )
 
@@ -887,9 +887,9 @@ class TestHangarCallTool:
         """Results are in original call order."""
         result = hangar_call(
             calls=[
-                {"provider": "math", "tool": "add", "arguments": {"a": 1}},
-                {"provider": "math", "tool": "add", "arguments": {"a": 2}},
-                {"provider": "math", "tool": "add", "arguments": {"a": 3}},
+                {"mcp_server": "math", "tool": "add", "arguments": {"a": 1}},
+                {"mcp_server": "math", "tool": "add", "arguments": {"a": 2}},
+                {"mcp_server": "math", "tool": "add", "arguments": {"a": 3}},
             ]
         )
 
@@ -912,7 +912,7 @@ class TestHangarCallTool:
         ctx.command_bus.send.side_effect = mock_send
 
         result = hangar_call(
-            calls=[{"provider": "math", "tool": "add", "arguments": {"a": i}} for i in range(5)],
+            calls=[{"mcp_server": "math", "tool": "add", "arguments": {"a": i}} for i in range(5)],
             max_concurrency=1,  # Sequential
             fail_fast=True,
         )
@@ -941,8 +941,8 @@ class TestRetryFunctionality:
         mock_provider.has_tools = False
         mock_provider.health.should_degrade.return_value = False
 
-        ctx.get_provider.side_effect = lambda k: mock_provider if k == "math" else None
-        ctx.provider_exists.side_effect = lambda k: k == "math"
+        ctx.get_mcp_server.side_effect = lambda k: mock_provider if k == "math" else None
+        ctx.mcp_server_exists.side_effect = lambda k: k == "math"
 
         with (
             patch("mcp_hangar.server.tools.batch.validator.get_context", return_value=ctx),
@@ -969,7 +969,7 @@ class TestRetryFunctionality:
         ctx.command_bus.send.side_effect = mock_send
 
         result = hangar_call(
-            calls=[{"provider": "math", "tool": "add", "arguments": {}}],
+            calls=[{"mcp_server": "math", "tool": "add", "arguments": {}}],
             max_attempts=5,
         )
 
@@ -989,7 +989,7 @@ class TestRetryFunctionality:
         ctx.command_bus.send.side_effect = TimeoutError("Always fail")
 
         result = hangar_call(
-            calls=[{"provider": "math", "tool": "add", "arguments": {}}],
+            calls=[{"mcp_server": "math", "tool": "add", "arguments": {}}],
             max_attempts=3,
         )
 
@@ -1020,7 +1020,7 @@ class TestRetryFunctionality:
         ctx.command_bus.send.side_effect = mock_send
 
         result = hangar_call(
-            calls=[{"provider": "math", "tool": "add", "arguments": {}}],
+            calls=[{"mcp_server": "math", "tool": "add", "arguments": {}}],
             max_attempts=1,  # No retry
         )
 
@@ -1046,7 +1046,7 @@ class TestRetryFunctionality:
         ctx.command_bus.send.side_effect = mock_send
 
         result = hangar_call(
-            calls=[{"provider": "math", "tool": "add", "arguments": {}}],
+            calls=[{"mcp_server": "math", "tool": "add", "arguments": {}}],
             max_attempts=5,
         )
 

@@ -142,15 +142,15 @@ MCP Hangar exports Prometheus metrics at `/metrics`. All metrics use the `mcp_ha
 
 | Metric | Type | Labels | Description |
 |--------|------|--------|-------------|
-| `mcp_hangar_tool_calls_total` | Counter | provider, tool, status | Total tool invocations |
-| `mcp_hangar_tool_call_duration_seconds` | Histogram | provider, tool | Invocation latency (buckets: 0.01-30s) |
-| `mcp_hangar_tool_call_errors_total` | Counter | provider, tool, error_type | Failed invocations by error type |
+| `mcp_hangar_tool_calls_total` | Counter | MCP server, tool, status | Total tool invocations |
+| `mcp_hangar_tool_call_duration_seconds` | Histogram | MCP server, tool | Invocation latency (buckets: 0.01-30s) |
+| `mcp_hangar_tool_call_errors_total` | Counter | MCP server, tool, error_type | Failed invocations by error type |
 
 **Example queries:**
 
 ```promql
-# Tool call rate by provider
-sum(rate(mcp_hangar_tool_calls_total[5m])) by (provider)
+# Tool call rate by mcp_server
+sum(rate(mcp_hangar_tool_calls_total[5m])) by (mcp_server)
 
 # P95 latency by tool
 histogram_quantile(0.95, sum(rate(mcp_hangar_tool_call_duration_seconds_bucket[5m])) by (le, tool))
@@ -185,27 +185,27 @@ rate(mcp_hangar_batch_size_sum[5m]) / rate(mcp_hangar_batch_size_count[5m])
 
 | Metric | Type | Labels | Description |
 |--------|------|--------|-------------|
-| `mcp_hangar_health_checks_total` | Counter | provider, result | Health check executions |
-| `mcp_hangar_health_check_duration_seconds` | Histogram | provider | Health check latency |
-| `mcp_hangar_health_check_consecutive_failures` | Gauge | provider | Current consecutive failure count |
+| `mcp_hangar_health_checks_total` | Counter | MCP server, result | Health check executions |
+| `mcp_hangar_health_check_duration_seconds` | Histogram | MCP server | Health check latency |
+| `mcp_hangar_health_check_consecutive_failures` | Gauge | MCP server | Current consecutive failure count |
 
 **Example queries:**
 
 ```promql
-# Unhealthy providers (>2 consecutive failures)
+# Unhealthy mcp_servers (>2 consecutive failures)
 mcp_hangar_health_check_consecutive_failures > 2
 
 # Health check success rate
-sum(rate(mcp_hangar_health_checks_total{result="healthy"}[5m])) by (provider)
-/ sum(rate(mcp_hangar_health_checks_total[5m])) by (provider)
+sum(rate(mcp_hangar_health_checks_total{result="healthy"}[5m])) by (mcp_server)
+/ sum(rate(mcp_hangar_health_checks_total[5m])) by (mcp_server)
 ```
 
-#### Provider Lifecycle
+#### MCP Server Lifecycle
 
 | Metric | Type | Labels | Description |
 |--------|------|--------|-------------|
-| `mcp_hangar_provider_starts_total` | Counter | provider | Provider start attempts |
-| `mcp_hangar_provider_initialized` | Gauge | provider | 1 if provider has been initialized |
+| `mcp_hangar_mcp_server_starts_total` | Counter | MCP server | MCP Server start attempts |
+| `mcp_hangar_mcp_server_initialized` | Gauge | MCP server | 1 if MCP server has been initialized |
 
 #### GC (Garbage Collection)
 
@@ -218,11 +218,11 @@ sum(rate(mcp_hangar_health_checks_total{result="healthy"}[5m])) by (provider)
 
 The following metrics are defined in code but not currently populated. They are planned for future releases:
 
-- `mcp_hangar_provider_state` - Provider state gauge (cold/ready/degraded/dead)
-- `mcp_hangar_provider_up` - Provider availability
-- `mcp_hangar_provider_cold_start_seconds` - Cold start latency histogram
+- `mcp_hangar_mcp_server_state` - MCP server state gauge (cold/ready/degraded/dead)
+- `mcp_hangar_mcp_server_up` - MCP Server availability
+- `mcp_hangar_mcp_server_cold_start_seconds` - Cold start latency histogram
 - `mcp_hangar_discovery_*` - Auto-discovery metrics
-- `mcp_hangar_http_*` - HTTP transport metrics (for remote providers)
+- `mcp_hangar_http_*` - HTTP transport metrics (for remote MCP servers)
 - `mcp_hangar_rate_limit_hits_total` - Rate limiting metrics
 - `mcp_hangar_connections_*` - Connection tracking
 
@@ -239,17 +239,17 @@ Provides high-level system health:
 
 - Request rate and error rate trends
 - Latency percentiles (P50, P95, P99)
-- Provider health status
+- MCP Server health status
 - Batch invocation success/failure rates
 - Health check results
 - GC cycle performance
 
-### Provider Details Dashboard
+### MCP Server Details Dashboard
 
-**File:** `provider-details.json`
-**URL:** http://localhost:3000/d/mcp-hangar-provider-details
+**File:** `MCP server-details.json`
+**URL:** http://localhost:3000/d/mcp-hangar-MCP server-details
 
-Deep dive into individual providers:
+Deep dive into individual MCP servers:
 
 - Tool call breakdown by tool name
 - Per-tool latency histograms
@@ -291,8 +291,8 @@ Alert rules are defined in `monitoring/prometheus/alerts.yaml` and organized by 
 | `MCPHangarNotResponding` | `up{job="mcp-hangar"} == 0` | 1m | Service unreachable |
 | `MCPHangarHighErrorRate` | Error rate > 10% | 2m | Significant failures |
 | `MCPHangarBatchHighFailureRate` | Batch failure > 20% | 3m | Batch operations failing |
-| `MCPHangarCircuitBreakerTripped` | CB rejections > 10/5m | 2m | Provider isolated |
-| `MCPHangarProviderUnhealthy` | Consecutive failures > 5 | 2m | Provider critically unhealthy |
+| `MCPHangarCircuitBreakerTripped` | CB rejections > 10/5m | 2m | MCP Server isolated |
+| `MCPHangarProviderUnhealthy` | Consecutive failures > 5 | 2m | MCP Server critically unhealthy |
 
 #### Warning Alerts (Investigate)
 
@@ -315,7 +315,7 @@ Alert rules are defined in `monitoring/prometheus/alerts.yaml` and organized by 
 
 | Alert | Condition | Description |
 |-------|-----------|-------------|
-| `MCPHangarProviderStarted` | Any provider start | Provider lifecycle event |
+| `MCPHangarMcpServerStarted` | Any MCP server start | MCP Server lifecycle event |
 | `MCPHangarHighToolCallVolume` | Rate > 100/s | High traffic notification |
 
 ### Alertmanager Configuration
@@ -371,7 +371,7 @@ curl -s http://localhost:9090/api/v1/alerts | jq '.data.alerts[] | select(.state
 ### OpenTelemetry Integration
 
 MCP Hangar supports distributed tracing via OpenTelemetry. Every tool invocation
-produces an OTEL span carrying MCP governance attributes (`mcp.provider.id`,
+produces an OTEL span carrying MCP governance attributes (`mcp.server.id`,
 `mcp.tool.name`, `mcp.tool.status`, enforcement context, and identity context
 when available).
 
@@ -400,13 +400,13 @@ with trace_span("process_request", {"request.id": req_id}) as span:
 with standard MCP governance attributes via `set_governance_attributes()`:
 
 ```python
-from mcp_hangar.observability.conventions import Provider, MCP, set_governance_attributes
+from mcp_hangar.observability.conventions import McpServer, MCP, set_governance_attributes
 
 # set_governance_attributes(span, ...) sets all applicable attributes in one call.
 # None values are omitted -- no empty strings pollute OTLP backends.
 set_governance_attributes(
     span,
-    provider_id="math",
+    mcp_server_id="math",
     tool_name="add",
     user_id="alice",           # optional
     session_id="sess-42",      # optional
@@ -417,15 +417,15 @@ set_governance_attributes(
 
 ### OTLP Audit Export
 
-Security-relevant domain events (tool invocations, provider state transitions) are
+Security-relevant domain events (tool invocations, MCP server state transitions) are
 automatically exported as OTLP log records when `OTEL_EXPORTER_OTLP_ENDPOINT` is
 set. This is handled by `OTLPAuditExporter` and `OTLPAuditEventHandler` -- no
 additional configuration needed.
 
 Events exported:
 
-- `ToolInvocationCompleted` / `ToolInvocationFailed` -- with provider, tool, status, duration
-- `ProviderStateChanged` -- with provider, from_state, to_state
+- `ToolInvocationCompleted` / `ToolInvocationFailed` -- with MCP server, tool, status, duration
+- `McpServerStateChanged` -- with MCP server, from_state, to_state
 
 ### Environment Variables
 
@@ -437,13 +437,13 @@ Events exported:
 
 ### Trace Context Propagation
 
-W3C TraceContext is automatically propagated across agent -> Hangar -> provider
+W3C TraceContext is automatically propagated across agent -> Hangar -> MCP server
 boundaries:
 
 - **Inbound:** `BatchExecutor` extracts `traceparent` from call metadata, creating
   child spans linked to the agent's root trace.
 - **Outbound:** `HttpClient` injects `traceparent` into outbound HTTP headers when
-  calling remote providers.
+  calling remote MCP servers.
 - **Stdio:** Not supported (JSON-RPC over stdin/stdout has no header mechanism).
 
 Manual propagation is also available:
@@ -490,7 +490,7 @@ observability:
 from mcp_hangar.application.services import TracedProviderService
 
 result = traced_service.invoke_tool(
-    provider_id="math",
+    mcp_server_id="math",
     tool_name="add",
     arguments={"a": 1, "b": 2},
     trace_id="your-langfuse-trace-id",
@@ -512,7 +512,7 @@ MCP Hangar uses structlog for structured JSON logging:
   "timestamp": "2026-02-03T10:30:00.123Z",
   "level": "info",
   "event": "tool_invoked",
-  "provider": "math",
+  "mcp_server": "math",
   "tool": "add",
   "duration_ms": 150,
   "service": "mcp-hangar"
@@ -562,7 +562,7 @@ logger.info("processing", trace_id=get_current_trace_id())
   "status": "healthy",
   "checks": [
     {
-      "name": "providers",
+      "name": "mcp_servers",
       "status": "healthy",
       "duration_ms": 1.2
     }
@@ -666,15 +666,15 @@ sum(rate(mcp_hangar_batch_calls_total{result="success"}[5m]))
 
 If `MCPHangarHighConsecutiveFailures` fires:
 
-1. Check provider logs for errors
-2. Verify provider command/configuration
-3. Test provider manually:
+1. Check MCP server logs for errors
+2. Verify MCP server command/configuration
+3. Test MCP server manually:
 
    ```bash
-   mcp-hangar provider start <provider-id>
+   mcp-hangar mcp_server start <mcp-server-id>
    ```
 
-### Provider Start Errors
+### MCP Server Start Errors
 
 Common patterns and fixes:
 

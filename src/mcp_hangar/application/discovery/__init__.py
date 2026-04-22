@@ -1,6 +1,6 @@
 """Discovery application module.
 
-This module contains application layer components for provider discovery,
+This module contains application layer components for mcp_server discovery,
 including the orchestrator, security validation, and metrics.
 """
 

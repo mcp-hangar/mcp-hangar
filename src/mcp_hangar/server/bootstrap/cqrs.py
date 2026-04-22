@@ -5,8 +5,8 @@ from typing import Any, TYPE_CHECKING
 from ...application.commands import register_all_handlers as register_command_handlers
 from ...application.queries import register_all_handlers as register_query_handlers
 from ...application.sagas import GroupRebalanceSaga
-from ...application.sagas.provider_failover_saga import ProviderFailoverEventSaga
-from ...application.sagas.provider_recovery_saga import ProviderRecoverySaga
+from ...application.sagas.mcp_server_failover_saga import McpServerFailoverEventSaga
+from ...application.sagas.mcp_server_recovery_saga import McpServerRecoverySaga
 from ...domain.model.circuit_breaker import CircuitBreaker
 from ...infrastructure.event_store import get_event_store
 from ...infrastructure.persistence.saga_state_store import NullSagaStateStore, SagaStateStore
@@ -144,7 +144,7 @@ def _create_saga_state_store(
 
 def _restore_saga_state(
     store: SagaStateStore | NullSagaStateStore,
-    saga: "ProviderRecoverySaga | ProviderFailoverEventSaga",
+    saga: "McpServerRecoverySaga | McpServerFailoverEventSaga",
 ) -> None:
     """Restore saga state from persistent store.
 
@@ -173,14 +173,14 @@ def _restore_group_circuit_breakers(
     store: SagaStateStore | NullSagaStateStore,
     groups: dict[str, Any],
 ) -> None:
-    """Restore circuit breaker state for provider groups from saga state store.
+    """Restore circuit breaker state for mcp_server groups from saga state store.
 
     Loads CB state persisted under saga_type="circuit_breaker" with saga_id=group_id.
     If found, replaces the group's CircuitBreaker with the restored one.
 
     Args:
         store: Saga state store to load from.
-        groups: Dictionary of group_id -> ProviderGroup.
+        groups: Dictionary of group_id -> McpServerGroup.
     """
     for group_id, group in groups.items():
         result = store.load("circuit_breaker")
@@ -210,14 +210,14 @@ def save_group_circuit_breakers(
     store: SagaStateStore | NullSagaStateStore,
     groups: dict[str, Any],
 ) -> None:
-    """Save circuit breaker state for all provider groups.
+    """Save circuit breaker state for all mcp_server groups.
 
     Persists CB state under saga_type="circuit_breaker" with saga_id=group_id.
     Called during shutdown to preserve CB state across restarts.
 
     Args:
         store: Saga state store to save to.
-        groups: Dictionary of group_id -> ProviderGroup.
+        groups: Dictionary of group_id -> McpServerGroup.
     """
     for group_id, group in groups.items():
         try:
@@ -242,7 +242,7 @@ def init_saga(full_config: dict[str, Any] | None = None) -> SagaStateStore | Nul
 
     Creates SagaStateStore when SQLite event store is configured, loads
     persisted state for recovery and failover sagas, restores circuit
-    breaker state for provider groups, and registers all three sagas.
+    breaker state for mcp_server groups, and registers all three sagas.
 
     Args:
         full_config: Full application configuration dictionary.
@@ -265,13 +265,13 @@ def init_saga(full_config: dict[str, Any] | None = None) -> SagaStateStore | Nul
     set_group_rebalance_saga(group_saga)
     saga_manager.register_event_saga(group_saga)
 
-    # 2. ProviderRecoverySaga
-    recovery_saga = ProviderRecoverySaga(saga_manager=saga_manager)
+    # 2. McpServerRecoverySaga
+    recovery_saga = McpServerRecoverySaga(saga_manager=saga_manager)
     _restore_saga_state(saga_state_store, recovery_saga)
     saga_manager.register_event_saga(recovery_saga)
 
-    # 3. ProviderFailoverEventSaga
-    failover_saga = ProviderFailoverEventSaga(saga_manager=saga_manager)
+    # 3. McpServerFailoverEventSaga
+    failover_saga = McpServerFailoverEventSaga(saga_manager=saga_manager)
     _restore_saga_state(saga_state_store, failover_saga)
     saga_manager.register_event_saga(failover_saga)
 

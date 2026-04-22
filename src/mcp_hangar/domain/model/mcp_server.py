@@ -1,4 +1,4 @@
-"""Provider aggregate root - the main domain entity."""
+"""McpServer aggregate root - the main domain entity."""
 
 import threading
 import time
@@ -9,35 +9,35 @@ from ...logging_config import get_logger
 if TYPE_CHECKING:
     from ...infrastructure.lock_hierarchy import TrackedLock
 
-from ..contracts.log_buffer import IProviderLogBuffer
+from ..contracts.log_buffer import IMcpServerLogBuffer
 from ..contracts.metrics_publisher import IMetricsPublisher, NullMetricsPublisher
-from ..value_objects.capabilities import ProviderCapabilities, ViolationSeverity, ViolationType
+from ..value_objects.capabilities import McpServerCapabilities, ViolationSeverity, ViolationType
 from ..events import (
     CapabilityViolationDetected,
     HealthCheckFailed,
     HealthCheckPassed,
-    ProviderDegraded,
-    ProviderIdleDetected,
-    ProviderStarted,
-    ProviderStateChanged,
-    ProviderStopped,
-    ProviderUpdated,
+    McpServerDegraded,
+    McpServerIdleDetected,
+    McpServerStarted,
+    McpServerStateChanged,
+    McpServerStopped,
+    McpServerUpdated,
     ToolInvocationCompleted,
     ToolInvocationFailed,
     ToolInvocationRequested,
 )
 from ..exceptions import (
-    CannotStartProviderError,
+    CannotStartMcpServerError,
     InvalidStateTransitionError,
-    ProviderStartError,
+    McpServerStartError,
     ToolInvocationError,
     ToolNotFoundError,
 )
 from ..services.error_diagnostics import collect_startup_diagnostics
-from ..value_objects import CorrelationId, HealthCheckInterval, IdleTTL, ProviderId, ProviderMode, ProviderState
+from ..value_objects import CorrelationId, HealthCheckInterval, IdleTTL, McpServerId, McpServerMode, McpServerState
 from .aggregate import AggregateRoot
 from .health_tracker import HealthTracker
-from .provider_config import ProviderConfig
+from .mcp_server_config import McpServerConfig
 from .tool_catalog import ToolCatalog, ToolSchema
 
 logger = get_logger(__name__)
@@ -45,27 +45,27 @@ logger = get_logger(__name__)
 
 # Valid state transitions
 VALID_TRANSITIONS = {
-    ProviderState.COLD: {ProviderState.INITIALIZING},
-    ProviderState.INITIALIZING: {
-        ProviderState.READY,
-        ProviderState.DEAD,
-        ProviderState.DEGRADED,
+    McpServerState.COLD: {McpServerState.INITIALIZING},
+    McpServerState.INITIALIZING: {
+        McpServerState.READY,
+        McpServerState.DEAD,
+        McpServerState.DEGRADED,
     },
-    ProviderState.READY: {
-        ProviderState.COLD,
-        ProviderState.DEAD,
-        ProviderState.DEGRADED,
+    McpServerState.READY: {
+        McpServerState.COLD,
+        McpServerState.DEAD,
+        McpServerState.DEGRADED,
     },
-    ProviderState.DEGRADED: {ProviderState.INITIALIZING, ProviderState.COLD},
-    ProviderState.DEAD: {ProviderState.INITIALIZING, ProviderState.DEGRADED},
+    McpServerState.DEGRADED: {McpServerState.INITIALIZING, McpServerState.COLD},
+    McpServerState.DEAD: {McpServerState.INITIALIZING, McpServerState.DEGRADED},
 }
 
 
-class Provider(AggregateRoot):
+class McpServer(AggregateRoot):
     """
-    Provider aggregate root.
+    McpServer aggregate root.
 
-    Manages the complete lifecycle of an MCP provider including:
+    Manages the complete lifecycle of an MCP mcp_server including:
     - State machine with valid transitions
     - Health tracking and circuit breaker logic
     - Tool catalog management
@@ -76,8 +76,8 @@ class Provider(AggregateRoot):
 
     def __init__(
         self,
-        provider_id: str,
-        mode: str | ProviderMode,  # Accept both string and enum
+        mcp_server_id: str,
+        mode: str | McpServerMode,  # Accept both string and enum
         command: list[str] | None = None,
         image: str | None = None,
         endpoint: str | None = None,
@@ -95,7 +95,7 @@ class Provider(AggregateRoot):
         container_command: list[str] | None = None,  # Override container entrypoint
         container_args: list[str] | None = None,  # Arguments for container command
         description: str | None = None,  # Description/preprompt for AI models
-        # Pre-defined tools (allows visibility before provider starts)
+        # Pre-defined tools (allows visibility before mcp_server starts)
         tools: list[dict[str, Any]] | None = None,
         # HTTP transport options (for remote mode)
         auth: dict[str, Any] | None = None,  # Authentication config
@@ -103,17 +103,17 @@ class Provider(AggregateRoot):
         http: dict[str, Any] | None = None,  # HTTP transport config
         # Dependencies
         metrics_publisher: IMetricsPublisher | None = None,
-        log_buffer: IProviderLogBuffer | None = None,
+        log_buffer: IMcpServerLogBuffer | None = None,
         # Capability declarations (Phase 38)
-        capabilities: ProviderCapabilities | None = None,
+        capabilities: McpServerCapabilities | None = None,
     ):
         super().__init__()
 
         # Identity
-        self._id = ProviderId(provider_id)
+        self._id = McpServerId(mcp_server_id)
 
-        # Mode - normalize to ProviderMode enum (container -> docker)
-        self._mode = ProviderMode.normalize(mode)
+        # Mode - normalize to McpServerMode enum (container -> docker)
+        self._mode = McpServerMode.normalize(mode)
 
         self._description = description
 
@@ -158,7 +158,7 @@ class Provider(AggregateRoot):
         self._capabilities = capabilities
 
         # State
-        self._state = ProviderState.COLD
+        self._state = McpServerState.COLD
         self._health = HealthTracker(max_consecutive_failures=max_consecutive_failures)
         self._tools = ToolCatalog()
         self._client: Any | None = None  # StdioClient or HttpClient
@@ -188,33 +188,33 @@ class Provider(AggregateRoot):
         # Safe to acquire after: (none - this is top level for domain)
         # Safe to acquire before: EVENT_BUS, EVENT_STORE, STDIO_CLIENT
         # I/O rule: Copy client reference under lock, do I/O outside lock
-        self._lock = self._create_lock(provider_id)
+        self._lock = self._create_lock(mcp_server_id)
 
     @classmethod
     def from_config(
         cls,
-        config: ProviderConfig,
+        config: McpServerConfig,
         metrics_publisher: "IMetricsPublisher | None" = None,
-    ) -> "Provider":
-        """Create Provider from ProviderConfig.
+    ) -> "McpServer":
+        """Create McpServer from McpServerConfig.
 
-        This is the preferred way to create a Provider instance.
+        This is the preferred way to create a McpServer instance.
         Uses structured configuration instead of 21+ parameters.
 
         Args:
-            config: Provider configuration dataclass.
+            config: McpServer configuration dataclass.
             metrics_publisher: Optional metrics publisher for observability.
 
         Returns:
-            Configured Provider instance.
+            Configured McpServer instance.
 
         Example:
-            config = ProviderConfig(
-                provider_id="math",
-                mode=ProviderMode.SUBPROCESS,
+            config = McpServerConfig(
+                mcp_server_id="math",
+                mode=McpServerMode.SUBPROCESS,
                 subprocess=SubprocessConfig(command=["python", "-m", "math"]),
             )
-            provider = Provider.from_config(config)
+            mcp_server = McpServer.from_config(config)
         """
         # Extract mode-specific configuration
         command = config.get_command()
@@ -256,7 +256,7 @@ class Provider(AggregateRoot):
             http = config.remote.http
 
         return cls(
-            provider_id=config.provider_id,
+            mcp_server_id=config.mcp_server_id,
             mode=config.mode,
             command=command,
             image=image,
@@ -283,7 +283,7 @@ class Provider(AggregateRoot):
         )
 
     @staticmethod
-    def _create_lock(provider_id: str) -> "TrackedLock | threading.RLock":
+    def _create_lock(mcp_server_id: str) -> "TrackedLock | threading.RLock":
         """Create lock with hierarchy tracking.
 
         Uses runtime import to avoid circular dependency between
@@ -292,7 +292,7 @@ class Provider(AggregateRoot):
         try:
             from ...infrastructure.lock_hierarchy import LockLevel, TrackedLock
 
-            return TrackedLock(LockLevel.PROVIDER, f"Provider:{provider_id}")
+            return TrackedLock(LockLevel.PROVIDER, f"McpServer:{mcp_server_id}")
         except ImportError:
             # Fallback for testing or isolated domain usage
             return threading.RLock()
@@ -300,42 +300,42 @@ class Provider(AggregateRoot):
     # --- Properties ---
 
     @property
-    def id(self) -> ProviderId:
-        """Provider identifier."""
+    def id(self) -> McpServerId:
+        """McpServer identifier."""
         return self._id
 
     @property
-    def provider_id(self) -> str:
-        """Provider identifier as string (for backward compatibility)."""
+    def mcp_server_id(self) -> str:
+        """McpServer identifier as string (for backward compatibility)."""
         return str(self._id)
 
     @property
-    def mode(self) -> ProviderMode:
-        """Provider mode enum."""
+    def mode(self) -> McpServerMode:
+        """McpServer mode enum."""
         return self._mode
 
     @property
     def mode_str(self) -> str:
-        """Provider mode as string (for backward compatibility)."""
+        """McpServer mode as string (for backward compatibility)."""
         return self._mode.value
 
     @property
     def description(self) -> str | None:
-        """Provider description for AI models."""
+        """McpServer description for AI models."""
         return self._description
 
     @property
-    def state(self) -> ProviderState:
-        """Current provider state."""
+    def state(self) -> McpServerState:
+        """Current mcp_server state."""
         with self._lock:
             return self._state
 
     @property
-    def state_snapshot(self) -> ProviderState:
+    def state_snapshot(self) -> McpServerState:
         """Read current state without acquiring lock.
 
-        Safe for callers that cannot acquire Provider lock due to lock hierarchy
-        constraints (e.g., ProviderGroup at level 11 cannot acquire Provider at
+        Safe for callers that cannot acquire McpServer lock due to lock hierarchy
+        constraints (e.g., McpServerGroup at level 11 cannot acquire McpServer at
         level 10).  Reading an enum attribute is atomic in CPython (GIL-protected
         single pointer read).  The value may be slightly stale, which is
         acceptable for health checks and rotation decisions.
@@ -354,7 +354,7 @@ class Provider(AggregateRoot):
 
     @property
     def has_tools(self) -> bool:
-        """Check if provider has any tools registered (predefined or discovered)."""
+        """Check if mcp_server has any tools registered (predefined or discovered)."""
         return self._tools.count() > 0
 
     @property
@@ -364,7 +364,7 @@ class Provider(AggregateRoot):
 
     @property
     def is_alive(self) -> bool:
-        """Check if provider client is alive."""
+        """Check if mcp_server client is alive."""
         with self._lock:
             return self._client is not None and self._client.is_alive()
 
@@ -384,9 +384,9 @@ class Provider(AggregateRoot):
 
     @property
     def is_idle(self) -> bool:
-        """Check if provider has been idle longer than TTL."""
+        """Check if mcp_server has been idle longer than TTL."""
         with self._lock:
-            if self._state != ProviderState.READY:
+            if self._state != McpServerState.READY:
                 return False
             if self._last_used == 0:
                 return False
@@ -394,7 +394,7 @@ class Provider(AggregateRoot):
 
     @property
     def meta(self) -> dict[str, Any]:
-        """Provider metadata."""
+        """McpServer metadata."""
         with self._lock:
             return dict(self._meta)
 
@@ -404,19 +404,19 @@ class Provider(AggregateRoot):
         return self._lock
 
     @property
-    def capabilities(self) -> ProviderCapabilities | None:
-        """Declared capabilities for this provider."""
+    def capabilities(self) -> McpServerCapabilities | None:
+        """Declared capabilities for this mcp_server."""
         return self._capabilities
 
-    def set_log_buffer(self, buffer: "IProviderLogBuffer") -> None:
-        """Inject or replace the log buffer for this provider.
+    def set_log_buffer(self, buffer: "IMcpServerLogBuffer") -> None:
+        """Inject or replace the log buffer for this mcp_server.
 
         Intended for use by the bootstrap composition root to wire in the
-        infrastructure log buffer after the provider has been constructed from
-        config.  Safe to call before the provider is started.
+        infrastructure log buffer after the mcp_server has been constructed from
+        config.  Safe to call before the mcp_server is started.
 
         Args:
-            buffer: The :class:`~mcp_hangar.domain.contracts.log_buffer.IProviderLogBuffer`
+            buffer: The :class:`~mcp_hangar.domain.contracts.log_buffer.IMcpServerLogBuffer`
                 implementation to use for capturing stderr output.
         """
         with self._lock:
@@ -424,26 +424,26 @@ class Provider(AggregateRoot):
 
     # --- State Management ---
 
-    def _transition_to(self, new_state: ProviderState) -> None:
+    def _transition_to(self, new_state: McpServerState) -> None:
         """
         Transition to a new state (must hold lock).
 
         Validates the transition is valid according to state machine rules.
-        Records a ProviderStateChanged event.
+        Records a McpServerStateChanged event.
         """
         if new_state == self._state:
             return
 
         if new_state not in VALID_TRANSITIONS.get(self._state, set()):
-            raise InvalidStateTransitionError(self.provider_id, str(self._state.value), str(new_state.value))
+            raise InvalidStateTransitionError(self.mcp_server_id, str(self._state.value), str(new_state.value))
 
         old_state = self._state
         self._state = new_state
         self._increment_version()
 
         self._record_event(
-            ProviderStateChanged(
-                provider_id=self.provider_id,
+            McpServerStateChanged(
+                mcp_server_id=self.mcp_server_id,
                 old_state=str(old_state.value),
                 new_state=str(new_state.value),
             )
@@ -451,15 +451,15 @@ class Provider(AggregateRoot):
 
     def _can_start(self) -> tuple:
         """
-        Check if provider can be started (must hold lock).
+        Check if mcp_server can be started (must hold lock).
 
         Returns: (can_start, reason, time_until_retry)
         """
-        if self._state == ProviderState.READY:
+        if self._state == McpServerState.READY:
             if self._client and self._client.is_alive():
                 return True, "already_ready", 0
 
-        if self._state == ProviderState.DEGRADED:
+        if self._state == McpServerState.DEGRADED:
             if not self._health.can_retry():
                 time_left = self._health.time_until_retry()
                 return False, "backoff_not_elapsed", time_left
@@ -470,7 +470,7 @@ class Provider(AggregateRoot):
 
     def ensure_ready(self) -> None:
         """
-        Ensure provider is in READY state, starting if necessary.
+        Ensure mcp_server is in READY state, starting if necessary.
 
         Thread-safe. Blocks until ready or raises exception.
 
@@ -481,39 +481,39 @@ class Provider(AggregateRoot):
         - Failed startup propagates error to all waiters
 
         Raises:
-            CannotStartProviderError: If backoff hasn't elapsed or startup times out
-            ProviderStartError: If provider fails to start
+            CannotStartMcpServerError: If backoff hasn't elapsed or startup times out
+            McpServerStartError: If mcp_server fails to start
         """
         should_start = False
         ready_event = None
 
         with self._lock:
             # Fast path -- already ready
-            if self._state == ProviderState.READY:
+            if self._state == McpServerState.READY:
                 if self._client and self._client.is_alive():
                     return
                 # Client died
-                logger.warning(f"provider_dead: {self.provider_id}")
-                self._state = ProviderState.DEAD
+                logger.warning(f"mcp_server_dead: {self.mcp_server_id}")
+                self._state = McpServerState.DEAD
 
             # Another thread is starting: become a waiter
-            if self._state == ProviderState.INITIALIZING:
+            if self._state == McpServerState.INITIALIZING:
                 ready_event = self._ready_event
             elif self._state in (
-                ProviderState.COLD,
-                ProviderState.DEAD,
-                ProviderState.DEGRADED,
+                McpServerState.COLD,
+                McpServerState.DEAD,
+                McpServerState.DEGRADED,
             ):
                 # Check if we can start
                 can_start, reason, time_left = self._can_start()
                 if not can_start:
-                    raise CannotStartProviderError(
-                        self.provider_id,
+                    raise CannotStartMcpServerError(
+                        self.mcp_server_id,
                         f"backoff not elapsed, retry in {time_left:.1f}s",
                         time_left,
                     )
                 # We are the starter: transition and prepare event
-                self._transition_to(ProviderState.INITIALIZING)
+                self._transition_to(McpServerState.INITIALIZING)
                 self._ready_event = threading.Event()  # Fresh event for this attempt
                 self._start_error = None
                 ready_event = self._ready_event
@@ -527,20 +527,20 @@ class Provider(AggregateRoot):
         else:
             # Path B: We are a waiter -- wait for starter to finish
             if not ready_event.wait(timeout=30.0):
-                raise CannotStartProviderError(
-                    self.provider_id,
-                    "startup_timeout: timed out waiting for provider to start",
+                raise CannotStartMcpServerError(
+                    self.mcp_server_id,
+                    "startup_timeout: timed out waiting for mcp_server to start",
                     30.0,
                 )
             if self._start_error:
-                raise ProviderStartError(
-                    provider_id=self.provider_id,
+                raise McpServerStartError(
+                    mcp_server_id=self.mcp_server_id,
                     reason=str(self._start_error),
                 )
 
     def _start(self) -> None:
         """
-        Start provider process with I/O outside lock.
+        Start mcp_server process with I/O outside lock.
 
         Called after ensure_ready() has set state to INITIALIZING and
         released the lock. Performs subprocess launch and MCP handshake
@@ -564,22 +564,22 @@ class Provider(AggregateRoot):
                 self._end_cold_start_tracking(cold_start_time, success=True)
                 self._ready_event.set()  # Wake waiters: success
 
-        except ProviderStartError as e:
+        except McpServerStartError as e:
             with self._lock:
                 self._end_cold_start_tracking(cold_start_time, success=False)
                 self._handle_start_failure(e)
                 self._start_error = e
                 self._ready_event.set()  # Wake waiters: failure
             raise
-        except Exception as e:  # noqa: BLE001 -- fault-barrier: wrap unexpected startup errors in ProviderStartError for callers
+        except Exception as e:  # noqa: BLE001 -- fault-barrier: wrap unexpected startup errors in McpServerStartError for callers
             # Collect diagnostics from client if available
             diagnostics = self._collect_startup_diagnostics(client) if client else {}
 
             with self._lock:
                 self._end_cold_start_tracking(cold_start_time, success=False)
                 self._handle_start_failure(e)
-                start_error = ProviderStartError(
-                    provider_id=self.provider_id,
+                start_error = McpServerStartError(
+                    mcp_server_id=self.mcp_server_id,
                     reason=str(e),
                     stderr=diagnostics.get("stderr"),
                     exit_code=diagnostics.get("exit_code"),
@@ -593,9 +593,9 @@ class Provider(AggregateRoot):
     def _begin_cold_start_tracking(self) -> float | None:
         """Begin tracking cold start metrics. Returns start timestamp."""
         try:
-            self._metrics_publisher.begin_cold_start(self.provider_id)
+            self._metrics_publisher.begin_cold_start(self.mcp_server_id)
             return time.time()
-        except Exception:  # noqa: BLE001 -- fault-barrier: metrics must not crash provider startup
+        except Exception:  # noqa: BLE001 -- fault-barrier: metrics must not crash mcp_server startup
             return None
 
     def _end_cold_start_tracking(self, start_time: float | None, success: bool) -> None:
@@ -605,9 +605,9 @@ class Provider(AggregateRoot):
         try:
             if success:
                 duration = time.time() - start_time
-                self._metrics_publisher.record_cold_start(self.provider_id, duration, self._mode.value)
-            self._metrics_publisher.end_cold_start(self.provider_id)
-        except Exception:  # noqa: BLE001 -- fault-barrier: metrics must not crash provider startup
+                self._metrics_publisher.record_cold_start(self.mcp_server_id, duration, self._mode.value)
+            self._metrics_publisher.end_cold_start(self.mcp_server_id)
+        except Exception:  # noqa: BLE001 -- fault-barrier: metrics must not crash mcp_server startup
             pass
 
     def _create_client(self) -> Any:
@@ -645,9 +645,9 @@ class Provider(AggregateRoot):
 
         from ..value_objects.log import LogLine
 
-        provider_id = self.provider_id
+        mcp_server_id = self.mcp_server_id
         # self._log_buffer is guaranteed non-None here: _create_client guards with `if self._log_buffer is not None`
-        log_buffer: IProviderLogBuffer = self._log_buffer  # type: ignore[assignment]
+        log_buffer: IMcpServerLogBuffer = self._log_buffer  # type: ignore[assignment]
 
         def _reader() -> None:
             try:
@@ -655,7 +655,7 @@ class Provider(AggregateRoot):
                     content = raw_line.rstrip("\n")
                     log_buffer.append(
                         LogLine(
-                            provider_id=provider_id,
+                            mcp_server_id=mcp_server_id,
                             stream="stderr",
                             content=content,
                         )
@@ -663,15 +663,15 @@ class Provider(AggregateRoot):
             except Exception:  # noqa: BLE001 -- fault-barrier: reader thread must not crash on pipe error
                 pass
 
-        t = threading.Thread(target=_reader, daemon=True, name=f"stderr-reader-{provider_id}")
+        t = threading.Thread(target=_reader, daemon=True, name=f"stderr-reader-{mcp_server_id}")
         t.start()
 
     def _get_launch_config(self) -> dict[str, Any]:
         """Get launch configuration for the current mode."""
-        if self._mode == ProviderMode.SUBPROCESS:
+        if self._mode == McpServerMode.SUBPROCESS:
             return {"command": self._command, "env": self._env}
 
-        if self._mode == ProviderMode.DOCKER:
+        if self._mode == McpServerMode.DOCKER:
             return {
                 "image": self._image,
                 "command": self._container_command,
@@ -683,7 +683,7 @@ class Provider(AggregateRoot):
                 "network": self._network,
                 "read_only": self._read_only,
                 "user": self._user,
-                "provider_id": self.provider_id,
+                "mcp_server_id": self.mcp_server_id,
             }
 
         if self._mode.value in ("container", "podman"):
@@ -698,10 +698,10 @@ class Provider(AggregateRoot):
                 "network": self._network,
                 "read_only": self._read_only,
                 "user": self._user,
-                "provider_id": self.provider_id,
+                "mcp_server_id": self.mcp_server_id,
             }
 
-        if self._mode == ProviderMode.REMOTE:
+        if self._mode == McpServerMode.REMOTE:
             return {
                 "endpoint": self._endpoint,
                 "auth_config": self._auth_config,
@@ -724,12 +724,12 @@ class Provider(AggregateRoot):
                 tag=self._build.get("tag"),
             )
             image = builder.build_if_needed(build_config)
-            logger.info(f"Built image for {self.provider_id}: {image}")
+            logger.info(f"Built image for {self.mcp_server_id}: {image}")
             return image
 
         if not self._image:
-            raise ProviderStartError(
-                self.provider_id,
+            raise McpServerStartError(
+                self.mcp_server_id,
                 "Container mode requires 'image' or 'build.dockerfile'",
             )
         return self._image
@@ -754,13 +754,13 @@ class Provider(AggregateRoot):
 
             # Collect full diagnostics for user-friendly error
             diagnostics = self._collect_startup_diagnostics(client)
-            raise ProviderStartError(
-                provider_id=self.provider_id,
+            raise McpServerStartError(
+                mcp_server_id=self.mcp_server_id,
                 reason=f"MCP initialization failed: {error_msg}",
                 stderr=diagnostics.get("stderr"),
                 exit_code=diagnostics.get("exit_code"),
                 suggestion=diagnostics.get("suggestion")
-                or "Check provider logs and ensure it implements the MCP protocol correctly.",
+                or "Check mcp_server logs and ensure it implements the MCP protocol correctly.",
             )
 
         # Discover tools
@@ -768,13 +768,13 @@ class Provider(AggregateRoot):
         if "error" in tools_resp:
             error_msg = tools_resp["error"].get("message", "unknown")
             diagnostics = self._collect_startup_diagnostics(client)
-            raise ProviderStartError(
-                provider_id=self.provider_id,
+            raise McpServerStartError(
+                mcp_server_id=self.mcp_server_id,
                 reason=f"Failed to list tools: {error_msg}",
                 stderr=diagnostics.get("stderr"),
                 exit_code=diagnostics.get("exit_code"),
                 suggestion=diagnostics.get("suggestion")
-                or "Provider started but tools/list failed. Check provider implementation.",
+                or "McpServer started but tools/list failed. Check mcp_server implementation.",
             )
 
         tool_list = tools_resp.get("result", {}).get("tools", [])
@@ -790,14 +790,14 @@ class Provider(AggregateRoot):
         try:
             rc = proc.poll()
             if rc is not None:
-                logger.error(f"provider_process_exit_code: {rc}")
+                logger.error(f"mcp_server_process_exit_code: {rc}")
         except Exception:  # noqa: BLE001 -- fault-barrier: diagnostics logging must not mask startup errors
             pass
 
         # Try to capture stderr (may already be captured by StdioClient)
         last_stderr = getattr(client, "_last_stderr", None)
         if last_stderr:
-            logger.error(f"provider_stderr: {last_stderr}")
+            logger.error(f"mcp_server_stderr: {last_stderr}")
             return
 
         # Fallback: try to read stderr directly
@@ -808,7 +808,7 @@ class Provider(AggregateRoot):
                 if err_bytes:
                     err_text = (err_bytes if isinstance(err_bytes, str) else err_bytes.decode(errors="replace")).strip()
                     if err_text:
-                        logger.error(f"provider_stderr: {err_text}")
+                        logger.error(f"mcp_server_stderr: {err_text}")
             except Exception:  # noqa: BLE001 -- fault-barrier: diagnostics logging must not mask startup errors
                 pass
 
@@ -820,28 +820,28 @@ class Provider(AggregateRoot):
         return collect_startup_diagnostics(client)
 
     def _finalize_start(self, client: Any, start_time: float) -> None:
-        """Finalize successful provider start."""
+        """Finalize successful mcp_server start."""
         self._client = client
         self._meta = {
             "init_result": {},
             "tools_count": self._tools.count(),
             "started_at": time.time(),
         }
-        self._transition_to(ProviderState.READY)
+        self._transition_to(McpServerState.READY)
         self._health.record_success()
         self._last_used = time.time()
 
         startup_duration_ms = (time.time() - start_time) * 1000
         self._record_event(
-            ProviderStarted(
-                provider_id=self.provider_id,
+            McpServerStarted(
+                mcp_server_id=self.mcp_server_id,
                 mode=self._mode.value,
                 tools_count=self._tools.count(),
                 startup_duration_ms=startup_duration_ms,
             )
         )
 
-        logger.info(f"provider_started: {self.provider_id}, mode={self._mode.value}, tools={self._tools.count()}")
+        logger.info(f"mcp_server_started: {self.mcp_server_id}, mode={self._mode.value}, tools={self._tools.count()}")
 
         # Runtime capability drift check -- after READY, before lock release
         self._verify_capability_drift()
@@ -874,7 +874,7 @@ class Provider(AggregateRoot):
 
         self._record_event(
             CapabilityViolationDetected(
-                provider_id=self.provider_id,
+                mcp_server_id=self.mcp_server_id,
                 violation_type=ViolationType.SCHEMA_MISMATCH.value,
                 violation_detail=violation_detail,
                 enforcement_action=enforcement,
@@ -884,13 +884,13 @@ class Provider(AggregateRoot):
 
         logger.warning(
             "capability_drift_detected",
-            provider_id=self.provider_id,
+            mcp_server_id=self.mcp_server_id,
             undeclared_tools=sorted(undeclared),
             enforcement_mode=enforcement,
         )
 
         if enforcement == "block":
-            self._transition_to(ProviderState.DEAD)
+            self._transition_to(McpServerState.DEAD)
 
     def _handle_start_failure(self, error: Exception | None) -> None:
         """Handle start failure (must hold lock)."""
@@ -909,30 +909,30 @@ class Provider(AggregateRoot):
         # Determine new state
         if self._health.should_degrade():
             # Use direct assignment to avoid transition validation issues
-            self._state = ProviderState.DEGRADED
+            self._state = McpServerState.DEGRADED
             self._increment_version()
 
-            logger.warning(f"provider_degraded: {self.provider_id}, failures={self._health.consecutive_failures}")
+            logger.warning(f"mcp_server_degraded: {self.mcp_server_id}, failures={self._health.consecutive_failures}")
 
             self._record_event(
-                ProviderDegraded(
-                    provider_id=self.provider_id,
+                McpServerDegraded(
+                    mcp_server_id=self.mcp_server_id,
                     consecutive_failures=self._health.consecutive_failures,
                     total_failures=self._health.total_failures,
                     reason=error_str,
                 )
             )
         else:
-            self._state = ProviderState.DEAD
+            self._state = McpServerState.DEAD
             self._increment_version()
 
-        logger.error(f"provider_start_failed: {self.provider_id}, error={error_str}")
+        logger.error(f"mcp_server_start_failed: {self.mcp_server_id}, error={error_str}")
 
     def invoke_tool(self, tool_name: str, arguments: dict[str, Any], timeout: float = 30.0) -> dict[str, Any]:
         """
-        Invoke a tool on this provider.
+        Invoke a tool on this mcp_server.
 
-        Thread-safe. Ensures provider is ready before invocation.
+        Thread-safe. Ensures mcp_server is ready before invocation.
 
         Uses a multi-lock-cycle pattern to avoid holding the lock during I/O:
         - Lock cycle 1: Ensure ready, check tool exists, decide if refresh needed
@@ -950,7 +950,7 @@ class Provider(AggregateRoot):
             Tool result dictionary
 
         Raises:
-            CannotStartProviderError: If provider cannot be started
+            CannotStartMcpServerError: If mcp_server cannot be started
             ToolNotFoundError: If tool doesn't exist
             ToolInvocationError: If invocation fails
         """
@@ -981,7 +981,7 @@ class Provider(AggregateRoot):
                 client = self._client
                 self._record_event(
                     ToolInvocationRequested(
-                        provider_id=self.provider_id,
+                        mcp_server_id=self.mcp_server_id,
                         tool_name=tool_name,
                         correlation_id=correlation_id,
                         arguments=arguments,
@@ -1001,7 +1001,7 @@ class Provider(AggregateRoot):
                 refresh_result = refresh_client.call("tools/list", {}, timeout=5.0)
             except (OSError, TimeoutError) as e:
                 refresh_error = e
-                logger.warning(f"tool_refresh_failed: {self.provider_id}, error={e}")
+                logger.warning(f"tool_refresh_failed: {self.mcp_server_id}, error={e}")
 
             # Lock cycle 2: Apply refresh results, clear flag, re-check tool
             with self._lock:
@@ -1012,14 +1012,14 @@ class Provider(AggregateRoot):
                     self._tools.update_from_list(tool_list)
 
                 if not self._tools.has(tool_name):
-                    raise ToolNotFoundError(self.provider_id, tool_name)
+                    raise ToolNotFoundError(self.mcp_server_id, tool_name)
 
                 tool_found = True
                 self._health._total_invocations += 1
                 client = self._client
                 self._record_event(
                     ToolInvocationRequested(
-                        provider_id=self.provider_id,
+                        mcp_server_id=self.mcp_server_id,
                         tool_name=tool_name,
                         correlation_id=correlation_id,
                         arguments=arguments,
@@ -1028,7 +1028,7 @@ class Provider(AggregateRoot):
                 )
         elif not tool_found:
             # Another thread is refreshing but tool still not found -- raise
-            raise ToolNotFoundError(self.provider_id, tool_name)
+            raise ToolNotFoundError(self.mcp_server_id, tool_name)
 
         # Invocation phase (outside lock): tools/call RPC
         start_time = time.time()
@@ -1052,7 +1052,7 @@ class Provider(AggregateRoot):
                 duration_ms = (time.time() - start_time) * 1000
                 self._record_event(
                     ToolInvocationFailed(
-                        provider_id=self.provider_id,
+                        mcp_server_id=self.mcp_server_id,
                         tool_name=tool_name,
                         correlation_id=correlation_id,
                         duration_ms=duration_ms,
@@ -1064,11 +1064,11 @@ class Provider(AggregateRoot):
 
                 logger.error(
                     f"tool_invocation_failed: {correlation_id}, "
-                    f"provider={self.provider_id}, tool={tool_name}, error={invocation_error}"
+                    f"mcp_server={self.mcp_server_id}, tool={tool_name}, error={invocation_error}"
                 )
 
                 raise ToolInvocationError(
-                    self.provider_id,
+                    self.mcp_server_id,
                     str(invocation_error),
                     {"tool_name": tool_name, "correlation_id": correlation_id},
                 ) from invocation_error
@@ -1080,7 +1080,7 @@ class Provider(AggregateRoot):
                 duration_ms = (time.time() - start_time) * 1000
                 self._record_event(
                     ToolInvocationFailed(
-                        provider_id=self.provider_id,
+                        mcp_server_id=self.mcp_server_id,
                         tool_name=tool_name,
                         correlation_id=correlation_id,
                         duration_ms=duration_ms,
@@ -1091,7 +1091,7 @@ class Provider(AggregateRoot):
                 )
 
                 raise ToolInvocationError(
-                    self.provider_id,
+                    self.mcp_server_id,
                     f"tool_error: {error_msg}",
                     {"tool_name": tool_name, "correlation_id": correlation_id},
                 )
@@ -1104,7 +1104,7 @@ class Provider(AggregateRoot):
             result = response.get("result", {})
             self._record_event(
                 ToolInvocationCompleted(
-                    provider_id=self.provider_id,
+                    mcp_server_id=self.mcp_server_id,
                     tool_name=tool_name,
                     correlation_id=correlation_id,
                     duration_ms=duration_ms,
@@ -1113,17 +1113,17 @@ class Provider(AggregateRoot):
                 )
             )
 
-            logger.debug(f"tool_invoked: {correlation_id}, provider={self.provider_id}, tool={tool_name}")
+            logger.debug(f"tool_invoked: {correlation_id}, mcp_server={self.mcp_server_id}, tool={tool_name}")
 
             return result
 
     def _refresh_tools(self) -> None:
-        """Refresh tool catalog from provider.
+        """Refresh tool catalog from mcp_server.
 
         Note: This performs I/O (tools/list RPC). Callers should prefer the
         two-lock-cycle pattern in invoke_tool() which performs the RPC outside
         the lock. This method is retained for internal use but should NOT be
-        called while holding the provider lock.
+        called while holding the mcp_server lock.
         """
         if not self._client or not self._client.is_alive():
             return
@@ -1134,7 +1134,7 @@ class Provider(AggregateRoot):
                 tool_list = tools_resp.get("result", {}).get("tools", [])
                 self._tools.update_from_list(tool_list)
         except (OSError, TimeoutError) as e:
-            logger.warning(f"tool_refresh_failed: {self.provider_id}, error={e}")
+            logger.warning(f"tool_refresh_failed: {self.mcp_server_id}, error={e}")
 
     def health_check(self) -> bool:
         """
@@ -1146,11 +1146,11 @@ class Provider(AggregateRoot):
         """
         # Phase 1: Check state and get client reference under lock
         with self._lock:
-            if self._state != ProviderState.READY:
+            if self._state != McpServerState.READY:
                 return False
 
             if not self._client or not self._client.is_alive():
-                self._state = ProviderState.DEAD
+                self._state = McpServerState.DEAD
                 self._increment_version()
                 return False
 
@@ -1172,7 +1172,7 @@ class Provider(AggregateRoot):
         # Phase 3: Update state based on result under lock
         with self._lock:
             # Re-check state in case it changed during I/O
-            if self._state != ProviderState.READY:
+            if self._state != McpServerState.READY:
                 return False
 
             if check_error is not None:
@@ -1180,23 +1180,23 @@ class Provider(AggregateRoot):
 
                 self._record_event(
                     HealthCheckFailed(
-                        provider_id=self.provider_id,
+                        mcp_server_id=self.mcp_server_id,
                         consecutive_failures=self._health.consecutive_failures,
                         error_message=str(check_error),
                     )
                 )
 
-                logger.warning(f"health_check_failed: {self.provider_id}, error={check_error}")
+                logger.warning(f"health_check_failed: {self.mcp_server_id}, error={check_error}")
 
                 if self._health.should_degrade():
-                    self._state = ProviderState.DEGRADED
+                    self._state = McpServerState.DEGRADED
                     self._increment_version()
 
-                    logger.warning(f"provider_degraded_by_health_check: {self.provider_id}")
+                    logger.warning(f"mcp_server_degraded_by_health_check: {self.mcp_server_id}")
 
                     self._record_event(
-                        ProviderDegraded(
-                            provider_id=self.provider_id,
+                        McpServerDegraded(
+                            mcp_server_id=self.mcp_server_id,
                             consecutive_failures=self._health.consecutive_failures,
                             total_failures=self._health.total_failures,
                             reason="health_check_failures",
@@ -1209,7 +1209,7 @@ class Provider(AggregateRoot):
             duration_ms = (time.time() - start_time) * 1000
             self._health.record_success()
 
-            self._record_event(HealthCheckPassed(provider_id=self.provider_id, duration_ms=duration_ms))
+            self._record_event(HealthCheckPassed(mcp_server_id=self.mcp_server_id, duration_ms=duration_ms))
 
             return True
 
@@ -1220,20 +1220,20 @@ class Provider(AggregateRoot):
         Thread-safe. Returns True if shutdown was performed.
         """
         with self._lock:
-            if self._state != ProviderState.READY:
+            if self._state != McpServerState.READY:
                 return False
 
             idle_time = time.time() - self._last_used
             if idle_time > self._idle_ttl.seconds:
                 self._record_event(
-                    ProviderIdleDetected(
-                        provider_id=self.provider_id,
+                    McpServerIdleDetected(
+                        mcp_server_id=self.mcp_server_id,
                         idle_duration_s=idle_time,
                         last_used_at=self._last_used,
                     )
                 )
 
-                logger.info(f"provider_idle_shutdown: {self.provider_id}, idle={idle_time:.1f}s")
+                logger.info(f"mcp_server_idle_shutdown: {self.mcp_server_id}, idle={idle_time:.1f}s")
                 self._shutdown_internal(reason="idle")
                 return True
 
@@ -1245,7 +1245,7 @@ class Provider(AggregateRoot):
             self._shutdown_internal(reason="shutdown")
 
     def stop(self) -> None:
-        """Stop the provider. Alias for shutdown(). Thread-safe."""
+        """Stop the mcp_server. Alias for shutdown(). Thread-safe."""
         self.shutdown()
 
     def _shutdown_internal(self, reason: str = "shutdown") -> None:
@@ -1254,15 +1254,15 @@ class Provider(AggregateRoot):
             try:
                 self._client.close()
             except Exception as e:  # noqa: BLE001 -- fault-barrier: shutdown cleanup must not propagate
-                logger.warning(f"shutdown_error: {self.provider_id}, error={e}")
+                logger.warning(f"shutdown_error: {self.mcp_server_id}, error={e}")
             self._client = None
 
-        self._state = ProviderState.COLD
+        self._state = McpServerState.COLD
         self._increment_version()
         self._tools.clear()
         self._meta.clear()
 
-        self._record_event(ProviderStopped(provider_id=self.provider_id, reason=reason))
+        self._record_event(McpServerStopped(mcp_server_id=self.mcp_server_id, reason=reason))
 
     # --- Compatibility Methods ---
 
@@ -1279,7 +1279,7 @@ class Provider(AggregateRoot):
     def get_tool_schemas(self) -> list[ToolSchema]:
         """Return a copy of the current tool schemas.
 
-        Returns the tools known to this provider. Thread-safe: takes a
+        Returns the tools known to this mcp_server. Thread-safe: takes a
         snapshot under lock and returns it.
 
         Returns:
@@ -1292,7 +1292,7 @@ class Provider(AggregateRoot):
         """Get status as dictionary (for registry.list)."""
         with self._lock:
             return {
-                "provider": self.provider_id,
+                "mcp_server": self.mcp_server_id,
                 "state": self._state.value,
                 "alive": self._client is not None and self._client.is_alive(),
                 "mode": self._mode.value,
@@ -1306,10 +1306,10 @@ class Provider(AggregateRoot):
         """Return YAML-compatible config spec dict.
 
         Returns the minimal representation for round-trip:
-        load_config(to_config_dict()) produces an equivalent Provider.
+        load_config(to_config_dict()) produces an equivalent McpServer.
 
         Returns:
-            Dictionary of provider configuration fields, omitting optional
+            Dictionary of mcp_server configuration fields, omitting optional
             fields that are empty or equal to their defaults.
         """
         spec: dict[str, Any] = {
@@ -1364,4 +1364,10 @@ class Provider(AggregateRoot):
                 self._idle_ttl = IdleTTL(idle_ttl_s)
             if health_check_interval_s is not None:
                 self._health_check_interval = HealthCheckInterval(health_check_interval_s)
-        self._record_event(ProviderUpdated(provider_id=self.provider_id, source="api"))
+        self._record_event(McpServerUpdated(mcp_server_id=self.mcp_server_id, source="api"))
+
+
+# legacy aliases
+Provider = McpServer
+
+ProviderState = McpServerState

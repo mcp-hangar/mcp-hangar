@@ -1,7 +1,7 @@
 """Audit service for tracking and logging operations.
 
 Domain service responsible for creating audit entries for
-provider lifecycle events and operations.
+mcp_server lifecycle events and operations.
 """
 
 from datetime import datetime
@@ -10,14 +10,14 @@ from typing import Any
 from ..contracts.persistence import AuditAction, AuditEntry, IAuditRepository
 from ..events import (
     DomainEvent,
-    ProviderDegraded,
-    ProviderStarted,
-    ProviderStateChanged,
-    ProviderStopped,
+    McpServerDegraded,
+    McpServerStarted,
+    McpServerStateChanged,
+    McpServerStopped,
     ToolInvocationCompleted,
     ToolInvocationFailed,
 )
-from ..value_objects import ProviderState
+from ..value_objects import McpServerState
 
 
 class AuditService:
@@ -35,25 +35,25 @@ class AuditService:
         """
         self._repo = audit_repository
 
-    async def record_provider_created(
+    async def record_mcp_server_created(
         self,
-        provider_id: str,
+        mcp_server_id: str,
         config: dict[str, Any],
         actor: str = "system",
         correlation_id: str | None = None,
     ) -> None:
-        """Record provider creation audit entry.
+        """Record mcp_server creation audit entry.
 
         Args:
-            provider_id: Provider identifier
-            config: Provider configuration
-            actor: Who created the provider
+            mcp_server_id: McpServer identifier
+            config: McpServer configuration
+            actor: Who created the mcp_server
             correlation_id: Optional correlation ID for tracing
         """
         await self._repo.append(
             AuditEntry(
-                entity_id=provider_id,
-                entity_type="provider",
+                entity_id=mcp_server_id,
+                entity_type="mcp_server",
                 action=AuditAction.CREATED,
                 timestamp=datetime.utcnow(),
                 actor=actor,
@@ -62,27 +62,27 @@ class AuditService:
             )
         )
 
-    async def record_provider_updated(
+    async def record_mcp_server_updated(
         self,
-        provider_id: str,
+        mcp_server_id: str,
         old_config: dict[str, Any],
         new_config: dict[str, Any],
         actor: str = "system",
         correlation_id: str | None = None,
     ) -> None:
-        """Record provider configuration update.
+        """Record mcp_server configuration update.
 
         Args:
-            provider_id: Provider identifier
+            mcp_server_id: McpServer identifier
             old_config: Previous configuration
             new_config: New configuration
-            actor: Who updated the provider
+            actor: Who updated the mcp_server
             correlation_id: Optional correlation ID
         """
         await self._repo.append(
             AuditEntry(
-                entity_id=provider_id,
-                entity_type="provider",
+                entity_id=mcp_server_id,
+                entity_type="mcp_server",
                 action=AuditAction.UPDATED,
                 timestamp=datetime.utcnow(),
                 actor=actor,
@@ -92,25 +92,25 @@ class AuditService:
             )
         )
 
-    async def record_provider_deleted(
+    async def record_mcp_server_deleted(
         self,
-        provider_id: str,
+        mcp_server_id: str,
         config: dict[str, Any],
         actor: str = "system",
         correlation_id: str | None = None,
     ) -> None:
-        """Record provider deletion.
+        """Record mcp_server deletion.
 
         Args:
-            provider_id: Provider identifier
-            config: Provider configuration at time of deletion
-            actor: Who deleted the provider
+            mcp_server_id: McpServer identifier
+            config: McpServer configuration at time of deletion
+            actor: Who deleted the mcp_server
             correlation_id: Optional correlation ID
         """
         await self._repo.append(
             AuditEntry(
-                entity_id=provider_id,
-                entity_type="provider",
+                entity_id=mcp_server_id,
+                entity_type="mcp_server",
                 action=AuditAction.DELETED,
                 timestamp=datetime.utcnow(),
                 actor=actor,
@@ -119,34 +119,34 @@ class AuditService:
             )
         )
 
-    async def record_provider_started(
+    async def record_mcp_server_started(
         self,
-        provider_id: str,
+        mcp_server_id: str,
         mode: str,
         tools_count: int,
         startup_duration_ms: float,
         actor: str = "system",
         correlation_id: str | None = None,
     ) -> None:
-        """Record provider start event.
+        """Record mcp_server start event.
 
         Args:
-            provider_id: Provider identifier
-            mode: Provider mode (subprocess, docker, remote)
+            mcp_server_id: McpServer identifier
+            mode: McpServer mode (subprocess, docker, remote)
             tools_count: Number of tools discovered
             startup_duration_ms: Time to start in milliseconds
-            actor: Who started the provider
+            actor: Who started the mcp_server
             correlation_id: Optional correlation ID
         """
         await self._repo.append(
             AuditEntry(
-                entity_id=provider_id,
-                entity_type="provider",
+                entity_id=mcp_server_id,
+                entity_type="mcp_server",
                 action=AuditAction.STARTED,
                 timestamp=datetime.utcnow(),
                 actor=actor,
                 new_state={
-                    "state": ProviderState.READY.value,
+                    "state": McpServerState.READY.value,
                     "mode": mode,
                     "tools_count": tools_count,
                 },
@@ -157,48 +157,48 @@ class AuditService:
             )
         )
 
-    async def record_provider_stopped(
+    async def record_mcp_server_stopped(
         self,
-        provider_id: str,
+        mcp_server_id: str,
         reason: str,
         actor: str = "system",
         correlation_id: str | None = None,
     ) -> None:
-        """Record provider stop event.
+        """Record mcp_server stop event.
 
         Args:
-            provider_id: Provider identifier
+            mcp_server_id: McpServer identifier
             reason: Reason for stopping (shutdown, idle, error, degraded)
-            actor: Who stopped the provider
+            actor: Who stopped the mcp_server
             correlation_id: Optional correlation ID
         """
         await self._repo.append(
             AuditEntry(
-                entity_id=provider_id,
-                entity_type="provider",
+                entity_id=mcp_server_id,
+                entity_type="mcp_server",
                 action=AuditAction.STOPPED,
                 timestamp=datetime.utcnow(),
                 actor=actor,
                 old_state={"state": "running"},
-                new_state={"state": ProviderState.COLD.value},
+                new_state={"state": McpServerState.COLD.value},
                 metadata={"reason": reason},
                 correlation_id=correlation_id,
             )
         )
 
-    async def record_provider_degraded(
+    async def record_mcp_server_degraded(
         self,
-        provider_id: str,
+        mcp_server_id: str,
         consecutive_failures: int,
         total_failures: int,
         reason: str,
         actor: str = "system",
         correlation_id: str | None = None,
     ) -> None:
-        """Record provider degradation event.
+        """Record mcp_server degradation event.
 
         Args:
-            provider_id: Provider identifier
+            mcp_server_id: McpServer identifier
             consecutive_failures: Number of consecutive failures
             total_failures: Total failure count
             reason: Reason for degradation
@@ -207,12 +207,12 @@ class AuditService:
         """
         await self._repo.append(
             AuditEntry(
-                entity_id=provider_id,
-                entity_type="provider",
+                entity_id=mcp_server_id,
+                entity_type="mcp_server",
                 action=AuditAction.DEGRADED,
                 timestamp=datetime.utcnow(),
                 actor=actor,
-                new_state={"state": ProviderState.DEGRADED.value},
+                new_state={"state": McpServerState.DEGRADED.value},
                 metadata={
                     "consecutive_failures": consecutive_failures,
                     "total_failures": total_failures,
@@ -224,16 +224,16 @@ class AuditService:
 
     async def record_state_change(
         self,
-        provider_id: str,
+        mcp_server_id: str,
         old_state: str,
         new_state: str,
         actor: str = "system",
         correlation_id: str | None = None,
     ) -> None:
-        """Record provider state transition.
+        """Record mcp_server state transition.
 
         Args:
-            provider_id: Provider identifier
+            mcp_server_id: McpServer identifier
             old_state: Previous state
             new_state: New state
             actor: Who triggered the change
@@ -241,8 +241,8 @@ class AuditService:
         """
         await self._repo.append(
             AuditEntry(
-                entity_id=provider_id,
-                entity_type="provider",
+                entity_id=mcp_server_id,
+                entity_type="mcp_server",
                 action=AuditAction.STATE_CHANGED,
                 timestamp=datetime.utcnow(),
                 actor=actor,
@@ -254,7 +254,7 @@ class AuditService:
 
     async def record_tool_invocation(
         self,
-        provider_id: str,
+        mcp_server_id: str,
         tool_name: str,
         arguments: dict[str, Any],
         result: Any,
@@ -267,7 +267,7 @@ class AuditService:
         """Record tool invocation for accountability.
 
         Args:
-            provider_id: Provider identifier
+            mcp_server_id: McpServer identifier
             tool_name: Tool that was invoked
             arguments: Arguments passed to tool
             result: Tool result (sanitized)
@@ -280,13 +280,13 @@ class AuditService:
         # Note: Consider sanitizing arguments/results for sensitive data
         await self._repo.append(
             AuditEntry(
-                entity_id=f"{provider_id}:{tool_name}",
+                entity_id=f"{mcp_server_id}:{tool_name}",
                 entity_type="tool_invocation",
                 action=AuditAction.UPDATED if success else AuditAction.STATE_CHANGED,
                 timestamp=datetime.utcnow(),
                 actor=actor,
                 metadata={
-                    "provider_id": provider_id,
+                    "mcp_server_id": mcp_server_id,
                     "tool_name": tool_name,
                     "arguments_keys": list(arguments.keys()),  # Only log keys, not values
                     "duration_ms": duration_ms,
@@ -313,9 +313,9 @@ class AuditService:
         """
         correlation_id = getattr(event, "correlation_id", None)
 
-        if isinstance(event, ProviderStarted):
-            await self.record_provider_started(
-                provider_id=event.provider_id,
+        if isinstance(event, McpServerStarted):
+            await self.record_mcp_server_started(
+                mcp_server_id=event.mcp_server_id,
                 mode=event.mode,
                 tools_count=event.tools_count,
                 startup_duration_ms=event.startup_duration_ms,
@@ -323,17 +323,17 @@ class AuditService:
                 correlation_id=correlation_id,
             )
 
-        elif isinstance(event, ProviderStopped):
-            await self.record_provider_stopped(
-                provider_id=event.provider_id,
+        elif isinstance(event, McpServerStopped):
+            await self.record_mcp_server_stopped(
+                mcp_server_id=event.mcp_server_id,
                 reason=event.reason,
                 actor=actor,
                 correlation_id=correlation_id,
             )
 
-        elif isinstance(event, ProviderDegraded):
-            await self.record_provider_degraded(
-                provider_id=event.provider_id,
+        elif isinstance(event, McpServerDegraded):
+            await self.record_mcp_server_degraded(
+                mcp_server_id=event.mcp_server_id,
                 consecutive_failures=event.consecutive_failures,
                 total_failures=event.total_failures,
                 reason=event.reason,
@@ -341,9 +341,9 @@ class AuditService:
                 correlation_id=correlation_id,
             )
 
-        elif isinstance(event, ProviderStateChanged):
+        elif isinstance(event, McpServerStateChanged):
             await self.record_state_change(
-                provider_id=event.provider_id,
+                mcp_server_id=event.mcp_server_id,
                 old_state=event.old_state,
                 new_state=event.new_state,
                 actor=actor,
@@ -352,7 +352,7 @@ class AuditService:
 
         elif isinstance(event, ToolInvocationCompleted):
             await self.record_tool_invocation(
-                provider_id=event.provider_id,
+                mcp_server_id=event.mcp_server_id,
                 tool_name=event.tool_name,
                 arguments={},  # Not available in event
                 result=None,
@@ -364,7 +364,7 @@ class AuditService:
 
         elif isinstance(event, ToolInvocationFailed):
             await self.record_tool_invocation(
-                provider_id=event.provider_id,
+                mcp_server_id=event.mcp_server_id,
                 tool_name=event.tool_name,
                 arguments={},
                 result=None,

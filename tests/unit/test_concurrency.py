@@ -46,23 +46,23 @@ class TestConcurrencyManagerConstruction:
         """Default limits match module constants."""
         cm = ConcurrencyManager()
         assert cm.global_limit == DEFAULT_GLOBAL_CONCURRENCY
-        assert cm.default_provider_limit == DEFAULT_PROVIDER_CONCURRENCY
+        assert cm.default_mcp_server_limit == DEFAULT_PROVIDER_CONCURRENCY
 
     def test_custom_limits(self):
         """Custom limits are respected."""
-        cm = ConcurrencyManager(global_limit=100, default_provider_limit=5)
+        cm = ConcurrencyManager(global_limit=100, default_mcp_server_limit=5)
         assert cm.global_limit == 100
-        assert cm.default_provider_limit == 5
+        assert cm.default_mcp_server_limit == 5
 
     def test_unlimited_global(self):
         """global_limit=0 means unlimited (no global semaphore)."""
-        cm = ConcurrencyManager(global_limit=0, default_provider_limit=10)
+        cm = ConcurrencyManager(global_limit=0, default_mcp_server_limit=10)
         assert cm.global_limit == 0
 
     def test_unlimited_provider(self):
-        """default_provider_limit=0 means unlimited per provider."""
-        cm = ConcurrencyManager(global_limit=50, default_provider_limit=0)
-        assert cm.default_provider_limit == 0
+        """default_mcp_server_limit=0 means unlimited per provider."""
+        cm = ConcurrencyManager(global_limit=50, default_mcp_server_limit=0)
+        assert cm.default_mcp_server_limit == 0
 
     def test_negative_global_limit_raises(self):
         """Negative global_limit raises ValueError."""
@@ -70,9 +70,9 @@ class TestConcurrencyManagerConstruction:
             ConcurrencyManager(global_limit=-1)
 
     def test_negative_provider_limit_raises(self):
-        """Negative default_provider_limit raises ValueError."""
-        with pytest.raises(ValueError, match="default_provider_limit must be >= 0"):
-            ConcurrencyManager(default_provider_limit=-1)
+        """Negative default_mcp_server_limit raises ValueError."""
+        with pytest.raises(ValueError, match="default_mcp_server_limit must be >= 0"):
+            ConcurrencyManager(default_mcp_server_limit=-1)
 
 
 # ---------------------------------------------------------------------------
@@ -81,39 +81,39 @@ class TestConcurrencyManagerConstruction:
 
 
 class TestProviderLimits:
-    """Tests for set_provider_limit and get_provider_limit."""
+    """Tests for set_mcp_server_limit and get_mcp_server_limit."""
 
-    def test_default_provider_limit(self):
+    def test_default_mcp_server_limit(self):
         """Providers without explicit limits use the default."""
-        cm = ConcurrencyManager(default_provider_limit=7)
-        assert cm.get_provider_limit("any-provider") == 7
+        cm = ConcurrencyManager(default_mcp_server_limit=7)
+        assert cm.get_mcp_server_limit("any-provider") == 7
 
-    def test_set_provider_limit(self):
+    def test_set_mcp_server_limit(self):
         """Explicit per-provider limit overrides the default."""
-        cm = ConcurrencyManager(default_provider_limit=10)
-        cm.set_provider_limit("slow-api", 3)
-        assert cm.get_provider_limit("slow-api") == 3
-        assert cm.get_provider_limit("fast-api") == 10  # Still default
+        cm = ConcurrencyManager(default_mcp_server_limit=10)
+        cm.set_mcp_server_limit("slow-api", 3)
+        assert cm.get_mcp_server_limit("slow-api") == 3
+        assert cm.get_mcp_server_limit("fast-api") == 10  # Still default
 
-    def test_set_provider_limit_unlimited(self):
+    def test_set_mcp_server_limit_unlimited(self):
         """Setting limit to 0 makes the provider unlimited."""
-        cm = ConcurrencyManager(default_provider_limit=10)
-        cm.set_provider_limit("unlimited-api", 0)
-        assert cm.get_provider_limit("unlimited-api") == 0
+        cm = ConcurrencyManager(default_mcp_server_limit=10)
+        cm.set_mcp_server_limit("unlimited-api", 0)
+        assert cm.get_mcp_server_limit("unlimited-api") == 0
 
-    def test_set_provider_limit_negative_raises(self):
+    def test_set_mcp_server_limit_negative_raises(self):
         """Negative per-provider limit raises ValueError."""
         cm = ConcurrencyManager()
         with pytest.raises(ValueError, match="limit must be >= 0"):
-            cm.set_provider_limit("api", -5)
+            cm.set_mcp_server_limit("api", -5)
 
     def test_update_provider_limit(self):
         """Updating a provider limit replaces the semaphore."""
-        cm = ConcurrencyManager(default_provider_limit=10)
-        cm.set_provider_limit("api", 5)
-        assert cm.get_provider_limit("api") == 5
-        cm.set_provider_limit("api", 20)
-        assert cm.get_provider_limit("api") == 20
+        cm = ConcurrencyManager(default_mcp_server_limit=10)
+        cm.set_mcp_server_limit("api", 5)
+        assert cm.get_mcp_server_limit("api") == 5
+        cm.set_mcp_server_limit("api", 20)
+        assert cm.get_mcp_server_limit("api") == 20
 
 
 # ---------------------------------------------------------------------------
@@ -126,14 +126,14 @@ class TestAcquireRelease:
 
     def test_acquire_yields_wait_time(self):
         """acquire() yields a float representing wait time in seconds."""
-        cm = ConcurrencyManager(global_limit=10, default_provider_limit=10)
+        cm = ConcurrencyManager(global_limit=10, default_mcp_server_limit=10)
         with cm.acquire("test") as wait_s:
             assert isinstance(wait_s, float)
             assert wait_s >= 0
 
     def test_acquire_releases_on_normal_exit(self):
         """Slots are released after the context manager exits normally."""
-        cm = ConcurrencyManager(global_limit=1, default_provider_limit=1)
+        cm = ConcurrencyManager(global_limit=1, default_mcp_server_limit=1)
 
         with cm.acquire("test"):
             pass
@@ -144,7 +144,7 @@ class TestAcquireRelease:
 
     def test_acquire_releases_on_exception(self):
         """Slots are released even if the block raises an exception."""
-        cm = ConcurrencyManager(global_limit=1, default_provider_limit=1)
+        cm = ConcurrencyManager(global_limit=1, default_mcp_server_limit=1)
 
         with pytest.raises(RuntimeError):
             with cm.acquire("test"):
@@ -157,7 +157,7 @@ class TestAcquireRelease:
     def test_global_concurrency_limit_respected(self):
         """With global_limit=N, at most N calls execute simultaneously."""
         limit = 5
-        cm = ConcurrencyManager(global_limit=limit, default_provider_limit=0)
+        cm = ConcurrencyManager(global_limit=limit, default_mcp_server_limit=0)
 
         concurrent_count = 0
         max_concurrent = 0
@@ -187,7 +187,7 @@ class TestAcquireRelease:
     def test_provider_concurrency_limit_respected(self):
         """Per-provider limit caps concurrent calls to that provider."""
         provider_limit = 3
-        cm = ConcurrencyManager(global_limit=0, default_provider_limit=provider_limit)
+        cm = ConcurrencyManager(global_limit=0, default_mcp_server_limit=provider_limit)
 
         concurrent_count = 0
         max_concurrent = 0
@@ -215,7 +215,7 @@ class TestAcquireRelease:
 
     def test_provider_isolation(self):
         """Provider A at max concurrency does not block Provider B."""
-        cm = ConcurrencyManager(global_limit=0, default_provider_limit=1)
+        cm = ConcurrencyManager(global_limit=0, default_mcp_server_limit=1)
 
         provider_a_started = threading.Event()
         provider_b_done = threading.Event()
@@ -246,7 +246,7 @@ class TestAcquireRelease:
     def test_both_limits_apply(self):
         """When both global and provider limits are set, the stricter one wins."""
         # Global=3, Provider=5 -> effective max is 3 for a single provider
-        cm = ConcurrencyManager(global_limit=3, default_provider_limit=5)
+        cm = ConcurrencyManager(global_limit=3, default_mcp_server_limit=5)
 
         concurrent_count = 0
         max_concurrent = 0
@@ -273,7 +273,7 @@ class TestAcquireRelease:
 
     def test_mixed_providers_global_limit(self):
         """Global=5, Provider A=3, Provider B=3: total concurrent <= 5."""
-        cm = ConcurrencyManager(global_limit=5, default_provider_limit=3)
+        cm = ConcurrencyManager(global_limit=5, default_mcp_server_limit=3)
 
         concurrent_count = 0
         max_concurrent = 0
@@ -303,7 +303,7 @@ class TestAcquireRelease:
 
     def test_unlimited_global(self):
         """global_limit=0 means no global semaphore, all run in parallel."""
-        cm = ConcurrencyManager(global_limit=0, default_provider_limit=0)
+        cm = ConcurrencyManager(global_limit=0, default_mcp_server_limit=0)
 
         concurrent_count = 0
         max_concurrent = 0
@@ -343,7 +343,7 @@ class TestTrueParallelism:
 
         10 calls x 50ms each, concurrency=10: should complete in ~50ms, not ~500ms.
         """
-        cm = ConcurrencyManager(global_limit=10, default_provider_limit=10)
+        cm = ConcurrencyManager(global_limit=10, default_mcp_server_limit=10)
 
         start = time.monotonic()
 
@@ -373,7 +373,7 @@ class TestTrueParallelism:
         With semaphore: total ~ 100ms (fast completes, queued starts, slow finishes)
         With chunking(2): total ~ 125ms (wave1=[fast,slow]->100ms, wave2=[queued]->25ms)
         """
-        cm = ConcurrencyManager(global_limit=2, default_provider_limit=0)
+        cm = ConcurrencyManager(global_limit=2, default_mcp_server_limit=0)
 
         timestamps: dict[str, float] = {}
         lock = threading.Lock()
@@ -417,13 +417,13 @@ class TestWaitTimeReporting:
 
     def test_no_contention_fast_wait(self):
         """Without contention, wait time is near zero."""
-        cm = ConcurrencyManager(global_limit=100, default_provider_limit=100)
+        cm = ConcurrencyManager(global_limit=100, default_mcp_server_limit=100)
         with cm.acquire("test") as wait_s:
             assert wait_s < 0.01
 
     def test_contention_reports_positive_wait(self):
         """Under contention, blocked callers report positive wait time."""
-        cm = ConcurrencyManager(global_limit=1, default_provider_limit=0)
+        cm = ConcurrencyManager(global_limit=1, default_mcp_server_limit=0)
 
         holder_started = threading.Event()
         wait_times: list[float] = []
@@ -460,36 +460,36 @@ class TestConcurrencyStats:
 
     def test_stats_reflect_defaults(self):
         """Stats show global and default provider limits."""
-        cm = ConcurrencyManager(global_limit=50, default_provider_limit=10)
+        cm = ConcurrencyManager(global_limit=50, default_mcp_server_limit=10)
         stats = cm.get_stats()
         assert stats["global_limit"] == 50
-        assert stats["default_provider_limit"] == 10
-        assert stats["provider_overrides"] == {}
+        assert stats["default_mcp_server_limit"] == 10
+        assert stats["mcp_server_overrides"] == {}
 
     def test_stats_reflect_overrides(self):
         """Stats include per-provider overrides."""
-        cm = ConcurrencyManager(global_limit=50, default_provider_limit=10)
-        cm.set_provider_limit("slow", 3)
-        cm.set_provider_limit("fast", 20)
+        cm = ConcurrencyManager(global_limit=50, default_mcp_server_limit=10)
+        cm.set_mcp_server_limit("slow", 3)
+        cm.set_mcp_server_limit("fast", 20)
         stats = cm.get_stats()
-        overrides = stats["provider_overrides"]
+        overrides = stats["mcp_server_overrides"]
         assert isinstance(overrides, dict)
         assert overrides["slow"] == 3
         assert overrides["fast"] == 20
 
     def test_stats_unlimited_shown_as_string(self):
         """Unlimited limits are shown as 'unlimited' in stats."""
-        cm = ConcurrencyManager(global_limit=0, default_provider_limit=0)
+        cm = ConcurrencyManager(global_limit=0, default_mcp_server_limit=0)
         stats = cm.get_stats()
         assert stats["global_limit"] == "unlimited"
-        assert stats["default_provider_limit"] == "unlimited"
+        assert stats["default_mcp_server_limit"] == "unlimited"
 
     def test_stats_provider_unlimited(self):
         """Per-provider unlimited shown as 'unlimited'."""
         cm = ConcurrencyManager()
-        cm.set_provider_limit("api", 0)
+        cm.set_mcp_server_limit("api", 0)
         stats = cm.get_stats()
-        overrides = stats["provider_overrides"]
+        overrides = stats["mcp_server_overrides"]
         assert isinstance(overrides, dict)
         assert overrides["api"] == "unlimited"
 
@@ -506,7 +506,7 @@ class TestSingleton:
         """get_concurrency_manager() creates a default instance."""
         cm = get_concurrency_manager()
         assert cm.global_limit == DEFAULT_GLOBAL_CONCURRENCY
-        assert cm.default_provider_limit == DEFAULT_PROVIDER_CONCURRENCY
+        assert cm.default_mcp_server_limit == DEFAULT_PROVIDER_CONCURRENCY
 
     def test_get_returns_same_instance(self):
         """get_concurrency_manager() returns the same instance."""
@@ -517,22 +517,22 @@ class TestSingleton:
     def test_init_replaces_singleton(self):
         """init_concurrency_manager() replaces the singleton."""
         cm1 = get_concurrency_manager()
-        cm2 = init_concurrency_manager(global_limit=99, default_provider_limit=7)
+        cm2 = init_concurrency_manager(global_limit=99, default_mcp_server_limit=7)
         assert cm2 is not cm1
         assert cm2.global_limit == 99
-        assert cm2.default_provider_limit == 7
+        assert cm2.default_mcp_server_limit == 7
         assert get_concurrency_manager() is cm2
 
     def test_init_with_provider_limits(self):
         """init_concurrency_manager() accepts provider-level limits."""
         cm = init_concurrency_manager(
             global_limit=50,
-            default_provider_limit=10,
-            provider_limits={"slow": 2, "fast": 25},
+            default_mcp_server_limit=10,
+            mcp_server_limits={"slow": 2, "fast": 25},
         )
-        assert cm.get_provider_limit("slow") == 2
-        assert cm.get_provider_limit("fast") == 25
-        assert cm.get_provider_limit("default") == 10
+        assert cm.get_mcp_server_limit("slow") == 2
+        assert cm.get_mcp_server_limit("fast") == 25
+        assert cm.get_mcp_server_limit("default") == 10
 
     def test_reset_clears_singleton(self):
         """reset_concurrency_manager() forces a new instance on next get."""
@@ -573,7 +573,7 @@ class TestBackwardCompatibility:
         """init with no arguments produces safe defaults."""
         cm = init_concurrency_manager()
         assert cm.global_limit == DEFAULT_GLOBAL_CONCURRENCY
-        assert cm.default_provider_limit == DEFAULT_PROVIDER_CONCURRENCY
+        assert cm.default_mcp_server_limit == DEFAULT_PROVIDER_CONCURRENCY
 
 
 # ---------------------------------------------------------------------------
@@ -586,7 +586,7 @@ class TestConcurrencyMetrics:
 
     def test_inflight_gauge_increments_and_decrements(self):
         """Global inflight gauge reflects in-progress calls."""
-        cm = ConcurrencyManager(global_limit=10, default_provider_limit=10)
+        cm = ConcurrencyManager(global_limit=10, default_mcp_server_limit=10)
 
         # Snapshot initial state
         initial_samples = BATCH_INFLIGHT_CALLS.collect()
@@ -615,7 +615,7 @@ class TestConcurrencyMetrics:
 
     def test_wait_histogram_observed(self):
         """Wait time histogram is observed on each acquire."""
-        cm = ConcurrencyManager(global_limit=10, default_provider_limit=10)
+        cm = ConcurrencyManager(global_limit=10, default_mcp_server_limit=10)
 
         with cm.acquire("test-prov"):
             pass
@@ -628,7 +628,7 @@ class TestConcurrencyMetrics:
 
     def test_queued_counter_incremented_on_contention(self):
         """Queued counter increases when a call has to wait."""
-        cm = ConcurrencyManager(global_limit=1, default_provider_limit=0)
+        cm = ConcurrencyManager(global_limit=1, default_mcp_server_limit=0)
 
         holder_started = threading.Event()
 
@@ -652,8 +652,8 @@ class TestConcurrencyMetrics:
 
         # The queued counter should have been incremented for the waiter
         samples = BATCH_CONCURRENCY_QUEUED_TOTAL.collect()
-        # At least one sample with provider=q-test should exist
-        found = any(s.labels.get("provider") == "q-test" and s.value > 0 for s in samples)
+        # At least one sample with mcp_server=q-test should exist
+        found = any(s.labels.get("mcp_server") == "q-test" and s.value > 0 for s in samples)
         assert found, f"Expected queued counter for 'q-test', got {samples}"
 
 
@@ -665,16 +665,16 @@ class TestConcurrencyMetrics:
 class TestThreadSafety:
     """Verify that ConcurrencyManager operations are thread-safe."""
 
-    def test_concurrent_set_provider_limit(self):
-        """set_provider_limit from multiple threads does not corrupt state."""
+    def test_concurrent_set_mcp_server_limit(self):
+        """set_mcp_server_limit from multiple threads does not corrupt state."""
         cm = ConcurrencyManager()
         errors = []
 
-        def setter(provider_id: str, limit: int):
+        def setter(mcp_server_id: str, limit: int):
             try:
                 for _ in range(50):
-                    cm.set_provider_limit(provider_id, limit)
-                    cm.get_provider_limit(provider_id)
+                    cm.set_mcp_server_limit(mcp_server_id, limit)
+                    cm.get_mcp_server_limit(mcp_server_id)
             except Exception as e:
                 errors.append(e)
 
@@ -688,7 +688,7 @@ class TestThreadSafety:
 
     def test_concurrent_acquire_different_providers(self):
         """Concurrent acquisitions on different providers are independent."""
-        cm = ConcurrencyManager(global_limit=0, default_provider_limit=1)
+        cm = ConcurrencyManager(global_limit=0, default_mcp_server_limit=1)
         results = []
         lock = threading.Lock()
 

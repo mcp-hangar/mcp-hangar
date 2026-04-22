@@ -3,9 +3,9 @@
 import pytest
 from unittest.mock import MagicMock, patch
 
-from mcp_hangar.application.services.traced_provider_service import TracedProviderService
+from mcp_hangar.application.services.traced_mcp_server_service import TracedMcpServerService
 from mcp_hangar.application.ports.observability import NullObservabilityAdapter
-from mcp_hangar.observability.conventions import Enforcement, MCP, Provider
+from mcp_hangar.observability.conventions import Enforcement, MCP, McpServer
 
 
 def _make_service(invoke_result: dict | None = None, invoke_raises: Exception | None = None):
@@ -16,8 +16,8 @@ def _make_service(invoke_result: dict | None = None, invoke_raises: Exception | 
     else:
         mock_service.invoke_tool.return_value = invoke_result or {"content": "ok"}
 
-    return TracedProviderService(
-        provider_service=mock_service,
+    return TracedMcpServerService(
+        mcp_server_service=mock_service,
         observability=NullObservabilityAdapter(),
     )
 
@@ -58,7 +58,7 @@ class TestTracedProviderServiceOtelSpan:
             svc.invoke_tool("math", "add", {"a": 1})
 
             set_calls = {c.args[0]: c.args[1] for c in mock_span.set_attribute.call_args_list}
-            assert set_calls.get(Provider.ID) == "math"
+            assert set_calls.get(McpServer.ID) == "math"
             assert set_calls.get(MCP.TOOL_NAME) == "add"
 
     def test_invoke_tool_span_sets_success_status(self) -> None:

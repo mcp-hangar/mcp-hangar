@@ -1,14 +1,14 @@
 """Config serializer -- inverse of server/config.py.
 
-This module serializes in-memory provider and group state back to a
+This module serializes in-memory mcp_server and group state back to a
 YAML-compatible dict structure, mirroring the format that server/config.py
 reads on startup.  It is the persistence-side of the CRUD cycle.
 
 Public API:
-    serialize_providers(providers=None) -> dict[str, Any]
+    serialize_mcp_servers(mcp_servers=None) -> dict[str, Any]
     serialize_groups(groups=None) -> dict[str, Any]
     serialize_execution_config() -> dict[str, Any]
-    serialize_full_config(providers=None, groups=None) -> dict[str, Any]
+    serialize_full_config(mcp_servers=None, groups=None) -> dict[str, Any]
     write_config_backup(config_path: str) -> str
 """
 
@@ -23,31 +23,31 @@ import yaml
 from .context import get_context
 
 if TYPE_CHECKING:
-    from ..domain.model.provider import Provider
-    from ..domain.model.provider_group import ProviderGroup
+    from ..domain.model.mcp_server import McpServer
+    from ..domain.model.mcp_server_group import McpServerGroup
 
 
-def serialize_providers(providers: dict[str, Provider] | None = None) -> dict[str, Any]:
-    """Return a YAML-compatible snapshot of all providers.
+def serialize_mcp_servers(mcp_servers: dict[str, McpServer] | None = None) -> dict[str, Any]:
+    """Return a YAML-compatible snapshot of all mcp_servers.
 
     Args:
-        providers: Optional explicit dict of ``{provider_id: Provider}``.  When
+        mcp_servers: Optional explicit dict of ``{mcp_server_id: McpServer}``.  When
             *None* the live application context is queried via ``get_context()``.
 
     Returns:
-        Dict mapping each provider ID to its ``to_config_dict()`` output.
+        Dict mapping each mcp_server ID to its ``to_config_dict()`` output.
     """
-    if providers is None:
+    if mcp_servers is None:
         ctx = get_context()
-        providers = ctx.repository.get_all()
-    return {provider_id: provider.to_config_dict() for provider_id, provider in providers.items()}
+        mcp_servers = ctx.repository.get_all()
+    return {mcp_server_id: mcp_server.to_config_dict() for mcp_server_id, mcp_server in mcp_servers.items()}
 
 
-def serialize_groups(groups: dict[str, ProviderGroup] | None = None) -> dict[str, Any]:
-    """Return a YAML-compatible snapshot of all provider groups.
+def serialize_groups(groups: dict[str, McpServerGroup] | None = None) -> dict[str, Any]:
+    """Return a YAML-compatible snapshot of all mcp_server groups.
 
     Args:
-        groups: Optional explicit dict of ``{group_id: ProviderGroup}``.  When
+        groups: Optional explicit dict of ``{group_id: McpServerGroup}``.  When
             *None* the live application context is queried via ``get_context()``.
 
     Returns:
@@ -77,39 +77,39 @@ def serialize_execution_config() -> dict[str, Any]:
         section: dict[str, Any] = {}
         if manager.global_limit != 0:
             section["max_concurrency"] = manager.global_limit
-        if manager.default_provider_limit != 0:
-            section["default_provider_concurrency"] = manager.default_provider_limit
+        if manager.default_mcp_server_limit != 0:
+            section["default_mcp_server_concurrency"] = manager.default_mcp_server_limit
         return section
     except Exception:  # noqa: BLE001 -- fault-barrier: concurrency unavailable should not break serializer
         return {}
 
 
 def serialize_full_config(
-    providers: dict[str, Provider] | None = None,
-    groups: dict[str, ProviderGroup] | None = None,
+    mcp_servers: dict[str, McpServer] | None = None,
+    groups: dict[str, McpServerGroup] | None = None,
 ) -> dict[str, Any]:
     """Return the complete config as a YAML-compatible dict.
 
-    Includes the ``"providers"`` section (providers + groups merged) and any
+    Includes the ``"mcp_servers"`` section (mcp_servers + groups merged) and any
     additional top-level sections that were present in the original config file
     (e.g. ``event_store``, ``auth``, ``catalog``, ``discovery``,
     ``config_reload``).  The ``execution`` section is always reconstructed from
     the live ConcurrencyManager state.
 
     Args:
-        providers: Optional explicit providers dict.  Passed through to
-            :func:`serialize_providers`.
+        mcp_servers: Optional explicit mcp_servers dict.  Passed through to
+            :func:`serialize_mcp_servers`.
         groups: Optional explicit groups dict.  Passed through to
             :func:`serialize_groups`.
 
     Returns:
-        Full config dict with ``"providers"`` key and any additional
+        Full config dict with ``"mcp_servers"`` key and any additional
         top-level sections from the original loaded config.
     """
-    serialized_providers = serialize_providers(providers)
+    serialized_mcp_servers = serialize_mcp_servers(mcp_servers)
     serialized_groups = serialize_groups(groups)
 
-    config: dict[str, Any] = {"providers": {**serialized_providers, **serialized_groups}}
+    config: dict[str, Any] = {"mcp_servers": {**serialized_mcp_servers, **serialized_groups}}
 
     # Append execution section from live ConcurrencyManager state
     execution = serialize_execution_config()
@@ -118,7 +118,7 @@ def serialize_full_config(
 
     # Pass through other top-level sections from the original config so that
     # the exported YAML can be used as a drop-in replacement for config.yaml.
-    # Sections that are purely runtime-derived (providers, execution) are
+    # Sections that are purely runtime-derived (mcp_servers, execution) are
     # handled above; everything else is preserved verbatim.
     _PASSTHROUGH_KEYS = frozenset({"event_store", "auth", "catalog", "discovery", "config_reload", "logging"})
     try:
@@ -144,14 +144,14 @@ def _build_snapshot_metadata(config: dict[str, Any]) -> dict[str, Any]:
         config: The full config dict that will be written to the backup.
 
     Returns:
-        Dict with ``timestamp``, ``provider_count``, and ``group_count`` keys.
+        Dict with ``timestamp``, ``mcp_server_count``, and ``group_count`` keys.
     """
-    providers_section = config.get("providers", {}) or {}
-    provider_count = sum(1 for v in providers_section.values() if isinstance(v, dict) and v.get("mode") != "group")
-    group_count = sum(1 for v in providers_section.values() if isinstance(v, dict) and v.get("mode") == "group")
+    mcp_servers_section = config.get("mcp_servers", {}) or {}
+    mcp_server_count = sum(1 for v in mcp_servers_section.values() if isinstance(v, dict) and v.get("mode") != "group")
+    group_count = sum(1 for v in mcp_servers_section.values() if isinstance(v, dict) and v.get("mode") == "group")
     return {
         "timestamp": datetime.datetime.now(datetime.UTC).isoformat(),
-        "provider_count": provider_count,
+        "mcp_server_count": mcp_server_count,
         "group_count": group_count,
     }
 
@@ -167,7 +167,7 @@ def write_config_backup(config_path: str) -> str:
         <new> -> bak1
 
     The backup file embeds a ``__snapshot__`` metadata block with the
-    creation timestamp, provider count, and group count so that backups
+    creation timestamp, mcp_server count, and group count so that backups
     can be audited without a live server.  The ``__snapshot__`` key is
     ignored by ``load_config_from_file`` because it is not a standard
     config section.

@@ -189,7 +189,7 @@ class EventBus(IEventBus):
         2. Publishes events to subscribed handlers
 
         Args:
-            stream_id: Stream identifier (e.g., "provider:math")
+            stream_id: Stream identifier (e.g., "mcp_server:math")
             events: List of events to persist and publish
             expected_version: Expected stream version for concurrency check.
                 Use -1 for new streams.
@@ -239,7 +239,7 @@ class EventBus(IEventBus):
         Constructs stream_id from aggregate type and ID.
 
         Args:
-            aggregate_type: Type of aggregate (e.g., "provider", "provider_group")
+            aggregate_type: Type of aggregate (e.g., "mcp_server", "mcp_server_group")
             aggregate_id: Unique identifier of the aggregate
             events: Events collected from aggregate
             expected_version: Expected version for concurrency

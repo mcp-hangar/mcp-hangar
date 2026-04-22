@@ -11,34 +11,34 @@ class IMetricsPublisher(ABC):
     """Contract for publishing metrics from domain layer."""
 
     @abstractmethod
-    def record_cold_start(self, provider_id: str, duration_s: float, mode: str) -> None:
+    def record_cold_start(self, mcp_server_id: str, duration_s: float, mode: str) -> None:
         """
         Record a cold start event.
 
         Args:
-            provider_id: Provider identifier
+            mcp_server_id: McpServer identifier
             duration_s: Duration of cold start in seconds
-            mode: Provider mode (subprocess, docker, etc.)
+            mode: McpServer mode (subprocess, docker, etc.)
         """
         pass
 
     @abstractmethod
-    def begin_cold_start(self, provider_id: str) -> None:
+    def begin_cold_start(self, mcp_server_id: str) -> None:
         """
         Mark the beginning of a cold start.
 
         Args:
-            provider_id: Provider identifier
+            mcp_server_id: McpServer identifier
         """
         pass
 
     @abstractmethod
-    def end_cold_start(self, provider_id: str) -> None:
+    def end_cold_start(self, mcp_server_id: str) -> None:
         """
         Mark the end of a cold start.
 
         Args:
-            provider_id: Provider identifier
+            mcp_server_id: McpServer identifier
         """
         pass
 
@@ -46,14 +46,14 @@ class IMetricsPublisher(ABC):
 class NullMetricsPublisher(IMetricsPublisher):
     """Null object pattern implementation that does nothing."""
 
-    def record_cold_start(self, provider_id: str, duration_s: float, mode: str) -> None:
+    def record_cold_start(self, mcp_server_id: str, duration_s: float, mode: str) -> None:
         """No-op implementation."""
         pass
 
-    def begin_cold_start(self, provider_id: str) -> None:
+    def begin_cold_start(self, mcp_server_id: str) -> None:
         """No-op implementation."""
         pass
 
-    def end_cold_start(self, provider_id: str) -> None:
+    def end_cold_start(self, mcp_server_id: str) -> None:
         """No-op implementation."""
         pass

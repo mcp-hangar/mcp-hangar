@@ -1086,7 +1086,7 @@ class TestAuthRoutes:
             body={
                 "role_name": "deployer",
                 "description": "Can deploy",
-                "permissions": ["provider:write:*"],
+                "permissions": ["mcp_server:write:*"],
             }
         )
 
@@ -1097,7 +1097,7 @@ class TestAuthRoutes:
         assert response.status_code == 201
         cmd = mock_dispatch.call_args[0][0]
         assert cmd.role_name == "deployer"
-        assert "provider:write:*" in cmd.permissions
+        assert "mcp_server:write:*" in cmd.permissions
 
     # --- get_principal_roles ---
 
@@ -1191,7 +1191,7 @@ class TestAuthRoutes:
 
         request = self._make_request(
             path_params={"role_name": "deployer"},
-            body={"permissions": ["provider:write:*"], "description": "Updated", "updated_by": "admin"},
+            body={"permissions": ["mcp_server:write:*"], "description": "Updated", "updated_by": "admin"},
         )
 
         with patch("enterprise.auth.api.routes.dispatch_command", new_callable=AsyncMock) as mock_dispatch:
@@ -1200,7 +1200,7 @@ class TestAuthRoutes:
 
         cmd = mock_dispatch.call_args[0][0]
         assert cmd.role_name == "deployer"
-        assert cmd.permissions == ["provider:write:*"]
+        assert cmd.permissions == ["mcp_server:write:*"]
         assert cmd.description == "Updated"
 
     # --- list_principals ---
@@ -1268,7 +1268,7 @@ class TestAuthRoutes:
         request = self._make_request(
             body={
                 "principal_id": "user:bob",
-                "permission": "provider:read:math",
+                "permission": "mcp_server:read:math",
             }
         )
 
@@ -1277,7 +1277,7 @@ class TestAuthRoutes:
             response = await check_permission(request)
 
         query = mock_dispatch.call_args[0][0]
-        assert query.resource_type == "provider"
+        assert query.resource_type == "mcp_server"
         assert query.action == "read"
         assert query.resource_id == "math"
 
@@ -1288,7 +1288,7 @@ class TestAuthRoutes:
         request = self._make_request(
             body={
                 "principal_id": "user:bob",
-                "permission": "provider:read",
+                "permission": "mcp_server:read",
             }
         )
 
@@ -1297,7 +1297,7 @@ class TestAuthRoutes:
             await check_permission(request)
 
         query = mock_dispatch.call_args[0][0]
-        assert query.resource_type == "provider"
+        assert query.resource_type == "mcp_server"
         assert query.action == "read"
         assert query.resource_id == "*"
 

@@ -76,14 +76,14 @@ async def ws_events_endpoint(websocket: WebSocket) -> None:
             pong_received.set()
             return
 
-        if typed_msg.get("type") == "subscribe" or "event_types" in typed_msg or "provider_ids" in typed_msg:
+        if typed_msg.get("type") == "subscribe" or "event_types" in typed_msg or "mcp_server_ids" in typed_msg:
             filters = parse_subscription_filters(typed_msg)
             if acknowledge_subscribe and typed_msg.get("type") == "subscribe":
                 await websocket.send_json(
                     {
                         "type": "subscribed",
                         "event_types": filters.get("event_types", []),
-                        "provider_ids": filters.get("provider_ids", []),
+                        "mcp_server_ids": filters.get("mcp_server_ids", []),
                     }
                 )
 

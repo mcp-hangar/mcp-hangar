@@ -42,7 +42,7 @@ async def get_config(request: Request) -> HangarJSONResponse:
     """Return sanitized current server configuration.
 
     Reads from the config repository if available, or falls back to a
-    minimal dict derived from the provider registry.
+    minimal dict derived from the mcp_server registry.
 
     Sensitive fields (containing 'secret', 'key', 'token', 'password') are
     stripped before the response is returned.
@@ -55,10 +55,10 @@ async def get_config(request: Request) -> HangarJSONResponse:
 
     if config_repository is not None:
         raw = await config_repository.get_all()
-        config_dict = {"providers": list(raw)} if raw else {}
+        config_dict = {"mcp_servers": list(raw)} if raw else {}
     else:
         # Fallback: minimal operational config
-        config_dict = {"providers": []}
+        config_dict = {"mcp_servers": []}
 
     return HangarJSONResponse({"config": _sanitize(config_dict)})
 
@@ -95,7 +95,7 @@ async def reload_config(request: Request) -> HangarJSONResponse:
 async def export_config(request: Request) -> HangarJSONResponse:
     """Serialize current in-memory state to a YAML string.
 
-    Calls serialize_full_config() to capture the current provider and group
+    Calls serialize_full_config() to capture the current mcp_server and group
     configuration, then serialises it to YAML.
 
     Returns:
@@ -132,7 +132,7 @@ async def diff_config(request: Request) -> HangarJSONResponse:
     """Diff on-disk config file vs current in-memory state.
 
     Computes a unified diff between the YAML representation of the config file
-    as it exists on disk and the serialised current in-memory provider/group
+    as it exists on disk and the serialised current in-memory mcp_server/group
     state.  The diff is returned as a unified-diff string along with the raw
     dicts for both sides.
 

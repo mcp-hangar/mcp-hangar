@@ -1,7 +1,7 @@
 """Dependency detection for CLI commands.
 
 Detects available runtimes (npx, uvx, docker, podman) and filters
-providers based on what can actually be executed.
+mcp_servers based on what can actually be executed.
 """
 
 from dataclasses import dataclass
@@ -99,15 +99,15 @@ def detect_dependencies() -> DependencyStatus:
     )
 
 
-def is_provider_available(install_type: str, deps: DependencyStatus | None = None) -> bool:
-    """Check if a provider can be installed given available dependencies.
+def is_mcp_server_available(install_type: str, deps: DependencyStatus | None = None) -> bool:
+    """Check if a mcp_server can be installed given available dependencies.
 
     Args:
-        install_type: Provider's install_type (npx, uvx, docker, binary)
+        install_type: McpServer's install_type (npx, uvx, docker, binary)
         deps: Optional pre-detected dependencies (uses cached if None)
 
     Returns:
-        True if provider can be installed
+        True if mcp_server can be installed
     """
     if deps is None:
         deps = detect_dependencies()
@@ -116,7 +116,7 @@ def is_provider_available(install_type: str, deps: DependencyStatus | None = Non
         "npx": deps.npx.available,
         "uvx": deps.uvx.available,
         "docker": deps.has_container_runtime,
-        "binary": True,  # Binary providers are self-contained
+        "binary": True,  # Binary mcp_servers are self-contained
     }
     return availability_map.get(install_type, True)  # Unknown types default to available
 
@@ -146,3 +146,7 @@ def clear_cache() -> None:
     Useful for testing or when environment changes.
     """
     detect_dependencies.cache_clear()
+
+
+# legacy aliases
+is_provider_available = is_mcp_server_available

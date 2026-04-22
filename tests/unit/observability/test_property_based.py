@@ -68,7 +68,7 @@ class TestNullObservabilityAdapterProperties:
         adapter = NullObservabilityAdapter()
 
         span = adapter.start_tool_span(
-            provider_name=provider_name,
+            mcp_server_name=provider_name,
             tool_name=tool_name,
             input_params={},
         )
@@ -97,7 +97,7 @@ class TestNullObservabilityAdapterProperties:
         adapter = NullObservabilityAdapter()
 
         span = adapter.start_tool_span(
-            provider_name="test",
+            mcp_server_name="test",
             tool_name="operation",
             input_params=input_params,
         )
@@ -182,7 +182,7 @@ class TestNullObservabilityAdapterProperties:
 
         # Should never raise
         adapter.record_health_check(
-            provider_name=provider_name,
+            mcp_server_name=provider_name,
             healthy=healthy,
             latency_ms=latency_ms,
         )

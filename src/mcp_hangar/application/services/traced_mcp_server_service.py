@@ -1,11 +1,11 @@
-"""Traced provider service - adds observability to provider operations.
+"""Traced mcp_server service - adds observability to mcp_server operations.
 
-This decorator wraps ProviderService to automatically trace all tool
+This decorator wraps McpServerService to automatically trace all tool
 invocations and health checks with the configured observability backend.
 
 Example:
-    service = TracedProviderService(
-        provider_service=ProviderService(...),
+    service = TracedMcpServerService(
+        mcp_server_service=McpServerService(...),
         observability=LangfuseObservabilityAdapter(config),
     )
 
@@ -21,16 +21,18 @@ from ..ports.observability import ObservabilityPort, TraceContext
 from ...observability.conventions import MCP, set_governance_attributes
 from ...observability.tracing import get_tracer
 
+from .mcp_server_service import McpServerService
+
 logger = logging.getLogger(__name__)
 
 
-class TracedProviderService:
-    """Decorator that adds observability tracing to ProviderService.
+class TracedMcpServerService:
+    """Decorator that adds observability tracing to McpServerService.
 
-    Wraps an existing ProviderService instance and automatically traces:
+    Wraps an existing McpServerService instance and automatically traces:
     - Tool invocations with input/output and timing
     - Health checks with results and latency
-    - Provider state transitions
+    - McpServer state transitions
 
     All tracing is transparent to callers and adds minimal overhead
     when observability is disabled.
@@ -38,41 +40,45 @@ class TracedProviderService:
 
     def __init__(
         self,
-        provider_service: "ProviderService",  # noqa: F821
         observability: ObservabilityPort,
+        mcp_server_service: McpServerService | None = None,
+        provider_service: McpServerService | None = None,
     ) -> None:
         """Initialize traced service.
 
         Args:
-            provider_service: The underlying provider service to wrap.
+            mcp_server_service: The underlying mcp_server service to wrap.
             observability: Observability adapter for tracing.
         """
-        self._service = provider_service
+        service = mcp_server_service or provider_service
+        if service is None:
+            raise TypeError("Missing required argument: mcp_server_service")
+        self._service = service
         self._observability = observability
 
     # --- Delegated methods (no tracing needed) ---
 
-    def list_providers(self) -> list[dict[str, Any]]:
-        """List all providers with their status."""
-        return self._service.list_providers()
+    def list_mcp_servers(self) -> list[dict[str, Any]]:
+        """List all mcp_servers with their status."""
+        return self._service.list_mcp_servers()
 
-    def start_provider(self, provider_id: str) -> dict[str, Any]:
-        """Start a provider."""
-        return self._service.start_provider(provider_id)
+    def start_mcp_server(self, mcp_server_id: str) -> dict[str, Any]:
+        """Start a mcp_server."""
+        return self._service.start_mcp_server(mcp_server_id)
 
-    def stop_provider(self, provider_id: str) -> dict[str, Any]:
-        """Stop a provider."""
-        return self._service.stop_provider(provider_id)
+    def stop_mcp_server(self, mcp_server_id: str) -> dict[str, Any]:
+        """Stop a mcp_server."""
+        return self._service.stop_mcp_server(mcp_server_id)
 
-    def get_provider_tools(self, provider_id: str) -> dict[str, Any]:
-        """Get provider tools."""
-        return self._service.get_provider_tools(provider_id)
+    def get_mcp_server_tools(self, mcp_server_id: str) -> dict[str, Any]:
+        """Get mcp_server tools."""
+        return self._service.get_mcp_server_tools(mcp_server_id)
 
     # --- Traced methods ---
 
     def invoke_tool(
         self,
-        provider_id: str,
+        mcp_server_id: str,
         tool_name: str,
         arguments: dict[str, Any],
         timeout: float = 30.0,
@@ -83,7 +89,7 @@ class TracedProviderService:
         """Invoke a tool with full tracing (OTEL span + ObservabilityPort span).
 
         Args:
-            provider_id: Provider identifier.
+            mcp_server_id: McpServer identifier.
             tool_name: Tool name.
             arguments: Tool arguments.
             timeout: Timeout in seconds.
@@ -95,7 +101,7 @@ class TracedProviderService:
             Tool result dictionary.
 
         Raises:
-            ProviderNotFoundError: If provider doesn't exist.
+            McpServerNotFoundError: If mcp_server doesn't exist.
             ToolNotFoundError: If tool doesn't exist.
             ToolInvocationError: If invocation fails.
         """
@@ -104,7 +110,7 @@ class TracedProviderService:
         with tracer.start_as_current_span(f"tool.invoke.{tool_name}") as otel_span:
             set_governance_attributes(
                 otel_span,
-                provider_id=provider_id,
+                mcp_server_id=mcp_server_id,
                 tool_name=tool_name,
                 user_id=user_id,
                 session_id=session_id,
@@ -120,7 +126,7 @@ class TracedProviderService:
                 )
 
             obs_span = self._observability.start_tool_span(
-                provider_name=provider_id,
+                mcp_server_name=mcp_server_id,
                 tool_name=tool_name,
                 input_params=arguments,
                 trace_context=trace_context,
@@ -128,7 +134,7 @@ class TracedProviderService:
 
             try:
                 result = self._service.invoke_tool(
-                    provider_id=provider_id,
+                    mcp_server_id=mcp_server_id,
                     tool_name=tool_name,
                     arguments=arguments,
                     timeout=timeout,
@@ -145,13 +151,13 @@ class TracedProviderService:
 
     def health_check(
         self,
-        provider_id: str,
+        mcp_server_id: str,
         trace_id: str | None = None,
     ) -> bool:
         """Perform health check with tracing.
 
         Args:
-            provider_id: Provider identifier.
+            mcp_server_id: McpServer identifier.
             trace_id: Optional trace ID to attach result to.
 
         Returns:
@@ -160,11 +166,11 @@ class TracedProviderService:
         start_time = time.perf_counter()
 
         try:
-            healthy = self._service.health_check(provider_id)
+            healthy = self._service.health_check(mcp_server_id)
             latency_ms = (time.perf_counter() - start_time) * 1000
 
             self._observability.record_health_check(
-                provider_name=provider_id,
+                mcp_server_name=mcp_server_id,
                 healthy=healthy,
                 latency_ms=latency_ms,
                 trace_id=trace_id,
@@ -176,15 +182,15 @@ class TracedProviderService:
             latency_ms = (time.perf_counter() - start_time) * 1000
 
             self._observability.record_health_check(
-                provider_name=provider_id,
+                mcp_server_name=mcp_server_id,
                 healthy=False,
                 latency_ms=latency_ms,
                 trace_id=trace_id,
             )
 
             logger.error(
-                "Health check failed for provider %s: %s",
-                provider_id,
+                "Health check failed for mcp_server %s: %s",
+                mcp_server_id,
                 e,
             )
             raise
@@ -193,29 +199,29 @@ class TracedProviderService:
         self,
         trace_id: str | None = None,
     ) -> dict[str, bool]:
-        """Check health of all providers with tracing.
+        """Check health of all mcp_servers with tracing.
 
         Args:
             trace_id: Optional trace ID to attach results to.
 
         Returns:
-            Dictionary mapping provider_id to health status.
+            Dictionary mapping mcp_server_id to health status.
         """
         results = {}
 
-        for provider_status in self._service.list_providers():
-            provider_id = provider_status.get("name") or provider_status.get("provider_id")
-            if provider_id:
+        for mcp_server_status in self._service.list_mcp_servers():
+            mcp_server_id = mcp_server_status.get("name") or mcp_server_status.get("mcp_server_id")
+            if mcp_server_id:
                 try:
-                    results[provider_id] = self.health_check(provider_id, trace_id)
-                except Exception:  # noqa: BLE001 -- fault-barrier: single provider health check failure must not crash batch check
-                    results[provider_id] = False
+                    results[mcp_server_id] = self.health_check(mcp_server_id, trace_id)
+                except Exception:  # noqa: BLE001 -- fault-barrier: single mcp_server health check failure must not crash batch check
+                    results[mcp_server_id] = False
 
         return results
 
-    def shutdown_idle_providers(self) -> list[str]:
-        """Shutdown idle providers."""
-        return self._service.shutdown_idle_providers()
+    def shutdown_idle_mcp_servers(self) -> list[str]:
+        """Shutdown idle mcp_servers."""
+        return self._service.shutdown_idle_mcp_servers()
 
     # --- Observability control ---
 
@@ -226,3 +232,7 @@ class TracedProviderService:
     def shutdown_tracing(self) -> None:
         """Shutdown tracing with final flush."""
         self._observability.shutdown()
+
+
+# legacy aliases
+TracedProviderService = TracedMcpServerService

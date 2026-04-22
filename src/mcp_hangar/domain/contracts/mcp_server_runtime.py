@@ -1,4 +1,4 @@
-"""Protocol contracts for provider-like objects.
+"""Protocol contracts for mcp_server-like objects.
 
 These contracts define the *minimum* surface area required by infrastructure
 components (e.g. background workers and command handlers) without importing
@@ -7,7 +7,7 @@ concrete implementations.
 Why:
 - Avoids duck-typing via hasattr(...)
 - Makes the expected interface explicit and type-checkable
-- Supports the domain `Provider` aggregate and any compatible implementations
+- Supports the domain `McpServer` aggregate and any compatible implementations
 
 Notes:
 - Protocols are for typing only; they don't enforce runtime inheritance.
@@ -73,15 +73,15 @@ class SupportsHealthStats(Protocol):
 
 
 @runtime_checkable
-class SupportsProviderLifecycle(Protocol):
+class SupportsMcpServerLifecycle(Protocol):
     """Commands-side lifecycle surface required by command handlers."""
 
     def ensure_ready(self) -> None:
-        """Ensure provider is started and ready to accept requests."""
+        """Ensure mcp_server is started and ready to accept requests."""
         ...
 
     def shutdown(self) -> None:
-        """Stop provider and release resources."""
+        """Stop mcp_server and release resources."""
         ...
 
 
@@ -90,7 +90,7 @@ class SupportsToolInvocation(Protocol):
     """Commands-side tool invocation surface required by command handlers."""
 
     def invoke_tool(self, tool_name: str, arguments: dict[str, Any], timeout: float = 30.0) -> dict[str, Any]:
-        """Invoke a tool on the provider."""
+        """Invoke a tool on the mcp_server."""
         ...
 
     def get_tool_names(self) -> list[str]:
@@ -99,40 +99,40 @@ class SupportsToolInvocation(Protocol):
 
 
 @runtime_checkable
-class ProviderRuntime(
+class McpServerRuntime(
     SupportsEventCollection,
     SupportsHealthCheck,
     SupportsIdleShutdown,
     SupportsState,
     SupportsHealthStats,
-    SupportsProviderLifecycle,
+    SupportsMcpServerLifecycle,
     SupportsToolInvocation,
     Protocol,
 ):
-    """Provider-like runtime contract required by background worker and command handlers.
+    """McpServer-like runtime contract required by background worker and command handlers.
 
     Any object satisfying this protocol can be managed by:
     - GC/health workers
     - CQRS command handlers
 
     Primary implementation:
-    - domain aggregate: `mcp_hangar.domain.model.Provider`
+    - domain aggregate: `mcp_hangar.domain.model.McpServer`
     """
 
     @property
-    def provider_id(self) -> Any:
-        """Stable provider identifier used by runtime management code."""
+    def mcp_server_id(self) -> Any:
+        """Stable mcp_server identifier used by runtime management code."""
         ...
 
 
 @runtime_checkable
-class ProviderMapping(Protocol):
-    """Dict-like view of providers consumed by BackgroundWorker.
+class McpServerMapping(Protocol):
+    """Dict-like view of mcp_servers consumed by BackgroundWorker.
 
     BackgroundWorker only needs `.items()` for snapshot iteration.
     """
 
-    def items(self) -> Iterable[tuple[str, ProviderRuntime]]: ...
+    def items(self) -> Iterable[tuple[str, McpServerRuntime]]: ...
 
 
 def normalize_state_to_str(state: Any) -> str:

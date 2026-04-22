@@ -5,8 +5,8 @@ timeout handling, and fail-fast behavior.
 
 Features:
 - Parallel execution with ThreadPoolExecutor
-- Two-level semaphore concurrency control (global + per-provider)
-- Single-flight pattern for cold starts (one provider starts once, not N times)
+- Two-level semaphore concurrency control (global + per-mcp_server)
+- Single-flight pattern for cold starts (one mcp_server starts once, not N times)
 - Cooperative cancellation via threading.Event
 - Eager validation before execution
 - Partial success handling (default: continue on error)
@@ -15,8 +15,8 @@ Features:
 
 Example:
     hangar_call(calls=[
-        {"provider": "math", "tool": "add", "arguments": {"a": 1, "b": 2}},
-        {"provider": "math", "tool": "multiply", "arguments": {"a": 3, "b": 4}},
+        {"mcp_server": "math", "tool": "add", "arguments": {"a": 1, "b": 2}},
+        {"mcp_server": "math", "tool": "multiply", "arguments": {"a": 3, "b": 4}},
     ])
 """
 
@@ -67,19 +67,19 @@ def hangar_call(
     fail_fast: bool = False,
     max_attempts: int = 1,
 ) -> dict[str, Any]:
-    """Invoke tools on MCP providers (single or batch).
+    """Invoke tools on MCP mcp_servers (single or batch).
 
-    CHOOSE THIS when: you want to execute tool(s) on provider(s). This is the main entry point.
+    CHOOSE THIS when: you want to execute tool(s) on mcp_server(s). This is the main entry point.
     CHOOSE hangar_tools when: you need to discover available tools before calling.
     CHOOSE hangar_start when: you only want to pre-warm without invoking.
 
-    Side effects: May start cold providers. Executes calls in parallel.
+    Side effects: May start cold mcp_servers. Executes calls in parallel.
 
     Concurrency model:
         Two levels of concurrency control apply simultaneously:
         1. Per-batch: max_concurrency limits threads for THIS invocation.
-        2. System-wide: global and per-provider semaphores (configured via
-           config.yaml ``execution.max_concurrency`` and per-provider
+        2. System-wide: global and per-mcp_server semaphores (configured via
+           config.yaml ``execution.max_concurrency`` and per-mcp_server
            ``max_concurrency``) provide cross-batch backpressure.
 
         All calls are submitted to the thread pool at once. Semaphores gate
@@ -87,7 +87,7 @@ def hangar_call(
         for the entire batch wave to complete.
 
     Args:
-        calls: list[{provider, tool, arguments, timeout?}] - Invocations to execute
+        calls: list[{mcp_server, tool, arguments, timeout?}] - Invocations to execute
         max_concurrency: int - Parallel workers for this batch (default: 10, range: 1-50)
         timeout: float - Batch timeout in seconds (default: 60, range: 1-300)
         fail_fast: bool - Stop batch on first error (default: false)
@@ -141,20 +141,20 @@ def hangar_call(
 
     Example:
         # Single call - success
-        hangar_call(calls=[{"provider": "math", "tool": "add", "arguments": {"a": 1, "b": 2}}])
+        hangar_call(calls=[{"mcp_server": "math", "tool": "add", "arguments": {"a": 1, "b": 2}}])
         # {"batch_id": "abc-123", "success": true, "total": 1, "succeeded": 1, "failed": 0,
         #  "elapsed_ms": 45.2, "results": [{"index": 0, "call_id": "def-456",
         #  "success": true, "result": 3, "error": null, "elapsed_ms": 42.1}]}
 
-        # Validation error - unknown provider
-        hangar_call(calls=[{"provider": "unknown", "tool": "x", "arguments": {}}])
+        # Validation error - unknown mcp_server
+        hangar_call(calls=[{"mcp_server": "unknown", "tool": "x", "arguments": {}}])
         # {"batch_id": "abc-123", "success": false, "error": "Validation failed",
-        #  "validation_errors": [{"index": 0, "field": "provider", "message": "..."}]}
+        #  "validation_errors": [{"index": 0, "field": "mcp_server", "message": "..."}]}
 
         # Partial failure - some succeed, some fail
         hangar_call(calls=[
-            {"provider": "math", "tool": "add", "arguments": {"a": 1, "b": 2}},
-            {"provider": "math", "tool": "divide", "arguments": {"a": 1, "b": 0}}
+            {"mcp_server": "math", "tool": "add", "arguments": {"a": 1, "b": 2}},
+            {"mcp_server": "math", "tool": "divide", "arguments": {"a": 1, "b": 0}}
         ])
         # {"batch_id": "...", "success": false, "total": 2, "succeeded": 1, "failed": 1,
         #  "results": [
@@ -234,7 +234,7 @@ def hangar_call(
             CallSpec(
                 index=i,
                 call_id=str(uuid.uuid4()),
-                provider=call["provider"],
+                mcp_server=call["mcp_server"],
                 tool=call["tool"],
                 arguments=call["arguments"],
                 timeout=call.get("timeout"),

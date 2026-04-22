@@ -20,7 +20,7 @@ import pytest
 # Add registry to path
 sys.path.insert(0, str(Path(__file__).parent))
 
-from mcp_hangar.domain.model import Provider  # noqa: E402
+from mcp_hangar.domain.model import McpServer  # noqa: E402
 
 logging.basicConfig(level=logging.INFO, format="%(levelname)s: %(message)s")
 logger = logging.getLogger(__name__)
@@ -60,7 +60,7 @@ def test_prebuilt_image() -> None:
     print("=" * 70)
 
     config = {
-        "provider_id": "math_prebuilt",
+        "mcp_server_id": "math_prebuilt",
         "mode": "container",
         "image": IMAGE_NAME,
         # No "build" section - just use the image directly
@@ -72,14 +72,14 @@ def test_prebuilt_image() -> None:
         "idle_ttl_s": 300,
     }
 
-    print(f"\n📦 Provider: {config['provider_id']}")
+    print(f"\n📦 Provider: {config['mcp_server_id']}")
     print(f"   Mode: {config['mode']}")
     print(f"   Image: {config['image']}")
     print("   Build: None (using pre-built image)")
 
     provider = None
     try:
-        provider = Provider(**config)
+        provider = McpServer(**config)
 
         print("\n🔄 Starting provider from pre-built image...")
         provider.ensure_ready()

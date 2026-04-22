@@ -1,9 +1,9 @@
-"""Configuration loading and provider registration.
+"""Configuration loading and mcp_server registration.
 
 Uses ApplicationContext for dependency injection (DIP).
 
 Configuration mutates the shared runtime repository and group registry during
-startup so the rest of the server observes the same provider state.
+startup so the rest of the server observes the same mcp_server state.
 """
 
 import os
@@ -14,9 +14,9 @@ from typing import Any
 import yaml
 
 from ..domain.exceptions import ConfigurationError
-from ..domain.model import LoadBalancerStrategy, Provider, ProviderGroup
-from ..domain.security.input_validator import validate_provider_id
-from ..domain.value_objects.capabilities import ProviderCapabilities
+from ..domain.model import LoadBalancerStrategy, McpServer, McpServerGroup
+from ..domain.security.input_validator import validate_mcp_server_id
+from ..domain.value_objects.capabilities import McpServerCapabilities
 from ..logging_config import get_logger
 
 from .state import get_group_rebalance_saga, get_runtime, GROUPS
@@ -25,8 +25,8 @@ from .tools.batch.concurrency import DEFAULT_GLOBAL_CONCURRENCY, DEFAULT_PROVIDE
 logger = get_logger(__name__)
 
 
-def _provider_repository():
-    """Return the shared provider repository."""
+def _mcp_server_repository():
+    """Return the shared mcp_server repository."""
     return get_runtime().repository
 
 
@@ -98,34 +98,34 @@ def load_config_from_file(config_path: str) -> dict[str, Any]:
     with open(path) as f:
         config = yaml.safe_load(f)
 
-    if not config or "providers" not in config:
-        raise ValueError(f"Invalid configuration: missing 'providers' section in {config_path}")
+    if not config or "mcp_servers" not in config:
+        raise ValueError(f"Invalid configuration: missing 'mcp_servers' section in {config_path}")
 
     return config
 
 
 def load_config(config: dict[str, Any]) -> None:
     """
-    Load provider and group configuration.
+    Load mcp_server and group configuration.
 
-    Creates Provider aggregates and ProviderGroup aggregates based on mode.
+    Creates McpServer aggregates and McpServerGroup aggregates based on mode.
 
     Args:
-        config: Dictionary mapping provider IDs to provider spec dictionaries
+        config: Dictionary mapping mcp_server IDs to mcp_server spec dictionaries
     """
-    for provider_id, spec_dict in config.items():
-        result = validate_provider_id(provider_id)
+    for mcp_server_id, spec_dict in config.items():
+        result = validate_mcp_server_id(mcp_server_id)
         if not result.valid:
-            logger.warning("skipping_invalid_provider_id", provider_id=provider_id)
+            logger.warning("skipping_invalid_mcp_server_id", mcp_server_id=mcp_server_id)
             continue
 
         mode = spec_dict.get("mode", "subprocess")
 
         if mode == "group":
-            _load_group_config(provider_id, spec_dict)
+            _load_group_config(mcp_server_id, spec_dict)
             continue
 
-        _load_provider_config(provider_id, spec_dict)
+        _load_mcp_server_config(mcp_server_id, spec_dict)
 
 
 def _parse_strategy(strategy_str: str, group_id: str) -> LoadBalancerStrategy:
@@ -143,12 +143,12 @@ def _parse_strategy(strategy_str: str, group_id: str) -> LoadBalancerStrategy:
 
 
 def _load_group_members(
-    group: ProviderGroup,
+    group: McpServerGroup,
     group_id: str,
     members: list[dict[str, Any]],
 ) -> None:
     """Load group members from configuration."""
-    from ..domain.model.provider_config import ToolsConfig
+    from ..domain.model.mcp_server_config import ToolsConfig
     from ..domain.services import get_tool_access_resolver
 
     saga = get_group_rebalance_saga()
@@ -160,29 +160,29 @@ def _load_group_members(
             logger.warning("skipping_group_member_without_id", group_id=group_id)
             continue
 
-        result = validate_provider_id(member_id)
+        result = validate_mcp_server_id(member_id)
         if not result.valid:
             logger.warning("skipping_invalid_member_id", member_id=member_id)
             continue
 
-        # Use already-loaded provider if it exists (defined in top-level providers section).
+        # Use already-loaded mcp_server if it exists (defined in top-level mcp_servers section).
         # Only create a new one from member_spec if not found.
-        repository = _provider_repository()
+        repository = _mcp_server_repository()
         if repository.exists(member_id):
-            member_provider = repository.get(member_id)
-            if member_provider is None:
+            member_mcp_server = repository.get(member_id)
+            if member_mcp_server is None:
                 logger.warning("group_member_missing_after_exists_check", group_id=group_id, member_id=member_id)
                 continue
             logger.debug(
-                "group_member_resolved_from_providers",
+                "group_member_resolved_from_mcp_servers",
                 group_id=group_id,
                 member_id=member_id,
-                mode=member_provider.mode.value,
+                mode=member_mcp_server.mode.value,
             )
         else:
-            member_provider = _load_provider_config(member_id, member_spec)
+            member_mcp_server = _load_mcp_server_config(member_id, member_spec)
         group.add_member(
-            member_provider,
+            member_mcp_server,
             weight=member_spec.get("weight", 1),
             priority=member_spec.get("priority", 1),
         )
@@ -203,7 +203,7 @@ def _load_group_members(
                         group_id=group_id,
                         member_id=member_id,
                         policy=member_tools_policy,
-                        provider_id=member_id,
+                        mcp_server_id=member_id,
                     )
                     logger.debug(
                         "member_tool_access_policy_set",
@@ -224,9 +224,9 @@ def _load_group_members(
             saga.register_member(member_id, group_id)
 
 
-def _load_provider_config(provider_id: str, spec_dict: dict[str, Any]) -> Provider:
-    """Load a single provider configuration."""
-    from ..domain.model.provider_config import ToolsConfig
+def _load_mcp_server_config(mcp_server_id: str, spec_dict: dict[str, Any]) -> McpServer:
+    """Load a single mcp_server configuration."""
+    from ..domain.model.mcp_server_config import ToolsConfig
     from ..domain.services import get_tool_access_resolver
 
     user = spec_dict.get("user")
@@ -267,11 +267,11 @@ def _load_provider_config(provider_id: str, spec_dict: dict[str, Any]) -> Provid
                 except ValueError as e:
                     logger.warning(
                         "invalid_tools_access_config",
-                        provider_id=provider_id,
+                        mcp_server_id=mcp_server_id,
                         error=str(e),
                     )
 
-    # Process auth configuration for remote providers
+    # Process auth configuration for remote mcp_servers
     auth_config = spec_dict.get("auth")
     if auth_config:
         # Interpolate environment variables in secrets
@@ -282,20 +282,20 @@ def _load_provider_config(provider_id: str, spec_dict: dict[str, Any]) -> Provid
     capabilities = None
     if capabilities_data is not None:
         try:
-            capabilities = ProviderCapabilities.from_dict(capabilities_data)
+            capabilities = McpServerCapabilities.from_dict(capabilities_data)
         except (ValueError, TypeError) as e:
             from ..domain.exceptions import ConfigurationError
 
-            raise ConfigurationError(f"Invalid capabilities for provider '{provider_id}': {e}") from e
+            raise ConfigurationError(f"Invalid capabilities for mcp_server '{mcp_server_id}': {e}") from e
     else:
         logger.warning(
-            "provider_no_capabilities_declared",
-            provider_id=provider_id,
+            "mcp_server_no_capabilities_declared",
+            mcp_server_id=mcp_server_id,
             hint="Add a 'capabilities' block to declare resource requirements",
         )
 
-    provider = Provider(
-        provider_id=provider_id,
+    mcp_server = McpServer(
+        mcp_server_id=mcp_server_id,
         mode=spec_dict.get("mode", "subprocess"),
         command=spec_dict.get("command"),
         image=spec_dict.get("image"),
@@ -321,60 +321,60 @@ def _load_provider_config(provider_id: str, spec_dict: dict[str, Any]) -> Provid
         # Capability declarations
         capabilities=capabilities,
     )
-    _provider_repository().add(provider_id, provider)
+    _mcp_server_repository().add(mcp_server_id, mcp_server)
 
     # Register tool access policy if configured
     if tools_access_policy is not None:
         resolver = get_tool_access_resolver()
-        resolver.set_provider_policy(provider_id, tools_access_policy)
+        resolver.set_mcp_server_policy(mcp_server_id, tools_access_policy)
 
         # Update metrics
         from ..metrics import TOOL_ACCESS_POLICY_ACTIVE
 
-        TOOL_ACCESS_POLICY_ACTIVE.set(1, provider=provider_id)
+        TOOL_ACCESS_POLICY_ACTIVE.set(1, mcp_server=mcp_server_id)
 
         logger.debug(
-            "provider_tool_access_policy_set",
-            provider_id=provider_id,
+            "mcp_server_tool_access_policy_set",
+            mcp_server_id=mcp_server_id,
             has_allow_list=bool(tools_access_policy.allow_list),
             has_deny_list=bool(tools_access_policy.deny_list),
         )
 
-    # Register per-provider concurrency limit if specified
-    provider_max_concurrency = spec_dict.get("max_concurrency")
-    if provider_max_concurrency is not None:
+    # Register per-mcp_server concurrency limit if specified
+    mcp_server_max_concurrency = spec_dict.get("max_concurrency")
+    if mcp_server_max_concurrency is not None:
         from .tools.batch.concurrency import get_concurrency_manager
 
         try:
             cm = get_concurrency_manager()
-            cm.set_provider_limit(provider_id, int(provider_max_concurrency))
-        except Exception as e:  # noqa: BLE001 -- fault-barrier: concurrency config failure must not crash provider setup
+            cm.set_mcp_server_limit(mcp_server_id, int(mcp_server_max_concurrency))
+        except Exception as e:  # noqa: BLE001 -- fault-barrier: concurrency config failure must not crash mcp_server setup
             logger.warning(
-                "provider_concurrency_limit_failed",
-                provider_id=provider_id,
-                max_concurrency=provider_max_concurrency,
+                "mcp_server_concurrency_limit_failed",
+                mcp_server_id=mcp_server_id,
+                max_concurrency=mcp_server_max_concurrency,
                 error=str(e),
             )
 
     logger.debug(
-        "provider_loaded",
-        provider_id=provider_id,
+        "mcp_server_loaded",
+        mcp_server_id=mcp_server_id,
         mode=spec_dict.get("mode", "subprocess"),
-        max_concurrency=provider_max_concurrency,
+        max_concurrency=mcp_server_max_concurrency,
     )
-    return provider
+    return mcp_server
 
 
 def _load_group_config(group_id: str, spec_dict: dict[str, Any]) -> None:
-    """Load a provider group configuration."""
-    from ..domain.model.provider_config import ToolsConfig
+    """Load a mcp_server group configuration."""
+    from ..domain.model.mcp_server_config import ToolsConfig
     from ..domain.services import get_tool_access_resolver
 
     strategy = _parse_strategy(spec_dict.get("strategy", "round_robin"), group_id)
     health_config = spec_dict.get("health", {})
     circuit_config = spec_dict.get("circuit_breaker", {})
 
-    group = ProviderGroup(
+    group = McpServerGroup(
         group_id=group_id,
         strategy=strategy,
         min_healthy=spec_dict.get("min_healthy", 1),
@@ -414,7 +414,7 @@ def _load_group_config(group_id: str, spec_dict: dict[str, Any]) -> None:
         # Update metrics
         from ..metrics import TOOL_ACCESS_POLICY_ACTIVE
 
-        TOOL_ACCESS_POLICY_ACTIVE.set(1, provider=group_id)
+        TOOL_ACCESS_POLICY_ACTIVE.set(1, mcp_server=group_id)
 
         logger.debug(
             "group_tool_access_policy_set",
@@ -438,10 +438,10 @@ def _init_concurrency_from_config(full_config: dict[str, Any]) -> None:
     """Initialize the ConcurrencyManager from configuration.
 
     Reads ``execution.max_concurrency`` for the global limit and
-    per-provider ``max_concurrency`` values from the ``providers`` section.
+    per-mcp_server ``max_concurrency`` values from the ``mcp_servers`` section.
 
-    Called during load_configuration before providers are loaded, so that
-    per-provider limits set via _load_provider_config are applied on top.
+    Called during load_configuration before mcp_servers are loaded, so that
+    per-mcp_server limits set via _load_mcp_server_config are applied on top.
 
     Args:
         full_config: Full configuration dictionary.
@@ -455,25 +455,25 @@ def _init_concurrency_from_config(full_config: dict[str, Any]) -> None:
     else:
         global_limit = DEFAULT_GLOBAL_CONCURRENCY
 
-    default_provider_limit_raw = execution_config.get("default_provider_concurrency")
-    if default_provider_limit_raw is not None:
-        default_provider_limit = int(default_provider_limit_raw) if default_provider_limit_raw else 0
+    default_mcp_server_limit_raw = execution_config.get("default_mcp_server_concurrency")
+    if default_mcp_server_limit_raw is not None:
+        default_mcp_server_limit = int(default_mcp_server_limit_raw) if default_mcp_server_limit_raw else 0
     else:
-        default_provider_limit = DEFAULT_PROVIDER_CONCURRENCY
+        default_mcp_server_limit = DEFAULT_PROVIDER_CONCURRENCY
 
-    # Collect per-provider limits from providers section
-    provider_limits: dict[str, int] = {}
-    providers_config = full_config.get("providers", {})
-    for provider_id, spec in providers_config.items():
+    # Collect per-mcp_server limits from mcp_servers section
+    mcp_server_limits: dict[str, int] = {}
+    mcp_servers_config = full_config.get("mcp_servers", {})
+    for mcp_server_id, spec in mcp_servers_config.items():
         if isinstance(spec, dict):
             pmc = spec.get("max_concurrency")
             if pmc is not None:
-                provider_limits[provider_id] = int(pmc)
+                mcp_server_limits[mcp_server_id] = int(pmc)
 
     init_concurrency_manager(
         global_limit=global_limit,
-        default_provider_limit=default_provider_limit,
-        provider_limits=provider_limits,
+        default_mcp_server_limit=default_mcp_server_limit,
+        mcp_server_limits=mcp_server_limits,
     )
 
 
@@ -495,17 +495,17 @@ class ServerConfigLoader:
         """
         return load_config_from_file(path)
 
-    def apply_providers(self, providers_config: dict[str, Any]) -> None:
-        """Apply a providers configuration section to the running system.
+    def apply_mcp_servers(self, mcp_servers_config: dict[str, Any]) -> None:
+        """Apply a mcp_servers configuration section to the running system.
 
         Args:
-            providers_config: Mapping of provider_id -> provider spec dict.
+            mcp_servers_config: Mapping of mcp_server_id -> mcp_server spec dict.
         """
-        load_config(providers_config)
+        load_config(mcp_servers_config)
 
 
 def load_configuration(config_path: str | None = None) -> dict[str, Any]:
-    """Load provider configuration from file or use defaults.
+    """Load mcp_server configuration from file or use defaults.
 
     Returns:
         Full configuration dictionary
@@ -517,7 +517,7 @@ def load_configuration(config_path: str | None = None) -> dict[str, Any]:
         logger.info("loading_config_from_file", config_path=config_path)
         full_config = load_config_from_file(config_path)
         _init_concurrency_from_config(full_config)
-        load_config(full_config.get("providers", {}))
+        load_config(full_config.get("mcp_servers", {}))
         return full_config
     else:
         logger.info("config_not_found_using_default", config_path=config_path)
@@ -528,6 +528,6 @@ def load_configuration(config_path: str | None = None) -> dict[str, Any]:
                 "idle_ttl_s": 180,
             },
         }
-        _init_concurrency_from_config({"providers": default_config})
+        _init_concurrency_from_config({"mcp_servers": default_config})
         load_config(default_config)
-        return {"providers": default_config}
+        return {"mcp_servers": default_config}

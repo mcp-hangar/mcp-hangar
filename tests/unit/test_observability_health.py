@@ -323,7 +323,7 @@ class TestBuiltInHealthChecks:
         providers = {}
         check = create_provider_health_check(providers)
 
-        assert check.name == "providers"
+        assert check.name == "mcp_servers"
         assert check.critical is False
 
     @pytest.mark.asyncio

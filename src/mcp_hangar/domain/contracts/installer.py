@@ -10,7 +10,7 @@ from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Protocol
 
-from ..value_objects import ProviderMode
+from ..value_objects import McpServerMode
 from .registry import PackageInfo
 
 
@@ -22,7 +22,7 @@ class InstalledPackage:
         package_info: Original package information from the registry.
         install_path: Path where the package was installed (None for npx/uvx).
         command: Command and arguments to run the MCP server.
-        mode: Provider mode to use when running the server.
+        mode: McpServer mode to use when running the server.
         env: Environment variables to set when running the server.
         cleanup: Optional cleanup function to uninstall the package.
     """
@@ -30,7 +30,7 @@ class InstalledPackage:
     package_info: PackageInfo
     install_path: Path | None
     command: list[str]
-    mode: ProviderMode
+    mode: McpServerMode
     env: dict[str, str] = field(default_factory=dict)
     cleanup: Callable[[], None] | None = None
 

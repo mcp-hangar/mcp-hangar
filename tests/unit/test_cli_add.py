@@ -81,12 +81,12 @@ class TestConfigFileManager:
 
             provider = get_provider("fetch")
             assert provider is not None
-            manager.add_provider(provider)
+            manager.add_mcp_server(provider)
 
             assert config_path.exists()
             content = config_path.read_text()
             assert "fetch:" in content
-            assert "providers:" in content
+            assert "mcp_servers:" in content
 
     def test_add_provider_adds_to_existing_config(self):
         """Should add provider to existing config."""
@@ -94,7 +94,7 @@ class TestConfigFileManager:
             config_path = Path(tmpdir) / "config.yaml"
             config_path.write_text(
                 """
-providers:
+mcp_servers:
   memory:
     mode: subprocess
     command: [npx, -y, "@anthropic/mcp-server-memory"]
@@ -104,7 +104,7 @@ providers:
 
             provider = get_provider("fetch")
             assert provider is not None
-            manager.add_provider(provider)
+            manager.add_mcp_server(provider)
 
             content = config_path.read_text()
             assert "fetch:" in content
@@ -118,7 +118,7 @@ providers:
 
             provider = get_provider("fetch")
             assert provider is not None
-            manager.add_provider(provider)
+            manager.add_mcp_server(provider)
 
             content = config_path.read_text()
             # Should contain either uvx package name or npx package name
@@ -132,7 +132,7 @@ providers:
 
             provider = get_provider("filesystem")
             assert provider is not None
-            manager.add_provider(provider, config_value="/home/user")
+            manager.add_mcp_server(provider, config_value="/home/user")
 
             content = config_path.read_text()
             assert "/home/user" in content
@@ -145,7 +145,7 @@ providers:
 
             provider = get_provider("github")
             assert provider is not None
-            manager.add_provider(provider, use_env="GITHUB_TOKEN")
+            manager.add_mcp_server(provider, use_env="GITHUB_TOKEN")
 
             content = config_path.read_text()
             assert "GITHUB_TOKEN" in content

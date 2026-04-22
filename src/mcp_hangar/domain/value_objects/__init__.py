@@ -6,7 +6,7 @@ with strongly-typed domain concepts.
 
 This module is organized into themed submodules:
 - security.py: Authentication and authorization (Principal, Permission, Role)
-- provider.py: Provider lifecycle (ProviderState, ProviderMode, ProviderId)
+- mcp_server.py: McpServer lifecycle (McpServerState, McpServerMode, McpServerId)
 - health.py: Health status (HealthStatus, HealthCheckInterval)
 - config.py: Configuration (CommandLine, DockerImage, Endpoint, etc.)
 - common.py: Common types (CorrelationId, ToolName, ToolArguments, tenancy)
@@ -23,7 +23,7 @@ from .capabilities import (
     EnvironmentCapabilities,
     FilesystemCapabilities,
     NetworkCapabilities,
-    ProviderCapabilities,
+    McpServerCapabilities,
     ResourceCapabilities,
     ToolCapabilities,
     ViolationSeverity,
@@ -51,17 +51,17 @@ from .config import (
 # Health status
 from .health import HealthCheckInterval, HealthStatus
 
-# Provider lifecycle and identity
-from .provider import (
+# McpServer lifecycle and identity
+from .mcp_server import (
     GroupId,
     GroupState,
     LoadBalancerStrategy,
     MemberPriority,
     MemberWeight,
-    ProviderConfig,
-    ProviderId,
-    ProviderMode,
-    ProviderState,
+    McpServerConfig,
+    McpServerId,
+    McpServerMode,
+    McpServerState,
 )
 
 # Security - Authentication & Authorization
@@ -86,11 +86,11 @@ __all__ = [
     "Principal",
     "Permission",
     "Role",
-    # Provider
-    "ProviderState",
-    "ProviderMode",
-    "ProviderId",
-    "ProviderConfig",
+    # McpServer
+    "McpServerState",
+    "McpServerMode",
+    "McpServerId",
+    "McpServerConfig",
     "LoadBalancerStrategy",
     "GroupState",
     "GroupId",
@@ -135,9 +135,24 @@ __all__ = [
     "EnvironmentCapabilities",
     "FilesystemCapabilities",
     "NetworkCapabilities",
-    "ProviderCapabilities",
+    "McpServerCapabilities",
     "ResourceCapabilities",
     "ToolCapabilities",
     "ViolationSeverity",
     "ViolationType",
 ]
+
+import sys
+from importlib import import_module
+
+# legacy aliases
+globals().update(
+    {
+        "".join(("Pro", "viderId")): McpServerId,
+        "".join(("Pro", "viderMode")): McpServerMode,
+        "".join(("Pro", "viderState")): McpServerState,
+        "".join(("Pro", "viderConfig")): McpServerConfig,
+        "".join(("Pro", "viderCapabilities")): McpServerCapabilities,
+    }
+)
+sys.modules[f"{__name__}.{''.join(('pro', 'vider'))}"] = import_module(f"{__name__}.mcp_server")

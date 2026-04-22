@@ -29,16 +29,16 @@ def create_background_workers(
     Returns:
         List of worker instances (not started).
     """
-    providers = get_runtime().repository
+    mcp_servers = get_runtime().repository
 
     gc_worker = BackgroundWorker(
-        providers,
+        mcp_servers,
         interval_s=GC_WORKER_INTERVAL_SECONDS,
         task="gc",
     )
 
     health_worker = BackgroundWorker(
-        providers,
+        mcp_servers,
         interval_s=HEALTH_CHECK_INTERVAL_SECONDS,
         task="health_check",
     )

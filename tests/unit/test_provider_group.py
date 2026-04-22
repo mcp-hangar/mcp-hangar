@@ -4,15 +4,15 @@ from unittest.mock import MagicMock
 
 import pytest
 
-from mcp_hangar.domain.model.provider_group import GroupCircuitOpened, GroupCreated, GroupMemberAdded, ProviderGroup
+from mcp_hangar.domain.model.mcp_server_group import GroupCircuitOpened, GroupCreated, GroupMemberAdded, McpServerGroup
 from mcp_hangar.domain.value_objects import GroupState, LoadBalancerStrategy, ProviderState
 
 
-def create_mock_provider(provider_id: str, state: ProviderState = ProviderState.READY):
+def create_mock_provider(mcp_server_id: str, state: ProviderState = ProviderState.READY):
     """Create a mock provider for testing."""
     mock = MagicMock()
-    mock.id = provider_id
-    mock.provider_id = provider_id
+    mock.id = mcp_server_id
+    mock.mcp_server_id = mcp_server_id
     mock.state = state
     mock.state_snapshot = state
     mock.ensure_ready = MagicMock()
@@ -27,7 +27,7 @@ class TestProviderGroupCreation:
 
     def test_creates_with_defaults(self):
         """Should create group with default configuration."""
-        group = ProviderGroup(group_id="test-group")
+        group = McpServerGroup(group_id="test-group")
 
         assert group.id == "test-group"
         assert group.state == GroupState.INACTIVE
@@ -38,7 +38,7 @@ class TestProviderGroupCreation:
 
     def test_creates_with_custom_strategy(self):
         """Should create group with specified strategy."""
-        group = ProviderGroup(
+        group = McpServerGroup(
             group_id="weighted-group",
             strategy=LoadBalancerStrategy.WEIGHTED_ROUND_ROBIN,
         )
@@ -47,7 +47,7 @@ class TestProviderGroupCreation:
 
     def test_creates_with_custom_min_healthy(self):
         """Should create group with specified min_healthy."""
-        group = ProviderGroup(
+        group = McpServerGroup(
             group_id="high-availability",
             min_healthy=3,
         )
@@ -56,7 +56,7 @@ class TestProviderGroupCreation:
 
     def test_emits_group_created_event(self):
         """Should emit GroupCreated event on creation."""
-        group = ProviderGroup(group_id="event-test")
+        group = McpServerGroup(group_id="event-test")
         events = group.collect_events()
 
         assert len(events) == 1
@@ -69,7 +69,7 @@ class TestMemberManagement:
 
     def test_add_member(self):
         """Should add member to group."""
-        group = ProviderGroup(group_id="test-group", auto_start=False)
+        group = McpServerGroup(group_id="test-group", auto_start=False)
         provider = create_mock_provider("provider-1")
 
         group.add_member(provider, weight=2, priority=1)
@@ -82,7 +82,7 @@ class TestMemberManagement:
 
     def test_add_member_emits_event(self):
         """Should emit GroupMemberAdded event."""
-        group = ProviderGroup(group_id="test-group", auto_start=False)
+        group = McpServerGroup(group_id="test-group", auto_start=False)
         group.collect_events()  # Clear creation event
         provider = create_mock_provider("provider-1")
 
@@ -95,7 +95,7 @@ class TestMemberManagement:
 
     def test_add_duplicate_member_raises(self):
         """Should raise error when adding duplicate member."""
-        group = ProviderGroup(group_id="test-group", auto_start=False)
+        group = McpServerGroup(group_id="test-group", auto_start=False)
         provider = create_mock_provider("provider-1")
         group.add_member(provider)
 
@@ -104,7 +104,7 @@ class TestMemberManagement:
 
     def test_remove_member(self):
         """Should remove member from group."""
-        group = ProviderGroup(group_id="test-group", auto_start=False)
+        group = McpServerGroup(group_id="test-group", auto_start=False)
         provider = create_mock_provider("provider-1")
         group.add_member(provider)
 
@@ -116,7 +116,7 @@ class TestMemberManagement:
 
     def test_remove_nonexistent_member_returns_false(self):
         """Should return False when removing non-existent member."""
-        group = ProviderGroup(group_id="test-group")
+        group = McpServerGroup(group_id="test-group")
 
         result = group.remove_member("nonexistent")
 
@@ -124,7 +124,7 @@ class TestMemberManagement:
 
     def test_auto_start_adds_to_rotation(self):
         """With auto_start=True, ready members are added to rotation."""
-        group = ProviderGroup(group_id="test-group", auto_start=True)
+        group = McpServerGroup(group_id="test-group", auto_start=True)
         provider = create_mock_provider("provider-1", state=ProviderState.READY)
 
         group.add_member(provider)
@@ -140,7 +140,7 @@ class TestLoadBalancing:
 
     def test_select_member_returns_provider(self):
         """Should return a provider from available members."""
-        group = ProviderGroup(group_id="test-group", auto_start=False)
+        group = McpServerGroup(group_id="test-group", auto_start=False)
         provider = create_mock_provider("provider-1", ProviderState.READY)
         group.add_member(provider)
 
@@ -155,7 +155,7 @@ class TestLoadBalancing:
 
     def test_select_member_returns_none_when_empty(self):
         """Should return None when no members available."""
-        group = ProviderGroup(group_id="test-group")
+        group = McpServerGroup(group_id="test-group")
 
         selected = group.select_member()
 
@@ -163,7 +163,7 @@ class TestLoadBalancing:
 
     def test_select_member_returns_none_when_circuit_open(self):
         """Should return None when circuit breaker is open."""
-        group = ProviderGroup(
+        group = McpServerGroup(
             group_id="test-group",
             auto_start=False,
             circuit_failure_threshold=1,
@@ -187,7 +187,7 @@ class TestHealthReporting:
 
     def test_report_success_resets_failures(self):
         """report_success should reset consecutive failures."""
-        group = ProviderGroup(group_id="test-group", auto_start=False)
+        group = McpServerGroup(group_id="test-group", auto_start=False)
         provider = create_mock_provider("provider-1", ProviderState.READY)
         group.add_member(provider)
         member = group.get_member("provider-1")
@@ -199,7 +199,7 @@ class TestHealthReporting:
 
     def test_report_failure_increments_counter(self):
         """report_failure should increment failure counter."""
-        group = ProviderGroup(group_id="test-group", auto_start=False)
+        group = McpServerGroup(group_id="test-group", auto_start=False)
         provider = create_mock_provider("provider-1", ProviderState.READY)
         group.add_member(provider)
         member = group.get_member("provider-1")
@@ -212,7 +212,7 @@ class TestHealthReporting:
 
     def test_report_failure_removes_from_rotation_at_threshold(self):
         """Should remove from rotation when unhealthy threshold reached."""
-        group = ProviderGroup(
+        group = McpServerGroup(
             group_id="test-group",
             auto_start=False,
             unhealthy_threshold=2,
@@ -234,7 +234,7 @@ class TestCircuitBreaker:
 
     def test_circuit_opens_at_failure_threshold(self):
         """Circuit should open when failure threshold reached."""
-        group = ProviderGroup(
+        group = McpServerGroup(
             group_id="test-group",
             auto_start=False,
             circuit_failure_threshold=3,
@@ -252,7 +252,7 @@ class TestCircuitBreaker:
 
     def test_circuit_emits_event_when_opened(self):
         """Should emit GroupCircuitOpened event."""
-        group = ProviderGroup(
+        group = McpServerGroup(
             group_id="test-group",
             auto_start=False,
             circuit_failure_threshold=1,
@@ -275,7 +275,7 @@ class TestStateManagement:
 
     def test_state_is_inactive_with_no_healthy(self):
         """State should be INACTIVE when no healthy members."""
-        group = ProviderGroup(group_id="test-group", auto_start=False)
+        group = McpServerGroup(group_id="test-group", auto_start=False)
         provider = create_mock_provider("provider-1", ProviderState.COLD)
         group.add_member(provider)
 
@@ -283,7 +283,7 @@ class TestStateManagement:
 
     def test_state_is_partial_below_min_healthy(self):
         """State should be PARTIAL when healthy < min_healthy."""
-        group = ProviderGroup(
+        group = McpServerGroup(
             group_id="test-group",
             auto_start=False,
             min_healthy=2,
@@ -300,7 +300,7 @@ class TestStateManagement:
 
     def test_state_is_healthy_at_min_healthy(self):
         """State should be HEALTHY when healthy >= min_healthy."""
-        group = ProviderGroup(
+        group = McpServerGroup(
             group_id="test-group",
             auto_start=False,
             min_healthy=1,
@@ -321,7 +321,7 @@ class TestRebalance:
 
     def test_rebalance_adds_ready_members_to_rotation(self):
         """Rebalance should add READY members to rotation."""
-        group = ProviderGroup(group_id="test-group", auto_start=False)
+        group = McpServerGroup(group_id="test-group", auto_start=False)
         provider = create_mock_provider("provider-1", ProviderState.READY)
         group.add_member(provider)
         member = group.get_member("provider-1")
@@ -333,7 +333,7 @@ class TestRebalance:
 
     def test_rebalance_removes_non_ready_members(self):
         """Rebalance should remove non-READY members from rotation."""
-        group = ProviderGroup(group_id="test-group", auto_start=False)
+        group = McpServerGroup(group_id="test-group", auto_start=False)
         provider = create_mock_provider("provider-1", ProviderState.COLD)
         group.add_member(provider)
         member = group.get_member("provider-1")
@@ -345,7 +345,7 @@ class TestRebalance:
 
     def test_rebalance_resets_circuit_breaker(self):
         """Rebalance should reset circuit breaker."""
-        group = ProviderGroup(
+        group = McpServerGroup(
             group_id="test-group",
             auto_start=False,
             circuit_failure_threshold=1,
@@ -369,7 +369,7 @@ class TestSerialization:
 
     def test_to_status_dict_includes_all_fields(self):
         """to_status_dict should include all relevant fields."""
-        group = ProviderGroup(
+        group = McpServerGroup(
             group_id="test-group",
             strategy=LoadBalancerStrategy.WEIGHTED_ROUND_ROBIN,
             min_healthy=2,
@@ -404,7 +404,7 @@ class TestProviderGroupLockHierarchy:
         """add_member() with auto_start must release group lock before ensure_ready()."""
         from mcp_hangar.infrastructure.lock_hierarchy import LockLevel, get_current_thread_locks
 
-        group = ProviderGroup(group_id="lock-test", auto_start=True)
+        group = McpServerGroup(group_id="lock-test", auto_start=True)
         lock_held_during_ensure_ready = []
 
         def check_lock_not_held():
@@ -430,7 +430,7 @@ class TestProviderGroupLockHierarchy:
         """start_all() must release group lock before ensure_ready()."""
         from mcp_hangar.infrastructure.lock_hierarchy import LockLevel, get_current_thread_locks
 
-        group = ProviderGroup(group_id="lock-test", auto_start=False)
+        group = McpServerGroup(group_id="lock-test", auto_start=False)
         lock_held_during_ensure_ready = []
 
         def check_lock_not_held():
@@ -454,7 +454,7 @@ class TestProviderGroupLockHierarchy:
         """stop_all() must release group lock before shutdown()."""
         from mcp_hangar.infrastructure.lock_hierarchy import LockLevel, get_current_thread_locks
 
-        group = ProviderGroup(group_id="lock-test", auto_start=False)
+        group = McpServerGroup(group_id="lock-test", auto_start=False)
         lock_held_during_shutdown = []
 
         def check_lock_not_held():
@@ -473,7 +473,7 @@ class TestProviderGroupLockHierarchy:
 
     def test_member_removed_between_phases_handled_gracefully(self):
         """Member removed between lock release and re-acquire is handled."""
-        group = ProviderGroup(group_id="lock-test", auto_start=True)
+        group = McpServerGroup(group_id="lock-test", auto_start=True)
 
         def ensure_ready_and_remove():
             # Simulate: another thread removes the member during ensure_ready
@@ -493,11 +493,11 @@ class TestProviderGroupLockHierarchy:
         """Concurrent add_member() + start_all() must not deadlock."""
         import threading
 
-        group = ProviderGroup(group_id="lock-test", auto_start=True)
+        group = McpServerGroup(group_id="lock-test", auto_start=True)
         barrier = threading.Barrier(2, timeout=5)
         errors: list[Exception] = []
 
-        def add_provider():
+        def add_mcp_server():
             try:
                 provider = create_mock_provider("p-add", ProviderState.COLD)
                 provider.state = ProviderState.READY
@@ -512,7 +512,7 @@ class TestProviderGroupLockHierarchy:
 
         def start_providers():
             try:
-                from mcp_hangar.domain.model.provider_group import GroupMember
+                from mcp_hangar.domain.model.mcp_server_group import GroupMember
 
                 provider2 = create_mock_provider("p-start", ProviderState.COLD)
                 provider2.state = ProviderState.READY
@@ -522,18 +522,15 @@ class TestProviderGroupLockHierarchy:
 
                 provider2.ensure_ready = MagicMock(side_effect=slow_start)
                 with group._lock:
-                    member = GroupMember(
-                        provider=provider2,
-                        weight=1,
-                        priority=1,
-                    )
+                    member = GroupMember(mcp_server=provider2, weight=1,
+                    priority=1,)
                     group._members["p-start"] = member
 
                 group.start_all()
             except Exception as e:  # noqa: BLE001 -- thread error collector
                 errors.append(e)
 
-        t1 = threading.Thread(target=add_provider)
+        t1 = threading.Thread(target=add_mcp_server)
         t2 = threading.Thread(target=start_providers)
         t1.start()
         t2.start()

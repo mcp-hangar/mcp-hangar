@@ -8,9 +8,9 @@ from mcp_hangar.application.commands import (
     Command,
     HealthCheckCommand,
     InvokeToolCommand,
-    ShutdownIdleProvidersCommand,
-    StartProviderCommand,
-    StopProviderCommand,
+    ShutdownIdleMcpServersCommand,
+    StartMcpServerCommand,
+    StopMcpServerCommand,
 )
 from mcp_hangar.domain.exceptions import RateLimitExceeded
 from mcp_hangar.infrastructure.command_bus import (
@@ -26,53 +26,50 @@ class TestCommands:
     """Test Command classes."""
 
     def test_start_provider_command(self):
-        """Test StartProviderCommand creation."""
-        cmd = StartProviderCommand(provider_id="test-provider")
+        """Test StartMcpServerCommand creation."""
+        cmd = StartMcpServerCommand(mcp_server_id="test-provider")
 
-        assert cmd.provider_id == "test-provider"
+        assert cmd.mcp_server_id == "test-provider"
 
     def test_stop_provider_command(self):
-        """Test StopProviderCommand creation."""
-        cmd = StopProviderCommand(provider_id="test-provider", reason="idle")
+        """Test StopMcpServerCommand creation."""
+        cmd = StopMcpServerCommand(mcp_server_id="test-provider", reason="idle")
 
-        assert cmd.provider_id == "test-provider"
+        assert cmd.mcp_server_id == "test-provider"
         assert cmd.reason == "idle"
 
     def test_stop_provider_command_default_reason(self):
-        """Test StopProviderCommand default reason."""
-        cmd = StopProviderCommand(provider_id="test-provider")
+        """Test StopMcpServerCommand default reason."""
+        cmd = StopMcpServerCommand(mcp_server_id="test-provider")
 
         assert cmd.reason == "user_request"
 
     def test_invoke_tool_command(self):
         """Test InvokeToolCommand creation."""
-        cmd = InvokeToolCommand(
-            provider_id="test-provider",
-            tool_name="add",
-            arguments={"a": 1, "b": 2},
-            timeout=30.0,
-        )
+        cmd = InvokeToolCommand(mcp_server_id="test-provider", tool_name="add",
+        arguments={"a": 1, "b": 2},
+        timeout=30.0,)
 
-        assert cmd.provider_id == "test-provider"
+        assert cmd.mcp_server_id == "test-provider"
         assert cmd.tool_name == "add"
         assert cmd.arguments == {"a": 1, "b": 2}
         assert cmd.timeout == 30.0
 
     def test_invoke_tool_command_default_timeout(self):
         """Test InvokeToolCommand default timeout."""
-        cmd = InvokeToolCommand(provider_id="test-provider", tool_name="add", arguments={})
+        cmd = InvokeToolCommand(mcp_server_id="test-provider", tool_name="add", arguments={})
 
         assert cmd.timeout == 30.0
 
     def test_health_check_command(self):
         """Test HealthCheckCommand creation."""
-        cmd = HealthCheckCommand(provider_id="test-provider")
+        cmd = HealthCheckCommand(mcp_server_id="test-provider")
 
-        assert cmd.provider_id == "test-provider"
+        assert cmd.mcp_server_id == "test-provider"
 
     def test_shutdown_idle_providers_command(self):
-        """Test ShutdownIdleProvidersCommand creation."""
-        cmd = ShutdownIdleProvidersCommand()
+        """Test ShutdownIdleMcpServersCommand creation."""
+        cmd = ShutdownIdleMcpServersCommand()
 
         assert isinstance(cmd, Command)
 
@@ -85,9 +82,9 @@ class TestCommandBus:
         bus = CommandBus()
         handler = Mock(spec=CommandHandler)
 
-        bus.register(StartProviderCommand, handler)
+        bus.register(StartMcpServerCommand, handler)
 
-        assert StartProviderCommand in bus._handlers
+        assert StartMcpServerCommand in bus._handlers
 
     def test_register_multiple_handlers(self):
         """Test registering multiple handlers for different commands."""
@@ -95,8 +92,8 @@ class TestCommandBus:
         handler1 = Mock(spec=CommandHandler)
         handler2 = Mock(spec=CommandHandler)
 
-        bus.register(StartProviderCommand, handler1)
-        bus.register(StopProviderCommand, handler2)
+        bus.register(StartMcpServerCommand, handler1)
+        bus.register(StopMcpServerCommand, handler2)
 
         assert len(bus._handlers) == 2
 
@@ -106,9 +103,9 @@ class TestCommandBus:
         handler = Mock(spec=CommandHandler)
         handler.handle.return_value = {"result": "success"}
 
-        bus.register(StartProviderCommand, handler)
+        bus.register(StartMcpServerCommand, handler)
 
-        cmd = StartProviderCommand(provider_id="test")
+        cmd = StartMcpServerCommand(mcp_server_id="test")
         result = bus.send(cmd)
 
         handler.handle.assert_called_once_with(cmd)
@@ -117,7 +114,7 @@ class TestCommandBus:
     def test_send_command_without_handler_raises(self):
         """Test sending unregistered command raises ValueError."""
         bus = CommandBus()
-        cmd = StartProviderCommand(provider_id="test")
+        cmd = StartMcpServerCommand(mcp_server_id="test")
 
         with pytest.raises(ValueError):
             bus.send(cmd)
@@ -126,14 +123,14 @@ class TestCommandBus:
         """Test send returns the handler's result."""
         bus = CommandBus()
         handler = Mock(spec=CommandHandler)
-        handler.handle.return_value = {"provider": "test", "state": "ready"}
+        handler.handle.return_value = {"mcp_server": "test", "state": "ready"}
 
-        bus.register(StartProviderCommand, handler)
+        bus.register(StartMcpServerCommand, handler)
 
-        cmd = StartProviderCommand(provider_id="test")
+        cmd = StartMcpServerCommand(mcp_server_id="test")
         result = bus.send(cmd)
 
-        assert result == {"provider": "test", "state": "ready"}
+        assert result == {"mcp_server": "test", "state": "ready"}
 
     def test_handler_exception_propagates(self):
         """Test that handler exceptions propagate."""
@@ -141,9 +138,9 @@ class TestCommandBus:
         handler = Mock(spec=CommandHandler)
         handler.handle.side_effect = ValueError("Test error")
 
-        bus.register(StartProviderCommand, handler)
+        bus.register(StartMcpServerCommand, handler)
 
-        cmd = StartProviderCommand(provider_id="test")
+        cmd = StartMcpServerCommand(mcp_server_id="test")
 
         with pytest.raises(ValueError, match="Test error"):
             bus.send(cmd)
@@ -160,7 +157,7 @@ class TestCommandBus:
         bus = CommandBus()
         handler = Mock(spec=CommandHandler)
 
-        bus.register(StartProviderCommand, handler)
+        bus.register(StartMcpServerCommand, handler)
 
         assert len(bus._handlers) == 1
 
@@ -206,13 +203,13 @@ class TestCommandIntegration:
 
         class TestHandler(CommandHandler):
             def handle(self, command):
-                results.append(command.provider_id)
+                results.append(command.mcp_server_id)
                 return {"status": "done"}
 
-        bus.register(StartProviderCommand, TestHandler())
+        bus.register(StartMcpServerCommand, TestHandler())
 
-        cmd1 = StartProviderCommand(provider_id="provider-1")
-        cmd2 = StartProviderCommand(provider_id="provider-2")
+        cmd1 = StartMcpServerCommand(mcp_server_id="provider-1")
+        cmd2 = StartMcpServerCommand(mcp_server_id="provider-2")
 
         bus.send(cmd1)
         bus.send(cmd2)
@@ -228,20 +225,20 @@ class TestCommandIntegration:
 
         class StartHandler(CommandHandler):
             def handle(self, command):
-                start_calls.append(command.provider_id)
+                start_calls.append(command.mcp_server_id)
                 return {"started": True}
 
         class StopHandler(CommandHandler):
             def handle(self, command):
-                stop_calls.append(command.provider_id)
+                stop_calls.append(command.mcp_server_id)
                 return {"stopped": True}
 
-        bus.register(StartProviderCommand, StartHandler())
-        bus.register(StopProviderCommand, StopHandler())
+        bus.register(StartMcpServerCommand, StartHandler())
+        bus.register(StopMcpServerCommand, StopHandler())
 
-        bus.send(StartProviderCommand(provider_id="p1"))
-        bus.send(StopProviderCommand(provider_id="p2"))
-        bus.send(StartProviderCommand(provider_id="p3"))
+        bus.send(StartMcpServerCommand(mcp_server_id="p1"))
+        bus.send(StopMcpServerCommand(mcp_server_id="p2"))
+        bus.send(StartMcpServerCommand(mcp_server_id="p3"))
 
         assert start_calls == ["p1", "p3"]
         assert stop_calls == ["p2"]
@@ -256,9 +253,9 @@ class TestCommandBusMiddleware:
         handler = Mock(spec=CommandHandler)
         handler.handle.return_value = {"ok": True}
 
-        bus.register(StartProviderCommand, handler)
+        bus.register(StartMcpServerCommand, handler)
 
-        cmd = StartProviderCommand(provider_id="test")
+        cmd = StartMcpServerCommand(mcp_server_id="test")
         result = bus.send(cmd)
 
         handler.handle.assert_called_once_with(cmd)
@@ -293,9 +290,9 @@ class TestCommandBusMiddleware:
                 return {"done": True}
 
         bus.add_middleware(TrackingMiddleware())
-        bus.register(StartProviderCommand, TrackingHandler())
+        bus.register(StartMcpServerCommand, TrackingHandler())
 
-        bus.send(StartProviderCommand(provider_id="test"))
+        bus.send(StartMcpServerCommand(mcp_server_id="test"))
 
         assert call_order == ["middleware", "handler"]
 
@@ -318,9 +315,9 @@ class TestCommandBusMiddleware:
 
         handler = Mock(spec=CommandHandler)
         handler.handle.return_value = None
-        bus.register(StartProviderCommand, handler)
+        bus.register(StartMcpServerCommand, handler)
 
-        bus.send(StartProviderCommand(provider_id="test"))
+        bus.send(StartMcpServerCommand(mcp_server_id="test"))
 
         assert order == ["first", "second", "third"]
 
@@ -334,10 +331,10 @@ class TestCommandBusMiddleware:
 
         handler = Mock(spec=CommandHandler)
         bus.add_middleware(RejectMiddleware())
-        bus.register(StartProviderCommand, handler)
+        bus.register(StartMcpServerCommand, handler)
 
         with pytest.raises(ValueError, match="rejected"):
-            bus.send(StartProviderCommand(provider_id="test"))
+            bus.send(StartMcpServerCommand(mcp_server_id="test"))
 
         handler.handle.assert_not_called()
 
@@ -349,18 +346,18 @@ class TestCommandBusMiddleware:
         class InspectMiddleware(CommandBusMiddleware):
             def __call__(self, command, next_handler):
                 captured["command_type"] = type(command).__name__
-                captured["provider_id"] = command.provider_id
+                captured["mcp_server_id"] = command.mcp_server_id
                 return next_handler(command)
 
         handler = Mock(spec=CommandHandler)
         handler.handle.return_value = None
         bus.add_middleware(InspectMiddleware())
-        bus.register(StartProviderCommand, handler)
+        bus.register(StartMcpServerCommand, handler)
 
-        bus.send(StartProviderCommand(provider_id="abc"))
+        bus.send(StartMcpServerCommand(mcp_server_id="abc"))
 
-        assert captured["command_type"] == "StartProviderCommand"
-        assert captured["provider_id"] == "abc"
+        assert captured["command_type"] == "StartMcpServerCommand"
+        assert captured["mcp_server_id"] == "abc"
 
     def test_handler_not_called_when_middleware_raises(self):
         """Test handler is NOT called if earlier middleware raises."""
@@ -377,10 +374,10 @@ class TestCommandBusMiddleware:
                 return None
 
         bus.add_middleware(FailMiddleware())
-        bus.register(StartProviderCommand, TrackHandler())
+        bus.register(StartMcpServerCommand, TrackHandler())
 
         with pytest.raises(RuntimeError, match="boom"):
-            bus.send(StartProviderCommand(provider_id="x"))
+            bus.send(StartMcpServerCommand(mcp_server_id="x"))
 
         assert handler_calls == []
 
@@ -410,11 +407,11 @@ class TestRateLimitMiddleware:
         handler = Mock(spec=CommandHandler)
         handler.handle.return_value = None
         bus.add_middleware(mw)
-        bus.register(StartProviderCommand, handler)
+        bus.register(StartMcpServerCommand, handler)
 
-        bus.send(StartProviderCommand(provider_id="test"))
+        bus.send(StartMcpServerCommand(mcp_server_id="test"))
 
-        limiter.consume.assert_called_once_with("StartProviderCommand")
+        limiter.consume.assert_called_once_with("StartMcpServerCommand")
 
     def test_rate_limit_middleware_raises_when_not_allowed(self):
         """Test middleware raises RateLimitExceeded when consume() denies."""
@@ -424,10 +421,10 @@ class TestRateLimitMiddleware:
         bus = CommandBus()
         handler = Mock(spec=CommandHandler)
         bus.add_middleware(mw)
-        bus.register(StartProviderCommand, handler)
+        bus.register(StartMcpServerCommand, handler)
 
         with pytest.raises(RateLimitExceeded):
-            bus.send(StartProviderCommand(provider_id="test"))
+            bus.send(StartMcpServerCommand(mcp_server_id="test"))
 
         handler.handle.assert_not_called()
 
@@ -440,9 +437,9 @@ class TestRateLimitMiddleware:
         handler = Mock(spec=CommandHandler)
         handler.handle.return_value = {"ok": True}
         bus.add_middleware(mw)
-        bus.register(StartProviderCommand, handler)
+        bus.register(StartMcpServerCommand, handler)
 
-        result = bus.send(StartProviderCommand(provider_id="test"))
+        result = bus.send(StartMcpServerCommand(mcp_server_id="test"))
 
         handler.handle.assert_called_once()
         assert result == {"ok": True}
@@ -455,10 +452,10 @@ class TestRateLimitMiddleware:
         bus = CommandBus()
         handler = Mock(spec=CommandHandler)
         bus.add_middleware(mw)
-        bus.register(StartProviderCommand, handler)
+        bus.register(StartMcpServerCommand, handler)
 
         with pytest.raises(RateLimitExceeded):
-            bus.send(StartProviderCommand(provider_id="test"))
+            bus.send(StartMcpServerCommand(mcp_server_id="test"))
 
         # Verify metrics were updated (import and check counter)
         # The counter should have been incremented - just verify no crash
@@ -473,8 +470,8 @@ class TestRateLimitMiddleware:
         handler = Mock(spec=CommandHandler)
         handler.handle.return_value = None
         bus.add_middleware(mw)
-        bus.register(StartProviderCommand, handler)
+        bus.register(StartMcpServerCommand, handler)
 
         # Should not raise
-        bus.send(StartProviderCommand(provider_id="test"))
+        bus.send(StartMcpServerCommand(mcp_server_id="test"))
         handler.handle.assert_called_once()

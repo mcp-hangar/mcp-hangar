@@ -1,6 +1,6 @@
 """High-level Hangar Facade.
 
-Provides a simple, user-friendly API for interacting with MCP providers.
+Provides a simple, user-friendly API for interacting with MCP mcp_servers.
 This is the recommended entry point for most use cases.
 
 Example (async):
@@ -18,8 +18,8 @@ Example (sync):
 Example (programmatic config):
     config = (
         HangarConfig()
-        .add_provider("math", command=["python", "-m", "math_server"])
-        .add_provider("fetch", mode="docker", image="mcp/fetch:latest")
+        .add_mcp_server("math", command=["python", "-m", "math_server"])
+        .add_mcp_server("fetch", mode="docker", image="mcp/fetch:latest")
         .build()
     )
     hangar = Hangar(config)
@@ -33,12 +33,12 @@ from dataclasses import dataclass, field
 from pathlib import Path
 from typing import TYPE_CHECKING, Any
 
-from .domain.exceptions import ConfigurationError, ProviderNotFoundError
-from .domain.value_objects import ProviderMode, ProviderState
+from .domain.exceptions import ConfigurationError, McpServerNotFoundError
+from .domain.value_objects import McpServerMode, McpServerState
 from .logging_config import get_logger
 
 if TYPE_CHECKING:
-    from .domain.model import Provider
+    from .domain.model import McpServer
     from .server.bootstrap import ApplicationContext
 
 logger = get_logger(__name__)
@@ -68,7 +68,7 @@ FACADE_MAX_CONCURRENCY = 100
 class HangarConfigData:
     """Internal configuration data structure."""
 
-    providers: dict[str, dict[str, Any]] = field(default_factory=dict)
+    mcp_servers: dict[str, dict[str, Any]] = field(default_factory=dict)
     discovery: DiscoverySpec = field(default_factory=DiscoverySpec)
     gc_interval_s: int = 30
     health_check_interval_s: int = 10
@@ -81,9 +81,9 @@ class HangarConfig:
     Example:
         config = (
             HangarConfig()
-            .add_provider("math", command=["python", "-m", "math_server"])
-            .add_provider("fetch", mode="docker", image="mcp/fetch:latest")
-            .add_provider("api", mode="remote", url="http://localhost:8080")
+            .add_mcp_server("math", command=["python", "-m", "math_server"])
+            .add_mcp_server("fetch", mode="docker", image="mcp/fetch:latest")
+            .add_mcp_server("api", mode="remote", url="http://localhost:8080")
             .enable_discovery(docker=True)
             .build()
         )
@@ -94,7 +94,7 @@ class HangarConfig:
         self._data = HangarConfigData()
         self._built = False
 
-    def add_provider(
+    def add_mcp_server(
         self,
         name: str,
         *,
@@ -105,56 +105,56 @@ class HangarConfig:
         env: dict[str, str] | None = None,
         idle_ttl_s: int = 300,
     ) -> HangarConfig:
-        """Add a provider to the configuration.
+        """Add a mcp_server to the configuration.
 
         Args:
-            name: Unique provider name.
-            mode: Provider mode - "subprocess", "docker", or "remote".
+            name: Unique mcp_server name.
+            mode: McpServer mode - "subprocess", "docker", or "remote".
             command: Command for subprocess mode.
             image: Docker image for docker mode.
             url: URL for remote mode.
-            env: Environment variables for the provider.
+            env: Environment variables for the mcp_server.
             idle_ttl_s: Idle timeout before auto-shutdown (default: 300s).
 
         Returns:
             Self for chaining.
 
         Raises:
-            ConfigurationError: If provider name is empty or mode is invalid.
+            ConfigurationError: If mcp_server name is empty or mode is invalid.
 
         Example:
-            config.add_provider("math", command=["python", "-m", "math_server"])
-            config.add_provider("fetch", mode="docker", image="mcp/fetch:latest")
+            config.add_mcp_server("math", command=["python", "-m", "math_server"])
+            config.add_mcp_server("fetch", mode="docker", image="mcp/fetch:latest")
         """
         self._check_not_built()
 
         if not name:
-            raise ConfigurationError("Provider name cannot be empty")
+            raise ConfigurationError("McpServer name cannot be empty")
 
-        normalized_mode = ProviderMode.normalize(mode)
+        normalized_mode = McpServerMode.normalize(mode)
 
         # Validate mode-specific requirements
-        if normalized_mode == ProviderMode.SUBPROCESS and not command:
-            raise ConfigurationError(f"Provider '{name}': command is required for subprocess mode")
-        if normalized_mode == ProviderMode.DOCKER and not image:
-            raise ConfigurationError(f"Provider '{name}': image is required for docker mode")
-        if normalized_mode == ProviderMode.REMOTE and not url:
-            raise ConfigurationError(f"Provider '{name}': url is required for remote mode")
+        if normalized_mode == McpServerMode.SUBPROCESS and not command:
+            raise ConfigurationError(f"McpServer '{name}': command is required for subprocess mode")
+        if normalized_mode == McpServerMode.DOCKER and not image:
+            raise ConfigurationError(f"McpServer '{name}': image is required for docker mode")
+        if normalized_mode == McpServerMode.REMOTE and not url:
+            raise ConfigurationError(f"McpServer '{name}': url is required for remote mode")
 
-        provider_config: dict[str, Any] = {
+        mcp_server_config: dict[str, Any] = {
             "mode": normalized_mode.value,
             "idle_ttl_s": idle_ttl_s,
         }
         if command:
-            provider_config["command"] = command
+            mcp_server_config["command"] = command
         if image:
-            provider_config["image"] = image
+            mcp_server_config["image"] = image
         if url:
-            provider_config["url"] = url
+            mcp_server_config["url"] = url
         if env:
-            provider_config["env"] = env
+            mcp_server_config["env"] = env
 
-        self._data.providers[name] = provider_config
+        self._data.mcp_servers[name] = mcp_server_config
         return self
 
     def enable_discovery(
@@ -164,18 +164,18 @@ class HangarConfig:
         kubernetes: bool = False,
         filesystem: list[str] | None = None,
     ) -> HangarConfig:
-        """Enable provider discovery.
+        """Enable mcp_server discovery.
 
         Args:
             docker: Enable Docker container discovery.
             kubernetes: Enable Kubernetes discovery.
-            filesystem: List of paths to scan for provider YAML files.
+            filesystem: List of paths to scan for mcp_server YAML files.
 
         Returns:
             Self for chaining.
 
         Example:
-            config.enable_discovery(docker=True, filesystem=["./providers"])
+            config.enable_discovery(docker=True, filesystem=["./mcp_servers"])
         """
         self._check_not_built()
         self._data.discovery = DiscoverySpec(
@@ -247,7 +247,7 @@ class HangarConfig:
             Dictionary that can be passed to bootstrap or saved as YAML.
         """
         result: dict[str, Any] = {
-            "providers": dict(self._data.providers),
+            "mcp_servers": dict(self._data.mcp_servers),
             "max_concurrency": self._data.max_concurrency,
         }
 
@@ -273,14 +273,14 @@ class HangarConfig:
             raise ConfigurationError("Configuration already built, cannot modify")
 
 
-# --- Provider Info ---
+# --- McpServer Info ---
 
 
 @dataclass(frozen=True)
-class ProviderInfo:
-    """Information about a provider.
+class McpServerInfo:
+    """Information about a mcp_server.
 
-    Immutable snapshot of provider state.
+    Immutable snapshot of mcp_server state.
     """
 
     name: str
@@ -292,31 +292,31 @@ class ProviderInfo:
 
     @property
     def is_ready(self) -> bool:
-        """Check if provider is ready to handle requests."""
+        """Check if mcp_server is ready to handle requests."""
         return self.state == "ready"
 
     @property
     def is_cold(self) -> bool:
-        """Check if provider is not started."""
+        """Check if mcp_server is not started."""
         return self.state == "cold"
 
 
 @dataclass(frozen=True)
 class HealthSummary:
-    """Health summary for all providers."""
+    """Health summary for all mcp_servers."""
 
-    providers: dict[str, str]  # name -> state
+    mcp_servers: dict[str, str]  # name -> state
     ready_count: int
     total_count: int
 
     @property
     def all_ready(self) -> bool:
-        """Check if all providers are ready."""
+        """Check if all mcp_servers are ready."""
         return self.ready_count == self.total_count
 
     @property
     def any_ready(self) -> bool:
-        """Check if at least one provider is ready."""
+        """Check if at least one mcp_server is ready."""
         return self.ready_count > 0
 
 
@@ -326,15 +326,15 @@ class HealthSummary:
 class Hangar:
     """High-level async facade for MCP Hangar.
 
-    Provides a simple API for managing providers and invoking tools.
-    Handles provider lifecycle automatically (auto-start on invoke).
+    Provides a simple API for managing mcp_servers and invoking tools.
+    Handles mcp_server lifecycle automatically (auto-start on invoke).
 
     Example:
         async with Hangar.from_config("config.yaml") as hangar:
-            # List providers
-            providers = await hangar.list_providers()
+            # List mcp_servers
+            mcp_servers = await hangar.list_mcp_servers()
 
-            # Invoke a tool (auto-starts provider if needed)
+            # Invoke a tool (auto-starts mcp_server if needed)
             result = await hangar.invoke("math", "add", {"a": 1, "b": 2})
 
             # Check health
@@ -392,7 +392,7 @@ class Hangar:
             Hangar instance (not yet started).
 
         Example:
-            config = HangarConfig().add_provider(...).build()
+            config = HangarConfig().add_mcp_server(...).build()
             hangar = Hangar.from_builder(config)
         """
         return cls(config=config)
@@ -400,7 +400,7 @@ class Hangar:
     async def start(self) -> None:
         """Start Hangar and initialize all components.
 
-        This bootstraps the application context, registers providers,
+        This bootstraps the application context, registers mcp_servers,
         and starts background workers.
 
         Called automatically when using async context manager.
@@ -435,7 +435,7 @@ class Hangar:
     async def stop(self) -> None:
         """Stop Hangar and cleanup resources.
 
-        Stops all providers and background workers.
+        Stops all mcp_servers and background workers.
         Called automatically when using async context manager.
         """
         if not self._started:
@@ -469,32 +469,32 @@ class Hangar:
                 "or call 'await hangar.start()' first."
             )
 
-    def _get_provider(self, name: str) -> Provider:
-        """Get provider by name.
+    def _get_mcp_server(self, name: str) -> McpServer:
+        """Get mcp_server by name.
 
         Raises:
-            ProviderNotFoundError: If provider doesn't exist.
+            McpServerNotFoundError: If mcp_server doesn't exist.
         """
         self._ensure_started()
-        provider = self._context.providers.get(name)
-        if not provider:
-            raise ProviderNotFoundError(provider_id=name)
-        return provider
+        mcp_server = self._context.mcp_servers.get(name)
+        if not mcp_server:
+            raise McpServerNotFoundError(mcp_server_id=name)
+        return mcp_server
 
     async def invoke(
         self,
-        provider_name: str,
+        mcp_server_name: str,
         tool_name: str,
         arguments: dict[str, Any] | None = None,
         *,
         timeout_s: float = 30.0,
     ) -> Any:
-        """Invoke a tool on a provider.
+        """Invoke a tool on a mcp_server.
 
-        Auto-starts the provider if it's cold.
+        Auto-starts the mcp_server if it's cold.
 
         Args:
-            provider_name: Name of the provider.
+            mcp_server_name: Name of the mcp_server.
             tool_name: Name of the tool to invoke.
             arguments: Tool arguments (default: empty dict).
             timeout_s: Timeout in seconds (default: 30s).
@@ -503,7 +503,7 @@ class Hangar:
             Tool result.
 
         Raises:
-            ProviderNotFoundError: If provider doesn't exist.
+            McpServerNotFoundError: If mcp_server doesn't exist.
             ToolNotFoundError: If tool doesn't exist.
             ToolInvocationError: If tool invocation fails.
             TimeoutError: If invocation times out.
@@ -511,100 +511,100 @@ class Hangar:
         Example:
             result = await hangar.invoke("math", "add", {"a": 1, "b": 2})
         """
-        provider = self._get_provider(provider_name)
+        mcp_server = self._get_mcp_server(mcp_server_name)
         loop = asyncio.get_event_loop()
 
-        # Run invoke in thread pool (Provider is sync)
+        # Run invoke in thread pool (McpServer is sync)
         result = await asyncio.wait_for(
             loop.run_in_executor(
                 self._executor,
-                lambda: provider.invoke_tool(tool_name, arguments or {}),
+                lambda: mcp_server.invoke_tool(tool_name, arguments or {}),
             ),
             timeout=timeout_s,
         )
         return result
 
-    async def start_provider(self, name: str) -> None:
-        """Explicitly start a provider.
+    async def start_mcp_server(self, name: str) -> None:
+        """Explicitly start a mcp_server.
 
         Args:
-            name: Provider name.
+            name: McpServer name.
 
         Raises:
-            ProviderNotFoundError: If provider doesn't exist.
-            ProviderStartError: If provider fails to start.
+            McpServerNotFoundError: If mcp_server doesn't exist.
+            McpServerStartError: If mcp_server fails to start.
 
         Example:
-            await hangar.start_provider("math")
+            await hangar.start_mcp_server("math")
         """
-        provider = self._get_provider(name)
+        mcp_server = self._get_mcp_server(name)
         loop = asyncio.get_event_loop()
-        await loop.run_in_executor(self._executor, provider.start)
+        await loop.run_in_executor(self._executor, mcp_server.start)
 
-    async def stop_provider(self, name: str) -> None:
-        """Stop a provider.
+    async def stop_mcp_server(self, name: str) -> None:
+        """Stop a mcp_server.
 
         Args:
-            name: Provider name.
+            name: McpServer name.
 
         Raises:
-            ProviderNotFoundError: If provider doesn't exist.
+            McpServerNotFoundError: If mcp_server doesn't exist.
 
         Example:
-            await hangar.stop_provider("math")
+            await hangar.stop_mcp_server("math")
         """
-        provider = self._get_provider(name)
+        mcp_server = self._get_mcp_server(name)
         loop = asyncio.get_event_loop()
-        await loop.run_in_executor(self._executor, provider.stop)
+        await loop.run_in_executor(self._executor, mcp_server.stop)
 
-    async def get_provider(self, name: str) -> ProviderInfo:
-        """Get information about a provider.
+    async def get_mcp_server(self, name: str) -> McpServerInfo:
+        """Get information about a mcp_server.
 
         Args:
-            name: Provider name.
+            name: McpServer name.
 
         Returns:
-            ProviderInfo with current state.
+            McpServerInfo with current state.
 
         Raises:
-            ProviderNotFoundError: If provider doesn't exist.
+            McpServerNotFoundError: If mcp_server doesn't exist.
 
         Example:
-            info = await hangar.get_provider("math")
+            info = await hangar.get_mcp_server("math")
             print(f"State: {info.state}, Tools: {info.tools}")
         """
-        provider = self._get_provider(name)
+        mcp_server = self._get_mcp_server(name)
 
-        return ProviderInfo(
+        return McpServerInfo(
             name=name,
-            state=provider.state.value if isinstance(provider.state, ProviderState) else str(provider.state),
-            mode=provider.mode.value if isinstance(provider.mode, ProviderMode) else str(provider.mode),
-            tools=list(provider.tools.keys()) if hasattr(provider, "tools") else [],
-            last_used=getattr(provider, "_last_used", None),
+            state=mcp_server.state.value if isinstance(mcp_server.state, McpServerState) else str(mcp_server.state),
+            mode=mcp_server.mode.value if isinstance(mcp_server.mode, McpServerMode) else str(mcp_server.mode),
+            tools=list(mcp_server.tools.keys()) if hasattr(mcp_server, "tools") else [],
+            last_used=getattr(mcp_server, "_last_used", None),
             error=None,
         )
 
-    async def list_providers(self) -> list[ProviderInfo]:
-        """List all registered providers.
+    async def list_mcp_servers(self) -> list[McpServerInfo]:
+        """List all registered mcp_servers.
 
         Returns:
-            List of ProviderInfo for all providers.
+            List of McpServerInfo for all mcp_servers.
 
         Example:
-            providers = await hangar.list_providers()
-            for p in providers:
+            mcp_servers = await hangar.list_mcp_servers()
+            for p in mcp_servers:
                 print(f"{p.name}: {p.state}")
         """
         self._ensure_started()
         result = []
-        for name in self._context.providers.keys():
+        for name in self._context.mcp_servers.keys():
             try:
-                info = await self.get_provider(name)
+                info = await self.get_mcp_server(name)
                 result.append(info)
-            except Exception as e:  # noqa: BLE001 -- fault-barrier: single provider info failure must not break list_providers
-                # Include provider even if we can't get full info
+            except Exception as e:  # noqa: BLE001 -- fault-barrier: single mcp_server info failure must not break list_mcp_servers
+                # Include mcp_server even if we can't get full info
                 result.append(
-                    ProviderInfo(
+                    McpServerInfo(
                         name=name,
                         state="unknown",
                         mode="unknown",
@@ -615,43 +615,43 @@ class Hangar:
         return result
 
     async def health(self) -> HealthSummary:
-        """Get health summary for all providers.
+        """Get health summary for all mcp_servers.
 
         Returns:
-            HealthSummary with provider states.
+            HealthSummary with mcp_server states.
 
         Example:
             health = await hangar.health()
             if health.all_ready:
-                print("All providers ready!")
+                print("All mcp_servers ready!")
             else:
                 print(f"Ready: {health.ready_count}/{health.total_count}")
         """
-        providers = await self.list_providers()
-        states = {p.name: p.state for p in providers}
-        ready_count = sum(1 for p in providers if p.is_ready)
+        mcp_servers = await self.list_mcp_servers()
+        states = {p.name: p.state for p in mcp_servers}
+        ready_count = sum(1 for p in mcp_servers if p.is_ready)
 
         return HealthSummary(
-            providers=states,
+            mcp_servers=states,
             ready_count=ready_count,
-            total_count=len(providers),
+            total_count=len(mcp_servers),
         )
 
     async def health_check(self, name: str) -> bool:
-        """Run health check on a specific provider.
+        """Run health check on a specific mcp_server.
 
         Args:
-            name: Provider name.
+            name: McpServer name.
 
         Returns:
             True if health check passed, False otherwise.
 
         Raises:
-            ProviderNotFoundError: If provider doesn't exist.
+            McpServerNotFoundError: If mcp_server doesn't exist.
         """
-        provider = self._get_provider(name)
+        mcp_server = self._get_mcp_server(name)
         loop = asyncio.get_event_loop()
-        return await loop.run_in_executor(self._executor, provider.health_check)
+        return await loop.run_in_executor(self._executor, mcp_server.health_check)
 
 
 # --- Sync Wrapper ---
@@ -730,38 +730,42 @@ class SyncHangar:
 
     def invoke(
         self,
-        provider_name: str,
+        mcp_server_name: str,
         tool_name: str,
         arguments: dict[str, Any] | None = None,
         *,
         timeout_s: float = 30.0,
     ) -> Any:
-        """Invoke a tool on a provider.
+        """Invoke a tool on a mcp_server.
 
         See Hangar.invoke() for full documentation.
         """
-        return self._run(self._hangar.invoke(provider_name, tool_name, arguments, timeout_s=timeout_s))
+        return self._run(self._hangar.invoke(mcp_server_name, tool_name, arguments, timeout_s=timeout_s))
 
-    def start_provider(self, name: str) -> None:
-        """Start a provider."""
-        self._run(self._hangar.start_provider(name))
+    def start_mcp_server(self, name: str) -> None:
+        """Start a mcp_server."""
+        self._run(self._hangar.start_mcp_server(name))
 
-    def stop_provider(self, name: str) -> None:
-        """Stop a provider."""
-        self._run(self._hangar.stop_provider(name))
+    def stop_mcp_server(self, name: str) -> None:
+        """Stop a mcp_server."""
+        self._run(self._hangar.stop_mcp_server(name))
 
-    def get_provider(self, name: str) -> ProviderInfo:
-        """Get provider information."""
-        return self._run(self._hangar.get_provider(name))
+    def get_mcp_server(self, name: str) -> McpServerInfo:
+        """Get mcp_server information."""
+        return self._run(self._hangar.get_mcp_server(name))
 
-    def list_providers(self) -> list[ProviderInfo]:
-        """List all providers."""
-        return self._run(self._hangar.list_providers())
+    def list_mcp_servers(self) -> list[McpServerInfo]:
+        """List all mcp_servers."""
+        return self._run(self._hangar.list_mcp_servers())
 
     def health(self) -> HealthSummary:
         """Get health summary."""
         return self._run(self._hangar.health())
 
     def health_check(self, name: str) -> bool:
-        """Run health check on a provider."""
+        """Run health check on a mcp_server."""
         return self._run(self._hangar.health_check(name))
+
+
+# legacy aliases
+ProviderInfo = McpServerInfo

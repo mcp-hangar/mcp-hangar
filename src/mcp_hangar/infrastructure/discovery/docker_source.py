@@ -1,6 +1,6 @@
 """Docker/Podman Discovery Source.
 
-Discovers MCP providers from Docker/Podman containers using labels.
+Discovers MCP mcp_servers from Docker/Podman containers using labels.
 Uses the same Docker API - works with both Docker and Podman.
 
 Socket Detection Order:
@@ -13,7 +13,7 @@ Socket Detection Order:
 
 Label Reference:
     mcp.hangar.enabled: "true"           # Required - enables discovery
-    mcp.hangar.name: "my-provider"       # Optional - defaults to container name
+    mcp.hangar.name: "my-mcp_server"       # Optional - defaults to container name
     mcp.hangar.mode: "container"         # Optional - container|http (default: container)
     mcp.hangar.port: "8080"              # For http mode only
     mcp.hangar.group: "tools"            # Optional - group membership
@@ -28,7 +28,7 @@ import random
 import time
 from typing import Any
 
-from mcp_hangar.domain.discovery.discovered_provider import DiscoveredProvider
+from mcp_hangar.domain.discovery.discovered_mcp_server import DiscoveredMcpServer
 from mcp_hangar.domain.discovery.discovery_source import DiscoveryMode, DiscoverySource
 
 from ...logging_config import get_logger
@@ -106,7 +106,7 @@ def find_container_socket() -> str | None:
 
 
 class DockerDiscoverySource(DiscoverySource):
-    """Discover MCP providers from Docker/Podman containers.
+    """Discover MCP mcp_servers from Docker/Podman containers.
 
     Works with both Docker and Podman through Docker API compatibility.
     Podman provides Docker-compatible API on its socket.
@@ -128,7 +128,7 @@ class DockerDiscoverySource(DiscoverySource):
         Args:
             mode: Discovery mode (additive or authoritative)
             socket_path: Path to socket (None = auto-detect)
-            default_ttl: Default TTL for discovered providers
+            default_ttl: Default TTL for discovered mcp_servers
             max_retries: Maximum connection retry attempts
             initial_backoff_s: Initial backoff delay in seconds
             max_backoff_s: Maximum backoff delay cap in seconds
@@ -210,15 +210,15 @@ class DockerDiscoverySource(DiscoverySource):
     def source_type(self) -> str:
         return "docker"
 
-    async def discover(self) -> list[DiscoveredProvider]:
-        """Discover providers from container labels with automatic reconnection."""
+    async def discover(self) -> list[DiscoveredMcpServer]:
+        """Discover mcp_servers from container labels with automatic reconnection."""
         try:
             self._ensure_client()
         except (DockerException, OSError, ConnectionError) as e:
             logger.error("docker_discovery_connection_failed", error=str(e))
             return []  # Graceful degradation
 
-        providers = []
+        mcp_servers = []
 
         try:
             # Get all containers with MCP label (including stopped)
@@ -231,15 +231,15 @@ class DockerDiscoverySource(DiscoverySource):
                 container_id = container.id[:12]
                 current_ids.add(container_id)
 
-                provider = self._parse_container(container)
-                if provider:
-                    providers.append(provider)
-                    await self.on_provider_discovered(provider)
+                mcp_server = self._parse_container(container)
+                if mcp_server:
+                    mcp_servers.append(mcp_server)
+                    await self.on_mcp_server_discovered(mcp_server)
 
             self._known_container_ids = current_ids
             logger.debug(
                 "docker_discovery_complete",
-                providers_found=len(providers),
+                mcp_servers_found=len(mcp_servers),
                 containers_tracked=len(current_ids),
             )
 
@@ -248,10 +248,10 @@ class DockerDiscoverySource(DiscoverySource):
             self._client = None  # Force reconnection on next call
             return []  # Graceful degradation -- next discover() will reconnect
 
-        return providers
+        return mcp_servers
 
-    def _parse_container(self, container) -> DiscoveredProvider | None:
-        """Parse container into DiscoveredProvider."""
+    def _parse_container(self, container) -> DiscoveredMcpServer | None:
+        """Parse container into DiscoveredMcpServer."""
         labels = container.labels or {}
 
         # Basic info
@@ -309,7 +309,7 @@ class DockerDiscoverySource(DiscoverySource):
             "group": labels.get(f"{self.LABEL_PREFIX}group"),
         }
 
-        return DiscoveredProvider.create(
+        return DiscoveredMcpServer.create(
             name=name,
             source_type=self.source_type,
             mode=mode,

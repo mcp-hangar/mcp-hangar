@@ -41,21 +41,21 @@ def test_descriptions() -> None:
     except FileNotFoundError:
         pytest.skip("config.container.yaml not present in repo/worktree")
 
-    provider_config = config.get("providers", {})
+    provider_config = config.get("mcp_servers", {})
     load_config(provider_config)
     print(f"   ✅ Loaded {len(runtime.repository.get_all_ids())} providers")
 
     # Check descriptions in config
     print("\n🔍 Checking descriptions in config...")
     missing = []
-    for provider_id, spec in provider_config.items():
+    for mcp_server_id, spec in provider_config.items():
         description = spec.get("description")
         if description:
             desc_preview = description.strip()[:60] + "..." if len(description.strip()) > 60 else description.strip()
-            print(f"   ✅ {provider_id:20s} {desc_preview}")
+            print(f"   ✅ {mcp_server_id:20s} {desc_preview}")
         else:
-            print(f"   ❌ {provider_id:20s} Missing description!")
-            missing.append(provider_id)
+            print(f"   ❌ {mcp_server_id:20s} Missing description!")
+            missing.append(mcp_server_id)
 
     if missing:
         print(f"\n❌ {len(missing)} providers missing descriptions: {missing}")
@@ -65,7 +65,7 @@ def test_descriptions() -> None:
     print("\n📋 Testing hangar_list response...")
     try:
         result = hangar_list()
-        providers_list = result.get("providers", [])
+        providers_list = result.get("mcp_servers", [])
 
         print(f"   Found {len(providers_list)} providers in response:")
 
@@ -73,16 +73,16 @@ def test_descriptions() -> None:
         no_description = []
 
         for provider in providers_list:
-            provider_id = provider.get("provider") or "(unknown)"
+            mcp_server_id = provider.get("provider") or "(unknown)"
             description = provider.get("description")
 
             if description:
                 has_description += 1
                 desc_preview = description[:50] + "..." if len(description) > 50 else description
-                print(f"   ✅ {provider_id:20s} {desc_preview}")
+                print(f"   ✅ {mcp_server_id:20s} {desc_preview}")
             else:
-                no_description.append(provider_id)
-                print(f"   ❌ {provider_id:20s} No description in response")
+                no_description.append(mcp_server_id)
+                print(f"   ❌ {mcp_server_id:20s} No description in response")
 
         print("\n📊 Summary:")
         print(f"   Providers with descriptions: {has_description}/{len(providers_list)}")

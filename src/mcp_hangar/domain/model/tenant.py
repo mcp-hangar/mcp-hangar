@@ -36,24 +36,64 @@ class TenantQuotas:
     and enable cost control.
     """
 
-    max_providers: int = 50
+    max_mcp_servers: int = 50
     max_namespaces: int = 10
     max_tool_invocations_per_hour: int = 10000
     max_tool_invocations_per_day: int = 100000
-    max_concurrent_providers: int = 20
+    max_concurrent_mcp_servers: int = 20
     max_cold_starts_per_hour: int = 100
     max_cpu_millicores: int = 8000  # 8 cores
     max_memory_mb: int = 16384  # 16 GB
     max_storage_mb: int = 102400  # 100 GB
 
+    def __init__(
+        self,
+        max_mcp_servers: int = 50,
+        max_namespaces: int = 10,
+        max_tool_invocations_per_hour: int = 10000,
+        max_tool_invocations_per_day: int = 100000,
+        max_concurrent_mcp_servers: int = 20,
+        max_cold_starts_per_hour: int = 100,
+        max_cpu_millicores: int = 8000,
+        max_memory_mb: int = 16384,
+        max_storage_mb: int = 102400,
+        **kwargs: object,
+    ):
+        legacy_max_providers = kwargs.pop("max_providers", None)
+        legacy_max_concurrent = kwargs.pop("max_concurrent_providers", None)
+        if isinstance(legacy_max_providers, int):
+            max_mcp_servers = legacy_max_providers
+        if isinstance(legacy_max_concurrent, int):
+            max_concurrent_mcp_servers = legacy_max_concurrent
+        if kwargs:
+            unexpected = ", ".join(sorted(kwargs))
+            raise TypeError(f"Unexpected keyword argument(s): {unexpected}")
+        self.max_mcp_servers = max_mcp_servers
+        self.max_namespaces = max_namespaces
+        self.max_tool_invocations_per_hour = max_tool_invocations_per_hour
+        self.max_tool_invocations_per_day = max_tool_invocations_per_day
+        self.max_concurrent_mcp_servers = max_concurrent_mcp_servers
+        self.max_cold_starts_per_hour = max_cold_starts_per_hour
+        self.max_cpu_millicores = max_cpu_millicores
+        self.max_memory_mb = max_memory_mb
+        self.max_storage_mb = max_storage_mb
+
+    @property
+    def max_providers(self) -> int:
+        return self.max_mcp_servers
+
+    @property
+    def max_concurrent_providers(self) -> int:
+        return self.max_concurrent_mcp_servers
+
     def to_dict(self) -> dict:
         """Convert to dictionary for serialization."""
         return {
-            "max_providers": self.max_providers,
+            "max_mcp_servers": self.max_mcp_servers,
             "max_namespaces": self.max_namespaces,
             "max_tool_invocations_per_hour": self.max_tool_invocations_per_hour,
             "max_tool_invocations_per_day": self.max_tool_invocations_per_day,
-            "max_concurrent_providers": self.max_concurrent_providers,
+            "max_concurrent_mcp_servers": self.max_concurrent_mcp_servers,
             "max_cold_starts_per_hour": self.max_cold_starts_per_hour,
             "max_cpu_millicores": self.max_cpu_millicores,
             "max_memory_mb": self.max_memory_mb,
@@ -68,11 +108,11 @@ class TenantUsage:
     Tracks actual usage against quotas for enforcement and reporting.
     """
 
-    provider_count: int = 0
+    mcp_server_count: int = 0
     namespace_count: int = 0
     tool_invocations_last_hour: int = 0
     tool_invocations_today: int = 0
-    concurrent_providers: int = 0
+    concurrent_mcp_servers: int = 0
     cold_starts_last_hour: int = 0
     cpu_millicores_used: int = 0
     memory_mb_used: int = 0
@@ -251,16 +291,16 @@ class Tenant(AggregateRoot):
         """Check if a resource request would exceed quota.
 
         Args:
-            resource_type: Type of resource (providers, tool_invocations_hour, etc.)
+            resource_type: Type of resource (mcp_servers, tool_invocations_hour, etc.)
             requested_amount: Amount requested
 
         Returns:
             QuotaCheckResult with allowed status and remaining capacity
         """
         quota_map = {
-            "providers": (self._usage.provider_count, self._quotas.max_providers),
+            "mcp_servers": (self._usage.mcp_server_count, self._quotas.max_mcp_servers),
             "namespaces": (self._usage.namespace_count, self._quotas.max_namespaces),
-            "concurrent_providers": (self._usage.concurrent_providers, self._quotas.max_concurrent_providers),
+            "concurrent_mcp_servers": (self._usage.concurrent_mcp_servers, self._quotas.max_concurrent_mcp_servers),
             "tool_invocations_hour": (
                 self._usage.tool_invocations_last_hour,
                 self._quotas.max_tool_invocations_per_hour,
@@ -324,14 +364,14 @@ class Tenant(AggregateRoot):
             self._usage.tool_invocations_today += amount
         elif resource_type == "cold_start":
             self._usage.cold_starts_last_hour += amount
-        elif resource_type == "provider_start":
-            self._usage.concurrent_providers += amount
-        elif resource_type == "provider_stop":
-            self._usage.concurrent_providers = max(0, self._usage.concurrent_providers - amount)
-        elif resource_type == "provider_create":
-            self._usage.provider_count += amount
-        elif resource_type == "provider_delete":
-            self._usage.provider_count = max(0, self._usage.provider_count - amount)
+        elif resource_type == "mcp_server_start":
+            self._usage.concurrent_mcp_servers += amount
+        elif resource_type == "mcp_server_stop":
+            self._usage.concurrent_mcp_servers = max(0, self._usage.concurrent_mcp_servers - amount)
+        elif resource_type == "mcp_server_create":
+            self._usage.mcp_server_count += amount
+        elif resource_type == "mcp_server_delete":
+            self._usage.mcp_server_count = max(0, self._usage.mcp_server_count - amount)
 
         self._usage.last_updated = datetime.now()
 

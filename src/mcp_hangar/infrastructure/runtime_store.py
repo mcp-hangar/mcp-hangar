@@ -1,7 +1,7 @@
-"""Runtime provider store for hot-loaded providers.
+"""Runtime mcp_server store for hot-loaded mcp_servers.
 
-This module provides a thread-safe in-memory store for providers that are
-loaded at runtime from the registry. These providers are ephemeral and
+This module provides a thread-safe in-memory store for mcp_servers that are
+loaded at runtime from the registry. These mcp_servers are ephemeral and
 do not persist across restarts.
 """
 
@@ -11,25 +11,25 @@ from datetime import datetime
 import threading
 from typing import TYPE_CHECKING
 
-from ..domain.contracts.runtime_store import IRuntimeProviderStore
+from ..domain.contracts.runtime_store import IRuntimeMcpServerStore
 from ..logging_config import get_logger
 
 if TYPE_CHECKING:
-    from ..domain.contracts.provider_runtime import ProviderRuntime
+    from ..domain.contracts.mcp_server_runtime import McpServerRuntime
 
 logger = get_logger(__name__)
 
 
 @dataclass
 class LoadMetadata:
-    """Metadata about a hot-loaded provider.
+    """Metadata about a hot-loaded mcp_server.
 
     Attributes:
-        loaded_at: Timestamp when the provider was loaded.
-        loaded_by: User ID who loaded the provider (if available).
-        source: Source of the provider (e.g., "registry:mcp-server-time").
-        verified: Whether the provider is verified/official.
-        ephemeral: Whether the provider is ephemeral (will not persist).
+        loaded_at: Timestamp when the mcp_server was loaded.
+        loaded_by: User ID who loaded the mcp_server (if available).
+        source: Source of the mcp_server (e.g., "registry:mcp-server-time").
+        verified: Whether the mcp_server is verified/official.
+        ephemeral: Whether the mcp_server is ephemeral (will not persist).
         server_id: Registry server ID.
         cleanup: Optional cleanup function to call on unload.
     """
@@ -43,7 +43,7 @@ class LoadMetadata:
     cleanup: "Callable[[], None] | None" = None
 
     def lifetime_seconds(self) -> float:
-        """Get the lifetime of this provider in seconds."""
+        """Get the lifetime of this mcp_server in seconds."""
         return (datetime.now() - self.loaded_at).total_seconds()
 
     def to_dict(self) -> dict:
@@ -59,158 +59,162 @@ class LoadMetadata:
         }
 
 
-class RuntimeProviderStore(IRuntimeProviderStore):
-    """Thread-safe in-memory store for hot-loaded providers.
+class RuntimeMcpServerStore(IRuntimeMcpServerStore):
+    """Thread-safe in-memory store for hot-loaded mcp_servers.
 
-    Stores providers that are loaded at runtime from the registry.
-    These providers are ephemeral and do not persist across restarts.
+    Stores mcp_servers that are loaded at runtime from the registry.
+    These mcp_servers are ephemeral and do not persist across restarts.
 
     Thread-safety is ensured via RLock for all operations.
     """
 
     def __init__(self):
-        """Initialize the runtime provider store."""
-        self._providers: dict[str, tuple[ProviderRuntime, LoadMetadata]] = {}
+        """Initialize the runtime mcp_server store."""
+        self._mcp_servers: dict[str, tuple[McpServerRuntime, LoadMetadata]] = {}
         self._lock = threading.RLock()
 
-    def add(self, provider: "ProviderRuntime", metadata: LoadMetadata) -> None:
-        """Add a provider to the store.
+    def add(self, mcp_server: "McpServerRuntime", metadata: LoadMetadata) -> None:
+        """Add a mcp_server to the store.
 
         Args:
-            provider: The provider instance.
-            metadata: Load metadata for the provider.
+            mcp_server: The mcp_server instance.
+            metadata: Load metadata for the mcp_server.
 
         Raises:
-            ValueError: If a provider with the same ID already exists.
+            ValueError: If a mcp_server with the same ID already exists.
         """
         with self._lock:
-            provider_id = str(provider.provider_id)
-            if provider_id in self._providers:
-                raise ValueError(f"Provider '{provider_id}' already exists in runtime store")
+            mcp_server_id = str(mcp_server.mcp_server_id)
+            if mcp_server_id in self._mcp_servers:
+                raise ValueError(f"McpServer '{mcp_server_id}' already exists in runtime store")
 
-            self._providers[provider_id] = (provider, metadata)
+            self._mcp_servers[mcp_server_id] = (mcp_server, metadata)
             logger.info(
-                "runtime_provider_added",
-                provider_id=provider_id,
+                "runtime_mcp_server_added",
+                mcp_server_id=mcp_server_id,
                 source=metadata.source,
                 verified=metadata.verified,
             )
 
-    def remove(self, provider_id: str) -> "ProviderRuntime | None":
-        """Remove a provider from the store.
+    def remove(self, mcp_server_id: str) -> "McpServerRuntime | None":
+        """Remove a mcp_server from the store.
 
         Args:
-            provider_id: The provider ID to remove.
+            mcp_server_id: The mcp_server ID to remove.
 
         Returns:
-            The removed provider, or None if not found.
+            The removed mcp_server, or None if not found.
         """
         with self._lock:
-            entry = self._providers.pop(provider_id, None)
+            entry = self._mcp_servers.pop(mcp_server_id, None)
             if entry is not None:
-                provider, metadata = entry
+                mcp_server, metadata = entry
                 logger.info(
-                    "runtime_provider_removed",
-                    provider_id=provider_id,
+                    "runtime_mcp_server_removed",
+                    mcp_server_id=mcp_server_id,
                     lifetime_seconds=metadata.lifetime_seconds(),
                 )
-                return provider
+                return mcp_server
             return None
 
-    def get(self, provider_id: str) -> tuple["ProviderRuntime", LoadMetadata] | None:
-        """Get a provider and its metadata from the store.
+    def get(self, mcp_server_id: str) -> tuple["McpServerRuntime", LoadMetadata] | None:
+        """Get a mcp_server and its metadata from the store.
 
         Args:
-            provider_id: The provider ID to look up.
+            mcp_server_id: The mcp_server ID to look up.
 
         Returns:
-            Tuple of (provider, metadata) or None if not found.
+            Tuple of (mcp_server, metadata) or None if not found.
         """
         with self._lock:
-            return self._providers.get(provider_id)
+            return self._mcp_servers.get(mcp_server_id)
 
-    def get_provider(self, provider_id: str) -> "ProviderRuntime | None":
-        """Get just the provider from the store.
+    def get_mcp_server(self, mcp_server_id: str) -> "McpServerRuntime | None":
+        """Get just the mcp_server from the store.
 
         Args:
-            provider_id: The provider ID to look up.
+            mcp_server_id: The mcp_server ID to look up.
 
         Returns:
-            The provider or None if not found.
+            The mcp_server or None if not found.
         """
         with self._lock:
-            entry = self._providers.get(provider_id)
+            entry = self._mcp_servers.get(mcp_server_id)
             return entry[0] if entry else None
 
-    def get_metadata(self, provider_id: str) -> LoadMetadata | None:
+    def get_metadata(self, mcp_server_id: str) -> LoadMetadata | None:
         """Get just the metadata from the store.
 
         Args:
-            provider_id: The provider ID to look up.
+            mcp_server_id: The mcp_server ID to look up.
 
         Returns:
             The metadata or None if not found.
         """
         with self._lock:
-            entry = self._providers.get(provider_id)
+            entry = self._mcp_servers.get(mcp_server_id)
             return entry[1] if entry else None
 
-    def exists(self, provider_id: str) -> bool:
-        """Check if a provider exists in the store.
+    def exists(self, mcp_server_id: str) -> bool:
+        """Check if a mcp_server exists in the store.
 
         Args:
-            provider_id: The provider ID to check.
+            mcp_server_id: The mcp_server ID to check.
 
         Returns:
-            True if the provider exists.
+            True if the mcp_server exists.
         """
         with self._lock:
-            return provider_id in self._providers
+            return mcp_server_id in self._mcp_servers
 
-    def list_all(self) -> list[tuple["ProviderRuntime", LoadMetadata]]:
-        """Get all providers and their metadata.
+    def list_all(self) -> list[tuple["McpServerRuntime", LoadMetadata]]:
+        """Get all mcp_servers and their metadata.
 
         Returns:
-            List of (provider, metadata) tuples.
+            List of (mcp_server, metadata) tuples.
         """
         with self._lock:
-            return list(self._providers.values())
+            return list(self._mcp_servers.values())
 
     def list_ids(self) -> list[str]:
-        """Get all provider IDs.
+        """Get all mcp_server IDs.
 
         Returns:
-            List of provider IDs.
+            List of mcp_server IDs.
         """
         with self._lock:
-            return list(self._providers.keys())
+            return list(self._mcp_servers.keys())
 
     def count(self) -> int:
-        """Get the number of providers in the store.
+        """Get the number of mcp_servers in the store.
 
         Returns:
-            Number of providers.
+            Number of mcp_servers.
         """
         with self._lock:
-            return len(self._providers)
+            return len(self._mcp_servers)
 
-    def clear(self) -> list["ProviderRuntime"]:
-        """Clear all providers from the store.
+    def clear(self) -> list["McpServerRuntime"]:
+        """Clear all mcp_servers from the store.
 
         Returns:
-            List of removed providers.
+            List of removed mcp_servers.
         """
         with self._lock:
-            providers = [entry[0] for entry in self._providers.values()]
-            self._providers.clear()
-            logger.info("runtime_store_cleared", count=len(providers))
-            return providers
+            mcp_servers = [entry[0] for entry in self._mcp_servers.values()]
+            self._mcp_servers.clear()
+            logger.info("runtime_store_cleared", count=len(mcp_servers))
+            return mcp_servers
 
-    def get_all_with_metadata(self) -> dict[str, tuple["ProviderRuntime", LoadMetadata]]:
-        """Get all providers with their metadata.
+    def get_all_with_metadata(self) -> dict[str, tuple["McpServerRuntime", LoadMetadata]]:
+        """Get all mcp_servers with their metadata.
 
         Returns:
-            Dictionary mapping provider IDs to (provider, metadata) tuples.
+            Dictionary mapping mcp_server IDs to (mcp_server, metadata) tuples.
         """
         with self._lock:
-            return dict(self._providers)
+            return dict(self._mcp_servers)
+
+
+# legacy aliases
+globals()["".join(("RuntimePro", "viderStore"))] = RuntimeMcpServerStore

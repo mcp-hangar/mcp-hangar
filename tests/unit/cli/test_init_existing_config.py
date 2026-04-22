@@ -36,7 +36,7 @@ class TestConfigFileManagerMerge:
 
             # Create existing config
             existing = {
-                "providers": {
+                "mcp_servers": {
                     "existing1": {"mode": "subprocess", "command": ["echo", "1"]},
                 }
             }
@@ -64,8 +64,8 @@ class TestConfigFileManagerMerge:
 
             # Verify file
             loaded = mgr.load()
-            assert "existing1" in loaded["providers"]
-            assert "new_provider" in loaded["providers"]
+            assert "existing1" in loaded["mcp_servers"]
+            assert "new_provider" in loaded["mcp_servers"]
 
     def test_merge_skips_existing_providers(self):
         """Should skip providers that already exist."""
@@ -73,7 +73,7 @@ class TestConfigFileManagerMerge:
             config_path = Path(tmpdir) / "config.yaml"
 
             existing = {
-                "providers": {
+                "mcp_servers": {
                     "filesystem": {"mode": "subprocess", "command": ["npx", "-y", "@test/fs"]},
                 }
             }
@@ -96,7 +96,7 @@ class TestConfigFileManagerMerge:
 
             # Verify original config preserved
             loaded = mgr.load()
-            assert loaded["providers"]["filesystem"]["command"] == ["npx", "-y", "@test/fs"]
+            assert loaded["mcp_servers"]["filesystem"]["command"] == ["npx", "-y", "@test/fs"]
 
     def test_merge_mixed_new_and_existing(self):
         """Should handle mix of new and existing providers."""
@@ -104,7 +104,7 @@ class TestConfigFileManagerMerge:
             config_path = Path(tmpdir) / "config.yaml"
 
             existing = {
-                "providers": {
+                "mcp_servers": {
                     "existing": {"mode": "subprocess", "command": ["echo"]},
                 }
             }
@@ -149,7 +149,7 @@ class TestInitExistingConfig:
             config_path = Path(tmpdir) / "config.yaml"
 
             # Create existing config
-            existing = {"providers": {"old": {"mode": "subprocess", "command": ["old"]}}}
+            existing = {"mcp_servers": {"old": {"mode": "subprocess", "command": ["old"]}}}
             with open(config_path, "w") as f:
                 yaml.dump(existing, f)
 
@@ -174,7 +174,7 @@ class TestInitExistingConfig:
             # Check old provider was replaced
             with open(config_path) as f:
                 new_config = yaml.safe_load(f)
-            assert "old" not in new_config.get("providers", {})
+            assert "old" not in new_config.get("mcp_servers", {})
 
     def test_abort_preserves_config(self, runner):
         """Abort should preserve existing configuration."""
@@ -184,7 +184,7 @@ class TestInitExistingConfig:
             config_path = Path(tmpdir) / "config.yaml"
 
             # Create existing config
-            existing = {"providers": {"preserved": {"mode": "subprocess", "command": ["kept"]}}}
+            existing = {"mcp_servers": {"preserved": {"mode": "subprocess", "command": ["kept"]}}}
             with open(config_path, "w") as f:
                 yaml.dump(existing, f)
 
@@ -209,8 +209,8 @@ class TestInitExistingConfig:
             # Verify config preserved
             with open(config_path) as f:
                 loaded = yaml.safe_load(f)
-            assert "preserved" in loaded.get("providers", {})
-            assert loaded["providers"]["preserved"]["command"] == ["kept"]
+            assert "preserved" in loaded.get("mcp_servers", {})
+            assert loaded["mcp_servers"]["preserved"]["command"] == ["kept"]
 
     def test_reset_flag_skips_existing_config_handling(self, runner):
         """--reset flag should overwrite without prompting."""
@@ -219,7 +219,7 @@ class TestInitExistingConfig:
         with tempfile.TemporaryDirectory() as tmpdir:
             config_path = Path(tmpdir) / "config.yaml"
 
-            existing = {"providers": {"old": {"mode": "subprocess", "command": ["old"]}}}
+            existing = {"mcp_servers": {"old": {"mode": "subprocess", "command": ["old"]}}}
             with open(config_path, "w") as f:
                 yaml.dump(existing, f)
 
@@ -245,4 +245,4 @@ class TestInitExistingConfig:
             # Check old provider was replaced
             with open(config_path) as f:
                 new_config = yaml.safe_load(f)
-            assert "old" not in new_config.get("providers", {})
+            assert "old" not in new_config.get("mcp_servers", {})

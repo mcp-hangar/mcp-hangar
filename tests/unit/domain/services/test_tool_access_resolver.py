@@ -37,10 +37,10 @@ class TestToolAccessResolverBasic:
         policy = resolver.resolve_effective_policy("test-provider")
         assert policy.is_unrestricted()
 
-    def test_set_provider_policy(self, resolver):
+    def test_set_mcp_server_policy(self, resolver):
         """Setting provider policy should be retrievable."""
         policy = ToolAccessPolicy(deny_list=("delete_*",))
-        resolver.set_provider_policy("grafana", policy)
+        resolver.set_mcp_server_policy("grafana", policy)
 
         effective = resolver.resolve_effective_policy("grafana")
         assert not effective.is_unrestricted()
@@ -50,7 +50,7 @@ class TestToolAccessResolverBasic:
     def test_remove_provider_policy(self, resolver):
         """Removing provider policy should return to unrestricted."""
         policy = ToolAccessPolicy(deny_list=("delete_*",))
-        resolver.set_provider_policy("grafana", policy)
+        resolver.set_mcp_server_policy("grafana", policy)
         resolver.remove_provider_policy("grafana")
 
         effective = resolver.resolve_effective_policy("grafana")
@@ -59,10 +59,10 @@ class TestToolAccessResolverBasic:
     def test_set_unrestricted_policy_removes_it(self, resolver):
         """Setting unrestricted policy should effectively remove it."""
         policy = ToolAccessPolicy(deny_list=("delete_*",))
-        resolver.set_provider_policy("grafana", policy)
+        resolver.set_mcp_server_policy("grafana", policy)
 
         # Set unrestricted
-        resolver.set_provider_policy("grafana", ToolAccessPolicy())
+        resolver.set_mcp_server_policy("grafana", ToolAccessPolicy())
 
         effective = resolver.resolve_effective_policy("grafana")
         assert effective.is_unrestricted()
@@ -75,7 +75,7 @@ class TestToolAccessResolverGroupMerge:
         """Group policy should be applied to members."""
         group_policy = ToolAccessPolicy(deny_list=("delete_*",))
         resolver.set_group_policy("monitoring", group_policy)
-        resolver.set_member_policy("monitoring", "grafana-prod", ToolAccessPolicy(), provider_id="grafana")
+        resolver.set_member_policy("monitoring", "grafana-prod", ToolAccessPolicy(), mcp_server_id="grafana")
 
         effective = resolver.resolve_effective_policy("grafana", group_id="monitoring", member_id="grafana-prod")
         assert not effective.is_tool_allowed("delete_dashboard")
@@ -87,7 +87,7 @@ class TestToolAccessResolverGroupMerge:
         member_policy = ToolAccessPolicy(deny_list=("create_alert_rule",))
 
         resolver.set_group_policy("monitoring", group_policy)
-        resolver.set_member_policy("monitoring", "grafana-prod", member_policy, provider_id="grafana")
+        resolver.set_member_policy("monitoring", "grafana-prod", member_policy, mcp_server_id="grafana")
 
         effective = resolver.resolve_effective_policy("grafana", group_id="monitoring", member_id="grafana-prod")
         # Both group and member denials should apply
@@ -100,7 +100,7 @@ class TestToolAccessResolverGroupMerge:
         group_policy = ToolAccessPolicy(deny_list=("delete_*",))
         resolver.set_group_policy("monitoring", group_policy)
         # No explicit member policy set
-        resolver.set_member_policy("monitoring", "grafana-staging", ToolAccessPolicy(), provider_id="grafana")
+        resolver.set_member_policy("monitoring", "grafana-staging", ToolAccessPolicy(), mcp_server_id="grafana")
 
         effective = resolver.resolve_effective_policy("grafana", group_id="monitoring", member_id="grafana-staging")
         assert not effective.is_tool_allowed("delete_dashboard")
@@ -116,9 +116,9 @@ class TestToolAccessResolverThreeLevelMerge:
         group_policy = ToolAccessPolicy(deny_list=("create_alert_*", "update_alert_*"))
         member_policy = ToolAccessPolicy(deny_list=("update_dashboard",))
 
-        resolver.set_provider_policy("grafana", provider_policy)
+        resolver.set_mcp_server_policy("grafana", provider_policy)
         resolver.set_group_policy("monitoring", group_policy)
-        resolver.set_member_policy("monitoring", "grafana-prod", member_policy, provider_id="grafana")
+        resolver.set_member_policy("monitoring", "grafana-prod", member_policy, mcp_server_id="grafana")
 
         effective = resolver.resolve_effective_policy("grafana", group_id="monitoring", member_id="grafana-prod")
 
@@ -138,7 +138,7 @@ class TestToolAccessResolverThreeLevelMerge:
         provider_policy = ToolAccessPolicy(deny_list=("delete_*",))
         group_policy = ToolAccessPolicy(deny_list=("create_*",))
 
-        resolver.set_provider_policy("math", provider_policy)
+        resolver.set_mcp_server_policy("math", provider_policy)
         resolver.set_group_policy("compute", group_policy)
 
         # Call without group context
@@ -153,7 +153,7 @@ class TestToolAccessResolverCache:
     def test_cache_hit(self, resolver):
         """Second call should use cached policy."""
         policy = ToolAccessPolicy(deny_list=("delete_*",))
-        resolver.set_provider_policy("grafana", policy)
+        resolver.set_mcp_server_policy("grafana", policy)
 
         # First call computes and caches
         result1 = resolver.resolve_effective_policy("grafana")
@@ -165,14 +165,14 @@ class TestToolAccessResolverCache:
     def test_cache_invalidation_on_policy_change(self, resolver):
         """Changing policy should invalidate cache."""
         policy1 = ToolAccessPolicy(deny_list=("delete_*",))
-        resolver.set_provider_policy("grafana", policy1)
+        resolver.set_mcp_server_policy("grafana", policy1)
 
         result1 = resolver.resolve_effective_policy("grafana")
         assert not result1.is_tool_allowed("delete_dashboard")
 
         # Change policy
         policy2 = ToolAccessPolicy(deny_list=("create_*",))
-        resolver.set_provider_policy("grafana", policy2)
+        resolver.set_mcp_server_policy("grafana", policy2)
 
         result2 = resolver.resolve_effective_policy("grafana")
         assert result2.is_tool_allowed("delete_dashboard")
@@ -181,7 +181,7 @@ class TestToolAccessResolverCache:
     def test_cache_invalidation_explicit(self, resolver):
         """Explicit invalidation should clear cache and force recomputation."""
         policy = ToolAccessPolicy(deny_list=("delete_*",))
-        resolver.set_provider_policy("grafana", policy)
+        resolver.set_mcp_server_policy("grafana", policy)
 
         # First resolve - populates cache
         result1 = resolver.resolve_effective_policy("grafana")
@@ -206,8 +206,8 @@ class TestToolAccessResolverCache:
 
     def test_cache_invalidation_all(self, resolver):
         """Invalidating all should clear entire cache."""
-        resolver.set_provider_policy("grafana", ToolAccessPolicy(deny_list=("delete_*",)))
-        resolver.set_provider_policy("prometheus", ToolAccessPolicy(deny_list=("create_*",)))
+        resolver.set_mcp_server_policy("grafana", ToolAccessPolicy(deny_list=("delete_*",)))
+        resolver.set_mcp_server_policy("prometheus", ToolAccessPolicy(deny_list=("create_*",)))
 
         resolver.resolve_effective_policy("grafana")
         resolver.resolve_effective_policy("prometheus")
@@ -223,14 +223,14 @@ class TestToolAccessResolverFiltering:
 
     def test_is_tool_allowed(self, resolver):
         """is_tool_allowed should check against effective policy."""
-        resolver.set_provider_policy("grafana", ToolAccessPolicy(deny_list=("delete_*",)))
+        resolver.set_mcp_server_policy("grafana", ToolAccessPolicy(deny_list=("delete_*",)))
 
         assert resolver.is_tool_allowed("grafana", "get_dashboard")
         assert not resolver.is_tool_allowed("grafana", "delete_dashboard")
 
     def test_filter_tools(self, resolver):
         """filter_tools should return only allowed ToolSchema objects."""
-        resolver.set_provider_policy("grafana", ToolAccessPolicy(deny_list=("delete_*", "create_alert_*")))
+        resolver.set_mcp_server_policy("grafana", ToolAccessPolicy(deny_list=("delete_*", "create_alert_*")))
 
         tools = [
             ToolSchema(name="get_dashboard", description="Get dashboard", input_schema={}),
@@ -247,7 +247,7 @@ class TestToolAccessResolverFiltering:
 
     def test_filter_tool_dicts(self, resolver):
         """filter_tool_dicts should return only allowed tool dictionaries."""
-        resolver.set_provider_policy("grafana", ToolAccessPolicy(allow_list=("get_*", "list_*")))
+        resolver.set_mcp_server_policy("grafana", ToolAccessPolicy(allow_list=("get_*", "list_*")))
 
         tools = [
             {"name": "get_dashboard", "description": "Get dashboard"},
@@ -277,7 +277,7 @@ class TestToolAccessResolverThreadSafety:
 
     def test_concurrent_resolve_calls(self, resolver):
         """Concurrent resolve calls should not corrupt state."""
-        resolver.set_provider_policy("grafana", ToolAccessPolicy(deny_list=("delete_*",)))
+        resolver.set_mcp_server_policy("grafana", ToolAccessPolicy(deny_list=("delete_*",)))
 
         results = []
 
@@ -299,7 +299,7 @@ class TestToolAccessResolverThreadSafety:
 
         def update_and_check(i):
             policy = ToolAccessPolicy(deny_list=(f"tool_{i}",))
-            resolver.set_provider_policy("test", policy)
+            resolver.set_mcp_server_policy("test", policy)
             effective = resolver.resolve_effective_policy("test")
             # Just verify it doesn't raise
             return effective is not None
@@ -323,7 +323,7 @@ class TestToolAccessResolverGlobalSingleton:
     def test_reset_creates_new_instance(self):
         """reset_tool_access_resolver should create new instance."""
         resolver1 = get_tool_access_resolver()
-        resolver1.set_provider_policy("test", ToolAccessPolicy(deny_list=("x",)))
+        resolver1.set_mcp_server_policy("test", ToolAccessPolicy(deny_list=("x",)))
 
         reset_tool_access_resolver()
 
@@ -343,7 +343,7 @@ class TestToolAccessResolverPolicySummary:
 
     def test_summary_with_deny_list(self, resolver):
         """Summary for provider with deny_list."""
-        resolver.set_provider_policy("grafana", ToolAccessPolicy(deny_list=("delete_*",)))
+        resolver.set_mcp_server_policy("grafana", ToolAccessPolicy(deny_list=("delete_*",)))
         summary = resolver.get_policy_summary("grafana")
         assert summary["active"] is True
         assert summary["unrestricted"] is False
@@ -352,7 +352,7 @@ class TestToolAccessResolverPolicySummary:
 
     def test_summary_with_allow_list(self, resolver):
         """Summary for provider with allow_list."""
-        resolver.set_provider_policy("grafana", ToolAccessPolicy(allow_list=("get_*",)))
+        resolver.set_mcp_server_policy("grafana", ToolAccessPolicy(allow_list=("get_*",)))
         summary = resolver.get_policy_summary("grafana")
         assert summary["active"] is True
         assert summary["unrestricted"] is False
@@ -364,35 +364,35 @@ class TestToolAccessResolverGlobalPolicy:
     """Tests for _global policy fallback (agent-pushed global deny/allow)."""
 
     def test_global_deny_applies_to_provider_without_policy(self, resolver):
-        resolver.set_provider_policy("_global", ToolAccessPolicy(deny_list=("delete_*",)))
+        resolver.set_mcp_server_policy("_global", ToolAccessPolicy(deny_list=("delete_*",)))
 
         assert not resolver.is_tool_allowed("any-provider", "delete_something")
         assert resolver.is_tool_allowed("any-provider", "get_something")
 
     def test_global_allow_list_applies_to_provider_without_policy(self, resolver):
-        resolver.set_provider_policy("_global", ToolAccessPolicy(allow_list=("get_*", "list_*")))
+        resolver.set_mcp_server_policy("_global", ToolAccessPolicy(allow_list=("get_*", "list_*")))
 
         assert resolver.is_tool_allowed("any-provider", "get_data")
         assert not resolver.is_tool_allowed("any-provider", "delete_data")
 
     def test_provider_policy_merges_with_global(self, resolver):
-        resolver.set_provider_policy("_global", ToolAccessPolicy(deny_list=("delete_*",)))
-        resolver.set_provider_policy("grafana", ToolAccessPolicy(deny_list=("create_alert_*",)))
+        resolver.set_mcp_server_policy("_global", ToolAccessPolicy(deny_list=("delete_*",)))
+        resolver.set_mcp_server_policy("grafana", ToolAccessPolicy(deny_list=("create_alert_*",)))
 
         assert not resolver.is_tool_allowed("grafana", "delete_dashboard")
         assert not resolver.is_tool_allowed("grafana", "create_alert_rule")
         assert resolver.is_tool_allowed("grafana", "get_dashboard")
 
     def test_global_deny_cannot_be_overridden_by_provider_allow(self, resolver):
-        resolver.set_provider_policy("_global", ToolAccessPolicy(deny_list=("rm_*",)))
-        resolver.set_provider_policy("dangerous", ToolAccessPolicy(allow_list=("rm_prod", "rm_staging")))
+        resolver.set_mcp_server_policy("_global", ToolAccessPolicy(deny_list=("rm_*",)))
+        resolver.set_mcp_server_policy("dangerous", ToolAccessPolicy(allow_list=("rm_prod", "rm_staging")))
 
         assert not resolver.is_tool_allowed("dangerous", "rm_prod")
         assert not resolver.is_tool_allowed("dangerous", "rm_staging")
 
     def test_global_allow_list_intersects_with_provider_allow_list(self, resolver):
-        resolver.set_provider_policy("_global", ToolAccessPolicy(allow_list=("get_*", "add")))
-        resolver.set_provider_policy("math", ToolAccessPolicy(allow_list=("add", "multiply")))
+        resolver.set_mcp_server_policy("_global", ToolAccessPolicy(allow_list=("get_*", "add")))
+        resolver.set_mcp_server_policy("math", ToolAccessPolicy(allow_list=("add", "multiply")))
 
         assert resolver.is_tool_allowed("math", "add")
         assert not resolver.is_tool_allowed("math", "multiply")
@@ -403,7 +403,7 @@ class TestToolAccessResolverGlobalPolicy:
         assert policy.is_unrestricted()
 
     def test_global_approval_list_applies_to_provider_without_policy(self, resolver):
-        resolver.set_provider_policy("_global", ToolAccessPolicy(approval_list=("power_*",)))
+        resolver.set_mcp_server_policy("_global", ToolAccessPolicy(approval_list=("power_*",)))
         policy = resolver.resolve_effective_policy("any-provider")
 
         assert policy.requires_approval("power_delete")

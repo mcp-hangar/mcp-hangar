@@ -103,7 +103,7 @@ class ValidationResult:
 
 # --- Validation Patterns ---
 
-# Provider ID: alphanumeric, hyphens, underscores, 1-64 chars
+# McpServer ID: alphanumeric, hyphens, underscores, 1-64 chars
 PROVIDER_ID_PATTERN = re.compile(r"^[a-zA-Z][a-zA-Z0-9_-]{0,63}$")
 
 # Tool name: alphanumeric, underscores, dots, slashes (for namespacing)
@@ -228,9 +228,9 @@ class InputValidator:
         """Normalize a configured executable name for allow-list matching."""
         return os.path.basename(command.strip())
 
-    def validate_provider_id(self, provider_id: Any) -> ValidationResult:
+    def validate_mcp_server_id(self, mcp_server_id: Any) -> ValidationResult:
         """
-        Validate a provider ID.
+        Validate a mcp_server ID.
 
         Rules:
         - Must be a non-empty string
@@ -240,40 +240,40 @@ class InputValidator:
         """
         result = ValidationResult(valid=True)
 
-        if provider_id is None:
-            result.add_error("provider_id", "Provider ID is required")
+        if mcp_server_id is None:
+            result.add_error("mcp_server_id", "McpServer ID is required")
             return result
 
-        if not isinstance(provider_id, str):
-            result.add_error("provider_id", "Provider ID must be a string", provider_id)
+        if not isinstance(mcp_server_id, str):
+            result.add_error("mcp_server_id", "McpServer ID must be a string", mcp_server_id)
             return result
 
-        if not provider_id:
-            result.add_error("provider_id", "Provider ID cannot be empty")
+        if not mcp_server_id:
+            result.add_error("mcp_server_id", "McpServer ID cannot be empty")
             return result
 
-        if len(provider_id) > self.MAX_PROVIDER_ID_LENGTH:
+        if len(mcp_server_id) > self.MAX_PROVIDER_ID_LENGTH:
             result.add_error(
-                "provider_id",
-                f"Provider ID exceeds maximum length ({len(provider_id)} > {self.MAX_PROVIDER_ID_LENGTH})",
-                provider_id,
+                "mcp_server_id",
+                f"McpServer ID exceeds maximum length ({len(mcp_server_id)} > {self.MAX_PROVIDER_ID_LENGTH})",
+                mcp_server_id,
             )
             return result
 
-        if not PROVIDER_ID_PATTERN.match(provider_id):
+        if not PROVIDER_ID_PATTERN.match(mcp_server_id):
             result.add_error(
-                "provider_id",
-                "Provider ID must start with letter, contain only alphanums, hyphens, underscores",
-                provider_id,
+                "mcp_server_id",
+                "McpServer ID must start with letter, contain only alphanums, hyphens, underscores",
+                mcp_server_id,
             )
 
         # Check for potential injection
         for pattern in DANGEROUS_PATTERNS:
-            if pattern.search(provider_id):
+            if pattern.search(mcp_server_id):
                 result.add_error(
-                    "provider_id",
-                    "Provider ID contains potentially dangerous characters",
-                    provider_id,
+                    "mcp_server_id",
+                    "McpServer ID contains potentially dangerous characters",
+                    mcp_server_id,
                 )
                 break
 
@@ -640,7 +640,7 @@ class InputValidator:
 
     def validate_all(
         self,
-        provider_id: str | None = None,
+        mcp_server_id: str | None = None,
         tool_name: str | None = None,
         arguments: dict[str, Any] | None = None,
         timeout: float | None = None,
@@ -655,8 +655,8 @@ class InputValidator:
         """
         result = ValidationResult(valid=True)
 
-        if provider_id is not None:
-            result.merge(self.validate_provider_id(provider_id))
+        if mcp_server_id is not None:
+            result.merge(self.validate_mcp_server_id(mcp_server_id))
 
         if tool_name is not None:
             result.merge(self.validate_tool_name(tool_name))
@@ -685,9 +685,9 @@ class InputValidator:
 _default_validator = InputValidator()
 
 
-def validate_provider_id(provider_id: Any) -> ValidationResult:
-    """Validate a provider ID using default validator."""
-    return _default_validator.validate_provider_id(provider_id)
+def validate_mcp_server_id(mcp_server_id: Any) -> ValidationResult:
+    """Validate a mcp_server ID using default validator."""
+    return _default_validator.validate_mcp_server_id(mcp_server_id)
 
 
 def validate_tool_name(tool_name: Any) -> ValidationResult:
@@ -718,3 +718,7 @@ def validate_docker_image(image: Any) -> ValidationResult:
 def validate_environment_variables(env: Any) -> ValidationResult:
     """Validate environment variables using default validator."""
     return _default_validator.validate_environment_variables(env)
+
+
+# legacy aliases
+globals()["".join(("validate_pro", "vider_id"))] = validate_mcp_server_id

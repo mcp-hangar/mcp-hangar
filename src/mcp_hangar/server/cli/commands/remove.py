@@ -1,7 +1,7 @@
-"""Remove command - Remove providers from configuration.
+"""Remove command - Remove mcp_servers from configuration.
 
-Removes a provider from the MCP Hangar configuration file and optionally
-stops the running provider instance.
+Removes a mcp_server from the MCP Hangar configuration file and optionally
+stops the running mcp_server instance.
 """
 
 import json
@@ -12,20 +12,20 @@ import questionary
 from rich.console import Console
 import typer
 
-from ..errors import ProviderNotFoundError
+from ..errors import McpServerNotFoundError
 from ..main import GlobalOptions
 
 console = Console()
 
 
-def _get_configured_providers(config_path: Path) -> list[str]:
-    """Get list of providers from config file.
+def _get_configured_mcp_servers(config_path: Path) -> list[str]:
+    """Get list of mcp_servers from config file.
 
     Args:
         config_path: Path to config file
 
     Returns:
-        List of provider names
+        List of mcp_server names
     """
     import yaml
 
@@ -35,20 +35,20 @@ def _get_configured_providers(config_path: Path) -> list[str]:
     try:
         with open(config_path) as f:
             config = yaml.safe_load(f) or {}
-        return list(config.get("providers", {}).keys())
+        return list(config.get("mcp_servers", {}).keys())
     except Exception:  # noqa: BLE001 -- fault-barrier: config read must not crash remove command
         return []
 
 
-def _remove_from_config(config_path: Path, provider_name: str) -> bool:
-    """Remove a provider from the configuration file.
+def _remove_from_config(config_path: Path, mcp_server_name: str) -> bool:
+    """Remove a mcp_server from the configuration file.
 
     Args:
         config_path: Path to config file
-        provider_name: Name of provider to remove
+        mcp_server_name: Name of mcp_server to remove
 
     Returns:
-        True if provider was removed, False if not found
+        True if mcp_server was removed, False if not found
     """
     import yaml
 
@@ -58,10 +58,10 @@ def _remove_from_config(config_path: Path, provider_name: str) -> bool:
     with open(config_path) as f:
         config = yaml.safe_load(f) or {}
 
-    if "providers" not in config or provider_name not in config["providers"]:
+    if "mcp_servers" not in config or mcp_server_name not in config["mcp_servers"]:
         return False
 
-    del config["providers"][provider_name]
+    del config["mcp_servers"][mcp_server_name]
 
     with open(config_path, "w") as f:
         yaml.dump(config, f, default_flow_style=False, sort_keys=False)
@@ -69,14 +69,14 @@ def _remove_from_config(config_path: Path, provider_name: str) -> bool:
     return True
 
 
-def _try_stop_provider(provider_name: str) -> bool:
-    """Try to stop a running provider instance.
+def _try_stop_mcp_server(mcp_server_name: str) -> bool:
+    """Try to stop a running mcp_server instance.
 
     Args:
-        provider_name: Name of provider to stop
+        mcp_server_name: Name of mcp_server to stop
 
     Returns:
-        True if provider was stopped, False otherwise
+        True if mcp_server was stopped, False otherwise
     """
     import httpx
 
@@ -84,7 +84,7 @@ def _try_stop_provider(provider_name: str) -> bool:
         for port in [8000, 8080]:
             try:
                 response = httpx.post(
-                    f"http://localhost:{port}/providers/{provider_name}/stop",
+                    f"http://localhost:{port}/mcp_servers/{mcp_server_name}/stop",
                     timeout=5.0,
                 )
                 if response.status_code == 200:
@@ -102,7 +102,7 @@ def remove_command(
     name: Annotated[
         str,
         typer.Argument(
-            help="Provider name to remove",
+            help="McpServer name to remove",
         ),
     ],
     yes: Annotated[
@@ -117,13 +117,13 @@ def remove_command(
         bool,
         typer.Option(
             "--keep-running",
-            help="Don't stop the running provider instance",
+            help="Don't stop the running mcp_server instance",
         ),
     ] = False,
 ):
-    """Remove a provider from MCP Hangar configuration.
+    """Remove a mcp_server from MCP Hangar configuration.
 
-    Removes the provider from the config file and optionally stops
+    Removes the mcp_server from the config file and optionally stops
     any running instance.
 
     Examples:
@@ -136,16 +136,16 @@ def remove_command(
     # Determine config path
     config_path = global_opts.config or (Path.home() / ".config" / "mcp-hangar" / "config.yaml")
 
-    # Check if provider exists
-    configured = _get_configured_providers(config_path)
+    # Check if mcp_server exists
+    configured = _get_configured_mcp_servers(config_path)
     if name not in configured:
         similar = [p for p in configured if name.lower() in p.lower()]
-        raise ProviderNotFoundError(name, similar=similar if similar else None)
+        raise McpServerNotFoundError(name, similar=similar if similar else None)
 
     # Confirm removal
     if not yes:
         confirm = questionary.confirm(
-            f"Remove provider '{name}' from configuration?",
+            f"Remove mcp_server '{name}' from configuration?",
             default=False,
         ).ask()
         if not confirm:
@@ -153,14 +153,14 @@ def remove_command(
 
     # Stop running instance first
     if not keep_running:
-        if _try_stop_provider(name):
+        if _try_stop_mcp_server(name):
             console.print(f"[dim]Stopped running instance of {name}[/dim]")
 
     # Remove from config
     if _remove_from_config(config_path, name):
         console.print(f"[green]Removed {name} from {config_path}[/green]")
     else:
-        console.print(f"[yellow]Provider {name} not found in configuration[/yellow]")
+        console.print(f"[yellow]McpServer {name} not found in configuration[/yellow]")
 
     # JSON output
     if global_opts.json_output:

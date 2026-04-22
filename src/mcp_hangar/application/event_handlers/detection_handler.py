@@ -1,6 +1,6 @@
 """Enforcement handler for detection rule matches.
 
-Executes local response actions (suspend_session, block_provider) in
+Executes local response actions (suspend_session, block_mcp_server) in
 reaction to DetectionRuleMatched events and emits EnforcementActionTaken.
 """
 
@@ -8,7 +8,7 @@ reaction to DetectionRuleMatched events and emits EnforcementActionTaken.
 
 from __future__ import annotations
 
-from ...application.commands.commands import StopProviderCommand
+from ...application.commands.commands import StopMcpServerCommand
 from ...application.ports import ICommandBus
 from ...domain.contracts.event_bus import IEventBus
 from ...domain.events import DetectionRuleMatched, DomainEvent, EnforcementActionTaken
@@ -37,7 +37,7 @@ class DetectionEnforcementHandler:
                         action="suspend_session",
                         rule_id=event.rule_id,
                         session_id=event.session_id,
-                        provider_id=event.provider_id,
+                        mcp_server_id=event.mcp_server_id,
                         matched_tools=event.matched_tools,
                         detail=f"session {event.session_id} suspended by rule {event.rule_id}",
                     )
@@ -45,15 +45,15 @@ class DetectionEnforcementHandler:
                 return
 
             if event.recommended_action == "block":
-                self._block_provider(event.provider_id)
+                self._block_mcp_server(event.mcp_server_id)
                 self._event_bus.publish(
                     EnforcementActionTaken(
-                        action="block_provider",
+                        action="block_mcp_server",
                         rule_id=event.rule_id,
                         session_id=event.session_id,
-                        provider_id=event.provider_id,
+                        mcp_server_id=event.mcp_server_id,
                         matched_tools=event.matched_tools,
-                        detail=f"provider {event.provider_id} blocked by rule {event.rule_id}",
+                        detail=f"mcp_server {event.mcp_server_id} blocked by rule {event.rule_id}",
                     )
                 )
         except Exception as exc:  # noqa: BLE001 -- fault barrier for event bus handler
@@ -66,9 +66,9 @@ class DetectionEnforcementHandler:
 
         logger.info("enforcement_session_suspended", session_id=session_id, rule_id=rule_id)
 
-    def _block_provider(self, provider_id: str) -> None:
+    def _block_mcp_server(self, mcp_server_id: str) -> None:
         if self._command_bus is None:
             raise RuntimeError("command bus required for block enforcement")
 
-        command = StopProviderCommand(provider_id=provider_id, reason="detection_enforcement:block")
+        command = StopMcpServerCommand(mcp_server_id=mcp_server_id, reason="detection_enforcement:block")
         self._command_bus.send(command)

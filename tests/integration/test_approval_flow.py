@@ -18,7 +18,7 @@ from mcp_hangar.domain.value_objects.tool_access_policy import ToolAccessPolicy
 
 from enterprise.approvals.delivery.noop import NoOpApprovalDelivery
 from enterprise.approvals.hold_registry import ApprovalHoldRegistry
-from enterprise.approvals.models import ApprovalResult, ApprovalState
+from enterprise.approvals.models import ApprovalRequest, ApprovalResult, ApprovalState
 
 
 # ---------------------------------------------------------------------------
@@ -30,7 +30,7 @@ class FakeRepository:
     """In-memory repository for integration tests."""
 
     def __init__(self):
-        self._store: dict = {}
+        self._store: dict[str, ApprovalRequest] = {}
 
     async def save(self, request):
         self._store[request.approval_id] = request
@@ -38,20 +38,20 @@ class FakeRepository:
     async def get(self, approval_id):
         return self._store.get(approval_id)
 
-    async def list_pending(self, provider_id=None):
+    async def list_pending(self, mcp_server_id=None):
         return [
             r
             for r in self._store.values()
             if r.state == ApprovalState.PENDING
-            and (provider_id is None or r.provider_id == provider_id)
+            and (mcp_server_id is None or r.mcp_server_id == mcp_server_id)
         ]
 
-    async def list_by_state(self, state, provider_id=None):
+    async def list_by_state(self, state, mcp_server_id=None):
         return [
             r
             for r in self._store.values()
             if r.state == state
-            and (provider_id is None or r.provider_id == provider_id)
+            and (mcp_server_id is None or r.mcp_server_id == mcp_server_id)
         ]
 
     async def update_state(self, approval_id, state, decided_by, decided_at, reason):
@@ -136,7 +136,7 @@ class TestApprovalFlowApprove:
         resolve_task = asyncio.create_task(resolve_after_delay())
 
         result = await gate_service.check(
-            provider_id="grafana",
+            mcp_server_id="grafana",
             tool_name="delete_dashboard",
             arguments={"id": "123"},
             policy=policy,
@@ -171,7 +171,7 @@ class TestApprovalFlowApprove:
         resolve_task = asyncio.create_task(resolve_after_delay())
 
         await gate_service.check(
-            provider_id="db",
+            mcp_server_id="db",
             tool_name="run_query",
             arguments={"sql": "SELECT 1"},
             policy=policy,
@@ -205,7 +205,7 @@ class TestApprovalFlowDeny:
         resolve_task = asyncio.create_task(resolve_after_delay())
 
         result = await gate_service.check(
-            provider_id="k8s",
+            mcp_server_id="k8s",
             tool_name="deploy_service",
             arguments={"image": "app:latest"},
             policy=policy,
@@ -235,7 +235,7 @@ class TestApprovalFlowTimeout:
         )
 
         result = await gate_service.check(
-            provider_id="admin",
+            mcp_server_id="admin",
             tool_name="dangerous_reset",
             arguments={},
             policy=policy,
@@ -258,7 +258,7 @@ class TestApprovalFlowBypass:
         policy = ToolAccessPolicy(approval_list=("delete_*",))
 
         result = await gate_service.check(
-            provider_id="grafana",
+            mcp_server_id="grafana",
             tool_name="get_dashboard",
             arguments={},
             policy=policy,
@@ -278,7 +278,7 @@ class TestApprovalFlowBypass:
         )
 
         result = await gate_service.check(
-            provider_id="grafana",
+            mcp_server_id="grafana",
             tool_name="delete_dashboard",
             arguments={},
             policy=policy,
@@ -303,7 +303,7 @@ class TestApprovalFlowSanitization:
         )
 
         await gate_service.check(
-            provider_id="db",
+            mcp_server_id="db",
             tool_name="connect_database",
             arguments={
                 "host": "localhost",
@@ -349,7 +349,7 @@ class TestApprovalFlowConcurrency:
 
             task = asyncio.create_task(resolve())
             result = await gate_service.check(
-                provider_id="svc",
+                mcp_server_id="svc",
                 tool_name=tool_name,
                 arguments={"data": corr_id},
                 policy=policy,

@@ -13,7 +13,7 @@ Usage:
     tracer = get_tracer(__name__)
 
     with tracer.start_as_current_span("operation") as span:
-        span.set_attribute(Provider.ID, provider_id)  # use conventions.Provider.ID
+        span.set_attribute(McpServer.ID, mcp_server_id)  # use conventions.McpServer.ID
         # ... do work
 """
 
@@ -30,7 +30,7 @@ from mcp_hangar.observability.tracing import (
     trace_span,
     trace_tool_invocation,
 )
-from mcp_hangar.observability.conventions import Audit, Behavioral, Enforcement, Health, MCP, Metrics, Provider
+from mcp_hangar.observability.conventions import Audit, Behavioral, Enforcement, Health, MCP, Metrics, McpServer
 
 __all__ = [
     # Tracing
@@ -54,7 +54,7 @@ __all__ = [
     "get_health_endpoint",
     # Semantic conventions
     "MCP",
-    "Provider",
+    "McpServer",
     "Enforcement",
     "Audit",
     "Behavioral",

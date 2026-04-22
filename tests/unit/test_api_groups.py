@@ -20,10 +20,10 @@ from starlette.testclient import TestClient
 # ---------------------------------------------------------------------------
 
 
-def _make_mock_member(provider_id: str, weight: int = 1, in_rotation: bool = True) -> Mock:
+def _make_mock_member(mcp_server_id: str, weight: int = 1, in_rotation: bool = True) -> Mock:
     """Create a mock GroupMember."""
     member = Mock()
-    member.id = provider_id
+    member.id = mcp_server_id
     member.weight = weight
     member.priority = 1
     member.in_rotation = in_rotation

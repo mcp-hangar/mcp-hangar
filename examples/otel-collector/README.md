@@ -4,7 +4,7 @@ Quick start for exporting MCP governance telemetry to an OTEL Collector.
 
 ## What this example demonstrates
 
-- Hangar emits OTLP traces (tool invocations, provider lifecycle) and audit logs (tool invocation events, state changes)
+- Hangar emits OTLP traces (tool invocations, MCP server lifecycle) and audit logs (tool invocation events, state changes)
 - OTEL Collector receives all telemetry on port 4317 (gRPC) or 4318 (HTTP)
 - Prometheus scrapes governance metrics from the collector's `/metrics` endpoint
 - Console exporter prints spans and audit logs to stdout for debugging
@@ -23,7 +23,7 @@ Governance spans and logs carry these MCP-specific attributes:
 
 | Attribute | Description |
 |-----------|-------------|
-| `mcp.provider.id` | Provider identifier |
+| `mcp.server.id` | MCP Server identifier |
 | `mcp.tool.name` | Tool name |
 | `mcp.tool.status` | "success", "error", "timeout", "blocked" |
 | `mcp.user.id` | Calling user identity (if propagated) |

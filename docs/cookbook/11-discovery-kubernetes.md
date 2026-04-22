@@ -3,11 +3,11 @@
 > **Prerequisite:** [01 -- HTTP Gateway](01-http-gateway.md)
 > **You will need:** Running Hangar, Kubernetes cluster with the MCP-Hangar Operator
 > **Time:** 15 minutes
-> **Adds:** Auto-discover MCP providers from Kubernetes annotations
+> **Adds:** Auto-discover MCP servers from Kubernetes annotations
 
 ## The Problem
 
-You run MCP providers as Kubernetes services. Teams deploy and scale providers independently. You need Hangar to discover them from annotations without manual config updates.
+You run MCP servers as Kubernetes services. Teams deploy and scale MCP servers independently. You need Hangar to discover them from annotations without manual config updates.
 
 ## The Config
 
@@ -22,21 +22,21 @@ discovery:
     - type: kubernetes                   # NEW: Kubernetes source
       mode: authoritative                # NEW: add AND remove on pod changes
       config:                            # NEW: K8s-specific config
-        namespace: "mcp-providers"       # NEW: watch this namespace
+        namespace: "mcp-servers"       # NEW: watch this namespace
         label_selector: "app.kubernetes.io/part-of=mcp"  # NEW: filter pods
 ```
 
 ## Try It
 
-1. Deploy an MCP provider with annotations:
+1. Deploy an MCP server with annotations:
 
    ```bash
    kubectl apply -f - <<EOF
    apiVersion: apps/v1
    kind: Deployment
    metadata:
-     name: math-provider
-     namespace: mcp-providers
+     name: math-mcp-server
+     namespace: mcp-servers
      labels:
        app.kubernetes.io/part-of: mcp
      annotations:
@@ -47,11 +47,11 @@ discovery:
      replicas: 2
      selector:
        matchLabels:
-         app: math-provider
+         app: math-mcp-server
      template:
        metadata:
          labels:
-           app: math-provider
+           app: math-mcp-server
        spec:
          containers:
            - name: math
@@ -64,7 +64,7 @@ discovery:
 2. Expose the deployment:
 
    ```bash
-   kubectl expose deployment math-provider -n mcp-providers --port=8080
+   kubectl expose deployment math-mcp-server -n mcp-servers --port=8080
    ```
 
 3. Verify Hangar discovers it:
@@ -73,7 +73,7 @@ discovery:
    curl http://localhost:8000/api/discovery/sources
    ```
 
-4. Check registered providers:
+4. Check registered MCP servers:
 
    ```bash
    mcp-hangar status
@@ -86,12 +86,12 @@ discovery:
 5. Scale up and watch Hangar adapt:
 
    ```bash
-   kubectl scale deployment math-provider -n mcp-providers --replicas=3
+   kubectl scale deployment math-mcp-server -n mcp-servers --replicas=3
    ```
 
 ## What Just Happened
 
-The Kubernetes discovery source watches pods in the configured namespace matching the label selector. Pods with `mcp-hangar.io/enabled: "true"` annotations are registered as remote providers. In `authoritative` mode, when a pod is deleted, the corresponding provider is deregistered.
+The Kubernetes discovery source watches pods in the configured namespace matching the label selector. Pods with `mcp-hangar.io/enabled: "true"` annotations are registered as remote MCP servers. In `authoritative` mode, when a pod is deleted, the corresponding MCP server is deregistered.
 
 For declarative management, use the MCP-Hangar Operator CRDs instead. See the [Kubernetes guide](../guides/KUBERNETES.md).
 
@@ -109,12 +109,12 @@ For declarative management, use the MCP-Hangar Operator CRDs instead. See the [K
 | Annotation | Required | Default | Description |
 |------------|----------|---------|-------------|
 | `mcp-hangar.io/enabled` | Yes | -- | Must be `"true"` |
-| `mcp-hangar.io/name` | No | Pod name | Provider name |
-| `mcp-hangar.io/port` | No | `8080` | Provider port |
+| `mcp-hangar.io/name` | No | Pod name | MCP Server name |
+| `mcp-hangar.io/port` | No | `8080` | MCP Server port |
 | `mcp-hangar.io/group` | No | -- | Auto-add to group |
 
 ## What's Next
 
-You have discovery working. Now add authentication to control who can access your providers.
+You have discovery working. Now add authentication to control who can access your MCP servers.
 
 --> [12 -- Auth & RBAC](12-auth-rbac.md)

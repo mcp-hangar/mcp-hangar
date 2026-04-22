@@ -93,7 +93,7 @@ class TestProgressTracker:
 
     def test_basic_progress_tracking(self):
         """Test basic progress reporting."""
-        tracker = ProgressTracker(provider="math", operation="add")
+        tracker = ProgressTracker(mcp_server="math", operation="add")
 
         tracker.report(ProgressStage.LAUNCHING, "Starting...")
         tracker.report(ProgressStage.READY, "Ready!")
@@ -235,11 +235,8 @@ class TestCreateProgressTracker:
         def cb(stage, msg, elapsed):
             callback_calls.append(stage)
 
-        tracker = create_progress_tracker(
-            provider="test",
-            operation="op",
-            callback=cb,
-        )
+        tracker = create_progress_tracker(mcp_server="test", operation="op",
+        callback=cb,)
         tracker.report(ProgressStage.READY, "Ready")
 
         assert len(callback_calls) == 1
@@ -296,7 +293,7 @@ class TestProgressEventDetails:
             message="Done",
             elapsed_ms=500.0,
             details={
-                "provider_id": "math",
+                "mcp_server_id": "math",
                 "tool_name": "add",
                 "duration_ms": 50.5,
             },
@@ -310,7 +307,7 @@ class TestProgressTrackerAdvanced:
 
     def test_multiple_reports(self):
         """Test multiple progress reports."""
-        tracker = ProgressTracker(provider="test", operation="multi")
+        tracker = ProgressTracker(mcp_server="test", operation="multi")
 
         tracker.report(ProgressStage.COLD_START, "Cold")
         tracker.report(ProgressStage.LAUNCHING, "Launching")
@@ -374,7 +371,7 @@ class TestGetStageMessageAdvanced:
 
     def test_cold_start_with_provider(self):
         """Test cold_start message with provider name."""
-        msg = get_stage_message(ProgressStage.COLD_START, provider="sqlite")
+        msg = get_stage_message(ProgressStage.COLD_START, mcp_server="sqlite")
         assert "cold" in msg.lower()
 
     def test_failed_with_error(self):

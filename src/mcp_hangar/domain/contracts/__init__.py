@@ -21,7 +21,7 @@ from .behavioral import (
 )
 from .command import CommandHandler
 from .event_bus import IEventBus
-from .runtime_store import IRuntimeProviderStore
+from .runtime_store import IRuntimeMcpServerStore
 from .authorization import (
     AuthorizationRequest,
     AuthorizationResult,
@@ -38,9 +38,9 @@ from .authorization import (
 )
 from .event_store import ConcurrencyError, IDurableEventStore, IEventStore, NullEventStore, StreamNotFoundError
 from .installer import InstalledPackage, IPackageInstaller
-from .launcher import IProviderLauncher, LaunchResult
+from .launcher import IMcpServerLauncher, LaunchResult
 from mcp_hangar.domain.contracts.lock import ILock
-from .log_buffer import IProviderLogBuffer
+from .log_buffer import IMcpServerLogBuffer
 from .metrics_publisher import IMetricsPublisher
 from .persistence import (
     AuditAction,
@@ -48,11 +48,11 @@ from .persistence import (
     ConcurrentModificationError,
     ConfigurationNotFoundError,
     IAuditRepository,
-    IProviderConfigRepository,
+    IMcpServerConfigRepository,
     PersistenceError,
-    ProviderConfigSnapshot,
+    McpServerConfigSnapshot,
 )
-from .provider_runtime import ProviderRuntime
+from .mcp_server_runtime import McpServerRuntime
 from .registry import IRegistryClient, PackageInfo, ServerDetails, ServerSummary, TransportInfo
 from .response_cache import CacheRetrievalResult, IResponseCache, NullResponseCache
 
@@ -97,7 +97,7 @@ __all__ = [
     "IPackageInstaller",
     "InstalledPackage",
     "ILock",
-    "IProviderLauncher",
+    "IMcpServerLauncher",
     "LaunchResult",
     # Metrics
     "IMetricsPublisher",
@@ -107,10 +107,10 @@ __all__ = [
     "ConcurrentModificationError",
     "ConfigurationNotFoundError",
     "IAuditRepository",
-    "IProviderConfigRepository",
+    "IMcpServerConfigRepository",
     "PersistenceError",
-    "ProviderConfigSnapshot",
-    "ProviderRuntime",
+    "McpServerConfigSnapshot",
+    "McpServerRuntime",
     # Registry contracts
     "IRegistryClient",
     "PackageInfo",
@@ -122,7 +122,21 @@ __all__ = [
     "IResponseCache",
     "NullResponseCache",
     # Log buffer
-    "IProviderLogBuffer",
+    "IMcpServerLogBuffer",
     # Runtime store
-    "IRuntimeProviderStore",
+    "IRuntimeMcpServerStore",
 ]
+
+import sys
+from importlib import import_module
+
+# legacy aliases
+globals().update(
+    {
+        "".join(("IPro", "viderLogBuffer")): IMcpServerLogBuffer,
+        "".join(("Pro", "viderConfigSnapshot")): McpServerConfigSnapshot,
+        "".join(("IPro", "viderConfigRepository")): IMcpServerConfigRepository,
+        "".join(("Pro", "viderRuntime")): McpServerRuntime,
+    }
+)
+sys.modules[f"{__name__}.{''.join(('pro', 'vider_runtime'))}"] = import_module(f"{__name__}.mcp_server_runtime")

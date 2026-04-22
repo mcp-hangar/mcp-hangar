@@ -26,7 +26,7 @@ from ..logging_config import get_logger, setup_logging
 from .bootstrap import ApplicationContext, bootstrap
 from .cli.cli_compat import CLIConfig
 from .config import load_config_from_file
-from .state import get_discovery_orchestrator, get_runtime_providers
+from .state import get_discovery_orchestrator, get_runtime_mcp_servers
 
 if TYPE_CHECKING:
     from ..cloud.config import CloudConfig
@@ -183,8 +183,8 @@ class ServerLifecycle:
             return JSONResponse(
                 {
                     "status": "healthy" if is_ready else "unhealthy",
-                    "ready_providers": ready_count,
-                    "total_providers": total_count,
+                    "ready_mcp_servers": ready_count,
+                    "total_mcp_servers": total_count,
                 },
                 status_code=200 if is_ready else 503,
             )
@@ -285,10 +285,10 @@ class ServerLifecycle:
         """Graceful shutdown of all components.
 
         Stops:
-        - Runtime (hot-loaded) providers
+        - Runtime (hot-loaded) mcp_servers
         - Background workers
         - Discovery orchestrator
-        - All configured providers
+        - All configured mcp_servers
 
         This method is safe to call multiple times.
         """
@@ -299,31 +299,31 @@ class ServerLifecycle:
         self._shutdown_requested = True
         logger.info("server_lifecycle_shutdown_start")
 
-        self._cleanup_runtime_providers()
+        self._cleanup_runtime_mcp_servers()
 
         self._context.shutdown()
         self._running = False
 
         logger.info("server_lifecycle_shutdown_complete")
 
-    def _cleanup_runtime_providers(self) -> None:
-        """Cleanup all hot-loaded runtime providers."""
-        runtime_store = get_runtime_providers()
+    def _cleanup_runtime_mcp_servers(self) -> None:
+        """Cleanup all hot-loaded runtime mcp_servers."""
+        runtime_store = get_runtime_mcp_servers()
         if runtime_store.count() == 0:
             return
 
         logger.info(
-            "cleaning_up_runtime_providers",
+            "cleaning_up_runtime_mcp_servers",
             count=runtime_store.count(),
         )
 
-        for provider, metadata in runtime_store.list_all():
+        for mcp_server, metadata in runtime_store.list_all():
             try:
-                provider.shutdown()
-            except Exception as e:  # noqa: BLE001 -- fault-barrier: one provider shutdown failure must not prevent others
+                mcp_server.shutdown()
+            except Exception as e:  # noqa: BLE001 -- fault-barrier: one mcp_server shutdown failure must not prevent others
                 logger.warning(
-                    "runtime_provider_shutdown_error",
-                    provider_id=str(provider.provider_id),
+                    "runtime_mcp_server_shutdown_error",
+                    mcp_server_id=str(mcp_server.mcp_server_id),
                     error=str(e),
                 )
 
@@ -332,13 +332,13 @@ class ServerLifecycle:
                     metadata.cleanup()
                 except Exception as e:  # noqa: BLE001 -- fault-barrier: cleanup callback failure must not prevent other cleanups
                     logger.warning(
-                        "runtime_provider_cleanup_error",
-                        provider_id=str(provider.provider_id),
+                        "runtime_mcp_server_cleanup_error",
+                        mcp_server_id=str(mcp_server.mcp_server_id),
                         error=str(e),
                     )
 
         runtime_store.clear()
-        logger.info("runtime_providers_cleaned_up")
+        logger.info("runtime_mcp_servers_cleaned_up")
 
     def _create_auth_app(self, inner_app, auth_components):
         """Create auth-enabled ASGI app wrapper.
@@ -592,7 +592,7 @@ def run_server(cli_config: CLIConfig) -> None:
     if cloud_cfg is not None:
         from ..cloud.connector import CloudConnector
 
-        cloud_connector = CloudConnector(config=cloud_cfg, providers=context.runtime.repository)
+        cloud_connector = CloudConnector(config=cloud_cfg, mcp_servers=context.runtime.repository)
         # Subscribe to all domain events (handler is synchronous, just pushes to buffer)
         context.runtime.event_bus.subscribe_to_all(cloud_connector.on_event)
 
@@ -608,13 +608,13 @@ def run_server(cli_config: CLIConfig) -> None:
         cloud_connector.start()
 
     # Log ready state
-    provider_ids = list(context.runtime.repository.get_all_ids())
+    mcp_server_ids = list(context.runtime.repository.get_all_ids())
     orchestrator = get_discovery_orchestrator()
     discovery_status = "enabled" if orchestrator else "disabled"
 
     logger.info(
         "mcp_registry_ready",
-        providers=provider_ids,
+        mcp_servers=mcp_server_ids,
         discovery=discovery_status,
     )
 

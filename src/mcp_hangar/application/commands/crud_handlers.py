@@ -1,4 +1,4 @@
-"""CQRS command handlers for Provider and Group CRUD operations.
+"""CQRS command handlers for McpServer and Group CRUD operations.
 
 All handlers:
 - Receive dependencies via constructor (Dependency Inversion Principle)
@@ -10,71 +10,71 @@ All handlers:
 import threading
 from typing import Any
 
-from ...domain.events import ProviderDeregistered, ProviderRegistered
-from ...domain.exceptions import ProviderNotFoundError, ValidationError
-from ...domain.model.provider import Provider
-from ...domain.model.provider_group import GroupDeleted, ProviderGroup
-from ...domain.repository import IProviderRepository
+from ...domain.events import McpServerDeregistered, McpServerRegistered
+from ...domain.exceptions import McpServerNotFoundError, ValidationError
+from ...domain.model.mcp_server import McpServer
+from ...domain.model.mcp_server_group import GroupDeleted, McpServerGroup
+from ...domain.repository import IMcpServerRepository
 from ...domain.security.ssrf import validate_no_ssrf
-from ...domain.value_objects import LoadBalancerStrategy, ProviderMode, ProviderState
+from ...domain.value_objects import LoadBalancerStrategy, McpServerMode, McpServerState
 from ...domain.contracts.command import CommandHandler
 from ...logging_config import get_logger
 from .crud_commands import (
     AddGroupMemberCommand,
     CreateGroupCommand,
-    CreateProviderCommand,
+    CreateMcpServerCommand,
     DeleteGroupCommand,
-    DeleteProviderCommand,
+    DeleteMcpServerCommand,
     RemoveGroupMemberCommand,
     UpdateGroupCommand,
-    UpdateProviderCommand,
+    UpdateMcpServerCommand,
 )
 
 logger = get_logger(__name__)
 
 
 # =============================================================================
-# Provider CRUD Handlers
+# McpServer CRUD Handlers
 # =============================================================================
 
 
-class CreateProviderHandler(CommandHandler):
-    """Handler for CreateProviderCommand.
+class CreateMcpServerHandler(CommandHandler):
+    """Handler for CreateMcpServerCommand.
 
-    Creates a new Provider in the repository and emits ProviderRegistered.
-    Raises ValidationError if a provider with the same ID already exists.
+    Creates a new McpServer in the repository and emits McpServerRegistered.
+    Raises ValidationError if a mcp_server with the same ID already exists.
     """
 
-    def __init__(self, repository: IProviderRepository, event_bus: Any) -> None:
+    def __init__(self, repository: IMcpServerRepository, event_bus: Any) -> None:
         """Initialize the handler.
 
         Args:
-            repository: Provider repository for persistence.
+            repository: McpServer repository for persistence.
             event_bus: Event bus for publishing domain events.
         """
         self._repository = repository
         self._event_bus = event_bus
 
-    def handle(self, command: CreateProviderCommand) -> dict[str, Any]:
-        """Create a new provider.
+    def handle(self, command: CreateMcpServerCommand) -> dict[str, Any]:
+        """Create a new mcp_server.
 
         Args:
-            command: CreateProviderCommand with provider configuration.
+            command: CreateMcpServerCommand with mcp_server configuration.
 
         Returns:
-            Dict with provider_id and created flag.
+            Dict with mcp_server_id and created flag.
 
         Raises:
-            ValidationError: If a provider with the same ID already exists.
+            ValidationError: If a mcp_server with the same ID already exists.
         """
-        if self._repository.exists(command.provider_id):
-            raise ValidationError(f"Provider already exists: {command.provider_id}")
+        if self._repository.exists(command.mcp_server_id):
+            raise ValidationError(f"McpServer already exists: {command.mcp_server_id}")
 
-        if ProviderMode.normalize(command.mode) == ProviderMode.REMOTE and command.endpoint is not None:
+        if McpServerMode.normalize(command.mode) == McpServerMode.REMOTE and command.endpoint is not None:
             validate_no_ssrf(command.endpoint)
 
-        provider = Provider(
-            provider_id=command.provider_id,
+        mcp_server = McpServer(
+            mcp_server_id=command.mcp_server_id,
             mode=command.mode,
             command=command.command,
             image=command.image,
@@ -84,169 +84,169 @@ class CreateProviderHandler(CommandHandler):
             health_check_interval_s=command.health_check_interval_s,
             description=command.description,
         )
-        self._repository.add(command.provider_id, provider)
+        self._repository.add(command.mcp_server_id, mcp_server)
 
         self._event_bus.publish(
-            ProviderRegistered(
-                provider_id=command.provider_id,
+            McpServerRegistered(
+                mcp_server_id=command.mcp_server_id,
                 source=command.source,
                 mode=command.mode,
             )
         )
 
         logger.info(
-            "provider_created",
-            provider_id=command.provider_id,
+            "mcp_server_created",
+            mcp_server_id=command.mcp_server_id,
             mode=command.mode,
             source=command.source,
         )
-        return {"provider_id": command.provider_id, "created": True}
+        return {"mcp_server_id": command.mcp_server_id, "created": True}
 
 
-class UpdateProviderHandler(CommandHandler):
-    """Handler for UpdateProviderCommand.
+class UpdateMcpServerHandler(CommandHandler):
+    """Handler for UpdateMcpServerCommand.
 
-    Updates mutable configuration fields on an existing Provider via
-    Provider.update_config(). Raises ProviderNotFoundError if not found.
+    Updates mutable configuration fields on an existing McpServer via
+    McpServer.update_config(). Raises McpServerNotFoundError if not found.
     """
 
-    def __init__(self, repository: IProviderRepository, event_bus: Any) -> None:
+    def __init__(self, repository: IMcpServerRepository, event_bus: Any) -> None:
         """Initialize the handler.
 
         Args:
-            repository: Provider repository for persistence.
+            repository: McpServer repository for persistence.
             event_bus: Event bus for publishing domain events.
         """
         self._repository = repository
         self._event_bus = event_bus
 
-    def _get_provider_or_raise(self, provider_id: str) -> Provider:
-        """Retrieve provider or raise ProviderNotFoundError.
+    def _get_mcp_server_or_raise(self, mcp_server_id: str) -> McpServer:
+        """Retrieve mcp_server or raise McpServerNotFoundError.
 
         Args:
-            provider_id: ID of the provider to retrieve.
+            mcp_server_id: ID of the mcp_server to retrieve.
 
         Returns:
-            Provider instance.
+            McpServer instance.
 
         Raises:
-            ProviderNotFoundError: If no provider with given ID exists.
+            McpServerNotFoundError: If no mcp_server with given ID exists.
         """
-        provider = self._repository.get(provider_id)
-        if provider is None:
-            raise ProviderNotFoundError(provider_id)
-        return provider  # type: ignore[return-value]
+        mcp_server = self._repository.get(mcp_server_id)
+        if mcp_server is None:
+            raise McpServerNotFoundError(mcp_server_id)
+        return mcp_server  # type: ignore[return-value]
 
-    def handle(self, command: UpdateProviderCommand) -> dict[str, Any]:
-        """Update provider configuration.
+    def handle(self, command: UpdateMcpServerCommand) -> dict[str, Any]:
+        """Update mcp_server configuration.
 
-        Delegates field updates to Provider.update_config() which acquires the
-        provider lock internally and records a ProviderUpdated event on the aggregate.
+        Delegates field updates to McpServer.update_config() which acquires the
+        mcp_server lock internally and records a McpServerUpdated event on the aggregate.
 
         Args:
-            command: UpdateProviderCommand with fields to update.
+            command: UpdateMcpServerCommand with fields to update.
 
         Returns:
-            Dict with provider_id and updated flag.
+            Dict with mcp_server_id and updated flag.
 
         Raises:
-            ProviderNotFoundError: If provider does not exist.
+            McpServerNotFoundError: If mcp_server does not exist.
         """
-        provider = self._get_provider_or_raise(command.provider_id)
+        mcp_server = self._get_mcp_server_or_raise(command.mcp_server_id)
 
-        provider.update_config(
+        mcp_server.update_config(
             description=command.description,
             env=command.env,
             idle_ttl_s=command.idle_ttl_s,
             health_check_interval_s=command.health_check_interval_s,
         )
 
-        # Collect the ProviderUpdated event recorded by update_config()
+        # Collect the McpServerUpdated event recorded by update_config()
         # and forward it through the event bus.
-        for event in provider.collect_events():
+        for event in mcp_server.collect_events():
             self._event_bus.publish(event)
 
         logger.info(
-            "provider_updated",
-            provider_id=command.provider_id,
+            "mcp_server_updated",
+            mcp_server_id=command.mcp_server_id,
             source=command.source,
         )
-        return {"provider_id": command.provider_id, "updated": True}
+        return {"mcp_server_id": command.mcp_server_id, "updated": True}
 
 
-class DeleteProviderHandler(CommandHandler):
-    """Handler for DeleteProviderCommand.
+class DeleteMcpServerHandler(CommandHandler):
+    """Handler for DeleteMcpServerCommand.
 
-    Stops a running provider (if not COLD or DEAD), then removes it from the
-    repository and emits ProviderDeregistered.
-    Raises ProviderNotFoundError if the provider does not exist.
+    Stops a running mcp_server (if not COLD or DEAD), then removes it from the
+    repository and emits McpServerDeregistered.
+    Raises McpServerNotFoundError if the mcp_server does not exist.
     """
 
-    def __init__(self, repository: IProviderRepository, event_bus: Any) -> None:
+    def __init__(self, repository: IMcpServerRepository, event_bus: Any) -> None:
         """Initialize the handler.
 
         Args:
-            repository: Provider repository for persistence.
+            repository: McpServer repository for persistence.
             event_bus: Event bus for publishing domain events.
         """
         self._repository = repository
         self._event_bus = event_bus
 
-    def _get_provider_or_raise(self, provider_id: str) -> Provider:
-        """Retrieve provider or raise ProviderNotFoundError.
+    def _get_mcp_server_or_raise(self, mcp_server_id: str) -> McpServer:
+        """Retrieve mcp_server or raise McpServerNotFoundError.
 
         Args:
-            provider_id: ID of the provider to retrieve.
+            mcp_server_id: ID of the mcp_server to retrieve.
 
         Returns:
-            Provider instance.
+            McpServer instance.
 
         Raises:
-            ProviderNotFoundError: If no provider with given ID exists.
+            McpServerNotFoundError: If no mcp_server with given ID exists.
         """
-        provider = self._repository.get(provider_id)
-        if provider is None:
-            raise ProviderNotFoundError(provider_id)
-        return provider  # type: ignore[return-value]
+        mcp_server = self._repository.get(mcp_server_id)
+        if mcp_server is None:
+            raise McpServerNotFoundError(mcp_server_id)
+        return mcp_server  # type: ignore[return-value]
 
-    def handle(self, command: DeleteProviderCommand) -> dict[str, Any]:
-        """Delete a provider, stopping it first if running.
+    def handle(self, command: DeleteMcpServerCommand) -> dict[str, Any]:
+        """Delete a mcp_server, stopping it first if running.
 
         Args:
-            command: DeleteProviderCommand with provider_id to delete.
+            command: DeleteMcpServerCommand with mcp_server_id to delete.
 
         Returns:
-            Dict with provider_id and deleted flag.
+            Dict with mcp_server_id and deleted flag.
 
         Raises:
-            ProviderNotFoundError: If provider does not exist.
+            McpServerNotFoundError: If mcp_server does not exist.
         """
-        provider = self._get_provider_or_raise(command.provider_id)
+        mcp_server = self._get_mcp_server_or_raise(command.mcp_server_id)
 
-        # Stop provider if it is in a running state (not COLD or DEAD).
+        # Stop mcp_server if it is in a running state (not COLD or DEAD).
         # I/O (shutdown) is done outside the repository lock to respect
         # the no-I/O-under-lock rule.
-        if provider.state not in (ProviderState.COLD, ProviderState.DEAD):
-            provider.shutdown()
+        if mcp_server.state not in (McpServerState.COLD, McpServerState.DEAD):
+            mcp_server.shutdown()
             # Publish any lifecycle events emitted by shutdown()
-            for event in provider.collect_events():
+            for event in mcp_server.collect_events():
                 self._event_bus.publish(event)
 
-        self._repository.remove(command.provider_id)
+        self._repository.remove(command.mcp_server_id)
 
         self._event_bus.publish(
-            ProviderDeregistered(
-                provider_id=command.provider_id,
+            McpServerDeregistered(
+                mcp_server_id=command.mcp_server_id,
                 source=command.source,
             )
         )
 
         logger.info(
-            "provider_deleted",
-            provider_id=command.provider_id,
+            "mcp_server_deleted",
+            mcp_server_id=command.mcp_server_id,
             source=command.source,
         )
-        return {"provider_id": command.provider_id, "deleted": True}
+        return {"mcp_server_id": command.mcp_server_id, "deleted": True}
 
 
 # =============================================================================
@@ -257,7 +257,7 @@ class DeleteProviderHandler(CommandHandler):
 class CreateGroupHandler(CommandHandler):
     """Handler for CreateGroupCommand.
 
-    Creates a new ProviderGroup in the groups dict and emits GroupCreated.
+    Creates a new McpServerGroup in the groups dict and emits GroupCreated.
     Raises ValidationError if a group with the same ID already exists.
     Thread-safe via a per-handler threading.Lock.
     """
@@ -266,7 +266,7 @@ class CreateGroupHandler(CommandHandler):
         """Initialize the handler.
 
         Args:
-            groups: Shared groups dict mapping group_id to ProviderGroup.
+            groups: Shared groups dict mapping group_id to McpServerGroup.
             event_bus: Event bus for publishing domain events.
         """
         self._groups = groups
@@ -274,7 +274,7 @@ class CreateGroupHandler(CommandHandler):
         self._lock = threading.Lock()
 
     def handle(self, command: CreateGroupCommand) -> dict[str, Any]:
-        """Create a new provider group.
+        """Create a new mcp_server group.
 
         Args:
             command: CreateGroupCommand with group configuration.
@@ -288,7 +288,7 @@ class CreateGroupHandler(CommandHandler):
         with self._lock:
             if command.group_id in self._groups:
                 raise ValidationError(f"Group already exists: {command.group_id}")
-            group = ProviderGroup(
+            group = McpServerGroup(
                 group_id=command.group_id,
                 strategy=LoadBalancerStrategy(command.strategy),
                 min_healthy=command.min_healthy,
@@ -307,8 +307,8 @@ class CreateGroupHandler(CommandHandler):
 class UpdateGroupHandler(CommandHandler):
     """Handler for UpdateGroupCommand.
 
-    Updates mutable configuration fields on an existing ProviderGroup via
-    ProviderGroup.update(). Raises ProviderNotFoundError if not found.
+    Updates mutable configuration fields on an existing McpServerGroup via
+    McpServerGroup.update(). Raises McpServerNotFoundError if not found.
     Thread-safe via a per-handler threading.Lock.
     """
 
@@ -316,7 +316,7 @@ class UpdateGroupHandler(CommandHandler):
         """Initialize the handler.
 
         Args:
-            groups: Shared groups dict mapping group_id to ProviderGroup.
+            groups: Shared groups dict mapping group_id to McpServerGroup.
             event_bus: Event bus for publishing domain events.
         """
         self._groups = groups
@@ -326,7 +326,7 @@ class UpdateGroupHandler(CommandHandler):
     def handle(self, command: UpdateGroupCommand) -> dict[str, Any]:
         """Update group configuration.
 
-        Delegates field updates to ProviderGroup.update() which acquires the
+        Delegates field updates to McpServerGroup.update() which acquires the
         group lock internally and records a GroupUpdated event on the aggregate.
 
         Args:
@@ -336,12 +336,12 @@ class UpdateGroupHandler(CommandHandler):
             Dict with group_id and updated flag.
 
         Raises:
-            ProviderNotFoundError: If group does not exist.
+            McpServerNotFoundError: If group does not exist.
         """
         with self._lock:
             group = self._groups.get(command.group_id)
             if group is None:
-                raise ProviderNotFoundError(command.group_id)
+                raise McpServerNotFoundError(command.group_id)
 
         # group.update() acquires its own lock internally
         group.update(
@@ -361,9 +361,9 @@ class UpdateGroupHandler(CommandHandler):
 class DeleteGroupHandler(CommandHandler):
     """Handler for DeleteGroupCommand.
 
-    Removes a ProviderGroup from the groups dict, calls stop_all() on the
+    Removes a McpServerGroup from the groups dict, calls stop_all() on the
     group (outside the lock), and emits GroupDeleted.
-    Raises ProviderNotFoundError if not found.
+    Raises McpServerNotFoundError if not found.
     Thread-safe via a per-handler threading.Lock.
     """
 
@@ -371,7 +371,7 @@ class DeleteGroupHandler(CommandHandler):
         """Initialize the handler.
 
         Args:
-            groups: Shared groups dict mapping group_id to ProviderGroup.
+            groups: Shared groups dict mapping group_id to McpServerGroup.
             event_bus: Event bus for publishing domain events.
         """
         self._groups = groups
@@ -379,7 +379,7 @@ class DeleteGroupHandler(CommandHandler):
         self._lock = threading.Lock()
 
     def handle(self, command: DeleteGroupCommand) -> dict[str, Any]:
-        """Delete a provider group, stopping all members first.
+        """Delete a mcp_server group, stopping all members first.
 
         Args:
             command: DeleteGroupCommand with group_id to delete.
@@ -388,15 +388,15 @@ class DeleteGroupHandler(CommandHandler):
             Dict with group_id and deleted flag.
 
         Raises:
-            ProviderNotFoundError: If group does not exist.
+            McpServerNotFoundError: If group does not exist.
         """
         with self._lock:
             group = self._groups.get(command.group_id)
             if group is None:
-                raise ProviderNotFoundError(command.group_id)
+                raise McpServerNotFoundError(command.group_id)
             del self._groups[command.group_id]
 
-        # I/O (stop) outside lock — stop_all() acquires Provider locks individually
+        # I/O (stop) outside lock — stop_all() acquires McpServer locks individually
         group.stop_all()
 
         # Collect any lifecycle events from stop_all(), then emit GroupDeleted
@@ -411,17 +411,17 @@ class DeleteGroupHandler(CommandHandler):
 class AddGroupMemberHandler(CommandHandler):
     """Handler for AddGroupMemberCommand.
 
-    Adds a Provider to an existing ProviderGroup.
-    Raises ProviderNotFoundError if provider or group does not exist.
+    Adds a McpServer to an existing McpServerGroup.
+    Raises McpServerNotFoundError if mcp_server or group does not exist.
     Thread-safe via a per-handler threading.Lock for the groups dict lookup.
     """
 
-    def __init__(self, repository: IProviderRepository, groups: dict, event_bus: Any) -> None:
+    def __init__(self, repository: IMcpServerRepository, groups: dict, event_bus: Any) -> None:
         """Initialize the handler.
 
         Args:
-            repository: Provider repository for member lookup.
-            groups: Shared groups dict mapping group_id to ProviderGroup.
+            repository: McpServer repository for member lookup.
+            groups: Shared groups dict mapping group_id to McpServerGroup.
             event_bus: Event bus for publishing domain events.
         """
         self._repository = repository
@@ -430,45 +430,45 @@ class AddGroupMemberHandler(CommandHandler):
         self._lock = threading.Lock()
 
     def handle(self, command: AddGroupMemberCommand) -> dict[str, Any]:
-        """Add a provider to a group.
+        """Add a mcp_server to a group.
 
-        Looks up provider first (outside lock), then acquires lock to
+        Looks up mcp_server first (outside lock), then acquires lock to
         find the group and call group.add_member().
 
         Args:
-            command: AddGroupMemberCommand with group_id and provider_id.
+            command: AddGroupMemberCommand with group_id and mcp_server_id.
 
         Returns:
-            Dict with group_id, provider_id, and added flag.
+            Dict with group_id, mcp_server_id, and added flag.
 
         Raises:
-            ProviderNotFoundError: If provider or group does not exist.
+            McpServerNotFoundError: If mcp_server or group does not exist.
         """
-        # Provider lookup outside lock (read-only, thread-safe via repository)
-        provider = self._repository.get(command.provider_id)
-        if provider is None:
-            raise ProviderNotFoundError(command.provider_id)
+        # McpServer lookup outside lock (read-only, thread-safe via repository)
+        mcp_server = self._repository.get(command.mcp_server_id)
+        if mcp_server is None:
+            raise McpServerNotFoundError(command.mcp_server_id)
 
         with self._lock:
             group = self._groups.get(command.group_id)
             if group is None:
-                raise ProviderNotFoundError(command.group_id)
+                raise McpServerNotFoundError(command.group_id)
             # group.add_member() acquires group's own lock internally
-            group.add_member(provider, weight=command.weight, priority=command.priority)
+            group.add_member(mcp_server, weight=command.weight, priority=command.priority)
 
         # Collect GroupMemberAdded event and forward
         for event in group.collect_events():
             self._event_bus.publish(event)
 
-        logger.info("group_member_added", group_id=command.group_id, provider_id=command.provider_id)
-        return {"group_id": command.group_id, "provider_id": command.provider_id, "added": True}
+        logger.info("group_member_added", group_id=command.group_id, mcp_server_id=command.mcp_server_id)
+        return {"group_id": command.group_id, "mcp_server_id": command.mcp_server_id, "added": True}
 
 
 class RemoveGroupMemberHandler(CommandHandler):
     """Handler for RemoveGroupMemberCommand.
 
-    Removes a Provider from an existing ProviderGroup.
-    Raises ProviderNotFoundError if the group does not exist.
+    Removes a McpServer from an existing McpServerGroup.
+    Raises McpServerNotFoundError if the group does not exist.
     Thread-safe via a per-handler threading.Lock.
     """
 
@@ -476,7 +476,7 @@ class RemoveGroupMemberHandler(CommandHandler):
         """Initialize the handler.
 
         Args:
-            groups: Shared groups dict mapping group_id to ProviderGroup.
+            groups: Shared groups dict mapping group_id to McpServerGroup.
             event_bus: Event bus for publishing domain events.
         """
         self._groups = groups
@@ -484,30 +484,30 @@ class RemoveGroupMemberHandler(CommandHandler):
         self._lock = threading.Lock()
 
     def handle(self, command: RemoveGroupMemberCommand) -> dict[str, Any]:
-        """Remove a provider from a group.
+        """Remove a mcp_server from a group.
 
         Args:
-            command: RemoveGroupMemberCommand with group_id and provider_id.
+            command: RemoveGroupMemberCommand with group_id and mcp_server_id.
 
         Returns:
-            Dict with group_id, provider_id, and removed flag.
+            Dict with group_id, mcp_server_id, and removed flag.
 
         Raises:
-            ProviderNotFoundError: If group does not exist.
+            McpServerNotFoundError: If group does not exist.
         """
         with self._lock:
             group = self._groups.get(command.group_id)
             if group is None:
-                raise ProviderNotFoundError(command.group_id)
+                raise McpServerNotFoundError(command.group_id)
             # group.remove_member() acquires group's own lock internally
-            group.remove_member(command.provider_id)
+            group.remove_member(command.mcp_server_id)
 
         # Collect GroupMemberRemoved event and forward
         for event in group.collect_events():
             self._event_bus.publish(event)
 
-        logger.info("group_member_removed", group_id=command.group_id, provider_id=command.provider_id)
-        return {"group_id": command.group_id, "provider_id": command.provider_id, "removed": True}
+        logger.info("group_member_removed", group_id=command.group_id, mcp_server_id=command.mcp_server_id)
+        return {"group_id": command.group_id, "mcp_server_id": command.mcp_server_id, "removed": True}
 
 
 # =============================================================================
@@ -517,23 +517,23 @@ class RemoveGroupMemberHandler(CommandHandler):
 
 def register_crud_handlers(
     command_bus: Any,
-    repository: IProviderRepository,
+    repository: IMcpServerRepository,
     event_bus: Any,
     groups: dict | None = None,
 ) -> None:
-    """Register all provider and group CRUD command handlers with the command bus.
+    """Register all mcp_server and group CRUD command handlers with the command bus.
 
     Args:
         command_bus: Command bus to register handlers on.
-        repository: Provider repository for handler injection.
+        repository: McpServer repository for handler injection.
         event_bus: Event bus for handler injection.
         groups: Groups dict for group handler injection. If None, group handlers
             are not registered.
     """
-    # Provider handlers
-    command_bus.register(CreateProviderCommand, CreateProviderHandler(repository=repository, event_bus=event_bus))
-    command_bus.register(UpdateProviderCommand, UpdateProviderHandler(repository=repository, event_bus=event_bus))
-    command_bus.register(DeleteProviderCommand, DeleteProviderHandler(repository=repository, event_bus=event_bus))
+    # McpServer handlers
+    command_bus.register(CreateMcpServerCommand, CreateMcpServerHandler(repository=repository, event_bus=event_bus))
+    command_bus.register(UpdateMcpServerCommand, UpdateMcpServerHandler(repository=repository, event_bus=event_bus))
+    command_bus.register(DeleteMcpServerCommand, DeleteMcpServerHandler(repository=repository, event_bus=event_bus))
 
     # Group handlers (require groups dict)
     if groups is not None:
@@ -550,4 +550,8 @@ def register_crud_handlers(
         )
         logger.info("crud_group_handlers_registered")
 
-    logger.info("crud_provider_handlers_registered")
+    logger.info("crud_mcp_server_handlers_registered")
+
+CreateProviderHandler = CreateMcpServerHandler
+UpdateProviderHandler = UpdateMcpServerHandler
+DeleteProviderHandler = DeleteMcpServerHandler

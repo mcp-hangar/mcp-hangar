@@ -44,10 +44,10 @@ enterprise:
 
 ## 2. Policy Configuration
 
-Add `approval_list` to a provider's tool access policy:
+Add `approval_list` to a MCP server's tool access policy:
 
 ```yaml
-providers:
+mcp_servers:
   grafana:
     tool_access_policy:
       deny_list:
@@ -102,7 +102,7 @@ A tool on `deny_list` is always blocked -- even if also on `approval_list`.
 
 6. Observe in the dashboard:
    - The "Approvals" page shows a new pending request
-   - Card shows: provider ID, tool name, countdown timer, arguments
+   - Card shows: MCP server ID, tool name, countdown timer, arguments
    - Badge shows pending count
 
 7. Click **Approve**
@@ -224,7 +224,7 @@ curl -s -o /dev/null -w "%{http_code}" -X POST \
 **Expected:** Slack message appears with:
 
 - Header: "Approval Required"
-- Provider and tool name
+- MCP Server and tool name
 - Sanitized arguments in a code block
 - Expiry countdown
 - "Approve" (green) and "Deny" (red) buttons
@@ -243,7 +243,7 @@ curl -s -o /dev/null -w "%{http_code}" -X POST \
 
 | Role            | Can view approvals | Can resolve |
 |-----------------|-------------------|-------------|
-| provider_admin  | Yes               | Yes         |
+| mcp_server_admin  | Yes               | Yes         |
 | auditor         | Yes               | No          |
 | viewer          | No                | No          |
 
@@ -253,7 +253,7 @@ curl -s -o /dev/null -w "%{http_code}" -X POST \
 2. Navigate to Approvals page -- should see pending requests
 3. Try to approve -- should be blocked (no `approval:resolve` permission)
 
-4. Log in as `provider_admin`
+4. Log in as `mcp_server_admin`
 5. Navigate to Approvals page
 6. Approve/Deny -- should succeed
 
@@ -316,7 +316,7 @@ bash scripts/check_enterprise_boundary.sh
 - [ ] Double resolve returns 409
 - [ ] Slack notifications arrive (if configured)
 - [ ] Slack buttons resolve correctly
-- [ ] provider_admin can resolve, auditor can only view
+- [ ] mcp_server_admin can resolve, auditor can only view
 - [ ] Domain events published for all transitions
 - [ ] Concurrent approvals do not interfere
 - [ ] All automated tests pass (unit + 14 integration)

@@ -3,13 +3,13 @@
 > **Prerequisite:** [03 — Circuit Breaker](03-circuit-breaker.md)
 > **You will need:** Two running MCP servers (primary + backup)
 > **Time:** 15 minutes
-> **Adds:** Automatic failover to backup provider with priority-based routing
+> **Adds:** Automatic failover to backup MCP server with priority-based routing
 
 ## The Problem
 
 Circuit breaker from recipe 03 saved you from wasting 30 seconds per failed call. But the agent still got nothing. Zero results. The circuit opened, requests failed fast, and your agent couldn't complete its task. Protection is great, but errors are still errors.
 
-Your single provider is one crash away from downtime. What if there was a second provider ready to answer while the primary recovers?
+Your single MCP server is one crash away from downtime. What if there was a second MCP server ready to answer while the primary recovers?
 
 ## Prerequisites
 
@@ -35,7 +35,7 @@ health_check:
   enabled: true
   interval_s: 30
 
-providers:
+mcp_servers:
   my-mcp:
     mode: remote
     endpoint: http://localhost:8080/sse
@@ -100,7 +100,7 @@ Save this as `~/.config/mcp-hangar/config.yaml` (or update your existing file).
    INFO     group_state_changed group=my-mcp-group state=healthy members=2/2
    ```
 
-   Both providers in rotation. Primary (priority 1) will handle requests.
+   Both MCP servers in rotation. Primary (priority 1) will handle requests.
 
 3. Call a tool through the group - succeeds via primary
 
@@ -110,7 +110,7 @@ Save this as `~/.config/mcp-hangar/config.yaml` (or update your existing file).
      sleep 0.5
      echo '{"jsonrpc":"2.0","method":"notifications/initialized","params":{}}'
      sleep 0.5
-     echo '{"jsonrpc":"2.0","method":"tools/call","params":{"name":"hangar_call","arguments":{"provider":"my-mcp-group","tool":"fetch","arguments":{"url":"https://example.com"}}},"id":2}'
+     echo '{"jsonrpc":"2.0","method":"tools/call","params":{"name":"hangar_call","arguments":{"mcp_server":"my-mcp-group","tool":"fetch","arguments":{"url":"https://example.com"}}},"id":2}'
      sleep 3
    ) | mcp-hangar --config ~/.config/mcp-hangar/config.yaml serve 2>&1 | grep -E '"id":2|selected_member'
    ```
@@ -138,9 +138,9 @@ Save this as `~/.config/mcp-hangar/config.yaml` (or update your existing file).
    ```
 
    ```
-   WARNING  health_check_failed provider=my-mcp consecutive_failures=1
-   WARNING  health_check_failed provider=my-mcp consecutive_failures=2
-   WARNING  health_check_failed provider=my-mcp consecutive_failures=3
+   WARNING  health_check_failed mcp_server=my-mcp consecutive_failures=1
+   WARNING  health_check_failed mcp_server=my-mcp consecutive_failures=2
+   WARNING  health_check_failed mcp_server=my-mcp consecutive_failures=3
    INFO     member_removed_from_rotation member=my-mcp reason=health_check_failures
    ```
 
@@ -154,7 +154,7 @@ Save this as `~/.config/mcp-hangar/config.yaml` (or update your existing file).
      sleep 0.5
      echo '{"jsonrpc":"2.0","method":"notifications/initialized","params":{}}'
      sleep 0.5
-     echo '{"jsonrpc":"2.0","method":"tools/call","params":{"name":"hangar_call","arguments":{"provider":"my-mcp-group","tool":"fetch","arguments":{"url":"https://example.com"}}},"id":2}'
+     echo '{"jsonrpc":"2.0","method":"tools/call","params":{"name":"hangar_call","arguments":{"mcp_server":"my-mcp-group","tool":"fetch","arguments":{"url":"https://example.com"}}},"id":2}'
      sleep 3
    ) | mcp-hangar --config ~/.config/mcp-hangar/config.yaml serve 2>&1 | grep -E '"id":2|selected_member'
    ```
@@ -163,7 +163,7 @@ Save this as `~/.config/mcp-hangar/config.yaml` (or update your existing file).
    {"jsonrpc":"2.0","id":2,"result":{"content":[{"type":"text","text":"..."}]}}
    ```
 
-   Call succeeded. Same request, same result, different provider. Zero downtime.
+   Call succeeded. Same request, same result, different MCP server. Zero downtime.
 
 7. Restart primary and verify failback
 
@@ -180,7 +180,7 @@ Save this as `~/.config/mcp-hangar/config.yaml` (or update your existing file).
    ```
 
    ```
-   INFO     health_check_passed provider=my-mcp
+   INFO     health_check_passed mcp_server=my-mcp
    INFO     member_added_to_rotation member=my-mcp reason=health_recovered
    INFO     group_state_changed group=my-mcp-group state=healthy members=2/2
    ```
@@ -189,7 +189,7 @@ Save this as `~/.config/mcp-hangar/config.yaml` (or update your existing file).
 
 ## What Just Happened
 
-You introduced **provider groups with priority-based routing** for automatic failover. The group contains two providers: `my-mcp` (priority 1, primary) and `my-mcp-backup` (priority 2, backup).
+You introduced **MCP server groups with priority-based routing** for automatic failover. The group contains two MCP servers: `my-mcp` (priority 1, primary) and `my-mcp-backup` (priority 2, backup).
 
 **Priority strategy mechanics:**
 
@@ -205,11 +205,11 @@ The `priority` load balancing strategy always routes traffic to the lowest-numbe
 
 **Layer cake architecture:**
 
-- **Recipe 02 (Health Checks)**: Per-provider health monitoring detects failures
+- **Recipe 02 (Health Checks)**: Per-MCP server health monitoring detects failures
 - **Recipe 03 (Circuit Breaker)**: Per-group fast-fail protection
-- **Recipe 04 (Failover)**: Inter-provider routing changes based on health
+- **Recipe 04 (Failover)**: Inter-MCP server routing changes based on health
 
-Both providers have their own health checks and circuit breakers. The group orchestrates between them. When the primary fails, its circuit may open AND health checks fail AND the group removes it from rotation. Multiple layers of protection working together.
+Both MCP servers have their own health checks and circuit breakers. The group orchestrates between them. When the primary fails, its circuit may open AND health checks fail AND the group removes it from rotation. Multiple layers of protection working together.
 
 **min_healthy: 1** means the group requires at least 1 healthy member to stay operational. If both fail, the group itself becomes unavailable.
 
@@ -217,13 +217,13 @@ Both providers have their own health checks and circuit breakers. The group orch
 
 | Key | Type | Default | Description |
 |-----|------|---------|-------------|
-| `providers.<name>.strategy` | string | — | Routing strategy. Use `priority` for failover |
-| `providers.<name>.members[].id` | string | — | Provider ID (must exist in `providers:` section) |
-| `providers.<name>.members[].priority` | int | `1` | Routing priority (lower number = higher priority) |
-| `providers.<name>.members[].weight` | int | `1` | Weight for weighted strategies (not used with priority) |
+| `MCP servers.<name>.strategy` | string | — | Routing strategy. Use `priority` for failover |
+| `MCP servers.<name>.members[].id` | string | — | MCP Server ID (must exist in `MCP servers:` section) |
+| `MCP servers.<name>.members[].priority` | int | `1` | Routing priority (lower number = higher priority) |
+| `MCP servers.<name>.members[].weight` | int | `1` | Weight for weighted strategies (not used with priority) |
 
 ## What's Next
 
-You have failover — one primary, one backup. But what if you have three, five, ten instances of the same provider? You don't want priority failover — you want to spread the load evenly across all healthy instances.
+You have failover — one primary, one backup. But what if you have three, five, ten instances of the same MCP server? You don't want priority failover — you want to spread the load evenly across all healthy instances.
 
 → [05 — Load Balancing](05-load-balancing.md)

@@ -83,15 +83,15 @@ class TestEndToEndTracePropagation:
         call_spec = CallSpec(
             index=0,
             call_id="test-call-e2e",
-            provider="math",
+            mcp_server="math",
             tool="add",
             arguments={"a": 1, "b": 2},
             metadata=carrier,  # contains traceparent
         )
 
         mock_ctx = MagicMock()
-        mock_ctx.get_provider.return_value = None
-        mock_ctx.provider_exists.return_value = False
+        mock_ctx.get_mcp_server.return_value = None
+        mock_ctx.mcp_server_exists.return_value = False
 
         # Clear the agent span from exporter so we only see BatchExecutor spans
         exporter.clear()
@@ -144,15 +144,15 @@ class TestEndToEndTracePropagation:
         call_spec = CallSpec(
             index=0,
             call_id="test-call-root",
-            provider="math",
+            mcp_server="math",
             tool="multiply",
             arguments={"a": 2, "b": 3},
             metadata={},
         )
 
         mock_ctx = MagicMock()
-        mock_ctx.get_provider.return_value = None
-        mock_ctx.provider_exists.return_value = False
+        mock_ctx.get_mcp_server.return_value = None
+        mock_ctx.mcp_server_exists.return_value = False
 
         test_tracer = provider.get_tracer("mcp_hangar.server.tools.batch.executor")
         with (

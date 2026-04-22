@@ -1,4 +1,4 @@
-"""Load balancing strategies for provider groups.
+"""Load balancing strategies for mcp_server groups.
 
 This module implements various load balancing strategies for distributing
 requests across group members.
@@ -14,7 +14,7 @@ from typing import TYPE_CHECKING
 from ..value_objects import LoadBalancerStrategy
 
 if TYPE_CHECKING:
-    from .provider_group import GroupMember
+    from .mcp_server_group import GroupMember
 
 
 class BaseStrategy(ABC):

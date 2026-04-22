@@ -126,12 +126,12 @@ class Permission:
     """A specific permission that can be granted.
 
     Permissions follow the format: resource_type:action:resource_id
-    Examples: "provider:read:*", "tool:invoke:math:add", "config:update:*"
+    Examples: "mcp_server:read:*", "tool:invoke:math:add", "config:update:*"
 
     Wildcard (*) matches any value for that component.
 
     Attributes:
-        resource_type: Type of resource (provider, tool, config, audit, metrics).
+        resource_type: Type of resource (mcp_server, tool, config, audit, metrics).
         action: Operation to perform (create, read, update, delete, invoke, list, start, stop).
         resource_id: Specific resource or wildcard (*) for any.
     """
@@ -184,8 +184,8 @@ class Permission:
             ValueError: If the format is invalid.
 
         Examples:
-            >>> Permission.parse("provider:read")
-            Permission(resource_type='provider', action='read', resource_id='*')
+            >>> Permission.parse("mcp_server:read")
+            Permission(resource_type='mcp_server', action='read', resource_id='*')
             >>> Permission.parse("tool:invoke:math:add")
             Permission(resource_type='tool', action='invoke', resource_id='math:add')
         """
@@ -204,7 +204,7 @@ class Role:
     """Named collection of permissions.
 
     Roles group related permissions for easier assignment and management.
-    Built-in roles include: admin, provider-admin, developer, viewer, auditor.
+    Built-in roles include: admin, mcp_server-admin, developer, viewer, auditor.
 
     Attributes:
         name: Unique role identifier.
@@ -241,9 +241,9 @@ class Role:
         return self.name
 
 
-PERMISSION_PROVIDERS_READ = Permission(resource_type="providers", action="read")
-PERMISSION_PROVIDERS_WRITE = Permission(resource_type="providers", action="write")
-PERMISSION_PROVIDERS_LIFECYCLE = Permission(resource_type="providers", action="lifecycle")
+PERMISSION_PROVIDERS_READ = Permission(resource_type="mcp_servers", action="read")
+PERMISSION_PROVIDERS_WRITE = Permission(resource_type="mcp_servers", action="write")
+PERMISSION_PROVIDERS_LIFECYCLE = Permission(resource_type="mcp_servers", action="lifecycle")
 PERMISSION_POLICY_WRITE = Permission(resource_type="policy", action="write")
 PERMISSION_CONFIG_RELOAD = Permission(resource_type="config", action="reload")
 

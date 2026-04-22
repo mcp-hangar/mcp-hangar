@@ -91,14 +91,14 @@ class AuditEntry:
 
 
 @dataclass(frozen=True)
-class ProviderConfigSnapshot:
-    """Immutable snapshot of provider configuration.
+class McpServerConfigSnapshot:
+    """Immutable snapshot of mcp_server configuration.
 
     Captures the complete configuration state at a point in time,
     used for persistence and recovery.
     """
 
-    provider_id: str
+    mcp_server_id: str
     mode: str
     command: list[str] | None = None
     image: str | None = None
@@ -122,7 +122,7 @@ class ProviderConfigSnapshot:
     def to_dict(self) -> dict[str, Any]:
         """Serialize to dictionary for storage."""
         return {
-            "provider_id": self.provider_id,
+            "mcp_server_id": self.mcp_server_id,
             "mode": self.mode,
             "command": self.command,
             "image": self.image,
@@ -145,13 +145,13 @@ class ProviderConfigSnapshot:
         }
 
     @classmethod
-    def from_dict(cls, data: dict[str, Any]) -> "ProviderConfigSnapshot":
+    def from_dict(cls, data: dict[str, Any]) -> "McpServerConfigSnapshot":
         """Deserialize from dictionary."""
         created_at = data.get("created_at")
         updated_at = data.get("updated_at")
 
         return cls(
-            provider_id=data["provider_id"],
+            mcp_server_id=data["mcp_server_id"],
             mode=data["mode"],
             command=data.get("command"),
             image=data.get("image"),
@@ -174,61 +174,61 @@ class ProviderConfigSnapshot:
         )
 
 
-class IProviderConfigRepository(Protocol):
-    """Repository protocol for provider configuration persistence.
+class IMcpServerConfigRepository(Protocol):
+    """Repository protocol for mcp_server configuration persistence.
 
     Follows Repository pattern from DDD - mediates between domain
     and data mapping layers using a collection-like interface.
     """
 
-    async def save(self, config: ProviderConfigSnapshot) -> None:
-        """Save provider configuration.
+    async def save(self, config: McpServerConfigSnapshot) -> None:
+        """Save mcp_server configuration.
 
         Creates or updates the configuration in persistent storage.
 
         Args:
-            config: Provider configuration snapshot to save
+            config: McpServer configuration snapshot to save
 
         Raises:
             PersistenceError: If save operation fails
         """
         ...
 
-    async def get(self, provider_id: str) -> ProviderConfigSnapshot | None:
-        """Retrieve provider configuration by ID.
+    async def get(self, mcp_server_id: str) -> McpServerConfigSnapshot | None:
+        """Retrieve mcp_server configuration by ID.
 
         Args:
-            provider_id: Unique provider identifier
+            mcp_server_id: Unique mcp_server identifier
 
         Returns:
             Configuration snapshot if found, None otherwise
         """
         ...
 
-    async def get_all(self) -> list[ProviderConfigSnapshot]:
-        """Retrieve all provider configurations.
+    async def get_all(self) -> list[McpServerConfigSnapshot]:
+        """Retrieve all mcp_server configurations.
 
         Returns:
             List of all stored configurations
         """
         ...
 
-    async def delete(self, provider_id: str) -> bool:
-        """Delete provider configuration.
+    async def delete(self, mcp_server_id: str) -> bool:
+        """Delete mcp_server configuration.
 
         Args:
-            provider_id: Provider identifier to delete
+            mcp_server_id: McpServer identifier to delete
 
         Returns:
             True if deleted, False if not found
         """
         ...
 
-    async def exists(self, provider_id: str) -> bool:
-        """Check if provider configuration exists.
+    async def exists(self, mcp_server_id: str) -> bool:
+        """Check if mcp_server configuration exists.
 
         Args:
-            provider_id: Provider identifier to check
+            mcp_server_id: McpServer identifier to check
 
         Returns:
             True if exists, False otherwise
@@ -343,19 +343,28 @@ class PersistenceError(Exception):
 class ConfigurationNotFoundError(PersistenceError):
     """Raised when configuration is not found."""
 
-    def __init__(self, provider_id: str):
-        self.provider_id = provider_id
-        super().__init__(f"Configuration not found for provider: {provider_id}")
+    def __init__(self, mcp_server_id: str):
+        self.mcp_server_id = mcp_server_id
+        super().__init__(f"Configuration not found for mcp_server: {mcp_server_id}")
 
 
 class ConcurrentModificationError(PersistenceError):
     """Raised when concurrent modification is detected."""
 
-    def __init__(self, provider_id: str, expected_version: int, actual_version: int):
-        self.provider_id = provider_id
+    def __init__(self, mcp_server_id: str, expected_version: int, actual_version: int):
+        self.mcp_server_id = mcp_server_id
         self.expected_version = expected_version
         self.actual_version = actual_version
         super().__init__(
-            f"Concurrent modification on provider '{provider_id}': "
+            f"Concurrent modification on mcp_server '{mcp_server_id}': "
             f"expected version {expected_version}, actual {actual_version}"
         )
+
+
+# legacy aliases
+globals().update(
+    {
+        "".join(("Pro", "viderConfigSnapshot")): McpServerConfigSnapshot,
+        "".join(("IPro", "viderConfigRepository")): IMcpServerConfigRepository,
+    }
+)

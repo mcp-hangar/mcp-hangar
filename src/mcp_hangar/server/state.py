@@ -14,7 +14,7 @@ from .bootstrap.composition import (
     get_discovery_orchestrator,
     get_group_rebalance_saga,
     get_runtime,
-    get_runtime_providers,
+    get_runtime_mcp_servers,
     set_discovery_orchestrator,
     set_group_rebalance_saga,
 )
@@ -53,7 +53,7 @@ __all__ = [
     "get_discovery_orchestrator",
     "get_group_rebalance_saga",
     "get_runtime",
-    "get_runtime_providers",
+    "get_runtime_mcp_servers",
     "set_discovery_orchestrator",
     "set_group_rebalance_saga",
 ]

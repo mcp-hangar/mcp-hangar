@@ -11,7 +11,7 @@ def parse_subscription_filters(msg: dict[str, object] | None) -> dict[str, list[
     Recognized keys:
     - "type": optional "subscribe" control message for initial negotiation
     - "event_types": list[str] -- only deliver events whose event_type is in this list
-    - "provider_ids": list[str] -- only deliver events whose provider_id is in this list
+    - "mcp_server_ids": list[str] -- only deliver events whose mcp_server_id is in this list
 
     Unknown keys are ignored. An empty dict or None means no filtering (deliver all).
 
@@ -29,8 +29,8 @@ def parse_subscription_filters(msg: dict[str, object] | None) -> dict[str, list[
     result: dict[str, list[str]] = {}
     if "event_types" in msg and isinstance(msg["event_types"], list):
         result["event_types"] = [str(v) for v in msg["event_types"]]
-    if "provider_ids" in msg and isinstance(msg["provider_ids"], list):
-        result["provider_ids"] = [str(v) for v in msg["provider_ids"]]
+    if "mcp_server_ids" in msg and isinstance(msg["mcp_server_ids"], list):
+        result["mcp_server_ids"] = [str(v) for v in msg["mcp_server_ids"]]
     return result
 
 
@@ -39,7 +39,7 @@ def matches_filters(event: DomainEvent, filters: dict[str, list[str]]) -> bool:
 
     An event passes if it satisfies ALL active filters (AND semantics):
     - event_types filter: event.to_dict()["event_type"] must be in the list
-    - provider_ids filter: event.to_dict().get("provider_id") must be in the list
+    - mcp_server_ids filter: event.to_dict().get("mcp_server_id") must be in the list
 
     An empty filters dict means no filtering -- all events pass.
 
@@ -55,6 +55,6 @@ def matches_filters(event: DomainEvent, filters: dict[str, list[str]]) -> bool:
     d = event.to_dict()
     if "event_types" in filters and d.get("event_type") not in filters["event_types"]:
         return False
-    if "provider_ids" in filters and d.get("provider_id") not in filters["provider_ids"]:
+    if "mcp_server_ids" in filters and d.get("mcp_server_id") not in filters["mcp_server_ids"]:
         return False
     return True

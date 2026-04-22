@@ -1,20 +1,20 @@
 """Kubernetes Discovery Source.
 
-Discovers MCP providers from Kubernetes pods/services using annotations.
+Discovers MCP mcp_servers from Kubernetes pods/services using annotations.
 Supports both in-cluster and out-of-cluster configuration.
 
 Annotation Prefix: mcp-hangar.io/*
 
 Example Pod Annotations:
     mcp-hangar.io/enabled: "true"
-    mcp-hangar.io/name: "my-provider"
+    mcp-hangar.io/name: "my-mcp_server"
     mcp-hangar.io/mode: "http"
     mcp-hangar.io/port: "8080"
     mcp-hangar.io/group: "data-team"
     mcp-hangar.io/health-path: "/health"
 """
 
-from mcp_hangar.domain.discovery.discovered_provider import DiscoveredProvider
+from mcp_hangar.domain.discovery.discovered_mcp_server import DiscoveredMcpServer
 from mcp_hangar.domain.discovery.discovery_source import DiscoveryMode, DiscoverySource
 
 from ...logging_config import get_logger
@@ -36,9 +36,9 @@ except ImportError:
 
 
 class KubernetesDiscoverySource(DiscoverySource):
-    """Discover MCP providers from Kubernetes pods/services.
+    """Discover MCP mcp_servers from Kubernetes pods/services.
 
-    Uses pod annotations to discover and configure MCP providers.
+    Uses pod annotations to discover and configure MCP mcp_servers.
     Supports namespace filtering and label selectors.
 
     Attributes:
@@ -64,7 +64,7 @@ class KubernetesDiscoverySource(DiscoverySource):
             label_selector: Kubernetes label selector
             in_cluster: Whether running inside cluster
             kubeconfig_path: Path to kubeconfig (for out-of-cluster)
-            default_ttl: Default TTL for discovered providers
+            default_ttl: Default TTL for discovered mcp_servers
         """
         super().__init__(mode)
 
@@ -107,14 +107,14 @@ class KubernetesDiscoverySource(DiscoverySource):
     def source_type(self) -> str:
         return "kubernetes"
 
-    async def discover(self) -> list[DiscoveredProvider]:
-        """Discover providers from pod annotations.
+    async def discover(self) -> list[DiscoveredMcpServer]:
+        """Discover mcp_servers from pod annotations.
 
         Returns:
-            List of discovered providers
+            List of discovered mcp_servers
         """
         self._ensure_initialized()
-        providers = []
+        mcp_servers = []
 
         namespaces = self.namespaces or await self._get_all_namespaces()
 
@@ -123,28 +123,28 @@ class KubernetesDiscoverySource(DiscoverySource):
                 pods = self._v1.list_namespaced_pod(namespace=namespace, label_selector=self.label_selector)
 
                 for pod in pods.items:
-                    provider = self._parse_pod(pod, namespace)
-                    if provider:
-                        providers.append(provider)
-                        await self.on_provider_discovered(provider)
+                    mcp_server = self._parse_pod(pod, namespace)
+                    if mcp_server:
+                        mcp_servers.append(mcp_server)
+                        await self.on_mcp_server_discovered(mcp_server)
 
             except ApiException as e:
                 logger.warning(f"Failed to list pods in {namespace}: {e.reason}")
             except Exception as e:  # noqa: BLE001 -- infra-boundary: skip namespace on discovery error
                 logger.error(f"Error discovering in namespace {namespace}: {e}")
 
-        logger.debug(f"Kubernetes discovery found {len(providers)} providers")
-        return providers
+        logger.debug(f"Kubernetes discovery found {len(mcp_servers)} mcp_servers")
+        return mcp_servers
 
-    def _parse_pod(self, pod, namespace: str) -> DiscoveredProvider | None:
-        """Parse pod annotations into DiscoveredProvider.
+    def _parse_pod(self, pod, namespace: str) -> DiscoveredMcpServer | None:
+        """Parse pod annotations into DiscoveredMcpServer.
 
         Args:
             pod: Kubernetes pod object
             namespace: Pod namespace
 
         Returns:
-            DiscoveredProvider or None if not MCP-enabled
+            DiscoveredMcpServer or None if not MCP-enabled
         """
         annotations = pod.metadata.annotations or {}
 
@@ -153,7 +153,7 @@ class KubernetesDiscoverySource(DiscoverySource):
         if enabled.lower() != "true":
             return None
 
-        # Extract provider config
+        # Extract mcp_server config
         name = annotations.get(f"{self.ANNOTATION_PREFIX}name", pod.metadata.name)
         mode = annotations.get(f"{self.ANNOTATION_PREFIX}mode", "http")
         port = annotations.get(f"{self.ANNOTATION_PREFIX}port", "8080")
@@ -197,7 +197,7 @@ class KubernetesDiscoverySource(DiscoverySource):
             "phase": phase,
         }
 
-        return DiscoveredProvider.create(
+        return DiscoveredMcpServer.create(
             name=name,
             source_type=self.source_type,
             mode=mode,

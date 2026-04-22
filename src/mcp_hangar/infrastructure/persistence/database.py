@@ -80,7 +80,7 @@ class Database:
 
         Example:
             async with db.connection() as conn:
-                await conn.execute("SELECT * FROM providers")
+                await conn.execute("SELECT * FROM mcp_servers")
         """
         conn = await aiosqlite.connect(
             self._config.path,
@@ -178,8 +178,8 @@ class Database:
                 await cursor.fetchone()
 
                 # Get database stats
-                cursor = await conn.execute("SELECT COUNT(*) FROM provider_configs")
-                provider_count = (await cursor.fetchone())[0]
+                cursor = await conn.execute("SELECT COUNT(*) FROM mcp_server_configs")
+                mcp_server_count = (await cursor.fetchone())[0]
 
                 cursor = await conn.execute("SELECT COUNT(*) FROM audit_log")
                 audit_count = (await cursor.fetchone())[0]
@@ -189,7 +189,7 @@ class Database:
                     "database_path": self._config.path,
                     "initialized": self._initialized,
                     "migrations_applied": self._migrations_applied,
-                    "provider_count": provider_count,
+                    "mcp_server_count": mcp_server_count,
                     "audit_entries": audit_count,
                 }
         except Exception as e:  # noqa: BLE001 -- infra-boundary: health check returns unhealthy on any error
@@ -215,9 +215,9 @@ MIGRATIONS: list[tuple[str, str]] = [
     (
         "001_initial_schema",
         """
-        -- Provider configurations table
-        CREATE TABLE IF NOT EXISTS provider_configs (
-            provider_id TEXT PRIMARY KEY,
+        -- McpServer configurations table
+        CREATE TABLE IF NOT EXISTS mcp_server_configs (
+            mcp_server_id TEXT PRIMARY KEY,
             mode TEXT NOT NULL,
             config_json TEXT NOT NULL,
             enabled INTEGER NOT NULL DEFAULT 1,
@@ -226,9 +226,9 @@ MIGRATIONS: list[tuple[str, str]] = [
             updated_at TEXT NOT NULL DEFAULT (datetime('now'))
         );
 
-        -- Index for listing enabled providers
-        CREATE INDEX IF NOT EXISTS idx_provider_configs_enabled
-            ON provider_configs(enabled);
+        -- Index for listing enabled mcp_servers
+        CREATE INDEX IF NOT EXISTS idx_mcp_server_configs_enabled
+            ON mcp_server_configs(enabled);
 
         -- Audit log table
         CREATE TABLE IF NOT EXISTS audit_log (
@@ -257,16 +257,16 @@ MIGRATIONS: list[tuple[str, str]] = [
         """,
     ),
     (
-        "002_add_provider_metadata",
+        "002_add_mcp_server_metadata",
         """
-        -- Add metadata column to provider_configs
-        ALTER TABLE provider_configs ADD COLUMN metadata_json TEXT;
+        -- Add metadata column to mcp_server_configs
+        ALTER TABLE mcp_server_configs ADD COLUMN metadata_json TEXT;
 
         -- Add last_started_at for recovery prioritization
-        ALTER TABLE provider_configs ADD COLUMN last_started_at TEXT;
+        ALTER TABLE mcp_server_configs ADD COLUMN last_started_at TEXT;
 
         -- Add failure_count for recovery decisions
-        ALTER TABLE provider_configs ADD COLUMN consecutive_failures INTEGER DEFAULT 0;
+        ALTER TABLE mcp_server_configs ADD COLUMN consecutive_failures INTEGER DEFAULT 0;
         """,
     ),
     (

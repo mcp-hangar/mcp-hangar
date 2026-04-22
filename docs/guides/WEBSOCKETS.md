@@ -1,6 +1,6 @@
 # WebSockets
 
-MCP Hangar provides WebSocket endpoints for real-time streaming of domain events, provider state changes, and provider logs.
+MCP Hangar provides WebSocket endpoints for real-time streaming of domain events, MCP server state changes, and MCP server logs.
 
 ## Endpoints
 
@@ -9,8 +9,8 @@ All WebSocket endpoints are mounted under `/api/ws/`:
 | Endpoint | Description |
 |----------|-------------|
 | `/api/ws/events` | All domain events |
-| `/api/ws/state` | Provider state changes only |
-| `/api/ws/providers/{id}/logs` | Live stderr log stream for a provider |
+| `/api/ws/state` | MCP server state changes only |
+| `/api/ws/MCP servers/{id}/logs` | Live stderr log stream for a MCP server |
 
 ## Connecting
 
@@ -23,8 +23,8 @@ websocat ws://localhost:8000/api/ws/events
 # Stream state changes only
 websocat ws://localhost:8000/api/ws/state
 
-# Stream logs for a specific provider
-websocat ws://localhost:8000/api/ws/providers/math/logs
+# Stream logs for a specific mcp_server
+websocat ws://localhost:8000/api/ws/mcp_servers/math/logs
 ```
 
 ## Event Stream (`/api/ws/events`)
@@ -33,8 +33,8 @@ Streams all domain events as they occur. Each message is a JSON object:
 
 ```json
 {
-  "event_type": "ProviderStarted",
-  "provider_id": "math",
+  "event_type": "McpServerStarted",
+  "mcp_server_id": "math",
   "mode": "subprocess",
   "tools_count": 5,
   "startup_duration_ms": 120,
@@ -46,10 +46,10 @@ Streams all domain events as they occur. Each message is a JSON object:
 
 All events from `domain/events.py` are published:
 
-- `ProviderStateChanged` -- State transition with old/new state.
-- `ProviderStarted` -- Provider initialization complete.
-- `ProviderStopped` -- Provider shut down.
-- `ProviderDegraded` -- Provider marked as degraded.
+- `McpServerStateChanged` -- State transition with old/new state.
+- `McpServerStarted` -- MCP Server initialization complete.
+- `McpServerStopped` -- MCP Server shut down.
+- `McpServerDegraded` -- MCP Server marked as degraded.
 - `HealthCheckPassed` / `HealthCheckFailed` -- Health check results.
 - `ToolInvocationCompleted` / `ToolInvocationFailed` -- Tool call results.
 - `ProviderDiscovered` / `ProviderRegistered` / `ProviderDeregistered` -- Discovery events.
@@ -60,35 +60,35 @@ All events from `domain/events.py` are published:
 The events endpoint supports optional query parameters for filtering:
 
 ```
-ws://localhost:8000/api/ws/events?provider_id=math
-ws://localhost:8000/api/ws/events?event_type=ProviderStateChanged
+ws://localhost:8000/api/ws/events?mcp_server_id=math
+ws://localhost:8000/api/ws/events?event_type=McpServerStateChanged
 ```
 
 ## State Stream (`/api/ws/state`)
 
-A filtered view of the event stream that only includes `ProviderStateChanged` events:
+A filtered view of the event stream that only includes `McpServerStateChanged` events:
 
 ```json
 {
-  "event_type": "ProviderStateChanged",
-  "provider_id": "math",
+  "event_type": "McpServerStateChanged",
+  "mcp_server_id": "math",
   "old_state": "COLD",
   "new_state": "INITIALIZING",
   "timestamp": "2026-03-23T10:15:30.123456"
 }
 ```
 
-This endpoint can be used by clients to update provider state in real-time without polling.
+This endpoint can be used by clients to update MCP server state in real-time without polling.
 
-## Log Stream (`/api/ws/providers/{id}/logs`)
+## Log Stream (`/api/ws/MCP servers/{id}/logs`)
 
-Streams stderr log lines for a specific provider. See the [Log Streaming guide](LOG_STREAMING.md) for details.
+Streams stderr log lines for a specific MCP server. See the [Log Streaming guide](LOG_STREAMING.md) for details.
 
 ```json
 {
   "timestamp": "2026-03-23T10:15:30.123456",
   "line": "INFO: Processing request...",
-  "provider_id": "math",
+  "mcp_server_id": "math",
   "stream": "stderr"
 }
 ```
@@ -141,13 +141,13 @@ High-level hook for the events endpoint:
 const { events } = useEventStream({ providerFilter: 'math' });
 ```
 
-### `useProviderState`
+### `useMcpServerState`
 
-Connects to the state endpoint and maintains a local map of provider states:
+Connects to the state endpoint and maintains a local map of MCP server states:
 
 ```typescript
-const { providerStates } = useProviderState();
-// providerStates: Record<string, ProviderState>
+const { providerStates } = useMcpServerState();
+// providerStates: Record<string, McpServerState>
 ```
 
 ### `useProviderLogs`

@@ -18,7 +18,7 @@ That's it. Restart Claude Desktop and you have:
 
 - Python 3.11 or later
 - Claude Desktop installed ([download](https://claude.ai/download))
-- uvx or npx (for MCP provider packages)
+- uvx or npx (for MCP server packages)
 
 ## Interactive Setup
 
@@ -33,25 +33,25 @@ The wizard will:
 
 1. **Detect runtimes** - finds uvx, npx, docker in your PATH
 2. **Detect Claude Desktop** - finds your Claude Desktop config automatically
-3. **Select providers** - choose which MCP providers to enable
-4. **Test providers** - verify each provider starts correctly
+3. **Select MCP servers** - choose which MCP servers to enable
+4. **Test MCP servers** - verify each MCP server starts correctly
 5. **Update Claude Desktop** - automatically configure Claude to use MCP Hangar
 
 **Restart Claude Desktop** after the wizard completes.
 
 ## Verify It Works
 
-Check that your providers are configured:
+Check that your MCP servers are configured:
 
 ```bash
 mcp-hangar status
 ```
 
-You should see your configured providers listed (they'll show as COLD until first use).
+You should see your configured MCP servers listed (they'll show as COLD until first use).
 
-## Adding More Providers
+## Adding More MCP servers
 
-Add providers anytime with:
+Add MCP servers anytime with:
 
 ```bash
 mcp-hangar add github     # GitHub integration (needs token)
@@ -63,7 +63,7 @@ mcp-hangar add postgres   # PostgreSQL access
 
 Use bundles to quickly configure common setups:
 
-| Bundle | Providers | Use Case |
+| Bundle | MCP servers | Use Case |
 |--------|-----------|----------|
 | `starter` | filesystem, fetch, memory | General everyday use |
 | `developer` | starter + github, git | Software development |
@@ -83,7 +83,7 @@ If you prefer manual setup or need advanced configuration:
 Create `~/.config/mcp-hangar/config.yaml`:
 
 ```yaml
-providers:
+mcp_servers:
   filesystem:
     mode: subprocess
     command: [npx, -y, "@anthropic/mcp-server-filesystem"]
@@ -123,12 +123,12 @@ If the wizard can't find Claude Desktop:
 mcp-hangar init --claude-config /path/to/claude_desktop_config.json
 ```
 
-### Provider won't start
+### MCP Server won't start
 
-Check the provider status for errors:
+Check the MCP server status for errors:
 
 ```bash
-mcp-hangar status provider-name
+mcp-hangar status mcp-server-name
 ```
 
 ### Permission denied
@@ -141,6 +141,6 @@ Make sure you have write access to the config directories:
 ## Next Steps
 
 - [CLI Reference](../reference/cli.md) - All CLI commands and options
-- [Container Providers](../guides/CONTAINERS.md) - Using Docker/Podman providers
+- [Container MCP servers](../guides/CONTAINERS.md) - Using Docker/Podman MCP servers
 - [Observability](../guides/OBSERVABILITY.md) - Metrics and monitoring
 - [Architecture](../architecture/OVERVIEW.md) - Understanding the design

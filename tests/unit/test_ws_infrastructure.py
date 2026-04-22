@@ -30,13 +30,13 @@ class _FakeEvent(DomainEvent):
     """Minimal DomainEvent for filter/queue tests."""
 
     event_type: str = "FakeEvent"
-    provider_id: str | None = None
+    mcp_server_id: str | None = None
     timestamp: datetime = field(default_factory=lambda: datetime.now(UTC))
 
-    def to_dict(self) -> dict:
+    def to_dict(self) -> dict[str, Any]:
         d: dict[str, Any] = {"event_type": self.event_type}
-        if self.provider_id is not None:
-            d["provider_id"] = self.provider_id
+        if self.mcp_server_id is not None:
+            d["mcp_server_id"] = self.mcp_server_id
         return d
 
 
@@ -118,7 +118,7 @@ def test_event_queue_put_threadsafe_delivers_via_loop():
     async def _check():
         esq = EventStreamQueue()
         loop = asyncio.get_event_loop()
-        event = _FakeEvent(event_type="ProviderStarted")
+        event = _FakeEvent(event_type="McpServerStarted")
         esq.put_threadsafe(event, loop)
         # Yield to let call_soon_threadsafe callback execute.
         await asyncio.sleep(0)
@@ -194,8 +194,8 @@ def test_event_queue_three_events_all_retrievable():
 
 def test_parse_filters_with_both_fields():
     """Full filter dict is parsed correctly."""
-    result = parse_subscription_filters({"event_types": ["ProviderStarted"], "provider_ids": ["math"]})
-    assert result == {"event_types": ["ProviderStarted"], "provider_ids": ["math"]}
+    result = parse_subscription_filters({"event_types": ["McpServerStarted"], "mcp_server_ids": ["math"]})
+    assert result == {"event_types": ["McpServerStarted"], "mcp_server_ids": ["math"]}
 
 
 def test_parse_filters_empty_dict_returns_empty():
@@ -204,10 +204,10 @@ def test_parse_filters_empty_dict_returns_empty():
 
 
 def test_parse_filters_only_event_types():
-    """Only event_types key is parsed; provider_ids absent from result."""
+    """Only event_types key is parsed; mcp_server_ids absent from result."""
     result = parse_subscription_filters({"event_types": ["X"]})
     assert result == {"event_types": ["X"]}
-    assert "provider_ids" not in result
+    assert "mcp_server_ids" not in result
 
 
 def test_parse_filters_none_input_returns_empty():
@@ -222,44 +222,44 @@ def test_parse_filters_none_input_returns_empty():
 
 def test_matches_filters_no_filters_returns_true():
     """Empty filters -- all events pass."""
-    event = _FakeEvent(event_type="ProviderStarted")
+    event = _FakeEvent(event_type="McpServerStarted")
     assert matches_filters(event, {}) is True
 
 
 def test_matches_filters_event_type_match():
     """Event type in filter list -- passes."""
-    event = _FakeEvent(event_type="ProviderStarted")
-    assert matches_filters(event, {"event_types": ["ProviderStarted"]}) is True
+    event = _FakeEvent(event_type="McpServerStarted")
+    assert matches_filters(event, {"event_types": ["McpServerStarted"]}) is True
 
 
 def test_matches_filters_event_type_mismatch():
     """Event type not in filter list -- filtered out."""
     event = _FakeEvent(event_type="HealthCheckPassed")
-    assert matches_filters(event, {"event_types": ["ProviderStarted"]}) is False
+    assert matches_filters(event, {"event_types": ["McpServerStarted"]}) is False
 
 
-def test_matches_filters_provider_id_match():
-    """provider_id in filter list -- passes."""
-    event = _FakeEvent(event_type="E", provider_id="math")
-    assert matches_filters(event, {"provider_ids": ["math"]}) is True
+def test_matches_filters_mcp_server_id_match():
+    """mcp_server_id in filter list -- passes."""
+    event = _FakeEvent(event_type="E", mcp_server_id="math")
+    assert matches_filters(event, {"mcp_server_ids": ["math"]}) is True
 
 
-def test_matches_filters_provider_id_mismatch():
-    """provider_id not in filter list -- filtered out."""
-    event = _FakeEvent(event_type="E", provider_id="other")
-    assert matches_filters(event, {"provider_ids": ["math"]}) is False
+def test_matches_filters_mcp_server_id_mismatch():
+    """mcp_server_id not in filter list -- filtered out."""
+    event = _FakeEvent(event_type="E", mcp_server_id="other")
+    assert matches_filters(event, {"mcp_server_ids": ["math"]}) is False
 
 
 def test_matches_filters_both_match():
-    """Both event_type and provider_id match -- passes."""
-    event = _FakeEvent(event_type="ProviderStarted", provider_id="math")
-    assert matches_filters(event, {"event_types": ["ProviderStarted"], "provider_ids": ["math"]}) is True
+    """Both event_type and mcp_server_id match -- passes."""
+    event = _FakeEvent(event_type="McpServerStarted", mcp_server_id="math")
+    assert matches_filters(event, {"event_types": ["McpServerStarted"], "mcp_server_ids": ["math"]}) is True
 
 
-def test_matches_filters_event_type_match_provider_id_mismatch():
-    """event_type matches but provider_id does not -- filtered out (AND semantics)."""
-    event = _FakeEvent(event_type="ProviderStarted", provider_id="other")
-    assert matches_filters(event, {"event_types": ["ProviderStarted"], "provider_ids": ["math"]}) is False
+def test_matches_filters_event_type_match_mcp_server_id_mismatch():
+    """event_type matches but mcp_server_id does not -- filtered out (AND semantics)."""
+    event = _FakeEvent(event_type="McpServerStarted", mcp_server_id="other")
+    assert matches_filters(event, {"event_types": ["McpServerStarted"], "mcp_server_ids": ["math"]}) is False
 
 
 # ---------------------------------------------------------------------------

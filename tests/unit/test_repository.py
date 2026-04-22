@@ -6,21 +6,21 @@ from unittest.mock import Mock
 
 import pytest
 
-from mcp_hangar.domain import InMemoryProviderRepository, IProviderRepository
-from mcp_hangar.domain.model import Provider
+from mcp_hangar.domain import InMemoryMcpServerRepository, IProviderRepository
+from mcp_hangar.domain.model import McpServer
 
 
 @pytest.fixture
 def repository():
     """Create a fresh repository for each test."""
-    return InMemoryProviderRepository()
+    return InMemoryMcpServerRepository()
 
 
 @pytest.fixture
 def mock_provider():
     """Create a mock provider."""
     mock = Mock()
-    mock.provider_id = "test-provider"
+    mock.mcp_server_id = "test-provider"
     return mock
 
 
@@ -28,7 +28,7 @@ def mock_provider():
 def mock_provider_2():
     """Create a second mock provider."""
     mock = Mock()
-    mock.provider_id = "test-provider-2"
+    mock.mcp_server_id = "test-provider-2"
     return mock
 
 
@@ -40,7 +40,7 @@ def test_repository_implements_interface(repository):
     assert isinstance(repository, IProviderRepository)
 
 
-def test_add_provider(repository, mock_provider):
+def test_add_mcp_server(repository, mock_provider):
     """Test adding a provider to the repository."""
     repository.add("test-provider", mock_provider)
 
@@ -217,11 +217,11 @@ def test_len_function(repository, mock_provider, mock_provider_2):
 
 def test_repr(repository, mock_provider):
     """Test string representation."""
-    assert "InMemoryProviderRepository" in repr(repository)
-    assert "providers=0" in repr(repository)
+    assert "InMemoryMcpServerRepository" in repr(repository)
+    assert "mcp_servers=0" in repr(repository)
 
     repository.add("provider-1", mock_provider)
-    assert "providers=1" in repr(repository)
+    assert "mcp_servers=1" in repr(repository)
 
 
 # Thread Safety Tests
@@ -234,9 +234,9 @@ def test_concurrent_adds(repository):
 
     def add_providers(thread_id):
         for i in range(providers_per_thread):
-            provider_id = f"provider-{thread_id}-{i}"
+            mcp_server_id = f"provider-{thread_id}-{i}"
             mock = Mock()
-            repository.add(provider_id, mock)
+            repository.add(mcp_server_id, mock)
 
     threads = []
     for i in range(num_threads):
@@ -365,19 +365,13 @@ def test_clear_during_concurrent_access(repository):
 
 def test_with_real_provider():
     """Test repository with real Provider instances."""
-    repository = InMemoryProviderRepository()
+    repository = InMemoryMcpServerRepository()
 
-    provider1 = Provider(
-        provider_id="math-provider",
-        mode="subprocess",
-        command=["python", "-m", "math_provider"],
-    )
+    provider1 = McpServer(mcp_server_id="math-provider", mode="subprocess",
+    command=["python", "-m", "math_provider"],)
 
-    provider2 = Provider(
-        provider_id="weather-provider",
-        mode="subprocess",
-        command=["python", "-m", "weather_provider"],
-    )
+    provider2 = McpServer(mcp_server_id="weather-provider", mode="subprocess",
+    command=["python", "-m", "weather_provider"],)
 
     # Add providers
     repository.add("math-provider", provider1)
@@ -391,5 +385,5 @@ def test_with_real_provider():
     # Verify retrieval
     all_providers = repository.get_all()
     assert len(all_providers) == 2
-    assert all_providers["math-provider"].provider_id == "math-provider"
-    assert all_providers["weather-provider"].provider_id == "weather-provider"
+    assert all_providers["math-provider"].mcp_server_id == "math-provider"
+    assert all_providers["weather-provider"].mcp_server_id == "weather-provider"

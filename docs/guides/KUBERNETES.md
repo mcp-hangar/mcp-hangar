@@ -1,14 +1,14 @@
 # Kubernetes Integration
 
-Deploy and manage MCP providers as native Kubernetes resources using the MCP-Hangar Operator.
+Deploy and manage MCP servers as native Kubernetes resources using the MCP-Hangar Operator.
 
 ## Overview
 
 The MCP-Hangar Operator provides:
 
-- **MCPProvider** - Declarative provider management
-- **MCPProviderGroup** - Load balancing and high availability
-- **MCPDiscoverySource** - Automatic provider discovery
+- **MCPServer** - Declarative MCP server management
+- **MCPServerGroup** - Load balancing and high availability
+- **MCPDiscoverySource** - Automatic MCP server discovery
 
 ## Installation
 
@@ -22,8 +22,8 @@ The MCP-Hangar Operator provides:
 
 ```bash
 # Install Custom Resource Definitions
-kubectl apply -f https://raw.githubusercontent.com/mcp-hangar/mcp-hangar/main/deploy/crds/mcpprovider.yaml
-kubectl apply -f https://raw.githubusercontent.com/mcp-hangar/mcp-hangar/main/deploy/crds/mcpprovidergroup.yaml
+kubectl apply -f https://raw.githubusercontent.com/mcp-hangar/mcp-hangar/main/deploy/crds/mcpserver.yaml
+kubectl apply -f https://raw.githubusercontent.com/mcp-hangar/mcp-hangar/main/deploy/crds/mcpservergroup.yaml
 kubectl apply -f https://raw.githubusercontent.com/mcp-hangar/mcp-hangar/main/deploy/crds/mcpdiscoverysource.yaml
 
 # Verify
@@ -73,16 +73,16 @@ resources:
     memory: 128Mi
 ```
 
-## MCPProvider
+## MCPServer
 
-### Basic Provider
+### Basic MCP Server
 
 ```yaml
 apiVersion: mcp-hangar.io/v1alpha1
-kind: MCPProvider
+kind: MCPServer
 metadata:
   name: sqlite-tools
-  namespace: mcp-providers
+  namespace: mcp-servers
 spec:
   mode: container
   image: ghcr.io/modelcontextprotocol/mcp-sqlite:latest
@@ -109,14 +109,14 @@ spec:
     failureThreshold: 3
 ```
 
-### Provider with Secrets
+### MCP Server with Secrets
 
 ```yaml
 apiVersion: mcp-hangar.io/v1alpha1
-kind: MCPProvider
+kind: MCPServer
 metadata:
   name: github-tools
-  namespace: mcp-providers
+  namespace: mcp-servers
 spec:
   mode: container
   image: ghcr.io/modelcontextprotocol/mcp-github:latest
@@ -136,14 +136,14 @@ spec:
       requestsPerMinute: 30
 ```
 
-### Remote Provider
+### Remote MCP Server
 
 ```yaml
 apiVersion: mcp-hangar.io/v1alpha1
-kind: MCPProvider
+kind: MCPServer
 metadata:
   name: external-api
-  namespace: mcp-providers
+  namespace: mcp-servers
 spec:
   mode: remote
   endpoint: https://api.example.com/mcp
@@ -163,7 +163,7 @@ spec:
 
 ```yaml
 apiVersion: mcp-hangar.io/v1alpha1
-kind: MCPProvider
+kind: MCPServer
 metadata:
   name: expensive-tool
 spec:
@@ -177,18 +177,18 @@ spec:
   idleTTL: "5m"
 ```
 
-## MCPProviderGroup
+## MCPServerGroup
 
 ### High Availability Group
 
 ```yaml
 apiVersion: mcp-hangar.io/v1alpha1
-kind: MCPProviderGroup
+kind: MCPServerGroup
 metadata:
   name: database-tools-ha
-  namespace: mcp-providers
+  namespace: mcp-servers
 spec:
-  # Select providers by label
+  # Select mcp_servers by label
   selector:
     matchLabels:
       mcp-hangar.io/category: database
@@ -208,11 +208,11 @@ spec:
     unhealthyThreshold: 3
 ```
 
-### Label Providers for Grouping
+### Label MCP servers for Grouping
 
 ```yaml
 apiVersion: mcp-hangar.io/v1alpha1
-kind: MCPProvider
+kind: MCPServer
 metadata:
   name: sqlite-primary
   labels:
@@ -223,7 +223,7 @@ spec:
   image: ghcr.io/modelcontextprotocol/mcp-sqlite:latest
 ---
 apiVersion: mcp-hangar.io/v1alpha1
-kind: MCPProvider
+kind: MCPServer
 metadata:
   name: sqlite-replica
   labels:
@@ -242,7 +242,7 @@ spec:
 apiVersion: mcp-hangar.io/v1alpha1
 kind: MCPDiscoverySource
 metadata:
-  name: team-providers
+  name: team-mcp-servers
   namespace: mcp-system
 spec:
   type: Namespace
@@ -268,13 +268,13 @@ spec:
 apiVersion: mcp-hangar.io/v1alpha1
 kind: MCPDiscoverySource
 metadata:
-  name: config-providers
+  name: config-mcp-servers
 spec:
   type: ConfigMap
   refreshInterval: "1m"
 
   configMapRef:
-    name: provider-definitions
+    name: mcp-server-definitions
     namespace: mcp-config
 ```
 
@@ -282,7 +282,7 @@ spec:
 
 ### Pod Security
 
-All provider pods run with secure defaults:
+All MCP server pods run with secure defaults:
 
 ```yaml
 securityContext:
@@ -299,13 +299,13 @@ Override if needed:
 
 ```yaml
 apiVersion: mcp-hangar.io/v1alpha1
-kind: MCPProvider
+kind: MCPServer
 metadata:
-  name: my-provider
+  name: my-mcp-server
 spec:
   securityContext:
     runAsUser: 1000
-    readOnlyRootFilesystem: false  # If provider needs writable fs
+    readOnlyRootFilesystem: false  # If mcp_server needs writable fs
 ```
 
 ### RBAC
@@ -320,7 +320,7 @@ metadata:
   name: mcp-hangar-operator
 rules:
   - apiGroups: [mcp-hangar.io]
-    resources: [mcpproviders, mcpprovidergroups, mcpdiscoverysources]
+    resources: [mcpservers, mcpservergroups, mcpdiscoverysources]
     verbs: [get, list, watch, create, update, patch, delete]
   - apiGroups: [""]
     resources: [pods, secrets, configmaps]
@@ -329,18 +329,18 @@ rules:
 
 ### Network Policies
 
-Restrict provider communication:
+Restrict MCP server communication:
 
 ```yaml
 apiVersion: networking.k8s.io/v1
 kind: NetworkPolicy
 metadata:
-  name: mcp-provider-isolation
-  namespace: mcp-providers
+  name: mcp-server-isolation
+  namespace: mcp-servers
 spec:
   podSelector:
     matchLabels:
-      mcp-hangar.io/provider: "true"
+      mcp-hangar.io/mcp_server: "true"
   policyTypes:
     - Ingress
     - Egress
@@ -366,8 +366,8 @@ The operator exposes metrics at `:8080/metrics`:
 |--------|------|-------------|
 | `mcp_operator_reconcile_total` | Counter | Total reconciliations |
 | `mcp_operator_reconcile_duration_seconds` | Histogram | Reconciliation duration |
-| `mcp_operator_provider_state` | Gauge | Provider state (1 = active) |
-| `mcp_operator_provider_tools_count` | Gauge | Tools per provider |
+| `mcp_operator_provider_state` | Gauge | MCP server state (1 = active) |
+| `mcp_operator_provider_tools_count` | Gauge | Tools per MCP server |
 | `mcp_operator_provider_health_check_failures_total` | Counter | Health check failures |
 
 ### ServiceMonitor
@@ -398,36 +398,36 @@ spec:
   groups:
     - name: mcp-hangar
       rules:
-        - alert: MCPProviderDegraded
+        - alert: MCPServerDegraded
           expr: mcp_operator_provider_state{state="Degraded"} == 1
           for: 5m
           labels:
             severity: warning
           annotations:
-            summary: "MCP Provider {{ $labels.name }} is degraded"
+            summary: "MCP MCP Server {{ $labels.name }} is degraded"
 
-        - alert: MCPProviderDead
+        - alert: MCPServerDead
           expr: mcp_operator_provider_state{state="Dead"} == 1
           for: 2m
           labels:
             severity: critical
           annotations:
-            summary: "MCP Provider {{ $labels.name }} is dead"
+            summary: "MCP MCP Server {{ $labels.name }} is dead"
 ```
 
 ## Troubleshooting
 
-### Check Provider Status
+### Check MCP Server Status
 
 ```bash
-# List all providers
-kubectl get mcpproviders -A
+# List all mcp_servers
+kubectl get mcpservers -A
 
-# Describe specific provider
-kubectl describe mcpprovider my-provider -n mcp-providers
+# Describe specific mcp_server
+kubectl describe mcpserver my-mcp-server -n mcp-servers
 
 # Check conditions
-kubectl get mcpprovider my-provider -o jsonpath='{.status.conditions}'
+kubectl get mcpserver my-mcp-server -o jsonpath='{.status.conditions}'
 ```
 
 ### Check Operator Logs
@@ -438,19 +438,19 @@ kubectl logs -n mcp-system deployment/mcp-hangar-operator -f
 
 ### Common Issues
 
-**Provider stuck in Initializing:**
+**MCP Server stuck in Initializing:**
 
-- Check pod logs: `kubectl logs mcp-provider-<name> -n <namespace>`
+- Check pod logs: `kubectl logs mcp-MCP server-<name> -n <namespace>`
 - Verify image exists and is pullable
 - Check resource limits
 
-**Provider in Degraded state:**
+**MCP Server in Degraded state:**
 
 - Health checks failing
-- Check network connectivity to provider
+- Check network connectivity to MCP server
 - Verify MCP-Hangar core is running
 
-**Discovery not finding providers:**
+**Discovery not finding MCP servers:**
 
 - Verify namespace labels match selector
 - Check MCPDiscoverySource status
@@ -458,7 +458,7 @@ kubectl logs -n mcp-system deployment/mcp-hangar-operator -f
 
 ## API Reference
 
-### MCPProvider Spec
+### MCPServer Spec
 
 | Field | Type | Required | Default | Description |
 |-------|------|----------|---------|-------------|
@@ -479,7 +479,7 @@ kubectl logs -n mcp-system deployment/mcp-hangar-operator -f
 | `tools` | object | No | - | Tool configuration |
 | `circuitBreaker` | object | No | enabled | Circuit breaker config |
 
-### MCPProvider Status
+### MCPServer Status
 
 | Field | Type | Description |
 |-------|------|-------------|

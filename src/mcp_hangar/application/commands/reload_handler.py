@@ -7,7 +7,7 @@ from ...domain.contracts.command import CommandHandler
 from ...domain.contracts.event_bus import IEventBus
 from ...domain.events import ConfigurationReloaded, ConfigurationReloadFailed, ConfigurationReloadRequested
 from ...domain.exceptions import ConfigurationError
-from ...domain.repository import IProviderRepository
+from ...domain.repository import IMcpServerRepository
 from ...domain.services import get_tool_access_resolver
 from ...logging_config import get_logger
 from ..ports.config_loader import IConfigLoader
@@ -20,15 +20,15 @@ class ReloadConfigurationHandler(CommandHandler):
     """Handler for ReloadConfigurationCommand.
 
     Reloads configuration from file and applies changes:
-    - Adds new providers
-    - Removes deleted providers
-    - Updates modified providers (restart with new config)
-    - Preserves unchanged providers (no restart)
+    - Adds new mcp_servers
+    - Removes deleted mcp_servers
+    - Updates modified mcp_servers (restart with new config)
+    - Preserves unchanged mcp_servers (no restart)
     """
 
     def __init__(
         self,
-        provider_repository: IProviderRepository,
+        mcp_server_repository: IMcpServerRepository,
         event_bus: IEventBus,
         current_config_path: str | None = None,
         config_loader: IConfigLoader | None = None,
@@ -37,13 +37,13 @@ class ReloadConfigurationHandler(CommandHandler):
         """Initialize the handler.
 
         Args:
-            provider_repository: Repository for provider persistence.
+            mcp_server_repository: Repository for mcp_server persistence.
             event_bus: Event bus for publishing events.
             current_config_path: Current configuration file path.
             config_loader: Config loader for loading/applying configuration.
             groups: Groups dict reference for clearing during reload.
         """
-        self._repository = provider_repository
+        self._repository = mcp_server_repository
         self._event_bus = event_bus
         self._current_config_path = current_config_path
         self._config_loader = config_loader
@@ -86,15 +86,15 @@ class ReloadConfigurationHandler(CommandHandler):
                 from ...server.config import load_config_from_file as _load_from_file
 
                 new_full_config = _load_from_file(config_path)
-            new_providers_config = new_full_config.get("providers", {})
+            new_mcp_servers_config = new_full_config.get("mcp_servers", {})
 
             # Capture current state
-            current_providers = dict(self._repository.get_all())
+            current_mcp_servers = dict(self._repository.get_all())
             # Note: Group reload not yet implemented (GROUPS state captured but not used)
 
             # Calculate diff
-            new_ids = set(new_providers_config.keys())
-            current_ids = set(current_providers.keys())
+            new_ids = set(new_mcp_servers_config.keys())
+            current_ids = set(current_mcp_servers.keys())
 
             added_ids = new_ids - current_ids
             removed_ids = current_ids - new_ids
@@ -103,13 +103,13 @@ class ReloadConfigurationHandler(CommandHandler):
             # Check for actual configuration changes
             updated_ids = []
             unchanged_ids = []
-            for provider_id in potentially_updated_ids:
-                old_spec = self._get_provider_spec(current_providers[provider_id])
-                new_spec = new_providers_config[provider_id]
+            for mcp_server_id in potentially_updated_ids:
+                old_spec = self._get_mcp_server_spec(current_mcp_servers[mcp_server_id])
+                new_spec = new_mcp_servers_config[mcp_server_id]
                 if self._config_differs(old_spec, new_spec):
-                    updated_ids.append(provider_id)
+                    updated_ids.append(mcp_server_id)
                 else:
-                    unchanged_ids.append(provider_id)
+                    unchanged_ids.append(mcp_server_id)
 
             logger.info(
                 "config_reload_diff_calculated",
@@ -120,35 +120,35 @@ class ReloadConfigurationHandler(CommandHandler):
             )
 
             # Apply changes atomically
-            # 1. Stop removed and updated providers
-            for provider_id in list(removed_ids) + updated_ids:
-                provider = current_providers.get(provider_id)
-                if provider:
+            # 1. Stop removed and updated mcp_servers
+            for mcp_server_id in list(removed_ids) + updated_ids:
+                mcp_server = current_mcp_servers.get(mcp_server_id)
+                if mcp_server:
                     try:
                         if command.graceful:
                             # Graceful shutdown with idle wait
-                            provider.stop(reason="config_reload")
+                            mcp_server.stop(reason="config_reload")
                         else:
                             # Immediate shutdown
-                            provider.shutdown()
+                            mcp_server.shutdown()
 
                         logger.info(
-                            "provider_stopped_for_reload",
-                            provider_id=provider_id,
+                            "mcp_server_stopped_for_reload",
+                            mcp_server_id=mcp_server_id,
                             graceful=command.graceful,
                         )
-                    except Exception as e:  # noqa: BLE001 -- fault-barrier: stop failure must not prevent reload of other providers
+                    except Exception as e:  # noqa: BLE001 -- fault-barrier: stop failure must not prevent reload of other mcp_servers
                         logger.warning(
-                            "provider_stop_failed_during_reload",
-                            provider_id=provider_id,
+                            "mcp_server_stop_failed_during_reload",
+                            mcp_server_id=mcp_server_id,
                             error=str(e),
                         )
 
-            # 2. Remove deleted providers from repository
-            for provider_id in removed_ids:
-                if provider_id in current_providers:
-                    self._repository.remove(provider_id)
-                    logger.info("provider_removed", provider_id=provider_id)
+            # 2. Remove deleted mcp_servers from repository
+            for mcp_server_id in removed_ids:
+                if mcp_server_id in current_mcp_servers:
+                    self._repository.remove(mcp_server_id)
+                    logger.info("mcp_server_removed", mcp_server_id=mcp_server_id)
 
             # 3. Clear groups (will be reloaded)
             self._groups.clear()
@@ -161,24 +161,24 @@ class ReloadConfigurationHandler(CommandHandler):
 
             # 5. Load new configuration (adds new and updates existing)
             if self._config_loader is not None:
-                self._config_loader.apply_providers(new_providers_config)
+                self._config_loader.apply_mcp_servers(new_mcp_servers_config)
             else:
                 # Fallback: import server-layer function directly (legacy path)
                 from ...server.config import load_config as _load_config
 
-                _load_config(new_providers_config)
+                _load_config(new_mcp_servers_config)
 
-            # 6. Auto-start providers if they were running before
-            # (This depends on auto_start config and provider state)
-            for provider_id in added_ids:
-                provider = self._repository.get(provider_id)
-                if provider:
-                    logger.info("provider_added", provider_id=provider_id)
+            # 6. Auto-start mcp_servers if they were running before
+            # (This depends on auto_start config and mcp_server state)
+            for mcp_server_id in added_ids:
+                mcp_server = self._repository.get(mcp_server_id)
+                if mcp_server:
+                    logger.info("mcp_server_added", mcp_server_id=mcp_server_id)
 
-            for provider_id in updated_ids:
-                provider = self._repository.get(provider_id)
-                if provider:
-                    logger.info("provider_updated", provider_id=provider_id)
+            for mcp_server_id in updated_ids:
+                mcp_server = self._repository.get(mcp_server_id)
+                if mcp_server:
+                    logger.info("mcp_server_updated", mcp_server_id=mcp_server_id)
 
             # Calculate duration
             duration_ms = (time.perf_counter() - start_time) * 1000
@@ -187,10 +187,10 @@ class ReloadConfigurationHandler(CommandHandler):
             self._event_bus.publish(
                 ConfigurationReloaded(
                     config_path=config_path,
-                    providers_added=list(added_ids),
-                    providers_removed=list(removed_ids),
-                    providers_updated=updated_ids,
-                    providers_unchanged=unchanged_ids,
+                    mcp_servers_added=list(added_ids),
+                    mcp_servers_removed=list(removed_ids),
+                    mcp_servers_updated=updated_ids,
+                    mcp_servers_unchanged=unchanged_ids,
                     reload_duration_ms=duration_ms,
                     requested_by=command.requested_by,
                 )
@@ -208,10 +208,10 @@ class ReloadConfigurationHandler(CommandHandler):
             return {
                 "success": True,
                 "config_path": config_path,
-                "providers_added": list(added_ids),
-                "providers_removed": list(removed_ids),
-                "providers_updated": updated_ids,
-                "providers_unchanged": unchanged_ids,
+                "mcp_servers_added": list(added_ids),
+                "mcp_servers_removed": list(removed_ids),
+                "mcp_servers_updated": updated_ids,
+                "mcp_servers_unchanged": unchanged_ids,
                 "duration_ms": duration_ms,
             }
 
@@ -238,51 +238,55 @@ class ReloadConfigurationHandler(CommandHandler):
 
             raise ConfigurationError(f"Configuration reload failed: {e}") from e
 
-    def _get_provider_spec(self, provider) -> dict[str, Any]:
-        """Extract configuration spec from provider aggregate.
+    def _get_mcp_server_spec(self, mcp_server) -> dict[str, Any]:
+        """Extract configuration spec from mcp_server aggregate.
 
         Args:
-            provider: Provider aggregate instance.
+            mcp_server: McpServer aggregate instance.
 
         Returns:
-            Dictionary with provider configuration.
+            Dictionary with mcp_server configuration.
         """
         return {
-            "mode": provider._mode.value if hasattr(provider._mode, "value") else str(provider._mode),
-            "command": provider._command,
-            "image": provider._image,
-            "endpoint": provider._endpoint,
-            "env": provider._env,
-            "idle_ttl_s": provider._idle_ttl.seconds if hasattr(provider._idle_ttl, "seconds") else provider._idle_ttl,
+            "mode": mcp_server._mode.value if hasattr(mcp_server._mode, "value") else str(mcp_server._mode),
+            "command": mcp_server._command,
+            "image": mcp_server._image,
+            "endpoint": mcp_server._endpoint,
+            "env": mcp_server._env,
+            "idle_ttl_s": mcp_server._idle_ttl.seconds
+            if hasattr(mcp_server._idle_ttl, "seconds")
+            else mcp_server._idle_ttl,
             "health_check_interval_s": (
-                provider._health_check_interval.seconds if hasattr(provider._health_check_interval, "seconds") else 60
+                mcp_server._health_check_interval.seconds
+                if hasattr(mcp_server._health_check_interval, "seconds")
+                else 60
             ),
             "max_consecutive_failures": (
-                provider._health.max_consecutive_failures
-                if hasattr(provider._health, "max_consecutive_failures")
+                mcp_server._health.max_consecutive_failures
+                if hasattr(mcp_server._health, "max_consecutive_failures")
                 else 3
             ),
-            "volumes": provider._volumes,
-            "build": provider._build,
-            "resources": provider._resources,
-            "network": provider._network,
-            "read_only": provider._read_only,
-            "user": provider._user,
-            "description": provider._description,
-            "tools": provider._tools.to_dict() if hasattr(provider._tools, "to_dict") else None,
+            "volumes": mcp_server._volumes,
+            "build": mcp_server._build,
+            "resources": mcp_server._resources,
+            "network": mcp_server._network,
+            "read_only": mcp_server._read_only,
+            "user": mcp_server._user,
+            "description": mcp_server._description,
+            "tools": mcp_server._tools.to_dict() if hasattr(mcp_server._tools, "to_dict") else None,
         }
 
     def _config_differs(self, old_spec: dict[str, Any], new_spec: dict[str, Any]) -> bool:
-        """Check if two provider configurations differ significantly.
+        """Check if two mcp_server configurations differ significantly.
 
         Args:
-            old_spec: Old provider configuration.
-            new_spec: New provider configuration.
+            old_spec: Old mcp_server configuration.
+            new_spec: New mcp_server configuration.
 
         Returns:
             True if configurations differ, False otherwise.
         """
-        # Default values for provider fields
+        # Default values for mcp_server fields
         DEFAULTS = {
             "idle_ttl_s": 300,
             "health_check_interval_s": 60,
@@ -291,7 +295,7 @@ class ReloadConfigurationHandler(CommandHandler):
             "read_only": True,
         }
 
-        # Compare key fields that affect provider behavior
+        # Compare key fields that affect mcp_server behavior
         key_fields = [
             "mode",
             "command",

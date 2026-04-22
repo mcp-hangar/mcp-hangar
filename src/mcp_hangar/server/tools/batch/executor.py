@@ -2,7 +2,7 @@
 
 Provides parallel execution of batch invocations with:
 - ThreadPoolExecutor for concurrent execution
-- Two-level semaphore concurrency control (global + per-provider)
+- Two-level semaphore concurrency control (global + per-mcp_server)
 - Single-flight pattern for cold starts
 - Cooperative cancellation
 - Circuit breaker integration
@@ -16,7 +16,7 @@ import threading
 import time
 from typing import Any
 
-from ....application.commands import InvokeToolCommand, StartProviderCommand
+from ....application.commands import InvokeToolCommand, StartMcpServerCommand
 from ....domain.events import BatchCallCompleted, BatchInvocationCompleted, BatchInvocationRequested
 from ....domain.services import get_tool_access_resolver
 from ....infrastructure.single_flight import SingleFlight
@@ -48,10 +48,10 @@ class BatchExecutor:
     1. ThreadPoolExecutor(max_workers=N) provides per-batch thread management.
        N is the effective batch concurrency: min(user_param, global_limit).
     2. ConcurrencyManager provides cross-batch, system-wide concurrency control
-       via global and per-provider semaphores.
+       via global and per-mcp_server semaphores.
 
     All calls in a batch are submitted to the thread pool at once. Each worker
-    thread acquires global + provider semaphores before executing, providing
+    thread acquires global + mcp_server semaphores before executing, providing
     backpressure without sequential chunking. Fast calls release their slots
     immediately, allowing queued calls to proceed without waiting for the
     entire batch wave to complete.
@@ -99,8 +99,8 @@ class BatchExecutor:
         Returns None if no approval is needed (continue execution).
         Returns a CallResult if the tool was denied or timed out.
         """
-        # Get effective policy for this provider (or fallback to _global)
-        policy = resolver.resolve_effective_policy(call.provider)
+        # Get effective policy for this mcp_server (or fallback to _global)
+        policy = resolver.resolve_effective_policy(call.mcp_server)
         if policy.is_unrestricted():
             # Check global policy fallback
             policy = resolver.resolve_effective_policy("_global")
@@ -118,7 +118,7 @@ class BatchExecutor:
 
         logger.info(
             "approval_gate_blocking",
-            provider=call.provider,
+            mcp_server=call.mcp_server,
             tool=call.tool,
             call_id=call.call_id,
         )
@@ -141,7 +141,7 @@ class BatchExecutor:
             try:
                 result = thread_loop.run_until_complete(
                     gate_service.check(
-                        provider_id=call.provider,
+                        mcp_server_id=call.mcp_server,
                         tool_name=call.tool,
                         arguments=call.arguments,
                         policy=policy,
@@ -191,7 +191,7 @@ class BatchExecutor:
         All calls are submitted to the thread pool immediately. Concurrency is
         controlled by two mechanisms:
         - ThreadPoolExecutor max_workers: caps threads for this batch
-        - ConcurrencyManager semaphores: caps in-flight calls globally and per-provider
+        - ConcurrencyManager semaphores: caps in-flight calls globally and per-mcp_server
 
         The effective per-batch thread count is min(max_concurrency, global_limit)
         when the global limit is set, ensuring we don't create more threads than
@@ -243,12 +243,12 @@ class BatchExecutor:
                 batch_span.set_attribute("batch.effective_workers", effective_workers)
 
                 # Emit batch requested event
-                providers = list(set(c.provider for c in calls))
+                mcp_servers = list(set(c.mcp_server for c in calls))
                 ctx.event_bus.publish(
                     BatchInvocationRequested(
                         batch_id=batch_id,
                         call_count=len(calls),
-                        providers=providers,
+                        mcp_servers=mcp_servers,
                         max_concurrency=max_concurrency,
                         timeout=global_timeout,
                         fail_fast=fail_fast,
@@ -261,7 +261,7 @@ class BatchExecutor:
                     call_count=len(calls),
                     effective_workers=effective_workers,
                     global_limit=global_limit if global_limit > 0 else "unlimited",
-                    provider_count=len(providers),
+                    mcp_server_count=len(mcp_servers),
                 )
 
                 # Execute calls in thread pool — all submitted at once, semaphores
@@ -291,7 +291,7 @@ class BatchExecutor:
                                         batch_id=batch_id,
                                         call_id=result.call_id,
                                         call_index=result.index,
-                                        provider_id=calls[index].provider,
+                                        mcp_server_id=calls[index].mcp_server,
                                         tool_name=calls[index].tool,
                                         success=result.success,
                                         elapsed_ms=result.elapsed_ms,
@@ -455,14 +455,14 @@ class BatchExecutor:
     ) -> CallResult:
         """Execute a single call within the batch.
 
-        Acquires global and per-provider concurrency slots via the
+        Acquires global and per-mcp_server concurrency slots via the
         ConcurrencyManager before performing the actual invocation.
-        This ensures system-wide and per-provider backpressure even
+        This ensures system-wide and per-mcp_server backpressure even
         when multiple batches run concurrently.
 
         Handles:
         - Cooperative cancellation
-        - Two-level concurrency control (global + per-provider)
+        - Two-level concurrency control (global + per-mcp_server)
         - Single-flight cold starts
         - Circuit breaker checks
         - Response truncation
@@ -497,7 +497,7 @@ class BatchExecutor:
             f"batch.call.{call.tool}",
             **span_ctx_kwargs,
         ) as span:
-            span.set_attribute("mcp.provider.id", call.provider)
+            span.set_attribute("mcp.server.id", call.mcp_server)
             span.set_attribute("mcp.tool.name", call.tool)
             span.set_attribute("batch.call.id", call.call_id)
             return self._execute_call_inner(
@@ -550,44 +550,44 @@ class BatchExecutor:
         if call.timeout is not None:
             effective_timeout = min(call.timeout, remaining_global)
 
-        # Get provider (or group)
-        provider_obj = ctx.get_provider(call.provider)
+        # Get mcp_server (or group)
+        mcp_server_obj = ctx.get_mcp_server(call.mcp_server)
         is_group = False
-        if not provider_obj:
-            group_obj = GROUPS.get(call.provider)
+        if not mcp_server_obj:
+            group_obj = GROUPS.get(call.mcp_server)
             if group_obj:
                 is_group = True
-            elif not ctx.provider_exists(call.provider):
+            elif not ctx.mcp_server_exists(call.mcp_server):
                 return CallResult(
                     index=call.index,
                     call_id=call.call_id,
                     success=False,
-                    error=f"Provider '{call.provider}' not found",
-                    error_type="ProviderNotFoundError",
+                    error=f"McpServer '{call.mcp_server}' not found",
+                    error_type="McpServerNotFoundError",
                     elapsed_ms=(time.perf_counter() - call_start) * 1000,
                 )
 
-        # Check tool access policy BEFORE starting provider or executing
+        # Check tool access policy BEFORE starting mcp_server or executing
         # This is config-driven filtering, identity-agnostic (runs before RBAC)
         resolver = get_tool_access_resolver()
         tracer = get_tracer(__name__)
         with tracer.start_as_current_span("policy.check_access") as policy_span:
-            policy_span.set_attribute("mcp.provider.id", call.provider)
+            policy_span.set_attribute("mcp.server.id", call.mcp_server)
             policy_span.set_attribute("mcp.tool.name", call.tool)
             policy_span.set_attribute("policy.is_group", is_group)
             if is_group:
-                group_obj = GROUPS.get(call.provider)
+                group_obj = GROUPS.get(call.mcp_server)
                 # For groups, we check against group policy
                 # Member-specific policy will be checked when member is selected
                 allowed = resolver.is_tool_allowed(
-                    provider_id=call.provider,
+                    mcp_server_id=call.mcp_server,
                     tool_name=call.tool,
-                    group_id=call.provider,
+                    group_id=call.mcp_server,
                 )
             else:
-                # For standalone providers
+                # For standalone mcp_servers
                 allowed = resolver.is_tool_allowed(
-                    provider_id=call.provider,
+                    mcp_server_id=call.mcp_server,
                     tool_name=call.tool,
                 )
             policy_span.set_attribute("policy.allowed", allowed)
@@ -595,12 +595,12 @@ class BatchExecutor:
         if not allowed:
             logger.info(
                 "tool_access_denied",
-                provider_id=call.provider,
+                mcp_server_id=call.mcp_server,
                 tool=call.tool,
                 reason="tool_not_in_access_policy",
             )
             TOOL_ACCESS_DENIED_TOTAL.inc(
-                provider=call.provider,
+                mcp_server=call.mcp_server,
                 tool=call.tool,
                 reason="tool_not_in_access_policy",
             )
@@ -608,15 +608,15 @@ class BatchExecutor:
                 index=call.index,
                 call_id=call.call_id,
                 success=False,
-                error="Tool not available for this provider",
+                error="Tool not available for this mcp_server",
                 error_type="ToolAccessDeniedError",
                 elapsed_ms=(time.perf_counter() - call_start) * 1000,
             )
 
-        # Check circuit breaker / health degradation (for non-group providers)
-        if not is_group and provider_obj:
-            if hasattr(provider_obj, "health") and provider_obj.health.should_degrade():
-                BATCH_CIRCUIT_BREAKER_REJECTIONS_TOTAL.inc(provider=call.provider)
+        # Check circuit breaker / health degradation (for non-group mcp_servers)
+        if not is_group and mcp_server_obj:
+            if hasattr(mcp_server_obj, "health") and mcp_server_obj.health.should_degrade():
+                BATCH_CIRCUIT_BREAKER_REJECTIONS_TOTAL.inc(mcp_server=call.mcp_server)
                 return CallResult(
                     index=call.index,
                     call_id=call.call_id,
@@ -628,9 +628,9 @@ class BatchExecutor:
 
         # Approval gate: check if the tool requires human approval before execution.
         # The policy is set by the agent via POST /api/agent/policy.
-        # Uses the resolver's effective policy (provider-specific or _global fallback).
+        # Uses the resolver's effective policy (mcp_server-specific or _global fallback).
         with tracer.start_as_current_span("approval_gate.check") as approval_span:
-            approval_span.set_attribute("mcp.provider.id", call.provider)
+            approval_span.set_attribute("mcp.server.id", call.mcp_server)
             approval_span.set_attribute("mcp.tool.name", call.tool)
             approval_result = self._check_approval_gate(call, resolver, ctx)
             if approval_result is not None:
@@ -639,25 +639,25 @@ class BatchExecutor:
                 return approval_result
             approval_span.set_attribute("approval.result", "not_required")
 
-        # Single-flight cold start (only for non-group providers)
-        if not is_group and provider_obj and provider_obj.state.value == "cold":
-            with tracer.start_as_current_span("provider.cold_start") as cs_span:
-                cs_span.set_attribute("mcp.provider.id", call.provider)
+        # Single-flight cold start (only for non-group mcp_servers)
+        if not is_group and mcp_server_obj and mcp_server_obj.state.value == "cold":
+            with tracer.start_as_current_span("mcp_server.cold_start") as cs_span:
+                cs_span.set_attribute("mcp.server.id", call.mcp_server)
                 try:
                     self._single_flight.do(
-                        call.provider,
-                        lambda: ctx.command_bus.send(StartProviderCommand(provider_id=call.provider)),
+                        call.mcp_server,
+                        lambda: ctx.command_bus.send(StartMcpServerCommand(mcp_server_id=call.mcp_server)),
                     )
                     cs_span.set_attribute("cold_start.result", "success")
-                except Exception as e:  # noqa: BLE001 -- fault-barrier: provider start failure must return error result, not crash batch
+                except Exception as e:  # noqa: BLE001 -- fault-barrier: mcp_server start failure must return error result, not crash batch
                     cs_span.set_attribute("cold_start.result", "error")
                     cs_span.record_exception(e)
                     return CallResult(
                         index=call.index,
                         call_id=call.call_id,
                         success=False,
-                        error=f"Failed to start provider: {e}",
-                        error_type="ProviderStartError",
+                        error=f"Failed to start mcp_server: {e}",
+                        error_type="McpServerStartError",
                         elapsed_ms=(time.perf_counter() - call_start) * 1000,
                     )
 
@@ -672,21 +672,21 @@ class BatchExecutor:
                 elapsed_ms=(time.perf_counter() - call_start) * 1000,
             )
 
-        # Acquire concurrency slots (global + per-provider) before invocation.
-        # This is where backpressure happens: if the global or provider semaphore
+        # Acquire concurrency slots (global + per-mcp_server) before invocation.
+        # This is where backpressure happens: if the global or mcp_server semaphore
         # is full, this thread blocks until a slot frees up. Crucially, the call
         # starts as soon as ANY slot is freed -- it does not wait for an entire
         # batch wave to complete (unlike sequential chunking).
         cm = self.concurrency_manager
         with tracer.start_as_current_span("concurrency.acquire") as conc_span:
-            conc_span.set_attribute("mcp.provider.id", call.provider)
-            with cm.acquire(call.provider) as wait_s:
+            conc_span.set_attribute("mcp.server.id", call.mcp_server)
+            with cm.acquire(call.mcp_server) as wait_s:
                 conc_span.set_attribute("concurrency.wait_ms", round(wait_s * 1000, 2))
                 if wait_s > 0.01:
                     logger.debug(
                         "concurrency_slot_wait",
                         call_id=call.call_id,
-                        provider=call.provider,
+                        mcp_server=call.mcp_server,
                         wait_ms=round(wait_s * 1000, 2),
                     )
 
@@ -722,11 +722,11 @@ class BatchExecutor:
 
         def do_invoke() -> dict[str, Any]:
             with tracer.start_as_current_span("command.send.InvokeToolCommand") as cmd_span:
-                cmd_span.set_attribute("mcp.provider.id", call.provider)
+                cmd_span.set_attribute("mcp.server.id", call.mcp_server)
                 cmd_span.set_attribute("mcp.tool.name", call.tool)
                 cmd_span.set_attribute("command.timeout", effective_timeout)
                 command = InvokeToolCommand(
-                    provider_id=call.provider,
+                    mcp_server_id=call.mcp_server,
                     tool_name=call.tool,
                     arguments=call.arguments,
                     timeout=effective_timeout,
@@ -740,13 +740,13 @@ class BatchExecutor:
         if call.max_retries > 1:
             with tracer.start_as_current_span("invoke_with_retry") as retry_span:
                 retry_span.set_attribute("retry.max_attempts", call.max_retries)
-                retry_span.set_attribute("mcp.provider.id", call.provider)
+                retry_span.set_attribute("mcp.server.id", call.mcp_server)
                 retry_span.set_attribute("mcp.tool.name", call.tool)
                 policy = RetryPolicy(max_attempts=call.max_retries)
                 retry_result = retry_sync(
                     operation=do_invoke,
                     policy=policy,
-                    provider=call.provider,
+                    mcp_server=call.mcp_server,
                     operation_name=call.tool,
                 )
                 retry_span.set_attribute("retry.attempts", retry_result.attempt_count)
@@ -762,7 +762,7 @@ class BatchExecutor:
                 logger.debug(
                     "batch_call_failed",
                     call_id=call.call_id,
-                    provider=call.provider,
+                    mcp_server=call.mcp_server,
                     tool=call.tool,
                     error=error_msg,
                     error_type=error_type,
@@ -794,7 +794,7 @@ class BatchExecutor:
                 logger.debug(
                     "batch_call_failed",
                     call_id=call.call_id,
-                    provider=call.provider,
+                    mcp_server=call.mcp_server,
                     tool=call.tool,
                     error=str(e),
                     error_type=error_type,
@@ -829,7 +829,7 @@ class BatchExecutor:
             logger.warning(
                 "batch_call_truncated",
                 call_id=call.call_id,
-                provider=call.provider,
+                mcp_server=call.mcp_server,
                 tool=call.tool,
                 size_bytes=result_size,
                 limit_bytes=MAX_RESPONSE_SIZE_BYTES,
@@ -838,7 +838,7 @@ class BatchExecutor:
         logger.debug(
             "batch_call_completed",
             call_id=call.call_id,
-            provider=call.provider,
+            mcp_server=call.mcp_server,
             tool=call.tool,
             success=True,
             elapsed_ms=round(elapsed_ms, 2),

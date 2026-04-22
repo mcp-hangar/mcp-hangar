@@ -20,6 +20,18 @@ from mcp_hangar.domain.events import (
     HealthCheckFailed,
     HealthCheckPassed,
     PolicyPushRejected,
+    McpServerApproved,
+    McpServerCapabilityQuarantined,
+    McpServerCapabilityQuarantineReleased,
+    McpServerDegraded,
+    McpServerDiscovered,
+    McpServerDiscoveryConfigChanged,
+    McpServerDiscoveryLost,
+    McpServerIdleDetected,
+    McpServerQuarantined,
+    McpServerStarted,
+    McpServerStateChanged,
+    McpServerStopped,
     ProviderApproved,
     ProviderCapabilityQuarantined,
     ProviderCapabilityQuarantineReleased,
@@ -46,13 +58,12 @@ from .event_upcaster import UpcasterChain
 
 logger = get_logger(__name__)
 
-# Registry of event types for deserialization
 EVENT_TYPE_MAP: dict[str, type[DomainEvent]] = {
-    # Provider Lifecycle
-    "ProviderStarted": ProviderStarted,
-    "ProviderStopped": ProviderStopped,
-    "ProviderDegraded": ProviderDegraded,
-    "ProviderStateChanged": ProviderStateChanged,
+    # McpServer Lifecycle
+    "McpServerStarted": McpServerStarted,
+    "McpServerStopped": McpServerStopped,
+    "McpServerDegraded": McpServerDegraded,
+    "McpServerStateChanged": McpServerStateChanged,
     "ProviderIdleDetected": ProviderIdleDetected,
     # Circuit Breaker
     "CircuitBreakerStateChanged": CircuitBreakerStateChanged,
@@ -85,13 +96,29 @@ EVENT_TYPE_MAP: dict[str, type[DomainEvent]] = {
     "ToolApprovalExpired": ToolApprovalExpired,
 }
 
+_EVENT_CLASS_BY_TYPE: dict[str, type[DomainEvent]] = {
+    **EVENT_TYPE_MAP,
+    "ProviderStarted": ProviderStarted,
+    "ProviderStopped": ProviderStopped,
+    "ProviderDegraded": ProviderDegraded,
+    "ProviderStateChanged": ProviderStateChanged,
+    "McpServerIdleDetected": McpServerIdleDetected,
+    "McpServerDiscovered": McpServerDiscovered,
+    "McpServerDiscoveryLost": McpServerDiscoveryLost,
+    "McpServerDiscoveryConfigChanged": McpServerDiscoveryConfigChanged,
+    "McpServerQuarantined": McpServerQuarantined,
+    "McpServerApproved": McpServerApproved,
+    "McpServerCapabilityQuarantined": McpServerCapabilityQuarantined,
+    "McpServerCapabilityQuarantineReleased": McpServerCapabilityQuarantineReleased,
+}
+
 EVENT_VERSION_MAP: dict[str, int] = {
-    # Provider Lifecycle
-    "ProviderStarted": 1,
-    "ProviderStopped": 1,
-    "ProviderDegraded": 1,
-    "ProviderStateChanged": 1,
-    "ProviderIdleDetected": 1,
+    # McpServer Lifecycle
+    "McpServerStarted": 1,
+    "McpServerStopped": 1,
+    "McpServerDegraded": 1,
+    "McpServerStateChanged": 1,
+    "McpServerIdleDetected": 1,
     # Circuit Breaker
     "CircuitBreakerStateChanged": 1,
     # Tool Invocation
@@ -102,18 +129,18 @@ EVENT_VERSION_MAP: dict[str, int] = {
     "HealthCheckPassed": 1,
     "HealthCheckFailed": 1,
     # Discovery
-    "ProviderDiscovered": 1,
-    "ProviderDiscoveryLost": 1,
-    "ProviderDiscoveryConfigChanged": 1,
-    "ProviderQuarantined": 1,
-    "ProviderApproved": 1,
+    "McpServerDiscovered": 1,
+    "McpServerDiscoveryLost": 1,
+    "McpServerDiscoveryConfigChanged": 1,
+    "McpServerQuarantined": 1,
+    "McpServerApproved": 1,
     "DiscoveryCycleCompleted": 1,
     "DiscoverySourceHealthChanged": 1,
     # Capability enforcement
     "CapabilityViolationDetected": 2,
     "EgressBlocked": 1,
-    "ProviderCapabilityQuarantined": 1,
-    "ProviderCapabilityQuarantineReleased": 1,
+    "McpServerCapabilityQuarantined": 1,
+    "McpServerCapabilityQuarantineReleased": 1,
     # Policy push
     "PolicyPushRejected": 1,
     # Approval Gate
@@ -201,11 +228,11 @@ class EventSerializer:
         Raises:
             EventSerializationError: If deserialization fails.
         """
-        event_class = EVENT_TYPE_MAP.get(event_type)
+        event_class = _EVENT_CLASS_BY_TYPE.get(event_type)
         if not event_class:
             raise EventSerializationError(
                 event_type,
-                f"Unknown event type. Known types: {list(EVENT_TYPE_MAP.keys())}",
+                f"Unknown event type. Known types: {list(_EVENT_CLASS_BY_TYPE.keys())}",
             )
 
         try:
@@ -310,11 +337,12 @@ class EventSerializer:
 def register_event_type(event_class: type[DomainEvent]) -> None:
     """Register a custom event type for deserialization.
 
-    Use this to register event types from other modules (e.g., provider_group events).
+    Use this to register event types from other modules (e.g., mcp_server_group events).
 
     Args:
         event_class: The event class to register.
     """
     event_type = event_class.__name__
     EVENT_TYPE_MAP[event_type] = event_class
+    _EVENT_CLASS_BY_TYPE[event_type] = event_class
     logger.debug("event_type_registered", event_type=event_type)

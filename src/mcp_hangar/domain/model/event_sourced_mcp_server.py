@@ -1,4 +1,4 @@
-"""Event Sourced Provider aggregate - provider that rebuilds state from events."""
+"""Event Sourced McpServer aggregate - mcp_server that rebuilds state from events."""
 
 from dataclasses import dataclass
 import threading
@@ -9,28 +9,28 @@ from ..events import (
     DomainEvent,
     HealthCheckFailed,
     HealthCheckPassed,
-    ProviderDegraded,
-    ProviderIdleDetected,
-    ProviderStarted,
-    ProviderStateChanged,
-    ProviderStopped,
+    McpServerDegraded,
+    McpServerIdleDetected,
+    McpServerStarted,
+    McpServerStateChanged,
+    McpServerStopped,
     ToolInvocationCompleted,
     ToolInvocationFailed,
     ToolInvocationRequested,
 )
-from ..value_objects import ProviderId
+from ..value_objects import McpServerId
 from .health_tracker import HealthTracker
-from .provider import Provider, ProviderState
+from .mcp_server import McpServer, McpServerState
 from .tool_catalog import ToolCatalog
 
 logger = get_logger(__name__)
 
 
 @dataclass
-class ProviderSnapshot:
-    """Snapshot of provider state for faster loading."""
+class McpServerSnapshot:
+    """Snapshot of mcp_server state for faster loading."""
 
-    provider_id: str
+    mcp_server_id: str
     mode: str
     state: str
     version: int
@@ -51,10 +51,14 @@ class ProviderSnapshot:
     meta: dict[str, Any]
     circuit_breaker_state: dict[str, Any] | None = None
 
+    @property
+    def provider_id(self) -> str:
+        return self.mcp_server_id
+
     def to_dict(self) -> dict[str, Any]:
         """Convert to dictionary for serialization."""
         return {
-            "provider_id": self.provider_id,
+            "mcp_server_id": self.mcp_server_id,
             "mode": self.mode,
             "state": self.state,
             "version": self.version,
@@ -77,10 +81,10 @@ class ProviderSnapshot:
         }
 
     @classmethod
-    def from_dict(cls, d: dict[str, Any]) -> "ProviderSnapshot":
+    def from_dict(cls, d: dict[str, Any]) -> "McpServerSnapshot":
         """Create from dictionary."""
         return cls(
-            provider_id=d["provider_id"],
+            mcp_server_id=d["mcp_server_id"],
             mode=d["mode"],
             state=d["state"],
             version=d["version"],
@@ -103,9 +107,9 @@ class ProviderSnapshot:
         )
 
 
-class EventSourcedProvider(Provider):
+class EventSourcedMcpServer(McpServer):
     """
-    Provider that rebuilds its state from domain events.
+    McpServer that rebuilds its state from domain events.
 
     Supports:
     - Loading from event stream
@@ -116,7 +120,7 @@ class EventSourcedProvider(Provider):
 
     def __init__(
         self,
-        provider_id: str,
+        mcp_server_id: str,
         mode: str,
         command: list[str] | None = None,
         image: str | None = None,
@@ -126,14 +130,14 @@ class EventSourcedProvider(Provider):
         health_check_interval_s: int = 60,
         max_consecutive_failures: int = 3,
     ):
-        # Don't call super().__init__ to avoid recording ProviderStateChanged
+        # Don't call super().__init__ to avoid recording McpServerStateChanged
         # Instead, manually initialize fields
         from .aggregate import AggregateRoot
 
         AggregateRoot.__init__(self)
 
         # Identity
-        self._id = ProviderId(provider_id)
+        self._id = McpServerId(mcp_server_id)
         self._mode = mode
 
         # Configuration
@@ -145,7 +149,7 @@ class EventSourcedProvider(Provider):
         self._health_check_interval_s = health_check_interval_s
 
         # State - start in COLD
-        self._state = ProviderState.COLD
+        self._state = McpServerState.COLD
         self._health = HealthTracker(max_consecutive_failures=max_consecutive_failures)
         self._tools = ToolCatalog()
         self._client: Any | None = None
@@ -161,7 +165,7 @@ class EventSourcedProvider(Provider):
     @classmethod
     def from_events(
         cls,
-        provider_id: str,
+        mcp_server_id: str,
         mode: str,
         events: list[DomainEvent],
         command: list[str] | None = None,
@@ -171,13 +175,13 @@ class EventSourcedProvider(Provider):
         idle_ttl_s: int = 300,
         health_check_interval_s: int = 60,
         max_consecutive_failures: int = 3,
-    ) -> "EventSourcedProvider":
+    ) -> "EventSourcedMcpServer":
         """
-        Create a provider by replaying events.
+        Create a mcp_server by replaying events.
 
         Args:
-            provider_id: Provider identifier
-            mode: Provider mode
+            mcp_server_id: McpServer identifier
+            mode: McpServer mode
             events: List of domain events to replay
             command: Command for subprocess mode
             image: Docker image for docker mode
@@ -188,10 +192,10 @@ class EventSourcedProvider(Provider):
             max_consecutive_failures: Max failures before degradation
 
         Returns:
-            Provider with state rebuilt from events
+            McpServer with state rebuilt from events
         """
-        provider = cls(
-            provider_id=provider_id,
+        mcp_server = cls(
+            mcp_server_id=mcp_server_id,
             mode=mode,
             command=command,
             image=image,
@@ -203,26 +207,26 @@ class EventSourcedProvider(Provider):
         )
 
         for event in events:
-            provider._apply_event(event)
+            mcp_server._apply_event(event)
 
-        return provider
+        return mcp_server
 
     @classmethod
     def from_snapshot(
-        cls, snapshot: ProviderSnapshot, events: list[DomainEvent] | None = None
-    ) -> "EventSourcedProvider":
+        cls, snapshot: McpServerSnapshot, events: list[DomainEvent] | None = None
+    ) -> "EventSourcedMcpServer":
         """
-        Create a provider from snapshot and subsequent events.
+        Create a mcp_server from snapshot and subsequent events.
 
         Args:
-            snapshot: Provider state snapshot
+            snapshot: McpServer state snapshot
             events: Events that occurred after the snapshot
 
         Returns:
-            Provider with state rebuilt from snapshot + events
+            McpServer with state rebuilt from snapshot + events
         """
-        provider = cls(
-            provider_id=snapshot.provider_id,
+        mcp_server = cls(
+            mcp_server_id=snapshot.mcp_server_id,
             mode=snapshot.mode,
             command=snapshot.command,
             image=snapshot.image,
@@ -234,31 +238,35 @@ class EventSourcedProvider(Provider):
         )
 
         # Restore state from snapshot
-        provider._state = ProviderState(snapshot.state)
-        provider._version = snapshot.version
+        mcp_server._state = McpServerState(snapshot.state)
+        mcp_server._version = snapshot.version
 
         # Restore health tracker state
-        provider._health._consecutive_failures = snapshot.consecutive_failures
-        provider._health._total_failures = snapshot.total_failures
-        provider._health._total_invocations = snapshot.total_invocations
-        provider._health._last_success_at = snapshot.last_success_at
-        provider._health._last_failure_at = snapshot.last_failure_at
+        mcp_server._health._consecutive_failures = snapshot.consecutive_failures
+        mcp_server._health._total_failures = snapshot.total_failures
+        mcp_server._health._total_invocations = snapshot.total_invocations
+        mcp_server._health._last_success_at = snapshot.last_success_at
+        mcp_server._health._last_failure_at = snapshot.last_failure_at
 
         # Restore tools (just names, no full schemas)
         for tool_name in snapshot.tool_names:
-            provider._tools._tools[tool_name] = {"name": tool_name}
+            mcp_server._tools._tools[tool_name] = {"name": tool_name}
 
         # Restore other state
-        provider._last_used = snapshot.last_used
-        provider._meta = dict(snapshot.meta)
-        provider._events_applied = snapshot.version
+        mcp_server._last_used = snapshot.last_used
+        mcp_server._meta = dict(snapshot.meta)
+        mcp_server._events_applied = snapshot.version
 
         # Apply subsequent events
         if events:
             for event in events:
-                provider._apply_event(event)
+                mcp_server._apply_event(event)
 
-        return provider
+        return mcp_server
+
+    @property
+    def provider_id(self) -> str:
+        return self.mcp_server_id
 
     def _apply_event(self, event: DomainEvent) -> None:
         """
@@ -270,13 +278,13 @@ class EventSourcedProvider(Provider):
         self._events_applied += 1
         self._increment_version()
 
-        if isinstance(event, ProviderStarted):
-            self._apply_provider_started(event)
-        elif isinstance(event, ProviderStopped):
-            self._apply_provider_stopped(event)
-        elif isinstance(event, ProviderDegraded):
-            self._apply_provider_degraded(event)
-        elif isinstance(event, ProviderStateChanged):
+        if isinstance(event, McpServerStarted):
+            self._apply_mcp_server_started(event)
+        elif isinstance(event, McpServerStopped):
+            self._apply_mcp_server_stopped(event)
+        elif isinstance(event, McpServerDegraded):
+            self._apply_mcp_server_degraded(event)
+        elif isinstance(event, McpServerStateChanged):
             self._apply_state_changed(event)
         elif isinstance(event, ToolInvocationRequested):
             self._apply_tool_requested(event)
@@ -288,33 +296,33 @@ class EventSourcedProvider(Provider):
             self._apply_health_passed(event)
         elif isinstance(event, HealthCheckFailed):
             self._apply_health_failed(event)
-        elif isinstance(event, ProviderIdleDetected):
+        elif isinstance(event, McpServerIdleDetected):
             self._apply_idle_detected(event)
 
-    def _apply_provider_started(self, event: ProviderStarted) -> None:
-        """Apply ProviderStarted event."""
-        self._state = ProviderState.READY
+    def _apply_mcp_server_started(self, event: McpServerStarted) -> None:
+        """Apply McpServerStarted event."""
+        self._state = McpServerState.READY
         self._mode = event.mode
         self._health._consecutive_failures = 0
         self._last_used = event.occurred_at
         self._meta["started_at"] = event.occurred_at
         self._meta["tools_count"] = event.tools_count
 
-    def _apply_provider_stopped(self, event: ProviderStopped) -> None:
-        """Apply ProviderStopped event."""
-        self._state = ProviderState.COLD
+    def _apply_mcp_server_stopped(self, event: McpServerStopped) -> None:
+        """Apply McpServerStopped event."""
+        self._state = McpServerState.COLD
         self._client = None
         self._tools.clear()
 
-    def _apply_provider_degraded(self, event: ProviderDegraded) -> None:
-        """Apply ProviderDegraded event."""
-        self._state = ProviderState.DEGRADED
+    def _apply_mcp_server_degraded(self, event: McpServerDegraded) -> None:
+        """Apply McpServerDegraded event."""
+        self._state = McpServerState.DEGRADED
         self._health._consecutive_failures = event.consecutive_failures
         self._health._total_failures = event.total_failures
 
-    def _apply_state_changed(self, event: ProviderStateChanged) -> None:
-        """Apply ProviderStateChanged event."""
-        self._state = ProviderState(event.new_state)
+    def _apply_state_changed(self, event: McpServerStateChanged) -> None:
+        """Apply McpServerStateChanged event."""
+        self._state = McpServerState(event.new_state)
 
     def _apply_tool_requested(self, event: ToolInvocationRequested) -> None:
         """Apply ToolInvocationRequested event."""
@@ -342,21 +350,21 @@ class EventSourcedProvider(Provider):
         self._health._consecutive_failures = event.consecutive_failures
         self._health._last_failure_at = event.occurred_at
 
-    def _apply_idle_detected(self, event: ProviderIdleDetected) -> None:
-        """Apply ProviderIdleDetected event."""
+    def _apply_idle_detected(self, event: McpServerIdleDetected) -> None:
+        """Apply McpServerIdleDetected event."""
         # Just a marker event, no state change
         pass
 
-    def create_snapshot(self) -> ProviderSnapshot:
+    def create_snapshot(self) -> McpServerSnapshot:
         """
         Create a snapshot of current state.
 
         Returns:
-            ProviderSnapshot that can be serialized
+            McpServerSnapshot that can be serialized
         """
         with self._lock:
-            return ProviderSnapshot(
-                provider_id=self.provider_id,
+            return McpServerSnapshot(
+                mcp_server_id=self.mcp_server_id,
                 mode=self._mode,
                 state=self._state.value,
                 version=self._version,
@@ -382,19 +390,19 @@ class EventSourcedProvider(Provider):
         """Number of events applied to this aggregate."""
         return self._events_applied
 
-    def replay_to_version(self, target_version: int, events: list[DomainEvent]) -> "EventSourcedProvider":
+    def replay_to_version(self, target_version: int, events: list[DomainEvent]) -> "EventSourcedMcpServer":
         """
-        Create a new provider at a specific version (time travel).
+        Create a new mcp_server at a specific version (time travel).
 
         Args:
             target_version: Target version to replay to
-            events: All events for this provider
+            events: All events for this mcp_server
 
         Returns:
-            New provider instance at the target version
+            New mcp_server instance at the target version
         """
-        provider = EventSourcedProvider(
-            provider_id=self.provider_id,
+        mcp_server = EventSourcedMcpServer(
+            mcp_server_id=self.mcp_server_id,
             mode=self._mode,
             command=self._command,
             image=self._image,
@@ -408,9 +416,9 @@ class EventSourcedProvider(Provider):
         for i, event in enumerate(events):
             if i >= target_version:
                 break
-            provider._apply_event(event)
+            mcp_server._apply_event(event)
 
-        return provider
+        return mcp_server
 
     def get_uncommitted_events(self) -> list[DomainEvent]:
         """
@@ -424,3 +432,8 @@ class EventSourcedProvider(Provider):
     def mark_events_committed(self) -> None:
         """Clear uncommitted events after persistence."""
         self._uncommitted_events.clear()
+
+
+# legacy aliases
+EventSourcedProvider = EventSourcedMcpServer
+ProviderSnapshot = McpServerSnapshot

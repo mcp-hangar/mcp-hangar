@@ -3,7 +3,7 @@
 > **Prerequisite:** None
 > **You will need:** A running Streamable HTTP MCP server (test server provided below)
 > **Time:** 5 minutes
-> **Adds:** Single remote MCP provider behind Hangar as control plane
+> **Adds:** Single remote MCP server behind Hangar as control plane
 
 ## The Problem
 
@@ -29,7 +29,7 @@ Keep this running in a separate terminal.
 
 ```yaml
 # config.yaml — Recipe 01: HTTP Gateway
-providers:
+mcp_servers:
   my-mcp:
     mode: remote
     endpoint: http://localhost:8080/sse
@@ -56,7 +56,7 @@ Save this as `~/.config/mcp-hangar/config.yaml` or pass it with `--config`.
 
    Hangar responds to MCP initialize. Press Ctrl+C to stop.
 
-2. Check provider status (create test script)
+2. Check MCP server status (create test script)
 
    ```bash
    cat > /tmp/test-hangar.sh << 'EOF'
@@ -78,7 +78,7 @@ Save this as `~/.config/mcp-hangar/config.yaml` or pass it with `--config`.
    {"jsonrpc":"2.0","id":2,"result":{"content":[{"type":"text","text":"...\"id\": \"my-mcp\", \"indicator\": \"[COLD]\", \"state\": \"cold\"..."}]}}
    ```
 
-   Provider shows COLD state (not started yet).
+   MCP Server shows COLD state (not started yet).
 
 3. List tools to trigger cold start
 
@@ -99,10 +99,10 @@ Save this as `~/.config/mcp-hangar/config.yaml` or pass it with `--config`.
    ```
 
    ```json
-   {"jsonrpc":"2.0","id":2,"result":{"content":[{"type":"text","text":"...\"provider\": \"my-mcp\", \"state\": \"ready\", \"mode\": \"subprocess\", \"tools_count\": 2..."}]}}
+   {"jsonrpc":"2.0","id":2,"result":{"content":[{"type":"text","text":"...\"mcp_server\": \"my-mcp\", \"state\": \"ready\", \"mode\": \"subprocess\", \"tools_count\": 2..."}]}}
    ```
 
-   Provider transitioned to READY and discovered tools.
+   MCP Server transitioned to READY and discovered tools.
 
 4. Configure Claude Desktop
 
@@ -121,7 +121,7 @@ Save this as `~/.config/mcp-hangar/config.yaml` or pass it with `--config`.
 
 ## What Just Happened
 
-Hangar loaded your provider configuration and started in stdio mode (JSON-RPC over stdin/stdout). When you sent the `initialize` handshake, Hangar responded with its capabilities. On the first `hangar_list` call, Hangar performed a cold start: it launched the subprocess provider (`uvx mcp-server-fetch` in this example, or connects to remote endpoint if using `mode: remote`), sent MCP `initialize` + `tools/list` to discover available tools, and registered them in its internal registry.
+Hangar loaded your MCP server configuration and started in stdio mode (JSON-RPC over stdin/stdout). When you sent the `initialize` handshake, Hangar responded with its capabilities. On the first `hangar_list` call, Hangar performed a cold start: it launched the subprocess MCP server (`uvx mcp-server-fetch` in this example, or connects to remote endpoint if using `mode: remote`), sent MCP `initialize` + `tools/list` to discover available tools, and registered them in its internal registry.
 
 The test MCP server doesn't know Hangar exists — it sees standard MCP JSON-RPC requests. This is a transparent proxy pattern. Hangar adds nothing yet: no health checks, no circuit breaker, no authentication. That's the point — recipe 01 is the baseline.
 
@@ -129,7 +129,7 @@ The test MCP server doesn't know Hangar exists — it sees standard MCP JSON-RPC
 
 | Key | Type | Default | Description |
 |-----|------|---------|-------------|
-| `mode` | string | — | Provider mode. Use `remote` for HTTP/SSE providers |
+| `mode` | string | — | MCP Server mode. Use `remote` for HTTP/SSE MCP servers |
 | `endpoint` | string | — | Full URL of the remote MCP server (including path) |
 | `description` | string | `""` | Human-readable description shown in status |
 | `http.connect_timeout` | float | `10.0` | TCP connection timeout in seconds |
@@ -137,6 +137,6 @@ The test MCP server doesn't know Hangar exists — it sees standard MCP JSON-RPC
 
 ## What's Next
 
-Your MCP server is proxied — but what happens when it goes down? Right now, Hangar sends requests into the void and forwards the error. You need visibility into provider health before failures surprise you.
+Your MCP server is proxied — but what happens when it goes down? Right now, Hangar sends requests into the void and forwards the error. You need visibility into MCP server health before failures surprise you.
 
 → [02 — Health Checks](02-health-checks.md)

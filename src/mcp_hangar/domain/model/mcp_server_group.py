@@ -1,6 +1,6 @@
-"""Provider Group Aggregate - manages a group of providers with load balancing.
+"""McpServer Group Aggregate - manages a group of mcp_servers with load balancing.
 
-A ProviderGroup is an aggregate root that manages multiple Provider instances
+A McpServerGroup is an aggregate root that manages multiple McpServer instances
 as a single logical unit with automatic load balancing and failover.
 """
 
@@ -11,12 +11,12 @@ from typing import Any, TYPE_CHECKING
 
 from ...logging_config import get_logger
 from ..events import CircuitBreakerStateChanged, DomainEvent
-from ..exceptions import ProviderStartError, CannotStartProviderError
-from ..value_objects import GroupId, GroupState, LoadBalancerStrategy, MemberPriority, MemberWeight, ProviderState
+from ..exceptions import McpServerStartError, CannotStartMcpServerError
+from ..value_objects import GroupId, GroupState, LoadBalancerStrategy, MemberPriority, MemberWeight, McpServerState
 from .aggregate import AggregateRoot
 from .circuit_breaker import CircuitBreaker, CircuitBreakerConfig
 from .load_balancer import LoadBalancer
-from .provider import Provider
+from .mcp_server import McpServer
 
 if TYPE_CHECKING:
     from ...infrastructure.lock_hierarchy import TrackedLock
@@ -29,7 +29,7 @@ logger = get_logger(__name__)
 
 @dataclass
 class GroupCreated(DomainEvent):
-    """Published when a provider group is created."""
+    """Published when a mcp_server group is created."""
 
     group_id: str
     strategy: str
@@ -136,9 +136,9 @@ class GroupDeleted(DomainEvent):
 
 @dataclass
 class GroupMember:
-    """A member of a provider group."""
+    """A member of a mcp_server group."""
 
-    provider: Provider
+    mcp_server: McpServer
     weight: int = 1
     priority: int = 1
     in_rotation: bool = False  # Currently accepting traffic
@@ -148,17 +148,17 @@ class GroupMember:
 
     @property
     def id(self) -> str:
-        """Get member's provider ID as string."""
-        # provider.id returns str (from Provider class)
-        return str(self.provider.id)
+        """Get member's mcp_server ID as string."""
+        # mcp_server.id returns str (from McpServer class)
+        return str(self.mcp_server.id)
 
 
-# --- Provider Group Aggregate ---
+# --- McpServer Group Aggregate ---
 
 
-class ProviderGroup(AggregateRoot):
+class McpServerGroup(AggregateRoot):
     """
-    Aggregate root for a group of load-balanced providers.
+    Aggregate root for a group of load-balanced mcp_servers.
 
     Responsibilities:
     - Manage member lifecycle
@@ -184,7 +184,7 @@ class ProviderGroup(AggregateRoot):
         description: str | None = None,
     ):
         """
-        Initialize a provider group.
+        Initialize a mcp_server group.
 
         Args:
             group_id: Unique identifier for the group
@@ -244,7 +244,7 @@ class ProviderGroup(AggregateRoot):
         try:
             from ...infrastructure.lock_hierarchy import LockLevel, TrackedLock
 
-            return TrackedLock(LockLevel.PROVIDER_GROUP, f"ProviderGroup:{group_id}")
+            return TrackedLock(LockLevel.PROVIDER_GROUP, f"McpServerGroup:{group_id}")
         except ImportError:
             return threading.RLock()
 
@@ -259,7 +259,7 @@ class ProviderGroup(AggregateRoot):
         """
         self._record_event(
             CircuitBreakerStateChanged(
-                provider_id=self._id.value,
+                mcp_server_id=self._id.value,
                 old_state=old_state.value,
                 new_state=new_state.value,
             )
@@ -321,20 +321,20 @@ class ProviderGroup(AggregateRoot):
 
     def add_member(
         self,
-        provider: Provider,
+        mcp_server: McpServer,
         weight: int = 1,
         priority: int = 1,
     ) -> None:
         """
-        Add a provider to the group.
+        Add a mcp_server to the group.
 
         Uses two-phase lock pattern to avoid lock hierarchy violation:
         Phase 1 (locked): Register member, emit event.
-        Phase 2 (unlocked): Call ensure_ready() if auto_start (provider I/O).
+        Phase 2 (unlocked): Call ensure_ready() if auto_start (mcp_server I/O).
         Phase 3 (locked): Update rotation state if member still exists.
 
         Args:
-            provider: Provider instance to add
+            mcp_server: McpServer instance to add
             weight: Load balancing weight (higher = more traffic)
             priority: Priority for priority-based selection (lower = higher priority)
 
@@ -347,7 +347,7 @@ class ProviderGroup(AggregateRoot):
 
         # Phase 1: Register member under lock
         with self._lock:
-            member_id = str(provider.id)
+            member_id = str(mcp_server.id)
 
             if member_id in self._members:
                 raise ValueError(f"Member {member_id} already in group {self.id}")
@@ -357,7 +357,7 @@ class ProviderGroup(AggregateRoot):
             validated_priority = MemberPriority(priority)
 
             member = GroupMember(
-                provider=provider,
+                mcp_server=mcp_server,
                 weight=validated_weight.value,
                 priority=validated_priority.value,
             )
@@ -375,13 +375,13 @@ class ProviderGroup(AggregateRoot):
             logger.info(f"Added member {member_id} to group {self.id} (weight={weight}, priority={priority})")
             need_start = self._auto_start
 
-        # Phase 2: Provider I/O outside lock (avoids level-11-holds-level-10)
+        # Phase 2: McpServer I/O outside lock (avoids level-11-holds-level-10)
         if need_start:
             self._try_start_member_unlocked(member, member_id)
 
     def remove_member(self, member_id: str) -> bool:
         """
-        Remove a provider from the group.
+        Remove a mcp_server from the group.
 
         Args:
             member_id: ID of the member to remove
@@ -412,22 +412,22 @@ class ProviderGroup(AggregateRoot):
     def _try_start_member_unlocked(self, member: GroupMember, member_id: str) -> bool:
         """Try to start a member with two-phase lock pattern.
 
-        Phase 1 (unlocked): Call ensure_ready() -- provider I/O outside group lock
-        to respect lock hierarchy (Provider level 10 < ProviderGroup level 11).
+        Phase 1 (unlocked): Call ensure_ready() -- mcp_server I/O outside group lock
+        to respect lock hierarchy (McpServer level 10 < McpServerGroup level 11).
         Phase 2 (locked): Re-acquire lock to update rotation state. Handles the
         case where the member was removed by another thread during Phase 1.
 
         Args:
             member: The group member to start.
-            member_id: The member's provider ID string.
+            member_id: The member's mcp_server ID string.
 
         Returns:
             True if member started and added to rotation.
         """
-        # Phase 1: Provider I/O outside group lock (respects Provider level 10 < ProviderGroup level 11)
+        # Phase 1: McpServer I/O outside group lock (respects McpServer level 10 < McpServerGroup level 11)
         try:
-            member.provider.ensure_ready()
-        except (ProviderStartError, CannotStartProviderError) as e:
+            member.mcp_server.ensure_ready()
+        except (McpServerStartError, CannotStartMcpServerError) as e:
             logger.warning(f"Failed to start member {member_id}: {e}")
             with self._lock:
                 # Only update if member still exists (may have been removed)
@@ -435,9 +435,9 @@ class ProviderGroup(AggregateRoot):
                     self._members[member_id].in_rotation = False
             return False
 
-        # Read provider state outside group lock to avoid lock order violation
-        # (Provider._lock level 10 must not be acquired while holding ProviderGroup._lock level 11)
-        provider_state = member.provider.state
+        # Read mcp_server state outside group lock to avoid lock order violation
+        # (McpServer._lock level 10 must not be acquired while holding McpServerGroup._lock level 11)
+        mcp_server_state = member.mcp_server.state
 
         # Phase 2: Re-acquire group lock to update rotation state
         with self._lock:
@@ -446,7 +446,7 @@ class ProviderGroup(AggregateRoot):
                 return False
 
             current_member = self._members[member_id]
-            if provider_state == ProviderState.READY:
+            if mcp_server_state == McpServerState.READY:
                 current_member.in_rotation = True
                 current_member.consecutive_failures = 0
                 current_member.consecutive_successes = 1
@@ -466,12 +466,12 @@ class ProviderGroup(AggregateRoot):
 
     # --- Load Balancing ---
 
-    def select_member(self) -> Provider | None:
+    def select_member(self) -> McpServer | None:
         """
         Select a member for the next request using load balancer.
 
         Returns:
-            Selected provider or None if no healthy members available
+            Selected mcp_server or None if no healthy members available
         """
         with self._lock:
             if not self._circuit_breaker.allow_request():
@@ -486,7 +486,7 @@ class ProviderGroup(AggregateRoot):
             selected = self._load_balancer.select(available)
             if selected:
                 selected.last_selected_at = time.time()
-                return selected.provider
+                return selected.mcp_server
 
             return None
 
@@ -519,7 +519,7 @@ class ProviderGroup(AggregateRoot):
         """Add member back to rotation if healthy threshold reached."""
         if member.in_rotation:
             return
-        if member.provider.state_snapshot != ProviderState.READY:
+        if member.mcp_server.state_snapshot != McpServerState.READY:
             return
         if member.consecutive_successes < self._healthy_threshold:
             return
@@ -627,7 +627,7 @@ class ProviderGroup(AggregateRoot):
         """
         with self._lock:
             for member in self._members.values():
-                if member.provider.state_snapshot == ProviderState.READY:
+                if member.mcp_server.state_snapshot == McpServerState.READY:
                     if not member.in_rotation:
                         member.in_rotation = True
                         member.consecutive_failures = 0
@@ -701,7 +701,7 @@ class ProviderGroup(AggregateRoot):
         # Phase 2: Shutdown each member outside lock
         for member_id, member in members_snapshot:
             try:
-                member.provider.shutdown()
+                member.mcp_server.shutdown()
             except Exception as e:  # noqa: BLE001 -- fault-barrier: shutdown of one member must not prevent others
                 logger.warning(f"Failed to stop member {member_id}: {e}")
 
@@ -728,16 +728,16 @@ class ProviderGroup(AggregateRoot):
         """
         with self._lock:
             for member in self._members.values():
-                if member.in_rotation and member.provider.state_snapshot == ProviderState.READY:
-                    return list(member.provider.tools)
+                if member.in_rotation and member.mcp_server.state_snapshot == McpServerState.READY:
+                    return list(member.mcp_server.tools)
             return []
 
     def get_tool_names(self) -> list[str]:
         """Get list of tool names from a healthy member."""
         with self._lock:
             for member in self._members.values():
-                if member.in_rotation and member.provider.state_snapshot == ProviderState.READY:
-                    return member.provider.get_tool_names()
+                if member.in_rotation and member.mcp_server.state_snapshot == McpServerState.READY:
+                    return member.mcp_server.get_tool_names()
             return []
 
     # --- Configuration Update ---
@@ -805,7 +805,7 @@ class ProviderGroup(AggregateRoot):
                 "members": [
                     {
                         "id": m.id,
-                        "state": m.provider.state_snapshot.value,
+                        "state": m.mcp_server.state_snapshot.value,
                         "in_rotation": m.in_rotation,
                         "weight": m.weight,
                         "priority": m.priority,
@@ -814,3 +814,7 @@ class ProviderGroup(AggregateRoot):
                     for m in self._members.values()
                 ],
             }
+
+
+# legacy aliases
+ProviderGroup = McpServerGroup

@@ -13,9 +13,9 @@ Security hardening release addressing findings from the April 2026 security audi
 
 ### Added
 
-- **SSRF Protection**: Block remote provider endpoints resolving to private/link-local addresses (10.0.0.0/8, 127.0.0.0/8, 169.254.0.0/16, etc.)
+- **SSRF Protection**: Block remote MCP server endpoints resolving to private/link-local addresses (10.0.0.0/8, 127.0.0.0/8, 169.254.0.0/16, etc.)
 - **Trusted Proxy Resolver**: `TrustedProxyResolver` with CIDR support, configurable via `MCP_TRUSTED_PROXIES` env var
-- **Granular RBAC Permissions**: `policy:write`, `providers:read`, `providers:write`, `providers:lifecycle`, `config:reload` permissions with `agent` role for hangar-agent tokens
+- **Granular RBAC Permissions**: `policy:write`, `MCP servers:read`, `MCP servers:write`, `MCP servers:lifecycle`, `config:reload` permissions with `agent` role for hangar-agent tokens
 - **Command Allow-List**: Default-deny `ALLOWED_COMMANDS` (node, python, docker, uv, etc.) replaces the old blocklist approach; configurable via `MCP_ALLOWED_COMMANDS` env var
 - **WebSocket Origin Validation**: Validates `Origin` header against CORS config before accepting WebSocket connections
 - **WebSocket Backpressure**: Per-connection bounded queue (maxsize=1024) with subscriber limit (max 100)
@@ -25,7 +25,7 @@ Security hardening release addressing findings from the April 2026 security audi
 
 ### Changed
 
-- **Launcher Architecture**: Provider launchers moved from `domain/services/provider_launcher/` to `infrastructure/launchers/`; old paths are deprecation shims
+- **Launcher Architecture**: MCP Server launchers moved from `domain/services/mcp_server_launcher/` to `infrastructure/launchers/`; old paths are deprecation shims
 - **Server State**: Eager globals replaced with lazy-initialized `server/bootstrap/composition.py`; `ProviderDict` wrapper removed
 - **Enterprise Module Loading**: Uses `importlib.metadata` entry points instead of direct enterprise imports
 - **CORS Defaults**: `allow_credentials=False`, explicit methods and headers instead of wildcards
@@ -36,7 +36,7 @@ Security hardening release addressing findings from the April 2026 security audi
 ### Security
 
 - Command execution restricted to allow-list only (default-deny)
-- SSRF validation on remote provider endpoint URLs
+- SSRF validation on remote MCP server endpoint URLs
 - Trusted proxy CIDR resolution prevents IP spoofing via `X-Forwarded-For`
 - JWT algorithm confusion guard for mixed symmetric/asymmetric families
 - WebSocket CSWSH protection via Origin validation
@@ -54,14 +54,14 @@ First stable release. All public APIs are now covered by semantic versioning gua
   - HMAC signing secret configurable via `HANGAR_LICENSE_HMAC_SECRET` environment variable (no longer hardcoded)
 
 - **Capability Declaration and Enforcement** (Phases 38-41):
-  - `ProviderCapabilities` value object with network, filesystem, environment, tool, and resource declarations
+  - `McpServerCapabilities` value object with network, filesystem, environment, tool, and resource declarations
   - `from_dict()` factory and config.yaml integration for capability blocks
   - Kubernetes CRD types for capabilities with reconciler propagation to status
   - `NetworkPolicyBuilder` pure function generating Kubernetes NetworkPolicy from declared egress rules
   - Docker capabilities-aware network mode in `DockerLauncher`
   - `ViolationType` and `ViolationSeverity` enums with Prometheus violations counter
   - `ViolationRecord` CRD type and `ViolationDetected` condition in operator reconciler
-  - CEL admission validation and `ExpectedTools` field in MCPProvider CRD
+  - CEL admission validation and `ExpectedTools` field in MCPServer CRD
   - Wildcard egress override audit warning event
 
 - **Behavioral Profiling** (Phases 42-44):
@@ -134,7 +134,7 @@ First stable release. All public APIs are now covered by semantic versioning gua
 
 - **REST API Foundation** (Phases 11-12):
   - Full REST API at `/api/` prefix with CORS middleware, JSON serializers, and error handling
-  - Provider endpoints: list, detail, start, stop, tool invocation history
+  - MCP Server endpoints: list, detail, start, stop, tool invocation history
   - Group and discovery source management endpoints
   - Config and system status endpoints
   - Auth endpoints with API key and role management
@@ -142,17 +142,17 @@ First stable release. All public APIs are now covered by semantic versioning gua
   - WebSocket infrastructure: `ws_events_endpoint`, `ws_state_endpoint`, connection manager with queue and filters
   - `EventBus.unsubscribe_from_all` for WebSocket lifecycle
 
-- **Provider Log Streaming** (Phases 21-22):
+- **MCP Server Log Streaming** (Phases 21-22):
   - `LogLine` value object, `IProviderLogBuffer` contract, and `ProviderLogBuffer` ring buffer
-  - Live stderr-reader threads for subprocess and Docker providers
-  - `GET /api/providers/{id}/logs` REST endpoint with `lines` parameter
-  - `LogStreamBroadcaster` and `/ws/providers/{id}/logs` WebSocket endpoint
+  - Live stderr-reader threads for subprocess and Docker MCP servers
+  - `GET /api/mcp_servers/{id}/logs` REST endpoint with `lines` parameter
+  - `LogStreamBroadcaster` and `/ws/MCP servers/{id}/logs` WebSocket endpoint
 
-- **Provider/Group CRUD** (Phase 23):
-  - Provider CRUD events, commands, and handlers (create, update, delete)
-  - Group CRUD handlers with `ProviderGroup.update()` and `to_config_dict()`
+- **MCP Server/Group CRUD** (Phase 23):
+  - MCP Server CRUD events, commands, and handlers (create, update, delete)
+  - Group CRUD handlers with `McpServerGroup.update()` and `to_config_dict()`
   - Config serializer module for export/backup
-  - Provider and group CRUD REST endpoints
+  - MCP Server and group CRUD REST endpoints
   - Config export and backup endpoints
   - Integration tests for CRUD operations and config serializer
 
@@ -208,20 +208,20 @@ First stable release. All public APIs are now covered by semantic versioning gua
 
 - **Health Check Scheduling**: State-aware `BackgroundWorker` with adaptive health check intervals
   - `HealthTracker` jitter on backoff to prevent thundering herd
-  - State-dependent check intervals (healthy vs degraded providers)
+  - State-dependent check intervals (healthy vs degraded MCP servers)
 
 - **CommandBus Middleware Pipeline**: Extensible middleware support for cross-cutting concerns
   - `RateLimitMiddleware` wired into bootstrap for command-level rate limiting
 
 - **Docker Discovery Resilience**: Reconnection with exponential backoff on Docker daemon failures
 
-- **Property-Based Testing**: Hypothesis-powered state machine tests for Provider aggregate
+- **Property-Based Testing**: Hypothesis-powered state machine tests for MCP Server aggregate
 
 - **PEP 561 Support**: `py.typed` marker for downstream type checking
 
 ### Fixed
 
-- **Concurrency Safety**: `ProviderGroup` lock hierarchy violation (CONC-01) resolved
+- **Concurrency Safety**: `McpServerGroup` lock hierarchy violation (CONC-01) resolved
 - **invoke_tool() Refresh**: Split into two-lock-cycle pattern (CONC-03) to avoid holding locks during I/O
 - **ensure_ready()/_start()**: Restructured with `threading.Event` coordination for safer startup
 - **Exception Hygiene**: All exception catches across domain, application, infrastructure, and server layers
@@ -230,7 +230,7 @@ First stable release. All public APIs are now covered by semantic versioning gua
 
 ### Changed
 
-- Discovery pipeline now validates commands before provider registration
+- Discovery pipeline now validates commands before MCP server registration
 - `StdioClient` ordering invariant documented with regression tests
 
 ## [0.10.0] - 2026-03-01
@@ -238,7 +238,7 @@ First stable release. All public APIs are now covered by semantic versioning gua
 ### Added
 
 - **Kubernetes Operator Controllers**:
-  - `MCPProviderGroupReconciler` with label selection and status aggregation
+  - `MCPServerGroupReconciler` with label selection and status aggregation
   - `MCPDiscoverySourceReconciler` with 4 discovery modes
   - envtest integration tests for both controllers
 
@@ -247,7 +247,7 @@ First stable release. All public APIs are now covered by semantic versioning gua
 - **Documentation Content**:
   - Configuration Reference page
   - MCP Tools Reference page
-  - Provider Groups Guide
+  - MCP Server Groups Guide
   - Facade API Guide
   - Updated mkdocs.yml navigation
 
@@ -300,10 +300,10 @@ First stable release. All public APIs are now covered by semantic versioning gua
 
 ### Added
 
-- **Tool Access Filtering**: Config-driven tool visibility control per provider, group, or member
+- **Tool Access Filtering**: Config-driven tool visibility control per MCP server, group, or member
   - `ToolAccessPolicy` value object with fnmatch glob pattern support (`*`, `?`, `[seq]`)
   - `ToolsConfig` dataclass for YAML configuration with `allow_list` and `deny_list`
-  - `ToolAccessResolver` domain service with 3-level policy merge (provider -> group -> member)
+  - `ToolAccessResolver` domain service with 3-level policy merge (MCP server -> group -> member)
   - Caching with automatic invalidation on policy changes
   - `ToolAccessDeniedError` exception for filtered tools (does not leak policy details)
   - Integration with hot-loading (`LoadProviderCommand.allow_tools/deny_tools`)
@@ -312,7 +312,7 @@ First stable release. All public APIs are now covered by semantic versioning gua
   - Example config:
 
     ```yaml
-    providers:
+    mcp_servers:
       grafana:
         tools:
           deny_list:
@@ -320,13 +320,13 @@ First stable release. All public APIs are now covered by semantic versioning gua
             - create_alert_rule
     ```
 
-- **Container Command Override**: Docker/Podman providers can now override container entrypoint
+- **Container Command Override**: Docker/Podman MCP servers can now override container entrypoint
   - `container.command` — list of strings to override container entrypoint
   - `container.args` — additional arguments passed after command
   - Example config:
 
     ```yaml
-    providers:
+    mcp_servers:
       custom:
         mode: docker
         image: my-mcp-server:latest
@@ -337,7 +337,7 @@ First stable release. All public APIs are now covered by semantic versioning gua
 
 ### Changed
 
-- `ProviderState` is now exported from `mcp_hangar.domain.model` module
+- `McpServerState` is now exported from `mcp_hangar.domain.model` module
 
 ## [0.7.0] - 2026-02-08
 
@@ -347,19 +347,19 @@ First stable release. All public APIs are now covered by semantic versioning gua
   tool invocations through `Hangar.invoke()`. Default: 20, range: 1-100.
   - Also exposed in `HangarConfigData.max_concurrency` and `to_dict()` output
   - Constants `FACADE_DEFAULT_CONCURRENCY` (20) and `FACADE_MAX_CONCURRENCY` (100) exported from `facade` module
-- **Two-level concurrency model**: New `ConcurrencyManager` with global and per-provider semaphores
-  - Global semaphore limits total in-flight calls across all providers and batches (default: 50)
-  - Per-provider semaphores limit concurrent calls to each individual provider (default: 10)
-  - Consistent lock ordering (global-first, then provider) prevents deadlocks
+- **Two-level concurrency model**: New `ConcurrencyManager` with global and per-MCP server semaphores
+  - Global semaphore limits total in-flight calls across all MCP servers and batches (default: 50)
+  - Per-MCP server semaphores limit concurrent calls to each individual MCP server (default: 10)
+  - Consistent lock ordering (global-first, then MCP server) prevents deadlocks
   - All calls submitted to thread pool at once — no more sequential chunking into waves
   - Calls start as soon as any slot is free, enabling true parallel execution
 - **Concurrency configuration**: New `execution` section in `config.yaml`
-  - `execution.max_concurrency` — global limit across all providers
-  - `execution.default_provider_concurrency` — default per-provider limit
-  - Per-provider `max_concurrency` override in provider config
+  - `execution.max_concurrency` — global limit across all MCP servers
+  - `execution.default_mcp_server_concurrency` — default per-MCP server limit
+  - Per-MCP server `max_concurrency` override in MCP server config
 - **Concurrency observability**: New Prometheus metrics for concurrency control
   - `mcp_hangar_batch_inflight_calls` — global in-flight call gauge
-  - `mcp_hangar_batch_inflight_calls_per_provider` — per-provider in-flight gauge
+  - `mcp_hangar_batch_inflight_calls_per_mcp_server` — per-MCP server in-flight gauge
   - `mcp_hangar_batch_concurrency_wait_seconds` — histogram of slot acquisition wait time
   - `mcp_hangar_batch_concurrency_queued` — gauge of calls queued due to contention
 - **Concurrency test suite**: 40 new unit tests covering limits, isolation, metrics, parallelism, thread safety, and backward compatibility
@@ -376,7 +376,7 @@ First stable release. All public APIs are now covered by semantic versioning gua
 - **Facade hardcoded concurrency limit**: `Hangar.invoke()` was hardcoded to 4 concurrent threads
   (`ThreadPoolExecutor(max_workers=4)`), causing parallel calls to execute in sequential waves of 4.
   Default increased to 20 and made configurable via `HangarConfig.max_concurrency()`. This masked the
-  true parallelism benefits of the MCP provider architecture (e.g., 20 parallel 100ms calls took ~520ms
+  true parallelism benefits of the MCP server architecture (e.g., 20 parallel 100ms calls took ~520ms
   instead of ~110ms).
 - **Import ordering**: Fixed isort violations in `scripts/validate_config.py` and `examples/discovery/test_container_discovery.py`
 - **E402 violations**: Moved mid-file imports to top of file in `examples/auth-keycloak/test_keycloak_integration.py`
@@ -390,7 +390,7 @@ First stable release. All public APIs are now covered by semantic versioning gua
   - `test_watchdog_detects_file_modification`: Increased watchdog initialization time and debounce wait
   - `test_multiple_rapid_changes_debounced_in_watchdog`: Added explicit polling interval configuration
   - `test_polling_detects_file_modification`: Ensured sufficient mtime difference for detection
-- **CLI add provider test**: Fixed assertion to accept both uvx and npx package names
+- **CLI add MCP server test**: Fixed assertion to accept both uvx and npx package names
   - Test now correctly validates `mcp-server-fetch` (uvx) or `@modelcontextprotocol/server-fetch` (npx)
 
 ## [0.6.6] - 2026-02-06
@@ -398,10 +398,10 @@ First stable release. All public APIs are now covered by semantic versioning gua
 ### Added
 
 - **Cookbook Documentation**: Step-by-step production recipes for MCP Hangar
-  - Recipe 01 — HTTP Gateway: Single MCP provider behind Hangar as control plane
+  - Recipe 01 — HTTP Gateway: Single MCP server behind Hangar as control plane
   - Recipe 02 — Health Checks: Automatic health monitoring with state transitions on failure
-  - Recipe 03 — Circuit Breaker: Provider groups with circuit breaker for fast-fail protection
-  - Recipe 04 — Failover: Automatic failover to backup provider with priority-based routing
+  - Recipe 03 — Circuit Breaker: MCP Server groups with circuit breaker for fast-fail protection
+  - Recipe 04 — Failover: Automatic failover to backup MCP server with priority-based routing
   - All recipes include complete config, step-by-step Try It sections, and technical explanations
   - Recipes build on each other sequentially (01 → 02 → 03 → 04)
   - Each recipe validated with working configs and real Hangar tests
@@ -411,25 +411,25 @@ First stable release. All public APIs are now covered by semantic versioning gua
   - Automatic file watching via watchdog (inotify/fsevents) with polling fallback
   - SIGHUP signal handler for Unix-style reload
   - New MCP tool `hangar_reload_config` for interactive reload from AI assistant
-  - Intelligent diff: only restarts providers with changed configuration
-  - Unchanged providers preserve their state and active connections
+  - Intelligent diff: only restarts MCP servers with changed configuration
+  - Unchanged MCP servers preserve their state and active connections
   - Atomic reload: invalid configuration is rejected, current config preserved
   - New domain events: `ConfigurationReloadRequested`, `ConfigurationReloaded`, `ConfigurationReloadFailed`
   - New command: `ReloadConfigurationCommand` with CQRS handler
   - Background worker `ConfigReloadWorker` for automatic file monitoring
   - Configurable via `config_reload` section in config.yaml
 
-- **Init Dependency Detection**: `mcp-hangar init` now detects available runtimes before offering providers
+- **Init Dependency Detection**: `mcp-hangar init` now detects available runtimes before offering MCP servers
   - Step 0 checks for `npx`, `uvx`, `docker`, `podman` in PATH
-  - Providers filtered by available dependencies (npx-based providers hidden when Node.js not installed)
+  - MCP servers filtered by available dependencies (npx-based MCP servers hidden when Node.js not installed)
   - Clear error message with install instructions when no runtimes found
-  - Unavailable providers shown grayed out with "(requires npx)" hint
-  - Bundles automatically filtered to only include installable providers
+  - Unavailable MCP servers shown grayed out with "(requires npx)" hint
+  - Bundles automatically filtered to only include installable MCP servers
   - New module: `dependency_detector.py` with `DependencyStatus`, `detect_dependencies()`
 
-- **Init Smoke Test**: `mcp-hangar init` now tests providers after configuration
-  - Step 5 starts each provider and waits for READY state (max 10s total)
-  - Shows green checkmark per provider on success: `✓ filesystem ready (1234ms)`
+- **Init Smoke Test**: `mcp-hangar init` now tests MCP servers after configuration
+  - Step 5 starts each MCP server and waits for READY state (max 10s total)
+  - Shows green checkmark per MCP server on success: `✓ filesystem ready (1234ms)`
   - Shows detailed error with actionable suggestion on failure
   - Summary shows pass/fail count before "Restart Claude Desktop" prompt
   - Skip with `--skip-test` flag if needed
@@ -437,21 +437,21 @@ First stable release. All public APIs are now covered by semantic versioning gua
 
 - **Init Existing Config Handling**: `mcp-hangar init` now handles existing configuration safely
   - Interactive mode prompts with three options: Merge, Backup & Overwrite, Abort
-  - Merge: Adds new providers while preserving existing ones (no overwrites)
+  - Merge: Adds new MCP servers while preserving existing ones (no overwrites)
   - Backup & Overwrite: Creates timestamped backup, then replaces with new config
   - Abort: Cancels init, preserves existing configuration unchanged
   - Non-interactive mode (`-y`): Always creates backup then overwrites
   - `--reset` flag: Overwrites without backup or prompt
   - Never silently overwrites existing configuration
-  - New method: `ConfigFileManager.merge_providers()` for safe merging
+  - New method: `ConfigFileManager.merge_mcp_servers()` for safe merging
 
 - **Init uvx Support (Dual-Stack)**: `mcp-hangar init` now supports uvx as alternative to npx
-  - Providers with Python equivalents can now run via uvx when Node.js not available
+  - MCP servers with Python equivalents can now run via uvx when Node.js not available
   - Runtime priority: uvx > npx (dogfooding - MCP Hangar is Python-based)
   - Mapping: `npx @modelcontextprotocol/server-fetch` -> `uvx mcp-server-fetch`
-  - All starter providers (filesystem, fetch, memory) have uvx packages
+  - All starter MCP servers (filesystem, fetch, memory) have uvx packages
   - Config generates appropriate command based on detected runtimes
-  - Provider unavailable only if NO suitable runtime available
+  - MCP Server unavailable only if NO suitable runtime available
   - puppeteer remains npx-only (no Python equivalent)
   - New fields in `ProviderDefinition`: `uvx_package`, `get_preferred_runtime()`, `get_command_package()`
 
@@ -484,13 +484,13 @@ config_reload:
 ### Added
 
 - **Metrics Population**: Prometheus metrics now emit data from domain events
-  - Provider state metrics: `mcp_hangar_provider_state`, `mcp_hangar_provider_up`, `mcp_hangar_provider_starts_total`, `mcp_hangar_provider_stops_total`
+  - MCP server state metrics: `mcp_hangar_mcp_server_state`, `mcp_hangar_mcp_server_up`, `mcp_hangar_mcp_server_starts_total`, `mcp_hangar_mcp_server_stops_total`
   - Tool call metrics: `mcp_hangar_tool_calls_total`, `mcp_hangar_tool_call_duration_seconds`, `mcp_hangar_tool_call_errors_total`
   - Health check metrics: `mcp_hangar_health_checks_total`, `mcp_hangar_health_check_duration_seconds`, `mcp_hangar_health_check_consecutive_failures`
   - Rate limiter metrics: `mcp_hangar_rate_limit_hits_total`
   - HTTP client metrics: `mcp_hangar_http_requests_total`, `mcp_hangar_http_request_duration_seconds`, `mcp_hangar_http_errors_total`
   - `MetricsEventHandler` bridges domain events to Prometheus
-  - HTTP client instrumented with provider label support
+  - HTTP client instrumented with MCP server label support
 
 ### Fixed
 
@@ -513,7 +513,7 @@ config_reload:
 - **Alerts**: Reduced from 28 to 19 alerts (removed 9 using non-existent metrics)
   - Added: `MCPHangarCircuitBreakerTripped`, `MCPHangarProviderUnhealthy`, `MCPHangarHealthCheckSlow`
   - Adjusted thresholds: P95 latency 5s->3s, P99 10s->5s, batch slow 60s->30s
-  - Removed alerts referencing `provider_state`, `provider_up`, `discovery_*` (not yet populated)
+  - Removed alerts referencing `mcp_server_state`, `mcp_server_up`, `discovery_*` (not yet populated)
 
 ### Documentation
 
@@ -526,7 +526,7 @@ config_reload:
 ### Added (Dashboards)
 
 - New `alerts.json` Grafana dashboard for alert monitoring
-- New `provider-details.json` Grafana dashboard for per-provider deep dive
+- New `MCP server-details.json` Grafana dashboard for per-MCP server deep dive
 
 ## [0.6.3] - 2026-02-01
 
@@ -603,14 +603,14 @@ truncation:
   - `server/tools/batch/models.py` - Data classes and constants
   - `server/tools/batch/validator.py` - Validation logic
 
-- **Provider launcher modularization**: Split `domain/services/provider_launcher.py` into package
-  - `domain/services/provider_launcher/__init__.py` - Public API
-  - `domain/services/provider_launcher/base.py` - Base launcher interface
-  - `domain/services/provider_launcher/subprocess.py` - Subprocess launcher
-  - `domain/services/provider_launcher/docker.py` - Docker launcher
-  - `domain/services/provider_launcher/container.py` - Container utilities
-  - `domain/services/provider_launcher/http.py` - HTTP/SSE launcher
-  - `domain/services/provider_launcher/factory.py` - Launcher factory
+- **MCP Server launcher modularization**: Split `domain/services/mcp_server_launcher.py` into package
+  - `domain/services/mcp_server_launcher/__init__.py` - Public API
+  - `domain/services/mcp_server_launcher/base.py` - Base launcher interface
+  - `domain/services/mcp_server_launcher/subprocess.py` - Subprocess launcher
+  - `domain/services/mcp_server_launcher/docker.py` - Docker launcher
+  - `domain/services/mcp_server_launcher/container.py` - Container utilities
+  - `domain/services/mcp_server_launcher/http.py` - HTTP/SSE launcher
+  - `domain/services/mcp_server_launcher/factory.py` - Launcher factory
 
 ### Migration
 
@@ -618,11 +618,11 @@ If you have scripts or integrations using the old `registry_*` tool names, updat
 
 ```python
 # Before
-registry_tools(provider="math")
+registry_tools(mcp_server="math")
 registry_health()
 
 # After
-hangar_tools(provider="math")
+hangar_tools(mcp_server="math")
 hangar_health()
 ```
 
@@ -630,37 +630,37 @@ hangar_health()
 
 ### Added
 
-- **Interactive CLI**: New typer-based CLI for streamlined MCP provider management
+- **Interactive CLI**: New typer-based CLI for streamlined MCP server management
   - `hangar init` - Initialize new project with guided setup
-  - `hangar add <provider>` - Add providers interactively with auto-configuration
-  - `hangar remove <provider>` - Remove providers from configuration
-  - `hangar status` - Show current providers and their states
+  - `hangar add <MCP server>` - Add MCP servers interactively with auto-configuration
+  - `hangar remove <MCP server>` - Remove MCP servers from configuration
+  - `hangar status` - Show current MCP servers and their states
   - `hangar serve` - Start the MCP server (default command)
   - `hangar completion` - Generate shell completion scripts
   - Rich console output with colors and progress indicators
   - JSON output mode for scripting (`--json`)
   - Backward compatible with existing argparse CLI
 
-- **Provider Bundles**: Pre-configured provider definitions for quick setup
+- **MCP Server Bundles**: Pre-configured MCP server definitions for quick setup
   - Built-in definitions for popular MCP servers (filesystem, memory, sqlite, fetch, github, slack, etc.)
   - `InstallType` enum: NPX, UVX, DOCKER, BINARY
   - `ConfigType` enum: NONE, PATH, SECRET, STRING, URL
-  - Bundle resolver for discovering and validating providers
+  - Bundle resolver for discovering and validating MCP servers
 
 - **Multi-runtime Installers**: Pluggable installer infrastructure
-  - `NpmInstaller` - Install providers via npx
-  - `PyPIInstaller` - Install providers via uvx
+  - `NpmInstaller` - Install MCP servers via npx
+  - `PyPIInstaller` - Install MCP servers via uvx
   - `OCIInstaller` - Pull and run Docker/OCI images
   - `BinaryInstaller` - Download and execute pre-built binaries
   - Automatic runtime detection and validation
 
 - **Package Resolver**: Unified package resolution across ecosystems
-  - Resolve provider packages from npm, PyPI, or container registries
+  - Resolve MCP server packages from npm, PyPI, or container registries
   - Version validation and compatibility checks
 
 - **Secrets Resolver**: Secure configuration management
   - Environment variable interpolation (`${VAR_NAME}`)
-  - Support for secret references in provider configs
+  - Support for secret references in MCP server configs
   - Integration with system keychain (future)
 
 - **Output Redactor**: Automatic sensitive data redaction
@@ -668,15 +668,15 @@ hangar_health()
   - Configurable redaction patterns
   - Safe for production logging
 
-- **Runtime Store**: Persistent storage for installed provider runtimes
-  - Track installed providers and their versions
+- **Runtime Store**: Persistent storage for installed MCP server runtimes
+  - Track installed MCP servers and their versions
   - Cache validation and cleanup
 
 ### Changed
 
 - Refactored CLI into modular command structure under `server/cli/`
 - Legacy CLI preserved in `cli_legacy.py` for backward compatibility
-- Provider launcher now supports multiple install types
+- MCP Server launcher now supports multiple install types
 
 ### Documentation
 
@@ -689,7 +689,7 @@ hangar_health()
 - **Batch Invocations**: New `hangar_batch()` tool for parallel tool execution
   - Execute multiple tool invocations in a single API call
   - Configurable concurrency (1-20 parallel workers)
-  - Single-flight pattern for cold starts (one provider starts once, not N times)
+  - Single-flight pattern for cold starts (one MCP server starts once, not N times)
   - Partial success handling (continue on error by default)
   - Fail-fast mode (abort on first error)
   - Per-call and global timeout support
@@ -714,7 +714,7 @@ hangar_health()
   - `mcp_hangar_batch_duration_seconds` - Batch execution time
   - `mcp_hangar_batch_concurrency_gauge` - Current parallel executions
   - `mcp_hangar_batch_truncations_total{reason}` - Response truncations
-  - `mcp_hangar_batch_circuit_breaker_rejections_total{provider}` - CB rejections
+  - `mcp_hangar_batch_circuit_breaker_rejections_total{MCP server}` - CB rejections
   - `mcp_hangar_batch_cancellations_total{reason}` - Batch cancellations
 
 ### Documentation
@@ -783,7 +783,7 @@ All metrics renamed from `mcp_registry_*` to `mcp_hangar_*`:
 |-----|-----|
 | `mcp_registry_tool_calls_total` | `mcp_hangar_tool_calls_total` |
 | `mcp_registry_tool_call_duration_seconds` | `mcp_hangar_tool_call_duration_seconds` |
-| `mcp_registry_provider_state` | `mcp_hangar_provider_state` |
+| `mcp_registry_provider_state` | `mcp_hangar_mcp_server_state` |
 | `mcp_registry_cold_starts_total` | `mcp_hangar_cold_starts_total` |
 | `mcp_registry_health_checks` | `mcp_hangar_health_checks` |
 | `mcp_registry_circuit_breaker_state` | `mcp_hangar_circuit_breaker_state` |
@@ -814,7 +814,7 @@ All metrics renamed from `mcp_registry_*` to `mcp_hangar_*`:
 
 ### Added
 
-- **Core**: Enhanced `ProviderStartError` with diagnostic information
+- **Core**: Enhanced `McpServerStartError` with diagnostic information
   - `stderr`: Captured process stderr output
   - `exit_code`: Process exit code for failed starts
   - `suggestion`: Actionable suggestions based on error patterns
@@ -829,19 +829,19 @@ All metrics renamed from `mcp_registry_*` to `mcp_hangar_*`:
 
 ### Documentation
 
-- Updated troubleshooting guide with provider startup error diagnostics
+- Updated troubleshooting guide with MCP server startup error diagnostics
 - Added programmatic error handling examples
 
 ## [0.3.0] - 2026-01-21
 
 ### Added
 
-- **Facade API**: New high-level `Hangar` class for simplified provider management
+- **Facade API**: New high-level `Hangar` class for simplified MCP server management
   - Async-first API with `await hangar.invoke()`, `await hangar.health()`
   - Sync wrapper `SyncHangar` for simple scripting use cases
   - Context manager support: `async with Hangar.from_config(...) as hangar:`
 - **HangarConfig Builder**: Programmatic configuration with fluent API
-  - `.add_provider()` for subprocess, docker, and remote providers
+  - `.add_mcp_server()` for subprocess, docker, and remote MCP servers
   - `.enable_discovery()` for Docker/Kubernetes/filesystem auto-discovery
   - Type-safe validation at build time
 - **Quick Install Script**: `curl -sSL https://mcp-hangar.io/install.sh | bash`
@@ -867,9 +867,9 @@ All metrics renamed from `mcp_registry_*` to `mcp_hangar_*`:
 
 ### Fixed
 
-- **Core**: Improved error diagnostics for provider startup failures - stderr from container/subprocess is now included in error messages instead of generic "unknown error"
+- **Core**: Improved error diagnostics for MCP server startup failures - stderr from container/subprocess is now included in error messages instead of generic "unknown error"
 - **Core**: `StdioClient` now captures and propagates stderr to error messages when process dies
-- **Core**: `Provider._handle_start_failure()` now receives actual exception instead of None
+- **Core**: `MCP Server._handle_start_failure()` now receives actual exception instead of None
 
 ## [0.2.2] - 2026-01-19
 
@@ -919,8 +919,8 @@ The following items are documented technical debt introduced to enable CI:
   - Tested with Keycloak integration
 
 - **Role-Based Access Control (RBAC)**: Granular permissions
-  - Built-in roles: admin, provider-admin, developer, viewer, auditor
-  - Permission-based authorization (provider:*, tool:invoke, etc.)
+  - Built-in roles: admin, mcp_server_admin, developer, viewer, auditor
+  - Permission-based authorization (MCP server:*, tool:invoke, etc.)
   - Group-based role assignment
   - Tenant/scope isolation support
 
@@ -937,15 +937,15 @@ The following items are documented technical debt introduced to enable CI:
 
 #### Kubernetes Operator (TASK-002)
 
-- **MCPProvider CRD**: Declarative provider management
-  - Container and remote provider modes
+- **MCPServer CRD**: Declarative MCP server management
+  - Container and remote MCP server modes
   - Configurable health checks and circuit breaker
   - Resource limits and security contexts
   - Environment variables from Secrets/ConfigMaps
   - Volume mounts (Secret, ConfigMap, PVC)
 
-- **MCPProviderGroup CRD**: High availability
-  - Label selector-based provider grouping
+- **MCPServerGroup CRD**: High availability
+  - Label selector-based MCP server grouping
   - Load balancing strategies (RoundRobin, LeastConnections, Random, Failover)
   - Configurable failover with retries
   - Health policy enforcement
@@ -954,7 +954,7 @@ The following items are documented technical debt introduced to enable CI:
   - Namespace-based discovery
   - ConfigMap-based discovery
   - Additive and Authoritative modes
-  - Provider templates for defaults
+  - MCP Server templates for defaults
 
 - **Operator Features**:
   - State machine reconciliation (Cold → Initializing → Ready → Degraded → Dead)
@@ -1005,14 +1005,14 @@ The following items are documented technical debt introduced to enable CI:
 
 - **Langfuse Integration**: Optional LLM observability with Langfuse
   - Full trace lifecycle management (start, end, error handling)
-  - Span nesting for tool invocations and provider operations
+  - Span nesting for tool invocations and MCP server operations
   - Automatic score recording for health checks and success rates
   - Graceful degradation when Langfuse is unavailable
   - Configuration via environment variables or config file
 
 - **Testcontainers Support**: Production-grade integration testing
   - PostgreSQL, Redis, Prometheus, Langfuse container fixtures
-  - Custom MCP provider container fixtures
+  - Custom MCP server container fixtures
   - Conditional loading - tests work without testcontainers installed
 
 ### Changed
@@ -1043,8 +1043,8 @@ The following items are documented technical debt introduced to enable CI:
   - Alertmanager configuration template
   - Documentation at `docs/guides/OBSERVABILITY.md`
 
-- **Provider Groups**: Load balancing and high availability for multiple providers
-  - Group multiple providers of the same type into a single logical unit
+- **MCP Server Groups**: Load balancing and high availability for multiple MCP servers
+  - Group multiple MCP servers of the same type into a single logical unit
   - Five load balancing strategies: `round_robin`, `weighted_round_robin`, `least_connections`, `random`, `priority`
   - Automatic member health tracking with configurable thresholds
   - Group-level circuit breaker for cascading failure protection
@@ -1059,14 +1059,14 @@ The following items are documented technical debt introduced to enable CI:
 ### Added
 
 - Initial open source release
-- Hot-loading MCP provider management with automatic lifecycle control
+- Hot-loading MCP server management with automatic lifecycle control
 - Multiple transport modes: Stdio (default) and HTTP with Streamable HTTP support
 - Container support for Docker and Podman with auto-detection
 - Pre-built image support for running any Docker/Podman image directly
 - Thread-safe operations with proper locking mechanisms
 - Health monitoring with active health checks and circuit breaker pattern
-- Automatic garbage collection for idle provider shutdown
-- Provider state machine: `COLD → INITIALIZING → READY → DEGRADED → DEAD`
+- Automatic garbage collection for idle MCP server shutdown
+- MCP server state machine: `COLD → INITIALIZING → READY → DEGRADED → DEAD`
 - Registry MCP tools: `registry_list`, `registry_start`, `registry_stop`, `registry_invoke`, `registry_tools`, `registry_details`, `registry_health`
 - Comprehensive security features:
   - Input validation at API boundaries
@@ -1075,13 +1075,13 @@ The following items are documented technical debt introduced to enable CI:
   - Secrets management with automatic masking
   - Security audit logging
 - Domain-Driven Design architecture with CQRS pattern
-- Event sourcing support for provider state management
+- Event sourcing support for MCP server state management
 - Subprocess mode for local MCP server processes
 - Container mode with security hardening (dropped capabilities, read-only filesystem, no-new-privileges)
 - Volume mount support with blocked sensitive paths
-- Resource limits (memory, CPU) for container providers
+- Resource limits (memory, CPU) for container MCP servers
 - Network isolation options (none, bridge, host)
-- Example math provider for testing
+- Example math MCP server for testing
 - Comprehensive test suite (unit, integration, feature, performance tests)
 - GitHub Actions CI/CD for linting and testing (Python 3.11-3.14)
 - Pre-commit hooks for code quality (black, isort, ruff)
@@ -1095,7 +1095,7 @@ The following items are documented technical debt introduced to enable CI:
 
 ### Security
 
-- Input validation for all provider IDs, tool names, and arguments
+- Input validation for all MCP server IDs, tool names, and arguments
 - Command sanitization to prevent shell injection attacks
 - Environment variable filtering to remove sensitive data
 - Rate limiting to prevent denial of service

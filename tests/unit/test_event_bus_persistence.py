@@ -3,7 +3,7 @@
 import pytest
 
 from mcp_hangar.domain.contracts.event_store import ConcurrencyError
-from mcp_hangar.domain.events import DomainEvent, ProviderStarted, ProviderStateChanged
+from mcp_hangar.domain.events import DomainEvent, McpServerStarted, McpServerStateChanged
 from mcp_hangar.infrastructure.event_bus import EventBus
 from mcp_hangar.infrastructure.persistence import InMemoryEventStore
 
@@ -20,23 +20,20 @@ class TestEventBusWithEventStore:
         return EventBus(event_store=event_store)
 
     def test_publish_to_stream_persists_events(self, event_bus: EventBus, event_store: InMemoryEventStore):
-        event = ProviderStarted(
-            provider_id="math",
-            mode="subprocess",
-            tools_count=3,
-            startup_duration_ms=50.0,
-        )
+        event = McpServerStarted(mcp_server_id="math", mode="subprocess",
+        tools_count=3,
+        startup_duration_ms=50.0,)
 
         new_version = event_bus.publish_to_stream(
-            stream_id="provider:math",
+            stream_id="mcp_server:math",
             events=[event],
             expected_version=-1,
         )
 
         assert new_version == 0
-        persisted = event_store.read_stream("provider:math")
+        persisted = event_store.read_stream("mcp_server:math")
         assert len(persisted) == 1
-        assert persisted[0].provider_id == "math"
+        assert persisted[0].mcp_server_id == "math"
 
     def test_publish_to_stream_notifies_handlers(self, event_bus: EventBus):
         received_events: list[DomainEvent] = []
@@ -44,35 +41,29 @@ class TestEventBusWithEventStore:
         def handler(event: DomainEvent):
             received_events.append(event)
 
-        event_bus.subscribe(ProviderStarted, handler)
+        event_bus.subscribe(McpServerStarted, handler)
 
-        event = ProviderStarted(
-            provider_id="math",
-            mode="subprocess",
-            tools_count=3,
-            startup_duration_ms=50.0,
-        )
+        event = McpServerStarted(mcp_server_id="math", mode="subprocess",
+        tools_count=3,
+        startup_duration_ms=50.0,)
 
         event_bus.publish_to_stream(
-            stream_id="provider:math",
+            stream_id="mcp_server:math",
             events=[event],
             expected_version=-1,
         )
 
         assert len(received_events) == 1
-        assert received_events[0].provider_id == "math"
+        assert received_events[0].mcp_server_id == "math"
 
     def test_publish_to_stream_with_concurrency_error(self, event_bus: EventBus, event_store: InMemoryEventStore):
-        event = ProviderStarted(
-            provider_id="math",
-            mode="subprocess",
-            tools_count=3,
-            startup_duration_ms=50.0,
-        )
+        event = McpServerStarted(mcp_server_id="math", mode="subprocess",
+        tools_count=3,
+        startup_duration_ms=50.0,)
 
         # First append
         event_bus.publish_to_stream(
-            stream_id="provider:math",
+            stream_id="mcp_server:math",
             events=[event],
             expected_version=-1,
         )
@@ -80,40 +71,34 @@ class TestEventBusWithEventStore:
         # Second append with wrong version
         with pytest.raises(ConcurrencyError):
             event_bus.publish_to_stream(
-                stream_id="provider:math",
+                stream_id="mcp_server:math",
                 events=[event],
                 expected_version=-1,  # Wrong - should be 0
             )
 
     def test_publish_aggregate_events(self, event_bus: EventBus, event_store: InMemoryEventStore):
         events = [
-            ProviderStarted(
-                provider_id="math",
-                mode="subprocess",
-                tools_count=3,
-                startup_duration_ms=50.0,
-            ),
-            ProviderStateChanged(
-                provider_id="math",
-                old_state="COLD",
-                new_state="READY",
-            ),
+            McpServerStarted(mcp_server_id="math", mode="subprocess",
+            tools_count=3,
+            startup_duration_ms=50.0,),
+            McpServerStateChanged(mcp_server_id="math", old_state="COLD",
+            new_state="READY",),
         ]
 
         new_version = event_bus.publish_aggregate_events(
-            aggregate_type="provider",
+            aggregate_type="mcp_server",
             aggregate_id="math",
             events=events,
             expected_version=-1,
         )
 
         assert new_version == 1
-        persisted = event_store.read_stream("provider:math")
+        persisted = event_store.read_stream("mcp_server:math")
         assert len(persisted) == 2
 
     def test_publish_empty_events_list(self, event_bus: EventBus):
         version = event_bus.publish_to_stream(
-            stream_id="provider:math",
+            stream_id="mcp_server:math",
             events=[],
             expected_version=-1,
         )
@@ -141,14 +126,11 @@ class TestEventBusWithoutEventStore:
         def handler(event: DomainEvent):
             received_events.append(event)
 
-        event_bus.subscribe(ProviderStarted, handler)
+        event_bus.subscribe(McpServerStarted, handler)
 
-        event = ProviderStarted(
-            provider_id="math",
-            mode="subprocess",
-            tools_count=3,
-            startup_duration_ms=50.0,
-        )
+        event = McpServerStarted(mcp_server_id="math", mode="subprocess",
+        tools_count=3,
+        startup_duration_ms=50.0,)
 
         # publish() doesn't persist
         event_bus.publish(event)
@@ -158,16 +140,13 @@ class TestEventBusWithoutEventStore:
     def test_publish_to_stream_with_null_store(self):
         event_bus = EventBus()  # Uses NullEventStore
 
-        event = ProviderStarted(
-            provider_id="math",
-            mode="subprocess",
-            tools_count=3,
-            startup_duration_ms=50.0,
-        )
+        event = McpServerStarted(mcp_server_id="math", mode="subprocess",
+        tools_count=3,
+        startup_duration_ms=50.0,)
 
         # Should work but not persist
         version = event_bus.publish_to_stream(
-            stream_id="provider:math",
+            stream_id="mcp_server:math",
             events=[event],
             expected_version=-1,
         )

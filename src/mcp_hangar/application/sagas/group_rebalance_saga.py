@@ -1,9 +1,9 @@
 """Group Rebalance Saga - automatically rebalances groups based on events.
 
-This saga listens for provider health events and updates group member
-rotation status. The actual logic is delegated to ProviderGroup methods.
+This saga listens for mcp_server health events and updates group member
+rotation status. The actual logic is delegated to McpServerGroup methods.
 
-Note: Most of the group health management is already handled by ProviderGroup
+Note: Most of the group health management is already handled by McpServerGroup
 through report_success() and report_failure() calls. This saga primarily
 serves as an event-driven bridge for external events (like health checks)
 that may not flow through the standard invoke path.
@@ -18,27 +18,27 @@ from ...domain.events import (
     DomainEvent,
     HealthCheckFailed,
     HealthCheckPassed,
-    ProviderDegraded,
-    ProviderStarted,
-    ProviderStopped,
+    McpServerDegraded,
+    McpServerStarted,
+    McpServerStopped,
 )
 from ...application.ports.saga import EventTriggeredSaga
 from ...logging_config import get_logger
 from ..commands import Command
 
 if TYPE_CHECKING:
-    from ...domain.model.provider_group import ProviderGroup
+    from ...domain.model.mcp_server_group import McpServerGroup
 
 logger = get_logger(__name__)
 
 
 class GroupRebalanceSaga(EventTriggeredSaga):
     """
-    Saga that observes provider events for group members.
+    Saga that observes mcp_server events for group members.
 
-    This saga tracks which providers belong to which groups and logs
+    This saga tracks which mcp_servers belong to which groups and logs
     relevant events. The actual rotation management is handled by
-    ProviderGroup through its report_success/report_failure methods.
+    McpServerGroup through its report_success/report_failure methods.
 
     The saga can optionally execute direct actions on groups if provided
     with a groups reference.
@@ -47,7 +47,7 @@ class GroupRebalanceSaga(EventTriggeredSaga):
     def __init__(
         self,
         group_lookup: Callable[[str], str | None] | None = None,
-        groups: dict[str, ProviderGroup] | None = None,
+        groups: dict[str, McpServerGroup] | None = None,
     ):
         """
         Initialize the saga.
@@ -69,9 +69,9 @@ class GroupRebalanceSaga(EventTriggeredSaga):
     @property
     def handled_events(self) -> list[type[DomainEvent]]:
         return [
-            ProviderStarted,
-            ProviderStopped,
-            ProviderDegraded,
+            McpServerStarted,
+            McpServerStopped,
+            McpServerDegraded,
             HealthCheckPassed,
             HealthCheckFailed,
         ]
@@ -93,7 +93,7 @@ class GroupRebalanceSaga(EventTriggeredSaga):
             return self._group_lookup(member_id)
         return None
 
-    def _get_group(self, group_id: str) -> ProviderGroup | None:
+    def _get_group(self, group_id: str) -> McpServerGroup | None:
         """Get group instance if available."""
         if self._groups:
             return self._groups.get(group_id)
@@ -101,41 +101,41 @@ class GroupRebalanceSaga(EventTriggeredSaga):
 
     def handle(self, event: DomainEvent) -> list[Command]:
         """
-        Handle provider events that affect group membership.
+        Handle mcp_server events that affect group membership.
 
         Returns empty list as we apply changes directly to groups
         rather than emitting commands.
         """
-        provider_id = getattr(event, "provider_id", None)
-        if not provider_id:
+        mcp_server_id = getattr(event, "mcp_server_id", None)
+        if not mcp_server_id:
             return []
 
-        group_id = self._get_group_id(provider_id)
+        group_id = self._get_group_id(mcp_server_id)
         if not group_id:
             return []
 
         group = self._get_group(group_id)
 
-        if isinstance(event, ProviderStarted):
-            logger.info(f"Member {provider_id} started in group {group_id}")
+        if isinstance(event, McpServerStarted):
+            logger.info(f"Member {mcp_server_id} started in group {group_id}")
             if group:
-                group.report_success(provider_id)
+                group.report_success(mcp_server_id)
 
-        elif isinstance(event, ProviderStopped | ProviderDegraded):
+        elif isinstance(event, McpServerStopped | McpServerDegraded):
             reason = getattr(event, "reason", "unknown")
-            logger.info(f"Member {provider_id} unavailable in group {group_id}: {reason}")
+            logger.info(f"Member {mcp_server_id} unavailable in group {group_id}: {reason}")
             if group:
-                group.report_failure(provider_id)
+                group.report_failure(mcp_server_id)
 
         elif isinstance(event, HealthCheckPassed):
-            logger.debug(f"Health check passed for {provider_id} in group {group_id}")
+            logger.debug(f"Health check passed for {mcp_server_id} in group {group_id}")
             if group:
-                group.report_success(provider_id)
+                group.report_success(mcp_server_id)
 
         elif isinstance(event, HealthCheckFailed):
-            logger.debug(f"Health check failed for {provider_id} in group {group_id}")
+            logger.debug(f"Health check failed for {mcp_server_id} in group {group_id}")
             if group:
-                group.report_failure(provider_id)
+                group.report_failure(mcp_server_id)
 
         return []
 

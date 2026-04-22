@@ -12,11 +12,11 @@ import pytest
 from starlette.testclient import TestClient
 
 from mcp_hangar.application.commands.crud_commands import (
-    CreateProviderCommand,
-    DeleteProviderCommand,
-    UpdateProviderCommand,
+    CreateMcpServerCommand,
+    DeleteMcpServerCommand,
+    UpdateMcpServerCommand,
 )
-from mcp_hangar.domain.exceptions import ProviderNotFoundError, ValidationError
+from mcp_hangar.domain.exceptions import McpServerNotFoundError, ValidationError
 
 
 # ---------------------------------------------------------------------------
@@ -32,18 +32,18 @@ def mock_context():
     query_bus = Mock()
 
     def send_command(command):
-        if isinstance(command, CreateProviderCommand):
-            if command.provider_id == "new-provider":
-                return {"provider_id": "new-provider", "created": True}
-            raise ValidationError(f"Provider already exists: {command.provider_id}")
-        elif isinstance(command, UpdateProviderCommand):
-            if command.provider_id == "math":
-                return {"provider_id": "math", "updated": True}
-            raise ProviderNotFoundError(command.provider_id)
-        elif isinstance(command, DeleteProviderCommand):
-            if command.provider_id == "math":
-                return {"provider_id": "math", "deleted": True}
-            raise ProviderNotFoundError(command.provider_id)
+        if isinstance(command, CreateMcpServerCommand):
+            if command.mcp_server_id == "new-provider":
+                return {"mcp_server_id": "new-provider", "created": True}
+            raise ValidationError(f"Provider already exists: {command.mcp_server_id}")
+        elif isinstance(command, UpdateMcpServerCommand):
+            if command.mcp_server_id == "math":
+                return {"mcp_server_id": "math", "updated": True}
+            raise McpServerNotFoundError(command.mcp_server_id)
+        elif isinstance(command, DeleteMcpServerCommand):
+            if command.mcp_server_id == "math":
+                return {"mcp_server_id": "math", "deleted": True}
+            raise McpServerNotFoundError(command.mcp_server_id)
         raise ValueError(f"Unexpected command: {type(command)}")
 
     command_bus.send.side_effect = send_command
@@ -74,44 +74,44 @@ class TestCreateProvider:
     def test_returns_201_on_success(self, api_client):
         """POST /providers/ returns HTTP 201 on creation."""
         response = api_client.post(
-            "/providers/",
-            json={"provider_id": "new-provider", "mode": "subprocess", "command": ["python", "-m", "srv"]},
+            "/mcp_servers/",
+            json={"mcp_server_id": "new-provider", "mode": "subprocess", "command": ["python", "-m", "srv"]},
         )
         assert response.status_code == 201
 
     def test_returns_created_flag(self, api_client):
         """POST /providers/ returns created=True in body."""
         response = api_client.post(
-            "/providers/",
-            json={"provider_id": "new-provider", "mode": "subprocess", "command": ["python", "-m", "srv"]},
+            "/mcp_servers/",
+            json={"mcp_server_id": "new-provider", "mode": "subprocess", "command": ["python", "-m", "srv"]},
         )
         data = response.json()
-        assert data["provider_id"] == "new-provider"
+        assert data["mcp_server_id"] == "new-provider"
         assert data["created"] is True
 
     def test_returns_422_on_duplicate(self, api_client):
-        """POST /providers/ returns 422 when provider_id already exists."""
+        """POST /providers/ returns 422 when mcp_server_id already exists."""
         response = api_client.post(
-            "/providers/",
-            json={"provider_id": "existing-provider", "mode": "subprocess", "command": ["python", "-m", "srv"]},
+            "/mcp_servers/",
+            json={"mcp_server_id": "existing-provider", "mode": "subprocess", "command": ["python", "-m", "srv"]},
         )
         assert response.status_code == 422
 
     def test_dispatches_create_provider_command(self, api_client, mock_context):
-        """POST /providers/ dispatches CreateProviderCommand."""
+        """POST /providers/ dispatches CreateMcpServerCommand."""
         api_client.post(
-            "/providers/",
-            json={"provider_id": "new-provider", "mode": "subprocess", "command": ["python", "-m", "srv"]},
+            "/mcp_servers/",
+            json={"mcp_server_id": "new-provider", "mode": "subprocess", "command": ["python", "-m", "srv"]},
         )
         calls = mock_context.command_bus.send.call_args_list
-        assert any(isinstance(call[0][0], CreateProviderCommand) for call in calls)
+        assert any(isinstance(call[0][0], CreateMcpServerCommand) for call in calls)
 
     def test_command_includes_all_required_fields(self, api_client, mock_context):
         """POST /providers/ dispatches command with correct fields."""
         api_client.post(
-            "/providers/",
+            "/mcp_servers/",
             json={
-                "provider_id": "new-provider",
+                "mcp_server_id": "new-provider",
                 "mode": "subprocess",
                 "command": ["python", "-m", "srv"],
                 "description": "my provider",
@@ -119,86 +119,86 @@ class TestCreateProvider:
             },
         )
         calls = mock_context.command_bus.send.call_args_list
-        cmd = next(c[0][0] for c in calls if isinstance(c[0][0], CreateProviderCommand))
-        assert cmd.provider_id == "new-provider"
+        cmd = next(c[0][0] for c in calls if isinstance(c[0][0], CreateMcpServerCommand))
+        assert cmd.mcp_server_id == "new-provider"
         assert cmd.mode == "subprocess"
         assert cmd.description == "my provider"
         assert cmd.idle_ttl_s == 600
 
 
 # ---------------------------------------------------------------------------
-# PUT /providers/{provider_id}
+# PUT /providers/{mcp_server_id}
 # ---------------------------------------------------------------------------
 
 
 class TestUpdateProvider:
-    """Tests for PUT /providers/{provider_id} endpoint."""
+    """Tests for PUT /providers/{mcp_server_id} endpoint."""
 
     def test_returns_200_on_success(self, api_client):
         """PUT /providers/math returns HTTP 200."""
-        response = api_client.put("/providers/math", json={"description": "Updated description"})
+        response = api_client.put("/mcp_servers/math", json={"description": "Updated description"})
         assert response.status_code == 200
 
     def test_returns_updated_flag(self, api_client):
         """PUT /providers/math returns updated=True in body."""
-        response = api_client.put("/providers/math", json={"description": "Updated description"})
+        response = api_client.put("/mcp_servers/math", json={"description": "Updated description"})
         data = response.json()
-        assert data["provider_id"] == "math"
+        assert data["mcp_server_id"] == "math"
         assert data["updated"] is True
 
     def test_returns_404_for_unknown_provider(self, api_client):
         """PUT /providers/unknown returns HTTP 404."""
-        response = api_client.put("/providers/unknown", json={"description": "test"})
+        response = api_client.put("/mcp_servers/unknown", json={"description": "test"})
         assert response.status_code == 404
 
     def test_dispatches_update_provider_command(self, api_client, mock_context):
-        """PUT /providers/math dispatches UpdateProviderCommand."""
-        api_client.put("/providers/math", json={"description": "Updated"})
+        """PUT /providers/math dispatches UpdateMcpServerCommand."""
+        api_client.put("/mcp_servers/math", json={"description": "Updated"})
         calls = mock_context.command_bus.send.call_args_list
-        assert any(isinstance(call[0][0], UpdateProviderCommand) for call in calls)
+        assert any(isinstance(call[0][0], UpdateMcpServerCommand) for call in calls)
 
-    def test_command_includes_provider_id_from_path(self, api_client, mock_context):
-        """PUT /providers/math dispatches command with provider_id from path."""
-        api_client.put("/providers/math", json={"description": "Updated"})
+    def test_command_includes_mcp_server_id_from_path(self, api_client, mock_context):
+        """PUT /providers/math dispatches command with mcp_server_id from path."""
+        api_client.put("/mcp_servers/math", json={"description": "Updated"})
         calls = mock_context.command_bus.send.call_args_list
-        cmd = next(c[0][0] for c in calls if isinstance(c[0][0], UpdateProviderCommand))
-        assert cmd.provider_id == "math"
+        cmd = next(c[0][0] for c in calls if isinstance(c[0][0], UpdateMcpServerCommand))
+        assert cmd.mcp_server_id == "math"
 
 
 # ---------------------------------------------------------------------------
-# DELETE /providers/{provider_id}
+# DELETE /providers/{mcp_server_id}
 # ---------------------------------------------------------------------------
 
 
 class TestDeleteProvider:
-    """Tests for DELETE /providers/{provider_id} endpoint."""
+    """Tests for DELETE /providers/{mcp_server_id} endpoint."""
 
     def test_returns_200_on_success(self, api_client):
         """DELETE /providers/math returns HTTP 200."""
-        response = api_client.delete("/providers/math")
+        response = api_client.delete("/mcp_servers/math")
         assert response.status_code == 200
 
     def test_returns_deleted_flag(self, api_client):
         """DELETE /providers/math returns deleted=True in body."""
-        response = api_client.delete("/providers/math")
+        response = api_client.delete("/mcp_servers/math")
         data = response.json()
-        assert data["provider_id"] == "math"
+        assert data["mcp_server_id"] == "math"
         assert data["deleted"] is True
 
     def test_returns_404_for_unknown_provider(self, api_client):
         """DELETE /providers/unknown returns HTTP 404."""
-        response = api_client.delete("/providers/unknown")
+        response = api_client.delete("/mcp_servers/unknown")
         assert response.status_code == 404
 
     def test_dispatches_delete_provider_command(self, api_client, mock_context):
-        """DELETE /providers/math dispatches DeleteProviderCommand."""
-        api_client.delete("/providers/math")
+        """DELETE /providers/math dispatches DeleteMcpServerCommand."""
+        api_client.delete("/mcp_servers/math")
         calls = mock_context.command_bus.send.call_args_list
-        assert any(isinstance(call[0][0], DeleteProviderCommand) for call in calls)
+        assert any(isinstance(call[0][0], DeleteMcpServerCommand) for call in calls)
 
-    def test_command_includes_provider_id_from_path(self, api_client, mock_context):
-        """DELETE /providers/math dispatches command with correct provider_id."""
-        api_client.delete("/providers/math")
+    def test_command_includes_mcp_server_id_from_path(self, api_client, mock_context):
+        """DELETE /providers/math dispatches command with correct mcp_server_id."""
+        api_client.delete("/mcp_servers/math")
         calls = mock_context.command_bus.send.call_args_list
-        cmd = next(c[0][0] for c in calls if isinstance(c[0][0], DeleteProviderCommand))
-        assert cmd.provider_id == "math"
+        cmd = next(c[0][0] for c in calls if isinstance(c[0][0], DeleteMcpServerCommand))
+        assert cmd.mcp_server_id == "math"

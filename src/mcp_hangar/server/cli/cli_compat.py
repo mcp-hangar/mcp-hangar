@@ -88,7 +88,7 @@ def parse_args(args: list[str] | None = None) -> CLIConfig:
         assert config.http_port == 9000
     """
     parser = argparse.ArgumentParser(
-        description="MCP Hangar - Production-grade MCP provider registry",
+        description="MCP Hangar - Production-grade MCP mcp_server registry",
         formatter_class=argparse.RawDescriptionHelpFormatter,
         epilog="""
 Examples:

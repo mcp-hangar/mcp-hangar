@@ -49,7 +49,7 @@ def mock_orchestrator():
     """Mock DiscoveryOrchestrator with all methods."""
     orchestrator = Mock()
     # Sync methods
-    orchestrator.get_pending_providers.return_value = [_make_discovered_provider("pending-1")]
+    orchestrator.get_pending_mcp_servers.return_value = [_make_discovered_provider("pending-1")]
     orchestrator.get_quarantined.return_value = {
         "bad-provider": {
             "provider": {"name": "bad-provider"},
@@ -68,10 +68,10 @@ def mock_orchestrator():
             }
         ]
     )
-    orchestrator.approve_provider = AsyncMock(
-        return_value={"approved": True, "provider": "pending-1", "status": "registered"}
+    orchestrator.approve_mcp_server = AsyncMock(
+        return_value={"approved": True, "mcp_server": "pending-1", "status": "registered"}
     )
-    orchestrator.reject_provider = AsyncMock(return_value={"rejected": True, "provider": "bad-provider"})
+    orchestrator.reject_mcp_server = AsyncMock(return_value={"rejected": True, "mcp_server": "bad-provider"})
     return orchestrator
 
 
@@ -248,13 +248,13 @@ class TestApproveProvider:
         response = api_client.post("/discovery/approve/pending-1")
         data = response.json()
         assert data["approved"] is True
-        assert data["provider"] == "pending-1"
+        assert data["mcp_server"] == "pending-1"
 
     def test_calls_approve_provider_on_orchestrator(self, api_client, mock_context):
         """POST /discovery/approve/pending-1 calls approve_provider on orchestrator."""
         response = api_client.post("/discovery/approve/pending-1")
         assert response.status_code == 200
-        mock_context.discovery_orchestrator.approve_provider.assert_called_once_with("pending-1")
+        mock_context.discovery_orchestrator.approve_mcp_server.assert_called_once_with("pending-1")
 
     def test_returns_404_when_discovery_not_configured(self, no_discovery_client):
         """POST /discovery/approve/name returns 404 when discovery not configured."""
@@ -280,13 +280,13 @@ class TestRejectProvider:
         response = api_client.post("/discovery/reject/bad-provider")
         data = response.json()
         assert data["rejected"] is True
-        assert data["provider"] == "bad-provider"
+        assert data["mcp_server"] == "bad-provider"
 
     def test_calls_reject_provider_on_orchestrator(self, api_client, mock_context):
         """POST /discovery/reject/bad-provider calls reject_provider on orchestrator."""
         response = api_client.post("/discovery/reject/bad-provider")
         assert response.status_code == 200
-        mock_context.discovery_orchestrator.reject_provider.assert_called_once_with("bad-provider")
+        mock_context.discovery_orchestrator.reject_mcp_server.assert_called_once_with("bad-provider")
 
     def test_returns_404_when_discovery_not_configured(self, no_discovery_client):
         """POST /discovery/reject/name returns 404 when discovery not configured."""

@@ -5,7 +5,7 @@ from datetime import datetime, timedelta, UTC
 import pytest
 
 from mcp_hangar.domain.discovery.conflict_resolver import ConflictResolution, ConflictResolver
-from mcp_hangar.domain.discovery.discovered_provider import DiscoveredProvider
+from mcp_hangar.domain.discovery.discovered_mcp_server import DiscoveredMcpServer
 from mcp_hangar.domain.discovery.discovery_service import DiscoveryService
 from mcp_hangar.domain.discovery.discovery_source import DiscoveryMode, DiscoverySource
 
@@ -15,7 +15,7 @@ class TestDiscoveredProvider:
 
     def test_create_with_fingerprint(self):
         """Test factory method generates fingerprint."""
-        provider = DiscoveredProvider.create(
+        provider = DiscoveredMcpServer.create(
             name="test-provider",
             source_type="docker",
             mode="http",
@@ -31,14 +31,14 @@ class TestDiscoveredProvider:
 
     def test_fingerprint_changes_with_config(self):
         """Test fingerprint changes when config changes."""
-        provider1 = DiscoveredProvider.create(
+        provider1 = DiscoveredMcpServer.create(
             name="test",
             source_type="docker",
             mode="http",
             connection_info={"host": "localhost", "port": 8080},
         )
 
-        provider2 = DiscoveredProvider.create(
+        provider2 = DiscoveredMcpServer.create(
             name="test",
             source_type="docker",
             mode="http",
@@ -50,7 +50,7 @@ class TestDiscoveredProvider:
     def test_is_expired(self):
         """Test TTL expiration check."""
         # Create provider with 1 second TTL
-        provider = DiscoveredProvider.create(
+        provider = DiscoveredMcpServer.create(
             name="test",
             source_type="docker",
             mode="http",
@@ -62,7 +62,7 @@ class TestDiscoveredProvider:
 
         # Simulate time passing by creating with old timestamp
         old_time = datetime.now(UTC) - timedelta(seconds=2)
-        expired_provider = DiscoveredProvider(
+        expired_provider = DiscoveredMcpServer(
             name="test",
             source_type="docker",
             mode="http",
@@ -79,7 +79,7 @@ class TestDiscoveredProvider:
     def test_with_updated_seen_time(self):
         """Test creating new instance with updated timestamp."""
         old_time = datetime.now(UTC) - timedelta(seconds=30)
-        provider = DiscoveredProvider(
+        provider = DiscoveredMcpServer(
             name="test",
             source_type="docker",
             mode="http",
@@ -103,7 +103,7 @@ class TestDiscoveredProvider:
 
     def test_has_changed(self):
         """Test change detection via fingerprint."""
-        provider1 = DiscoveredProvider.create(
+        provider1 = DiscoveredMcpServer.create(
             name="test",
             source_type="docker",
             mode="http",
@@ -111,7 +111,7 @@ class TestDiscoveredProvider:
         )
 
         # Same config
-        provider2 = DiscoveredProvider.create(
+        provider2 = DiscoveredMcpServer.create(
             name="test",
             source_type="docker",
             mode="http",
@@ -119,7 +119,7 @@ class TestDiscoveredProvider:
         )
 
         # Different config
-        provider3 = DiscoveredProvider.create(
+        provider3 = DiscoveredMcpServer.create(
             name="test",
             source_type="docker",
             mode="http",
@@ -131,7 +131,7 @@ class TestDiscoveredProvider:
 
     def test_to_dict_and_from_dict(self):
         """Test serialization round-trip."""
-        provider = DiscoveredProvider.create(
+        provider = DiscoveredMcpServer.create(
             name="test",
             source_type="kubernetes",
             mode="sse",
@@ -140,7 +140,7 @@ class TestDiscoveredProvider:
         )
 
         data = provider.to_dict()
-        restored = DiscoveredProvider.from_dict(data)
+        restored = DiscoveredMcpServer.from_dict(data)
 
         assert restored.name == provider.name
         assert restored.source_type == provider.source_type
@@ -153,9 +153,9 @@ class TestConflictResolver:
 
     def test_static_always_wins(self):
         """Test static config takes precedence."""
-        resolver = ConflictResolver(static_providers={"my-static-provider"})
+        resolver = ConflictResolver(static_mcp_servers={"my-static-provider"})
 
-        provider = DiscoveredProvider.create(
+        provider = DiscoveredMcpServer.create(
             name="my-static-provider",
             source_type="kubernetes",
             mode="http",
@@ -171,7 +171,7 @@ class TestConflictResolver:
         """Test new provider is registered."""
         resolver = ConflictResolver()
 
-        provider = DiscoveredProvider.create(
+        provider = DiscoveredMcpServer.create(
             name="new-provider",
             source_type="docker",
             mode="http",
@@ -187,7 +187,7 @@ class TestConflictResolver:
         """Test same provider with same fingerprint returns unchanged."""
         resolver = ConflictResolver()
 
-        provider = DiscoveredProvider.create(
+        provider = DiscoveredMcpServer.create(
             name="test-provider",
             source_type="docker",
             mode="http",
@@ -208,7 +208,7 @@ class TestConflictResolver:
         """Test config change triggers update."""
         resolver = ConflictResolver()
 
-        provider1 = DiscoveredProvider.create(
+        provider1 = DiscoveredMcpServer.create(
             name="test-provider",
             source_type="docker",
             mode="http",
@@ -219,7 +219,7 @@ class TestConflictResolver:
         resolver.register(provider1)
 
         # Changed config
-        provider2 = DiscoveredProvider.create(
+        provider2 = DiscoveredMcpServer.create(
             name="test-provider",
             source_type="docker",
             mode="http",
@@ -236,7 +236,7 @@ class TestConflictResolver:
         resolver = ConflictResolver()
 
         # Register from filesystem (lower priority)
-        provider1 = DiscoveredProvider.create(
+        provider1 = DiscoveredMcpServer.create(
             name="test-provider",
             source_type="filesystem",
             mode="http",
@@ -246,7 +246,7 @@ class TestConflictResolver:
         resolver.register(provider1)
 
         # Same name from kubernetes (higher priority)
-        provider2 = DiscoveredProvider.create(
+        provider2 = DiscoveredMcpServer.create(
             name="test-provider",
             source_type="kubernetes",
             mode="http",
@@ -263,7 +263,7 @@ class TestConflictResolver:
         resolver = ConflictResolver()
 
         # Register from kubernetes (higher priority)
-        provider1 = DiscoveredProvider.create(
+        provider1 = DiscoveredMcpServer.create(
             name="test-provider",
             source_type="kubernetes",
             mode="http",
@@ -273,7 +273,7 @@ class TestConflictResolver:
         resolver.register(provider1)
 
         # Same name from filesystem (lower priority)
-        provider2 = DiscoveredProvider.create(
+        provider2 = DiscoveredMcpServer.create(
             name="test-provider",
             source_type="filesystem",
             mode="http",
@@ -292,12 +292,12 @@ class MockDiscoverySource(DiscoverySource):
     def __init__(
         self,
         source_type: str = "mock",
-        providers: list = None,
+        mcp_servers: list = None,
         mode: DiscoveryMode = DiscoveryMode.ADDITIVE,
     ):
         super().__init__(mode)
         self._source_type = source_type
-        self._providers = providers or []
+        self._providers = mcp_servers or []
         self._healthy = True
 
     @property
@@ -336,14 +336,14 @@ class TestDiscoveryService:
         """Test running a discovery cycle."""
         service = DiscoveryService()
 
-        provider = DiscoveredProvider.create(
+        provider = DiscoveredMcpServer.create(
             name="test",
             source_type="docker",
             mode="http",
             connection_info={},
         )
 
-        source = MockDiscoverySource("docker", providers=[provider])
+        source = MockDiscoverySource("docker", mcp_servers=[provider])
         service.register_source(source)
 
         result = await service.run_discovery_cycle()
@@ -356,22 +356,22 @@ class TestDiscoveryService:
         """Test discovery from multiple sources."""
         service = DiscoveryService()
 
-        provider1 = DiscoveredProvider.create(
+        provider1 = DiscoveredMcpServer.create(
             name="docker-provider",
             source_type="docker",
             mode="http",
             connection_info={},
         )
 
-        provider2 = DiscoveredProvider.create(
+        provider2 = DiscoveredMcpServer.create(
             name="k8s-provider",
             source_type="kubernetes",
             mode="http",
             connection_info={},
         )
 
-        source1 = MockDiscoverySource("docker", providers=[provider1])
-        source2 = MockDiscoverySource("kubernetes", providers=[provider2])
+        source1 = MockDiscoverySource("docker", mcp_servers=[provider1])
+        source2 = MockDiscoverySource("kubernetes", mcp_servers=[provider2])
 
         service.register_source(source1)
         service.register_source(source2)
@@ -411,7 +411,7 @@ class TestDiscoveryService:
         """Test quarantine workflow."""
         service = DiscoveryService()
 
-        provider = DiscoveredProvider.create(
+        provider = DiscoveredMcpServer.create(
             name="bad-provider",
             source_type="docker",
             mode="http",

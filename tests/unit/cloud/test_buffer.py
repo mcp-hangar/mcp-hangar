@@ -7,7 +7,7 @@ class TestEventBuffer:
     def test_push_and_drain(self):
         buf = EventBuffer(max_size=100)
         buf.push({"event_type": "ToolInvocationCompleted"})
-        buf.push({"event_type": "ProviderStarted"})
+        buf.push({"event_type": "McpServerStarted"})
         batch = buf.drain(10)
         assert len(batch) == 2
         assert batch[0]["event_type"] == "ToolInvocationCompleted"

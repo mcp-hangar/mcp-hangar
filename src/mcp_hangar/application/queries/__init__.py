@@ -1,11 +1,11 @@
 """Query handlers for CQRS."""
 
 from .queries import (
-    GetProviderHealthQuery,
-    GetProviderQuery,
-    GetProviderToolsQuery,
+    GetMcpServerHealthQuery,
+    GetMcpServerQuery,
+    GetMcpServerToolsQuery,
     GetSystemMetricsQuery,
-    ListProvidersQuery,
+    ListMcpServersQuery,
     Query,
     QueryHandler,
 )
@@ -29,11 +29,11 @@ except ImportError:
 def __getattr__(name: str):
     """Lazy import handlers to break circular dependency."""
     if name in (
-        "GetProviderHandler",
-        "GetProviderHealthHandler",
-        "GetProviderToolsHandler",
+        "GetMcpServerHandler",
+        "GetMcpServerHealthHandler",
+        "GetMcpServerToolsHandler",
         "GetSystemMetricsHandler",
-        "ListProvidersHandler",
+        "ListMcpServersHandler",
         "register_all_handlers",
     ):
         from . import handlers
@@ -63,17 +63,17 @@ __all__ = [
     # Query base classes
     "Query",
     "QueryHandler",
-    # Provider Queries
-    "ListProvidersQuery",
-    "GetProviderQuery",
-    "GetProviderToolsQuery",
-    "GetProviderHealthQuery",
+    # McpServer Queries
+    "ListMcpServersQuery",
+    "GetMcpServerQuery",
+    "GetMcpServerToolsQuery",
+    "GetMcpServerHealthQuery",
     "GetSystemMetricsQuery",
     # Handlers
-    "ListProvidersHandler",
-    "GetProviderHandler",
-    "GetProviderToolsHandler",
-    "GetProviderHealthHandler",
+    "ListMcpServersHandler",
+    "GetMcpServerHandler",
+    "GetMcpServerToolsHandler",
+    "GetMcpServerHealthHandler",
     "GetSystemMetricsHandler",
     "register_all_handlers",
 ]

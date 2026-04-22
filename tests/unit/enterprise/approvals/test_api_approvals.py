@@ -28,14 +28,14 @@ class FakeRepository:
     async def get(self, approval_id: str) -> ApprovalRequest | None:
         return self._store.get(approval_id)
 
-    async def list_pending(self, provider_id=None):
-        return await self.list_by_state(ApprovalState.PENDING, provider_id)
+    async def list_pending(self, mcp_server_id=None):
+        return await self.list_by_state(ApprovalState.PENDING, mcp_server_id)
 
-    async def list_by_state(self, state, provider_id=None):
+    async def list_by_state(self, state, mcp_server_id=None):
         return [
             r for r in self._store.values()
             if r.state == state
-            and (provider_id is None or r.provider_id == provider_id)
+            and (mcp_server_id is None or r.mcp_server_id == mcp_server_id)
         ]
 
     async def update_state(self, approval_id, state, decided_by, decided_at, reason):
@@ -56,7 +56,7 @@ def _make_pending_request(approval_id="test-001", **overrides):
     now = datetime.now(timezone.utc)
     defaults = dict(
         approval_id=approval_id,
-        provider_id="notion",
+        mcp_server_id="notion",
         tool_name="update_page",
         arguments={"page_id": "abc"},
         arguments_hash="sha256:test",

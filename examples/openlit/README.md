@@ -5,7 +5,7 @@ Visualize MCP governance telemetry in OpenLIT.
 ## What you get
 
 - Tool invocation traces in OpenLIT's trace explorer
-- Provider lifecycle events (COLD -> READY -> DEGRADED) as audit log records
+- MCP Server lifecycle events (COLD -> READY -> DEGRADED) as audit log records
 - Violation and enforcement signals searchable by `mcp.enforcement.violation_type`
 - Filter all tool calls by user: `mcp.user.id = "alice"`
 
@@ -21,7 +21,7 @@ Open OpenLIT at http://localhost:3000. Look in Traces for spans with `mcp.tool.n
 
 | Attribute | Example | Description |
 |-----------|---------|-------------|
-| `mcp.provider.id` | `math-server` | Provider that handled the call |
+| `mcp.server.id` | `math-server` | MCP Server that handled the call |
 | `mcp.tool.name` | `add` | Tool that was invoked |
 | `mcp.tool.status` | `success` / `error` | Invocation outcome |
 | `mcp.tool.duration_ms` | `12.5` | Call duration |

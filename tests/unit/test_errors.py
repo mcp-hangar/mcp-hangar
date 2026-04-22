@@ -10,7 +10,7 @@ from mcp_hangar.errors import (
     map_exception_to_hangar_error,
     NetworkError,
     ProviderCrashError,
-    ProviderDegradedError,
+    McpServerDegradedError,
     ProviderNotFoundError,
     ProviderProtocolError,
     RateLimitError,
@@ -27,11 +27,11 @@ class TestHangarError:
         """Test creating a basic error."""
         error = HangarError(
             message="Something went wrong",
-            provider="test-provider",
+            mcp_server="test-provider",
             operation="invoke",
         )
         assert error.message == "Something went wrong"
-        assert error.provider == "test-provider"
+        assert error.mcp_server == "test-provider"
         assert error.operation == "invoke"
         assert "Something went wrong" in str(error)
 
@@ -39,7 +39,7 @@ class TestHangarError:
         """Test error formatting with recovery hints."""
         error = HangarError(
             message="Operation failed",
-            provider="math",
+            mcp_server="math",
             operation="add",
             recovery_hints=[
                 "Check provider status",
@@ -55,7 +55,7 @@ class TestHangarError:
         """Test error serialization to dictionary."""
         error = HangarError(
             message="Test error",
-            provider="test",
+            mcp_server="test",
             operation="test_op",
             technical_details="Details here",
             recovery_hints=["Hint 1"],
@@ -63,14 +63,14 @@ class TestHangarError:
         result = error.to_dict()
         assert result["error_type"] == "HangarError"
         assert result["message"] == "Test error"
-        assert result["provider"] == "test"
+        assert result["mcp_server"] == "test"
         assert result["recovery_hints"] == ["Hint 1"]
 
     def test_error_with_related_logs(self):
         """Test error with related logs reference."""
         error = HangarError(
             message="Test",
-            provider="test",
+            mcp_server="test",
             related_logs="/logs/mcp-hangar.log:580",
         )
         error_str = str(error)
@@ -81,7 +81,7 @@ class TestHangarError:
         """Test error with issue URL."""
         error = HangarError(
             message="Test",
-            provider="test",
+            mcp_server="test",
             issue_url="https://github.com/test/issues/123",
         )
         error_str = str(error)
@@ -93,7 +93,7 @@ class TestHangarError:
         original = ValueError("Original error")
         error = HangarError(
             message="Wrapped error",
-            provider="test",
+            mcp_server="test",
             original_exception=original,
         )
         assert error.original_exception == original
@@ -102,7 +102,7 @@ class TestHangarError:
         """Test error with context dict."""
         error = HangarError(
             message="Test",
-            provider="test",
+            mcp_server="test",
             context={"key": "value", "count": 42},
         )
         result = error.to_dict()
@@ -116,7 +116,7 @@ class TestProviderProtocolError:
         """Test that default recovery hints are provided."""
         error = ProviderProtocolError(
             message="Invalid JSON response",
-            provider="sqlite",
+            mcp_server="sqlite",
             operation="query",
         )
         assert len(error.recovery_hints) > 0
@@ -126,7 +126,7 @@ class TestProviderProtocolError:
         """Test that raw response preview is included."""
         error = ProviderProtocolError(
             message="Invalid response",
-            provider="test",
+            mcp_server="test",
             operation="invoke",
             raw_response="SELECT * FROM users",
         )
@@ -140,7 +140,7 @@ class TestProviderCrashError:
         """Test error with exit code."""
         error = ProviderCrashError(
             message="Provider crashed",
-            provider="fetch",
+            mcp_server="fetch",
             operation="shutdown",
             exit_code=-9,
         )
@@ -151,7 +151,7 @@ class TestProviderCrashError:
         """Test error with idle duration context."""
         error = ProviderCrashError(
             message="Provider shutdown",
-            provider="fetch",
+            mcp_server="fetch",
             operation="shutdown",
             idle_duration_s=195.0,
         )
@@ -162,7 +162,7 @@ class TestProviderCrashError:
         """Test error with signal name."""
         error = ProviderCrashError(
             message="Crashed",
-            provider="test",
+            mcp_server="test",
             operation="invoke",
             exit_code=-9,
             signal_name="SIGKILL",
@@ -173,7 +173,7 @@ class TestProviderCrashError:
         """Test default recovery hints for crash."""
         error = ProviderCrashError(
             message="Crashed",
-            provider="test",
+            mcp_server="test",
             operation="invoke",
         )
         assert len(error.recovery_hints) > 0
@@ -186,7 +186,7 @@ class TestNetworkError:
         """Test error with hostname suggestion."""
         error = NetworkError(
             message="Cannot connect",
-            provider="fetch",
+            mcp_server="fetch",
             operation="request",
             hostname="httpbin.org",
         )
@@ -197,7 +197,7 @@ class TestNetworkError:
         """Test default network recovery hints."""
         error = NetworkError(
             message="Connection failed",
-            provider="test",
+            mcp_server="test",
             operation="invoke",
         )
         assert len(error.recovery_hints) > 0
@@ -210,7 +210,7 @@ class TestConfigurationError:
         """Test error with config path."""
         error = ConfigurationError(
             message="Invalid config",
-            provider="test",
+            mcp_server="test",
             config_path="/path/to/config.yaml",
         )
         assert error.config_path == "/path/to/config.yaml"
@@ -219,7 +219,7 @@ class TestConfigurationError:
         """Test error with field name."""
         error = ConfigurationError(
             message="Missing key",
-            provider="test",
+            mcp_server="test",
             field_name="providers.sqlite.image",
         )
         assert error.field_name == "providers.sqlite.image"
@@ -228,7 +228,7 @@ class TestConfigurationError:
         """Test default config recovery hints."""
         error = ConfigurationError(
             message="Bad config",
-            provider="test",
+            mcp_server="test",
         )
         assert len(error.recovery_hints) > 0
 
@@ -240,8 +240,8 @@ class TestProviderNotFoundError:
         """Test 'did you mean' suggestion for similar names."""
         error = ProviderNotFoundError(
             message="Provider not found",
-            provider="mat",  # typo for "math"
-            available_providers=["math", "sqlite", "memory"],
+            mcp_server="mat",  # typo for "math"
+            available_mcp_servers=["math", "sqlite", "memory"],
         )
         assert "math" in str(error) or len(error.recovery_hints) > 0
 
@@ -249,8 +249,8 @@ class TestProviderNotFoundError:
         """Test available providers listed in hints."""
         error = ProviderNotFoundError(
             message="Not found",
-            provider="unknown",
-            available_providers=["math", "sqlite"],
+            mcp_server="unknown",
+            available_mcp_servers=["math", "sqlite"],
         )
         error_str = str(error)
         # Should mention available providers
@@ -264,7 +264,7 @@ class TestToolNotFoundError:
         """Test error with tool name."""
         error = ToolNotFoundError(
             message="Tool not found",
-            provider="math",
+            mcp_server="math",
             operation="invoke",
             tool_name="subtract",
             available_tools=["add", "multiply"],
@@ -276,7 +276,7 @@ class TestToolNotFoundError:
         """Test similar tool suggestion."""
         error = ToolNotFoundError(
             message="Not found",
-            provider="math",
+            mcp_server="math",
             tool_name="ad",  # typo for "add"
             available_tools=["add", "multiply"],
         )
@@ -292,7 +292,7 @@ class TestTimeoutError:
         """Test error with timeout value."""
         error = TimeoutError(
             message="Operation timed out",
-            provider="slow-provider",
+            mcp_server="slow-provider",
             operation="query",
             timeout_seconds=30.0,
         )
@@ -302,7 +302,7 @@ class TestTimeoutError:
         """Test default timeout recovery hints."""
         error = TimeoutError(
             message="Timed out",
-            provider="test",
+            mcp_server="test",
             timeout_seconds=30.0,
         )
         assert len(error.recovery_hints) > 0
@@ -315,7 +315,7 @@ class TestRateLimitError:
         """Test error with rate limit info."""
         error = RateLimitError(
             message="Rate limited",
-            provider="test",
+            mcp_server="test",
             operation="invoke",
             limit=10,
             window_seconds=60,
@@ -329,7 +329,7 @@ class TestRateLimitError:
         """Test default rate limit recovery hints."""
         error = RateLimitError(
             message="Too many requests",
-            provider="test",
+            mcp_server="test",
             retry_after_seconds=10.0,
         )
         assert len(error.recovery_hints) > 0
@@ -337,14 +337,14 @@ class TestRateLimitError:
         assert "10" in hints_str or "wait" in hints_str.lower()
 
 
-class TestProviderDegradedError:
-    """Tests for ProviderDegradedError."""
+class TestMcpServerDegradedError:
+    """Tests for McpServerDegradedError."""
 
     def test_with_failure_info(self):
         """Test error with failure info."""
-        error = ProviderDegradedError(
+        error = McpServerDegradedError(
             message="Provider degraded",
-            provider="flaky",
+            mcp_server="flaky",
             operation="invoke",
             consecutive_failures=5,
             backoff_remaining_s=30.0,
@@ -354,9 +354,9 @@ class TestProviderDegradedError:
 
     def test_default_recovery_hints(self):
         """Test default degraded recovery hints."""
-        error = ProviderDegradedError(
+        error = McpServerDegradedError(
             message="Degraded",
-            provider="test",
+            mcp_server="test",
             consecutive_failures=3,
             backoff_remaining_s=15.0,
         )
@@ -369,57 +369,57 @@ class TestMapExceptionToHangarError:
     def test_json_decode_error_mapping(self):
         """Test that JSON errors are mapped to ProviderProtocolError."""
         original = json.JSONDecodeError("msg", "doc", 0)
-        result = map_exception_to_hangar_error(original, provider="test", operation="invoke")
+        result = map_exception_to_hangar_error(original, mcp_server="test", operation="invoke")
         assert isinstance(result, ProviderProtocolError)
 
     def test_timeout_error_mapping(self):
         """Test that timeout errors are mapped correctly."""
         original = Exception("timeout after 30s")
-        result = map_exception_to_hangar_error(original, provider="test", operation="invoke")
+        result = map_exception_to_hangar_error(original, mcp_server="test", operation="invoke")
         assert isinstance(result, TimeoutError)
 
     def test_connection_error_mapping(self):
         """Test that connection errors are mapped to NetworkError."""
         original = ConnectionError("Connection refused")
-        result = map_exception_to_hangar_error(original, provider="test", operation="invoke")
+        result = map_exception_to_hangar_error(original, mcp_server="test", operation="invoke")
         assert isinstance(result, NetworkError)
 
     def test_generic_error_mapping(self):
         """Test that unknown errors get wrapped in HangarError."""
         original = ValueError("Some value error")
-        result = map_exception_to_hangar_error(original, provider="test", operation="invoke")
+        result = map_exception_to_hangar_error(original, mcp_server="test", operation="invoke")
         assert isinstance(result, HangarError)
         assert result.original_exception == original
 
     def test_dns_error_mapping(self):
         """Test DNS errors are mapped to NetworkError."""
         original = Exception("DNS resolution failed: EAI_AGAIN")
-        result = map_exception_to_hangar_error(original, provider="fetch", operation="request")
+        result = map_exception_to_hangar_error(original, mcp_server="fetch", operation="request")
         assert isinstance(result, NetworkError)
 
     def test_exit_code_error_mapping(self):
         """Test exit code errors are mapped to ProviderCrashError."""
         original = Exception("Process died with exit code -9")
-        result = map_exception_to_hangar_error(original, provider="test", operation="invoke", context={"exit_code": -9})
+        result = map_exception_to_hangar_error(original, mcp_server="test", operation="invoke", context={"exit_code": -9})
         assert isinstance(result, ProviderCrashError)
 
     def test_rate_limit_error_mapping(self):
         """Test rate limit errors are mapped correctly."""
         original = Exception("Rate limit exceeded")
-        result = map_exception_to_hangar_error(original, provider="test", operation="invoke")
+        result = map_exception_to_hangar_error(original, mcp_server="test", operation="invoke")
         assert isinstance(result, RateLimitError)
 
     def test_provider_not_found_mapping(self):
         """Test provider not found errors."""
-        original = Exception("Provider 'unknown' not found")
-        result = map_exception_to_hangar_error(original, provider="unknown", operation="invoke")
+        original = Exception("mcp_server 'unknown' not found")
+        result = map_exception_to_hangar_error(original, mcp_server="unknown", operation="invoke")
         assert isinstance(result, ProviderNotFoundError)
 
     def test_tool_not_found_mapping(self):
         """Test tool not found errors."""
         original = Exception("Tool 'missing' not found")
         result = map_exception_to_hangar_error(
-            original, provider="math", operation="invoke", context={"tool_name": "missing"}
+            original, mcp_server="math", operation="invoke", context={"tool_name": "missing"}
         )
         assert isinstance(result, ToolNotFoundError)
 
@@ -427,7 +427,7 @@ class TestMapExceptionToHangarError:
         """Test client malformed JSON errors are mapped to ProviderProtocolError."""
         # JSON errors in exception message map to ProviderProtocolError
         original = Exception("ClientError: malformed JSON response")
-        result = map_exception_to_hangar_error(original, provider="test", operation="invoke")
+        result = map_exception_to_hangar_error(original, mcp_server="test", operation="invoke")
         # JSON-related errors map to ProviderProtocolError, which is retryable
         assert isinstance(result, ProviderProtocolError | TransientError)
 
@@ -435,23 +435,23 @@ class TestMapExceptionToHangarError:
         """Test socket timeout is mapped to TimeoutError."""
 
         original = builtins.TimeoutError("timed out")
-        result = map_exception_to_hangar_error(original, provider="test", operation="invoke")
+        result = map_exception_to_hangar_error(original, mcp_server="test", operation="invoke")
         assert isinstance(result, TimeoutError)
 
     def test_oserror_network_mapping(self):
         """Test OSError network errors are mapped."""
         original = OSError("Network is unreachable")
-        result = map_exception_to_hangar_error(original, provider="test", operation="invoke")
+        result = map_exception_to_hangar_error(original, mcp_server="test", operation="invoke")
         assert isinstance(result, NetworkError)
 
     def test_already_hangar_error_passthrough(self):
         """Test that HangarError is passed through unchanged."""
         original = ProviderProtocolError(
             message="Already wrapped",
-            provider="test",
+            mcp_server="test",
             operation="invoke",
         )
-        result = map_exception_to_hangar_error(original, provider="other", operation="other")
+        result = map_exception_to_hangar_error(original, mcp_server="other", operation="other")
         assert result is original
 
 
@@ -465,7 +465,7 @@ class TestIsRetryable:
 
     def test_protocol_error_is_retryable(self):
         """Test that ProviderProtocolError is retryable."""
-        error = ProviderProtocolError(message="Bad JSON", provider="test")
+        error = ProviderProtocolError(message="Bad JSON", mcp_server="test")
         assert is_retryable(error) is True
 
     def test_config_error_not_retryable(self):
@@ -480,17 +480,17 @@ class TestIsRetryable:
 
     def test_network_error_is_retryable(self):
         """Test that NetworkError is retryable."""
-        error = NetworkError(message="Connection failed", provider="test")
+        error = NetworkError(message="Connection failed", mcp_server="test")
         assert is_retryable(error) is True
 
     def test_timeout_error_is_retryable(self):
         """Test that TimeoutError is retryable."""
-        error = TimeoutError(message="Timed out", provider="test")
+        error = TimeoutError(message="Timed out", mcp_server="test")
         assert is_retryable(error) is True
 
     def test_provider_not_found_not_retryable(self):
         """Test that ProviderNotFoundError is not retryable."""
-        error = ProviderNotFoundError(message="Not found", provider="test")
+        error = ProviderNotFoundError(message="Not found", mcp_server="test")
         assert is_retryable(error) is False
 
     def test_transient_with_retryable_false(self):
@@ -577,7 +577,7 @@ class TestErrorClassifier:
 
         error = HangarTimeout(
             message="Operation timed out",
-            provider="math",
+            mcp_server="math",
             timeout_seconds=30.0,
         )
         result = ErrorClassifier.classify(error)
@@ -594,8 +594,8 @@ class TestErrorClassifier:
 
         error = ProviderNotFoundError(
             message="Provider 'unknown' not found",
-            provider="unknown",
-            available_providers=["math", "sqlite"],
+            mcp_server="unknown",
+            available_mcp_servers=["math", "sqlite"],
         )
         result = ErrorClassifier.classify(error)
 

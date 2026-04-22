@@ -9,7 +9,7 @@ from unittest.mock import MagicMock, patch
 
 
 from mcp_hangar.domain.contracts.log_buffer import IProviderLogBuffer
-from mcp_hangar.domain.model.provider import Provider
+from mcp_hangar.domain.model.provider import McpServer
 from mcp_hangar.infrastructure.persistence.log_buffer import ProviderLogBuffer
 
 
@@ -18,17 +18,14 @@ from mcp_hangar.infrastructure.persistence.log_buffer import ProviderLogBuffer
 # ---------------------------------------------------------------------------
 
 
-def _make_provider(provider_id: str = "test-p", log_buffer: IProviderLogBuffer | None = None) -> Provider:
-    return Provider(
-        provider_id=provider_id,
-        mode="subprocess",
-        command=[sys.executable, "-c", "pass"],
-        log_buffer=log_buffer,
-    )
+def _make_provider(mcp_server_id: str = "test-p", log_buffer: IProviderLogBuffer | None = None) -> McpServer:
+    return McpServer(mcp_server_id=mcp_server_id, mode="subprocess",
+    command=[sys.executable, "-c", "pass"],
+    log_buffer=log_buffer,)
 
 
-def _make_buffer(provider_id: str = "test-p") -> ProviderLogBuffer:
-    return ProviderLogBuffer(provider_id)
+def _make_buffer(mcp_server_id: str = "test-p") -> ProviderLogBuffer:
+    return ProviderLogBuffer(mcp_server_id)
 
 
 # ---------------------------------------------------------------------------
@@ -74,7 +71,7 @@ class TestStartStderrReader:
         assert lines[0].content == "hello"
         assert lines[1].content == "world"
         assert all(ln.stream == "stderr" for ln in lines)
-        assert all(ln.provider_id == "test-p" for ln in lines)
+        assert all(ln.mcp_server_id == "test-p" for ln in lines)
 
     def test_trailing_newline_stripped(self):
         """Trailing newline is stripped from each line."""
@@ -268,12 +265,12 @@ class TestProviderStderrCapture:
         # Simulate what Provider._start_stderr_reader does
         from mcp_hangar.domain.value_objects.log import LogLine as _LogLine
 
-        provider_id = "echo-provider"
+        mcp_server_id = "echo-provider"
 
         def _reader():
             try:
                 for raw_line in process.stderr:
-                    buf.append(_LogLine(provider_id=provider_id, stream="stderr", content=raw_line.rstrip("\n")))
+                    buf.append(_LogLine(mcp_server_id=mcp_server_id, stream="stderr", content=raw_line.rstrip("\n")))
             except Exception:  # noqa: BLE001
                 pass
 

@@ -31,17 +31,17 @@ class HangarFunctions:
     and will return appropriate errors if not provided.
 
     Attributes:
-        list: Function to list all managed providers.
-        start: Function to start a provider.
-        stop: Function to stop a provider.
-        invoke: Function to invoke a tool on a provider.
+        list: Function to list all managed mcp_servers.
+        start: Function to start a mcp_server.
+        stop: Function to stop a mcp_server.
+        invoke: Function to invoke a tool on a mcp_server.
         tools: Function to get tool schemas.
-        details: Function to get provider details.
+        details: Function to get mcp_server details.
         health: Function to get control plane health.
         discover: Optional async function to trigger discovery.
-        discovered: Optional function to list discovered providers.
-        quarantine: Optional function to list quarantined providers.
-        approve: Optional async function to approve a quarantined provider.
+        discovered: Optional function to list discovered mcp_servers.
+        quarantine: Optional function to list quarantined mcp_servers.
+        approve: Optional async function to approve a quarantined mcp_server.
         sources: Optional function to list discovery sources.
         metrics: Optional function to get control plane metrics.
     """

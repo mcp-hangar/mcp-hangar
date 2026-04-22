@@ -1,7 +1,7 @@
 """OpenTelemetry tracing for MCP Hangar.
 
 Provides distributed tracing with automatic context propagation
-through tool invocations and provider calls.
+through tool invocations and mcp_server calls.
 
 Configuration via environment variables:
     OTEL_EXPORTER_OTLP_ENDPOINT: OTLP endpoint (default: http://localhost:4317)
@@ -31,7 +31,7 @@ import os
 from typing import Any, TypeVar
 
 from mcp_hangar.logging_config import get_logger
-from mcp_hangar.observability.conventions import MCP, Provider
+from mcp_hangar.observability.conventions import MCP, McpServer
 
 logger = get_logger(__name__)
 
@@ -39,14 +39,14 @@ logger = get_logger(__name__)
 F = TypeVar("F", bound=Callable[..., Any])
 
 # Global state
-_tracer_provider = None
+_tracer_mcp_server = None
 _initialized = False
 
 # Check if OpenTelemetry is available
 try:
     from opentelemetry.sdk.resources import Resource, SERVICE_NAME
     from opentelemetry.sdk.trace.export import BatchSpanProcessor, ConsoleSpanExporter
-    from opentelemetry.sdk.trace import TracerProvider
+    from opentelemetry.sdk.trace import TracerMcpServer
     from opentelemetry import trace
     from opentelemetry.trace.propagation.tracecontext import TraceContextTextMapPropagator
     from opentelemetry.trace import Status, StatusCode
@@ -136,7 +136,7 @@ def init_tracing(
     Returns:
         True if tracing was initialized, False otherwise.
     """
-    global _tracer_provider, _initialized
+    global _tracer_mcp_server, _initialized
 
     if _initialized:
         logger.debug("tracing_already_initialized")
@@ -166,8 +166,8 @@ def init_tracing(
             }
         )
 
-        # Create tracer provider
-        _tracer_provider = TracerProvider(resource=resource)
+        # Create tracer mcp_server
+        _tracer_mcp_server = TracerMcpServer(resource=resource)
 
         # Add exporters
         exporters_added = 0
@@ -176,7 +176,7 @@ def init_tracing(
         if OTLP_AVAILABLE and otlp_endpoint:
             try:
                 otlp_exporter = OTLPSpanExporter(endpoint=otlp_endpoint, insecure=True)
-                _tracer_provider.add_span_processor(BatchSpanProcessor(otlp_exporter))
+                _tracer_mcp_server.add_span_processor(BatchSpanProcessor(otlp_exporter))
                 exporters_added += 1
                 logger.info("tracing_otlp_exporter_added", endpoint=otlp_endpoint)
             except Exception as e:  # noqa: BLE001 -- fault-barrier: exporter init must not crash tracing setup
@@ -189,7 +189,7 @@ def init_tracing(
                     agent_host_name=jaeger_host,
                     agent_port=jaeger_port,
                 )
-                _tracer_provider.add_span_processor(BatchSpanProcessor(jaeger_exporter))
+                _tracer_mcp_server.add_span_processor(BatchSpanProcessor(jaeger_exporter))
                 exporters_added += 1
                 logger.info(
                     "tracing_jaeger_exporter_added",
@@ -202,7 +202,7 @@ def init_tracing(
         # Console exporter (debugging)
         if console_export:
             console_exporter = ConsoleSpanExporter()
-            _tracer_provider.add_span_processor(BatchSpanProcessor(console_exporter))
+            _tracer_mcp_server.add_span_processor(BatchSpanProcessor(console_exporter))
             exporters_added += 1
             logger.info("tracing_console_exporter_added")
 
@@ -210,8 +210,8 @@ def init_tracing(
             logger.warning("tracing_no_exporters_configured")
             return False
 
-        # Set global tracer provider
-        trace.set_tracer_provider(_tracer_provider)
+        # Set global tracer mcp_server
+        trace.set_tracer_mcp_server(_tracer_mcp_server)
         _initialized = True
 
         logger.info(
@@ -228,16 +228,16 @@ def init_tracing(
 
 def shutdown_tracing() -> None:
     """Shutdown tracing and flush pending spans."""
-    global _tracer_provider, _initialized
+    global _tracer_mcp_server, _initialized
 
-    if _tracer_provider is not None:
+    if _tracer_mcp_server is not None:
         try:
-            _tracer_provider.shutdown()
+            _tracer_mcp_server.shutdown()
             logger.info("tracing_shutdown_complete")
         except Exception as e:  # noqa: BLE001 -- fault-barrier: tracing shutdown must not crash application
             logger.warning("tracing_shutdown_error", error=str(e))
         finally:
-            _tracer_provider = None
+            _tracer_mcp_server = None
             _initialized = False
 
 
@@ -257,14 +257,14 @@ def get_tracer(name: str = __name__) -> Any:
 
 
 def trace_tool_invocation(
-    provider_id: str,
+    mcp_server_id: str,
     tool_name: str,
     timeout: float,
 ) -> Callable[[F], F]:
     """Decorator to trace tool invocations.
 
     Args:
-        provider_id: Provider ID.
+        mcp_server_id: McpServer ID.
         tool_name: Tool name.
         timeout: Timeout in seconds.
 
@@ -284,7 +284,7 @@ def trace_tool_invocation(
                 kind=trace.SpanKind.CLIENT if OTEL_AVAILABLE else None,
             ) as span:
                 # Set standard attributes
-                span.set_attribute(Provider.ID, provider_id)
+                span.set_attribute(McpServer.ID, mcp_server_id)
                 span.set_attribute(MCP.TOOL_NAME, tool_name)
                 span.set_attribute("mcp.timeout_seconds", timeout)
 

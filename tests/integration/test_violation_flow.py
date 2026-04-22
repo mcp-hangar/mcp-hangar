@@ -41,22 +41,19 @@ class TestCapabilityViolationThroughHandler:
         handler = MetricsEventHandler()
         before = _get_counter_value(
             CAPABILITY_VIOLATIONS_TOTAL,
-            provider="test-provider-cv",
+            mcp_server="test-provider-cv",
             violation_type="capability_drift",
         )
 
-        event = CapabilityViolationDetected(
-            provider_id="test-provider-cv",
-            violation_type="capability_drift",
-            violation_detail="Tool count exceeded declared maximum",
-            enforcement_action="alert",
-            severity="high",
-        )
+        event = CapabilityViolationDetected(mcp_server_id="test-provider-cv", violation_type="capability_drift",
+        violation_detail="Tool count exceeded declared maximum",
+        enforcement_action="alert",
+        severity="high",)
         handler.handle(event)
 
         after = _get_counter_value(
             CAPABILITY_VIOLATIONS_TOTAL,
-            provider="test-provider-cv",
+            mcp_server="test-provider-cv",
             violation_type="capability_drift",
         )
         assert after - before == 1.0, f"Expected counter to increment by 1, got delta {after - before}"
@@ -69,21 +66,18 @@ class TestEgressBlockedThroughHandler:
         handler = MetricsEventHandler()
         before = _get_counter_value(
             CAPABILITY_VIOLATIONS_TOTAL,
-            provider="test-provider-eb",
+            mcp_server="test-provider-eb",
             violation_type="egress_denied",
         )
 
-        event = EgressBlocked(
-            provider_id="test-provider-eb",
-            destination_host="evil.example.com",
-            destination_port=443,
-            protocol="https",
-        )
+        event = EgressBlocked(mcp_server_id="test-provider-eb", destination_host="evil.example.com",
+        destination_port=443,
+        protocol="https",)
         handler.handle(event)
 
         after = _get_counter_value(
             CAPABILITY_VIOLATIONS_TOTAL,
-            provider="test-provider-eb",
+            mcp_server="test-provider-eb",
             violation_type="egress_denied",
         )
         assert after - before == 1.0, f"Expected counter to increment by 1, got delta {after - before}"
@@ -98,22 +92,19 @@ class TestViolationTypeEnumRoundtrip:
 
         before = _get_counter_value(
             CAPABILITY_VIOLATIONS_TOTAL,
-            provider="test-provider-rt",
+            mcp_server="test-provider-rt",
             violation_type=vtype.value,
         )
 
-        event = CapabilityViolationDetected(
-            provider_id="test-provider-rt",
-            violation_type=vtype.value,
-            violation_detail="Undeclared tool detected",
-            enforcement_action="block",
-            severity=ViolationSeverity.MEDIUM.value,
-        )
+        event = CapabilityViolationDetected(mcp_server_id="test-provider-rt", violation_type=vtype.value,
+        violation_detail="Undeclared tool detected",
+        enforcement_action="block",
+        severity=ViolationSeverity.MEDIUM.value,)
         handler.handle(event)
 
         after = _get_counter_value(
             CAPABILITY_VIOLATIONS_TOTAL,
-            provider="test-provider-rt",
+            mcp_server="test-provider-rt",
             violation_type=vtype.value,
         )
         assert after - before == 1.0
@@ -123,23 +114,17 @@ class TestViolationSeverityFieldOnEvent:
     """CapabilityViolationDetected has severity field from ViolationSeverity."""
 
     def test_severity_field_accessible_as_string(self):
-        event = CapabilityViolationDetected(
-            provider_id="test-provider-sev",
-            violation_type="schema_mismatch",
-            violation_detail="Schema changed",
-            enforcement_action="alert",
-            severity=ViolationSeverity.CRITICAL.value,
-        )
+        event = CapabilityViolationDetected(mcp_server_id="test-provider-sev", violation_type="schema_mismatch",
+        violation_detail="Schema changed",
+        enforcement_action="alert",
+        severity=ViolationSeverity.CRITICAL.value,)
         assert event.severity == "critical"
         assert isinstance(event.severity, str)
 
     def test_severity_default_is_high(self):
-        event = CapabilityViolationDetected(
-            provider_id="test-provider-def",
-            violation_type="capability_drift",
-            violation_detail="Drift detected",
-            enforcement_action="alert",
-        )
+        event = CapabilityViolationDetected(mcp_server_id="test-provider-def", violation_type="capability_drift",
+        violation_detail="Drift detected",
+        enforcement_action="alert",)
         assert event.severity == "high"
 
 
@@ -187,24 +172,21 @@ class TestQuarantinedEventsDistinct:
         assert ProviderCapabilityQuarantined is not ProviderQuarantined
 
     def test_different_field_signatures(self):
-        cap_q = ProviderCapabilityQuarantined(
-            provider_id="test-provider",
-            reason="Too many violations",
-            violation_count=5,
-        )
+        cap_q = ProviderCapabilityQuarantined(mcp_server_id="test-provider", reason="Too many violations",
+        violation_count=5,)
         disc_q = ProviderQuarantined(
-            provider_name="test-provider",
+            mcp_server_name="test-provider",
             source_type="kubernetes",
             reason="Health check failed",
             validation_result="failed",
         )
-        # ProviderCapabilityQuarantined has provider_id; ProviderQuarantined has provider_name
-        assert hasattr(cap_q, "provider_id")
+        # ProviderCapabilityQuarantined has mcp_server_id; ProviderQuarantined has provider_name
+        assert hasattr(cap_q, "mcp_server_id")
         assert hasattr(cap_q, "violation_count")
-        assert hasattr(disc_q, "provider_name")
+        assert hasattr(disc_q, "mcp_server_name")
         assert hasattr(disc_q, "source_type")
-        assert not hasattr(cap_q, "provider_name")
-        assert not hasattr(disc_q, "provider_id")
+        assert not hasattr(cap_q, "mcp_server_name")
+        assert not hasattr(disc_q, "mcp_server_id")
 
 
 class TestMultipleProvidersIndependentCounters:
@@ -215,31 +197,28 @@ class TestMultipleProvidersIndependentCounters:
 
         before_a = _get_counter_value(
             CAPABILITY_VIOLATIONS_TOTAL,
-            provider="provider-alpha",
+            mcp_server="provider-alpha",
             violation_type="capability_drift",
         )
         before_b = _get_counter_value(
             CAPABILITY_VIOLATIONS_TOTAL,
-            provider="provider-beta",
+            mcp_server="provider-beta",
             violation_type="capability_drift",
         )
 
-        event_a = CapabilityViolationDetected(
-            provider_id="provider-alpha",
-            violation_type="capability_drift",
-            violation_detail="Drift A",
-            enforcement_action="alert",
-        )
+        event_a = CapabilityViolationDetected(mcp_server_id="provider-alpha", violation_type="capability_drift",
+        violation_detail="Drift A",
+        enforcement_action="alert",)
         handler.handle(event_a)
 
         after_a = _get_counter_value(
             CAPABILITY_VIOLATIONS_TOTAL,
-            provider="provider-alpha",
+            mcp_server="provider-alpha",
             violation_type="capability_drift",
         )
         after_b = _get_counter_value(
             CAPABILITY_VIOLATIONS_TOTAL,
-            provider="provider-beta",
+            mcp_server="provider-beta",
             violation_type="capability_drift",
         )
 
@@ -251,38 +230,32 @@ class TestMultipleProvidersIndependentCounters:
 
         before_a = _get_counter_value(
             CAPABILITY_VIOLATIONS_TOTAL,
-            provider="provider-gamma",
+            mcp_server="provider-gamma",
             violation_type="egress_denied",
         )
         before_b = _get_counter_value(
             CAPABILITY_VIOLATIONS_TOTAL,
-            provider="provider-delta",
+            mcp_server="provider-delta",
             violation_type="egress_denied",
         )
 
-        event_a = EgressBlocked(
-            provider_id="provider-gamma",
-            destination_host="a.example.com",
-            destination_port=443,
-            protocol="https",
-        )
-        event_b = EgressBlocked(
-            provider_id="provider-delta",
-            destination_host="b.example.com",
-            destination_port=80,
-            protocol="http",
-        )
+        event_a = EgressBlocked(mcp_server_id="provider-gamma", destination_host="a.example.com",
+        destination_port=443,
+        protocol="https",)
+        event_b = EgressBlocked(mcp_server_id="provider-delta", destination_host="b.example.com",
+        destination_port=80,
+        protocol="http",)
         handler.handle(event_a)
         handler.handle(event_b)
 
         after_a = _get_counter_value(
             CAPABILITY_VIOLATIONS_TOTAL,
-            provider="provider-gamma",
+            mcp_server="provider-gamma",
             violation_type="egress_denied",
         )
         after_b = _get_counter_value(
             CAPABILITY_VIOLATIONS_TOTAL,
-            provider="provider-delta",
+            mcp_server="provider-delta",
             violation_type="egress_denied",
         )
 

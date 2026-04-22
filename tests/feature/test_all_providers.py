@@ -12,7 +12,7 @@ import pytest
 # Add registry to path
 sys.path.insert(0, str(Path(__file__).parent))
 
-from mcp_hangar.domain.model import Provider  # noqa: E402
+from mcp_hangar.domain.model import McpServer  # noqa: E402
 
 logging.basicConfig(level=logging.INFO, format="%(levelname)s: %(message)s")
 logger = logging.getLogger(__name__)
@@ -31,9 +31,9 @@ def _run_provider_check(
     print(f"{'=' * 70}")
 
     # Create provider
-    provider = Provider(provider_id=name, **config)
+    provider = McpServer(mcp_server_id=name, **config)
 
-    print(f"\n📦 Provider: {provider.provider_id}")
+    print(f"\n📦 Provider: {provider.mcp_server_id}")
     print(f"   Mode: {provider._mode}")
     print(f"   Image: {provider._image if provider._image else 'building from Dockerfile'}")
     print(f"   Network: {provider._network}")

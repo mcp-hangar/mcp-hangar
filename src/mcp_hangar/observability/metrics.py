@@ -52,51 +52,51 @@ class ObservabilityMetrics:
         self.circuit_breaker_state = Gauge(
             name="mcp_hangar_circuit_breaker_state",
             description="Circuit breaker state (0=closed, 1=open, 2=half_open)",
-            labels=["provider"],
+            labels=["mcp_server"],
         )
 
         self.circuit_breaker_failures = Counter(
             name="mcp_hangar_circuit_breaker_failures_total",
             description="Total circuit breaker failures",
-            labels=["provider"],
+            labels=["mcp_server"],
         )
 
         self.circuit_breaker_successes = Counter(
             name="mcp_hangar_circuit_breaker_successes_total",
             description="Total circuit breaker successes after recovery",
-            labels=["provider"],
+            labels=["mcp_server"],
         )
 
         # Retry metrics
         self.retry_attempts = Counter(
             name="mcp_hangar_retry_attempts_total",
             description="Total retry attempts",
-            labels=["provider", "tool", "attempt_number"],
+            labels=["mcp_server", "tool", "attempt_number"],
         )
 
         self.retry_exhausted = Counter(
             name="mcp_hangar_retry_exhausted_total",
             description="Total times all retries were exhausted",
-            labels=["provider", "tool"],
+            labels=["mcp_server", "tool"],
         )
 
         self.retry_succeeded = Counter(
             name="mcp_hangar_retry_succeeded_total",
             description="Total times retry succeeded after failure",
-            labels=["provider", "tool", "attempt_number"],
+            labels=["mcp_server", "tool", "attempt_number"],
         )
 
         # Queue metrics
         self.pending_requests = Gauge(
             name="mcp_hangar_pending_requests",
-            description="Number of pending requests per provider",
-            labels=["provider"],
+            description="Number of pending requests per mcp_server",
+            labels=["mcp_server"],
         )
 
         self.request_queue_time_seconds = Histogram(
             name="mcp_hangar_request_queue_time_seconds",
             description="Time requests spend waiting in queue",
-            labels=["provider"],
+            labels=["mcp_server"],
             buckets=(0.001, 0.005, 0.01, 0.025, 0.05, 0.1, 0.25, 0.5, 1.0, 2.5),
         )
 
@@ -104,33 +104,33 @@ class ObservabilityMetrics:
         self.cold_start_phase_duration = Histogram(
             name="mcp_hangar_cold_start_phase_duration_seconds",
             description="Duration of cold start phases",
-            labels=["provider", "phase"],  # phase: spawn, connect, discover, health
+            labels=["mcp_server", "phase"],  # phase: spawn, connect, discover, health
             buckets=(0.01, 0.025, 0.05, 0.1, 0.25, 0.5, 1.0, 2.5, 5.0, 10.0),
         )
 
         self.cold_starts_in_progress = Gauge(
             name="mcp_hangar_cold_starts_in_progress",
             description="Number of cold starts currently in progress",
-            labels=["provider"],
+            labels=["mcp_server"],
         )
 
         # Resource metrics (best-effort)
-        self.provider_memory_bytes = Gauge(
-            name="mcp_hangar_provider_memory_bytes",
-            description="Memory usage of provider process in bytes",
-            labels=["provider"],
+        self.mcp_server_memory_bytes = Gauge(
+            name="mcp_hangar_mcp_server_memory_bytes",
+            description="Memory usage of mcp_server process in bytes",
+            labels=["mcp_server"],
         )
 
-        self.provider_cpu_percent = Gauge(
-            name="mcp_hangar_provider_cpu_percent",
-            description="CPU usage percentage of provider process",
-            labels=["provider"],
+        self.mcp_server_cpu_percent = Gauge(
+            name="mcp_hangar_mcp_server_cpu_percent",
+            description="CPU usage percentage of mcp_server process",
+            labels=["mcp_server"],
         )
 
         # SLI metrics
         self.availability_ratio = Gauge(
             name="mcp_hangar_availability_ratio",
-            description="Availability ratio (ready providers / total providers)",
+            description="Availability ratio (ready mcp_servers / total mcp_servers)",
         )
 
         self.error_budget_remaining = Gauge(
@@ -139,10 +139,10 @@ class ObservabilityMetrics:
         )
 
         # Saturation metrics
-        self.provider_utilization = Gauge(
-            name="mcp_hangar_provider_utilization",
-            description="Provider utilization ratio (active/capacity)",
-            labels=["provider"],
+        self.mcp_server_utilization = Gauge(
+            name="mcp_hangar_mcp_server_utilization",
+            description="McpServer utilization ratio (active/capacity)",
+            labels=["mcp_server"],
         )
 
         # Register all with global registry
@@ -163,11 +163,11 @@ class ObservabilityMetrics:
             self.request_queue_time_seconds,
             self.cold_start_phase_duration,
             self.cold_starts_in_progress,
-            self.provider_memory_bytes,
-            self.provider_cpu_percent,
+            self.mcp_server_memory_bytes,
+            self.mcp_server_cpu_percent,
             self.availability_ratio,
             self.error_budget_remaining,
-            self.provider_utilization,
+            self.mcp_server_utilization,
         ]
 
         for metric in metrics:
@@ -178,91 +178,91 @@ class ObservabilityMetrics:
                 pass
 
     # Circuit breaker methods
-    def set_circuit_state(self, provider: str, state: CircuitState) -> None:
+    def set_circuit_state(self, mcp_server: str, state: CircuitState) -> None:
         """Update circuit breaker state."""
         state_value = {"closed": 0, "open": 1, "half_open": 2}.get(state.value, 0)
-        self.circuit_breaker_state.set(state_value, provider=provider)
+        self.circuit_breaker_state.set(state_value, mcp_server=mcp_server)
 
-    def record_circuit_failure(self, provider: str) -> None:
+    def record_circuit_failure(self, mcp_server: str) -> None:
         """Record circuit breaker failure."""
-        self.circuit_breaker_failures.inc(provider=provider)
+        self.circuit_breaker_failures.inc(mcp_server=mcp_server)
 
-    def record_circuit_success(self, provider: str) -> None:
+    def record_circuit_success(self, mcp_server: str) -> None:
         """Record circuit breaker success (recovery)."""
-        self.circuit_breaker_successes.inc(provider=provider)
+        self.circuit_breaker_successes.inc(mcp_server=mcp_server)
 
     # Retry methods
-    def record_retry_attempt(self, provider: str, tool: str, attempt: int) -> None:
+    def record_retry_attempt(self, mcp_server: str, tool: str, attempt: int) -> None:
         """Record a retry attempt."""
-        self.retry_attempts.inc(provider=provider, tool=tool, attempt_number=str(attempt))
+        self.retry_attempts.inc(mcp_server=mcp_server, tool=tool, attempt_number=str(attempt))
 
-    def record_retry_exhausted(self, provider: str, tool: str) -> None:
+    def record_retry_exhausted(self, mcp_server: str, tool: str) -> None:
         """Record when all retries are exhausted."""
-        self.retry_exhausted.inc(provider=provider, tool=tool)
+        self.retry_exhausted.inc(mcp_server=mcp_server, tool=tool)
 
-    def record_retry_success(self, provider: str, tool: str, attempt: int) -> None:
+    def record_retry_success(self, mcp_server: str, tool: str, attempt: int) -> None:
         """Record successful retry."""
-        self.retry_succeeded.inc(provider=provider, tool=tool, attempt_number=str(attempt))
+        self.retry_succeeded.inc(mcp_server=mcp_server, tool=tool, attempt_number=str(attempt))
 
     # Queue methods
-    def set_pending_requests(self, provider: str, count: int) -> None:
+    def set_pending_requests(self, mcp_server: str, count: int) -> None:
         """Update pending request count."""
-        self.pending_requests.set(count, provider=provider)
+        self.pending_requests.set(count, mcp_server=mcp_server)
 
-    def observe_queue_time(self, provider: str, duration_seconds: float) -> None:
+    def observe_queue_time(self, mcp_server: str, duration_seconds: float) -> None:
         """Record time spent in queue."""
-        self.request_queue_time_seconds.observe(duration_seconds, provider=provider)
+        self.request_queue_time_seconds.observe(duration_seconds, mcp_server=mcp_server)
 
     # Cold start methods
-    def record_cold_start_phase(self, provider: str, phase: str, duration_seconds: float) -> None:
+    def record_cold_start_phase(self, mcp_server: str, phase: str, duration_seconds: float) -> None:
         """Record duration of a cold start phase.
 
         Args:
-            provider: Provider ID.
+            mcp_server: McpServer ID.
             phase: Phase name (spawn, connect, discover, health).
             duration_seconds: Phase duration.
         """
-        self.cold_start_phase_duration.observe(duration_seconds, provider=provider, phase=phase)
+        self.cold_start_phase_duration.observe(duration_seconds, mcp_server=mcp_server, phase=phase)
 
-    def cold_start_began(self, provider: str) -> None:
+    def cold_start_began(self, mcp_server: str) -> None:
         """Mark cold start in progress."""
-        self.cold_starts_in_progress.inc(provider=provider)
+        self.cold_starts_in_progress.inc(mcp_server=mcp_server)
 
-    def cold_start_completed(self, provider: str) -> None:
+    def cold_start_completed(self, mcp_server: str) -> None:
         """Mark cold start completed."""
-        self.cold_starts_in_progress.dec(provider=provider)
+        self.cold_starts_in_progress.dec(mcp_server=mcp_server)
 
     # Resource methods
-    def update_provider_resources(
+    def update_mcp_server_resources(
         self,
-        provider: str,
+        mcp_server: str,
         memory_bytes: int | None = None,
         cpu_percent: float | None = None,
     ) -> None:
-        """Update provider resource metrics.
+        """Update mcp_server resource metrics.
 
         Args:
-            provider: Provider ID.
+            mcp_server: McpServer ID.
             memory_bytes: Memory usage in bytes.
             cpu_percent: CPU usage percentage (0-100).
         """
         if memory_bytes is not None:
-            self.provider_memory_bytes.set(memory_bytes, provider=provider)
+            self.mcp_server_memory_bytes.set(memory_bytes, mcp_server=mcp_server)
         if cpu_percent is not None:
-            self.provider_cpu_percent.set(cpu_percent, provider=provider)
+            self.mcp_server_cpu_percent.set(cpu_percent, mcp_server=mcp_server)
 
     # SLI methods
     def update_availability(self, ready_count: int, total_count: int) -> None:
         """Update availability ratio.
 
         Args:
-            ready_count: Number of ready providers.
-            total_count: Total number of providers.
+            ready_count: Number of ready mcp_servers.
+            total_count: Total number of mcp_servers.
         """
         if total_count > 0:
             ratio = ready_count / total_count
         else:
-            ratio = 1.0  # No providers = 100% available (vacuous truth)
+            ratio = 1.0  # No mcp_servers = 100% available (vacuous truth)
         self.availability_ratio.set(ratio)
 
     def update_error_budget(self, remaining_ratio: float) -> None:
@@ -273,14 +273,14 @@ class ObservabilityMetrics:
         """
         self.error_budget_remaining.set(max(0.0, min(1.0, remaining_ratio)))
 
-    def update_utilization(self, provider: str, ratio: float) -> None:
-        """Update provider utilization.
+    def update_utilization(self, mcp_server: str, ratio: float) -> None:
+        """Update mcp_server utilization.
 
         Args:
-            provider: Provider ID.
+            mcp_server: McpServer ID.
             ratio: Utilization ratio (0.0 - 1.0).
         """
-        self.provider_utilization.set(ratio, provider=provider)
+        self.mcp_server_utilization.set(ratio, mcp_server=mcp_server)
 
 
 # Singleton accessor

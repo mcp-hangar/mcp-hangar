@@ -3,20 +3,20 @@
 import time
 from typing import Any
 
-from ...domain.contracts.runtime_store import IRuntimeProviderStore
-from ...domain.exceptions import ProviderNotFoundError
-from ...domain.policies.provider_health import to_health_status_string
-from ...domain.repository import IProviderRepository
+from ...domain.contracts.runtime_store import IRuntimeMcpServerStore
+from ...domain.exceptions import McpServerNotFoundError
+from ...domain.policies.mcp_server_health import to_health_status_string
+from ...domain.repository import IMcpServerRepository
 from ...logging_config import get_logger
 from ..ports.bus import IQueryBus
-from ..read_models import HealthInfo, ProviderDetails, ProviderSummary, SystemMetrics, ToolInfo
+from ..read_models import HealthInfo, McpServerDetails, McpServerSummary, SystemMetrics, ToolInfo
 from .queries import (
-    GetProviderHealthQuery,
-    GetProviderQuery,
-    GetProviderToolsQuery,
+    GetMcpServerHealthQuery,
+    GetMcpServerQuery,
+    GetMcpServerToolsQuery,
     GetSystemMetricsQuery,
     GetToolInvocationHistoryQuery,
-    ListProvidersQuery,
+    ListMcpServersQuery,
     QueryHandler,
 )
 
@@ -28,44 +28,44 @@ class BaseQueryHandler(QueryHandler):
 
     def __init__(
         self,
-        repository: IProviderRepository,
-        runtime_store: IRuntimeProviderStore | None = None,
+        repository: IMcpServerRepository,
+        runtime_store: IRuntimeMcpServerStore | None = None,
     ):
         self._repository = repository
         self._runtime_store = runtime_store
 
-    def _get_provider(self, provider_id: str):
-        """Get provider or raise ProviderNotFoundError.
+    def _get_mcp_server(self, mcp_server_id: str):
+        """Get mcp_server or raise McpServerNotFoundError.
 
-        Checks both static repository and runtime (hot-loaded) providers.
+        Checks both static repository and runtime (hot-loaded) mcp_servers.
         """
         # First check static repository
-        provider = self._repository.get(provider_id)
-        if provider is not None:
-            return provider
+        mcp_server = self._repository.get(mcp_server_id)
+        if mcp_server is not None:
+            return mcp_server
 
-        # Then check runtime (hot-loaded) providers
+        # Then check runtime (hot-loaded) mcp_servers
         if self._runtime_store is not None:
-            provider = self._runtime_store.get_provider(provider_id)
-            if provider is not None:
-                return provider
+            mcp_server = self._runtime_store.get_mcp_server(mcp_server_id)
+            if mcp_server is not None:
+                return mcp_server
 
-        raise ProviderNotFoundError(provider_id)
+        raise McpServerNotFoundError(mcp_server_id)
 
-    def _get_health_status(self, provider) -> str:
+    def _get_health_status(self, mcp_server) -> str:
         """Determine health status string.
 
         Delegates classification to a domain policy to keep CQRS query layer free
         from business interpretation logic.
         """
         return to_health_status_string(
-            state=provider.state,
-            consecutive_failures=provider.health.consecutive_failures,
+            state=mcp_server.state,
+            consecutive_failures=mcp_server.health.consecutive_failures,
         )
 
-    def _build_health_info(self, provider) -> HealthInfo:
-        """Build HealthInfo from provider."""
-        health = provider.health
+    def _build_health_info(self, mcp_server) -> HealthInfo:
+        """Build HealthInfo from mcp_server."""
+        health = mcp_server.health
         now = time.time()
 
         last_success_ago = None
@@ -96,92 +96,92 @@ class BaseQueryHandler(QueryHandler):
         )
 
 
-class ListProvidersHandler(BaseQueryHandler):
-    """Handler for ListProvidersQuery."""
+class ListMcpServersHandler(BaseQueryHandler):
+    """Handler for ListMcpServersQuery."""
 
-    def handle(self, query: ListProvidersQuery) -> list[ProviderSummary]:
+    def handle(self, query: ListMcpServersQuery) -> list[McpServerSummary]:
         """
-        List all providers with optional state filtering.
+        List all mcp_servers with optional state filtering.
 
         Returns:
-            List of ProviderSummary
+            List of McpServerSummary
         """
         result = []
-        for provider_id, provider in self._repository.get_all().items():
-            state = provider.state.value
+        for mcp_server_id, mcp_server in self._repository.get_all().items():
+            state = mcp_server.state.value
 
             # Apply filter if specified
             if query.state_filter and state != query.state_filter:
                 continue
 
-            summary = ProviderSummary(
-                provider_id=provider_id,
+            summary = McpServerSummary(
+                mcp_server_id=mcp_server_id,
                 state=state,
-                mode=provider.mode.value,
-                is_alive=provider.is_alive,
-                tools_count=provider.tools.count(),
-                health_status=self._get_health_status(provider),
-                description=provider.description,
-                tools_predefined=provider.tools_predefined,
+                mode=mcp_server.mode.value,
+                is_alive=mcp_server.is_alive,
+                tools_count=mcp_server.tools.count(),
+                health_status=self._get_health_status(mcp_server),
+                description=mcp_server.description,
+                tools_predefined=mcp_server.tools_predefined,
             )
             result.append(summary)
 
         return result
 
 
-class GetProviderHandler(BaseQueryHandler):
-    """Handler for GetProviderQuery."""
+class GetMcpServerHandler(BaseQueryHandler):
+    """Handler for GetMcpServerQuery."""
 
-    def handle(self, query: GetProviderQuery) -> ProviderDetails:
+    def handle(self, query: GetMcpServerQuery) -> McpServerDetails:
         """
-        Get detailed information about a provider.
+        Get detailed information about a mcp_server.
 
         Returns:
-            ProviderDetails
+            McpServerDetails
         """
-        provider = self._get_provider(query.provider_id)
+        mcp_server = self._get_mcp_server(query.mcp_server_id)
 
-        tools = [self._build_tool_info(t) for t in provider.tools]
-        health = self._build_health_info(provider)
+        tools = [self._build_tool_info(t) for t in mcp_server.tools]
+        health = self._build_health_info(mcp_server)
 
-        return ProviderDetails(
-            provider_id=query.provider_id,
-            state=provider.state.value,
-            mode=provider.mode.value,
-            is_alive=provider.is_alive,
+        return McpServerDetails(
+            mcp_server_id=query.mcp_server_id,
+            state=mcp_server.state.value,
+            mode=mcp_server.mode.value,
+            is_alive=mcp_server.is_alive,
             tools=tools,
             health=health,
-            idle_time=provider.idle_time,
-            meta=provider.meta,
+            idle_time=mcp_server.idle_time,
+            meta=mcp_server.meta,
         )
 
 
-class GetProviderToolsHandler(BaseQueryHandler):
-    """Handler for GetProviderToolsQuery."""
+class GetMcpServerToolsHandler(BaseQueryHandler):
+    """Handler for GetMcpServerToolsQuery."""
 
-    def handle(self, query: GetProviderToolsQuery) -> list[ToolInfo]:
+    def handle(self, query: GetMcpServerToolsQuery) -> list[ToolInfo]:
         """
-        Get tools for a specific provider.
+        Get tools for a specific mcp_server.
 
         Returns:
             List of ToolInfo
         """
-        provider = self._get_provider(query.provider_id)
-        return [self._build_tool_info(t) for t in provider.tools]
+        mcp_server = self._get_mcp_server(query.mcp_server_id)
+        return [self._build_tool_info(t) for t in mcp_server.tools]
 
 
-class GetProviderHealthHandler(BaseQueryHandler):
-    """Handler for GetProviderHealthQuery."""
+class GetMcpServerHealthHandler(BaseQueryHandler):
+    """Handler for GetMcpServerHealthQuery."""
 
-    def handle(self, query: GetProviderHealthQuery) -> HealthInfo:
+    def handle(self, query: GetMcpServerHealthQuery) -> HealthInfo:
         """
-        Get health information for a provider.
+        Get health information for a mcp_server.
 
         Returns:
             HealthInfo
         """
-        provider = self._get_provider(query.provider_id)
-        return self._build_health_info(provider)
+        mcp_server = self._get_mcp_server(query.mcp_server_id)
+        return self._build_health_info(mcp_server)
 
 
 class GetSystemMetricsHandler(BaseQueryHandler):
@@ -194,23 +194,23 @@ class GetSystemMetricsHandler(BaseQueryHandler):
         Returns:
             SystemMetrics
         """
-        providers = self._repository.get_all()
+        mcp_servers = self._repository.get_all()
 
-        total_providers = len(providers)
-        providers_by_state: dict[str, int] = {}
+        total_mcp_servers = len(mcp_servers)
+        mcp_servers_by_state: dict[str, int] = {}
         total_tools = 0
         total_invocations = 0
         total_failures = 0
 
-        for provider in providers.values():
+        for mcp_server in mcp_servers.values():
             # Count by state
-            state = provider.state.value
-            providers_by_state[state] = providers_by_state.get(state, 0) + 1
+            state = mcp_server.state.value
+            mcp_servers_by_state[state] = mcp_servers_by_state.get(state, 0) + 1
 
             # Sum metrics
-            total_tools += provider.tools.count()
-            total_invocations += provider.health.total_invocations
-            total_failures += provider.health.total_failures
+            total_tools += mcp_server.tools.count()
+            total_invocations += mcp_server.health.total_invocations
+            total_failures += mcp_server.health.total_failures
 
         # Calculate overall success rate
         if total_invocations > 0:
@@ -219,8 +219,8 @@ class GetSystemMetricsHandler(BaseQueryHandler):
             overall_success_rate = 1.0
 
         return SystemMetrics(
-            total_providers=total_providers,
-            providers_by_state=providers_by_state,
+            total_mcp_servers=total_mcp_servers,
+            mcp_servers_by_state=mcp_servers_by_state,
             total_tools=total_tools,
             total_invocations=total_invocations,
             total_failures=total_failures,
@@ -241,13 +241,13 @@ class GetToolInvocationHistoryHandler(QueryHandler):
         self._event_store = event_store
 
     def handle(self, query: GetToolInvocationHistoryQuery) -> dict:
-        """Get tool invocation history for a provider from the event store.
+        """Get tool invocation history for a mcp_server from the event store.
 
-        Reads all streams matching the provider's stream ID and filters for
+        Reads all streams matching the mcp_server's stream ID and filters for
         ToolInvocationCompleted and ToolInvocationFailed events.
 
         Returns:
-            Dict with provider_id, history list, and total count.
+            Dict with mcp_server_id, history list, and total count.
         """
         if self._event_store is not None:
             event_store = self._event_store
@@ -255,7 +255,7 @@ class GetToolInvocationHistoryHandler(QueryHandler):
             from ...infrastructure.event_store import get_event_store
 
             event_store = get_event_store()
-        target_stream_id = f"provider-{query.provider_id}"
+        target_stream_id = f"mcp_server-{query.mcp_server_id}"
         tool_event_types = {"ToolInvocationCompleted", "ToolInvocationFailed"}
         limit = min(max(1, query.limit), 500)
 
@@ -272,7 +272,7 @@ class GetToolInvocationHistoryHandler(QueryHandler):
                     break
 
         return {
-            "provider_id": query.provider_id,
+            "mcp_server_id": query.mcp_server_id,
             "history": history,
             "total": len(history),
         }
@@ -280,8 +280,8 @@ class GetToolInvocationHistoryHandler(QueryHandler):
 
 def register_all_handlers(
     query_bus: IQueryBus,
-    repository: IProviderRepository,
-    runtime_store: IRuntimeProviderStore | None = None,
+    repository: IMcpServerRepository,
+    runtime_store: IRuntimeMcpServerStore | None = None,
     event_store: Any = None,
 ) -> None:
     """
@@ -289,14 +289,14 @@ def register_all_handlers(
 
     Args:
         query_bus: The query bus to register handlers with
-        repository: Provider repository
-        runtime_store: Optional runtime provider store for hot-loaded provider lookup
+        repository: McpServer repository
+        runtime_store: Optional runtime mcp_server store for hot-loaded mcp_server lookup
         event_store: Optional event store for tool invocation history
     """
-    query_bus.register(ListProvidersQuery, ListProvidersHandler(repository, runtime_store))
-    query_bus.register(GetProviderQuery, GetProviderHandler(repository, runtime_store))
-    query_bus.register(GetProviderToolsQuery, GetProviderToolsHandler(repository, runtime_store))
-    query_bus.register(GetProviderHealthQuery, GetProviderHealthHandler(repository, runtime_store))
+    query_bus.register(ListMcpServersQuery, ListMcpServersHandler(repository, runtime_store))
+    query_bus.register(GetMcpServerQuery, GetMcpServerHandler(repository, runtime_store))
+    query_bus.register(GetMcpServerToolsQuery, GetMcpServerToolsHandler(repository, runtime_store))
+    query_bus.register(GetMcpServerHealthQuery, GetMcpServerHealthHandler(repository, runtime_store))
     query_bus.register(GetSystemMetricsQuery, GetSystemMetricsHandler(repository, runtime_store))
     query_bus.register(GetToolInvocationHistoryQuery, GetToolInvocationHistoryHandler(event_store))
 

@@ -1,26 +1,26 @@
-"""Provider Failover Saga - failover to backup providers on failure.
+"""McpServer Failover Saga - failover to backup mcp_servers on failure.
 
 Architecture
 ------------
 There are two classes here:
 
-``ProviderFailoverSaga``
+``McpServerFailoverSaga``
     A step-based :class:`~mcp_hangar.infrastructure.saga_manager.Saga` subclass.
     Each instance handles one concrete failover (primary -> backup).  It defines
     three named steps with compensation commands so that SagaManager can roll back
     partial work automatically on failure.
 
     Steps:
-        1. ``start_backup``  - StartProviderCommand(backup_id)
-                               compensation: StopProviderCommand(backup_id, reason="compensation")
+        1. ``start_backup``  - StartMcpServerCommand(backup_id)
+                               compensation: StopMcpServerCommand(backup_id, reason="compensation")
         2. ``await_primary`` - no-op marker step (primary restart is event-driven)
                                compensation: no-op
-        3. ``failback``      - StopProviderCommand(backup_id, reason="failback")
-                               compensation: StartProviderCommand(backup_id)
+        3. ``failback``      - StopMcpServerCommand(backup_id, reason="failback")
+                               compensation: StartMcpServerCommand(backup_id)
 
-``ProviderFailoverEventSaga``
+``McpServerFailoverEventSaga``
     An :class:`~mcp_hangar.infrastructure.saga_manager.EventTriggeredSaga` that
-    listens for domain events and starts ``ProviderFailoverSaga`` instances via the
+    listens for domain events and starts ``McpServerFailoverSaga`` instances via the
     SagaManager when a configured primary degrades.  This class owns the failover
     configuration and tracks which pairs are currently active.
 """
@@ -29,10 +29,10 @@ import time
 from dataclasses import dataclass
 from typing import Any
 
-from ...domain.events import DomainEvent, ProviderDegraded, ProviderStarted, ProviderStopped
+from ...domain.events import DomainEvent, McpServerDegraded, McpServerStarted, McpServerStopped
 from ...application.ports.saga import EventTriggeredSaga, ISagaManager, Saga, SagaContext
 from ...logging_config import get_logger
-from ..commands import Command, StartProviderCommand, StopProviderCommand
+from ..commands import Command, StartMcpServerCommand, StopMcpServerCommand
 
 logger = get_logger(__name__)
 
@@ -58,28 +58,28 @@ class FailoverState:
     is_active: bool = True
 
 
-class ProviderFailoverSaga(Saga):
+class McpServerFailoverSaga(Saga):
     """
-    Step-based saga that orchestrates failover to a single backup provider.
+    Step-based saga that orchestrates failover to a single backup mcp_server.
 
-    This saga is started on demand by ``ProviderFailoverEventSaga`` whenever a
-    configured primary provider becomes degraded.  It progresses through three
+    This saga is started on demand by ``McpServerFailoverEventSaga`` whenever a
+    configured primary mcp_server becomes degraded.  It progresses through three
     named steps; if any step fails SagaManager runs compensations in reverse order.
 
     Steps:
-        1. ``start_backup``  - starts the backup provider.
+        1. ``start_backup``  - starts the backup mcp_server.
         2. ``await_primary`` - marker step; no command (primary restart is async).
         3. ``failback``      - stops the backup once the primary is healthy again.
 
     Context data expected in ``initial_data``:
-        - ``primary_id`` (str): ID of the degraded primary provider.
-        - ``backup_id``  (str): ID of the backup provider to start.
+        - ``primary_id`` (str): ID of the degraded primary mcp_server.
+        - ``backup_id``  (str): ID of the backup mcp_server to start.
         - ``failback_delay_s`` (float, optional): Seconds to wait before failback.
     """
 
     @property
     def saga_type(self) -> str:
-        return "provider_failover"
+        return "mcp_server_failover"
 
     def configure(self, context: SagaContext) -> None:
         """
@@ -92,18 +92,18 @@ class ProviderFailoverSaga(Saga):
 
         self.add_step(
             name="start_backup",
-            command=StartProviderCommand(provider_id=backup_id),
-            compensation_command=StopProviderCommand(provider_id=backup_id, reason="compensation"),
+            command=StartMcpServerCommand(mcp_server_id=backup_id),
+            compensation_command=StopMcpServerCommand(mcp_server_id=backup_id, reason="compensation"),
         )
         self.add_step(
             name="await_primary",
-            command=None,  # no-op: primary recovery is handled by ProviderRecoverySaga
+            command=None,  # no-op: primary recovery is handled by McpServerRecoverySaga
             compensation_command=None,
         )
         self.add_step(
             name="failback",
-            command=StopProviderCommand(provider_id=backup_id, reason="failback"),
-            compensation_command=StartProviderCommand(provider_id=backup_id),
+            command=StopMcpServerCommand(mcp_server_id=backup_id, reason="failback"),
+            compensation_command=StartMcpServerCommand(mcp_server_id=backup_id),
         )
 
         logger.info(
@@ -114,18 +114,18 @@ class ProviderFailoverSaga(Saga):
         )
 
 
-class ProviderFailoverEventSaga(EventTriggeredSaga):
+class McpServerFailoverEventSaga(EventTriggeredSaga):
     """
-    Event-driven coordinator that starts ``ProviderFailoverSaga`` instances.
+    Event-driven coordinator that starts ``McpServerFailoverSaga`` instances.
 
-    Listens for domain events and starts a new step-based ``ProviderFailoverSaga``
+    Listens for domain events and starts a new step-based ``McpServerFailoverSaga``
     whenever a configured primary degrades.  Also handles auto-failback using
     ``SagaManager.schedule_command`` so the delay is properly enforced.
 
     Usage::
 
-        saga = ProviderFailoverEventSaga()
-        saga.configure_failover("primary-provider", "backup-provider")
+        saga = McpServerFailoverEventSaga()
+        saga.configure_failover("primary-mcp_server", "backup-mcp_server")
         saga_manager.register_event_saga(saga)
     """
 
@@ -140,7 +140,7 @@ class ProviderFailoverEventSaga(EventTriggeredSaga):
         # Active failovers: primary_id -> FailoverState
         self._active_failovers: dict[str, FailoverState] = {}
 
-        # Providers currently acting as backups (to avoid cascading failovers)
+        # McpServers currently acting as backups (to avoid cascading failovers)
         self._active_backups: set[str] = set()
 
         # Pending failback timer IDs: primary_id -> timer_id
@@ -148,11 +148,11 @@ class ProviderFailoverEventSaga(EventTriggeredSaga):
 
     @property
     def saga_type(self) -> str:
-        return "provider_failover_event"
+        return "mcp_server_failover_event"
 
     @property
     def handled_events(self) -> list[type[DomainEvent]]:
-        return [ProviderDegraded, ProviderStarted, ProviderStopped]
+        return [McpServerDegraded, McpServerStarted, McpServerStopped]
 
     def configure_failover(
         self,
@@ -165,8 +165,8 @@ class ProviderFailoverEventSaga(EventTriggeredSaga):
         Configure a failover pair.
 
         Args:
-            primary_id: Primary provider ID.
-            backup_id: Backup provider ID.
+            primary_id: Primary mcp_server ID.
+            backup_id: Backup mcp_server ID.
             auto_failback: Whether to automatically fail back when primary recovers.
             failback_delay_s: Delay in seconds before failing back.
         """
@@ -187,47 +187,47 @@ class ProviderFailoverEventSaga(EventTriggeredSaga):
 
     def handle(self, event: DomainEvent) -> list[Command]:
         """Handle failover-related events."""
-        if isinstance(event, ProviderDegraded):
+        if isinstance(event, McpServerDegraded):
             return self._handle_degraded(event)
-        elif isinstance(event, ProviderStarted):
+        elif isinstance(event, McpServerStarted):
             return self._handle_started(event)
-        elif isinstance(event, ProviderStopped):
+        elif isinstance(event, McpServerStopped):
             return self._handle_stopped(event)
         return []
 
-    def _handle_degraded(self, event: ProviderDegraded) -> list[Command]:
+    def _handle_degraded(self, event: McpServerDegraded) -> list[Command]:
         """Initiate failover when a primary degrades."""
-        provider_id = event.provider_id
+        mcp_server_id = event.mcp_server_id
 
-        if provider_id in self._active_backups:
-            logger.warning("backup_provider_degraded", provider_id=provider_id)
+        if mcp_server_id in self._active_backups:
+            logger.warning("backup_mcp_server_degraded", mcp_server_id=mcp_server_id)
             return []
 
-        config = self._failover_configs.get(provider_id)
+        config = self._failover_configs.get(mcp_server_id)
         if not config:
             return []
 
-        if provider_id in self._active_failovers:
-            logger.debug("failover_already_active", primary_id=provider_id)
+        if mcp_server_id in self._active_failovers:
+            logger.debug("failover_already_active", primary_id=mcp_server_id)
             return []
 
-        logger.info("initiating_failover", primary_id=provider_id, backup_id=config.backup_id)
+        logger.info("initiating_failover", primary_id=mcp_server_id, backup_id=config.backup_id)
 
-        self._active_failovers[provider_id] = FailoverState(
-            primary_id=provider_id,
+        self._active_failovers[mcp_server_id] = FailoverState(
+            primary_id=mcp_server_id,
             backup_id=config.backup_id,
             failed_at=time.time(),
         )
         self._active_backups.add(config.backup_id)
 
-        # Start the step-based ProviderFailoverSaga for this pair.
+        # Start the step-based McpServerFailoverSaga for this pair.
         # Commands are dispatched by SagaManager; we return empty here.
         if self._saga_manager is not None:
-            failover_saga = ProviderFailoverSaga()
+            failover_saga = McpServerFailoverSaga()
             self._saga_manager.start_saga(
                 failover_saga,
                 initial_data={
-                    "primary_id": provider_id,
+                    "primary_id": mcp_server_id,
                     "backup_id": config.backup_id,
                     "failback_delay_s": config.failback_delay_s,
                 },
@@ -236,11 +236,11 @@ class ProviderFailoverEventSaga(EventTriggeredSaga):
             from ...infrastructure.saga_manager import get_saga_manager
 
             saga_manager = get_saga_manager()
-            failover_saga = ProviderFailoverSaga()
+            failover_saga = McpServerFailoverSaga()
             saga_manager.start_saga(
                 failover_saga,
                 initial_data={
-                    "primary_id": provider_id,
+                    "primary_id": mcp_server_id,
                     "backup_id": config.backup_id,
                     "failback_delay_s": config.failback_delay_s,
                 },
@@ -248,51 +248,51 @@ class ProviderFailoverEventSaga(EventTriggeredSaga):
 
         return []
 
-    def _handle_started(self, event: ProviderStarted) -> list[Command]:
+    def _handle_started(self, event: McpServerStarted) -> list[Command]:
         """Mark backup as started; schedule failback if primary recovers."""
-        provider_id = event.provider_id
+        mcp_server_id = event.mcp_server_id
 
         # Mark backup start time
         for primary_id, state in self._active_failovers.items():
-            if state.backup_id == provider_id and state.backup_started_at is None:
+            if state.backup_id == mcp_server_id and state.backup_started_at is None:
                 state.backup_started_at = time.time()
-                logger.info("failover_backup_started", primary_id=primary_id, backup_id=provider_id)
+                logger.info("failover_backup_started", primary_id=primary_id, backup_id=mcp_server_id)
 
         # Primary recovered while failover is active -> schedule failback
-        if provider_id in self._active_failovers:
-            state = self._active_failovers[provider_id]
-            config = self._failover_configs.get(provider_id)
+        if mcp_server_id in self._active_failovers:
+            state = self._active_failovers[mcp_server_id]
+            config = self._failover_configs.get(mcp_server_id)
 
             if config and config.auto_failback:
                 logger.info(
                     "primary_recovered_scheduling_failback",
-                    primary_id=provider_id,
+                    primary_id=mcp_server_id,
                     delay_s=config.failback_delay_s,
                 )
-                stop_cmd = StopProviderCommand(provider_id=state.backup_id, reason="failback")
+                stop_cmd = StopMcpServerCommand(mcp_server_id=state.backup_id, reason="failback")
                 sm = self._saga_manager
                 if sm is None:
                     from ...infrastructure.saga_manager import get_saga_manager
 
                     sm = get_saga_manager()
                 timer_id = sm.schedule_command(stop_cmd, delay_s=config.failback_delay_s)
-                self._pending_failback_timers[provider_id] = timer_id
+                self._pending_failback_timers[mcp_server_id] = timer_id
 
                 # Clean up failover tracking
-                del self._active_failovers[provider_id]
+                del self._active_failovers[mcp_server_id]
                 self._active_backups.discard(state.backup_id)
 
         return []
 
-    def _handle_stopped(self, event: ProviderStopped) -> list[Command]:
+    def _handle_stopped(self, event: McpServerStopped) -> list[Command]:
         """Clean up when a backup is stopped."""
-        provider_id = event.provider_id
+        mcp_server_id = event.mcp_server_id
 
-        if provider_id in self._active_backups:
-            self._active_backups.discard(provider_id)
+        if mcp_server_id in self._active_backups:
+            self._active_backups.discard(mcp_server_id)
 
             for primary_id, state in list(self._active_failovers.items()):
-                if state.backup_id == provider_id:
+                if state.backup_id == mcp_server_id:
                     del self._active_failovers[primary_id]
                     timer_id = self._pending_failback_timers.pop(primary_id, None)
                     if timer_id is not None:
@@ -305,7 +305,7 @@ class ProviderFailoverEventSaga(EventTriggeredSaga):
                             sm.cancel_scheduled_command(timer_id)
                         except Exception as e:  # noqa: BLE001 -- fault-barrier: cancel failure must not block event handling
                             logger.warning("failback_timer_cancel_failed", error=str(e))
-                    logger.info("failover_ended", primary_id=primary_id, backup_id=provider_id)
+                    logger.info("failover_ended", primary_id=primary_id, backup_id=mcp_server_id)
 
         return []
 
@@ -314,23 +314,23 @@ class ProviderFailoverEventSaga(EventTriggeredSaga):
         return dict(self._active_failovers)
 
     def get_failover_config(self, primary_id: str) -> FailoverConfig | None:
-        """Get failover configuration for a provider."""
+        """Get failover configuration for a mcp_server."""
         return self._failover_configs.get(primary_id)
 
     def get_all_configs(self) -> dict[str, FailoverConfig]:
         """Get all failover configurations."""
         return dict(self._failover_configs)
 
-    def is_backup_active(self, provider_id: str) -> bool:
-        """Check if a provider is currently serving as a backup."""
-        return provider_id in self._active_backups
+    def is_backup_active(self, mcp_server_id: str) -> bool:
+        """Check if a mcp_server is currently serving as a backup."""
+        return mcp_server_id in self._active_backups
 
     def force_failback(self, primary_id: str) -> list[Command]:
         """Manually force a failback to primary."""
         state = self._active_failovers.get(primary_id)
         if not state:
             return []
-        cmd: Command = StopProviderCommand(provider_id=state.backup_id, reason="failback")
+        cmd: Command = StopMcpServerCommand(mcp_server_id=state.backup_id, reason="failback")
         commands: list[Command] = [cmd]
         del self._active_failovers[primary_id]
         self._active_backups.discard(state.backup_id)
@@ -390,3 +390,6 @@ class ProviderFailoverEventSaga(EventTriggeredSaga):
         self._active_backups = set(data.get("active_backups", []))
         # Timers cannot be restored across process restarts; start fresh.
         self._pending_failback_timers = {}
+
+ProviderFailoverSaga = McpServerFailoverSaga
+ProviderFailoverEventSaga = McpServerFailoverEventSaga

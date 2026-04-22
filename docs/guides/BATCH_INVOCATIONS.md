@@ -11,10 +11,10 @@ The `hangar_call()` tool is the unified API for all tool invocations. Whether yo
 - **Unified API** - One function for single calls and batches
 - **Parallel execution** - Multiple calls run concurrently
 - **Automatic retry** - Built-in retry with exponential backoff
-- **Single-flight cold starts** - Multiple calls to the same COLD provider trigger only one startup
+- **Single-flight cold starts** - Multiple calls to the same COLD MCP server trigger only one startup
 - **Partial success handling** - Failed calls don't block successful ones
 - **Fail-fast mode** - Optionally abort on first error
-- **Circuit breaker integration** - Respects provider health status
+- **Circuit breaker integration** - Respects MCP server health status
 
 ## Basic Usage
 
@@ -23,12 +23,12 @@ The `hangar_call()` tool is the unified API for all tool invocations. Whether yo
 ```python
 # Simple call
 hangar_call(calls=[
-    {"provider": "math", "tool": "add", "arguments": {"a": 1, "b": 2}}
+    {"mcp_server": "math", "tool": "add", "arguments": {"a": 1, "b": 2}}
 ])
 
 # With retry for reliability
 hangar_call(
-    calls=[{"provider": "math", "tool": "add", "arguments": {"a": 1, "b": 2}}],
+    calls=[{"mcp_server": "math", "tool": "add", "arguments": {"a": 1, "b": 2}}],
     max_retries=3
 )
 ```
@@ -38,9 +38,9 @@ hangar_call(
 ```python
 # Execute multiple calls in parallel - much faster than sequential
 hangar_call(calls=[
-    {"provider": "math", "tool": "add", "arguments": {"a": 1, "b": 2}},
-    {"provider": "math", "tool": "multiply", "arguments": {"a": 3, "b": 4}},
-    {"provider": "fetch", "tool": "get", "arguments": {"url": "https://api.example.com"}},
+    {"mcp_server": "math", "tool": "add", "arguments": {"a": 1, "b": 2}},
+    {"mcp_server": "math", "tool": "multiply", "arguments": {"a": 3, "b": 4}},
+    {"mcp_server": "fetch", "tool": "get", "arguments": {"url": "https://api.example.com"}},
 ])
 # Total time: max(t1, t2, t3) instead of t1 + t2 + t3
 ```
@@ -75,7 +75,7 @@ Each item in `calls` must be a dictionary with:
 
 | Field | Type | Required | Description |
 |-------|------|----------|-------------|
-| `provider` | `str` | Yes | Provider ID |
+| `MCP server` | `str` | Yes | MCP Server ID |
 | `tool` | `str` | Yes | Tool name |
 | `arguments` | `dict` | Yes | Tool arguments |
 | `timeout` | `float` | No | Per-call timeout (overrides global) |
@@ -115,10 +115,10 @@ Each item in `calls` must be a dictionary with:
 ### With Automatic Retry
 
 ```python
-# Retry on transient failures (recommended for unreliable providers)
+# Retry on transient failures (recommended for unreliable mcp_servers)
 hangar_call(
     calls=[
-        {"provider": "fetch", "tool": "get", "arguments": {"url": "https://api.example.com"}}
+        {"mcp_server": "fetch", "tool": "get", "arguments": {"url": "https://api.example.com"}}
     ],
     max_retries=3
 )
@@ -137,17 +137,17 @@ hangar_call(
 }
 ```
 
-### Mixed Providers (Parallel Cold Starts)
+### Mixed MCP servers (Parallel Cold Starts)
 
-When calling multiple COLD providers, they start in parallel:
+When calling multiple COLD MCP servers, they start in parallel:
 
 ```python
 hangar_call(calls=[
-    {"provider": "math", "tool": "add", "arguments": {"a": 1, "b": 2}},
-    {"provider": "sqlite", "tool": "query", "arguments": {"sql": "SELECT 1"}},
-    {"provider": "fetch", "tool": "get", "arguments": {"url": "https://api.github.com"}},
+    {"mcp_server": "math", "tool": "add", "arguments": {"a": 1, "b": 2}},
+    {"mcp_server": "sqlite", "tool": "query", "arguments": {"sql": "SELECT 1"}},
+    {"mcp_server": "fetch", "tool": "get", "arguments": {"url": "https://api.github.com"}},
 ], max_concurrency=3)
-# All 3 providers start simultaneously if COLD
+# All 3 mcp_servers start simultaneously if COLD
 ```
 
 ### Fail-Fast Mode
@@ -157,9 +157,9 @@ Stop processing on first error:
 ```python
 results = hangar_call(
     calls=[
-        {"provider": "math", "tool": "add", "arguments": {"a": 1, "b": 2}},
-        {"provider": "nonexistent", "tool": "foo", "arguments": {}},  # Will fail
-        {"provider": "math", "tool": "multiply", "arguments": {"a": 3, "b": 4}},
+        {"mcp_server": "math", "tool": "add", "arguments": {"a": 1, "b": 2}},
+        {"mcp_server": "nonexistent", "tool": "foo", "arguments": {}},  # Will fail
+        {"mcp_server": "math", "tool": "multiply", "arguments": {"a": 3, "b": 4}},
     ],
     fail_fast=True,
 )
@@ -172,20 +172,20 @@ Different timeouts for different calls:
 
 ```python
 hangar_call(calls=[
-    {"provider": "fetch", "tool": "get", "arguments": {"url": "..."}, "timeout": 5.0},
-    {"provider": "ml", "tool": "predict", "arguments": {...}, "timeout": 30.0},
+    {"mcp_server": "fetch", "tool": "get", "arguments": {"url": "..."}, "timeout": 5.0},
+    {"mcp_server": "ml", "tool": "predict", "arguments": {...}, "timeout": 30.0},
 ], timeout=60.0)
 # Effective timeout = min(per_call_timeout, remaining_global_timeout)
 ```
 
 ### Circuit Breaker Behavior
 
-If a provider's circuit breaker is OPEN, calls to it fail immediately:
+If a MCP server's circuit breaker is OPEN, calls to it fail immediately:
 
 ```python
 results = hangar_call(calls=[
-    {"provider": "math", "tool": "add", "arguments": {"a": 1, "b": 2}},
-    {"provider": "unhealthy_provider", "tool": "foo", "arguments": {}},  # CB OPEN
+    {"mcp_server": "math", "tool": "add", "arguments": {"a": 1, "b": 2}},
+    {"mcp_server": "unhealthy_mcp_server", "tool": "foo", "arguments": {}},  # CB OPEN
 ])
 # Response:
 {
@@ -205,8 +205,8 @@ results = hangar_call(calls=[
 
 Batch validation is **eager** - the entire batch is validated before any execution:
 
-- Provider existence
-- Tool existence (for providers with predefined tools)
+- MCP Server existence
+- Tool existence (for MCP servers with predefined tools)
 - Argument types
 - Batch size limits
 - Timeout bounds
@@ -218,19 +218,19 @@ If validation fails, no calls are executed:
     "success": False,
     "error": "Validation failed",
     "validation_errors": [
-        {"index": 0, "field": "provider", "message": "Provider 'foo' not found"}
+        {"index": 0, "field": "mcp_server", "message": "McpServer 'foo' not found"}
     ]
 }
 ```
 
 ### Single-Flight Cold Starts
 
-When multiple calls target the same COLD provider, the provider starts exactly once:
+When multiple calls target the same COLD MCP server, the MCP server starts exactly once:
 
 ```python
-# 5 calls to COLD "math" provider = 1 startup, then 5 parallel tool calls
+# 5 calls to COLD "math" mcp_server = 1 startup, then 5 parallel tool calls
 hangar_call(calls=[
-    {"provider": "math", "tool": "add", "arguments": {"a": i, "b": 1}}
+    {"mcp_server": "math", "tool": "add", "arguments": {"a": i, "b": 1}}
     for i in range(5)
 ])
 ```
@@ -241,7 +241,7 @@ When `max_retries > 1`:
 
 - Retries use exponential backoff
 - Only transient errors trigger retry (timeout, network errors, malformed JSON)
-- Permanent errors (validation, provider not found) do not retry
+- Permanent errors (validation, MCP server not found) do not retry
 - Each call retries independently within the batch
 
 ### Timeout Resolution
@@ -296,7 +296,7 @@ mcp_hangar_batch_size_histogram{}
 mcp_hangar_batch_duration_seconds{}
 mcp_hangar_batch_concurrency_gauge{}
 mcp_hangar_batch_truncations_total{reason="per_call|total_size"}
-mcp_hangar_batch_circuit_breaker_rejections_total{provider="..."}
+mcp_hangar_batch_circuit_breaker_rejections_total{mcp_server="..."}
 mcp_hangar_batch_cancellations_total{reason="timeout|fail_fast"}
 ```
 
@@ -320,7 +320,7 @@ If you were using the previous tools, here's how to migrate:
 
 | Old API | New API |
 |---------|---------|
-| `registry_invoke(provider, tool, arguments)` | `hangar_call(calls=[{"provider": ..., "tool": ..., "arguments": ...}])` |
+| `registry_invoke(MCP server, tool, arguments)` | `hangar_call(calls=[{"MCP server": ..., "tool": ..., "arguments": ...}])` |
 | `registry_invoke_ex(..., max_retries=5)` | `hangar_call(calls=[...], max_retries=5)` |
 | `registry_invoke_stream(...)` | `hangar_call(calls=[...])` (progress logged internally) |
 | `hangar_batch(calls=[...])` | `hangar_call(calls=[...])` |

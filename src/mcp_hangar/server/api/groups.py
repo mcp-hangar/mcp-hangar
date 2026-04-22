@@ -1,6 +1,6 @@
-"""Provider group endpoint handlers for the REST API.
+"""McpServer group endpoint handlers for the REST API.
 
-Implements GET/POST endpoints for provider group operations,
+Implements GET/POST endpoints for mcp_server group operations,
 reading directly from the application context groups dict.
 """
 
@@ -15,14 +15,14 @@ from ...application.commands.crud_commands import (
     RemoveGroupMemberCommand,
     UpdateGroupCommand,
 )
-from ...domain.exceptions import ProviderNotFoundError
+from ...domain.exceptions import McpServerNotFoundError
 from ..context import get_context
 from .middleware import dispatch_command
 from .serializers import HangarJSONResponse
 
 
 async def list_groups(request: Request) -> HangarJSONResponse:
-    """List all provider groups with summary info.
+    """List all mcp_server groups with summary info.
 
     Returns:
         JSON with {"groups": [...]} array of group summaries.
@@ -33,7 +33,7 @@ async def list_groups(request: Request) -> HangarJSONResponse:
 
 
 async def get_group(request: Request) -> HangarJSONResponse:
-    """Get detailed info for a single provider group.
+    """Get detailed info for a single mcp_server group.
 
     Path params:
         group_id: Group identifier.
@@ -42,18 +42,18 @@ async def get_group(request: Request) -> HangarJSONResponse:
         JSON with group detail including members and circuit breaker state.
 
     Raises:
-        ProviderNotFoundError: If group_id is not found.
+        McpServerNotFoundError: If group_id is not found.
     """
     group_id = request.path_params["group_id"]
     ctx = get_context()
     group = ctx.groups.get(group_id)
     if group is None:
-        raise ProviderNotFoundError(provider_id=group_id)
+        raise McpServerNotFoundError(mcp_server_id=group_id)
     return HangarJSONResponse(group.to_status_dict())
 
 
 async def rebalance_group(request: Request) -> HangarJSONResponse:
-    """Trigger a rebalance on a provider group.
+    """Trigger a rebalance on a mcp_server group.
 
     Path params:
         group_id: Group identifier.
@@ -62,19 +62,19 @@ async def rebalance_group(request: Request) -> HangarJSONResponse:
         JSON with {"status": "rebalanced", "group_id": ...}.
 
     Raises:
-        ProviderNotFoundError: If group_id is not found.
+        McpServerNotFoundError: If group_id is not found.
     """
     group_id = request.path_params["group_id"]
     ctx = get_context()
     group = ctx.groups.get(group_id)
     if group is None:
-        raise ProviderNotFoundError(provider_id=group_id)
+        raise McpServerNotFoundError(mcp_server_id=group_id)
     await run_in_threadpool(group.rebalance)
     return HangarJSONResponse({"status": "rebalanced", "group_id": group_id})
 
 
 async def create_group(request: Request) -> HangarJSONResponse:
-    """Create a new provider group.
+    """Create a new mcp_server group.
 
     Body:
         group_id: Unique identifier for the group.
@@ -98,7 +98,7 @@ async def create_group(request: Request) -> HangarJSONResponse:
 
 
 async def update_group(request: Request) -> HangarJSONResponse:
-    """Update an existing provider group.
+    """Update an existing mcp_server group.
 
     Path params:
         group_id: Group identifier.
@@ -125,7 +125,7 @@ async def update_group(request: Request) -> HangarJSONResponse:
 
 
 async def delete_group(request: Request) -> HangarJSONResponse:
-    """Delete a provider group.
+    """Delete a mcp_server group.
 
     Path params:
         group_id: Group identifier.
@@ -139,25 +139,25 @@ async def delete_group(request: Request) -> HangarJSONResponse:
 
 
 async def add_group_member(request: Request) -> HangarJSONResponse:
-    """Add a provider as a member of a group.
+    """Add a mcp_server as a member of a group.
 
     Path params:
         group_id: Group identifier.
 
     Body:
-        member_id: Provider ID to add (mapped to provider_id in command).
+        member_id: McpServer ID to add (mapped to mcp_server_id in command).
         weight: Optional routing weight.
         priority: Optional routing priority.
 
     Returns:
-        JSON with {"group_id": ..., "provider_id": ..., "added": true} and HTTP 201.
+        JSON with {"group_id": ..., "mcp_server_id": ..., "added": true} and HTTP 201.
     """
     group_id = request.path_params["group_id"]
     body = await request.json()
     result = await dispatch_command(
         AddGroupMemberCommand(
             group_id=group_id,
-            provider_id=body["member_id"],
+            mcp_server_id=body["member_id"],
             weight=body.get("weight", 1),
             priority=body.get("priority", 1),
         )
@@ -166,18 +166,18 @@ async def add_group_member(request: Request) -> HangarJSONResponse:
 
 
 async def remove_group_member(request: Request) -> HangarJSONResponse:
-    """Remove a provider from a group.
+    """Remove a mcp_server from a group.
 
     Path params:
         group_id: Group identifier.
-        member_id: Provider ID to remove.
+        member_id: McpServer ID to remove.
 
     Returns:
-        JSON with {"group_id": ..., "provider_id": ..., "removed": true} and HTTP 200.
+        JSON with {"group_id": ..., "mcp_server_id": ..., "removed": true} and HTTP 200.
     """
     group_id = request.path_params["group_id"]
     member_id = request.path_params["member_id"]
-    result = await dispatch_command(RemoveGroupMemberCommand(group_id=group_id, provider_id=member_id))
+    result = await dispatch_command(RemoveGroupMemberCommand(group_id=group_id, mcp_server_id=member_id))
     return HangarJSONResponse(result)
 
 

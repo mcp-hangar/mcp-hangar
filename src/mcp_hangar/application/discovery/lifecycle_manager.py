@@ -1,6 +1,6 @@
 """Discovery Lifecycle Manager.
 
-Manages the lifecycle of discovered providers including TTL tracking,
+Manages the lifecycle of discovered mcp_servers including TTL tracking,
 quarantine management, and graceful deregistration.
 """
 
@@ -8,7 +8,7 @@ import asyncio
 from collections.abc import Awaitable, Callable
 from datetime import datetime, UTC
 
-from mcp_hangar.domain.discovery.discovered_provider import DiscoveredProvider
+from mcp_hangar.domain.discovery.discovered_mcp_server import DiscoveredMcpServer
 
 from ...logging_config import get_logger
 
@@ -20,17 +20,17 @@ HangarCallback = Callable[[str, str], Awaitable[None]]
 
 
 class DiscoveryLifecycleManager:
-    """Manages lifecycle of discovered providers.
+    """Manages lifecycle of discovered mcp_servers.
 
     Responsibilities:
-        - Track provider TTLs and expiration
+        - Track mcp_server TTLs and expiration
         - Manage quarantine state
         - Handle graceful deregistration
         - Provide manual approval workflow
 
     Usage:
         manager = DiscoveryLifecycleManager(default_ttl=90)
-        manager.add_provider(provider)
+        manager.add_mcp_server(mcp_server)
 
         # Periodic check
         expired = await manager.check_expirations()
@@ -49,20 +49,20 @@ class DiscoveryLifecycleManager:
             default_ttl: Default TTL in seconds (3x refresh interval)
             check_interval: Interval between expiration checks
             drain_timeout: Timeout for graceful connection draining
-            on_deregister: Callback when provider should be deregistered
+            on_deregister: Callback when mcp_server should be deregistered
         """
         self.default_ttl = default_ttl
         self.check_interval = check_interval
         self.drain_timeout = drain_timeout
         self.on_deregister = on_deregister
 
-        # Active providers
-        self._providers: dict[str, DiscoveredProvider] = {}
+        # Active mcp_servers
+        self._mcp_servers: dict[str, DiscoveredMcpServer] = {}
 
-        # Quarantined providers: name -> (provider, reason, timestamp)
-        self._quarantine: dict[str, tuple[DiscoveredProvider, str, datetime]] = {}
+        # Quarantined mcp_servers: name -> (mcp_server, reason, timestamp)
+        self._quarantine: dict[str, tuple[DiscoveredMcpServer, str, datetime]] = {}
 
-        # Providers being drained (graceful shutdown)
+        # McpServers being drained (graceful shutdown)
         self._draining: set[str] = set()
 
         # Lifecycle task
@@ -93,7 +93,7 @@ class DiscoveryLifecycleManager:
         logger.info("Lifecycle manager stopped")
 
     async def _lifecycle_loop(self) -> None:
-        """Periodic check for expired providers."""
+        """Periodic check for expired mcp_servers."""
         while self._running:
             try:
                 await self._check_expirations()
@@ -105,33 +105,35 @@ class DiscoveryLifecycleManager:
                 await asyncio.sleep(self.check_interval)
 
     async def _check_expirations(self) -> list[str]:
-        """Check and handle expired providers.
+        """Check and handle expired mcp_servers.
 
         Returns:
-            List of expired provider names
+            List of expired mcp_server names
         """
         expired = []
 
-        for name, provider in list(self._providers.items()):
-            if provider.is_expired():
+        for name, mcp_server in list(self._mcp_servers.items()):
+            if mcp_server.is_expired():
                 expired.append(name)
-                logger.info(f"Provider '{name}' expired (last seen: {provider.last_seen_at}). Starting deregistration.")
+                logger.info(
+                    f"McpServer '{name}' expired (last seen: {mcp_server.last_seen_at}). Starting deregistration."
+                )
                 await self._deregister(name, "ttl_expired")
 
         return expired
 
     async def _deregister(self, name: str, reason: str) -> None:
-        """Deregister a provider with optional draining.
+        """Deregister a mcp_server with optional draining.
 
         Args:
-            name: Provider name
+            name: McpServer name
             reason: Reason for deregistration
         """
         if name in self._draining:
             return
 
-        provider = self._providers.pop(name, None)
-        if not provider:
+        mcp_server = self._mcp_servers.pop(name, None)
+        if not mcp_server:
             return
 
         # Mark as draining
@@ -142,133 +144,133 @@ class DiscoveryLifecycleManager:
             if self.on_deregister:
                 await self.on_deregister(name, reason)
         except Exception as e:  # noqa: BLE001 -- fault-barrier: deregister callback failure must not crash lifecycle
-            logger.error(f"Error deregistering provider {name}: {e}")
+            logger.error(f"Error deregistering mcp_server {name}: {e}")
         finally:
             self._draining.discard(name)
 
-    def add_provider(self, provider: DiscoveredProvider) -> None:
-        """Add provider to lifecycle tracking.
+    def add_mcp_server(self, mcp_server: DiscoveredMcpServer) -> None:
+        """Add mcp_server to lifecycle tracking.
 
         Args:
-            provider: Provider to track
+            mcp_server: McpServer to track
         """
-        self._providers[provider.name] = provider
-        logger.debug(f"Added provider to lifecycle tracking: {provider.name}")
+        self._mcp_servers[mcp_server.name] = mcp_server
+        logger.debug(f"Added mcp_server to lifecycle tracking: {mcp_server.name}")
 
-    def update_seen(self, name: str) -> DiscoveredProvider | None:
-        """Update last_seen for a provider.
+    def update_seen(self, name: str) -> DiscoveredMcpServer | None:
+        """Update last_seen for a mcp_server.
 
         Args:
-            name: Provider name
+            name: McpServer name
 
         Returns:
-            Updated provider, or None if not found
+            Updated mcp_server, or None if not found
         """
-        if name in self._providers:
-            old_provider = self._providers[name]
-            updated = old_provider.with_updated_seen_time()
-            self._providers[name] = updated
+        if name in self._mcp_servers:
+            old_mcp_server = self._mcp_servers[name]
+            updated = old_mcp_server.with_updated_seen_time()
+            self._mcp_servers[name] = updated
             return updated
         return None
 
-    def update_provider(self, provider: DiscoveredProvider) -> None:
-        """Update provider configuration.
+    def update_mcp_server(self, mcp_server: DiscoveredMcpServer) -> None:
+        """Update mcp_server configuration.
 
         Args:
-            provider: Updated provider
+            mcp_server: Updated mcp_server
         """
-        self._providers[provider.name] = provider
-        logger.debug(f"Updated provider in lifecycle tracking: {provider.name}")
+        self._mcp_servers[mcp_server.name] = mcp_server
+        logger.debug(f"Updated mcp_server in lifecycle tracking: {mcp_server.name}")
 
-    def remove_provider(self, name: str) -> DiscoveredProvider | None:
-        """Remove provider from tracking.
+    def remove_mcp_server(self, name: str) -> DiscoveredMcpServer | None:
+        """Remove mcp_server from tracking.
 
         Args:
-            name: Provider name
+            name: McpServer name
 
         Returns:
-            Removed provider, or None if not found
+            Removed mcp_server, or None if not found
         """
-        return self._providers.pop(name, None)
+        return self._mcp_servers.pop(name, None)
 
-    def get_provider(self, name: str) -> DiscoveredProvider | None:
-        """Get a tracked provider.
+    def get_mcp_server(self, name: str) -> DiscoveredMcpServer | None:
+        """Get a tracked mcp_server.
 
         Args:
-            name: Provider name
+            name: McpServer name
 
         Returns:
-            Provider, or None if not found
+            McpServer, or None if not found
         """
-        return self._providers.get(name)
+        return self._mcp_servers.get(name)
 
-    def get_all_providers(self) -> dict[str, DiscoveredProvider]:
-        """Get all tracked providers.
+    def get_all_mcp_servers(self) -> dict[str, DiscoveredMcpServer]:
+        """Get all tracked mcp_servers.
 
         Returns:
-            Dictionary of name -> provider
+            Dictionary of name -> mcp_server
         """
-        return dict(self._providers)
+        return dict(self._mcp_servers)
 
     # Quarantine management
 
-    def quarantine(self, provider: DiscoveredProvider, reason: str) -> None:
-        """Move provider to quarantine.
+    def quarantine(self, mcp_server: DiscoveredMcpServer, reason: str) -> None:
+        """Move mcp_server to quarantine.
 
         Args:
-            provider: Provider to quarantine
+            mcp_server: McpServer to quarantine
             reason: Reason for quarantine
         """
-        self._quarantine[provider.name] = (provider, reason, datetime.now(UTC))
+        self._quarantine[mcp_server.name] = (mcp_server, reason, datetime.now(UTC))
         # Remove from active tracking
-        self._providers.pop(provider.name, None)
-        logger.warning(f"Provider '{provider.name}' quarantined: {reason}")
+        self._mcp_servers.pop(mcp_server.name, None)
+        logger.warning(f"McpServer '{mcp_server.name}' quarantined: {reason}")
 
-    def approve(self, name: str) -> DiscoveredProvider | None:
-        """Approve quarantined provider for registration.
+    def approve(self, name: str) -> DiscoveredMcpServer | None:
+        """Approve quarantined mcp_server for registration.
 
         Args:
-            name: Provider name
+            name: McpServer name
 
         Returns:
-            Approved provider, or None if not in quarantine
+            Approved mcp_server, or None if not in quarantine
         """
         if name in self._quarantine:
-            provider, reason, _ = self._quarantine.pop(name)
+            mcp_server, reason, _ = self._quarantine.pop(name)
             # Add back to active tracking
-            self._providers[provider.name] = provider
-            logger.info(f"Approved quarantined provider: {name}")
-            return provider
+            self._mcp_servers[mcp_server.name] = mcp_server
+            logger.info(f"Approved quarantined mcp_server: {name}")
+            return mcp_server
         return None
 
-    def reject(self, name: str) -> DiscoveredProvider | None:
-        """Reject and remove quarantined provider.
+    def reject(self, name: str) -> DiscoveredMcpServer | None:
+        """Reject and remove quarantined mcp_server.
 
         Args:
-            name: Provider name
+            name: McpServer name
 
         Returns:
-            Rejected provider, or None if not in quarantine
+            Rejected mcp_server, or None if not in quarantine
         """
         if name in self._quarantine:
-            provider, _, _ = self._quarantine.pop(name)
-            logger.info(f"Rejected quarantined provider: {name}")
-            return provider
+            mcp_server, _, _ = self._quarantine.pop(name)
+            logger.info(f"Rejected quarantined mcp_server: {name}")
+            return mcp_server
         return None
 
-    def get_quarantined(self) -> dict[str, tuple[DiscoveredProvider, str, datetime]]:
-        """Get all quarantined providers.
+    def get_quarantined(self) -> dict[str, tuple[DiscoveredMcpServer, str, datetime]]:
+        """Get all quarantined mcp_servers.
 
         Returns:
-            Dictionary of name -> (provider, reason, quarantine_time)
+            Dictionary of name -> (mcp_server, reason, quarantine_time)
         """
         return dict(self._quarantine)
 
     def is_quarantined(self, name: str) -> bool:
-        """Check if provider is quarantined.
+        """Check if mcp_server is quarantined.
 
         Args:
-            name: Provider name
+            name: McpServer name
 
         Returns:
             True if quarantined
@@ -284,32 +286,32 @@ class DiscoveryLifecycleManager:
             Dictionary with counts
         """
         return {
-            "active": len(self._providers),
+            "active": len(self._mcp_servers),
             "quarantined": len(self._quarantine),
             "draining": len(self._draining),
         }
 
-    def get_expiring_soon(self, threshold_seconds: int = 30) -> list[DiscoveredProvider]:
-        """Get providers expiring soon.
+    def get_expiring_soon(self, threshold_seconds: int = 30) -> list[DiscoveredMcpServer]:
+        """Get mcp_servers expiring soon.
 
         Args:
             threshold_seconds: Time threshold for "soon"
 
         Returns:
-            List of providers expiring within threshold
+            List of mcp_servers expiring within threshold
         """
         expiring = []
         now = datetime.now(UTC)
 
-        for provider in self._providers.values():
-            last_seen = provider.last_seen_at
+        for mcp_server in self._mcp_servers.values():
+            last_seen = mcp_server.last_seen_at
             if last_seen.tzinfo is None:
                 last_seen = last_seen.replace(tzinfo=UTC)
 
             elapsed = (now - last_seen).total_seconds()
-            remaining = provider.ttl_seconds - elapsed
+            remaining = mcp_server.ttl_seconds - elapsed
 
             if remaining <= threshold_seconds:
-                expiring.append(provider)
+                expiring.append(mcp_server)
 
         return expiring

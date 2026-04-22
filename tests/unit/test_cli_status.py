@@ -83,7 +83,7 @@ class TestGetStatusFromConfig:
             config_path = Path(tmpdir) / "config.yaml"
             config_path.write_text(
                 """
-providers:
+mcp_servers:
   fetch:
     mode: subprocess
     command: [npx, -y, "@anthropic/mcp-server-fetch"]
@@ -96,8 +96,8 @@ providers:
             status = _get_status_from_config(config_path)
 
             assert status["server_running"] is False
-            assert len(status["providers"]) == 2
-            provider_names = [p["name"] for p in status["providers"]]
+            assert len(status["mcp_servers"]) == 2
+            provider_names = [p["name"] for p in status["mcp_servers"]]
             assert "fetch" in provider_names
             assert "memory" in provider_names
 
@@ -107,7 +107,7 @@ providers:
             config_path = Path(tmpdir) / "config.yaml"
             config_path.write_text(
                 """
-providers:
+mcp_servers:
   fetch:
     mode: subprocess
 """
@@ -115,7 +115,7 @@ providers:
 
             status = _get_status_from_config(config_path)
 
-            assert all(p["state"] == "COLD" for p in status["providers"])
+            assert all(p["state"] == "COLD" for p in status["mcp_servers"])
 
     def test_get_status_missing_config(self):
         """Should handle missing config gracefully."""
@@ -128,13 +128,13 @@ providers:
             # When no config is found, either an error is returned or providers list is empty.
             # The function also searches fallback paths, so we check that it handles
             # at least the primary path being missing without crashing.
-            assert isinstance(status.get("providers"), list)
+            assert isinstance(status.get("mcp_servers"), list)
 
     def test_get_status_includes_config_path(self):
         """Should include the config path used."""
         with TemporaryDirectory() as tmpdir:
             config_path = Path(tmpdir) / "config.yaml"
-            config_path.write_text("providers: {}")
+            config_path.write_text("mcp_servers: {}")
 
             status = _get_status_from_config(config_path)
 

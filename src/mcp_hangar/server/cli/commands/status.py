@@ -1,6 +1,6 @@
-"""Status command - Provider health dashboard.
+"""Status command - McpServer health dashboard.
 
-Shows the health and status of all configured providers with:
+Shows the health and status of all configured mcp_servers with:
 - Color-coded state indicators
 - Tool counts and metadata
 - Memory usage and uptime
@@ -77,7 +77,7 @@ def _get_status_from_config(config_path: Path | None) -> dict:
         config_path: Path to config file, or None to search default locations
 
     Returns:
-        Status dictionary with providers in COLD state
+        Status dictionary with mcp_servers in COLD state
     """
     import yaml
 
@@ -105,18 +105,18 @@ def _get_status_from_config(config_path: Path | None) -> dict:
         return {
             "server_running": False,
             "config_path": None,
-            "providers": [],
+            "mcp_servers": [],
             "error": "No configuration found",
         }
 
-    # Build provider list from config
-    providers = []
-    for name, provider_config in config.get("providers", {}).items():
-        providers.append(
+    # Build mcp_server list from config
+    mcp_servers = []
+    for name, mcp_server_config in config.get("mcp_servers", {}).items():
+        mcp_servers.append(
             {
                 "name": name,
                 "state": "COLD",
-                "mode": provider_config.get("mode", "subprocess"),
+                "mode": mcp_server_config.get("mode", "subprocess"),
                 "health_pct": None,
                 "tools_count": None,
                 "last_used": None,
@@ -128,7 +128,7 @@ def _get_status_from_config(config_path: Path | None) -> dict:
     return {
         "server_running": False,
         "config_path": str(used_path),
-        "providers": providers,
+        "mcp_servers": mcp_servers,
     }
 
 
@@ -175,7 +175,7 @@ def _create_status_table(status: dict, show_details: bool = False) -> Table:
 
     # Add columns
     table.add_column("", width=3)  # Status icon
-    table.add_column("Provider", style="bold")
+    table.add_column("McpServer", style="bold")
     table.add_column("State", justify="center")
     table.add_column("Health", justify="right")
     table.add_column("Tools", justify="right")
@@ -186,13 +186,13 @@ def _create_status_table(status: dict, show_details: bool = False) -> Table:
         table.add_column("Uptime", justify="right")
         table.add_column("Last Used")
 
-    # Add rows for each provider
-    for provider in status.get("providers", []):
-        state = provider.get("state", "COLD")
+    # Add rows for each mcp_server
+    for mcp_server in status.get("mcp_servers", []):
+        state = mcp_server.get("state", "COLD")
         state_color = STATE_COLORS.get(state, "white")
         state_icon = STATE_ICONS.get(state, "??")
 
-        health_pct = provider.get("health_pct")
+        health_pct = mcp_server.get("health_pct")
         health_str = f"{health_pct}%" if health_pct is not None else "-"
         if health_pct is not None:
             if health_pct >= 90:
@@ -202,12 +202,12 @@ def _create_status_table(status: dict, show_details: bool = False) -> Table:
             else:
                 health_str = f"[red]{health_str}[/red]"
 
-        tools_count = provider.get("tools_count")
+        tools_count = mcp_server.get("tools_count")
         tools_str = str(tools_count) if tools_count is not None else "-"
 
         row = [
             state_icon,
-            provider["name"],
+            mcp_server["name"],
             f"[{state_color}]{state}[/{state_color}]",
             health_str,
             tools_str,
@@ -216,10 +216,10 @@ def _create_status_table(status: dict, show_details: bool = False) -> Table:
         if show_details:
             row.extend(
                 [
-                    provider.get("mode", "-"),
-                    _format_memory(provider.get("memory_mb")),
-                    _format_uptime(provider.get("uptime_s")),
-                    provider.get("last_used") or "-",
+                    mcp_server.get("mode", "-"),
+                    _format_memory(mcp_server.get("memory_mb")),
+                    _format_uptime(mcp_server.get("uptime_s")),
+                    mcp_server.get("last_used") or "-",
                 ]
             )
 
@@ -230,19 +230,19 @@ def _create_status_table(status: dict, show_details: bool = False) -> Table:
 
 def _create_summary_panel(status: dict) -> Panel:
     """Create a summary panel for the status display."""
-    providers = status.get("providers", [])
-    total = len(providers)
+    mcp_servers = status.get("mcp_servers", [])
+    total = len(mcp_servers)
 
     if total == 0:
         return Panel(
-            "[dim]No providers configured[/dim]",
+            "[dim]No mcp_servers configured[/dim]",
             title="Summary",
             border_style="dim",
         )
 
-    ready = sum(1 for p in providers if p.get("state") == "READY")
-    degraded = sum(1 for p in providers if p.get("state") == "DEGRADED")
-    dead = sum(1 for p in providers if p.get("state") == "DEAD")
+    ready = sum(1 for p in mcp_servers if p.get("state") == "READY")
+    degraded = sum(1 for p in mcp_servers if p.get("state") == "DEGRADED")
+    dead = sum(1 for p in mcp_servers if p.get("state") == "DEAD")
 
     parts = []
     if status.get("server_running"):
@@ -250,7 +250,7 @@ def _create_summary_panel(status: dict) -> Panel:
     else:
         parts.append("[yellow]Server not running[/yellow]")
 
-    parts.append(f"Providers: {total}")
+    parts.append(f"McpServers: {total}")
 
     if ready:
         parts.append(f"[green]Ready: {ready}[/green]")
@@ -265,23 +265,23 @@ def _create_summary_panel(status: dict) -> Panel:
     )
 
 
-def _get_provider_details(name: str, status: dict) -> dict | None:
-    """Get detailed information for a single provider."""
-    for provider in status.get("providers", []):
-        if provider.get("name") == name:
-            return provider
+def _get_mcp_server_details(name: str, status: dict) -> dict | None:
+    """Get detailed information for a single mcp_server."""
+    for mcp_server in status.get("mcp_servers", []):
+        if mcp_server.get("name") == name:
+            return mcp_server
     return None
 
 
-def _display_provider_details(name: str, status: dict):
-    """Display detailed information for a single provider."""
-    provider = _get_provider_details(name, status)
+def _display_mcp_server_details(name: str, status: dict):
+    """Display detailed information for a single mcp_server."""
+    mcp_server = _get_mcp_server_details(name, status)
 
-    if not provider:
-        console.print(f"[red]Provider '{name}' not found[/red]")
+    if not mcp_server:
+        console.print(f"[red]McpServer '{name}' not found[/red]")
         return
 
-    state = provider.get("state", "COLD")
+    state = mcp_server.get("state", "COLD")
     state_color = STATE_COLORS.get(state, "white")
 
     # Header
@@ -297,17 +297,17 @@ def _display_provider_details(name: str, status: dict):
     table.add_column("Property", style="bold")
     table.add_column("Value")
 
-    table.add_row("Mode", provider.get("mode", "-"))
-    table.add_row("Health", f"{provider.get('health_pct', '-')}%")
-    table.add_row("Tools", str(provider.get("tools_count", "-")))
-    table.add_row("Memory", _format_memory(provider.get("memory_mb")))
-    table.add_row("Uptime", _format_uptime(provider.get("uptime_s")))
-    table.add_row("Last Used", provider.get("last_used") or "-")
+    table.add_row("Mode", mcp_server.get("mode", "-"))
+    table.add_row("Health", f"{mcp_server.get('health_pct', '-')}%")
+    table.add_row("Tools", str(mcp_server.get("tools_count", "-")))
+    table.add_row("Memory", _format_memory(mcp_server.get("memory_mb")))
+    table.add_row("Uptime", _format_uptime(mcp_server.get("uptime_s")))
+    table.add_row("Last Used", mcp_server.get("last_used") or "-")
 
     console.print(table)
 
     # Tools list if available
-    tools = provider.get("tools", [])
+    tools = mcp_server.get("tools", [])
     if tools:
         console.print("\n[bold]Available Tools:[/bold]")
         for tool in tools:
@@ -318,7 +318,7 @@ def _display_provider_details(name: str, status: dict):
                 console.print(f"  [green]+[/green] {tool['name']}")
 
     # Recent health checks if available
-    health_history = provider.get("health_history", [])
+    health_history = mcp_server.get("health_history", [])
     if health_history:
         console.print("\n[bold]Recent Health Checks:[/bold]")
         for check in health_history[-5:]:
@@ -332,10 +332,10 @@ def _display_provider_details(name: str, status: dict):
 
 def status_command(
     ctx: typer.Context,
-    provider: Annotated[
+    mcp_server: Annotated[
         str | None,
         typer.Argument(
-            help="Show detailed status for a specific provider",
+            help="Show detailed status for a specific mcp_server",
         ),
     ] = None,
     watch: Annotated[
@@ -363,15 +363,15 @@ def status_command(
         ),
     ] = False,
 ):
-    """Show status of all providers.
+    """Show status of all mcp_servers.
 
-    Displays a table with provider states, health percentages, and tool counts.
+    Displays a table with mcp_server states, health percentages, and tool counts.
     Use --watch for real-time updates.
 
     Examples:
         mcp-hangar status
         mcp-hangar status --watch
-        mcp-hangar status my-provider
+        mcp-hangar status my-mcp_server
         mcp-hangar status --details
     """
     global_opts: GlobalOptions = ctx.obj if ctx.obj else GlobalOptions()
@@ -386,9 +386,9 @@ def status_command(
         console.print(json.dumps(status, indent=2))
         return
 
-    # Single provider details
-    if provider:
-        _display_provider_details(provider, status)
+    # Single mcp_server details
+    if mcp_server:
+        _display_mcp_server_details(mcp_server, status)
         return
 
     # Watch mode with live updates

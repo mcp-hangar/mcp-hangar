@@ -12,19 +12,19 @@ from enum import Enum
 from typing import TYPE_CHECKING
 
 if TYPE_CHECKING:
-    from .provider import ProviderState
+    from .mcp_server import McpServerState
 
 
 class HealthStatus(Enum):
-    """Health status for providers.
+    """Health status for mcp_servers.
 
-    Represents the externally visible health classification of a provider.
+    Represents the externally visible health classification of a mcp_server.
 
     Attributes:
-        HEALTHY: Provider is fully operational with no recent failures.
-        DEGRADED: Provider is operational but has experienced recent failures.
-        UNHEALTHY: Provider is not operational or has exceeded failure threshold.
-        UNKNOWN: Provider health cannot be determined (e.g., not started).
+        HEALTHY: McpServer is fully operational with no recent failures.
+        DEGRADED: McpServer is operational but has experienced recent failures.
+        UNHEALTHY: McpServer is not operational or has exceeded failure threshold.
+        UNKNOWN: McpServer health cannot be determined (e.g., not started).
     """
 
     HEALTHY = "healthy"
@@ -37,31 +37,31 @@ class HealthStatus(Enum):
         return self.value
 
     @classmethod
-    def from_state(cls, state: ProviderState, consecutive_failures: int = 0) -> HealthStatus:
-        """Derive health status from provider state and failure count.
+    def from_state(cls, state: McpServerState, consecutive_failures: int = 0) -> HealthStatus:
+        """Derive health status from mcp_server state and failure count.
 
         Args:
-            state: The current provider state.
+            state: The current mcp_server state.
             consecutive_failures: Number of consecutive failures (default: 0).
 
         Returns:
             The derived HealthStatus based on state and failures.
 
         Example:
-            >>> from mcp_hangar.domain.value_objects import ProviderState, HealthStatus
-            >>> HealthStatus.from_state(ProviderState.READY, 0)
+            >>> from mcp_hangar.domain.value_objects import McpServerState, HealthStatus
+            >>> HealthStatus.from_state(McpServerState.READY, 0)
             <HealthStatus.HEALTHY: 'healthy'>
         """
         # Import here to avoid circular import
-        from .provider import ProviderState  # noqa: N817
+        from .mcp_server import McpServerState  # noqa: N817
 
-        if state == ProviderState.READY:
+        if state == McpServerState.READY:
             if consecutive_failures == 0:
                 return cls.HEALTHY
             return cls.DEGRADED
-        elif state == ProviderState.DEGRADED:
+        elif state == McpServerState.DEGRADED:
             return cls.UNHEALTHY
-        elif state == ProviderState.COLD:
+        elif state == McpServerState.COLD:
             return cls.UNKNOWN
         else:
             return cls.UNHEALTHY

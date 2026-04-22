@@ -8,12 +8,12 @@ Recipes 01-06 build on each other. Start at 01 and work through in order.
 
 | # | Recipe | What it adds |
 |---|--------|--------------|
-| 01 | [HTTP Gateway](01-http-gateway.md) | Single MCP provider behind Hangar |
-| 02 | [Health Checks](02-health-checks.md) | Know when your provider is dead |
-| 03 | [Circuit Breaker](03-circuit-breaker.md) | Stop hammering a failing provider |
-| 04 | [Failover](04-failover.md) | Automatic switch to backup provider |
-| 05 | [Load Balancing](05-load-balancing.md) | Distribute load across multiple providers |
-| 06 | [Rate Limiting](06-rate-limiting.md) | Protect providers from overload |
+| 01 | [HTTP Gateway](01-http-gateway.md) | Single MCP server behind Hangar |
+| 02 | [Health Checks](02-health-checks.md) | Know when your MCP server is dead |
+| 03 | [Circuit Breaker](03-circuit-breaker.md) | Stop hammering a failing MCP server |
+| 04 | [Failover](04-failover.md) | Automatic switch to backup MCP server |
+| 05 | [Load Balancing](05-load-balancing.md) | Distribute load across multiple MCP servers |
+| 06 | [Rate Limiting](06-rate-limiting.md) | Protect MCP servers from overload |
 
 ## Standalone Recipes
 
@@ -23,7 +23,7 @@ These recipes can be done independently but assume basic Hangar setup from recip
 |---|--------|--------------|
 | 07 | [Observability: Metrics](07-observability-metrics.md) | 01 |
 | 08 | [Observability: Langfuse](08-observability-langfuse.md) | 01 |
-| 09 | [Subprocess Providers](09-subprocess-providers.md) | 01 |
+| 09 | [Subprocess MCP servers](09-subprocess-MCP servers.md) | 01 |
 | 10 | [Discovery: Docker](10-discovery-docker.md) | 01 |
 | 11 | [Discovery: Kubernetes](11-discovery-kubernetes.md) | 01 |
 | 12 | [Auth & RBAC](12-auth-rbac.md) | 01 |

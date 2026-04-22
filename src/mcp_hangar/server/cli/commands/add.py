@@ -1,6 +1,6 @@
-"""Add command - Add providers from MCP Registry.
+"""Add command - Add mcp_servers from MCP Registry.
 
-Searches the MCP Registry, installs the provider, prompts for configuration,
+Searches the MCP Registry, installs the mcp_server, prompts for configuration,
 and updates the MCP Hangar config file.
 """
 
@@ -15,21 +15,21 @@ from rich.console import Console
 from rich.table import Table
 import typer
 
-from ..errors import ProviderNotFoundError
+from ..errors import McpServerNotFoundError
 from ..main import GlobalOptions
-from ..services import ConfigFileManager, get_all_providers, get_provider, ProviderDefinition, search_providers
+from ..services import ConfigFileManager, get_all_mcp_servers, get_mcp_server, McpServerDefinition, search_mcp_servers
 
 console = Console()
 
 
-def _display_search_results(results: list[ProviderDefinition]) -> str | None:
+def _display_search_results(results: list[McpServerDefinition]) -> str | None:
     """Display search results and let user select.
 
     Args:
-        results: List of provider definitions
+        results: List of mcp_server definitions
 
     Returns:
-        Selected provider name or None
+        Selected mcp_server name or None
     """
     if not results:
         return None
@@ -38,9 +38,9 @@ def _display_search_results(results: list[ProviderDefinition]) -> str | None:
         result = results[0]
         console.print(f"\n[bold]Found:[/bold] {result.name} - {result.description}")
         if result.official:
-            console.print("[dim]Official Anthropic provider[/dim]")
+            console.print("[dim]Official Anthropic mcp_server[/dim]")
 
-        confirm = questionary.confirm("Install this provider?", default=True).ask()
+        confirm = questionary.confirm("Install this mcp_server?", default=True).ask()
         return result.name if confirm else None
 
     # Multiple matches - show table
@@ -54,55 +54,55 @@ def _display_search_results(results: list[ProviderDefinition]) -> str | None:
         badge = "[green]official[/green]" if result.official else ""
         table.add_row(str(i), result.name, result.description, badge)
 
-    console.print("\n[bold]Multiple providers found:[/bold]")
+    console.print("\n[bold]Multiple mcp_servers found:[/bold]")
     console.print(table)
 
     choices = [questionary.Choice(title=f"{r.name} - {r.description}", value=r.name) for r in results]
     choices.append(questionary.Choice(title="Cancel", value=None))
 
-    return questionary.select("Select a provider to install:", choices=choices).ask()
+    return questionary.select("Select a mcp_server to install:", choices=choices).ask()
 
 
-def _collect_config(provider: ProviderDefinition) -> dict | None:
-    """Collect configuration for a provider.
+def _collect_config(mcp_server: McpServerDefinition) -> dict | None:
+    """Collect configuration for a mcp_server.
 
     Args:
-        provider: Provider definition
+        mcp_server: McpServer definition
 
     Returns:
         Configuration dictionary or None if skipped
     """
-    if not provider.requires_config:
+    if not mcp_server.requires_config:
         return {}
 
     # Check if env var is already set
-    if provider.env_var and os.environ.get(provider.env_var):
+    if mcp_server.env_var and os.environ.get(mcp_server.env_var):
         use_env = questionary.confirm(
-            f"Use existing ${provider.env_var} environment variable?",
+            f"Use existing ${mcp_server.env_var} environment variable?",
             default=True,
         ).ask()
         if use_env:
-            return {"use_env": provider.env_var}
+            return {"use_env": mcp_server.env_var}
 
-    console.print(f"\n[dim]{provider.config_prompt}[/dim]")
-    if provider.env_var:
-        console.print(f"[dim]Tip: You can also set ${provider.env_var} in your shell profile[/dim]")
+    console.print(f"\n[dim]{mcp_server.config_prompt}[/dim]")
+    if mcp_server.env_var:
+        console.print(f"[dim]Tip: You can also set ${mcp_server.env_var} in your shell profile[/dim]")
 
-    if provider.config_type == "secret":
-        value = questionary.password(f"{provider.config_prompt}:").ask()
-    elif provider.config_type == "path":
-        is_dir = provider.config_prompt and "directory" in provider.config_prompt.lower()
-        value = questionary.path(f"{provider.config_prompt}:", only_directories=is_dir).ask()
+    if mcp_server.config_type == "secret":
+        value = questionary.password(f"{mcp_server.config_prompt}:").ask()
+    elif mcp_server.config_type == "path":
+        is_dir = mcp_server.config_prompt and "directory" in mcp_server.config_prompt.lower()
+        value = questionary.path(f"{mcp_server.config_prompt}:", only_directories=is_dir).ask()
         if value:
             value = str(Path(value).expanduser().resolve())
     else:
-        value = questionary.text(f"{provider.config_prompt}:").ask()
+        value = questionary.text(f"{mcp_server.config_prompt}:").ask()
 
     if not value:
-        console.print("[yellow]Skipping configuration - provider may not work correctly[/yellow]")
+        console.print("[yellow]Skipping configuration - mcp_server may not work correctly[/yellow]")
         return {}
 
-    return {"value": value, "env_var": provider.env_var, "config_type": provider.config_type}
+    return {"value": value, "env_var": mcp_server.env_var, "config_type": mcp_server.config_type}
 
 
 def _try_hot_reload() -> bool:
@@ -124,7 +124,7 @@ def _try_hot_reload() -> bool:
 
 def add_command(
     ctx: typer.Context,
-    name: Annotated[str, typer.Argument(help="Provider name or search query")],
+    name: Annotated[str, typer.Argument(help="McpServer name or search query")],
     search: Annotated[
         bool,
         typer.Option("--search", "-s", help="Search the registry instead of exact match"),
@@ -138,9 +138,9 @@ def add_command(
         typer.Option("--no-reload", help="Don't try to hot-reload the running server"),
     ] = False,
 ):
-    """Add a provider from the MCP Registry.
+    """Add a mcp_server from the MCP Registry.
 
-    Searches for the provider, prompts for configuration, and adds it
+    Searches for the mcp_server, prompts for configuration, and adds it
     to your MCP Hangar config file.
 
     Examples:
@@ -153,75 +153,75 @@ def add_command(
 
     # Search mode
     if search:
-        results = search_providers(name)
+        results = search_mcp_servers(name)
         if not results:
-            raise ProviderNotFoundError(name)
+            raise McpServerNotFoundError(name)
 
-        provider_name = _display_search_results(results)
-        if not provider_name:
+        mcp_server_name = _display_search_results(results)
+        if not mcp_server_name:
             raise typer.Abort()
     else:
-        provider_name = name
+        mcp_server_name = name
 
-    # Get provider info
-    provider = get_provider(provider_name)
+    # Get mcp_server info
+    mcp_server = get_mcp_server(mcp_server_name)
 
-    if not provider:
+    if not mcp_server:
         # Try search as fallback
-        results = search_providers(provider_name)
+        results = search_mcp_servers(mcp_server_name)
         if results:
-            console.print(f"[yellow]Exact match for '{provider_name}' not found.[/yellow]")
-            provider_name = _display_search_results(results)
-            if not provider_name:
+            console.print(f"[yellow]Exact match for '{mcp_server_name}' not found.[/yellow]")
+            mcp_server_name = _display_search_results(results)
+            if not mcp_server_name:
                 raise typer.Abort()
-            provider = get_provider(provider_name)
+            mcp_server = get_mcp_server(mcp_server_name)
         else:
-            all_providers = get_all_providers()
-            similar = [p.name for p in all_providers if name[0].lower() == p.name[0].lower()][:3]
-            raise ProviderNotFoundError(provider_name, similar=similar if similar else None)
+            all_mcp_servers = get_all_mcp_servers()
+            similar = [p.name for p in all_mcp_servers if name[0].lower() == p.name[0].lower()][:3]
+            raise McpServerNotFoundError(mcp_server_name, similar=similar if similar else None)
 
-    if not provider:
-        raise ProviderNotFoundError(provider_name)
+    if not mcp_server:
+        raise McpServerNotFoundError(mcp_server_name)
 
-    # Show provider info
-    console.print(f"\n[bold]Adding provider:[/bold] {provider.name}")
-    console.print(f"[dim]{provider.description}[/dim]")
-    console.print(f"[dim]Package: {provider.package}[/dim]")
+    # Show mcp_server info
+    console.print(f"\n[bold]Adding mcp_server:[/bold] {mcp_server.name}")
+    console.print(f"[dim]{mcp_server.description}[/dim]")
+    console.print(f"[dim]Package: {mcp_server.package}[/dim]")
 
     # Collect configuration
-    provider_config: dict = {}
-    if provider.requires_config and not yes:
-        result = _collect_config(provider)
+    mcp_server_config: dict = {}
+    if mcp_server.requires_config and not yes:
+        result = _collect_config(mcp_server)
         if result is None:
             raise typer.Abort()
-        provider_config = result
+        mcp_server_config = result
 
     # Confirm
     if not yes:
         confirm = questionary.confirm(
-            f"Add {provider.name} to {config_mgr.config_path}?",
+            f"Add {mcp_server.name} to {config_mgr.config_path}?",
             default=True,
         ).ask()
         if not confirm:
             raise typer.Abort()
 
     # Update config file
-    config_value = provider_config.get("value")
-    use_env = provider_config.get("use_env")
-    config_mgr.add_provider(provider, config_value=config_value, use_env=use_env)
-    console.print(f"[green]Added {provider.name} to {config_mgr.config_path}[/green]")
+    config_value = mcp_server_config.get("value")
+    use_env = mcp_server_config.get("use_env")
+    config_mgr.add_mcp_server(mcp_server, config_value=config_value, use_env=use_env)
+    console.print(f"[green]Added {mcp_server.name} to {config_mgr.config_path}[/green]")
 
     # Try hot reload
     if not no_reload:
         if _try_hot_reload():
-            console.print("[green]Server reloaded - provider is now available[/green]")
+            console.print("[green]Server reloaded - mcp_server is now available[/green]")
         else:
             console.print("[dim]Server not running or reload not available[/dim]")
-            console.print("Run 'mcp-hangar serve' or restart Claude Desktop to use the new provider")
+            console.print("Run 'mcp-hangar serve' or restart Claude Desktop to use the new mcp_server")
 
     # JSON output
     if global_opts.json_output:
-        console.print(json.dumps({"added": provider.name, "config_path": str(config_mgr.config_path)}))
+        console.print(json.dumps({"added": mcp_server.name, "config_path": str(config_mgr.config_path)}))
 
 
 __all__ = ["add_command"]

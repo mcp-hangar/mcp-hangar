@@ -1,12 +1,12 @@
 """Security Validator for Discovery.
 
-Validates discovered providers before registration.
+Validates discovered mcp_servers before registration.
 Implements a multi-stage validation pipeline with security controls.
 
 Validation Pipeline:
     1. Source Validation - Is the source trusted?
     2. Rate Limit Check - Is this source flooding?
-    3. Health Check - Does the provider respond?
+    3. Health Check - Does the mcp_server respond?
     4. Schema Validation - Does it implement MCP correctly?
 """
 
@@ -15,7 +15,7 @@ from enum import Enum
 import time
 from typing import Any
 
-from mcp_hangar.domain.discovery.discovered_provider import DiscoveredProvider
+from mcp_hangar.domain.discovery.discovered_mcp_server import DiscoveredMcpServer
 
 from ...logging_config import get_logger
 
@@ -55,14 +55,14 @@ class ValidationReport:
 
     Attributes:
         result: Validation result
-        provider: Provider being validated
+        mcp_server: McpServer being validated
         reason: Human-readable explanation
         details: Additional details (URLs, errors, etc.)
         duration_ms: Validation duration in milliseconds
     """
 
     result: ValidationResult
-    provider: DiscoveredProvider
+    mcp_server: DiscoveredMcpServer
     reason: str
     details: dict[str, Any] | None = None
     duration_ms: float = 0.0
@@ -75,7 +75,7 @@ class ValidationReport:
         """Convert to dictionary for serialization."""
         return {
             "result": self.result.value,
-            "provider_name": self.provider.name,
+            "mcp_server_name": self.mcp_server.name,
             "reason": self.reason,
             "details": self.details,
             "duration_ms": self.duration_ms,
@@ -91,17 +91,17 @@ class SecurityConfig:
         denied_namespaces: Blacklist of K8s namespaces
         require_health_check: Whether to require health check pass
         require_mcp_schema: Whether to validate MCP schema
-        max_providers_per_source: Max providers from single source
+        max_mcp_servers_per_source: Max mcp_servers from single source
         max_registration_rate: Max registrations per minute per source
         health_check_timeout_s: Health check timeout in seconds
-        quarantine_on_failure: Whether to quarantine failed providers
+        quarantine_on_failure: Whether to quarantine failed mcp_servers
     """
 
     allowed_namespaces: set[str] = field(default_factory=set)
     denied_namespaces: set[str] = field(default_factory=lambda: {"kube-system", "default"})
     require_health_check: bool = True
     require_mcp_schema: bool = False
-    max_providers_per_source: int = 100
+    max_mcp_servers_per_source: int = 100
     max_registration_rate: int = 10  # per minute
     health_check_timeout_s: float = 5.0
     quarantine_on_failure: bool = True
@@ -114,7 +114,7 @@ class SecurityConfig:
             denied_namespaces=set(data.get("denied_namespaces", ["kube-system", "default"])),
             require_health_check=data.get("require_health_check", True),
             require_mcp_schema=data.get("require_mcp_schema", False),
-            max_providers_per_source=data.get("max_providers_per_source", 100),
+            max_mcp_servers_per_source=data.get("max_mcp_servers_per_source", 100),
             max_registration_rate=data.get("max_registration_rate", 10),
             health_check_timeout_s=data.get("health_check_timeout_s", 5.0),
             quarantine_on_failure=data.get("quarantine_on_failure", True),
@@ -122,19 +122,19 @@ class SecurityConfig:
 
 
 class SecurityValidator:
-    """Validates discovered providers before registration.
+    """Validates discovered mcp_servers before registration.
 
     Implements a multi-stage validation pipeline:
         1. Source Validation - Namespace whitelist/blacklist
         2. Rate Limit Check - Prevent registration floods
-        3. Health Check - Verify provider is responsive
+        3. Health Check - Verify mcp_server is responsive
         4. Schema Validation - Verify MCP compliance
 
     Usage:
         validator = SecurityValidator(config)
-        report = await validator.validate(provider)
+        report = await validator.validate(mcp_server)
         if report.is_passed:
-            # Register provider
+            # Register mcp_server
         else:
             # Quarantine or reject
     """
@@ -150,14 +150,14 @@ class SecurityValidator:
         # Rate limiting state: source -> list of timestamps
         self._registration_counts: dict[str, list[float]] = {}
 
-        # Provider counts per source
-        self._provider_counts: dict[str, int] = {}
+        # McpServer counts per source
+        self._mcp_server_counts: dict[str, int] = {}
 
-    async def validate(self, provider: DiscoveredProvider) -> ValidationReport:
+    async def validate(self, mcp_server: DiscoveredMcpServer) -> ValidationReport:
         """Run full validation pipeline.
 
         Args:
-            provider: Provider to validate
+            mcp_server: McpServer to validate
 
         Returns:
             ValidationReport with result and details
@@ -165,33 +165,33 @@ class SecurityValidator:
         start_time = time.perf_counter()
 
         # Step 1: Source validation
-        source_result = self._validate_source(provider)
+        source_result = self._validate_source(mcp_server)
         if source_result:
             source_result.duration_ms = (time.perf_counter() - start_time) * 1000
             return source_result
 
         # Step 2: Rate limit check
-        rate_result = self._check_rate_limit(provider)
+        rate_result = self._check_rate_limit(mcp_server)
         if rate_result:
             rate_result.duration_ms = (time.perf_counter() - start_time) * 1000
             return rate_result
 
-        # Step 3: Provider count check
-        count_result = self._check_provider_count(provider)
+        # Step 3: McpServer count check
+        count_result = self._check_mcp_server_count(mcp_server)
         if count_result:
             count_result.duration_ms = (time.perf_counter() - start_time) * 1000
             return count_result
 
-        # Step 4: Health check (for HTTP providers)
+        # Step 4: Health check (for HTTP mcp_servers)
         if self.config.require_health_check:
-            health_result = await self._validate_health(provider)
+            health_result = await self._validate_health(mcp_server)
             if health_result:
                 health_result.duration_ms = (time.perf_counter() - start_time) * 1000
                 return health_result
 
         # Step 5: MCP schema validation
         if self.config.require_mcp_schema:
-            schema_result = await self._validate_schema(provider)
+            schema_result = await self._validate_schema(mcp_server)
             if schema_result:
                 schema_result.duration_ms = (time.perf_counter() - start_time) * 1000
                 return schema_result
@@ -200,29 +200,29 @@ class SecurityValidator:
         duration_ms = (time.perf_counter() - start_time) * 1000
         return ValidationReport(
             result=ValidationResult.PASSED,
-            provider=provider,
+            mcp_server=mcp_server,
             reason="All validation checks passed",
             duration_ms=duration_ms,
         )
 
-    def _validate_source(self, provider: DiscoveredProvider) -> ValidationReport | None:
+    def _validate_source(self, mcp_server: DiscoveredMcpServer) -> ValidationReport | None:
         """Validate source is trusted.
 
         Args:
-            provider: Provider to validate
+            mcp_server: McpServer to validate
 
         Returns:
             ValidationReport if failed, None if passed
         """
         # Kubernetes namespace checks
-        if provider.source_type == "kubernetes":
-            namespace = provider.metadata.get("namespace", "")
+        if mcp_server.source_type == "kubernetes":
+            namespace = mcp_server.metadata.get("namespace", "")
 
             # Check denied list first
             if namespace in self.config.denied_namespaces:
                 return ValidationReport(
                     result=ValidationResult.FAILED_SOURCE,
-                    provider=provider,
+                    mcp_server=mcp_server,
                     reason=f"Namespace '{namespace}' is in denied list",
                     details={
                         "namespace": namespace,
@@ -234,7 +234,7 @@ class SecurityValidator:
             if self.config.allowed_namespaces and namespace not in self.config.allowed_namespaces:
                 return ValidationReport(
                     result=ValidationResult.FAILED_SOURCE,
-                    provider=provider,
+                    mcp_server=mcp_server,
                     reason=f"Namespace '{namespace}' is not in allowed list",
                     details={
                         "namespace": namespace,
@@ -244,16 +244,16 @@ class SecurityValidator:
 
         return None
 
-    def _check_rate_limit(self, provider: DiscoveredProvider) -> ValidationReport | None:
+    def _check_rate_limit(self, mcp_server: DiscoveredMcpServer) -> ValidationReport | None:
         """Check registration rate limit.
 
         Args:
-            provider: Provider to validate
+            mcp_server: McpServer to validate
 
         Returns:
             ValidationReport if rate exceeded, None if within limit
         """
-        source = provider.source_type
+        source = mcp_server.source_type
         now = time.time()
         window = 60.0  # 1 minute window
 
@@ -268,7 +268,7 @@ class SecurityValidator:
         if len(self._registration_counts[source]) >= self.config.max_registration_rate:
             return ValidationReport(
                 result=ValidationResult.FAILED_RATE_LIMIT,
-                provider=provider,
+                mcp_server=mcp_server,
                 reason=f"Rate limit exceeded for source '{source}'",
                 details={
                     "source": source,
@@ -282,59 +282,59 @@ class SecurityValidator:
         self._registration_counts[source].append(now)
         return None
 
-    def _check_provider_count(self, provider: DiscoveredProvider) -> ValidationReport | None:
-        """Check provider count per source.
+    def _check_mcp_server_count(self, mcp_server: DiscoveredMcpServer) -> ValidationReport | None:
+        """Check mcp_server count per source.
 
         Args:
-            provider: Provider to validate
+            mcp_server: McpServer to validate
 
         Returns:
             ValidationReport if count exceeded, None if within limit
         """
-        source = provider.source_type
-        current_count = self._provider_counts.get(source, 0)
+        source = mcp_server.source_type
+        current_count = self._mcp_server_counts.get(source, 0)
 
-        if current_count >= self.config.max_providers_per_source:
+        if current_count >= self.config.max_mcp_servers_per_source:
             return ValidationReport(
                 result=ValidationResult.FAILED_RATE_LIMIT,
-                provider=provider,
-                reason=f"Max providers exceeded for source '{source}'",
+                mcp_server=mcp_server,
+                reason=f"Max mcp_servers exceeded for source '{source}'",
                 details={
                     "source": source,
                     "current_count": current_count,
-                    "max_count": self.config.max_providers_per_source,
+                    "max_count": self.config.max_mcp_servers_per_source,
                 },
             )
 
         return None
 
-    async def _validate_health(self, provider: DiscoveredProvider) -> ValidationReport | None:
-        """Validate provider health endpoint.
+    async def _validate_health(self, mcp_server: DiscoveredMcpServer) -> ValidationReport | None:
+        """Validate mcp_server health endpoint.
 
         Args:
-            provider: Provider to validate
+            mcp_server: McpServer to validate
 
         Returns:
             ValidationReport if health check failed, None if passed
         """
-        # Only check HTTP-based providers
-        if provider.mode not in ("http", "sse", "remote"):
+        # Only check HTTP-based mcp_servers
+        if mcp_server.mode not in ("http", "sse", "remote"):
             return None
 
         if not AIOHTTP_AVAILABLE:
-            logger.debug(f"Skipping health check for {provider.name} (aiohttp not available)")
+            logger.debug(f"Skipping health check for {mcp_server.name} (aiohttp not available)")
             return None
 
-        host = provider.connection_info.get("host")
-        port = provider.connection_info.get("port")
-        health_path = provider.connection_info.get("health_path", "/health")
+        host = mcp_server.connection_info.get("host")
+        port = mcp_server.connection_info.get("port")
+        health_path = mcp_server.connection_info.get("health_path", "/health")
 
         if not host or not port:
             return ValidationReport(
                 result=ValidationResult.FAILED_HEALTH,
-                provider=provider,
+                mcp_server=mcp_server,
                 reason="Missing host or port in connection_info",
-                details={"connection_info": provider.connection_info},
+                details={"connection_info": mcp_server.connection_info},
             )
 
         url = f"http://{host}:{port}{health_path}"
@@ -346,7 +346,7 @@ class SecurityValidator:
                 if response.status != 200:
                     return ValidationReport(
                         result=ValidationResult.FAILED_HEALTH,
-                        provider=provider,
+                        mcp_server=mcp_server,
                         reason=f"Health check returned status {response.status}",
                         details={"url": url, "status": response.status},
                     )
@@ -354,59 +354,59 @@ class SecurityValidator:
         except TimeoutError:
             return ValidationReport(
                 result=ValidationResult.FAILED_HEALTH,
-                provider=provider,
+                mcp_server=mcp_server,
                 reason="Health check timed out",
                 details={"url": url, "timeout": self.config.health_check_timeout_s},
             )
         except Exception as e:  # noqa: BLE001 -- fault-barrier: health check failure returns validation report, not crash
             return ValidationReport(
                 result=ValidationResult.FAILED_HEALTH,
-                provider=provider,
+                mcp_server=mcp_server,
                 reason=f"Health check failed: {e}",
                 details={"url": url, "error": str(e)},
             )
 
         return None
 
-    async def _validate_schema(self, provider: DiscoveredProvider) -> ValidationReport | None:
+    async def _validate_schema(self, mcp_server: DiscoveredMcpServer) -> ValidationReport | None:
         """Validate MCP tools schema.
 
         Args:
-            provider: Provider to validate
+            mcp_server: McpServer to validate
 
         Returns:
             ValidationReport if schema invalid, None if valid
         """
         # NOTE: MCP schema validation is intentionally deferred.
-        # The provider's tools/list response should be validated against MCP spec,
+        # The mcp_server's tools/list response should be validated against MCP spec,
         # but this requires network calls during registration which adds latency.
         # Schema validation can be done lazily on first tool invocation instead.
-        logger.debug(f"Schema validation deferred for {provider.name}")
+        logger.debug(f"Schema validation deferred for {mcp_server.name}")
         return None
 
-    def record_registration(self, provider: DiscoveredProvider) -> None:
+    def record_registration(self, mcp_server: DiscoveredMcpServer) -> None:
         """Record successful registration for counting.
 
         Args:
-            provider: Registered provider
+            mcp_server: Registered mcp_server
         """
-        source = provider.source_type
-        self._provider_counts[source] = self._provider_counts.get(source, 0) + 1
+        source = mcp_server.source_type
+        self._mcp_server_counts[source] = self._mcp_server_counts.get(source, 0) + 1
 
-    def record_deregistration(self, provider: DiscoveredProvider) -> None:
+    def record_deregistration(self, mcp_server: DiscoveredMcpServer) -> None:
         """Record deregistration for counting.
 
         Args:
-            provider: Deregistered provider
+            mcp_server: Deregistered mcp_server
         """
-        source = provider.source_type
-        if source in self._provider_counts:
-            self._provider_counts[source] = max(0, self._provider_counts[source] - 1)
+        source = mcp_server.source_type
+        if source in self._mcp_server_counts:
+            self._mcp_server_counts[source] = max(0, self._mcp_server_counts[source] - 1)
 
     def reset_rate_limits(self) -> None:
         """Reset all rate limit counters."""
         self._registration_counts.clear()
 
-    def reset_provider_counts(self) -> None:
-        """Reset all provider counts."""
-        self._provider_counts.clear()
+    def reset_mcp_server_counts(self) -> None:
+        """Reset all mcp_server counts."""
+        self._mcp_server_counts.clear()

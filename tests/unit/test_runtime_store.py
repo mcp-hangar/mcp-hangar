@@ -6,13 +6,13 @@ from unittest.mock import MagicMock
 
 import pytest
 
-from mcp_hangar.infrastructure.runtime_store import LoadMetadata, RuntimeProviderStore
+from mcp_hangar.infrastructure.runtime_store import LoadMetadata, RuntimeMcpServerStore
 
 
-def make_mock_provider(provider_id: str) -> MagicMock:
+def make_mock_provider(mcp_server_id: str) -> MagicMock:
     """Create a mock provider for testing."""
     provider = MagicMock()
-    provider.provider_id = provider_id
+    provider.mcp_server_id = mcp_server_id
     return provider
 
 
@@ -64,12 +64,12 @@ class TestLoadMetadata:
         assert "lifetime_seconds" in result
 
 
-class TestRuntimeProviderStore:
-    """Tests for RuntimeProviderStore."""
+class TestRuntimeMcpServerStore:
+    """Tests for RuntimeMcpServerStore."""
 
     def test_add_and_get(self):
         """Test adding and retrieving a provider."""
-        store = RuntimeProviderStore()
+        store = RuntimeMcpServerStore()
         provider = make_mock_provider("test-provider")
         metadata = make_metadata()
 
@@ -82,7 +82,7 @@ class TestRuntimeProviderStore:
 
     def test_add_duplicate_raises_error(self):
         """Test adding duplicate provider raises error."""
-        store = RuntimeProviderStore()
+        store = RuntimeMcpServerStore()
         provider = make_mock_provider("test-provider")
         metadata = make_metadata()
 
@@ -93,23 +93,23 @@ class TestRuntimeProviderStore:
 
     def test_get_nonexistent(self):
         """Test getting nonexistent provider returns None."""
-        store = RuntimeProviderStore()
+        store = RuntimeMcpServerStore()
         assert store.get("nonexistent") is None
 
-    def test_get_provider(self):
+    def test_get_mcp_server(self):
         """Test getting just the provider."""
-        store = RuntimeProviderStore()
+        store = RuntimeMcpServerStore()
         provider = make_mock_provider("test-provider")
         metadata = make_metadata()
         store.add(provider, metadata)
 
-        result = store.get_provider("test-provider")
+        result = store.get_mcp_server("test-provider")
 
         assert result == provider
 
     def test_get_metadata(self):
         """Test getting just the metadata."""
-        store = RuntimeProviderStore()
+        store = RuntimeMcpServerStore()
         provider = make_mock_provider("test-provider")
         metadata = make_metadata()
         store.add(provider, metadata)
@@ -120,7 +120,7 @@ class TestRuntimeProviderStore:
 
     def test_remove(self):
         """Test removing a provider."""
-        store = RuntimeProviderStore()
+        store = RuntimeMcpServerStore()
         provider = make_mock_provider("test-provider")
         metadata = make_metadata()
         store.add(provider, metadata)
@@ -132,12 +132,12 @@ class TestRuntimeProviderStore:
 
     def test_remove_nonexistent(self):
         """Test removing nonexistent provider returns None."""
-        store = RuntimeProviderStore()
+        store = RuntimeMcpServerStore()
         assert store.remove("nonexistent") is None
 
     def test_exists(self):
         """Test checking if provider exists."""
-        store = RuntimeProviderStore()
+        store = RuntimeMcpServerStore()
         provider = make_mock_provider("test-provider")
         metadata = make_metadata()
         store.add(provider, metadata)
@@ -147,7 +147,7 @@ class TestRuntimeProviderStore:
 
     def test_list_all(self):
         """Test listing all providers."""
-        store = RuntimeProviderStore()
+        store = RuntimeMcpServerStore()
         provider1 = make_mock_provider("provider1")
         provider2 = make_mock_provider("provider2")
         store.add(provider1, make_metadata())
@@ -159,7 +159,7 @@ class TestRuntimeProviderStore:
 
     def test_list_ids(self):
         """Test listing all provider IDs."""
-        store = RuntimeProviderStore()
+        store = RuntimeMcpServerStore()
         store.add(make_mock_provider("provider1"), make_metadata())
         store.add(make_mock_provider("provider2"), make_metadata())
 
@@ -169,7 +169,7 @@ class TestRuntimeProviderStore:
 
     def test_count(self):
         """Test counting providers."""
-        store = RuntimeProviderStore()
+        store = RuntimeMcpServerStore()
         assert store.count() == 0
 
         store.add(make_mock_provider("provider1"), make_metadata())
@@ -180,7 +180,7 @@ class TestRuntimeProviderStore:
 
     def test_clear(self):
         """Test clearing all providers."""
-        store = RuntimeProviderStore()
+        store = RuntimeMcpServerStore()
         store.add(make_mock_provider("provider1"), make_metadata())
         store.add(make_mock_provider("provider2"), make_metadata())
 
@@ -191,14 +191,14 @@ class TestRuntimeProviderStore:
 
     def test_thread_safety(self):
         """Test thread safety of store operations."""
-        store = RuntimeProviderStore()
+        store = RuntimeMcpServerStore()
         errors = []
 
         def add_providers(start: int):
             try:
                 for i in range(10):
-                    provider_id = f"provider_{start}_{i}"
-                    provider = make_mock_provider(provider_id)
+                    mcp_server_id = f"provider_{start}_{i}"
+                    provider = make_mock_provider(mcp_server_id)
                     store.add(provider, make_metadata())
             except Exception as e:
                 errors.append(e)
@@ -229,7 +229,7 @@ class TestRuntimeProviderStore:
 
     def test_get_all_with_metadata(self):
         """Test getting all providers with metadata as dict."""
-        store = RuntimeProviderStore()
+        store = RuntimeMcpServerStore()
         provider1 = make_mock_provider("provider1")
         provider2 = make_mock_provider("provider2")
         metadata1 = make_metadata(source="source1")

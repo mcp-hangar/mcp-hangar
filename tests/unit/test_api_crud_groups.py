@@ -50,11 +50,11 @@ def mock_context():
             raise ProviderNotFoundError(command.group_id)
         elif isinstance(command, AddGroupMemberCommand):
             if command.group_id == "my-group":
-                return {"group_id": "my-group", "provider_id": command.provider_id, "added": True}
+                return {"group_id": "my-group", "mcp_server_id": command.mcp_server_id, "added": True}
             raise ProviderNotFoundError(command.group_id)
         elif isinstance(command, RemoveGroupMemberCommand):
             if command.group_id == "my-group":
-                return {"group_id": "my-group", "provider_id": command.provider_id, "removed": True}
+                return {"group_id": "my-group", "mcp_server_id": command.mcp_server_id, "removed": True}
             raise ProviderNotFoundError(command.group_id)
         raise ValueError(f"Unexpected command: {type(command)}")
 
@@ -243,12 +243,12 @@ class TestAddGroupMember:
         calls = mock_context.command_bus.send.call_args_list
         assert any(isinstance(call[0][0], AddGroupMemberCommand) for call in calls)
 
-    def test_command_uses_member_id_as_provider_id(self, api_client, mock_context):
-        """POST /groups/my-group/members maps member_id to provider_id in command."""
+    def test_command_uses_member_id_as_mcp_server_id(self, api_client, mock_context):
+        """POST /groups/my-group/members maps member_id to mcp_server_id in command."""
         api_client.post("/groups/my-group/members", json={"member_id": "math", "weight": 2})
         calls = mock_context.command_bus.send.call_args_list
         cmd = next(c[0][0] for c in calls if isinstance(c[0][0], AddGroupMemberCommand))
-        assert cmd.provider_id == "math"
+        assert cmd.mcp_server_id == "math"
         assert cmd.group_id == "my-group"
         assert cmd.weight == 2
 
@@ -290,4 +290,4 @@ class TestRemoveGroupMember:
         calls = mock_context.command_bus.send.call_args_list
         cmd = next(c[0][0] for c in calls if isinstance(c[0][0], RemoveGroupMemberCommand))
         assert cmd.group_id == "my-group"
-        assert cmd.provider_id == "math"
+        assert cmd.mcp_server_id == "math"

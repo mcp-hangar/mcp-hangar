@@ -1,6 +1,6 @@
-"""Provider configuration dataclass.
+"""McpServer configuration dataclass.
 
-Replaces the 21-parameter Provider.__init__() with a structured configuration object.
+Replaces the 21-parameter McpServer.__init__() with a structured configuration object.
 This follows the Builder pattern and improves code clarity.
 """
 
@@ -8,15 +8,15 @@ import logging
 from dataclasses import dataclass, field
 from typing import Any
 
-from ..value_objects import HealthCheckInterval, IdleTTL, ProviderMode, ToolAccessPolicy
-from ..value_objects.capabilities import ProviderCapabilities
+from ..value_objects import HealthCheckInterval, IdleTTL, McpServerMode, ToolAccessPolicy
+from ..value_objects.capabilities import McpServerCapabilities
 
 logger = logging.getLogger(__name__)
 
 
 @dataclass
 class SubprocessConfig:
-    """Configuration for subprocess mode providers."""
+    """Configuration for subprocess mode mcp_servers."""
 
     command: list[str]
     env: dict[str, str] = field(default_factory=dict)
@@ -24,7 +24,7 @@ class SubprocessConfig:
 
 @dataclass
 class ContainerResourceConfig:
-    """Resource limits for container providers."""
+    """Resource limits for container mcp_servers."""
 
     memory: str = "512m"
     cpu: str = "1.0"
@@ -32,7 +32,7 @@ class ContainerResourceConfig:
 
 @dataclass
 class ContainerConfig:
-    """Configuration for container (Docker/Podman) mode providers."""
+    """Configuration for container (Docker/Podman) mode mcp_servers."""
 
     image: str
     command: list[str] | None = None  # Override container entrypoint
@@ -48,7 +48,7 @@ class ContainerConfig:
 
 @dataclass
 class RemoteConfig:
-    """Configuration for remote (HTTP) mode providers."""
+    """Configuration for remote (HTTP) mode mcp_servers."""
 
     endpoint: str
     auth: dict[str, Any] | None = None
@@ -58,7 +58,7 @@ class RemoteConfig:
 
 @dataclass
 class ToolsConfig:
-    """Tool access configuration for a provider, group, or member.
+    """Tool access configuration for a mcp_server, group, or member.
 
     Controls which tools are visible and invocable. This is config-driven,
     identity-agnostic filtering that runs before RBAC.
@@ -117,27 +117,27 @@ class HealthConfig:
 
 
 @dataclass
-class ProviderConfig:
-    """Complete provider configuration.
+class McpServerConfig:
+    """Complete mcp_server configuration.
 
-    Groups all provider parameters into logical sections:
-    - Core: provider_id, mode, description
+    Groups all mcp_server parameters into logical sections:
+    - Core: mcp_server_id, mode, description
     - Mode-specific: subprocess, container, or remote config
     - Runtime: idle_ttl, health settings
     - Tools: pre-defined tool schemas
 
     Example:
-        config = ProviderConfig(
-            provider_id="math",
-            mode=ProviderMode.SUBPROCESS,
+        config = McpServerConfig(
+            mcp_server_id="math",
+            mode=McpServerMode.SUBPROCESS,
             subprocess=SubprocessConfig(command=["python", "-m", "math_server"]),
         )
-        provider = Provider(config)
+        mcp_server = McpServer(config)
     """
 
     # Core identity
-    provider_id: str
-    mode: ProviderMode | str
+    mcp_server_id: str
+    mode: McpServerMode | str
     description: str | None = None
 
     # Mode-specific configuration (only one should be set)
@@ -149,44 +149,44 @@ class ProviderConfig:
     idle_ttl: IdleTTL = field(default_factory=lambda: IdleTTL(300))
     health: HealthConfig = field(default_factory=HealthConfig)
 
-    # Pre-defined tools (allows visibility before provider starts)
+    # Pre-defined tools (allows visibility before mcp_server starts)
     tools: list[dict[str, Any]] = field(default_factory=list)
 
     # Tool access policy (controls which tools are visible/invocable)
     tools_access: ToolsConfig | None = None
 
     # Capability declarations (Phase 38: network, filesystem, environment, tools, resources)
-    capabilities: ProviderCapabilities | None = None
+    capabilities: McpServerCapabilities | None = None
 
     def __post_init__(self) -> None:
-        """Normalize mode to ProviderMode enum."""
+        """Normalize mode to McpServerMode enum."""
         if isinstance(self.mode, str):
-            self.mode = ProviderMode.normalize(self.mode)
+            self.mode = McpServerMode.normalize(self.mode)
 
     @classmethod
-    def from_dict(cls, provider_id: str, data: dict[str, Any]) -> "ProviderConfig":
-        """Create ProviderConfig from a configuration dictionary.
+    def from_dict(cls, mcp_server_id: str, data: dict[str, Any]) -> "McpServerConfig":
+        """Create McpServerConfig from a configuration dictionary.
 
         Args:
-            provider_id: The provider identifier.
+            mcp_server_id: The mcp_server identifier.
             data: Configuration dictionary (as from YAML config).
 
         Returns:
-            ProviderConfig instance.
+            McpServerConfig instance.
         """
-        mode = ProviderMode.normalize(data.get("mode", "subprocess"))
+        mode = McpServerMode.normalize(data.get("mode", "subprocess"))
 
         # Parse mode-specific config
         subprocess_config = None
         container_config = None
         remote_config = None
 
-        if mode == ProviderMode.SUBPROCESS:
+        if mode == McpServerMode.SUBPROCESS:
             subprocess_config = SubprocessConfig(
                 command=data.get("command", []),
                 env=data.get("env", {}),
             )
-        elif mode in (ProviderMode.DOCKER, ProviderMode.CONTAINER):
+        elif mode in (McpServerMode.DOCKER, McpServerMode.CONTAINER):
             resources = data.get("resources", {})
             container_config = ContainerConfig(
                 image=data.get("image", ""),
@@ -203,7 +203,7 @@ class ProviderConfig:
                 read_only=data.get("read_only", True),
                 user=data.get("user"),
             )
-        elif mode == ProviderMode.REMOTE:
+        elif mode == McpServerMode.REMOTE:
             remote_config = RemoteConfig(
                 endpoint=data.get("endpoint", data.get("url", "")),
                 auth=data.get("auth"),
@@ -243,10 +243,10 @@ class ProviderConfig:
 
         # Parse capabilities declaration
         capabilities_data = data.get("capabilities")
-        capabilities = ProviderCapabilities.from_dict(capabilities_data) if capabilities_data else None
+        capabilities = McpServerCapabilities.from_dict(capabilities_data) if capabilities_data else None
 
         return cls(
-            provider_id=provider_id,
+            mcp_server_id=mcp_server_id,
             mode=mode,
             description=data.get("description"),
             subprocess=subprocess_config,
@@ -283,7 +283,7 @@ class ProviderConfig:
         return {}
 
     def get_tools_policy(self) -> ToolAccessPolicy:
-        """Get the tool access policy for this provider.
+        """Get the tool access policy for this mcp_server.
 
         Returns:
             ToolAccessPolicy, or unrestricted policy if no tools_access configured.
@@ -291,3 +291,7 @@ class ProviderConfig:
         if self.tools_access:
             return self.tools_access.to_policy()
         return ToolAccessPolicy()  # Unrestricted
+
+
+# legacy aliases
+ProviderConfig = McpServerConfig

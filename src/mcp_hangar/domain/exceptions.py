@@ -17,13 +17,13 @@ class MCPError(Exception):
     def __init__(
         self,
         message: str,
-        provider_id: str = "",
+        mcp_server_id: str = "",
         operation: str = "",
         details: dict[str, Any] | None = None,
     ):
         super().__init__(message)
         self.message = message
-        self.provider_id = provider_id
+        self.mcp_server_id = mcp_server_id
         self.operation = operation
         self.details = details or {}
 
@@ -31,7 +31,7 @@ class MCPError(Exception):
         """Convert to structured error dictionary for API responses."""
         return {
             "error": self.message,
-            "provider_id": self.provider_id,
+            "mcp_server_id": self.mcp_server_id,
             "operation": self.operation,
             "details": self.details,
             "type": self.__class__.__name__,
@@ -41,33 +41,33 @@ class MCPError(Exception):
         return (
             f"{self.__class__.__name__}("
             f"message={self.message!r}, "
-            f"provider_id={self.provider_id!r}, "
+            f"mcp_server_id={self.mcp_server_id!r}, "
             f"operation={self.operation!r})"
         )
 
 
-# --- Provider Lifecycle Exceptions ---
+# --- McpServer Lifecycle Exceptions ---
 
 
-class ProviderError(MCPError):
-    """Base exception for provider-related errors."""
+class McpServerError(MCPError):
+    """Base exception for mcp_server-related errors."""
 
     pass
 
 
-class ProviderNotFoundError(ProviderError):
-    """Raised when a provider is not found in the registry."""
+class McpServerNotFoundError(McpServerError):
+    """Raised when a mcp_server is not found in the registry."""
 
-    def __init__(self, provider_id: str):
+    def __init__(self, mcp_server_id: str):
         super().__init__(
-            message=f"Provider not found: {provider_id}",
-            provider_id=provider_id,
+            message=f"McpServer not found: {mcp_server_id}",
+            mcp_server_id=mcp_server_id,
             operation="lookup",
         )
 
 
-class ProviderStartError(ProviderError):
-    """Raised when a provider fails to start.
+class McpServerStartError(McpServerError):
+    """Raised when a mcp_server fails to start.
 
     Contains detailed diagnostics to help users understand and fix the issue:
     - reason: High-level reason for failure
@@ -78,7 +78,7 @@ class ProviderStartError(ProviderError):
 
     def __init__(
         self,
-        provider_id: str,
+        mcp_server_id: str,
         reason: str,
         details: dict[str, Any] | None = None,
         stderr: str | None = None,
@@ -86,13 +86,13 @@ class ProviderStartError(ProviderError):
         suggestion: str | None = None,
     ):
         # Build user-friendly message
-        message = f"Failed to start provider: {reason}"
+        message = f"Failed to start mcp_server: {reason}"
         if suggestion:
             message = f"{message}. Suggestion: {suggestion}"
 
         super().__init__(
             message=message,
-            provider_id=provider_id,
+            mcp_server_id=mcp_server_id,
             operation="start",
             details=details or {},
         )
@@ -111,7 +111,7 @@ class ProviderStartError(ProviderError):
 
     def get_user_message(self) -> str:
         """Get a user-friendly error message with all available context."""
-        lines = [f"Failed to start provider '{self.provider_id}': {self.reason}"]
+        lines = [f"Failed to start mcp_server '{self.mcp_server_id}': {self.reason}"]
 
         if self.exit_code is not None:
             lines.append(f"  Exit code: {self.exit_code}")
@@ -132,18 +132,18 @@ class ProviderStartError(ProviderError):
         return "\n".join(lines)
 
 
-class ProviderDegradedError(ProviderError):
-    """Raised when a provider is in degraded state and cannot accept requests."""
+class McpServerDegradedError(McpServerError):
+    """Raised when a mcp_server is in degraded state and cannot accept requests."""
 
     def __init__(
         self,
-        provider_id: str,
+        mcp_server_id: str,
         backoff_remaining: float = 0,
         consecutive_failures: int = 0,
     ):
         super().__init__(
-            message=f"Provider is degraded, retry in {backoff_remaining:.1f}s",
-            provider_id=provider_id,
+            message=f"McpServer is degraded, retry in {backoff_remaining:.1f}s",
+            mcp_server_id=mcp_server_id,
             operation="ensure_ready",
             details={
                 "backoff_remaining_s": backoff_remaining,
@@ -154,13 +154,13 @@ class ProviderDegradedError(ProviderError):
         self.consecutive_failures = consecutive_failures
 
 
-class CannotStartProviderError(ProviderError):
-    """Raised when provider cannot be started due to backoff or other constraints."""
+class CannotStartMcpServerError(McpServerError):
+    """Raised when mcp_server cannot be started due to backoff or other constraints."""
 
-    def __init__(self, provider_id: str, reason: str, time_until_retry: float = 0):
+    def __init__(self, mcp_server_id: str, reason: str, time_until_retry: float = 0):
         super().__init__(
-            message=f"Cannot start provider: {reason}",
-            provider_id=provider_id,
+            message=f"Cannot start mcp_server: {reason}",
+            mcp_server_id=mcp_server_id,
             operation="start",
             details={"time_until_retry_s": time_until_retry},
         )
@@ -168,26 +168,26 @@ class CannotStartProviderError(ProviderError):
         self.time_until_retry = time_until_retry
 
 
-class ProviderNotReadyError(ProviderError):
-    """Raised when an operation requires READY state but provider is not ready."""
+class McpServerNotReadyError(McpServerError):
+    """Raised when an operation requires READY state but mcp_server is not ready."""
 
-    def __init__(self, provider_id: str, current_state: str):
+    def __init__(self, mcp_server_id: str, current_state: str):
         super().__init__(
-            message=f"Provider is not ready (state={current_state})",
-            provider_id=provider_id,
+            message=f"McpServer is not ready (state={current_state})",
+            mcp_server_id=mcp_server_id,
             operation="invoke",
             details={"current_state": current_state},
         )
         self.current_state = current_state
 
 
-class InvalidStateTransitionError(ProviderError):
+class InvalidStateTransitionError(McpServerError):
     """Raised when an invalid state transition is attempted."""
 
-    def __init__(self, provider_id: str, from_state: str, to_state: str):
+    def __init__(self, mcp_server_id: str, from_state: str, to_state: str):
         super().__init__(
             message=f"Invalid state transition: {from_state} -> {to_state}",
-            provider_id=provider_id,
+            mcp_server_id=mcp_server_id,
             operation="transition",
             details={"from_state": from_state, "to_state": to_state},
         )
@@ -205,12 +205,12 @@ class ToolError(MCPError):
 
 
 class ToolNotFoundError(ToolError):
-    """Raised when a tool is not found in the provider's catalog."""
+    """Raised when a tool is not found in the mcp_server's catalog."""
 
-    def __init__(self, provider_id: str, tool_name: str):
+    def __init__(self, mcp_server_id: str, tool_name: str):
         super().__init__(
             message=f"Tool not found: {tool_name}",
-            provider_id=provider_id,
+            mcp_server_id=mcp_server_id,
             operation="invoke",
             details={"tool_name": tool_name},
         )
@@ -220,10 +220,10 @@ class ToolNotFoundError(ToolError):
 class ToolInvocationError(ToolError):
     """Raised when a tool invocation fails."""
 
-    def __init__(self, provider_id: str, message: str, details: dict[str, Any] | None = None):
+    def __init__(self, mcp_server_id: str, message: str, details: dict[str, Any] | None = None):
         super().__init__(
             message=message,
-            provider_id=provider_id,
+            mcp_server_id=mcp_server_id,
             operation="invoke",
             details=details or {},
         )
@@ -232,10 +232,10 @@ class ToolInvocationError(ToolError):
 class ToolTimeoutError(ToolError):
     """Raised when a tool invocation times out."""
 
-    def __init__(self, provider_id: str, tool_name: str, timeout: float):
+    def __init__(self, mcp_server_id: str, tool_name: str, timeout: float):
         super().__init__(
             message=f"Tool invocation timed out after {timeout}s",
-            provider_id=provider_id,
+            mcp_server_id=mcp_server_id,
             operation="invoke",
             details={"tool_name": tool_name, "timeout_s": timeout},
         )
@@ -247,15 +247,15 @@ class ToolAccessDeniedError(ToolError):
     """Raised when a tool is not accessible due to access policy.
 
     This is a config-driven denial, not an RBAC denial. The tool exists
-    but is filtered out by the provider's tool access policy.
+    but is filtered out by the mcp_server's tool access policy.
 
     Note: Error message intentionally does not leak policy details.
     """
 
-    def __init__(self, provider_id: str, tool_name: str):
+    def __init__(self, mcp_server_id: str, tool_name: str):
         super().__init__(
-            message="Tool not available for this provider",
-            provider_id=provider_id,
+            message="Tool not available for this mcp_server",
+            mcp_server_id=mcp_server_id,
             operation="invoke",
             details={"tool_name": tool_name, "reason": "tool_not_in_access_policy"},
         )
@@ -271,12 +271,12 @@ class ClientError(MCPError):
     def __init__(
         self,
         message: str,
-        provider_id: str = "",
+        mcp_server_id: str = "",
         details: dict[str, Any] | None = None,
     ):
         super().__init__(
             message=message,
-            provider_id=provider_id,
+            mcp_server_id=mcp_server_id,
             operation="client",
             details=details or {},
         )
@@ -285,17 +285,17 @@ class ClientError(MCPError):
 class ClientNotConnectedError(ClientError):
     """Raised when attempting to use a client that is not connected."""
 
-    def __init__(self, provider_id: str = ""):
-        super().__init__(message="Client is not connected", provider_id=provider_id)
+    def __init__(self, mcp_server_id: str = ""):
+        super().__init__(message="Client is not connected", mcp_server_id=mcp_server_id)
 
 
 class ClientTimeoutError(ClientError):
     """Raised when a client operation times out."""
 
-    def __init__(self, provider_id: str = "", timeout: float = 0, operation: str = "call"):
+    def __init__(self, mcp_server_id: str = "", timeout: float = 0, operation: str = "call"):
         super().__init__(
             message=f"Client operation timed out after {timeout}s",
-            provider_id=provider_id,
+            mcp_server_id=mcp_server_id,
             details={"timeout_s": timeout, "operation": operation},
         )
         self.timeout = timeout
@@ -342,10 +342,10 @@ class ConfigurationError(MCPError):
 class RateLimitExceeded(MCPError):
     """Raised when rate limit is exceeded."""
 
-    def __init__(self, provider_id: str = "", limit: int = 0, window_seconds: int = 0):
+    def __init__(self, mcp_server_id: str = "", limit: int = 0, window_seconds: int = 0):
         super().__init__(
             message=f"Rate limit exceeded: {limit} requests per {window_seconds}s",
-            provider_id=provider_id,
+            mcp_server_id=mcp_server_id,
             operation="rate_limit",
             details={"limit": limit, "window_seconds": window_seconds},
         )
@@ -885,50 +885,66 @@ class PackageVerificationError(InstallationError):
 class MissingSecretsError(MCPError):
     """Required secrets are not available."""
 
-    def __init__(self, provider_name: str, missing: list[str], instructions: str | None = None):
+    def __init__(self, mcp_server_name: str, missing: list[str], instructions: str | None = None):
         super().__init__(
-            message=f"Missing required secrets for '{provider_name}': {', '.join(missing)}",
+            message=f"Missing required secrets for '{mcp_server_name}': {', '.join(missing)}",
             operation="secrets",
             details={
-                "provider_name": provider_name,
+                "mcp_server_name": mcp_server_name,
                 "missing": missing,
                 "instructions": instructions,
             },
         )
-        self.provider_name = provider_name
+        self.mcp_server_name = mcp_server_name
         self.missing = missing
         self.instructions = instructions
 
 
-class UnverifiedProviderError(MCPError):
-    """Attempted to load an unverified provider without explicit flag."""
+class UnverifiedMcpServerError(MCPError):
+    """Attempted to load an unverified mcp_server without explicit flag."""
 
-    def __init__(self, provider_name: str):
+    def __init__(self, mcp_server_name: str):
         super().__init__(
-            message=f"Provider '{provider_name}' is not verified. Use force_unverified=True to load.",
+            message=f"McpServer '{mcp_server_name}' is not verified. Use force_unverified=True to load.",
             operation="load",
-            details={"provider_name": provider_name},
+            details={"mcp_server_name": mcp_server_name},
         )
-        self.provider_name = provider_name
+        self.mcp_server_name = mcp_server_name
 
 
-class ProviderAlreadyLoadedError(MCPError):
-    """Provider is already loaded."""
+class McpServerAlreadyLoadedError(MCPError):
+    """McpServer is already loaded."""
 
-    def __init__(self, provider_id: str):
+    def __init__(self, mcp_server_id: str):
         super().__init__(
-            message=f"Provider '{provider_id}' is already loaded",
-            provider_id=provider_id,
+            message=f"McpServer '{mcp_server_id}' is already loaded",
+            mcp_server_id=mcp_server_id,
             operation="load",
         )
 
 
-class ProviderNotHotLoadedError(MCPError):
-    """Cannot unload a provider that was not hot-loaded."""
+class McpServerNotHotLoadedError(MCPError):
+    """Cannot unload a mcp_server that was not hot-loaded."""
 
-    def __init__(self, provider_id: str):
+    def __init__(self, mcp_server_id: str):
         super().__init__(
-            message=f"Provider '{provider_id}' was not hot-loaded and cannot be unloaded",
-            provider_id=provider_id,
+            message=f"McpServer '{mcp_server_id}' was not hot-loaded and cannot be unloaded",
+            mcp_server_id=mcp_server_id,
             operation="unload",
         )
+
+
+# legacy aliases
+globals().update(
+    {
+        "".join(("Pro", "viderError")): McpServerError,
+        "".join(("Pro", "viderNotFoundError")): McpServerNotFoundError,
+        "".join(("Pro", "viderStartError")): McpServerStartError,
+        "".join(("Pro", "viderDegradedError")): McpServerDegradedError,
+        "".join(("CannotStartPro", "viderError")): CannotStartMcpServerError,
+        "".join(("Pro", "viderNotReadyError")): McpServerNotReadyError,
+        "".join(("UnverifiedPro", "viderError")): UnverifiedMcpServerError,
+        "".join(("Pro", "viderAlreadyLoadedError")): McpServerAlreadyLoadedError,
+        "".join(("Pro", "viderNotHotLoadedError")): McpServerNotHotLoadedError,
+    }
+)

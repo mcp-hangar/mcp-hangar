@@ -2,12 +2,12 @@
 
 from typing import Any, TYPE_CHECKING
 
-from ...application.commands.load_handlers import LoadProviderHandler, UnloadProviderHandler
+from ...application.commands.load_handlers import LoadMcpServerHandler, UnloadMcpServerHandler
 from ...application.services.package_resolver import PackageResolver, RuntimeAvailability
 from ...application.services.secrets_resolver import SecretsResolver
-from ...domain.model import Provider
+from ...domain.model import McpServer
 from ...logging_config import get_logger
-from ..state import get_runtime, get_runtime_providers
+from ..state import get_runtime, get_runtime_mcp_servers
 
 if TYPE_CHECKING:
     from ...bootstrap.runtime import Runtime
@@ -18,15 +18,15 @@ logger = get_logger(__name__)
 def init_hot_loading(
     runtime: "Runtime",
     config: dict[str, Any],
-) -> tuple[LoadProviderHandler | None, UnloadProviderHandler | None]:
-    """Initialize hot-loading components for runtime provider injection.
+) -> tuple[LoadMcpServerHandler | None, UnloadMcpServerHandler | None]:
+    """Initialize hot-loading components for runtime mcp_server injection.
 
     Args:
         runtime: Runtime instance.
         config: Full configuration dictionary.
 
     Returns:
-        Tuple of (LoadProviderHandler, UnloadProviderHandler) or (None, None) if disabled.
+        Tuple of (LoadMcpServerHandler, UnloadMcpServerHandler) or (None, None) if disabled.
     """
     hot_loading_config = config.get("hot_loading", {})
     if not hot_loading_config.get("enabled", True):
@@ -64,23 +64,23 @@ def init_hot_loading(
 
         secrets_resolver = SecretsResolver()
 
-        runtime_store = get_runtime_providers()
+        runtime_store = get_runtime_mcp_servers()
 
-        def provider_factory(**kwargs):
-            return Provider(**kwargs)
+        def mcp_server_factory(**kwargs):
+            return McpServer(**kwargs)
 
-        load_handler = LoadProviderHandler(
+        load_handler = LoadMcpServerHandler(
             registry_client=registry_client,
             package_resolver=package_resolver,
             secrets_resolver=secrets_resolver,
             installers=[],
             runtime_store=runtime_store,
             event_bus=runtime.event_bus,
-            provider_factory=provider_factory,
-            provider_repository=get_runtime().repository,
+            mcp_server_factory=mcp_server_factory,
+            mcp_server_repository=get_runtime().repository,
         )
 
-        unload_handler = UnloadProviderHandler(
+        unload_handler = UnloadMcpServerHandler(
             runtime_store=runtime_store,
             event_bus=runtime.event_bus,
         )

@@ -25,39 +25,39 @@ from mcp_hangar.infrastructure.persistence.log_buffer import (
 
 class TestLogLine:
     def test_creates_with_required_fields(self):
-        line = LogLine(provider_id="math", stream="stderr", content="error: boom")
-        assert line.provider_id == "math"
+        line = LogLine(mcp_server_id="math", stream="stderr", content="error: boom")
+        assert line.mcp_server_id == "math"
         assert line.stream == "stderr"
         assert line.content == "error: boom"
 
     def test_recorded_at_defaults_to_now(self):
         before = time.time()
-        line = LogLine(provider_id="p", stream="stdout", content="hello")
+        line = LogLine(mcp_server_id="p", stream="stdout", content="hello")
         after = time.time()
         assert before <= line.recorded_at <= after
 
     def test_recorded_at_accepts_explicit_value(self):
-        line = LogLine(provider_id="p", stream="stdout", content="hi", recorded_at=1_000_000.0)
+        line = LogLine(mcp_server_id="p", stream="stdout", content="hi", recorded_at=1_000_000.0)
         assert line.recorded_at == 1_000_000.0
 
     def test_frozen_immutable(self):
-        line = LogLine(provider_id="p", stream="stdout", content="hi")
+        line = LogLine(mcp_server_id="p", stream="stdout", content="hi")
         with pytest.raises((AttributeError, TypeError)):
             line.content = "changed"  # type: ignore[misc]
 
     def test_to_dict_contains_all_keys(self):
-        line = LogLine(provider_id="math", stream="stderr", content="oops", recorded_at=42.0)
+        line = LogLine(mcp_server_id="math", stream="stderr", content="oops", recorded_at=42.0)
         d = line.to_dict()
         assert d == {
-            "provider_id": "math",
+            "mcp_server_id": "math",
             "stream": "stderr",
             "content": "oops",
             "recorded_at": 42.0,
         }
 
     def test_stdout_and_stderr_are_valid_streams(self):
-        LogLine(provider_id="p", stream="stdout", content="out")
-        LogLine(provider_id="p", stream="stderr", content="err")
+        LogLine(mcp_server_id="p", stream="stdout", content="out")
+        LogLine(mcp_server_id="p", stream="stderr", content="err")
 
 
 # ---------------------------------------------------------------------------
@@ -70,7 +70,7 @@ class TestProviderLogBuffer:
         return ProviderLogBuffer("test-provider", max_lines=max_lines)
 
     def _line(self, content: str, stream: str = "stdout") -> LogLine:
-        return LogLine(provider_id="test-provider", stream=stream, content=content)  # type: ignore[arg-type]
+        return LogLine(mcp_server_id="test-provider", stream=stream, content=content)  # type: ignore[arg-type]
 
     # --- interface compliance ---
 
@@ -78,9 +78,9 @@ class TestProviderLogBuffer:
         buf = self._make_buffer()
         assert isinstance(buf, IProviderLogBuffer)
 
-    def test_provider_id_property(self):
+    def test_mcp_server_id_property(self):
         buf = ProviderLogBuffer("my-provider", max_lines=10)
-        assert buf.provider_id == "my-provider"
+        assert buf.mcp_server_id == "my-provider"
 
     # --- append / tail / clear ---
 
@@ -153,7 +153,7 @@ class TestProviderLogBuffer:
         def writer(n: int) -> None:
             try:
                 for i in range(n):
-                    buf.append(LogLine(provider_id="p", stream="stdout", content=f"{n}-{i}"))
+                    buf.append(LogLine(mcp_server_id="p", stream="stdout", content=f"{n}-{i}"))
             except Exception as exc:  # noqa: BLE001
                 errors.append(exc)
 
@@ -180,7 +180,7 @@ class TestProviderLogBuffer:
 
         def writer() -> None:
             for i in range(200):
-                buf.append(LogLine(provider_id="p", stream="stderr", content=f"line-{i}"))
+                buf.append(LogLine(mcp_server_id="p", stream="stderr", content=f"line-{i}"))
 
         r = threading.Thread(target=reader)
         w = threading.Thread(target=writer)
@@ -223,7 +223,7 @@ class TestLogBufferRegistry:
     def test_get_or_create_creates_new_buffer(self):
         buf = get_or_create_log_buffer("new-provider")
         assert isinstance(buf, ProviderLogBuffer)
-        assert buf.provider_id == "new-provider"
+        assert buf.mcp_server_id == "new-provider"
 
     def test_get_or_create_returns_existing_buffer(self):
         buf1 = get_or_create_log_buffer("p")

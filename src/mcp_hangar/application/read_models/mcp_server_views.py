@@ -1,4 +1,4 @@
-"""Read models (views) for provider queries.
+"""Read models (views) for mcp_server queries.
 
 Read models are optimized for specific query use cases.
 They are immutable and contain only the data needed for display.
@@ -55,13 +55,13 @@ class HealthInfo:
 
 
 @dataclass(frozen=True)
-class ProviderSummary:
-    """Read model for provider list view.
+class McpServerSummary:
+    """Read model for mcp_server list view.
 
-    Contains minimal information for listing providers.
+    Contains minimal information for listing mcp_servers.
     """
 
-    provider_id: str
+    mcp_server_id: str
     state: str
     mode: str
     is_alive: bool
@@ -73,7 +73,7 @@ class ProviderSummary:
     def to_dict(self) -> dict[str, Any]:
         """Convert to dictionary."""
         result = {
-            "provider_id": self.provider_id,
+            "mcp_server_id": self.mcp_server_id,
             "state": self.state,
             "mode": self.mode,
             "alive": self.is_alive,
@@ -87,13 +87,13 @@ class ProviderSummary:
 
 
 @dataclass(frozen=True)
-class ProviderDetails:
-    """Read model for detailed provider view.
+class McpServerDetails:
+    """Read model for detailed mcp_server view.
 
-    Contains full information about a provider.
+    Contains full information about a mcp_server.
     """
 
-    provider_id: str
+    mcp_server_id: str
     state: str
     mode: str
     is_alive: bool
@@ -105,7 +105,7 @@ class ProviderDetails:
     def to_dict(self) -> dict[str, Any]:
         """Convert to dictionary."""
         return {
-            "provider_id": self.provider_id,
+            "mcp_server_id": self.mcp_server_id,
             "state": self.state,
             "mode": self.mode,
             "alive": self.is_alive,
@@ -120,8 +120,8 @@ class ProviderDetails:
 class SystemMetrics:
     """Read model for system-wide metrics."""
 
-    total_providers: int
-    providers_by_state: dict[str, int]
+    total_mcp_servers: int
+    mcp_servers_by_state: dict[str, int]
     total_tools: int
     total_invocations: int
     total_failures: int
@@ -130,10 +130,15 @@ class SystemMetrics:
     def to_dict(self) -> dict[str, Any]:
         """Convert to dictionary."""
         return {
-            "total_providers": self.total_providers,
-            "providers_by_state": self.providers_by_state,
+            "total_mcp_servers": self.total_mcp_servers,
+            "mcp_servers_by_state": self.mcp_servers_by_state,
             "total_tools": self.total_tools,
             "total_invocations": self.total_invocations,
             "total_failures": self.total_failures,
             "overall_success_rate": self.overall_success_rate,
         }
+
+
+# legacy aliases
+ProviderSummary = McpServerSummary
+ProviderDetails = McpServerDetails

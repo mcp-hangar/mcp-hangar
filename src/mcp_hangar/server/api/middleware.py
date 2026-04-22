@@ -23,9 +23,9 @@ from ...domain.exceptions import (
     AuthenticationError,
     AuthorizationError,
     MCPError,
-    ProviderDegradedError,
-    ProviderNotFoundError,
-    ProviderNotReadyError,
+    McpServerDegradedError,
+    McpServerNotFoundError,
+    McpServerNotReadyError,
     RateLimitExceeded,
     RateLimitExceededError,
     ToolNotFoundError,
@@ -50,16 +50,16 @@ _ORIGIN_RE = re.compile(r"^https?://[^*\s]+$")
 # Mapping of exception types to HTTP status codes.
 # More specific types must come before their base classes.
 _EXCEPTION_STATUS_MAP: list[tuple[type, int]] = [
-    (ProviderNotFoundError, 404),
+    (McpServerNotFoundError, 404),
     (ToolNotFoundError, 404),
-    (ProviderNotReadyError, 409),
+    (McpServerNotReadyError, 409),
     (ValidationError, 422),
     (RateLimitExceededError, 429),
     (RateLimitExceeded, 429),
     (AuthenticationError, 401),
     (AccessDeniedError, 403),
     (AuthorizationError, 403),
-    (ProviderDegradedError, 503),
+    (McpServerDegradedError, 503),
     (ToolTimeoutError, 504),
     (MCPError, 500),
 ]

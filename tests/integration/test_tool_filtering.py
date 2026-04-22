@@ -24,7 +24,7 @@ class TestToolFilteringDiscovery:
     def test_deny_list_filters_tools_from_discovery(self):
         """Tools in deny_list should not appear in hangar_tools output."""
         resolver = get_tool_access_resolver()
-        resolver.set_provider_policy(
+        resolver.set_mcp_server_policy(
             "grafana",
             ToolAccessPolicy(deny_list=("delete_*", "create_alert_rule")),
         )
@@ -48,7 +48,7 @@ class TestToolFilteringDiscovery:
     def test_allow_list_shows_only_allowed_tools(self):
         """Only tools in allow_list should appear in hangar_tools output."""
         resolver = get_tool_access_resolver()
-        resolver.set_provider_policy(
+        resolver.set_mcp_server_policy(
             "grafana",
             ToolAccessPolicy(allow_list=("get_*", "list_*")),
         )
@@ -74,7 +74,7 @@ class TestToolFilteringDiscovery:
             "monitoring",
             ToolAccessPolicy(deny_list=("delete_*",)),
         )
-        resolver.set_member_policy("monitoring", "grafana-prod", ToolAccessPolicy(), provider_id="grafana")
+        resolver.set_member_policy("monitoring", "grafana-prod", ToolAccessPolicy(), mcp_server_id="grafana")
 
         all_tools = [
             ToolSchema(name="get_dashboard", description="", input_schema={}),
@@ -94,7 +94,7 @@ class TestToolFilteringDiscovery:
     def test_all_tools_filtered_returns_empty_list(self):
         """If all tools are filtered, return empty list (not error)."""
         resolver = get_tool_access_resolver()
-        resolver.set_provider_policy(
+        resolver.set_mcp_server_policy(
             "restricted",
             ToolAccessPolicy(deny_list=("*",)),  # Deny everything
         )
@@ -110,7 +110,7 @@ class TestToolFilteringDiscovery:
     def test_tool_count_reflects_filtered_count(self):
         """Tool count should reflect filtered count, not raw count."""
         resolver = get_tool_access_resolver()
-        resolver.set_provider_policy(
+        resolver.set_mcp_server_policy(
             "grafana",
             ToolAccessPolicy(deny_list=("delete_*",)),
         )
@@ -131,7 +131,7 @@ class TestToolFilteringInvocation:
     def test_allowed_tool_passes_check(self):
         """Allowed tool should pass is_tool_allowed check."""
         resolver = get_tool_access_resolver()
-        resolver.set_provider_policy(
+        resolver.set_mcp_server_policy(
             "grafana",
             ToolAccessPolicy(deny_list=("delete_*",)),
         )
@@ -142,7 +142,7 @@ class TestToolFilteringInvocation:
     def test_denied_tool_fails_check(self):
         """Denied tool should fail is_tool_allowed check."""
         resolver = get_tool_access_resolver()
-        resolver.set_provider_policy(
+        resolver.set_mcp_server_policy(
             "grafana",
             ToolAccessPolicy(deny_list=("delete_*", "create_alert_*")),
         )
@@ -161,7 +161,7 @@ class TestToolFilteringInvocation:
             "monitoring",
             "grafana-prod",
             ToolAccessPolicy(deny_list=("create_alert_*",)),
-            provider_id="grafana",
+            mcp_server_id="grafana",
         )
 
         # Should be denied by group policy
@@ -186,7 +186,7 @@ class TestToolFilteringReload:
         resolver = get_tool_access_resolver()
 
         # Initial policy
-        resolver.set_provider_policy(
+        resolver.set_mcp_server_policy(
             "grafana",
             ToolAccessPolicy(deny_list=("delete_*",)),
         )
@@ -194,7 +194,7 @@ class TestToolFilteringReload:
         assert resolver.is_tool_allowed("grafana", "create_dashboard")
 
         # Change policy
-        resolver.set_provider_policy(
+        resolver.set_mcp_server_policy(
             "grafana",
             ToolAccessPolicy(deny_list=("create_*",)),
         )
@@ -209,7 +209,7 @@ class TestToolFilteringReload:
         assert resolver.is_tool_allowed("grafana", "delete_dashboard")
 
         # Add policy
-        resolver.set_provider_policy(
+        resolver.set_mcp_server_policy(
             "grafana",
             ToolAccessPolicy(deny_list=("delete_*",)),
         )
@@ -219,7 +219,7 @@ class TestToolFilteringReload:
         """Removing policy should make all tools visible again."""
         resolver = get_tool_access_resolver()
 
-        resolver.set_provider_policy(
+        resolver.set_mcp_server_policy(
             "grafana",
             ToolAccessPolicy(deny_list=("delete_*",)),
         )
@@ -239,7 +239,7 @@ class TestToolFilteringHotLoad:
 
         # Simulate what hangar_load does with deny_tools
         policy = ToolAccessPolicy(deny_list=("create_*", "delete_*"))
-        resolver.set_provider_policy("mcp-server-grafana", policy)
+        resolver.set_mcp_server_policy("mcp-server-grafana", policy)
 
         all_tools = [
             ToolSchema(name="get_dashboard", description="", input_schema={}),
@@ -257,7 +257,7 @@ class TestToolFilteringHotLoad:
 
         # Simulate what hangar_load does with allow_tools
         policy = ToolAccessPolicy(allow_list=("get_*",))
-        resolver.set_provider_policy("mcp-server-grafana", policy)
+        resolver.set_mcp_server_policy("mcp-server-grafana", policy)
 
         assert resolver.is_tool_allowed("mcp-server-grafana", "get_dashboard")
         assert not resolver.is_tool_allowed("mcp-server-grafana", "create_dashboard")
@@ -267,7 +267,7 @@ class TestToolFilteringHotLoad:
         resolver = get_tool_access_resolver()
 
         # Set policy
-        resolver.set_provider_policy(
+        resolver.set_mcp_server_policy(
             "mcp-server-time",
             ToolAccessPolicy(deny_list=("set_*",)),
         )
@@ -284,7 +284,7 @@ class TestGlobPatterns:
     def test_asterisk_wildcard(self):
         """Asterisk should match any characters."""
         resolver = get_tool_access_resolver()
-        resolver.set_provider_policy(
+        resolver.set_mcp_server_policy(
             "test",
             ToolAccessPolicy(deny_list=("delete_*",)),
         )
@@ -297,7 +297,7 @@ class TestGlobPatterns:
     def test_middle_wildcard(self):
         """Wildcard in middle should match correctly."""
         resolver = get_tool_access_resolver()
-        resolver.set_provider_policy(
+        resolver.set_mcp_server_policy(
             "test",
             ToolAccessPolicy(deny_list=("*_alert_*",)),
         )
@@ -310,7 +310,7 @@ class TestGlobPatterns:
     def test_question_mark_single_char(self):
         """Question mark should match single character."""
         resolver = get_tool_access_resolver()
-        resolver.set_provider_policy(
+        resolver.set_mcp_server_policy(
             "test",
             ToolAccessPolicy(deny_list=("tool_?",)),
         )
@@ -323,7 +323,7 @@ class TestGlobPatterns:
     def test_exact_name_match(self):
         """Exact names should match exactly."""
         resolver = get_tool_access_resolver()
-        resolver.set_provider_policy(
+        resolver.set_mcp_server_policy(
             "test",
             ToolAccessPolicy(deny_list=("dangerous_tool",)),
         )

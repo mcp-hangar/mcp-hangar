@@ -135,12 +135,12 @@ class TestApplicationContext:
     def test_get_provider_returns_none_for_unknown(self):
         """get_provider() should return None for unknown provider."""
         ctx = get_context()
-        assert ctx.get_provider("unknown-provider") is None
+        assert ctx.get_mcp_server("unknown-provider") is None
 
     def test_provider_exists_returns_false_for_unknown(self):
         """provider_exists() should return False for unknown provider."""
         ctx = get_context()
-        assert ctx.provider_exists("unknown-provider") is False
+        assert ctx.mcp_server_exists("unknown-provider") is False
 
     def test_get_group_returns_none_for_unknown(self):
         """get_group() should return None for unknown group."""

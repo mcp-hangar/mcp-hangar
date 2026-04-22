@@ -20,7 +20,7 @@ def validate_batch(
     Validates:
     - Batch size limits
     - Concurrency and timeout bounds
-    - Each call's provider exists
+    - Each call's mcp_server exists
     - Each call's tool exists
     - Each call's arguments are valid
 
@@ -70,10 +70,10 @@ def validate_batch(
             errors.append(ValidationError(index=i, field="call", message="Call must be a dictionary"))
             continue
 
-        provider = call.get("provider")
-        if not provider or not isinstance(provider, str):
+        mcp_server = call.get("mcp_server")
+        if not mcp_server or not isinstance(mcp_server, str):
             errors.append(
-                ValidationError(index=i, field="provider", message="provider is required and must be a string")
+                ValidationError(index=i, field="mcp_server", message="mcp_server is required and must be a string")
             )
             continue
 
@@ -90,32 +90,32 @@ def validate_batch(
             errors.append(ValidationError(index=i, field="arguments", message="arguments must be a dictionary"))
             continue
 
-        # Provider exists (check both providers and groups via context)
+        # McpServer exists (check both mcp_servers and groups via context)
         ctx = get_context()
-        provider_obj = ctx.get_provider(provider)
-        if not provider_obj:
-            provider_obj = GROUPS.get(provider)
-        if not provider_obj:
+        mcp_server_obj = ctx.get_mcp_server(mcp_server)
+        if not mcp_server_obj:
+            mcp_server_obj = GROUPS.get(mcp_server)
+        if not mcp_server_obj:
             errors.append(
                 ValidationError(
                     index=i,
-                    field="provider",
-                    message=f"Provider '{provider}' not found",
+                    field="mcp_server",
+                    message=f"McpServer '{mcp_server}' not found",
                 )
             )
             continue
 
-        # Tool exists (if provider has predefined tools, check against them)
-        # Note: For COLD providers without predefined tools, we skip tool validation
+        # Tool exists (if mcp_server has predefined tools, check against them)
+        # Note: For COLD mcp_servers without predefined tools, we skip tool validation
         # as tools will be discovered on start
-        if hasattr(provider_obj, "has_tools") and provider_obj.has_tools:
-            tool_schema = provider_obj.tools.get(tool)
+        if hasattr(mcp_server_obj, "has_tools") and mcp_server_obj.has_tools:
+            tool_schema = mcp_server_obj.tools.get(tool)
             if not tool_schema:
                 errors.append(
                     ValidationError(
                         index=i,
                         field="tool",
-                        message=f"Tool '{tool}' not found in provider '{provider}'",
+                        message=f"Tool '{tool}' not found in mcp_server '{mcp_server}'",
                     )
                 )
                 continue

@@ -3,7 +3,7 @@
 ## Requirements
 
 - Python 3.11 or higher
-- Docker or Podman (for container providers)
+- Docker or Podman (for container MCP servers)
 
 ## Quick Install (Recommended)
 

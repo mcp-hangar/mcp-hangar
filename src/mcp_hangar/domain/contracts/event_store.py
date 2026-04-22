@@ -48,7 +48,7 @@ class IEventStore(ABC):
     Each stream represents an aggregate's event history.
 
     Stream IDs follow convention: "{aggregate_type}:{aggregate_id}"
-    Example: "provider:math", "provider_group:default"
+    Example: "mcp_server:math", "mcp_server_group:default"
 
     Version numbers:
     - -1 means "no stream exists" (for new aggregates)

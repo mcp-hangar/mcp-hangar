@@ -11,7 +11,7 @@ from mcp_hangar.application.commands.reload_handler import ReloadConfigurationHa
 from mcp_hangar.application.commands import ReloadConfigurationCommand
 from mcp_hangar.domain.events import ConfigurationReloaded, ConfigurationReloadFailed, ConfigurationReloadRequested
 from mcp_hangar.domain.exceptions import ConfigurationError
-from mcp_hangar.domain.model import Provider
+from mcp_hangar.domain.model import McpServer
 
 
 class TestReloadConfigurationHandler:
@@ -44,7 +44,7 @@ class TestReloadConfigurationHandler:
         """Create temporary config file."""
         with tempfile.NamedTemporaryFile(mode="w", suffix=".yaml", delete=False) as f:
             config = {
-                "providers": {
+                "mcp_servers": {
                     "test-provider": {
                         "mode": "subprocess",
                         "command": ["python", "-m", "test_server"],
@@ -124,9 +124,9 @@ class TestReloadConfigurationHandler:
             result = handler.handle(command)
 
         assert result["success"] is True
-        assert "test-provider" in result["providers_added"]
-        assert len(result["providers_removed"]) == 0
-        assert len(result["providers_updated"]) == 0
+        assert "test-provider" in result["mcp_servers_added"]
+        assert len(result["mcp_servers_removed"]) == 0
+        assert len(result["mcp_servers_updated"]) == 0
 
         # Check success event published
         success_events = [
@@ -135,12 +135,12 @@ class TestReloadConfigurationHandler:
             if isinstance(call[0][0], ConfigurationReloaded)
         ]
         assert len(success_events) == 1
-        assert "test-provider" in success_events[0].providers_added
+        assert "test-provider" in success_events[0].mcp_servers_added
 
     def test_reload_detects_removed_providers(self, handler, mock_repository, mock_event_bus):
         """Should detect and remove deleted providers."""
         # Create existing provider
-        existing_provider = Mock(spec=Provider)
+        existing_provider = Mock(spec=McpServer)
         existing_provider._mode = Mock(value="subprocess")
         existing_provider._command = ["old", "command"]
         existing_provider._image = None
@@ -164,7 +164,7 @@ class TestReloadConfigurationHandler:
 
         # Create config without old-provider
         with tempfile.NamedTemporaryFile(mode="w", suffix=".yaml", delete=False) as f:
-            config = {"providers": {}}
+            config = {"mcp_servers": {}}
             yaml.dump(config, f)
             config_path = f.name
 
@@ -178,7 +178,7 @@ class TestReloadConfigurationHandler:
                 result = handler.handle(command)
 
             assert result["success"] is True
-            assert "old-provider" in result["providers_removed"]
+            assert "old-provider" in result["mcp_servers_removed"]
             existing_provider.stop.assert_called_once_with(reason="config_reload")
             mock_repository.remove.assert_called_once_with("old-provider")
 
@@ -188,7 +188,7 @@ class TestReloadConfigurationHandler:
     def test_reload_detects_updated_providers(self, handler, mock_repository, mock_event_bus):
         """Should detect providers with changed configuration."""
         # Create existing provider with old config
-        existing_provider = Mock(spec=Provider)
+        existing_provider = Mock(spec=McpServer)
         existing_provider._mode = Mock(value="subprocess")
         existing_provider._command = ["old", "command"]
         existing_provider._image = None
@@ -213,7 +213,7 @@ class TestReloadConfigurationHandler:
         # Create config with modified provider
         with tempfile.NamedTemporaryFile(mode="w", suffix=".yaml", delete=False) as f:
             config = {
-                "providers": {
+                "mcp_servers": {
                     "test-provider": {
                         "mode": "subprocess",
                         "command": ["new", "command"],  # Changed
@@ -234,7 +234,7 @@ class TestReloadConfigurationHandler:
                 result = handler.handle(command)
 
             assert result["success"] is True
-            assert "test-provider" in result["providers_updated"]
+            assert "test-provider" in result["mcp_servers_updated"]
             existing_provider.stop.assert_called_once_with(reason="config_reload")
 
         finally:
@@ -243,7 +243,7 @@ class TestReloadConfigurationHandler:
     def test_reload_preserves_unchanged_providers(self, handler, mock_repository, mock_event_bus):
         """Should not restart providers with unchanged configuration."""
         # Create existing provider
-        existing_provider = Mock(spec=Provider)
+        existing_provider = Mock(spec=McpServer)
         existing_provider._mode = Mock(value="subprocess")
         existing_provider._command = ["python", "-m", "test_server"]
         existing_provider._image = None
@@ -267,7 +267,7 @@ class TestReloadConfigurationHandler:
         # Create config with same provider config
         with tempfile.NamedTemporaryFile(mode="w", suffix=".yaml", delete=False) as f:
             config = {
-                "providers": {
+                "mcp_servers": {
                     "test-provider": {
                         "mode": "subprocess",
                         "command": ["python", "-m", "test_server"],
@@ -288,7 +288,7 @@ class TestReloadConfigurationHandler:
                 result = handler.handle(command)
 
             assert result["success"] is True
-            assert "test-provider" in result["providers_unchanged"]
+            assert "test-provider" in result["mcp_servers_unchanged"]
             existing_provider.stop.assert_not_called()
 
         finally:
@@ -297,7 +297,7 @@ class TestReloadConfigurationHandler:
     def test_reload_graceful_vs_immediate(self, handler, mock_repository, mock_event_bus):
         """Should respect graceful flag when stopping providers."""
         # Create existing provider
-        existing_provider = Mock(spec=Provider)
+        existing_provider = Mock(spec=McpServer)
         existing_provider._mode = Mock(value="subprocess")
         existing_provider._command = ["old", "command"]
         existing_provider._image = None
@@ -322,7 +322,7 @@ class TestReloadConfigurationHandler:
 
         # Create empty config to remove provider
         with tempfile.NamedTemporaryFile(mode="w", suffix=".yaml", delete=False) as f:
-            config = {"providers": {}}
+            config = {"mcp_servers": {}}
             yaml.dump(config, f)
             config_path = f.name
 

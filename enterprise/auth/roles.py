@@ -73,13 +73,13 @@ PERMISSION_ADMIN_ALL = Permission("*", "*")
 # Permission registry for easy lookup
 PERMISSIONS: dict[str, Permission] = {
     # Provider
-    "provider:create": PERMISSION_PROVIDER_CREATE,
-    "provider:read": PERMISSION_PROVIDER_READ,
-    "provider:update": PERMISSION_PROVIDER_UPDATE,
-    "provider:delete": PERMISSION_PROVIDER_DELETE,
-    "provider:list": PERMISSION_PROVIDER_LIST,
-    "provider:start": PERMISSION_PROVIDER_START,
-    "provider:stop": PERMISSION_PROVIDER_STOP,
+    "mcp_server:create": PERMISSION_PROVIDER_CREATE,
+    "mcp_server:read": PERMISSION_PROVIDER_READ,
+    "mcp_server:update": PERMISSION_PROVIDER_UPDATE,
+    "mcp_server:delete": PERMISSION_PROVIDER_DELETE,
+    "mcp_server:list": PERMISSION_PROVIDER_LIST,
+    "mcp_server:start": PERMISSION_PROVIDER_START,
+    "mcp_server:stop": PERMISSION_PROVIDER_STOP,
     "provider:load": PERMISSION_PROVIDER_LOAD,
     "provider:load:verified": PERMISSION_PROVIDER_LOAD_VERIFIED,
     "provider:load:any": PERMISSION_PROVIDER_LOAD_ANY,

@@ -1,6 +1,6 @@
 # Hot-Reload Configuration
 
-Reload configuration without restarting the server. Add, remove, or modify providers while preserving active connections for unchanged providers.
+Reload configuration without restarting the server. Add, remove, or modify MCP servers while preserving active connections for unchanged MCP servers.
 
 ## Quick Start
 
@@ -78,10 +78,10 @@ hangar_reload_config(graceful=false)      # Immediate shutdown
 ```json
 {
   "status": "success",
-  "providers_added": ["new-api"],
-  "providers_removed": ["deprecated-service"],
-  "providers_updated": ["modified-provider"],
-  "providers_unchanged": ["stable-provider"],
+  "mcp_servers_added": ["new-api"],
+  "mcp_servers_removed": ["deprecated-service"],
+  "mcp_servers_updated": ["modified-mcp-server"],
+  "mcp_servers_unchanged": ["stable-mcp-server"],
   "duration_ms": 45.2
 }
 ```
@@ -97,11 +97,11 @@ hangar_reload_config(graceful=false)      # Immediate shutdown
 
 ### Compared Fields
 
-Changes to any of these fields trigger provider restart:
+Changes to any of these fields trigger MCP server restart:
 
 | Field | Description |
 |-------|-------------|
-| `mode` | Provider mode (subprocess, docker, remote) |
+| `mode` | MCP Server mode (subprocess, docker, remote) |
 | `command` | Command and arguments |
 | `image` | Container image |
 | `endpoint` | Remote endpoint URL |
@@ -121,12 +121,12 @@ Changes to any of these fields trigger provider restart:
 
 ## Examples
 
-### Add Provider
+### Add MCP Server
 
 **Before:**
 
 ```yaml
-providers:
+mcp_servers:
   math:
     mode: subprocess
     command: [python, -m, math_server]
@@ -135,7 +135,7 @@ providers:
 **After:**
 
 ```yaml
-providers:
+mcp_servers:
   math:
     mode: subprocess
     command: [python, -m, math_server]
@@ -148,12 +148,12 @@ providers:
 
 **Result:** `math` unchanged, `filesystem` added in `COLD` state.
 
-### Update Provider
+### Update MCP Server
 
 **Before:**
 
 ```yaml
-providers:
+mcp_servers:
   database:
     mode: remote
     endpoint: https://db-mcp.internal/v1
@@ -163,7 +163,7 @@ providers:
 **After:**
 
 ```yaml
-providers:
+mcp_servers:
   database:
     mode: remote
     endpoint: https://db-mcp.internal/v2
@@ -174,12 +174,12 @@ providers:
 
 **Result:** `database` stopped gracefully, new instance created.
 
-### Remove Provider
+### Remove MCP Server
 
 **Before:**
 
 ```yaml
-providers:
+mcp_servers:
   legacy-api:
     mode: subprocess
     command: [python, legacy_server.py]
@@ -192,7 +192,7 @@ providers:
 **After:**
 
 ```yaml
-providers:
+mcp_servers:
   modern-api:
     mode: remote
     endpoint: https://api.example.com/mcp
@@ -200,12 +200,12 @@ providers:
 
 **Result:** `legacy-api` stopped and removed, `modern-api` unchanged.
 
-### Change Provider Mode
+### Change MCP Server Mode
 
 **Before:**
 
 ```yaml
-providers:
+mcp_servers:
   search:
     mode: subprocess
     command: [python, -m, search_v1]
@@ -214,7 +214,7 @@ providers:
 **After:**
 
 ```yaml
-providers:
+mcp_servers:
   search:
     mode: docker
     image: search-mcp:v2
@@ -239,10 +239,10 @@ Hot-reload emits domain events for observability:
 ```python
 ConfigurationReloaded(
     config_path="/app/config.yaml",
-    providers_added=["new-api"],
-    providers_removed=["old-api"],
-    providers_updated=["modified"],
-    providers_unchanged=["stable"],
+    mcp_servers_added=["new-api"],
+    mcp_servers_removed=["old-api"],
+    mcp_servers_updated=["modified"],
+    mcp_servers_unchanged=["stable"],
     reload_duration_ms=42.5,
     requested_by="file_watcher"
 )
@@ -280,10 +280,10 @@ config_reload:
 
 | Limitation | Workaround |
 |------------|------------|
-| Provider groups cleared on reload | Groups reconstructed from new config |
-| Hot-loaded providers unaffected | Use `hangar_unload` to manage separately |
+| MCP Server groups cleared on reload | Groups reconstructed from new config |
+| Hot-loaded MCP servers unaffected | Use `hangar_unload` to manage separately |
 | Event store config requires restart | Restart server for event store changes |
-| In-flight requests | Completed before provider stops (graceful mode) |
+| In-flight requests | Completed before MCP server stops (graceful mode) |
 
 ## Troubleshooting
 
@@ -306,24 +306,24 @@ kill -HUP $(pgrep -f "mcp-hangar serve")
 # Validate YAML
 python -c "import yaml; yaml.safe_load(open('config.yaml'))"
 
-# Check providers section
-grep -q "^providers:" config.yaml && echo "OK" || echo "Missing"
+# Check mcp_servers section
+grep -q "^mcp_servers:" config.yaml && echo "OK" || echo "Missing"
 
 # Check logs
 grep "configuration_reload_failed" logs/mcp-hangar.log
 ```
 
-### Provider Not Starting
+### MCP Server Not Starting
 
 ```bash
-# Check provider added
-grep "provider_added" logs/mcp-hangar.log
+# Check mcp_server added
+grep "mcp_server_added" logs/mcp-hangar.log
 
 # Check status
 hangar_status()
 
 # Start manually
-hangar_start(provider="my-provider")
+hangar_start(mcp_server="my-mcp-server")
 ```
 
 ## Security

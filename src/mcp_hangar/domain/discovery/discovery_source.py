@@ -1,6 +1,6 @@
 """Discovery Source Port (ABC).
 
-Defines the interface for provider discovery sources.
+Defines the interface for mcp_server discovery sources.
 Implementations include Kubernetes, Docker, Filesystem, and Python entrypoints.
 """
 
@@ -9,16 +9,16 @@ from collections.abc import Callable, Coroutine
 from enum import Enum
 from typing import Any
 
-from .discovered_provider import DiscoveredProvider
+from .discovered_mcp_server import DiscoveredMcpServer
 
 
 class DiscoveryMode(Enum):
-    """How the source handles provider lifecycle.
+    """How the source handles mcp_server lifecycle.
 
-    ADDITIVE: Only adds new providers, never removes existing ones.
+    ADDITIVE: Only adds new mcp_servers, never removes existing ones.
               Safe for production environments.
 
-    AUTHORITATIVE: Can add AND remove providers based on what's discovered.
+    AUTHORITATIVE: Can add AND remove mcp_servers based on what's discovered.
                    Use for dynamic environments like K8s where pods come and go.
     """
 
@@ -34,16 +34,16 @@ EventHandler = Callable[..., Coroutine[Any, Any, None]]
 
 
 class DiscoverySource(ABC):
-    """Port for provider discovery sources.
+    """Port for mcp_server discovery sources.
 
     This abstract base class defines the contract for all discovery sources.
-    Implementations discover providers from various infrastructure sources
+    Implementations discover mcp_servers from various infrastructure sources
     and report changes via event hooks.
 
     Lifecycle:
         1. Source is configured and registered with orchestrator
         2. Orchestrator calls discover() periodically
-        3. Source reports new/changed/lost providers via event hooks
+        3. Source reports new/changed/lost mcp_servers via event hooks
         4. Orchestrator handles registration/deregistration
 
     Example:
@@ -52,7 +52,7 @@ class DiscoverySource(ABC):
             def source_type(self) -> str:
                 return "my_source"
 
-            async def discover(self) -> List[DiscoveredProvider]:
+            async def discover(self) -> List[DiscoveredMcpServer]:
                 # Implementation
                 pass
 
@@ -81,14 +81,14 @@ class DiscoverySource(ABC):
         ...
 
     @abstractmethod
-    async def discover(self) -> list[DiscoveredProvider]:
-        """Discover providers from this source.
+    async def discover(self) -> list[DiscoveredMcpServer]:
+        """Discover mcp_servers from this source.
 
         This method is called periodically by the discovery orchestrator.
-        It should return all currently available providers from this source.
+        It should return all currently available mcp_servers from this source.
 
         Returns:
-            List of discovered providers
+            List of discovered mcp_servers
 
         Raises:
             Exception: If discovery fails (will be logged and retried)
@@ -119,32 +119,32 @@ class DiscoverySource(ABC):
 
     # Event hooks for observability
 
-    async def on_provider_discovered(self, provider: DiscoveredProvider) -> None:
-        """Hook called when a new provider is found.
+    async def on_mcp_server_discovered(self, mcp_server: DiscoveredMcpServer) -> None:
+        """Hook called when a new mcp_server is found.
 
         Args:
-            provider: Newly discovered provider
+            mcp_server: Newly discovered mcp_server
         """
         handler = self._event_handlers.get("discovered")
         if handler:
-            await handler(provider)
+            await handler(mcp_server)
 
-    async def on_provider_lost(self, provider_name: str) -> None:
-        """Hook called when a previously discovered provider disappears.
+    async def on_mcp_server_lost(self, mcp_server_name: str) -> None:
+        """Hook called when a previously discovered mcp_server disappears.
 
         Args:
-            provider_name: Name of the lost provider
+            mcp_server_name: Name of the lost mcp_server
         """
         handler = self._event_handlers.get("lost")
         if handler:
-            await handler(provider_name)
+            await handler(mcp_server_name)
 
-    async def on_provider_changed(self, old: DiscoveredProvider, new: DiscoveredProvider) -> None:
-        """Hook called when provider config changes (fingerprint mismatch).
+    async def on_mcp_server_changed(self, old: DiscoveredMcpServer, new: DiscoveredMcpServer) -> None:
+        """Hook called when mcp_server config changes (fingerprint mismatch).
 
         Args:
-            old: Previous provider configuration
-            new: New provider configuration
+            old: Previous mcp_server configuration
+            new: New mcp_server configuration
         """
         handler = self._event_handlers.get("changed")
         if handler:

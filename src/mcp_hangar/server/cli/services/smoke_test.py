@@ -1,6 +1,6 @@
-"""Smoke test for validating provider configuration.
+"""Smoke test for validating mcp_server configuration.
 
-Starts each provider, waits for READY state, reports status, then stops.
+Starts each mcp_server, waits for READY state, reports status, then stops.
 Used by `mcp-hangar init` to verify configuration before user closes terminal.
 """
 
@@ -12,13 +12,17 @@ from typing import Any
 from rich.console import Console
 from rich.progress import BarColumn, Progress, SpinnerColumn, TextColumn
 
-from ....domain.exceptions import CannotStartProviderError, ProviderStartError
-from ....domain.model.provider import Provider
-from ....domain.value_objects import ProviderState
+from ....domain.exceptions import CannotStartMcpServerError, McpServerStartError
+from ....domain.model.mcp_server import McpServer
+from ....domain.value_objects import McpServerState
 from ....logging_config import get_logger
 from ....server.config import load_configuration
 
 logger = get_logger(__name__)
+
+# legacy alias for tests patching the old symbol
+Provider = McpServer
+ProviderState = McpServerState
 
 # Constants
 DEFAULT_TIMEOUT_SECONDS = 10
@@ -26,10 +30,10 @@ MAX_PARALLEL_STARTS = 3
 
 
 @dataclass
-class ProviderTestResult:
-    """Result of testing a single provider."""
+class McpServerTestResult:
+    """Result of testing a single mcp_server."""
 
-    provider_id: str
+    mcp_server_id: str
     success: bool
     state: str
     duration_ms: float
@@ -39,80 +43,80 @@ class ProviderTestResult:
 
 @dataclass
 class SmokeTestResult:
-    """Aggregate result of smoke testing all providers."""
+    """Aggregate result of smoke testing all mcp_servers."""
 
-    results: list[ProviderTestResult]
+    results: list[McpServerTestResult]
     total_duration_ms: float
 
     @property
     def all_passed(self) -> bool:
-        """Check if all providers passed."""
+        """Check if all mcp_servers passed."""
         return all(r.success for r in self.results)
 
     @property
     def passed_count(self) -> int:
-        """Count of passed providers."""
+        """Count of passed mcp_servers."""
         return sum(1 for r in self.results if r.success)
 
     @property
     def failed_count(self) -> int:
-        """Count of failed providers."""
+        """Count of failed mcp_servers."""
         return sum(1 for r in self.results if not r.success)
 
 
-def _test_single_provider(
-    provider_id: str,
-    provider_config: dict[str, Any],
+def _test_single_mcp_server(
+    mcp_server_id: str,
+    mcp_server_config: dict[str, Any],
     timeout_s: float,
-) -> ProviderTestResult:
-    """Test a single provider by starting it and waiting for READY.
+) -> McpServerTestResult:
+    """Test a single mcp_server by starting it and waiting for READY.
 
     Args:
-        provider_id: Provider identifier.
-        provider_config: Provider configuration dict.
+        mcp_server_id: McpServer identifier.
+        mcp_server_config: McpServer configuration dict.
         timeout_s: Maximum time to wait for READY state.
 
     Returns:
-        ProviderTestResult with success/failure details.
+        McpServerTestResult with success/failure details.
     """
     start_time = time.perf_counter()
 
     try:
-        # Create provider from config
-        provider = Provider(
-            provider_id=provider_id,
-            mode=provider_config.get("mode", "subprocess"),
-            command=provider_config.get("command"),
-            image=provider_config.get("image"),
-            endpoint=provider_config.get("endpoint"),
-            env=provider_config.get("env"),
-            idle_ttl_s=provider_config.get("idle_ttl_s", 300),
-            health_check_interval_s=provider_config.get("health_check_interval_s", 60),
-            volumes=provider_config.get("volumes"),
-            resources=provider_config.get("resources"),
-            network=provider_config.get("network", "none"),
-            auth=provider_config.get("auth"),
-            tls=provider_config.get("tls"),
-            http=provider_config.get("http"),
+        # Create mcp_server from config
+        mcp_server = McpServer(
+            mcp_server_id=mcp_server_id,
+            mode=mcp_server_config.get("mode", "subprocess"),
+            command=mcp_server_config.get("command"),
+            image=mcp_server_config.get("image"),
+            endpoint=mcp_server_config.get("endpoint"),
+            env=mcp_server_config.get("env"),
+            idle_ttl_s=mcp_server_config.get("idle_ttl_s", 300),
+            health_check_interval_s=mcp_server_config.get("health_check_interval_s", 60),
+            volumes=mcp_server_config.get("volumes"),
+            resources=mcp_server_config.get("resources"),
+            network=mcp_server_config.get("network", "none"),
+            auth=mcp_server_config.get("auth"),
+            tls=mcp_server_config.get("tls"),
+            http=mcp_server_config.get("http"),
         )
 
-        # Start provider with timeout
+        # Start mcp_server with timeout
         deadline = time.time() + timeout_s
-        provider.ensure_ready()
+        mcp_server.ensure_ready()
 
         # Wait for READY state (should be immediate after ensure_ready)
         while time.time() < deadline:
-            if provider.state == ProviderState.READY:
+            if mcp_server.state == McpServerState.READY:
                 duration_ms = (time.perf_counter() - start_time) * 1000
 
-                # Stop provider after successful test
+                # Stop mcp_server after successful test
                 try:
-                    provider.stop()
+                    mcp_server.stop()
                 except Exception:  # noqa: BLE001 -- fault-barrier: best-effort cleanup after successful test
                     pass  # Best effort cleanup
 
-                return ProviderTestResult(
-                    provider_id=provider_id,
+                return McpServerTestResult(
+                    mcp_server_id=mcp_server_id,
                     success=True,
                     state="ready",
                     duration_ms=duration_ms,
@@ -122,23 +126,23 @@ def _test_single_provider(
         # Timeout waiting for READY
         duration_ms = (time.perf_counter() - start_time) * 1000
         try:
-            provider.stop()
+            mcp_server.stop()
         except Exception:  # noqa: BLE001 -- fault-barrier: best-effort cleanup after timeout
             pass
 
-        return ProviderTestResult(
-            provider_id=provider_id,
+        return McpServerTestResult(
+            mcp_server_id=mcp_server_id,
             success=False,
-            state=str(provider.state.value),
+            state=str(mcp_server.state.value),
             duration_ms=duration_ms,
-            error=f"Timeout after {timeout_s}s - provider did not reach READY state",
-            suggestion="Check provider command/image and ensure it starts correctly",
+            error=f"Timeout after {timeout_s}s - mcp_server did not reach READY state",
+            suggestion="Check mcp_server command/image and ensure it starts correctly",
         )
 
-    except ProviderStartError as e:
+    except McpServerStartError as e:
         duration_ms = (time.perf_counter() - start_time) * 1000
-        return ProviderTestResult(
-            provider_id=provider_id,
+        return McpServerTestResult(
+            mcp_server_id=mcp_server_id,
             success=False,
             state="dead",
             duration_ms=duration_ms,
@@ -146,21 +150,21 @@ def _test_single_provider(
             suggestion=e.suggestion if hasattr(e, "suggestion") else _get_suggestion_for_error(str(e)),
         )
 
-    except CannotStartProviderError as e:
+    except CannotStartMcpServerError as e:
         duration_ms = (time.perf_counter() - start_time) * 1000
-        return ProviderTestResult(
-            provider_id=provider_id,
+        return McpServerTestResult(
+            mcp_server_id=mcp_server_id,
             success=False,
             state="backoff",
             duration_ms=duration_ms,
             error=str(e),
-            suggestion="Provider is in backoff state, try again later",
+            suggestion="McpServer is in backoff state, try again later",
         )
 
     except Exception as e:  # noqa: BLE001 -- fault-barrier: smoke test must return result, not crash CLI
         duration_ms = (time.perf_counter() - start_time) * 1000
-        return ProviderTestResult(
-            provider_id=provider_id,
+        return McpServerTestResult(
+            mcp_server_id=mcp_server_id,
             success=False,
             state="error",
             duration_ms=duration_ms,
@@ -194,15 +198,15 @@ def run_smoke_test(
     timeout_s: float = DEFAULT_TIMEOUT_SECONDS,
     console: Console | None = None,
 ) -> SmokeTestResult:
-    """Run smoke test on all providers in configuration.
+    """Run smoke test on all mcp_servers in configuration.
 
     Args:
         config_path: Path to configuration file.
-        timeout_s: Maximum time per provider.
+        timeout_s: Maximum time per mcp_server.
         console: Optional Rich console for output.
 
     Returns:
-        SmokeTestResult with all provider results.
+        SmokeTestResult with all mcp_server results.
     """
     if console is None:
         console = Console()
@@ -211,13 +215,13 @@ def run_smoke_test(
 
     # Load configuration
     config = load_configuration(str(config_path))
-    providers_config = config.get("providers", {})
+    mcp_servers_config = config.get("mcp_servers", {})
 
-    if not providers_config:
+    if not mcp_servers_config:
         return SmokeTestResult(results=[], total_duration_ms=0)
 
-    results: list[ProviderTestResult] = []
-    per_provider_timeout = min(timeout_s / len(providers_config), timeout_s / 2)
+    results: list[McpServerTestResult] = []
+    per_mcp_server_timeout = min(timeout_s / len(mcp_servers_config), timeout_s / 2)
 
     # Run tests with progress indicator
     with Progress(
@@ -228,24 +232,24 @@ def run_smoke_test(
         console=console,
         transient=True,
     ) as progress:
-        task = progress.add_task("Testing providers...", total=len(providers_config))
+        task = progress.add_task("Testing mcp_servers...", total=len(mcp_servers_config))
 
-        # Test providers sequentially to avoid resource contention
-        for provider_id, provider_config in providers_config.items():
-            progress.update(task, description=f"Testing {provider_id}...")
+        # Test mcp_servers sequentially to avoid resource contention
+        for mcp_server_id, mcp_server_config in mcp_servers_config.items():
+            progress.update(task, description=f"Testing {mcp_server_id}...")
 
-            result = _test_single_provider(
-                provider_id=provider_id,
-                provider_config=provider_config,
-                timeout_s=per_provider_timeout,
+            result = _test_single_mcp_server(
+                mcp_server_id=mcp_server_id,
+                mcp_server_config=mcp_server_config,
+                timeout_s=per_mcp_server_timeout,
             )
             results.append(result)
 
             # Show result immediately
             if result.success:
-                console.print(f"  [green]OK[/green] {provider_id} ready ({result.duration_ms:.0f}ms)")
+                console.print(f"  [green]OK[/green] {mcp_server_id} ready ({result.duration_ms:.0f}ms)")
             else:
-                console.print(f"  [red]FAIL[/red] {provider_id}: {result.error}")
+                console.print(f"  [red]FAIL[/red] {mcp_server_id}: {result.error}")
                 if result.suggestion:
                     console.print(f"       [dim]Suggestion: {result.suggestion}[/dim]")
 
@@ -267,13 +271,19 @@ def run_smoke_test_simple(
 
     Args:
         config_path: Path to configuration file.
-        timeout_s: Maximum time per provider.
+        timeout_s: Maximum time per mcp_server.
 
     Returns:
-        Tuple of (all_passed, [(provider_id, success, error), ...])
+        Tuple of (all_passed, [(mcp_server_id, success, error), ...])
     """
     result = run_smoke_test(config_path, timeout_s, console=Console(quiet=True))
 
-    provider_results = [(r.provider_id, r.success, r.error) for r in result.results]
+    mcp_server_results = [(r.mcp_server_id, r.success, r.error) for r in result.results]
 
-    return result.all_passed, provider_results
+    return result.all_passed, mcp_server_results
+
+
+# legacy aliases
+_test_single_provider = _test_single_mcp_server
+
+ProviderTestResult = McpServerTestResult

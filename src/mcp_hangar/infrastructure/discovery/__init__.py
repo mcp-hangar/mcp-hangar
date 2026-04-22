@@ -1,6 +1,6 @@
 """Discovery infrastructure module.
 
-This module contains infrastructure implementations for provider discovery
+This module contains infrastructure implementations for mcp_server discovery
 from various sources: Kubernetes, Docker, Filesystem, and Python entrypoints.
 
 Note: Each source has optional dependencies. Import errors are handled gracefully.

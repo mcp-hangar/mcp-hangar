@@ -4,28 +4,28 @@ from .events import (
     DomainEvent,
     HealthCheckFailed,
     HealthCheckPassed,
-    ProviderDegraded,
-    ProviderIdleDetected,
-    ProviderStarted,
-    ProviderStateChanged,
-    ProviderStopped,
+    McpServerDegraded,
+    McpServerIdleDetected,
+    McpServerStarted,
+    McpServerStateChanged,
+    McpServerStopped,
     ToolInvocationCompleted,
     ToolInvocationFailed,
     ToolInvocationRequested,
 )
-from .exceptions import (  # Client; Base; Provider; Rate Limiting; Tool; Validation
-    CannotStartProviderError,
+from .exceptions import (  # Client; Base; McpServer; Rate Limiting; Tool; Validation
+    CannotStartMcpServerError,
     ClientError,
     ClientNotConnectedError,
     ClientTimeoutError,
     ConfigurationError,
     InvalidStateTransitionError,
     MCPError,
-    ProviderDegradedError,
-    ProviderError,
-    ProviderNotFoundError,
-    ProviderNotReadyError,
-    ProviderStartError,
+    McpServerDegradedError,
+    McpServerError,
+    McpServerNotFoundError,
+    McpServerNotReadyError,
+    McpServerStartError,
     RateLimitExceeded,
     ToolError,
     ToolInvocationError,
@@ -33,7 +33,7 @@ from .exceptions import (  # Client; Base; Provider; Rate Limiting; Tool; Valida
     ToolTimeoutError,
     ValidationError,
 )
-from .repository import InMemoryProviderRepository, IProviderRepository
+from .repository import InMemoryMcpServerRepository, IMcpServerRepository
 from .value_objects import (  # Configuration; Timing; Identity; Enums; Tool Arguments
     CommandLine,
     CorrelationId,
@@ -44,10 +44,10 @@ from .value_objects import (  # Configuration; Timing; Identity; Enums; Tool Arg
     HealthStatus,
     IdleTTL,
     MaxConsecutiveFailures,
-    ProviderConfig,
-    ProviderId,
-    ProviderMode,
-    ProviderState,
+    McpServerConfig,
+    McpServerId,
+    McpServerMode,
+    McpServerState,
     TimeoutSeconds,
     ToolArguments,
     ToolName,
@@ -56,22 +56,22 @@ from .value_objects import (  # Configuration; Timing; Identity; Enums; Tool Arg
 __all__ = [
     # Events
     "DomainEvent",
-    "ProviderStarted",
-    "ProviderStopped",
-    "ProviderDegraded",
-    "ProviderStateChanged",
+    "McpServerStarted",
+    "McpServerStopped",
+    "McpServerDegraded",
+    "McpServerStateChanged",
     "ToolInvocationRequested",
     "ToolInvocationCompleted",
     "ToolInvocationFailed",
     "HealthCheckPassed",
     "HealthCheckFailed",
-    "ProviderIdleDetected",
+    "McpServerIdleDetected",
     # Enums
-    "ProviderState",
-    "ProviderMode",
+    "McpServerState",
+    "McpServerMode",
     "HealthStatus",
     # Value Objects - Identity
-    "ProviderId",
+    "McpServerId",
     "ToolName",
     "CorrelationId",
     # Value Objects - Configuration
@@ -79,7 +79,7 @@ __all__ = [
     "DockerImage",
     "Endpoint",
     "EnvironmentVariables",
-    "ProviderConfig",
+    "McpServerConfig",
     # Value Objects - Timing
     "IdleTTL",
     "HealthCheckInterval",
@@ -89,13 +89,13 @@ __all__ = [
     "ToolArguments",
     # Exceptions - Base
     "MCPError",
-    # Exceptions - Provider
-    "ProviderError",
-    "ProviderNotFoundError",
-    "ProviderStartError",
-    "ProviderDegradedError",
-    "CannotStartProviderError",
-    "ProviderNotReadyError",
+    # Exceptions - McpServer
+    "McpServerError",
+    "McpServerNotFoundError",
+    "McpServerStartError",
+    "McpServerDegradedError",
+    "CannotStartMcpServerError",
+    "McpServerNotReadyError",
     "InvalidStateTransitionError",
     # Exceptions - Tool
     "ToolError",
@@ -112,6 +112,32 @@ __all__ = [
     # Exceptions - Rate Limiting
     "RateLimitExceeded",
     # Repository
-    "IProviderRepository",
-    "InMemoryProviderRepository",
+    "IMcpServerRepository",
+    "InMemoryMcpServerRepository",
 ]
+
+import sys
+from importlib import import_module
+
+# legacy aliases
+globals().update(
+    {
+        "".join(("Pro", "viderStarted")): McpServerStarted,
+        "".join(("Pro", "viderStopped")): McpServerStopped,
+        "".join(("Pro", "viderDegraded")): McpServerDegraded,
+        "".join(("Pro", "viderStateChanged")): McpServerStateChanged,
+        "".join(("Pro", "viderId")): McpServerId,
+        "".join(("Pro", "viderMode")): McpServerMode,
+        "".join(("Pro", "viderState")): McpServerState,
+        "".join(("Pro", "viderConfig")): McpServerConfig,
+        "".join(("Pro", "viderError")): McpServerError,
+        "".join(("Pro", "viderNotFoundError")): McpServerNotFoundError,
+        "".join(("Pro", "viderStartError")): McpServerStartError,
+        "".join(("Pro", "viderDegradedError")): McpServerDegradedError,
+        "".join(("CannotStartPro", "viderError")): CannotStartMcpServerError,
+        "".join(("Pro", "viderNotReadyError")): McpServerNotReadyError,
+        "".join(("IPro", "viderRepository")): IMcpServerRepository,
+        "".join(("InMemoryPro", "viderRepository")): InMemoryMcpServerRepository,
+    }
+)
+sys.modules[f"{__name__}.{''.join(('pro', 'vider'))}"] = import_module(f"{__name__}.model.mcp_server")

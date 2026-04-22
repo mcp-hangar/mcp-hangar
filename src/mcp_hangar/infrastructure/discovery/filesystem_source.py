@@ -1,12 +1,12 @@
 """Filesystem Discovery Source.
 
-Discovers MCP providers from YAML files in a directory.
+Discovers MCP mcp_servers from YAML files in a directory.
 Supports file watching for automatic updates.
 
-Default Path: /etc/mcp-hangar/providers.d/*.yaml
+Default Path: /etc/mcp-hangar/mcp_servers.d/*.yaml
 
-Example Provider File:
-    # /etc/mcp-hangar/providers.d/custom-tool.yaml
+Example McpServer File:
+    # /etc/mcp-hangar/mcp_servers.d/custom-tool.yaml
     name: custom-tool
     enabled: true
     mode: subprocess
@@ -28,7 +28,7 @@ import asyncio
 from pathlib import Path
 from typing import Any
 
-from mcp_hangar.domain.discovery.discovered_provider import DiscoveredProvider
+from mcp_hangar.domain.discovery.discovered_mcp_server import DiscoveredMcpServer
 from mcp_hangar.domain.discovery.discovery_source import DiscoveryMode, DiscoverySource
 
 from ...logging_config import get_logger
@@ -55,13 +55,13 @@ except ImportError:
 
 
 class FilesystemDiscoverySource(DiscoverySource):
-    """Discover MCP providers from YAML files in a directory.
+    """Discover MCP mcp_servers from YAML files in a directory.
 
-    Scans a directory for YAML files containing provider definitions.
+    Scans a directory for YAML files containing mcp_server definitions.
     Optionally watches for file changes using inotify/fsevents.
 
     File Format:
-        name: provider-name
+        name: mcp_server-name
         enabled: true
         mode: subprocess|http|sse
 
@@ -75,7 +75,7 @@ class FilesystemDiscoverySource(DiscoverySource):
           key: value
     """
 
-    DEFAULT_PATH = "/etc/mcp-hangar/providers.d/"
+    DEFAULT_PATH = "/etc/mcp-hangar/mcp_servers.d/"
     DEFAULT_PATTERN = "*.yaml"
 
     def __init__(
@@ -89,11 +89,11 @@ class FilesystemDiscoverySource(DiscoverySource):
         """Initialize filesystem discovery source.
 
         Args:
-            path: Directory path to scan (default: /etc/mcp-hangar/providers.d/)
+            path: Directory path to scan (default: /etc/mcp-hangar/mcp_servers.d/)
             pattern: Glob pattern for files (default: *.yaml)
             mode: Discovery mode (default: additive)
             watch: Enable file watching (requires watchdog)
-            default_ttl: Default TTL for discovered providers
+            default_ttl: Default TTL for discovered mcp_servers
         """
         super().__init__(mode)
 
@@ -109,27 +109,27 @@ class FilesystemDiscoverySource(DiscoverySource):
 
         self._observer: Observer | None = None
         self._event_handler: FileSystemEventHandler | None = None
-        self._cached_providers: dict[str, DiscoveredProvider] = {}
+        self._cached_mcp_servers: dict[str, DiscoveredMcpServer] = {}
 
     @property
     def source_type(self) -> str:
         return "filesystem"
 
-    async def discover(self) -> list[DiscoveredProvider]:
-        """Discover providers from YAML files.
+    async def discover(self) -> list[DiscoveredMcpServer]:
+        """Discover mcp_servers from YAML files.
 
         Returns:
-            List of discovered providers
+            List of discovered mcp_servers
         """
-        providers = []
+        mcp_servers = []
 
         if not self.path.exists():
             logger.warning(f"Discovery path does not exist: {self.path}")
-            return providers
+            return mcp_servers
 
         if not self.path.is_dir():
             logger.warning(f"Discovery path is not a directory: {self.path}")
-            return providers
+            return mcp_servers
 
         # Also check for .yml extension
         patterns = [self.pattern]
@@ -144,32 +144,32 @@ class FilesystemDiscoverySource(DiscoverySource):
                 seen_files.add(file_path)
 
                 try:
-                    provider = self._parse_file(file_path)
-                    if provider:
-                        providers.append(provider)
-                        self._cached_providers[provider.name] = provider
-                        await self.on_provider_discovered(provider)
+                    mcp_server = self._parse_file(file_path)
+                    if mcp_server:
+                        mcp_servers.append(mcp_server)
+                        self._cached_mcp_servers[mcp_server.name] = mcp_server
+                        await self.on_mcp_server_discovered(mcp_server)
                 except Exception as e:  # noqa: BLE001 -- infra-boundary: skip malformed config file
                     logger.error(f"Failed to parse {file_path}: {e}")
 
-        logger.debug(f"Filesystem discovery found {len(providers)} providers")
-        return providers
+        logger.debug(f"Filesystem discovery found {len(mcp_servers)} mcp_servers")
+        return mcp_servers
 
-    def _parse_file(self, file_path: Path) -> DiscoveredProvider | None:
-        """Parse YAML file into DiscoveredProvider.
+    def _parse_file(self, file_path: Path) -> DiscoveredMcpServer | None:
+        """Parse YAML file into DiscoveredMcpServer.
 
         Args:
             file_path: Path to YAML file
 
         Returns:
-            DiscoveredProvider or None if disabled/invalid
+            DiscoveredMcpServer or None if disabled/invalid
         """
         try:
             with open(file_path) as f:
                 data = yaml.safe_load(f)
         except yaml.YAMLError as e:
             # Multi-document YAML or invalid YAML - skip silently
-            logger.debug(f"Skipping non-provider YAML file {file_path}: {e}")
+            logger.debug(f"Skipping non-mcp_server YAML file {file_path}: {e}")
             return None
 
         if not data:
@@ -180,19 +180,19 @@ class FilesystemDiscoverySource(DiscoverySource):
             logger.debug(f"Not a dict, skipping: {file_path}")
             return None
 
-        # Check if this looks like a provider definition (must have name or mode)
+        # Check if this looks like a mcp_server definition (must have name or mode)
         # Skip files that look like docker-compose or k8s manifests
         if "services" in data or "apiVersion" in data or "kind" in data:
-            logger.debug(f"Skipping non-provider file (docker-compose or k8s): {file_path}")
+            logger.debug(f"Skipping non-mcp_server file (docker-compose or k8s): {file_path}")
             return None
 
         if not data.get("enabled", True):
-            logger.debug(f"Provider disabled in {file_path}")
+            logger.debug(f"McpServer disabled in {file_path}")
             return None
 
-        # Must have either 'name' or 'mode' to be considered a provider
+        # Must have either 'name' or 'mode' to be considered a mcp_server
         if "name" not in data and "mode" not in data and "connection" not in data:
-            logger.debug(f"Not a provider definition, skipping: {file_path}")
+            logger.debug(f"Not a mcp_server definition, skipping: {file_path}")
             return None
 
         name = data.get("name", file_path.stem)
@@ -210,7 +210,7 @@ class FilesystemDiscoverySource(DiscoverySource):
             **data.get("metadata", {}),
         }
 
-        return DiscoveredProvider.create(
+        return DiscoveredMcpServer.create(
             name=name,
             source_type=self.source_type,
             mode=mode,
@@ -224,7 +224,7 @@ class FilesystemDiscoverySource(DiscoverySource):
 
         Args:
             connection: Connection dict from YAML
-            mode: Provider mode
+            mode: McpServer mode
 
         Returns:
             Normalized connection info
@@ -316,23 +316,23 @@ class FilesystemDiscoverySource(DiscoverySource):
             return
 
         if event_type == "deleted":
-            # Find provider by file path and notify loss
-            for name, provider in list(self._cached_providers.items()):
-                if provider.metadata.get("file_path") == str(file_path):
-                    del self._cached_providers[name]
-                    await self.on_provider_lost(name)
+            # Find mcp_server by file path and notify loss
+            for name, mcp_server in list(self._cached_mcp_servers.items()):
+                if mcp_server.metadata.get("file_path") == str(file_path):
+                    del self._cached_mcp_servers[name]
+                    await self.on_mcp_server_lost(name)
                     break
         else:
             # Created or modified - re-parse
             try:
-                new_provider = self._parse_file(file_path)
-                if new_provider:
-                    old_provider = self._cached_providers.get(new_provider.name)
-                    if old_provider and old_provider.fingerprint != new_provider.fingerprint:
-                        await self.on_provider_changed(old_provider, new_provider)
-                    elif not old_provider:
-                        await self.on_provider_discovered(new_provider)
-                    self._cached_providers[new_provider.name] = new_provider
+                new_mcp_server = self._parse_file(file_path)
+                if new_mcp_server:
+                    old_mcp_server = self._cached_mcp_servers.get(new_mcp_server.name)
+                    if old_mcp_server and old_mcp_server.fingerprint != new_mcp_server.fingerprint:
+                        await self.on_mcp_server_changed(old_mcp_server, new_mcp_server)
+                    elif not old_mcp_server:
+                        await self.on_mcp_server_discovered(new_mcp_server)
+                    self._cached_mcp_servers[new_mcp_server.name] = new_mcp_server
             except Exception as e:  # noqa: BLE001 -- infra-boundary: skip individual file change on error
                 logger.error(f"Error parsing changed file {file_path}: {e}")
 

@@ -4,7 +4,7 @@ import threading
 from types import TracebackType
 
 from mcp_hangar.domain.contracts import ILock
-from mcp_hangar.domain.repository import InMemoryProviderRepository
+from mcp_hangar.domain.repository import InMemoryMcpServerRepository
 
 
 def test_threading_lock_satisfies_lock_protocol():
@@ -43,7 +43,7 @@ def test_repository_uses_injected_lock_factory():
     """Repository should create its lock through the injected factory."""
     lock = StubLock()
 
-    repository = InMemoryProviderRepository(lock_factory=lambda: lock)
+    repository = InMemoryMcpServerRepository(lock_factory=lambda: lock)
     repository.add("provider-1", object())
 
     assert lock.enter_calls == 1

@@ -49,14 +49,14 @@ class TestNetworkObservation:
     def test_valid_construction(self) -> None:
         obs = NetworkObservation(
             timestamp=1234567890.0,
-            provider_id="math",
+            mcp_server_id="math",
             destination_host="api.openai.com",
             destination_port=443,
             protocol="https",
             direction="outbound",
         )
         assert obs.timestamp == 1234567890.0
-        assert obs.provider_id == "math"
+        assert obs.mcp_server_id == "math"
         assert obs.destination_host == "api.openai.com"
         assert obs.destination_port == 443
         assert obs.protocol == "https"
@@ -65,20 +65,20 @@ class TestNetworkObservation:
     def test_frozen_immutable(self) -> None:
         obs = NetworkObservation(
             timestamp=1234567890.0,
-            provider_id="math",
+            mcp_server_id="math",
             destination_host="api.openai.com",
             destination_port=443,
             protocol="https",
             direction="outbound",
         )
         with pytest.raises(AttributeError):
-            obs.provider_id = "other"  # type: ignore[misc]
+            obs.mcp_server_id = "other"  # type: ignore[misc]
 
-    def test_rejects_empty_provider_id(self) -> None:
-        with pytest.raises(ValueError, match="provider_id"):
+    def test_rejects_empty_mcp_server_id(self) -> None:
+        with pytest.raises(ValueError, match="mcp_server_id"):
             NetworkObservation(
                 timestamp=1234567890.0,
-                provider_id="",
+                mcp_server_id="",
                 destination_host="api.openai.com",
                 destination_port=443,
                 protocol="https",
@@ -89,7 +89,7 @@ class TestNetworkObservation:
         with pytest.raises(ValueError, match="destination_host"):
             NetworkObservation(
                 timestamp=1234567890.0,
-                provider_id="math",
+                mcp_server_id="math",
                 destination_host="",
                 destination_port=443,
                 protocol="https",
@@ -100,7 +100,7 @@ class TestNetworkObservation:
         with pytest.raises(ValueError, match="destination_port"):
             NetworkObservation(
                 timestamp=1234567890.0,
-                provider_id="math",
+                mcp_server_id="math",
                 destination_host="api.openai.com",
                 destination_port=-1,
                 protocol="https",
@@ -111,7 +111,7 @@ class TestNetworkObservation:
         with pytest.raises(ValueError, match="destination_port"):
             NetworkObservation(
                 timestamp=1234567890.0,
-                provider_id="math",
+                mcp_server_id="math",
                 destination_host="api.openai.com",
                 destination_port=65536,
                 protocol="https",
@@ -121,7 +121,7 @@ class TestNetworkObservation:
     def test_accepts_port_zero(self) -> None:
         obs = NetworkObservation(
             timestamp=1234567890.0,
-            provider_id="math",
+            mcp_server_id="math",
             destination_host="api.openai.com",
             destination_port=0,
             protocol="tcp",
@@ -132,7 +132,7 @@ class TestNetworkObservation:
     def test_accepts_port_65535(self) -> None:
         obs = NetworkObservation(
             timestamp=1234567890.0,
-            provider_id="math",
+            mcp_server_id="math",
             destination_host="api.openai.com",
             destination_port=65535,
             protocol="tcp",
@@ -146,43 +146,31 @@ class TestNetworkObservation:
 
 class TestBehavioralModeChanged:
     def test_has_event_id_and_occurred_at(self) -> None:
-        event = BehavioralModeChanged(
-            provider_id="math",
-            old_mode="disabled",
-            new_mode="learning",
-        )
+        event = BehavioralModeChanged(mcp_server_id="math", old_mode="disabled",
+        new_mode="learning",)
         assert hasattr(event, "event_id")
         assert hasattr(event, "occurred_at")
         assert event.event_id is not None
         assert event.occurred_at > 0
 
     def test_fields_correct(self) -> None:
-        event = BehavioralModeChanged(
-            provider_id="math",
-            old_mode="disabled",
-            new_mode="learning",
-        )
-        assert event.provider_id == "math"
+        event = BehavioralModeChanged(mcp_server_id="math", old_mode="disabled",
+        new_mode="learning",)
+        assert event.mcp_server_id == "math"
         assert event.old_mode == "disabled"
         assert event.new_mode == "learning"
         assert event.schema_version == 1
 
     def test_schema_version_default(self) -> None:
-        event = BehavioralModeChanged(
-            provider_id="math",
-            old_mode="learning",
-            new_mode="enforcing",
-        )
+        event = BehavioralModeChanged(mcp_server_id="math", old_mode="learning",
+        new_mode="enforcing",)
         assert event.schema_version == 1
 
     def test_is_domain_event(self) -> None:
         from mcp_hangar.domain.events import DomainEvent
 
-        event = BehavioralModeChanged(
-            provider_id="math",
-            old_mode="disabled",
-            new_mode="learning",
-        )
+        event = BehavioralModeChanged(mcp_server_id="math", old_mode="disabled",
+        new_mode="learning",)
         assert isinstance(event, DomainEvent)
 
 
@@ -239,7 +227,7 @@ class TestNullBehavioralProfiler:
         profiler = NullBehavioralProfiler()
         obs = NetworkObservation(
             timestamp=1234567890.0,
-            provider_id="math",
+            mcp_server_id="math",
             destination_host="api.openai.com",
             destination_port=443,
             protocol="https",

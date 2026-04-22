@@ -42,7 +42,7 @@ class TestExportConfig:
 
     def test_returns_200_on_success(self):
         """POST /config/export returns HTTP 200."""
-        sample_config = {"providers": {"math": {"mode": "subprocess", "command": ["python", "-m", "math"]}}}
+        sample_config = {"mcp_servers": {"math": {"mode": "subprocess", "command": ["python", "-m", "math"]}}}
 
         with patch(
             "mcp_hangar.server.api.config.serialize_full_config",
@@ -54,7 +54,7 @@ class TestExportConfig:
 
     def test_returns_yaml_key(self):
         """POST /config/export response contains 'yaml' key."""
-        sample_config = {"providers": {}}
+        sample_config = {"mcp_servers": {}}
 
         with patch(
             "mcp_hangar.server.api.config.serialize_full_config",
@@ -66,7 +66,7 @@ class TestExportConfig:
 
     def test_yaml_is_parseable(self):
         """POST /config/export yaml value can be parsed back to dict."""
-        sample_config = {"providers": {"test": {"mode": "remote", "endpoint": "http://localhost:8080"}}}
+        sample_config = {"mcp_servers": {"test": {"mode": "remote", "endpoint": "http://localhost:8080"}}}
 
         with patch(
             "mcp_hangar.server.api.config.serialize_full_config",
@@ -81,7 +81,7 @@ class TestExportConfig:
 
     def test_yaml_matches_serialize_full_config_output(self):
         """POST /config/export yaml serialises the dict returned by serialize_full_config."""
-        sample_config = {"providers": {"math": {"mode": "subprocess"}}, "logging": {"level": "INFO"}}
+        sample_config = {"mcp_servers": {"math": {"mode": "subprocess"}}, "logging": {"level": "INFO"}}
 
         with patch(
             "mcp_hangar.server.api.config.serialize_full_config",
@@ -91,7 +91,7 @@ class TestExportConfig:
                 response = client.post("/config/export")
 
         parsed = yaml.safe_load(response.json()["yaml"])
-        assert parsed["providers"]["math"]["mode"] == "subprocess"
+        assert parsed["mcp_servers"]["math"]["mode"] == "subprocess"
         assert parsed["logging"]["level"] == "INFO"
 
     def test_calls_serialize_full_config(self):

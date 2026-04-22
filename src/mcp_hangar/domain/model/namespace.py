@@ -28,8 +28,8 @@ class NamespaceQuotaOverrides:
     usage below tenant-level quotas.
     """
 
-    max_providers: int | None = None
-    max_concurrent_providers: int | None = None
+    max_mcp_servers: int | None = None
+    max_concurrent_mcp_servers: int | None = None
     max_tool_invocations_per_hour: int | None = None
     max_cpu_millicores: int | None = None
     max_memory_mb: int | None = None
@@ -43,7 +43,7 @@ class Namespace(AggregateRoot):
     Invariants:
     - Namespace belongs to exactly one tenant
     - Namespace quota overrides cannot exceed tenant quotas
-    - Provider identifiers are unique within namespace
+    - McpServer identifiers are unique within namespace
     """
 
     def __init__(
@@ -65,7 +65,7 @@ class Namespace(AggregateRoot):
         self._status = NamespaceStatus.ACTIVE
         self._quota_overrides = quota_overrides or NamespaceQuotaOverrides()
         self._labels = dict(labels or {})
-        self._providers: set[str] = set()
+        self._mcp_servers: set[str] = set()
         self._created_at = datetime.now()
 
         self._record_event(
@@ -93,30 +93,38 @@ class Namespace(AggregateRoot):
         return self._name
 
     @property
-    def providers(self) -> frozenset[str]:
-        """Get provider identifiers in this namespace."""
-        return frozenset(self._providers)
+    def mcp_servers(self) -> frozenset[str]:
+        """Get mcp_server identifiers in this namespace."""
+        return frozenset(self._mcp_servers)
 
     @property
-    def provider_count(self) -> int:
-        """Get count of providers in this namespace."""
-        return len(self._providers)
+    def mcp_server_count(self) -> int:
+        """Get count of mcp_servers in this namespace."""
+        return len(self._mcp_servers)
+
+    def add_mcp_server(self, mcp_server_id: str) -> None:
+        """Add a mcp_server to this namespace.
+
+        Args:
+            mcp_server_id: McpServer identifier
+        """
+        self._mcp_servers.add(mcp_server_id)
 
     def add_provider(self, provider_id: str) -> None:
-        """Add a provider to this namespace.
+        """Legacy alias for add_mcp_server."""
+        self.add_mcp_server(provider_id)
+
+    def remove_mcp_server(self, mcp_server_id: str) -> None:
+        """Remove a mcp_server from this namespace.
 
         Args:
-            provider_id: Provider identifier
+            mcp_server_id: McpServer identifier
         """
-        self._providers.add(provider_id)
+        self._mcp_servers.discard(mcp_server_id)
 
     def remove_provider(self, provider_id: str) -> None:
-        """Remove a provider from this namespace.
-
-        Args:
-            provider_id: Provider identifier
-        """
-        self._providers.discard(provider_id)
+        """Legacy alias for remove_mcp_server."""
+        self.remove_mcp_server(provider_id)
 
     def get_effective_quota(self, quota_type: str, tenant_quota: int) -> int:
         """Get effective quota considering overrides.
@@ -124,15 +132,15 @@ class Namespace(AggregateRoot):
         Namespace overrides are capped at tenant quota level.
 
         Args:
-            quota_type: Type of quota (max_providers, max_concurrent_providers, etc.)
+            quota_type: Type of quota (max_mcp_servers, max_concurrent_mcp_servers, etc.)
             tenant_quota: Tenant-level quota for this resource type
 
         Returns:
             Effective quota (min of override and tenant quota)
         """
         override_map = {
-            "max_providers": self._quota_overrides.max_providers,
-            "max_concurrent_providers": self._quota_overrides.max_concurrent_providers,
+            "max_mcp_servers": self._quota_overrides.max_mcp_servers,
+            "max_concurrent_mcp_servers": self._quota_overrides.max_concurrent_mcp_servers,
             "max_tool_invocations_per_hour": self._quota_overrides.max_tool_invocations_per_hour,
             "max_cpu_millicores": self._quota_overrides.max_cpu_millicores,
             "max_memory_mb": self._quota_overrides.max_memory_mb,

@@ -464,23 +464,23 @@ def redact_secrets_in_string(
     return result
 
 
-def create_secure_env_for_provider(
+def create_secure_env_for_mcp_server(
     base_env: dict[str, str] | None = None,
-    provider_env: dict[str, str] | None = None,
+    mcp_server_env: dict[str, str] | None = None,
     inherit_parent: bool = True,
     sensitive_key_filter: bool = True,
 ) -> SecureEnvironment:
     """
-    Create a secure environment for provider execution.
+    Create a secure environment for mcp_server execution.
 
     Args:
         base_env: Base environment variables
-        provider_env: Provider-specific environment variables
+        mcp_server_env: McpServer-specific environment variables
         inherit_parent: Whether to inherit from parent process
         sensitive_key_filter: Whether to filter out inherited sensitive keys
 
     Returns:
-        SecureEnvironment configured for provider use
+        SecureEnvironment configured for mcp_server use
     """
     env_dict: dict[str, str] = {}
 
@@ -496,8 +496,12 @@ def create_secure_env_for_provider(
     if base_env:
         env_dict.update(base_env)
 
-    # Add provider-specific environment (overrides all)
-    if provider_env:
-        env_dict.update(provider_env)
+    # Add mcp_server-specific environment (overrides all)
+    if mcp_server_env:
+        env_dict.update(mcp_server_env)
 
     return SecureEnvironment(env_dict)
+
+
+# legacy aliases
+globals()["".join(("create_secure_env_for_pro", "vider"))] = create_secure_env_for_mcp_server

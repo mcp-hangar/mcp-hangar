@@ -8,7 +8,7 @@ import shutil
 import subprocess
 
 from ...logging_config import get_logger
-from ..exceptions import ProviderStartError
+from ..exceptions import McpServerStartError
 
 logger = get_logger(__name__)
 
@@ -65,20 +65,20 @@ class ImageBuilder:
             Detected runtime name (full path if needed)
 
         Raises:
-            ProviderStartError: If no runtime found
+            McpServerStartError: If no runtime found
         """
         runtime_path = self._find_runtime(preference)
         if runtime_path:
             return runtime_path
 
         if preference != "auto":
-            raise ProviderStartError(
-                provider_id="image_builder",
+            raise McpServerStartError(
+                mcp_server_id="image_builder",
                 reason=f"Container runtime '{preference}' not found in PATH",
             )
 
-        raise ProviderStartError(
-            provider_id="image_builder",
+        raise McpServerStartError(
+            mcp_server_id="image_builder",
             reason="No container runtime found. Install podman or docker.",
         )
 
@@ -194,7 +194,7 @@ class ImageBuilder:
             Image tag
 
         Raises:
-            ProviderStartError: If build fails
+            McpServerStartError: If build fails
         """
         tag = self._generate_tag(config)
 
@@ -208,14 +208,14 @@ class ImageBuilder:
 
         # Validate paths
         if not dockerfile_path.exists():
-            raise ProviderStartError(
-                provider_id="image_builder",
+            raise McpServerStartError(
+                mcp_server_id="image_builder",
                 reason=f"Dockerfile not found: {dockerfile_path}",
             )
 
         if not context_path.exists():
-            raise ProviderStartError(
-                provider_id="image_builder",
+            raise McpServerStartError(
+                mcp_server_id="image_builder",
                 reason=f"Build context not found: {context_path}",
             )
 
@@ -250,8 +250,8 @@ class ImageBuilder:
 
             if result.returncode != 0:
                 logger.error(f"Build failed: {result.stderr}")
-                raise ProviderStartError(
-                    provider_id="image_builder",
+                raise McpServerStartError(
+                    mcp_server_id="image_builder",
                     reason=f"Image build failed: {result.stderr[:500]}",
                 )
 
@@ -259,12 +259,12 @@ class ImageBuilder:
             return tag
 
         except subprocess.TimeoutExpired:
-            raise ProviderStartError(
-                provider_id="image_builder",
+            raise McpServerStartError(
+                mcp_server_id="image_builder",
                 reason="Image build timed out after 10 minutes",
             )
         except (OSError, subprocess.SubprocessError) as e:
-            raise ProviderStartError(provider_id="image_builder", reason=f"Image build failed: {e}")
+            raise McpServerStartError(mcp_server_id="image_builder", reason=f"Image build failed: {e}")
 
     def build_if_needed(self, config: BuildConfig) -> str:
         """

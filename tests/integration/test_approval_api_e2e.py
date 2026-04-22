@@ -33,18 +33,18 @@ class InMemoryRepository:
     async def get(self, approval_id):
         return self._store.get(approval_id)
 
-    async def list_pending(self, provider_id=None):
+    async def list_pending(self, mcp_server_id=None):
         return [
             r for r in self._store.values()
             if r.state == ApprovalState.PENDING
-            and (provider_id is None or r.provider_id == provider_id)
+            and (mcp_server_id is None or r.mcp_server_id == mcp_server_id)
         ]
 
-    async def list_by_state(self, state, provider_id=None):
+    async def list_by_state(self, state, mcp_server_id=None):
         return [
             r for r in self._store.values()
             if r.state == state
-            and (provider_id is None or r.provider_id == provider_id)
+            and (mcp_server_id is None or r.mcp_server_id == mcp_server_id)
         ]
 
     async def update_state(self, approval_id, state, decided_by, decided_at, reason):
@@ -117,7 +117,7 @@ class TestApprovalAPIResolveFlow:
 
         async def do_check():
             return await service.check(
-                provider_id="grafana",
+                mcp_server_id="grafana",
                 tool_name="delete_dashboard",
                 arguments={"id": "42"},
                 policy=policy,
@@ -171,7 +171,7 @@ class TestApprovalAPIResolveFlow:
 
         async def do_check():
             return await service.check(
-                provider_id="svc",
+                mcp_server_id="svc",
                 tool_name="x_action",
                 arguments={},
                 policy=policy,
@@ -204,7 +204,7 @@ class TestApprovalAPIResolveFlow:
 
         async def do_check():
             return await service.check(
-                provider_id="svc",
+                mcp_server_id="svc",
                 tool_name="y_action",
                 arguments={},
                 policy=policy,

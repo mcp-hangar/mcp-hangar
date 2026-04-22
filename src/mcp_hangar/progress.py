@@ -3,7 +3,7 @@
 This module provides streaming progress updates for long-running
 operations, giving users visibility into:
 
-- Cold starts and provider launches
+- Cold starts and mcp_server launches
 - Container initialization
 - Tool discovery
 - Network calls and execution
@@ -118,7 +118,7 @@ class ProgressTracker:
     Usage with callback:
         tracker = ProgressTracker(callback=my_callback)
         tracker.report(ProgressStage.COLD_START, "Launching container...")
-        tracker.report(ProgressStage.READY, "Provider ready")
+        tracker.report(ProgressStage.READY, "McpServer ready")
         tracker.complete(result)
 
     Usage as iterator:
@@ -134,18 +134,18 @@ class ProgressTracker:
     def __init__(
         self,
         callback: ProgressCallback | None = None,
-        provider: str = "",
+        mcp_server: str = "",
         operation: str = "",
     ):
         """Initialize progress tracker.
 
         Args:
             callback: Optional callback for progress updates
-            provider: Provider name for context
+            mcp_server: McpServer name for context
             operation: Operation name for context
         """
         self._callback = callback
-        self._provider = provider
+        self._mcp_server = mcp_server
         self._operation = operation
         self._start_time = time.time()
         self._events: list[ProgressEvent] = []
@@ -200,12 +200,12 @@ class ProgressTracker:
         if self._callback:
             try:
                 self._callback(stage.value, message, elapsed)
-            except Exception as e:  # noqa: BLE001 -- fault-barrier: progress callback must not crash provider operation
+            except Exception as e:  # noqa: BLE001 -- fault-barrier: progress callback must not crash mcp_server operation
                 logger.debug("progress_callback_error", error=str(e))
 
         logger.debug(
             "progress_reported",
-            provider=self._provider,
+            mcp_server=self._mcp_server,
             operation=self._operation,
             stage=stage.value,
             message=message,
@@ -248,7 +248,7 @@ class ProgressTracker:
 
         logger.debug(
             "progress_complete",
-            provider=self._provider,
+            mcp_server=self._mcp_server,
             operation=self._operation,
             elapsed_ms=elapsed,
         )
@@ -289,7 +289,7 @@ class ProgressTracker:
 
         logger.debug(
             "progress_failed",
-            provider=self._provider,
+            mcp_server=self._mcp_server,
             operation=self._operation,
             error=str(error)[:200],
             elapsed_ms=elapsed,
@@ -342,22 +342,22 @@ class ProgressOperation:
 
     Usage:
         async with ProgressOperation("math", "add", callback=my_cb) as progress:
-            progress.report(ProgressStage.LAUNCHING, "Starting provider...")
+            progress.report(ProgressStage.LAUNCHING, "Starting mcp_server...")
             result = await do_work()
             progress.complete(result)
     """
 
     def __init__(
         self,
-        provider: str,
+        mcp_server: str,
         operation: str,
         callback: ProgressCallback | None = None,
     ):
-        self.provider = provider
+        self.mcp_server = mcp_server
         self.operation = operation
         self.tracker = ProgressTracker(
             callback=callback,
-            provider=provider,
+            mcp_server=mcp_server,
             operation=operation,
         )
 
@@ -384,12 +384,12 @@ class ProgressOperation:
 
 # Pre-defined messages for common operations
 PROGRESS_MESSAGES = {
-    ProgressStage.COLD_START: "Provider is cold, launching...",
-    ProgressStage.LAUNCHING: "Starting {mode} provider...",
+    ProgressStage.COLD_START: "McpServer is cold, launching...",
+    ProgressStage.LAUNCHING: "Starting {mode} mcp_server...",
     ProgressStage.INITIALIZING: "Container started (PID: {pid}), initializing...",
     ProgressStage.DISCOVERING_TOOLS: "Discovering available tools...",
-    ProgressStage.CONNECTING: "Connecting to provider...",
-    ProgressStage.READY: "Provider ready, executing request...",
+    ProgressStage.CONNECTING: "Connecting to mcp_server...",
+    ProgressStage.READY: "McpServer ready, executing request...",
     ProgressStage.EXECUTING: "Calling tool '{tool}'...",
     ProgressStage.PROCESSING: "Processing response...",
     ProgressStage.COMPLETE: "Operation completed (total: {elapsed_ms:.0f}ms)",
@@ -432,9 +432,9 @@ class ProgressEventHandler:
 
     # Map domain event types to progress stages
     EVENT_STAGE_MAP = {
-        "ProviderStarted": ProgressStage.READY,
-        "ProviderStopped": ProgressStage.COMPLETE,
-        "ProviderStateChanged": ProgressStage.INITIALIZING,
+        "McpServerStarted": ProgressStage.READY,
+        "McpServerStopped": ProgressStage.COMPLETE,
+        "McpServerStateChanged": ProgressStage.INITIALIZING,
         "ToolInvocationRequested": ProgressStage.EXECUTING,
         "ToolInvocationCompleted": ProgressStage.COMPLETE,
         "ToolInvocationFailed": ProgressStage.FAILED,
@@ -476,11 +476,11 @@ class ProgressEventHandler:
 
     def _format_event_message(self, event: Any, event_type: str) -> str:
         """Format event into progress message."""
-        if event_type == "ProviderStarted":
-            return f"Provider started ({getattr(event, 'tools_count', 0)} tools)"
-        elif event_type == "ProviderStateChanged":
+        if event_type == "McpServerStarted":
+            return f"McpServer started ({getattr(event, 'tools_count', 0)} tools)"
+        elif event_type == "McpServerStateChanged":
             new_state = getattr(event, "new_state", "unknown")
-            return f"Provider state: {new_state}"
+            return f"McpServer state: {new_state}"
         elif event_type == "ToolInvocationRequested":
             tool = getattr(event, "tool_name", "unknown")
             return f"Invoking tool: {tool}"
@@ -495,7 +495,7 @@ class ProgressEventHandler:
     def _extract_details(self, event: Any) -> dict[str, Any]:
         """Extract relevant details from event."""
         details = {}
-        for attr in ["provider_id", "tool_name", "duration_ms", "error_type"]:
+        for attr in ["mcp_server_id", "tool_name", "duration_ms", "error_type"]:
             if hasattr(event, attr):
                 details[attr] = getattr(event, attr)
         return details
@@ -514,7 +514,7 @@ def get_progress_handler() -> ProgressEventHandler:
 
 
 def create_progress_tracker(
-    provider: str = "",
+    mcp_server: str = "",
     operation: str = "",
     callback: ProgressCallback | None = None,
     correlation_id: str | None = None,
@@ -522,7 +522,7 @@ def create_progress_tracker(
     """Create a progress tracker with optional event bus integration.
 
     Args:
-        provider: Provider name
+        mcp_server: McpServer name
         operation: Operation name
         callback: Optional progress callback
         correlation_id: Optional correlation ID for event bus integration
@@ -532,7 +532,7 @@ def create_progress_tracker(
     """
     tracker = ProgressTracker(
         callback=callback,
-        provider=provider,
+        mcp_server=mcp_server,
         operation=operation,
     )
 

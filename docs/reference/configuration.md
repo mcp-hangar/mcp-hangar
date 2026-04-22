@@ -2,12 +2,12 @@
 
 All MCP Hangar behavior is controlled through a YAML configuration file and environment variables. The config file defaults to `config.yaml` in the working directory, overridden by the `MCP_CONFIG` environment variable. Environment variables take precedence over YAML settings where both exist.
 
-## `providers`
+## `MCP servers`
 
-Provider definitions. Each key is a unique provider ID.
+MCP Server definitions. Each key is a unique MCP server ID.
 
 ```yaml
-providers:
+mcp_servers:
   math:
     mode: subprocess
     command: [python, -m, math_server]
@@ -31,12 +31,12 @@ providers:
 
 | Key | Type | Default | Range | Description |
 |-----|------|---------|-------|-------------|
-| `mode` | `str` | `"subprocess"` | subprocess, docker, remote | Provider mode. `container` and `podman` normalize to `docker`. |
+| `mode` | `str` | `"subprocess"` | subprocess, docker, remote | MCP Server mode. `container` and `podman` normalize to `docker`. |
 | `command` | `list[str]` | -- | -- | Command for subprocess mode (required for subprocess) |
 | `image` | `str` | -- | -- | Docker image for docker mode (required for docker) |
 | `endpoint` | `str` | -- | -- | HTTP endpoint for remote mode (required for remote) |
-| `env` | `dict[str, str]` | `{}` | -- | Environment variables passed to the provider process |
-| `idle_ttl_s` | `int` | `300` | 1--86400 | Seconds of inactivity before the provider is auto-stopped |
+| `env` | `dict[str, str]` | `{}` | -- | Environment variables passed to the MCP server process |
+| `idle_ttl_s` | `int` | `300` | 1--86400 | Seconds of inactivity before the MCP server is auto-stopped |
 | `health_check_interval_s` | `int` | `60` | 5--3600 | Interval between health checks in seconds |
 | `max_consecutive_failures` | `int` | `3` | 1--100 | Consecutive health check failures before marking degraded |
 | `volumes` | `list[str]` | `[]` | -- | Docker volume mounts (docker mode only) |
@@ -46,21 +46,21 @@ providers:
 | `read_only` | `bool` | `true` | -- | Read-only filesystem (docker mode only) |
 | `user` | `str` | -- | -- | Container user. `"current"` maps to host `uid:gid` |
 | `args` | `list[str]` | -- | -- | Container CMD override (docker mode only) |
-| `description` | `str` | -- | -- | Human-readable provider description |
+| `description` | `str` | -- | -- | Human-readable MCP server description |
 | `tools` | `list` or `dict` | -- | -- | Predefined tool schemas (list) or access policy (dict). See below. |
 | `auth` | `dict` | -- | -- | HTTP auth configuration (remote mode only) |
 | `tls` | `dict` | -- | -- | TLS configuration (remote mode only) |
 | `http` | `dict` | -- | -- | HTTP transport configuration (remote mode only) |
-| `max_concurrency` | `int` | -- | -- | Per-provider concurrency limit |
+| `max_concurrency` | `int` | -- | -- | Per-MCP server concurrency limit |
 
 ### `tools` dual format
 
 The `tools` key accepts two formats depending on intent.
 
-**List format** -- predefined tool schemas. The provider is not started to discover tools; schemas are served directly.
+**List format** -- predefined tool schemas. The MCP server is not started to discover tools; schemas are served directly.
 
 ```yaml
-providers:
+mcp_servers:
   static-math:
     mode: subprocess
     command: [python, -m, math_server]
@@ -77,7 +77,7 @@ providers:
 **Dict format** -- tool access policy using fnmatch glob patterns.
 
 ```yaml
-providers:
+mcp_servers:
   restricted:
     mode: subprocess
     command: [python, -m, full_server]
@@ -98,17 +98,17 @@ System-wide concurrency limits.
 ```yaml
 execution:
   max_concurrency: 50
-  default_provider_concurrency: 10
+  default_mcp_server_concurrency: 10
 ```
 
 | Key | Type | Default | Range | Description |
 |-----|------|---------|-------|-------------|
 | `max_concurrency` | `int` | `50` | 0 = unlimited | System-wide maximum concurrent tool invocations |
-| `default_provider_concurrency` | `int` | `10` | -- | Default per-provider concurrency limit |
+| `default_mcp_server_concurrency` | `int` | `10` | -- | Default per-MCP server concurrency limit |
 
 ## `discovery`
 
-Auto-discovery of MCP providers from external sources.
+Auto-discovery of MCP servers from external sources.
 
 ```yaml
 discovery:
@@ -120,7 +120,7 @@ discovery:
       mode: additive
     - type: filesystem
       mode: additive
-      path: /etc/mcp/providers
+      path: /etc/mcp/mcp_servers
       watch: true
 ```
 
@@ -128,10 +128,10 @@ discovery:
 |-----|------|---------|-------|-------------|
 | `enabled` | `bool` | -- | -- | Enable or disable discovery |
 | `refresh_interval_s` | `int` | -- | -- | Interval between discovery scans in seconds |
-| `auto_register` | `bool` | -- | -- | Automatically register discovered providers |
+| `auto_register` | `bool` | -- | -- | Automatically register discovered MCP servers |
 | `sources` | `list[dict]` | `[]` | -- | Discovery source configurations (see below) |
 | `security` | `dict` | -- | -- | Security constraints for discovery |
-| `lifecycle` | `dict` | -- | -- | Lifecycle management for discovered providers |
+| `lifecycle` | `dict` | -- | -- | Lifecycle management for discovered MCP servers |
 
 ### `sources[]` entry
 
@@ -144,7 +144,7 @@ discovery:
 | `namespaces` | `list[str]` | Kubernetes namespaces to scan |
 | `label_selector` | `str` | Kubernetes label selector |
 | `in_cluster` | `bool` | Use in-cluster Kubernetes config |
-| `group` | `str` | Target group for discovered providers |
+| `group` | `str` | Target group for discovered MCP servers |
 
 ### `security` sub-section
 
@@ -154,16 +154,16 @@ discovery:
 | `denied_namespaces` | `list[str]` | -- | Kubernetes namespace denylist |
 | `require_health_check` | `bool` | -- | Require health check before registration |
 | `require_mcp_schema` | `bool` | -- | Require valid MCP schema |
-| `max_providers_per_source` | `int` | -- | Maximum providers per source |
+| `max_mcp_servers_per_source` | `int` | -- | Maximum MCP servers per source |
 | `max_registration_rate` | `int` | -- | Registration rate limit |
 | `health_check_timeout_s` | `float` | -- | Health check timeout in seconds |
-| `quarantine_on_failure` | `bool` | -- | Quarantine providers that fail health checks |
+| `quarantine_on_failure` | `bool` | -- | Quarantine MCP servers that fail health checks |
 
 ### `lifecycle` sub-section
 
 | Key | Type | Default | Description |
 |-----|------|---------|-------------|
-| `default_ttl_s` | `int` | -- | Default TTL for discovered providers |
+| `default_ttl_s` | `int` | -- | Default TTL for discovered MCP servers |
 | `check_interval_s` | `int` | -- | Lifecycle check interval in seconds |
 | `drain_timeout_s` | `int` | -- | Drain timeout before removal |
 
@@ -390,16 +390,16 @@ batch:
 
 ## `groups`
 
-Provider groups are configured inside the `providers` section with `mode: group`. A group load-balances requests across multiple member providers.
+MCP Server groups are configured inside the `MCP servers` section with `mode: group`. A group load-balances requests across multiple member MCP servers.
 
 ```yaml
-providers:
+mcp_servers:
   llm-group:
     mode: group
     strategy: round_robin
     min_healthy: 1
     auto_start: true
-    description: LLM provider pool
+    description: LLM mcp_server pool
     health:
       unhealthy_threshold: 2
       healthy_threshold: 1
@@ -433,11 +433,11 @@ providers:
 | `circuit_breaker.failure_threshold` | `int` | `10` | >= 1 | Total group failures before the circuit opens |
 | `circuit_breaker.reset_timeout_s` | `float` | `60.0` | >= 1.0 | Seconds before the circuit auto-resets |
 | `tools` | `dict` | -- | -- | Group-level tool access policy (`allow_list`, `deny_list`) |
-| `members` | `list[dict]` | `[]` | -- | Member provider configurations |
+| `members` | `list[dict]` | `[]` | -- | Member MCP server configurations |
 
 ### Member configuration
 
-Each member entry supports all standard provider keys (`mode`, `command`, `image`, `endpoint`, `env`, etc.) plus:
+Each member entry supports all standard MCP server keys (`mode`, `command`, `image`, `endpoint`, `env`, etc.) plus:
 
 | Key | Type | Default | Range | Description |
 |-----|------|---------|-------|-------------|

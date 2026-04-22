@@ -1,6 +1,6 @@
-"""Discovered Provider Value Object.
+"""Discovered McpServer Value Object.
 
-Value object representing a discovered provider with fingerprinting
+Value object representing a discovered mcp_server with fingerprinting
 and TTL-based lifecycle tracking.
 """
 
@@ -12,14 +12,14 @@ from typing import Any
 
 
 @dataclass(frozen=True)
-class DiscoveredProvider:
-    """Value object representing a discovered provider.
+class DiscoveredMcpServer:
+    """Value object representing a discovered mcp_server.
 
-    This immutable value object captures all information about a provider
+    This immutable value object captures all information about a mcp_server
     discovered from external sources (Kubernetes, Docker, filesystem, etc.).
 
     Attributes:
-        name: Unique identifier for the provider
+        name: Unique identifier for the mcp_server
         source_type: Origin of discovery (kubernetes, docker, filesystem, entrypoint)
         mode: Connection mode (stdio, sse, http, subprocess)
         connection_info: Mode-specific connection details
@@ -49,11 +49,11 @@ class DiscoveredProvider:
         connection_info: dict[str, Any],
         metadata: dict[str, Any] | None = None,
         ttl_seconds: int = 90,
-    ) -> "DiscoveredProvider":
+    ) -> "DiscoveredMcpServer":
         """Factory method with automatic fingerprinting.
 
         Args:
-            name: Unique identifier for the provider
+            name: Unique identifier for the mcp_server
             source_type: Origin of discovery
             mode: Connection mode
             connection_info: Mode-specific connection details
@@ -61,7 +61,7 @@ class DiscoveredProvider:
             ttl_seconds: Time-to-live in seconds
 
         Returns:
-            New DiscoveredProvider instance with computed fingerprint
+            New DiscoveredMcpServer instance with computed fingerprint
         """
         metadata = metadata or {}
         fingerprint_data = json.dumps({"connection_info": connection_info, "metadata": metadata}, sort_keys=True)
@@ -81,7 +81,7 @@ class DiscoveredProvider:
         )
 
     def is_expired(self) -> bool:
-        """Check if provider has exceeded TTL.
+        """Check if mcp_server has exceeded TTL.
 
         Returns:
             True if time since last_seen exceeds ttl_seconds
@@ -94,16 +94,16 @@ class DiscoveredProvider:
         elapsed = (now - last_seen).total_seconds()
         return elapsed > self.ttl_seconds
 
-    def with_updated_seen_time(self) -> "DiscoveredProvider":
+    def with_updated_seen_time(self) -> "DiscoveredMcpServer":
         """Return new instance with updated last_seen_at.
 
         Since this is an immutable value object, we create a new instance
         rather than mutating in place.
 
         Returns:
-            New DiscoveredProvider with current timestamp as last_seen_at
+            New DiscoveredMcpServer with current timestamp as last_seen_at
         """
-        return DiscoveredProvider(
+        return DiscoveredMcpServer(
             name=self.name,
             source_type=self.source_type,
             mode=self.mode,
@@ -115,11 +115,11 @@ class DiscoveredProvider:
             ttl_seconds=self.ttl_seconds,
         )
 
-    def has_changed(self, other: "DiscoveredProvider") -> bool:
+    def has_changed(self, other: "DiscoveredMcpServer") -> bool:
         """Check if configuration has changed by comparing fingerprints.
 
         Args:
-            other: Another DiscoveredProvider to compare
+            other: Another DiscoveredMcpServer to compare
 
         Returns:
             True if fingerprints differ (configuration changed)
@@ -130,7 +130,7 @@ class DiscoveredProvider:
         """Convert to dictionary for serialization.
 
         Returns:
-            Dictionary representation of the provider
+            Dictionary representation of the mcp_server
         """
         return {
             "name": self.name,
@@ -146,14 +146,14 @@ class DiscoveredProvider:
         }
 
     @classmethod
-    def from_dict(cls, data: dict[str, Any]) -> "DiscoveredProvider":
+    def from_dict(cls, data: dict[str, Any]) -> "DiscoveredMcpServer":
         """Create from dictionary representation.
 
         Args:
-            data: Dictionary with provider data
+            data: Dictionary with mcp_server data
 
         Returns:
-            DiscoveredProvider instance
+            DiscoveredMcpServer instance
         """
         discovered_at = data.get("discovered_at")
         last_seen_at = data.get("last_seen_at")
@@ -176,10 +176,14 @@ class DiscoveredProvider:
         )
 
     def __str__(self) -> str:
-        return f"DiscoveredProvider({self.name}, source={self.source_type}, mode={self.mode})"
+        return f"DiscoveredMcpServer({self.name}, source={self.source_type}, mode={self.mode})"
 
     def __repr__(self) -> str:
         return (
-            f"DiscoveredProvider(name={self.name!r}, source_type={self.source_type!r}, "
+            f"DiscoveredMcpServer(name={self.name!r}, source_type={self.source_type!r}, "
             f"mode={self.mode!r}, fingerprint={self.fingerprint!r})"
         )
+
+
+# legacy aliases
+DiscoveredProvider = DiscoveredMcpServer

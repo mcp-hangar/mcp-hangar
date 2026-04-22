@@ -2,8 +2,8 @@
 
 from unittest.mock import MagicMock
 
-from mcp_hangar.application.commands import Command, StartProviderCommand, StopProviderCommand
-from mcp_hangar.domain.events import DomainEvent, ProviderDegraded, ProviderStarted
+from mcp_hangar.application.commands import Command, StartMcpServerCommand, StopMcpServerCommand
+from mcp_hangar.domain.events import DomainEvent, McpServerDegraded, McpServerStarted
 from mcp_hangar.infrastructure.command_bus import CommandBus, CommandHandler
 from mcp_hangar.infrastructure.event_bus import EventBus
 from mcp_hangar.infrastructure.persistence.saga_state_store import SagaStateStore
@@ -32,9 +32,9 @@ class TestSagaContext:
 
     def test_context_with_data(self):
         """Test creating context with data."""
-        context = SagaContext(data={"provider_id": "p1"})
+        context = SagaContext(data={"mcp_server_id": "p1"})
 
-        assert context.data["provider_id"] == "p1"
+        assert context.data["mcp_server_id"] == "p1"
 
     def test_context_to_dict(self):
         """Test context to dictionary conversion."""
@@ -52,7 +52,7 @@ class TestSagaStep:
 
     def test_step_creation(self):
         """Test creating saga step."""
-        step = SagaStep(name="start_provider", command=StartProviderCommand(provider_id="p1"))
+        step = SagaStep(name="start_provider", command=StartMcpServerCommand(mcp_server_id="p1"))
 
         assert step.name == "start_provider"
         assert not step.completed
@@ -62,8 +62,8 @@ class TestSagaStep:
         """Test step with compensation command."""
         step = SagaStep(
             name="start_provider",
-            command=StartProviderCommand(provider_id="p1"),
-            compensation_command=StopProviderCommand(provider_id="p1", reason="rollback"),
+            command=StartMcpServerCommand(mcp_server_id="p1"),
+            compensation_command=StopMcpServerCommand(mcp_server_id="p1", reason="rollback"),
         )
 
         assert step.compensation_command is not None
@@ -77,11 +77,11 @@ class SimpleSaga(Saga):
         return "simple_saga"
 
     def configure(self, context: SagaContext) -> None:
-        provider_id = context.data.get("provider_id", "default")
+        mcp_server_id = context.data.get("mcp_server_id", "default")
         self.add_step(
             name="start",
-            command=StartProviderCommand(provider_id=provider_id),
-            compensation_command=StopProviderCommand(provider_id=provider_id, reason="rollback"),
+            command=StartMcpServerCommand(mcp_server_id=mcp_server_id),
+            compensation_command=StopMcpServerCommand(mcp_server_id=mcp_server_id, reason="rollback"),
         )
 
 
@@ -95,13 +95,13 @@ class FailingSaga(Saga):
     def configure(self, context: SagaContext) -> None:
         self.add_step(
             name="step1",
-            command=StartProviderCommand(provider_id="p1"),
-            compensation_command=StopProviderCommand(provider_id="p1", reason="rollback"),
+            command=StartMcpServerCommand(mcp_server_id="p1"),
+            compensation_command=StopMcpServerCommand(mcp_server_id="p1", reason="rollback"),
         )
         self.add_step(
             name="step2",
-            command=StartProviderCommand(provider_id="fail"),  # Will fail
-            compensation_command=StopProviderCommand(provider_id="fail", reason="rollback"),
+            command=StartMcpServerCommand(mcp_server_id="fail"),  # Will fail
+            compensation_command=StopMcpServerCommand(mcp_server_id="fail", reason="rollback"),
         )
 
 
@@ -117,20 +117,24 @@ class SimpleEventSaga(EventTriggeredSaga):
         return "simple_event_saga"
 
     @property
-    def handled_events(self) -> list:
-        return [ProviderDegraded]
+    def handled_events(self) -> list[type[DomainEvent]]:
+        return [McpServerDegraded]
 
     def handle(self, event: DomainEvent) -> list[Command]:
         self.handled_events_list.append(event)
-        if isinstance(event, ProviderDegraded):
-            return [StartProviderCommand(provider_id=event.provider_id)]
+        if isinstance(event, McpServerDegraded):
+            return [StartMcpServerCommand(mcp_server_id=event.mcp_server_id)]
         return []
 
-    def to_dict(self) -> dict:
+    def to_dict(self) -> dict[str, int]:
         return {"handled_count": len(self.handled_events_list)}
 
-    def from_dict(self, data: dict) -> None:
+    def from_dict(self, data: dict[str, object]) -> None:
         pass
+
+
+def _set_event_global_position(event: McpServerDegraded, position: int) -> None:
+    object.__setattr__(event, "global_position", position)
 
 
 class TestSaga:
@@ -149,11 +153,11 @@ class TestSaga:
     def test_saga_context(self):
         """Test saga context is set."""
         saga = SimpleSaga()
-        context = SagaContext(data={"provider_id": "test"})
+        context = SagaContext(data={"mcp_server_id": "test"})
         saga._context = context
 
         assert saga.context is not None
-        assert saga.context.data["provider_id"] == "test"
+        assert saga.context.data["mcp_server_id"] == "test"
 
 
 class TestEventTriggeredSaga:
@@ -163,8 +167,8 @@ class TestEventTriggeredSaga:
         """Test should_handle method."""
         saga = SimpleEventSaga()
 
-        degraded = ProviderDegraded("p1", 3, 5, "error")
-        started = ProviderStarted("p1", "subprocess", 5, 100.0)
+        degraded = McpServerDegraded("p1", 3, 5, "error")
+        started = McpServerStarted("p1", "subprocess", 5, 100.0)
 
         assert saga.should_handle(degraded)
         assert not saga.should_handle(started)
@@ -173,11 +177,11 @@ class TestEventTriggeredSaga:
         """Test handle returns commands."""
         saga = SimpleEventSaga()
 
-        event = ProviderDegraded("p1", 3, 5, "error")
+        event = McpServerDegraded("p1", 3, 5, "error")
         commands = saga.handle(event)
 
         assert len(commands) == 1
-        assert isinstance(commands[0], StartProviderCommand)
+        assert isinstance(commands[0], StartMcpServerCommand)
 
 
 class TestSagaManager:
@@ -227,13 +231,13 @@ class TestSagaManager:
             def handle(self, command):
                 return {"status": "ok"}
 
-        command_bus.register(StartProviderCommand, SuccessHandler())
-        command_bus.register(StopProviderCommand, SuccessHandler())
+        command_bus.register(StartMcpServerCommand, SuccessHandler())
+        command_bus.register(StopMcpServerCommand, SuccessHandler())
 
         manager = SagaManager(command_bus=command_bus, event_bus=event_bus)
 
         saga = SimpleSaga()
-        context = manager.start_saga(saga, {"provider_id": "test"})
+        context = manager.start_saga(saga, {"mcp_server_id": "test"})
 
         assert context.state == SagaState.COMPLETED
 
@@ -247,12 +251,12 @@ class TestSagaManager:
         class TrackingHandler(CommandHandler):
             def handle(self, command):
                 call_log.append(command)
-                if command.provider_id == "fail":
+                if command.mcp_server_id == "fail":
                     raise ValueError("Intentional failure")
                 return {"status": "ok"}
 
-        command_bus.register(StartProviderCommand, TrackingHandler())
-        command_bus.register(StopProviderCommand, TrackingHandler())
+        command_bus.register(StartMcpServerCommand, TrackingHandler())
+        command_bus.register(StopMcpServerCommand, TrackingHandler())
 
         manager = SagaManager(command_bus=command_bus, event_bus=event_bus)
 
@@ -264,7 +268,7 @@ class TestSagaManager:
         assert context.error is not None
 
         # First step should have been compensated
-        assert any(isinstance(c, StopProviderCommand) and c.provider_id == "p1" for c in call_log)
+        assert any(isinstance(c, StopMcpServerCommand) and c.mcp_server_id == "p1" for c in call_log)
 
     def test_event_triggers_saga(self):
         """Test that events trigger saga handlers."""
@@ -278,7 +282,7 @@ class TestSagaManager:
                 commands_sent.append(command)
                 return {"status": "ok"}
 
-        command_bus.register(StartProviderCommand, CaptureHandler())
+        command_bus.register(StartMcpServerCommand, CaptureHandler())
 
         manager = SagaManager(command_bus=command_bus, event_bus=event_bus)
 
@@ -286,11 +290,11 @@ class TestSagaManager:
         manager.register_event_saga(saga)
 
         # Publish event
-        event = ProviderDegraded("p1", 3, 5, "error")
+        event = McpServerDegraded("p1", 3, 5, "error")
         event_bus.publish(event)
 
         assert len(commands_sent) == 1
-        assert commands_sent[0].provider_id == "p1"
+        assert commands_sent[0].mcp_server_id == "p1"
 
     def test_get_active_sagas(self):
         """Test getting active sagas."""
@@ -310,14 +314,14 @@ class TestSagaManager:
             def handle(self, command):
                 return {"status": "ok"}
 
-        command_bus.register(StartProviderCommand, SuccessHandler())
-        command_bus.register(StopProviderCommand, SuccessHandler())
+        command_bus.register(StartMcpServerCommand, SuccessHandler())
+        command_bus.register(StopMcpServerCommand, SuccessHandler())
 
         manager = SagaManager(command_bus=command_bus, event_bus=event_bus)
 
         # Run a saga
         saga = SimpleSaga()
-        manager.start_saga(saga, {"provider_id": "test"})
+        manager.start_saga(saga, {"mcp_server_id": "test"})
 
         history = manager.get_saga_history()
 
@@ -350,7 +354,7 @@ class TestSagaManagerCheckpoint:
             def handle(self, command):
                 return {"status": "ok"}
 
-        command_bus.register(StartProviderCommand, SuccessHandler())
+        command_bus.register(StartMcpServerCommand, SuccessHandler())
 
         manager = SagaManager(
             command_bus=command_bus,
@@ -367,7 +371,7 @@ class TestSagaManagerCheckpoint:
         saga = SimpleEventSaga()
         manager.register_event_saga(saga)
 
-        event = ProviderDegraded("p1", 3, 5, "error")
+        event = McpServerDegraded("p1", 3, 5, "error")
         event_bus.publish(event)
 
         mock_store.checkpoint.assert_called_once()
@@ -384,7 +388,7 @@ class TestSagaManagerCheckpoint:
         saga = SimpleEventSaga()
         manager.register_event_saga(saga)
 
-        event = ProviderDegraded("p1", 3, 5, "error")
+        event = McpServerDegraded("p1", 3, 5, "error")
         event_bus.publish(event)
 
         # No checkpoint called -- saga handles the event but no store to write to
@@ -411,7 +415,7 @@ class TestSagaManagerCheckpoint:
         saga = SimpleEventSaga()
         manager.register_event_saga(saga)
 
-        event = ProviderDegraded("p1", 3, 5, "error")
+        event = McpServerDegraded("p1", 3, 5, "error")
         event_bus.publish(event)
 
         assert len(lock_held_during_checkpoint) == 1
@@ -436,7 +440,7 @@ class TestSagaManagerCheckpoint:
 
         command_bus.send = tracking_send
 
-        event = ProviderDegraded("p1", 3, 5, "error")
+        event = McpServerDegraded("p1", 3, 5, "error")
         # Should not raise even though checkpoint fails
         event_bus.publish(event)
 
@@ -444,7 +448,7 @@ class TestSagaManagerCheckpoint:
         assert len(saga.handled_events_list) == 1
         # Command was still sent despite checkpoint failure
         assert len(commands_sent) == 1
-        assert commands_sent[0].provider_id == "p1"
+        assert commands_sent[0].mcp_server_id == "p1"
 
     def test_checkpoint_passes_correct_saga_state_and_position(self):
         """SagaManager._handle_event() correctly passes saga.to_dict() and event position to checkpoint."""
@@ -455,9 +459,9 @@ class TestSagaManagerCheckpoint:
         saga = SimpleEventSaga()
         manager.register_event_saga(saga)
 
-        event = ProviderDegraded("p1", 3, 5, "error")
+        event = McpServerDegraded("p1", 3, 5, "error")
         # Set a global_position to verify it's passed through
-        event.global_position = 42
+        _set_event_global_position(event, 42)
         event_bus.publish(event)
 
         mock_store.checkpoint.assert_called_once_with(
@@ -483,7 +487,7 @@ class TestSagaManagerIdempotency:
             def handle(self, command):
                 return {"status": "ok"}
 
-        command_bus.register(StartProviderCommand, SuccessHandler())
+        command_bus.register(StartMcpServerCommand, SuccessHandler())
 
         manager = SagaManager(
             command_bus=command_bus,
@@ -501,8 +505,8 @@ class TestSagaManagerIdempotency:
         saga = SimpleEventSaga()
         manager.register_event_saga(saga)
 
-        event = ProviderDegraded("p1", 3, 5, "error")
-        event.global_position = 42
+        event = McpServerDegraded("p1", 3, 5, "error")
+        _set_event_global_position(event, 42)
         event_bus.publish(event)
 
         # is_processed was called
@@ -519,8 +523,8 @@ class TestSagaManagerIdempotency:
         saga = SimpleEventSaga()
         manager.register_event_saga(saga)
 
-        event = ProviderDegraded("p1", 3, 5, "error")
-        event.global_position = 42
+        event = McpServerDegraded("p1", 3, 5, "error")
+        _set_event_global_position(event, 42)
         event_bus.publish(event)
 
         # saga.handle() was called
@@ -536,7 +540,7 @@ class TestSagaManagerIdempotency:
         saga = SimpleEventSaga()
         manager.register_event_saga(saga)
 
-        event = ProviderDegraded("p1", 3, 5, "error")
+        event = McpServerDegraded("p1", 3, 5, "error")
         # No global_position attribute set
         event_bus.publish(event)
 
@@ -552,8 +556,8 @@ class TestSagaManagerIdempotency:
         saga = SimpleEventSaga()
         manager.register_event_saga(saga)
 
-        event = ProviderDegraded("p1", 3, 5, "error")
-        event.global_position = 42
+        event = McpServerDegraded("p1", 3, 5, "error")
+        _set_event_global_position(event, 42)
         event_bus.publish(event)
 
         # Event was processed normally despite having global_position
@@ -568,8 +572,8 @@ class TestSagaManagerIdempotency:
         saga = SimpleEventSaga()
         manager.register_event_saga(saga)
 
-        event = ProviderDegraded("p1", 3, 5, "error")
-        event.global_position = 99
+        event = McpServerDegraded("p1", 3, 5, "error")
+        _set_event_global_position(event, 99)
         event_bus.publish(event)
 
         mock_store.mark_processed.assert_called_once_with("simple_event_saga", 99)
@@ -593,8 +597,8 @@ class TestSagaManagerIdempotency:
         saga = SimpleEventSaga()
         manager.register_event_saga(saga)
 
-        event = ProviderDegraded("p1", 3, 5, "error")
-        event.global_position = 42
+        event = McpServerDegraded("p1", 3, 5, "error")
+        _set_event_global_position(event, 42)
         event_bus.publish(event)
 
         # Event was handled despite mark_processed failure

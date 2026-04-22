@@ -11,7 +11,7 @@ def _make_request(**overrides) -> ApprovalRequest:
     now = datetime.now(timezone.utc)
     defaults = dict(
         approval_id="test-id-001",
-        provider_id="notion",
+        mcp_server_id="notion",
         tool_name="update_page",
         arguments={"page_id": "abc"},
         arguments_hash="sha256:abc123",

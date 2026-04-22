@@ -1,17 +1,17 @@
-"""Factory function for provider launchers."""
+"""Factory function for mcp_server launchers."""
 
-from .base import ProviderLauncher
+from .base import McpServerLauncher
 from .container import ContainerLauncher
 from .http import HttpLauncher
 from .subprocess import SubprocessLauncher
 
 
-def get_launcher(mode: str) -> ProviderLauncher:
+def get_launcher(mode: str) -> McpServerLauncher:
     """
     Factory function to get the appropriate launcher for a mode.
 
     Args:
-        mode: Provider mode (subprocess, docker, container, podman, remote)
+        mode: McpServer mode (subprocess, docker, container, podman, remote)
 
     Returns:
         Appropriate launcher instance

@@ -228,7 +228,7 @@ def _replay_tap_policies(tap_store: Any) -> None:
         )
         try:
             if scope == "provider":
-                resolver.set_provider_policy(target_id, policy)
+                resolver.set_mcp_server_policy(target_id, policy)
             elif scope == "group":
                 resolver.set_group_policy(target_id, policy)
             elif scope == "member":

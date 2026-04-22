@@ -9,7 +9,7 @@ from typing import Any
 
 
 class IConfigLoader(ABC):
-    """Interface for loading and applying provider configuration.
+    """Interface for loading and applying mcp_server configuration.
 
     Application layer uses this port; server.config provides the implementation.
     """
@@ -29,11 +29,11 @@ class IConfigLoader(ABC):
         """
 
     @abstractmethod
-    def apply_providers(self, providers_config: dict[str, Any]) -> None:
-        """Apply a providers configuration section to the running system.
+    def apply_mcp_servers(self, mcp_servers_config: dict[str, Any]) -> None:
+        """Apply a mcp_servers configuration section to the running system.
 
-        Registers new providers, updates existing ones, etc.
+        Registers new mcp_servers, updates existing ones, etc.
 
         Args:
-            providers_config: Mapping of provider_id -> provider spec dict.
+            mcp_servers_config: Mapping of mcp_server_id -> mcp_server spec dict.
         """

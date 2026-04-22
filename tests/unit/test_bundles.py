@@ -75,7 +75,7 @@ class TestBundle:
             name="test",
             display_name="Test",
             description="Test bundle",
-            providers=["a", "b"],
+            mcp_servers=["a", "b"],
         )
 
         with pytest.raises(Exception):  # FrozenInstanceError
@@ -87,7 +87,7 @@ class TestBundle:
             name="advanced",
             display_name="Advanced",
             description="Advanced bundle",
-            providers=["extra"],
+            mcp_servers=["extra"],
             includes=["starter"],
         )
 
@@ -158,9 +158,9 @@ class TestBundleResolver:
         resolver = BundleResolver()
         result = resolver.resolve(bundles=["starter"])
 
-        assert "filesystem" in result.providers
-        assert "fetch" in result.providers
-        assert "memory" in result.providers
+        assert "filesystem" in result.mcp_servers
+        assert "fetch" in result.mcp_servers
+        assert "memory" in result.mcp_servers
         assert len(result.warnings) == 0
 
     def test_resolve_bundle_with_includes(self):
@@ -169,12 +169,12 @@ class TestBundleResolver:
         result = resolver.resolve(bundles=["developer"])
 
         # Should have starter providers
-        assert "filesystem" in result.providers
-        assert "fetch" in result.providers
-        assert "memory" in result.providers
+        assert "filesystem" in result.mcp_servers
+        assert "fetch" in result.mcp_servers
+        assert "memory" in result.mcp_servers
         # Plus developer providers
-        assert "github" in result.providers
-        assert "git" in result.providers
+        assert "github" in result.mcp_servers
+        assert "git" in result.mcp_servers
 
     def test_resolve_multiple_bundles_deduplicates(self):
         """Resolving multiple bundles deduplicates providers."""
@@ -182,24 +182,24 @@ class TestBundleResolver:
         result = resolver.resolve(bundles=["starter", "developer"])
 
         # Should not have duplicates
-        assert len(result.providers) == len(set(result.providers))
+        assert len(result.mcp_servers) == len(set(result.mcp_servers))
 
     def test_resolve_with_explicit_providers(self):
         """Can add explicit providers to bundle."""
         resolver = BundleResolver()
-        result = resolver.resolve(bundles=["starter"], providers=["sqlite"])
+        result = resolver.resolve(bundles=["starter"], mcp_servers=["sqlite"])
 
-        assert "sqlite" in result.providers
-        assert "filesystem" in result.providers
+        assert "sqlite" in result.mcp_servers
+        assert "filesystem" in result.mcp_servers
 
     def test_resolve_with_without_exclusions(self):
         """Can exclude providers from bundles."""
         resolver = BundleResolver()
         result = resolver.resolve(bundles=["starter"], without=["memory"])
 
-        assert "filesystem" in result.providers
-        assert "fetch" in result.providers
-        assert "memory" not in result.providers
+        assert "filesystem" in result.mcp_servers
+        assert "fetch" in result.mcp_servers
+        assert "memory" not in result.mcp_servers
 
     def test_resolve_unknown_bundle_warning(self):
         """Resolving unknown bundle adds warning."""
@@ -212,7 +212,7 @@ class TestBundleResolver:
     def test_resolve_unknown_provider_warning(self):
         """Resolving unknown provider adds warning."""
         resolver = BundleResolver()
-        result = resolver.resolve(providers=["nonexistent"])
+        result = resolver.resolve(mcp_servers=["nonexistent"])
 
         assert len(result.warnings) > 0
         assert any("nonexistent" in w.lower() for w in result.warnings)
@@ -222,12 +222,12 @@ class TestBundleResolver:
         resolver = BundleResolver()
         result = resolver.resolve()
 
-        assert len(result.providers) == 0
+        assert len(result.mcp_servers) == 0
 
-    def test_get_bundle_providers(self):
-        """get_bundle_providers returns expanded provider list."""
+    def test_get_bundle_mcp_servers(self):
+        """get_bundle_mcp_servers returns expanded provider list."""
         resolver = BundleResolver()
-        providers = resolver.get_bundle_providers("developer")
+        providers = resolver.get_bundle_mcp_servers("developer")
 
         assert "filesystem" in providers  # From starter
         assert "github" in providers  # Direct
@@ -241,16 +241,16 @@ class TestResolveBundlesConvenience:
         result = resolve_bundles(bundles=["starter"])
 
         assert isinstance(result, ResolutionResult)
-        assert "filesystem" in result.providers
+        assert "filesystem" in result.mcp_servers
 
     def test_resolve_bundles_combined(self):
         """resolve_bundles handles all arguments."""
         result = resolve_bundles(
             bundles=["starter"],
-            providers=["sqlite"],
+            mcp_servers=["sqlite"],
             without=["memory"],
         )
 
-        assert "filesystem" in result.providers
-        assert "sqlite" in result.providers
-        assert "memory" not in result.providers
+        assert "filesystem" in result.mcp_servers
+        assert "sqlite" in result.mcp_servers
+        assert "memory" not in result.mcp_servers

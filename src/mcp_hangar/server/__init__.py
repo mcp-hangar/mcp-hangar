@@ -1,6 +1,6 @@
 """MCP Hangar Server.
 
-Production-grade MCP provider registry with lazy loading, health monitoring,
+Production-grade MCP mcp_server registry with lazy loading, health monitoring,
 auto-discovery, and container support.
 
 Usage:
@@ -69,9 +69,9 @@ def cli_main():
 
     This is the recommended entry point that provides:
     - mcp-hangar init: Interactive setup wizard
-    - mcp-hangar status: Provider health dashboard
-    - mcp-hangar add: Add providers from registry
-    - mcp-hangar remove: Remove providers
+    - mcp-hangar status: McpServer health dashboard
+    - mcp-hangar add: Add mcp_servers from registry
+    - mcp-hangar remove: Remove mcp_servers
     - mcp-hangar serve: Start the MCP server (default)
     """
     from .cli import cli_main as _cli_main

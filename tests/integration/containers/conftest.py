@@ -296,7 +296,7 @@ def math_provider_container() -> Generator[dict[str, Any], None, None]:
 
     container = MCPProviderContainer(
         image="localhost/mcp-math:latest",
-        provider_name="math",
+        mcp_server_name="math",
         port=8080,
     )
 
@@ -321,7 +321,7 @@ def sqlite_provider_container() -> Generator[dict[str, Any], None, None]:
 
     container = MCPProviderContainer(
         image="localhost/mcp-sqlite:latest",
-        provider_name="sqlite",
+        mcp_server_name="sqlite",
         port=8080,
     )
     container.with_volume_mapping("/tmp/mcp-test-data", "/data", "rw")

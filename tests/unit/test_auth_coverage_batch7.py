@@ -537,7 +537,7 @@ class TestRolesEnterpriseAvailable:
     def test_get_permission_returns_permission(self) -> None:
         from mcp_hangar.domain.security.roles import get_permission
 
-        perm = get_permission("provider:read")
+        perm = get_permission("mcp_server:read")
         assert perm is not None
         assert perm.resource_type == "provider"
         assert perm.action == "read"
@@ -559,7 +559,7 @@ class TestRolesEnterpriseAvailable:
 
         keys = list_permissions()
         assert isinstance(keys, list)
-        assert "provider:read" in keys
+        assert "mcp_server:read" in keys
 
     def test_role_constants_are_not_none(self) -> None:
         from mcp_hangar.domain.security.roles import (

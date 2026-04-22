@@ -23,22 +23,20 @@ def _make_ws() -> MagicMock:
     return ws
 
 
-def _make_event(event_type: str, provider_id: str | None = None) -> MagicMock:
+def _make_event(event_type: str, mcp_server_id: str | None = None) -> MagicMock:
     event = MagicMock()
     payload = {"event_type": event_type}
-    if provider_id is not None:
-        payload["provider_id"] = provider_id
+    if mcp_server_id is not None:
+        payload["mcp_server_id"] = mcp_server_id
     event.to_dict.return_value = payload
     return event
 
 
 def test_parse_subscription_filters_accepts_subscribe_messages() -> None:
     """Subscribe control messages should parse into normal filter config."""
-    result = parse_subscription_filters(
-        {"type": "subscribe", "event_types": ["ProviderStarted"], "provider_ids": ["math"]}
-    )
+    result = parse_subscription_filters({"type": "subscribe", "event_types": ["McpServerStarted"], "mcp_server_ids": ["math"]})
 
-    assert result == {"event_types": ["ProviderStarted"], "provider_ids": ["math"]}
+    assert result == {"event_types": ["McpServerStarted"], "mcp_server_ids": ["math"]}
 
 
 def test_ws_events_negotiates_subscription_before_streaming() -> None:
@@ -62,7 +60,7 @@ def test_ws_events_negotiates_subscription_before_streaming() -> None:
         ws = _make_ws()
         ws.receive_json = AsyncMock(
             side_effect=[
-                {"type": "subscribe", "event_types": ["ProviderStarted"], "provider_ids": ["math"]},
+                {"type": "subscribe", "event_types": ["McpServerStarted"], "mcp_server_ids": ["math"]},
                 WebSocketDisconnect(),
             ]
         )
@@ -75,14 +73,14 @@ def test_ws_events_negotiates_subscription_before_streaming() -> None:
                     await ws_events_endpoint(ws)
 
         ws.send_json.assert_awaited_once_with(
-            {"type": "subscribed", "event_types": ["ProviderStarted"], "provider_ids": ["math"]}
+            {"type": "subscribed", "event_types": ["McpServerStarted"], "mcp_server_ids": ["math"]}
         )
 
     asyncio.run(run())
 
     handler = captured_handler["fn"]
-    matching_event = _make_event("ProviderStarted", "math")
-    non_matching_event = _make_event("ProviderStopped", "math")
+    matching_event = _make_event("McpServerStarted", "math")
+    non_matching_event = _make_event("McpServerStopped", "math")
 
     handler(matching_event)
     handler(non_matching_event)

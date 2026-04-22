@@ -41,7 +41,7 @@ class PolicyPushBody(TypedDict, total=False):
 
 
 class PolicyItem(TypedDict, total=False):
-    provider_id: str
+    mcp_server_id: str
     action: str
     tool_name: str
     approval_timeout_seconds: int
@@ -109,10 +109,10 @@ async def push_policy(request: Request) -> HangarJSONResponse:
         {
             "version": 1,
             "tool_policies": [
-                {"provider_id": "*", "tool_name": "power", "action": "require_approval",
+                {"mcp_server_id": "*", "tool_name": "power", "action": "require_approval",
                  "approval_timeout_seconds": 300},
-                {"provider_id": "*", "tool_name": "divide", "action": "audit"},
-                {"provider_id": "*", "tool_name": "*", "action": "allow"}
+                {"mcp_server_id": "*", "tool_name": "divide", "action": "audit"},
+                {"mcp_server_id": "*", "tool_name": "*", "action": "allow"}
             ]
         }
     """
@@ -133,28 +133,28 @@ async def push_policy(request: Request) -> HangarJSONResponse:
 
     resolver = get_tool_access_resolver()
 
-    # Group policies by provider_id
-    # provider_id="*" means global (applies to all providers)
-    per_provider: dict[str, PolicyEntry] = {}  # provider_id -> {allow, deny, approval, timeout}
+    # Group policies by mcp_server_id
+    # mcp_server_id="*" means global (applies to all mcp_servers)
+    per_mcp_server: dict[str, PolicyEntry] = {}  # mcp_server_id -> {allow, deny, approval, timeout}
 
     for tp in tool_policies:
         if not isinstance(tp, dict):
             continue
         item = cast(PolicyItem, cast(object, tp))
-        pid = item.get("provider_id", "*")
+        pid = item.get("mcp_server_id", "*")
         action = item.get("action", "allow")
         tool_name = item.get("tool_name", "*")
         timeout = item.get("approval_timeout_seconds", 300)
 
-        if pid not in per_provider:
-            per_provider[pid] = {
+        if pid not in per_mcp_server:
+            per_mcp_server[pid] = {
                 "allow": [],
                 "deny": [],
                 "approval": [],
                 "timeout": timeout,
             }
 
-        entry = per_provider[pid]
+        entry = per_mcp_server[pid]
         if action == _ACTION_DENY:
             entry["deny"].append(tool_name)
         elif action == _ACTION_REQUIRE_APPROVAL:
@@ -168,7 +168,7 @@ async def push_policy(request: Request) -> HangarJSONResponse:
 
     # Apply to resolver
     applied_count = 0
-    for pid, entry in per_provider.items():
+    for pid, entry in per_mcp_server.items():
         policy = ToolAccessPolicy(
             allow_list=tuple(entry["allow"]) if entry["allow"] else (),
             deny_list=tuple(entry["deny"]) if entry["deny"] else (),
@@ -178,19 +178,19 @@ async def push_policy(request: Request) -> HangarJSONResponse:
         )
 
         if pid == "*":
-            # Global policy: apply to all known providers
+            # Global policy: apply to all known mcp_servers
             # Also set a special "_global" key for the executor to check
-            resolver.set_provider_policy("_global", policy)
+            resolver.set_mcp_server_policy("_global", policy)
             applied_count += 1
         else:
-            resolver.set_provider_policy(pid, policy)
+            resolver.set_mcp_server_policy(pid, policy)
             applied_count += 1
 
     logger.info(
         "agent_policy_applied",
         version=version,
         tool_policies_count=len(tool_policies),
-        providers_updated=applied_count,
+        mcp_servers_updated=applied_count,
     )
 
     return HangarJSONResponse(

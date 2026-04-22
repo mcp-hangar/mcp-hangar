@@ -20,25 +20,19 @@ class TestProviderTestResult:
 
     def test_success_result(self):
         """Should create success result."""
-        result = ProviderTestResult(
-            provider_id="test",
-            success=True,
-            state="ready",
-            duration_ms=100.0,
-        )
+        result = ProviderTestResult(mcp_server_id="test", success=True,
+        state="ready",
+        duration_ms=100.0,)
         assert result.success is True
         assert result.error is None
 
     def test_failure_result(self):
         """Should create failure result with error."""
-        result = ProviderTestResult(
-            provider_id="test",
-            success=False,
-            state="dead",
-            duration_ms=50.0,
-            error="Connection refused",
-            suggestion="Check endpoint",
-        )
+        result = ProviderTestResult(mcp_server_id="test", success=False,
+        state="dead",
+        duration_ms=50.0,
+        error="Connection refused",
+        suggestion="Check endpoint",)
         assert result.success is False
         assert result.error == "Connection refused"
         assert result.suggestion == "Check endpoint"
@@ -119,46 +113,34 @@ class TestGetSuggestionForError:
 class TestTestSingleProvider:
     """Tests for _test_single_provider function."""
 
-    @patch("mcp_hangar.server.cli.services.smoke_test.Provider")
+    @patch("mcp_hangar.server.cli.services.smoke_test.McpServer")
     def test_successful_start(self, mock_provider_class):
         """Should return success when provider starts successfully."""
+        from mcp_hangar.domain.value_objects import McpServerState
+
         mock_provider = MagicMock()
-        mock_provider.state = MagicMock()
-        mock_provider.state.__eq__ = lambda self, other: True  # Always READY
+        mock_provider.state = McpServerState.READY
         mock_provider_class.return_value = mock_provider
 
-        # Patch ProviderState.READY
-        with patch("mcp_hangar.server.cli.services.smoke_test.ProviderState") as mock_state:
-            mock_state.READY = "ready"
-            mock_provider.state = mock_state.READY
-
-            result = _test_single_provider(
-                provider_id="test",
-                provider_config={"mode": "subprocess", "command": ["echo", "hi"]},
-                timeout_s=5.0,
-            )
+        result = _test_single_provider(mcp_server_id="test", mcp_server_config={"mode": "subprocess", "command": ["echo", "hi"]},
+        timeout_s=5.0,)
 
         assert result.success is True
         assert result.state == "ready"
 
-    @patch("mcp_hangar.server.cli.services.smoke_test.Provider")
+    @patch("mcp_hangar.server.cli.services.smoke_test.McpServer")
     def test_start_failure(self, mock_provider_class):
         """Should return failure when provider fails to start."""
-        from mcp_hangar.domain.exceptions import ProviderStartError
+        from mcp_hangar.domain.exceptions import McpServerStartError
 
-        mock_provider_class.side_effect = ProviderStartError(
-            provider_id="test",
-            reason="Failed to connect",
-        )
+        mock_provider_class.side_effect = McpServerStartError(mcp_server_id="test", reason="Failed to connect",)
 
-        result = _test_single_provider(
-            provider_id="test",
-            provider_config={"mode": "subprocess", "command": ["invalid"]},
-            timeout_s=5.0,
-        )
+        result = _test_single_provider(mcp_server_id="test", mcp_server_config={"mode": "subprocess", "command": ["invalid"]},
+        timeout_s=5.0,)
 
         assert result.success is False
         assert result.state == "dead"
+        assert result.error is not None
         assert "Failed to connect" in result.error
 
 
@@ -168,7 +150,7 @@ class TestRunSmokeTest:
     def test_empty_config(self):
         """Should handle config with no providers."""
         with tempfile.NamedTemporaryFile(mode="w", suffix=".yaml", delete=False) as f:
-            yaml.dump({"providers": {}}, f)
+            yaml.dump({"mcp_servers": {}}, f)
             config_path = Path(f.name)
 
         try:
@@ -181,8 +163,8 @@ class TestRunSmokeTest:
     def test_missing_providers_section(self):
         """Should handle config with empty providers section."""
         with tempfile.NamedTemporaryFile(mode="w", suffix=".yaml", delete=False) as f:
-            # Note: load_configuration requires 'providers' section
-            yaml.dump({"providers": {}}, f)
+            # Note: load_configuration requires 'mcp_servers' section
+            yaml.dump({"mcp_servers": {}}, f)
             config_path = Path(f.name)
 
         try:

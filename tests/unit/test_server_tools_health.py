@@ -79,7 +79,7 @@ class TestProcessToolCallsMetric:
         """Should process tool_calls count metric."""
         tool_calls = {}
         _process_tool_calls_metric(
-            "tool_calls_total", {"provider": "test-provider", "tool": "test-tool"}, 5.0, tool_calls
+            "tool_calls_total", {"mcp_server": "test-provider", "tool": "test-tool"}, 5.0, tool_calls
         )
 
         assert "test-provider.test-tool" in tool_calls
@@ -89,7 +89,7 @@ class TestProcessToolCallsMetric:
         """Should process tool_calls error metric."""
         tool_calls = {}
         _process_tool_calls_metric(
-            "tool_calls_error_total", {"provider": "test-provider", "tool": "test-tool"}, 2.0, tool_calls
+            "tool_calls_error_total", {"mcp_server": "test-provider", "tool": "test-tool"}, 2.0, tool_calls
         )
 
         assert "test-provider.test-tool" in tool_calls
@@ -108,22 +108,22 @@ class TestProcessInvocationsMetric:
 
     def test_ignores_non_invocations_metric(self):
         """Should ignore metrics that don't contain 'invocations'."""
-        providers = {"test": {"invocations": 0}}
-        _process_invocations_metric("some_metric", {"provider": "test"}, 1.0, providers)
-        assert providers["test"]["invocations"] == 0
+        mcp_servers = {"test": {"invocations": 0}}
+        _process_invocations_metric("some_metric", {"mcp_server": "test"}, 1.0, mcp_servers)
+        assert mcp_servers["test"]["invocations"] == 0
 
     def test_ignores_metric_without_provider_label(self):
         """Should ignore metrics without provider label."""
-        providers = {"test": {"invocations": 0}}
-        _process_invocations_metric("invocations_total", {}, 1.0, providers)
-        assert providers["test"]["invocations"] == 0
+        mcp_servers = {"test": {"invocations": 0}}
+        _process_invocations_metric("invocations_total", {}, 1.0, mcp_servers)
+        assert mcp_servers["test"]["invocations"] == 0
 
     def test_processes_invocations_metric(self):
         """Should process invocations metric."""
-        providers = {"test-provider": {"invocations": 0}}
-        _process_invocations_metric("invocations_total", {"provider": "test-provider"}, 10.0, providers)
+        mcp_servers = {"test-provider": {"invocations": 0}}
+        _process_invocations_metric("invocations_total", {"mcp_server": "test-provider"}, 10.0, mcp_servers)
 
-        assert providers["test-provider"]["invocations"] == 10
+        assert mcp_servers["test-provider"]["invocations"] == 10
 
 
 class TestProcessDiscoveryMetric:
@@ -147,11 +147,11 @@ class TestProcessDiscoveryMetric:
         """Should process discovery providers metric."""
         discovery = {}
         _process_discovery_metric(
-            "discovery_providers_total", {"source_type": "docker", "status": "registered"}, 3.0, discovery
+            "discovery_mcp_servers_total", {"source_type": "docker", "status": "registered"}, 3.0, discovery
         )
 
         assert "docker" in discovery
-        assert discovery["docker"]["providers_registered"] == 3
+        assert discovery["docker"]["mcp_servers_registered"] == 3
 
 
 class TestProcessErrorMetric:
@@ -195,7 +195,7 @@ class TestProcessMetricSample:
         class NoLabels:
             value = 1.0
 
-        result = {"tool_calls": {}, "providers": {}, "discovery": {}, "errors": {}}
+        result = {"tool_calls": {}, "mcp_servers": {}, "discovery": {}, "errors": {}}
         _process_metric_sample(NoLabels(), result)
 
         assert result["tool_calls"] == {}
@@ -206,15 +206,15 @@ class TestProcessMetricSample:
         class NoValue:
             labels = {}
 
-        result = {"tool_calls": {}, "providers": {}, "discovery": {}, "errors": {}}
+        result = {"tool_calls": {}, "mcp_servers": {}, "discovery": {}, "errors": {}}
         _process_metric_sample(NoValue(), result)
 
         assert result["tool_calls"] == {}
 
     def test_processes_complete_sample(self):
         """Should process sample with all required attributes."""
-        sample = MockSample("tool_calls_total", {"provider": "test", "tool": "my_tool"}, 5.0)
-        result = {"tool_calls": {}, "providers": {}, "discovery": {}, "errors": {}}
+        sample = MockSample("tool_calls_total", {"mcp_server": "test", "tool": "my_tool"}, 5.0)
+        result = {"tool_calls": {}, "mcp_servers": {}, "discovery": {}, "errors": {}}
 
         _process_metric_sample(sample, result)
 

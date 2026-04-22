@@ -2,7 +2,7 @@
 
 import pytest
 
-from mcp_hangar.domain.model.provider_config import ProviderConfig, ToolsConfig
+from mcp_hangar.domain.model.mcp_server_config import McpServerConfig, ToolsConfig
 
 
 class TestToolsConfig:
@@ -77,7 +77,7 @@ class TestProviderConfigToolsAccess:
 
     def test_no_tools_config(self):
         """Provider config without tools should have no tools_access."""
-        config = ProviderConfig.from_dict(
+        config = McpServerConfig.from_dict(
             "test",
             {
                 "mode": "subprocess",
@@ -89,7 +89,7 @@ class TestProviderConfigToolsAccess:
 
     def test_predefined_tools_list(self):
         """Provider config with tools as list should parse as predefined tools."""
-        config = ProviderConfig.from_dict(
+        config = McpServerConfig.from_dict(
             "test",
             {
                 "mode": "subprocess",
@@ -105,7 +105,7 @@ class TestProviderConfigToolsAccess:
 
     def test_tools_deny_list(self):
         """Provider config with tools.deny_list should parse as access policy."""
-        config = ProviderConfig.from_dict(
+        config = McpServerConfig.from_dict(
             "test",
             {
                 "mode": "docker",
@@ -126,7 +126,7 @@ class TestProviderConfigToolsAccess:
 
     def test_tools_allow_list(self):
         """Provider config with tools.allow_list should parse as access policy."""
-        config = ProviderConfig.from_dict(
+        config = McpServerConfig.from_dict(
             "test",
             {
                 "mode": "docker",
@@ -147,7 +147,7 @@ class TestProviderConfigToolsAccess:
 
     def test_tools_both_lists(self, caplog):
         """Provider config with both allow and deny should log warning."""
-        config = ProviderConfig.from_dict(
+        config = McpServerConfig.from_dict(
             "test",
             {
                 "mode": "docker",
@@ -163,7 +163,7 @@ class TestProviderConfigToolsAccess:
 
     def test_tools_empty_dict(self):
         """Provider config with empty tools dict should have no access policy."""
-        config = ProviderConfig.from_dict(
+        config = McpServerConfig.from_dict(
             "test",
             {
                 "mode": "docker",
@@ -176,7 +176,7 @@ class TestProviderConfigToolsAccess:
 
     def test_backward_compat_no_tools_key(self):
         """Existing configs without tools key should work unchanged."""
-        config = ProviderConfig.from_dict(
+        config = McpServerConfig.from_dict(
             "test",
             {
                 "mode": "subprocess",

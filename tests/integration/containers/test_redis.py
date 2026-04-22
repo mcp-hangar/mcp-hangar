@@ -200,7 +200,7 @@ class TestRedisDistributedLocks:
 class TestRedisProviderState:
     """Tests for storing provider state in Redis."""
 
-    def test_provider_state_persistence(
+    def test_mcp_server_state_persistence(
         self,
         redis_container: dict,
     ) -> None:
@@ -211,10 +211,10 @@ class TestRedisProviderState:
 
         client = redis.from_url(redis_container["url"])
 
-        provider_id = "state-test"
-        state_key = f"mcp:state:{provider_id}"
-        history_key = f"mcp:state_history:{provider_id}"
-        health_key = f"mcp:health:{provider_id}"
+        mcp_server_id = "state-test"
+        state_key = f"mcp:state:{mcp_server_id}"
+        history_key = f"mcp:state_history:{mcp_server_id}"
+        health_key = f"mcp:health:{mcp_server_id}"
 
         # Clean up
         client.delete(state_key, history_key, health_key)

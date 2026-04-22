@@ -1,6 +1,6 @@
-"""Secrets resolver for MCP provider environment variables.
+"""Secrets resolver for MCP mcp_server environment variables.
 
-This module provides functionality to resolve required secrets for MCP providers
+This module provides functionality to resolve required secrets for MCP mcp_servers
 from environment variables and configuration files.
 """
 
@@ -34,11 +34,11 @@ class SecretsResult:
 
 
 class SecretsResolver:
-    """Resolves secrets for MCP providers from environment and files.
+    """Resolves secrets for MCP mcp_servers from environment and files.
 
     Resolution order:
     1. Environment variable (exact name)
-    2. File: ~/.config/mcp-hangar/secrets/{provider}/{VAR_NAME}
+    2. File: ~/.config/mcp-hangar/secrets/{mcp_server}/{VAR_NAME}
     3. File: ~/.config/mcp-hangar/secrets/{VAR_NAME}
 
     Attributes:
@@ -60,12 +60,12 @@ class SecretsResolver:
         """Get the secrets directory."""
         return self._secrets_dir
 
-    def resolve(self, required: list[str], provider_name: str) -> SecretsResult:
-        """Resolve required secrets for a provider.
+    def resolve(self, required: list[str], mcp_server_name: str) -> SecretsResult:
+        """Resolve required secrets for a mcp_server.
 
         Args:
             required: List of required secret names (environment variable names).
-            provider_name: Name of the provider (used for provider-specific secrets).
+            mcp_server_name: Name of the mcp_server (used for mcp_server-specific secrets).
 
         Returns:
             SecretsResult with resolved secrets and any missing ones.
@@ -73,14 +73,14 @@ class SecretsResolver:
         result = SecretsResult()
 
         for secret_name in required:
-            value, source = self._resolve_single(secret_name, provider_name)
+            value, source = self._resolve_single(secret_name, mcp_server_name)
             if value is not None:
                 result.resolved[secret_name] = value
                 result.sources[secret_name] = source
                 logger.debug(
                     "secret_resolved",
                     secret_name=secret_name,
-                    provider=provider_name,
+                    mcp_server=mcp_server_name,
                     source=source,
                 )
             else:
@@ -88,17 +88,17 @@ class SecretsResolver:
                 logger.debug(
                     "secret_not_found",
                     secret_name=secret_name,
-                    provider=provider_name,
+                    mcp_server=mcp_server_name,
                 )
 
         return result
 
-    def _resolve_single(self, secret_name: str, provider_name: str) -> tuple[str | None, str]:
+    def _resolve_single(self, secret_name: str, mcp_server_name: str) -> tuple[str | None, str]:
         """Resolve a single secret.
 
         Args:
             secret_name: Name of the secret to resolve.
-            provider_name: Name of the provider.
+            mcp_server_name: Name of the mcp_server.
 
         Returns:
             Tuple of (value, source) or (None, "") if not found.
@@ -107,15 +107,15 @@ class SecretsResolver:
         if value is not None:
             return value, "env"
 
-        provider_file = self._secrets_dir / provider_name / secret_name
-        if provider_file.is_file():
+        mcp_server_file = self._secrets_dir / mcp_server_name / secret_name
+        if mcp_server_file.is_file():
             try:
-                value = provider_file.read_text().strip()
+                value = mcp_server_file.read_text().strip()
                 return value, "file"
             except (OSError, PermissionError) as e:
                 logger.warning(
                     "secret_file_read_error",
-                    path=str(provider_file),
+                    path=str(mcp_server_file),
                     error=str(e),
                 )
 
@@ -133,18 +133,18 @@ class SecretsResolver:
 
         return None, ""
 
-    def get_missing_instructions(self, missing: list[str], provider_name: str) -> str:
+    def get_missing_instructions(self, missing: list[str], mcp_server_name: str) -> str:
         """Generate instructions for setting up missing secrets.
 
         Args:
             missing: List of missing secret names.
-            provider_name: Name of the provider.
+            mcp_server_name: Name of the mcp_server.
 
         Returns:
             Human-readable instructions for setting up the secrets.
         """
         lines = [
-            f"The following secrets are required for '{provider_name}':",
+            f"The following secrets are required for '{mcp_server_name}':",
             "",
         ]
 
@@ -166,12 +166,12 @@ class SecretsResolver:
         lines.extend(
             [
                 "",
-                f"2. Files in ~/.config/mcp-hangar/secrets/{provider_name}/:",
+                f"2. Files in ~/.config/mcp-hangar/secrets/{mcp_server_name}/:",
             ]
         )
 
         for secret in missing:
-            lines.append(f"   echo 'your_value' > ~/.config/mcp-hangar/secrets/{provider_name}/{secret}")
+            lines.append(f"   echo 'your_value' > ~/.config/mcp-hangar/secrets/{mcp_server_name}/{secret}")
 
         lines.extend(
             [

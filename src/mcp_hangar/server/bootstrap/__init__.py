@@ -11,7 +11,7 @@ The bootstrap process:
 5. Register event handlers
 6. Register CQRS handlers
 7. Initialize sagas
-8. Load providers from config
+8. Load mcp_servers from config
 9. Initialize discovery (if enabled)
 10. Create MCP server with tools
 11. Create background workers (DO NOT START)
@@ -28,7 +28,7 @@ from typing import Any, cast, TYPE_CHECKING
 
 from mcp.server.fastmcp import FastMCP
 
-from ...application.commands.load_handlers import LoadProviderHandler, UnloadProviderHandler
+from ...application.commands.load_handlers import LoadMcpServerHandler, UnloadMcpServerHandler
 from ...application.discovery import DiscoveryOrchestrator
 from ...application.ports.observability import ObservabilityPort
 from ...infrastructure.persistence.saga_state_store import NullSagaStateStore, SagaStateStore
@@ -95,11 +95,11 @@ class ApplicationContext:
     config: dict[str, Any] = field(default_factory=dict)
     """Full configuration dictionary."""
 
-    load_provider_handler: LoadProviderHandler | None = None
-    """Handler for loading providers at runtime."""
+    load_mcp_server_handler: LoadMcpServerHandler | None = None
+    """Handler for loading mcp_servers at runtime."""
 
-    unload_provider_handler: UnloadProviderHandler | None = None
-    """Handler for unloading providers at runtime."""
+    unload_mcp_server_handler: UnloadMcpServerHandler | None = None
+    """Handler for unloading mcp_servers at runtime."""
 
     observability_adapter: ObservabilityPort | None = None
     """Observability adapter for tracing (Langfuse, etc.)."""
@@ -114,8 +114,8 @@ class ApplicationContext:
     """Enterprise approval gate service (when ENTERPRISE tier)."""
 
     @property
-    def providers(self):
-        """Get providers mapping for easy access."""
+    def mcp_servers(self):
+        """Get mcp_servers mapping for easy access."""
         return self.runtime.repository
 
     def shutdown(self) -> None:
@@ -143,21 +143,21 @@ class ApplicationContext:
             except Exception as e:  # noqa: BLE001 -- fault-barrier: shutdown must complete even if discovery stop fails
                 logger.warning("discovery_orchestrator_stop_failed", error=str(e))
 
-        # Save circuit breaker state for provider groups before stopping
+        # Save circuit breaker state for mcp_server groups before stopping
         if self.saga_state_store is not None:
             try:
                 save_group_circuit_breakers(self.saga_state_store, GROUPS)
             except Exception as e:  # noqa: BLE001 -- fault-barrier: shutdown must complete even if CB save fails
                 logger.warning("circuit_breaker_save_failed", error=str(e))
 
-        # Stop all providers
-        for provider_id, provider in self.runtime.repository.items():
+        # Stop all mcp_servers
+        for mcp_server_id, mcp_server in self.runtime.repository.get_all().items():
             try:
-                provider.stop()
-            except Exception as e:  # noqa: BLE001 -- fault-barrier: shutdown must complete even if individual provider stop fails
+                mcp_server.stop()
+            except Exception as e:  # noqa: BLE001 -- fault-barrier: shutdown must complete even if individual mcp_server stop fails
                 logger.warning(
-                    "provider_stop_failed",
-                    provider_id=provider_id,
+                    "mcp_server_stop_failed",
+                    mcp_server_id=mcp_server_id,
                     error=str(e),
                 )
 
@@ -192,7 +192,7 @@ def bootstrap(
     5. Register event handlers
     6. Register CQRS handlers
     7. Initialize sagas
-    8. Load configuration and providers
+    8. Load configuration and mcp_servers
     9. Initialize retry configuration
     10. Create MCP server with tools
     11. Create background workers (DO NOT START)
@@ -219,10 +219,10 @@ def bootstrap(
         # Use provided config dict, merge with defaults
         full_config = load_configuration(None)
         full_config.update(config_dict)
-        # Load providers from config_dict
-        providers_config = config_dict.get("providers", {})
-        if providers_config:
-            load_config(providers_config)
+        # Load mcp_servers from config_dict
+        mcp_servers_config = config_dict.get("mcp_servers", {})
+        if mcp_servers_config:
+            load_config(mcp_servers_config)
     else:
         full_config = load_configuration(config_path)
 
@@ -306,8 +306,8 @@ def bootstrap(
     mcp_server = FastMCP("mcp-registry")
     register_all_tools(mcp_server)
 
-    # Wire log buffers to providers after configuration populates the shared repository.
-    init_log_buffers(runtime.repository)
+    # Wire log buffers to mcp_servers after configuration populates the shared repository.
+    init_log_buffers(runtime.repository.get_all())
 
     # Create background workers (not started)
     workers: list[WorkerLike] = create_background_workers(config=full_config)
@@ -344,11 +344,11 @@ def bootstrap(
         logger.info("discovery_registry_created")
 
     # Log ready state
-    provider_ids = list(runtime.repository.keys())
+    mcp_server_ids = runtime.repository.get_all_ids()
     group_ids = list(GROUPS.keys())
     logger.info(
         "bootstrap_complete",
-        providers=provider_ids,
+        mcp_servers=mcp_server_ids,
         groups=group_ids,
         discovery_enabled=discovery_orchestrator is not None,
         auth_enabled=auth_components.enabled,
@@ -362,8 +362,8 @@ def bootstrap(
         auth_components=auth_components,
         license_tier=license_tier,
         config=full_config,
-        load_provider_handler=load_handler,
-        unload_provider_handler=unload_handler,
+        load_mcp_server_handler=load_handler,
+        unload_mcp_server_handler=unload_handler,
         observability_adapter=observability_adapter,
         saga_state_store=saga_state_store,
         discovery_registry=discovery_registry,
@@ -373,8 +373,8 @@ def bootstrap(
     # Update application context for tools to access
     ctx = get_context()
     ctx.groups = GROUPS  # Wire shared GROUPS dict so API reads/writes use same instance
-    ctx.load_provider_handler = load_handler
-    ctx.unload_provider_handler = unload_handler
+    ctx.load_mcp_server_handler = load_handler
+    ctx.unload_mcp_server_handler = unload_handler
     ctx.discovery_registry = discovery_registry
     ctx.full_config = full_config  # Store for config round-trip serialization
     if enterprise.approval_service is not None:

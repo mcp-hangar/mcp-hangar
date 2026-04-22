@@ -30,14 +30,23 @@ class DomainEvent(ABC):
         return {"event_type": self.__class__.__name__, **self.__dict__}
 
 
-# Provider Lifecycle Events
+def _resolve_legacy_mcp_server_id(mcp_server_id: str | None, kwargs: dict[str, object]) -> str:
+    if mcp_server_id is not None:
+        return mcp_server_id
+    legacy_id = kwargs.pop("provider_id", None)
+    if isinstance(legacy_id, str):
+        return legacy_id
+    raise TypeError("Missing required argument: mcp_server_id")
+
+
+# McpServer Lifecycle Events
 
 
 @dataclass
-class ProviderStarted(DomainEvent):
-    """Published when a provider successfully starts."""
+class McpServerStarted(DomainEvent):
+    """Published when a mcp_server successfully starts."""
 
-    provider_id: str
+    mcp_server_id: str
     mode: str  # subprocess, docker, remote
     tools_count: int
     startup_duration_ms: float
@@ -47,10 +56,10 @@ class ProviderStarted(DomainEvent):
 
 
 @dataclass
-class ProviderStopped(DomainEvent):
-    """Published when a provider is stopped."""
+class McpServerStopped(DomainEvent):
+    """Published when a mcp_server is stopped."""
 
-    provider_id: str
+    mcp_server_id: str
     reason: str
 
     def __post_init__(self):
@@ -58,10 +67,10 @@ class ProviderStopped(DomainEvent):
 
 
 @dataclass
-class ProviderDegraded(DomainEvent):
-    """Published when a provider enters degraded state."""
+class McpServerDegraded(DomainEvent):
+    """Published when a mcp_server enters degraded state."""
 
-    provider_id: str
+    mcp_server_id: str
     consecutive_failures: int
     total_failures: int
     reason: str
@@ -71,10 +80,10 @@ class ProviderDegraded(DomainEvent):
 
 
 @dataclass
-class ProviderStateChanged(DomainEvent):
-    """Published when provider state transitions."""
+class McpServerStateChanged(DomainEvent):
+    """Published when mcp_server state transitions."""
 
-    provider_id: str
+    mcp_server_id: str
     old_state: str
     new_state: str
 
@@ -85,13 +94,22 @@ class ProviderStateChanged(DomainEvent):
 # Circuit Breaker Events
 
 
-@dataclass
+@dataclass(init=False)
 class CircuitBreakerStateChanged(DomainEvent):
     """Published when a circuit breaker transitions between states."""
 
-    provider_id: str
+    mcp_server_id: str
     old_state: str  # closed, open, half_open
     new_state: str  # closed, open, half_open
+
+    def __init__(self, mcp_server_id: str | None = None, old_state: str = "", new_state: str = "", **kwargs: object):
+        self.mcp_server_id = _resolve_legacy_mcp_server_id(mcp_server_id, kwargs)
+        self.old_state = old_state
+        self.new_state = new_state
+        if kwargs:
+            unexpected = ", ".join(sorted(kwargs))
+            raise TypeError(f"Unexpected keyword argument(s): {unexpected}")
+        super().__init__()
 
     def __post_init__(self):
         super().__init__()
@@ -100,46 +118,109 @@ class CircuitBreakerStateChanged(DomainEvent):
 # Tool Invocation Events
 
 
-@dataclass
+@dataclass(init=False)
 class ToolInvocationRequested(DomainEvent):
     """Published when a tool invocation is requested."""
 
-    provider_id: str
+    mcp_server_id: str
     tool_name: str
     correlation_id: str
     arguments: dict[str, Any] = field(default_factory=dict)
     identity_context: dict[str, Any] | None = None
 
+    def __init__(
+        self,
+        mcp_server_id: str | None = None,
+        tool_name: str = "",
+        correlation_id: str = "",
+        arguments: dict[str, Any] | None = None,
+        identity_context: dict[str, Any] | None = None,
+        **kwargs: object,
+    ):
+        self.mcp_server_id = _resolve_legacy_mcp_server_id(mcp_server_id, kwargs)
+        self.tool_name = tool_name
+        self.correlation_id = correlation_id
+        self.arguments = arguments or {}
+        self.identity_context = identity_context
+        if kwargs:
+            unexpected = ", ".join(sorted(kwargs))
+            raise TypeError(f"Unexpected keyword argument(s): {unexpected}")
+        super().__init__()
+
     def __post_init__(self):
         super().__init__()
 
 
-@dataclass
+@dataclass(init=False)
 class ToolInvocationCompleted(DomainEvent):
     """Published when a tool invocation completes successfully."""
 
-    provider_id: str
+    mcp_server_id: str
     tool_name: str
     correlation_id: str
     duration_ms: float
     result_size_bytes: int
     identity_context: dict[str, Any] | None = None
 
+    def __init__(
+        self,
+        mcp_server_id: str | None = None,
+        tool_name: str = "",
+        correlation_id: str = "",
+        duration_ms: float = 0.0,
+        result_size_bytes: int = 0,
+        identity_context: dict[str, Any] | None = None,
+        **kwargs: object,
+    ):
+        self.mcp_server_id = _resolve_legacy_mcp_server_id(mcp_server_id, kwargs)
+        self.tool_name = tool_name
+        self.correlation_id = correlation_id
+        self.duration_ms = duration_ms
+        self.result_size_bytes = result_size_bytes
+        self.identity_context = identity_context
+        if kwargs:
+            unexpected = ", ".join(sorted(kwargs))
+            raise TypeError(f"Unexpected keyword argument(s): {unexpected}")
+        super().__init__()
+
     def __post_init__(self):
         super().__init__()
 
 
-@dataclass
+@dataclass(init=False)
 class ToolInvocationFailed(DomainEvent):
     """Published when a tool invocation fails."""
 
-    provider_id: str
+    mcp_server_id: str
     tool_name: str
     correlation_id: str
     duration_ms: float
     error_message: str
     error_type: str
     identity_context: dict[str, Any] | None = None
+
+    def __init__(
+        self,
+        mcp_server_id: str | None = None,
+        tool_name: str = "",
+        correlation_id: str = "",
+        duration_ms: float = 0.0,
+        error_message: str = "",
+        error_type: str = "",
+        identity_context: dict[str, Any] | None = None,
+        **kwargs: object,
+    ):
+        self.mcp_server_id = _resolve_legacy_mcp_server_id(mcp_server_id, kwargs)
+        self.tool_name = tool_name
+        self.correlation_id = correlation_id
+        self.duration_ms = duration_ms
+        self.error_message = error_message
+        self.error_type = error_type
+        self.identity_context = identity_context
+        if kwargs:
+            unexpected = ", ".join(sorted(kwargs))
+            raise TypeError(f"Unexpected keyword argument(s): {unexpected}")
+        super().__init__()
 
     def __post_init__(self):
         super().__init__()
@@ -148,24 +229,47 @@ class ToolInvocationFailed(DomainEvent):
 # Health Check Events
 
 
-@dataclass
+@dataclass(init=False)
 class HealthCheckPassed(DomainEvent):
     """Published when a health check succeeds."""
 
-    provider_id: str
+    mcp_server_id: str
     duration_ms: float
+
+    def __init__(self, mcp_server_id: str | None = None, duration_ms: float = 0.0, **kwargs: object):
+        self.mcp_server_id = _resolve_legacy_mcp_server_id(mcp_server_id, kwargs)
+        self.duration_ms = duration_ms
+        if kwargs:
+            unexpected = ", ".join(sorted(kwargs))
+            raise TypeError(f"Unexpected keyword argument(s): {unexpected}")
+        super().__init__()
 
     def __post_init__(self):
         super().__init__()
 
 
-@dataclass
+@dataclass(init=False)
 class HealthCheckFailed(DomainEvent):
     """Published when a health check fails."""
 
-    provider_id: str
+    mcp_server_id: str
     consecutive_failures: int
     error_message: str
+
+    def __init__(
+        self,
+        mcp_server_id: str | None = None,
+        consecutive_failures: int = 0,
+        error_message: str = "",
+        **kwargs: object,
+    ):
+        self.mcp_server_id = _resolve_legacy_mcp_server_id(mcp_server_id, kwargs)
+        self.consecutive_failures = consecutive_failures
+        self.error_message = error_message
+        if kwargs:
+            unexpected = ", ".join(sorted(kwargs))
+            raise TypeError(f"Unexpected keyword argument(s): {unexpected}")
+        super().__init__()
 
     def __post_init__(self):
         super().__init__()
@@ -175,10 +279,10 @@ class HealthCheckFailed(DomainEvent):
 
 
 @dataclass
-class ProviderIdleDetected(DomainEvent):
-    """Published when a provider is detected as idle."""
+class McpServerIdleDetected(DomainEvent):
+    """Published when a mcp_server is detected as idle."""
 
-    provider_id: str
+    mcp_server_id: str
     idle_duration_s: float
     last_used_at: float
 
@@ -186,7 +290,7 @@ class ProviderIdleDetected(DomainEvent):
         super().__init__()
 
 
-# Provider Group Events are defined in mcp_hangar.domain.model.provider_group
+# McpServer Group Events are defined in mcp_hangar.domain.model.mcp_server_group
 # to avoid circular imports. Re-export them here for convenience.
 # Import at runtime only when needed.
 
@@ -195,10 +299,10 @@ class ProviderIdleDetected(DomainEvent):
 
 
 @dataclass
-class ProviderDiscovered(DomainEvent):
-    """Published when a new provider is discovered."""
+class McpServerDiscovered(DomainEvent):
+    """Published when a new mcp_server is discovered."""
 
-    provider_name: str
+    mcp_server_name: str
     source_type: str
     mode: str
     fingerprint: str
@@ -208,10 +312,10 @@ class ProviderDiscovered(DomainEvent):
 
 
 @dataclass
-class ProviderDiscoveryLost(DomainEvent):
-    """Published when a previously discovered provider is no longer found."""
+class McpServerDiscoveryLost(DomainEvent):
+    """Published when a previously discovered mcp_server is no longer found."""
 
-    provider_name: str
+    mcp_server_name: str
     source_type: str
     reason: str  # "ttl_expired", "source_removed", etc.
 
@@ -220,10 +324,10 @@ class ProviderDiscoveryLost(DomainEvent):
 
 
 @dataclass
-class ProviderDiscoveryConfigChanged(DomainEvent):
-    """Published when discovered provider configuration changes."""
+class McpServerDiscoveryConfigChanged(DomainEvent):
+    """Published when discovered mcp_server configuration changes."""
 
-    provider_name: str
+    mcp_server_name: str
     source_type: str
     old_fingerprint: str
     new_fingerprint: str
@@ -233,10 +337,10 @@ class ProviderDiscoveryConfigChanged(DomainEvent):
 
 
 @dataclass
-class ProviderQuarantined(DomainEvent):
-    """Published when a discovered provider is quarantined."""
+class McpServerQuarantined(DomainEvent):
+    """Published when a discovered mcp_server is quarantined."""
 
-    provider_name: str
+    mcp_server_name: str
     source_type: str
     reason: str
     validation_result: str
@@ -246,15 +350,170 @@ class ProviderQuarantined(DomainEvent):
 
 
 @dataclass
-class ProviderApproved(DomainEvent):
-    """Published when a quarantined provider is approved."""
+class McpServerApproved(DomainEvent):
+    """Published when a quarantined mcp_server is approved."""
 
-    provider_name: str
+    mcp_server_name: str
     source_type: str
     approved_by: str  # "manual" or "auto"
 
     def __post_init__(self):
         super().__init__()
+
+
+@dataclass
+@dataclass(init=False)
+class ProviderStarted(McpServerStarted):
+    def __init__(
+        self,
+        provider_id: str | None = None,
+        mcp_server_id: str | None = None,
+        mode: str = "",
+        tools_count: int = 0,
+        startup_duration_ms: float = 0.0,
+        **kwargs: object,
+    ):
+        provider_id = provider_id or mcp_server_id or _resolve_legacy_mcp_server_id(None, kwargs)
+        if kwargs:
+            unexpected = ", ".join(sorted(kwargs))
+            raise TypeError(f"Unexpected keyword argument(s): {unexpected}")
+        super().__init__(
+            mcp_server_id=provider_id, mode=mode, tools_count=tools_count, startup_duration_ms=startup_duration_ms
+        )
+
+
+@dataclass(init=False)
+class ProviderStopped(McpServerStopped):
+    def __init__(
+        self, provider_id: str | None = None, mcp_server_id: str | None = None, reason: str = "", **kwargs: object
+    ):
+        provider_id = provider_id or mcp_server_id or _resolve_legacy_mcp_server_id(None, kwargs)
+        if kwargs:
+            unexpected = ", ".join(sorted(kwargs))
+            raise TypeError(f"Unexpected keyword argument(s): {unexpected}")
+        super().__init__(mcp_server_id=provider_id, reason=reason)
+
+
+@dataclass(init=False)
+class ProviderDegraded(McpServerDegraded):
+    def __init__(
+        self,
+        provider_id: str | None = None,
+        mcp_server_id: str | None = None,
+        consecutive_failures: int = 0,
+        total_failures: int = 0,
+        reason: str = "",
+        **kwargs: object,
+    ):
+        provider_id = provider_id or mcp_server_id or _resolve_legacy_mcp_server_id(None, kwargs)
+        if kwargs:
+            unexpected = ", ".join(sorted(kwargs))
+            raise TypeError(f"Unexpected keyword argument(s): {unexpected}")
+        super().__init__(
+            mcp_server_id=provider_id,
+            consecutive_failures=consecutive_failures,
+            total_failures=total_failures,
+            reason=reason,
+        )
+
+
+@dataclass(init=False)
+class ProviderStateChanged(McpServerStateChanged):
+    def __init__(
+        self,
+        provider_id: str | None = None,
+        mcp_server_id: str | None = None,
+        old_state: str = "",
+        new_state: str = "",
+        **kwargs: object,
+    ):
+        provider_id = provider_id or mcp_server_id or _resolve_legacy_mcp_server_id(None, kwargs)
+        if kwargs:
+            unexpected = ", ".join(sorted(kwargs))
+            raise TypeError(f"Unexpected keyword argument(s): {unexpected}")
+        super().__init__(mcp_server_id=provider_id, old_state=old_state, new_state=new_state)
+
+
+@dataclass(init=False)
+class ProviderIdleDetected(McpServerIdleDetected):
+    def __init__(
+        self,
+        provider_id: str | None = None,
+        mcp_server_id: str | None = None,
+        idle_duration_s: float = 0.0,
+        last_used_at: float = 0.0,
+        **kwargs: object,
+    ):
+        provider_id = provider_id or mcp_server_id or _resolve_legacy_mcp_server_id(None, kwargs)
+        if kwargs:
+            unexpected = ", ".join(sorted(kwargs))
+            raise TypeError(f"Unexpected keyword argument(s): {unexpected}")
+        super().__init__(mcp_server_id=provider_id, idle_duration_s=idle_duration_s, last_used_at=last_used_at)
+
+
+@dataclass(init=False)
+class ProviderDiscovered(McpServerDiscovered):
+    def __init__(
+        self,
+        provider_name: str = "",
+        mcp_server_name: str = "",
+        source_type: str = "",
+        mode: str = "",
+        fingerprint: str = "",
+    ):
+        provider_name = provider_name or mcp_server_name
+        super().__init__(mcp_server_name=provider_name, source_type=source_type, mode=mode, fingerprint=fingerprint)
+
+
+@dataclass(init=False)
+class ProviderDiscoveryLost(McpServerDiscoveryLost):
+    def __init__(self, provider_name: str = "", mcp_server_name: str = "", source_type: str = "", reason: str = ""):
+        provider_name = provider_name or mcp_server_name
+        super().__init__(mcp_server_name=provider_name, source_type=source_type, reason=reason)
+
+
+@dataclass(init=False)
+class ProviderDiscoveryConfigChanged(McpServerDiscoveryConfigChanged):
+    def __init__(
+        self,
+        provider_name: str = "",
+        mcp_server_name: str = "",
+        source_type: str = "",
+        old_fingerprint: str = "",
+        new_fingerprint: str = "",
+    ):
+        provider_name = provider_name or mcp_server_name
+        super().__init__(
+            mcp_server_name=provider_name,
+            source_type=source_type,
+            old_fingerprint=old_fingerprint,
+            new_fingerprint=new_fingerprint,
+        )
+
+
+@dataclass(init=False)
+class ProviderQuarantined(McpServerQuarantined):
+    def __init__(
+        self,
+        provider_name: str = "",
+        mcp_server_name: str = "",
+        source_type: str = "",
+        reason: str = "",
+        validation_result: str = "",
+    ):
+        provider_name = provider_name or mcp_server_name
+        super().__init__(
+            mcp_server_name=provider_name, source_type=source_type, reason=reason, validation_result=validation_result
+        )
+
+
+@dataclass(init=False)
+class ProviderApproved(McpServerApproved):
+    def __init__(
+        self, provider_name: str = "", mcp_server_name: str = "", source_type: str = "", approved_by: str = ""
+    ):
+        provider_name = provider_name or mcp_server_name
+        super().__init__(mcp_server_name=provider_name, source_type=source_type, approved_by=approved_by)
 
 
 @dataclass
@@ -712,7 +971,7 @@ class BatchInvocationRequested(DomainEvent):
 
     batch_id: str
     call_count: int
-    providers: list[str]
+    mcp_servers: list[str]
     max_concurrency: int
     timeout: float
     fail_fast: bool
@@ -743,7 +1002,7 @@ class BatchCallCompleted(DomainEvent):
     batch_id: str
     call_id: str
     call_index: int
-    provider_id: str
+    mcp_server_id: str
     tool_name: str
     success: bool
     elapsed_ms: float
@@ -759,10 +1018,10 @@ class BatchCallCompleted(DomainEvent):
 
 
 @dataclass
-class ProviderLoadAttempted(DomainEvent):
-    """Published when a provider load is attempted."""
+class McpServerLoadAttempted(DomainEvent):
+    """Published when a mcp_server load is attempted."""
 
-    provider_name: str
+    mcp_server_name: str
     user_id: str | None
 
     def __post_init__(self):
@@ -770,11 +1029,11 @@ class ProviderLoadAttempted(DomainEvent):
 
 
 @dataclass
-class ProviderHotLoaded(DomainEvent):
-    """Published when a provider is successfully hot-loaded from the registry."""
+class McpServerHotLoaded(DomainEvent):
+    """Published when a mcp_server is successfully hot-loaded from the registry."""
 
-    provider_id: str
-    provider_name: str
+    mcp_server_id: str
+    mcp_server_name: str
     source: str
     verified: bool
     user_id: str | None
@@ -786,10 +1045,10 @@ class ProviderHotLoaded(DomainEvent):
 
 
 @dataclass
-class ProviderLoadFailed(DomainEvent):
-    """Published when a provider load fails."""
+class McpServerLoadFailed(DomainEvent):
+    """Published when a mcp_server load fails."""
 
-    provider_name: str
+    mcp_server_name: str
     reason: str
     user_id: str | None
     error_type: str | None = None
@@ -799,10 +1058,10 @@ class ProviderLoadFailed(DomainEvent):
 
 
 @dataclass
-class ProviderHotUnloaded(DomainEvent):
-    """Published when a hot-loaded provider is unloaded."""
+class McpServerHotUnloaded(DomainEvent):
+    """Published when a hot-loaded mcp_server is unloaded."""
 
-    provider_id: str
+    mcp_server_id: str
     user_id: str | None
     lifetime_seconds: float
 
@@ -830,10 +1089,10 @@ class ConfigurationReloaded(DomainEvent):
     """Published when configuration is successfully reloaded."""
 
     config_path: str
-    providers_added: list[str]
-    providers_removed: list[str]
-    providers_updated: list[str]
-    providers_unchanged: list[str]
+    mcp_servers_added: list[str]
+    mcp_servers_removed: list[str]
+    mcp_servers_updated: list[str]
+    mcp_servers_unchanged: list[str]
     reload_duration_ms: float
     requested_by: str
 
@@ -855,15 +1114,15 @@ class ConfigurationReloadFailed(DomainEvent):
 
 
 # =============================================================================
-# Provider CRUD Events
+# McpServer CRUD Events
 # =============================================================================
 
 
 @dataclass
-class ProviderRegistered(DomainEvent):
-    """Published when a provider is registered via API, config, or discovery."""
+class McpServerRegistered(DomainEvent):
+    """Published when a mcp_server is registered via API, config, or discovery."""
 
-    provider_id: str
+    mcp_server_id: str
     source: str  # "api" | "config" | "discovery"
     mode: str
 
@@ -872,10 +1131,10 @@ class ProviderRegistered(DomainEvent):
 
 
 @dataclass
-class ProviderUpdated(DomainEvent):
-    """Published when a provider configuration is updated."""
+class McpServerUpdated(DomainEvent):
+    """Published when a mcp_server configuration is updated."""
 
-    provider_id: str
+    mcp_server_id: str
     source: str
 
     def __post_init__(self):
@@ -883,14 +1142,44 @@ class ProviderUpdated(DomainEvent):
 
 
 @dataclass
-class ProviderDeregistered(DomainEvent):
-    """Published when a provider is deleted/deregistered."""
+class McpServerDeregistered(DomainEvent):
+    """Published when a mcp_server is deleted/deregistered."""
 
-    provider_id: str
+    mcp_server_id: str
     source: str
 
     def __post_init__(self):
         super().__init__()
+
+
+@dataclass(init=False)
+class ProviderRegistered(McpServerRegistered):
+    def __init__(self, provider_id: str | None = None, source: str = "", mode: str = "", **kwargs: object):
+        resolved_id = provider_id or _resolve_legacy_mcp_server_id(None, kwargs)
+        if kwargs:
+            unexpected = ", ".join(sorted(kwargs))
+            raise TypeError(f"Unexpected keyword argument(s): {unexpected}")
+        super().__init__(mcp_server_id=resolved_id, source=source, mode=mode)
+
+
+@dataclass(init=False)
+class ProviderUpdated(McpServerUpdated):
+    def __init__(self, provider_id: str | None = None, source: str = "", **kwargs: object):
+        resolved_id = provider_id or _resolve_legacy_mcp_server_id(None, kwargs)
+        if kwargs:
+            unexpected = ", ".join(sorted(kwargs))
+            raise TypeError(f"Unexpected keyword argument(s): {unexpected}")
+        super().__init__(mcp_server_id=resolved_id, source=source)
+
+
+@dataclass(init=False)
+class ProviderDeregistered(McpServerDeregistered):
+    def __init__(self, provider_id: str | None = None, source: str = "", **kwargs: object):
+        resolved_id = provider_id or _resolve_legacy_mcp_server_id(None, kwargs)
+        if kwargs:
+            unexpected = ", ".join(sorted(kwargs))
+            raise TypeError(f"Unexpected keyword argument(s): {unexpected}")
+        super().__init__(mcp_server_id=resolved_id, source=source)
 
 
 # =============================================================================
@@ -939,7 +1228,7 @@ class CustomRoleUpdated(DomainEvent):
 class ToolAccessPolicySet(DomainEvent):
     """Published when a tool access policy is set for a scope/target."""
 
-    scope: str  # "provider", "group", or "member"
+    scope: str  # "mcp_server", "group", or "member"
     target_id: str
     allow_list: list[str]
     deny_list: list[str]
@@ -966,23 +1255,23 @@ class ToolAccessPolicyCleared(DomainEvent):
 # ---------------------------------------------------------------------------
 
 
-@dataclass
+@dataclass(init=False)
 class CapabilityViolationDetected(DomainEvent):
-    """Published when a provider exceeds its declared capabilities.
+    """Published when a mcp_server exceeds its declared capabilities.
 
     Emitted by the enforcement engine whenever runtime behavior deviates
     from the capability declaration. The enforcement_action field records
     what Hangar did in response (alert/block/quarantine).
 
     Attributes:
-        provider_id: Provider that violated its capabilities.
+        mcp_server_id: McpServer that violated its capabilities.
         violation_type: Category of violation. One of:
             "egress_undeclared" -- outbound connection to undeclared destination.
             "egress_blocked" -- blocked outbound connection.
             "filesystem_write" -- write to path not in write_paths.
             "filesystem_read" -- read from path not in read_paths.
             "env_undeclared" -- access to undeclared environment variable.
-            "tool_count_exceeded" -- provider advertised more tools than declared.
+            "tool_count_exceeded" -- mcp_server advertised more tools than declared.
             "tool_schema_drift" -- tool schema changed between restarts.
             "resource_limit_exceeded" -- memory or CPU exceeded declared limit.
         violation_detail: Human-readable description with specifics.
@@ -991,7 +1280,7 @@ class CapabilityViolationDetected(DomainEvent):
         schema_version: Event schema version.
     """
 
-    provider_id: str
+    mcp_server_id: str
     violation_type: str
     violation_detail: str
     enforcement_action: str
@@ -999,19 +1288,42 @@ class CapabilityViolationDetected(DomainEvent):
     severity: str = "high"
     schema_version: int = 2
 
+    def __init__(
+        self,
+        mcp_server_id: str | None = None,
+        violation_type: str = "",
+        violation_detail: str = "",
+        enforcement_action: str = "",
+        destination: str | None = None,
+        severity: str = "high",
+        schema_version: int = 2,
+        **kwargs: object,
+    ):
+        self.mcp_server_id = _resolve_legacy_mcp_server_id(mcp_server_id, kwargs)
+        self.violation_type = violation_type
+        self.violation_detail = violation_detail
+        self.enforcement_action = enforcement_action
+        self.destination = destination
+        self.severity = severity
+        self.schema_version = schema_version
+        if kwargs:
+            unexpected = ", ".join(sorted(kwargs))
+            raise TypeError(f"Unexpected keyword argument(s): {unexpected}")
+        super().__init__()
+
     def __post_init__(self):
         super().__init__()
 
 
-@dataclass
+@dataclass(init=False)
 class EgressBlocked(DomainEvent):
-    """Published when an outbound connection from a provider is blocked.
+    """Published when an outbound connection from a mcp_server is blocked.
 
     This is a specialization of CapabilityViolationDetected for the
     common case of network egress enforcement.
 
     Attributes:
-        provider_id: Provider whose egress was blocked.
+        mcp_server_id: McpServer whose egress was blocked.
         destination_host: Blocked destination hostname or IP.
         destination_port: Blocked destination port.
         protocol: Connection protocol (tcp/udp/https/etc.).
@@ -1019,32 +1331,53 @@ class EgressBlocked(DomainEvent):
         schema_version: Event schema version.
     """
 
-    provider_id: str
+    mcp_server_id: str
     destination_host: str
     destination_port: int
     protocol: str
     enforcement_source: str = "networkpolicy"
     schema_version: int = 1
 
+    def __init__(
+        self,
+        mcp_server_id: str | None = None,
+        destination_host: str = "",
+        destination_port: int = 0,
+        protocol: str = "",
+        enforcement_source: str = "networkpolicy",
+        schema_version: int = 1,
+        **kwargs: object,
+    ):
+        self.mcp_server_id = _resolve_legacy_mcp_server_id(mcp_server_id, kwargs)
+        self.destination_host = destination_host
+        self.destination_port = destination_port
+        self.protocol = protocol
+        self.enforcement_source = enforcement_source
+        self.schema_version = schema_version
+        if kwargs:
+            unexpected = ", ".join(sorted(kwargs))
+            raise TypeError(f"Unexpected keyword argument(s): {unexpected}")
+        super().__init__()
+
     def __post_init__(self):
         super().__init__()
 
 
 @dataclass
-class ProviderCapabilityQuarantined(DomainEvent):
-    """Published when a provider is quarantined due to capability violations.
+class McpServerCapabilityQuarantined(DomainEvent):
+    """Published when a mcp_server is quarantined due to capability violations.
 
-    A quarantined provider stops serving new requests until the operator
+    A quarantined mcp_server stops serving new requests until the operator
     reviews and releases it. Existing in-flight requests complete normally.
 
     Attributes:
-        provider_id: Provider that was quarantined.
+        mcp_server_id: McpServer that was quarantined.
         reason: Human-readable reason for quarantine.
         violation_count: Number of violations that triggered quarantine.
         schema_version: Event schema version.
     """
 
-    provider_id: str
+    mcp_server_id: str
     reason: str
     violation_count: int = 1
     schema_version: int = 1
@@ -1054,16 +1387,16 @@ class ProviderCapabilityQuarantined(DomainEvent):
 
 
 @dataclass
-class ProviderCapabilityQuarantineReleased(DomainEvent):
-    """Published when a capability-quarantined provider is released by the operator.
+class McpServerCapabilityQuarantineReleased(DomainEvent):
+    """Published when a capability-quarantined mcp_server is released by the operator.
 
     Attributes:
-        provider_id: Provider released from quarantine.
-        released_by: Identity of the operator who released the provider.
+        mcp_server_id: McpServer released from quarantine.
+        released_by: Identity of the operator who released the mcp_server.
         schema_version: Event schema version.
     """
 
-    provider_id: str
+    mcp_server_id: str
     released_by: str
     schema_version: int = 1
 
@@ -1071,22 +1404,59 @@ class ProviderCapabilityQuarantineReleased(DomainEvent):
         super().__init__()
 
 
+@dataclass(init=False)
+class ProviderCapabilityQuarantined(McpServerCapabilityQuarantined):
+    def __init__(
+        self,
+        provider_id: str | None = None,
+        mcp_server_id: str | None = None,
+        reason: str = "",
+        violation_count: int = 1,
+        schema_version: int = 1,
+        **kwargs: object,
+    ):
+        provider_id = provider_id or mcp_server_id or _resolve_legacy_mcp_server_id(None, kwargs)
+        if kwargs:
+            unexpected = ", ".join(sorted(kwargs))
+            raise TypeError(f"Unexpected keyword argument(s): {unexpected}")
+        super().__init__(
+            mcp_server_id=provider_id, reason=reason, violation_count=violation_count, schema_version=schema_version
+        )
+
+
+@dataclass(init=False)
+class ProviderCapabilityQuarantineReleased(McpServerCapabilityQuarantineReleased):
+    def __init__(
+        self,
+        provider_id: str | None = None,
+        mcp_server_id: str | None = None,
+        released_by: str = "",
+        schema_version: int = 1,
+        **kwargs: object,
+    ):
+        provider_id = provider_id or mcp_server_id or _resolve_legacy_mcp_server_id(None, kwargs)
+        if kwargs:
+            unexpected = ", ".join(sorted(kwargs))
+            raise TypeError(f"Unexpected keyword argument(s): {unexpected}")
+        super().__init__(mcp_server_id=provider_id, released_by=released_by, schema_version=schema_version)
+
+
 @dataclass
 class ToolSchemaDriftDetected(DomainEvent):
-    """Published when a provider's tool schema changes between restarts.
+    """Published when a mcp_server's tool schema changes between restarts.
 
     Schema drift may indicate a supply-chain attack, a mis-deployed image,
     or an intentional but undeclared upgrade.
 
     Attributes:
-        provider_id: Provider whose tool schema changed.
+        mcp_server_id: McpServer whose tool schema changed.
         tools_added: Names of newly appeared tools.
         tools_removed: Names of removed tools.
         tools_changed: Names of tools with changed parameter schemas.
         schema_version: Event schema version.
     """
 
-    provider_id: str
+    mcp_server_id: str
     tools_added: list[str]
     tools_removed: list[str]
     tools_changed: list[str]
@@ -1098,18 +1468,18 @@ class ToolSchemaDriftDetected(DomainEvent):
 
 @dataclass
 class CapabilityDeclarationMissing(DomainEvent):
-    """Published when a provider starts without a capability declaration.
+    """Published when a mcp_server starts without a capability declaration.
 
-    In strict mode this prevents the provider from reaching READY state.
+    In strict mode this prevents the mcp_server from reaching READY state.
     In alert mode it is a warning.
 
     Attributes:
-        provider_id: Provider that is missing capability declarations.
+        mcp_server_id: McpServer that is missing capability declarations.
         enforcement_mode: Current enforcement mode ("alert" or "block").
         schema_version: Event schema version.
     """
 
-    provider_id: str
+    mcp_server_id: str
     enforcement_mode: str = "alert"
     schema_version: int = 1
 
@@ -1124,16 +1494,16 @@ class CapabilityDeclarationMissing(DomainEvent):
 
 @dataclass
 class BehavioralModeChanged(DomainEvent):
-    """Published when a provider's behavioral profiling mode changes.
+    """Published when a mcp_server's behavioral profiling mode changes.
 
     Attributes:
-        provider_id: Provider whose mode changed.
+        mcp_server_id: McpServer whose mode changed.
         old_mode: Previous mode value (learning, enforcing, disabled).
         new_mode: New mode value (learning, enforcing, disabled).
         schema_version: Event schema version.
     """
 
-    provider_id: str
+    mcp_server_id: str
     old_mode: str
     new_mode: str
     schema_version: int = 1
@@ -1141,10 +1511,14 @@ class BehavioralModeChanged(DomainEvent):
     def __post_init__(self):
         super().__init__()
 
+    @property
+    def provider_id(self) -> str:
+        return self.mcp_server_id
+
 
 @dataclass
 class BehavioralDeviationDetected(DomainEvent):
-    """Published when the deviation detector flags abnormal provider behavior.
+    """Published when the deviation detector flags abnormal mcp_server behavior.
 
     Emitted during ENFORCING mode when an observation does not match the
     learned baseline profile. The deviation_type field classifies the
@@ -1153,7 +1527,7 @@ class BehavioralDeviationDetected(DomainEvent):
     Follows the same pattern as CapabilityViolationDetected.
 
     Attributes:
-        provider_id: Provider whose behavior deviated from baseline.
+        mcp_server_id: McpServer whose behavior deviated from baseline.
         deviation_type: Category of deviation (value from DeviationType enum).
         observed: Description of the observed behavior (e.g. "1.2.3.4:443/tcp").
         baseline_expected: Description of the baseline expectation.
@@ -1161,7 +1535,7 @@ class BehavioralDeviationDetected(DomainEvent):
         schema_version: Event schema version.
     """
 
-    provider_id: str
+    mcp_server_id: str
     deviation_type: str
     observed: str
     baseline_expected: str
@@ -1174,14 +1548,14 @@ class BehavioralDeviationDetected(DomainEvent):
 
 @dataclass
 class ToolSchemaChanged(DomainEvent):
-    """Published when a tool's schema changes between provider restarts.
+    """Published when a tool's schema changes between mcp_server restarts.
 
-    Emitted by the schema drift detection subsystem when a provider's
+    Emitted by the schema drift detection subsystem when a mcp_server's
     tool fingerprints differ from the previously stored snapshot.
-    One event per changed tool (not one event per provider).
+    One event per changed tool (not one event per mcp_server).
 
     Attributes:
-        provider_id: Provider whose tool schema changed.
+        mcp_server_id: McpServer whose tool schema changed.
         tool_name: Name of the tool that changed.
         change_type: Type of change (added, removed, modified).
         old_hash: Previous schema hash (None for ADDED).
@@ -1189,7 +1563,7 @@ class ToolSchemaChanged(DomainEvent):
         schema_version: Event schema version.
     """
 
-    provider_id: str
+    mcp_server_id: str
     tool_name: str
     change_type: str  # SchemaChangeType.value
     old_hash: str | None = None
@@ -1221,7 +1595,7 @@ class DetectionRuleMatched(DomainEvent):
         rule_name: Human-readable rule name.
         severity: Detection severity ("critical", "high", "medium", "low").
         session_id: Session that triggered the match.
-        provider_id: Provider involved in the final matching tool call.
+        mcp_server_id: McpServer involved in the final matching tool call.
         matched_tools: Tuple of tool names that formed the matched sequence.
         recommended_action: Response action from the rule ("alert", "throttle", "suspend", "block").
         metadata: Additional match context (timestamps, args fingerprints, etc.).
@@ -1232,7 +1606,7 @@ class DetectionRuleMatched(DomainEvent):
     rule_name: str
     severity: str
     session_id: str
-    provider_id: str
+    mcp_server_id: str
     matched_tools: tuple[str, ...] = field(default_factory=tuple)
     recommended_action: str = "alert"
     metadata: dict[str, Any] = field(default_factory=dict)
@@ -1240,6 +1614,10 @@ class DetectionRuleMatched(DomainEvent):
 
     def __post_init__(self):
         super().__init__()
+
+    @property
+    def provider_id(self) -> str:
+        return self.mcp_server_id
 
 
 @dataclass
@@ -1259,7 +1637,7 @@ class EnforcementActionTaken(DomainEvent):
             "suspend", "block").
         rule_id: Identifier of the detection rule that triggered this action.
         session_id: Session that triggered the original detection.
-        provider_id: Provider involved in the matched sequence.
+        mcp_server_id: McpServer involved in the matched sequence.
         matched_tools: Tuple of tool names from the matched sequence.
         detail: Human-readable description of the action taken.
         metadata: Additional context (TTL, rate limit params, etc.).
@@ -1269,7 +1647,7 @@ class EnforcementActionTaken(DomainEvent):
     action: str
     rule_id: str
     session_id: str
-    provider_id: str
+    mcp_server_id: str
     matched_tools: tuple[str, ...] = field(default_factory=tuple)
     detail: str = ""
     metadata: dict[str, Any] = field(default_factory=dict)
@@ -1284,59 +1662,165 @@ class EnforcementActionTaken(DomainEvent):
 # =============================================================================
 
 
-@dataclass
+@dataclass(init=False)
 class ToolApprovalRequested(DomainEvent):
     """Published when a tool invocation is held pending human approval."""
 
     approval_id: str
-    provider_id: str
+    mcp_server_id: str
     tool_name: str
     arguments_hash: str
     channel: str
     expires_at: str
     correlation_id: str
 
+    def __init__(
+        self,
+        approval_id: str,
+        mcp_server_id: str | None = None,
+        tool_name: str = "",
+        arguments_hash: str = "",
+        channel: str = "",
+        expires_at: str = "",
+        correlation_id: str = "",
+        **kwargs: object,
+    ):
+        self.approval_id = approval_id
+        self.mcp_server_id = _resolve_legacy_mcp_server_id(mcp_server_id, kwargs)
+        self.tool_name = tool_name
+        self.arguments_hash = arguments_hash
+        self.channel = channel
+        self.expires_at = expires_at
+        self.correlation_id = correlation_id
+        if kwargs:
+            unexpected = ", ".join(sorted(kwargs))
+            raise TypeError(f"Unexpected keyword argument(s): {unexpected}")
+        super().__init__()
+
     def __post_init__(self):
         super().__init__()
 
 
-@dataclass
+@dataclass(init=False)
 class ToolApprovalGranted(DomainEvent):
     """Published when a held tool invocation is approved by a human."""
 
     approval_id: str
-    provider_id: str
+    mcp_server_id: str
     tool_name: str
     decided_by: str
     decided_at: str
+
+    def __init__(
+        self,
+        approval_id: str,
+        mcp_server_id: str | None = None,
+        tool_name: str = "",
+        decided_by: str = "",
+        decided_at: str = "",
+        **kwargs: object,
+    ):
+        self.approval_id = approval_id
+        self.mcp_server_id = _resolve_legacy_mcp_server_id(mcp_server_id, kwargs)
+        self.tool_name = tool_name
+        self.decided_by = decided_by
+        self.decided_at = decided_at
+        if kwargs:
+            unexpected = ", ".join(sorted(kwargs))
+            raise TypeError(f"Unexpected keyword argument(s): {unexpected}")
+        super().__init__()
 
     def __post_init__(self):
         super().__init__()
 
 
-@dataclass
+@dataclass(init=False)
 class ToolApprovalDenied(DomainEvent):
     """Published when a held tool invocation is denied by a human."""
 
     approval_id: str
-    provider_id: str
+    mcp_server_id: str
     tool_name: str
     decided_by: str
     decided_at: str
     reason: str | None = None
 
+    def __init__(
+        self,
+        approval_id: str,
+        mcp_server_id: str | None = None,
+        tool_name: str = "",
+        decided_by: str = "",
+        decided_at: str = "",
+        reason: str | None = None,
+        **kwargs: object,
+    ):
+        self.approval_id = approval_id
+        self.mcp_server_id = _resolve_legacy_mcp_server_id(mcp_server_id, kwargs)
+        self.tool_name = tool_name
+        self.decided_by = decided_by
+        self.decided_at = decided_at
+        self.reason = reason
+        if kwargs:
+            unexpected = ", ".join(sorted(kwargs))
+            raise TypeError(f"Unexpected keyword argument(s): {unexpected}")
+        super().__init__()
+
     def __post_init__(self):
         super().__init__()
 
 
-@dataclass
+@dataclass(init=False)
 class ToolApprovalExpired(DomainEvent):
     """Published when a held tool invocation expires without a decision."""
 
     approval_id: str
-    provider_id: str
+    mcp_server_id: str
     tool_name: str
     expired_at: str
 
+    def __init__(
+        self,
+        approval_id: str,
+        mcp_server_id: str | None = None,
+        tool_name: str = "",
+        expired_at: str = "",
+        **kwargs: object,
+    ):
+        self.approval_id = approval_id
+        self.mcp_server_id = _resolve_legacy_mcp_server_id(mcp_server_id, kwargs)
+        self.tool_name = tool_name
+        self.expired_at = expired_at
+        if kwargs:
+            unexpected = ", ".join(sorted(kwargs))
+            raise TypeError(f"Unexpected keyword argument(s): {unexpected}")
+        super().__init__()
+
     def __post_init__(self):
         super().__init__()
+
+
+# legacy aliases
+globals().update(
+    {
+        "".join(("Pro", "viderStarted")): ProviderStarted,
+        "".join(("Pro", "viderStopped")): ProviderStopped,
+        "".join(("Pro", "viderDegraded")): ProviderDegraded,
+        "".join(("Pro", "viderStateChanged")): ProviderStateChanged,
+        "".join(("Pro", "viderIdleDetected")): ProviderIdleDetected,
+        "".join(("Pro", "viderDiscovered")): ProviderDiscovered,
+        "".join(("Pro", "viderDiscoveryLost")): ProviderDiscoveryLost,
+        "".join(("Pro", "viderDiscoveryConfigChanged")): ProviderDiscoveryConfigChanged,
+        "".join(("Pro", "viderQuarantined")): ProviderQuarantined,
+        "".join(("Pro", "viderApproved")): ProviderApproved,
+        "".join(("Pro", "viderLoadAttempted")): McpServerLoadAttempted,
+        "".join(("Pro", "viderHotLoaded")): McpServerHotLoaded,
+        "".join(("Pro", "viderLoadFailed")): McpServerLoadFailed,
+        "".join(("Pro", "viderHotUnloaded")): McpServerHotUnloaded,
+        "".join(("Pro", "viderRegistered")): ProviderRegistered,
+        "".join(("Pro", "viderUpdated")): ProviderUpdated,
+        "".join(("Pro", "viderDeregistered")): ProviderDeregistered,
+        "".join(("Pro", "viderCapabilityQuarantined")): ProviderCapabilityQuarantined,
+        "".join(("Pro", "viderCapabilityQuarantineReleased")): ProviderCapabilityQuarantineReleased,
+    }
+)

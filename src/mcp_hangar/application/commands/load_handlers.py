@@ -1,4 +1,4 @@
-"""Command handlers for hot-loading providers from the registry."""
+"""Command handlers for hot-loading mcp_servers from the registry."""
 
 from dataclasses import dataclass
 from datetime import datetime
@@ -7,39 +7,39 @@ from typing import Any
 
 from ...domain.contracts.installer import IPackageInstaller
 from ...domain.contracts.registry import IRegistryClient, ServerDetails
-from ...domain.events import ProviderHotLoaded, ProviderHotUnloaded, ProviderLoadAttempted, ProviderLoadFailed
+from ...domain.events import McpServerHotLoaded, McpServerHotUnloaded, McpServerLoadAttempted, McpServerLoadFailed
 from ...domain.exceptions import (
     MissingSecretsError,
-    ProviderNotHotLoadedError,
+    McpServerNotHotLoadedError,
     RegistryAmbiguousSearchError,
     RegistryServerNotFoundError,
-    UnverifiedProviderError,
+    UnverifiedMcpServerError,
 )
 from ...domain.security.redactor import OutputRedactor
 from ...domain.services import get_tool_access_resolver
 from ...domain.value_objects import ToolAccessPolicy
 from ...domain.contracts.command import CommandHandler
 from ...domain.contracts.event_bus import IEventBus
-from ...infrastructure.runtime_store import LoadMetadata, RuntimeProviderStore
+from ...infrastructure.runtime_store import LoadMetadata, RuntimeMcpServerStore
 from ...logging_config import get_logger
 from ..services.package_resolver import PackageResolver
 from ..services.secrets_resolver import SecretsResolver
-from .commands import LoadProviderCommand, UnloadProviderCommand
+from .commands import LoadMcpServerCommand, UnloadMcpServerCommand
 
 logger = get_logger(__name__)
 
 
-def _sanitize_provider_id(server_id: str) -> str:
-    """Sanitize server ID to be a valid ProviderId.
+def _sanitize_mcp_server_id(server_id: str) -> str:
+    """Sanitize server ID to be a valid McpServerId.
 
-    ProviderId only allows alphanumeric characters, hyphens, and underscores.
+    McpServerId only allows alphanumeric characters, hyphens, and underscores.
     This converts dots and slashes to hyphens.
 
     Args:
         server_id: The server ID from the registry.
 
     Returns:
-        A sanitized provider ID.
+        A sanitized mcp_server ID.
     """
     # Replace common separators with hyphens
     sanitized = server_id.replace("/", "-").replace(".", "-")
@@ -53,12 +53,12 @@ def _sanitize_provider_id(server_id: str) -> str:
 
 @dataclass
 class LoadResult:
-    """Result of loading a provider.
+    """Result of loading a mcp_server.
 
     Attributes:
         status: Result status ("loaded", "already_loaded", "failed", "missing_secrets").
-        provider_id: Provider ID if loaded.
-        provider_name: Server name from registry.
+        mcp_server_id: McpServer ID if loaded.
+        mcp_server_name: Server name from registry.
         tools: List of tool summaries if loaded.
         message: Human-readable message.
         warnings: List of warnings.
@@ -66,8 +66,8 @@ class LoadResult:
     """
 
     status: str
-    provider_id: str | None = None
-    provider_name: str | None = None
+    mcp_server_id: str | None = None
+    mcp_server_name: str | None = None
     tools: list[dict[str, Any]] | None = None
     message: str = ""
     warnings: list[str] | None = None
@@ -79,10 +79,10 @@ class LoadResult:
             "status": self.status,
             "message": self.message,
         }
-        if self.provider_id:
-            result["provider_id"] = self.provider_id
-        if self.provider_name:
-            result["provider_name"] = self.provider_name
+        if self.mcp_server_id:
+            result["mcp_server_id"] = self.mcp_server_id
+        if self.mcp_server_name:
+            result["mcp_server_name"] = self.mcp_server_name
         if self.tools is not None:
             result["tools"] = self.tools
         if self.warnings:
@@ -92,10 +92,10 @@ class LoadResult:
         return result
 
 
-class LoadProviderHandler(CommandHandler):
-    """Handler for LoadProviderCommand.
+class LoadMcpServerHandler(CommandHandler):
+    """Handler for LoadMcpServerCommand.
 
-    Loads a provider from the registry, installs it, and makes it available.
+    Loads a mcp_server from the registry, installs it, and makes it available.
     """
 
     def __init__(
@@ -104,10 +104,10 @@ class LoadProviderHandler(CommandHandler):
         package_resolver: PackageResolver,
         secrets_resolver: SecretsResolver,
         installers: list[IPackageInstaller],
-        runtime_store: RuntimeProviderStore,
+        runtime_store: RuntimeMcpServerStore,
         event_bus: IEventBus,
-        provider_factory: callable,
-        provider_repository: Any,
+        mcp_server_factory: callable,
+        mcp_server_repository: Any,
     ):
         """Initialize the handler.
 
@@ -116,10 +116,10 @@ class LoadProviderHandler(CommandHandler):
             package_resolver: Resolver for selecting best package.
             secrets_resolver: Resolver for environment secrets.
             installers: List of package installers.
-            runtime_store: Store for hot-loaded providers.
+            runtime_store: Store for hot-loaded mcp_servers.
             event_bus: Event bus for publishing events.
-            provider_factory: Factory function to create Provider instances.
-            provider_repository: Repository for checking existing providers.
+            mcp_server_factory: Factory function to create McpServer instances.
+            mcp_server_repository: Repository for checking existing mcp_servers.
         """
         self._registry_client = registry_client
         self._package_resolver = package_resolver
@@ -127,11 +127,11 @@ class LoadProviderHandler(CommandHandler):
         self._installers = {i.registry_type: i for i in installers}
         self._runtime_store = runtime_store
         self._event_bus = event_bus
-        self._provider_factory = provider_factory
-        self._provider_repository = provider_repository
+        self._mcp_server_factory = mcp_server_factory
+        self._mcp_server_repository = mcp_server_repository
 
-    async def handle(self, command: LoadProviderCommand) -> LoadResult:
-        """Handle the load provider command.
+    async def handle(self, command: LoadMcpServerCommand) -> LoadResult:
+        """Handle the load mcp_server command.
 
         Args:
             command: The command to handle.
@@ -143,37 +143,37 @@ class LoadProviderHandler(CommandHandler):
         warnings: list[str] = []
 
         self._event_bus.publish(
-            ProviderLoadAttempted(
-                provider_name=command.name,
+            McpServerLoadAttempted(
+                mcp_server_name=command.name,
                 user_id=command.user_id,
             )
         )
 
         try:
             # Check both original name and sanitized version
-            sanitized_name = _sanitize_provider_id(command.name)
+            sanitized_name = _sanitize_mcp_server_id(command.name)
 
             if self._runtime_store.exists(command.name) or self._runtime_store.exists(sanitized_name):
                 return LoadResult(
                     status="already_loaded",
-                    provider_id=sanitized_name,
-                    message=f"Provider '{command.name}' is already loaded",
+                    mcp_server_id=sanitized_name,
+                    message=f"McpServer '{command.name}' is already loaded",
                 )
 
-            if self._provider_repository.exists(command.name) or self._provider_repository.exists(sanitized_name):
+            if self._mcp_server_repository.exists(command.name) or self._mcp_server_repository.exists(sanitized_name):
                 return LoadResult(
                     status="already_loaded",
-                    provider_id=sanitized_name,
-                    message=f"Provider '{command.name}' is already configured (not hot-loaded)",
+                    mcp_server_id=sanitized_name,
+                    message=f"McpServer '{command.name}' is already configured (not hot-loaded)",
                 )
 
             server = await self._find_server(command.name)
 
             if not server.is_official and not command.force_unverified:
-                raise UnverifiedProviderError(command.name)
+                raise UnverifiedMcpServerError(command.name)
 
             if not server.is_official:
-                warnings.append(f"Provider '{server.name}' is not officially verified")
+                warnings.append(f"McpServer '{server.name}' is not officially verified")
 
             secrets_result = self._secrets_resolver.resolve(
                 server.required_env_vars,
@@ -190,7 +190,7 @@ class LoadProviderHandler(CommandHandler):
                 )
                 return LoadResult(
                     status="missing_secrets",
-                    provider_name=server.name,
+                    mcp_server_name=server.name,
                     message=f"Missing required secrets: {', '.join(secrets_result.missing)}",
                     instructions=instructions,
                 )
@@ -199,7 +199,7 @@ class LoadProviderHandler(CommandHandler):
             if package is None:
                 return LoadResult(
                     status="failed",
-                    provider_name=server.name,
+                    mcp_server_name=server.name,
                     message="No compatible package found (missing runtime?)",
                     warnings=[
                         f"Available packages: {[p.registry_type for p in server.packages]}",
@@ -211,24 +211,24 @@ class LoadProviderHandler(CommandHandler):
             if installer is None:
                 return LoadResult(
                     status="failed",
-                    provider_name=server.name,
+                    mcp_server_name=server.name,
                     message=f"No installer available for package type: {package.registry_type}",
                 )
 
             installed = await installer.install(package)
 
-            # Sanitize provider ID (registry IDs may contain dots/slashes)
-            provider_id = _sanitize_provider_id(server.id)
+            # Sanitize mcp_server ID (registry IDs may contain dots/slashes)
+            mcp_server_id = _sanitize_mcp_server_id(server.id)
 
-            provider = self._provider_factory(
-                provider_id=provider_id,
+            mcp_server = self._mcp_server_factory(
+                mcp_server_id=mcp_server_id,
                 mode=installed.mode.value,
                 command=installed.command,
                 env={**installed.env, **secrets_result.resolved},
             )
 
             try:
-                provider.ensure_ready()
+                mcp_server.ensure_ready()
             except Exception:  # noqa: BLE001 -- fault-barrier: cleanup installed package on startup failure, then re-raise
                 # Cleanup installed package on startup failure
                 if installed.cleanup:
@@ -238,7 +238,7 @@ class LoadProviderHandler(CommandHandler):
                         pass
                 raise
 
-            tools = provider.get_tool_names()
+            tools = mcp_server.get_tool_names()
 
             metadata = LoadMetadata(
                 loaded_at=datetime.now(),
@@ -249,7 +249,7 @@ class LoadProviderHandler(CommandHandler):
                 server_id=server.id,
                 cleanup=installed.cleanup,
             )
-            self._runtime_store.add(provider, metadata)
+            self._runtime_store.add(mcp_server, metadata)
 
             # Register tool access policy if specified
             if command.allow_tools or command.deny_tools:
@@ -258,10 +258,10 @@ class LoadProviderHandler(CommandHandler):
                     deny_list=tuple(command.deny_tools or []),
                 )
                 resolver = get_tool_access_resolver()
-                resolver.set_provider_policy(provider_id, policy)
+                resolver.set_mcp_server_policy(mcp_server_id, policy)
                 logger.debug(
-                    "hot_loaded_provider_tool_policy_set",
-                    provider_id=provider_id,
+                    "hot_loaded_mcp_server_tool_policy_set",
+                    mcp_server_id=mcp_server_id,
                     has_allow_list=bool(command.allow_tools),
                     has_deny_list=bool(command.deny_tools),
                 )
@@ -269,9 +269,9 @@ class LoadProviderHandler(CommandHandler):
             duration_ms = (time.perf_counter() - start_time) * 1000
 
             self._event_bus.publish(
-                ProviderHotLoaded(
-                    provider_id=provider_id,
-                    provider_name=server.name,
+                McpServerHotLoaded(
+                    mcp_server_id=mcp_server_id,
+                    mcp_server_name=server.name,
                     source=f"registry:{server.id}",
                     verified=server.is_official,
                     user_id=command.user_id,
@@ -282,14 +282,14 @@ class LoadProviderHandler(CommandHandler):
 
             return LoadResult(
                 status="loaded",
-                provider_id=provider_id,
-                provider_name=server.name,
+                mcp_server_id=mcp_server_id,
+                mcp_server_name=server.name,
                 tools=[{"name": t} for t in tools],
                 message=f"Successfully loaded '{server.name}' with {len(tools)} tools",
                 warnings=warnings if warnings else None,
             )
 
-        except (UnverifiedProviderError, MissingSecretsError):
+        except (UnverifiedMcpServerError, MissingSecretsError):
             raise
 
         except Exception as e:  # noqa: BLE001 -- fault-barrier: catch-all for error event publishing, then re-raise
@@ -302,8 +302,8 @@ class LoadProviderHandler(CommandHandler):
                 pass
 
             self._event_bus.publish(
-                ProviderLoadFailed(
-                    provider_name=command.name,
+                McpServerLoadFailed(
+                    mcp_server_name=command.name,
                     reason=error_reason,
                     user_id=command.user_id,
                     error_type=type(e).__name__,
@@ -347,28 +347,28 @@ class LoadProviderHandler(CommandHandler):
         raise RegistryAmbiguousSearchError(name, [r.name for r in results])
 
 
-class UnloadProviderHandler(CommandHandler):
-    """Handler for UnloadProviderCommand.
+class UnloadMcpServerHandler(CommandHandler):
+    """Handler for UnloadMcpServerCommand.
 
-    Unloads a hot-loaded provider and cleans up resources.
+    Unloads a hot-loaded mcp_server and cleans up resources.
     """
 
     def __init__(
         self,
-        runtime_store: RuntimeProviderStore,
+        runtime_store: RuntimeMcpServerStore,
         event_bus: IEventBus,
     ):
         """Initialize the handler.
 
         Args:
-            runtime_store: Store for hot-loaded providers.
+            runtime_store: Store for hot-loaded mcp_servers.
             event_bus: Event bus for publishing events.
         """
         self._runtime_store = runtime_store
         self._event_bus = event_bus
 
-    def handle(self, command: UnloadProviderCommand) -> dict[str, Any]:
-        """Handle the unload provider command.
+    def handle(self, command: UnloadMcpServerCommand) -> dict[str, Any]:
+        """Handle the unload mcp_server command.
 
         Args:
             command: The command to handle.
@@ -377,20 +377,20 @@ class UnloadProviderHandler(CommandHandler):
             Dictionary with unload result.
 
         Raises:
-            ProviderNotHotLoadedError: If provider is not hot-loaded.
+            McpServerNotHotLoadedError: If mcp_server is not hot-loaded.
         """
-        entry = self._runtime_store.get(command.provider_id)
+        entry = self._runtime_store.get(command.mcp_server_id)
         if entry is None:
-            raise ProviderNotHotLoadedError(command.provider_id)
+            raise McpServerNotHotLoadedError(command.mcp_server_id)
 
-        provider, metadata = entry
+        mcp_server, metadata = entry
 
         try:
-            provider.shutdown()
+            mcp_server.shutdown()
         except Exception as e:  # noqa: BLE001 -- fault-barrier: shutdown failure must not prevent cleanup
             logger.warning(
-                "provider_shutdown_error",
-                provider_id=command.provider_id,
+                "mcp_server_shutdown_error",
+                mcp_server_id=command.mcp_server_id,
                 error=str(e),
             )
 
@@ -399,28 +399,28 @@ class UnloadProviderHandler(CommandHandler):
                 metadata.cleanup()
             except Exception as e:  # noqa: BLE001 -- fault-barrier: cleanup callback failure must not prevent unload
                 logger.warning(
-                    "provider_cleanup_error",
-                    provider_id=command.provider_id,
+                    "mcp_server_cleanup_error",
+                    mcp_server_id=command.mcp_server_id,
                     error=str(e),
                 )
 
-        self._runtime_store.remove(command.provider_id)
+        self._runtime_store.remove(command.mcp_server_id)
 
-        # Remove tool access policy for unloaded provider
+        # Remove tool access policy for unloaded mcp_server
         resolver = get_tool_access_resolver()
-        resolver.remove_provider_policy(command.provider_id)
+        resolver.remove_mcp_server_policy(command.mcp_server_id)
 
         lifetime_seconds = metadata.lifetime_seconds()
 
         self._event_bus.publish(
-            ProviderHotUnloaded(
-                provider_id=command.provider_id,
+            McpServerHotUnloaded(
+                mcp_server_id=command.mcp_server_id,
                 user_id=command.user_id,
                 lifetime_seconds=lifetime_seconds,
             )
         )
 
         return {
-            "unloaded": command.provider_id,
+            "unloaded": command.mcp_server_id,
             "lifetime_seconds": round(lifetime_seconds, 1),
         }

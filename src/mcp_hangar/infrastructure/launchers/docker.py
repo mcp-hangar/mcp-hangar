@@ -1,24 +1,24 @@
-"""Docker provider launcher implementation."""
+"""Docker mcp_server launcher implementation."""
 
 import shutil
 import subprocess
 
 from mcp_hangar.logging_config import get_logger
 from mcp_hangar.stdio_client import StdioClient
-from mcp_hangar.domain.exceptions import ProviderStartError, ValidationError
+from mcp_hangar.domain.exceptions import McpServerStartError, ValidationError
 from mcp_hangar.domain.security.input_validator import InputValidator
 from mcp_hangar.domain.security.sanitizer import Sanitizer
-from mcp_hangar.domain.value_objects.capabilities import ProviderCapabilities
-from .base import ProviderLauncher
+from mcp_hangar.domain.value_objects.capabilities import McpServerCapabilities
+from .base import McpServerLauncher
 
 logger = get_logger(__name__)
 
 
-class DockerLauncher(ProviderLauncher):
+class DockerLauncher(McpServerLauncher):
     """
-    Launch providers in Docker containers.
+    Launch mcp_servers in Docker containers.
 
-    Runs the provider image with stdin/stdout attached for MCP communication.
+    Runs the mcp_server image with stdin/stdout attached for MCP communication.
     Security-hardened with:
     - Image name validation
     - Environment sanitization
@@ -131,8 +131,8 @@ class DockerLauncher(ProviderLauncher):
         self,
         image: str,
         env: dict[str, str] | None = None,
-        capabilities: ProviderCapabilities | None = None,
-        provider_id: str | None = None,
+        capabilities: McpServerCapabilities | None = None,
+        mcp_server_id: str | None = None,
     ) -> list[str]:
         """
         Build secure Docker/Podman run command.
@@ -150,7 +150,7 @@ class DockerLauncher(ProviderLauncher):
         Args:
             image: Docker image to run
             env: Environment variables for container
-            capabilities: Optional provider capability declaration. When present,
+            capabilities: Optional mcp_server capability declaration. When present,
                 network.egress drives network mode selection.
 
         Returns:
@@ -195,9 +195,9 @@ class DockerLauncher(ProviderLauncher):
                 # Docker -e format
                 cmd.extend(["-e", f"{key}={sanitized}"])
 
-        # Provider identity label for container discovery
-        if provider_id:
-            cmd.extend(["--label", f"mcp-hangar.provider-id={provider_id}"])
+        # McpServer identity label for container discovery
+        if mcp_server_id:
+            cmd.extend(["--label", f"mcp-hangar.mcp_server-id={mcp_server_id}"])
 
         # Image name
         cmd.append(image)
@@ -208,23 +208,23 @@ class DockerLauncher(ProviderLauncher):
         self,
         image: str,
         env: dict[str, str] | None = None,
-        capabilities: ProviderCapabilities | None = None,
-        provider_id: str | None = None,
+        capabilities: McpServerCapabilities | None = None,
+        mcp_server_id: str | None = None,
     ) -> StdioClient:
         """
-        Launch a Docker provider with security validation.
+        Launch a Docker mcp_server with security validation.
 
         Args:
             image: Docker image name and tag
             env: Environment variables to pass to container
-            capabilities: Optional provider capability declaration. When present,
+            capabilities: Optional mcp_server capability declaration. When present,
                 network.egress drives network mode (overrides enable_network flag).
 
         Returns:
             StdioClient connected to the Docker container
 
         Raises:
-            ProviderStartError: If container fails to start
+            McpServerStartError: If container fails to start
             ValidationError: If inputs fail security validation
         """
         if not image:
@@ -241,7 +241,7 @@ class DockerLauncher(ProviderLauncher):
                 raise ValidationError(message=f"Environment validation failed: {errors}", field="env")
 
         # Build secure command
-        cmd = self._build_docker_command(image, env, capabilities=capabilities, provider_id=provider_id)
+        cmd = self._build_docker_command(image, env, capabilities=capabilities, mcp_server_id=mcp_server_id)
 
         # Log launch
         logger.info(f"Launching Docker container: {image}")
@@ -258,14 +258,14 @@ class DockerLauncher(ProviderLauncher):
             )
             return StdioClient(process)
         except FileNotFoundError as e:
-            raise ProviderStartError(
-                provider_id="unknown",
+            raise McpServerStartError(
+                mcp_server_id="unknown",
                 reason="Docker not found. Is Docker installed and in PATH?",
                 details={"image": image},
             ) from e
         except (OSError, subprocess.SubprocessError) as e:
-            raise ProviderStartError(
-                provider_id="unknown",
+            raise McpServerStartError(
+                mcp_server_id="unknown",
                 reason=f"docker_spawn_failed: {e}",
                 details={"image": image},
             ) from e

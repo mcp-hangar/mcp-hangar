@@ -126,9 +126,9 @@ class TestInputValidatorExtended:
         assert v.allowed_commands == {"python", "node"}
         assert v.blocked_commands == {"rm"}
 
-    def test_provider_id_non_string_type(self):
+    def test_mcp_server_id_non_string_type(self):
         v = InputValidator()
-        result = v.validate_provider_id(123)
+        result = v.validate_mcp_server_id(123)
         assert not result.valid
         assert any("string" in i.message.lower() for i in result.errors)
 
@@ -306,20 +306,14 @@ class TestInputValidatorExtended:
 
     def test_validate_all_combines_results(self):
         v = InputValidator()
-        result = v.validate_all(
-            provider_id="valid_id",
-            tool_name="valid_tool",
-            timeout=30.0,
-        )
+        result = v.validate_all(mcp_server_id="valid_id", tool_name="valid_tool",
+        timeout=30.0,)
         assert result.valid
 
     def test_validate_all_with_invalid_inputs(self):
         v = InputValidator()
-        result = v.validate_all(
-            provider_id="",
-            tool_name="",
-            timeout=-1,
-        )
+        result = v.validate_all(mcp_server_id="", tool_name="",
+        timeout=-1,)
         assert not result.valid
         assert len(result.errors) >= 3
 
@@ -591,7 +585,7 @@ class TestCreateSecureEnvExtended:
         with patch.dict(os.environ, {"PATH": "/usr"}, clear=True):
             env = create_secure_env_for_provider(
                 base_env={"KEY": "base"},
-                provider_env={"KEY": "provider"},
+                mcp_server_env={"KEY": "provider"},
             )
             d = env.to_dict(mask_sensitive=False)
             assert d["KEY"] == "provider"
@@ -600,7 +594,7 @@ class TestCreateSecureEnvExtended:
         with patch.dict(os.environ, {"PATH": "/usr", "HOME": "/home"}, clear=True):
             env = create_secure_env_for_provider(
                 inherit_parent=False,
-                provider_env={"MY_VAR": "val"},
+                mcp_server_env={"MY_VAR": "val"},
             )
             d = env.to_dict(mask_sensitive=False)
             assert "PATH" not in d
@@ -653,7 +647,7 @@ class TestRateLimitConfigValidation:
 
     def test_scope_enum(self):
         assert RateLimitScope.GLOBAL.value == "global"
-        assert RateLimitScope.PER_PROVIDER.value == "provider"
+        assert RateLimitScope.PER_PROVIDER.value == "mcp_server"
         assert RateLimitScope.PER_TOOL.value == "tool"
         assert RateLimitScope.PER_CLIENT.value == "client"
 
@@ -1239,7 +1233,7 @@ class TestRolesStub:
     def test_get_permission(self):
         from mcp_hangar.domain.security.roles import get_permission
 
-        # get_permission takes a single key string, e.g. "providers:read"
-        result = get_permission("providers:read")
+        # get_permission takes a permission key string, e.g. "mcp_server:read"
+        result = get_permission("mcp_server:read")
         # Returns Permission or None
         assert result is None or hasattr(result, "resource_type")

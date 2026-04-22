@@ -20,10 +20,10 @@ from mcp_hangar.application.queries.queries import GetToolInvocationHistoryQuery
 # ---------------------------------------------------------------------------
 
 
-def _make_history_entry(event_type: str = "ToolInvocationCompleted", provider_id: str = "math") -> dict:
+def _make_history_entry(event_type: str = "ToolInvocationCompleted", mcp_server_id: str = "math") -> dict[str, object]:
     """Create a sample tool history entry."""
     return {
-        "stream_id": f"provider-{provider_id}",
+        "stream_id": f"provider-{mcp_server_id}",
         "version": 1,
         "event_type": event_type,
         "event_id": "evt-001",
@@ -37,7 +37,7 @@ def _make_history_entry(event_type: str = "ToolInvocationCompleted", provider_id
 def mock_history_result():
     """Sample result dict returned by GetToolInvocationHistoryHandler."""
     return {
-        "provider_id": "math",
+        "mcp_server_id": "math",
         "history": [_make_history_entry("ToolInvocationCompleted")],
         "total": 1,
     }
@@ -47,7 +47,7 @@ def mock_history_result():
 def mock_empty_history_result():
     """Result dict with no history entries."""
     return {
-        "provider_id": "unknown",
+        "mcp_server_id": "unknown",
         "history": [],
         "total": 0,
     }
@@ -62,15 +62,15 @@ def mock_context(mock_history_result, mock_empty_history_result):
 
     def execute_query(query):
         if isinstance(query, GetToolInvocationHistoryQuery):
-            if query.provider_id == "math":
+            if query.mcp_server_id == "math":
                 return {
-                    "provider_id": "math",
+                    "mcp_server_id": "math",
                     "history": [_make_history_entry("ToolInvocationCompleted")],
                     "total": 1,
                 }
             # Unknown provider returns empty history (not 404)
             return {
-                "provider_id": query.provider_id,
+                "mcp_server_id": query.mcp_server_id,
                 "history": [],
                 "total": 0,
             }
@@ -103,28 +103,28 @@ class TestGetProviderToolHistory:
 
     def test_returns_200_for_known_provider(self, api_client):
         """GET /providers/math/tools/history returns HTTP 200."""
-        response = api_client.get("/providers/math/tools/history")
+        response = api_client.get("/mcp_servers/math/tools/history")
         assert response.status_code == 200
 
     def test_returns_history_with_expected_keys(self, api_client):
-        """GET /providers/math/tools/history returns JSON with provider_id, history, total."""
-        response = api_client.get("/providers/math/tools/history")
+        """GET /providers/math/tools/history returns JSON with mcp_server_id, history, total."""
+        response = api_client.get("/mcp_servers/math/tools/history")
         data = response.json()
-        assert "provider_id" in data
+        assert "mcp_server_id" in data
         assert "history" in data
         assert "total" in data
 
     def test_history_contains_events(self, api_client):
         """GET /providers/math/tools/history returns non-empty history list."""
-        response = api_client.get("/providers/math/tools/history")
+        response = api_client.get("/mcp_servers/math/tools/history")
         data = response.json()
-        assert data["provider_id"] == "math"
+        assert data["mcp_server_id"] == "math"
         assert isinstance(data["history"], list)
         assert len(data["history"]) == 1
 
     def test_returns_200_with_empty_history_for_unknown_provider(self, api_client):
         """GET /providers/unknown/tools/history returns 200 with empty history (not 404)."""
-        response = api_client.get("/providers/unknown/tools/history")
+        response = api_client.get("/mcp_servers/unknown/tools/history")
         assert response.status_code == 200
         data = response.json()
         assert data["history"] == []
@@ -132,34 +132,34 @@ class TestGetProviderToolHistory:
 
     def test_default_limit_is_100(self, api_client, mock_context):
         """GET /providers/math/tools/history without limit uses default 100."""
-        api_client.get("/providers/math/tools/history")
+        api_client.get("/mcp_servers/math/tools/history")
         calls = mock_context.query_bus.execute.call_args_list
         query_call = next(c for c in calls if isinstance(c[0][0], GetToolInvocationHistoryQuery))
         assert query_call[0][0].limit == 100
 
     def test_limit_query_param_forwarded(self, api_client, mock_context):
         """GET /providers/math/tools/history?limit=50 forwards limit=50 to query."""
-        api_client.get("/providers/math/tools/history?limit=50")
+        api_client.get("/mcp_servers/math/tools/history?limit=50")
         calls = mock_context.query_bus.execute.call_args_list
         query_call = next(c for c in calls if isinstance(c[0][0], GetToolInvocationHistoryQuery))
         assert query_call[0][0].limit == 50
 
     def test_from_position_query_param_forwarded(self, api_client, mock_context):
         """GET /providers/math/tools/history?from_position=10 forwards from_position=10."""
-        api_client.get("/providers/math/tools/history?from_position=10")
+        api_client.get("/mcp_servers/math/tools/history?from_position=10")
         calls = mock_context.query_bus.execute.call_args_list
         query_call = next(c for c in calls if isinstance(c[0][0], GetToolInvocationHistoryQuery))
         assert query_call[0][0].from_position == 10
 
     def test_invalid_limit_falls_back_to_default(self, api_client, mock_context):
         """GET /providers/math/tools/history?limit=bad uses default 100."""
-        api_client.get("/providers/math/tools/history?limit=bad")
+        api_client.get("/mcp_servers/math/tools/history?limit=bad")
         calls = mock_context.query_bus.execute.call_args_list
         query_call = next(c for c in calls if isinstance(c[0][0], GetToolInvocationHistoryQuery))
         assert query_call[0][0].limit == 100
 
     def test_dispatches_get_tool_invocation_history_query(self, api_client, mock_context):
         """GET /providers/math/tools/history dispatches GetToolInvocationHistoryQuery."""
-        api_client.get("/providers/math/tools/history")
+        api_client.get("/mcp_servers/math/tools/history")
         calls = mock_context.query_bus.execute.call_args_list
         assert any(isinstance(c[0][0], GetToolInvocationHistoryQuery) for c in calls)

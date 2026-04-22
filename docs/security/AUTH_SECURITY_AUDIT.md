@@ -46,8 +46,8 @@ This audit covers the authentication and authorization subsystem introduced in M
 | Role | Permissions |
 |------|------------|
 | `admin` | Full access to all operations |
-| `operator` | Start, stop, reload providers; manage groups |
-| `developer` | Invoke tools, read provider status |
+| `operator` | Start, stop, reload MCP servers; manage groups |
+| `developer` | Invoke tools, read MCP server status |
 | `viewer` | Read-only access to status and metrics |
 
 ### Custom Roles
@@ -59,7 +59,7 @@ This audit covers the authentication and authorization subsystem introduced in M
 ## Tool Access Policies
 
 - Policies are evaluated after RBAC permission check.
-- A policy maps `(principal, provider, tool)` to `allow` or `deny`.
+- A policy maps `(principal, MCP server, tool)` to `allow` or `deny`.
 - Default policy when no TAP exists: `allow` (open by default).
 - Policies are stored in `SQLiteToolAccessPolicyStore`.
 
@@ -88,6 +88,6 @@ The `AuthMiddleware` in `http_auth_middleware.py`:
 
 ## Open Items
 
-- **mTLS for provider-to-Hangar communication**: Not yet implemented. Recommended for cross-network deployments.
+- **mTLS for MCP server-to-Hangar communication**: Not yet implemented. Recommended for cross-network deployments.
 - **OIDC/OAuth2 integration**: Planned for future release. Currently API key only.
 - **Secret auto-rotation**: Signing key rotation without restart.

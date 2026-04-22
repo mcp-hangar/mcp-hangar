@@ -17,10 +17,10 @@ MAX_CONCURRENCY_LIMIT = 50  # Upper bound for per-batch max_concurrency paramete
 
 # System-wide concurrency limits (configured via config.yaml, shared across batches)
 DEFAULT_GLOBAL_CONCURRENCY = 50
-"""Default global limit across all providers and batches (0 = unlimited)."""
+"""Default global limit across all mcp_servers and batches (0 = unlimited)."""
 
 DEFAULT_PROVIDER_CONCURRENCY = 10
-"""Default per-provider concurrency limit (0 = unlimited)."""
+"""Default per-mcp_server concurrency limit (0 = unlimited)."""
 
 DEFAULT_TIMEOUT = 60.0
 MAX_TIMEOUT = 300.0
@@ -43,7 +43,7 @@ class CallSpec:
 
     index: int
     call_id: str
-    provider: str
+    mcp_server: str
     tool: str
     arguments: dict[str, Any]
     timeout: float | None = None

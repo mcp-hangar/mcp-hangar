@@ -6,9 +6,9 @@ MCP Hangar persists domain events in an append-only Event Store. This supports a
 
 Events are serialized as JSON and stored with:
 
-- `stream_id` (e.g. `provider:math`)
+- `stream_id` (e.g. `MCP server:math`)
 - `stream_version` (0-based, optimistic concurrency)
-- `event_type` (e.g. `ProviderStarted`)
+- `event_type` (e.g. `McpServerStarted`)
 - `data` (JSON payload)
 
 ### Schema versioning
@@ -18,7 +18,7 @@ Every serialized payload includes a schema version field:
 ```json
 {
   "_version": 1,
-  "provider_id": "math",
+  "mcp_server_id": "math",
   "mode": "subprocess",
   "tools_count": 3,
   "startup_duration_ms": 50.0
@@ -60,12 +60,12 @@ from typing import Any
 from mcp_hangar.infrastructure.persistence.event_upcaster import IEventUpcaster
 
 
-class ProviderStartedV1ToV2(IEventUpcaster):
+class McpServerStartedV1ToV2(IEventUpcaster):
     """Example evolution: add a `tags` field introduced in v2."""
 
     @property
     def event_type(self) -> str:
-        return "ProviderStarted"
+        return "McpServerStarted"
 
     @property
     def from_version(self) -> int:
@@ -87,11 +87,11 @@ Upcaster chain is built at startup:
 from mcp_hangar.infrastructure.persistence import EventSerializer, SQLiteEventStore
 from mcp_hangar.infrastructure.persistence.event_upcaster import UpcasterChain
 
-from mcp_hangar.infrastructure.persistence.upcasters.provider_started import ProviderStartedV1ToV2
+from mcp_hangar.infrastructure.persistence.upcasters.mcp_server_started import McpServerStartedV1ToV2
 
 
 chain = UpcasterChain()
-chain.register(ProviderStartedV1ToV2())
+chain.register(McpServerStartedV1ToV2())
 
 serializer = EventSerializer(upcaster_chain=chain)
 store = SQLiteEventStore(db_path, serializer=serializer)

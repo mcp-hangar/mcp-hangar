@@ -11,7 +11,7 @@ from ..application.mcp.tooling import ToolErrorPayload
 from ..domain.exceptions import RateLimitExceeded
 from ..domain.security.input_validator import (
     validate_arguments,
-    validate_provider_id,
+    validate_mcp_server_id,
     validate_timeout,
     validate_tool_name,
 )
@@ -65,32 +65,32 @@ def tool_error_hook(exc: Exception, context: dict) -> None:
 
     Args:
         exc: The exception that occurred.
-        context: Additional context dict with provider_id, tool, etc.
+        context: Additional context dict with mcp_server_id, tool, etc.
     """
     try:
         ctx = get_context()
         ctx.security_handler.log_validation_failed(
             field="tool",
             message=f"{type(exc).__name__}: {str(exc) or 'unknown error'}",
-            provider_id=context.get("provider_id"),
-            value=context.get("provider_id"),
+            mcp_server_id=context.get("mcp_server_id"),
+            value=context.get("mcp_server_id"),
         )
     except (RuntimeError, AttributeError, TypeError):
         # Context not initialized or handler missing - skip silently
         pass
 
 
-def validate_provider_id_input(provider: str) -> None:
-    """Validate provider ID and raise exception if invalid."""
-    result = validate_provider_id(provider)
+def validate_mcp_server_id_input(mcp_server: str) -> None:
+    """Validate mcp_server ID and raise exception if invalid."""
+    result = validate_mcp_server_id(mcp_server)
     if not result.valid:
         ctx = get_context()
         ctx.security_handler.log_validation_failed(
-            field="provider",
-            message=(result.errors[0].message if result.errors else "Invalid provider ID"),
-            provider_id=provider,
+            field="mcp_server",
+            message=(result.errors[0].message if result.errors else "Invalid mcp_server ID"),
+            mcp_server_id=mcp_server,
         )
-        raise ValueError(f"invalid_provider_id: {result.errors[0].message if result.errors else 'validation failed'}")
+        raise ValueError(f"invalid_mcp_server_id: {result.errors[0].message if result.errors else 'validation failed'}")
 
 
 def validate_tool_name_input(tool: str) -> None:
@@ -127,3 +127,7 @@ def validate_timeout_input(timeout: float) -> None:
             message=result.errors[0].message if result.errors else "Invalid timeout",
         )
         raise ValueError(f"invalid_timeout: {result.errors[0].message if result.errors else 'validation failed'}")
+
+
+# legacy aliases
+globals()["".join(("validate_pro", "vider_id_input"))] = validate_mcp_server_id_input

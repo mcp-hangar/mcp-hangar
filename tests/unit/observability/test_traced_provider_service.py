@@ -9,10 +9,10 @@ from unittest.mock import MagicMock
 import pytest
 
 from mcp_hangar.application.ports.observability import NullObservabilityAdapter
-from mcp_hangar.application.services.traced_provider_service import TracedProviderService
+from mcp_hangar.application.services.traced_mcp_server_service import TracedMcpServerService
 
 
-class MockProviderService:
+class MockMcpServerService:
     """Mock ProviderService for testing."""
 
     def __init__(self) -> None:
@@ -22,21 +22,21 @@ class MockProviderService:
         self.health_check_error: Exception | None = None
         self.list_providers_result: list = []
 
-    def list_providers(self) -> list:
+    def list_mcp_servers(self) -> list:
         return self.list_providers_result
 
-    def start_provider(self, provider_id: str) -> dict:
-        return {"provider": provider_id, "state": "READY"}
+    def start_mcp_server(self, mcp_server_id: str) -> dict:
+        return {"mcp_server": mcp_server_id, "state": "READY"}
 
-    def stop_provider(self, provider_id: str) -> dict:
-        return {"stopped": provider_id}
+    def stop_mcp_server(self, mcp_server_id: str) -> dict:
+        return {"stopped": mcp_server_id}
 
-    def get_provider_tools(self, provider_id: str) -> dict:
-        return {"provider": provider_id, "tools": []}
+    def get_mcp_server_tools(self, mcp_server_id: str) -> dict:
+        return {"mcp_server": mcp_server_id, "tools": []}
 
     def invoke_tool(
         self,
-        provider_id: str,
+        mcp_server_id: str,
         tool_name: str,
         arguments: dict,
         timeout: float = 30.0,
@@ -45,81 +45,81 @@ class MockProviderService:
             raise self.invoke_tool_error
         return self.invoke_tool_result
 
-    def health_check(self, provider_id: str) -> bool:
+    def health_check(self, mcp_server_id: str) -> bool:
         if self.health_check_error:
             raise self.health_check_error
         return self.health_check_result
 
-    def shutdown_idle_providers(self) -> list:
+    def shutdown_idle_mcp_servers(self) -> list:
         return []
 
 
-class TestTracedProviderServiceDelegation:
+class TestTracedMcpServerServiceDelegation:
     """Tests for method delegation."""
 
     def test_list_providers_delegates(self) -> None:
         """list_providers delegates to underlying service."""
-        mock_service = MockProviderService()
+        mock_service = MockMcpServerService()
         mock_service.list_providers_result = [{"name": "math"}]
 
-        traced = TracedProviderService(
-            provider_service=mock_service,
+        traced = TracedMcpServerService(
+            mcp_server_service=mock_service,
             observability=NullObservabilityAdapter(),
         )
 
-        result = traced.list_providers()
+        result = traced.list_mcp_servers()
 
         assert result == [{"name": "math"}]
 
     def test_start_provider_delegates(self) -> None:
         """start_provider delegates to underlying service."""
-        mock_service = MockProviderService()
-        traced = TracedProviderService(
-            provider_service=mock_service,
+        mock_service = MockMcpServerService()
+        traced = TracedMcpServerService(
+            mcp_server_service=mock_service,
             observability=NullObservabilityAdapter(),
         )
 
-        result = traced.start_provider("math")
+        result = traced.start_mcp_server("math")
 
-        assert result == {"provider": "math", "state": "READY"}
+        assert result == {"mcp_server": "math", "state": "READY"}
 
     def test_stop_provider_delegates(self) -> None:
         """stop_provider delegates to underlying service."""
-        mock_service = MockProviderService()
-        traced = TracedProviderService(
-            provider_service=mock_service,
+        mock_service = MockMcpServerService()
+        traced = TracedMcpServerService(
+            mcp_server_service=mock_service,
             observability=NullObservabilityAdapter(),
         )
 
-        result = traced.stop_provider("math")
+        result = traced.stop_mcp_server("math")
 
         assert result == {"stopped": "math"}
 
     def test_get_provider_tools_delegates(self) -> None:
         """get_provider_tools delegates to underlying service."""
-        mock_service = MockProviderService()
-        traced = TracedProviderService(
-            provider_service=mock_service,
+        mock_service = MockMcpServerService()
+        traced = TracedMcpServerService(
+            mcp_server_service=mock_service,
             observability=NullObservabilityAdapter(),
         )
 
-        result = traced.get_provider_tools("math")
+        result = traced.get_mcp_server_tools("math")
 
-        assert result == {"provider": "math", "tools": []}
+        assert result == {"mcp_server": "math", "tools": []}
 
 
-class TestTracedProviderServiceTracing:
+class TestTracedMcpServerServiceTracing:
     """Tests for tracing behavior."""
 
     def test_invoke_tool_creates_span(self) -> None:
         """invoke_tool creates a traced span."""
-        mock_service = MockProviderService()
+        mock_service = MockMcpServerService()
         mock_observability = MagicMock()
         mock_span = MagicMock()
         mock_observability.start_tool_span.return_value = mock_span
 
-        traced = TracedProviderService(
-            provider_service=mock_service,
+        traced = TracedMcpServerService(
+            mcp_server_service=mock_service,
             observability=mock_observability,
         )
 
@@ -127,7 +127,7 @@ class TestTracedProviderServiceTracing:
 
         # Verify span was started
         mock_observability.start_tool_span.assert_called_once_with(
-            provider_name="math",
+            mcp_server_name="math",
             tool_name="add",
             input_params={"a": 1, "b": 2},
             trace_context=None,
@@ -140,15 +140,15 @@ class TestTracedProviderServiceTracing:
 
     def test_invoke_tool_ends_span_on_error(self) -> None:
         """invoke_tool ends span with error on failure."""
-        mock_service = MockProviderService()
+        mock_service = MockMcpServerService()
         mock_service.invoke_tool_error = ValueError("Test error")
 
         mock_observability = MagicMock()
         mock_span = MagicMock()
         mock_observability.start_tool_span.return_value = mock_span
 
-        traced = TracedProviderService(
-            provider_service=mock_service,
+        traced = TracedMcpServerService(
+            mcp_server_service=mock_service,
             observability=mock_observability,
         )
 
@@ -162,13 +162,13 @@ class TestTracedProviderServiceTracing:
 
     def test_invoke_tool_propagates_trace_context(self) -> None:
         """invoke_tool passes trace context to observability."""
-        mock_service = MockProviderService()
+        mock_service = MockMcpServerService()
         mock_observability = MagicMock()
         mock_span = MagicMock()
         mock_observability.start_tool_span.return_value = mock_span
 
-        traced = TracedProviderService(
-            provider_service=mock_service,
+        traced = TracedMcpServerService(
+            mcp_server_service=mock_service,
             observability=mock_observability,
         )
 
@@ -191,13 +191,13 @@ class TestTracedProviderServiceTracing:
 
     def test_health_check_records_result(self) -> None:
         """health_check records result in observability."""
-        mock_service = MockProviderService()
+        mock_service = MockMcpServerService()
         mock_service.health_check_result = True
 
         mock_observability = MagicMock()
 
-        traced = TracedProviderService(
-            provider_service=mock_service,
+        traced = TracedMcpServerService(
+            mcp_server_service=mock_service,
             observability=mock_observability,
         )
 
@@ -209,19 +209,19 @@ class TestTracedProviderServiceTracing:
         mock_observability.record_health_check.assert_called_once()
         call_args = mock_observability.record_health_check.call_args
 
-        assert call_args.kwargs["provider_name"] == "math"
+        assert call_args.kwargs["mcp_server_name"] == "math"
         assert call_args.kwargs["healthy"] is True
         assert call_args.kwargs["latency_ms"] >= 0
 
     def test_health_check_records_failure(self) -> None:
         """health_check records failure in observability."""
-        mock_service = MockProviderService()
+        mock_service = MockMcpServerService()
         mock_service.health_check_error = ConnectionError("Timeout")
 
         mock_observability = MagicMock()
 
-        traced = TracedProviderService(
-            provider_service=mock_service,
+        traced = TracedMcpServerService(
+            mcp_server_service=mock_service,
             observability=mock_observability,
         )
 
@@ -232,20 +232,20 @@ class TestTracedProviderServiceTracing:
         mock_observability.record_health_check.assert_called_once()
         call_args = mock_observability.record_health_check.call_args
 
-        assert call_args.kwargs["provider_name"] == "math"
+        assert call_args.kwargs["mcp_server_name"] == "math"
         assert call_args.kwargs["healthy"] is False
 
 
-class TestTracedProviderServiceObservabilityControl:
+class TestTracedMcpServerServiceObservabilityControl:
     """Tests for observability control methods."""
 
     def test_flush_traces_calls_flush(self) -> None:
         """flush_traces calls observability flush."""
-        mock_service = MockProviderService()
+        mock_service = MockMcpServerService()
         mock_observability = MagicMock()
 
-        traced = TracedProviderService(
-            provider_service=mock_service,
+        traced = TracedMcpServerService(
+            mcp_server_service=mock_service,
             observability=mock_observability,
         )
 
@@ -255,11 +255,11 @@ class TestTracedProviderServiceObservabilityControl:
 
     def test_shutdown_tracing_calls_shutdown(self) -> None:
         """shutdown_tracing calls observability shutdown."""
-        mock_service = MockProviderService()
+        mock_service = MockMcpServerService()
         mock_observability = MagicMock()
 
-        traced = TracedProviderService(
-            provider_service=mock_service,
+        traced = TracedMcpServerService(
+            mcp_server_service=mock_service,
             observability=mock_observability,
         )
 

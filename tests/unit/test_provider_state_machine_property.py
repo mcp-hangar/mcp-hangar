@@ -10,10 +10,10 @@ from hypothesis.stateful import RuleBasedStateMachine, invariant, precondition, 
 from hypothesis import strategies as st
 from unittest.mock import Mock
 
-from mcp_hangar.domain.model.provider import Provider, VALID_TRANSITIONS
+from mcp_hangar.domain.model.provider import McpServer, VALID_TRANSITIONS
 from mcp_hangar.domain.value_objects.provider import ProviderState
 from mcp_hangar.domain.exceptions import InvalidStateTransitionError
-from mcp_hangar.domain.events import ProviderStateChanged
+from mcp_hangar.domain.events import McpServerStateChanged
 
 
 # -- Hypothesis profiles for CI reproducibility --
@@ -40,14 +40,11 @@ settings.register_profile(
 )
 
 
-def _make_provider() -> Provider:
+def _make_provider() -> McpServer:
     """Create a minimal Provider for state machine testing."""
-    return Provider(
-        provider_id="test-prop",
-        mode="subprocess",
-        command=["echo", "test"],
-        metrics_publisher=Mock(),
-    )
+    return McpServer(mcp_server_id="test-prop", mode="subprocess",
+    command=["echo", "test"],
+    metrics_publisher=Mock(),)
 
 
 class ProviderStateMachine(RuleBasedStateMachine):
@@ -192,10 +189,10 @@ class ProviderStateMachine(RuleBasedStateMachine):
     # --- Helpers ---
 
     def _verify_state_changed_event(self):
-        """Verify the last event batch contains ProviderStateChanged."""
+        """Verify the last event batch contains McpServerStateChanged."""
         events = self.provider.collect_events()
-        state_changed_events = [e for e in events if isinstance(e, ProviderStateChanged)]
-        assert len(state_changed_events) >= 1, f"Expected ProviderStateChanged event after transition, got: {events}"
+        state_changed_events = [e for e in events if isinstance(e, McpServerStateChanged)]
+        assert len(state_changed_events) >= 1, f"Expected McpServerStateChanged event after transition, got: {events}"
 
 
 # Create the test class that Hypothesis will run
@@ -258,7 +255,7 @@ class TestExhaustiveTransitions:
         provider._transition_to(state)
         assert provider.state == state
         events = provider.collect_events()
-        state_changed = [e for e in events if isinstance(e, ProviderStateChanged)]
+        state_changed = [e for e in events if isinstance(e, McpServerStateChanged)]
         assert len(state_changed) == 0, f"Same-state transition {state}->{state} should not emit events"
 
 
@@ -287,23 +284,23 @@ class TestEventEmission:
     """Verify event emission for state transitions."""
 
     def test_valid_transition_emits_exactly_one_event(self):
-        """A single valid transition emits exactly one ProviderStateChanged."""
+        """A single valid transition emits exactly one McpServerStateChanged."""
         provider = _make_provider()
         provider.collect_events()  # Drain initial events
 
         provider._transition_to(ProviderState.INITIALIZING)
         events = provider.collect_events()
-        state_changed = [e for e in events if isinstance(e, ProviderStateChanged)]
+        state_changed = [e for e in events if isinstance(e, McpServerStateChanged)]
         assert len(state_changed) == 1
 
     def test_event_has_correct_states(self):
-        """ProviderStateChanged event captures old and new state."""
+        """McpServerStateChanged event captures old and new state."""
         provider = _make_provider()
         provider.collect_events()
 
         provider._transition_to(ProviderState.INITIALIZING)
         events = provider.collect_events()
-        event = [e for e in events if isinstance(e, ProviderStateChanged)][0]
+        event = [e for e in events if isinstance(e, McpServerStateChanged)][0]
         assert event.old_state == "cold"
         assert event.new_state == "initializing"
 
@@ -317,7 +314,7 @@ class TestEventEmission:
         provider._transition_to(ProviderState.DEGRADED)
 
         events = provider.collect_events()
-        state_changed = [e for e in events if isinstance(e, ProviderStateChanged)]
+        state_changed = [e for e in events if isinstance(e, McpServerStateChanged)]
         assert len(state_changed) == 3
 
         assert state_changed[0].old_state == "cold"

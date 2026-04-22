@@ -15,7 +15,7 @@ from typing import Any, Protocol, runtime_checkable
 
 from ..application.event_handlers import get_security_handler
 from ..application.ports.observability import NullObservabilityAdapter, ObservabilityPort
-from ..domain.repository import InMemoryProviderRepository, IProviderRepository
+from ..domain.repository import InMemoryMcpServerRepository, IMcpServerRepository
 from ..domain.security.input_validator import InputValidator
 from ..domain.security.rate_limiter import get_rate_limiter, RateLimitConfig
 from ..infrastructure.command_bus import CommandBus, get_command_bus
@@ -24,10 +24,10 @@ from ..infrastructure.persistence import (
     Database,
     DatabaseConfig,
     InMemoryAuditRepository,
-    InMemoryProviderConfigRepository,
+    InMemoryMcpServerConfigRepository,
     RecoveryService,
     SQLiteAuditRepository,
-    SQLiteProviderConfigRepository,
+    SQLiteMcpServerConfigRepository,
 )
 from ..infrastructure.query_bus import get_query_bus, QueryBus
 
@@ -65,7 +65,7 @@ class ISecurityHandler(Protocol):
         self,
         field: str,
         message: str,
-        provider_id: str | None = None,
+        mcp_server_id: str | None = None,
         value: str | None = None,
     ) -> None:
         """Log validation failure."""
@@ -74,14 +74,14 @@ class ISecurityHandler(Protocol):
 
 @runtime_checkable
 class IConfigRepository(Protocol):
-    """Interface for provider config repository."""
+    """Interface for mcp_server config repository."""
 
     async def save(self, config: Any) -> None:
         """Save a configuration."""
         ...
 
-    async def get(self, provider_id: str) -> Any | None:
-        """Get configuration by provider ID."""
+    async def get(self, mcp_server_id: str) -> Any | None:
+        """Get configuration by mcp_server ID."""
         ...
 
     async def get_all(self) -> list[Any]:
@@ -140,7 +140,7 @@ class Runtime:
     Uses Protocol interfaces for type safety while maintaining flexibility.
     """
 
-    repository: IProviderRepository
+    repository: IMcpServerRepository
     event_bus: EventBus
     command_bus: CommandBus
     query_bus: QueryBus
@@ -165,7 +165,7 @@ class Runtime:
 
 def create_runtime(
     *,
-    repository: IProviderRepository | None = None,
+    repository: IMcpServerRepository | None = None,
     event_bus: EventBus | None = None,
     command_bus: CommandBus | None = None,
     query_bus: QueryBus | None = None,
@@ -189,7 +189,7 @@ def create_runtime(
     """
     env = env or os.environ
 
-    repo = repository or InMemoryProviderRepository()
+    repo = repository or InMemoryMcpServerRepository()
     eb = event_bus or get_event_bus()
     cb = command_bus or get_command_bus()
     qb = query_bus or get_query_bus()
@@ -228,17 +228,17 @@ def create_runtime(
             enable_wal=persistence_config.enable_wal,
         )
         database = Database(db_config)
-        config_repository = SQLiteProviderConfigRepository(database)
+        config_repository = SQLiteMcpServerConfigRepository(database)
         audit_repository = SQLiteAuditRepository(database)
         recovery_service = RecoveryService(
             database=database,
-            provider_repository=repo,
+            mcp_server_repository=repo,
             config_repository=config_repository,
             audit_repository=audit_repository,
         )
     else:
         # Use in-memory repositories for non-persistent mode
-        config_repository = InMemoryProviderConfigRepository()
+        config_repository = InMemoryMcpServerConfigRepository()
         audit_repository = InMemoryAuditRepository()
 
     # Configure observability if enabled
@@ -310,7 +310,7 @@ async def initialize_runtime(runtime: Runtime) -> None:
 
     if runtime.recovery_service and runtime.persistence_config:
         if runtime.persistence_config.auto_recover:
-            await runtime.recovery_service.recover_providers()
+            await runtime.recovery_service.recover_mcp_servers()
 
 
 async def shutdown_runtime(runtime: Runtime) -> None:

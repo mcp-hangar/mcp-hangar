@@ -60,9 +60,9 @@ This project implements multiple security layers:
 When using this project:
 
 1. **Keep dependencies updated**: Regularly update to the latest version
-2. **Use container mode**: For untrusted MCP providers, use container isolation
+2. **Use container mode**: For untrusted MCP servers, use container isolation
 3. **Limit network access**: Use `network: none` when possible
-4. **Review configurations**: Audit provider configurations before deployment
+4. **Review configurations**: Audit MCP server configurations before deployment
 5. **Monitor logs**: Enable audit logging for security events
 
 ## Acknowledgments

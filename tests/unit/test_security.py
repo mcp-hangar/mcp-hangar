@@ -32,7 +32,7 @@ from mcp_hangar.domain.security.input_validator import (
     validate_command,
     validate_docker_image,
     validate_environment_variables,
-    validate_provider_id,
+    validate_mcp_server_id,
     validate_timeout,
     validate_tool_name,
 )
@@ -59,7 +59,7 @@ pytestmark = pytest.mark.security
 class TestInputValidator:
     """Tests for input validation."""
 
-    def test_valid_provider_id(self):
+    def test_valid_mcp_server_id(self):
         """Test validation of valid provider IDs."""
         valid_ids = [
             "my_provider",
@@ -68,11 +68,11 @@ class TestInputValidator:
             "a",  # Single character
             "a" * 64,  # Max length
         ]
-        for provider_id in valid_ids:
-            result = validate_provider_id(provider_id)
-            assert result.valid, f"Expected '{provider_id}' to be valid"
+        for mcp_server_id in valid_ids:
+            result = validate_mcp_server_id(mcp_server_id)
+            assert result.valid, f"Expected '{mcp_server_id}' to be valid"
 
-    def test_invalid_provider_id(self):
+    def test_invalid_mcp_server_id(self):
         """Test validation rejects invalid provider IDs."""
         invalid_ids = [
             "",  # Empty
@@ -85,9 +85,9 @@ class TestInputValidator:
             "provider`id`",  # Backtick injection
             "provider$(whoami)",  # Command substitution
         ]
-        for provider_id in invalid_ids:
-            result = validate_provider_id(provider_id)
-            assert not result.valid, f"Expected '{provider_id}' to be invalid"
+        for mcp_server_id in invalid_ids:
+            result = validate_mcp_server_id(mcp_server_id)
+            assert not result.valid, f"Expected '{mcp_server_id}' to be invalid"
 
     def test_valid_tool_name(self):
         """Test validation of valid tool names."""
@@ -594,13 +594,13 @@ class TestSecurityEventHandler:
             event_type=SecurityEventType.VALIDATION_FAILED,
             severity=SecuritySeverity.MEDIUM,
             message="Test validation failure",
-            provider_id="test_provider",
+            mcp_server_id="test_provider",
         )
 
         assert event.event_id  # Should be generated
         assert event.event_type == SecurityEventType.VALIDATION_FAILED
         assert event.severity == SecuritySeverity.MEDIUM
-        assert event.provider_id == "test_provider"
+        assert event.mcp_server_id == "test_provider"
 
     def test_security_event_to_dict(self):
         """Test security event serialization."""
@@ -642,12 +642,12 @@ class TestSecurityEventHandler:
         handler.log_validation_failed(
             field="command",
             message="Dangerous pattern detected",
-            provider_id="test_provider",
+            mcp_server_id="test_provider",
         )
 
         events = sink.query(event_type=SecurityEventType.VALIDATION_FAILED)
         assert len(events) == 1
-        assert events[0].provider_id == "test_provider"
+        assert events[0].mcp_server_id == "test_provider"
 
     def test_security_handler_logs_injection_attempt(self):
         """Test security handler logs injection attempts."""
@@ -657,7 +657,7 @@ class TestSecurityEventHandler:
         handler.log_injection_attempt(
             field="arguments",
             pattern=";",
-            provider_id="bad_provider",
+            mcp_server_id="bad_provider",
             source_ip="10.0.0.1",
         )
 
@@ -670,11 +670,8 @@ class TestSecurityEventHandler:
         sink = InMemorySecuritySink()
         handler = SecurityEventHandler(sink=sink)
 
-        handler.log_rate_limit_exceeded(
-            provider_id="test",
-            limit=100,
-            window_seconds=60,
-        )
+        handler.log_rate_limit_exceeded(mcp_server_id="test", limit=100,
+        window_seconds=60,)
 
         events = sink.query(event_type=SecurityEventType.RATE_LIMIT_EXCEEDED)
         assert len(events) == 1
@@ -686,7 +683,7 @@ class TestSecurityEventHandler:
 
         handler.log_suspicious_command(
             command=["rm", "-rf", "/"],
-            provider_id="evil_provider",
+            mcp_server_id="evil_provider",
             reason="Destructive command blocked",
         )
 
@@ -872,12 +869,9 @@ class TestIntegrationSecurity:
         validator = InputValidator()
 
         # Simulate validating a tool invocation request
-        result = validator.validate_all(
-            provider_id="my_provider",
-            tool_name="my_tool",
-            arguments={"param": "value"},
-            timeout=30.0,
-        )
+        result = validator.validate_all(mcp_server_id="my_provider", tool_name="my_tool",
+        arguments={"param": "value"},
+        timeout=30.0,)
 
         assert result.valid
         assert len(result.errors) == 0
@@ -887,12 +881,9 @@ class TestIntegrationSecurity:
         validator = InputValidator()
 
         # Simulate attack attempt
-        result = validator.validate_all(
-            provider_id="provider; rm -rf /",
-            tool_name="../../../etc/passwd",
-            arguments={"cmd": "$(whoami)"},
-            timeout=30.0,
-        )
+        result = validator.validate_all(mcp_server_id="provider; rm -rf /", tool_name="../../../etc/passwd",
+        arguments={"cmd": "$(whoami)"},
+        timeout=30.0,)
 
         assert not result.valid
         assert len(result.errors) > 0

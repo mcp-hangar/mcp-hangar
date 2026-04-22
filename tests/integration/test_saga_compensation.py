@@ -1,4 +1,4 @@
-"""Integration tests for saga compensation in ProviderFailoverSaga.
+"""Integration tests for saga compensation in McpServerFailoverSaga.
 
 Tests exercise:
     (a) Successful failover end-to-end: all steps complete, saga reaches COMPLETED.
@@ -9,8 +9,8 @@ Tests exercise:
 
 from unittest.mock import MagicMock
 
-from mcp_hangar.application.commands import StartProviderCommand, StopProviderCommand
-from mcp_hangar.application.sagas.provider_failover_saga import ProviderFailoverSaga
+from mcp_hangar.application.commands import StartMcpServerCommand, StopMcpServerCommand
+from mcp_hangar.application.sagas.mcp_server_failover_saga import McpServerFailoverSaga
 from mcp_hangar.infrastructure.command_bus import CommandBus
 from mcp_hangar.infrastructure.event_bus import EventBus
 from mcp_hangar.infrastructure.saga_manager import SagaManager, SagaState, set_saga_manager
@@ -24,7 +24,7 @@ def _make_manager(command_bus: CommandBus) -> SagaManager:
     return manager
 
 
-class TestProviderFailoverSagaHappyPath:
+class TestMcpServerFailoverSagaHappyPath:
     """(a) Successful failover end-to-end."""
 
     def test_all_steps_complete_saga_reaches_completed(self):
@@ -33,7 +33,7 @@ class TestProviderFailoverSagaHappyPath:
         mock_command_bus.send.return_value = None
 
         manager = _make_manager(mock_command_bus)
-        saga = ProviderFailoverSaga()
+        saga = McpServerFailoverSaga()
 
         context = manager.start_saga(saga, initial_data={"primary_id": "primary", "backup_id": "backup"})
 
@@ -46,7 +46,7 @@ class TestProviderFailoverSagaHappyPath:
         mock_command_bus.send.return_value = None
 
         manager = _make_manager(mock_command_bus)
-        saga = ProviderFailoverSaga()
+        saga = McpServerFailoverSaga()
 
         manager.start_saga(saga, initial_data={"primary_id": "primary", "backup_id": "backup"})
 
@@ -57,7 +57,7 @@ class TestProviderFailoverSagaHappyPath:
         assert steps[2].completed is True, "failback step should be completed"
 
     def test_start_backup_command_dispatched_to_correct_provider(self):
-        """Happy path: start_backup step sends StartProviderCommand for backup_id."""
+        """Happy path: start_backup step sends StartMcpServerCommand for backup_id."""
         dispatched: list = []
 
         def capture_send(cmd):
@@ -68,21 +68,21 @@ class TestProviderFailoverSagaHappyPath:
 
         manager = _make_manager(mock_command_bus)
         manager.start_saga(
-            ProviderFailoverSaga(),
+            McpServerFailoverSaga(),
             initial_data={"primary_id": "primary", "backup_id": "backup"},
         )
 
         # Step 0 (start_backup) and step 2 (failback) both dispatch commands.
         # Step 1 (await_primary) has no command.
         assert len(dispatched) == 2
-        assert isinstance(dispatched[0], StartProviderCommand)
-        assert dispatched[0].provider_id == "backup"
-        assert isinstance(dispatched[1], StopProviderCommand)
-        assert dispatched[1].provider_id == "backup"
+        assert isinstance(dispatched[0], StartMcpServerCommand)
+        assert dispatched[0].mcp_server_id == "backup"
+        assert isinstance(dispatched[1], StopMcpServerCommand)
+        assert dispatched[1].mcp_server_id == "backup"
         assert dispatched[1].reason == "failback"
 
 
-class TestProviderFailoverSagaMidSagaFailure:
+class TestMcpServerFailoverSagaMidSagaFailure:
     """(b) Mid-saga failure triggers compensation in reverse step order."""
 
     def test_step2_failure_triggers_compensate(self):
@@ -99,7 +99,7 @@ class TestProviderFailoverSagaMidSagaFailure:
         mock_command_bus.send.side_effect = fail_on_third_call
 
         manager = _make_manager(mock_command_bus)
-        saga = ProviderFailoverSaga()
+        saga = McpServerFailoverSaga()
 
         context = manager.start_saga(saga, initial_data={"primary_id": "primary", "backup_id": "backup"})
 
@@ -107,7 +107,7 @@ class TestProviderFailoverSagaMidSagaFailure:
         assert context.state in (SagaState.COMPENSATED, SagaState.COMPENSATING, SagaState.FAILED)
 
     def test_step2_failure_compensation_dispatches_stop_for_backup(self):
-        """If step 2 fails, the start_backup compensation (StopProviderCommand) is dispatched."""
+        """If step 2 fails, the start_backup compensation (StopMcpServerCommand) is dispatched."""
         dispatched: list = []
         call_count = {"n": 0}
 
@@ -121,18 +121,18 @@ class TestProviderFailoverSagaMidSagaFailure:
         mock_command_bus.send.side_effect = side_effect
 
         manager = _make_manager(mock_command_bus)
-        saga = ProviderFailoverSaga()
+        saga = McpServerFailoverSaga()
 
         manager.start_saga(saga, initial_data={"primary_id": "primary", "backup_id": "backup"})
 
         sent_cmds = [cmd for (_label, cmd) in dispatched]
 
-        # Compensation for start_backup: StopProviderCommand(backup, reason="compensation")
-        compensation_cmds = [c for c in sent_cmds if isinstance(c, StopProviderCommand) and c.reason == "compensation"]
+        # Compensation for start_backup: StopMcpServerCommand(backup, reason="compensation")
+        compensation_cmds = [c for c in sent_cmds if isinstance(c, StopMcpServerCommand) and c.reason == "compensation"]
         assert len(compensation_cmds) >= 1, (
-            "Expected at least one StopProviderCommand(reason='compensation') to be dispatched"
+            "Expected at least one StopMcpServerCommand(reason='compensation') to be dispatched"
         )
-        assert compensation_cmds[0].provider_id == "backup"
+        assert compensation_cmds[0].mcp_server_id == "backup"
 
     def test_step2_failure_compensation_is_reverse_order(self):
         """Compensation commands must be dispatched in reverse step order."""
@@ -149,24 +149,24 @@ class TestProviderFailoverSagaMidSagaFailure:
         mock_command_bus.send.side_effect = side_effect
 
         manager = _make_manager(mock_command_bus)
-        saga = ProviderFailoverSaga()
+        saga = McpServerFailoverSaga()
 
         manager.start_saga(saga, initial_data={"primary_id": "primary", "backup_id": "backup"})
 
-        # dispatched[0] = StartProviderCommand(backup) -- step 0 forward
-        # dispatched[1] = StopProviderCommand(backup, reason="failback") -- step 2 forward (fails)
-        # dispatched[2] = StopProviderCommand(backup, reason="compensation") -- step 0 compensation
+        # dispatched[0] = StartMcpServerCommand(backup) -- step 0 forward
+        # dispatched[1] = StopMcpServerCommand(backup, reason="failback") -- step 2 forward (fails)
+        # dispatched[2] = StopMcpServerCommand(backup, reason="compensation") -- step 0 compensation
         #
         # Step 1 (await_primary) has no command and no compensation, so it is skipped.
         # The forward commands for step 0 and step 2 plus the compensation of step 0:
         assert len(dispatched) >= 2
 
         # The last dispatched command after the failure must be the compensation
-        # for start_backup (StopProviderCommand with reason="compensation").
+        # for start_backup (StopMcpServerCommand with reason="compensation").
         last_cmd = dispatched[-1]
-        assert isinstance(last_cmd, StopProviderCommand)
+        assert isinstance(last_cmd, StopMcpServerCommand)
         assert last_cmd.reason == "compensation"
-        assert last_cmd.provider_id == "backup"
+        assert last_cmd.mcp_server_id == "backup"
 
     def test_step1_failure_no_compensation_needed(self):
         """If step 0 (start_backup) fails immediately, compensation list is empty (nothing completed yet)."""
@@ -183,19 +183,19 @@ class TestProviderFailoverSagaMidSagaFailure:
         mock_command_bus.send.side_effect = fail_first_call
 
         manager = _make_manager(mock_command_bus)
-        saga = ProviderFailoverSaga()
+        saga = McpServerFailoverSaga()
 
         context = manager.start_saga(saga, initial_data={"primary_id": "primary", "backup_id": "backup"})
 
         # Only the one failed start_backup command was dispatched; no compensation possible
         assert len(dispatched) == 1
-        assert isinstance(dispatched[0], StartProviderCommand)
+        assert isinstance(dispatched[0], StartMcpServerCommand)
 
         # Saga must reach COMPENSATED (empty compensation list still transitions)
         assert context.state == SagaState.COMPENSATED
 
 
-class TestProviderFailoverSagaCompensatedState:
+class TestMcpServerFailoverSagaCompensatedState:
     """(c) Full compensation path reaches SagaState.COMPENSATED."""
 
     def test_mid_saga_failure_reaches_compensated(self):
@@ -211,7 +211,7 @@ class TestProviderFailoverSagaCompensatedState:
         mock_command_bus.send.side_effect = fail_on_second
 
         manager = _make_manager(mock_command_bus)
-        saga = ProviderFailoverSaga()
+        saga = McpServerFailoverSaga()
 
         context = manager.start_saga(saga, initial_data={"primary_id": "primary", "backup_id": "backup"})
 
@@ -230,7 +230,7 @@ class TestProviderFailoverSagaCompensatedState:
         mock_command_bus.send.side_effect = fail_on_second
 
         manager = _make_manager(mock_command_bus)
-        saga = ProviderFailoverSaga()
+        saga = McpServerFailoverSaga()
 
         context = manager.start_saga(saga, initial_data={"primary_id": "primary", "backup_id": "backup"})
 
@@ -250,7 +250,7 @@ class TestProviderFailoverSagaCompensatedState:
         mock_command_bus.send.side_effect = fail_on_second
 
         manager = _make_manager(mock_command_bus)
-        saga = ProviderFailoverSaga()
+        saga = McpServerFailoverSaga()
 
         context = manager.start_saga(saga, initial_data={"primary_id": "primary", "backup_id": "backup"})
 
@@ -271,7 +271,7 @@ class TestProviderFailoverSagaCompensatedState:
         mock_command_bus.send.side_effect = fail_on_second
 
         manager = _make_manager(mock_command_bus)
-        saga = ProviderFailoverSaga()
+        saga = McpServerFailoverSaga()
 
         context = manager.start_saga(saga, initial_data={"primary_id": "primary", "backup_id": "backup"})
 
@@ -293,7 +293,7 @@ class TestProviderFailoverSagaCompensatedState:
         mock_command_bus.send.side_effect = fail_on_second_and_third
 
         manager = _make_manager(mock_command_bus)
-        saga = ProviderFailoverSaga()
+        saga = McpServerFailoverSaga()
 
         context = manager.start_saga(saga, initial_data={"primary_id": "primary", "backup_id": "backup"})
 

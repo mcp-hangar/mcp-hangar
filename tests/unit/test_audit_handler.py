@@ -15,10 +15,10 @@ from mcp_hangar.application.event_handlers.audit_handler import (
 from mcp_hangar.domain.events import (
     HealthCheckFailed,
     HealthCheckPassed,
-    ProviderDegraded,
-    ProviderStarted,
-    ProviderStateChanged,
-    ProviderStopped,
+    McpServerDegraded,
+    McpServerStarted,
+    McpServerStateChanged,
+    McpServerStopped,
     ToolInvocationCompleted,
     ToolInvocationFailed,
     ToolInvocationRequested,
@@ -33,16 +33,16 @@ class TestAuditRecord:
         now = datetime.now(UTC)
         record = AuditRecord(
             event_id="evt-123",
-            event_type="ProviderStarted",
+            event_type="McpServerStarted",
             occurred_at=now,
-            provider_id="test-provider",
+            mcp_server_id="test-provider",
             data={"mode": "subprocess"},
         )
 
         assert record.event_id == "evt-123"
-        assert record.event_type == "ProviderStarted"
+        assert record.event_type == "McpServerStarted"
         assert record.occurred_at == now
-        assert record.provider_id == "test-provider"
+        assert record.mcp_server_id == "test-provider"
         assert record.data == {"mode": "subprocess"}
         assert isinstance(record.recorded_at, datetime)
 
@@ -51,18 +51,18 @@ class TestAuditRecord:
         now = datetime.now(UTC)
         record = AuditRecord(
             event_id="evt-456",
-            event_type="ProviderStopped",
+            event_type="McpServerStopped",
             occurred_at=now,
-            provider_id="test",
+            mcp_server_id="test",
             data={"reason": "idle"},
         )
 
         d = record.to_dict()
 
         assert d["event_id"] == "evt-456"
-        assert d["event_type"] == "ProviderStopped"
+        assert d["event_type"] == "McpServerStopped"
         assert "occurred_at" in d
-        assert d["provider_id"] == "test"
+        assert d["mcp_server_id"] == "test"
         assert d["data"] == {"reason": "idle"}
         assert "recorded_at" in d
         assert d["caller_user_id"] is None
@@ -77,7 +77,7 @@ class TestAuditRecord:
             event_id="evt-id-1",
             event_type="ToolInvocationCompleted",
             occurred_at=now,
-            provider_id="math",
+            mcp_server_id="math",
             data={"tool_name": "add"},
             caller_user_id="alice",
             caller_agent_id="agent-007",
@@ -101,7 +101,7 @@ class TestAuditRecord:
             event_id="evt-789",
             event_type="Test",
             occurred_at=now,
-            provider_id="p1",
+            mcp_server_id="p1",
             data={},
         )
 
@@ -121,9 +121,9 @@ class TestInMemoryAuditStore:
 
         record = AuditRecord(
             event_id="evt-1",
-            event_type="ProviderStarted",
+            event_type="McpServerStarted",
             occurred_at=datetime.now(UTC),
-            provider_id="p1",
+            mcp_server_id="p1",
             data={},
         )
 
@@ -135,8 +135,8 @@ class TestInMemoryAuditStore:
         """Test querying all records."""
         store = InMemoryAuditStore()
 
-        record1 = AuditRecord("evt-1", "ProviderStarted", datetime.now(UTC), "p1", {})
-        record2 = AuditRecord("evt-2", "ProviderStopped", datetime.now(UTC), "p1", {})
+        record1 = AuditRecord("evt-1", "McpServerStarted", datetime.now(UTC), "p1", {})
+        record2 = AuditRecord("evt-2", "McpServerStopped", datetime.now(UTC), "p1", {})
 
         store.record(record1)
         store.record(record2)
@@ -150,12 +150,12 @@ class TestInMemoryAuditStore:
         """Test querying records by provider ID."""
         store = InMemoryAuditStore()
 
-        store.record(AuditRecord("e1", "ProviderStarted", datetime.now(UTC), "p1", {}))
-        store.record(AuditRecord("e2", "ProviderStarted", datetime.now(UTC), "p2", {}))
-        store.record(AuditRecord("e3", "ProviderStopped", datetime.now(UTC), "p1", {}))
+        store.record(AuditRecord("e1", "McpServerStarted", datetime.now(UTC), "p1", {}))
+        store.record(AuditRecord("e2", "McpServerStarted", datetime.now(UTC), "p2", {}))
+        store.record(AuditRecord("e3", "McpServerStopped", datetime.now(UTC), "p1", {}))
 
-        p1_records = store.query(provider_id="p1")
-        p2_records = store.query(provider_id="p2")
+        p1_records = store.query(mcp_server_id="p1")
+        p2_records = store.query(mcp_server_id="p2")
 
         assert len(p1_records) == 2
         assert len(p2_records) == 1
@@ -164,12 +164,12 @@ class TestInMemoryAuditStore:
         """Test querying records by event type."""
         store = InMemoryAuditStore()
 
-        store.record(AuditRecord("e1", "ProviderStarted", datetime.now(UTC), "p1", {}))
-        store.record(AuditRecord("e2", "ProviderStarted", datetime.now(UTC), "p2", {}))
-        store.record(AuditRecord("e3", "ProviderStopped", datetime.now(UTC), "p1", {}))
+        store.record(AuditRecord("e1", "McpServerStarted", datetime.now(UTC), "p1", {}))
+        store.record(AuditRecord("e2", "McpServerStarted", datetime.now(UTC), "p2", {}))
+        store.record(AuditRecord("e3", "McpServerStopped", datetime.now(UTC), "p1", {}))
 
-        started_records = store.query(event_type="ProviderStarted")
-        stopped_records = store.query(event_type="ProviderStopped")
+        started_records = store.query(event_type="McpServerStarted")
+        stopped_records = store.query(event_type="McpServerStopped")
 
         assert len(started_records) == 2
         assert len(stopped_records) == 1
@@ -235,9 +235,9 @@ class TestLogAuditStore:
 
         record = AuditRecord(
             event_id="evt-1",
-            event_type="ProviderStarted",
+            event_type="McpServerStarted",
             occurred_at=datetime.now(UTC),
-            provider_id="test",
+            mcp_server_id="test",
             data={"mode": "subprocess"},
         )
 
@@ -270,44 +270,41 @@ class TestAuditEventHandler:
         assert handler._store is custom_store
 
     def test_handle_provider_started_event(self):
-        """Test handling ProviderStarted event."""
+        """Test handling McpServerStarted event."""
         store = InMemoryAuditStore()
         handler = AuditEventHandler(store=store)
 
-        event = ProviderStarted(
-            provider_id="test-provider",
-            mode="subprocess",
-            tools_count=5,
-            startup_duration_ms=150.0,
-        )
+        event = McpServerStarted(mcp_server_id="test-provider", mode="subprocess",
+        tools_count=5,
+        startup_duration_ms=150.0,)
 
         handler.handle(event)
 
         records = store.query()
         assert len(records) == 1
-        assert records[0].event_type == "ProviderStarted"
-        assert records[0].provider_id == "test-provider"
+        assert records[0].event_type == "McpServerStarted"
+        assert records[0].mcp_server_id == "test-provider"
 
     def test_handle_provider_stopped_event(self):
-        """Test handling ProviderStopped event."""
+        """Test handling McpServerStopped event."""
         store = InMemoryAuditStore()
         handler = AuditEventHandler(store=store)
 
-        event = ProviderStopped(provider_id="test-provider", reason="idle")
+        event = McpServerStopped(mcp_server_id="test-provider", reason="idle")
 
         handler.handle(event)
 
         records = store.query()
         assert len(records) == 1
-        assert records[0].event_type == "ProviderStopped"
+        assert records[0].event_type == "McpServerStopped"
         assert "reason" in records[0].data
 
-    def test_handle_provider_state_changed_event(self):
-        """Test handling ProviderStateChanged event."""
+    def test_handle_mcp_server_state_changed_event(self):
+        """Test handling McpServerStateChanged event."""
         store = InMemoryAuditStore()
         handler = AuditEventHandler(store=store)
 
-        event = ProviderStateChanged(provider_id="test", old_state="cold", new_state="ready")
+        event = McpServerStateChanged(mcp_server_id="test", old_state="cold", new_state="ready")
 
         handler.handle(event)
 
@@ -321,12 +318,9 @@ class TestAuditEventHandler:
         store = InMemoryAuditStore()
         handler = AuditEventHandler(store=store)
 
-        event = ToolInvocationRequested(
-            provider_id="test",
-            tool_name="add",
-            correlation_id="corr-123",
-            arguments={"a": 1, "b": 2},
-        )
+        event = ToolInvocationRequested(mcp_server_id="test", tool_name="add",
+        correlation_id="corr-123",
+        arguments={"a": 1, "b": 2},)
 
         handler.handle(event)
 
@@ -339,13 +333,10 @@ class TestAuditEventHandler:
         store = InMemoryAuditStore()
         handler = AuditEventHandler(store=store)
 
-        event = ToolInvocationCompleted(
-            provider_id="test",
-            tool_name="add",
-            correlation_id="corr-123",
-            duration_ms=150.0,
-            result_size_bytes=42,
-        )
+        event = ToolInvocationCompleted(mcp_server_id="test", tool_name="add",
+        correlation_id="corr-123",
+        duration_ms=150.0,
+        result_size_bytes=42,)
 
         handler.handle(event)
 
@@ -358,19 +349,16 @@ class TestAuditEventHandler:
         store = InMemoryAuditStore()
         handler = AuditEventHandler(store=store)
 
-        event = ToolInvocationCompleted(
-            provider_id="math",
-            tool_name="add",
-            correlation_id="corr-456",
-            duration_ms=100.0,
-            result_size_bytes=10,
-            identity_context={
-                "user_id": "alice",
-                "agent_id": "agent-007",
-                "session_id": "sess-abc",
-                "principal_type": "user",
-            },
-        )
+        event = ToolInvocationCompleted(mcp_server_id="math", tool_name="add",
+        correlation_id="corr-456",
+        duration_ms=100.0,
+        result_size_bytes=10,
+        identity_context={
+            "user_id": "alice",
+            "agent_id": "agent-007",
+            "session_id": "sess-abc",
+            "principal_type": "user",
+        },)
 
         handler.handle(event)
 
@@ -386,18 +374,15 @@ class TestAuditEventHandler:
         store = InMemoryAuditStore()
         handler = AuditEventHandler(store=store)
 
-        event = ToolInvocationRequested(
-            provider_id="test",
-            tool_name="add",
-            correlation_id="corr-789",
-            arguments={"a": 1},
-            identity_context={
-                "user_id": "bob",
-                "agent_id": None,
-                "session_id": "sess-xyz",
-                "principal_type": "service",
-            },
-        )
+        event = ToolInvocationRequested(mcp_server_id="test", tool_name="add",
+        correlation_id="corr-789",
+        arguments={"a": 1},
+        identity_context={
+            "user_id": "bob",
+            "agent_id": None,
+            "session_id": "sess-xyz",
+            "principal_type": "service",
+        },)
 
         handler.handle(event)
 
@@ -411,20 +396,17 @@ class TestAuditEventHandler:
         store = InMemoryAuditStore()
         handler = AuditEventHandler(store=store)
 
-        event = ToolInvocationFailed(
-            provider_id="test",
-            tool_name="add",
-            correlation_id="corr-fail",
-            duration_ms=50.0,
-            error_message="timeout",
-            error_type="TimeoutError",
-            identity_context={
-                "user_id": "charlie",
-                "agent_id": "agent-x",
-                "session_id": None,
-                "principal_type": "user",
-            },
-        )
+        event = ToolInvocationFailed(mcp_server_id="test", tool_name="add",
+        correlation_id="corr-fail",
+        duration_ms=50.0,
+        error_message="timeout",
+        error_type="TimeoutError",
+        identity_context={
+            "user_id": "charlie",
+            "agent_id": "agent-x",
+            "session_id": None,
+            "principal_type": "user",
+        },)
 
         handler.handle(event)
 
@@ -439,12 +421,9 @@ class TestAuditEventHandler:
         store = InMemoryAuditStore()
         handler = AuditEventHandler(store=store)
 
-        event = ProviderStarted(
-            provider_id="test",
-            mode="subprocess",
-            tools_count=3,
-            startup_duration_ms=200.0,
-        )
+        event = McpServerStarted(mcp_server_id="test", mode="subprocess",
+        tools_count=3,
+        startup_duration_ms=200.0,)
 
         handler.handle(event)
 
@@ -460,14 +439,11 @@ class TestAuditEventHandler:
         store = InMemoryAuditStore()
         handler = AuditEventHandler(store=store)
 
-        event = ToolInvocationFailed(
-            provider_id="test",
-            tool_name="add",
-            correlation_id="corr-123",
-            duration_ms=50.0,
-            error_message="timeout",
-            error_type="TimeoutError",
-        )
+        event = ToolInvocationFailed(mcp_server_id="test", tool_name="add",
+        correlation_id="corr-123",
+        duration_ms=50.0,
+        error_message="timeout",
+        error_type="TimeoutError",)
 
         handler.handle(event)
 
@@ -476,16 +452,13 @@ class TestAuditEventHandler:
         assert records[0].data["error_message"] == "timeout"
 
     def test_handle_provider_degraded_event(self):
-        """Test handling ProviderDegraded event."""
+        """Test handling McpServerDegraded event."""
         store = InMemoryAuditStore()
         handler = AuditEventHandler(store=store)
 
-        event = ProviderDegraded(
-            provider_id="test",
-            consecutive_failures=5,
-            total_failures=10,
-            reason="timeout",
-        )
+        event = McpServerDegraded(mcp_server_id="test", consecutive_failures=5,
+        total_failures=10,
+        reason="timeout",)
 
         handler.handle(event)
 
@@ -498,7 +471,7 @@ class TestAuditEventHandler:
         store = InMemoryAuditStore()
         handler = AuditEventHandler(store=store)
 
-        event = HealthCheckPassed(provider_id="test", duration_ms=50.0)
+        event = HealthCheckPassed(mcp_server_id="test", duration_ms=50.0)
 
         handler.handle(event)
 
@@ -511,11 +484,8 @@ class TestAuditEventHandler:
         store = InMemoryAuditStore()
         handler = AuditEventHandler(store=store)
 
-        event = HealthCheckFailed(
-            provider_id="test",
-            consecutive_failures=3,
-            error_message="connection refused",
-        )
+        event = HealthCheckFailed(mcp_server_id="test", consecutive_failures=3,
+        error_message="connection refused",)
 
         handler.handle(event)
 
@@ -529,12 +499,9 @@ class TestAuditEventHandler:
         handler = AuditEventHandler(store=store)
 
         for i in range(5):
-            event = ProviderStarted(
-                provider_id=f"p{i}",
-                mode="subprocess",
-                tools_count=1,
-                startup_duration_ms=100.0,
-            )
+            event = McpServerStarted(mcp_server_id=f"p{i}", mode="subprocess",
+            tools_count=1,
+            startup_duration_ms=100.0,)
             handler.handle(event)
 
         records = store.query()
@@ -549,12 +516,9 @@ class TestAuditEventHandler:
         handler = AuditEventHandler(store=store)
 
         before = datetime.now(UTC)
-        event = ProviderStarted(
-            provider_id="test",
-            mode="subprocess",
-            tools_count=1,
-            startup_duration_ms=100.0,
-        )
+        event = McpServerStarted(mcp_server_id="test", mode="subprocess",
+        tools_count=1,
+        startup_duration_ms=100.0,)
         handler.handle(event)
         after = datetime.now(UTC)
 
@@ -566,9 +530,9 @@ class TestAuditEventHandler:
         store = InMemoryAuditStore()
         handler = AuditEventHandler(store=store)
 
-        handler.handle(ProviderStarted("p1", "subprocess", 1, 100.0))
-        handler.handle(ProviderStopped("p1", "idle"))
-        handler.handle(ProviderStarted("p2", "docker", 2, 200.0))
+        handler.handle(McpServerStarted("p1", "subprocess", 1, 100.0))
+        handler.handle(McpServerStopped("p1", "idle"))
+        handler.handle(McpServerStarted("p2", "docker", 2, 200.0))
 
         records = store.query()
         assert len(records) == 3
@@ -577,7 +541,7 @@ class TestAuditEventHandler:
         """Test handler provides access to records via query."""
         handler = AuditEventHandler()
 
-        handler.handle(ProviderStarted("test", "subprocess", 1, 100.0))
+        handler.handle(McpServerStarted("test", "subprocess", 1, 100.0))
 
         records = handler.query()
         assert len(records) == 1
@@ -586,11 +550,11 @@ class TestAuditEventHandler:
         """Test querying records filtered by provider."""
         handler = AuditEventHandler()
 
-        handler.handle(ProviderStarted("p1", "subprocess", 1, 100.0))
-        handler.handle(ProviderStarted("p2", "subprocess", 1, 100.0))
-        handler.handle(ProviderStopped("p1", "idle"))
+        handler.handle(McpServerStarted("p1", "subprocess", 1, 100.0))
+        handler.handle(McpServerStarted("p2", "subprocess", 1, 100.0))
+        handler.handle(McpServerStopped("p1", "idle"))
 
-        p1_records = handler.query(provider_id="p1")
+        p1_records = handler.query(mcp_server_id="p1")
         assert len(p1_records) == 2
 
     def test_query_by_caller_user_id(self):
@@ -598,30 +562,21 @@ class TestAuditEventHandler:
         store = InMemoryAuditStore()
         handler = AuditEventHandler(store=store)
 
-        handler.handle(ToolInvocationCompleted(
-            provider_id="math",
-            tool_name="add",
-            correlation_id="c1",
-            duration_ms=10.0,
-            result_size_bytes=5,
-            identity_context={"user_id": "alice", "agent_id": None, "session_id": None, "principal_type": "user"},
-        ))
-        handler.handle(ToolInvocationCompleted(
-            provider_id="math",
-            tool_name="sub",
-            correlation_id="c2",
-            duration_ms=20.0,
-            result_size_bytes=5,
-            identity_context={"user_id": "bob", "agent_id": None, "session_id": None, "principal_type": "user"},
-        ))
-        handler.handle(ToolInvocationCompleted(
-            provider_id="math",
-            tool_name="mul",
-            correlation_id="c3",
-            duration_ms=30.0,
-            result_size_bytes=5,
-            identity_context={"user_id": "alice", "agent_id": None, "session_id": None, "principal_type": "user"},
-        ))
+        handler.handle(ToolInvocationCompleted(mcp_server_id="math", tool_name="add",
+        correlation_id="c1",
+        duration_ms=10.0,
+        result_size_bytes=5,
+        identity_context={"user_id": "alice", "agent_id": None, "session_id": None, "principal_type": "user"},))
+        handler.handle(ToolInvocationCompleted(mcp_server_id="math", tool_name="sub",
+        correlation_id="c2",
+        duration_ms=20.0,
+        result_size_bytes=5,
+        identity_context={"user_id": "bob", "agent_id": None, "session_id": None, "principal_type": "user"},))
+        handler.handle(ToolInvocationCompleted(mcp_server_id="math", tool_name="mul",
+        correlation_id="c3",
+        duration_ms=30.0,
+        result_size_bytes=5,
+        identity_context={"user_id": "alice", "agent_id": None, "session_id": None, "principal_type": "user"},))
 
         alice_records = handler.query(caller_user_id="alice")
         assert len(alice_records) == 2
@@ -633,11 +588,11 @@ class TestAuditEventHandler:
     def test_include_event_types_filter(self):
         """Test filtering by included event types."""
         store = InMemoryAuditStore()
-        handler = AuditEventHandler(store=store, include_event_types=["ProviderStarted", "ProviderStopped"])
+        handler = AuditEventHandler(store=store, include_event_types=["McpServerStarted", "McpServerStopped"])
 
-        handler.handle(ProviderStarted("p1", "subprocess", 1, 100.0))
-        handler.handle(ProviderStopped("p1", "idle"))
-        handler.handle(ProviderDegraded("p1", 3, 5, "error"))  # Should be excluded
+        handler.handle(McpServerStarted("p1", "subprocess", 1, 100.0))
+        handler.handle(McpServerStopped("p1", "idle"))
+        handler.handle(McpServerDegraded("p1", 3, 5, "error"))  # Should be excluded
 
         records = store.query()
         assert len(records) == 2
@@ -647,12 +602,12 @@ class TestAuditEventHandler:
         store = InMemoryAuditStore()
         handler = AuditEventHandler(store=store, exclude_event_types=["HealthCheckPassed"])
 
-        handler.handle(ProviderStarted("p1", "subprocess", 1, 100.0))
+        handler.handle(McpServerStarted("p1", "subprocess", 1, 100.0))
         handler.handle(HealthCheckPassed("p1", 50.0))  # Should be excluded
 
         records = store.query()
         assert len(records) == 1
-        assert records[0].event_type == "ProviderStarted"
+        assert records[0].event_type == "McpServerStarted"
 
 
 class TestAuditStoreInterface:
@@ -677,10 +632,10 @@ class TestAuditStoreInterface:
             def record(self, audit_record: AuditRecord) -> None:
                 self.records.append(audit_record)
 
-            def query(self, provider_id=None, event_type=None, since=None, limit=100, caller_user_id=None):
+            def query(self, mcp_server_id=None, event_type=None, since=None, limit=100, caller_user_id=None):
                 results = self.records.copy()
-                if provider_id:
-                    results = [r for r in results if r.provider_id == provider_id]
+                if mcp_server_id:
+                    results = [r for r in results if r.mcp_server_id == mcp_server_id]
                 if event_type:
                     results = [r for r in results if r.event_type == event_type]
                 if caller_user_id:

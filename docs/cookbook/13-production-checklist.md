@@ -11,13 +11,13 @@
 - [ ] Tool access policies set for sensitive tools
 - [ ] `MCP_AUTH_SECRET` set to a stable, random value (not auto-generated)
 - [ ] Secrets use environment variable interpolation (`${VAR}`), not plain text in config
-- [ ] Docker providers use `read_only: true` and `network: none` where possible
+- [ ] Docker MCP servers use `read_only: true` and `network: none` where possible
 
 ## Reliability
 
-- [ ] Health checks enabled on all providers (`health_check_interval_s`)
+- [ ] Health checks enabled on all MCP servers (`health_check_interval_s`)
 - [ ] Circuit breaker thresholds tuned (`max_consecutive_failures`)
-- [ ] Provider groups configured for critical providers (at least 2 members)
+- [ ] MCP Server groups configured for critical MCP servers (at least 2 members)
 - [ ] `min_healthy` set to match your SLA requirements
 - [ ] Idle TTL set appropriately (300s for subprocess, 600s for containers)
 - [ ] Rate limiting enabled to prevent overload
@@ -28,7 +28,7 @@
 - [ ] Prometheus scraping `/metrics` endpoint
 - [ ] Grafana dashboards imported from `monitoring/grafana/`
 - [ ] Alertmanager rules configured for:
-  - Provider state transitions to DEAD
+  - MCP server state transitions to DEAD
   - Circuit breaker OPEN events
   - Health check failure rate above threshold
   - Tool call error rate above threshold
@@ -54,24 +54,24 @@
 ## Kubernetes (if applicable)
 
 - [ ] MCP-Hangar Operator installed
-- [ ] CRDs applied (`MCPProvider`, `MCPProviderGroup`, `MCPDiscoverySource`)
+- [ ] CRDs applied (`MCPServer`, `MCPServerGroup`, `MCPDiscoverySource`)
 - [ ] RBAC (Kubernetes) configured for operator service account
-- [ ] Network policies restricting provider-to-provider communication
+- [ ] Network policies restricting MCP server-to-MCP server communication
 - [ ] Resource requests and limits in Helm values
 - [ ] PodDisruptionBudget for Hangar deployment
 
 ## Testing
 
-- [ ] Failover tested: kill a primary provider, verify backup takes over
-- [ ] Cold start tested: invoke a tool on a cold provider, verify latency
+- [ ] Failover tested: kill a primary MCP server, verify backup takes over
+- [ ] Cold start tested: invoke a tool on a cold MCP server, verify latency
 - [ ] Rate limit tested: flood API, verify 429 responses
 - [ ] Auth tested: invalid key returns 401, insufficient role returns 403
 - [ ] Config reload tested: edit config.yaml, verify changes apply
-- [ ] Recovery tested: kill all providers, verify they reinitialize
+- [ ] Recovery tested: kill all MCP servers, verify they reinitialize
 
 ## Runbook
 
 - [ ] Incident response documented
-- [ ] Provider restart procedure documented
+- [ ] MCP Server restart procedure documented
 - [ ] Config rollback procedure documented
-- [ ] Contact list for provider owners maintained
+- [ ] Contact list for MCP server owners maintained

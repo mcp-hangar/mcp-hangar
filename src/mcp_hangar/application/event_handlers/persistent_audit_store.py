@@ -69,7 +69,7 @@ class PersistentAuditStore(AuditStore):
 
     def query(
         self,
-        provider_id: str | None = None,
+        mcp_server_id: str | None = None,
         event_type: str | None = None,
         since: datetime | None = None,
         limit: int = 100,
@@ -78,7 +78,7 @@ class PersistentAuditStore(AuditStore):
         """Query audit records.
 
         Args:
-            provider_id: Filter by provider ID
+            mcp_server_id: Filter by mcp_server ID
             event_type: Filter by event type (entity_type in new model)
             since: Filter records after this time
             limit: Maximum records to return
@@ -93,10 +93,10 @@ class PersistentAuditStore(AuditStore):
                     caller_user_id=caller_user_id,
                     limit=limit,
                 )
-            elif provider_id:
+            elif mcp_server_id:
                 coro = self._repo.get_by_entity(
-                    entity_id=provider_id,
-                    entity_type="provider",
+                    entity_id=mcp_server_id,
+                    entity_type="mcp_server",
                     limit=limit,
                 )
             elif since:
@@ -154,8 +154,8 @@ class PersistentAuditStore(AuditStore):
         actor = record.caller_user_id or "system"
 
         return AuditEntry(
-            entity_id=record.provider_id or "_unknown",
-            entity_type="provider",
+            entity_id=record.mcp_server_id or "_unknown",
+            entity_type="mcp_server",
             action=action,
             timestamp=timestamp,
             actor=actor,
@@ -187,7 +187,7 @@ class PersistentAuditStore(AuditStore):
             event_id=event_id,
             event_type=event_type,
             occurred_at=entry.timestamp,
-            provider_id=entry.entity_id if entry.entity_id != "_unknown" else None,
+            mcp_server_id=entry.entity_id if entry.entity_id != "_unknown" else None,
             data=data,
             recorded_at=entry.timestamp,
             caller_user_id=entry.caller_user_id,
@@ -206,12 +206,12 @@ class PersistentAuditStore(AuditStore):
             Corresponding AuditAction
         """
         mapping = {
-            "ProviderStarted": AuditAction.STARTED,
-            "ProviderStopped": AuditAction.STOPPED,
-            "ProviderDegraded": AuditAction.DEGRADED,
-            "ProviderStateChanged": AuditAction.STATE_CHANGED,
-            "ProviderRegistered": AuditAction.CREATED,
-            "ProviderUnregistered": AuditAction.DELETED,
+            "McpServerStarted": AuditAction.STARTED,
+            "McpServerStopped": AuditAction.STOPPED,
+            "McpServerDegraded": AuditAction.DEGRADED,
+            "McpServerStateChanged": AuditAction.STATE_CHANGED,
+            "McpServerRegistered": AuditAction.CREATED,
+            "McpServerUnregistered": AuditAction.DELETED,
             "ToolInvocationRequested": AuditAction.TOOL_INVOKED,
             "ToolInvocationCompleted": AuditAction.TOOL_INVOKED,
             "ToolInvocationFailed": AuditAction.TOOL_INVOKED,

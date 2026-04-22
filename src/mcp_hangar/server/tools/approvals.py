@@ -18,7 +18,7 @@ logger = get_logger(__name__)
 
 
 async def hangar_approve_prompt(
-    provider_id: str,
+    mcp_server_id: str,
     tool_name: str,
     arguments: dict[str, Any] | None = None,
     *,
@@ -27,7 +27,7 @@ async def hangar_approve_prompt(
     """MCP tool implementing the Claude Code permission prompt spec.
 
     Args:
-        provider_id: Provider whose tool needs approval.
+        mcp_server_id: McpServer whose tool needs approval.
         tool_name: Name of the tool requiring approval.
         arguments: Tool arguments (sanitized before display).
         _context: Application context injected at registration time.
@@ -40,14 +40,16 @@ async def hangar_approve_prompt(
         return {"behavior": "allow"}
 
     gate_service = _context.approval_gate
-    policy = _context.get_policy_for_provider(provider_id) if hasattr(_context, "get_policy_for_provider") else None
+    policy = (
+        _context.get_policy_for_mcp_server(mcp_server_id) if hasattr(_context, "get_policy_for_mcp_server") else None
+    )
 
     if policy is None:
         return {"behavior": "allow"}
 
     try:
         result = await gate_service.check(
-            provider_id=provider_id,
+            mcp_server_id=mcp_server_id,
             tool_name=tool_name,
             arguments=arguments or {},
             policy=policy,

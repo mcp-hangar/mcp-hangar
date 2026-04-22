@@ -71,8 +71,8 @@ pytest tests/integration/containers/ --run-containers -m "not slow" -v
 | `redis_container` | Redis 7 Alpine | `testcontainers` |
 | `langfuse_container` | Langfuse 2 with PostgreSQL | `testcontainers[postgres]` |
 | `prometheus_container` | Prometheus v2.47 | `testcontainers` |
-| `math_provider_container` | MCP Math Provider | Local image required |
-| `sqlite_provider_container` | MCP SQLite Provider | Local image required |
+| `math_provider_container` | MCP Math MCP Server | Local image required |
+| `sqlite_provider_container` | MCP SQLite MCP Server | Local image required |
 
 ### Example: Using PostgreSQL Container
 
@@ -137,13 +137,13 @@ pytest tests/unit/observability/test_property_based.py -v --hypothesis-seed=1234
 from hypothesis import given, strategies as st
 
 @given(
-    provider_name=st.text(min_size=1, max_size=50),
+    mcp_server_name=st.text(min_size=1, max_size=50),
     tool_name=st.text(min_size=1, max_size=50),
 )
-def test_adapter_accepts_any_strings(provider_name, tool_name):
+def test_adapter_accepts_any_strings(mcp_server_name, tool_name):
     """Adapter accepts any valid string inputs."""
     adapter = NullObservabilityAdapter()
-    span = adapter.start_tool_span(provider_name, tool_name, {})
+    span = adapter.start_tool_span(mcp_server_name, tool_name, {})
     assert isinstance(span, NullSpanHandle)
 ```
 
@@ -162,14 +162,14 @@ pytest tests/feature/ -v
 
 ## Manual Testing
 
-### Subprocess Provider
+### Subprocess MCP Server
 
 ```yaml
 # config.yaml
-providers:
+mcp_servers:
   math:
     mode: subprocess
-    command: [python, tests/mock_provider.py]
+    command: [python, tests/mock_mcp_server.py]
 ```
 
 ```bash
@@ -179,41 +179,41 @@ python -m mcp_hangar.server
 ### Test via Python
 
 ```python
-from mcp_hangar.domain.model import Provider
+from mcp_hangar.domain.model import McpServer
 
-provider = Provider(
-    provider_id="test",
+mcp_server = McpServer(
+    mcp_server_id="test",
     mode="subprocess",
-    command=["python", "tests/mock_provider.py"]
+    command=["python", "tests/mock_mcp_server.py"]
 )
 
-provider.ensure_ready()
+mcp_server.ensure_ready()
 
-result = provider.invoke_tool("add", {"a": 5, "b": 3})
+result = mcp_server.invoke_tool("add", {"a": 5, "b": 3})
 print(result)  # {"result": 8}
 
-provider.shutdown()
+mcp_server.shutdown()
 ```
 
-### Test Provider Directly
+### Test MCP Server Directly
 
 ```bash
-echo '{"jsonrpc":"2.0","id":1,"method":"initialize","params":{}}' | python tests/mock_provider.py
+echo '{"jsonrpc":"2.0","id":1,"method":"initialize","params":{}}' | python tests/mock_mcp_server.py
 ```
 
 ## Common Issues
 
-### Provider won't start
+### MCP Server won't start
 
 ```bash
 # Test directly
-echo '{"jsonrpc":"2.0","id":1,"method":"initialize","params":{}}' | python tests/mock_provider.py
+echo '{"jsonrpc":"2.0","id":1,"method":"initialize","params":{}}' | python tests/mock_mcp_server.py
 ```
 
 ### Permission denied (container)
 
 ```yaml
-providers:
+mcp_servers:
   memory:
     mode: container
     read_only: false
