@@ -71,4 +71,4 @@ The `TracedProviderService` wraps tool invocations with Langfuse spans via the `
 
 You've set up external observability. Now try running MCP servers as local subprocesses instead of remote HTTP.
 
---> [09 -- Subprocess MCP servers](09-subprocess-MCP servers.md)
+--> [09 -- Subprocess MCP servers](09-subprocess-providers.md)

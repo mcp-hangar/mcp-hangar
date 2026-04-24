@@ -23,7 +23,7 @@ These recipes can be done independently but assume basic Hangar setup from recip
 |---|--------|--------------|
 | 07 | [Observability: Metrics](07-observability-metrics.md) | 01 |
 | 08 | [Observability: Langfuse](08-observability-langfuse.md) | 01 |
-| 09 | [Subprocess MCP servers](09-subprocess-MCP servers.md) | 01 |
+| 09 | [Subprocess MCP servers](09-subprocess-providers.md) | 01 |
 | 10 | [Discovery: Docker](10-discovery-docker.md) | 01 |
 | 11 | [Discovery: Kubernetes](11-discovery-kubernetes.md) | 01 |
 | 12 | [Auth & RBAC](12-auth-rbac.md) | 01 |
