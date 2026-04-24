@@ -5,6 +5,8 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [Unreleased]
+
 ## [1.0.2] - 2026-04-24
 
 ### Changed
@@ -1117,7 +1119,9 @@ The following items are documented technical debt introduced to enable CI:
 - Rate limiting to prevent denial of service
 - Audit logging for security-relevant events
 
-[Unreleased]: https://github.com/mcp-hangar/mcp-hangar/compare/v1.0.0...HEAD
+[Unreleased]: https://github.com/mcp-hangar/mcp-hangar/compare/v1.0.2...HEAD
+[1.0.2]: https://github.com/mcp-hangar/mcp-hangar/compare/v1.0.1...v1.0.2
+[1.0.1]: https://github.com/mcp-hangar/mcp-hangar/compare/v1.0.0...v1.0.1
 [1.0.0]: https://github.com/mcp-hangar/mcp-hangar/compare/v0.12.0...v1.0.0
 [0.12.0]: https://github.com/mcp-hangar/mcp-hangar/compare/v0.11.0...v0.12.0
 [0.11.0]: https://github.com/mcp-hangar/mcp-hangar/compare/v0.10.0...v0.11.0
