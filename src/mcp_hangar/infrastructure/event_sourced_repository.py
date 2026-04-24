@@ -515,4 +515,5 @@ def set_event_sourced_repository(repository: EventSourcedMcpServerRepository) ->
     global _event_sourced_repository
     _event_sourced_repository = repository
 
+
 EventSourcedProviderRepository = EventSourcedMcpServerRepository
