@@ -45,7 +45,6 @@ from mcp_hangar.domain.contracts.event_store import (
     NullEventStore,
 )
 from mcp_hangar.application.ports.observability import (
-    IAuditExporter,
     NullAuditExporter,
     NullObservabilityAdapter,
     ObservabilityPort,

@@ -17,12 +17,11 @@ from pathlib import Path
 import signal
 import sys
 from typing import TYPE_CHECKING
-from urllib.parse import parse_qs
 
 import yaml
 
-from ..infrastructure.identity import TrustedProxyResolver
 from ..logging_config import get_logger, setup_logging
+from .api.middleware import create_auth_enforced_app
 from .bootstrap import ApplicationContext, bootstrap
 from .cli.cli_compat import CLIConfig
 from .config import load_config_from_file
@@ -350,100 +349,7 @@ class ServerLifecycle:
         Returns:
             ASGI app with authentication.
         """
-        from starlette.responses import JSONResponse
-
-        from ..domain.contracts.authentication import AuthRequest
-        from ..domain.exceptions import AccessDeniedError, AuthenticationError
-
-        # Paths to skip authentication (health checks, metrics)
-        skip_paths = frozenset(["/health/live", "/health/ready", "/health/startup", "/metrics"])
-        trusted_proxy_resolver = TrustedProxyResolver()
-
-        async def auth_app(scope, receive, send):
-            """ASGI app with authentication middleware."""
-            if scope["type"] not in ("http", "websocket"):
-                await inner_app(scope, receive, send)
-                return
-
-            path = scope.get("path", "")
-
-            # Skip auth for health/metrics endpoints
-            if path in skip_paths or path.startswith("/health/"):
-                await inner_app(scope, receive, send)
-                return
-
-            # Build headers dict from scope
-            headers = {}
-            for key, value in scope.get("headers", []):
-                headers[key.decode("latin-1").lower()] = value.decode("latin-1")
-
-            if scope["type"] == "websocket":
-                raw_query_string = scope.get("query_string", b"")
-                query_params = parse_qs(raw_query_string.decode("latin-1"))
-                token = query_params.get("token", [None])[0]
-                if token and "authorization" not in headers and "x-api-key" not in headers:
-                    headers["authorization"] = token if token.lower().startswith("bearer ") else f"Bearer {token}"
-
-            # Get client IP
-            client = scope.get("client")
-            source_ip = client[0] if client else "unknown"
-
-            # Trust X-Forwarded-For only from trusted proxies
-            if client and trusted_proxy_resolver.is_trusted(source_ip):
-                forwarded_for = headers.get("x-forwarded-for")
-                if forwarded_for:
-                    source_ip = forwarded_for.split(",")[0].strip()
-
-            # Create auth request
-            auth_request = AuthRequest(
-                headers=headers,
-                source_ip=source_ip,
-                method=scope.get("method", "GET" if scope["type"] == "websocket" else ""),
-                path=path,
-            )
-
-            try:
-                # Authenticate
-                auth_context = auth_components.authn_middleware.authenticate(auth_request)
-
-                # Store auth context in scope for downstream handlers
-                scope["auth"] = auth_context
-
-                # Pass to inner app
-                await inner_app(scope, receive, send)
-
-            except AuthenticationError as e:
-                if scope["type"] == "websocket":
-                    logger.warning("ws_authentication_failed", path=path, source_ip=source_ip, message=e.message)
-                    await send({"type": "websocket.close", "code": 1008, "reason": e.message})
-                    return
-
-                response = JSONResponse(
-                    status_code=401,
-                    content={
-                        "error": "authentication_failed",
-                        "message": e.message,
-                    },
-                    headers={"WWW-Authenticate": "Bearer, ApiKey"},
-                )
-                await response(scope, receive, send)
-
-            except AccessDeniedError as e:
-                if scope["type"] == "websocket":
-                    logger.warning("ws_access_denied", path=path, source_ip=source_ip, message=str(e))
-                    await send({"type": "websocket.close", "code": 1008, "reason": str(e)})
-                    return
-
-                response = JSONResponse(
-                    status_code=403,
-                    content={
-                        "error": "access_denied",
-                        "message": str(e),
-                    },
-                )
-                await response(scope, receive, send)
-
-        return auth_app
+        return create_auth_enforced_app(inner_app, auth_components)
 
 
 def _setup_signal_handlers(lifecycle: ServerLifecycle) -> None:

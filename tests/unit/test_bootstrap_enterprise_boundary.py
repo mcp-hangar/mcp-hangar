@@ -9,7 +9,6 @@ These tests form the contract ensuring the import boundary holds
 at runtime.
 """
 
-import importlib
 import sys
 from unittest.mock import MagicMock
 

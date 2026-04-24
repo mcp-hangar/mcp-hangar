@@ -56,8 +56,6 @@ class TestEndToEndTracePropagation:
         exporter, provider = otel_setup
 
         from opentelemetry.propagate import inject
-        from opentelemetry import context as otel_context
-        from opentelemetry.trace.propagation.tracecontext import TraceContextTextMapPropagator
         from mcp_hangar.server.tools.batch.executor import BatchExecutor
         from mcp_hangar.server.tools.batch.models import CallSpec
 

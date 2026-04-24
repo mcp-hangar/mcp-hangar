@@ -34,7 +34,9 @@ def _make_event(event_type: str, mcp_server_id: str | None = None) -> MagicMock:
 
 def test_parse_subscription_filters_accepts_subscribe_messages() -> None:
     """Subscribe control messages should parse into normal filter config."""
-    result = parse_subscription_filters({"type": "subscribe", "event_types": ["McpServerStarted"], "mcp_server_ids": ["math"]})
+    result = parse_subscription_filters(
+        {"type": "subscribe", "event_types": ["McpServerStarted"], "mcp_server_ids": ["math"]}
+    )
 
     assert result == {"event_types": ["McpServerStarted"], "mcp_server_ids": ["math"]}
 
@@ -108,7 +110,7 @@ def test_ws_events_negotiation_timeout_falls_back_to_unfiltered_stream() -> None
 
     async def run() -> None:
         ws = _make_ws()
-        ws.receive_json = AsyncMock(side_effect=[asyncio.TimeoutError(), WebSocketDisconnect()])
+        ws.receive_json = AsyncMock(side_effect=[TimeoutError(), WebSocketDisconnect()])
 
         with patch("mcp_hangar.server.api.ws.events.get_event_bus", return_value=mock_bus):
             with patch("mcp_hangar.server.api.ws.events.connection_manager") as mock_cm:

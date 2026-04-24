@@ -123,7 +123,7 @@ def test_memory_container() -> None:
         try:
             provider.shutdown()
             print(f"   ✅ Provider stopped. Final state: {provider.state.value}")
-        except Exception as e:
+        except Exception as e:  # noqa: BLE001
             print(f"   ⚠️  Error stopping provider: {e}")
 
 

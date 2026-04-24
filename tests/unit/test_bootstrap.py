@@ -3,7 +3,6 @@
 Tests cover application bootstrapping and dependency injection.
 """
 
-import sys
 from unittest.mock import MagicMock, patch
 
 import pytest

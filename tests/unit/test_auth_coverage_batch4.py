@@ -15,9 +15,7 @@ import tempfile
 import threading
 from contextlib import contextmanager
 from datetime import datetime, timedelta, UTC
-from pathlib import Path
-from typing import Any
-from unittest.mock import MagicMock, Mock, patch, call
+from unittest.mock import MagicMock, Mock, patch
 
 import pytest
 
@@ -85,7 +83,8 @@ class TestPostgresApiKeyStore:
         from mcp_hangar.domain.exceptions import RevokedCredentialsError
 
         store, mock_conn, mock_cursor = self._make_store()
-        # Row: principal_id, tenant_id, groups, name, key_id, expires_at, revoked, metadata, rotated_to_key_id, grace_until
+        # Row: principal_id, tenant_id, groups, name, key_id, expires_at,
+        # revoked, metadata, rotated_to_key_id, grace_until
         mock_cursor.fetchone.return_value = (
             "svc-1", "t1", "[]", "mykey", "kid1",
             None, True, {}, None, None,
@@ -765,7 +764,6 @@ class TestEventSourcedApiKeyStoreGaps:
 
     def test_maybe_create_snapshot_existing_snapshot_not_enough_events(self):
         from enterprise.auth.infrastructure.event_sourced_store import EventSourcedApiKeyStore
-        from mcp_hangar.domain.model.event_sourced_api_key import ApiKeySnapshot
 
         existing = Mock()
         existing.version = 45
@@ -842,7 +840,7 @@ class TestEventSourcedRoleStoreGaps:
             store.delete_role("nonexistent-custom")
 
     def test_delete_role_success(self):
-        from mcp_hangar.domain.value_objects import Permission, Role
+        from mcp_hangar.domain.value_objects import Role
 
         store, _ = self._make_store()
         role = Role(name="temp-role", permissions=frozenset(), description="Temporary")
@@ -953,10 +951,10 @@ class TestSQLiteToolAccessPolicyStore:
     def _make_store(self):
         from enterprise.auth.infrastructure.sqlite_tap_store import SQLiteToolAccessPolicyStore
 
-        tmpfile = tempfile.NamedTemporaryFile(suffix=".db", delete=False)
-        tmpfile.close()
-        store = SQLiteToolAccessPolicyStore(db_path=tmpfile.name)
-        return store, tmpfile.name
+        with tempfile.NamedTemporaryFile(suffix=".db", delete=False) as tmpfile:
+            tmpfile_name = tmpfile.name
+        store = SQLiteToolAccessPolicyStore(db_path=tmpfile_name)
+        return store, tmpfile_name
 
     def test_init_creates_schema(self):
         store, path = self._make_store()
@@ -1264,7 +1262,7 @@ class TestListAllRolesHandler:
         from enterprise.auth.queries.handlers import ListAllRolesHandler
         from enterprise.auth.queries.queries import ListAllRolesQuery
         from enterprise.auth.roles import BUILTIN_ROLES
-        from mcp_hangar.domain.value_objects import Permission, Role
+        from mcp_hangar.domain.value_objects import Role
 
         mock_store = Mock()
         mock_store.list_all_roles.return_value = [
@@ -1715,7 +1713,7 @@ class TestSetToolAccessPolicyHandler:
             "mcp_hangar.domain.services.tool_access_resolver.get_tool_access_resolver",
             return_value=mock_resolver,
         ):
-            result = handler.handle(SetToolAccessPolicyCommand(
+            handler.handle(SetToolAccessPolicyCommand(
                 scope="group", target_id="grp1",
                 allow_list=[], deny_list=["x"],
             ))
@@ -1736,12 +1734,16 @@ class TestSetToolAccessPolicyHandler:
             "mcp_hangar.domain.services.tool_access_resolver.get_tool_access_resolver",
             return_value=mock_resolver,
         ):
-            result = handler.handle(SetToolAccessPolicyCommand(
+            handler.handle(SetToolAccessPolicyCommand(
                 scope="member", target_id="grp1:member1",
                 allow_list=["add"], deny_list=[],
             ))
 
-        mock_resolver.set_member_policy.assert_called_once_with("grp1", "member1", mock_resolver.set_member_policy.call_args[0][2])
+        mock_resolver.set_member_policy.assert_called_once_with(
+            "grp1",
+            "member1",
+            mock_resolver.set_member_policy.call_args[0][2],
+        )
 
     def test_handle_member_scope_without_colon(self):
         from enterprise.auth.commands.handlers import SetToolAccessPolicyHandler
@@ -1762,7 +1764,11 @@ class TestSetToolAccessPolicyHandler:
                 allow_list=[], deny_list=[],
             ))
 
-        mock_resolver.set_member_policy.assert_called_once_with("single_id", "single_id", mock_resolver.set_member_policy.call_args[0][2])
+        mock_resolver.set_member_policy.assert_called_once_with(
+            "single_id",
+            "single_id",
+            mock_resolver.set_member_policy.call_args[0][2],
+        )
 
 
 class TestClearToolAccessPolicyHandler:

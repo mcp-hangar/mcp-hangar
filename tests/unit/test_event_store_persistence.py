@@ -464,7 +464,7 @@ class TestEventStoreThreadSafety:
                     startup_duration_ms=float(i),)
                     current_version = store.get_stream_version(stream_id)
                     store.append(stream_id, [event], expected_version=current_version)
-            except Exception as e:
+            except Exception as e:  # noqa: BLE001
                 errors.append(e)
 
         threads = [threading.Thread(target=append_events, args=(f"mcp_server:{i}",)) for i in range(5)]

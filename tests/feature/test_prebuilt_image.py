@@ -38,7 +38,7 @@ def _image_exists(image_name: str) -> bool:
             timeout=10,
         )
         return bool(result.stdout.strip())
-    except Exception:
+    except Exception:  # noqa: BLE001
         return False
 
 
@@ -115,7 +115,7 @@ def test_prebuilt_image() -> None:
                     if "text" in content:
                         text = content["text"]
                         print(f"   Result: {text[:200]}{'...' if len(text) > 200 else ''}")
-            except Exception as e:
+            except Exception as e:  # noqa: BLE001
                 # Tool invocation may fail but provider started successfully
                 print(f"   ⚠️  Tool invocation failed: {e}")
                 print("   (This is OK - the main goal is testing provider startup)")
@@ -142,7 +142,7 @@ def test_prebuilt_image() -> None:
             if provider is not None:
                 provider.shutdown()
                 print("   ✅ Provider stopped.")
-        except Exception as e:
+        except Exception as e:  # noqa: BLE001
             print(f"   ⚠️  Error stopping provider: {e}")
 
 

@@ -5,7 +5,6 @@ domain events flow through MetricsEventHandler to Prometheus counters,
 OTEL conventions are consistent, and event classes are correctly disambiguated.
 """
 
-import pytest
 
 from mcp_hangar.application.event_handlers.metrics_handler import MetricsEventHandler
 from mcp_hangar.domain.events import (
@@ -18,7 +17,7 @@ from mcp_hangar.domain.value_objects.capabilities import (
     ViolationSeverity,
     ViolationType,
 )
-from mcp_hangar.metrics import CAPABILITY_VIOLATIONS_TOTAL, record_capability_violation
+from mcp_hangar.metrics import CAPABILITY_VIOLATIONS_TOTAL
 from mcp_hangar.observability.conventions import Enforcement
 
 

@@ -6,7 +6,6 @@ Runs in CI on every PR.
 
 import pathlib
 
-import pytest
 import yaml
 
 

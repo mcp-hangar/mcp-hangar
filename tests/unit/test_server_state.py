@@ -3,7 +3,6 @@
 import warnings
 from unittest.mock import MagicMock
 
-import pytest
 
 from mcp_hangar.server import state
 from mcp_hangar.server.state import (

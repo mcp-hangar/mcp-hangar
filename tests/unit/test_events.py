@@ -127,7 +127,13 @@ def test_logging_event_handler():
     event = McpServerStarted(mcp_server_id="test", mode="subprocess", tools_count=3, startup_duration_ms=100.0)
     handler.handle(event)
 
-    event = ToolInvocationCompleted(mcp_server_id="test", tool_name="add", correlation_id="abc123", duration_ms=50.0, result_size_bytes=100)
+    event = ToolInvocationCompleted(
+        mcp_server_id="test",
+        tool_name="add",
+        correlation_id="abc123",
+        duration_ms=50.0,
+        result_size_bytes=100,
+    )
     handler.handle(event)
 
 
@@ -136,10 +142,13 @@ def test_metrics_event_handler():
     handler = MetricsEventHandler()
 
     # Simulate tool invocation completion
-    event = ToolInvocationCompleted(mcp_server_id="test_provider", tool_name="add",
-    correlation_id="abc123",
-    duration_ms=50.0,
-    result_size_bytes=100,)
+    event = ToolInvocationCompleted(
+        mcp_server_id="test_provider",
+        tool_name="add",
+        correlation_id="abc123",
+        duration_ms=50.0,
+        result_size_bytes=100,
+    )
     handler.handle(event)
 
     # Verify metrics were collected

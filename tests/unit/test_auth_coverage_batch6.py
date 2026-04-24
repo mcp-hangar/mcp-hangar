@@ -5,14 +5,13 @@ Targets all uncovered lines listed in the batch6 coverage plan.
 """
 
 from datetime import datetime, timedelta, UTC
-from unittest.mock import Mock, patch, MagicMock
+from unittest.mock import Mock, patch
 import hashlib
-import time
 
 import pytest
 
-from mcp_hangar.domain.contracts.authentication import ApiKeyMetadata, AuthRequest, IApiKeyStore
-from mcp_hangar.domain.contracts.authorization import AuthorizationRequest, AuthorizationResult, IRoleStore
+from mcp_hangar.domain.contracts.authentication import AuthRequest, IApiKeyStore
+from mcp_hangar.domain.contracts.authorization import AuthorizationRequest, IRoleStore
 from mcp_hangar.domain.exceptions import (
     CannotModifyBuiltinRoleError,
     ExpiredCredentialsError,
@@ -34,10 +33,8 @@ from enterprise.auth.infrastructure.rbac_authorizer import (
 from enterprise.auth.infrastructure.rate_limiter import (
     AuthRateLimitConfig,
     AuthRateLimiter,
-    RateLimitResult,
     get_auth_rate_limiter,
     set_auth_rate_limiter,
-    _default_limiter,
 )
 from enterprise.auth.infrastructure.constant_time import constant_time_key_lookup
 
@@ -259,7 +256,7 @@ class TestInMemoryApiKeyStore:
         # Rotate with large grace period
         with patch("enterprise.auth.infrastructure.api_key_authenticator.time") as mock_time:
             mock_time.time.return_value = 1000.0
-            new_raw = store.rotate_key(metadata.key_id, grace_period_seconds=3600)
+            _ = store.rotate_key(metadata.key_id, grace_period_seconds=3600)
         # Access old key within grace period
         with patch("enterprise.auth.infrastructure.api_key_authenticator.time") as mock_time:
             mock_time.time.return_value = 1500.0  # Within grace period

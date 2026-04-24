@@ -3,12 +3,13 @@
 Creates a Starlette application with:
 - CORSMiddleware configured from environment
 - Optional AuthMiddlewareHTTP for enterprise authentication
+- CSRFMiddleware for mutating browser-style requests
 - TrustedHostMiddleware for host header validation
 - Exception handlers mapping domain errors to JSON error envelopes
 - McpServer endpoint routes mounted at /mcp_servers
 
 Middleware ordering note: CORS is outermost for OPTIONS preflight handling,
-auth runs inside CORS, and TrustedHostMiddleware is innermost.
+auth runs inside CORS, CSRF runs outside auth, and TrustedHostMiddleware is innermost.
 """
 
 # pyright: reportAny=false, reportExplicitAny=false
@@ -22,7 +23,8 @@ from starlette.middleware.trustedhost import TrustedHostMiddleware
 from starlette.routing import BaseRoute, Mount
 
 from ...domain.exceptions import MCPError
-from .middleware import error_handler, get_cors_config
+from .middleware import AuthMiddlewareHTTP, CSRFMiddleware, error_handler, get_cors_config
+from ..bootstrap.enterprise import get_enterprise_api_routes
 
 
 def create_api_router(auth_components: Any = None) -> Starlette:
@@ -64,21 +66,7 @@ def create_api_router(auth_components: Any = None) -> Starlette:
         Mount("/agent/policy", routes=agent_policy_routes),
     ]
 
-    # Auth routes are part of enterprise tier.
-    try:
-        from enterprise.auth.api.routes import auth_routes
-
-        routes.append(Mount("/auth", routes=auth_routes))
-    except ImportError:
-        pass
-
-    # Approval gate routes (enterprise tier).
-    try:
-        from enterprise.approvals.api.routes import approval_routes
-
-        routes.extend(approval_routes)
-    except ImportError:
-        pass
+    routes.extend(get_enterprise_api_routes())
 
     exception_handlers = {
         MCPError: error_handler,
@@ -92,15 +80,15 @@ def create_api_router(auth_components: Any = None) -> Starlette:
     trusted_hosts = [h.strip() for h in _trusted_hosts_env.split(",") if h.strip()]
     app.add_middleware(TrustedHostMiddleware, allowed_hosts=trusted_hosts)
 
-    # Auth middleware: mount when enterprise auth is enabled.
+    # CSRF middleware sits outside auth but inside CORS.
+    # It enforces X-Requested-With for mutating browser requests while letting
+    # non-browser API key and bearer token clients bypass the check.
+    app.add_middleware(CSRFMiddleware)
+
+    # Auth middleware: mount when auth is enabled.
     # Must be inside CORSMiddleware so CORS remains outermost (handles OPTIONS preflight first).
     if auth_components is not None and hasattr(auth_components, "enabled") and auth_components.enabled:
-        try:
-            from enterprise.auth.http_middleware import AuthMiddlewareHTTP
-
-            app.add_middleware(AuthMiddlewareHTTP, authn=auth_components.authn_middleware)
-        except ImportError:
-            pass  # Enterprise not installed, skip auth middleware
+        app.add_middleware(AuthMiddlewareHTTP, authn=auth_components.authn_middleware)
 
     cors_config = get_cors_config()
     app.add_middleware(CORSMiddleware, **cors_config)

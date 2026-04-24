@@ -18,7 +18,7 @@ from mcp_hangar.domain.value_objects.tool_access_policy import ToolAccessPolicy
 
 from enterprise.approvals.delivery.noop import NoOpApprovalDelivery
 from enterprise.approvals.hold_registry import ApprovalHoldRegistry
-from enterprise.approvals.models import ApprovalRequest, ApprovalResult, ApprovalState
+from enterprise.approvals.models import ApprovalRequest, ApprovalState
 
 
 # ---------------------------------------------------------------------------

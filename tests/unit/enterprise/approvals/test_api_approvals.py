@@ -4,12 +4,11 @@ import hashlib
 import hmac
 import json
 import time
-from datetime import datetime, timedelta, timezone
-from unittest.mock import AsyncMock, MagicMock
+from datetime import datetime, timedelta, UTC
+from unittest.mock import MagicMock
 
 import pytest
 from starlette.applications import Starlette
-from starlette.routing import Route
 from starlette.testclient import TestClient
 
 from enterprise.approvals.api.routes import approval_routes
@@ -53,18 +52,18 @@ class FakeDelivery:
 
 
 def _make_pending_request(approval_id="test-001", **overrides):
-    now = datetime.now(timezone.utc)
-    defaults = dict(
-        approval_id=approval_id,
-        mcp_server_id="notion",
-        tool_name="update_page",
-        arguments={"page_id": "abc"},
-        arguments_hash="sha256:test",
-        requested_at=now,
-        expires_at=now + timedelta(seconds=300),
-        state=ApprovalState.PENDING,
-        channel="dashboard",
-    )
+    now = datetime.now(UTC)
+    defaults = {
+        "approval_id": approval_id,
+        "mcp_server_id": "notion",
+        "tool_name": "update_page",
+        "arguments": {"page_id": "abc"},
+        "arguments_hash": "sha256:test",
+        "requested_at": now,
+        "expires_at": now + timedelta(seconds=300),
+        "state": ApprovalState.PENDING,
+        "channel": "dashboard",
+    }
     defaults.update(overrides)
     return ApprovalRequest(**defaults)
 

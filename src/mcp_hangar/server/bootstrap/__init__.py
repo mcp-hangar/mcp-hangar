@@ -39,7 +39,7 @@ from ..context import get_context, init_context
 from ..state import get_runtime, GROUPS
 
 from ...domain.value_objects.license import LicenseTier
-from .enterprise import EnterpriseComponents, load_enterprise_modules
+from .enterprise import EnterpriseComponents, get_auth_compat_exports, load_enterprise_modules, validate_license_key
 
 from .cqrs import init_cqrs, init_auth_cqrs, init_saga, save_group_circuit_breakers
 from .discovery import _auto_add_volumes, _create_discovery_source, create_discovery_orchestrator
@@ -255,14 +255,11 @@ def bootstrap(
     # Validate license key and determine tier
     raw_license_key = os.environ.get("HANGAR_LICENSE_KEY")
     license_tier = LicenseTier.COMMUNITY
-    try:
-        from enterprise.auth.license import LicenseValidator
-
-        result = LicenseValidator().validate(raw_license_key)
-        license_tier = result.tier
-        if result.grace_period:
-            logger.warning("license_grace_period", tier=license_tier.value, org=result.org)
-    except ImportError:
+    license_result = validate_license_key(raw_license_key)
+    license_tier = license_result.tier
+    if license_result.grace_period:
+        logger.warning("license_grace_period", tier=license_tier.value, org=license_result.org)
+    elif not get_auth_compat_exports().enterprise_auth_available:
         logger.debug("license_validator_not_available", reason="enterprise_not_installed")
 
     logger.info("license_tier", tier=license_tier.value)
@@ -276,20 +273,7 @@ def bootstrap(
     )
 
     # Wire enterprise components with null fallbacks
-    auth_components = enterprise.auth_components
-    if auth_components is None:
-
-        class _StubAuthComponents:
-            """Stub auth components used when enterprise auth is not loaded."""
-
-            enabled = False
-            api_key_store = None
-            role_store = None
-            tap_store = None
-            authn_middleware = None
-            authz_middleware = None
-
-        auth_components = _StubAuthComponents()
+    auth_components = enterprise.auth_components if enterprise.auth_components is not None else NullAuthComponents()
 
     init_auth_cqrs(runtime, auth_components)
 
@@ -397,45 +381,13 @@ _create_background_workers = create_background_workers
 _create_discovery_orchestrator = create_discovery_orchestrator
 
 # Backward compatibility: enterprise auth shims for existing code and tests that
-# import these names from bootstrap.__init__.  The real implementations now live
-# in bootstrap/enterprise.py (MIT) and enterprise/auth/* (BSL).
-try:
-    from enterprise.auth.bootstrap import (
-        AuthComponents as _EnterpriseAuthComponents,
-        NullAuthComponents as _EnterpriseNullAuthComponents,
-        bootstrap_auth as _enterprise_bootstrap_auth,
-    )
-    from enterprise.auth.config import parse_auth_config as _enterprise_parse_auth_config
-
-    AuthComponents = cast(Any, _EnterpriseAuthComponents)
-    NullAuthComponents = cast(Any, _EnterpriseNullAuthComponents)
-    bootstrap_auth = cast(Any, _enterprise_bootstrap_auth)
-    parse_auth_config = cast(Any, _enterprise_parse_auth_config)
-
-    _enterprise_auth_available = True
-except ImportError:
-    _enterprise_auth_available = False
-
-    class AuthComponents:  # type: ignore[no-redef]
-        """Stub AuthComponents used when enterprise is not installed."""
-
-        enabled: bool = False
-        api_key_store = None
-        role_store = None
-        tap_store = None
-
-    class NullAuthComponents(AuthComponents):  # type: ignore[no-redef]
-        """Null/noop auth implementation used when enterprise is not installed."""
-
-        enabled: bool = False
-
-    def bootstrap_auth(config=None, **kwargs) -> AuthComponents:  # type: ignore[misc]
-        """Return noop auth components when enterprise is not installed."""
-        return NullAuthComponents()
-
-    def parse_auth_config(raw: dict[str, Any] | None = None):  # type: ignore[misc]
-        """Return empty config when enterprise is not installed."""
-        return None
+# import these names from bootstrap.__init__.
+_auth_compat_exports = get_auth_compat_exports()
+AuthComponents = _auth_compat_exports.AuthComponents
+NullAuthComponents = _auth_compat_exports.NullAuthComponents
+bootstrap_auth = _auth_compat_exports.bootstrap_auth
+parse_auth_config = _auth_compat_exports.parse_auth_config
+_enterprise_auth_available = _auth_compat_exports.enterprise_auth_available
 
 
 # Re-export for backward compatibility

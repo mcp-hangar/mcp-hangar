@@ -83,7 +83,7 @@ class TestWsEventsEndpoint:
                     with patch("asyncio.wait_for", side_effect=asyncio.TimeoutError):
                         try:
                             await ws_events_endpoint(ws)
-                        except Exception:
+                        except Exception:  # noqa: BLE001
                             pass
 
             mock_bus.subscribe_to_all.assert_called_once()
@@ -165,7 +165,7 @@ class TestWsEventsEndpoint:
                     with patch("asyncio.wait_for", side_effect=asyncio.TimeoutError):
                         try:
                             await ws_events_endpoint(ws)
-                        except Exception:
+                        except Exception:  # noqa: BLE001
                             pass
 
             # Now test filter behavior via captured handler
@@ -220,7 +220,7 @@ class TestWsEventsEndpoint:
                     with patch("asyncio.wait_for", side_effect=asyncio.TimeoutError):
                         try:
                             await ws_events_endpoint(ws)
-                        except Exception:
+                        except Exception:  # noqa: BLE001
                             pass
 
             mock_bus.unsubscribe_from_all.assert_called_once()
@@ -297,7 +297,7 @@ class TestWsEventsEndpoint:
                     with patch("asyncio.wait_for", side_effect=asyncio.TimeoutError):
                         try:
                             await ws_events_endpoint(ws)
-                        except Exception:
+                        except Exception:  # noqa: BLE001
                             pass
 
             # send_json should have been called with {"type": "ping"}

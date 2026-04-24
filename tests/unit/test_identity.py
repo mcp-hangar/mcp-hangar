@@ -65,7 +65,7 @@ class TestCallerIdentity:
             principal_type="user",
         )
         with pytest.raises((AttributeError, FrozenInstanceError)):
-            setattr(identity, "user_id", "u2")
+            identity.user_id = "u2"
 
 
 class TestIdentityContext:

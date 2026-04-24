@@ -281,7 +281,7 @@ class TestMemoryResponseCache:
             try:
                 for i in range(50):
                     cache.store(f"cont_{start}_{i}", {"v": i}, 300)
-            except Exception as e:
+            except Exception as e:  # noqa: BLE001
                 errors.append(e)
 
         def reader():
@@ -289,7 +289,7 @@ class TestMemoryResponseCache:
                 for _ in range(50):
                     for i in range(10):
                         cache.retrieve(f"cont_0_{i}")
-            except Exception as e:
+            except Exception as e:  # noqa: BLE001
                 errors.append(e)
 
         threads = []

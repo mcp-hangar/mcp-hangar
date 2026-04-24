@@ -7,6 +7,17 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Changed
+
+- **Enterprise Boundary**: server bootstrap and router code now resolve optional enterprise integrations through a single core provider boundary in `server/bootstrap/enterprise.py` instead of scattered direct `enterprise.*` imports. The boundary supports entry-point discovery when available and a monorepo-safe fallback for local development.
+- **Unified Auth Enforcement**: HTTP and WebSocket auth now share the same core enforcement path in `server/api/middleware.py`, including trusted proxy resolution, `?token=` WebSocket bearer mapping, auth context propagation, and consistent 401/403/1008 failures.
+- **CSRF Scope**: CSRF protection now targets browser-style session suspension requests instead of all mutating API routes. Browser hints (`Origin`, `Referer`, `Cookie`) plus `X-Requested-With` are used to distinguish SPA/browser requests from API clients.
+
+### Security
+
+- Browser-originated `POST /sessions/{id}/suspend` now requires `X-Requested-With`, while API key / bearer / non-browser clients remain unaffected.
+- Direct server-layer `from enterprise` imports were removed from the bootstrap/router path, shrinking the core-to-enterprise attack surface and making the boundary auditable in one place.
+
 ## [1.0.1] - 2026-04-17
 
 Security hardening release addressing findings from the April 2026 security audit.

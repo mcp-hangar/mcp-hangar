@@ -8,7 +8,6 @@ Covers:
 
 from unittest.mock import Mock
 
-import pytest
 from starlette.testclient import TestClient
 
 from mcp_hangar.server.api.router import create_api_router

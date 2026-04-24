@@ -11,7 +11,6 @@ import json
 import time
 from unittest.mock import patch
 
-import pytest
 
 from enterprise.auth.license import LicenseValidator, LicenseValidationResult
 from mcp_hangar.domain.value_objects.license import LicenseTier

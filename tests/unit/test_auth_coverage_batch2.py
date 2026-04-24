@@ -10,15 +10,12 @@ from __future__ import annotations
 
 import argparse
 import time
-from datetime import datetime, timedelta, UTC
-from dataclasses import dataclass
 from typing import Any
-from unittest import mock
-from unittest.mock import MagicMock, Mock, patch, PropertyMock, ANY
+from unittest.mock import MagicMock, Mock, patch, ANY
 
 import pytest
 
-from mcp_hangar.domain.contracts.authentication import AuthRequest, ITokenValidator, ApiKeyMetadata
+from mcp_hangar.domain.contracts.authentication import AuthRequest, ITokenValidator
 from mcp_hangar.domain.contracts.authorization import AuthorizationRequest, AuthorizationResult
 from mcp_hangar.domain.exceptions import (
     ExpiredCredentialsError,
@@ -728,7 +725,6 @@ class TestOPAAuthorizerEvaluate:
 
     def test_lazy_client_initialization(self):
         from enterprise.auth.infrastructure.opa_authorizer import OPAAuthorizer
-        import httpx
 
         opa = OPAAuthorizer("http://localhost:8181", timeout=3.0)
         assert opa._client is None
@@ -970,7 +966,9 @@ class TestAuthCLICreateParser:
         subparsers = parent.add_subparsers()
         auth_parser = create_auth_parser(subparsers)
 
-        args = auth_parser.parse_args(["revoke-role", "--principal", "user:c", "--role", "admin", "--scope", "tenant:x"])
+        args = auth_parser.parse_args(
+            ["revoke-role", "--principal", "user:c", "--role", "admin", "--scope", "tenant:x"]
+        )
         assert args.scope == "tenant:x"
 
     def test_create_key_with_roles_and_expires(self):
@@ -1434,9 +1432,13 @@ class TestCreateStorageBackendsPostgres:
         )
 
         # Patch the lazy imports for postgres stores
-        with patch("enterprise.auth.infrastructure.postgres_store.create_postgres_connection_factory") as mock_factory, \
-             patch("enterprise.auth.infrastructure.postgres_store.PostgresApiKeyStore") as mock_key_store_cls, \
-             patch("enterprise.auth.infrastructure.postgres_store.PostgresRoleStore") as mock_role_store_cls:
+        with patch(
+            "enterprise.auth.infrastructure.postgres_store.create_postgres_connection_factory"
+        ) as mock_factory, patch(
+            "enterprise.auth.infrastructure.postgres_store.PostgresApiKeyStore"
+        ) as mock_key_store_cls, patch(
+            "enterprise.auth.infrastructure.postgres_store.PostgresRoleStore"
+        ) as mock_role_store_cls:
 
             mock_factory.return_value = MagicMock()
             mock_key_instance = MagicMock()
@@ -1457,9 +1459,13 @@ class TestCreateStorageBackendsPostgres:
 
         config = AuthConfig(storage=StorageConfig(driver="postgres"))
 
-        with patch("enterprise.auth.infrastructure.postgres_store.create_postgres_connection_factory") as mock_factory, \
-             patch("enterprise.auth.infrastructure.postgres_store.PostgresApiKeyStore") as mock_key_store_cls, \
-             patch("enterprise.auth.infrastructure.postgres_store.PostgresRoleStore") as mock_role_store_cls:
+        with patch(
+            "enterprise.auth.infrastructure.postgres_store.create_postgres_connection_factory"
+        ) as mock_factory, patch(
+            "enterprise.auth.infrastructure.postgres_store.PostgresApiKeyStore"
+        ) as mock_key_store_cls, patch(
+            "enterprise.auth.infrastructure.postgres_store.PostgresRoleStore"
+        ) as mock_role_store_cls:
 
             mock_factory.return_value = MagicMock()
             mock_key_store_cls.return_value = MagicMock()

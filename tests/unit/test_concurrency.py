@@ -675,7 +675,7 @@ class TestThreadSafety:
                 for _ in range(50):
                     cm.set_mcp_server_limit(mcp_server_id, limit)
                     cm.get_mcp_server_limit(mcp_server_id)
-            except Exception as e:
+            except Exception as e:  # noqa: BLE001
                 errors.append(e)
 
         threads = [threading.Thread(target=setter, args=(f"p-{i}", i)) for i in range(10)]

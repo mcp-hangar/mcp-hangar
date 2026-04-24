@@ -242,8 +242,11 @@ class TestConfigRoundTripIntegration:
 
     def _make_provider(self, mcp_server_id: str, mode: str = "subprocess") -> McpServer:
         """Create a real Provider for round-trip tests."""
-        return McpServer(mcp_server_id=mcp_server_id, mode=ProviderMode.SUBPROCESS if mode == "subprocess" else ProviderMode.SUBPROCESS,
-        command=["python", "-m", f"{mcp_server_id}_server"],)
+        return McpServer(
+            mcp_server_id=mcp_server_id,
+            mode=ProviderMode.SUBPROCESS if mode == "subprocess" else ProviderMode.SUBPROCESS,
+            command=["python", "-m", f"{mcp_server_id}_server"],
+        )
 
     def test_serialize_then_yaml_dump_then_safe_load_preserves_mcp_server_id(self):
         """serialize_full_config -> safe_dump -> safe_load round-trip preserves provider id."""

@@ -103,7 +103,7 @@ def _run_provider_check(
         try:
             provider.shutdown()
             print(f"   ✅ Provider stopped. Final state: {provider.state.value}")
-        except Exception as e:
+        except Exception as e:  # noqa: BLE001
             print(f"   ⚠️  Error stopping provider: {e}")
 
 
@@ -115,7 +115,7 @@ def test_filesystem():
     try:
         test_file.write_text("MCP filesystem provider test")
         print(f"📝 Created test file: {test_file}")
-    except Exception as e:
+    except Exception as e:  # noqa: BLE001
         print(f"⚠️  Could not create test file: {e}")
 
     # Get current UID:GID
@@ -143,7 +143,7 @@ def test_filesystem():
         if test_file.exists():
             test_file.unlink()
             print("🗑️  Cleaned up test file")
-    except Exception as e:
+    except Exception as e:  # noqa: BLE001
         print(f"⚠️  Could not cleanup test file: {e}")
 
     return None

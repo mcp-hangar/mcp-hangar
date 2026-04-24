@@ -1,6 +1,5 @@
 """Unit tests for OTLPAuditEventHandler domain event -> IAuditExporter wiring."""
 
-import pytest
 from unittest.mock import MagicMock
 
 from mcp_hangar.application.ports.observability import NullAuditExporter

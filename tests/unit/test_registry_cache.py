@@ -121,7 +121,7 @@ class TestRegistryCache:
             try:
                 for i in range(100):
                     cache.set(f"key_{start}_{i}", f"value_{start}_{i}")
-            except Exception as e:
+            except Exception as e:  # noqa: BLE001
                 errors.append(e)
 
         def reader():
@@ -129,7 +129,7 @@ class TestRegistryCache:
                 for _ in range(100):
                     for i in range(10):
                         cache.get(f"key_0_{i}")
-            except Exception as e:
+            except Exception as e:  # noqa: BLE001
                 errors.append(e)
 
         threads = []

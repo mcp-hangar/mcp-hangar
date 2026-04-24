@@ -187,7 +187,7 @@ def main():
 
             print(json.dumps(response), flush=True)
 
-        except Exception:
+        except Exception:  # noqa: BLE001
             # Silent error handling
             break
 

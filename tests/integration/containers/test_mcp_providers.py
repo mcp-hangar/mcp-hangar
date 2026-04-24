@@ -36,7 +36,7 @@ class TestMCPProviderContainerLifecycle:
             )
             # Any response (even 404) means container is running
             assert response.status_code in [200, 404, 405]
-        except Exception:
+        except Exception:  # noqa: BLE001
             # Container might not have health endpoint, check SSE
             try:
                 response = http_client.get(
@@ -44,7 +44,7 @@ class TestMCPProviderContainerLifecycle:
                     timeout=5.0,
                 )
                 assert response.status_code in [200, 400, 404, 405]
-            except Exception as e:
+            except Exception as e:  # noqa: BLE001
                 pytest.skip(f"Container not reachable: {e}")
 
 
@@ -108,7 +108,7 @@ class TestContainerLoadHandling:
                 )
                 with lock:
                     success_count += 1
-            except Exception as e:
+            except Exception as e:  # noqa: BLE001
                 with lock:
                     errors.append(e)
 

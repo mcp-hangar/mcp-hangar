@@ -5,7 +5,7 @@ from unittest.mock import MagicMock, patch
 
 from mcp_hangar.application.services.traced_mcp_server_service import TracedMcpServerService
 from mcp_hangar.application.ports.observability import NullObservabilityAdapter
-from mcp_hangar.observability.conventions import Enforcement, MCP, McpServer
+from mcp_hangar.observability.conventions import MCP, McpServer
 
 
 def _make_service(invoke_result: dict | None = None, invoke_raises: Exception | None = None):

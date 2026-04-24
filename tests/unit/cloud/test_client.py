@@ -1,6 +1,6 @@
 """Tests for cloud.client -- HTTP client for uplink REST API."""
 
-from unittest.mock import AsyncMock, MagicMock, patch
+from unittest.mock import AsyncMock, MagicMock
 
 import pytest
 

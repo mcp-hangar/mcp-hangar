@@ -1,20 +1,14 @@
 """Unit tests for ApprovalGateService."""
 
 import asyncio
-from datetime import datetime, timedelta, timezone
-from unittest.mock import AsyncMock, MagicMock
+from datetime import datetime, timedelta, UTC
+from unittest.mock import MagicMock
 
 import pytest
 
 from enterprise.approvals.hold_registry import ApprovalHoldRegistry
-from enterprise.approvals.models import ApprovalRequest, ApprovalResult, ApprovalState
+from enterprise.approvals.models import ApprovalRequest, ApprovalState
 from enterprise.approvals.service import ApprovalGateService
-from mcp_hangar.domain.events import (
-    ToolApprovalDenied,
-    ToolApprovalExpired,
-    ToolApprovalGranted,
-    ToolApprovalRequested,
-)
 from mcp_hangar.domain.value_objects.tool_access_policy import ToolAccessPolicy
 
 
@@ -250,7 +244,7 @@ class TestApprovalGateServiceResolve:
 
     async def test_resolve_already_terminal_returns_false(self, service, repo):
         """Resolving an already-terminal request returns False."""
-        now = datetime.now(timezone.utc)
+        now = datetime.now(UTC)
         req = ApprovalRequest(
             approval_id="done-001",
             mcp_server_id="notion",

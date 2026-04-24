@@ -40,7 +40,7 @@ class TestHttpTraceContextInjection:
 
     def test_outbound_headers_contain_traceparent_when_trace_active(self) -> None:
         """Headers passed to HTTP request include traceparent when an active trace exists."""
-        otel_sdk = pytest.importorskip("opentelemetry.sdk.trace")
+        pytest.importorskip("opentelemetry.sdk.trace")
 
         from opentelemetry.sdk.trace import TracerProvider
         from opentelemetry.sdk.trace.export.in_memory_span_exporter import InMemorySpanExporter
@@ -63,8 +63,6 @@ class TestHttpTraceContextInjection:
             )
 
             captured_headers: dict[str, str] = {}
-
-            original_post = client._client.post
 
             def capture_post(url, *, json=None, timeout=None, headers=None, **kwargs):
                 """Capture extra headers sent to httpx.post."""

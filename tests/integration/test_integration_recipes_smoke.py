@@ -6,7 +6,6 @@ Runs in CI on every PR to catch broken example configs.
 
 import pathlib
 
-import pytest
 import yaml
 
 

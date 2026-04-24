@@ -337,7 +337,7 @@ class TestRemoteProviderHealthCheck:
         for _ in range(3):
             try:
                 provider.ensure_ready()
-            except Exception:
+            except Exception:  # noqa: BLE001
                 pass
 
         # Should have accumulated failures

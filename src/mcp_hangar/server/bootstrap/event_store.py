@@ -5,6 +5,7 @@ from typing import Any, TYPE_CHECKING
 
 from ...domain.contracts.event_store import NullEventStore
 from ...logging_config import get_logger
+from .enterprise import create_enterprise_event_store
 
 if TYPE_CHECKING:
     from ...bootstrap.runtime import Runtime
@@ -48,7 +49,11 @@ def init_event_store(runtime: "Runtime", config: dict[str, Any]) -> None:
         # SQLiteEventStore lives in enterprise tier (BSL 1.1).
         # Fallback to in-memory when enterprise is not installed.
         try:
-            from enterprise.persistence.sqlite_event_store import SQLiteEventStore
+            Path(db_path).parent.mkdir(parents=True, exist_ok=True)
+            event_store = create_enterprise_event_store(driver, event_store_config)
+            if event_store is None:
+                raise ImportError
+            logger.info("event_store_initialized", driver="sqlite", path=db_path)
         except ImportError:
             logger.warning(
                 "event_store_sqlite_enterprise_unavailable",
@@ -61,11 +66,6 @@ def init_event_store(runtime: "Runtime", config: dict[str, Any]) -> None:
             logger.info("event_store_initialized", driver="memory", reason="enterprise_not_installed")
             runtime.event_bus.set_event_store(event_store)
             return
-
-        try:
-            Path(db_path).parent.mkdir(parents=True, exist_ok=True)
-            event_store = SQLiteEventStore(db_path)
-            logger.info("event_store_initialized", driver="sqlite", path=db_path)
         except OSError as e:
             logger.warning(
                 "event_store_sqlite_fallback_to_memory",

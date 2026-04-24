@@ -10,10 +10,9 @@ Covers:
 
 import asyncio
 import json
-from dataclasses import FrozenInstanceError, dataclass
+from dataclasses import FrozenInstanceError
 from types import SimpleNamespace
-from typing import Any
-from unittest.mock import AsyncMock, MagicMock, Mock, patch
+from unittest.mock import AsyncMock, Mock, patch
 
 import pytest
 
@@ -78,7 +77,7 @@ class TestAuthContext:
 
         ctx = AuthContext(principal=_make_principal(), auth_method="api_key")
         with pytest.raises((AttributeError, FrozenInstanceError)):
-            setattr(ctx, "auth_method", "something_else")
+            ctx.auth_method = "something_else"
 
 
 # ===========================================================================
@@ -463,7 +462,6 @@ class TestAuthMiddlewareHTTP:
     async def test_successful_auth_attaches_context_to_request_state(self):
         from enterprise.auth.http_middleware import AuthMiddlewareHTTP
         from enterprise.auth.infrastructure.middleware import AuthContext
-        from mcp_hangar.infrastructure.identity import TrustedProxyResolver
 
         principal = _make_principal("user:alice")
         auth_ctx = AuthContext(principal=principal, auth_method="jwt")
@@ -942,7 +940,7 @@ class TestAuthRoutes:
 
         with patch("enterprise.auth.api.routes.dispatch_command", new_callable=AsyncMock) as mock_dispatch:
             mock_dispatch.return_value = {"key_id": "k2"}
-            response = await create_api_key(request)
+            await create_api_key(request)
 
         cmd = mock_dispatch.call_args[0][0]
         assert cmd.expires_at is not None
@@ -961,7 +959,7 @@ class TestAuthRoutes:
 
         with patch("enterprise.auth.api.routes.dispatch_command", new_callable=AsyncMock) as mock_dispatch:
             mock_dispatch.return_value = {"revoked": True}
-            response = await revoke_api_key(request)
+            await revoke_api_key(request)
 
         cmd = mock_dispatch.call_args[0][0]
         assert cmd.key_id == "k1"
@@ -978,7 +976,7 @@ class TestAuthRoutes:
 
         with patch("enterprise.auth.api.routes.dispatch_command", new_callable=AsyncMock) as mock_dispatch:
             mock_dispatch.return_value = {"revoked": True}
-            response = await revoke_api_key(request)
+            await revoke_api_key(request)
 
         cmd = mock_dispatch.call_args[0][0]
         assert cmd.revoked_by == "system"
@@ -994,7 +992,7 @@ class TestAuthRoutes:
 
         with patch("enterprise.auth.api.routes.dispatch_query", new_callable=AsyncMock) as mock_dispatch:
             mock_dispatch.return_value = {"keys": [], "total": 0}
-            response = await list_api_keys(request)
+            await list_api_keys(request)
 
         query = mock_dispatch.call_args[0][0]
         assert query.principal_id == "user:alice"
@@ -1030,7 +1028,7 @@ class TestAuthRoutes:
 
         with patch("enterprise.auth.api.routes.dispatch_command", new_callable=AsyncMock) as mock_dispatch:
             mock_dispatch.return_value = {"assigned": True}
-            response = await assign_role(request)
+            await assign_role(request)
 
         cmd = mock_dispatch.call_args[0][0]
         assert cmd.principal_id == "user:alice"
@@ -1053,7 +1051,7 @@ class TestAuthRoutes:
 
         with patch("enterprise.auth.api.routes.dispatch_command", new_callable=AsyncMock) as mock_dispatch:
             mock_dispatch.return_value = {"revoked": True}
-            response = await revoke_role(request)
+            await revoke_role(request)
 
         cmd = mock_dispatch.call_args[0][0]
         assert cmd.principal_id == "user:bob"
@@ -1070,7 +1068,7 @@ class TestAuthRoutes:
 
         with patch("enterprise.auth.api.routes.dispatch_query", new_callable=AsyncMock) as mock_dispatch:
             mock_dispatch.return_value = {"roles": []}
-            response = await list_roles(request)
+            await list_roles(request)
 
         from enterprise.auth.queries.queries import ListBuiltinRolesQuery
 
@@ -1109,7 +1107,7 @@ class TestAuthRoutes:
 
         with patch("enterprise.auth.api.routes.dispatch_query", new_callable=AsyncMock) as mock_dispatch:
             mock_dispatch.return_value = {"roles": []}
-            response = await get_principal_roles(request)
+            await get_principal_roles(request)
 
         query = mock_dispatch.call_args[0][0]
         assert query.principal_id == "user:alice"
@@ -1125,7 +1123,7 @@ class TestAuthRoutes:
 
         with patch("enterprise.auth.api.routes.dispatch_query", new_callable=AsyncMock) as mock_dispatch:
             mock_dispatch.return_value = {"roles": [], "total": 0}
-            response = await list_all_roles(request)
+            await list_all_roles(request)
 
         query = mock_dispatch.call_args[0][0]
         assert query.include_builtin is True
@@ -1196,7 +1194,7 @@ class TestAuthRoutes:
 
         with patch("enterprise.auth.api.routes.dispatch_command", new_callable=AsyncMock) as mock_dispatch:
             mock_dispatch.return_value = {"role_name": "deployer"}
-            response = await update_role(request)
+            await update_role(request)
 
         cmd = mock_dispatch.call_args[0][0]
         assert cmd.role_name == "deployer"
@@ -1213,7 +1211,7 @@ class TestAuthRoutes:
 
         with patch("enterprise.auth.api.routes.dispatch_query", new_callable=AsyncMock) as mock_dispatch:
             mock_dispatch.return_value = {"principals": [], "total": 0}
-            response = await list_principals(request)
+            await list_principals(request)
 
         from enterprise.auth.queries.queries import ListPrincipalsQuery
 
@@ -1253,7 +1251,7 @@ class TestAuthRoutes:
 
         with patch("enterprise.auth.api.routes.dispatch_query", new_callable=AsyncMock) as mock_dispatch:
             mock_dispatch.return_value = {"allowed": True}
-            response = await check_permission(request)
+            await check_permission(request)
 
         query = mock_dispatch.call_args[0][0]
         assert query.principal_id == "user:alice"
@@ -1274,7 +1272,7 @@ class TestAuthRoutes:
 
         with patch("enterprise.auth.api.routes.dispatch_query", new_callable=AsyncMock) as mock_dispatch:
             mock_dispatch.return_value = {"allowed": False}
-            response = await check_permission(request)
+            await check_permission(request)
 
         query = mock_dispatch.call_args[0][0]
         assert query.resource_type == "mcp_server"

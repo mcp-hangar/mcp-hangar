@@ -291,7 +291,7 @@ class TestProviderThreadSafety:
                     _ = provider.is_alive
                     _ = provider.last_used
                 results.append(True)
-            except Exception as e:
+            except Exception as e:  # noqa: BLE001
                 errors.append(e)
 
         threads = [threading.Thread(target=access_properties) for _ in range(10)]
@@ -312,7 +312,7 @@ class TestProviderThreadSafety:
         def shutdown():
             try:
                 provider.shutdown()
-            except Exception as e:
+            except Exception as e:  # noqa: BLE001
                 errors.append(e)
 
         threads = [threading.Thread(target=shutdown) for _ in range(5)]
@@ -358,7 +358,7 @@ class TestEnsureReadyConcurrency:
             try:
                 provider.ensure_ready()
                 results.append("ok")
-            except Exception as e:
+            except Exception as e:  # noqa: BLE001
                 errors.append(e)
 
         with patch.object(provider, "_create_client", side_effect=slow_create_client):
@@ -393,7 +393,7 @@ class TestEnsureReadyConcurrency:
             try:
                 provider.ensure_ready()
                 completion_order.append(name)
-            except Exception:
+            except Exception:  # noqa: BLE001
                 pass
 
         with patch.object(provider, "_create_client", side_effect=slow_create_client):
@@ -423,7 +423,7 @@ class TestEnsureReadyConcurrency:
                 provider.ensure_ready()
             except (ProviderStartError, CannotStartProviderError) as e:
                 errors.append(e)
-            except Exception as e:
+            except Exception as e:  # noqa: BLE001
                 errors.append(e)
 
         with patch.object(provider, "_create_client", side_effect=failing_create_client):
@@ -459,7 +459,7 @@ class TestEnsureReadyConcurrency:
                 provider.ensure_ready()
             except (CannotStartProviderError, ProviderStartError) as e:
                 errors.append(e)
-            except Exception as e:
+            except Exception as e:  # noqa: BLE001
                 errors.append(e)
 
         # Temporarily reduce the wait timeout so test doesn't take 30s
@@ -501,7 +501,7 @@ class TestEnsureReadyConcurrency:
                             0.5,
                         )
                     )
-            except Exception as e:
+            except Exception as e:  # noqa: BLE001
                 waiter_errors.append(e)
 
         with patch.object(provider, "_create_client", side_effect=very_slow_create_client):
@@ -535,7 +535,7 @@ class TestEnsureReadyConcurrency:
             with patch.object(provider, "_perform_mcp_handshake"):
                 try:
                     provider.ensure_ready()
-                except (ProviderStartError, Exception):
+                except (ProviderStartError, Exception):  # noqa: BLE001
                     pass
 
                 assert provider.state in (ProviderState.DEAD, ProviderState.DEGRADED)
@@ -715,7 +715,7 @@ class TestInvokeToolRefresh:
             try:
                 result = provider.invoke_tool("new_tool", {})
                 results.append(result)
-            except Exception as e:
+            except Exception as e:  # noqa: BLE001
                 errors.append(e)
 
         t1 = threading.Thread(target=call_invoke, args=("t1",))

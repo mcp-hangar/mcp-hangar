@@ -4,7 +4,7 @@ Targets uncovered lines listed in the coverage report for batch 5.
 """
 
 from datetime import datetime, timedelta, UTC
-from unittest.mock import Mock, MagicMock, patch
+from unittest.mock import Mock
 import time
 
 import pytest
@@ -25,10 +25,9 @@ from mcp_hangar.domain.exceptions import (
 )
 from mcp_hangar.domain.contracts.authentication import ApiKeyMetadata
 from mcp_hangar.domain.contracts.event_store import IEventStore
-from mcp_hangar.domain.value_objects import Permission, Principal, PrincipalId, PrincipalType, Role
+from mcp_hangar.domain.value_objects import Permission, PrincipalId, PrincipalType, Role
 from mcp_hangar.domain.model.event_sourced_api_key import ApiKeySnapshot, EventSourcedApiKey
 from mcp_hangar.domain.model.event_sourced_role_assignment import (
-    EventSourcedRoleAssignment,
     RoleAssignmentSnapshot,
 )
 

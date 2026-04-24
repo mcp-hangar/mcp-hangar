@@ -13,6 +13,7 @@ from ...infrastructure.persistence.saga_state_store import NullSagaStateStore, S
 from ...infrastructure.saga_manager import get_saga_manager
 from ...logging_config import get_logger
 from ..config import ServerConfigLoader
+from .enterprise import register_auth_cqrs
 from ..context import get_context
 from ..state import get_runtime, GROUPS, RUNTIME_PROVIDERS, set_group_rebalance_saga
 
@@ -76,29 +77,9 @@ def init_auth_cqrs(runtime: "Runtime", auth_components: Any) -> None:
         logger.info("auth_cqrs_skipped", reason="auth_disabled")
         return
 
-    try:
-        from enterprise.auth.commands.handlers import register_auth_command_handlers
-        from enterprise.auth.queries.handlers import register_auth_query_handlers
-    except ImportError:
+    if not register_auth_cqrs(runtime, auth_components):
         logger.info("auth_cqrs_skipped", reason="enterprise_not_installed")
         return
-
-    tap_store = getattr(auth_components, "tap_store", None)
-    event_bus = getattr(runtime, "event_bus", None)
-
-    register_auth_command_handlers(
-        runtime.command_bus,
-        api_key_store=getattr(auth_components, "api_key_store", None),
-        role_store=getattr(auth_components, "role_store", None),
-        tap_store=tap_store,
-        event_bus=event_bus,
-    )
-    register_auth_query_handlers(
-        runtime.query_bus,
-        api_key_store=getattr(auth_components, "api_key_store", None),
-        role_store=getattr(auth_components, "role_store", None),
-        tap_store=tap_store,
-    )
     logger.info("auth_cqrs_handlers_registered")
 
 

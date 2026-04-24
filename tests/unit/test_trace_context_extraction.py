@@ -10,7 +10,6 @@ crashing.
 import threading
 from unittest.mock import MagicMock, patch
 
-import pytest
 
 from mcp_hangar.server.tools.batch.models import CallSpec
 
@@ -59,7 +58,7 @@ class TestTraceContextExtraction:
             mock_extract.return_value = None
             # Execute -- will fail at provider lookup, but we only care
             # about whether extract_trace_context was called
-            result = executor._execute_call(
+            _ = executor._execute_call(
                 call_spec,
                 cancel_event=threading.Event(),
                 global_timeout=60.0,

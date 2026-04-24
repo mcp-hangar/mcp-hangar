@@ -84,7 +84,7 @@ def test_manager_concurrent_register_both_entries_survive():
         try:
             barrier.wait()
             mgr.register(cid)
-        except Exception as e:
+        except Exception as e:  # noqa: BLE001
             errors.append(e)
 
     t1 = threading.Thread(target=register_conn, args=("conn-a",))

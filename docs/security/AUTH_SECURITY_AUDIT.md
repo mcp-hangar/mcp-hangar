@@ -1,93 +1,104 @@
 # Authentication Security Audit
 
-Last audit date: 2026-03-08 (v0.11.0)
+Last audit date: 2026-04-23 (v1.6 security hardening refresh)
 
 ## Scope
 
-This audit covers the authentication and authorization subsystem introduced in MCP Hangar:
+This audit covers the authentication, authorization, and request-enforcement paths in MCP Hangar after the v1.6 security hardening work:
 
-- API key generation, storage, and validation
-- JWT token issuance and verification
-- Role-based access control (RBAC)
+- API key and JWT/OIDC authentication
+- Role-based access control (RBAC) and `policy:write` authorization
 - Tool access policies (TAP)
-- HTTP middleware enforcement
+- HTTP and WebSocket auth enforcement
+- Browser-oriented CSRF defense-in-depth on session suspension
+- Enterprise boundary loading between core `src/` and optional `enterprise/`
 
-## API Key Security
+## Current Security Posture
 
-### Key Generation
+### Authentication
 
-- Keys use `secrets.token_urlsafe(32)` (256 bits of entropy).
-- Keys are prefixed with `mcp_` for identification in log scanning.
-- Raw key is returned exactly once at creation time; only the SHA-256 hash is stored.
+- API requests rely on `request.state.auth`; WebSocket / generic ASGI paths use `scope["auth"]`.
+- HTTP and WebSocket auth enforcement now share one core implementation in `src/mcp_hangar/server/api/middleware.py`.
+- WebSocket connections support `?token=` bearer mapping for clients that cannot set custom headers.
+- Trusted proxy resolution is centralized through `TrustedProxyResolver`, preventing spoofed `X-Forwarded-For` from untrusted peers.
 
-### Key Storage
+### Authorization
 
-- **SQLite backend**: Keys stored as SHA-256 hashes in `api_keys` table.
-- **In-memory backend**: Keys stored as SHA-256 hashes in a dict (development only).
-- Lookup by hash is constant-time via dict/index; no timing side-channel on comparison.
+- `/api/agent/policy` no longer trusts a magic internal header.
+- Policy push now requires an authenticated principal plus `policy:write` authorization.
+- Failed policy pushes emit `PolicyPushRejected` audit events.
+- The `agent` role includes the explicit `policy:write` permission required by hangar-agent.
 
-### Key Revocation
+### Browser CSRF Defense
 
-- Revoked keys are marked with `revoked_at` timestamp and `revoked_by` principal.
-- Revocation is immediate; no grace period.
-- Revoked keys are retained for audit trail; they never validate again.
+- CSRF enforcement is intentionally scoped to browser-style session suspension requests.
+- `POST /sessions/{session_id}/suspend` requires `X-Requested-With` only when the request looks browser-originated (`Origin`, `Referer`, or `Cookie` present).
+- API key clients, bearer-token clients, and non-browser API callers bypass the CSRF check.
+- This keeps REST API automation compatible while still defending against browser-triggered session suspension.
 
-## JWT Security
+### WebSocket Security
 
-- Tokens signed with HS256 using a server-generated secret.
-- Token lifetime defaults to 3600 seconds (configurable via `auth.jwt.expiry_s`).
-- Refresh tokens are not supported; clients must re-authenticate.
-- The signing secret is derived from `MCP_AUTH_SECRET` environment variable or auto-generated at startup (not persisted across restarts in auto-generated mode).
+- Authentication failures close the socket with code `1008` before the connection is used.
+- `Origin` validation happens before `websocket.accept()` to mitigate cross-site WebSocket hijacking.
+- Per-connection backpressure is enforced with bounded queues.
 
-## RBAC Model
+### Enterprise Boundary
 
-### Built-in Roles
+- Core bootstrap/router code no longer scatters direct `enterprise.*` imports across server modules.
+- Optional enterprise integrations are resolved via `src/mcp_hangar/server/bootstrap/enterprise.py`.
+- The boundary exposes provider hooks for:
+  - license validation
+  - auth CQRS registration
+  - API route extension
+  - enterprise-backed event store creation
+  - observability adapter creation
+  - legacy bootstrap compatibility exports
+- Entry points are supported when available; the monorepo layout uses a controlled fallback loader so development remains functional without breaking the core boundary.
 
-| Role | Permissions |
-|------|------------|
-| `admin` | Full access to all operations |
-| `operator` | Start, stop, reload MCP servers; manage groups |
-| `developer` | Invoke tools, read MCP server status |
-| `viewer` | Read-only access to status and metrics |
+## Findings Status
 
-### Custom Roles
-
-- Custom roles extend built-in permissions with additional grants.
-- Role assignments are stored in `IRoleStore` (SQLite or in-memory).
-- A principal can have multiple roles; effective permissions are the union of all role grants.
-
-## Tool Access Policies
-
-- Policies are evaluated after RBAC permission check.
-- A policy maps `(principal, MCP server, tool)` to `allow` or `deny`.
-- Default policy when no TAP exists: `allow` (open by default).
-- Policies are stored in `SQLiteToolAccessPolicyStore`.
-
-## Middleware Enforcement
-
-The `AuthMiddleware` in `http_auth_middleware.py`:
-
-1. Extracts API key from `X-API-Key` header.
-2. Validates key hash against store.
-3. Resolves principal and roles.
-4. Attaches `Principal` to request state.
-5. Returns `401 Unauthorized` for invalid/missing keys (when `allow_anonymous: false`).
-6. Returns `403 Forbidden` for insufficient permissions.
+| Finding | Status | Notes |
+|--------|--------|-------|
+| K-1 Agent policy auth bypass | Fixed | `/api/agent/policy` requires authenticated principal + `policy:write`; rejection events emitted |
+| K-2 WebSocket auth / CSWSH gaps | Fixed | Shared auth enforcement, pre-accept Origin validation, bounded queue backpressure |
+| K-3 Unsafe unauthenticated HTTP exposure | Fixed | Non-loopback HTTP bind blocked without auth unless explicitly overridden |
+| K-4 CORS / host / CSRF hardening | Fixed | Explicit CORS config, TrustedHostMiddleware, browser-scoped CSRF defense |
+| W-1/W-2 Header identity spoofing via proxies | Fixed | Trusted proxy resolution centralized and required for forwarded identity trust |
+| W-3 SSRF on remote endpoints | Fixed | SSRF validation blocks private/link-local targets |
+| W-4 Unbounded suspended-session cache | Fixed | TTL-bounded cache with max size |
+| W-5 JWT algorithm confusion | Fixed | Mixed symmetric/asymmetric algorithm families rejected |
+| A-5 Core importing enterprise directly | Fixed | Server bootstrap/router path moved behind single core enterprise boundary |
+| A-7 Divergent HTTP/WS auth middleware | Fixed | Core shared auth middleware path now handles both |
 
 ## Recommendations
 
 | Item | Status | Notes |
 |------|--------|-------|
-| Key entropy (256-bit) | Pass | `secrets.token_urlsafe(32)` |
-| Hash-only storage | Pass | Raw key never persisted |
-| Timing-safe comparison | Pass | Dict lookup by hash |
-| Rate limiting on auth endpoints | Pass | `RateLimitMiddleware` applied |
-| Audit logging of auth events | Pass | `SecurityEventHandler` captures all auth events |
-| TLS enforcement | Manual | Not enforced by Hangar; must be configured at reverse proxy level |
-| Secret rotation | Manual | Requires restart; no online rotation mechanism yet |
+| API key hash-only storage | Pass | Raw keys are not persisted |
+| JWT algorithm-family validation | Pass | Mixed HS*/RS*/ES*/PS* families rejected |
+| Trusted proxy validation | Pass | Only configured proxies may influence forwarded source identity |
+| WebSocket origin validation | Pass | Performed before accept |
+| Shared auth logic across protocols | Pass | One core implementation reduces drift |
+| Core/enterprise import boundary | Pass | Centralized in `server/bootstrap/enterprise.py` |
+| Repo-wide Ruff cleanliness | Follow-up | `uv run ruff check src/ tests/` still reports historical unrelated test lint debt |
+| Manual exploit verification | Pass | Replay confirmed K-1 returns 401, K-2 closes with 1008, K-3 aborts non-loopback startup with `SystemExit(1)`, and K-4 rejects hostile hosts with 400 under strict CORS |
+| TLS / mTLS at deployment edge | Manual | Must be enforced by deployment topology / reverse proxy |
+
+## Verification Evidence
+
+- `uv run pytest tests/ -x -q` -- pass
+- `uv run mypy src/` -- pass
+- Manual exploit replay of K-1..K-4 -- pass (`/agent/policy/` spoof returns 401, unauthenticated WebSocket closes 1008, non-loopback no-auth HTTP exits 1, hostile Host rejected with 400)
+- Focused security and boundary suites cover:
+  - `tests/security/test_critical.py`
+  - `tests/security/test_identity_network.py`
+  - `tests/unit/test_bootstrap_enterprise_boundary.py`
+  - `tests/unit/test_bootstrap_enterprise_loading.py`
+  - `tests/unit/test_api_auth_enforcement.py`
+  - `tests/unit/test_agent_policy.py`
+  - `tests/unit/test_ws_auth.py`
 
 ## Open Items
 
-- **mTLS for MCP server-to-Hangar communication**: Not yet implemented. Recommended for cross-network deployments.
-- **OIDC/OAuth2 integration**: Planned for future release. Currently API key only.
-- **Secret auto-rotation**: Signing key rotation without restart.
+- Repo-wide Ruff debt in historical tests remains outside the scope of this hardening pass.
+- If enterprise packaging is split into a separately installed distribution later, the fallback loader can be retired in favor of entry-point-only discovery.

@@ -400,7 +400,12 @@ class TestMapExceptionToHangarError:
     def test_exit_code_error_mapping(self):
         """Test exit code errors are mapped to ProviderCrashError."""
         original = Exception("Process died with exit code -9")
-        result = map_exception_to_hangar_error(original, mcp_server="test", operation="invoke", context={"exit_code": -9})
+        result = map_exception_to_hangar_error(
+            original,
+            mcp_server="test",
+            operation="invoke",
+            context={"exit_code": -9},
+        )
         assert isinstance(result, ProviderCrashError)
 
     def test_rate_limit_error_mapping(self):

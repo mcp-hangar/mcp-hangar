@@ -200,7 +200,7 @@ class TestRuntimeMcpServerStore:
                     mcp_server_id = f"provider_{start}_{i}"
                     provider = make_mock_provider(mcp_server_id)
                     store.add(provider, make_metadata())
-            except Exception as e:
+            except Exception as e:  # noqa: BLE001
                 errors.append(e)
 
         def read_providers():
@@ -208,7 +208,7 @@ class TestRuntimeMcpServerStore:
                 for _ in range(50):
                     store.list_all()
                     store.count()
-            except Exception as e:
+            except Exception as e:  # noqa: BLE001
                 errors.append(e)
 
         threads = []

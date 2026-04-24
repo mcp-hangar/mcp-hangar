@@ -8,7 +8,7 @@ produce the correct span attribute names and values when the SDK is active.
 import pytest
 from unittest.mock import MagicMock
 
-from mcp_hangar.observability.conventions import Enforcement, MCP, McpServer
+from mcp_hangar.observability.conventions import MCP, McpServer
 
 
 @pytest.fixture(autouse=True)
@@ -106,12 +106,11 @@ class TestOtelSpanAttributesIntegration:
         svc.invoke_tool("p", "t", {})
 
         spans = otel_setup.get_finished_spans()
-        tool_span = next(s for s in spans if ".t" in s.name or "t" == s.name.split(".")[-1])
+        tool_span = next(s for s in spans if ".t" in s.name or s.name.split(".")[-1] == "t")
         assert tool_span.status.status_code in (StatusCode.UNSET, StatusCode.OK)
 
     def test_tool_invoke_span_status_error_on_failure(self, otel_setup) -> None:
         """Failed invocation: span status is ERROR and exception event is recorded."""
-        from opentelemetry.trace import StatusCode
         from mcp_hangar.application.services.traced_mcp_server_service import TracedMcpServerService
         from mcp_hangar.application.ports.observability import NullObservabilityAdapter
         from mcp_hangar.domain.exceptions import ToolInvocationError

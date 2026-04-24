@@ -4,7 +4,6 @@ Verifies _verify_capability_drift() behavior across enforcement modes,
 and that McpServerRecoverySaga correctly filters capability_violation events.
 """
 
-import pytest
 
 from mcp_hangar.domain.events import CapabilityViolationDetected, McpServerDegraded, McpServerStateChanged
 from mcp_hangar.domain.model.provider import McpServer

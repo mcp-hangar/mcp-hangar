@@ -263,7 +263,7 @@ def test_concurrent_reads_and_writes(repository, mock_provider):
             try:
                 all_providers = repository.get_all()
                 results.append(len(all_providers))
-            except Exception as e:
+            except Exception as e:  # noqa: BLE001
                 errors.append(e)
 
     def writer(thread_id):
@@ -271,7 +271,7 @@ def test_concurrent_reads_and_writes(repository, mock_provider):
             try:
                 # Use unique IDs per thread to avoid overwrites
                 repository.add(f"provider-{thread_id}-{i}", Mock())
-            except Exception as e:
+            except Exception as e:  # noqa: BLE001
                 errors.append(e)
 
     reader_threads = [threading.Thread(target=reader) for _ in range(5)]
@@ -337,7 +337,7 @@ def test_clear_during_concurrent_access(repository):
             try:
                 repository.get_all()
                 time.sleep(0.001)
-            except Exception as e:
+            except Exception as e:  # noqa: BLE001
                 errors.append(e)
 
     def clear_repository():

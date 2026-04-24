@@ -117,7 +117,7 @@ if __name__ == "__main__":
     try:
         test_descriptions()
         success = True
-    except Exception:
+    except Exception:  # noqa: BLE001
         success = False
 
     print("\n" + "=" * 70)

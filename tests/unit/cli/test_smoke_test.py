@@ -122,8 +122,11 @@ class TestTestSingleProvider:
         mock_provider.state = McpServerState.READY
         mock_provider_class.return_value = mock_provider
 
-        result = _test_single_provider(mcp_server_id="test", mcp_server_config={"mode": "subprocess", "command": ["echo", "hi"]},
-        timeout_s=5.0,)
+        result = _test_single_provider(
+            mcp_server_id="test",
+            mcp_server_config={"mode": "subprocess", "command": ["echo", "hi"]},
+            timeout_s=5.0,
+        )
 
         assert result.success is True
         assert result.state == "ready"
@@ -135,8 +138,11 @@ class TestTestSingleProvider:
 
         mock_provider_class.side_effect = McpServerStartError(mcp_server_id="test", reason="Failed to connect",)
 
-        result = _test_single_provider(mcp_server_id="test", mcp_server_config={"mode": "subprocess", "command": ["invalid"]},
-        timeout_s=5.0,)
+        result = _test_single_provider(
+            mcp_server_id="test",
+            mcp_server_config={"mode": "subprocess", "command": ["invalid"]},
+            timeout_s=5.0,
+        )
 
         assert result.success is False
         assert result.state == "dead"

@@ -539,7 +539,7 @@ async def main():
         try:
             passed = await test_func()
             results.append((name, passed, None))
-        except Exception as e:
+        except Exception as e:  # noqa: BLE001
             results.append((name, False, str(e)))
             print(f"\n❌ ERROR in {name}: {e}")
             import traceback
