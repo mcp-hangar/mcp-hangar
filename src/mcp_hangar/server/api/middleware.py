@@ -14,7 +14,7 @@ Provides:
 import logging
 import os
 import re
-from typing import Any, override
+from typing import Any
 from urllib.parse import parse_qs
 from urllib.parse import urlparse
 
@@ -89,7 +89,6 @@ _EXCEPTION_STATUS_MAP: list[tuple[type, int]] = [
 class CSRFMiddleware(BaseHTTPMiddleware):
     """Require X-Requested-With on mutating browser-style requests."""
 
-    @override
     async def dispatch(self, request: Request, call_next: RequestResponseEndpoint) -> Response:
         method = request.method.upper()
         headers = Headers(scope=request.scope)
@@ -258,7 +257,6 @@ class AuthMiddlewareHTTP(BaseHTTPMiddleware):
         self._skip_paths = skip_paths or _DEFAULT_AUTH_SKIP_PATHS
         self._trusted_proxies = TrustedProxyResolver()
 
-    @override
     async def dispatch(self, request: Request, call_next: RequestResponseEndpoint) -> Response:
         path = request.url.path
         if _should_skip_auth_path(path, self._skip_paths):
