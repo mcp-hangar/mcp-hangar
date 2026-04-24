@@ -68,6 +68,7 @@ class _AuthLoggerAdapter:
     def warning(event: str, **kwargs: Any) -> None:
         logger.warning("%s %s", event, kwargs)
 
+
 # Mapping of exception types to HTTP status codes.
 # More specific types must come before their base classes.
 _EXCEPTION_STATUS_MAP: list[tuple[type, int]] = [
@@ -150,8 +151,7 @@ def _build_auth_request(scope: Scope, trusted_proxies: TrustedProxyResolver) -> 
     client = scope.get("client")
     client_host = client[0] if client else None
     source_ip = (
-        resolve_source_ip(headers=headers, client_host=client_host, trusted_proxies=trusted_proxies)
-        or "unknown"
+        resolve_source_ip(headers=headers, client_host=client_host, trusted_proxies=trusted_proxies) or "unknown"
     )
     method = scope.get("method", "GET" if scope["type"] == "websocket" else "")
     path = scope.get("path", "")
