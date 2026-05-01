@@ -78,6 +78,25 @@ stable contract that partner backends consume without Hangar-specific plugins.
 | `mcp.behavioral.rule_id` | string | Detection rule that matched |
 | `mcp.behavioral.pattern_step` | int | Sequence position in a detected multi-step pattern |
 | `mcp.behavioral.pattern_name` | string | Name of the detected behavioral pattern |
+| `mcp.behavioral.deviation_type` | string | Type of behavioral deviation detected |
+
+### Caller attributes (identity propagation)
+
+| Attribute | Type | Description |
+|-----------|------|-------------|
+| `mcp.caller.type` | string | Caller type: `human`, `agent`, `service`, `anonymous` |
+| `mcp.caller.id` | string | Caller identifier (user ID, service account, API key ID) |
+| `mcp.caller.roles` | string | Roles held at invocation time (comma-separated) |
+
+### Cost attributes (FinOps)
+
+| Attribute | Type | Description |
+|-----------|------|-------------|
+| `mcp.cost.cents` | int | Cost of invocation in hundredths of a cent |
+| `mcp.cost.model` | string | Pricing model: `token`, `duration`, `fixed`, `composite` |
+| `mcp.cost.input_tokens` | int | Input tokens consumed (LLM-backed tools) |
+| `mcp.cost.output_tokens` | int | Output tokens produced (LLM-backed tools) |
+| `mcp.cost.currency` | string | ISO 4217 currency code (default: `USD`) |
 
 ### Risk attributes (semantic analysis)
 
@@ -88,8 +107,10 @@ escalation). Partner backends such as OpenLIT, Grafana, and SIEM tools can filte
 spans by `mcp.risk.severity = critical` to surface high-risk events.
 
 Requires the ENTERPRISE license tier. The `mcp.risk.score` and
-`mcp.risk.session_anomaly_score` attributes are populated when session anomaly
-scoring is enabled (planned for a future release).
+`mcp.risk.session_anomaly_score` attributes are populated by the `WeightedRiskScorer`
+when behavioral profiling is active. The scorer aggregates signals from
+`BehavioralDeviationDetected`, `DetectionRuleMatched`, and
+`CapabilityViolationDetected` events with exponential time decay.
 
 | Attribute | Type | Description |
 |-----------|------|-------------|
@@ -125,6 +146,8 @@ scoring is enabled (planned for a future release).
 | `mcp_hangar_detection_rule_matches_total` | Counter | Total detection rule matches (labels: `rule_id`, `severity`) |
 | `mcp_hangar_providers_quarantined` | Gauge | MCP servers currently quarantined |
 | `mcp_hangar_tool_schema_drifts_total` | Counter | Total tool schema drift detections |
+| `mcp_hangar_cost_cents_total` | Counter | Total attributed cost in hundredths of a cent (labels: `mcp_server`, `tool`, `cost_model`) |
+| `mcp_hangar_cost_attributions_total` | Counter | Total cost attribution computations (labels: `mcp_server`, `tool`) |
 
 ---
 

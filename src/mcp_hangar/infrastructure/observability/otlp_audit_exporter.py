@@ -9,7 +9,7 @@ MIT licensed -- part of core observability infrastructure.
 import time
 
 from ...logging_config import get_logger
-from ...observability.conventions import MCP, McpServer
+from ...observability.conventions import MCP, Caller, Cost, McpServer
 
 logger = get_logger(__name__)
 
@@ -70,6 +70,13 @@ class OTLPAuditExporter:
         user_id: str | None = None,
         session_id: str | None = None,
         error_type: str | None = None,
+        caller_type: str | None = None,
+        caller_id: str | None = None,
+        caller_roles: str | None = None,
+        cost_cents: int | None = None,
+        cost_model: str | None = None,
+        cost_input_tokens: int | None = None,
+        cost_output_tokens: int | None = None,
     ) -> None:
         """Export a tool invocation event as an audit log record.
 
@@ -81,6 +88,13 @@ class OTLPAuditExporter:
             user_id: Optional calling user identity.
             session_id: Optional MCP session identifier.
             error_type: Optional exception class name on error.
+            caller_type: Optional caller type for identity attribution.
+            caller_id: Optional caller identifier.
+            caller_roles: Optional comma-separated roles.
+            cost_cents: Optional cost in hundredths of a cent.
+            cost_model: Optional pricing model used.
+            cost_input_tokens: Optional input tokens consumed.
+            cost_output_tokens: Optional output tokens produced.
         """
         try:
             attributes: dict = {
@@ -96,6 +110,20 @@ class OTLPAuditExporter:
                 attributes[MCP.SESSION_ID] = session_id
             if error_type is not None:
                 attributes["mcp.error.type"] = error_type
+            if caller_type is not None:
+                attributes[Caller.TYPE] = caller_type
+            if caller_id is not None:
+                attributes[Caller.ID] = caller_id
+            if caller_roles is not None:
+                attributes[Caller.ROLES] = caller_roles
+            if cost_cents is not None:
+                attributes[Cost.CENTS] = cost_cents
+            if cost_model is not None:
+                attributes[Cost.MODEL] = cost_model
+            if cost_input_tokens is not None:
+                attributes[Cost.INPUT_TOKENS] = cost_input_tokens
+            if cost_output_tokens is not None:
+                attributes[Cost.OUTPUT_TOKENS] = cost_output_tokens
 
             self._emit_log_record(attributes)
 

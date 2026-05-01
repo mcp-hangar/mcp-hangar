@@ -1,6 +1,16 @@
 """Unit tests for MCP OTEL semantic conventions."""
 
-from mcp_hangar.observability.conventions import Audit, Behavioral, Enforcement, Health, MCP, Metrics, McpServer
+from mcp_hangar.observability.conventions import (
+    Audit,
+    Behavioral,
+    Caller,
+    Cost,
+    Enforcement,
+    Health,
+    MCP,
+    Metrics,
+    McpServer,
+)
 
 
 def _public_str_attrs(cls: type) -> list[str]:
@@ -36,12 +46,21 @@ class TestConventionNamespacing:
             assert attr.startswith("mcp."), f"{attr} should start with mcp."
 
 
+    def test_caller_attributes_prefixed(self) -> None:
+        for attr in _public_str_attrs(Caller):
+            assert attr.startswith("mcp."), f"{attr} should start with mcp."
+
+    def test_cost_attributes_prefixed(self) -> None:
+        for attr in _public_str_attrs(Cost):
+            assert attr.startswith("mcp."), f"{attr} should start with mcp."
+
+
 class TestConventionUniqueness:
     """Attribute names must be unique across all convention classes."""
 
     def test_no_duplicate_attribute_names(self) -> None:
         all_attrs: list[str] = []
-        for cls in (McpServer, MCP, Enforcement, Audit, Behavioral, Health):
+        for cls in (McpServer, MCP, Enforcement, Audit, Behavioral, Health, Caller, Cost):
             all_attrs.extend(_public_str_attrs(cls))
 
         duplicates = {a for a in all_attrs if all_attrs.count(a) > 1}
@@ -68,6 +87,18 @@ class TestKeyAttributes:
 
     def test_session_id(self) -> None:
         assert MCP.SESSION_ID == "mcp.session.id"
+
+    def test_caller_type(self) -> None:
+        assert Caller.TYPE == "mcp.caller.type"
+
+    def test_caller_id(self) -> None:
+        assert Caller.ID == "mcp.caller.id"
+
+    def test_cost_cents(self) -> None:
+        assert Cost.CENTS == "mcp.cost.cents"
+
+    def test_cost_model(self) -> None:
+        assert Cost.MODEL == "mcp.cost.model"
 
 
 class TestMetricNames:
@@ -145,6 +176,61 @@ class TestSetGovernanceAttributes:
         calls = {call.args[0]: call.args[1] for call in span.set_attribute.call_args_list}
         assert calls[Enforcement.POLICY_RESULT] == "deny"
         assert calls[Enforcement.ACTION] == "block"
+
+    def test_sets_caller_attributes_when_provided(self) -> None:
+        from unittest.mock import MagicMock
+
+        from mcp_hangar.observability.conventions import set_governance_attributes
+
+        span = MagicMock()
+        set_governance_attributes(
+            span,
+            mcp_server_id="p",
+            tool_name="t",
+            caller_type="human",
+            caller_id="alice",
+            caller_roles="admin,viewer",
+        )
+        calls = {call.args[0]: call.args[1] for call in span.set_attribute.call_args_list}
+        assert calls[Caller.TYPE] == "human"
+        assert calls[Caller.ID] == "alice"
+        assert calls[Caller.ROLES] == "admin,viewer"
+
+    def test_sets_cost_attributes_when_provided(self) -> None:
+        from unittest.mock import MagicMock
+
+        from mcp_hangar.observability.conventions import set_governance_attributes
+
+        span = MagicMock()
+        set_governance_attributes(
+            span,
+            mcp_server_id="p",
+            tool_name="t",
+            cost_cents=150,
+            cost_model="token",
+            cost_input_tokens=500,
+            cost_output_tokens=200,
+            cost_currency="USD",
+        )
+        calls = {call.args[0]: call.args[1] for call in span.set_attribute.call_args_list}
+        assert calls[Cost.CENTS] == 150
+        assert calls[Cost.MODEL] == "token"
+        assert calls[Cost.INPUT_TOKENS] == 500
+        assert calls[Cost.OUTPUT_TOKENS] == 200
+        assert calls[Cost.CURRENCY] == "USD"
+
+    def test_does_not_set_caller_cost_when_none(self) -> None:
+        from unittest.mock import MagicMock
+
+        from mcp_hangar.observability.conventions import set_governance_attributes
+
+        span = MagicMock()
+        set_governance_attributes(span, mcp_server_id="p", tool_name="t")
+        set_keys = {call.args[0] for call in span.set_attribute.call_args_list}
+        assert Caller.TYPE not in set_keys
+        assert Caller.ID not in set_keys
+        assert Cost.CENTS not in set_keys
+        assert Cost.MODEL not in set_keys
 
 
 class TestTracingUsesConventionConstants:

@@ -43,19 +43,27 @@ class OTLPAuditEventHandler:
                 ToolInvocationFailed, McpServerStateChanged. Ignores all others.
         """
         if isinstance(event, ToolInvocationCompleted):
+            identity = event.identity_context or {}
             self._exporter.export_tool_invocation(
                 mcp_server_id=event.mcp_server_id,
                 tool_name=event.tool_name,
                 status="success",
                 duration_ms=event.duration_ms,
+                caller_type=identity.get("principal_type"),
+                caller_id=identity.get("principal_id"),
+                caller_roles=identity.get("roles"),
             )
         elif isinstance(event, ToolInvocationFailed):
+            identity = event.identity_context or {}
             self._exporter.export_tool_invocation(
                 mcp_server_id=event.mcp_server_id,
                 tool_name=event.tool_name,
                 status="error",
                 duration_ms=0.0,
                 error_type=event.error_type,
+                caller_type=identity.get("principal_type"),
+                caller_id=identity.get("principal_id"),
+                caller_roles=identity.get("roles"),
             )
         elif isinstance(event, McpServerStateChanged):
             self._exporter.export_mcp_server_state_change(

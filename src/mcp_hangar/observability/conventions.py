@@ -199,6 +199,48 @@ class Risk:
     SESSION_ANOMALY_SCORE = "mcp.risk.session_anomaly_score"
 
 
+class Caller:
+    """Attributes identifying the caller (human or agent) behind a request.
+
+    The ``mcp.caller.*`` namespace propagates identity from upstream systems
+    (OIDC tokens, API keys, header-based identity) into OTEL spans so
+    partner backends can correlate tool calls to originating users.
+    """
+
+    #: Caller type ("human", "agent", "service", "anonymous").
+    TYPE = "mcp.caller.type"
+
+    #: Caller identifier (user ID, service account name, API key ID).
+    ID = "mcp.caller.id"
+
+    #: Roles held by the caller at invocation time (comma-separated).
+    ROLES = "mcp.caller.roles"
+
+
+class Cost:
+    """Attributes for FinOps cost attribution on tool invocations.
+
+    The ``mcp.cost.*`` namespace enables per-invocation cost tracking.
+    Values are set by the cost attribution service when pricing config
+    is available; otherwise omitted (no zero-value attributes emitted).
+    """
+
+    #: Cost of this invocation in hundredths of a cent (integer for precision).
+    CENTS = "mcp.cost.cents"
+
+    #: Pricing model used for attribution ("token", "duration", "fixed", "composite").
+    MODEL = "mcp.cost.model"
+
+    #: Input tokens consumed (LLM-backed tools).
+    INPUT_TOKENS = "mcp.cost.input_tokens"
+
+    #: Output tokens produced (LLM-backed tools).
+    OUTPUT_TOKENS = "mcp.cost.output_tokens"
+
+    #: Currency code (ISO 4217, default "USD").
+    CURRENCY = "mcp.cost.currency"
+
+
 class Health:
     """Attributes for mcp_server health check spans."""
 
@@ -256,6 +298,14 @@ def set_governance_attributes(
     policy_result: str | None = None,
     enforcement_action: str | None = None,
     cold_start: bool | None = None,
+    caller_type: str | None = None,
+    caller_id: str | None = None,
+    caller_roles: str | None = None,
+    cost_cents: int | None = None,
+    cost_model: str | None = None,
+    cost_input_tokens: int | None = None,
+    cost_output_tokens: int | None = None,
+    cost_currency: str | None = None,
 ) -> None:
     """Set standard MCP governance attributes on an OTEL span in one call.
 
@@ -274,6 +324,14 @@ def set_governance_attributes(
         policy_result: Optional. Policy evaluation result ("allow", "deny", "quarantine").
         enforcement_action: Optional. Enforcement action taken.
         cold_start: Optional. Whether this invocation triggered a cold start.
+        caller_type: Optional. Caller type ("human", "agent", "service", "anonymous").
+        caller_id: Optional. Caller identifier.
+        caller_roles: Optional. Comma-separated roles.
+        cost_cents: Optional. Cost in hundredths of a cent.
+        cost_model: Optional. Pricing model used.
+        cost_input_tokens: Optional. Input tokens consumed.
+        cost_output_tokens: Optional. Output tokens produced.
+        cost_currency: Optional. ISO 4217 currency code.
     """
     span.set_attribute(McpServer.ID, mcp_server_id)
     span.set_attribute(MCP.TOOL_NAME, tool_name)
@@ -294,6 +352,22 @@ def set_governance_attributes(
         span.set_attribute(Enforcement.ACTION, enforcement_action)
     if cold_start is not None:
         span.set_attribute(MCP.COLD_START, str(cold_start).lower())
+    if caller_type is not None:
+        span.set_attribute(Caller.TYPE, caller_type)
+    if caller_id is not None:
+        span.set_attribute(Caller.ID, caller_id)
+    if caller_roles is not None:
+        span.set_attribute(Caller.ROLES, caller_roles)
+    if cost_cents is not None:
+        span.set_attribute(Cost.CENTS, cost_cents)
+    if cost_model is not None:
+        span.set_attribute(Cost.MODEL, cost_model)
+    if cost_input_tokens is not None:
+        span.set_attribute(Cost.INPUT_TOKENS, cost_input_tokens)
+    if cost_output_tokens is not None:
+        span.set_attribute(Cost.OUTPUT_TOKENS, cost_output_tokens)
+    if cost_currency is not None:
+        span.set_attribute(Cost.CURRENCY, cost_currency)
 
 
 # legacy aliases

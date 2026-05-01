@@ -12,6 +12,7 @@ import asyncio
 from collections.abc import Callable
 from dataclasses import dataclass, field
 from enum import Enum
+import inspect
 import threading
 import time
 from typing import Any
@@ -72,7 +73,7 @@ class HealthCheck:
         start = time.perf_counter()
         try:
             # Run check with timeout
-            if asyncio.iscoroutinefunction(self.check_fn):
+            if inspect.iscoroutinefunction(self.check_fn):
                 result = await asyncio.wait_for(self.check_fn(), timeout=self.timeout_seconds)
             else:
                 # Run sync function in thread pool

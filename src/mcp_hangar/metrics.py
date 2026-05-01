@@ -944,6 +944,22 @@ ENFORCEMENT_ACTIONS_TOTAL = Counter(
     labels=["action", "rule_id"],
 )
 
+# -----------------------------------------------------------------------------
+# Cost Attribution Metrics
+# -----------------------------------------------------------------------------
+
+COST_CENTS_TOTAL = Counter(
+    name="mcp_hangar_cost_cents_total",
+    description="Total attributed cost in hundredths of a cent",
+    labels=["mcp_server", "tool", "cost_model"],
+)
+
+COST_ATTRIBUTIONS_TOTAL = Counter(
+    name="mcp_hangar_cost_attributions_total",
+    description="Total number of cost attribution computations",
+    labels=["mcp_server", "tool"],
+)
+
 
 # =============================================================================
 # Register All Metrics
@@ -1011,6 +1027,9 @@ def _register_all_metrics():
         BATCH_TRUNCATIONS_TOTAL,
         BATCH_CIRCUIT_BREAKER_REJECTIONS_TOTAL,
         BATCH_CANCELLATIONS_TOTAL,
+        # Cost attribution metrics
+        COST_CENTS_TOTAL,
+        COST_ATTRIBUTIONS_TOTAL,
     ]
 
     # Concurrency metrics (defined above alongside other batch metrics)

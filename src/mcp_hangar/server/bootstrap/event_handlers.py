@@ -11,8 +11,19 @@ from ...application.event_handlers import (
     get_audit_handler,
 )
 from ...application.event_handlers.audit_event_handler import OTLPAuditEventHandler
+from ...application.event_handlers.cost_handler import CostAttributionEventHandler
+from ...application.event_handlers.risk_scoring_handler import RiskScoringEventHandler
 from ...application.ports.observability import NullAuditExporter
-from ...domain.events import DetectionRuleMatched, McpServerStateChanged, ToolInvocationCompleted, ToolInvocationFailed
+from ...domain.contracts.cost import NullCostAttributor
+from ...domain.contracts.risk import NullRiskScorer
+from ...domain.events import (
+    BehavioralDeviationDetected,
+    CapabilityViolationDetected,
+    DetectionRuleMatched,
+    McpServerStateChanged,
+    ToolInvocationCompleted,
+    ToolInvocationFailed,
+)
 from ...logging_config import get_logger
 
 if TYPE_CHECKING:
@@ -60,6 +71,21 @@ def init_event_handlers(runtime: "Runtime") -> None:
     )
     runtime.event_bus.subscribe(DetectionRuleMatched, detection_enforcement_handler.handle)
 
+    # Cost attribution -- computes cost per tool invocation
+    cost_attributor = getattr(runtime, "cost_attributor", None) or NullCostAttributor()
+    cost_handler = CostAttributionEventHandler(
+        cost_attributor=cost_attributor,
+        event_bus=runtime.event_bus,
+    )
+    runtime.event_bus.subscribe(ToolInvocationCompleted, cost_handler.handle)
+
+    # Risk scoring -- aggregates behavioral signals into risk scores
+    risk_scorer = getattr(runtime, "risk_scorer", None) or NullRiskScorer()
+    risk_handler = RiskScoringEventHandler(risk_scorer=risk_scorer)
+    runtime.event_bus.subscribe(BehavioralDeviationDetected, risk_handler.handle)
+    runtime.event_bus.subscribe(DetectionRuleMatched, risk_handler.handle)
+    runtime.event_bus.subscribe(CapabilityViolationDetected, risk_handler.handle)
+
     logger.info(
         "event_handlers_registered",
         handlers=[
@@ -70,5 +96,7 @@ def init_event_handlers(runtime: "Runtime") -> None:
             "security",
             "otlp_audit",
             "detection_enforcement",
+            "cost_attribution",
+            "risk_scoring",
         ],
     )

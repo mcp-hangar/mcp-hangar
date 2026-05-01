@@ -256,6 +256,13 @@ class IAuditExporter(Protocol):
         user_id: str | None = None,
         session_id: str | None = None,
         error_type: str | None = None,
+        caller_type: str | None = None,
+        caller_id: str | None = None,
+        caller_roles: str | None = None,
+        cost_cents: int | None = None,
+        cost_model: str | None = None,
+        cost_input_tokens: int | None = None,
+        cost_output_tokens: int | None = None,
     ) -> None:
         """Export a tool invocation event as an audit log record."""
         ...

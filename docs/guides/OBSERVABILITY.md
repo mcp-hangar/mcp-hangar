@@ -424,8 +424,29 @@ additional configuration needed.
 
 Events exported:
 
-- `ToolInvocationCompleted` / `ToolInvocationFailed` -- with MCP server, tool, status, duration
+- `ToolInvocationCompleted` / `ToolInvocationFailed` -- with MCP server, tool, status, duration, caller identity, cost attribution
 - `McpServerStateChanged` -- with MCP server, from_state, to_state
+
+Caller identity attributes (`mcp.caller.type`, `mcp.caller.id`, `mcp.caller.roles`)
+are automatically propagated from the event's `identity_context` when available.
+
+Cost attributes (`mcp.cost.cents`, `mcp.cost.model`, `mcp.cost.input_tokens`,
+`mcp.cost.output_tokens`) are included when cost attribution is configured.
+
+### Compliance Export Formats (Enterprise)
+
+Enterprise deployments can export audit events in SIEM-compatible formats alongside
+OTLP. Available exporters (in `enterprise/compliance/`):
+
+| Format | Class | Use Case |
+|--------|-------|----------|
+| CEF | `CEFExporter` | ArcSight, QRadar, Splunk via CEF |
+| JSON-lines | `JSONLinesExporter` | Splunk HEC, Elasticsearch, custom pipelines |
+| LEEF | `LEEFExporter` | IBM QRadar native format |
+| Syslog (RFC 5424) | `SyslogExporter` | Any syslog-compatible SIEM |
+
+All exporters implement the `IAuditExporter` protocol and output to file, callback,
+or stderr (for container log collection). Configure via the compliance bootstrap.
 
 ### Environment Variables
 

@@ -19,6 +19,7 @@ Design notes:
 from __future__ import annotations
 
 import asyncio
+import inspect
 from collections.abc import Awaitable, Callable
 from dataclasses import dataclass
 from functools import wraps
@@ -95,7 +96,7 @@ def mcp_tool_wrapper(
     mapper = error_mapper or _default_error_mapper
 
     def decorator(func: F) -> F:
-        is_async = asyncio.iscoroutinefunction(func)
+        is_async = inspect.iscoroutinefunction(func)
 
         if is_async:
 

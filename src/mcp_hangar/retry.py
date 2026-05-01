@@ -28,6 +28,7 @@ import asyncio
 from collections.abc import Callable
 from dataclasses import dataclass, field
 from enum import StrEnum
+import inspect
 import time
 from typing import Any, TypeVar
 
@@ -262,7 +263,7 @@ async def retry_async(
     for attempt in range(policy.max_attempts):
         try:
             # Execute the operation
-            if asyncio.iscoroutinefunction(operation):
+            if inspect.iscoroutinefunction(operation):
                 result = await operation()
             else:
                 result = operation()
@@ -607,7 +608,7 @@ def with_retry(
                 return result.result
             raise result.final_error or Exception("Retry failed")
 
-        if asyncio.iscoroutinefunction(func):
+        if inspect.iscoroutinefunction(func):
             return async_wrapper
         return sync_wrapper
 
