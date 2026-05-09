@@ -1,5 +1,6 @@
 """Tests for Provider Recovery and Failover Sagas."""
 
+import time
 from unittest.mock import MagicMock
 
 from mcp_hangar.application.commands import StartMcpServerCommand, StopMcpServerCommand
@@ -416,3 +417,48 @@ class TestMcpServerFailoverSaga:
         assert len(configs) == 2
         assert "p1" in configs
         assert "p2" in configs
+
+
+class TestFailoverSagaTtl:
+    """Tests for failover TTL cleanup (ghost state prevention)."""
+
+    def test_expired_failover_removed_on_handle(self):
+        """After TTL elapses, _active_failovers entry is dropped on next event."""
+        saga_mgr = MagicMock()
+        saga = McpServerFailoverEventSaga(saga_manager=saga_mgr, failover_ttl_s=1.0)
+        saga.configure_failover("primary-1", "backup-1")
+
+        saga.handle(McpServerDegraded("primary-1", 3, 5, "crash"))
+        assert "primary-1" in saga._active_failovers
+        assert "backup-1" in saga._active_backups
+
+        saga._active_failovers["primary-1"].failed_at = time.time() - 3600.0
+
+        saga.handle(McpServerStarted("other-server", "subprocess", 5, 100.0))
+
+        assert "primary-1" not in saga._active_failovers
+        assert "backup-1" not in saga._active_backups
+
+    def test_ttl_disabled_when_zero(self):
+        """failover_ttl_s=0 disables cleanup entirely."""
+        saga_mgr = MagicMock()
+        saga = McpServerFailoverEventSaga(saga_manager=saga_mgr, failover_ttl_s=0)
+        saga.configure_failover("primary-1", "backup-1")
+        saga.handle(McpServerDegraded("primary-1", 3, 5, "crash"))
+        saga._active_failovers["primary-1"].failed_at = 0  # very old
+        saga.handle(McpServerStarted("other", "subprocess", 5, 100.0))
+        assert "primary-1" in saga._active_failovers
+
+    def test_ttl_cleanup_cancels_pending_timer(self):
+        """When TTL expires entry with pending failback timer, timer is cancelled."""
+        saga_mgr = MagicMock()
+        saga = McpServerFailoverEventSaga(saga_manager=saga_mgr, failover_ttl_s=1.0)
+        saga.configure_failover("primary-1", "backup-1")
+        saga.handle(McpServerDegraded("primary-1", 3, 5, "crash"))
+        saga._pending_failback_timers["primary-1"] = "timer-xyz"
+        saga._active_failovers["primary-1"].failed_at = time.time() - 3600.0
+
+        saga.handle(McpServerStarted("other", "subprocess", 5, 100.0))
+
+        saga_mgr.cancel_scheduled_command.assert_called_once_with("timer-xyz")
+        assert "primary-1" not in saga._pending_failback_timers

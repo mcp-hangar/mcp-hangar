@@ -129,10 +129,15 @@ class McpServerFailoverEventSaga(EventTriggeredSaga):
         saga_manager.register_event_saga(saga)
     """
 
-    def __init__(self, saga_manager: ISagaManager | None = None):
+    def __init__(
+        self,
+        saga_manager: ISagaManager | None = None,
+        failover_ttl_s: float = 3600.0,
+    ):
         super().__init__()
 
         self._saga_manager = saga_manager
+        self._failover_ttl_s = failover_ttl_s
 
         # Failover configuration: primary_id -> FailoverConfig
         self._failover_configs: dict[str, FailoverConfig] = {}
@@ -185,8 +190,50 @@ class McpServerFailoverEventSaga(EventTriggeredSaga):
             return True
         return False
 
+    def _get_saga_manager(self) -> ISagaManager:
+        if self._saga_manager is not None:
+            return self._saga_manager
+        from ...infrastructure.saga_manager import get_saga_manager
+
+        return get_saga_manager()
+
+    def _cleanup_expired_failovers(self) -> None:
+        """Drop failover entries older than failover_ttl_s.
+
+        Called at the start of every event handler. Prevents ghost state when a
+        primary never recovers (crash, removal from config) -- entries would
+        otherwise live forever and block the backup from being reused.
+        """
+        if self._failover_ttl_s <= 0:
+            return
+        now = time.time()
+        expired = [
+            primary_id
+            for primary_id, state in self._active_failovers.items()
+            if now - state.failed_at > self._failover_ttl_s
+        ]
+        for primary_id in expired:
+            state = self._active_failovers.pop(primary_id, None)
+            if state is None:
+                continue
+            self._active_backups.discard(state.backup_id)
+            timer_id = self._pending_failback_timers.pop(primary_id, None)
+            if timer_id is not None:
+                try:
+                    self._get_saga_manager().cancel_scheduled_command(timer_id)
+                except Exception as exc:  # noqa: BLE001 -- fault barrier
+                    logger.warning("ttl_cleanup_timer_cancel_failed", primary_id=primary_id, error=str(exc))
+            logger.warning(
+                "failover_state_expired",
+                primary_id=primary_id,
+                backup_id=state.backup_id,
+                age_s=now - state.failed_at,
+                ttl_s=self._failover_ttl_s,
+            )
+
     def handle(self, event: DomainEvent) -> list[Command]:
         """Handle failover-related events."""
+        self._cleanup_expired_failovers()
         if isinstance(event, McpServerDegraded):
             return self._handle_degraded(event)
         elif isinstance(event, McpServerStarted):
@@ -222,29 +269,15 @@ class McpServerFailoverEventSaga(EventTriggeredSaga):
 
         # Start the step-based McpServerFailoverSaga for this pair.
         # Commands are dispatched by SagaManager; we return empty here.
-        if self._saga_manager is not None:
-            failover_saga = McpServerFailoverSaga()
-            self._saga_manager.start_saga(
-                failover_saga,
-                initial_data={
-                    "primary_id": mcp_server_id,
-                    "backup_id": config.backup_id,
-                    "failback_delay_s": config.failback_delay_s,
-                },
-            )
-        else:
-            from ...infrastructure.saga_manager import get_saga_manager
-
-            saga_manager = get_saga_manager()
-            failover_saga = McpServerFailoverSaga()
-            saga_manager.start_saga(
-                failover_saga,
-                initial_data={
-                    "primary_id": mcp_server_id,
-                    "backup_id": config.backup_id,
-                    "failback_delay_s": config.failback_delay_s,
-                },
-            )
+        failover_saga = McpServerFailoverSaga()
+        self._get_saga_manager().start_saga(
+            failover_saga,
+            initial_data={
+                "primary_id": mcp_server_id,
+                "backup_id": config.backup_id,
+                "failback_delay_s": config.failback_delay_s,
+            },
+        )
 
         return []
 
@@ -270,11 +303,7 @@ class McpServerFailoverEventSaga(EventTriggeredSaga):
                     delay_s=config.failback_delay_s,
                 )
                 stop_cmd = StopMcpServerCommand(mcp_server_id=state.backup_id, reason="failback")
-                sm = self._saga_manager
-                if sm is None:
-                    from ...infrastructure.saga_manager import get_saga_manager
-
-                    sm = get_saga_manager()
+                sm = self._get_saga_manager()
                 timer_id = sm.schedule_command(stop_cmd, delay_s=config.failback_delay_s)
                 self._pending_failback_timers[mcp_server_id] = timer_id
 
@@ -297,12 +326,7 @@ class McpServerFailoverEventSaga(EventTriggeredSaga):
                     timer_id = self._pending_failback_timers.pop(primary_id, None)
                     if timer_id is not None:
                         try:
-                            sm = self._saga_manager
-                            if sm is None:
-                                from ...infrastructure.saga_manager import get_saga_manager
-
-                                sm = get_saga_manager()
-                            sm.cancel_scheduled_command(timer_id)
+                            self._get_saga_manager().cancel_scheduled_command(timer_id)
                         except Exception as e:  # noqa: BLE001 -- fault-barrier: cancel failure must not block event handling
                             logger.warning("failback_timer_cancel_failed", error=str(e))
                     logger.info("failover_ended", primary_id=primary_id, backup_id=mcp_server_id)
@@ -346,12 +370,7 @@ class McpServerFailoverEventSaga(EventTriggeredSaga):
             timer_id = self._pending_failback_timers.pop(primary_id, None)
             if timer_id is not None:
                 try:
-                    sm = self._saga_manager
-                    if sm is None:
-                        from ...infrastructure.saga_manager import get_saga_manager
-
-                        sm = get_saga_manager()
-                    sm.cancel_scheduled_command(timer_id)
+                    self._get_saga_manager().cancel_scheduled_command(timer_id)
                 except Exception as e:  # noqa: BLE001 -- fault-barrier: cancel failure must not block caller
                     logger.warning("failback_timer_cancel_failed", error=str(e))
             return True
