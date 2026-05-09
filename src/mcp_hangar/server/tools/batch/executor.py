@@ -11,10 +11,12 @@ Provides parallel execution of batch invocations with:
 
 from concurrent.futures import as_completed, ThreadPoolExecutor
 import asyncio
+import atexit
 import json
 import threading
 import time
 from typing import Any
+
 
 from ....application.commands import InvokeToolCommand, StartMcpServerCommand
 from ....domain.events import BatchCallCompleted, BatchInvocationCompleted, BatchInvocationRequested
@@ -39,6 +41,41 @@ from .concurrency import ConcurrencyManager, get_concurrency_manager
 from .models import BatchResult, CallResult, CallSpec, MAX_RESPONSE_SIZE_BYTES, RetryMetadata
 
 logger = get_logger(__name__)
+
+_approval_loop_local = threading.local()
+_all_approval_loops: set[asyncio.AbstractEventLoop] = set()
+
+
+def _get_approval_loop() -> asyncio.AbstractEventLoop:
+    """Return a thread-local event loop for synchronous approval gate calls.
+
+    A fresh loop is created on first access per thread and reused for the
+    thread's lifetime. ThreadPoolExecutor reuses worker threads, so amortizes
+    loop setup cost across all approval-gated calls in that thread.
+
+    Cross-loop signaling rationale (preserved from original design):
+    The hold_registry uses threading.Event (not asyncio.Event) for resolve()
+    notifications, because resolve() runs on FastMCP's main loop while
+    check() awaits here on a different per-thread loop. Loop reuse does not
+    change this -- threading.Event remains the correct signaling primitive.
+    """
+    loop = getattr(_approval_loop_local, "loop", None)
+    if loop is None or loop.is_closed():
+        loop = asyncio.new_event_loop()
+        _approval_loop_local.loop = loop
+        _all_approval_loops.add(loop)
+    return loop
+
+
+@atexit.register
+def _close_approval_loops() -> None:
+    """Close any thread-local approval gate event loops at interpreter shutdown."""
+    for loop in list(_all_approval_loops):
+        try:
+            if not loop.is_closed():
+                loop.close()
+        except Exception:  # noqa: BLE001 -- best-effort shutdown
+            pass
 
 
 class BatchExecutor:
@@ -124,32 +161,20 @@ class BatchExecutor:
         )
 
         try:
-            # ApprovalGateService.check() is async.  We cannot use
-            # run_coroutine_threadsafe on the main event loop because
-            # FastMCP calls sync tools directly on the event loop thread,
-            # which is blocked inside hangar_call() -> execute() right now.
-            #
-            # Instead we create a fresh per-thread event loop.  aiosqlite
-            # opens a new connection per call (no shared state), so this is
-            # safe.  The hold_registry uses asyncio.Event which is bound to
-            # whichever loop it is first awaited on -- here that's the
-            # per-thread loop.  The resolve() endpoint will need to signal
-            # the same hold_registry entry; we handle this by using
-            # threading.Event as the cross-loop signaling mechanism instead
-            # of asyncio.Event.
-            thread_loop = asyncio.new_event_loop()
-            try:
-                result = thread_loop.run_until_complete(
-                    gate_service.check(
-                        mcp_server_id=call.mcp_server,
-                        tool_name=call.tool,
-                        arguments=call.arguments,
-                        policy=policy,
-                        correlation_id=call.call_id,
-                    )
+            # ApprovalGateService.check() is async; we run it on a thread-local
+            # event loop reused across calls in this worker thread. We cannot
+            # use the main FastMCP loop because hangar_call() blocks it. See
+            # _get_approval_loop() for the cross-loop signaling rationale.
+            thread_loop = _get_approval_loop()
+            result = thread_loop.run_until_complete(
+                gate_service.check(
+                    mcp_server_id=call.mcp_server,
+                    tool_name=call.tool,
+                    arguments=call.arguments,
+                    policy=policy,
+                    correlation_id=call.call_id,
                 )
-            finally:
-                thread_loop.close()
+            )
         except (RuntimeError, OSError, ValueError, TimeoutError) as exc:
             logger.warning("approval_gate_error", tool=call.tool, error=str(exc))
             return CallResult(
