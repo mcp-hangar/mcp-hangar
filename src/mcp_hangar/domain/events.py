@@ -12,6 +12,8 @@ import time
 from typing import Any
 import uuid
 
+from .value_objects.compat import resolve_legacy_mcp_server_id as _resolve_legacy_mcp_server_id
+
 
 class DomainEvent(ABC):
     """
@@ -28,15 +30,6 @@ class DomainEvent(ABC):
     def to_dict(self) -> dict[str, Any]:
         """Convert event to dictionary for serialization."""
         return {"event_type": self.__class__.__name__, **self.__dict__}
-
-
-def _resolve_legacy_mcp_server_id(mcp_server_id: str | None, kwargs: dict[str, object]) -> str:
-    if mcp_server_id is not None:
-        return mcp_server_id
-    legacy_id = kwargs.pop("provider_id", None)
-    if isinstance(legacy_id, str):
-        return legacy_id
-    raise TypeError("Missing required argument: mcp_server_id")
 
 
 # McpServer Lifecycle Events
@@ -361,7 +354,6 @@ class McpServerApproved(DomainEvent):
         super().__init__()
 
 
-@dataclass
 @dataclass(init=False)
 class ProviderStarted(McpServerStarted):
     def __init__(
@@ -1513,6 +1505,13 @@ class BehavioralModeChanged(DomainEvent):
 
     @property
     def provider_id(self) -> str:
+        import warnings
+
+        warnings.warn(
+            "provider_id is deprecated; use mcp_server_id instead.",
+            DeprecationWarning,
+            stacklevel=2,
+        )
         return self.mcp_server_id
 
 
@@ -1617,6 +1616,13 @@ class DetectionRuleMatched(DomainEvent):
 
     @property
     def provider_id(self) -> str:
+        import warnings
+
+        warnings.warn(
+            "provider_id is deprecated; use mcp_server_id instead.",
+            DeprecationWarning,
+            stacklevel=2,
+        )
         return self.mcp_server_id
 
 
@@ -1800,27 +1806,9 @@ class ToolApprovalExpired(DomainEvent):
         super().__init__()
 
 
-# legacy aliases
-globals().update(
-    {
-        "".join(("Pro", "viderStarted")): ProviderStarted,
-        "".join(("Pro", "viderStopped")): ProviderStopped,
-        "".join(("Pro", "viderDegraded")): ProviderDegraded,
-        "".join(("Pro", "viderStateChanged")): ProviderStateChanged,
-        "".join(("Pro", "viderIdleDetected")): ProviderIdleDetected,
-        "".join(("Pro", "viderDiscovered")): ProviderDiscovered,
-        "".join(("Pro", "viderDiscoveryLost")): ProviderDiscoveryLost,
-        "".join(("Pro", "viderDiscoveryConfigChanged")): ProviderDiscoveryConfigChanged,
-        "".join(("Pro", "viderQuarantined")): ProviderQuarantined,
-        "".join(("Pro", "viderApproved")): ProviderApproved,
-        "".join(("Pro", "viderLoadAttempted")): McpServerLoadAttempted,
-        "".join(("Pro", "viderHotLoaded")): McpServerHotLoaded,
-        "".join(("Pro", "viderLoadFailed")): McpServerLoadFailed,
-        "".join(("Pro", "viderHotUnloaded")): McpServerHotUnloaded,
-        "".join(("Pro", "viderRegistered")): ProviderRegistered,
-        "".join(("Pro", "viderUpdated")): ProviderUpdated,
-        "".join(("Pro", "viderDeregistered")): ProviderDeregistered,
-        "".join(("Pro", "viderCapabilityQuarantined")): ProviderCapabilityQuarantined,
-        "".join(("Pro", "viderCapabilityQuarantineReleased")): ProviderCapabilityQuarantineReleased,
-    }
-)
+# Legacy aliases for renamed classes -- public API back-compat.
+# Remove together with the deprecated `provider_id` kwarg (planned 2026-Q3).
+ProviderLoadAttempted = McpServerLoadAttempted
+ProviderHotLoaded = McpServerHotLoaded
+ProviderLoadFailed = McpServerLoadFailed
+ProviderHotUnloaded = McpServerHotUnloaded

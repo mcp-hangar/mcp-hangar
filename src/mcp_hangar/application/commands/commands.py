@@ -9,13 +9,7 @@ from dataclasses import dataclass, field
 from typing import Any
 
 
-def _resolve_legacy_mcp_server_id(mcp_server_id: str | None, kwargs: dict[str, object]) -> str:
-    if mcp_server_id is not None:
-        return mcp_server_id
-    legacy_id = kwargs.pop("provider_id", None)
-    if isinstance(legacy_id, str):
-        return legacy_id
-    raise TypeError("Missing required argument: mcp_server_id")
+from ...domain.value_objects.compat import resolve_legacy_mcp_server_id as _resolve_legacy_mcp_server_id
 
 
 @dataclass(frozen=True)
@@ -43,6 +37,13 @@ class StartMcpServerCommand(Command):
 
     @property
     def provider_id(self) -> str:
+        import warnings
+
+        warnings.warn(
+            "Command.provider_id is deprecated; use mcp_server_id instead.",
+            DeprecationWarning,
+            stacklevel=2,
+        )
         return self.mcp_server_id
 
 
@@ -62,6 +63,13 @@ class StopMcpServerCommand(Command):
 
     @property
     def provider_id(self) -> str:
+        import warnings
+
+        warnings.warn(
+            "Command.provider_id is deprecated; use mcp_server_id instead.",
+            DeprecationWarning,
+            stacklevel=2,
+        )
         return self.mcp_server_id
 
 
@@ -92,6 +100,13 @@ class InvokeToolCommand(Command):
 
     @property
     def provider_id(self) -> str:
+        import warnings
+
+        warnings.warn(
+            "Command.provider_id is deprecated; use mcp_server_id instead.",
+            DeprecationWarning,
+            stacklevel=2,
+        )
         return self.mcp_server_id
 
 
@@ -109,6 +124,13 @@ class HealthCheckCommand(Command):
 
     @property
     def provider_id(self) -> str:
+        import warnings
+
+        warnings.warn(
+            "Command.provider_id is deprecated; use mcp_server_id instead.",
+            DeprecationWarning,
+            stacklevel=2,
+        )
         return self.mcp_server_id
 
 
@@ -148,13 +170,10 @@ class ReloadConfigurationCommand(Command):
     requested_by: str = "manual"
 
 
-# legacy aliases
-globals().update(
-    {
-        "".join(("StartPro", "viderCommand")): StartMcpServerCommand,
-        "".join(("StopPro", "viderCommand")): StopMcpServerCommand,
-        "".join(("ShutdownIdlePro", "vidersCommand")): ShutdownIdleMcpServersCommand,
-        "".join(("LoadPro", "viderCommand")): LoadMcpServerCommand,
-        "".join(("UnloadPro", "viderCommand")): UnloadMcpServerCommand,
-    }
-)
+# Legacy aliases for renamed commands -- public API back-compat.
+# Remove together with the deprecated `provider_id` kwarg (planned 2026-Q3).
+StartProviderCommand = StartMcpServerCommand
+StopProviderCommand = StopMcpServerCommand
+ShutdownIdleProvidersCommand = ShutdownIdleMcpServersCommand
+LoadProviderCommand = LoadMcpServerCommand
+UnloadProviderCommand = UnloadMcpServerCommand

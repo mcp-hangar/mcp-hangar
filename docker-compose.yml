@@ -15,6 +15,7 @@ services:
     volumes:
       - ./config.yaml:/app/config.yaml:ro
       - ./logs:/app/logs
+    command: ["serve", "--http", "--host", "0.0.0.0", "--port", "8080", "--unsafe-no-auth"]
     restart: unless-stopped
     networks:
       - mcp-network
