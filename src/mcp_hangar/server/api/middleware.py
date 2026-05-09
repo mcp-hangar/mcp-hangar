@@ -19,7 +19,7 @@ from urllib.parse import parse_qs
 from urllib.parse import urlparse
 
 from starlette.concurrency import run_in_threadpool
-from starlette.datastructures import Headers
+from starlette.datastructures import Headers, State
 from starlette.middleware.base import BaseHTTPMiddleware, RequestResponseEndpoint
 from starlette.requests import Request
 from starlette.responses import JSONResponse, Response
@@ -159,10 +159,17 @@ def _build_auth_request(scope: Scope, trusted_proxies: TrustedProxyResolver) -> 
 
 
 def _store_auth_context(scope: Scope, auth_context: Any) -> None:
-    scope["auth"] = auth_context
-    state = scope.setdefault("state", {})
-    if isinstance(state, dict):
-        state["auth"] = auth_context
+    """Store auth context as Starlette State.auth on the ASGI scope.
+
+    Uses starlette.datastructures.State so downstream Starlette handlers can
+    read it via request.state.auth. A bare dict would not work -- Starlette's
+    Request.state casts scope["state"] as State, and dict lacks __getattr__.
+    """
+    state = scope.get("state")
+    if not isinstance(state, State):
+        state = State()
+        scope["state"] = state
+    state.auth = auth_context
 
 
 async def _send_auth_failure(
@@ -266,7 +273,6 @@ class AuthMiddlewareHTTP(BaseHTTPMiddleware):
         try:
             auth_context = self._authn.authenticate(auth_request)
             request.state.auth = auth_context
-            request.scope["auth"] = auth_context
             return await call_next(request)
         except AuthenticationError as exc:
             return JSONResponse(

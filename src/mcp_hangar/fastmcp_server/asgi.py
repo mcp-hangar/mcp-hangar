@@ -123,6 +123,7 @@ def create_auth_combined_app(
     """
     from ..domain.contracts.authentication import AuthRequest
     from ..domain.exceptions import AccessDeniedError, AuthenticationError
+    from ..server.api.middleware import _store_auth_context
 
     skip_paths = set(config.auth_skip_paths)
     trusted_proxies = config.trusted_proxies
@@ -182,7 +183,7 @@ def create_auth_combined_app(
 
         try:
             auth_context = auth_components.authn_middleware.authenticate(auth_request)
-            scope["auth"] = auth_context
+            _store_auth_context(scope, auth_context)
             await mcp_app(scope, receive, send)
 
         except AuthenticationError as e:
