@@ -181,7 +181,7 @@ class RateLimitMiddleware(CommandBusMiddleware):
 
                 prometheus_metrics.RATE_LIMIT_HITS_TOTAL.inc(result="rejected")
                 if hasattr(self._rate_limiter, "get_stats"):
-                    stats = self._rate_limiter.get_stats()  # type: ignore[attr-defined]
+                    stats = self._rate_limiter.get_stats()
                     prometheus_metrics.RATE_LIMIT_ACTIVE_BUCKETS.set(stats.get("active_buckets", 0))
             except Exception:  # noqa: BLE001 -- fault-barrier: metrics failure must not block rate limit enforcement
                 pass
@@ -199,7 +199,7 @@ class RateLimitMiddleware(CommandBusMiddleware):
 
             prometheus_metrics.RATE_LIMIT_HITS_TOTAL.inc(result="allowed")
             if hasattr(self._rate_limiter, "get_stats"):
-                stats = self._rate_limiter.get_stats()  # type: ignore[attr-defined]
+                stats = self._rate_limiter.get_stats()
                 prometheus_metrics.RATE_LIMIT_ACTIVE_BUCKETS.set(stats.get("active_buckets", 0))
         except Exception:  # noqa: BLE001 -- fault-barrier: metrics failure must not block command dispatch
             pass

@@ -132,18 +132,18 @@ class CircuitBreaker:
         In CLOSED, resets failure count.
         In OPEN, closes immediately (e.g. after manual reset).
         """
-        callback = None
+        callback: tuple[CircuitState, CircuitState] | None = None
         with self._lock:
             if self._state == CircuitState.HALF_OPEN:
                 self._probe_successes += 1
                 if self._probe_successes >= self._config.probe_count:
-                    old = self._state
+                    old: CircuitState = self._state
                     self._close()
                     callback = (old, self._state)
             elif self._state == CircuitState.OPEN:
-                old = self._state
+                old_open: CircuitState = self._state
                 self._close()
-                callback = (old, self._state)
+                callback = (old_open, self._state)
             else:
                 self._failure_count = 0
 
@@ -158,21 +158,21 @@ class CircuitBreaker:
             True if circuit just opened (CLOSED -> OPEN or HALF_OPEN -> OPEN),
             False otherwise.
         """
-        callback = None
+        callback: tuple[CircuitState, CircuitState] | None = None
         opened = False
         with self._lock:
             if self._state == CircuitState.HALF_OPEN:
-                old = self._state
+                old_half: CircuitState = self._state
                 self._open()
                 opened = True
-                callback = (old, self._state)
+                callback = (old_half, self._state)
             elif self._state == CircuitState.CLOSED:
                 self._failure_count += 1
                 if self._failure_count >= self._config.failure_threshold:
-                    old = self._state
+                    old_closed: CircuitState = self._state
                     self._open()
                     opened = True
-                    callback = (old, self._state)
+                    callback = (old_closed, self._state)
             # OPEN: additional failures are ignored (already open)
 
         if callback is not None:

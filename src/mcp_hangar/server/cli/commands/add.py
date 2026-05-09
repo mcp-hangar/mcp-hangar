@@ -7,7 +7,7 @@ and updates the MCP Hangar config file.
 import json
 import os
 from pathlib import Path
-from typing import Annotated
+from typing import Annotated, cast
 
 import questionary
 from rich import box
@@ -60,7 +60,7 @@ def _display_search_results(results: list[McpServerDefinition]) -> str | None:
     choices = [questionary.Choice(title=f"{r.name} - {r.description}", value=r.name) for r in results]
     choices.append(questionary.Choice(title="Cancel", value=None))
 
-    return questionary.select("Select a mcp_server to install:", choices=choices).ask()
+    return cast(str | None, questionary.select("Select a mcp_server to install:", choices=choices).ask())
 
 
 def _collect_config(mcp_server: McpServerDefinition) -> dict | None:
@@ -91,7 +91,7 @@ def _collect_config(mcp_server: McpServerDefinition) -> dict | None:
     if mcp_server.config_type == "secret":
         value = questionary.password(f"{mcp_server.config_prompt}:").ask()
     elif mcp_server.config_type == "path":
-        is_dir = mcp_server.config_prompt and "directory" in mcp_server.config_prompt.lower()
+        is_dir = bool(mcp_server.config_prompt and "directory" in mcp_server.config_prompt.lower())
         value = questionary.path(f"{mcp_server.config_prompt}:", only_directories=is_dir).ask()
         if value:
             value = str(Path(value).expanduser().resolve())

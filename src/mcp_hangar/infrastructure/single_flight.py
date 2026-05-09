@@ -14,7 +14,7 @@ Thread-safe implementation using threading primitives.
 from collections.abc import Callable
 from dataclasses import dataclass, field
 import threading
-from typing import Any, TypeVar
+from typing import Any, TypeVar, cast
 
 from ..logging_config import get_logger
 
@@ -93,7 +93,7 @@ class SingleFlight:
                         # Return cached result
                         if state.exception:
                             raise state.exception
-                        return state.result
+                        return cast(T, state.result)
                     else:
                         # Clear completed state, allow new execution
                         del self._calls[key]
@@ -119,7 +119,7 @@ class SingleFlight:
 
             if state.exception:
                 raise state.exception
-            return state.result
+            return cast(T, state.result)
 
         # We are the executor
         logger.debug("single_flight_executing", key=key)

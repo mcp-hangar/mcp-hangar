@@ -92,7 +92,7 @@ def validate_batch(
 
         # McpServer exists (check both mcp_servers and groups via context)
         ctx = get_context()
-        mcp_server_obj = ctx.get_mcp_server(mcp_server)
+        mcp_server_obj: Any = ctx.get_mcp_server(mcp_server)  # McpServer | McpServerGroup, duck-typed below
         if not mcp_server_obj:
             mcp_server_obj = GROUPS.get(mcp_server)
         if not mcp_server_obj:

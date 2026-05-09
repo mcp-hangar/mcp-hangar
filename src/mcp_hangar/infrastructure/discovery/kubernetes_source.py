@@ -120,6 +120,7 @@ class KubernetesDiscoverySource(DiscoverySource):
 
         for namespace in namespaces:
             try:
+                assert self._v1 is not None
                 pods = self._v1.list_namespaced_pod(namespace=namespace, label_selector=self.label_selector)
 
                 for pod in pods.items:
@@ -214,6 +215,7 @@ class KubernetesDiscoverySource(DiscoverySource):
         """
         try:
             self._ensure_initialized()
+            assert self._v1 is not None
             self._v1.get_api_resources()
             return True
         except Exception as e:  # noqa: BLE001 -- infra-boundary: health check returns unhealthy on error
@@ -227,6 +229,7 @@ class KubernetesDiscoverySource(DiscoverySource):
             List of namespace names
         """
         try:
+            assert self._v1 is not None
             namespaces = self._v1.list_namespace()
             return [ns.metadata.name for ns in namespaces.items]
         except ApiException as e:

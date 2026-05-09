@@ -281,7 +281,7 @@ class EventSerializer:
 
         # Create instance with remaining data.
         # Event dataclasses have different constructor signatures; we instantiate dynamically from payload.
-        instance = cls(**ctor_kwargs)  # type: ignore[call-arg]
+        instance = cls(**ctor_kwargs)
 
         # Restore original values if present
         if event_id is not None:

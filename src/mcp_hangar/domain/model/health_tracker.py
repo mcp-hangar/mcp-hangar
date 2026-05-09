@@ -3,6 +3,7 @@
 from dataclasses import dataclass, field
 import random
 import time
+from typing import cast
 
 
 @dataclass
@@ -172,9 +173,9 @@ class HealthTracker:
         """
         base = min(60.0, 2**self._consecutive_failures)
         if self.jitter_factor <= 0.0:
-            return base
+            return cast(float, base)
         jitter = base * random.uniform(-self.jitter_factor, self.jitter_factor)
-        return min(60.0, max(0.0, base + jitter))
+        return cast(float, min(60.0, max(0.0, base + jitter)))
 
     def get_health_check_interval(self, state: str, normal_interval: float = 10.0) -> float:
         """Get the health check interval based on mcp_server state.

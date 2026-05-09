@@ -301,7 +301,7 @@ def trace_tool_invocation(
                         span.set_status(Status(StatusCode.ERROR, str(e)))
                     raise
 
-        return wrapper
+        return wrapper  # type: ignore[return-value]  # decorated wrapper preserves F signature via @wraps
 
     return decorator
 

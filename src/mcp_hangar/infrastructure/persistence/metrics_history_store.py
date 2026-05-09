@@ -186,7 +186,7 @@ class MetricsHistoryStore:
 
         if deleted:
             logger.info("metrics_history_pruned", deleted=deleted, retention_days=self._retention_days)
-        return deleted
+        return deleted or 0
 
 
 # ---------------------------------------------------------------------------

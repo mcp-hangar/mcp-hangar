@@ -15,7 +15,7 @@ import atexit
 import json
 import threading
 import time
-from typing import Any
+from typing import Any, cast
 
 
 from ....application.commands import InvokeToolCommand, StartMcpServerCommand
@@ -393,8 +393,8 @@ class BatchExecutor:
                             failed += 1
 
                 # Fill in cancelled/timed out calls
-                for i, result in enumerate(results):
-                    if result is None:
+                for i, r in enumerate(results):
+                    if r is None:
                         call = calls[i]
                         results[i] = CallResult(
                             index=i,
@@ -758,7 +758,7 @@ class BatchExecutor:
                 )
                 result = ctx.command_bus.send(command)
                 cmd_span.set_attribute("command.result", "success")
-                return result
+                return cast(dict[str, Any], result)
 
         # Execute with retry if max_retries > 1
         retry_result: RetryResult | None = None

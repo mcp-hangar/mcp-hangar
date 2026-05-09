@@ -12,6 +12,7 @@ import structlog
 from mcp_hangar.domain.contracts.authorization import AuthorizationRequest, AuthorizationResult, IPolicyEngine
 
 if TYPE_CHECKING:
+    import httpx
     from .rbac_authorizer import RBACAuthorizer
 
 logger = structlog.get_logger(__name__)
@@ -58,7 +59,7 @@ class OPAAuthorizer(IPolicyEngine):
         self._opa_url = opa_url.rstrip("/")
         self._policy_path = policy_path.lstrip("/")
         self._timeout = timeout
-        self._client = None  # Lazy initialization
+        self._client: httpx.Client | None = None
 
     def evaluate(self, input_data: dict[str, Any]) -> AuthorizationResult:
         """Evaluate OPA policy with given input.
@@ -83,6 +84,7 @@ class OPAAuthorizer(IPolicyEngine):
             if self._client is None:
                 self._client = httpx.Client(timeout=self._timeout)
 
+            assert self._client is not None
             response = self._client.post(url, json={"input": input_data})
             response.raise_for_status()
 

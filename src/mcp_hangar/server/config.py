@@ -9,7 +9,7 @@ startup so the rest of the server observes the same mcp_server state.
 import os
 from pathlib import Path
 import re
-from typing import Any
+from typing import Any, cast
 
 import yaml
 
@@ -74,7 +74,7 @@ def _interpolate_env_vars(config: dict[str, Any]) -> dict[str, Any]:
             return [interpolate_value(item) for item in value]
         return value
 
-    return interpolate_value(config)
+    return cast(dict[str, Any], interpolate_value(config))
 
 
 def load_config_from_file(config_path: str) -> dict[str, Any]:
@@ -101,7 +101,7 @@ def load_config_from_file(config_path: str) -> dict[str, Any]:
     if not config or "mcp_servers" not in config:
         raise ValueError(f"Invalid configuration: missing 'mcp_servers' section in {config_path}")
 
-    return config
+    return cast(dict[str, Any], config)
 
 
 def load_config(config: dict[str, Any]) -> None:

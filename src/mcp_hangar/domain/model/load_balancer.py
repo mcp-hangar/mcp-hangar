@@ -161,7 +161,7 @@ class LoadBalancer:
     Thread-safe - each strategy implementation handles its own locking.
     """
 
-    _STRATEGIES = {
+    _STRATEGIES: dict[LoadBalancerStrategy, type[BaseStrategy]] = {
         LoadBalancerStrategy.ROUND_ROBIN: RoundRobinStrategy,
         LoadBalancerStrategy.WEIGHTED_ROUND_ROBIN: WeightedRoundRobinStrategy,
         LoadBalancerStrategy.LEAST_CONNECTIONS: LeastConnectionsStrategy,
@@ -171,7 +171,7 @@ class LoadBalancer:
 
     def __init__(self, strategy: LoadBalancerStrategy):
         self._strategy_type = strategy
-        self._impl = self._STRATEGIES[strategy]()
+        self._impl: BaseStrategy = self._STRATEGIES[strategy]()
 
     @property
     def strategy(self) -> LoadBalancerStrategy:

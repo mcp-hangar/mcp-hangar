@@ -206,7 +206,7 @@ def calculate_backoff(
         delay += random.uniform(-jitter_range, jitter_range)
         delay = max(0, delay)  # Ensure non-negative
 
-    return delay
+    return float(delay)
 
 
 def should_retry(error: Exception, policy: RetryPolicy) -> bool:

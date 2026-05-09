@@ -3,6 +3,8 @@
 This adapter implements the IMetricsPublisher contract using Prometheus metrics.
 """
 
+import types
+
 from ..domain.contracts.metrics_publisher import IMetricsPublisher
 
 
@@ -11,26 +13,24 @@ class PrometheusMetricsPublisher(IMetricsPublisher):
 
     def __init__(self):
         """Initialize with lazy import to avoid circular dependencies."""
-        self._metrics = None
+        self._metrics: types.ModuleType | None = None
 
-    def _ensure_metrics(self):
+    def _ensure_metrics(self) -> types.ModuleType:
         """Lazy load metrics module."""
         if self._metrics is None:
             from mcp_hangar import metrics
 
             self._metrics = metrics
+        return self._metrics
 
     def record_cold_start(self, mcp_server_id: str, duration_s: float, mode: str) -> None:
         """Record a cold start event."""
-        self._ensure_metrics()
-        self._metrics.record_cold_start(mcp_server_id, duration_s, mode)
+        self._ensure_metrics().record_cold_start(mcp_server_id, duration_s, mode)
 
     def begin_cold_start(self, mcp_server_id: str) -> None:
         """Mark the beginning of a cold start."""
-        self._ensure_metrics()
-        self._metrics.cold_start_begin(mcp_server_id)
+        self._ensure_metrics().cold_start_begin(mcp_server_id)
 
     def end_cold_start(self, mcp_server_id: str) -> None:
         """Mark the end of a cold start."""
-        self._ensure_metrics()
-        self._metrics.cold_start_end(mcp_server_id)
+        self._ensure_metrics().cold_start_end(mcp_server_id)

@@ -54,7 +54,7 @@ See docs/guides/UX_IMPROVEMENTS.md for more examples.
 from collections.abc import Callable
 from dataclasses import dataclass, field
 from enum import StrEnum
-from typing import Any
+from typing import Any, cast
 
 
 class ErrorCategory(StrEnum):
@@ -1056,7 +1056,7 @@ def map_exception_to_hangar_error(
     # Try each matcher in order
     for _, detector, creator in _ERROR_MATCHERS:
         if detector(exc_type, exc_str):
-            return creator(exc, mcp_server, operation, context)
+            return cast(HangarError, creator(exc, mcp_server, operation, context))
 
     # Default: wrap as generic HangarError
     return _create_generic_error(exc, mcp_server, operation, context)

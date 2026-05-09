@@ -323,7 +323,7 @@ class ToolAccessResolver:
                 logger.debug("tool_access_cache_invalidated_all")
             else:
                 self._invalidate_mcp_server_cache(mcp_server_id)
-                logger.debug("tool_access_cache_invalidated", mcp_server_id=mcp_server_id)
+                logger.debug("tool_access_cache_invalidated", extra={"mcp_server_id": mcp_server_id})
 
     def _invalidate_mcp_server_cache(self, mcp_server_id: str) -> None:
         """Invalidate cache entries related to a mcp_server.

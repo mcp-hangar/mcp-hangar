@@ -26,7 +26,7 @@ try:
     METADATA_AVAILABLE = True
 except ImportError:
     try:
-        from importlib_metadata import entry_points, EntryPoint
+        from importlib_metadata import entry_points, EntryPoint  # type: ignore[no-redef]  # fallback import for importlib_metadata backport on older Python
 
         METADATA_AVAILABLE = True
     except ImportError:
@@ -108,10 +108,10 @@ class EntrypointDiscoverySource(DiscoverySource):
                 group_eps = eps.select(group=self.group)
             elif hasattr(eps, "get"):
                 # Python 3.9
-                group_eps = eps.get(self.group, [])
+                group_eps = eps.get(self.group, [])  # type: ignore[arg-type]  # dead on 3.11+: SelectableGroups.get() default type mismatch
             else:
                 # Fallback
-                group_eps = getattr(eps, self.group, [])
+                group_eps = getattr(eps, self.group, [])  # type: ignore[assignment]  # dead on 3.11+: getattr returns Any for pre-3.9 compat
 
             for ep in group_eps:
                 try:

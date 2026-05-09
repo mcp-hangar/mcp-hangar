@@ -352,9 +352,9 @@ class McpServerConfig:
     image: DockerImage | None = None
     endpoint: Endpoint | None = None
     env: EnvironmentVariables | None = None
-    idle_ttl: IdleTTL = None
-    health_check_interval: HealthCheckInterval = None
-    max_consecutive_failures: MaxConsecutiveFailures = None
+    idle_ttl: IdleTTL | None = None
+    health_check_interval: HealthCheckInterval | None = None
+    max_consecutive_failures: MaxConsecutiveFailures | None = None
 
     def __init__(
         self,
@@ -413,6 +413,9 @@ class McpServerConfig:
 
     def to_dict(self) -> dict[str, Any]:
         """Convert to dictionary representation."""
+        assert self.idle_ttl is not None
+        assert self.health_check_interval is not None
+        assert self.max_consecutive_failures is not None
         result = {
             "mcp_server_id": str(self.mcp_server_id),
             "mode": str(self.mode),

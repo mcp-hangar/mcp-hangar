@@ -1,6 +1,6 @@
 """McpServer application service - orchestrates use cases."""
 
-from typing import Any
+from typing import Any, cast
 
 from ...domain.exceptions import McpServerNotFoundError
 from ...domain.model import McpServer
@@ -45,7 +45,7 @@ class McpServerService:
         mcp_server = self._repository.get(mcp_server_id)
         if mcp_server is None:
             raise McpServerNotFoundError(mcp_server_id)
-        return mcp_server
+        return cast(McpServer, mcp_server)
 
     # --- Use Cases ---
 

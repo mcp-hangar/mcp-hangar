@@ -6,7 +6,7 @@ registry.modelcontextprotocol.io.
 """
 
 import asyncio
-from typing import Any
+from typing import Any, cast
 
 import httpx
 
@@ -104,7 +104,7 @@ class RegistryClient(IRegistryClient):
             cached = self._cache.get(cache_key)
             if cached is not None:
                 logger.debug("registry_cache_hit", key=cache_key)
-                return cached
+                return cast(list[ServerSummary], cached)
 
         url = f"{self._base_url}/servers"
         params = {"search": query, "limit": str(limit)}
@@ -144,7 +144,7 @@ class RegistryClient(IRegistryClient):
             cached = self._cache.get(cache_key)
             if cached is not None:
                 logger.debug("registry_cache_hit", key=cache_key)
-                return cached
+                return cast(ServerDetails, cached)
 
         # Search for the server by name
         url = f"{self._base_url}/servers"
@@ -201,7 +201,7 @@ class RegistryClient(IRegistryClient):
                     raise RegistryServerNotFoundError(url.split("/")[-1])
 
                 response.raise_for_status()
-                return response.json()
+                return cast(dict[str, Any], response.json())
 
             except RegistryServerNotFoundError:
                 raise

@@ -20,7 +20,7 @@ import asyncio
 import atexit
 from collections.abc import Callable, Coroutine
 from concurrent.futures import ThreadPoolExecutor
-from typing import Any, Optional
+from typing import Any, Optional, cast
 
 from ..application.ports.async_task import IAsyncTaskSubmitter
 from ..logging_config import get_logger
@@ -98,12 +98,13 @@ class AsyncExecutor(IAsyncTaskSubmitter):
                 # Handle expected async/runtime errors
                 if on_error:
                     try:
-                        on_error(e)
+                        on_error(cast(Exception, e))
                     except (TypeError, ValueError, RuntimeError) as callback_err:
                         logger.debug("async_executor_error_callback_failed", error=str(callback_err))
                 else:
                     logger.debug("async_executor_error", error_type=type(e).__name__, error=str(e))
 
+        assert self._executor is not None
         self._executor.submit(run_coro)
 
     def shutdown(self, wait: bool = False) -> None:

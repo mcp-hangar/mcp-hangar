@@ -1,5 +1,7 @@
 """Factory function for mcp_server launchers."""
 
+from typing import cast
+
 from .base import McpServerLauncher
 from .container import ContainerLauncher
 from .http import HttpLauncher
@@ -21,7 +23,7 @@ def get_launcher(mode: str) -> McpServerLauncher:
     """
     launchers = {
         "subprocess": SubprocessLauncher,
-        "docker": lambda: ContainerLauncher(runtime="auto"),  # Use ContainerLauncher with auto-detection
+        "docker": lambda: ContainerLauncher(runtime="auto"),
         "container": lambda: ContainerLauncher(runtime="auto"),
         "podman": lambda: ContainerLauncher(runtime="podman"),
         "remote": HttpLauncher,
@@ -32,4 +34,4 @@ def get_launcher(mode: str) -> McpServerLauncher:
         raise ValueError(f"unsupported_mode: {mode}")
 
     launcher = launcher_factory() if callable(launcher_factory) else launcher_factory
-    return launcher
+    return cast(McpServerLauncher, launcher)

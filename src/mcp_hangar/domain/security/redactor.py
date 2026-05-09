@@ -205,8 +205,8 @@ class OutputRedactor:
             Text with long strings redacted.
         """
 
-        def replace_if_suspicious(match: re.Match) -> str:
-            value = match.group(0)
+        def replace_if_suspicious(match: re.Match[str]) -> str:
+            value: str = match.group(0)
             if len(value) < self._min_long_string_length:
                 return value
             if value in self._known_secrets.values():

@@ -227,7 +227,7 @@ class SecretsMask:
         Returns:
             New dictionary with sensitive values masked
         """
-        result = {}
+        result: dict[str, Any] = {}
         for key, value in data.items():
             if isinstance(value, dict) and recursive:
                 result[key] = self.mask_dict(value, recursive=True)

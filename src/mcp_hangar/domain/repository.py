@@ -142,7 +142,7 @@ class InMemoryMcpServerRepository(IMcpServerRepository):
         try:
             from ..infrastructure.lock_hierarchy import LockLevel, TrackedLock
 
-            return TrackedLock(LockLevel.REPOSITORY, "InMemoryMcpServerRepository")
+            return TrackedLock(LockLevel.REPOSITORY, "InMemoryMcpServerRepository")  # type: ignore[return-value]  # TrackedLock satisfies ILock protocol at runtime
         except ImportError:
             return lock_factory()
 

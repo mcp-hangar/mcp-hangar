@@ -6,6 +6,7 @@ import os
 from pathlib import Path
 import platform
 import shutil
+from typing import cast
 
 
 class ClaudeDesktopManager:
@@ -53,7 +54,7 @@ class ClaudeDesktopManager:
     def get_mcp_servers(self) -> dict:
         """Get existing MCP servers from config."""
         if self.config:
-            return self.config.get("mcpServers", {})
+            return cast(dict, self.config.get("mcpServers", {}))
         return {}
 
     def backup(self) -> Path | None:
@@ -116,7 +117,7 @@ class ClaudeDesktopManager:
         """Load config from file."""
         try:
             with open(path) as f:
-                return json.load(f)
+                return cast(dict, json.load(f))
         except (json.JSONDecodeError, OSError):
             return None
 

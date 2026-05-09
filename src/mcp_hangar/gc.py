@@ -263,6 +263,7 @@ class ConfigReloadWorker:
 
     def _start_watchdog(self):
         """Start watchdog-based file monitoring."""
+        assert self.config_path is not None
         if not WATCHDOG_AVAILABLE:
             logger.warning("watchdog_not_available_falling_back_to_polling")
             self._start_polling()
@@ -320,6 +321,8 @@ class ConfigReloadWorker:
 
     def _polling_loop(self):
         """Polling loop that checks mtime periodically."""
+        assert self.config_path is not None
+        assert self._last_mtime is not None
         while self.running:
             time.sleep(self.interval_s)
 

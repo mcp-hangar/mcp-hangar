@@ -10,7 +10,7 @@ Shows the health and status of all configured mcp_servers with:
 import json
 from pathlib import Path
 import time
-from typing import Annotated
+from typing import Annotated, cast
 
 from rich import box
 from rich.console import Console
@@ -61,7 +61,7 @@ def _get_status_from_server() -> dict | None:
                     timeout=2.0,
                 )
                 if response.status_code == 200:
-                    return response.json()
+                    return cast(dict, response.json())
             except httpx.ConnectError:
                 continue
     except Exception:  # noqa: BLE001 -- fault-barrier: health probe must not crash status command
@@ -269,7 +269,7 @@ def _get_mcp_server_details(name: str, status: dict) -> dict | None:
     """Get detailed information for a single mcp_server."""
     for mcp_server in status.get("mcp_servers", []):
         if mcp_server.get("name") == name:
-            return mcp_server
+            return cast(dict, mcp_server)
     return None
 
 

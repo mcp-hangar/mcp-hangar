@@ -15,7 +15,7 @@ from enum import Enum
 import inspect
 import threading
 import time
-from typing import Any
+from typing import Any, cast
 
 from mcp_hangar.logging_config import get_logger
 
@@ -330,7 +330,7 @@ class HealthEndpoint:
                         message=f"Check execution failed: {result}",
                     )
                 )
-            else:
+            elif isinstance(result, HealthCheckResult):
                 processed.append(result)
 
         # Cache results
@@ -482,7 +482,7 @@ def create_event_loop_health_check() -> HealthCheck:
 
     return HealthCheck(
         name="event_loop",
-        check_fn=check,
+        check_fn=cast(Callable[[], bool], check),
         description="Check event loop is responsive",
         timeout_seconds=1.0,
         critical=True,

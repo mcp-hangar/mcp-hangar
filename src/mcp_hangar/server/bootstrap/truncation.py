@@ -64,6 +64,7 @@ def init_truncation(config: dict[str, Any]) -> TruncationManager | None:
         try:
             from ...infrastructure.truncation.redis_cache import RedisResponseCache
 
+            assert truncation_config.redis_url is not None
             _response_cache = RedisResponseCache(truncation_config.redis_url)
             logger.info(
                 "truncation_redis_cache_initialized",

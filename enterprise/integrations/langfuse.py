@@ -44,7 +44,7 @@ try:
     _langfuse_available = True
     _Langfuse = _LangfuseClient
 except ImportError:
-    _LangfuseClient = None  # type: ignore[misc, assignment]
+    _LangfuseClient = None  # conditional import fallback
     logger.debug("Langfuse not installed. Install with: pip install mcp-hangar[observability]")
 
 
@@ -119,6 +119,7 @@ class LangfuseAdapter:
         if errors:
             raise ValueError(f"Invalid Langfuse config: {'; '.join(errors)}")
 
+        assert _Langfuse is not None
         self._client = _Langfuse(
             public_key=config.public_key,
             secret_key=config.secret_key,

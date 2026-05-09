@@ -383,7 +383,8 @@ class PostgresApiKeyStore(IApiKeyStore):
                 """,
                 (principal_id,),
             )
-            return cur.fetchone()[0]
+            row = cur.fetchone()
+            return int(row[0]) if row else 0
 
     def rotate_key(
         self,

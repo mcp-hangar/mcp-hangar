@@ -6,8 +6,7 @@ on low-level modules, both depend on abstractions.
 """
 
 from dataclasses import dataclass, field
-from typing import cast
-from typing import Any, Optional, Protocol, runtime_checkable, TYPE_CHECKING
+from typing import Any, Optional, Protocol, cast, runtime_checkable, TYPE_CHECKING
 
 if TYPE_CHECKING:
     from ..application.commands.load_handlers import LoadMcpServerHandler, UnloadMcpServerHandler
@@ -171,7 +170,7 @@ class ApplicationContext:
         # First check static repository
         mcp_server = self.runtime.repository.get(mcp_server_id)
         if mcp_server is not None:
-            return mcp_server
+            return cast("McpServer", mcp_server)
 
         # Then check runtime (hot-loaded) mcp_servers
         from .state import get_runtime_mcp_servers

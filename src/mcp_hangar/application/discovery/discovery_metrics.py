@@ -201,7 +201,7 @@ class DiscoveryMetrics:
 
 
 # Global metrics instance
-_metrics: DiscoveryMetrics = None
+_metrics: DiscoveryMetrics | None = None
 
 
 def get_discovery_metrics() -> DiscoveryMetrics:

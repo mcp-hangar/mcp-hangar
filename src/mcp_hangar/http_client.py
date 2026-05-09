@@ -19,7 +19,7 @@ import uuid
 from dataclasses import dataclass, field
 from enum import Enum
 from queue import Queue
-from typing import Any
+from typing import Any, cast
 
 import httpx
 
@@ -382,7 +382,7 @@ class HttpClient:
 
             try:
                 result = response.json()
-                return result
+                return cast(dict[str, Any], result)
             except json.JSONDecodeError as e:
                 prometheus_metrics.HTTP_ERRORS_TOTAL.inc(mcp_server=mcp_server_label, error_type="json_decode_error")
                 return {
@@ -477,7 +477,7 @@ class HttpClient:
                                     msg_id=msg.get("id"),
                                     expected_id=request_id,
                                 )
-                                return msg
+                                return cast(dict[str, Any], msg)
                         except json.JSONDecodeError:
                             pass
 
@@ -580,7 +580,7 @@ class HttpClient:
             # Check if this is our response - compare string representations
             msg_id = msg.get("id")
             if msg_id is not None and str(msg_id) == str(request_id):
-                return msg
+                return cast(dict[str, Any], msg)
 
             # Log other messages (notifications, etc.)
             logger.debug("http_client_sse_notification", message_id=msg_id, expected_id=request_id)

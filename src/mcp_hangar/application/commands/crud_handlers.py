@@ -8,7 +8,7 @@ All handlers:
 """
 
 import threading
-from typing import Any
+from typing import Any, cast
 
 from ...domain.events import McpServerDeregistered, McpServerRegistered
 from ...domain.exceptions import McpServerNotFoundError, ValidationError
@@ -135,7 +135,7 @@ class UpdateMcpServerHandler(CommandHandler):
         mcp_server = self._repository.get(mcp_server_id)
         if mcp_server is None:
             raise McpServerNotFoundError(mcp_server_id)
-        return mcp_server  # type: ignore[return-value]
+        return cast(McpServer, mcp_server)
 
     def handle(self, command: UpdateMcpServerCommand) -> dict[str, Any]:
         """Update mcp_server configuration.
@@ -207,7 +207,7 @@ class DeleteMcpServerHandler(CommandHandler):
         mcp_server = self._repository.get(mcp_server_id)
         if mcp_server is None:
             raise McpServerNotFoundError(mcp_server_id)
-        return mcp_server  # type: ignore[return-value]
+        return cast(McpServer, mcp_server)
 
     def handle(self, command: DeleteMcpServerCommand) -> dict[str, Any]:
         """Delete a mcp_server, stopping it first if running.

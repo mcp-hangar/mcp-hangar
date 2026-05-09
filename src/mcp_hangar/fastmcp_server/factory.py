@@ -4,7 +4,7 @@ The factory encapsulates all dependencies needed to create an MCP server,
 enabling proper dependency injection and testability.
 """
 
-from typing import Any, Optional, TYPE_CHECKING
+from typing import Any, TYPE_CHECKING
 
 from mcp.server.fastmcp import FastMCP
 from starlette.applications import Starlette
@@ -14,7 +14,6 @@ from .asgi import create_auth_combined_app, create_combined_asgi_app, create_hea
 from .config import HangarFunctions, ServerConfig
 
 if TYPE_CHECKING:
-    from mcp_hangar.server.bootstrap import AuthComponents
     from .builder import MCPServerFactoryBuilder
 
 logger = get_logger(__name__)
@@ -53,7 +52,7 @@ class MCPServerFactory:
         self,
         hangar: HangarFunctions,
         config: ServerConfig | None = None,
-        auth_components: Optional["AuthComponents"] = None,
+        auth_components: "Any" = None,
     ):
         """Initialize factory with dependencies.
 
@@ -175,7 +174,7 @@ class MCPServerFactory:
         hgr = self._hangar
 
         @mcp.tool()
-        def hangar_list(state_filter: str = None) -> dict:
+        def hangar_list(state_filter: str | None = None) -> dict:
             """List all managed mcp_servers with lifecycle state and metadata.
 
             Args:

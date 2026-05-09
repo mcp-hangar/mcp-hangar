@@ -370,7 +370,7 @@ class AuditService:
                 result=None,
                 duration_ms=event.duration_ms,
                 success=False,
-                error=event.error,
+                error=event.error_message,
                 actor=actor,
                 correlation_id=event.correlation_id,
             )

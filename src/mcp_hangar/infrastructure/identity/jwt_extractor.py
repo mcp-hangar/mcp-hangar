@@ -152,7 +152,7 @@ class JWTIdentityExtractor:
                 user_id=str(user_id),
                 agent_id=str(agent_id) if agent_id else None,
                 session_id=str(session_id) if session_id else None,
-                principal_type=principal_type,  # type: ignore[arg-type]
+                principal_type=principal_type,
             )
         except ValueError as e:
             logger.warning("jwt_identity_construction_failed", error=str(e))

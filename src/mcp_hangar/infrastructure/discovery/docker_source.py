@@ -44,7 +44,7 @@ try:
 except ImportError:
     DOCKER_AVAILABLE = False
     DockerException = Exception
-    docker = None
+    docker = None  # type: ignore[assignment]  # optional dependency: module unavailable
 
 
 # Well-known socket locations
@@ -151,6 +151,8 @@ class DockerDiscoverySource(DiscoverySource):
         if self._client is not None:
             return
 
+        assert docker is not None  # guaranteed by __init__ DOCKER_AVAILABLE check
+
         last_error: Exception | None = None
 
         for attempt in range(self._max_retries):
@@ -159,10 +161,10 @@ class DockerDiscoverySource(DiscoverySource):
 
                 if socket:
                     logger.info("docker_connecting", socket=socket, attempt=attempt + 1)
-                    self._client = docker.DockerClient(base_url=f"unix://{socket}")
+                    self._client = docker.DockerClient(base_url=f"unix://{socket}")  # type: ignore[attr-defined]  # docker SDK has no type stubs
                 else:
                     logger.info("docker_connecting_from_env", attempt=attempt + 1)
-                    self._client = docker.from_env()
+                    self._client = docker.from_env()  # type: ignore[attr-defined]  # docker SDK has no type stubs
 
                 # Verify connection works
                 self._client.ping()
@@ -324,7 +326,7 @@ class DockerDiscoverySource(DiscoverySource):
             networks = container.attrs.get("NetworkSettings", {}).get("Networks", {})
             for net_info in networks.values():
                 if ip := net_info.get("IPAddress"):
-                    return ip
+                    return str(ip)
         except Exception:  # noqa: BLE001 -- infra-boundary: best-effort container IP extraction
             pass
         return None

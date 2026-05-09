@@ -308,7 +308,7 @@ def bootstrap(
             use_watchdog=reload_config.get("use_watchdog", True),
         )
         # ConfigReloadWorker has .start() and .stop() compatible with BackgroundWorker
-        workers.append(config_reload_worker)  # type: ignore[arg-type]
+        workers.append(config_reload_worker)
         logger.info("config_reload_worker_created")
 
     # Initialize discovery (not started)

@@ -28,6 +28,8 @@ References:
     - PRODUCT_ARCHITECTURE.md Section 2: "MCP-aware OTEL semantic conventions"
 """
 
+from typing import Any
+
 
 class McpServer:
     """Attributes describing an MCP mcp_server instance."""
@@ -286,7 +288,7 @@ class Metrics:
 
 
 def set_governance_attributes(
-    span: object,
+    span: Any,
     *,
     mcp_server_id: str,
     tool_name: str,

@@ -5,9 +5,13 @@ with OIDC support (JWKS validation, standard claims).
 """
 
 from dataclasses import dataclass
-from typing import Any
+from typing import Any, TYPE_CHECKING
 
 import structlog
+
+if TYPE_CHECKING:
+    from jwt import PyJWKClient
+    from jwt.types import Options
 
 from mcp_hangar.domain.contracts.authentication import AuthRequest, IAuthenticator, ITokenValidator
 from mcp_hangar.domain.exceptions import ExpiredCredentialsError, InvalidCredentialsError, TokenLifetimeExceededError
@@ -209,7 +213,7 @@ class JWKSTokenValidator(ITokenValidator):
             config: OIDC configuration with issuer and optional JWKS URI.
         """
         self._config = config
-        self._jwks_client = None
+        self._jwks_client: PyJWKClient | None = None
         self._jwks_uri: str | None = None
 
     def validate(self, token: str) -> dict:
@@ -238,6 +242,7 @@ class JWKSTokenValidator(ITokenValidator):
             if self._jwks_client is None:
                 self._init_jwks_client()
 
+            assert self._jwks_client is not None
             signing_key = self._jwks_client.get_signing_key_from_jwt(token)
 
             claims = jwt.decode(
@@ -376,7 +381,7 @@ class StaticSecretTokenValidator(ITokenValidator):
                 auth_method="jwt",
             ) from e
 
-        options = {
+        options: Options = {
             "verify_exp": True,
             "verify_iat": True,
             "verify_aud": self._audience is not None,

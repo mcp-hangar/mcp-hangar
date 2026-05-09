@@ -163,6 +163,8 @@ class DiscoveredMcpServer:
         if isinstance(last_seen_at, str):
             last_seen_at = datetime.fromisoformat(last_seen_at)
 
+        assert discovered_at is not None
+        assert last_seen_at is not None
         return cls(
             name=data["name"],
             source_type=data["source_type"],

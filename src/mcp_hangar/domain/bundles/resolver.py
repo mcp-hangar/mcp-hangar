@@ -149,7 +149,8 @@ class BundleResolver:
                 for conflict in definition.conflicts:
                     if conflict in mcp_servers:
                         # Only report each conflict once
-                        pair = tuple(sorted([name, conflict]))
+                        pair_sorted = sorted([name, conflict])
+                        pair = (pair_sorted[0], pair_sorted[1])
                         if pair not in result.conflicts:
                             result.conflicts.append(pair)
 

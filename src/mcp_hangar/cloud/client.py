@@ -71,7 +71,7 @@ class CloudClient:
         }
         resp = await self._http.post("/api/uplink/register", json=body)
         resp.raise_for_status()
-        data = resp.json()
+        data: dict[str, Any] = resp.json()
         self._agent_id = data.get("agent_id", "")
         logger.info(
             "cloud_registered",

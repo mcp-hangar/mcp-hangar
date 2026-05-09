@@ -74,6 +74,7 @@ class PersistentAuditStore(AuditStore):
         since: datetime | None = None,
         limit: int = 100,
         caller_user_id: str | None = None,
+        provider_id: str | None = None,
     ) -> list[AuditRecord]:
         """Query audit records.
 

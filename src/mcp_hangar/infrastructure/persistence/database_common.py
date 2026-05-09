@@ -185,11 +185,13 @@ class PostgresConnectionFactory:
             psycopg2 connection.
         """
         self._ensure_pool()
+        assert self._pool is not None
         conn = self._pool.getconn()
         try:
             yield conn
         finally:
-            self._pool.putconn(conn)
+            if self._pool:
+                self._pool.putconn(conn)
 
     def close(self) -> None:
         """Close the connection pool."""

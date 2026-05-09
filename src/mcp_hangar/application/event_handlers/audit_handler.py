@@ -107,7 +107,8 @@ class InMemoryAuditStore(AuditStore):
         """Query audit records with optional filters."""
         if mcp_server_id is None:
             mcp_server_id = provider_id
-        results = []
+        from typing import Any
+        results: list[Any] = []
         for record in reversed(self._records):  # Most recent first
             if len(results) >= limit:
                 break
@@ -218,7 +219,7 @@ class AuditEventHandler:
         record = AuditRecord(
             event_id=event.event_id,
             event_type=event_type,
-            occurred_at=event.occurred_at,
+            occurred_at=datetime.fromtimestamp(event.occurred_at, tz=UTC),
             mcp_server_id=mcp_server_id,
             data=event.to_dict(),
             caller_user_id=caller_user_id,

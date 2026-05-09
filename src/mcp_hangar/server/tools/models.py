@@ -18,7 +18,7 @@ class ToolSummary:
 
     def to_dict(self) -> dict[str, Any]:
         """Convert to dictionary."""
-        result = {"name": self.name}
+        result: dict[str, Any] = {"name": self.name}
         if self.description:
             result["description"] = self.description
         return result
@@ -48,7 +48,7 @@ class HangarLoadResult:
 
     def to_dict(self) -> dict[str, Any]:
         """Convert to dictionary for MCP response."""
-        result = {
+        result: dict[str, Any] = {
             "status": self.status,
             "message": self.message,
         }

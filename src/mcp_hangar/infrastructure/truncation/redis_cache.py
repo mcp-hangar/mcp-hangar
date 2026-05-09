@@ -5,7 +5,7 @@ multiple instances need to share the truncation cache.
 """
 
 import json
-from typing import Any
+from typing import Any, cast
 
 from ...domain.contracts.response_cache import CacheRetrievalResult, IResponseCache
 from ...logging_config import get_logger
@@ -195,7 +195,7 @@ class RedisResponseCache(IResponseCache):
             deleted = self._client.delete(key)
             if deleted:
                 logger.debug("redis_cache_entry_deleted", continuation_id=continuation_id)
-            return deleted > 0
+            return cast(bool, deleted > 0)
         except Exception as e:  # noqa: BLE001 -- infra-boundary: graceful degradation on Redis failure
             logger.error(
                 "redis_cache_delete_failed",
@@ -274,6 +274,6 @@ class RedisResponseCache(IResponseCache):
             True if Redis is reachable, False otherwise.
         """
         try:
-            return self._client.ping()
+            return cast(bool, self._client.ping())
         except Exception:  # noqa: BLE001 -- infra-boundary: graceful degradation on Redis failure
             return False

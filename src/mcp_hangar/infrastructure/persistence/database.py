@@ -179,10 +179,14 @@ class Database:
 
                 # Get database stats
                 cursor = await conn.execute("SELECT COUNT(*) FROM mcp_server_configs")
-                mcp_server_count = (await cursor.fetchone())[0]
+                row1 = await cursor.fetchone()
+                assert row1 is not None
+                mcp_server_count = row1[0]
 
                 cursor = await conn.execute("SELECT COUNT(*) FROM audit_log")
-                audit_count = (await cursor.fetchone())[0]
+                row2 = await cursor.fetchone()
+                assert row2 is not None
+                audit_count = row2[0]
 
                 return {
                     "status": "healthy",

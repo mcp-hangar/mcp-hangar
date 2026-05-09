@@ -181,7 +181,8 @@ class InMemorySecuritySink(SecurityEventSink):
     ) -> list[SecurityEvent]:
         """Query stored security events."""
         with self._lock:
-            results = []
+            from typing import Any
+            results: list[Any] = []
             for event in reversed(self._events):
                 if len(results) >= limit:
                     break
@@ -310,7 +311,7 @@ class SecurityEventHandler:
         }
 
         handler = handlers.get(type(event))
-        if handler:
+        if handler and callable(handler):
             handler(event)
 
         # Run anomaly detection

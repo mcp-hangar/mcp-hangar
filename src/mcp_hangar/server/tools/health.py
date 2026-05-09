@@ -206,12 +206,12 @@ def register_health_tools(mcp: FastMCP) -> None:
         # Get all mcp_servers via repository
         all_mcp_servers = ctx.repository.get_all()
         mcp_servers = list(all_mcp_servers.values())
-        state_counts = {}
+        state_counts: dict[str, int] = {}
         for p in mcp_servers:
             state = str(p.state)
             state_counts[state] = state_counts.get(state, 0) + 1
 
-        group_state_counts = {}
+        group_state_counts: dict[str, int] = {}
         total_group_members = 0
         healthy_group_members = 0
         for group in ctx.groups.values():
@@ -282,7 +282,7 @@ def register_health_tools(mcp: FastMCP) -> None:
         ctx = get_context()
 
         if format == "prometheus":
-            return {"metrics": m.REGISTRY.render()}
+            return {"metrics": m.REGISTRY.get_metrics_output()}
 
         result: dict[str, Any] = {
             "mcp_servers": {},

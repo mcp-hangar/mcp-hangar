@@ -13,7 +13,7 @@ This command provides the "5-minute experience" for new users:
 
 import os
 from pathlib import Path
-from typing import Annotated
+from typing import Annotated, cast
 
 import questionary
 from rich import box
@@ -228,7 +228,7 @@ def _prompt_existing_config_action(
     if action is None:
         raise typer.Abort()
 
-    return action
+    return cast(str, action)
 
 
 def _show_completion_summary(
@@ -492,8 +492,8 @@ def init_command(
 
         elif action == ExistingConfigAction.MERGE:
             # Merge new mcp_servers with existing
-            mcp_server_defs = [get_mcp_server(name) for name in selected_mcp_servers]
-            mcp_server_defs = [p for p in mcp_server_defs if p is not None]
+            mcp_server_defs_raw = [get_mcp_server(name) for name in selected_mcp_servers]
+            mcp_server_defs = [p for p in mcp_server_defs_raw if p is not None]
 
             try:
                 added, skipped, total = config_mgr.merge_mcp_servers(mcp_server_defs, mcp_server_configs, deps)
@@ -518,8 +518,8 @@ def init_command(
                 if backup_path:
                     console.print(f"  [dim]Backed up to: {backup_path}[/dim]")
 
-            mcp_server_defs = [get_mcp_server(name) for name in selected_mcp_servers]
-            mcp_server_defs = [p for p in mcp_server_defs if p is not None]
+            mcp_server_defs_raw = [get_mcp_server(name) for name in selected_mcp_servers]
+            mcp_server_defs = [p for p in mcp_server_defs_raw if p is not None]
 
             try:
                 config_mgr.write_initial_config(mcp_server_defs, mcp_server_configs, deps)
@@ -529,8 +529,8 @@ def init_command(
 
     else:
         # No existing config or reset flag - write fresh config
-        mcp_server_defs = [get_mcp_server(name) for name in selected_mcp_servers]
-        mcp_server_defs = [p for p in mcp_server_defs if p is not None]
+        mcp_server_defs_raw = [get_mcp_server(name) for name in selected_mcp_servers]
+        mcp_server_defs = [p for p in mcp_server_defs_raw if p is not None]
 
         try:
             config_mgr.write_initial_config(mcp_server_defs, mcp_server_configs, deps)

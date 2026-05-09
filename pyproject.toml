@@ -102,45 +102,33 @@ ignore = [
     "SIM117",
     "SIM118",
 ]
+# Mypy strictness migration in progress (TASK-P1-5).
+# Phase 1: baseline strictness with per-module debt overrides (DONE).
+# Phase 2: clean union-attr + attr-defined site by site.
+# Phase 3: enable disallow_untyped_defs, drop all per-module overrides.
+# Goal: zero overrides + strict = true by 2026-Q4.
 [tool.mypy]
 python_version = "3.11"
 strict = false
-warn_return_any = false
-warn_unused_ignores = false
-disallow_untyped_defs = false
-disallow_incomplete_defs = false
-check_untyped_defs = false
-no_implicit_optional = false
+warn_return_any = true
+warn_unused_ignores = true
 warn_redundant_casts = true
 warn_unused_configs = true
+disallow_untyped_defs = false      # TODO(mypy-phase-3): enable
+disallow_incomplete_defs = false   # TODO(mypy-phase-3): enable
+check_untyped_defs = true
+no_implicit_optional = true
 show_error_codes = true
 ignore_missing_imports = true
-disable_error_code = [
-    "union-attr",
-    "arg-type",
-    "assignment",
-    "attr-defined",
-    "return-value",
-    "override",
-    "call-arg",
-    "var-annotated",
-    "valid-type",
-    "misc",
-    "index",
-    "operator",
-    "no-redef",
-    "abstract",
-    "typeddict-unknown-key",
-    "list-item",
-    "name-defined",
-]
+# disable_error_code intentionally absent -- per-module overrides below
+# carry the technical debt explicitly. Goal: zero per-module overrides
+# by 2026-Q4 (see ROADMAP / TASK-P1-5 phases 2 and 3).
 [[tool.mypy.overrides]]
 module = [
     "docker.*",
     "yaml.*",
     "prometheus_client.*",
     "kubernetes.*",
-    "asyncpg.*",
     "psycopg2.*",
     "langfuse.*",
     "opentelemetry.*",
@@ -150,6 +138,128 @@ module = [
     "structlog.*",
 ]
 ignore_missing_imports = true
+
+# TODO(mypy-phase-2): target removal 2026-Q3
+[[tool.mypy.overrides]]
+module = "mcp_hangar.observability.conventions"
+disable_error_code = ["attr-defined"]
+
+# TODO(mypy-phase-2): target removal 2026-Q3
+[[tool.mypy.overrides]]
+module = "mcp_hangar.bootstrap.runtime"
+disable_error_code = ["arg-type", "assignment", "union-attr"]
+
+# TODO(mypy-phase-2): target removal 2026-Q3
+[[tool.mypy.overrides]]
+module = "mcp_hangar.domain.security.roles"
+disable_error_code = ["assignment", "misc", "no-redef"]
+
+# TODO(mypy-phase-2): target removal 2026-Q3
+[[tool.mypy.overrides]]
+module = "mcp_hangar.metrics"
+disable_error_code = ["assignment", "operator", "valid-type"]
+
+# TODO(mypy-phase-2): target removal 2026-Q3
+[[tool.mypy.overrides]]
+module = "mcp_hangar.infrastructure.event_sourced_repository"
+disable_error_code = ["attr-defined", "no-any-return"]
+
+# TODO(mypy-phase-2): target removal 2026-Q3
+[[tool.mypy.overrides]]
+module = "mcp_hangar.fastmcp_server.builder"
+disable_error_code = ["arg-type", "valid-type"]
+
+# TODO(mypy-phase-2): target removal 2026-Q3
+[[tool.mypy.overrides]]
+module = "mcp_hangar.facade"
+disable_error_code = ["attr-defined", "no-any-return", "union-attr"]
+
+# TODO(mypy-phase-2): target removal 2026-Q3
+[[tool.mypy.overrides]]
+module = "mcp_hangar.server.tools.mcp_server"
+disable_error_code = ["no-any-return", "union-attr"]
+
+# TODO(mypy-phase-2): target removal 2026-Q3
+[[tool.mypy.overrides]]
+module = "mcp_hangar.server.tools.hangar"
+disable_error_code = ["no-any-return", "union-attr"]
+
+# TODO(mypy-phase-2): target removal 2026-Q3
+[[tool.mypy.overrides]]
+module = "mcp_hangar.domain.model.mcp_server"
+disable_error_code = ["attr-defined", "index", "no-any-return", "operator", "union-attr"]
+
+# TODO(mypy-phase-2): target removal 2026-Q3
+[[tool.mypy.overrides]]
+module = "mcp_hangar.infrastructure.discovery.filesystem_source"
+disable_error_code = ["assignment", "misc", "var-annotated"]
+
+# TODO(mypy-phase-2): target removal 2026-Q3
+[[tool.mypy.overrides]]
+module = "mcp_hangar.fastmcp_server.asgi"
+disable_error_code = ["attr-defined", "misc", "valid-type"]
+
+# TODO(mypy-phase-2): target removal 2026-Q3
+[[tool.mypy.overrides]]
+module = "mcp_hangar.application.queries.handlers"
+disable_error_code = ["override"]
+
+# TODO(mypy-phase-2): target removal 2026-Q3
+[[tool.mypy.overrides]]
+module = "enterprise.auth.infrastructure.event_sourced_store"
+disable_error_code = ["arg-type", "index", "misc", "operator", "union-attr", "valid-type"]
+
+# TODO(mypy-phase-2): target removal 2026-Q3
+[[tool.mypy.overrides]]
+module = "enterprise.auth.bootstrap"
+disable_error_code = ["abstract", "arg-type", "assignment", "attr-defined"]
+
+# TODO(mypy-phase-2): target removal 2026-Q3
+[[tool.mypy.overrides]]
+module = "enterprise.auth.infrastructure.api_key_authenticator"
+disable_error_code = ["assignment", "union-attr"]
+
+# TODO(mypy-phase-2): target removal 2026-Q3
+[[tool.mypy.overrides]]
+module = "enterprise.auth.queries.handlers"
+disable_error_code = ["override"]
+
+# TODO(mypy-phase-2): target removal 2026-Q3
+[[tool.mypy.overrides]]
+module = "enterprise.auth.commands.handlers"
+disable_error_code = ["attr-defined", "call-arg"]
+
+# TODO(mypy-phase-2): target removal 2026-Q3
+[[tool.mypy.overrides]]
+module = "mcp_hangar.logging_config"
+disable_error_code = ["list-item", "no-any-return"]
+
+# TODO(mypy-phase-2): target removal 2026-Q3
+[[tool.mypy.overrides]]
+module = "mcp_hangar.stdio_client"
+disable_error_code = ["no-any-return", "union-attr", "var-annotated"]
+
+# TODO(mypy-phase-2): target removal 2026-Q3
+[[tool.mypy.overrides]]
+module = "mcp_hangar.domain.model.event_sourced_mcp_server"
+disable_error_code = ["arg-type", "assignment"]
+
+# TODO(mypy-phase-2): target removal 2026-Q3
+[[tool.mypy.overrides]]
+module = "mcp_hangar.server.tools.groups"
+disable_error_code = ["union-attr"]
+# TODO(mypy-phase-2): target removal 2026-Q3
+[[tool.mypy.overrides]]
+module = "enterprise.auth.infrastructure.sqlite_store"
+disable_error_code = ["arg-type", "no-any-return"]
+
+
+# TODO(mypy-phase-2): target removal 2026-Q3
+[[tool.mypy.overrides]]
+module = "mcp_hangar.application.commands.load_handlers"
+disable_error_code = ["assignment", "misc", "valid-type"]
+
+
 [tool.pytest.ini_options]
 testpaths = ["tests"]
 asyncio_mode = "auto"

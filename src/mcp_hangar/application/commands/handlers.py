@@ -1,7 +1,7 @@
 """Command handlers implementation."""
 
 import time
-from typing import Any
+from typing import Any, cast
 
 from ...domain.contracts.command import CommandHandler
 from ...domain.contracts.event_bus import IEventBus
@@ -44,7 +44,7 @@ class BaseMcpServerHandler(CommandHandler):
         # First check static repository
         mcp_server = self._repository.get(mcp_server_id)
         if mcp_server is not None:
-            return mcp_server
+            return cast(McpServerRuntime, mcp_server)
 
         # Then check runtime (hot-loaded) mcp_servers
         if self._runtime_store is not None:
@@ -146,7 +146,7 @@ class InvokeToolHandler(BaseMcpServerHandler):
                 tool=command.tool_name,
                 duration=duration,
                 success=success,
-                error_type=error_type,
+                error_type=error_type or "",
             )
             self._publish_events(mcp_server)
 

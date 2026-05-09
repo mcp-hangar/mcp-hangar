@@ -75,9 +75,10 @@ _thread_locks: threading.local = threading.local()
 
 def _get_held_locks() -> list[tuple[int, str]]:
     """Get list of (level, name) for locks held by current thread."""
+    result: list[tuple[int, str]] = getattr(_thread_locks, "held", [])
     if not hasattr(_thread_locks, "held"):
-        _thread_locks.held = []
-    return _thread_locks.held
+        _thread_locks.held = result
+    return result
 
 
 def _register_lock(level: int, name: str) -> None:

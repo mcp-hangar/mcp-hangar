@@ -39,6 +39,9 @@ def init_event_store(runtime: "Runtime", config: dict[str, Any]) -> None:
 
     driver = event_store_config.get("driver", "sqlite")
 
+    from ...domain.contracts.event_store import IEventStore
+    event_store: IEventStore
+
     if driver == "memory":
         from ...infrastructure.persistence import InMemoryEventStore
 
@@ -50,9 +53,10 @@ def init_event_store(runtime: "Runtime", config: dict[str, Any]) -> None:
         # Fallback to in-memory when enterprise is not installed.
         try:
             Path(db_path).parent.mkdir(parents=True, exist_ok=True)
-            event_store = create_enterprise_event_store(driver, event_store_config)
-            if event_store is None:
+            _result = create_enterprise_event_store(driver, event_store_config)
+            if _result is None:
                 raise ImportError
+            event_store = _result
             logger.info("event_store_initialized", driver="sqlite", path=db_path)
         except ImportError:
             logger.warning(

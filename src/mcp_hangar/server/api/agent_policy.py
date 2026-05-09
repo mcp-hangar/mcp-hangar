@@ -72,7 +72,7 @@ def _require_authenticated_principal(request: Request) -> Principal:
         _publish_policy_push_rejected("anonymous", "authentication_required")
         raise MissingCredentialsError("Authentication required")
 
-    return principal
+    return cast(Principal, principal)
 
 
 def _authorize_policy_write(principal: Principal) -> None:

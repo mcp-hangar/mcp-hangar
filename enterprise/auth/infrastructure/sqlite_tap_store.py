@@ -50,12 +50,13 @@ class SQLiteToolAccessPolicyStore:
     def _get_connection(self) -> sqlite3.Connection:
         """Get or create a thread-local SQLite connection."""
         if not hasattr(self._local, "connection") or self._local.connection is None:
-            conn = sqlite3.connect(self._db_path, check_same_thread=False)
-            conn.row_factory = sqlite3.Row
-            conn.execute("PRAGMA journal_mode=WAL")
-            conn.execute("PRAGMA foreign_keys=ON")
-            self._local.connection = conn
-        return self._local.connection
+            new_conn = sqlite3.connect(self._db_path, check_same_thread=False)
+            new_conn.row_factory = sqlite3.Row
+            new_conn.execute("PRAGMA journal_mode=WAL")
+            new_conn.execute("PRAGMA foreign_keys=ON")
+            self._local.connection = new_conn
+        result: sqlite3.Connection = getattr(self._local, "connection")
+        return result
 
     def _init_schema(self) -> None:
         """Create the tool_access_policies table if it does not exist."""
