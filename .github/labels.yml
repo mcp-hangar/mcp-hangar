@@ -82,6 +82,10 @@
   color: fef2c0
   description: Issue needs initial review; priority and scope not yet assigned
 
+- name: skip-changelog
+  color: ededed
+  description: PR is exempt from CHANGELOG entry requirement (chore/deps, ci, style, test, pure docs)
+
 - name: pinned
   color: "000000"
   description: Long-lived issue; exempt from stale bot
