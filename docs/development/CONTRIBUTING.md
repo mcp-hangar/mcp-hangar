@@ -145,6 +145,7 @@ See [Git Flow](GIT_FLOW.md) for branching conventions, merge strategy, and commi
 4. Run checks:
 
    ```bash
+   pre-commit install --hook-type pre-commit --hook-type commit-msg
    pytest -v -m "not slow"
    pre-commit run --all-files
    ```
