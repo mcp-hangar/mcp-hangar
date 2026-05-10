@@ -293,14 +293,17 @@ jobs:
             CHANGELOG=$(awk '/^## \[Unreleased\]/{flag=1; next} /^## \[/{flag=0} flag' CHANGELOG.md)
           fi
 
-          # Escape for GitHub Actions
-          CHANGELOG="${CHANGELOG//'%'/'%25'}"
-          CHANGELOG="${CHANGELOG//$'\n'/'%0A'}"
-          CHANGELOG="${CHANGELOG//$'\r'/'%0D'}"
+          # Decode HTML entities inserted by release-please (option B from issue)
+          CHANGELOG=$(echo "$CHANGELOG" | sed 's/&gt;/>/g; s/&lt;/</g; s/&amp;/\&/g')
+
+          # Derive the previous release tag for the Full Changelog compare link
+          PREV_TAG=$(git tag --sort=-v:refname | grep -E '^v[0-9]+\.[0-9]+\.[0-9]+$' | grep -v "^v${BASE_VERSION}$" | head -1)
 
           echo "content<<EOF" >> $GITHUB_OUTPUT
           echo "$CHANGELOG" >> $GITHUB_OUTPUT
           echo "EOF" >> $GITHUB_OUTPUT
+
+          echo "prev_tag=${PREV_TAG}" >> $GITHUB_OUTPUT
 
       - name: Create GitHub Release
         uses: softprops/action-gh-release@v2
@@ -327,5 +330,6 @@ jobs:
             - [PyPI Package](https://pypi.org/project/mcp-hangar/${{ needs.validate.outputs.version }}/)
             - [Docker Image](https://ghcr.io/${{ github.repository }}:${{ needs.validate.outputs.version }})
             - [Documentation](https://${{ github.repository_owner }}.github.io/mcp-hangar/)
+
+            **Full Changelog**: https://github.com/${{ github.repository }}/compare/${{ steps.changelog.outputs.prev_tag }}...v${{ needs.validate.outputs.version }}
           prerelease: ${{ needs.validate.outputs.is_prerelease == 'true' }}
-          generate_release_notes: true
