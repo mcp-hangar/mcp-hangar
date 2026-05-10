@@ -91,7 +91,7 @@ nav:
       - Overview: architecture/OVERVIEW.md
       - Event Sourcing: architecture/EVENT_SOURCING.md
       - ADRs:
-          - ADR-001 Langfuse Integration: adr/001-langfuse-integration.md
+          - ADR-007 Langfuse Integration: adr/ADR-007-langfuse-integration.md
   - Guides:
       - Testing: guides/TESTING.md
       - Containers: guides/CONTAINERS.md

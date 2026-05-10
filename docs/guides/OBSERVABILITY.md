@@ -520,7 +520,7 @@ result = traced_service.invoke_tool(
 )
 ```
 
-See [ADR-001](../adr/001-langfuse-integration.md) for architectural details.
+See [ADR-007](../adr/ADR-007-langfuse-integration.md) for architectural details.
 
 ## Logging
 

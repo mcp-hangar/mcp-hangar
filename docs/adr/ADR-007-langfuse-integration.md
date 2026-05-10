@@ -1,4 +1,4 @@
-# ADR-001: Langfuse Integration for LLM Observability
+# ADR-007: Langfuse Integration for LLM Observability
 
 **Status:** Accepted
 **Date:** 2026-01-12
