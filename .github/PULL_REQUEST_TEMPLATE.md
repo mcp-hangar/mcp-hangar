@@ -1,55 +1,27 @@
-## Description
+## Why
+<!-- 1-3 sentences on motivation. Link to issue: Closes #N or Refs #N -->
 
-Brief description of the changes in this PR.
+## What
+<!-- Bulleted list of changes. Imperative voice. -->
 
-## Type of Change
+-
 
-- [ ] Bug fix (non-breaking change that fixes an issue)
-- [ ] New feature (non-breaking change that adds functionality)
-- [ ] Breaking change (fix or feature that would cause existing functionality to not work as expected)
-- [ ] Documentation update
-- [ ] Refactoring (no functional changes)
-- [ ] Performance improvement
-- [ ] Test coverage improvement
+## How tested
+<!-- Commands run, scenarios verified. "Manual smoke on X" is acceptable.
+     For UI changes: include browser/screenshot.
+     For workflows: actionlint output. -->
 
-## Related Issues
+## Risk and rollback
+<!-- What could break and how to revert.
+     "Low risk; revert single commit" is fine for trivial changes. -->
 
-Fixes #(issue number)
+## CHANGELOG note
+<!-- Paste the [Unreleased] entry this PR adds, or write: skip-changelog: <reason> -->
 
-## Changes Made
-
-- Change 1
-- Change 2
-- Change 3
-
-## Testing
-
-Describe the tests you ran to verify your changes:
-
-- [ ] Unit tests pass (`pytest tests/ -m "not slow"`)
-- [ ] Integration tests pass (if applicable)
-- [ ] Manual testing performed
-
-### Test Configuration
-
-- **OS**:
-- **Python version**:
-
-## Checklist
-
-- [ ] My code follows the project's style guidelines
-- [ ] I have performed a self-review of my code
-- [ ] I have commented my code, particularly in hard-to-understand areas
-- [ ] I have made corresponding changes to the documentation
-- [ ] My changes generate no new warnings
-- [ ] I have added tests that prove my fix is effective or that my feature works
-- [ ] New and existing unit tests pass locally with my changes
-- [ ] Any dependent changes have been merged and published
-
-## Screenshots (if applicable)
-
-Add screenshots to help explain your changes.
-
-## Additional Notes
-
-Add any other information about the PR here.
+## Agent metadata
+<!-- Fill if this PR was authored by a coding agent (Copilot, Claude, etc.).
+     Humans: delete this entire section if not applicable. -->
+- [ ] Single Conventional Commit scope: `<scope>`
+- [ ] Single goal (no scope creep)
+- [ ] LOC declared upfront: `<n>`
+- [ ] Files in scope match the issue brief
