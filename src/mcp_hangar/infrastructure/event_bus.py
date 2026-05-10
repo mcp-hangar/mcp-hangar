@@ -9,7 +9,9 @@ import threading
 
 from mcp_hangar.domain.contracts.event_bus import IEventBus
 from mcp_hangar.domain.contracts.event_store import IEventStore, NullEventStore
+from mcp_hangar.domain.contracts.hook_subscriber import IHookSubscriber
 from mcp_hangar.domain.events import DomainEvent
+from mcp_hangar.domain.value_objects.hook import Hook, HookPhase
 from mcp_hangar.infrastructure.lock_hierarchy import LockLevel, TrackedLock
 from mcp_hangar.logging_config import get_logger
 from mcp_hangar.observability.tracing import get_tracer
@@ -49,6 +51,8 @@ class EventBus(IEventBus):
         self._lock = TrackedLock(LockLevel.EVENT_BUS, "EventBus", reentrant=False)
         self._error_handlers: list[Callable[[Exception, DomainEvent], None]] = []
         self._event_store = event_store or NullEventStore()
+        self._hook_subscribers: list[IHookSubscriber] = []
+        self._hook_sequence: int = 0
 
     @property
     def event_store(self) -> IEventStore:
@@ -120,6 +124,32 @@ class EventBus(IEventBus):
             if event_type in self._handlers:
                 self._handlers[event_type].remove(handler)
 
+    def subscribe_hooks(self, subscriber: IHookSubscriber) -> None:
+        """Register a hook subscriber for phase-wrapped event delivery.
+
+        Hook subscribers receive Hook objects (event + phase) in parallel
+        with the existing flat-event path. This is the forward-looking API;
+        flat-event subscribers will be deprecated over time.
+
+        Args:
+            subscriber: Hook subscriber to register.
+        """
+        with self._lock:
+            self._hook_subscribers.append(subscriber)
+        logger.debug("hook_subscriber_registered", subscriber=type(subscriber).__name__)
+
+    def unsubscribe_hooks(self, subscriber: IHookSubscriber) -> None:
+        """Remove a hook subscriber. Silently ignores unregistered subscribers.
+
+        Args:
+            subscriber: Hook subscriber to remove.
+        """
+        with self._lock:
+            try:
+                self._hook_subscribers.remove(subscriber)
+            except ValueError:
+                pass
+
     def publish(self, event: DomainEvent) -> None:
         """
         Publish an event to all subscribed handlers.
@@ -174,6 +204,12 @@ class EventBus(IEventBus):
                                 event_type=event_type_name,
                                 error=str(eh),
                             )
+
+            # Hook fan-out: deliver phase-wrapped event to hook subscribers.
+            # Default phase is OBSERVE for events published via the flat API;
+            # phase-specific emission will be added when interceptor pipeline
+            # code lands (issue #121).
+            self._publish_hook(event, HookPhase.OBSERVE, evt_span)
 
     def publish_to_stream(
         self,
@@ -250,6 +286,30 @@ class EventBus(IEventBus):
         stream_id = f"{aggregate_type}:{aggregate_id}"
         return self.publish_to_stream(stream_id, events, expected_version)
 
+    def _publish_hook(self, event: DomainEvent, phase: HookPhase, span: object) -> None:
+        with self._lock:
+            subscribers = list(self._hook_subscribers)
+            seq = self._hook_sequence
+            self._hook_sequence += 1
+
+        if not subscribers:
+            return
+
+        hook = Hook(event=event, phase=phase, sequence_number=seq)
+        for subscriber in subscribers:
+            try:
+                subscriber.on_hook(hook)
+            except Exception as e:  # noqa: BLE001 -- fault-barrier: hook subscriber errors must not break event publishing
+                logger.exception(
+                    "hook_subscriber_error",
+                    event_type=event.__class__.__name__,
+                    phase=phase.value,
+                    subscriber=type(subscriber).__name__,
+                    error=str(e),
+                )
+                if hasattr(span, "record_exception"):
+                    span.record_exception(e)
+
     def on_error(self, handler: Callable[[Exception, DomainEvent], None]) -> None:
         """
         Register a handler for errors that occur during event handling.
@@ -264,6 +324,8 @@ class EventBus(IEventBus):
         with self._lock:
             self._handlers.clear()
             self._error_handlers.clear()
+            self._hook_subscribers.clear()
+            self._hook_sequence = 0
 
 
 # Global event bus instance

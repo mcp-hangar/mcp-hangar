@@ -27,6 +27,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - GitHub Projects v2 board setup script and auto-add workflow
 - actionlint CI workflow to validate `.github/workflows/` YAML on PRs, push to main, and weekly schedule (#111)
 - **core:** ADR-004 digest pinning domain types (`ToolDigest`, `DigestPolicy`, `DigestMismatchEvent`), canonical SHA-256 computation helper, and standalone `DigestValidator` service (#119)
+- **core:** ADR-005 P1 interceptor framework: `Hook`/`HookPhase` value objects, `IHookSubscriber` contract, EventBus hook fan-out, and `GET /interceptors/list` endpoint for SEP-1763 discoverability (#120)
 
 ### Fixed
 
