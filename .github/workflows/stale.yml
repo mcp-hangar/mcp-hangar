@@ -1,0 +1,27 @@
+# v0.x cadence per GIT_FLOW.md decision #4. Drop to 90d post-1.0.
+name: Stale
+
+on:
+  schedule:
+    - cron: "17 3 * * *"
+  workflow_dispatch:
+
+permissions:
+  issues: write
+  pull-requests: write
+
+jobs:
+  stale:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/stale@v9
+        with:
+          days-before-stale: 180
+          days-before-close: 30
+          exempt-issue-labels: priority/p0-critical,priority/p1-high,status/blocked,pinned,type/bug
+          exempt-pr-labels: priority/p0-critical,priority/p1-high,status/blocked,pinned
+          operations-per-run: 30
+          stale-issue-message: This issue has had no activity for 180 days and is marked stale. Comment to keep it open.
+          stale-pr-message: This pull request has had no activity for 180 days and is marked stale. Update it to keep it open.
+          close-issue-message: This issue is being closed after 30 more days without activity.
+          close-pr-message: This pull request is being closed after 30 more days without activity.
