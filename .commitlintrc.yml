@@ -14,8 +14,8 @@ rules:
     - never
   subject-case:
     - 2
-    - always
-    - [lower-case, sentence-case]
+    - never
+    - [upper-case]
   subject-full-stop:
     - 2
     - never

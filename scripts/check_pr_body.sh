@@ -9,7 +9,7 @@ if echo "$PR_LABELS" | grep -q "trivial"; then
   exit 0
 fi
 
-stripped=$(echo "$PR_BODY" | sed 's/<!--.*-->//g' | sed '/<!--/,/-->/d')
+stripped=$(echo "$PR_BODY" | tr -d '\r' | sed 's/<!--.*-->//g' | sed '/<!--/,/-->/d')
 
 required_sections=("## Why" "## What" "## How tested" "## Risk and rollback" "## CHANGELOG note")
 failed=false
