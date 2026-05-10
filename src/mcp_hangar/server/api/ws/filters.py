@@ -3,6 +3,7 @@
 # pyright: reportUnknownArgumentType=false, reportUnknownVariableType=false
 
 from ....domain.events import DomainEvent
+from ....domain.value_objects.event_pattern import EventPattern
 
 
 def parse_subscription_filters(msg: dict[str, object] | None) -> dict[str, list[str]]:
@@ -34,11 +35,26 @@ def parse_subscription_filters(msg: dict[str, object] | None) -> dict[str, list[
     return result
 
 
+def compile_event_patterns(raw_patterns: list[str]) -> list[EventPattern]:
+    """Pre-compile event type strings into EventPattern objects.
+
+    Called once per subscription. Invalid patterns are silently dropped
+    (logged at debug level) to avoid breaking existing exact-match callers.
+    """
+    compiled: list[EventPattern] = []
+    for raw in raw_patterns:
+        try:
+            compiled.append(EventPattern(raw))
+        except ValueError:
+            pass
+    return compiled
+
+
 def matches_filters(event: DomainEvent, filters: dict[str, list[str]]) -> bool:
     """Determine whether an event passes the given subscription filters.
 
     An event passes if it satisfies ALL active filters (AND semantics):
-    - event_types filter: event.to_dict()["event_type"] must be in the list
+    - event_types filter: event_type must match at least one pattern (supports wildcards)
     - mcp_server_ids filter: event.to_dict().get("mcp_server_id") must be in the list
 
     An empty filters dict means no filtering -- all events pass.
@@ -53,8 +69,11 @@ def matches_filters(event: DomainEvent, filters: dict[str, list[str]]) -> bool:
     if not filters:
         return True
     d = event.to_dict()
-    if "event_types" in filters and d.get("event_type") not in filters["event_types"]:
-        return False
+    if "event_types" in filters:
+        event_type = d.get("event_type", "")
+        patterns = compile_event_patterns(filters["event_types"])
+        if not any(p.matches(event_type) for p in patterns):
+            return False
     if "mcp_server_ids" in filters and d.get("mcp_server_id") not in filters["mcp_server_ids"]:
         return False
     return True
