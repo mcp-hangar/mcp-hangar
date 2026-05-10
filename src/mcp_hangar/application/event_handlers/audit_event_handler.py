@@ -7,6 +7,7 @@ when OTLP not configured).
 MIT licensed -- part of core event handler infrastructure.
 """
 
+from ...domain.contracts.cost import ICostAttributor, InvocationContext, NullCostAttributor
 from ...domain.events import (
     McpServerStateChanged,
     ToolInvocationCompleted,
@@ -26,24 +27,25 @@ class OTLPAuditEventHandler:
     swallowed by the exporter (OTLPAuditExporter fault-barrier pattern).
     """
 
-    def __init__(self, audit_exporter: IAuditExporter | None = None) -> None:
-        """Initialize handler.
-
-        Args:
-            audit_exporter: Exporter to forward events to.
-                Defaults to NullAuditExporter if None.
-        """
+    def __init__(
+        self,
+        audit_exporter: IAuditExporter | None = None,
+        cost_attributor: ICostAttributor | None = None,
+    ) -> None:
         self._exporter = audit_exporter or NullAuditExporter()
+        self._cost_attributor = cost_attributor or NullCostAttributor()
 
     def handle(self, event: object) -> None:
-        """Dispatch event to the appropriate exporter method.
-
-        Args:
-            event: A domain event. Handles ToolInvocationCompleted,
-                ToolInvocationFailed, McpServerStateChanged. Ignores all others.
-        """
         if isinstance(event, ToolInvocationCompleted):
             identity = event.identity_context or {}
+            cost_record = self._cost_attributor.compute_cost(
+                InvocationContext(
+                    mcp_server_id=event.mcp_server_id,
+                    tool_name=event.tool_name,
+                    duration_ms=event.duration_ms,
+                    correlation_id=event.correlation_id,
+                )
+            )
             self._exporter.export_tool_invocation(
                 mcp_server_id=event.mcp_server_id,
                 tool_name=event.tool_name,
@@ -52,6 +54,10 @@ class OTLPAuditEventHandler:
                 caller_type=identity.get("principal_type"),
                 caller_id=identity.get("principal_id"),
                 caller_roles=identity.get("roles"),
+                cost_cents=cost_record.cost_cents if cost_record.cost_cents else None,
+                cost_model=str(cost_record.cost_model) if cost_record.cost_cents else None,
+                cost_input_tokens=cost_record.input_tokens if cost_record.input_tokens else None,
+                cost_output_tokens=cost_record.output_tokens if cost_record.output_tokens else None,
             )
         elif isinstance(event, ToolInvocationFailed):
             identity = event.identity_context or {}

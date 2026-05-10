@@ -33,8 +33,8 @@ if ! echo "$changed_files" | grep -qx "CHANGELOG.md"; then
   exit 1
 fi
 
-unreleased_addition=$(git diff "$BASE_SHA".."$HEAD_SHA" -- CHANGELOG.md \
-  | awk '/^@@/{ in_diff=1; next } in_diff && /^\+.*\[Unreleased\]/{ found=1; next } found && /^## \[/{ exit } found && /^\+[^+]/{ print; exit }')
+unreleased_addition=$(git diff -U999 "$BASE_SHA".."$HEAD_SHA" -- CHANGELOG.md \
+  | awk '/^@@/{ in_diff=1; next } in_diff && /\[Unreleased\]/{ found=1; next } found && /^[^+-].*## \[/{ found=0 } found && !p && /^\+[^+]/{ print; p=1 }')
 
 if [ -z "$unreleased_addition" ]; then
   echo "::error::No new line found under \`## [Unreleased]\` in CHANGELOG.md. Add an entry or apply the \`skip-changelog\` label."

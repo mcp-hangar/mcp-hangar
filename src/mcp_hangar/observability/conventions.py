@@ -308,6 +308,8 @@ def set_governance_attributes(
     cost_input_tokens: int | None = None,
     cost_output_tokens: int | None = None,
     cost_currency: str | None = None,
+    risk_score: float | None = None,
+    risk_session_anomaly_score: float | None = None,
 ) -> None:
     """Set standard MCP governance attributes on an OTEL span in one call.
 
@@ -370,6 +372,10 @@ def set_governance_attributes(
         span.set_attribute(Cost.OUTPUT_TOKENS, cost_output_tokens)
     if cost_currency is not None:
         span.set_attribute(Cost.CURRENCY, cost_currency)
+    if risk_score is not None:
+        span.set_attribute(Risk.SCORE, risk_score)
+    if risk_session_anomaly_score is not None:
+        span.set_attribute(Risk.SESSION_ANOMALY_SCORE, risk_session_anomaly_score)
 
 
 # legacy aliases
