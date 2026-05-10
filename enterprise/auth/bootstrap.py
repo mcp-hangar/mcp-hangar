@@ -10,7 +10,7 @@ from typing import Any
 
 import structlog
 
-from mcp_hangar.domain.contracts.authentication import IApiKeyStore
+from mcp_hangar.domain.contracts.authentication import IApiKeyStore, IAuthenticator
 from mcp_hangar.domain.contracts.authorization import IAuthorizer, IRoleStore
 from enterprise.auth.infrastructure.api_key_authenticator import ApiKeyAuthenticator, InMemoryApiKeyStore
 from enterprise.auth.infrastructure.jwt_authenticator import JWKSTokenValidator, JWTAuthenticator, OIDCConfig
@@ -48,9 +48,9 @@ def _create_storage_backends(
 
     if driver == "memory":
         logger.info("auth_storage_memory", warning="Data will be lost on restart")
-        api_key_store = InMemoryApiKeyStore()
-        role_store = InMemoryRoleStore()
-        tap_store = None
+        api_key_store: IApiKeyStore = InMemoryApiKeyStore()
+        role_store: IRoleStore = InMemoryRoleStore()
+        tap_store: Any = None
 
     elif driver == "event_sourcing":
         from enterprise.auth.infrastructure.event_sourced_store import EventSourcedApiKeyStore, EventSourcedRoleStore
@@ -79,11 +79,13 @@ def _create_storage_backends(
 
         logger.info("auth_storage_sqlite", path=str(db_path))
 
-        api_key_store = SQLiteApiKeyStore(db_path, event_publisher=event_publisher)
-        api_key_store.initialize()
+        sqlite_api_key_store = SQLiteApiKeyStore(db_path, event_publisher=event_publisher)
+        sqlite_api_key_store.initialize()
+        api_key_store = sqlite_api_key_store
 
-        role_store = SQLiteRoleStore(db_path, event_publisher=event_publisher)
-        role_store.initialize()
+        sqlite_role_store = SQLiteRoleStore(db_path, event_publisher=event_publisher)
+        sqlite_role_store.initialize()
+        role_store = sqlite_role_store
 
         from enterprise.auth.infrastructure.sqlite_tap_store import SQLiteToolAccessPolicyStore
 
@@ -113,11 +115,13 @@ def _create_storage_backends(
             max_connections=config.storage.max_connections,
         )
 
-        api_key_store = PostgresApiKeyStore(connection_factory, event_publisher=event_publisher)
-        api_key_store.initialize()
+        pg_api_key_store = PostgresApiKeyStore(connection_factory, event_publisher=event_publisher)
+        pg_api_key_store.initialize()
+        api_key_store = pg_api_key_store
 
-        role_store = PostgresRoleStore(connection_factory, event_publisher=event_publisher)
-        role_store.initialize()
+        pg_role_store = PostgresRoleStore(connection_factory, event_publisher=event_publisher)
+        pg_role_store.initialize()
+        role_store = pg_role_store
         tap_store = None
 
     else:
@@ -280,7 +284,7 @@ def bootstrap_auth(
         event_bus=event_bus,
     )
 
-    authenticators = []
+    authenticators: list[IAuthenticator] = []
 
     # Initialize API Key authentication
     if config.api_key.enabled:

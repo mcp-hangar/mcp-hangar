@@ -4,6 +4,7 @@ from dataclasses import dataclass
 from datetime import datetime
 import time
 from typing import Any
+from collections.abc import Callable
 
 from ...domain.contracts.installer import IPackageInstaller
 from ...domain.contracts.registry import IRegistryClient, ServerDetails
@@ -75,7 +76,7 @@ class LoadResult:
 
     def to_dict(self) -> dict[str, Any]:
         """Convert to dictionary."""
-        result = {
+        result: dict[str, Any] = {
             "status": self.status,
             "message": self.message,
         }
@@ -106,7 +107,7 @@ class LoadMcpServerHandler(CommandHandler):
         installers: list[IPackageInstaller],
         runtime_store: RuntimeMcpServerStore,
         event_bus: IEventBus,
-        mcp_server_factory: callable,
+        mcp_server_factory: Callable[..., Any],
         mcp_server_repository: Any,
     ):
         """Initialize the handler.

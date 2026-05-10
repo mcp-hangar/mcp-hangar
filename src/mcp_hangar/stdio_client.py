@@ -23,7 +23,7 @@ class PendingRequest:
     """Tracks a pending RPC request waiting for a response."""
 
     request_id: str
-    result_queue: Queue
+    result_queue: "Queue[dict[str, Any]]"
     started_at: float
 
 
@@ -68,6 +68,7 @@ class StdioClient:
         Runs in a dedicated daemon thread.
         """
         logger.info("stdio_client_reader_started", pid=self.process.pid)
+        assert self.process.stdout is not None
         while not self.closed:
             try:
                 line = self.process.stdout.readline()
@@ -176,7 +177,7 @@ class StdioClient:
             raise ClientError("client_closed")
 
         request_id = str(uuid.uuid4())
-        result_queue = Queue(maxsize=1)
+        result_queue: Queue[dict[str, Any]] = Queue(maxsize=1)
 
         pending = PendingRequest(request_id=request_id, result_queue=result_queue, started_at=time.time())
 
@@ -203,6 +204,7 @@ class StdioClient:
                 pid=self.process.pid,
                 alive=self.process.poll() is None,
             )
+            assert self.process.stdin is not None
             self.process.stdin.write(request_str)
             self.process.stdin.flush()
             logger.debug("stdio_client_request_sent")

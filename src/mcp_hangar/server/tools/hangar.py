@@ -190,6 +190,7 @@ def register_hangar_tools(mcp: FastMCP) -> None:
         # Check if it's a group first
         if ctx.group_exists(mcp_server):
             group = ctx.get_group(mcp_server)
+            assert group is not None
             started = group.start_all()
             return {
                 "group": mcp_server,
@@ -205,7 +206,9 @@ def register_hangar_tools(mcp: FastMCP) -> None:
 
         # Send command via CQRS command bus
         command = StartMcpServerCommand(mcp_server_id=mcp_server)
-        return ctx.command_bus.send(command)
+        result = ctx.command_bus.send(command)
+        assert isinstance(result, dict)
+        return result
 
     @mcp.tool(name="hangar_stop")
     @mcp_tool_wrapper(
@@ -248,6 +251,7 @@ def register_hangar_tools(mcp: FastMCP) -> None:
         # Check if it's a group first
         if ctx.group_exists(mcp_server):
             group = ctx.get_group(mcp_server)
+            assert group is not None
             group.stop_all()
             return {
                 "group": mcp_server,
@@ -261,7 +265,9 @@ def register_hangar_tools(mcp: FastMCP) -> None:
 
         # Send command via CQRS command bus
         command = StopMcpServerCommand(mcp_server_id=mcp_server)
-        return ctx.command_bus.send(command)
+        result = ctx.command_bus.send(command)
+        assert isinstance(result, dict)
+        return result
 
     @mcp.tool(name="hangar_status")
     @mcp_tool_wrapper(

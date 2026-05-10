@@ -10,6 +10,7 @@ Production-grade metrics following Prometheus/OpenMetrics best practices:
 from collections import defaultdict
 from dataclasses import dataclass, field
 from functools import wraps
+from typing import Any
 import platform
 import threading
 import time
@@ -34,7 +35,7 @@ class Counter:
     Use for: requests, errors, completions, bytes transferred.
     """
 
-    def __init__(self, name: str, description: str, labels: list[str] = None):
+    def __init__(self, name: str, description: str, labels: list[str] | None = None):
         self.name = name
         self.description = description
         self.label_names = labels or []
@@ -75,7 +76,7 @@ class Gauge:
     Use for: in-progress operations, current state, temperature, queue size.
     """
 
-    def __init__(self, name: str, description: str, labels: list[str] = None):
+    def __init__(self, name: str, description: str, labels: list[str] | None = None):
         self.name = name
         self.description = description
         self.label_names = labels or []
@@ -151,8 +152,8 @@ class Histogram:
         self,
         name: str,
         description: str,
-        labels: list[str] = None,
-        buckets: tuple = None,
+        labels: list[str] | None = None,
+        buckets: tuple[Any, ...] | None = None,
     ):
         self.name = name
         self.description = description
@@ -214,7 +215,7 @@ class Summary:
     Use for: streaming data where quantiles aren't critical.
     """
 
-    def __init__(self, name: str, description: str, labels: list[str] = None):
+    def __init__(self, name: str, description: str, labels: list[str] | None = None):
         self.name = name
         self.description = description
         self.label_names = labels or []
@@ -330,6 +331,7 @@ class _Timer:
         return self
 
     def __exit__(self, *args) -> None:
+        assert self._start is not None
         duration = time.perf_counter() - self._start
         self._histogram.observe(duration, **self._labels)
 
@@ -343,7 +345,7 @@ class CollectorRegistry:
     """Central registry for all metrics with Prometheus exposition format output."""
 
     def __init__(self):
-        self._collectors: dict[str, any] = {}
+        self._collectors: dict[str, Any] = {}
         self._lock = threading.Lock()
 
     def register(self, collector) -> None:
@@ -1099,7 +1101,7 @@ def init_metrics(version: str = "1.0.0"):
     PROCESS_START_TIME.set(time.time())
 
 
-def observe_tool_call(mcp_server: str, tool: str, duration: float, success: bool, error_type: str = None):
+def observe_tool_call(mcp_server: str, tool: str, duration: float, success: bool, error_type: str | None = None):
     """Record a tool call observation."""
     status = "success" if success else "error"
     TOOL_CALLS_TOTAL.inc(mcp_server=mcp_server, tool=tool, status=status)
@@ -1183,7 +1185,7 @@ def cold_start_end(mcp_server: str):
     PROVIDER_COLD_START_IN_PROGRESS.set(0, mcp_server=mcp_server)
 
 
-def record_gc_cycle(duration: float, collected: dict[str, int] = None):
+def record_gc_cycle(duration: float, collected: dict[str, int] | None = None):
     """Record a GC cycle."""
     GC_CYCLES_TOTAL.inc()
     GC_CYCLE_DURATION_SECONDS.observe(duration)

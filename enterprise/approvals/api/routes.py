@@ -14,11 +14,10 @@ import hmac
 import json
 import time
 from dataclasses import asdict, dataclass
-from datetime import datetime, timezone
-from typing import Any
+from datetime import datetime, UTC
+from typing import Any, cast
 
 from starlette.requests import Request
-from starlette.responses import Response
 from starlette.routing import Route
 
 from mcp_hangar.logging_config import get_logger
@@ -45,7 +44,7 @@ class ApprovalRequestDTO:
 
 def _to_dto(request: Any) -> dict[str, Any]:
     """Convert ApprovalRequest model to DTO dict."""
-    now = datetime.now(timezone.utc)
+    now = datetime.now(UTC)
     expires_in = max(0, int((request.expires_at - now).total_seconds()))
     dto = ApprovalRequestDTO(
         approval_id=request.approval_id,
@@ -85,9 +84,7 @@ async def list_approvals(request: Request) -> HangarJSONResponse:
     try:
         state = ApprovalState(state_filter)
     except ValueError:
-        return HangarJSONResponse(
-            {"error": f"Invalid state: {state_filter}"}, status_code=400
-        )
+        return HangarJSONResponse({"error": f"Invalid state: {state_filter}"}, status_code=400)
 
     requests = await service._repository.list_by_state(state, provider_id)
     return HangarJSONResponse([_to_dto(r) for r in requests])
@@ -100,9 +97,7 @@ async def get_approval(request: Request) -> HangarJSONResponse:
 
     approval = await service._repository.get(approval_id)
     if approval is None:
-        return HangarJSONResponse(
-            {"error": "Approval not found"}, status_code=404
-        )
+        return HangarJSONResponse({"error": "Approval not found"}, status_code=404)
 
     return HangarJSONResponse(_to_dto(approval))
 
@@ -135,9 +130,7 @@ async def resolve_approval(request: Request) -> HangarJSONResponse:
     reason = body.get("reason")
 
     if decision not in ("approve", "deny"):
-        return HangarJSONResponse(
-            {"error": "decision must be 'approve' or 'deny'"}, status_code=400
-        )
+        return HangarJSONResponse({"error": "decision must be 'approve' or 'deny'"}, status_code=400)
 
     # Check if already resolved
     existing = await service._repository.get(approval_id)
@@ -154,22 +147,20 @@ async def resolve_approval(request: Request) -> HangarJSONResponse:
 
     success = await service.resolve(approval_id, approved, decided_by, reason)
     if not success:
-        return HangarJSONResponse(
-            {"error": "Failed to resolve approval"}, status_code=409
-        )
+        return HangarJSONResponse({"error": "Failed to resolve approval"}, status_code=409)
 
     updated = await service._repository.get(approval_id)
     state = updated.state.value if updated else decision
 
-    return HangarJSONResponse({
-        "approval_id": approval_id,
-        "state": state,
-    })
+    return HangarJSONResponse(
+        {
+            "approval_id": approval_id,
+            "state": state,
+        }
+    )
 
 
-async def _handle_slack_callback(
-    request: Request, service: Any, approval_id: str
-) -> HangarJSONResponse:
+async def _handle_slack_callback(request: Request, service: Any, approval_id: str) -> HangarJSONResponse:
     """Handle Slack interactive message callback."""
     # Verify timestamp freshness (replay protection)
     timestamp_str = request.headers.get("x-slack-request-timestamp", "")
@@ -179,17 +170,13 @@ async def _handle_slack_callback(
         return HangarJSONResponse({"error": "Invalid timestamp"}, status_code=401)
 
     if abs(time.time() - timestamp) > 300:
-        return HangarJSONResponse(
-            {"error": "Stale request"}, status_code=401
-        )
+        return HangarJSONResponse({"error": "Stale request"}, status_code=401)
 
     # Verify HMAC signature
     raw_body = await request.body()
     signing_secret = _get_slack_signing_secret(request)
     if not signing_secret:
-        return HangarJSONResponse(
-            {"error": "Slack signing not configured"}, status_code=500
-        )
+        return HangarJSONResponse({"error": "Slack signing not configured"}, status_code=500)
 
     sig_basestring = f"v0:{timestamp}:{raw_body.decode('utf-8')}"
     expected_sig = (
@@ -233,9 +220,7 @@ async def _handle_slack_callback(
     success = await service.resolve(approval_id, approved, decided_by)
 
     if not success:
-        return HangarJSONResponse(
-            {"error": "Already resolved"}, status_code=409
-        )
+        return HangarJSONResponse({"error": "Already resolved"}, status_code=409)
 
     return HangarJSONResponse({"approval_id": approval_id, "state": "resolved"})
 
@@ -244,14 +229,14 @@ def _extract_principal(request: Request) -> str:
     """Extract principal identity from request auth context."""
     # Check for auth middleware populated identity
     if hasattr(request, "state") and hasattr(request.state, "principal_id"):
-        return request.state.principal_id
+        return cast(str, request.state.principal_id)
     return request.headers.get("x-principal-id", "unknown")
 
 
 def _get_slack_signing_secret(request: Request) -> str | None:
     """Get Slack signing secret from app config."""
     if hasattr(request.app.state, "slack_signing_secret"):
-        return request.app.state.slack_signing_secret
+        return cast(str | None, request.app.state.slack_signing_secret)
     return None
 
 

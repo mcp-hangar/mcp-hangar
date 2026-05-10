@@ -4,6 +4,7 @@ Provides functions to create ASGI applications with health endpoints
 and optional authentication middleware.
 """
 
+from collections.abc import Callable
 from typing import Any, TYPE_CHECKING
 
 from starlette.applications import Starlette
@@ -13,15 +14,15 @@ from starlette.routing import Route
 from ..logging_config import get_logger
 
 if TYPE_CHECKING:
-    from mcp_hangar.server.bootstrap import AuthComponents
+    from typing import Any as AuthComponents
     from .config import ServerConfig
 
 logger = get_logger(__name__)
 
 
 def create_health_routes(
-    run_readiness_checks: callable,
-    update_metrics: callable,
+    run_readiness_checks: Callable[[], dict[str, Any]],
+    update_metrics: Callable[[], None],
 ) -> list[Route]:
     """Create health, readiness, and metrics routes.
 

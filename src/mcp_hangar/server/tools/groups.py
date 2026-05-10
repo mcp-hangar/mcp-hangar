@@ -110,6 +110,7 @@ def register_group_tools(mcp: FastMCP) -> None:
             raise ValueError(f"unknown_group: {group}")
 
         g = ctx.get_group(group)
+        assert g is not None
         g.rebalance()
 
         return {

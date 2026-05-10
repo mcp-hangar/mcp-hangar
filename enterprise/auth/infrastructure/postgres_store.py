@@ -230,7 +230,7 @@ class PostgresApiKeyStore(IApiKeyStore):
         expires_at: datetime | None = None,
         groups: frozenset[str] | None = None,
         tenant_id: str | None = None,
-        created_by: str = "system",
+        created_by: str | None = None,
     ) -> str:
         """Create a new API key.
 
@@ -294,13 +294,13 @@ class PostgresApiKeyStore(IApiKeyStore):
                         principal_id=principal_id,
                         key_name=name,
                         expires_at=expires_at.timestamp() if expires_at else None,
-                        created_by=created_by,
+                        created_by=created_by or "system",
                     )
                 )
 
             return raw_key
 
-    def revoke_key(self, key_id: str, revoked_by: str = "system", reason: str = "") -> bool:
+    def revoke_key(self, key_id: str, revoked_by: str | None = None, reason: str | None = None) -> bool:
         """Revoke an API key.
 
         Emits: ApiKeyRevoked event
@@ -339,8 +339,8 @@ class PostgresApiKeyStore(IApiKeyStore):
                         ApiKeyRevoked(
                             key_id=key_id,
                             principal_id=principal_id,
-                            revoked_by=revoked_by,
-                            reason=reason,
+                            revoked_by=revoked_by or "system",
+                            reason=reason or "",
                         )
                     )
                 return True
@@ -513,6 +513,25 @@ class PostgresApiKeyStore(IApiKeyStore):
 
 
 class PostgresRoleStore(IRoleStore):
+    """PostgreSQL-based role store.
+
+    Features:
+    - Built-in roles seeded on init
+    - Custom roles support
+    """
+
+    def delete_role(self, role_name: str) -> None:
+        """Delete a custom role."""
+        raise NotImplementedError("Not implemented in postgres store")
+
+    def update_role(self, role_name: str, permissions: list[Permission], description: str | None = None) -> Role:
+        """Update a custom role."""
+        raise NotImplementedError("Not implemented in postgres store")
+
+    def list_all_roles(self) -> list[Role]:
+        """List all roles."""
+        raise NotImplementedError("Not implemented in postgres store")
+
     """PostgreSQL-based role store.
 
     Features:
@@ -691,7 +710,7 @@ class PostgresRoleStore(IRoleStore):
         principal_id: str,
         role_name: str,
         scope: str = "global",
-        assigned_by: str = "system",
+        assigned_by: str | None = None,
     ) -> None:
         """Assign a role to a principal.
 
@@ -727,7 +746,7 @@ class PostgresRoleStore(IRoleStore):
                             principal_id=principal_id,
                             role_name=role_name,
                             scope=scope,
-                            assigned_by=assigned_by,
+                            assigned_by=assigned_by or "system",
                         )
                     )
 
@@ -736,7 +755,7 @@ class PostgresRoleStore(IRoleStore):
         principal_id: str,
         role_name: str,
         scope: str = "global",
-        revoked_by: str = "system",
+        revoked_by: str | None = None,
     ) -> None:
         """Revoke a role from a principal.
 
@@ -765,7 +784,7 @@ class PostgresRoleStore(IRoleStore):
                             principal_id=principal_id,
                             role_name=role_name,
                             scope=scope,
-                            revoked_by=revoked_by,
+                            revoked_by=revoked_by or "system",
                         )
                     )
 

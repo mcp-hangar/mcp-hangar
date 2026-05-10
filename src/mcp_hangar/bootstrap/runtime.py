@@ -57,7 +57,13 @@ class ISecurityHandler(Protocol):
         """Handle a security event."""
         ...
 
-    def log_rate_limit_exceeded(self, limit: int, window_seconds: int) -> None:
+    def log_rate_limit_exceeded(
+        self,
+        mcp_server_id: str | None = None,
+        limit: int = 0,
+        window_seconds: int = 0,
+        source_ip: str | None = None,
+    ) -> None:
         """Log rate limit exceeded."""
         ...
 
@@ -187,7 +193,7 @@ def create_runtime(
     Returns:
         Runtime container.
     """
-    env = env or os.environ
+    env = dict(os.environ) if env is None else env
 
     repo = repository or InMemoryMcpServerRepository()
     eb = event_bus or get_event_bus()
@@ -217,10 +223,10 @@ def create_runtime(
             auto_recover=env.get("MCP_AUTO_RECOVER", "true").lower() == "true",
         )
 
-    database = None
-    config_repository = None
-    audit_repository = None
-    recovery_service = None
+    database: Database | None = None
+    config_repository: IConfigRepository | None = None
+    audit_repository: IAuditRepository | None = None
+    recovery_service: RecoveryService | None = None
 
     if persistence_config and persistence_config.enabled:
         db_config = DatabaseConfig(

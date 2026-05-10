@@ -19,6 +19,7 @@ Usage:
 import argparse
 from datetime import datetime, timedelta, UTC
 import sys
+from typing import cast
 
 from enterprise.auth.roles import list_builtin_roles
 from enterprise.auth.infrastructure.api_key_authenticator import InMemoryApiKeyStore
@@ -149,7 +150,7 @@ def create_auth_parser(subparsers) -> argparse.ArgumentParser:
         help="List available built-in roles",
     )
 
-    return auth_parser
+    return cast(argparse.ArgumentParser, auth_parser)
 
 
 def handle_auth_command(args, key_store: InMemoryApiKeyStore, role_store: InMemoryRoleStore) -> int:

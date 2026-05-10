@@ -31,7 +31,7 @@ import asyncio
 from concurrent.futures import ThreadPoolExecutor
 from dataclasses import dataclass, field
 from pathlib import Path
-from typing import TYPE_CHECKING, Any
+from typing import TYPE_CHECKING, Any, cast
 
 from .domain.exceptions import ConfigurationError, McpServerNotFoundError
 from .domain.value_objects import McpServerMode, McpServerState
@@ -476,10 +476,11 @@ class Hangar:
             McpServerNotFoundError: If mcp_server doesn't exist.
         """
         self._ensure_started()
+        assert self._context is not None
         mcp_server = self._context.mcp_servers.get(name)
         if not mcp_server:
             raise McpServerNotFoundError(mcp_server_id=name)
-        return mcp_server
+        return cast("McpServer", mcp_server)
 
     async def invoke(
         self,
@@ -539,7 +540,7 @@ class Hangar:
         """
         mcp_server = self._get_mcp_server(name)
         loop = asyncio.get_event_loop()
-        await loop.run_in_executor(self._executor, mcp_server.start)
+        await loop.run_in_executor(self._executor, mcp_server.start)  # type: ignore[attr-defined]  # start is handled by the execution layer
 
     async def stop_mcp_server(self, name: str) -> None:
         """Stop a mcp_server.
@@ -579,7 +580,7 @@ class Hangar:
             name=name,
             state=mcp_server.state.value if isinstance(mcp_server.state, McpServerState) else str(mcp_server.state),
             mode=mcp_server.mode.value if isinstance(mcp_server.mode, McpServerMode) else str(mcp_server.mode),
-            tools=list(mcp_server.tools.keys()) if hasattr(mcp_server, "tools") else [],
+            tools=mcp_server.tools.list_names() if hasattr(mcp_server, "tools") else [],
             last_used=getattr(mcp_server, "_last_used", None),
             error=None,
         )
@@ -596,6 +597,7 @@ class Hangar:
                 print(f"{p.name}: {p.state}")
         """
         self._ensure_started()
+        assert self._context is not None
         result = []
         for name in self._context.mcp_servers.keys():
             try:
@@ -752,19 +754,19 @@ class SyncHangar:
 
     def get_mcp_server(self, name: str) -> McpServerInfo:
         """Get mcp_server information."""
-        return self._run(self._hangar.get_mcp_server(name))
+        return cast(McpServerInfo, self._run(self._hangar.get_mcp_server(name)))
 
     def list_mcp_servers(self) -> list[McpServerInfo]:
         """List all mcp_servers."""
-        return self._run(self._hangar.list_mcp_servers())
+        return cast(list[McpServerInfo], self._run(self._hangar.list_mcp_servers()))
 
     def health(self) -> HealthSummary:
         """Get health summary."""
-        return self._run(self._hangar.health())
+        return cast(HealthSummary, self._run(self._hangar.health()))
 
     def health_check(self, name: str) -> bool:
         """Run health check on a mcp_server."""
-        return self._run(self._hangar.health_check(name))
+        return cast(bool, self._run(self._hangar.health_check(name)))
 
 
 # legacy aliases

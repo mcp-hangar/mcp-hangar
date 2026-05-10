@@ -4,7 +4,7 @@ Stores mcp_servers by persisting their domain events and rebuilding state on loa
 """
 
 import threading
-from typing import Any
+from typing import Any, cast
 
 from ..domain.events import DomainEvent
 from ..domain.model.event_sourced_mcp_server import EventSourcedMcpServer, McpServerSnapshot
@@ -110,7 +110,7 @@ class EventSourcedMcpServerRepository(IMcpServerRepository):
     def _store_get_version(self, stream_id: str) -> int:
         """Get stream version from event store, supporting both APIs."""
         if self._has_new_api:
-            return self._event_store.get_stream_version(stream_id)
+            return cast(int, self._event_store.get_stream_version(stream_id))  # type: ignore[attr-defined]  # runtime-detected API compatibility
         return self._event_store.get_version(stream_id)
 
     def _store_stream_exists(self, stream_id: str) -> bool:
@@ -131,14 +131,14 @@ class EventSourcedMcpServerRepository(IMcpServerRepository):
         Returns raw stored events (StoredEvent for old API, DomainEvent for new API).
         """
         if self._has_new_api:
-            return self._event_store.read_stream(stream_id, from_version=from_version)
+            return cast(list[Any], self._event_store.read_stream(stream_id, from_version=from_version))  # type: ignore[attr-defined]  # runtime-detected API compatibility
         return self._event_store.load(stream_id, from_version=from_version, to_version=to_version)
 
     def _store_get_all_stream_ids(self) -> list[str]:
         """Get all stream IDs, supporting both APIs."""
         if hasattr(self._event_store, "get_all_stream_ids"):
             return self._event_store.get_all_stream_ids()
-        return self._event_store.list_streams()
+        return cast(list[str], self._event_store.list_streams())  # type: ignore[attr-defined]  # runtime-detected API compatibility
 
     def add(self, mcp_server_id: str, mcp_server: McpServerLike) -> None:
         """
@@ -246,7 +246,7 @@ class EventSourcedMcpServerRepository(IMcpServerRepository):
 
         if self._has_snapshot_methods:
             # New IEventStore with built-in snapshot support
-            snapshot_data = self._event_store.load_snapshot(mcp_server_id)
+            snapshot_data = self._event_store.load_snapshot(mcp_server_id)  # type: ignore[attr-defined]  # runtime-detected API compatibility
             if snapshot_data:
                 snapshot = McpServerSnapshot.from_dict(snapshot_data["state"])
                 snapshot_version = snapshot_data["version"]
@@ -360,7 +360,7 @@ class EventSourcedMcpServerRepository(IMcpServerRepository):
         snapshot_version = -1
 
         if self._has_snapshot_methods:
-            snapshot_data = self._event_store.load_snapshot(mcp_server_id)
+            snapshot_data = self._event_store.load_snapshot(mcp_server_id)  # type: ignore[attr-defined]  # runtime-detected API compatibility
             snapshot_version = snapshot_data["version"] if snapshot_data else -1
         elif self._snapshot_store:
             snapshot_data = self._snapshot_store.load_snapshot(mcp_server_id)
@@ -375,7 +375,7 @@ class EventSourcedMcpServerRepository(IMcpServerRepository):
         version = self._store_get_version(mcp_server.mcp_server_id)
 
         if self._has_snapshot_methods:
-            self._event_store.save_snapshot(
+            self._event_store.save_snapshot(  # type: ignore[attr-defined]  # runtime-detected API compatibility
                 stream_id=mcp_server.mcp_server_id, version=version, state=snapshot.to_dict()
             )
         elif self._snapshot_store:

@@ -16,7 +16,7 @@ Usage:
 
 from __future__ import annotations
 
-from collections.abc import Sequence
+from collections.abc import Mapping, MutableMapping, Sequence
 import logging
 import sys
 from typing import Any, cast
@@ -25,13 +25,15 @@ import structlog
 from structlog.types import Processor
 
 
-def _add_service_context(_logger: Any, _method_name: str, event_dict: dict[str, Any]) -> dict[str, Any]:
+def _add_service_context(_logger: Any, _method_name: str, event_dict: MutableMapping[str, Any]) -> Mapping[str, Any]:
     """Add service-level context to all log entries."""
     event_dict.setdefault("service", "mcp-hangar")
     return event_dict
 
 
-def _sanitize_sensitive_data(_logger: Any, _method_name: str, event_dict: dict[str, Any]) -> dict[str, Any]:
+def _sanitize_sensitive_data(
+    _logger: Any, _method_name: str, event_dict: MutableMapping[str, Any]
+) -> Mapping[str, Any]:
     """Redact sensitive fields from log output."""
     sensitive_keys = {
         "password",
@@ -54,7 +56,7 @@ def _sanitize_sensitive_data(_logger: Any, _method_name: str, event_dict: dict[s
     return cast(dict[str, Any], redact(event_dict))
 
 
-def _drop_color_message_key(_logger: Any, _method_name: str, event_dict: dict[str, Any]) -> dict[str, Any]:
+def _drop_color_message_key(_logger: Any, _method_name: str, event_dict: MutableMapping[str, Any]) -> Mapping[str, Any]:
     """Remove the color_message key that uvicorn adds."""
     event_dict.pop("color_message", None)
     return event_dict
@@ -181,7 +183,7 @@ def get_logger(name: str | None = None) -> structlog.stdlib.BoundLogger:
         logger = get_logger(__name__)
         logger.info("user_logged_in", user_id=123, ip="192.168.1.1")
     """
-    return structlog.get_logger(name)
+    return cast(structlog.stdlib.BoundLogger, structlog.get_logger(name))
 
 
 # Convenience aliases for common log levels

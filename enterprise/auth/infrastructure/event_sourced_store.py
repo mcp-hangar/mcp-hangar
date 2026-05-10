@@ -12,6 +12,7 @@ import hashlib
 import secrets
 import threading
 from typing import Protocol
+from collections.abc import Callable
 
 from .constant_time import constant_time_key_lookup
 from mcp_hangar.domain.contracts.authentication import ApiKeyMetadata, IApiKeyStore
@@ -148,6 +149,7 @@ class EventSourcedApiKeyStore(IApiKeyStore):
         else:
             # Get metadata from index or first event
             self._build_index()
+            assert self._index is not None
             if key_hash not in self._index:
                 return None
             key_id, principal_id = self._index[key_hash]
@@ -185,7 +187,7 @@ class EventSourcedApiKeyStore(IApiKeyStore):
         self,
         key_id: str,
         new_version: int,
-        create_snapshot_fn: callable,
+        create_snapshot_fn: Callable,
     ) -> None:
         """Create snapshot if threshold reached."""
         if new_version < self.SNAPSHOT_INTERVAL:
@@ -215,7 +217,7 @@ class EventSourcedApiKeyStore(IApiKeyStore):
 
         # Update index
         with self._lock:
-            if self._index is not None:
+            if self._index is not None and self._principal_index is not None:
                 self._index[key.key_hash] = (key.key_id, key.principal_id)
                 if key.principal_id not in self._principal_index:
                     self._principal_index[key.principal_id] = set()
@@ -245,6 +247,7 @@ class EventSourcedApiKeyStore(IApiKeyStore):
         """
         # Build index and perform constant-time lookup
         self._build_index()
+        assert self._index is not None and self._principal_index is not None
         index_entry = constant_time_key_lookup(key_hash, self._index)
 
         if index_entry is None:
@@ -282,11 +285,12 @@ class EventSourcedApiKeyStore(IApiKeyStore):
         expires_at: datetime | None = None,
         groups: frozenset[str] | None = None,
         tenant_id: str | None = None,
-        created_by: str = "system",
+        created_by: str | None = None,
     ) -> str:
         """Create a new API key."""
         # Build index to check limits
         self._build_index()
+        assert self._index is not None and self._principal_index is not None
 
         # Check key limit
         existing_keys = self._principal_index.get(principal_id, set())
@@ -304,7 +308,7 @@ class EventSourcedApiKeyStore(IApiKeyStore):
             key_id=key_id,
             principal_id=principal_id,
             name=name,
-            created_by=created_by,
+            created_by=created_by or "system",
             tenant_id=tenant_id,
             groups=groups,
             expires_at=expires_at,
@@ -325,12 +329,13 @@ class EventSourcedApiKeyStore(IApiKeyStore):
     def revoke_key(
         self,
         key_id: str,
-        revoked_by: str = "system",
-        reason: str = "",
+        revoked_by: str | None = None,
+        reason: str | None = None,
     ) -> bool:
         """Revoke an API key."""
         # Find key by key_id
         self._build_index()
+        assert self._index is not None and self._principal_index is not None
 
         key_hash = None
         for kh, (kid, _) in self._index.items():
@@ -345,14 +350,14 @@ class EventSourcedApiKeyStore(IApiKeyStore):
         if key is None or key.is_revoked:
             return False
 
-        key.revoke(revoked_by=revoked_by, reason=reason)
+        key.revoke(revoked_by=revoked_by or "system", reason=reason or "")
         self._save_key(key)
 
         logger.info(
             "api_key_revoked",
             key_id=key_id,
-            revoked_by=revoked_by,
-            reason=reason,
+            revoked_by=revoked_by or "system",
+            reason=reason or "",
         )
 
         return True
@@ -360,6 +365,7 @@ class EventSourcedApiKeyStore(IApiKeyStore):
     def list_keys(self, principal_id: str) -> list[ApiKeyMetadata]:
         """List API keys for a principal."""
         self._build_index()
+        assert self._index is not None and self._principal_index is not None
 
         key_hashes = self._principal_index.get(principal_id, set())
         result = []
@@ -372,7 +378,7 @@ class EventSourcedApiKeyStore(IApiKeyStore):
                         key_id=key.key_id,
                         name=key.name,
                         principal_id=key.principal_id,
-                        created_at=key.created_at,
+                        created_at=key.created_at or datetime.now(UTC),
                         expires_at=key.expires_at,
                         last_used_at=key.last_used_at,
                         revoked=key.is_revoked,
@@ -384,6 +390,7 @@ class EventSourcedApiKeyStore(IApiKeyStore):
     def count_keys(self, principal_id: str) -> int:
         """Count active API keys for a principal."""
         self._build_index()
+        assert self._index is not None and self._principal_index is not None
 
         key_hashes = self._principal_index.get(principal_id, set())
         count = 0
@@ -416,6 +423,7 @@ class EventSourcedApiKeyStore(IApiKeyStore):
         """
         # Find key by key_id
         self._build_index()
+        assert self._index is not None and self._principal_index is not None
 
         key_hash = None
         index_entry = None
@@ -539,7 +547,7 @@ class EventSourcedRoleStore(IRoleStore):
         self,
         key_id: str,
         new_version: int,
-        create_snapshot_fn: callable,
+        create_snapshot_fn: Callable,
     ) -> None:
         """Create snapshot if threshold reached."""
         if new_version < self.SNAPSHOT_INTERVAL:
@@ -628,7 +636,7 @@ class EventSourcedRoleStore(IRoleStore):
         principal_id: str,
         role_name: str,
         scope: str = "global",
-        assigned_by: str = "system",
+        assigned_by: str | None = None,
     ) -> None:
         """Assign a role to a principal."""
         # Verify role exists
@@ -637,14 +645,14 @@ class EventSourcedRoleStore(IRoleStore):
 
         assignment = self._load_assignment(principal_id)
 
-        if assignment.assign_role(role_name, scope, assigned_by):
+        if assignment.assign_role(role_name, scope, assigned_by or "system"):
             self._save_assignment(assignment)
             logger.info(
                 "role_assigned",
                 principal_id=principal_id,
                 role_name=role_name,
                 scope=scope,
-                assigned_by=assigned_by,
+                assigned_by=assigned_by or "system",
             )
 
     def revoke_role(
@@ -652,19 +660,19 @@ class EventSourcedRoleStore(IRoleStore):
         principal_id: str,
         role_name: str,
         scope: str = "global",
-        revoked_by: str = "system",
+        revoked_by: str | None = None,
     ) -> None:
         """Revoke a role from a principal."""
         assignment = self._load_assignment(principal_id)
 
-        if assignment.revoke_role(role_name, scope, revoked_by):
+        if assignment.revoke_role(role_name, scope, revoked_by or "system"):
             self._save_assignment(assignment)
             logger.info(
                 "role_revoked",
                 principal_id=principal_id,
                 role_name=role_name,
                 scope=scope,
-                revoked_by=revoked_by,
+                revoked_by=revoked_by or "system",
             )
 
     def list_all_roles(self) -> list[Role]:

@@ -17,6 +17,7 @@ import json
 from pathlib import Path
 import secrets
 import sqlite3
+from typing import cast
 import threading
 
 import structlog
@@ -125,7 +126,7 @@ class SQLiteApiKeyStore(IApiKeyStore):
             conn.execute("PRAGMA journal_mode=WAL")
             conn.execute("PRAGMA foreign_keys=ON")
             self._local.connection = conn
-        return self._local.connection
+        return cast(sqlite3.Connection, self._local.connection)
 
     def initialize(self) -> None:
         """Create tables if they don't exist."""
@@ -242,7 +243,7 @@ class SQLiteApiKeyStore(IApiKeyStore):
         expires_at: datetime | None = None,
         groups: frozenset[str] | None = None,
         tenant_id: str | None = None,
-        created_by: str = "system",
+        created_by: str | None = None,
     ) -> str:
         """Create a new API key.
 
@@ -308,13 +309,13 @@ class SQLiteApiKeyStore(IApiKeyStore):
                     principal_id=principal_id,
                     key_name=name,
                     expires_at=expires_at.timestamp() if expires_at else None,
-                    created_by=created_by,
+                    created_by=created_by or "system",
                 )
             )
 
         return raw_key
 
-    def revoke_key(self, key_id: str, revoked_by: str = "system", reason: str = "") -> bool:
+    def revoke_key(self, key_id: str, revoked_by: str | None = None, reason: str | None = None) -> bool:
         """Revoke an API key.
 
         Emits: ApiKeyRevoked event
@@ -350,8 +351,8 @@ class SQLiteApiKeyStore(IApiKeyStore):
                     ApiKeyRevoked(
                         key_id=key_id,
                         principal_id=principal_id,
-                        revoked_by=revoked_by,
-                        reason=reason,
+                        revoked_by=revoked_by or "system",
+                        reason=reason or "",
                     )
                 )
 
@@ -378,7 +379,7 @@ class SQLiteApiKeyStore(IApiKeyStore):
                 key_id=row["key_id"],
                 name=row["name"],
                 principal_id=row["principal_id"],
-                created_at=datetime.fromisoformat(row["created_at"]) if row["created_at"] else None,
+                created_at=datetime.fromisoformat(row["created_at"]),
                 expires_at=datetime.fromisoformat(row["expires_at"]) if row["expires_at"] else None,
                 last_used_at=datetime.fromisoformat(row["last_used_at"]) if row["last_used_at"] else None,
                 revoked=bool(row["revoked"]),
@@ -398,7 +399,7 @@ class SQLiteApiKeyStore(IApiKeyStore):
             (principal_id,),
         )
 
-        return cursor.fetchone()["count"]
+        return cast(int, cursor.fetchone()["count"])
 
     def rotate_key(
         self,
@@ -562,7 +563,7 @@ class SQLiteRoleStore(IRoleStore):
             conn.execute("PRAGMA journal_mode=WAL")
             conn.execute("PRAGMA foreign_keys=ON")
             self._local.connection = conn
-        return self._local.connection
+        return cast(sqlite3.Connection, self._local.connection)
 
     def initialize(self) -> None:
         """Create tables and seed built-in roles."""
@@ -695,7 +696,7 @@ class SQLiteRoleStore(IRoleStore):
         principal_id: str,
         role_name: str,
         scope: str = "global",
-        assigned_by: str = "system",
+        assigned_by: str | None = None,
     ) -> None:
         """Assign a role to a principal.
 
@@ -729,7 +730,7 @@ class SQLiteRoleStore(IRoleStore):
                         principal_id=principal_id,
                         role_name=role_name,
                         scope=scope,
-                        assigned_by=assigned_by,
+                        assigned_by=assigned_by or "system",
                     )
                 )
 
@@ -738,7 +739,7 @@ class SQLiteRoleStore(IRoleStore):
         principal_id: str,
         role_name: str,
         scope: str = "global",
-        revoked_by: str = "system",
+        revoked_by: str | None = None,
     ) -> None:
         """Revoke a role from a principal.
 
@@ -765,7 +766,7 @@ class SQLiteRoleStore(IRoleStore):
                         principal_id=principal_id,
                         role_name=role_name,
                         scope=scope,
-                        revoked_by=revoked_by,
+                        revoked_by=revoked_by or "system",
                     )
                 )
 

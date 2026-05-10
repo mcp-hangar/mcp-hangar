@@ -172,6 +172,7 @@ class IApiKeyStore(Protocol):
         expires_at: datetime | None = None,
         groups: frozenset[str] | None = None,
         tenant_id: str | None = None,
+        created_by: str | None = None,
     ) -> str:
         """Create a new API key.
 
@@ -188,7 +189,12 @@ class IApiKeyStore(Protocol):
         ...
 
     @abstractmethod
-    def revoke_key(self, key_id: str) -> bool:
+    def revoke_key(
+        self,
+        key_id: str,
+        revoked_by: str | None = None,
+        reason: str | None = None,
+    ) -> bool:
         """Revoke an API key.
 
         Args:
@@ -292,11 +298,17 @@ class NullApiKeyStore:
         expires_at: datetime | None = None,
         groups: frozenset[str] | None = None,
         tenant_id: str | None = None,
+        created_by: str | None = None,
     ) -> str:
         """No-op: raise NotImplementedError (no key storage without enterprise)."""
         raise NotImplementedError("API key creation requires enterprise auth module")
 
-    def revoke_key(self, key_id: str) -> bool:
+    def revoke_key(
+        self,
+        key_id: str,
+        revoked_by: str | None = None,
+        reason: str | None = None,
+    ) -> bool:
         """No keys to revoke."""
         return False
 

@@ -99,7 +99,7 @@ class BaseQueryHandler(QueryHandler):
 class ListMcpServersHandler(BaseQueryHandler):
     """Handler for ListMcpServersQuery."""
 
-    def handle(self, query: ListMcpServersQuery) -> list[McpServerSummary]:
+    def handle(self, query: ListMcpServersQuery) -> list[McpServerSummary]:  # type: ignore[override]  # CQRS: handler narrows Query to specific query type
         """
         List all mcp_servers with optional state filtering.
 
@@ -132,7 +132,7 @@ class ListMcpServersHandler(BaseQueryHandler):
 class GetMcpServerHandler(BaseQueryHandler):
     """Handler for GetMcpServerQuery."""
 
-    def handle(self, query: GetMcpServerQuery) -> McpServerDetails:
+    def handle(self, query: GetMcpServerQuery) -> McpServerDetails:  # type: ignore[override]  # CQRS: handler narrows Query to specific query type
         """
         Get detailed information about a mcp_server.
 
@@ -159,7 +159,7 @@ class GetMcpServerHandler(BaseQueryHandler):
 class GetMcpServerToolsHandler(BaseQueryHandler):
     """Handler for GetMcpServerToolsQuery."""
 
-    def handle(self, query: GetMcpServerToolsQuery) -> list[ToolInfo]:
+    def handle(self, query: GetMcpServerToolsQuery) -> list[ToolInfo]:  # type: ignore[override]  # CQRS: handler narrows Query to specific query type
         """
         Get tools for a specific mcp_server.
 
@@ -173,7 +173,7 @@ class GetMcpServerToolsHandler(BaseQueryHandler):
 class GetMcpServerHealthHandler(BaseQueryHandler):
     """Handler for GetMcpServerHealthQuery."""
 
-    def handle(self, query: GetMcpServerHealthQuery) -> HealthInfo:
+    def handle(self, query: GetMcpServerHealthQuery) -> HealthInfo:  # type: ignore[override]  # CQRS: handler narrows Query to specific query type
         """
         Get health information for a mcp_server.
 
@@ -187,7 +187,7 @@ class GetMcpServerHealthHandler(BaseQueryHandler):
 class GetSystemMetricsHandler(BaseQueryHandler):
     """Handler for GetSystemMetricsQuery."""
 
-    def handle(self, query: GetSystemMetricsQuery) -> SystemMetrics:
+    def handle(self, query: GetSystemMetricsQuery) -> SystemMetrics:  # type: ignore[override]  # CQRS: handler narrows Query to specific query type
         """
         Get system-wide metrics.
 
@@ -240,7 +240,7 @@ class GetToolInvocationHistoryHandler(QueryHandler):
         """
         self._event_store = event_store
 
-    def handle(self, query: GetToolInvocationHistoryQuery) -> dict:
+    def handle(self, query: GetToolInvocationHistoryQuery) -> dict:  # type: ignore[override]  # CQRS: handler narrows Query to specific query type
         """Get tool invocation history for a mcp_server from the event store.
 
         Reads all streams matching the mcp_server's stream ID and filters for

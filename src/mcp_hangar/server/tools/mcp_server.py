@@ -30,6 +30,7 @@ def _get_tools_for_group(mcp_server: str) -> dict[str, Any]:
     """Get tools for a mcp_server group."""
     ctx = get_context()
     group = ctx.get_group(mcp_server)
+    assert group is not None, f"Group {mcp_server} not found"
     selected = group.select_member()
 
     if not selected:
@@ -71,6 +72,7 @@ def _get_tools_for_mcp_server(mcp_server: str) -> dict[str, Any]:
     """Get tools for a single mcp_server."""
     ctx = get_context()
     mcp_server_obj = ctx.get_mcp_server(mcp_server)
+    assert mcp_server_obj is not None, f"Server {mcp_server} not found"
     resolver = get_tool_access_resolver()
 
     # If mcp_server has predefined tools, return them without starting
@@ -259,13 +261,16 @@ def register_mcp_server_tools(mcp: FastMCP) -> None:
         ctx = get_context()
 
         if ctx.group_exists(mcp_server):
-            return ctx.get_group(mcp_server).to_status_dict()
+            group = ctx.get_group(mcp_server)
+            assert group is not None
+            return group.to_status_dict()
 
         if not ctx.mcp_server_exists(mcp_server):
             raise ValueError(f"unknown_mcp_server: {mcp_server}")
 
         query = GetMcpServerQuery(mcp_server_id=mcp_server)
         result = ctx.query_bus.execute(query).to_dict()
+        assert isinstance(result, dict)
 
         # Add tool access policy summary
         resolver = get_tool_access_resolver()

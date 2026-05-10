@@ -2,7 +2,7 @@
 
 import threading
 import time
-from typing import Any, TYPE_CHECKING
+from typing import Any, TYPE_CHECKING, cast
 
 from ...logging_config import get_logger
 
@@ -614,7 +614,7 @@ class McpServer(AggregateRoot):
         """Create and return the appropriate client based on mode."""
         from mcp_hangar.infrastructure.launchers import get_launcher
 
-        launcher = get_launcher(self._mode.value)
+        launcher: Any = get_launcher(self._mode.value)
         config = self._get_launch_config()
         client = launcher.launch(**config)
 
@@ -997,6 +997,9 @@ class McpServer(AggregateRoot):
             with self._lock:
                 refresh_client = self._client
 
+            if refresh_client is None:
+                raise ToolInvocationError(self.mcp_server_id, "mcp_server client is None")
+
             try:
                 refresh_result = refresh_client.call("tools/list", {}, timeout=5.0)
             except (OSError, TimeoutError) as e:
@@ -1034,6 +1037,9 @@ class McpServer(AggregateRoot):
         start_time = time.time()
         response = None
         invocation_error = None
+
+        if client is None:
+            raise ToolInvocationError(self.mcp_server_id, "mcp_server client is None")
 
         try:
             response = client.call(
@@ -1073,6 +1079,9 @@ class McpServer(AggregateRoot):
                     {"tool_name": tool_name, "correlation_id": correlation_id},
                 ) from invocation_error
 
+            if response is None:
+                raise ToolInvocationError(self.mcp_server_id, "No response from mcp_server")
+
             if "error" in response:
                 error_msg = response["error"].get("message", "unknown")
                 self._health.record_invocation_failure()
@@ -1102,6 +1111,7 @@ class McpServer(AggregateRoot):
             self._last_used = time.time()
 
             result = response.get("result", {})
+
             self._record_event(
                 ToolInvocationCompleted(
                     mcp_server_id=self.mcp_server_id,
@@ -1115,7 +1125,7 @@ class McpServer(AggregateRoot):
 
             logger.debug(f"tool_invoked: {correlation_id}, mcp_server={self.mcp_server_id}, tool={tool_name}")
 
-            return result
+            return cast(dict[str, Any], result)
 
     def _refresh_tools(self) -> None:
         """Refresh tool catalog from mcp_server.

@@ -18,10 +18,10 @@ from ..events import (
     ToolInvocationFailed,
     ToolInvocationRequested,
 )
-from ..value_objects import McpServerId
+from ..value_objects import McpServerId, McpServerMode
 from .health_tracker import HealthTracker
 from .mcp_server import McpServer, McpServerState
-from .tool_catalog import ToolCatalog
+from .tool_catalog import ToolCatalog, ToolSchema
 
 logger = get_logger(__name__)
 
@@ -138,7 +138,7 @@ class EventSourcedMcpServer(McpServer):
 
         # Identity
         self._id = McpServerId(mcp_server_id)
-        self._mode = mode
+        self._mode = McpServerMode.normalize(mode)
 
         # Configuration
         self._command = command
@@ -250,7 +250,7 @@ class EventSourcedMcpServer(McpServer):
 
         # Restore tools (just names, no full schemas)
         for tool_name in snapshot.tool_names:
-            mcp_server._tools._tools[tool_name] = {"name": tool_name}
+            mcp_server._tools._tools[tool_name] = ToolSchema(name=tool_name, description="", input_schema={})
 
         # Restore other state
         mcp_server._last_used = snapshot.last_used
@@ -302,7 +302,7 @@ class EventSourcedMcpServer(McpServer):
     def _apply_mcp_server_started(self, event: McpServerStarted) -> None:
         """Apply McpServerStarted event."""
         self._state = McpServerState.READY
-        self._mode = event.mode
+        self._mode = McpServerMode.normalize(event.mode)
         self._health._consecutive_failures = 0
         self._last_used = event.occurred_at
         self._meta["started_at"] = event.occurred_at
@@ -365,7 +365,7 @@ class EventSourcedMcpServer(McpServer):
         with self._lock:
             return McpServerSnapshot(
                 mcp_server_id=self.mcp_server_id,
-                mode=self._mode,
+                mode=self._mode.value,
                 state=self._state.value,
                 version=self._version,
                 command=self._command,
@@ -403,7 +403,7 @@ class EventSourcedMcpServer(McpServer):
         """
         mcp_server = EventSourcedMcpServer(
             mcp_server_id=self.mcp_server_id,
-            mode=self._mode,
+            mode=self._mode.value,
             command=self._command,
             image=self._image,
             endpoint=self._endpoint,

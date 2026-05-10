@@ -28,29 +28,29 @@ try:
 except ImportError:
     from mcp_hangar.domain.value_objects import Permission, Role
 
-    BUILTIN_ROLES: dict[str, "Role"] = {}
-    PERMISSIONS: dict[str, "Permission"] = {}
+    BUILTIN_ROLES: dict[str, "Role"] = {}  # type: ignore[no-redef]  # fallback stubs when enterprise not installed
+    PERMISSIONS: dict[str, "Permission"] = {}  # type: ignore[no-redef]  # fallback stubs when enterprise not installed
 
-    ROLE_ADMIN = None
-    ROLE_AGENT = None
-    ROLE_AUDITOR = None
-    ROLE_DEVELOPER = None
-    ROLE_PROVIDER_ADMIN = None
-    ROLE_VIEWER = None
+    ROLE_ADMIN = None  # type: ignore[assignment]  # stub fallback: None when enterprise unavailable
+    ROLE_AGENT = None  # type: ignore[assignment]  # stub fallback: None when enterprise unavailable
+    ROLE_AUDITOR = None  # type: ignore[assignment]  # stub fallback: None when enterprise unavailable
+    ROLE_DEVELOPER = None  # type: ignore[assignment]  # stub fallback: None when enterprise unavailable
+    ROLE_PROVIDER_ADMIN = None  # type: ignore[assignment]  # stub fallback: None when enterprise unavailable
+    ROLE_VIEWER = None  # type: ignore[assignment]  # stub fallback: None when enterprise unavailable
 
     def get_builtin_role(name: str) -> "Role | None":
         """Return None when enterprise is not installed."""
         return None
 
-    def get_permission(resource: str, action: str, scope: str | None = None) -> "Permission | None":
+    def get_permission(key: str) -> "Permission | None":
         """Return None when enterprise is not installed."""
         return None
 
-    def list_builtin_roles() -> "list[Role]":
+    def list_builtin_roles() -> list[str]:
         """Return empty list when enterprise is not installed."""
         return []
 
-    def list_permissions() -> "list[Permission]":
+    def list_permissions() -> list[str]:
         """Return empty list when enterprise is not installed."""
         return []
 

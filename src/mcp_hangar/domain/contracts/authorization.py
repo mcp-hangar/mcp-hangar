@@ -116,6 +116,15 @@ class IRoleStore(Protocol):
     """
 
     @abstractmethod
+    def add_role(self, role: Role) -> None:
+        """Add a new role to the store.
+
+        Args:
+            role: The role to add.
+        """
+        ...
+
+    @abstractmethod
     def get_role(self, role_name: str) -> Role | None:
         """Get role by name.
 
@@ -150,6 +159,7 @@ class IRoleStore(Protocol):
         principal_id: str,
         role_name: str,
         scope: str = "global",
+        assigned_by: str | None = None,
     ) -> None:
         """Assign a role to a principal.
 
@@ -169,6 +179,7 @@ class IRoleStore(Protocol):
         principal_id: str,
         role_name: str,
         scope: str = "global",
+        revoked_by: str | None = None,
     ) -> None:
         """Revoke a role from a principal.
 
@@ -411,6 +422,9 @@ class NullRoleStore:
     Used when enterprise RBAC is not installed or during testing.
     """
 
+    def add_role(self, role: Role) -> None:
+        """No-op: role creation requires enterprise RBAC."""
+
     def get_role(self, role_name: str) -> Role | None:
         """No roles defined."""
         return None
@@ -428,6 +442,7 @@ class NullRoleStore:
         principal_id: str,
         role_name: str,
         scope: str = "global",
+        assigned_by: str | None = None,
     ) -> None:
         """No-op: role assignment requires enterprise RBAC."""
 
@@ -436,6 +451,7 @@ class NullRoleStore:
         principal_id: str,
         role_name: str,
         scope: str = "global",
+        revoked_by: str | None = None,
     ) -> None:
         """No-op: role revocation requires enterprise RBAC."""
 

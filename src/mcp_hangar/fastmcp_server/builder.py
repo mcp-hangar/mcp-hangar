@@ -4,7 +4,7 @@ Provides a convenient way to construct an MCPServerFactory
 with optional components.
 """
 
-from typing import TYPE_CHECKING
+from typing import TYPE_CHECKING, Any
 
 from .config import HangarFunctions, ServerConfig
 from .protocols import (
@@ -24,7 +24,6 @@ from .protocols import (
 )
 
 if TYPE_CHECKING:
-    from mcp_hangar.server.bootstrap import AuthComponents
     from .factory import MCPServerFactory
 
 
@@ -60,7 +59,7 @@ class MCPServerFactoryBuilder:
         self._metrics_fn: HangarMetricsFn | None = None
 
         self._config: ServerConfig | None = None
-        self._auth_components: AuthComponents | None = None
+        self._auth_components: Any | None = None
 
     def with_hangar(
         self,
@@ -165,7 +164,7 @@ class MCPServerFactoryBuilder:
 
     def with_auth(
         self,
-        auth_components: "AuthComponents",
+        auth_components: Any,
     ) -> "MCPServerFactoryBuilder":
         """Set authentication components.
 
@@ -205,6 +204,14 @@ class MCPServerFactoryBuilder:
             ]
         ):
             raise ValueError("All core hangar functions must be provided via with_hangar()")
+
+        assert self._list_fn is not None
+        assert self._start_fn is not None
+        assert self._stop_fn is not None
+        assert self._invoke_fn is not None
+        assert self._tools_fn is not None
+        assert self._details_fn is not None
+        assert self._health_fn is not None
 
         hangar = HangarFunctions(
             list=self._list_fn,

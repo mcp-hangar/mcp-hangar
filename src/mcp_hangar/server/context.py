@@ -86,7 +86,13 @@ class IRateLimiter(Protocol):
 class ISecurityHandler(Protocol):
     """Interface for security handler."""
 
-    def log_rate_limit_exceeded(self, limit: int, window_seconds: int) -> None:
+    def log_rate_limit_exceeded(
+        self,
+        mcp_server_id: str | None = None,
+        limit: int = 0,
+        window_seconds: int = 0,
+        source_ip: str | None = None,
+    ) -> None:
         """Log rate limit exceeded event."""
         ...
 

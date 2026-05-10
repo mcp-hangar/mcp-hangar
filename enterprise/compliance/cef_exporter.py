@@ -12,7 +12,7 @@ import logging
 import sys
 from datetime import datetime, UTC
 from pathlib import Path
-from typing import Callable
+from collections.abc import Callable
 
 from mcp_hangar.application.event_handlers.audit_handler import AuditRecord
 from .cef_formatter import format_audit_record
@@ -107,7 +107,7 @@ class CEFExporter:
             event_id="",
             event_type=event_type,
             occurred_at=datetime.now(UTC),
-            provider_id=provider_id,
+            mcp_server_id=provider_id,
             data=data,
             caller_user_id=user_id,
             caller_session_id=session_id,
@@ -127,7 +127,7 @@ class CEFExporter:
             event_id="",
             event_type="ProviderStateChanged",
             occurred_at=datetime.now(UTC),
-            provider_id=provider_id,
+            mcp_server_id=provider_id,
             data={
                 "from_state": from_state,
                 "to_state": to_state,

@@ -247,7 +247,7 @@ class InMemoryApiKeyStore(IApiKeyStore):
         expires_at: datetime | None = None,
         groups: frozenset[str] | None = None,
         tenant_id: str | None = None,
-        created_by: str = "system",
+        created_by: str | None = None,
     ) -> str:
         """Create a new API key.
 
@@ -312,7 +312,7 @@ class InMemoryApiKeyStore(IApiKeyStore):
 
             return raw_key  # Only returned once!
 
-    def revoke_key(self, key_id: str, revoked_by: str = "system", reason: str = "") -> bool:
+    def revoke_key(self, key_id: str, revoked_by: str | None = None, reason: str | None = None) -> bool:
         """Revoke an API key.
 
         Args:
@@ -454,7 +454,7 @@ class InMemoryApiKeyStore(IApiKeyStore):
                     old_principal = principal
                     break
 
-            if old_key_hash is None:
+            if old_key_hash is None or old_metadata is None or old_principal is None:
                 raise ValueError(f"API key not found: {key_id}")
 
             # Check if key is revoked

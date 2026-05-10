@@ -37,7 +37,7 @@ class GetApiKeysByPrincipalHandler(QueryHandler):
     def __init__(self, api_key_store: IApiKeyStore):
         self._store = api_key_store
 
-    def handle(self, query: GetApiKeysByPrincipalQuery) -> dict[str, Any]:
+    def handle(self, query: GetApiKeysByPrincipalQuery) -> dict[str, Any]:  # type: ignore[override]  # CQRS: handler narrows Query to specific query type
         """Get all API keys for a principal.
 
         Returns:
@@ -72,7 +72,7 @@ class GetApiKeyCountHandler(QueryHandler):
     def __init__(self, api_key_store: IApiKeyStore):
         self._store = api_key_store
 
-    def handle(self, query: GetApiKeyCountQuery) -> dict[str, Any]:
+    def handle(self, query: GetApiKeyCountQuery) -> dict[str, Any]:  # type: ignore[override]  # CQRS: handler narrows Query to specific query type
         """Get count of active API keys for a principal.
 
         Returns:
@@ -97,7 +97,7 @@ class GetRolesForPrincipalHandler(QueryHandler):
     def __init__(self, role_store: IRoleStore):
         self._store = role_store
 
-    def handle(self, query: GetRolesForPrincipalQuery) -> dict[str, Any]:
+    def handle(self, query: GetRolesForPrincipalQuery) -> dict[str, Any]:  # type: ignore[override]  # CQRS: handler narrows Query to specific query type
         """Get all roles assigned to a principal.
 
         Returns:
@@ -129,7 +129,7 @@ class GetRoleHandler(QueryHandler):
     def __init__(self, role_store: IRoleStore):
         self._store = role_store
 
-    def handle(self, query: GetRoleQuery) -> dict[str, Any]:
+    def handle(self, query: GetRoleQuery) -> dict[str, Any]:  # type: ignore[override]  # CQRS: handler narrows Query to specific query type
         """Get a specific role by name.
 
         Returns:
@@ -154,7 +154,7 @@ class GetRoleHandler(QueryHandler):
 class ListBuiltinRolesHandler(QueryHandler):
     """Handler for ListBuiltinRolesQuery."""
 
-    def handle(self, query: ListBuiltinRolesQuery) -> dict[str, Any]:
+    def handle(self, query: ListBuiltinRolesQuery) -> dict[str, Any]:  # type: ignore[override]  # CQRS: handler narrows Query to specific query type
         """List all built-in roles.
 
         Returns:
@@ -179,7 +179,7 @@ class CheckPermissionHandler(QueryHandler):
     def __init__(self, role_store: IRoleStore):
         self._store = role_store
 
-    def handle(self, query: CheckPermissionQuery) -> dict[str, Any]:
+    def handle(self, query: CheckPermissionQuery) -> dict[str, Any]:  # type: ignore[override]  # CQRS: handler narrows Query to specific query type
         """Check if a principal has a specific permission.
 
         Returns:
@@ -221,7 +221,7 @@ class ListAllRolesHandler(QueryHandler):
     def __init__(self, role_store: IRoleStore):
         self._store = role_store
 
-    def handle(self, query: ListAllRolesQuery) -> dict[str, Any]:
+    def handle(self, query: ListAllRolesQuery) -> dict[str, Any]:  # type: ignore[override]  # CQRS: handler narrows Query to specific query type
         """List all roles.
 
         Returns:
@@ -275,7 +275,7 @@ class ListPrincipalsHandler(QueryHandler):
     def __init__(self, role_store: IRoleStore):
         self._store = role_store
 
-    def handle(self, query: ListPrincipalsQuery) -> dict[str, Any]:
+    def handle(self, query: ListPrincipalsQuery) -> dict[str, Any]:  # type: ignore[override]  # CQRS: handler narrows Query to specific query type
         """List principals with at least one role assignment.
 
         Returns:
@@ -313,7 +313,7 @@ class GetToolAccessPolicyHandler(QueryHandler):
     def __init__(self, tap_store: Any):
         self._tap_store = tap_store
 
-    def handle(self, query: GetToolAccessPolicyQuery) -> dict[str, Any]:
+    def handle(self, query: GetToolAccessPolicyQuery) -> dict[str, Any]:  # type: ignore[override]  # CQRS: handler narrows Query to specific query type
         """Get the tool access policy for a scope/target.
 
         Returns:

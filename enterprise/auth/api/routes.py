@@ -319,7 +319,7 @@ async def list_permissions(request: Request) -> HangarJSONResponse:
     """
     # Graceful fallback: if constants don't exist, return known defaults
     try:
-        from mcp_hangar.domain.value_objects.security import ACTIONS, RESOURCE_TYPES
+        from mcp_hangar.domain.value_objects.security import ACTIONS, RESOURCE_TYPES  # type: ignore[attr-defined]  # optional constants, fallback handles missing
 
         permissions = [{"resource_type": rt, "actions": list(ACTIONS)} for rt in RESOURCE_TYPES]
     except Exception:  # noqa: BLE001

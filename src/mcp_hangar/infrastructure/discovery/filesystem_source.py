@@ -121,7 +121,7 @@ class FilesystemDiscoverySource(DiscoverySource):
         Returns:
             List of discovered mcp_servers
         """
-        mcp_servers = []
+        mcp_servers: list[DiscoveredMcpServer] = []
 
         if not self.path.exists():
             logger.warning(f"Discovery path does not exist: {self.path}")
@@ -229,7 +229,7 @@ class FilesystemDiscoverySource(DiscoverySource):
         Returns:
             Normalized connection info
         """
-        result = {}
+        result: dict[str, Any] = {}
 
         if mode in ("subprocess", "stdio"):
             # Command-based connection
@@ -379,5 +379,5 @@ if WATCHDOG_AVAILABLE:
     FileChangeHandler = _FileChangeHandler
 else:
     # Stub for when watchdog is not available
-    _FileChangeHandler = None
-    FileChangeHandler = None
+    _FileChangeHandler = None  # type: ignore[assignment,misc]  # optional dependency
+    FileChangeHandler = None  # type: ignore[assignment,misc]  # optional dependency

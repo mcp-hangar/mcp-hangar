@@ -236,7 +236,7 @@ class InMemoryRoleStore(IRoleStore):
         principal_id: str,
         role_name: str,
         scope: str = "global",
-        assigned_by: str = "system",
+        assigned_by: str | None = None,
     ) -> None:
         """Assign a role to a principal.
 
@@ -274,7 +274,7 @@ class InMemoryRoleStore(IRoleStore):
         principal_id: str,
         role_name: str,
         scope: str = "global",
-        revoked_by: str = "system",
+        revoked_by: str | None = None,
     ) -> None:
         """Revoke a role from a principal.
 
