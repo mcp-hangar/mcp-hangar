@@ -5,9 +5,9 @@ agents and human contributors before creating, modifying, or referencing
 Architecture Decision Records (ADRs).
 
 For repo-wide conventions (build commands, source layout, testing, coding
-style), see the root [`AGENTS.md`](../../AGENTS.md).
+style), see the root [`AGENTS.md`](https://github.com/mcp-hangar/mcp-hangar/blob/main/AGENTS.md).
 For contribution workflow (PRs, licensing, CLA), see
-[`CONTRIBUTING.md`](../../CONTRIBUTING.md).
+[`CONTRIBUTING.md`](https://github.com/mcp-hangar/mcp-hangar/blob/main/CONTRIBUTING.md).
 
 ---
 
@@ -311,7 +311,7 @@ Before creating or modifying any ADR, confirm:
 - [ ] Confirm the decision warrants an ADR (section 2 criteria met).
 - [ ] Confirm no existing ADR already covers this decision
       (`grep -l "<keyword>" docs/adr/ADR-*.md`).
-- [ ] Read root [`AGENTS.md`](../../AGENTS.md) for repo-wide conventions
+- [ ] Read root [`AGENTS.md`](https://github.com/mcp-hangar/mcp-hangar/blob/main/AGENTS.md) for repo-wide conventions
       if this is your first task in this repository.
 
 ---
