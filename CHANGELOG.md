@@ -32,6 +32,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - **ci:** release notes no longer contain literal `%0A` newlines (removed legacy set-output encoding)
 - **ci:** release body no longer has a duplicated `## What's Changed` section (removed `generate_release_notes: true`); a manual Full Changelog compare link is added instead
 - **ci:** HTML entities (`&gt;`, `&lt;`, `&amp;`) in CHANGELOG entries are decoded before writing to the release body
+- **ci:** PR-only checks (`pr-title`, `commitlint`, `changelog`, `pr-body`) no longer emit ghost failed runs on push to main (removed from required status checks; they still gate PR merges implicitly)
 
 ## [1.0.3](https://github.com/mcp-hangar/mcp-hangar/compare/v1.0.2...v1.0.3) (2026-05-10)
 
