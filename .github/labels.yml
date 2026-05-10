@@ -78,6 +78,10 @@
   color: b60205
   description: Cannot progress until external dependency resolves
 
+- name: status/triage
+  color: fef2c0
+  description: Issue needs initial review; priority and scope not yet assigned
+
 - name: pinned
   color: "000000"
   description: Long-lived issue; exempt from stale bot
