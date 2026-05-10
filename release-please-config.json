@@ -12,6 +12,7 @@
       "include-component-in-tag": false,
       "tag-separator": "",
       "extra-files": [],
+      "pull-request-title-pattern": "chore(release): release ${version}",
       "changelog-sections": [
         { "type": "feat",     "section": "Added",      "hidden": false },
         { "type": "fix",      "section": "Fixed",      "hidden": false },
