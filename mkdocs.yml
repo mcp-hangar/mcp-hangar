@@ -124,6 +124,7 @@ nav:
       - Contributing: development/CONTRIBUTING.md
       - Git Flow: development/GIT_FLOW.md
       - Hotfix Runbook: development/HOTFIX_RUNBOOK.md
+      - Epic Playbook: development/EPIC_PLAYBOOK.md
       - Release Process: runbooks/RELEASE.md
       - Contributor License Agreement: cla.md
   - Reference:
