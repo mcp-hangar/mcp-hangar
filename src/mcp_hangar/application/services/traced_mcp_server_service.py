@@ -18,12 +18,20 @@ import time
 from typing import Any
 
 from ..ports.observability import ObservabilityPort, TraceContext
-from ...observability.conventions import MCP, set_governance_attributes
+from ...domain.contracts.risk import IRiskScorer, NullRiskScorer
+from ...observability.conventions import MCP, Risk, set_governance_attributes
 from ...observability.tracing import get_tracer
 
 from .mcp_server_service import McpServerService
 
 logger = logging.getLogger(__name__)
+
+
+def _normalize_risk(score: float) -> float:
+    """Clamp a risk score from [0.0, 100.0] domain scale to [0.0, 1.0] OTEL scale."""
+    if not (isinstance(score, (int, float)) and score == score):  # NaN check
+        return 0.0
+    return max(0.0, min(score / 100.0, 1.0))
 
 
 class TracedMcpServerService:
@@ -43,18 +51,14 @@ class TracedMcpServerService:
         observability: ObservabilityPort,
         mcp_server_service: McpServerService | None = None,
         provider_service: McpServerService | None = None,
+        risk_scorer: IRiskScorer | None = None,
     ) -> None:
-        """Initialize traced service.
-
-        Args:
-            mcp_server_service: The underlying mcp_server service to wrap.
-            observability: Observability adapter for tracing.
-        """
         service = mcp_server_service or provider_service
         if service is None:
             raise TypeError("Missing required argument: mcp_server_service")
         self._service = service
         self._observability = observability
+        self._risk_scorer = risk_scorer or NullRiskScorer()
 
     # --- Delegated methods (no tracing needed) ---
 
@@ -115,6 +119,14 @@ class TracedMcpServerService:
                 user_id=user_id,
                 session_id=session_id,
             )
+
+            risk_score_obj = self._risk_scorer.get_score(mcp_server_id)
+            if risk_score_obj.score > 0.0:
+                otel_span.set_attribute(Risk.SCORE, _normalize_risk(risk_score_obj.score))
+            if session_id:
+                session_risk = self._risk_scorer.get_session_score(session_id)
+                if session_risk.score > 0.0:
+                    otel_span.set_attribute(Risk.SESSION_ANOMALY_SCORE, _normalize_risk(session_risk.score))
 
             # ObservabilityPort span (Langfuse / partner backend)
             trace_context = None

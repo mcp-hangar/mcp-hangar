@@ -9,6 +9,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Added
 
+- End-to-end observability and compliance loop: cost attribution in audit spans, risk score normalization and emission, compliance exporter deprecation rename, dynamic enterprise bootstrap (#106)
 - Branch name validator workflow enforcing GIT_FLOW.md naming conventions on PRs
 - GitHub Projects v2 board setup script and auto-add workflow
 

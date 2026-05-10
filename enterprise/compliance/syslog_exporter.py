@@ -115,27 +115,48 @@ class SyslogExporter:
 
     def export_tool_invocation(
         self,
-        provider_id: str,
+        mcp_server_id: str,
         tool_name: str,
         status: str,
         duration_ms: float,
         user_id: str | None = None,
         session_id: str | None = None,
         error_type: str | None = None,
+        caller_type: str | None = None,
+        caller_id: str | None = None,
+        caller_roles: str | None = None,
+        cost_cents: int | None = None,
+        cost_model: str | None = None,
+        cost_input_tokens: int | None = None,
+        cost_output_tokens: int | None = None,
     ) -> None:
-        data: dict[str, str | float] = {
+        data: dict[str, str | float | int] = {
             "tool_name": tool_name,
             "status": status,
             "duration_ms": duration_ms,
         }
         if error_type:
             data["error_type"] = error_type
+        if caller_type:
+            data["caller_type"] = caller_type
+        if caller_id:
+            data["caller_id"] = caller_id
+        if caller_roles:
+            data["caller_roles"] = caller_roles
+        if cost_cents is not None:
+            data["cost_cents"] = cost_cents
+        if cost_model:
+            data["cost_model"] = cost_model
+        if cost_input_tokens is not None:
+            data["cost_input_tokens"] = cost_input_tokens
+        if cost_output_tokens is not None:
+            data["cost_output_tokens"] = cost_output_tokens
 
         record = AuditRecord(
             event_id="",
             event_type=_event_type_for_status(status),
             occurred_at=datetime.now(UTC),
-            mcp_server_id=provider_id,
+            mcp_server_id=mcp_server_id,
             data=data,
             caller_user_id=user_id,
             caller_session_id=session_id,
@@ -143,20 +164,29 @@ class SyslogExporter:
         self._emit(_format_record(record))
 
     def export_provider_state_change(self, provider_id: str, from_state: str, to_state: str) -> None:
+        """.. deprecated:: Use :meth:`export_mcp_server_state_change`. Removal: 2026-Q3."""
+        import warnings
+
+        warnings.warn(
+            "export_provider_state_change is deprecated, use export_mcp_server_state_change instead. "
+            "Planned removal: 2026-Q3.",
+            DeprecationWarning,
+            stacklevel=2,
+        )
+        self.export_mcp_server_state_change(provider_id, from_state, to_state)
+
+    def export_mcp_server_state_change(self, mcp_server_id: str, from_state: str, to_state: str) -> None:
         record = AuditRecord(
             event_id="",
             event_type="ProviderStateChanged",
             occurred_at=datetime.now(UTC),
-            mcp_server_id=provider_id,
+            mcp_server_id=mcp_server_id,
             data={
                 "from_state": from_state,
                 "to_state": to_state,
             },
         )
         self._emit(_format_record(record))
-
-    def export_mcp_server_state_change(self, mcp_server_id: str, from_state: str, to_state: str) -> None:
-        self.export_provider_state_change(mcp_server_id, from_state, to_state)
 
     @property
     def lines_exported(self) -> int:
