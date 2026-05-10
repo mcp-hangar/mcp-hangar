@@ -1,0 +1,26 @@
+# Per-commit Conventional Commits lint. Pairs with pr-title.yml. See GIT_FLOW.md.
+name: commitlint
+
+on:
+  pull_request:
+    types: [opened, synchronize, reopened]
+
+permissions:
+  contents: read
+  pull-requests: read
+
+jobs:
+  lint:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: Lint commits
+        uses: wagoid/commitlint-github-action@v6
+        with:
+          configFile: .commitlintrc.yml
+          failOnWarnings: true
+          firstParent: false
