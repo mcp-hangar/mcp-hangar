@@ -86,6 +86,10 @@
   color: ededed
   description: PR is exempt from CHANGELOG entry requirement (chore/deps, ci, style, test, pure docs)
 
+- name: trivial
+  color: cfd3d7
+  description: Small/obvious change exempt from PR body structure requirements (typo, comment, version bump)
+
 - name: pinned
   color: "000000"
   description: Long-lived issue; exempt from stale bot
