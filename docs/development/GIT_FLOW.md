@@ -201,10 +201,11 @@ Reference .github/workflows/release.yml for the specific logic of tag-driven pub
 Releases are currently ad-hoc based on feature readiness and security needs.
 This follows the decision made in section 2, row 6.
 
-The project plans to use release-please as a queue mechanism.
-Currently, this tool is NOT installed.
-The version-bump.yml workflow is the primary path for version management today.
-Future automation for release notes and automated tagging is deferred to the parking lot.
+release-please runs on every push to `main` and maintains a long-running
+Release PR (`release-please--branches--main`) summarizing the next release.
+Merging that PR creates the version tag, which `release.yml` consumes to
+publish to PyPI and GHCR. There is no scheduled release cron -- the Release PR
+sits open until a maintainer decides "enough has accumulated."
 
 ## Hotfix process
 
@@ -226,7 +227,7 @@ Detailed manual steps are in [HOTFIX_RUNBOOK.md](HOTFIX_RUNBOOK.md).
 - ci-operator.yml (operator SDK tests)
 - ci-docs.yml (MkDocs build validation)
 - release.yml (TestPyPI and PyPI publishing)
-- version-bump.yml (manual version management)
+- release-please.yml (automated version bump and Release PR)
 - security.yml (static analysis and boundary checks)
 
 ### Active after sibling tickets merge
