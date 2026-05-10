@@ -17,6 +17,10 @@ on:
       - '.markdownlint.json'
       - '.github/workflows/ci-docs.yml'
 
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
 jobs:
   lint:
     name: Markdown Lint

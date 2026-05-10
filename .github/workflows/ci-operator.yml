@@ -11,6 +11,10 @@ on:
       - 'packages/operator/**'
       - '.github/workflows/ci-operator.yml'
 
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
 defaults:
   run:
     working-directory: packages/operator

@@ -17,6 +17,10 @@ on:
       - "pyproject.toml"
       - ".github/workflows/ci-core.yml"
 
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
 env:
   RUFF_VERSION: "0.14.13"
 
