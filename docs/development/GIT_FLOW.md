@@ -78,6 +78,7 @@ They are used in commit messages: `<type>(<scope>): <subject>`.
 | docs | Markdown documentation and MkDocs config |
 | deps | Dependency updates and lockfile changes |
 | release | Release artifacts and versioning |
+| repo | Root-level governance files: AGENTS.md, CODEOWNERS, LICENSE, commitlint config |
 | infra | Dockerfile, Makefile, and local dev setup |
 | tests | Test fixtures and suite configuration |
 
