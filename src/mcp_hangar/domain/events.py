@@ -1479,6 +1479,35 @@ class CapabilityDeclarationMissing(DomainEvent):
         super().__init__()
 
 
+@dataclass
+class DigestMismatchEvent(DomainEvent):
+    """Published when a tool's observed digest does not match the expected digest.
+
+    Emitted by the digest validator during tool invocation or tool list refresh.
+    The enforcement field records what action was taken (audit/warn/block).
+
+    Attributes:
+        mcp_server_id: McpServer that served the tool.
+        tool_name: Name of the tool with mismatched digest.
+        expected_digest: The digest from the allowlist, or None if tool had no entry.
+        observed_digest: The computed digest of the tool's current schema.
+        enforcement: The DigestEnforcement value applied.
+        correlation_id: Request correlation ID for audit trail linkage.
+        schema_version: Event schema version.
+    """
+
+    mcp_server_id: str
+    tool_name: str
+    expected_digest: str | None
+    observed_digest: str | None
+    enforcement: str
+    correlation_id: str
+    schema_version: int = 1
+
+    def __post_init__(self):
+        super().__init__()
+
+
 # ---------------------------------------------------------------------------
 # Behavioral Profiling Events
 # ---------------------------------------------------------------------------

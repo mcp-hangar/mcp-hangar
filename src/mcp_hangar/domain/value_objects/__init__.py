@@ -79,6 +79,9 @@ from .discovery import DiscoverySourceSpec
 # License
 from .license import LicenseTier
 
+# Tool Digest (SEP-1766)
+from .tool_digest import DigestEnforcement, DigestPolicy, DigestUnknownPolicy, ToolDigest
+
 __all__ = [
     # Security
     "PrincipalType",
@@ -140,6 +143,11 @@ __all__ = [
     "ToolCapabilities",
     "ViolationSeverity",
     "ViolationType",
+    # Tool Digest
+    "ToolDigest",
+    "DigestEnforcement",
+    "DigestUnknownPolicy",
+    "DigestPolicy",
 ]
 
 import sys
