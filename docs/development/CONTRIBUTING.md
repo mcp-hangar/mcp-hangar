@@ -137,6 +137,8 @@ def test_tool_invocation():
 
 ## Pull Requests
 
+See [Git Flow](GIT_FLOW.md) for branching conventions, merge strategy, and commit scopes.
+
 1. Create feature branch
 2. Make changes following style guidelines
 3. Add tests

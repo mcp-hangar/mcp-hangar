@@ -12,6 +12,8 @@ MCP Hangar is a monorepo containing multiple packages:
 
 ## Quick Start
 
+See [Git Flow](docs/development/GIT_FLOW.md) for branching conventions and commit scopes.
+
 ```bash
 git clone https://github.com/mcp-hangar/mcp-hangar.git
 cd mcp-hangar
