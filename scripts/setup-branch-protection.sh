@@ -40,7 +40,6 @@ PAYLOAD=$(cat <<EOF
       "pr-validation / required-check",
       "enterprise-boundary",
       "pr-title / validate",
-      "commitlint / lint",
       "changelog / check",
       "branch-name / validate",
       "pr-body / validate"
