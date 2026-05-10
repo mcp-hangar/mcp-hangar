@@ -109,6 +109,7 @@ class MCPServerFactory:
 
         self._register_core_tools(mcp)
         self._register_discovery_tools(mcp)
+        self._register_interceptors_list(mcp)
 
         self._mcp = mcp
         logger.info(
@@ -321,6 +322,12 @@ class MCPServerFactory:
             if hgr.metrics is None:
                 return {"error": "Metrics not available"}
             return hgr.metrics(format=format)
+
+    @staticmethod
+    def _register_interceptors_list(mcp: FastMCP) -> None:
+        from .interceptors_list import interceptors_list_handler
+
+        mcp.custom_route("/interceptors/list", methods=["GET"], name="interceptors_list")(interceptors_list_handler)
 
     def _run_readiness_checks(self) -> dict[str, Any]:
         """Run readiness checks.
