@@ -1,0 +1,38 @@
+# CODEOWNERS for mcp-hangar/mcp-hangar
+#
+# See: https://docs.github.com/en/repositories/managing-your-repositories-settings-and-security/customizing-your-repository/about-code-owners
+#
+# Solo maintainer today (@mapyr). Team placeholders left as comments — uncomment
+# and replace owner once `@mcp-hangar/maintainers` and `@mcp-hangar/security` teams exist.
+
+# Default: maintainer reviews everything not matched below
+*                                       @mapyr
+
+# Security-sensitive runtime code
+/src/mcp_hangar/server/security/        @mapyr  # @mcp-hangar/security
+/src/mcp_hangar/server/api/middleware*  @mapyr  # @mcp-hangar/security
+/src/mcp_hangar/auth/                   @mapyr  # @mcp-hangar/security
+
+# Enterprise (BSL 1.1) — separate license, separate review
+/enterprise/                            @mapyr  # @mcp-hangar/maintainers
+
+# Architecture decision records — immutable after Accepted
+/docs/adr/                              @mapyr  # @mcp-hangar/maintainers
+/docs/adr/AGENTS.md                     @mapyr  # @mcp-hangar/maintainers
+
+# Release machinery
+/.github/workflows/release.yml          @mapyr  # @mcp-hangar/maintainers
+/.github/workflows/version-bump.yml     @mapyr  # @mcp-hangar/maintainers
+/pyproject.toml                         @mapyr  # @mcp-hangar/maintainers
+/CHANGELOG.md                           @mapyr  # @mcp-hangar/maintainers
+
+# Repo governance
+/.github/CODEOWNERS                     @mapyr  # @mcp-hangar/maintainers
+/.github/workflows/                     @mapyr  # @mcp-hangar/maintainers
+/AGENTS.md                              @mapyr  # @mcp-hangar/maintainers
+/docs/development/GIT_FLOW.md           @mapyr  # @mcp-hangar/maintainers
+
+# CLA + licensing
+/LICENSE                                @mapyr
+/CLA.md                                 @mapyr
+/enterprise/LICENSE.BSL                 @mapyr
