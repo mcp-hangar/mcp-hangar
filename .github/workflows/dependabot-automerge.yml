@@ -4,6 +4,10 @@ name: Dependabot auto-merge
 on:
   pull_request_target:
 
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
 permissions:
   contents: write
   pull-requests: write
