@@ -123,6 +123,7 @@ nav:
   - Development:
       - Contributing: development/CONTRIBUTING.md
       - Git Flow: development/GIT_FLOW.md
+      - Branch Protection: development/BRANCH_PROTECTION.md
       - Hotfix Runbook: development/HOTFIX_RUNBOOK.md
       - Epic Playbook: development/EPIC_PLAYBOOK.md
       - Release Process: runbooks/RELEASE.md
