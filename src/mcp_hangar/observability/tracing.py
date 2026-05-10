@@ -46,7 +46,7 @@ _initialized = False
 try:
     from opentelemetry.sdk.resources import Resource, SERVICE_NAME
     from opentelemetry.sdk.trace.export import BatchSpanProcessor, ConsoleSpanExporter
-    from opentelemetry.sdk.trace import TracerMcpServer
+    from opentelemetry.sdk.trace import TracerProvider
     from opentelemetry import trace
     from opentelemetry.trace.propagation.tracecontext import TraceContextTextMapPropagator
     from opentelemetry.trace import Status, StatusCode
@@ -167,7 +167,7 @@ def init_tracing(
         )
 
         # Create tracer mcp_server
-        _tracer_mcp_server = TracerMcpServer(resource=resource)
+        _tracer_mcp_server = TracerProvider(resource=resource)
 
         # Add exporters
         exporters_added = 0
