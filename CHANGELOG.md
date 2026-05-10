@@ -34,6 +34,10 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - **ci:** HTML entities (`&gt;`, `&lt;`, `&amp;`) in CHANGELOG entries are decoded before writing to the release body
 - **ci:** PR-only checks (`pr-title`, `commitlint`, `changelog`, `pr-body`) no longer emit ghost failed runs on push to main (removed from required status checks; they still gate PR merges implicitly)
 
+### Security
+
+- **ci:** scope `dependabot-automerge` `pull_request_target` to `branches: [main]` with explicit event types (#112)
+
 ## [1.0.3](https://github.com/mcp-hangar/mcp-hangar/compare/v1.0.2...v1.0.3) (2026-05-10)
 
 
