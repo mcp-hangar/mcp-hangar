@@ -212,7 +212,7 @@ They bypass the standard feature flow to provide rapid resolution.
 
 A hotfix branch is cut directly from the target version tag.
 After verification, the fix is tagged and then cherry-picked into the main branch.
-Detailed manual steps are deferred to HOTFIX_RUNBOOK.md which is currently TBD.
+Detailed manual steps are in [HOTFIX_RUNBOOK.md](HOTFIX_RUNBOOK.md).
 
 ## Automation surface
 

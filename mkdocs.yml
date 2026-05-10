@@ -123,6 +123,7 @@ nav:
   - Development:
       - Contributing: development/CONTRIBUTING.md
       - Git Flow: development/GIT_FLOW.md
+      - Hotfix Runbook: development/HOTFIX_RUNBOOK.md
       - Release Process: runbooks/RELEASE.md
       - Contributor License Agreement: cla.md
   - Reference:
