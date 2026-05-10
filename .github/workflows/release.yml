@@ -298,12 +298,19 @@ jobs:
 
           # Derive the previous release tag for the Full Changelog compare link
           PREV_TAG=$(git tag --sort=-v:refname | grep -E '^v[0-9]+\.[0-9]+\.[0-9]+$' | grep -v "^v${BASE_VERSION}$" | head -1)
+          if [ -n "$PREV_TAG" ]; then
+            FULL_CHANGELOG_LINE="**Full Changelog**: https://github.com/${{ github.repository }}/compare/${PREV_TAG}...v${VERSION}"
+          else
+            FULL_CHANGELOG_LINE=""
+          fi
 
           echo "content<<EOF" >> $GITHUB_OUTPUT
           echo "$CHANGELOG" >> $GITHUB_OUTPUT
           echo "EOF" >> $GITHUB_OUTPUT
 
-          echo "prev_tag=${PREV_TAG}" >> $GITHUB_OUTPUT
+          echo "full_changelog_line<<EOF" >> $GITHUB_OUTPUT
+          echo "$FULL_CHANGELOG_LINE" >> $GITHUB_OUTPUT
+          echo "EOF" >> $GITHUB_OUTPUT
 
       - name: Create GitHub Release
         uses: softprops/action-gh-release@v2
@@ -331,5 +338,5 @@ jobs:
             - [Docker Image](https://ghcr.io/${{ github.repository }}:${{ needs.validate.outputs.version }})
             - [Documentation](https://${{ github.repository_owner }}.github.io/mcp-hangar/)
 
-            **Full Changelog**: https://github.com/${{ github.repository }}/compare/${{ steps.changelog.outputs.prev_tag }}...v${{ needs.validate.outputs.version }}
+            ${{ steps.changelog.outputs.full_changelog_line }}
           prerelease: ${{ needs.validate.outputs.is_prerelease == 'true' }}
