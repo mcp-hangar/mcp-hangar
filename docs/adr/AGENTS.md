@@ -342,9 +342,11 @@ Mechanically checkable. Use these for automated or manual review.
 |------|-------|
 | Filename | Matches `ADR-NNN-kebab-name.md` (three-digit, lowercase kebab) |
 | Title line | `# ADR-NNN: <title>` on line 1 |
-| Header line 2 | Blank line, then `**Status:** <value>` where value is one of: Proposed, Accepted, Superseded by ADR-NNN, Deprecated, Rejected |
-| Header line 3 | `**Date:** YYYY-MM-DD` |
-| Header line 4 | `**Authors:** MCP Hangar Team` |
+| Line 2 | Blank line |
+| Line 3 | `**Status:** <value>` where value is one of: Proposed, Accepted, Superseded by ADR-NNN, Deprecated, Rejected |
+| Line 4 | `**Date:** YYYY-MM-DD` |
+| Line 5 | `**Authors:** MCP Hangar Team` |
+| Line 6 | Blank line |
 | Required sections | `## Context`, `## Decision`, `## Consequences` present, in that order |
 | Consequences sub-sections | `### Positive` and `### Negative` both present under `## Consequences` |
 | Status value | One of the five defined values (section 8) |

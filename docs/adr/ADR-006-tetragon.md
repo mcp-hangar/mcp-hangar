@@ -28,10 +28,9 @@ three known gaps:
    pod-IP-port granularity.
 
 These gaps recur consistently in fresh CVE analysis (CVE-2026-44284
-FastGPT; Semantic Kernel SSRF / process attribution gaps -- specific CVEs
-pending public disclosure) and in the threat model presented to enterprise
-prospects. They must be closed no later than v2.0, but not at the cost of
-slipping the v1.0 launch.
+FastGPT) and in the threat model presented to enterprise prospects. They
+must be closed no later than v2.0, but not at the cost of slipping the
+v1.0 launch.
 
 ## Decision
 
@@ -55,7 +54,7 @@ kprobes on arbitrary kernel functions, enforcement actions (Sigkill /
 Override / Signal / NotifyEnforcer) cover required semantics, in-kernel
 filtering avoids userspace context switches, preserving Hangar's <5 ms p99
 latency budget, installs standalone (does not require Cilium CNI),
-Apache 2.0, CNCF Graduated (Cilium ecosystem), production-grade since
+Apache 2.0, CNCF Incubating (Cilium sub-project), production-grade since
 v1.x.
 
 ### Phasing
@@ -159,5 +158,3 @@ v1.x.
   validators/mutators); Tetragon operates at L3/L4 + syscall level. No
   functional overlap -- complementary layers.
 - CVE-2026-44284 (FastGPT SSRF) -- motivating gap analysis.
-- Semantic Kernel SSRF / process attribution gaps -- specific CVEs pending
-  public disclosure.

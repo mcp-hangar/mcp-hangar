@@ -82,7 +82,7 @@ three-line header (Status, Date, Authors), three required body sections
 (Context, Decision, Consequences), and optional sections for Alternatives
 Considered and References. Once accepted, ADR bodies are immutable --
 changing a decision requires a new ADR. Five statuses are permitted:
-Proposed, Accepted, Superseded, Deprecated, and Rejected. For the full
+Proposed, Accepted, Superseded by ADR-NNN, Deprecated, and Rejected. For the full
 specification, see [AGENTS.md](AGENTS.md).
 
 ## Quick links
