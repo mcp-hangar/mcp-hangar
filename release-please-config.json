@@ -1,0 +1,30 @@
+{
+  "$schema": "https://raw.githubusercontent.com/googleapis/release-please/main/schemas/config.json",
+  "release-type": "python",
+  "packages": {
+    ".": {
+      "package-name": "mcp-hangar",
+      "release-type": "python",
+      "bump-minor-pre-major": false,
+      "bump-patch-for-minor-pre-major": false,
+      "draft": false,
+      "prerelease": false,
+      "include-component-in-tag": false,
+      "tag-separator": "",
+      "extra-files": [],
+      "changelog-sections": [
+        { "type": "feat",     "section": "Added",      "hidden": false },
+        { "type": "fix",      "section": "Fixed",      "hidden": false },
+        { "type": "perf",     "section": "Changed",    "hidden": false },
+        { "type": "refactor", "section": "Changed",    "hidden": false },
+        { "type": "security", "section": "Security",   "hidden": false },
+        { "type": "revert",   "section": "Changed",    "hidden": false },
+        { "type": "docs",     "section": "Changed",    "hidden": true  },
+        { "type": "test",     "section": "Changed",    "hidden": true  },
+        { "type": "build",    "section": "Changed",    "hidden": true  },
+        { "type": "ci",       "section": "Changed",    "hidden": true  },
+        { "type": "chore",    "section": "Changed",    "hidden": true  }
+      ]
+    }
+  }
+}

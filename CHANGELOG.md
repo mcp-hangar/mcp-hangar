@@ -14,12 +14,17 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - **Export Formats (B-11)**: Three new enterprise compliance exporters implementing `IAuditExporter`: `JSONLinesExporter` (one JSON object per line), `LEEFExporter` (IBM QRadar LEEF 2.0), `SyslogExporter` (RFC 5424 structured data). All support file, callback, or stderr output.
 - **Agent Behavior Scoring (B-04)**: `RiskScore` value object, `IRiskScorer` contract with `WeightedRiskScorer` implementation using exponential time decay (configurable half-life). `RiskScoringEventHandler` subscribes to `BehavioralDeviationDetected`, `DetectionRuleMatched`, and `CapabilityViolationDetected` events to aggregate per-server and per-session anomaly scores.
 - Copilot custom instructions for PR descriptions and commit messages, aligning generated content with repo CC schema and PR template
+- release-please workflow for automated version bumps, changelog sectioning, and tag-driven releases
 
 ### Fixed
 
 - PR body validator: handle CRLF line endings in event payload (was reporting all sections empty)
 - commitlint: relax subject-case rule to allow file references and acronyms (was blocking any commit mentioning CHANGELOG.md, MCP, OAuth, etc.)
 - GIT_FLOW.md: add `repo` to approved CC scopes for root-level governance files
+
+### Removed
+
+- `version-bump.yml` workflow superseded by release-please
 
 ## [1.0.2] - 2026-04-24
 
