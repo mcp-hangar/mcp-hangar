@@ -1,0 +1,42 @@
+name: ADR Proposal
+description: >
+  ADRs must be human-authored. Agents may draft content here as a comment,
+  but the PR author must be a human contributor. See docs/adr/AGENTS.md.
+title: "[ADR] "
+labels: ["type/feature", "human-required", "priority/p1-high"]
+body:
+  - type: textarea
+    id: problem
+    attributes:
+      label: Problem
+      placeholder: What architectural problem needs a decision?
+    validations:
+      required: true
+  - type: textarea
+    id: decision
+    attributes:
+      label: Decision proposed
+      placeholder: The recommended approach and rationale
+    validations:
+      required: true
+  - type: textarea
+    id: alternatives
+    attributes:
+      label: Alternatives
+      placeholder: Other options evaluated and why they were rejected
+    validations:
+      required: true
+  - type: textarea
+    id: consequences
+    attributes:
+      label: Consequences
+      placeholder: Trade-offs, migration steps, and downstream impact
+    validations:
+      required: true
+  - type: textarea
+    id: references
+    attributes:
+      label: References
+      placeholder: Links to relevant docs, issues, or prior art
+    validations:
+      required: false

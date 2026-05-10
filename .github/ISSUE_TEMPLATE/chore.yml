@@ -1,0 +1,28 @@
+name: Chore
+description: Routine maintenance, dependency updates, or housekeeping.
+title: "[CHORE] "
+labels: ["type/chore", "priority/p3-low"]
+body:
+  - type: textarea
+    id: what
+    attributes:
+      label: What
+      placeholder: Describe the chore
+    validations:
+      required: true
+  - type: textarea
+    id: why
+    attributes:
+      label: Why
+      placeholder: Why is this needed now?
+    validations:
+      required: true
+  - type: textarea
+    id: affected-paths
+    attributes:
+      label: Affected paths
+      placeholder: |
+        - src/mcp_hangar/...
+        - pyproject.toml
+    validations:
+      required: false
