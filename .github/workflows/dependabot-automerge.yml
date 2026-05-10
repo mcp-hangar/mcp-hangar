@@ -1,0 +1,54 @@
+# Decision #8 (override): auto-merge runtime CVE patches alongside dev/actions. See GIT_FLOW.md.
+name: Dependabot auto-merge
+
+on:
+  pull_request_target:
+
+permissions:
+  contents: write
+  pull-requests: write
+
+jobs:
+  automerge:
+    runs-on: ubuntu-latest
+    if: ${{ github.actor == 'dependabot[bot]' }}
+    steps:
+      - name: Fetch Dependabot metadata
+        id: meta
+        uses: dependabot/fetch-metadata@v2
+        with:
+          github-token: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Auto-merge eligible patches
+        env:
+          PR_URL: ${{ github.event.pull_request.html_url }}
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          UPDATE_TYPE: ${{ steps.meta.outputs.update-type }}
+          DEP_TYPE: ${{ steps.meta.outputs.dependency-type }}
+          ALERT_STATE: ${{ steps.meta.outputs.alert-state }}
+          ECOSYSTEM: ${{ steps.meta.outputs.package-ecosystem }}
+        run: |
+          if [ "$UPDATE_TYPE" != "version-update:semver-patch" ]; then
+            echo "Not a patch update ($UPDATE_TYPE). Skipping auto-merge."
+            exit 0
+          fi
+
+          if [ "$DEP_TYPE" = "direct:development" ]; then
+            echo "Dev dependency patch. Enabling auto-merge."
+            gh pr merge --auto --squash "$PR_URL"
+            exit 0
+          fi
+
+          if [ "$ECOSYSTEM" = "github-actions" ]; then
+            echo "GitHub Actions patch. Enabling auto-merge."
+            gh pr merge --auto --squash "$PR_URL"
+            exit 0
+          fi
+
+          if [ "$ALERT_STATE" = "open" ]; then
+            echo "Runtime CVE patch (alert-state=open). Enabling auto-merge."
+            gh pr merge --auto --squash "$PR_URL"
+            exit 0
+          fi
+
+          echo "Patch update but no auto-merge rule matched (dep-type=$DEP_TYPE, ecosystem=$ECOSYSTEM, alert-state=$ALERT_STATE). Skipping."
