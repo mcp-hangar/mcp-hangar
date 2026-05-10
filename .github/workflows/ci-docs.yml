@@ -31,7 +31,8 @@ jobs:
           globs: |
             docs/**/*.md
             *.md
-            *.md
+            !CHANGELOG.md
+            !docs/changelog.md
 
   build:
     runs-on: ubuntu-latest
