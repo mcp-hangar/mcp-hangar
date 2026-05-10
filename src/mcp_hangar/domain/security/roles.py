@@ -2,56 +2,71 @@
 
 """Built-in roles stub for core domain.
 
-Role definitions have been moved to ``enterprise/auth/roles.py``
-under BSL 1.1.
+Role definitions live in ``enterprise/auth/roles.py`` under BSL 1.1.
 
-This stub re-exports from enterprise when available. When enterprise
-is not installed, all role-related symbols resolve to empty defaults
-to allow core to function without auth features.
+This stub re-exports from enterprise when available via importlib. When
+enterprise is not installed, all role-related symbols resolve to empty
+defaults to allow core to function without auth features.
 """
 
+import importlib
+from typing import TYPE_CHECKING
+
+if TYPE_CHECKING:
+    from mcp_hangar.domain.value_objects import Permission, Role
+
+_ENTERPRISE_ROLE_NAMES = (
+    "BUILTIN_ROLES",
+    "PERMISSIONS",
+    "ROLE_ADMIN",
+    "ROLE_AGENT",
+    "ROLE_AUDITOR",
+    "ROLE_DEVELOPER",
+    "ROLE_PROVIDER_ADMIN",
+    "ROLE_VIEWER",
+    "get_builtin_role",
+    "get_permission",
+    "list_builtin_roles",
+    "list_permissions",
+)
+
 try:
-    from enterprise.auth.roles import (
-        BUILTIN_ROLES,
-        get_builtin_role,
-        get_permission,
-        list_builtin_roles,
-        list_permissions,
-        PERMISSIONS,
-        ROLE_AGENT,
-        ROLE_ADMIN,
-        ROLE_AUDITOR,
-        ROLE_DEVELOPER,
-        ROLE_PROVIDER_ADMIN,
-        ROLE_VIEWER,
-    )
+    _enterprise_roles = importlib.import_module("enterprise.auth.roles")
+    BUILTIN_ROLES = _enterprise_roles.BUILTIN_ROLES
+    PERMISSIONS = _enterprise_roles.PERMISSIONS
+    ROLE_ADMIN = _enterprise_roles.ROLE_ADMIN
+    ROLE_AGENT = _enterprise_roles.ROLE_AGENT
+    ROLE_AUDITOR = _enterprise_roles.ROLE_AUDITOR
+    ROLE_DEVELOPER = _enterprise_roles.ROLE_DEVELOPER
+    ROLE_PROVIDER_ADMIN = _enterprise_roles.ROLE_PROVIDER_ADMIN
+    ROLE_VIEWER = _enterprise_roles.ROLE_VIEWER
+    get_builtin_role = _enterprise_roles.get_builtin_role
+    get_permission = _enterprise_roles.get_permission
+    list_builtin_roles = _enterprise_roles.list_builtin_roles
+    list_permissions = _enterprise_roles.list_permissions
 except ImportError:
     from mcp_hangar.domain.value_objects import Permission, Role
 
     BUILTIN_ROLES: dict[str, "Role"] = {}  # type: ignore[no-redef]  # fallback stubs when enterprise not installed
     PERMISSIONS: dict[str, "Permission"] = {}  # type: ignore[no-redef]  # fallback stubs when enterprise not installed
 
-    ROLE_ADMIN = None  # type: ignore[assignment]  # stub fallback: None when enterprise unavailable
-    ROLE_AGENT = None  # type: ignore[assignment]  # stub fallback: None when enterprise unavailable
-    ROLE_AUDITOR = None  # type: ignore[assignment]  # stub fallback: None when enterprise unavailable
-    ROLE_DEVELOPER = None  # type: ignore[assignment]  # stub fallback: None when enterprise unavailable
-    ROLE_PROVIDER_ADMIN = None  # type: ignore[assignment]  # stub fallback: None when enterprise unavailable
-    ROLE_VIEWER = None  # type: ignore[assignment]  # stub fallback: None when enterprise unavailable
+    ROLE_ADMIN = None
+    ROLE_AGENT = None
+    ROLE_AUDITOR = None
+    ROLE_DEVELOPER = None
+    ROLE_PROVIDER_ADMIN = None
+    ROLE_VIEWER = None
 
     def get_builtin_role(name: str) -> "Role | None":
-        """Return None when enterprise is not installed."""
         return None
 
     def get_permission(key: str) -> "Permission | None":
-        """Return None when enterprise is not installed."""
         return None
 
     def list_builtin_roles() -> list[str]:
-        """Return empty list when enterprise is not installed."""
         return []
 
     def list_permissions() -> list[str]:
-        """Return empty list when enterprise is not installed."""
         return []
 
 

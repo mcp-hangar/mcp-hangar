@@ -22,29 +22,6 @@ from .handlers import (
 from .load_handlers import LoadMcpServerHandler, LoadResult, UnloadMcpServerHandler
 from .reload_handler import ReloadConfigurationHandler
 
-# Auth commands and handlers live in enterprise/auth/commands/.
-# Re-export conditionally for backwards compatibility.
-try:
-    from enterprise.auth.commands.commands import (  # noqa: F401
-        AssignRoleCommand,
-        CreateApiKeyCommand,
-        CreateCustomRoleCommand,
-        ListApiKeysCommand,
-        RevokeApiKeyCommand,
-        RevokeRoleCommand,
-    )
-    from enterprise.auth.commands.handlers import (  # noqa: F401
-        AssignRoleHandler,
-        CreateApiKeyHandler,
-        CreateCustomRoleHandler,
-        ListApiKeysHandler,
-        register_auth_command_handlers,
-        RevokeApiKeyHandler,
-        RevokeRoleHandler,
-    )
-except ImportError:
-    pass
-
 __all__ = [
     # Commands
     "Command",
@@ -82,3 +59,32 @@ globals().update(
     }
 )
 sys.modules[f"{__name__}.crud_{''.join(('com', 'mands'))}"] = import_module(f"{__name__}.crud_commands")
+
+_ENTERPRISE_AUTH_COMMANDS = {
+    "AssignRoleCommand",
+    "CreateApiKeyCommand",
+    "CreateCustomRoleCommand",
+    "ListApiKeysCommand",
+    "RevokeApiKeyCommand",
+    "RevokeRoleCommand",
+    "AssignRoleHandler",
+    "CreateApiKeyHandler",
+    "CreateCustomRoleHandler",
+    "ListApiKeysHandler",
+    "RevokeApiKeyHandler",
+    "RevokeRoleHandler",
+    "register_auth_command_handlers",
+}
+
+
+def __getattr__(name: str):  # noqa: ANN001
+    if name in _ENTERPRISE_AUTH_COMMANDS:
+        try:
+            if "Handler" in name or name.startswith("register"):
+                mod_name = "enterprise.auth.commands.handlers"
+            else:
+                mod_name = "enterprise.auth.commands.commands"
+            return getattr(import_module(mod_name), name)
+        except ImportError as err:
+            raise AttributeError(f"module {__name__!r} has no attribute {name!r} (enterprise not installed)") from err
+    raise AttributeError(f"module {__name__!r} has no attribute {name!r}")

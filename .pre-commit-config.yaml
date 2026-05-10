@@ -14,10 +14,10 @@ repos:
       - id: ruff
         name: ruff check (lint + isort)
         args: ["--fix"]
-        files: ^packages/core/
+        files: ^src/
       - id: ruff-format
         name: ruff format
-        files: ^packages/core/
+        files: ^src/
 
   # Markdown linting
   - repo: https://github.com/igorshubovych/markdownlint-cli

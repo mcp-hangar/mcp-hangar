@@ -1,5 +1,7 @@
 """Query handlers for CQRS."""
 
+import importlib
+
 from .queries import (
     GetMcpServerHealthQuery,
     GetMcpServerQuery,
@@ -10,24 +12,27 @@ from .queries import (
     QueryHandler,
 )
 
-# Auth queries live in enterprise/auth/queries/.
-# Re-export conditionally for backwards compatibility.
-try:
-    from enterprise.auth.queries.queries import (  # noqa: F401
-        CheckPermissionQuery,
-        GetApiKeyCountQuery,
-        GetApiKeysByPrincipalQuery,
-        GetRoleQuery,
-        GetRolesForPrincipalQuery,
-        ListBuiltinRolesQuery,
-    )
-except ImportError:
-    pass
+_ENTERPRISE_AUTH_QUERIES = {
+    "CheckPermissionQuery",
+    "GetApiKeyCountQuery",
+    "GetApiKeysByPrincipalQuery",
+    "GetRoleQuery",
+    "GetRolesForPrincipalQuery",
+    "ListBuiltinRolesQuery",
+}
+
+_ENTERPRISE_AUTH_QUERY_HANDLERS = {
+    "CheckPermissionHandler",
+    "GetApiKeyCountHandler",
+    "GetApiKeysByPrincipalHandler",
+    "GetRoleHandler",
+    "GetRolesForPrincipalHandler",
+    "ListBuiltinRolesHandler",
+    "register_auth_query_handlers",
+}
 
 
-# Lazy import handlers to avoid circular imports
-def __getattr__(name: str):
-    """Lazy import handlers to break circular dependency."""
+def __getattr__(name: str):  # noqa: ANN001
     if name in (
         "GetMcpServerHandler",
         "GetMcpServerHealthHandler",
@@ -40,19 +45,15 @@ def __getattr__(name: str):
 
         return getattr(handlers, name)
 
-    if name in (
-        "CheckPermissionHandler",
-        "GetApiKeyCountHandler",
-        "GetApiKeysByPrincipalHandler",
-        "GetRoleHandler",
-        "GetRolesForPrincipalHandler",
-        "ListBuiltinRolesHandler",
-        "register_auth_query_handlers",
-    ):
+    if name in _ENTERPRISE_AUTH_QUERIES:
         try:
-            from enterprise.auth.queries import handlers as auth_handlers
+            return getattr(importlib.import_module("enterprise.auth.queries.queries"), name)
+        except ImportError as err:
+            raise AttributeError(f"module {__name__!r} has no attribute {name!r} (enterprise not installed)") from err
 
-            return getattr(auth_handlers, name)
+    if name in _ENTERPRISE_AUTH_QUERY_HANDLERS:
+        try:
+            return getattr(importlib.import_module("enterprise.auth.queries.handlers"), name)
         except ImportError as err:
             raise AttributeError(f"module {__name__!r} has no attribute {name!r} (enterprise not installed)") from err
 

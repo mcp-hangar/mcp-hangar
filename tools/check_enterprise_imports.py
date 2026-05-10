@@ -25,19 +25,8 @@ ROOT = Path(__file__).resolve().parent.parent
 SRC = ROOT / "src" / "mcp_hangar"
 
 # Known violations -- each entry is a relative path under src/mcp_hangar/.
-# REMOVE entries from this list as the corresponding refactor lands.
-# Goal: empty list by 2026-Q3 (see TASK-P0-2).
-ALLOWLIST: frozenset[str] = frozenset(
-    {
-        "application/commands/__init__.py",
-        "application/queries/__init__.py",
-        "application/mcp/tooling.py",
-        "domain/security/roles.py",
-        "infrastructure/auth/__init__.py",
-        "infrastructure/observability/__init__.py",
-        "infrastructure/persistence/__init__.py",
-    }
-)
+# Goal: empty list (TASK-P0-2 complete).
+ALLOWLIST: frozenset[str] = frozenset()
 
 # Matches: `from enterprise...`, `from enterprise.X...`, `import enterprise...`.
 # Does NOT match string-based dynamic imports like _import_attribute("enterprise.X").

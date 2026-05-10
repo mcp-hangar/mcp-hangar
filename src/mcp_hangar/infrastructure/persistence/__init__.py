@@ -4,6 +4,8 @@ Provides implementations of domain persistence contracts
 using SQLite, in-memory storage, and other backends.
 """
 
+import importlib
+
 from .audit_repository import InMemoryAuditRepository, SQLiteAuditRepository
 from .config_repository import InMemoryMcpServerConfigRepository, SQLiteMcpServerConfigRepository
 from .database import Database, DatabaseConfig
@@ -21,13 +23,6 @@ from .log_buffer import (
 )
 from .recovery_service import RecoveryService
 from .unit_of_work import SQLiteUnitOfWork
-
-# SQLiteEventStore moved to enterprise/persistence/ (BSL 1.1).
-# Re-export conditionally for backwards compatibility.
-try:
-    from enterprise.persistence.sqlite_event_store import SQLiteEventStore  # noqa: F401
-except ImportError:
-    pass
 
 __all__ = [
     "Database",
@@ -57,3 +52,12 @@ __all__ = [
 InMemoryProviderConfigRepository = InMemoryMcpServerConfigRepository
 SQLiteProviderConfigRepository = SQLiteMcpServerConfigRepository
 ProviderLogBuffer = McpServerLogBuffer
+
+
+def __getattr__(name: str):  # noqa: ANN001
+    if name == "SQLiteEventStore":
+        try:
+            return getattr(importlib.import_module("enterprise.persistence.sqlite_event_store"), name)
+        except ImportError as err:
+            raise AttributeError(f"module {__name__!r} has no attribute {name!r} (enterprise not installed)") from err
+    raise AttributeError(f"module {__name__!r} has no attribute {name!r}")

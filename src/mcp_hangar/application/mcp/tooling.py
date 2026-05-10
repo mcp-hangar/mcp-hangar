@@ -22,10 +22,7 @@ import inspect
 from collections.abc import Awaitable, Callable
 from dataclasses import dataclass
 from functools import wraps
-from typing import TYPE_CHECKING, Any, TypeVar
-
-if TYPE_CHECKING:
-    from enterprise.approvals.models import ApprovalResult
+from typing import Any, TypeVar
 
 from ...logging_config import get_logger
 
@@ -70,7 +67,7 @@ def mcp_tool_wrapper(
     validate: Callable[..., None] | None = None,
     error_mapper: Callable[[Exception], ToolErrorPayload] | None = None,
     on_error: Callable[[Exception, dict[str, Any]], None] | None = None,
-    check_approval: Callable[..., Awaitable[ApprovalResult]] | None = None,
+    check_approval: Callable[..., Awaitable[Any]] | None = None,
 ) -> Callable[[F], F]:
     """Decorator to standardize MCP tool behavior.
 
