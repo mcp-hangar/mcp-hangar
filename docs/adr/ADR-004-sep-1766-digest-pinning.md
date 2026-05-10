@@ -3,6 +3,7 @@
 **Status:** Accepted
 **Date:** 2026-05-01
 **Authors:** MCP Hangar Team
+**Implementation:** P1 complete in v1.2.0 (epic #118). Domain types, digest computation, and standalone validator landed in PRs #123, #136, #137, #138.
 
 ## Context
 
