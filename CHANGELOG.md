@@ -13,6 +13,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - **FinOps Cost Attribution (B-12)**: `CostRecord` value object, `ICostAttributor` contract with `DefaultCostAttributor` implementation supporting token, duration, fixed, and composite pricing models with specificity-based rule matching. `CostAttributionEventHandler` computes cost on every `ToolInvocationCompleted` event. New Prometheus metrics: `mcp_hangar_cost_cents_total`, `mcp_hangar_cost_attributions_total`.
 - **Export Formats (B-11)**: Three new enterprise compliance exporters implementing `IAuditExporter`: `JSONLinesExporter` (one JSON object per line), `LEEFExporter` (IBM QRadar LEEF 2.0), `SyslogExporter` (RFC 5424 structured data). All support file, callback, or stderr output.
 - **Agent Behavior Scoring (B-04)**: `RiskScore` value object, `IRiskScorer` contract with `WeightedRiskScorer` implementation using exponential time decay (configurable half-life). `RiskScoringEventHandler` subscribes to `BehavioralDeviationDetected`, `DetectionRuleMatched`, and `CapabilityViolationDetected` events to aggregate per-server and per-session anomaly scores.
+- Copilot custom instructions for PR descriptions and commit messages, aligning generated content with repo CC schema and PR template
 
 ### Fixed
 
