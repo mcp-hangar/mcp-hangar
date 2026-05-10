@@ -1,0 +1,59 @@
+# Enforces Conventional Commits per GIT_FLOW.md decision #1 and CC scope reference.
+name: pr-title
+
+on:
+  pull_request:
+    types: [opened, edited, synchronize, ready_for_review]
+
+permissions:
+  pull-requests: read
+
+jobs:
+  validate:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Validate PR title (Conventional Commits)
+        uses: amannn/action-semantic-pull-request@v5
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        with:
+          types: |
+            feat
+            fix
+            perf
+            refactor
+            docs
+            test
+            build
+            ci
+            chore
+            revert
+            security
+          scopes: |
+            core
+            enterprise
+            cli
+            operator
+            helm
+            ui
+            observability
+            security
+            docs
+            deps
+            release
+            infra
+            tests
+            repo
+          requireScope: true
+          subjectPattern: ^[a-z].*[^.]$
+          subjectPatternError: "Subject must start lowercase and not end with a period."
+          headerPattern: ^(\w+)(?:\(([^)]+)\))?(!)?: (.+)$
+          validateSingleCommit: false
+
+      - name: Reject emoji in title
+        run: |
+          TITLE="${{ github.event.pull_request.title }}"
+          if echo "$TITLE" | grep -qP '[\x{1F300}-\x{1F9FF}]|[\x{2600}-\x{26FF}]|[\x{2700}-\x{27BF}]'; then
+            echo "::error::PR title contains emoji. See GIT_FLOW.md."
+            exit 1
+          fi
