@@ -21,6 +21,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - PR body validator: handle CRLF line endings in event payload (was reporting all sections empty)
 - commitlint: relax subject-case rule to allow file references and acronyms (was blocking any commit mentioning CHANGELOG.md, MCP, OAuth, etc.)
 - GIT_FLOW.md: add `repo` to approved CC scopes for root-level governance files
+- pip-audit `--skip-editable` to prevent circular self-lookup on Release PRs
 
 ### Removed
 
