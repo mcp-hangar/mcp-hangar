@@ -9,6 +9,7 @@
 SEP-1763 (Interceptors for Model Context Protocol) proposes a standardized interceptor framework for MCP. The original issue (#1763, Nov 2025) was closed April 22, 2026 and superseded by PR #2624 with a refined specification. A formal working group was chartered (Apr 21, 2026) with biweekly meetings, and an experimental multi-language SDK lives at `modelcontextprotocol/experimental-ext-interceptors`.
 
 MCP Hangar's hangar-agent is already a production interceptor sidecar:
+
 - L7 proxy intercepting all MCP traffic
 - Policy engine with audit/warn/block modes
 - Trust-boundary-aware execution (different rules for inbound vs outbound)
@@ -73,6 +74,7 @@ We will align hangar-agent with the SEP-1763 spec (PR #2624) as it evolves, posi
 ### Upstream Tracking
 
 The SEP-1763 successor (PR #2624) and working group outputs MUST be checked before any milestone touching:
+
 - MCP traffic interception
 - Policy engine execution model
 - Event types / lifecycle hooks

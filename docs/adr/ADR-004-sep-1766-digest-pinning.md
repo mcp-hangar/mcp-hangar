@@ -14,6 +14,7 @@ The MCP protocol ecosystem is developing two complementary proposals that direct
 Both SEPs are in open/proposal status as of 2026-05-01. Neither has been merged into the MCP specification yet.
 
 MCP Hangar already implements the core functionality described by both proposals:
+
 - hangar-agent intercepts all MCP traffic (SEP-1763 alignment)
 - Policy engine evaluates calls against configurable rules (SEP-1763 enforcement)
 - Audit logging captures all tool invocations (SEP-1763 observability)
