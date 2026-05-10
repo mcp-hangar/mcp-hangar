@@ -161,7 +161,8 @@ jobs:
       name: ${{ needs.validate.outputs.is_prerelease == 'true' && 'testpypi' || 'pypi' }}
       url: ${{ needs.validate.outputs.is_prerelease == 'true' && 'https://test.pypi.org/p/mcp-hangar' || 'https://pypi.org/p/mcp-hangar' }}
     permissions:
-      id-token: write  # Required for trusted publishing
+      id-token: write  # Required for trusted publishing and OIDC signing
+      attestations: write  # Required for build provenance attestations
 
     steps:
       - uses: actions/checkout@v4
@@ -178,6 +179,11 @@ jobs:
 
       - name: Build package
         run: python -m build
+
+      - name: Generate build provenance attestation
+        uses: actions/attest-build-provenance@v2
+        with:
+          subject-path: 'dist/*'
 
       - name: Verify package
         run: |
@@ -206,6 +212,7 @@ jobs:
     permissions:
       contents: read
       packages: write
+      id-token: write
 
     steps:
       - uses: actions/checkout@v4
@@ -232,6 +239,7 @@ jobs:
             type=raw,value=latest,enable=${{ needs.validate.outputs.is_prerelease == 'false' }}
 
       - name: Build and push Docker image
+        id: docker-build
         uses: docker/build-push-action@v6
         with:
           context: .
@@ -242,6 +250,20 @@ jobs:
           cache-from: type=gha
           cache-to: type=gha,mode=max
           platforms: linux/amd64,linux/arm64
+
+      - name: Install cosign
+        uses: sigstore/cosign-installer@v3
+
+      - name: Sign container image
+        env:
+          DIGEST: ${{ steps.docker-build.outputs.digest }}
+          TAGS: ${{ steps.meta.outputs.tags }}
+        run: |
+          images=""
+          for tag in ${TAGS}; do
+            images="${images} ${tag}@${DIGEST}"
+          done
+          cosign sign --yes ${images}
 
   # Create GitHub Release with changelog
   create-release:
