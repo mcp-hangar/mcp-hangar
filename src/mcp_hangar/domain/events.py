@@ -1509,6 +1509,35 @@ class DigestMismatchEvent(DomainEvent):
 
 
 # ---------------------------------------------------------------------------
+# Mutator Events (SEP-1763)
+# ---------------------------------------------------------------------------
+
+
+@dataclass
+class ResponseTruncated(DomainEvent):
+    """Published when a mutator truncates an oversized response.
+
+    Attributes:
+        method: MCP method name (e.g. "tools/call").
+        correlation_id: Request correlation ID.
+        original_size: Payload size in bytes before truncation.
+        truncated_size: Payload size in bytes after truncation.
+        max_size: Configured maximum size that triggered truncation.
+        schema_version: Event schema version.
+    """
+
+    method: str
+    correlation_id: str
+    original_size: int
+    truncated_size: int
+    max_size: int
+    schema_version: int = 1
+
+    def __post_init__(self):
+        super().__init__()
+
+
+# ---------------------------------------------------------------------------
 # Behavioral Profiling Events
 # ---------------------------------------------------------------------------
 

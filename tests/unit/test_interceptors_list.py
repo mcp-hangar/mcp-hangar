@@ -16,7 +16,7 @@ class TestInterceptorsListResponse:
     def test_response_shape(self):
         data = interceptors_list_response()
         assert "interceptors" in data
-        assert len(data["interceptors"]) == 1
+        assert len(data["interceptors"]) == 2
 
     def test_interceptor_fields(self):
         interceptor = interceptors_list_response()["interceptors"][0]
@@ -26,6 +26,14 @@ class TestInterceptorsListResponse:
         assert interceptor["supportedEvents"] == ["tools/call", "tools/list"]
         assert interceptor["modes"] == ["audit", "enforce"]
         assert interceptor["trustBoundary"] == "host"
+
+    def test_mutator_entry(self):
+        mutator = interceptors_list_response()["interceptors"][1]
+        assert mutator["name"] == "mcp-hangar"
+        assert mutator["type"] == "mutator"
+        assert mutator["supportedEvents"] == ["tools/call"]
+        assert mutator["modes"] == ["enforce"]
+        assert mutator["trustBoundary"] == "host"
 
     def test_version_is_nonempty(self):
         interceptor = interceptors_list_response()["interceptors"][0]

@@ -28,6 +28,14 @@ def interceptors_list_response() -> dict[str, Any]:
                 "modes": ["audit", "enforce"],
                 "trustBoundary": "host",
             },
+            {
+                "name": "mcp-hangar",
+                "version": __version__,
+                "type": "mutator",
+                "supportedEvents": ["tools/call"],
+                "modes": ["enforce"],
+                "trustBoundary": "host",
+            },
         ],
     }
 
