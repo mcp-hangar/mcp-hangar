@@ -36,7 +36,9 @@ The following table tracks the evolution of git and workflow standards.
 ## Branch naming and merge strategy
 
 The project uses a squash-merge strategy for all pull requests.
-This preserves a linear history while keeping individual feature commits grouped.
+Rebase-merge and merge-commit are disabled at the repository level.
+This preserves a linear history where every commit on main corresponds
+to exactly one PR whose title was validated by `pr-title.yml`.
 Branch names must follow a structured prefix pattern to support automation.
 
 Standard prefixes:
@@ -78,7 +80,7 @@ They are used in commit messages: `<type>(<scope>): <subject>`.
 | docs | Markdown documentation and MkDocs config |
 | deps | Dependency updates and lockfile changes |
 | release | Release artifacts and versioning |
-| repo | Root-level governance files: AGENTS.md, CODEOWNERS, LICENSE, commitlint config |
+| repo | Root-level governance files: AGENTS.md, CODEOWNERS, LICENSE |
 | infra | Dockerfile, Makefile, and local dev setup |
 | tests | Test fixtures and suite configuration |
 

@@ -43,6 +43,11 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 - **ci:** scope `dependabot-automerge` `pull_request_target` to `branches: [main]` with explicit event types (#112)
 
+### Changed
+
+- **ci:** remove commitlint workflow, config, and pre-commit hook; `pr-title.yml` is now the sole Conventional Commits gate (#130)
+- **repo:** disable rebase-merge and merge-commit; squash-merge only guarantees validated PR titles land on main (#130)
+
 ## [1.0.3](https://github.com/mcp-hangar/mcp-hangar/compare/v1.0.2...v1.0.3) (2026-05-10)
 
 
