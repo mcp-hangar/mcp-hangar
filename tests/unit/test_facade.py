@@ -413,7 +413,8 @@ class TestHangarWithMockedContext:
         provider = Mock()
         provider.state = McpServerState.READY
         provider.mode = McpServerMode.SUBPROCESS
-        provider.tools = {"add": Mock(), "subtract": Mock()}
+        provider.tools = Mock()
+        provider.tools.list_names.return_value = ["add", "subtract"]
         provider.invoke_tool.return_value = {"result": 42}
         provider.health_check.return_value = True
         return provider

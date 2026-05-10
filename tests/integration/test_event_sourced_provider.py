@@ -12,6 +12,7 @@ from mcp_hangar.domain.events import (
 )
 from mcp_hangar.domain.model.event_sourced_provider import EventSourcedProvider, ProviderSnapshot
 from mcp_hangar.domain.model.provider import ProviderState
+from mcp_hangar.domain.value_objects import McpServerMode
 
 
 class TestProviderSnapshot:
@@ -231,7 +232,7 @@ class TestEventSourcedProvider:
         provider = EventSourcedProvider(mcp_server_id="test", mode="subprocess", command=["python", "server.py"])
 
         assert provider.mcp_server_id == "test"
-        assert provider.mode == "subprocess"
+        assert provider.mode == McpServerMode.SUBPROCESS
         assert provider.state == ProviderState.COLD
         assert provider.events_applied == 0
 
