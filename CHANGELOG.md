@@ -25,12 +25,14 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - End-to-end observability and compliance loop: cost attribution in audit spans, risk score normalization and emission, compliance exporter deprecation rename, dynamic enterprise bootstrap (#106)
 - Branch name validator workflow enforcing GIT_FLOW.md naming conventions on PRs
 - GitHub Projects v2 board setup script and auto-add workflow
+- actionlint CI workflow to validate `.github/workflows/` YAML on PRs, push to main, and weekly schedule (#111)
 
 ### Fixed
 
 - **ci:** release notes no longer contain literal `%0A` newlines (removed legacy set-output encoding)
 - **ci:** release body no longer has a duplicated `## What's Changed` section (removed `generate_release_notes: true`); a manual Full Changelog compare link is added instead
 - **ci:** HTML entities (`&gt;`, `&lt;`, `&amp;`) in CHANGELOG entries are decoded before writing to the release body
+- **ci:** PR-only checks (`pr-title`, `commitlint`, `changelog`, `pr-body`) no longer emit ghost failed runs on push to main (removed from required status checks; they still gate PR merges implicitly)
 
 ### Security
 
