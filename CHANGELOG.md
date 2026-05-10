@@ -10,6 +10,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 ### Added
 
 - Branch name validator workflow enforcing GIT_FLOW.md naming conventions on PRs
+- GitHub Projects v2 board setup script and auto-add workflow
 
 ## [1.0.3](https://github.com/mcp-hangar/mcp-hangar/compare/v1.0.2...v1.0.3) (2026-05-10)
 

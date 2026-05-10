@@ -126,6 +126,7 @@ nav:
       - Branch Protection: development/BRANCH_PROTECTION.md
       - Hotfix Runbook: development/HOTFIX_RUNBOOK.md
       - Epic Playbook: development/EPIC_PLAYBOOK.md
+      - Project Board: development/PROJECT_BOARD.md
       - Release Process: runbooks/RELEASE.md
       - Contributor License Agreement: cla.md
   - Reference:
