@@ -89,6 +89,16 @@ jobs:
         with:
           sarif_file: "trivy-results.sarif"
 
+  import-boundary:
+    name: Import Boundary Check
+    runs-on: ubuntu-latest
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Enforce core -> enterprise import boundary
+        run: python3 tools/check_enterprise_imports.py
+
   secrets-scan:
     name: Secrets Scan
     runs-on: ubuntu-latest

@@ -113,9 +113,9 @@ enterprise/  ──never──►       imports from enterprise/ in core
 
 This is enforced by:
 
-1. Import linting rule in CI: no `enterprise.*` imports in `src/`
+1. CI check via `tools/check_enterprise_imports.py` — scans `src/` for static `enterprise` imports, fails on any new violation outside a tracked allowlist. Pre-commit hook (`enterprise-import-boundary`) runs the same check locally.
 2. Core defines interfaces (ports/contracts). Enterprise provides implementations.
-3. Bootstrap wiring in `server/bootstrap/` conditionally loads enterprise modules when license key is present.
+3. Bootstrap wiring in `server/bootstrap/` conditionally loads enterprise modules when license key is present. Dynamic imports via `_import_attribute()` are the canonical pattern and are not flagged by the boundary check.
 
 ### Migration plan (v0.12.0 → v0.13.0)
 
@@ -322,7 +322,7 @@ Phases 1-2 are complete.
 | **Trace context propagation**     | Cross-system traces depend on ad hoc correlation                           | Standardize agent -> Hangar -> MCP server trace propagation for audit and enforcement paths                   | v0.13.0        | **DONE** (v6.0 Phase 32) |
 | **Operator enforcement loop**     | Operator reconciles state, but not full governance posture                 | Make operator the primary engine for capability enforcement, NetworkPolicy rollout, and violation signaling | v0.13.0        | |
 | **Admission/policy hooks**        | K8s integration is not yet policy-driven enough                            | Validate and reject unsafe specs before runtime using admission and policy integrations                     | v0.13.0        | |
-| **Import boundary enforcement**   | No CI rule prevents core from importing enterprise                         | Add CI check: `src/` must never import from `enterprise/`                                                   | v0.13.0        | |
+| **Import boundary enforcement**   | No CI rule prevents core from importing enterprise                         | Add CI check: `src/` must never import from `enterprise/`                                                   | v0.13.0        | **DONE** (TASK-P0-1) |
 
 ### Important (before first paying customer)
 
@@ -425,14 +425,7 @@ mcp-hangar/
 
 ### Import boundary rule
 
-```
-# CI check (must pass on every PR)
-# Core must never depend on enterprise features
-if grep -rn "from enterprise" src/; then
-  echo "FAIL: core imports enterprise module"
-  exit 1
-fi
-```
+Enforced by `tools/check_enterprise_imports.py` (CI job `import-boundary` in `security.yml`, pre-commit hook `enterprise-import-boundary`). The script maintains an explicit allowlist of known tech-debt files with a removal target of 2026-Q3 (TASK-P0-2). New static `from enterprise` / `import enterprise` statements in `src/` fail CI immediately. Dynamic imports via `importlib` are the approved pattern and are not detected.
 
 ---
 

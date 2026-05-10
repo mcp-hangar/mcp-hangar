@@ -248,7 +248,10 @@ Core (`src/`) and enterprise (`enterprise/`) are **separate DDD boundaries**.
 
 ## What NOT to Do
 
-- Do not import from `enterprise/` in `src/` code (CI rejects)
+- Do not statically import from `enterprise/` in `src/` code. CI enforces this via
+  `tools/check_enterprise_imports.py`. When bridging to enterprise functionality,
+  use dynamic imports via importlib (see
+  `src/mcp_hangar/server/bootstrap/enterprise.py:_import_attribute()`)
 - Do not use `shell=True` in subprocess calls (security)
 - Do not change lock acquisition order (deadlock)
 - Do not call `_get_or_create_event_handler()` under external lock
