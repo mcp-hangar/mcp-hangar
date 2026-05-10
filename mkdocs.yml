@@ -91,6 +91,13 @@ nav:
       - Overview: architecture/OVERVIEW.md
       - Event Sourcing: architecture/EVENT_SOURCING.md
       - ADRs:
+          - Index: adr/README.md
+          - ADR-001 CQRS: adr/ADR-001-cqrs.md
+          - ADR-002 Event Sourcing: adr/ADR-002-event-sourcing.md
+          - ADR-003 Saga Pattern: adr/ADR-003-sagas.md
+          - ADR-004 SEP-1766 Digest Pinning: adr/ADR-004-sep-1766-digest-pinning.md
+          - ADR-005 SEP-1763 Interceptor Compliance: adr/ADR-005-sep-1763-interceptor-compliance.md
+          - ADR-006 Tetragon Runtime Enforcement: adr/ADR-006-tetragon.md
           - ADR-007 Langfuse Integration: adr/ADR-007-langfuse-integration.md
   - Guides:
       - Testing: guides/TESTING.md

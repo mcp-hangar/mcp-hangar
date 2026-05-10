@@ -80,4 +80,3 @@ We will implement SEP-1766 and SEP-1763 compliance **preemptively**, treating ou
 - [SEP-1766: Digest-Pinned Tool Versioning](https://github.com/modelcontextprotocol/modelcontextprotocol/issues/1766)
 - [SEP-1763: Interceptor Framework](https://github.com/modelcontextprotocol/modelcontextprotocol/issues/1763)
 - [SEP-1575: Tool Versioning](https://github.com/modelcontextprotocol/modelcontextprotocol/issues/1575)
-- workspace/AGENTS.md -- MCP Protocol Compliance section (checklist + tracking)

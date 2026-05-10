@@ -78,8 +78,6 @@ The SEP-1763 successor (PR #2624) and working group outputs MUST be checked befo
 - Event types / lifecycle hooks
 - Agent discoverability or identity
 
-See workspace/AGENTS.md "Upstream Protocol Tracking" section for the mandatory checklist.
-
 ## References
 
 - [SEP-1763 (closed)](https://github.com/modelcontextprotocol/modelcontextprotocol/issues/1763)

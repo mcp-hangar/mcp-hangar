@@ -242,8 +242,6 @@ groups:
   # ============================================================================
   # PLACEHOLDER ALERTS - Uncomment when metrics are implemented
   # ============================================================================
-  # These alerts are ready but the corresponding metrics are not yet populated
-  # by MCP Hangar. Tracked in workspace/.planning/MILESTONES.md (v10.0+).
   #
   # - name: mcp-hangar-future
   #   rules:
