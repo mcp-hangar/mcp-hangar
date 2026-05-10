@@ -12,6 +12,7 @@ Branch protection on `main` ensures that every commit landing in the default bra
   - `pr-title / validate`
   - `commitlint / lint`
   - `changelog / check`
+  - `branch-name / validate`
   - `pr-body / validate`
 - Required approving reviewers: 0
 - Require code owner reviews: false
@@ -31,6 +32,7 @@ Branch protection on `main` ensures that every commit landing in the default bra
 | `pr-title / validate` | `pr-title.yml` | Conventional Commits title |
 | `commitlint / lint` | `commitlint.yml` | Per-commit message lint |
 | `changelog / check` | `changelog-check.yml` | CHANGELOG entry present |
+| `branch-name / validate` | `branch-name.yml` | Branch naming convention |
 | `pr-body / validate` | `pr-body.yml` | PR body section structure |
 
 ## Solo vs community mode

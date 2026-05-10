@@ -42,6 +42,7 @@ PAYLOAD=$(cat <<EOF
       "pr-title / validate",
       "commitlint / lint",
       "changelog / check",
+      "branch-name / validate",
       "pr-body / validate"
     ]
   },

@@ -1,0 +1,39 @@
+# Enforces branch naming per GIT_FLOW.md section "Branch naming and merge strategy".
+name: branch-name
+
+on:
+  pull_request:
+    types: [opened, edited, synchronize, reopened]
+
+permissions:
+  pull-requests: read
+
+jobs:
+  validate:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Validate branch name
+        env:
+          BRANCH: ${{ github.head_ref }}
+        run: |
+          set -euo pipefail
+          # Tool prefixes pass without restriction
+          if [[ "$BRANCH" =~ ^(dependabot|copilot)/ ]] || [[ "$BRANCH" =~ ^release-please-- ]]; then
+            echo "::notice::Branch name '$BRANCH' is a recognized tool prefix."
+            exit 0
+          fi
+          # Standard CC-typed branches
+          if [[ "$BRANCH" =~ ^(feat|fix|perf|refactor|docs|test|build|ci|chore)/[a-z][a-z0-9-]*$ ]]; then
+            echo "::notice::Branch name '$BRANCH' is valid."
+            exit 0
+          fi
+          # Hotfix: hotfix/vX.Y.Z
+          if [[ "$BRANCH" =~ ^hotfix/v[0-9]+\.[0-9]+\.[0-9]+$ ]]; then
+            echo "::notice::Branch name '$BRANCH' is a valid hotfix."
+            exit 0
+          fi
+          echo "::error::Branch name '$BRANCH' does not match GIT_FLOW.md conventions."
+          echo "Expected: <type>/<slug> where type is feat|fix|perf|refactor|docs|test|build|ci|chore."
+          echo "Or: hotfix/vX.Y.Z, dependabot/*, copilot/*, release-please--*."
+          echo "See: https://github.com/mcp-hangar/mcp-hangar/blob/main/docs/development/GIT_FLOW.md#branch-naming-and-merge-strategy"
+          exit 1
