@@ -182,6 +182,7 @@ class InMemorySecuritySink(SecurityEventSink):
         """Query stored security events."""
         with self._lock:
             from typing import Any
+
             results: list[Any] = []
             for event in reversed(self._events):
                 if len(results) >= limit:

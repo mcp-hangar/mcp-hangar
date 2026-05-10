@@ -53,6 +53,7 @@ def init_event_handlers(runtime: "Runtime") -> None:
     runtime.event_bus.subscribe_to_all(runtime.security_handler.handle)
 
     from ...application.ports.observability import IAuditExporter
+
     otlp_audit_exporter: IAuditExporter
     # OTLP audit exporter handler -- exports security events as OTLP log records
     if os.getenv("OTEL_EXPORTER_OTLP_ENDPOINT"):

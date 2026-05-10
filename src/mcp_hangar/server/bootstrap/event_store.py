@@ -40,6 +40,7 @@ def init_event_store(runtime: "Runtime", config: dict[str, Any]) -> None:
     driver = event_store_config.get("driver", "sqlite")
 
     from ...domain.contracts.event_store import IEventStore
+
     event_store: IEventStore
 
     if driver == "memory":

@@ -108,6 +108,7 @@ class InMemoryAuditStore(AuditStore):
         if mcp_server_id is None:
             mcp_server_id = provider_id
         from typing import Any
+
         results: list[Any] = []
         for record in reversed(self._records):  # Most recent first
             if len(results) >= limit:
