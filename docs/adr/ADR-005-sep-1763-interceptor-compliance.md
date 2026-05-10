@@ -3,6 +3,7 @@
 **Status:** Accepted
 **Date:** 2026-05-01
 **Authors:** MCP Hangar Team
+**Implementation:** P1 complete in v1.2.0 (epic #118). Hook model, IMutator contract, MutatorPipeline, ResponseTruncator, wildcard subscriptions, and interceptors/list landed in PRs #136, #137, #138.
 
 ## Context
 

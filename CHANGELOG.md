@@ -30,6 +30,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - **core:** ADR-005 P1 interceptor framework: `Hook`/`HookPhase` value objects, `IHookSubscriber` contract, EventBus hook fan-out, and `GET /interceptors/list` endpoint for SEP-1763 discoverability (#120)
 - **core:** ADR-005 P1 mutator framework: `IMutator` contract, `MutationContext`/`MutationResult` VOs, priority-based `MutatorPipeline`, `ResponseTruncator` mutator with `ResponseTruncated` event (#121)
 - **core:** ADR-005 wildcard event subscription patterns via `EventPattern` value object and `compile_event_patterns()` helper (#122)
+- **core:** Epic #118 closure: end-to-end integration test for ADR-004/ADR-005 pipeline, ADR implementation status annotations, and interceptor framework architecture doc
 
 ### Fixed
 
