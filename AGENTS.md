@@ -218,6 +218,27 @@ Always acquire locks in ascending order. `TrackedLock` enforces this at runtime.
 - **Hot-loading**: `RuntimeProviderStore` for dynamically loaded providers (separate from static config)
 - **No DI framework**: explicit wiring in `server/bootstrap/` modules
 
+## Git Workflow for Agents
+
+Read `docs/development/GIT_FLOW.md` for the full flow. Hard rules for agent-authored PRs:
+
+- **One PR, one goal, one Conventional Commit scope.** No mixed-scope changes.
+- **Branch:** `<type>/<scope>-<slug>` where `<type>` is one of `feat|fix|perf|refactor|docs|test|build|ci|chore`. Agent prefix `copilot/<task>-<slug>` is also valid.
+- **PR title** is the Conventional Commit subject (squash-merge propagates it). Example: `feat(core): add capability validation cache`.
+- **PR body** follows `.github/PULL_REQUEST_TEMPLATE.md` — fill every section including Agent metadata.
+- **Soft LOC limit:** ≤400 lines changed (excluding tests). Larger changes require decomposition; open a parent issue first.
+- **Issue first:** open or claim an `agent_task` issue before pushing the first commit. Link via `Closes #N` (or `Refs #N` for child PRs of an epic).
+- **Forbidden paths for agent-authored PRs** (must be human-authored — see CODEOWNERS):
+  - `enterprise/` (BSL-licensed, requires CLA)
+  - `src/mcp_hangar/server/security/`, `src/mcp_hangar/server/api/middleware*`
+  - `docs/adr/` (ADRs are human-authored; agents may draft content in issue comments)
+  - `.github/workflows/release.yml`, `pyproject.toml` version field
+- **CHANGELOG:** every non-trivial PR adds a line under `## [Unreleased]` in the appropriate section (`### Added`, `### Fixed`, `### Changed`, `### Security`). Trivial = `chore(deps)`, `ci`, `style`, `test`, pure `docs`.
+- **No emoji** anywhere in code, comments, commit messages, or docs.
+- **Squash-merge default.** Do not request merge commits.
+
+For ADR work specifically, see `docs/adr/AGENTS.md` — agents may draft ADR content in issue comments but never author the PR.
+
 ## Enterprise Boundary
 
 Core (`src/`) and enterprise (`enterprise/`) are **separate DDD boundaries**.
