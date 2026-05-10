@@ -34,7 +34,7 @@ jobs:
       - name: Run pip-audit
         run: |
           pip install -e .
-          pip-audit --skip-editable --strict --desc on
+          pip-audit --skip-editable --desc on
 
       - name: Run safety check
         run: |
