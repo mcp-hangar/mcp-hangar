@@ -26,6 +26,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - Branch name validator workflow enforcing GIT_FLOW.md naming conventions on PRs
 - GitHub Projects v2 board setup script and auto-add workflow
 - actionlint CI workflow to validate `.github/workflows/` YAML on PRs, push to main, and weekly schedule (#111)
+- **core:** ADR-004 digest pinning domain types (`ToolDigest`, `DigestPolicy`, `DigestMismatchEvent`), canonical SHA-256 computation helper, and standalone `DigestValidator` service (#119)
 
 ### Fixed
 
