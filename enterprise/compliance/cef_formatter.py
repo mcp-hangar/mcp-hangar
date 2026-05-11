@@ -88,12 +88,7 @@ def _escape_extension_value(value: str) -> str:
     Returns:
         Escaped string safe for CEF extension value.
     """
-    return (
-        value.replace("\\", "\\\\")
-        .replace("=", "\\=")
-        .replace("\n", "\\n")
-        .replace("\r", "\\r")
-    )
+    return value.replace("\\", "\\\\").replace("=", "\\=").replace("\n", "\\n").replace("\r", "\\r")
 
 
 def _format_cef_timestamp(dt: datetime) -> str:
@@ -132,15 +127,17 @@ def format_audit_record(record: AuditRecord) -> str:
     severity = _SEVERITY_MAP.get(event_type, 5)
 
     # Build header
-    header = "|".join([
-        f"CEF:{CEF_VERSION}",
-        _escape_header(DEVICE_VENDOR),
-        _escape_header(DEVICE_PRODUCT),
-        _escape_header(DEVICE_VERSION),
-        _escape_header(sig_id),
-        _escape_header(name),
-        str(severity),
-    ])
+    header = "|".join(
+        [
+            f"CEF:{CEF_VERSION}",
+            _escape_header(DEVICE_VENDOR),
+            _escape_header(DEVICE_PRODUCT),
+            _escape_header(DEVICE_VERSION),
+            _escape_header(sig_id),
+            _escape_header(name),
+            str(severity),
+        ]
+    )
 
     # Build extension key=value pairs
     extensions: list[str] = []

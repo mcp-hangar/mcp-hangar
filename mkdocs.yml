@@ -128,7 +128,6 @@ nav:
       - Epic Playbook: development/EPIC_PLAYBOOK.md
       - Project Board: development/PROJECT_BOARD.md
       - Release Process: runbooks/RELEASE.md
-      - Contributor License Agreement: cla.md
   - Reference:
       - CLI: reference/cli.md
       - Configuration: reference/configuration.md
