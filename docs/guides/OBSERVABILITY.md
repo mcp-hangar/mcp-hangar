@@ -411,7 +411,7 @@ with trace_span("process_request", {"request.id": req_id}) as span:
 
 ### MCP Governance Attributes on Spans
 
-`TracedProviderService` automatically creates an OTEL span for each tool invocation
+`TracedMcpServerService` automatically creates an OTEL span for each tool invocation
 with standard MCP governance attributes via `set_governance_attributes()`:
 
 ```python
@@ -523,7 +523,7 @@ observability:
 ### Trace Propagation
 
 ```python
-from mcp_hangar.application.services import TracedProviderService
+from mcp_hangar.application.services import TracedMcpServerService
 
 result = traced_service.invoke_tool(
     mcp_server_id="math",

@@ -254,10 +254,10 @@ Cold MCP servers are auto-started on first invocation.
     await hangar.stop_mcp_server("math")
 
     # Get mcp_server state snapshot
-    info: ProviderInfo = await hangar.get_mcp_server("math")
+    info: McpServerInfo = await hangar.get_mcp_server("math")
 
     # List all mcp_servers
-    mcp_servers: list[ProviderInfo] = await hangar.list_mcp_servers()
+    mcp_servers: list[McpServerInfo] = await hangar.list_mcp_servers()
     ```
 
 === "Sync (SyncHangar)"
@@ -265,8 +265,8 @@ Cold MCP servers are auto-started on first invocation.
     ```python
     hangar.start_mcp_server("math")
     hangar.stop_mcp_server("math")
-    info: ProviderInfo = hangar.get_mcp_server("math")
-    mcp_servers: list[ProviderInfo] = hangar.list_mcp_servers()
+    info: McpServerInfo = hangar.get_mcp_server("math")
+    mcp_servers: list[McpServerInfo] = hangar.list_mcp_servers()
     ```
 
 ### Health
@@ -290,7 +290,7 @@ Cold MCP servers are auto-started on first invocation.
 
 ## Data Classes
 
-### ProviderInfo
+### McpServerInfo
 
 Frozen dataclass representing a MCP server state snapshot.
 
@@ -314,7 +314,7 @@ Frozen dataclass with aggregate health information.
 
 | Field | Type | Description |
 |-------|------|-------------|
-| `MCP servers` | `dict[str, str]` | Mapping of MCP server name to state |
+| `mcp_servers` | `dict[str, str]` | Mapping of MCP server name to state |
 | `ready_count` | `int` | Number of MCP servers in `ready` state |
 | `total_count` | `int` | Total number of MCP servers |
 
@@ -329,7 +329,7 @@ Dataclass holding the built configuration.
 
 | Field | Type | Default | Description |
 |-------|------|---------|-------------|
-| `MCP servers` | `dict[str, dict]` | `{}` | MCP Server definitions |
+| `mcp_servers` | `dict[str, dict]` | `{}` | MCP Server definitions |
 | `discovery` | `DiscoverySpec` | default | Discovery configuration |
 | `gc_interval_s` | `int` | `30` | Garbage collection interval |
 | `health_check_interval_s` | `int` | `10` | Health check interval |
@@ -403,7 +403,7 @@ The Facade API raises specific exceptions for different failure modes:
 | Exception | When Raised |
 |-----------|-------------|
 | `ConfigurationError` | Invalid configuration, Hangar not started, builder already built |
-| `ProviderNotFoundError` | MCP Server name does not exist in configuration |
+| `McpServerNotFoundError` | MCP Server name does not exist in configuration |
 | `ToolNotFoundError` | Tool name not found on the specified MCP server |
 | `ToolInvocationError` | Tool execution failed on the MCP server side |
 | `TimeoutError` | Invocation exceeded `timeout_s` |
@@ -412,7 +412,7 @@ All exceptions include descriptive messages. Catch specific exceptions for targe
 
 ```python
 from mcp_hangar.domain.exceptions import (
-    ProviderNotFoundError,
+    McpServerNotFoundError,
     ToolInvocationError,
     ToolNotFoundError,
 )
@@ -421,7 +421,7 @@ try:
     result = await hangar.invoke("math", "divide", {"a": 10, "b": 0})
 except ToolInvocationError as e:
     print(f"Tool failed: {e}")
-except ProviderNotFoundError as e:
+except McpServerNotFoundError as e:
     print(f"McpServer not found: {e}")
 except TimeoutError:
     print("Invocation timed out")

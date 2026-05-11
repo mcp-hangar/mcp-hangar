@@ -75,7 +75,7 @@ Each item in `calls` must be a dictionary with:
 
 | Field | Type | Required | Description |
 |-------|------|----------|-------------|
-| `MCP server` | `str` | Yes | MCP Server ID |
+| `mcp_server` | `str` | Yes | MCP Server ID |
 | `tool` | `str` | Yes | Tool name |
 | `arguments` | `dict` | Yes | Tool arguments |
 | `timeout` | `float` | No | Per-call timeout (overrides global) |
@@ -320,7 +320,7 @@ If you were using the previous tools, here's how to migrate:
 
 | Old API | New API |
 |---------|---------|
-| `registry_invoke(MCP server, tool, arguments)` | `hangar_call(calls=[{"MCP server": ..., "tool": ..., "arguments": ...}])` |
+| `registry_invoke(mcp_server, tool, arguments)` | `hangar_call(calls=[{"mcp_server": ..., "tool": ..., "arguments": ...}])` |
 | `registry_invoke_ex(..., max_retries=5)` | `hangar_call(calls=[...], max_retries=5)` |
 | `registry_invoke_stream(...)` | `hangar_call(calls=[...])` (progress logged internally) |
 | `hangar_batch(calls=[...])` | `hangar_call(calls=[...])` |

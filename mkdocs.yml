@@ -112,7 +112,7 @@ nav:
       - Observability: guides/OBSERVABILITY.md
       - Authentication: guides/AUTHENTICATION.md
       - Kubernetes: guides/KUBERNETES.md
-      - Provider Groups: guides/PROVIDER_GROUPS.md
+      - MCP Server Groups: guides/MCP_SERVER_GROUPS.md
       - Facade API: guides/FACADE_API.md
       - REST API: guides/REST_API.md
       - Log Streaming: guides/LOG_STREAMING.md
