@@ -6,9 +6,9 @@ from typing import Callable, Protocol, cast
 
 import pytest
 
-from enterprise.compliance.jsonlines_exporter import JSONLinesExporter
-from enterprise.compliance.leef_exporter import LEEFExporter
-from enterprise.compliance.syslog_exporter import SyslogExporter
+from mcp_hangar.compliance.jsonlines_exporter import JSONLinesExporter
+from mcp_hangar.compliance.leef_exporter import LEEFExporter
+from mcp_hangar.compliance.syslog_exporter import SyslogExporter
 
 
 class SupportsExport(Protocol):
@@ -193,7 +193,7 @@ def test_syslog_tool_invocation_uses_rfc5424_structure() -> None:
 
     line = lines[0]
     assert re.match(
-        r'^<134>1 \S+ \S+ mcp-hangar \d+ 101 \[mcp@49152[^\]]*\] Tool add on provider math success$',
+        r"^<134>1 \S+ \S+ mcp-hangar \d+ 101 \[mcp@49152[^\]]*\] Tool add on provider math success$",
         line,
     )
     assert 'provider="math"' in line
@@ -212,7 +212,7 @@ def test_syslog_provider_state_change_uses_warning_priority() -> None:
 
     line = lines[0]
     assert re.match(
-        r'^<132>1 \S+ \S+ mcp-hangar \d+ 202 \[mcp@49152[^\]]*\] Provider math state changed from READY to DEGRADED$',
+        r"^<132>1 \S+ \S+ mcp-hangar \d+ 202 \[mcp@49152[^\]]*\] Provider math state changed from READY to DEGRADED$",
         line,
     )
     assert 'fromState="READY"' in line

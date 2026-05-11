@@ -18,7 +18,6 @@ class _FakeEvent(DomainEvent):
 
 
 class TestCompileEventPatterns:
-
     def test_exact_patterns(self):
         patterns = compile_event_patterns(["tools/call", "tools/list"])
         assert len(patterns) == 2
@@ -37,7 +36,6 @@ class TestCompileEventPatterns:
 
 
 class TestMatchesFiltersWildcard:
-
     def test_exact_match_still_works(self):
         filters = {"event_types": ["McpServerStarted"]}
         assert matches_filters(_FakeEvent("McpServerStarted"), filters) is True

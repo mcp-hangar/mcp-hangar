@@ -13,9 +13,12 @@ class TestOTLPAuditExporter:
         exporter = OTLPAuditExporter()
 
         with patch.object(exporter, "_emit_log_record") as mock_emit:
-            exporter.export_tool_invocation(mcp_server_id="math", tool_name="add",
-            status="success",
-            duration_ms=12.5,)
+            exporter.export_tool_invocation(
+                mcp_server_id="math",
+                tool_name="add",
+                status="success",
+                duration_ms=12.5,
+            )
             mock_emit.assert_called_once()
             record = mock_emit.call_args[0][0]
             assert record.get(McpServer.ID) == "math"
@@ -28,10 +31,13 @@ class TestOTLPAuditExporter:
         exporter = OTLPAuditExporter()
 
         with patch.object(exporter, "_emit_log_record") as mock_emit:
-            exporter.export_tool_invocation(mcp_server_id="p", tool_name="t",
-            status="error",
-            duration_ms=5.0,
-            error_type="ToolInvocationError",)
+            exporter.export_tool_invocation(
+                mcp_server_id="p",
+                tool_name="t",
+                status="error",
+                duration_ms=5.0,
+                error_type="ToolInvocationError",
+            )
             record = mock_emit.call_args[0][0]
             assert record.get("mcp.tool.status") == "error"
             assert record.get("mcp.error.type") == "ToolInvocationError"

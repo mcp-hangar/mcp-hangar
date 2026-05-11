@@ -4,7 +4,7 @@ import asyncio
 
 import pytest
 
-from enterprise.approvals.hold_registry import ApprovalHoldRegistry
+from mcp_hangar.approvals.hold_registry import ApprovalHoldRegistry
 
 
 @pytest.fixture
@@ -13,7 +13,6 @@ def registry():
 
 
 class TestApprovalHoldRegistry:
-
     async def test_register_wait_resolve_approve(self, registry):
         """Register -> wait -> resolve approve -> returns True."""
         await registry.register("id-001")

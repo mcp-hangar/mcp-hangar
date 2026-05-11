@@ -42,9 +42,12 @@ settings.register_profile(
 
 def _make_provider() -> McpServer:
     """Create a minimal Provider for state machine testing."""
-    return McpServer(mcp_server_id="test-prop", mode="subprocess",
-    command=["echo", "test"],
-    metrics_publisher=Mock(),)
+    return McpServer(
+        mcp_server_id="test-prop",
+        mode="subprocess",
+        command=["echo", "test"],
+        metrics_publisher=Mock(),
+    )
 
 
 class ProviderStateMachine(RuleBasedStateMachine):

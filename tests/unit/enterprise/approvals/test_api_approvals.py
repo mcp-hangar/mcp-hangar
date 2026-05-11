@@ -11,10 +11,10 @@ import pytest
 from starlette.applications import Starlette
 from starlette.testclient import TestClient
 
-from enterprise.approvals.api.routes import approval_routes
-from enterprise.approvals.hold_registry import ApprovalHoldRegistry
-from enterprise.approvals.models import ApprovalRequest, ApprovalState
-from enterprise.approvals.service import ApprovalGateService
+from mcp_hangar.approvals.api.routes import approval_routes
+from mcp_hangar.approvals.hold_registry import ApprovalHoldRegistry
+from mcp_hangar.approvals.models import ApprovalRequest, ApprovalState
+from mcp_hangar.approvals.service import ApprovalGateService
 
 
 class FakeRepository:
@@ -32,9 +32,9 @@ class FakeRepository:
 
     async def list_by_state(self, state, mcp_server_id=None):
         return [
-            r for r in self._store.values()
-            if r.state == state
-            and (mcp_server_id is None or r.mcp_server_id == mcp_server_id)
+            r
+            for r in self._store.values()
+            if r.state == state and (mcp_server_id is None or r.mcp_server_id == mcp_server_id)
         ]
 
     async def update_state(self, approval_id, state, decided_by, decided_at, reason):
@@ -97,18 +97,16 @@ def client(app_with_service):
 
 
 class TestListApprovals:
-
     def test_list_pending_returns_only_pending(self, app_with_service):
         app, service, repo = app_with_service
         client = TestClient(app)
 
         # Add pending and approved requests
         import asyncio
+
         loop = asyncio.new_event_loop()
         loop.run_until_complete(repo.save(_make_pending_request("p-001")))
-        loop.run_until_complete(repo.save(
-            _make_pending_request("a-001", state=ApprovalState.APPROVED)
-        ))
+        loop.run_until_complete(repo.save(_make_pending_request("a-001", state=ApprovalState.APPROVED)))
         loop.close()
 
         response = client.get("/enterprise/approvals")
@@ -122,10 +120,9 @@ class TestListApprovals:
         client = TestClient(app)
 
         import asyncio
+
         loop = asyncio.new_event_loop()
-        loop.run_until_complete(repo.save(
-            _make_pending_request("a-001", state=ApprovalState.APPROVED)
-        ))
+        loop.run_until_complete(repo.save(_make_pending_request("a-001", state=ApprovalState.APPROVED)))
         loop.close()
 
         response = client.get("/enterprise/approvals?state=approved")
@@ -140,12 +137,12 @@ class TestListApprovals:
 
 
 class TestGetApproval:
-
     def test_get_existing_approval(self, app_with_service):
         app, service, repo = app_with_service
         client = TestClient(app)
 
         import asyncio
+
         loop = asyncio.new_event_loop()
         loop.run_until_complete(repo.save(_make_pending_request("test-001")))
         loop.close()
@@ -162,12 +159,12 @@ class TestGetApproval:
 
 
 class TestResolveApproval:
-
     def test_resolve_approve_success(self, app_with_service):
         app, service, repo = app_with_service
         client = TestClient(app)
 
         import asyncio
+
         loop = asyncio.new_event_loop()
         req = _make_pending_request("r-001")
         loop.run_until_complete(repo.save(req))
@@ -187,6 +184,7 @@ class TestResolveApproval:
         client = TestClient(app)
 
         import asyncio
+
         loop = asyncio.new_event_loop()
         req = _make_pending_request("r-002")
         loop.run_until_complete(repo.save(req))
@@ -211,10 +209,9 @@ class TestResolveApproval:
         client = TestClient(app)
 
         import asyncio
+
         loop = asyncio.new_event_loop()
-        loop.run_until_complete(repo.save(
-            _make_pending_request("done-001", state=ApprovalState.APPROVED)
-        ))
+        loop.run_until_complete(repo.save(_make_pending_request("done-001", state=ApprovalState.APPROVED)))
         loop.close()
 
         response = client.post(
@@ -228,6 +225,7 @@ class TestResolveApproval:
         client = TestClient(app)
 
         import asyncio
+
         loop = asyncio.new_event_loop()
         loop.run_until_complete(repo.save(_make_pending_request("r-003")))
         loop.close()
@@ -240,16 +238,18 @@ class TestResolveApproval:
 
 
 class TestSlackCallback:
-
     def _make_slack_request(self, body: str, secret: str, timestamp: int | None = None):
         """Generate Slack-compatible HMAC headers."""
         ts = timestamp or int(time.time())
         sig_basestring = f"v0:{ts}:{body}"
-        sig = "v0=" + hmac.new(
-            secret.encode("utf-8"),
-            sig_basestring.encode("utf-8"),
-            hashlib.sha256,
-        ).hexdigest()
+        sig = (
+            "v0="
+            + hmac.new(
+                secret.encode("utf-8"),
+                sig_basestring.encode("utf-8"),
+                hashlib.sha256,
+            ).hexdigest()
+        )
         return {
             "x-slack-signature": sig,
             "x-slack-request-timestamp": str(ts),
@@ -260,6 +260,7 @@ class TestSlackCallback:
         client = TestClient(app)
 
         import asyncio
+
         loop = asyncio.new_event_loop()
         loop.run_until_complete(repo.save(_make_pending_request("s-001")))
         loop.close()
@@ -280,6 +281,7 @@ class TestSlackCallback:
         client = TestClient(app)
 
         import asyncio
+
         loop = asyncio.new_event_loop()
         loop.run_until_complete(repo.save(_make_pending_request("s-002")))
         loop.close()

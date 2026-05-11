@@ -63,15 +63,20 @@ class TestDefaultCostAttributor:
         assert result.cost_model == CostModel.DURATION
 
     def test_token_pricing(self) -> None:
-        rules = [PricingRule(
-            cost_per_input_token_cents=0.03,
-            cost_per_output_token_cents=0.06,
-            model=CostModel.TOKEN,
-        )]
+        rules = [
+            PricingRule(
+                cost_per_input_token_cents=0.03,
+                cost_per_output_token_cents=0.06,
+                model=CostModel.TOKEN,
+            )
+        ]
         attributor = DefaultCostAttributor(rules=rules)
         ctx = InvocationContext(
-            mcp_server_id="llm", tool_name="gen",
-            duration_ms=500.0, input_tokens=1000, output_tokens=500,
+            mcp_server_id="llm",
+            tool_name="gen",
+            duration_ms=500.0,
+            input_tokens=1000,
+            output_tokens=500,
         )
         result = attributor.compute_cost(ctx)
         assert result.cost_cents == int(1000 * 0.03 + 500 * 0.06)
@@ -85,17 +90,22 @@ class TestDefaultCostAttributor:
         assert result.cost_cents == 50
 
     def test_composite_pricing(self) -> None:
-        rules = [PricingRule(
-            cost_per_input_token_cents=0.01,
-            cost_per_output_token_cents=0.02,
-            cost_per_ms_cents=0.001,
-            fixed_cost_cents=5,
-            model=CostModel.COMPOSITE,
-        )]
+        rules = [
+            PricingRule(
+                cost_per_input_token_cents=0.01,
+                cost_per_output_token_cents=0.02,
+                cost_per_ms_cents=0.001,
+                fixed_cost_cents=5,
+                model=CostModel.COMPOSITE,
+            )
+        ]
         attributor = DefaultCostAttributor(rules=rules)
         ctx = InvocationContext(
-            mcp_server_id="x", tool_name="y",
-            duration_ms=1000.0, input_tokens=100, output_tokens=50,
+            mcp_server_id="x",
+            tool_name="y",
+            duration_ms=1000.0,
+            input_tokens=100,
+            output_tokens=50,
         )
         result = attributor.compute_cost(ctx)
         expected = int(100 * 0.01 + 50 * 0.02 + 1000 * 0.001 + 5)
@@ -163,8 +173,11 @@ class TestCostAttributionEventHandler:
 
         handler = CostAttributionEventHandler(cost_attributor=attributor, event_bus=event_bus)
         event = ToolInvocationCompleted(
-            mcp_server_id="math", tool_name="add",
-            correlation_id="c1", duration_ms=10.0, result_size_bytes=0,
+            mcp_server_id="math",
+            tool_name="add",
+            correlation_id="c1",
+            duration_ms=10.0,
+            result_size_bytes=0,
         )
         handler.handle(event)
         event_bus.publish.assert_not_called()

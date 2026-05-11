@@ -274,9 +274,12 @@ class TestAuditEventHandler:
         store = InMemoryAuditStore()
         handler = AuditEventHandler(store=store)
 
-        event = McpServerStarted(mcp_server_id="test-provider", mode="subprocess",
-        tools_count=5,
-        startup_duration_ms=150.0,)
+        event = McpServerStarted(
+            mcp_server_id="test-provider",
+            mode="subprocess",
+            tools_count=5,
+            startup_duration_ms=150.0,
+        )
 
         handler.handle(event)
 
@@ -318,9 +321,12 @@ class TestAuditEventHandler:
         store = InMemoryAuditStore()
         handler = AuditEventHandler(store=store)
 
-        event = ToolInvocationRequested(mcp_server_id="test", tool_name="add",
-        correlation_id="corr-123",
-        arguments={"a": 1, "b": 2},)
+        event = ToolInvocationRequested(
+            mcp_server_id="test",
+            tool_name="add",
+            correlation_id="corr-123",
+            arguments={"a": 1, "b": 2},
+        )
 
         handler.handle(event)
 
@@ -333,10 +339,13 @@ class TestAuditEventHandler:
         store = InMemoryAuditStore()
         handler = AuditEventHandler(store=store)
 
-        event = ToolInvocationCompleted(mcp_server_id="test", tool_name="add",
-        correlation_id="corr-123",
-        duration_ms=150.0,
-        result_size_bytes=42,)
+        event = ToolInvocationCompleted(
+            mcp_server_id="test",
+            tool_name="add",
+            correlation_id="corr-123",
+            duration_ms=150.0,
+            result_size_bytes=42,
+        )
 
         handler.handle(event)
 
@@ -349,16 +358,19 @@ class TestAuditEventHandler:
         store = InMemoryAuditStore()
         handler = AuditEventHandler(store=store)
 
-        event = ToolInvocationCompleted(mcp_server_id="math", tool_name="add",
-        correlation_id="corr-456",
-        duration_ms=100.0,
-        result_size_bytes=10,
-        identity_context={
-            "user_id": "alice",
-            "agent_id": "agent-007",
-            "session_id": "sess-abc",
-            "principal_type": "user",
-        },)
+        event = ToolInvocationCompleted(
+            mcp_server_id="math",
+            tool_name="add",
+            correlation_id="corr-456",
+            duration_ms=100.0,
+            result_size_bytes=10,
+            identity_context={
+                "user_id": "alice",
+                "agent_id": "agent-007",
+                "session_id": "sess-abc",
+                "principal_type": "user",
+            },
+        )
 
         handler.handle(event)
 
@@ -374,15 +386,18 @@ class TestAuditEventHandler:
         store = InMemoryAuditStore()
         handler = AuditEventHandler(store=store)
 
-        event = ToolInvocationRequested(mcp_server_id="test", tool_name="add",
-        correlation_id="corr-789",
-        arguments={"a": 1},
-        identity_context={
-            "user_id": "bob",
-            "agent_id": None,
-            "session_id": "sess-xyz",
-            "principal_type": "service",
-        },)
+        event = ToolInvocationRequested(
+            mcp_server_id="test",
+            tool_name="add",
+            correlation_id="corr-789",
+            arguments={"a": 1},
+            identity_context={
+                "user_id": "bob",
+                "agent_id": None,
+                "session_id": "sess-xyz",
+                "principal_type": "service",
+            },
+        )
 
         handler.handle(event)
 
@@ -396,17 +411,20 @@ class TestAuditEventHandler:
         store = InMemoryAuditStore()
         handler = AuditEventHandler(store=store)
 
-        event = ToolInvocationFailed(mcp_server_id="test", tool_name="add",
-        correlation_id="corr-fail",
-        duration_ms=50.0,
-        error_message="timeout",
-        error_type="TimeoutError",
-        identity_context={
-            "user_id": "charlie",
-            "agent_id": "agent-x",
-            "session_id": None,
-            "principal_type": "user",
-        },)
+        event = ToolInvocationFailed(
+            mcp_server_id="test",
+            tool_name="add",
+            correlation_id="corr-fail",
+            duration_ms=50.0,
+            error_message="timeout",
+            error_type="TimeoutError",
+            identity_context={
+                "user_id": "charlie",
+                "agent_id": "agent-x",
+                "session_id": None,
+                "principal_type": "user",
+            },
+        )
 
         handler.handle(event)
 
@@ -421,9 +439,12 @@ class TestAuditEventHandler:
         store = InMemoryAuditStore()
         handler = AuditEventHandler(store=store)
 
-        event = McpServerStarted(mcp_server_id="test", mode="subprocess",
-        tools_count=3,
-        startup_duration_ms=200.0,)
+        event = McpServerStarted(
+            mcp_server_id="test",
+            mode="subprocess",
+            tools_count=3,
+            startup_duration_ms=200.0,
+        )
 
         handler.handle(event)
 
@@ -439,11 +460,14 @@ class TestAuditEventHandler:
         store = InMemoryAuditStore()
         handler = AuditEventHandler(store=store)
 
-        event = ToolInvocationFailed(mcp_server_id="test", tool_name="add",
-        correlation_id="corr-123",
-        duration_ms=50.0,
-        error_message="timeout",
-        error_type="TimeoutError",)
+        event = ToolInvocationFailed(
+            mcp_server_id="test",
+            tool_name="add",
+            correlation_id="corr-123",
+            duration_ms=50.0,
+            error_message="timeout",
+            error_type="TimeoutError",
+        )
 
         handler.handle(event)
 
@@ -456,9 +480,12 @@ class TestAuditEventHandler:
         store = InMemoryAuditStore()
         handler = AuditEventHandler(store=store)
 
-        event = McpServerDegraded(mcp_server_id="test", consecutive_failures=5,
-        total_failures=10,
-        reason="timeout",)
+        event = McpServerDegraded(
+            mcp_server_id="test",
+            consecutive_failures=5,
+            total_failures=10,
+            reason="timeout",
+        )
 
         handler.handle(event)
 
@@ -484,8 +511,11 @@ class TestAuditEventHandler:
         store = InMemoryAuditStore()
         handler = AuditEventHandler(store=store)
 
-        event = HealthCheckFailed(mcp_server_id="test", consecutive_failures=3,
-        error_message="connection refused",)
+        event = HealthCheckFailed(
+            mcp_server_id="test",
+            consecutive_failures=3,
+            error_message="connection refused",
+        )
 
         handler.handle(event)
 
@@ -499,9 +529,12 @@ class TestAuditEventHandler:
         handler = AuditEventHandler(store=store)
 
         for i in range(5):
-            event = McpServerStarted(mcp_server_id=f"p{i}", mode="subprocess",
-            tools_count=1,
-            startup_duration_ms=100.0,)
+            event = McpServerStarted(
+                mcp_server_id=f"p{i}",
+                mode="subprocess",
+                tools_count=1,
+                startup_duration_ms=100.0,
+            )
             handler.handle(event)
 
         records = store.query()
@@ -516,9 +549,12 @@ class TestAuditEventHandler:
         handler = AuditEventHandler(store=store)
 
         before = datetime.now(UTC)
-        event = McpServerStarted(mcp_server_id="test", mode="subprocess",
-        tools_count=1,
-        startup_duration_ms=100.0,)
+        event = McpServerStarted(
+            mcp_server_id="test",
+            mode="subprocess",
+            tools_count=1,
+            startup_duration_ms=100.0,
+        )
         handler.handle(event)
         after = datetime.now(UTC)
 
@@ -562,21 +598,36 @@ class TestAuditEventHandler:
         store = InMemoryAuditStore()
         handler = AuditEventHandler(store=store)
 
-        handler.handle(ToolInvocationCompleted(mcp_server_id="math", tool_name="add",
-        correlation_id="c1",
-        duration_ms=10.0,
-        result_size_bytes=5,
-        identity_context={"user_id": "alice", "agent_id": None, "session_id": None, "principal_type": "user"},))
-        handler.handle(ToolInvocationCompleted(mcp_server_id="math", tool_name="sub",
-        correlation_id="c2",
-        duration_ms=20.0,
-        result_size_bytes=5,
-        identity_context={"user_id": "bob", "agent_id": None, "session_id": None, "principal_type": "user"},))
-        handler.handle(ToolInvocationCompleted(mcp_server_id="math", tool_name="mul",
-        correlation_id="c3",
-        duration_ms=30.0,
-        result_size_bytes=5,
-        identity_context={"user_id": "alice", "agent_id": None, "session_id": None, "principal_type": "user"},))
+        handler.handle(
+            ToolInvocationCompleted(
+                mcp_server_id="math",
+                tool_name="add",
+                correlation_id="c1",
+                duration_ms=10.0,
+                result_size_bytes=5,
+                identity_context={"user_id": "alice", "agent_id": None, "session_id": None, "principal_type": "user"},
+            )
+        )
+        handler.handle(
+            ToolInvocationCompleted(
+                mcp_server_id="math",
+                tool_name="sub",
+                correlation_id="c2",
+                duration_ms=20.0,
+                result_size_bytes=5,
+                identity_context={"user_id": "bob", "agent_id": None, "session_id": None, "principal_type": "user"},
+            )
+        )
+        handler.handle(
+            ToolInvocationCompleted(
+                mcp_server_id="math",
+                tool_name="mul",
+                correlation_id="c3",
+                duration_ms=30.0,
+                result_size_bytes=5,
+                identity_context={"user_id": "alice", "agent_id": None, "session_id": None, "principal_type": "user"},
+            )
+        )
 
         alice_records = handler.query(caller_user_id="alice")
         assert len(alice_records) == 2

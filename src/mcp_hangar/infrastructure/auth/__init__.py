@@ -1,25 +1,24 @@
-"""Authentication infrastructure — moved to enterprise.
+"""Authentication infrastructure.
 
-Actual implementations live in ``enterprise/auth/infrastructure/`` under BSL 1.1.
-This module provides lazy re-exports via importlib for backward compatibility.
+Provides lazy re-exports of auth implementations via importlib.
 """
 
 import importlib
 
 _ENTERPRISE_AUTH_SYMBOLS: dict[str, str] = {
-    "ApiKeyAuthenticator": "enterprise.auth.infrastructure.api_key_authenticator",
-    "InMemoryApiKeyStore": "enterprise.auth.infrastructure.api_key_authenticator",
-    "JWTAuthenticator": "enterprise.auth.infrastructure.jwt_authenticator",
-    "JWKSTokenValidator": "enterprise.auth.infrastructure.jwt_authenticator",
-    "OIDCConfig": "enterprise.auth.infrastructure.jwt_authenticator",
-    "AuthenticationMiddleware": "enterprise.auth.infrastructure.middleware",
-    "AuthorizationMiddleware": "enterprise.auth.infrastructure.middleware",
-    "AuthContext": "enterprise.auth.infrastructure.middleware",
-    "AuthRateLimiter": "enterprise.auth.infrastructure.rate_limiter",
-    "AuthRateLimitConfig": "enterprise.auth.infrastructure.rate_limiter",
-    "RBACAuthorizer": "enterprise.auth.infrastructure.rbac_authorizer",
-    "InMemoryRoleStore": "enterprise.auth.infrastructure.rbac_authorizer",
-    "OPAAuthorizer": "enterprise.auth.infrastructure.opa_authorizer",
+    "ApiKeyAuthenticator": "mcp_hangar.auth.infrastructure.api_key_authenticator",
+    "InMemoryApiKeyStore": "mcp_hangar.auth.infrastructure.api_key_authenticator",
+    "JWTAuthenticator": "mcp_hangar.auth.infrastructure.jwt_authenticator",
+    "JWKSTokenValidator": "mcp_hangar.auth.infrastructure.jwt_authenticator",
+    "OIDCConfig": "mcp_hangar.auth.infrastructure.jwt_authenticator",
+    "AuthenticationMiddleware": "mcp_hangar.auth.infrastructure.middleware",
+    "AuthorizationMiddleware": "mcp_hangar.auth.infrastructure.middleware",
+    "AuthContext": "mcp_hangar.auth.infrastructure.middleware",
+    "AuthRateLimiter": "mcp_hangar.auth.infrastructure.rate_limiter",
+    "AuthRateLimitConfig": "mcp_hangar.auth.infrastructure.rate_limiter",
+    "RBACAuthorizer": "mcp_hangar.auth.infrastructure.rbac_authorizer",
+    "InMemoryRoleStore": "mcp_hangar.auth.infrastructure.rbac_authorizer",
+    "OPAAuthorizer": "mcp_hangar.auth.infrastructure.opa_authorizer",
 }
 
 __all__: list[str] = list(_ENTERPRISE_AUTH_SYMBOLS)
@@ -31,5 +30,5 @@ def __getattr__(name: str):  # noqa: ANN001
         try:
             return getattr(importlib.import_module(module_name), name)
         except ImportError as err:
-            raise AttributeError(f"module {__name__!r} has no attribute {name!r} (enterprise not installed)") from err
+            raise AttributeError(f"module {__name__!r} has no attribute {name!r} (auth module not available)") from err
     raise AttributeError(f"module {__name__!r} has no attribute {name!r}")

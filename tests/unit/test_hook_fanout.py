@@ -26,7 +26,6 @@ class _FailingSubscriber:
 
 
 class TestEventBusHookFanOut:
-
     def setup_method(self) -> None:
         self.bus = EventBus()
 

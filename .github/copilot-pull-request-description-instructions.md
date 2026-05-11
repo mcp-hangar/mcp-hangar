@@ -17,7 +17,7 @@ The PR body MUST contain these five `##` sections, in this exact wording
 4. `## Risk and rollback` -- what could break and how to revert.
 5. `## CHANGELOG note` -- paste the `[Unreleased]` entry the PR adds, or write
    `skip-changelog: <reason>` when the change does not touch a triggering
-   path (`src/`, `enterprise/`, `pyproject.toml`, `packages/operator|helm-charts|ui/`).
+    path (`src/`, `pyproject.toml`, `packages/operator|helm-charts|ui/`).
 
 Optionally append `## Agent metadata` for agent-authored PRs (single CC scope
 declaration, single-goal confirmation, LOC declared, files-in-scope match).

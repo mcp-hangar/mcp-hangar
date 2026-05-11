@@ -20,24 +20,27 @@ class TestProviderSnapshot:
 
     def test_snapshot_creation(self):
         """Test creating a snapshot."""
-        snapshot = ProviderSnapshot(mcp_server_id="test-provider", mode="subprocess",
-        state="ready",
-        version=10,
-        command=["python", "server.py"],
-        image=None,
-        endpoint=None,
-        env={"VAR": "value"},
-        idle_ttl_s=300,
-        health_check_interval_s=60,
-        max_consecutive_failures=3,
-        consecutive_failures=0,
-        total_failures=2,
-        total_invocations=100,
-        last_success_at=1000.0,
-        last_failure_at=500.0,
-        tool_names=["add", "subtract"],
-        last_used=1000.0,
-        meta={"started_at": 100.0},)
+        snapshot = ProviderSnapshot(
+            mcp_server_id="test-provider",
+            mode="subprocess",
+            state="ready",
+            version=10,
+            command=["python", "server.py"],
+            image=None,
+            endpoint=None,
+            env={"VAR": "value"},
+            idle_ttl_s=300,
+            health_check_interval_s=60,
+            max_consecutive_failures=3,
+            consecutive_failures=0,
+            total_failures=2,
+            total_invocations=100,
+            last_success_at=1000.0,
+            last_failure_at=500.0,
+            tool_names=["add", "subtract"],
+            last_used=1000.0,
+            meta={"started_at": 100.0},
+        )
 
         assert snapshot.mcp_server_id == "test-provider"
         assert snapshot.state == "ready"
@@ -45,24 +48,27 @@ class TestProviderSnapshot:
 
     def test_snapshot_to_dict(self):
         """Test snapshot to dictionary conversion."""
-        snapshot = ProviderSnapshot(mcp_server_id="p1", mode="subprocess",
-        state="cold",
-        version=5,
-        command=None,
-        image=None,
-        endpoint=None,
-        env={},
-        idle_ttl_s=300,
-        health_check_interval_s=60,
-        max_consecutive_failures=3,
-        consecutive_failures=0,
-        total_failures=0,
-        total_invocations=0,
-        last_success_at=None,
-        last_failure_at=None,
-        tool_names=[],
-        last_used=0.0,
-        meta={},)
+        snapshot = ProviderSnapshot(
+            mcp_server_id="p1",
+            mode="subprocess",
+            state="cold",
+            version=5,
+            command=None,
+            image=None,
+            endpoint=None,
+            env={},
+            idle_ttl_s=300,
+            health_check_interval_s=60,
+            max_consecutive_failures=3,
+            consecutive_failures=0,
+            total_failures=0,
+            total_invocations=0,
+            last_success_at=None,
+            last_failure_at=None,
+            tool_names=[],
+            last_used=0.0,
+            meta={},
+        )
 
         d = snapshot.to_dict()
 
@@ -114,25 +120,28 @@ class TestProviderSnapshotCircuitBreakerState:
             "reset_timeout_s": 60.0,
             "opened_at": 1700000000.0,
         }
-        snapshot = ProviderSnapshot(mcp_server_id="test-provider", mode="subprocess",
-        state="ready",
-        version=10,
-        command=["python", "server.py"],
-        image=None,
-        endpoint=None,
-        env={},
-        idle_ttl_s=300,
-        health_check_interval_s=60,
-        max_consecutive_failures=3,
-        consecutive_failures=0,
-        total_failures=2,
-        total_invocations=100,
-        last_success_at=1000.0,
-        last_failure_at=500.0,
-        tool_names=["add"],
-        last_used=1000.0,
-        meta={},
-        circuit_breaker_state=cb_state,)
+        snapshot = ProviderSnapshot(
+            mcp_server_id="test-provider",
+            mode="subprocess",
+            state="ready",
+            version=10,
+            command=["python", "server.py"],
+            image=None,
+            endpoint=None,
+            env={},
+            idle_ttl_s=300,
+            health_check_interval_s=60,
+            max_consecutive_failures=3,
+            consecutive_failures=0,
+            total_failures=2,
+            total_invocations=100,
+            last_success_at=1000.0,
+            last_failure_at=500.0,
+            tool_names=["add"],
+            last_used=1000.0,
+            meta={},
+            circuit_breaker_state=cb_state,
+        )
 
         d = snapshot.to_dict()
         restored = ProviderSnapshot.from_dict(d)
@@ -171,25 +180,28 @@ class TestProviderSnapshotCircuitBreakerState:
 
     def test_from_snapshot_with_circuit_breaker_state_does_not_crash(self):
         """EventSourcedProvider.from_snapshot() does not crash when circuit_breaker_state is present."""
-        snapshot = ProviderSnapshot(mcp_server_id="p1", mode="subprocess",
-        state="ready",
-        version=10,
-        command=["python", "server.py"],
-        image=None,
-        endpoint=None,
-        env={},
-        idle_ttl_s=300,
-        health_check_interval_s=60,
-        max_consecutive_failures=3,
-        consecutive_failures=0,
-        total_failures=0,
-        total_invocations=0,
-        last_success_at=None,
-        last_failure_at=None,
-        tool_names=[],
-        last_used=0.0,
-        meta={},
-        circuit_breaker_state={"state": "open", "failure_count": 5},)
+        snapshot = ProviderSnapshot(
+            mcp_server_id="p1",
+            mode="subprocess",
+            state="ready",
+            version=10,
+            command=["python", "server.py"],
+            image=None,
+            endpoint=None,
+            env={},
+            idle_ttl_s=300,
+            health_check_interval_s=60,
+            max_consecutive_failures=3,
+            consecutive_failures=0,
+            total_failures=0,
+            total_invocations=0,
+            last_success_at=None,
+            last_failure_at=None,
+            tool_names=[],
+            last_used=0.0,
+            meta={},
+            circuit_breaker_state={"state": "open", "failure_count": 5},
+        )
 
         provider = EventSourcedProvider.from_snapshot(snapshot)
 
@@ -198,25 +210,28 @@ class TestProviderSnapshotCircuitBreakerState:
 
     def test_from_snapshot_with_none_circuit_breaker_state_does_not_crash(self):
         """EventSourcedProvider.from_snapshot() does not crash when circuit_breaker_state is None."""
-        snapshot = ProviderSnapshot(mcp_server_id="p1", mode="subprocess",
-        state="ready",
-        version=10,
-        command=["python", "server.py"],
-        image=None,
-        endpoint=None,
-        env={},
-        idle_ttl_s=300,
-        health_check_interval_s=60,
-        max_consecutive_failures=3,
-        consecutive_failures=0,
-        total_failures=0,
-        total_invocations=0,
-        last_success_at=None,
-        last_failure_at=None,
-        tool_names=[],
-        last_used=0.0,
-        meta={},
-        circuit_breaker_state=None,)
+        snapshot = ProviderSnapshot(
+            mcp_server_id="p1",
+            mode="subprocess",
+            state="ready",
+            version=10,
+            command=["python", "server.py"],
+            image=None,
+            endpoint=None,
+            env={},
+            idle_ttl_s=300,
+            health_check_interval_s=60,
+            max_consecutive_failures=3,
+            consecutive_failures=0,
+            total_failures=0,
+            total_invocations=0,
+            last_success_at=None,
+            last_failure_at=None,
+            tool_names=[],
+            last_used=0.0,
+            meta={},
+            circuit_breaker_state=None,
+        )
 
         provider = EventSourcedProvider.from_snapshot(snapshot)
 
@@ -333,24 +348,27 @@ class TestEventSourcedProvider:
 
     def test_from_snapshot(self):
         """Test creating provider from snapshot."""
-        snapshot = ProviderSnapshot(mcp_server_id="p1", mode="subprocess",
-        state="ready",
-        version=10,
-        command=["python", "server.py"],
-        image=None,
-        endpoint=None,
-        env={},
-        idle_ttl_s=300,
-        health_check_interval_s=60,
-        max_consecutive_failures=3,
-        consecutive_failures=1,
-        total_failures=5,
-        total_invocations=100,
-        last_success_at=1000.0,
-        last_failure_at=500.0,
-        tool_names=["add"],
-        last_used=1000.0,
-        meta={"started_at": 100.0},)
+        snapshot = ProviderSnapshot(
+            mcp_server_id="p1",
+            mode="subprocess",
+            state="ready",
+            version=10,
+            command=["python", "server.py"],
+            image=None,
+            endpoint=None,
+            env={},
+            idle_ttl_s=300,
+            health_check_interval_s=60,
+            max_consecutive_failures=3,
+            consecutive_failures=1,
+            total_failures=5,
+            total_invocations=100,
+            last_success_at=1000.0,
+            last_failure_at=500.0,
+            tool_names=["add"],
+            last_used=1000.0,
+            meta={"started_at": 100.0},
+        )
 
         provider = EventSourcedProvider.from_snapshot(snapshot)
 
@@ -362,24 +380,27 @@ class TestEventSourcedProvider:
 
     def test_from_snapshot_with_events(self):
         """Test creating provider from snapshot plus subsequent events."""
-        snapshot = ProviderSnapshot(mcp_server_id="p1", mode="subprocess",
-        state="ready",
-        version=10,
-        command=None,
-        image=None,
-        endpoint=None,
-        env={},
-        idle_ttl_s=300,
-        health_check_interval_s=60,
-        max_consecutive_failures=3,
-        consecutive_failures=0,
-        total_failures=0,
-        total_invocations=0,
-        last_success_at=None,
-        last_failure_at=None,
-        tool_names=[],
-        last_used=0.0,
-        meta={},)
+        snapshot = ProviderSnapshot(
+            mcp_server_id="p1",
+            mode="subprocess",
+            state="ready",
+            version=10,
+            command=None,
+            image=None,
+            endpoint=None,
+            env={},
+            idle_ttl_s=300,
+            health_check_interval_s=60,
+            max_consecutive_failures=3,
+            consecutive_failures=0,
+            total_failures=0,
+            total_invocations=0,
+            last_success_at=None,
+            last_failure_at=None,
+            tool_names=[],
+            last_used=0.0,
+            meta={},
+        )
 
         events = [
             ToolInvocationCompleted("p1", "add", "c1", 50.0, 0),
@@ -398,9 +419,12 @@ class TestEventSourcedProvider:
             ToolInvocationCompleted("p1", "add", "c1", 50.0, 0),
         ]
 
-        provider = EventSourcedProvider.from_events(mcp_server_id="p1", mode="subprocess",
-        command=["python", "server.py"],
-        events=events,)
+        provider = EventSourcedProvider.from_events(
+            mcp_server_id="p1",
+            mode="subprocess",
+            command=["python", "server.py"],
+            events=events,
+        )
 
         snapshot = provider.create_snapshot()
 

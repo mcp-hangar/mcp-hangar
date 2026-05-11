@@ -57,22 +57,21 @@ def _make_ready_provider(
     tool_names: list[str] | None = None,
 ) -> tuple[McpServer, MagicMock]:
     """Create a READY provider with pre-loaded tools and a zero-cost mock client."""
-    provider = McpServer(mcp_server_id=mcp_server_id, mode="subprocess",
-    command=["python", "-m", "test"],)
+    provider = McpServer(
+        mcp_server_id=mcp_server_id,
+        mode="subprocess",
+        command=["python", "-m", "test"],
+    )
     mock_client = MagicMock()
     mock_client.is_alive.return_value = True
-    mock_client.call.return_value = {
-        "result": {"content": [{"type": "text", "text": "ok"}]}
-    }
+    mock_client.call.return_value = {"result": {"content": [{"type": "text", "text": "ok"}]}}
 
     with provider._lock:
         provider._state = McpServerState.READY
         provider._client = mock_client
 
     for name in tool_names or ["calculator"]:
-        provider._tools.add(
-            ToolSchema(name=name, description=f"Tool {name}", input_schema={})
-        )
+        provider._tools.add(ToolSchema(name=name, description=f"Tool {name}", input_schema={}))
 
     return provider, mock_client
 
@@ -242,9 +241,7 @@ class TestToolAccessResolver:
         )
 
         def check():
-            return resolver.is_tool_allowed(
-                "provider-a", "read_file", group_id="group-1", member_id="member-1"
-            )
+            return resolver.is_tool_allowed("provider-a", "read_file", group_id="group-1", member_id="member-1")
 
         result = benchmark(check)
         assert result is True
@@ -262,29 +259,38 @@ class TestEventBusPublish:
     def test_publish_no_handlers(self, benchmark):
         """Publish with zero handlers (baseline)."""
         bus = EventBus()
-        event = ToolInvocationCompleted(mcp_server_id="bench", tool_name="calculator",
-        correlation_id="corr-1",
-        duration_ms=1.5,
-        result_size_bytes=64,)
+        event = ToolInvocationCompleted(
+            mcp_server_id="bench",
+            tool_name="calculator",
+            correlation_id="corr-1",
+            duration_ms=1.5,
+            result_size_bytes=64,
+        )
 
         benchmark(bus.publish, event)
 
     def test_publish_with_metrics_and_audit(self, benchmark):
         """Publish with metrics + audit handlers (production-like)."""
         bus = _make_event_bus_with_handlers()
-        event = ToolInvocationCompleted(mcp_server_id="bench", tool_name="calculator",
-        correlation_id="corr-1",
-        duration_ms=1.5,
-        result_size_bytes=64,)
+        event = ToolInvocationCompleted(
+            mcp_server_id="bench",
+            tool_name="calculator",
+            correlation_id="corr-1",
+            duration_ms=1.5,
+            result_size_bytes=64,
+        )
 
         benchmark(bus.publish, event)
 
     def test_publish_tool_invocation_requested(self, benchmark):
         """Publish ToolInvocationRequested (emitted before RPC)."""
         bus = _make_event_bus_with_handlers()
-        event = ToolInvocationRequested(mcp_server_id="bench", tool_name="calculator",
-        correlation_id="corr-1",
-        arguments={"a": 1, "b": 2},)
+        event = ToolInvocationRequested(
+            mcp_server_id="bench",
+            tool_name="calculator",
+            correlation_id="corr-1",
+            arguments={"a": 1, "b": 2},
+        )
 
         benchmark(bus.publish, event)
 
@@ -301,10 +307,13 @@ class TestEventBusPublish:
 
             bus.subscribe(ToolInvocationCompleted, handler)
 
-        event = ToolInvocationCompleted(mcp_server_id="bench", tool_name="calculator",
-        correlation_id="corr-1",
-        duration_ms=1.5,
-        result_size_bytes=64,)
+        event = ToolInvocationCompleted(
+            mcp_server_id="bench",
+            tool_name="calculator",
+            correlation_id="corr-1",
+            duration_ms=1.5,
+            result_size_bytes=64,
+        )
 
         benchmark(bus.publish, event)
         assert all(c > 0 for c in counters)
@@ -330,8 +339,11 @@ class TestCommandBusSend:
         handler = InvokeToolHandler(repository, event_bus)
         command_bus.register(InvokeToolCommand, handler)
 
-        cmd = InvokeToolCommand(mcp_server_id="bench-provider", tool_name="calculator",
-        arguments={"a": 1, "b": 2},)
+        cmd = InvokeToolCommand(
+            mcp_server_id="bench-provider",
+            tool_name="calculator",
+            arguments={"a": 1, "b": 2},
+        )
 
         def send():
             return command_bus.send(cmd)
@@ -350,8 +362,11 @@ class TestCommandBusSend:
         handler = InvokeToolHandler(repository, event_bus)
         command_bus.register(InvokeToolCommand, handler)
 
-        cmd = InvokeToolCommand(mcp_server_id="bench-provider", tool_name="calculator",
-        arguments={"a": 1, "b": 2},)
+        cmd = InvokeToolCommand(
+            mcp_server_id="bench-provider",
+            tool_name="calculator",
+            arguments={"a": 1, "b": 2},
+        )
 
         def send():
             return command_bus.send(cmd)
@@ -443,9 +458,7 @@ class TestFullProxyPath:
 
     def _setup_full_path(self):
         """Set up the full command dispatch infrastructure."""
-        provider, mock_client = _make_ready_provider(
-            tool_names=["calculator", "search", "fetch", "parse", "validate"]
-        )
+        provider, mock_client = _make_ready_provider(tool_names=["calculator", "search", "fetch", "parse", "validate"])
         repository = InMemoryMcpServerRepository()
         repository.add("bench-provider", provider)
         event_bus = _make_event_bus_with_handlers()
@@ -459,8 +472,11 @@ class TestFullProxyPath:
     def test_full_path_single_tool(self, benchmark):
         """Full proxy path: command bus -> handler -> invoke -> events."""
         command_bus, provider = self._setup_full_path()
-        cmd = InvokeToolCommand(mcp_server_id="bench-provider", tool_name="calculator",
-        arguments={"a": 1, "b": 2},)
+        cmd = InvokeToolCommand(
+            mcp_server_id="bench-provider",
+            tool_name="calculator",
+            arguments={"a": 1, "b": 2},
+        )
 
         result = benchmark(command_bus.send, cmd)
         assert "content" in result
@@ -468,8 +484,11 @@ class TestFullProxyPath:
     def test_full_path_with_identity(self, benchmark):
         """Full proxy path with identity context set."""
         command_bus, provider = self._setup_full_path()
-        cmd = InvokeToolCommand(mcp_server_id="bench-provider", tool_name="calculator",
-        arguments={"a": 1, "b": 2},)
+        cmd = InvokeToolCommand(
+            mcp_server_id="bench-provider",
+            tool_name="calculator",
+            arguments={"a": 1, "b": 2},
+        )
         idt = IdentityContext(
             caller=CallerIdentity(
                 user_id="user-123",
@@ -496,8 +515,11 @@ class TestFullProxyPath:
         overhead exceeds the target and optimization is needed.
         """
         command_bus, provider = self._setup_full_path()
-        cmd = InvokeToolCommand(mcp_server_id="bench-provider", tool_name="calculator",
-        arguments={"a": 1, "b": 2},)
+        cmd = InvokeToolCommand(
+            mcp_server_id="bench-provider",
+            tool_name="calculator",
+            arguments={"a": 1, "b": 2},
+        )
 
         # Run benchmark and collect raw timing data
         timings = []

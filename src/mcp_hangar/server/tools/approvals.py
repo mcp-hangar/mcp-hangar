@@ -1,6 +1,6 @@
 """MCP permission prompt tool for Claude Code integration.
 
-Registered conditionally when enterprise.approvals.channel is "mcp_prompt".
+Registered conditionally when mcp_hangar.approvals.channel is "mcp_prompt".
 Implements the Claude Code permission prompt spec:
   - {"behavior": "allow"} to approve
   - {"behavior": "deny", "message": str} to deny

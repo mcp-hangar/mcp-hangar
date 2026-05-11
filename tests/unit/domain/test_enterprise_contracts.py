@@ -327,15 +327,21 @@ class TestNullAuditExporter:
     def test_export_tool_invocation_is_noop(self) -> None:
         exporter = NullAuditExporter()
         # Should not raise
-        exporter.export_tool_invocation(mcp_server_id="math", tool_name="add",
-        status="success",
-        duration_ms=10.0,)
+        exporter.export_tool_invocation(
+            mcp_server_id="math",
+            tool_name="add",
+            status="success",
+            duration_ms=10.0,
+        )
 
     def test_export_mcp_server_state_change_is_noop(self) -> None:
         exporter = NullAuditExporter()
         # Should not raise
-        exporter.export_mcp_server_state_change(mcp_server_id="math", from_state="COLD",
-        to_state="INITIALIZING",)
+        exporter.export_mcp_server_state_change(
+            mcp_server_id="math",
+            from_state="COLD",
+            to_state="INITIALIZING",
+        )
 
 
 # -- Complete inventory check --

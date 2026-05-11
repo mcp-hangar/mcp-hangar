@@ -53,12 +53,12 @@ def run_stdio_benchmark(iterations: int = 20):
         else:
             status = "FAIL"
 
-        print(f"  [{i+1}/{iterations}] {elapsed_ms:.1f}ms - {status}")
+        print(f"  [{i + 1}/{iterations}] {elapsed_ms:.1f}ms - {status}")
 
     if latencies:
-        print(f"\n{'='*50}")
+        print(f"\n{'=' * 50}")
         print("RESULTS (tools/list via stdio)")
-        print(f"{'='*50}")
+        print(f"{'=' * 50}")
         print(f"Iterations: {len(latencies)}/{iterations}")
         print(f"Min:        {min(latencies):.1f}ms")
         print(f"Max:        {max(latencies):.1f}ms")
@@ -67,7 +67,7 @@ def run_stdio_benchmark(iterations: int = 20):
         sorted_lat = sorted(latencies)
         p95_idx = int(len(sorted_lat) * 0.95)
         print(f"P95:        {sorted_lat[p95_idx] if p95_idx < len(sorted_lat) else sorted_lat[-1]:.1f}ms")
-        print(f"Throughput: {len(latencies) / (sum(latencies)/1000):.2f} req/s")
+        print(f"Throughput: {len(latencies) / (sum(latencies) / 1000):.2f} req/s")
 
 
 def run_tool_call_benchmark(iterations: int = 10):
@@ -117,12 +117,12 @@ def run_tool_call_benchmark(iterations: int = 10):
         else:
             status = "FAIL"
 
-        print(f"  [{i+1}/{iterations}] {elapsed_ms:.1f}ms - {status}")
+        print(f"  [{i + 1}/{iterations}] {elapsed_ms:.1f}ms - {status}")
 
     if latencies:
-        print(f"\n{'='*50}")
+        print(f"\n{'=' * 50}")
         print("RESULTS (hangar_status tool call)")
-        print(f"{'='*50}")
+        print(f"{'=' * 50}")
         print(f"Iterations: {len(latencies)}/{iterations}")
         print(f"Min:        {min(latencies):.1f}ms")
         print(f"Max:        {max(latencies):.1f}ms")

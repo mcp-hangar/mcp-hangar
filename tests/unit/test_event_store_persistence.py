@@ -18,9 +18,12 @@ class TestNullEventStore:
 
     def test_append_returns_incremented_version(self):
         store = NullEventStore()
-        event = McpServerStarted(mcp_server_id="test", mode="subprocess",
-        tools_count=5,
-        startup_duration_ms=100.0,)
+        event = McpServerStarted(
+            mcp_server_id="test",
+            mode="subprocess",
+            tools_count=5,
+            startup_duration_ms=100.0,
+        )
 
         version = store.append("stream:test", [event], expected_version=-1)
 
@@ -56,9 +59,12 @@ class TestInMemoryEventStorePersistence:
         return InMemoryEventStore()
 
     def test_append_to_new_stream(self, store: InMemoryEventStore):
-        event = McpServerStarted(mcp_server_id="math", mode="subprocess",
-        tools_count=3,
-        startup_duration_ms=50.0,)
+        event = McpServerStarted(
+            mcp_server_id="math",
+            mode="subprocess",
+            tools_count=3,
+            startup_duration_ms=50.0,
+        )
 
         version = store.append("mcp_server:math", [event], expected_version=-1)
 
@@ -67,11 +73,17 @@ class TestInMemoryEventStorePersistence:
 
     def test_append_multiple_events(self, store: InMemoryEventStore):
         events = [
-            McpServerStarted(mcp_server_id="math", mode="subprocess",
-            tools_count=3,
-            startup_duration_ms=50.0,),
-            McpServerStateChanged(mcp_server_id="math", old_state="COLD",
-            new_state="INITIALIZING",),
+            McpServerStarted(
+                mcp_server_id="math",
+                mode="subprocess",
+                tools_count=3,
+                startup_duration_ms=50.0,
+            ),
+            McpServerStateChanged(
+                mcp_server_id="math",
+                old_state="COLD",
+                new_state="INITIALIZING",
+            ),
         ]
 
         version = store.append("mcp_server:math", events, expected_version=-1)
@@ -80,9 +92,12 @@ class TestInMemoryEventStorePersistence:
         assert store.get_event_count() == 2
 
     def test_append_with_wrong_version_raises_concurrency_error(self, store: InMemoryEventStore):
-        event = McpServerStarted(mcp_server_id="math", mode="subprocess",
-        tools_count=3,
-        startup_duration_ms=50.0,)
+        event = McpServerStarted(
+            mcp_server_id="math",
+            mode="subprocess",
+            tools_count=3,
+            startup_duration_ms=50.0,
+        )
         store.append("mcp_server:math", [event], expected_version=-1)
 
         with pytest.raises(ConcurrencyError) as exc_info:
@@ -94,13 +109,22 @@ class TestInMemoryEventStorePersistence:
 
     def test_read_stream_returns_events_in_order(self, store: InMemoryEventStore):
         events = [
-            McpServerStarted(mcp_server_id="math", mode="subprocess",
-            tools_count=3,
-            startup_duration_ms=50.0,),
-            McpServerStateChanged(mcp_server_id="math", old_state="COLD",
-            new_state="INITIALIZING",),
-            McpServerStateChanged(mcp_server_id="math", old_state="INITIALIZING",
-            new_state="READY",),
+            McpServerStarted(
+                mcp_server_id="math",
+                mode="subprocess",
+                tools_count=3,
+                startup_duration_ms=50.0,
+            ),
+            McpServerStateChanged(
+                mcp_server_id="math",
+                old_state="COLD",
+                new_state="INITIALIZING",
+            ),
+            McpServerStateChanged(
+                mcp_server_id="math",
+                old_state="INITIALIZING",
+                new_state="READY",
+            ),
         ]
         store.append("mcp_server:math", events, expected_version=-1)
 
@@ -114,13 +138,22 @@ class TestInMemoryEventStorePersistence:
 
     def test_read_stream_from_version(self, store: InMemoryEventStore):
         events = [
-            McpServerStarted(mcp_server_id="math", mode="subprocess",
-            tools_count=3,
-            startup_duration_ms=50.0,),
-            McpServerStateChanged(mcp_server_id="math", old_state="COLD",
-            new_state="INITIALIZING",),
-            McpServerStateChanged(mcp_server_id="math", old_state="INITIALIZING",
-            new_state="READY",),
+            McpServerStarted(
+                mcp_server_id="math",
+                mode="subprocess",
+                tools_count=3,
+                startup_duration_ms=50.0,
+            ),
+            McpServerStateChanged(
+                mcp_server_id="math",
+                old_state="COLD",
+                new_state="INITIALIZING",
+            ),
+            McpServerStateChanged(
+                mcp_server_id="math",
+                old_state="INITIALIZING",
+                new_state="READY",
+            ),
         ]
         store.append("mcp_server:math", events, expected_version=-1)
 
@@ -135,12 +168,18 @@ class TestInMemoryEventStorePersistence:
         assert events == []
 
     def test_read_all_returns_global_order(self, store: InMemoryEventStore):
-        event1 = McpServerStarted(mcp_server_id="math", mode="subprocess",
-        tools_count=3,
-        startup_duration_ms=50.0,)
-        event2 = McpServerStarted(mcp_server_id="sqlite", mode="docker",
-        tools_count=5,
-        startup_duration_ms=100.0,)
+        event1 = McpServerStarted(
+            mcp_server_id="math",
+            mode="subprocess",
+            tools_count=3,
+            startup_duration_ms=50.0,
+        )
+        event2 = McpServerStarted(
+            mcp_server_id="sqlite",
+            mode="docker",
+            tools_count=5,
+            startup_duration_ms=100.0,
+        )
 
         store.append("mcp_server:math", [event1], expected_version=-1)
         store.append("mcp_server:sqlite", [event2], expected_version=-1)
@@ -158,9 +197,12 @@ class TestInMemoryEventStorePersistence:
 
     def test_read_all_with_limit(self, store: InMemoryEventStore):
         for i in range(10):
-            event = McpServerStarted(mcp_server_id=f"provider-{i}", mode="subprocess",
-            tools_count=i,
-            startup_duration_ms=float(i),)
+            event = McpServerStarted(
+                mcp_server_id=f"provider-{i}",
+                mode="subprocess",
+                tools_count=i,
+                startup_duration_ms=float(i),
+            )
             store.append(f"mcp_server:{i}", [event], expected_version=-1)
 
         all_events = list(store.read_all(limit=5))
@@ -168,9 +210,12 @@ class TestInMemoryEventStorePersistence:
         assert len(all_events) == 5
 
     def test_clear_removes_all_events(self, store: InMemoryEventStore):
-        event = McpServerStarted(mcp_server_id="math", mode="subprocess",
-        tools_count=3,
-        startup_duration_ms=50.0,)
+        event = McpServerStarted(
+            mcp_server_id="math",
+            mode="subprocess",
+            tools_count=3,
+            startup_duration_ms=50.0,
+        )
         store.append("mcp_server:math", [event], expected_version=-1)
 
         store.clear()
@@ -189,9 +234,12 @@ class TestSQLiteEventStorePersistence:
         return SQLiteEventStore(":memory:")
 
     def test_append_to_new_stream(self, store: SQLiteEventStore):
-        event = McpServerStarted(mcp_server_id="math", mode="subprocess",
-        tools_count=3,
-        startup_duration_ms=50.0,)
+        event = McpServerStarted(
+            mcp_server_id="math",
+            mode="subprocess",
+            tools_count=3,
+            startup_duration_ms=50.0,
+        )
 
         version = store.append("mcp_server:math", [event], expected_version=-1)
 
@@ -200,11 +248,17 @@ class TestSQLiteEventStorePersistence:
 
     def test_append_multiple_events(self, store: SQLiteEventStore):
         events = [
-            McpServerStarted(mcp_server_id="math", mode="subprocess",
-            tools_count=3,
-            startup_duration_ms=50.0,),
-            McpServerStateChanged(mcp_server_id="math", old_state="COLD",
-            new_state="INITIALIZING",),
+            McpServerStarted(
+                mcp_server_id="math",
+                mode="subprocess",
+                tools_count=3,
+                startup_duration_ms=50.0,
+            ),
+            McpServerStateChanged(
+                mcp_server_id="math",
+                old_state="COLD",
+                new_state="INITIALIZING",
+            ),
         ]
 
         version = store.append("mcp_server:math", events, expected_version=-1)
@@ -213,9 +267,12 @@ class TestSQLiteEventStorePersistence:
         assert store.get_event_count() == 2
 
     def test_optimistic_concurrency_check(self, store: SQLiteEventStore):
-        event = McpServerStarted(mcp_server_id="math", mode="subprocess",
-        tools_count=3,
-        startup_duration_ms=50.0,)
+        event = McpServerStarted(
+            mcp_server_id="math",
+            mode="subprocess",
+            tools_count=3,
+            startup_duration_ms=50.0,
+        )
         store.append("mcp_server:math", [event], expected_version=-1)
 
         # Try appending with wrong version
@@ -227,11 +284,17 @@ class TestSQLiteEventStorePersistence:
         assert exc_info.value.actual == 0
 
     def test_sequential_appends_with_correct_versions(self, store: SQLiteEventStore):
-        event1 = McpServerStarted(mcp_server_id="math", mode="subprocess",
-        tools_count=3,
-        startup_duration_ms=50.0,)
-        event2 = McpServerStateChanged(mcp_server_id="math", old_state="COLD",
-        new_state="READY",)
+        event1 = McpServerStarted(
+            mcp_server_id="math",
+            mode="subprocess",
+            tools_count=3,
+            startup_duration_ms=50.0,
+        )
+        event2 = McpServerStateChanged(
+            mcp_server_id="math",
+            old_state="COLD",
+            new_state="READY",
+        )
         event3 = McpServerStopped(mcp_server_id="math", reason="shutdown")
 
         v1 = store.append("mcp_server:math", [event1], expected_version=-1)
@@ -245,13 +308,19 @@ class TestSQLiteEventStorePersistence:
 
     def test_read_stream_deserializes_events(self, store: SQLiteEventStore):
         events = [
-            McpServerStarted(mcp_server_id="math", mode="subprocess",
-            tools_count=3,
-            startup_duration_ms=50.0,),
-            ToolInvocationCompleted(mcp_server_id="math", tool_name="add",
-            correlation_id="corr-123",
-            duration_ms=10.5,
-            result_size_bytes=256,),
+            McpServerStarted(
+                mcp_server_id="math",
+                mode="subprocess",
+                tools_count=3,
+                startup_duration_ms=50.0,
+            ),
+            ToolInvocationCompleted(
+                mcp_server_id="math",
+                tool_name="add",
+                correlation_id="corr-123",
+                duration_ms=10.5,
+                result_size_bytes=256,
+            ),
         ]
         store.append("mcp_server:math", events, expected_version=-1)
 
@@ -267,12 +336,18 @@ class TestSQLiteEventStorePersistence:
         assert read_events[1].duration_ms == 10.5
 
     def test_read_all_across_streams(self, store: SQLiteEventStore):
-        event1 = McpServerStarted(mcp_server_id="math", mode="subprocess",
-        tools_count=3,
-        startup_duration_ms=50.0,)
-        event2 = McpServerStarted(mcp_server_id="sqlite", mode="docker",
-        tools_count=5,
-        startup_duration_ms=100.0,)
+        event1 = McpServerStarted(
+            mcp_server_id="math",
+            mode="subprocess",
+            tools_count=3,
+            startup_duration_ms=50.0,
+        )
+        event2 = McpServerStarted(
+            mcp_server_id="sqlite",
+            mode="docker",
+            tools_count=5,
+            startup_duration_ms=100.0,
+        )
 
         store.append("mcp_server:math", [event1], expected_version=-1)
         store.append("mcp_server:sqlite", [event2], expected_version=-1)
@@ -285,9 +360,12 @@ class TestSQLiteEventStorePersistence:
 
     def test_persistence_across_connections(self, tmp_path: Path):
         db_path = tmp_path / "events.db"
-        event = McpServerStarted(mcp_server_id="math", mode="subprocess",
-        tools_count=3,
-        startup_duration_ms=50.0,)
+        event = McpServerStarted(
+            mcp_server_id="math",
+            mode="subprocess",
+            tools_count=3,
+            startup_duration_ms=50.0,
+        )
 
         # Write with first connection
         store1 = SQLiteEventStore(db_path)
@@ -301,12 +379,18 @@ class TestSQLiteEventStorePersistence:
         assert events[0].mcp_server_id == "math"
 
     def test_get_all_stream_ids(self, store: SQLiteEventStore):
-        event1 = McpServerStarted(mcp_server_id="math", mode="subprocess",
-        tools_count=3,
-        startup_duration_ms=50.0,)
-        event2 = McpServerStarted(mcp_server_id="sqlite", mode="docker",
-        tools_count=5,
-        startup_duration_ms=100.0,)
+        event1 = McpServerStarted(
+            mcp_server_id="math",
+            mode="subprocess",
+            tools_count=3,
+            startup_duration_ms=50.0,
+        )
+        event2 = McpServerStarted(
+            mcp_server_id="sqlite",
+            mode="docker",
+            tools_count=5,
+            startup_duration_ms=100.0,
+        )
 
         store.append("mcp_server:math", [event1], expected_version=-1)
         store.append("mcp_server:sqlite", [event2], expected_version=-1)
@@ -387,9 +471,12 @@ class TestSQLiteEventStoreSnapshots:
     def test_save_snapshot_inside_lock_scope(self, store: SQLiteEventStore):
         """Verify save_snapshot uses self._lock for version consistency."""
         # Append an event so stream version is 0
-        event = McpServerStarted(mcp_server_id="math", mode="subprocess",
-        tools_count=3,
-        startup_duration_ms=50.0,)
+        event = McpServerStarted(
+            mcp_server_id="math",
+            mode="subprocess",
+            tools_count=3,
+            startup_duration_ms=50.0,
+        )
         store.append("mcp_server:math", [event], expected_version=-1)
 
         # Save snapshot at version 0
@@ -402,9 +489,12 @@ class TestSQLiteEventStoreSnapshots:
 
     def test_snapshot_version_matches_stream_version(self, store: SQLiteEventStore):
         """Snapshot version should match stream version at save time."""
-        event = McpServerStarted(mcp_server_id="math", mode="subprocess",
-        tools_count=3,
-        startup_duration_ms=50.0,)
+        event = McpServerStarted(
+            mcp_server_id="math",
+            mode="subprocess",
+            tools_count=3,
+            startup_duration_ms=50.0,
+        )
         version = store.append("mcp_server:math", [event], expected_version=-1)
 
         state = {"mcp_server_id": "math", "state": "READY"}
@@ -459,9 +549,12 @@ class TestEventStoreThreadSafety:
         def append_events(stream_id: str):
             try:
                 for i in range(100):
-                    event = McpServerStarted(mcp_server_id=stream_id, mode="subprocess",
-                    tools_count=i,
-                    startup_duration_ms=float(i),)
+                    event = McpServerStarted(
+                        mcp_server_id=stream_id,
+                        mode="subprocess",
+                        tools_count=i,
+                        startup_duration_ms=float(i),
+                    )
                     current_version = store.get_stream_version(stream_id)
                     store.append(stream_id, [event], expected_version=current_version)
             except Exception as e:  # noqa: BLE001
@@ -487,9 +580,12 @@ class TestEventStoreThreadSafety:
             for _ in range(10):
                 for attempt in range(100):  # Max retries
                     try:
-                        event = McpServerStarted(mcp_server_id="shared", mode="subprocess",
-                        tools_count=1,
-                        startup_duration_ms=1.0,)
+                        event = McpServerStarted(
+                            mcp_server_id="shared",
+                            mode="subprocess",
+                            tools_count=1,
+                            startup_duration_ms=1.0,
+                        )
                         version = store.get_stream_version("mcp_server:shared")
                         store.append("mcp_server:shared", [event], expected_version=version)
                         with lock:

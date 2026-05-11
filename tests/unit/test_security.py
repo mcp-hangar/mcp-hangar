@@ -670,8 +670,11 @@ class TestSecurityEventHandler:
         sink = InMemorySecuritySink()
         handler = SecurityEventHandler(sink=sink)
 
-        handler.log_rate_limit_exceeded(mcp_server_id="test", limit=100,
-        window_seconds=60,)
+        handler.log_rate_limit_exceeded(
+            mcp_server_id="test",
+            limit=100,
+            window_seconds=60,
+        )
 
         events = sink.query(event_type=SecurityEventType.RATE_LIMIT_EXCEEDED)
         assert len(events) == 1
@@ -869,9 +872,12 @@ class TestIntegrationSecurity:
         validator = InputValidator()
 
         # Simulate validating a tool invocation request
-        result = validator.validate_all(mcp_server_id="my_provider", tool_name="my_tool",
-        arguments={"param": "value"},
-        timeout=30.0,)
+        result = validator.validate_all(
+            mcp_server_id="my_provider",
+            tool_name="my_tool",
+            arguments={"param": "value"},
+            timeout=30.0,
+        )
 
         assert result.valid
         assert len(result.errors) == 0
@@ -881,9 +887,12 @@ class TestIntegrationSecurity:
         validator = InputValidator()
 
         # Simulate attack attempt
-        result = validator.validate_all(mcp_server_id="provider; rm -rf /", tool_name="../../../etc/passwd",
-        arguments={"cmd": "$(whoami)"},
-        timeout=30.0,)
+        result = validator.validate_all(
+            mcp_server_id="provider; rm -rf /",
+            tool_name="../../../etc/passwd",
+            arguments={"cmd": "$(whoami)"},
+            timeout=30.0,
+        )
 
         assert not result.valid
         assert len(result.errors) > 0

@@ -22,6 +22,7 @@ Starting is handled by the lifecycle module.
 
 import asyncio
 import os
+import warnings
 from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Any, cast, TYPE_CHECKING
@@ -38,8 +39,7 @@ from ..config import load_config, load_configuration
 from ..context import get_context, init_context
 from ..state import get_runtime, GROUPS
 
-from ...domain.value_objects.license import LicenseTier
-from .enterprise import EnterpriseComponents, get_auth_compat_exports, load_enterprise_modules, validate_license_key
+from .enterprise import EnterpriseComponents, get_auth_compat_exports, load_enterprise_modules
 
 from .cqrs import init_cqrs, init_auth_cqrs, init_saga, save_group_circuit_breakers
 from .discovery import _auto_add_volumes, _create_discovery_source, create_discovery_orchestrator
@@ -88,9 +88,6 @@ class ApplicationContext:
 
     auth_components: Any = None
     """Authentication and authorization components."""
-
-    license_tier: LicenseTier = LicenseTier.COMMUNITY
-    """License tier governing enterprise module availability."""
 
     config: dict[str, Any] = field(default_factory=dict)
     """Full configuration dictionary."""
@@ -252,21 +249,17 @@ def bootstrap(
     rate_limit_mw = RateLimitMiddleware(rate_limiter=cast(Any, runtime.rate_limiter))
     runtime.command_bus.add_middleware(rate_limit_mw)
 
-    # Validate license key and determine tier
-    raw_license_key = os.environ.get("HANGAR_LICENSE_KEY")
-    license_tier = LicenseTier.COMMUNITY
-    license_result = validate_license_key(raw_license_key)
-    license_tier = license_result.tier
-    if license_result.grace_period:
-        logger.warning("license_grace_period", tier=license_tier.value, org=license_result.org)
-    elif not get_auth_compat_exports().enterprise_auth_available:
-        logger.debug("license_validator_not_available", reason="enterprise_not_installed")
+    # Deprecation warning for legacy license key env var
+    if os.environ.get("HANGAR_LICENSE_KEY"):
+        warnings.warn(
+            "HANGAR_LICENSE_KEY is deprecated and has no effect. "
+            "All enterprise features are now available under the MIT license.",
+            DeprecationWarning,
+            stacklevel=1,
+        )
 
-    logger.info("license_tier", tier=license_tier.value)
-
-    # Load enterprise modules based on license tier
+    # Load enterprise modules unconditionally
     enterprise = load_enterprise_modules(
-        tier=license_tier,
         config=full_config,
         event_bus=runtime.event_bus,
         event_publisher=lambda event: runtime.event_bus.publish(event),
@@ -344,7 +337,6 @@ def bootstrap(
         background_workers=workers,
         discovery_orchestrator=discovery_orchestrator,
         auth_components=auth_components,
-        license_tier=license_tier,
         config=full_config,
         load_mcp_server_handler=load_handler,
         unload_mcp_server_handler=unload_handler,
@@ -396,7 +388,6 @@ __all__ = [
     "EnterpriseComponents",
     "bootstrap",
     "load_enterprise_modules",
-    "LicenseTier",
     "GC_WORKER_INTERVAL_SECONDS",
     "HEALTH_CHECK_INTERVAL_SECONDS",
     # Initialization functions (with and without underscore prefix)

@@ -6,7 +6,6 @@ from mcp_hangar.domain.value_objects.event_pattern import EventPattern
 
 
 class TestEventPatternConstruction:
-
     def test_exact_match(self):
         p = EventPattern("tools/call")
         assert p.raw == "tools/call"
@@ -60,7 +59,6 @@ class TestEventPatternConstruction:
 
 
 class TestEventPatternMatching:
-
     def test_exact_match_positive(self):
         assert EventPattern("tools/call").matches("tools/call") is True
 

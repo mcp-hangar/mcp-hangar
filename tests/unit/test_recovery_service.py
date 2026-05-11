@@ -61,13 +61,16 @@ class TestRecoveryServiceInMemory:
         audit_repo = SQLiteAuditRepository(database)
 
         # Save a configuration
-        config = McpServerConfigSnapshot(mcp_server_id="test-provider", mode="subprocess",
-        command=["python", "-m", "test_server"],
-        env={"TEST": "value"},
-        idle_ttl_s=300,
-        health_check_interval_s=60,
-        max_consecutive_failures=3,
-        description="Test provider",)
+        config = McpServerConfigSnapshot(
+            mcp_server_id="test-provider",
+            mode="subprocess",
+            command=["python", "-m", "test_server"],
+            env={"TEST": "value"},
+            idle_ttl_s=300,
+            health_check_interval_s=60,
+            max_consecutive_failures=3,
+            description="Test provider",
+        )
         await config_repo.save(config)
 
         service = RecoveryService(
@@ -100,12 +103,21 @@ class TestRecoveryServiceInMemory:
 
         # Save multiple configurations
         configs = [
-            McpServerConfigSnapshot(mcp_server_id="provider-1", mode="subprocess",
-            command=["cmd1"],),
-            McpServerConfigSnapshot(mcp_server_id="provider-2", mode="docker",
-            image="test-image:latest",),
-            McpServerConfigSnapshot(mcp_server_id="provider-3", mode="remote",
-            endpoint="http://localhost:8080",),
+            McpServerConfigSnapshot(
+                mcp_server_id="provider-1",
+                mode="subprocess",
+                command=["cmd1"],
+            ),
+            McpServerConfigSnapshot(
+                mcp_server_id="provider-2",
+                mode="docker",
+                image="test-image:latest",
+            ),
+            McpServerConfigSnapshot(
+                mcp_server_id="provider-3",
+                mode="remote",
+                endpoint="http://localhost:8080",
+            ),
         ]
 
         for config in configs:
@@ -136,14 +148,20 @@ class TestRecoveryServiceInMemory:
         audit_repo = SQLiteAuditRepository(database)
 
         # Save and then disable a configuration
-        config = McpServerConfigSnapshot(mcp_server_id="disabled-provider", mode="subprocess",
-        command=["cmd"],)
+        config = McpServerConfigSnapshot(
+            mcp_server_id="disabled-provider",
+            mode="subprocess",
+            command=["cmd"],
+        )
         await config_repo.save(config)
         await config_repo.delete("disabled-provider")  # Soft delete
 
         # Save an enabled one
-        enabled_config = McpServerConfigSnapshot(mcp_server_id="enabled-provider", mode="subprocess",
-        command=["cmd"],)
+        enabled_config = McpServerConfigSnapshot(
+            mcp_server_id="enabled-provider",
+            mode="subprocess",
+            command=["cmd"],
+        )
         await config_repo.save(enabled_config)
 
         service = RecoveryService(
@@ -171,8 +189,11 @@ class TestRecoveryServiceInMemory:
 
         # Save configurations
         for i in range(3):
-            config = McpServerConfigSnapshot(mcp_server_id=f"provider-{i}", mode="subprocess",
-            command=["cmd"],)
+            config = McpServerConfigSnapshot(
+                mcp_server_id=f"provider-{i}",
+                mode="subprocess",
+                command=["cmd"],
+            )
             await config_repo.save(config)
 
         service = RecoveryService(
@@ -207,8 +228,11 @@ class TestRecoveryServiceInMemory:
         config_repo = SQLiteMcpServerConfigRepository(database)
         audit_repo = SQLiteAuditRepository(database)
 
-        config = McpServerConfigSnapshot(mcp_server_id="specific-provider", mode="subprocess",
-        command=["cmd"],)
+        config = McpServerConfigSnapshot(
+            mcp_server_id="specific-provider",
+            mode="subprocess",
+            command=["cmd"],
+        )
         await config_repo.save(config)
 
         service = RecoveryService(
@@ -244,10 +268,13 @@ class TestRecoveryServiceInMemory:
         )
 
         # Create a provider
-        provider = McpServer(mcp_server_id="new-provider", mode="subprocess",
-        command=["python", "-m", "server"],
-        description="Test provider",
-        idle_ttl_s=300,)
+        provider = McpServer(
+            mcp_server_id="new-provider",
+            mode="subprocess",
+            command=["python", "-m", "server"],
+            description="Test provider",
+            idle_ttl_s=300,
+        )
 
         await service.save_mcp_server_config(provider)
 
@@ -270,8 +297,11 @@ class TestRecoveryServiceInMemory:
         audit_repo = SQLiteAuditRepository(database)
 
         # Save a configuration first
-        config = McpServerConfigSnapshot(mcp_server_id="to-delete", mode="subprocess",
-        command=["cmd"],)
+        config = McpServerConfigSnapshot(
+            mcp_server_id="to-delete",
+            mode="subprocess",
+            command=["cmd"],
+        )
         await config_repo.save(config)
 
         service = RecoveryService(

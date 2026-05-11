@@ -20,9 +20,12 @@ class TestEventBusWithEventStore:
         return EventBus(event_store=event_store)
 
     def test_publish_to_stream_persists_events(self, event_bus: EventBus, event_store: InMemoryEventStore):
-        event = McpServerStarted(mcp_server_id="math", mode="subprocess",
-        tools_count=3,
-        startup_duration_ms=50.0,)
+        event = McpServerStarted(
+            mcp_server_id="math",
+            mode="subprocess",
+            tools_count=3,
+            startup_duration_ms=50.0,
+        )
 
         new_version = event_bus.publish_to_stream(
             stream_id="mcp_server:math",
@@ -43,9 +46,12 @@ class TestEventBusWithEventStore:
 
         event_bus.subscribe(McpServerStarted, handler)
 
-        event = McpServerStarted(mcp_server_id="math", mode="subprocess",
-        tools_count=3,
-        startup_duration_ms=50.0,)
+        event = McpServerStarted(
+            mcp_server_id="math",
+            mode="subprocess",
+            tools_count=3,
+            startup_duration_ms=50.0,
+        )
 
         event_bus.publish_to_stream(
             stream_id="mcp_server:math",
@@ -57,9 +63,12 @@ class TestEventBusWithEventStore:
         assert received_events[0].mcp_server_id == "math"
 
     def test_publish_to_stream_with_concurrency_error(self, event_bus: EventBus, event_store: InMemoryEventStore):
-        event = McpServerStarted(mcp_server_id="math", mode="subprocess",
-        tools_count=3,
-        startup_duration_ms=50.0,)
+        event = McpServerStarted(
+            mcp_server_id="math",
+            mode="subprocess",
+            tools_count=3,
+            startup_duration_ms=50.0,
+        )
 
         # First append
         event_bus.publish_to_stream(
@@ -78,11 +87,17 @@ class TestEventBusWithEventStore:
 
     def test_publish_aggregate_events(self, event_bus: EventBus, event_store: InMemoryEventStore):
         events = [
-            McpServerStarted(mcp_server_id="math", mode="subprocess",
-            tools_count=3,
-            startup_duration_ms=50.0,),
-            McpServerStateChanged(mcp_server_id="math", old_state="COLD",
-            new_state="READY",),
+            McpServerStarted(
+                mcp_server_id="math",
+                mode="subprocess",
+                tools_count=3,
+                startup_duration_ms=50.0,
+            ),
+            McpServerStateChanged(
+                mcp_server_id="math",
+                old_state="COLD",
+                new_state="READY",
+            ),
         ]
 
         new_version = event_bus.publish_aggregate_events(
@@ -128,9 +143,12 @@ class TestEventBusWithoutEventStore:
 
         event_bus.subscribe(McpServerStarted, handler)
 
-        event = McpServerStarted(mcp_server_id="math", mode="subprocess",
-        tools_count=3,
-        startup_duration_ms=50.0,)
+        event = McpServerStarted(
+            mcp_server_id="math",
+            mode="subprocess",
+            tools_count=3,
+            startup_duration_ms=50.0,
+        )
 
         # publish() doesn't persist
         event_bus.publish(event)
@@ -140,9 +158,12 @@ class TestEventBusWithoutEventStore:
     def test_publish_to_stream_with_null_store(self):
         event_bus = EventBus()  # Uses NullEventStore
 
-        event = McpServerStarted(mcp_server_id="math", mode="subprocess",
-        tools_count=3,
-        startup_duration_ms=50.0,)
+        event = McpServerStarted(
+            mcp_server_id="math",
+            mode="subprocess",
+            tools_count=3,
+            startup_duration_ms=50.0,
+        )
 
         # Should work but not persist
         version = event_bus.publish_to_stream(

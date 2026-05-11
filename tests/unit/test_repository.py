@@ -367,11 +367,17 @@ def test_with_real_provider():
     """Test repository with real Provider instances."""
     repository = InMemoryMcpServerRepository()
 
-    provider1 = McpServer(mcp_server_id="math-provider", mode="subprocess",
-    command=["python", "-m", "math_provider"],)
+    provider1 = McpServer(
+        mcp_server_id="math-provider",
+        mode="subprocess",
+        command=["python", "-m", "math_provider"],
+    )
 
-    provider2 = McpServer(mcp_server_id="weather-provider", mode="subprocess",
-    command=["python", "-m", "weather_provider"],)
+    provider2 = McpServer(
+        mcp_server_id="weather-provider",
+        mode="subprocess",
+        command=["python", "-m", "weather_provider"],
+    )
 
     # Add providers
     repository.add("math-provider", provider1)

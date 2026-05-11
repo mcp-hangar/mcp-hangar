@@ -244,7 +244,7 @@ class IAuditExporter(Protocol):
 
     Implementations:
       - OTLPAuditExporter (infrastructure/observability/) -- MIT, exports via OTLP
-      - ComplianceExporter (enterprise/compliance/) -- BSL, exports CEF/LEEF/JSON-lines
+      - ComplianceExporter (compliance/) -- exports CEF/LEEF/JSON-lines
     """
 
     def export_tool_invocation(

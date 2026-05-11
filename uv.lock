@@ -954,7 +954,7 @@ wheels = [
 
 [[package]]
 name = "mcp-hangar"
-version = "1.2.0"
+version = "1.2.1"
 source = { editable = "." }
 dependencies = [
     { name = "aiosqlite" },
@@ -987,7 +987,7 @@ dev = [
     { name = "pytest-timeout" },
     { name = "ruff" },
 ]
-enterprise = [
+full = [
     { name = "fpdf2" },
 ]
 langfuse = [
@@ -1015,7 +1015,7 @@ requires-dist = [
     { name = "asyncpg", marker = "extra == 'postgres'", specifier = ">=0.29.0" },
     { name = "cryptography", specifier = ">=41.0.0" },
     { name = "docker", specifier = ">=7.1.0" },
-    { name = "fpdf2", marker = "extra == 'enterprise'", specifier = ">=2.8.0" },
+    { name = "fpdf2", marker = "extra == 'full'", specifier = ">=2.8.0" },
     { name = "httpx", specifier = ">=0.25.0" },
     { name = "hypothesis", marker = "extra == 'dev'", specifier = ">=6.90.0" },
     { name = "jcs", specifier = ">=0.2.1" },
@@ -1043,7 +1043,7 @@ requires-dist = [
     { name = "structlog", specifier = ">=24.0.0" },
     { name = "typer", specifier = ">=0.12.0" },
 ]
-provides-extras = ["dev", "langfuse", "opentelemetry", "postgres", "enterprise"]
+provides-extras = ["dev", "langfuse", "opentelemetry", "postgres", "full"]
 
 [package.metadata.requires-dev]
 dev = [

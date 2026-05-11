@@ -50,8 +50,8 @@ def init_event_store(runtime: "Runtime", config: dict[str, Any]) -> None:
         logger.info("event_store_initialized", driver="memory")
     elif driver == "sqlite":
         db_path = event_store_config.get("path", "data/events.db")
-        # SQLiteEventStore lives in enterprise tier (BSL 1.1).
-        # Fallback to in-memory when enterprise is not installed.
+        # SQLiteEventStore requires the persistence module.
+        # Fallback to in-memory when persistence module is unavailable.
         try:
             Path(db_path).parent.mkdir(parents=True, exist_ok=True)
             _result = create_enterprise_event_store(driver, event_store_config)
@@ -61,14 +61,14 @@ def init_event_store(runtime: "Runtime", config: dict[str, Any]) -> None:
             logger.info("event_store_initialized", driver="sqlite", path=db_path)
         except ImportError:
             logger.warning(
-                "event_store_sqlite_enterprise_unavailable",
+                "event_store_sqlite_unavailable",
                 fallback="memory",
-                hint="Install mcp-hangar-enterprise for SQLite event store.",
+                hint="SQLite event store could not be loaded.",
             )
             from ...infrastructure.persistence import InMemoryEventStore
 
             event_store = InMemoryEventStore()
-            logger.info("event_store_initialized", driver="memory", reason="enterprise_not_installed")
+            logger.info("event_store_initialized", driver="memory", reason="sqlite_unavailable")
             runtime.event_bus.set_event_store(event_store)
             return
         except OSError as e:

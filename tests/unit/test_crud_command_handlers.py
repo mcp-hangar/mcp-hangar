@@ -110,8 +110,11 @@ class TestProviderToConfigDict:
     """Tests for Provider.to_config_dict() round-trip serialization."""
 
     def test_subprocess_provider_config_dict(self):
-        provider = McpServer(mcp_server_id="p", mode="subprocess",
-        command=["python", "-m", "test"],)
+        provider = McpServer(
+            mcp_server_id="p",
+            mode="subprocess",
+            command=["python", "-m", "test"],
+        )
         cfg = provider.to_config_dict()
         assert cfg["mode"] == "subprocess"
         assert cfg["command"] == ["python", "-m", "test"]

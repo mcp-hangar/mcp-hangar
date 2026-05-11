@@ -31,9 +31,7 @@ Composio connects agents to tools. Smithery helps you find servers. Glama hosts 
    deployments, and compatibility. Stdio providers are supported but do not receive new security/governance investments.
 3. **Declare, then verify.** Servers declare what they need. Hangar verifies at runtime that they don't exceed those
    declarations. Deviation = alert + block.
-4. **Open core, open telemetry.** The core control plane is open source under MIT. Advanced governance, enforcement, and
-   compliance capabilities live under [BSL 1.1](enterprise/LICENSE.BSL) — source-available, free for evaluation and
-   development, commercially licensed for production use. All telemetry flows through OpenTelemetry into partner
+4. **Open core, open telemetry.** The entire project is open source under MIT. All telemetry flows through OpenTelemetry into partner
    backends such as OpenLIT, Langfuse, Grafana, or a standard OTEL Collector. No vendor lock-in on the observation path.
    OTEL is a strategic integration interface, not a product pivot.
 5. **Governance over metrics.** Metrics, traces, and telemetry exist to support policy, verification, audit, and response.
@@ -45,22 +43,8 @@ Composio connects agents to tools. Smithery helps you find servers. Glama hosts 
 
 ## Licensing
 
-MCP Hangar uses a **dual-license model**:
-
-- **Core** (`src/mcp_hangar/`) — [MIT License](LICENSE). Free to use,
-  modify, and distribute without restriction.
-- **Enterprise** (`enterprise/`) — [Business Source License 1.1](enterprise/LICENSE.BSL). Source-available: anyone can
-  read, audit, and run the code for evaluation, development, and testing. Production use requires a commercial license.
-  Each release automatically converts to MIT after the Change Date (3 years from release).
-
-This means:
-
-- The full source is always readable and auditable — no black boxes.
-- Core features are permanently free and open source.
-- Enterprise features are protected for 3 years per release, then become fully open (MIT).
-- You always have access to the code. You pay for the right to run enterprise features in production.
-
-See [LICENSE](LICENSE) and [enterprise/LICENSE.BSL](enterprise/LICENSE.BSL) for full terms.
+MCP Hangar is licensed under the [MIT License](LICENSE). The full source is always
+readable, auditable, and free to use, modify, and distribute without restriction.
 
 ---
 
@@ -149,8 +133,7 @@ foundational -- they must be open for trust and adoption.*
 
 **Goal:** Know what your MCP servers do -- not what they say they do.
 
-*Behavioral profiling features are developed under [BSL 1.1](enterprise/LICENSE.BSL) in the `enterprise/behavioral/`
-directory.*
+*Behavioral profiling features are developed under [MIT](LICENSE) in `src/mcp_hangar/`.*
 
 | Item                               | Description                                                                                                                                         | Priority | Status |
 |------------------------------------|-----------------------------------------------------------------------------------------------------------------------------------------------------|----------|--------|
@@ -164,8 +147,7 @@ directory.*
 
 **Goal:** Full chain-of-custody from user to agent to tool call to result.
 
-*Identity propagation and compliance export features are developed under [BSL 1.1](enterprise/LICENSE.BSL) in
-the `enterprise/identity/` and `enterprise/compliance/` directories.*
+*Identity propagation and compliance export features are developed under [MIT](LICENSE) in `src/mcp_hangar/`.*
 
 | Item                                    | Description                                                                                                                                                                     | Priority | Status |
 |-----------------------------------------|---------------------------------------------------------------------------------------------------------------------------------------------------------------------------------|----------|--------|
@@ -180,8 +162,7 @@ the `enterprise/identity/` and `enterprise/compliance/` directories.*
 
 **Goal:** Detect malicious or anomalous agent behavior patterns.
 
-*Semantic analysis features are developed under [BSL 1.1](enterprise/LICENSE.BSL) in the `enterprise/semantic/`
-directory.*
+*Semantic analysis features are developed under [MIT](LICENSE) in `src/mcp_hangar/`.*
 
 | Item                             | Description                                                                                                                                                                  | Priority | Status |
 |----------------------------------|------------------------------------------------------------------------------------------------------------------------------------------------------------------------------|----------|--------|
@@ -236,8 +217,7 @@ We welcome contributions to the **MIT-licensed core**, especially in:
 - Behavioral profiling improvements (core interfaces and contracts)
 - Documentation and guides
 
-Contributions to the `enterprise/` directory (BSL-licensed) require a [Contributor License Agreement](CLA.md) to
-maintain licensing flexibility. See [CONTRIBUTING.md](CONTRIBUTING.md) for guidelines.
+Contributions to the `enterprise/` directory are welcome. See [CONTRIBUTING.md](CONTRIBUTING.md) for guidelines.
 
 ## Links
 

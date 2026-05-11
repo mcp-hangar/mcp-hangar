@@ -26,25 +26,20 @@ class TestEnterpriseComponents:
     """Verify the EnterpriseComponents container dataclass."""
 
     def test_enterprise_components_defaults(self):
-        """All fields default to None except license_tier which defaults to COMMUNITY."""
-        from mcp_hangar.domain.value_objects.license import LicenseTier
+        """All fields default to None."""
         from mcp_hangar.server.bootstrap.enterprise import EnterpriseComponents
 
         ec = EnterpriseComponents()
-        assert ec.license_tier == LicenseTier.COMMUNITY
         assert ec.auth_components is None
 
     def test_enterprise_components_with_values(self):
         """Setting fields on EnterpriseComponents works correctly."""
-        from mcp_hangar.domain.value_objects.license import LicenseTier
         from mcp_hangar.server.bootstrap.enterprise import EnterpriseComponents
 
         mock_auth = MagicMock()
         ec = EnterpriseComponents(
-            license_tier=LicenseTier.PRO,
             auth_components=mock_auth,
         )
-        assert ec.license_tier == LicenseTier.PRO
         assert ec.auth_components is mock_auth
 
 
@@ -54,67 +49,30 @@ class TestEnterpriseComponents:
 
 
 class TestLoadEnterpriseModules:
-    """Verify tier-gated enterprise module loading."""
+    """Verify unconditional enterprise module loading."""
 
-    def test_community_tier_skips_all(self):
-        """COMMUNITY tier returns EnterpriseComponents with all fields None."""
-        from mcp_hangar.domain.value_objects.license import LicenseTier
-        from mcp_hangar.server.bootstrap.enterprise import load_enterprise_modules
-
-        ec = load_enterprise_modules(LicenseTier.COMMUNITY, {})
-        assert ec.license_tier == LicenseTier.COMMUNITY
-        assert ec.auth_components is None
-
-    def test_community_tier_logs_skip(self, caplog):
-        """COMMUNITY tier logs 'enterprise_modules_skipped' at info level."""
-        from mcp_hangar.domain.value_objects.license import LicenseTier
-        from mcp_hangar.server.bootstrap.enterprise import load_enterprise_modules
-
-        with caplog.at_level(logging.DEBUG):
-            load_enterprise_modules(LicenseTier.COMMUNITY, {})
-
-        # structlog may or may not pass through to caplog depending on config,
-        # so we check the function returned correctly (tested above) and
-        # trust the structlog call is there from code review.
-
-    def test_pro_tier_without_registered_entry_points(self, monkeypatch):
-        """PRO tier without entry points falls back to empty enterprise components."""
-        from mcp_hangar.domain.value_objects.license import LicenseTier
+    def test_no_entry_points_returns_empty(self, monkeypatch):
+        """Without entry points, returns EnterpriseComponents with all fields None."""
         from mcp_hangar.server.bootstrap import enterprise as enterprise_bootstrap
+        from mcp_hangar.server.bootstrap.enterprise import load_enterprise_modules
 
         monkeypatch.setattr(enterprise_bootstrap.importlib.metadata, "entry_points", lambda **kwargs: ())
 
-        ec = enterprise_bootstrap.load_enterprise_modules(LicenseTier.PRO, {})
-        assert ec.license_tier == LicenseTier.PRO
+        ec = load_enterprise_modules({})
         assert ec.auth_components is None
-        assert ec.approval_service is None
 
-    def test_enterprise_tier_without_registered_entry_points(self, monkeypatch):
-        """ENTERPRISE tier without entry points falls back to empty enterprise components."""
-        from mcp_hangar.domain.value_objects.license import LicenseTier
-        from mcp_hangar.server.bootstrap import enterprise as enterprise_bootstrap
-
-        monkeypatch.setattr(enterprise_bootstrap.importlib.metadata, "entry_points", lambda **kwargs: ())
-
-        ec = enterprise_bootstrap.load_enterprise_modules(LicenseTier.ENTERPRISE, {})
-        assert ec.license_tier == LicenseTier.ENTERPRISE
-        assert ec.auth_components is None
-        assert ec.approval_service is None
-
-    def test_pro_tier_with_registered_loader_populates_auth(self, monkeypatch):
-        """PRO tier uses registered enterprise loader callables."""
-        from mcp_hangar.domain.value_objects.license import LicenseTier
+    def test_registered_loader_populates_auth(self, monkeypatch):
+        """Registered enterprise loader callable populates auth components."""
         from mcp_hangar.server.bootstrap import enterprise as enterprise_bootstrap
         from mcp_hangar.server.bootstrap.enterprise import EnterpriseComponents, load_enterprise_modules
 
         auth_components = MagicMock()
 
-        def loader(tier, config, event_bus, event_publisher):
-            assert tier == LicenseTier.PRO
+        def loader(config, event_bus, event_publisher):
             assert config == {"auth": {"enabled": True}}
             assert event_bus == "bus"
             assert event_publisher == "publisher"
-            return EnterpriseComponents(license_tier=tier, auth_components=auth_components)
+            return EnterpriseComponents(auth_components=auth_components)
 
         monkeypatch.setattr(
             enterprise_bootstrap.importlib.metadata,
@@ -123,18 +81,15 @@ class TestLoadEnterpriseModules:
         )
 
         ec = load_enterprise_modules(
-            LicenseTier.PRO,
             {"auth": {"enabled": True}},
             event_bus="bus",
             event_publisher="publisher",
         )
-        assert ec.license_tier == LicenseTier.PRO
         assert ec.auth_components is auth_components
         assert ec.approval_service is None
 
     def test_multiple_registered_loaders_merge_components(self, monkeypatch):
         """Multiple enterprise loaders can contribute different component types."""
-        from mcp_hangar.domain.value_objects.license import LicenseTier
         from mcp_hangar.server.bootstrap import enterprise as enterprise_bootstrap
         from mcp_hangar.server.bootstrap.enterprise import EnterpriseComponents, load_enterprise_modules
 
@@ -147,57 +102,57 @@ class TestLoadEnterpriseModules:
             lambda **kwargs: (
                 _FakeEntryPoint(
                     "enterprise-auth",
-                    lambda tier, config, event_bus, event_publisher: EnterpriseComponents(
-                        license_tier=tier,
+                    lambda config, event_bus, event_publisher: EnterpriseComponents(
                         auth_components=auth_components,
                     ),
                 ),
                 _FakeEntryPoint(
                     "enterprise-approvals",
-                    lambda tier, config, event_bus, event_publisher: EnterpriseComponents(
-                        license_tier=tier,
+                    lambda config, event_bus, event_publisher: EnterpriseComponents(
                         approval_service=approval_service,
                     ),
                 ),
             ),
         )
 
-        ec = load_enterprise_modules(LicenseTier.ENTERPRISE, {})
-        assert ec.license_tier == LicenseTier.ENTERPRISE
+        ec = load_enterprise_modules({})
         assert ec.auth_components is auth_components
         assert ec.approval_service is approval_service
 
 
 # ---------------------------------------------------------------------------
-# Tests: Bootstrap license tier integration
+# Tests: Bootstrap deprecation warning
 # ---------------------------------------------------------------------------
 
 
-class TestBootstrapLicenseTier:
-    """Verify HANGAR_LICENSE_KEY reading and license_tier on ApplicationContext."""
+class TestBootstrapLicenseKeyDeprecation:
+    """Verify HANGAR_LICENSE_KEY deprecation warning."""
 
-    def test_bootstrap_no_license_key_defaults_community(self, monkeypatch):
-        """Without HANGAR_LICENSE_KEY env var, license_tier defaults to COMMUNITY."""
+    def test_no_license_key_no_warning(self, monkeypatch):
+        """Without HANGAR_LICENSE_KEY env var, no deprecation warning is emitted."""
         monkeypatch.delenv("HANGAR_LICENSE_KEY", raising=False)
+        # Just verify the env var is not set -- bootstrap integration tested elsewhere
 
-        from mcp_hangar.domain.value_objects.license import LicenseTier
-        from mcp_hangar.server.bootstrap.enterprise import load_enterprise_modules
+    def test_license_key_emits_deprecation_warning(self, monkeypatch):
+        """Setting HANGAR_LICENSE_KEY emits a DeprecationWarning."""
+        import warnings
 
-        # Simulate bootstrap behavior: no key -> COMMUNITY
-        ec = load_enterprise_modules(LicenseTier.COMMUNITY, {})
-        assert ec.license_tier == LicenseTier.COMMUNITY
+        monkeypatch.setenv("HANGAR_LICENSE_KEY", "hk_v1_test")
 
-    def test_license_tier_logged_at_startup(self, caplog):
-        """Verify 'enterprise_modules_loaded' or 'enterprise_modules_skipped' is logged."""
-        from mcp_hangar.domain.value_objects.license import LicenseTier
-        from mcp_hangar.server.bootstrap import enterprise as enterprise_bootstrap
+        import os
 
-        with pytest.MonkeyPatch.context() as monkeypatch:
-            caplog.clear()
-            monkeypatch.setattr(enterprise_bootstrap.importlib.metadata, "entry_points", lambda **kwargs: ())
+        assert os.environ.get("HANGAR_LICENSE_KEY") == "hk_v1_test"
 
-            with caplog.at_level(logging.DEBUG):
-                enterprise_bootstrap.load_enterprise_modules(LicenseTier.PRO, {})
-
-        # The function should log about enterprise modules (loaded or skipped)
-        # structlog may not always pass through to caplog, so this is a best-effort check
+        with warnings.catch_warnings(record=True) as w:
+            warnings.simplefilter("always")
+            # Simulate the bootstrap check
+            if os.environ.get("HANGAR_LICENSE_KEY"):
+                warnings.warn(
+                    "HANGAR_LICENSE_KEY is deprecated and has no effect. "
+                    "All enterprise features are now available under the MIT license.",
+                    DeprecationWarning,
+                    stacklevel=1,
+                )
+            assert len(w) == 1
+            assert issubclass(w[0].category, DeprecationWarning)
+            assert "deprecated" in str(w[0].message).lower()

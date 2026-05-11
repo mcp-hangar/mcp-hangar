@@ -78,7 +78,7 @@ def init_auth_cqrs(runtime: "Runtime", auth_components: Any) -> None:
         return
 
     if not register_auth_cqrs(runtime, auth_components):
-        logger.info("auth_cqrs_skipped", reason="enterprise_not_installed")
+        logger.info("auth_cqrs_skipped", reason="auth_module_unavailable")
         return
     logger.info("auth_cqrs_handlers_registered")
 

@@ -40,7 +40,7 @@ class BenchmarkResult:
     def __str__(self) -> str:
         return f"""
 {self.name}
-{'=' * len(self.name)}
+{"=" * len(self.name)}
 Iterations:  {self.iterations}
 Total time:  {self.total_time_s:.2f}s
 Throughput:  {self.throughput_rps:.2f} req/s
@@ -124,9 +124,9 @@ def benchmark_cold_start(iterations: int = 10, config_path: str = "../../config.
         latencies.append(elapsed_ms)
 
         if result.returncode != 0:
-            print(f"  [{i+1}/{iterations}] FAILED: {result.stderr[:100]}")
+            print(f"  [{i + 1}/{iterations}] FAILED: {result.stderr[:100]}")
         else:
-            print(f"  [{i+1}/{iterations}] {elapsed_ms:.2f}ms")
+            print(f"  [{i + 1}/{iterations}] {elapsed_ms:.2f}ms")
 
     total_time = time.perf_counter() - start_total
     return calculate_stats("Cold Start", latencies, total_time)
@@ -226,7 +226,7 @@ def benchmark_tool_invocation(
             if result:
                 latencies.append(result)
             if (i + 1) % 20 == 0:
-                print(f"  Progress: {i+1}/{iterations}")
+                print(f"  Progress: {i + 1}/{iterations}")
 
     total_time = time.perf_counter() - start_total
 
@@ -272,13 +272,13 @@ def benchmark_batch_invocation(
                 elapsed_ms = (time.perf_counter() - start) * 1000
                 if response.status_code == 200:
                     latencies.append(elapsed_ms)
-                    print(f"  [{i+1}/{iterations}] {elapsed_ms:.2f}ms ({batch_size} calls)")
+                    print(f"  [{i + 1}/{iterations}] {elapsed_ms:.2f}ms ({batch_size} calls)")
                 else:
                     errors += 1
-                    print(f"  [{i+1}/{iterations}] FAILED: {response.status_code}")
+                    print(f"  [{i + 1}/{iterations}] FAILED: {response.status_code}")
         except Exception as e:
             errors += 1
-            print(f"  [{i+1}/{iterations}] ERROR: {e}")
+            print(f"  [{i + 1}/{iterations}] ERROR: {e}")
 
     total_time = sum(latencies) / 1000 if latencies else 0
 

@@ -360,7 +360,7 @@ class TestTrueParallelism:
         elapsed = time.monotonic() - start
         # Should be close to 50ms (1 wave), not 500ms (10 sequential) or
         # 100ms+ (chunked at 5). Allow generous headroom for CI.
-        assert elapsed < 0.3, f"Expected ~50ms but took {elapsed*1000:.0f}ms (chunking suspected)"
+        assert elapsed < 0.3, f"Expected ~50ms but took {elapsed * 1000:.0f}ms (chunking suspected)"
 
     def test_semaphore_allows_immediate_start_on_slot_free(self):
         """When a slot frees up mid-wave, queued calls start immediately.
@@ -402,8 +402,7 @@ class TestTrueParallelism:
         total_elapsed = max(timestamps.values()) - min(timestamps.values())
         # With semaphore: total ~ 100ms.  With chunking: total ~ 125ms.
         assert total_elapsed < 0.15, (
-            f"Total elapsed {total_elapsed*1000:.0f}ms suggests chunking, "
-            f"expected ~100ms with semaphore backpressure"
+            f"Total elapsed {total_elapsed * 1000:.0f}ms suggests chunking, expected ~100ms with semaphore backpressure"
         )
 
 
@@ -709,4 +708,4 @@ class TestThreadSafety:
 
         assert len(results) == 10
         # All should run in parallel (~20ms), not serially (~200ms)
-        assert elapsed < 0.15, f"Expected ~20ms, got {elapsed*1000:.0f}ms"
+        assert elapsed < 0.15, f"Expected ~20ms, got {elapsed * 1000:.0f}ms"

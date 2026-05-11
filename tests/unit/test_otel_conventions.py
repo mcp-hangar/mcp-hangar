@@ -45,7 +45,6 @@ class TestConventionNamespacing:
         for attr in _public_str_attrs(Health):
             assert attr.startswith("mcp."), f"{attr} should start with mcp."
 
-
     def test_caller_attributes_prefixed(self) -> None:
         for attr in _public_str_attrs(Caller):
             assert attr.startswith("mcp."), f"{attr} should start with mcp."
@@ -251,9 +250,7 @@ class TestTracingUsesConventionConstants:
 
         src = pathlib.Path("src/mcp_hangar/observability/tracing.py").read_text()
         # raw string literal should not appear -- the constant Provider.ID should be used instead
-        assert '"mcp.server.id"' not in src, (
-            "tracing.py must use Provider.ID constant, not raw string 'mcp.server.id'"
-        )
+        assert '"mcp.server.id"' not in src, "tracing.py must use Provider.ID constant, not raw string 'mcp.server.id'"
 
     def test_no_raw_mcp_tool_name_string_in_tracing(self) -> None:
         import pathlib

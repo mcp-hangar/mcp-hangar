@@ -49,7 +49,6 @@ def handler(event_bus):
 
 
 class TestDetectionFreePassesEnterpriseCatches:
-
     def test_free_no_handler_wired_rule_match_has_no_enforcement(self):
         unregistered_bus = MagicMock()
         unregistered_bus.published = []
@@ -123,9 +122,12 @@ class TestDetectionFreePassesEnterpriseCatches:
     def test_enterprise_non_detection_event_is_ignored(self, handler, event_bus):
         from mcp_hangar.domain.events import McpServerStarted
 
-        other_event = McpServerStarted(mcp_server_id="math", mode="subprocess",
-        tools_count=3,
-        startup_duration_ms=42.0,)
+        other_event = McpServerStarted(
+            mcp_server_id="math",
+            mode="subprocess",
+            tools_count=3,
+            startup_duration_ms=42.0,
+        )
         handler.handle(other_event)
 
         assert len(event_bus.published) == 0

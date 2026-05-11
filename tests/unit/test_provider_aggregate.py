@@ -16,8 +16,11 @@ class TestProviderInitialization:
 
     def test_create_subprocess_provider(self):
         """Test creating a subprocess provider."""
-        provider = McpServer(mcp_server_id="test-provider", mode="subprocess",
-        command=["python", "-m", "test"],)
+        provider = McpServer(
+            mcp_server_id="test-provider",
+            mode="subprocess",
+            command=["python", "-m", "test"],
+        )
 
         assert provider.mcp_server_id == "test-provider"
         assert provider.mode == ProviderMode.SUBPROCESS
@@ -42,19 +45,25 @@ class TestProviderInitialization:
 
     def test_provider_with_env_vars(self):
         """Test provider with environment variables."""
-        provider = McpServer(mcp_server_id="test", mode="subprocess",
-        command=["test"],
-        env={"KEY": "value"},)
+        provider = McpServer(
+            mcp_server_id="test",
+            mode="subprocess",
+            command=["test"],
+            env={"KEY": "value"},
+        )
 
         assert provider._env == {"KEY": "value"}
 
     def test_provider_with_custom_config(self):
         """Test provider with custom configuration."""
-        provider = McpServer(mcp_server_id="test", mode="subprocess",
-        command=["test"],
-        idle_ttl_s=600,
-        health_check_interval_s=120,
-        max_consecutive_failures=5,)
+        provider = McpServer(
+            mcp_server_id="test",
+            mode="subprocess",
+            command=["test"],
+            idle_ttl_s=600,
+            health_check_interval_s=120,
+            max_consecutive_failures=5,
+        )
 
         assert provider._idle_ttl.seconds == 600
         assert provider._health_check_interval.seconds == 120
@@ -217,8 +226,11 @@ class TestProviderStatusDict:
 
     def test_to_status_dict(self):
         """Test status dictionary generation."""
-        provider = McpServer(mcp_server_id="test-provider", mode="subprocess",
-        command=["python", "-m", "test"],)
+        provider = McpServer(
+            mcp_server_id="test-provider",
+            mode="subprocess",
+            command=["python", "-m", "test"],
+        )
 
         status = provider.to_status_dict()
 
@@ -583,9 +595,12 @@ class TestProviderPredefinedTools:
                 "inputSchema": {"type": "object"},
             },
         ]
-        provider = McpServer(mcp_server_id="test", mode="subprocess",
-        command=["test"],
-        tools=tools,)
+        provider = McpServer(
+            mcp_server_id="test",
+            mode="subprocess",
+            command=["test"],
+            tools=tools,
+        )
 
         assert provider.state == ProviderState.COLD
         assert provider.has_tools is True
@@ -596,8 +611,11 @@ class TestProviderPredefinedTools:
 
     def test_create_provider_without_predefined_tools(self):
         """Test creating a provider without pre-defined tools."""
-        provider = McpServer(mcp_server_id="test", mode="subprocess",
-        command=["test"],)
+        provider = McpServer(
+            mcp_server_id="test",
+            mode="subprocess",
+            command=["test"],
+        )
 
         assert provider.state == ProviderState.COLD
         assert provider.has_tools is False
@@ -620,9 +638,12 @@ class TestProviderPredefinedTools:
                 },
             },
         ]
-        provider = McpServer(mcp_server_id="test", mode="subprocess",
-        command=["test"],
-        tools=tools,)
+        provider = McpServer(
+            mcp_server_id="test",
+            mode="subprocess",
+            command=["test"],
+            tools=tools,
+        )
 
         tool = provider.tools.get("calculate")
         assert tool is not None
@@ -634,9 +655,12 @@ class TestProviderPredefinedTools:
 
     def test_predefined_tools_with_empty_list(self):
         """Test provider with empty tools list."""
-        provider = McpServer(mcp_server_id="test", mode="subprocess",
-        command=["test"],
-        tools=[],)
+        provider = McpServer(
+            mcp_server_id="test",
+            mode="subprocess",
+            command=["test"],
+            tools=[],
+        )
 
         assert provider.has_tools is False
         assert provider.tools_predefined is False  # Empty list = no predefined tools
@@ -648,8 +672,11 @@ class TestInvokeToolRefresh:
 
     def _make_ready_provider(self):
         """Create a provider in READY state with a mock client."""
-        provider = McpServer(mcp_server_id="test", mode="subprocess",
-        command=["python", "-m", "test"],)
+        provider = McpServer(
+            mcp_server_id="test",
+            mode="subprocess",
+            command=["python", "-m", "test"],
+        )
         mock_client = MagicMock()
         mock_client.is_alive.return_value = True
 

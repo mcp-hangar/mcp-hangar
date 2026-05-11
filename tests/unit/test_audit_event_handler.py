@@ -21,10 +21,13 @@ class TestOTLPAuditEventHandler:
         mock_exporter = MagicMock()
         handler = OTLPAuditEventHandler(audit_exporter=mock_exporter)
 
-        event = ToolInvocationCompleted(mcp_server_id="math", tool_name="add",
-        correlation_id="corr-1",
-        duration_ms=10.5,
-        result_size_bytes=256,)
+        event = ToolInvocationCompleted(
+            mcp_server_id="math",
+            tool_name="add",
+            correlation_id="corr-1",
+            duration_ms=10.5,
+            result_size_bytes=256,
+        )
         handler.handle(event)
 
         mock_exporter.export_tool_invocation.assert_called_once()
@@ -42,11 +45,14 @@ class TestOTLPAuditEventHandler:
         mock_exporter = MagicMock()
         handler = OTLPAuditEventHandler(audit_exporter=mock_exporter)
 
-        event = ToolInvocationFailed(mcp_server_id="math", tool_name="add",
-        correlation_id="corr-2",
-        duration_ms=50.0,
-        error_message="boom",
-        error_type="ToolInvocationError",)
+        event = ToolInvocationFailed(
+            mcp_server_id="math",
+            tool_name="add",
+            correlation_id="corr-2",
+            duration_ms=50.0,
+            error_message="boom",
+            error_type="ToolInvocationError",
+        )
         handler.handle(event)
 
         mock_exporter.export_tool_invocation.assert_called_once()
@@ -62,12 +68,18 @@ class TestOTLPAuditEventHandler:
         mock_exporter = MagicMock()
         handler = OTLPAuditEventHandler(audit_exporter=mock_exporter)
 
-        event = McpServerStateChanged(mcp_server_id="math", old_state="READY",
-        new_state="DEGRADED",)
+        event = McpServerStateChanged(
+            mcp_server_id="math",
+            old_state="READY",
+            new_state="DEGRADED",
+        )
         handler.handle(event)
 
-        mock_exporter.export_mcp_server_state_change.assert_called_once_with(mcp_server_id="math", from_state="READY",
-        to_state="DEGRADED",)
+        mock_exporter.export_mcp_server_state_change.assert_called_once_with(
+            mcp_server_id="math",
+            from_state="READY",
+            to_state="DEGRADED",
+        )
 
     def test_handler_uses_null_exporter_when_none_provided(self) -> None:
         """Handler must work with NullAuditExporter (no crash, no output)."""
@@ -76,10 +88,13 @@ class TestOTLPAuditEventHandler:
         )
 
         handler = OTLPAuditEventHandler(audit_exporter=NullAuditExporter())
-        event = ToolInvocationCompleted(mcp_server_id="p", tool_name="t",
-        correlation_id="corr-3",
-        duration_ms=1.0,
-        result_size_bytes=0,)
+        event = ToolInvocationCompleted(
+            mcp_server_id="p",
+            tool_name="t",
+            correlation_id="corr-3",
+            duration_ms=1.0,
+            result_size_bytes=0,
+        )
         handler.handle(event)  # must not raise
 
     def test_cost_fields_propagated_when_attributor_configured(self) -> None:

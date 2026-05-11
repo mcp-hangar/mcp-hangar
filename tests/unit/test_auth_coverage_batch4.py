@@ -29,7 +29,7 @@ class TestPostgresApiKeyStore:
     """Tests for PostgresApiKeyStore with mock psycopg2 connection factory."""
 
     def _make_store(self, event_publisher=None, table_prefix=""):
-        from enterprise.auth.infrastructure.postgres_store import PostgresApiKeyStore
+        from mcp_hangar.auth.infrastructure.postgres_store import PostgresApiKeyStore
 
         mock_conn = MagicMock()
         mock_cursor = MagicMock()
@@ -50,13 +50,13 @@ class TestPostgresApiKeyStore:
         return store, mock_conn, mock_cursor
 
     def test_init_default_table_name(self):
-        from enterprise.auth.infrastructure.postgres_store import PostgresApiKeyStore
+        from mcp_hangar.auth.infrastructure.postgres_store import PostgresApiKeyStore
 
         store = PostgresApiKeyStore(connection_factory=lambda: None)
         assert store._table == "api_keys"
 
     def test_init_with_prefix(self):
-        from enterprise.auth.infrastructure.postgres_store import PostgresApiKeyStore
+        from mcp_hangar.auth.infrastructure.postgres_store import PostgresApiKeyStore
 
         store = PostgresApiKeyStore(connection_factory=lambda: None, table_prefix="auth_")
         assert store._table == "auth_api_keys"
@@ -86,8 +86,16 @@ class TestPostgresApiKeyStore:
         # Row: principal_id, tenant_id, groups, name, key_id, expires_at,
         # revoked, metadata, rotated_to_key_id, grace_until
         mock_cursor.fetchone.return_value = (
-            "svc-1", "t1", "[]", "mykey", "kid1",
-            None, True, {}, None, None,
+            "svc-1",
+            "t1",
+            "[]",
+            "mykey",
+            "kid1",
+            None,
+            True,
+            {},
+            None,
+            None,
         )
         with pytest.raises(RevokedCredentialsError):
             store.get_principal_for_key("abc123hash")
@@ -97,8 +105,16 @@ class TestPostgresApiKeyStore:
 
         store, mock_conn, mock_cursor = self._make_store()
         mock_cursor.fetchone.return_value = (
-            "svc-1", "t1", "[]", "mykey", "kid1",
-            None, False, {}, "new_kid", None,
+            "svc-1",
+            "t1",
+            "[]",
+            "mykey",
+            "kid1",
+            None,
+            False,
+            {},
+            "new_kid",
+            None,
         )
         with pytest.raises(ExpiredCredentialsError, match="rotated"):
             store.get_principal_for_key("abc123hash")
@@ -109,8 +125,16 @@ class TestPostgresApiKeyStore:
         store, mock_conn, mock_cursor = self._make_store()
         past_grace = datetime.now(UTC) - timedelta(hours=1)
         mock_cursor.fetchone.return_value = (
-            "svc-1", "t1", "[]", "mykey", "kid1",
-            None, False, {}, "new_kid", past_grace,
+            "svc-1",
+            "t1",
+            "[]",
+            "mykey",
+            "kid1",
+            None,
+            False,
+            {},
+            "new_kid",
+            past_grace,
         )
         with pytest.raises(ExpiredCredentialsError, match="rotated"):
             store.get_principal_for_key("abc123hash")
@@ -119,8 +143,16 @@ class TestPostgresApiKeyStore:
         store, mock_conn, mock_cursor = self._make_store()
         future_grace = datetime.now(UTC) + timedelta(hours=24)
         mock_cursor.fetchone.return_value = (
-            "svc-1", "t1", json.dumps(["grp1"]), "mykey", "kid1",
-            None, False, {"extra": "val"}, "new_kid", future_grace,
+            "svc-1",
+            "t1",
+            json.dumps(["grp1"]),
+            "mykey",
+            "kid1",
+            None,
+            False,
+            {"extra": "val"},
+            "new_kid",
+            future_grace,
         )
         result = store.get_principal_for_key("abc123hash")
         assert result is not None
@@ -132,8 +164,16 @@ class TestPostgresApiKeyStore:
         store, mock_conn, mock_cursor = self._make_store()
         past_expiry = datetime.now(UTC) - timedelta(hours=1)
         mock_cursor.fetchone.return_value = (
-            "svc-1", "t1", "[]", "mykey", "kid1",
-            past_expiry, False, {}, None, None,
+            "svc-1",
+            "t1",
+            "[]",
+            "mykey",
+            "kid1",
+            past_expiry,
+            False,
+            {},
+            None,
+            None,
         )
         with pytest.raises(ExpiredCredentialsError, match="expired"):
             store.get_principal_for_key("abc123hash")
@@ -142,8 +182,16 @@ class TestPostgresApiKeyStore:
         store, mock_conn, mock_cursor = self._make_store()
         future_expiry = datetime.now(UTC) + timedelta(days=30)
         mock_cursor.fetchone.return_value = (
-            "svc-1", "t1", json.dumps(["grp1", "grp2"]), "mykey", "kid1",
-            future_expiry, False, {"foo": "bar"}, None, None,
+            "svc-1",
+            "t1",
+            json.dumps(["grp1", "grp2"]),
+            "mykey",
+            "kid1",
+            future_expiry,
+            False,
+            {"foo": "bar"},
+            None,
+            None,
         )
         result = store.get_principal_for_key("abc123hash")
         assert result is not None
@@ -158,8 +206,16 @@ class TestPostgresApiKeyStore:
         """Groups stored as a native Python list (not JSON string)."""
         store, mock_conn, mock_cursor = self._make_store()
         mock_cursor.fetchone.return_value = (
-            "svc-1", None, ["g1", "g2"], "mykey", "kid1",
-            None, False, {}, None, None,
+            "svc-1",
+            None,
+            ["g1", "g2"],
+            "mykey",
+            "kid1",
+            None,
+            False,
+            {},
+            None,
+            None,
         )
         result = store.get_principal_for_key("h1")
         assert "g1" in result.groups
@@ -169,8 +225,16 @@ class TestPostgresApiKeyStore:
         """If updating last_used_at fails, auth should still succeed."""
         store, mock_conn, mock_cursor = self._make_store()
         mock_cursor.fetchone.return_value = (
-            "svc-1", None, "[]", "mykey", "kid1",
-            None, False, {}, None, None,
+            "svc-1",
+            None,
+            "[]",
+            "mykey",
+            "kid1",
+            None,
+            False,
+            {},
+            None,
+            None,
         )
 
         call_count = [0]
@@ -190,14 +254,14 @@ class TestPostgresApiKeyStore:
         store, mock_conn, mock_cursor = self._make_store()
         mock_cursor.fetchone.return_value = (0,)  # count_keys = 0
 
-        with patch("enterprise.auth.infrastructure.api_key_authenticator.ApiKeyAuthenticator") as mock_auth_cls:
+        with patch("mcp_hangar.auth.infrastructure.api_key_authenticator.ApiKeyAuthenticator") as mock_auth_cls:
             # Mock the class-level methods
             mock_auth_cls.generate_key.return_value = "mcp_raw_key_123"
             mock_auth_cls._hash_key.return_value = "hash123"
 
             # Need to patch import inside method
             with patch(
-                "enterprise.auth.infrastructure.postgres_store.secrets.token_urlsafe",
+                "mcp_hangar.auth.infrastructure.postgres_store.secrets.token_urlsafe",
                 return_value="keyid_abc",
             ):
                 raw_key = store.create_key(
@@ -224,15 +288,16 @@ class TestPostgresApiKeyStore:
         store, mock_conn, mock_cursor = self._make_store(event_publisher=publisher)
         mock_cursor.fetchone.return_value = (0,)
 
-        with patch("enterprise.auth.infrastructure.api_key_authenticator.ApiKeyAuthenticator") as mock_auth:
+        with patch("mcp_hangar.auth.infrastructure.api_key_authenticator.ApiKeyAuthenticator") as mock_auth:
             mock_auth.generate_key.return_value = "mcp_raw"
             mock_auth._hash_key.return_value = "h"
-            with patch("enterprise.auth.infrastructure.postgres_store.secrets.token_urlsafe", return_value="kid"):
+            with patch("mcp_hangar.auth.infrastructure.postgres_store.secrets.token_urlsafe", return_value="kid"):
                 store.create_key(principal_id="p1", name="k1", created_by="admin")
 
         publisher.assert_called_once()
         event = publisher.call_args[0][0]
         from mcp_hangar.domain.events import ApiKeyCreated
+
         assert isinstance(event, ApiKeyCreated)
         assert event.principal_id == "p1"
 
@@ -241,10 +306,10 @@ class TestPostgresApiKeyStore:
         store, mock_conn, mock_cursor = self._make_store(event_publisher=None)
         mock_cursor.fetchone.return_value = (0,)
 
-        with patch("enterprise.auth.infrastructure.api_key_authenticator.ApiKeyAuthenticator") as mock_auth:
+        with patch("mcp_hangar.auth.infrastructure.api_key_authenticator.ApiKeyAuthenticator") as mock_auth:
             mock_auth.generate_key.return_value = "mcp_raw"
             mock_auth._hash_key.return_value = "h"
-            with patch("enterprise.auth.infrastructure.postgres_store.secrets.token_urlsafe", return_value="kid"):
+            with patch("mcp_hangar.auth.infrastructure.postgres_store.secrets.token_urlsafe", return_value="kid"):
                 raw_key = store.create_key(principal_id="p1", name="k1")
         assert raw_key == "mcp_raw"
 
@@ -272,6 +337,7 @@ class TestPostgresApiKeyStore:
         store.revoke_key("kid1", revoked_by="admin", reason="test")
         publisher.assert_called_once()
         from mcp_hangar.domain.events import ApiKeyRevoked
+
         event = publisher.call_args[0][0]
         assert isinstance(event, ApiKeyRevoked)
         assert event.revoked_by == "admin"
@@ -315,14 +381,21 @@ class TestPostgresApiKeyStore:
     def test_rotate_key_success(self):
         store, mock_conn, mock_cursor = self._make_store()
         mock_cursor.fetchone.return_value = (
-            "oldhash", "p1", "mykey", "t1", "[]", None,
-            False, None, None,  # not revoked, not rotated
+            "oldhash",
+            "p1",
+            "mykey",
+            "t1",
+            "[]",
+            None,
+            False,
+            None,
+            None,  # not revoked, not rotated
         )
 
-        with patch("enterprise.auth.infrastructure.api_key_authenticator.ApiKeyAuthenticator") as mock_auth:
+        with patch("mcp_hangar.auth.infrastructure.api_key_authenticator.ApiKeyAuthenticator") as mock_auth:
             mock_auth.generate_key.return_value = "mcp_new_key"
             mock_auth._hash_key.return_value = "newhash"
-            with patch("enterprise.auth.infrastructure.postgres_store.secrets.token_urlsafe", return_value="newkid"):
+            with patch("mcp_hangar.auth.infrastructure.postgres_store.secrets.token_urlsafe", return_value="newkid"):
                 raw_key = store.rotate_key("oldkid", grace_period_seconds=3600, rotated_by="admin")
 
         assert raw_key == "mcp_new_key"
@@ -338,8 +411,15 @@ class TestPostgresApiKeyStore:
     def test_rotate_key_revoked_raises(self):
         store, mock_conn, mock_cursor = self._make_store()
         mock_cursor.fetchone.return_value = (
-            "h", "p1", "k", "t1", "[]", None,
-            True, None, None,  # revoked
+            "h",
+            "p1",
+            "k",
+            "t1",
+            "[]",
+            None,
+            True,
+            None,
+            None,  # revoked
         )
         with pytest.raises(ValueError, match="revoked"):
             store.rotate_key("kid")
@@ -348,8 +428,15 @@ class TestPostgresApiKeyStore:
         store, mock_conn, mock_cursor = self._make_store()
         future = datetime.now(UTC) + timedelta(hours=12)
         mock_cursor.fetchone.return_value = (
-            "h", "p1", "k", "t1", "[]", None,
-            False, "newkid", future,  # already rotated, grace in future
+            "h",
+            "p1",
+            "k",
+            "t1",
+            "[]",
+            None,
+            False,
+            "newkid",
+            future,  # already rotated, grace in future
         )
         with pytest.raises(ValueError, match="pending rotation"):
             store.rotate_key("kid")
@@ -359,14 +446,21 @@ class TestPostgresApiKeyStore:
         store, mock_conn, mock_cursor = self._make_store()
         past = datetime.now(UTC) - timedelta(hours=1)
         mock_cursor.fetchone.return_value = (
-            "h", "p1", "k", "t1", "[]", None,
-            False, "oldnew", past,  # grace period expired
+            "h",
+            "p1",
+            "k",
+            "t1",
+            "[]",
+            None,
+            False,
+            "oldnew",
+            past,  # grace period expired
         )
 
-        with patch("enterprise.auth.infrastructure.api_key_authenticator.ApiKeyAuthenticator") as mock_auth:
+        with patch("mcp_hangar.auth.infrastructure.api_key_authenticator.ApiKeyAuthenticator") as mock_auth:
             mock_auth.generate_key.return_value = "mcp_regen"
             mock_auth._hash_key.return_value = "newhash"
-            with patch("enterprise.auth.infrastructure.postgres_store.secrets.token_urlsafe", return_value="nkid"):
+            with patch("mcp_hangar.auth.infrastructure.postgres_store.secrets.token_urlsafe", return_value="nkid"):
                 raw_key = store.rotate_key("kid")
 
         assert raw_key == "mcp_regen"
@@ -375,18 +469,26 @@ class TestPostgresApiKeyStore:
         publisher = Mock()
         store, mock_conn, mock_cursor = self._make_store(event_publisher=publisher)
         mock_cursor.fetchone.return_value = (
-            "h", "p1", "k", "t1", "[]", None,
-            False, None, None,
+            "h",
+            "p1",
+            "k",
+            "t1",
+            "[]",
+            None,
+            False,
+            None,
+            None,
         )
 
-        with patch("enterprise.auth.infrastructure.api_key_authenticator.ApiKeyAuthenticator") as mock_auth:
+        with patch("mcp_hangar.auth.infrastructure.api_key_authenticator.ApiKeyAuthenticator") as mock_auth:
             mock_auth.generate_key.return_value = "mcp_raw"
             mock_auth._hash_key.return_value = "nh"
-            with patch("enterprise.auth.infrastructure.postgres_store.secrets.token_urlsafe", return_value="nk"):
+            with patch("mcp_hangar.auth.infrastructure.postgres_store.secrets.token_urlsafe", return_value="nk"):
                 store.rotate_key("kid", rotated_by="admin")
 
         publisher.assert_called_once()
         from mcp_hangar.domain.events import KeyRotated
+
         event = publisher.call_args[0][0]
         assert isinstance(event, KeyRotated)
         assert event.rotated_by == "admin"
@@ -394,14 +496,21 @@ class TestPostgresApiKeyStore:
     def test_rotate_key_db_error_rolls_back(self):
         store, mock_conn, mock_cursor = self._make_store()
         mock_cursor.fetchone.return_value = (
-            "h", "p1", "k", "t1", "[]", None,
-            False, None, None,
+            "h",
+            "p1",
+            "k",
+            "t1",
+            "[]",
+            None,
+            False,
+            None,
+            None,
         )
 
-        with patch("enterprise.auth.infrastructure.api_key_authenticator.ApiKeyAuthenticator") as mock_auth:
+        with patch("mcp_hangar.auth.infrastructure.api_key_authenticator.ApiKeyAuthenticator") as mock_auth:
             mock_auth.generate_key.return_value = "mcp_raw"
             mock_auth._hash_key.return_value = "nh"
-            with patch("enterprise.auth.infrastructure.postgres_store.secrets.token_urlsafe", return_value="nk"):
+            with patch("mcp_hangar.auth.infrastructure.postgres_store.secrets.token_urlsafe", return_value="nk"):
                 # Make the INSERT for new key fail
                 original_execute = mock_cursor.execute
                 call_count = [0]
@@ -429,7 +538,7 @@ class TestPostgresRoleStore:
     """Tests for PostgresRoleStore with mock psycopg2 connection factory."""
 
     def _make_store(self, event_publisher=None, table_prefix=""):
-        from enterprise.auth.infrastructure.postgres_store import PostgresRoleStore
+        from mcp_hangar.auth.infrastructure.postgres_store import PostgresRoleStore
 
         mock_conn = MagicMock()
         mock_cursor = MagicMock()
@@ -495,7 +604,8 @@ class TestPostgresRoleStore:
         store, mock_conn, mock_cursor = self._make_store()
         # permissions_json as a raw string (needs json.loads)
         mock_cursor.fetchone.return_value = (
-            "admin", "Full access",
+            "admin",
+            "Full access",
             '[{"resource_type": "*", "action": "*", "resource_id": "*"}]',
         )
         role = store.get_role("admin")
@@ -506,7 +616,8 @@ class TestPostgresRoleStore:
         store, mock_conn, mock_cursor = self._make_store()
         # permissions_json already parsed by the DB driver
         mock_cursor.fetchone.return_value = (
-            "dev", "Dev access",
+            "dev",
+            "Dev access",
             [{"resource_type": "tool", "action": "invoke", "resource_id": "*"}],
         )
         role = store.get_role("dev")
@@ -565,6 +676,7 @@ class TestPostgresRoleStore:
         mock_conn.commit.assert_called()
         publisher.assert_called_once()
         from mcp_hangar.domain.events import RoleAssigned
+
         event = publisher.call_args[0][0]
         assert isinstance(event, RoleAssigned)
 
@@ -592,6 +704,7 @@ class TestPostgresRoleStore:
         mock_conn.commit.assert_called()
         publisher.assert_called_once()
         from mcp_hangar.domain.events import RoleRevoked
+
         event = publisher.call_args[0][0]
         assert isinstance(event, RoleRevoked)
 
@@ -613,7 +726,7 @@ class TestCreatePostgresConnectionFactory:
     """Tests for create_postgres_connection_factory."""
 
     def test_missing_psycopg2_raises_import_error(self):
-        from enterprise.auth.infrastructure.postgres_store import create_postgres_connection_factory
+        from mcp_hangar.auth.infrastructure.postgres_store import create_postgres_connection_factory
 
         with patch.dict("sys.modules", {"psycopg2": None, "psycopg2.pool": None}):
             with pytest.raises(ImportError, match="psycopg2"):
@@ -628,13 +741,18 @@ class TestCreatePostgresConnectionFactory:
         mock_psycopg2.pool = mock_pool_module
 
         import sys
+
         with patch.dict(sys.modules, {"psycopg2": mock_psycopg2, "psycopg2.pool": mock_pool_module}):
-            from enterprise.auth.infrastructure.postgres_store import create_postgres_connection_factory
+            from mcp_hangar.auth.infrastructure.postgres_store import create_postgres_connection_factory
 
             factory = create_postgres_connection_factory(
-                host="db.local", port=5433, database="test_db",
-                user="testuser", password="secret",
-                min_connections=1, max_connections=5,
+                host="db.local",
+                port=5433,
+                database="test_db",
+                user="testuser",
+                password="secret",
+                min_connections=1,
+                max_connections=5,
             )
 
             assert callable(factory)
@@ -649,7 +767,7 @@ class TestEventSourcedApiKeyStoreGaps:
     """Tests for uncovered paths in EventSourcedApiKeyStore."""
 
     def _make_store(self, events=None, streams=None, publisher=None, snapshot_store=None):
-        from enterprise.auth.infrastructure.event_sourced_store import EventSourcedApiKeyStore
+        from mcp_hangar.auth.infrastructure.event_sourced_store import EventSourcedApiKeyStore
 
         event_store = Mock(spec=["read_stream", "append", "list_streams", "get_stream_version"])
         event_store.list_streams.return_value = streams or []
@@ -667,15 +785,19 @@ class TestEventSourcedApiKeyStoreGaps:
         from mcp_hangar.domain.events import ApiKeyCreated
 
         creation_event = ApiKeyCreated(
-            key_id="kid1", principal_id="p1", key_name="k1",
-            expires_at=None, created_by="admin",
+            key_id="kid1",
+            principal_id="p1",
+            key_name="k1",
+            expires_at=None,
+            created_by="admin",
         )
 
         event_store = Mock()
         event_store.list_streams.return_value = ["api_key:hash1"]
         event_store.read_stream.return_value = iter([creation_event])
 
-        from enterprise.auth.infrastructure.event_sourced_store import EventSourcedApiKeyStore
+        from mcp_hangar.auth.infrastructure.event_sourced_store import EventSourcedApiKeyStore
+
         store = EventSourcedApiKeyStore(event_store=event_store)
         store._build_index()
 
@@ -699,7 +821,7 @@ class TestEventSourcedApiKeyStoreGaps:
 
     def test_rotate_key_load_returns_none_raises(self):
         """rotate_key raises ValueError if _load_key returns None for found index entry."""
-        from enterprise.auth.infrastructure.event_sourced_store import EventSourcedApiKeyStore
+        from mcp_hangar.auth.infrastructure.event_sourced_store import EventSourcedApiKeyStore
 
         event_store = Mock()
         event_store.list_streams.return_value = []
@@ -718,8 +840,11 @@ class TestEventSourcedApiKeyStoreGaps:
         from mcp_hangar.domain.model.event_sourced_api_key import EventSourcedApiKey
 
         creation_event = ApiKeyCreated(
-            key_id="kid1", principal_id="p1", key_name="test",
-            expires_at=None, created_by="admin",
+            key_id="kid1",
+            principal_id="p1",
+            key_name="test",
+            expires_at=None,
+            created_by="admin",
         )
 
         event_store = Mock()
@@ -729,15 +854,19 @@ class TestEventSourcedApiKeyStoreGaps:
         event_store.read_stream.return_value = iter([creation_event])
         event_store.append.return_value = 2
 
-        from enterprise.auth.infrastructure.event_sourced_store import EventSourcedApiKeyStore
+        from mcp_hangar.auth.infrastructure.event_sourced_store import EventSourcedApiKeyStore
+
         store = EventSourcedApiKeyStore(event_store=event_store)
         store._index = {"h1": ("kid1", "p1")}
         store._principal_index = {"p1": {"h1"}}
 
         # Patch _load_key to return a proper EventSourcedApiKey
         original_key = EventSourcedApiKey.create(
-            key_hash="h1", key_id="kid1", principal_id="p1",
-            name="test", created_by="admin",
+            key_hash="h1",
+            key_id="kid1",
+            principal_id="p1",
+            name="test",
+            created_by="admin",
         )
         original_key.collect_events()  # clear events
 
@@ -747,14 +876,14 @@ class TestEventSourcedApiKeyStoreGaps:
         assert raw_key.startswith("mcp_")
 
     def test_maybe_create_snapshot_below_threshold(self):
-        from enterprise.auth.infrastructure.event_sourced_store import EventSourcedApiKeyStore
+        from mcp_hangar.auth.infrastructure.event_sourced_store import EventSourcedApiKeyStore
 
         store = EventSourcedApiKeyStore(event_store=Mock())
         store._maybe_create_snapshot("k1", 10, lambda: "snap")
         assert "k1" not in store._snapshot_store
 
     def test_maybe_create_snapshot_at_threshold(self):
-        from enterprise.auth.infrastructure.event_sourced_store import EventSourcedApiKeyStore
+        from mcp_hangar.auth.infrastructure.event_sourced_store import EventSourcedApiKeyStore
 
         store = EventSourcedApiKeyStore(event_store=Mock())
         create_fn = Mock(return_value="snapshot_data")
@@ -763,7 +892,7 @@ class TestEventSourcedApiKeyStoreGaps:
         create_fn.assert_called_once()
 
     def test_maybe_create_snapshot_existing_snapshot_not_enough_events(self):
-        from enterprise.auth.infrastructure.event_sourced_store import EventSourcedApiKeyStore
+        from mcp_hangar.auth.infrastructure.event_sourced_store import EventSourcedApiKeyStore
 
         existing = Mock()
         existing.version = 45
@@ -773,16 +902,23 @@ class TestEventSourcedApiKeyStoreGaps:
         create_fn.assert_not_called()  # only 15 events since last snapshot
 
     def test_load_key_with_snapshot(self):
-        from enterprise.auth.infrastructure.event_sourced_store import EventSourcedApiKeyStore
+        from mcp_hangar.auth.infrastructure.event_sourced_store import EventSourcedApiKeyStore
         from mcp_hangar.domain.model.event_sourced_api_key import ApiKeySnapshot
 
         snapshot = ApiKeySnapshot(
-            key_hash="h1", key_id="kid1", principal_id="p1",
-            name="test", tenant_id=None, groups=[],
+            key_hash="h1",
+            key_id="kid1",
+            principal_id="p1",
+            name="test",
+            tenant_id=None,
+            groups=[],
             created_at=datetime.now(UTC).timestamp(),
-            expires_at=None, last_used_at=None,
-            revoked=False, revoked_at=None,
-            rotated_to_key_id=None, grace_until=None,
+            expires_at=None,
+            last_used_at=None,
+            revoked=False,
+            revoked_at=None,
+            rotated_to_key_id=None,
+            grace_until=None,
             version=5,
         )
 
@@ -808,7 +944,7 @@ class TestEventSourcedRoleStoreGaps:
     """Tests for uncovered paths in EventSourcedRoleStore."""
 
     def _make_store(self, publisher=None):
-        from enterprise.auth.infrastructure.event_sourced_store import EventSourcedRoleStore
+        from mcp_hangar.auth.infrastructure.event_sourced_store import EventSourcedRoleStore
 
         event_store = Mock()
         event_store.read_stream.return_value = iter([])
@@ -823,7 +959,7 @@ class TestEventSourcedRoleStoreGaps:
 
     def test_delete_role_builtin_raises(self):
         from mcp_hangar.domain.exceptions import CannotModifyBuiltinRoleError
-        from enterprise.auth.roles import BUILTIN_ROLES
+        from mcp_hangar.auth.roles import BUILTIN_ROLES
 
         store, _ = self._make_store()
         builtin_name = next(iter(BUILTIN_ROLES))
@@ -851,7 +987,7 @@ class TestEventSourcedRoleStoreGaps:
 
     def test_update_role_builtin_raises(self):
         from mcp_hangar.domain.exceptions import CannotModifyBuiltinRoleError
-        from enterprise.auth.roles import BUILTIN_ROLES
+        from mcp_hangar.auth.roles import BUILTIN_ROLES
 
         store, _ = self._make_store()
         builtin_name = next(iter(BUILTIN_ROLES))
@@ -902,7 +1038,7 @@ class TestEventSourcedRoleStoreGaps:
         assert "role-b" in names
 
     def test_add_role_builtin_raises(self):
-        from enterprise.auth.roles import BUILTIN_ROLES
+        from mcp_hangar.auth.roles import BUILTIN_ROLES
         from mcp_hangar.domain.value_objects import Role
 
         store, _ = self._make_store()
@@ -912,7 +1048,7 @@ class TestEventSourcedRoleStoreGaps:
             store.add_role(Role(name=builtin_name, permissions=frozenset()))
 
     def test_get_role_builtin(self):
-        from enterprise.auth.roles import BUILTIN_ROLES
+        from mcp_hangar.auth.roles import BUILTIN_ROLES
 
         store, _ = self._make_store()
         builtin_name = next(iter(BUILTIN_ROLES))
@@ -949,7 +1085,7 @@ class TestSQLiteToolAccessPolicyStore:
     """Tests for SQLiteToolAccessPolicyStore with real SQLite :memory: or tmp file."""
 
     def _make_store(self):
-        from enterprise.auth.infrastructure.sqlite_tap_store import SQLiteToolAccessPolicyStore
+        from mcp_hangar.auth.infrastructure.sqlite_tap_store import SQLiteToolAccessPolicyStore
 
         with tempfile.NamedTemporaryFile(suffix=".db", delete=False) as tmpfile:
             tmpfile_name = tmpfile.name
@@ -1089,8 +1225,8 @@ class TestGetApiKeysByPrincipalHandler:
     """Tests for GetApiKeysByPrincipalHandler."""
 
     def test_handle_returns_keys_with_metadata(self):
-        from enterprise.auth.queries.handlers import GetApiKeysByPrincipalHandler
-        from enterprise.auth.queries.queries import GetApiKeysByPrincipalQuery
+        from mcp_hangar.auth.queries.handlers import GetApiKeysByPrincipalHandler
+        from mcp_hangar.auth.queries.queries import GetApiKeysByPrincipalQuery
         from mcp_hangar.domain.contracts.authentication import ApiKeyMetadata
 
         now = datetime.now(UTC)
@@ -1108,8 +1244,8 @@ class TestGetApiKeysByPrincipalHandler:
         assert len(result["keys"]) == 2
 
     def test_handle_excludes_revoked(self):
-        from enterprise.auth.queries.handlers import GetApiKeysByPrincipalHandler
-        from enterprise.auth.queries.queries import GetApiKeysByPrincipalQuery
+        from mcp_hangar.auth.queries.handlers import GetApiKeysByPrincipalHandler
+        from mcp_hangar.auth.queries.queries import GetApiKeysByPrincipalQuery
         from mcp_hangar.domain.contracts.authentication import ApiKeyMetadata
 
         now = datetime.now(UTC)
@@ -1131,8 +1267,8 @@ class TestGetApiKeyCountHandler:
     """Tests for GetApiKeyCountHandler."""
 
     def test_handle_returns_count(self):
-        from enterprise.auth.queries.handlers import GetApiKeyCountHandler
-        from enterprise.auth.queries.queries import GetApiKeyCountQuery
+        from mcp_hangar.auth.queries.handlers import GetApiKeyCountHandler
+        from mcp_hangar.auth.queries.queries import GetApiKeyCountQuery
 
         mock_store = Mock()
         mock_store.count_keys.return_value = 3
@@ -1148,8 +1284,8 @@ class TestGetRolesForPrincipalHandler:
     """Tests for GetRolesForPrincipalHandler."""
 
     def test_handle_returns_roles(self):
-        from enterprise.auth.queries.handlers import GetRolesForPrincipalHandler
-        from enterprise.auth.queries.queries import GetRolesForPrincipalQuery
+        from mcp_hangar.auth.queries.handlers import GetRolesForPrincipalHandler
+        from mcp_hangar.auth.queries.queries import GetRolesForPrincipalQuery
         from mcp_hangar.domain.value_objects import Permission, Role
 
         mock_store = Mock()
@@ -1168,8 +1304,8 @@ class TestGetRoleHandler:
     """Tests for GetRoleHandler."""
 
     def test_handle_role_found(self):
-        from enterprise.auth.queries.handlers import GetRoleHandler
-        from enterprise.auth.queries.queries import GetRoleQuery
+        from mcp_hangar.auth.queries.handlers import GetRoleHandler
+        from mcp_hangar.auth.queries.queries import GetRoleQuery
         from mcp_hangar.domain.value_objects import Permission, Role
 
         mock_store = Mock()
@@ -1187,8 +1323,8 @@ class TestGetRoleHandler:
         assert result["role"]["permissions_count"] == 1
 
     def test_handle_role_not_found(self):
-        from enterprise.auth.queries.handlers import GetRoleHandler
-        from enterprise.auth.queries.queries import GetRoleQuery
+        from mcp_hangar.auth.queries.handlers import GetRoleHandler
+        from mcp_hangar.auth.queries.queries import GetRoleQuery
 
         mock_store = Mock()
         mock_store.get_role.return_value = None
@@ -1204,9 +1340,9 @@ class TestListBuiltinRolesHandler:
     """Tests for ListBuiltinRolesHandler."""
 
     def test_handle_returns_builtin_roles(self):
-        from enterprise.auth.queries.handlers import ListBuiltinRolesHandler
-        from enterprise.auth.queries.queries import ListBuiltinRolesQuery
-        from enterprise.auth.roles import BUILTIN_ROLES
+        from mcp_hangar.auth.queries.handlers import ListBuiltinRolesHandler
+        from mcp_hangar.auth.queries.queries import ListBuiltinRolesQuery
+        from mcp_hangar.auth.roles import BUILTIN_ROLES
 
         handler = ListBuiltinRolesHandler()
         result = handler.handle(ListBuiltinRolesQuery())
@@ -1219,8 +1355,8 @@ class TestCheckPermissionHandler:
     """Tests for CheckPermissionHandler."""
 
     def test_permission_granted(self):
-        from enterprise.auth.queries.handlers import CheckPermissionHandler
-        from enterprise.auth.queries.queries import CheckPermissionQuery
+        from mcp_hangar.auth.queries.handlers import CheckPermissionHandler
+        from mcp_hangar.auth.queries.queries import CheckPermissionQuery
         from mcp_hangar.domain.value_objects import Permission, Role
 
         mock_store = Mock()
@@ -1229,16 +1365,20 @@ class TestCheckPermissionHandler:
         ]
 
         handler = CheckPermissionHandler(mock_store)
-        result = handler.handle(CheckPermissionQuery(
-            principal_id="p1", action="read", resource_type="provider",
-        ))
+        result = handler.handle(
+            CheckPermissionQuery(
+                principal_id="p1",
+                action="read",
+                resource_type="provider",
+            )
+        )
 
         assert result["allowed"] is True
         assert result["granted_by_role"] == "admin"
 
     def test_permission_denied(self):
-        from enterprise.auth.queries.handlers import CheckPermissionHandler
-        from enterprise.auth.queries.queries import CheckPermissionQuery
+        from mcp_hangar.auth.queries.handlers import CheckPermissionHandler
+        from mcp_hangar.auth.queries.queries import CheckPermissionQuery
         from mcp_hangar.domain.value_objects import Permission, Role
 
         mock_store = Mock()
@@ -1247,9 +1387,13 @@ class TestCheckPermissionHandler:
         ]
 
         handler = CheckPermissionHandler(mock_store)
-        result = handler.handle(CheckPermissionQuery(
-            principal_id="p1", action="delete", resource_type="provider",
-        ))
+        result = handler.handle(
+            CheckPermissionQuery(
+                principal_id="p1",
+                action="delete",
+                resource_type="provider",
+            )
+        )
 
         assert result["allowed"] is False
         assert result["granted_by_role"] is None
@@ -1259,9 +1403,9 @@ class TestListAllRolesHandler:
     """Tests for ListAllRolesHandler."""
 
     def test_handle_with_builtin(self):
-        from enterprise.auth.queries.handlers import ListAllRolesHandler
-        from enterprise.auth.queries.queries import ListAllRolesQuery
-        from enterprise.auth.roles import BUILTIN_ROLES
+        from mcp_hangar.auth.queries.handlers import ListAllRolesHandler
+        from mcp_hangar.auth.queries.queries import ListAllRolesQuery
+        from mcp_hangar.auth.roles import BUILTIN_ROLES
         from mcp_hangar.domain.value_objects import Role
 
         mock_store = Mock()
@@ -1277,8 +1421,8 @@ class TestListAllRolesHandler:
         assert result["total"] == len(BUILTIN_ROLES) + 1
 
     def test_handle_without_builtin(self):
-        from enterprise.auth.queries.handlers import ListAllRolesHandler
-        from enterprise.auth.queries.queries import ListAllRolesQuery
+        from mcp_hangar.auth.queries.handlers import ListAllRolesHandler
+        from mcp_hangar.auth.queries.queries import ListAllRolesQuery
         from mcp_hangar.domain.value_objects import Role
 
         mock_store = Mock()
@@ -1297,8 +1441,8 @@ class TestListPrincipalsHandler:
     """Tests for ListPrincipalsHandler."""
 
     def test_handle_with_list_principals_method(self):
-        from enterprise.auth.queries.handlers import ListPrincipalsHandler
-        from enterprise.auth.queries.queries import ListPrincipalsQuery
+        from mcp_hangar.auth.queries.handlers import ListPrincipalsHandler
+        from mcp_hangar.auth.queries.queries import ListPrincipalsQuery
 
         mock_store = Mock()
         mock_store.list_principals.return_value = [
@@ -1312,8 +1456,8 @@ class TestListPrincipalsHandler:
         assert result["total"] == 2
 
     def test_handle_with_assignments_dict_fallback(self):
-        from enterprise.auth.queries.handlers import ListPrincipalsHandler
-        from enterprise.auth.queries.queries import ListPrincipalsQuery
+        from mcp_hangar.auth.queries.handlers import ListPrincipalsHandler
+        from mcp_hangar.auth.queries.queries import ListPrincipalsQuery
 
         mock_store = Mock(spec=[])  # no list_principals
         mock_store._assignments = {
@@ -1329,8 +1473,8 @@ class TestListPrincipalsHandler:
         assert principals_ids == {"p1", "p2"}
 
     def test_handle_no_method_no_assignments(self):
-        from enterprise.auth.queries.handlers import ListPrincipalsHandler
-        from enterprise.auth.queries.queries import ListPrincipalsQuery
+        from mcp_hangar.auth.queries.handlers import ListPrincipalsHandler
+        from mcp_hangar.auth.queries.queries import ListPrincipalsQuery
 
         mock_store = Mock(spec=[])  # no list_principals, no _assignments
 
@@ -1345,8 +1489,8 @@ class TestGetToolAccessPolicyHandler:
     """Tests for GetToolAccessPolicyHandler."""
 
     def test_handle_policy_found(self):
-        from enterprise.auth.queries.handlers import GetToolAccessPolicyHandler
-        from enterprise.auth.queries.queries import GetToolAccessPolicyQuery
+        from mcp_hangar.auth.queries.handlers import GetToolAccessPolicyHandler
+        from mcp_hangar.auth.queries.queries import GetToolAccessPolicyQuery
         from mcp_hangar.domain.value_objects.tool_access_policy import ToolAccessPolicy
 
         mock_store = Mock()
@@ -1363,8 +1507,8 @@ class TestGetToolAccessPolicyHandler:
         assert result["deny_list"] == ["rm"]
 
     def test_handle_policy_not_found(self):
-        from enterprise.auth.queries.handlers import GetToolAccessPolicyHandler
-        from enterprise.auth.queries.queries import GetToolAccessPolicyQuery
+        from mcp_hangar.auth.queries.handlers import GetToolAccessPolicyHandler
+        from mcp_hangar.auth.queries.queries import GetToolAccessPolicyQuery
 
         mock_store = Mock()
         mock_store.get_policy.return_value = None
@@ -1381,8 +1525,8 @@ class TestRegisterAuthQueryHandlers:
     """Tests for register_auth_query_handlers function."""
 
     def test_register_all_handlers(self):
-        from enterprise.auth.queries.handlers import register_auth_query_handlers
-        from enterprise.auth.queries.queries import (
+        from mcp_hangar.auth.queries.handlers import register_auth_query_handlers
+        from mcp_hangar.auth.queries.queries import (
             CheckPermissionQuery,
             GetApiKeyCountQuery,
             GetApiKeysByPrincipalQuery,
@@ -1419,8 +1563,8 @@ class TestRegisterAuthQueryHandlers:
         assert GetToolAccessPolicyQuery in registered_types
 
     def test_register_with_none_stores(self):
-        from enterprise.auth.queries.handlers import register_auth_query_handlers
-        from enterprise.auth.queries.queries import ListBuiltinRolesQuery
+        from mcp_hangar.auth.queries.handlers import register_auth_query_handlers
+        from mcp_hangar.auth.queries.queries import ListBuiltinRolesQuery
 
         mock_bus = Mock()
         register_auth_query_handlers(mock_bus)
@@ -1440,8 +1584,8 @@ class TestCreateApiKeyHandler:
     """Tests for CreateApiKeyHandler."""
 
     def test_handle_creates_key(self):
-        from enterprise.auth.commands.handlers import CreateApiKeyHandler
-        from enterprise.auth.commands.commands import CreateApiKeyCommand
+        from mcp_hangar.auth.commands.handlers import CreateApiKeyHandler
+        from mcp_hangar.auth.commands.commands import CreateApiKeyCommand
         from mcp_hangar.domain.contracts.authentication import ApiKeyMetadata
 
         now = datetime.now(UTC)
@@ -1452,9 +1596,13 @@ class TestCreateApiKeyHandler:
         ]
 
         handler = CreateApiKeyHandler(mock_store)
-        result = handler.handle(CreateApiKeyCommand(
-            principal_id="p1", name="test-key", created_by="admin",
-        ))
+        result = handler.handle(
+            CreateApiKeyCommand(
+                principal_id="p1",
+                name="test-key",
+                created_by="admin",
+            )
+        )
 
         assert result["raw_key"] == "mcp_raw_key"
         assert result["key_id"] == "kid1"
@@ -1462,8 +1610,8 @@ class TestCreateApiKeyHandler:
         assert "warning" in result
 
     def test_handle_key_metadata_not_found(self):
-        from enterprise.auth.commands.handlers import CreateApiKeyHandler
-        from enterprise.auth.commands.commands import CreateApiKeyCommand
+        from mcp_hangar.auth.commands.handlers import CreateApiKeyHandler
+        from mcp_hangar.auth.commands.commands import CreateApiKeyCommand
 
         mock_store = Mock()
         mock_store.create_key.return_value = "mcp_raw"
@@ -1480,23 +1628,27 @@ class TestRevokeApiKeyHandler:
     """Tests for RevokeApiKeyHandler."""
 
     def test_handle_revokes(self):
-        from enterprise.auth.commands.handlers import RevokeApiKeyHandler
-        from enterprise.auth.commands.commands import RevokeApiKeyCommand
+        from mcp_hangar.auth.commands.handlers import RevokeApiKeyHandler
+        from mcp_hangar.auth.commands.commands import RevokeApiKeyCommand
 
         mock_store = Mock()
         mock_store.revoke_key.return_value = True
 
         handler = RevokeApiKeyHandler(mock_store)
-        result = handler.handle(RevokeApiKeyCommand(
-            key_id="kid1", revoked_by="admin", reason="compromised",
-        ))
+        result = handler.handle(
+            RevokeApiKeyCommand(
+                key_id="kid1",
+                revoked_by="admin",
+                reason="compromised",
+            )
+        )
 
         assert result["revoked"] is True
         assert result["revoked_by"] == "admin"
 
     def test_handle_revoke_fails(self):
-        from enterprise.auth.commands.handlers import RevokeApiKeyHandler
-        from enterprise.auth.commands.commands import RevokeApiKeyCommand
+        from mcp_hangar.auth.commands.handlers import RevokeApiKeyHandler
+        from mcp_hangar.auth.commands.commands import RevokeApiKeyCommand
 
         mock_store = Mock()
         mock_store.revoke_key.return_value = False
@@ -1511,8 +1663,8 @@ class TestListApiKeysHandler:
     """Tests for ListApiKeysHandler."""
 
     def test_handle_lists_keys(self):
-        from enterprise.auth.commands.handlers import ListApiKeysHandler
-        from enterprise.auth.commands.commands import ListApiKeysCommand
+        from mcp_hangar.auth.commands.handlers import ListApiKeysHandler
+        from mcp_hangar.auth.commands.commands import ListApiKeysCommand
         from mcp_hangar.domain.contracts.authentication import ApiKeyMetadata
 
         now = datetime.now(UTC)
@@ -1532,14 +1684,19 @@ class TestAssignRoleHandler:
     """Tests for AssignRoleHandler."""
 
     def test_handle_assigns(self):
-        from enterprise.auth.commands.handlers import AssignRoleHandler
-        from enterprise.auth.commands.commands import AssignRoleCommand
+        from mcp_hangar.auth.commands.handlers import AssignRoleHandler
+        from mcp_hangar.auth.commands.commands import AssignRoleCommand
 
         mock_store = Mock()
         handler = AssignRoleHandler(mock_store)
-        result = handler.handle(AssignRoleCommand(
-            principal_id="p1", role_name="viewer", scope="global", assigned_by="admin",
-        ))
+        result = handler.handle(
+            AssignRoleCommand(
+                principal_id="p1",
+                role_name="viewer",
+                scope="global",
+                assigned_by="admin",
+            )
+        )
 
         assert result["assigned"] is True
         mock_store.assign_role.assert_called_once()
@@ -1549,14 +1706,19 @@ class TestRevokeRoleHandler:
     """Tests for RevokeRoleHandler."""
 
     def test_handle_revokes(self):
-        from enterprise.auth.commands.handlers import RevokeRoleHandler
-        from enterprise.auth.commands.commands import RevokeRoleCommand
+        from mcp_hangar.auth.commands.handlers import RevokeRoleHandler
+        from mcp_hangar.auth.commands.commands import RevokeRoleCommand
 
         mock_store = Mock()
         handler = RevokeRoleHandler(mock_store)
-        result = handler.handle(RevokeRoleCommand(
-            principal_id="p1", role_name="viewer", scope="global", revoked_by="admin",
-        ))
+        result = handler.handle(
+            RevokeRoleCommand(
+                principal_id="p1",
+                role_name="viewer",
+                scope="global",
+                revoked_by="admin",
+            )
+        )
 
         assert result["revoked"] is True
         mock_store.revoke_role.assert_called_once()
@@ -1566,19 +1728,21 @@ class TestCreateCustomRoleHandler:
     """Tests for CreateCustomRoleHandler."""
 
     def test_handle_creates_role(self):
-        from enterprise.auth.commands.handlers import CreateCustomRoleHandler
-        from enterprise.auth.commands.commands import CreateCustomRoleCommand
+        from mcp_hangar.auth.commands.handlers import CreateCustomRoleHandler
+        from mcp_hangar.auth.commands.commands import CreateCustomRoleCommand
 
         mock_store = Mock()
         mock_event_bus = Mock()
 
         handler = CreateCustomRoleHandler(mock_store, event_bus=mock_event_bus)
-        result = handler.handle(CreateCustomRoleCommand(
-            role_name="custom-role",
-            description="Custom",
-            permissions=frozenset(["mcp_server:read", "tool:invoke"]),
-            created_by="admin",
-        ))
+        result = handler.handle(
+            CreateCustomRoleCommand(
+                role_name="custom-role",
+                description="Custom",
+                permissions=frozenset(["mcp_server:read", "tool:invoke"]),
+                created_by="admin",
+            )
+        )
 
         assert result["created"] is True
         assert result["permissions_count"] == 2
@@ -1586,14 +1750,17 @@ class TestCreateCustomRoleHandler:
         mock_event_bus.publish.assert_called_once()
 
     def test_handle_no_event_bus(self):
-        from enterprise.auth.commands.handlers import CreateCustomRoleHandler
-        from enterprise.auth.commands.commands import CreateCustomRoleCommand
+        from mcp_hangar.auth.commands.handlers import CreateCustomRoleHandler
+        from mcp_hangar.auth.commands.commands import CreateCustomRoleCommand
 
         mock_store = Mock()
         handler = CreateCustomRoleHandler(mock_store, event_bus=None)
-        result = handler.handle(CreateCustomRoleCommand(
-            role_name="custom-role", permissions=frozenset(["mcp_server:read"]),
-        ))
+        result = handler.handle(
+            CreateCustomRoleCommand(
+                role_name="custom-role",
+                permissions=frozenset(["mcp_server:read"]),
+            )
+        )
         assert result["created"] is True
 
 
@@ -1601,24 +1768,27 @@ class TestDeleteCustomRoleHandler:
     """Tests for DeleteCustomRoleHandler."""
 
     def test_handle_deletes_role(self):
-        from enterprise.auth.commands.handlers import DeleteCustomRoleHandler
-        from enterprise.auth.commands.commands import DeleteCustomRoleCommand
+        from mcp_hangar.auth.commands.handlers import DeleteCustomRoleHandler
+        from mcp_hangar.auth.commands.commands import DeleteCustomRoleCommand
 
         mock_store = Mock()
         mock_event_bus = Mock()
 
         handler = DeleteCustomRoleHandler(mock_store, event_bus=mock_event_bus)
-        result = handler.handle(DeleteCustomRoleCommand(
-            role_name="my-role", deleted_by="admin",
-        ))
+        result = handler.handle(
+            DeleteCustomRoleCommand(
+                role_name="my-role",
+                deleted_by="admin",
+            )
+        )
 
         assert result["deleted"] is True
         mock_store.delete_role.assert_called_once_with("my-role")
         mock_event_bus.publish.assert_called_once()
 
     def test_handle_builtin_role_propagates_error(self):
-        from enterprise.auth.commands.handlers import DeleteCustomRoleHandler
-        from enterprise.auth.commands.commands import DeleteCustomRoleCommand
+        from mcp_hangar.auth.commands.handlers import DeleteCustomRoleHandler
+        from mcp_hangar.auth.commands.commands import DeleteCustomRoleCommand
         from mcp_hangar.domain.exceptions import CannotModifyBuiltinRoleError
 
         mock_store = Mock()
@@ -1634,8 +1804,8 @@ class TestUpdateCustomRoleHandler:
     """Tests for UpdateCustomRoleHandler."""
 
     def test_handle_updates_role(self):
-        from enterprise.auth.commands.handlers import UpdateCustomRoleHandler
-        from enterprise.auth.commands.commands import UpdateCustomRoleCommand
+        from mcp_hangar.auth.commands.handlers import UpdateCustomRoleHandler
+        from mcp_hangar.auth.commands.commands import UpdateCustomRoleCommand
         from mcp_hangar.domain.value_objects import Permission, Role
 
         mock_store = Mock()
@@ -1647,20 +1817,22 @@ class TestUpdateCustomRoleHandler:
         mock_event_bus = Mock()
 
         handler = UpdateCustomRoleHandler(mock_store, event_bus=mock_event_bus)
-        result = handler.handle(UpdateCustomRoleCommand(
-            role_name="my-role",
-            permissions=["tool:invoke"],
-            description="Updated",
-            updated_by="admin",
-        ))
+        result = handler.handle(
+            UpdateCustomRoleCommand(
+                role_name="my-role",
+                permissions=["tool:invoke"],
+                description="Updated",
+                updated_by="admin",
+            )
+        )
 
         assert result["updated"] is True
         assert result["permissions_count"] == 1
         mock_event_bus.publish.assert_called_once()
 
     def test_handle_role_not_found_propagates(self):
-        from enterprise.auth.commands.handlers import UpdateCustomRoleHandler
-        from enterprise.auth.commands.commands import UpdateCustomRoleCommand
+        from mcp_hangar.auth.commands.handlers import UpdateCustomRoleHandler
+        from mcp_hangar.auth.commands.commands import UpdateCustomRoleCommand
         from mcp_hangar.domain.exceptions import RoleNotFoundError
 
         mock_store = Mock()
@@ -1676,8 +1848,8 @@ class TestSetToolAccessPolicyHandler:
     """Tests for SetToolAccessPolicyHandler."""
 
     def test_handle_provider_scope(self):
-        from enterprise.auth.commands.handlers import SetToolAccessPolicyHandler
-        from enterprise.auth.commands.commands import SetToolAccessPolicyCommand
+        from mcp_hangar.auth.commands.handlers import SetToolAccessPolicyHandler
+        from mcp_hangar.auth.commands.commands import SetToolAccessPolicyCommand
 
         mock_tap_store = Mock()
         mock_event_bus = Mock()
@@ -1689,10 +1861,14 @@ class TestSetToolAccessPolicyHandler:
             "mcp_hangar.domain.services.tool_access_resolver.get_tool_access_resolver",
             return_value=mock_resolver,
         ):
-            result = handler.handle(SetToolAccessPolicyCommand(
-                scope="provider", target_id="math",
-                allow_list=["add"], deny_list=["rm"],
-            ))
+            result = handler.handle(
+                SetToolAccessPolicyCommand(
+                    scope="provider",
+                    target_id="math",
+                    allow_list=["add"],
+                    deny_list=["rm"],
+                )
+            )
 
         assert result["set"] is True
         mock_tap_store.set_policy.assert_called_once()
@@ -1700,8 +1876,8 @@ class TestSetToolAccessPolicyHandler:
         mock_event_bus.publish.assert_called_once()
 
     def test_handle_group_scope(self):
-        from enterprise.auth.commands.handlers import SetToolAccessPolicyHandler
-        from enterprise.auth.commands.commands import SetToolAccessPolicyCommand
+        from mcp_hangar.auth.commands.handlers import SetToolAccessPolicyHandler
+        from mcp_hangar.auth.commands.commands import SetToolAccessPolicyCommand
 
         mock_tap_store = Mock()
         mock_event_bus = Mock()
@@ -1713,16 +1889,20 @@ class TestSetToolAccessPolicyHandler:
             "mcp_hangar.domain.services.tool_access_resolver.get_tool_access_resolver",
             return_value=mock_resolver,
         ):
-            handler.handle(SetToolAccessPolicyCommand(
-                scope="group", target_id="grp1",
-                allow_list=[], deny_list=["x"],
-            ))
+            handler.handle(
+                SetToolAccessPolicyCommand(
+                    scope="group",
+                    target_id="grp1",
+                    allow_list=[],
+                    deny_list=["x"],
+                )
+            )
 
         mock_resolver.set_group_policy.assert_called_once()
 
     def test_handle_member_scope_with_colon_format(self):
-        from enterprise.auth.commands.handlers import SetToolAccessPolicyHandler
-        from enterprise.auth.commands.commands import SetToolAccessPolicyCommand
+        from mcp_hangar.auth.commands.handlers import SetToolAccessPolicyHandler
+        from mcp_hangar.auth.commands.commands import SetToolAccessPolicyCommand
 
         mock_tap_store = Mock()
         mock_event_bus = Mock()
@@ -1734,10 +1914,14 @@ class TestSetToolAccessPolicyHandler:
             "mcp_hangar.domain.services.tool_access_resolver.get_tool_access_resolver",
             return_value=mock_resolver,
         ):
-            handler.handle(SetToolAccessPolicyCommand(
-                scope="member", target_id="grp1:member1",
-                allow_list=["add"], deny_list=[],
-            ))
+            handler.handle(
+                SetToolAccessPolicyCommand(
+                    scope="member",
+                    target_id="grp1:member1",
+                    allow_list=["add"],
+                    deny_list=[],
+                )
+            )
 
         mock_resolver.set_member_policy.assert_called_once_with(
             "grp1",
@@ -1746,8 +1930,8 @@ class TestSetToolAccessPolicyHandler:
         )
 
     def test_handle_member_scope_without_colon(self):
-        from enterprise.auth.commands.handlers import SetToolAccessPolicyHandler
-        from enterprise.auth.commands.commands import SetToolAccessPolicyCommand
+        from mcp_hangar.auth.commands.handlers import SetToolAccessPolicyHandler
+        from mcp_hangar.auth.commands.commands import SetToolAccessPolicyCommand
 
         mock_tap_store = Mock()
         mock_event_bus = Mock()
@@ -1759,10 +1943,14 @@ class TestSetToolAccessPolicyHandler:
             "mcp_hangar.domain.services.tool_access_resolver.get_tool_access_resolver",
             return_value=mock_resolver,
         ):
-            handler.handle(SetToolAccessPolicyCommand(
-                scope="member", target_id="single_id",
-                allow_list=[], deny_list=[],
-            ))
+            handler.handle(
+                SetToolAccessPolicyCommand(
+                    scope="member",
+                    target_id="single_id",
+                    allow_list=[],
+                    deny_list=[],
+                )
+            )
 
         mock_resolver.set_member_policy.assert_called_once_with(
             "single_id",
@@ -1775,8 +1963,8 @@ class TestClearToolAccessPolicyHandler:
     """Tests for ClearToolAccessPolicyHandler."""
 
     def test_handle_clears_policy(self):
-        from enterprise.auth.commands.handlers import ClearToolAccessPolicyHandler
-        from enterprise.auth.commands.commands import ClearToolAccessPolicyCommand
+        from mcp_hangar.auth.commands.handlers import ClearToolAccessPolicyHandler
+        from mcp_hangar.auth.commands.commands import ClearToolAccessPolicyCommand
 
         mock_tap_store = Mock()
         mock_event_bus = Mock()
@@ -1793,8 +1981,8 @@ class TestRegisterAuthCommandHandlers:
     """Tests for register_auth_command_handlers function."""
 
     def test_register_all_handlers(self):
-        from enterprise.auth.commands.handlers import register_auth_command_handlers
-        from enterprise.auth.commands.commands import (
+        from mcp_hangar.auth.commands.handlers import register_auth_command_handlers
+        from mcp_hangar.auth.commands.commands import (
             AssignRoleCommand,
             ClearToolAccessPolicyCommand,
             CreateApiKeyCommand,
@@ -1829,7 +2017,7 @@ class TestRegisterAuthCommandHandlers:
         assert ClearToolAccessPolicyCommand in registered_types
 
     def test_register_with_none_stores(self):
-        from enterprise.auth.commands.handlers import register_auth_command_handlers
+        from mcp_hangar.auth.commands.handlers import register_auth_command_handlers
 
         mock_bus = Mock()
         register_auth_command_handlers(mock_bus)
@@ -1838,8 +2026,8 @@ class TestRegisterAuthCommandHandlers:
         mock_bus.register.assert_not_called()
 
     def test_register_only_api_key_store(self):
-        from enterprise.auth.commands.handlers import register_auth_command_handlers
-        from enterprise.auth.commands.commands import CreateApiKeyCommand, RevokeApiKeyCommand, ListApiKeysCommand
+        from mcp_hangar.auth.commands.handlers import register_auth_command_handlers
+        from mcp_hangar.auth.commands.commands import CreateApiKeyCommand, RevokeApiKeyCommand, ListApiKeysCommand
 
         mock_bus = Mock()
         register_auth_command_handlers(mock_bus, api_key_store=Mock())
@@ -1851,8 +2039,8 @@ class TestRegisterAuthCommandHandlers:
         assert len(registered_types) == 3
 
     def test_register_only_role_store(self):
-        from enterprise.auth.commands.handlers import register_auth_command_handlers
-        from enterprise.auth.commands.commands import (
+        from mcp_hangar.auth.commands.handlers import register_auth_command_handlers
+        from mcp_hangar.auth.commands.commands import (
             AssignRoleCommand,
             CreateCustomRoleCommand,
             DeleteCustomRoleCommand,

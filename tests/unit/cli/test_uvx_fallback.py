@@ -116,6 +116,6 @@ class TestProviderDefinitionUvx:
         for name in ["filesystem", "fetch", "memory", "github", "git"]:
             provider = get_provider(name)
             if provider.uvx_package:
-                assert provider.uvx_package.startswith(
-                    "mcp-server-"
-                ), f"{name} uvx_package should start with mcp-server-"
+                assert provider.uvx_package.startswith("mcp-server-"), (
+                    f"{name} uvx_package should start with mcp-server-"
+                )

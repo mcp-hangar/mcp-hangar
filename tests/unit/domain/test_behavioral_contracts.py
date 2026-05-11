@@ -146,31 +146,43 @@ class TestNetworkObservation:
 
 class TestBehavioralModeChanged:
     def test_has_event_id_and_occurred_at(self) -> None:
-        event = BehavioralModeChanged(mcp_server_id="math", old_mode="disabled",
-        new_mode="learning",)
+        event = BehavioralModeChanged(
+            mcp_server_id="math",
+            old_mode="disabled",
+            new_mode="learning",
+        )
         assert hasattr(event, "event_id")
         assert hasattr(event, "occurred_at")
         assert event.event_id is not None
         assert event.occurred_at > 0
 
     def test_fields_correct(self) -> None:
-        event = BehavioralModeChanged(mcp_server_id="math", old_mode="disabled",
-        new_mode="learning",)
+        event = BehavioralModeChanged(
+            mcp_server_id="math",
+            old_mode="disabled",
+            new_mode="learning",
+        )
         assert event.mcp_server_id == "math"
         assert event.old_mode == "disabled"
         assert event.new_mode == "learning"
         assert event.schema_version == 1
 
     def test_schema_version_default(self) -> None:
-        event = BehavioralModeChanged(mcp_server_id="math", old_mode="learning",
-        new_mode="enforcing",)
+        event = BehavioralModeChanged(
+            mcp_server_id="math",
+            old_mode="learning",
+            new_mode="enforcing",
+        )
         assert event.schema_version == 1
 
     def test_is_domain_event(self) -> None:
         from mcp_hangar.domain.events import DomainEvent
 
-        event = BehavioralModeChanged(mcp_server_id="math", old_mode="disabled",
-        new_mode="learning",)
+        event = BehavioralModeChanged(
+            mcp_server_id="math",
+            old_mode="disabled",
+            new_mode="learning",
+        )
         assert isinstance(event, DomainEvent)
 
 

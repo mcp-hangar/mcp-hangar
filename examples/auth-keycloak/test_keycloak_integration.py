@@ -1,5 +1,6 @@
 #!/usr/bin/env python3
 """Test Keycloak + MCP-Hangar OIDC integration."""
+
 import base64
 import json
 

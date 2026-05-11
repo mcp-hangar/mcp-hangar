@@ -14,7 +14,6 @@ class _StubEvent(DomainEvent):
 
 
 class TestHookPhase:
-
     def test_all_phases_are_strings(self):
         assert HookPhase.PRE_VALIDATE == "pre_validate"
         assert HookPhase.POST_VALIDATE == "post_validate"
@@ -34,7 +33,6 @@ class TestHookPhase:
 
 
 class TestHook:
-
     def test_valid_hook(self):
         evt = _StubEvent()
         hook = Hook(event=evt, phase=HookPhase.OBSERVE, sequence_number=0)

@@ -67,8 +67,11 @@ class TestProviderCrudIntegration:
         """CreateProviderHandler stores provider and emits McpServerRegistered."""
         command_bus, _, repo, _, captured = _make_infrastructure()
         command_bus.send(
-            CreateMcpServerCommand(mcp_server_id="test-provider", mode="subprocess",
-            command=["python", "-m", "fake_server"],)
+            CreateMcpServerCommand(
+                mcp_server_id="test-provider",
+                mode="subprocess",
+                command=["python", "-m", "fake_server"],
+            )
         )
         provider = repo.get("test-provider")
         assert provider is not None
@@ -78,11 +81,17 @@ class TestProviderCrudIntegration:
         """UpdateProviderHandler updates description and emits McpServerUpdated."""
         command_bus, _, repo, _, captured = _make_infrastructure()
         command_bus.send(
-            CreateMcpServerCommand(mcp_server_id="test-provider", mode="subprocess",
-            command=["python", "-m", "fake_server"],)
+            CreateMcpServerCommand(
+                mcp_server_id="test-provider",
+                mode="subprocess",
+                command=["python", "-m", "fake_server"],
+            )
         )
         command_bus.send(
-            UpdateMcpServerCommand(mcp_server_id="test-provider", description="updated description",)
+            UpdateMcpServerCommand(
+                mcp_server_id="test-provider",
+                description="updated description",
+            )
         )
         assert any(isinstance(e, McpServerUpdated) and e.mcp_server_id == "test-provider" for e in captured)
 
@@ -90,8 +99,11 @@ class TestProviderCrudIntegration:
         """DeleteProviderHandler removes COLD provider and emits McpServerDeregistered."""
         command_bus, _, repo, _, captured = _make_infrastructure()
         command_bus.send(
-            CreateMcpServerCommand(mcp_server_id="test-provider", mode="subprocess",
-            command=["python", "-m", "fake_server"],)
+            CreateMcpServerCommand(
+                mcp_server_id="test-provider",
+                mode="subprocess",
+                command=["python", "-m", "fake_server"],
+            )
         )
         command_bus.send(DeleteMcpServerCommand(mcp_server_id="test-provider"))
         assert repo.get("test-provider") is None
@@ -130,8 +142,11 @@ class TestGroupCrudIntegration:
         command_bus.send(CreateGroupCommand(group_id="team-a"))
         # Create a provider to add as member
         command_bus.send(
-            CreateMcpServerCommand(mcp_server_id="member-1", mode="subprocess",
-            command=["python", "-m", "fake_server"],)
+            CreateMcpServerCommand(
+                mcp_server_id="member-1",
+                mode="subprocess",
+                command=["python", "-m", "fake_server"],
+            )
         )
         command_bus.send(AddGroupMemberCommand(group_id="team-a", mcp_server_id="member-1"))
         group = groups["team-a"]
@@ -143,8 +158,11 @@ class TestGroupCrudIntegration:
         command_bus, _, repo, groups, _ = _make_infrastructure()
         command_bus.send(CreateGroupCommand(group_id="team-a"))
         command_bus.send(
-            CreateMcpServerCommand(mcp_server_id="member-1", mode="subprocess",
-            command=["python", "-m", "fake_server"],)
+            CreateMcpServerCommand(
+                mcp_server_id="member-1",
+                mode="subprocess",
+                command=["python", "-m", "fake_server"],
+            )
         )
         command_bus.send(AddGroupMemberCommand(group_id="team-a", mcp_server_id="member-1"))
         command_bus.send(RemoveGroupMemberCommand(group_id="team-a", mcp_server_id="member-1"))
@@ -178,8 +196,11 @@ class TestConfigSerializerIntegration:
 
     def _make_provider(self, mcp_server_id: str = "math") -> McpServer:
         """Create a real Provider instance for serialization tests."""
-        return McpServer(mcp_server_id=mcp_server_id, mode=ProviderMode.SUBPROCESS,
-        command=["python", "-m", "math_server"],)
+        return McpServer(
+            mcp_server_id=mcp_server_id,
+            mode=ProviderMode.SUBPROCESS,
+            command=["python", "-m", "math_server"],
+        )
 
     def test_serialize_full_config_includes_provider(self):
         """serialize_full_config() with explicit providers returns dict with provider."""

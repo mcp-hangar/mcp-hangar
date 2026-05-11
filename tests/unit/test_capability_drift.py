@@ -4,7 +4,6 @@ Verifies _verify_capability_drift() behavior across enforcement modes,
 and that McpServerRecoverySaga correctly filters capability_violation events.
 """
 
-
 from mcp_hangar.domain.events import CapabilityViolationDetected, McpServerDegraded, McpServerStateChanged
 from mcp_hangar.domain.model.provider import McpServer
 from mcp_hangar.domain.value_objects import ProviderMode, ProviderState
@@ -26,9 +25,12 @@ def _make_provider(
         tools=ToolCapabilities(expected_tools=expected_tools),
         enforcement_mode=enforcement_mode,
     )
-    provider = McpServer(mcp_server_id="drift-test", mode=ProviderMode.SUBPROCESS,
-    command=["echo"],
-    capabilities=caps,)
+    provider = McpServer(
+        mcp_server_id="drift-test",
+        mode=ProviderMode.SUBPROCESS,
+        command=["echo"],
+        capabilities=caps,
+    )
     # Move to READY so drift check is meaningful
     provider._state = ProviderState.READY
     return provider
@@ -39,8 +41,11 @@ class TestVerifyCapabilityDrift:
 
     def test_no_capabilities_skips(self) -> None:
         """Provider without capabilities should skip drift check entirely."""
-        provider = McpServer(mcp_server_id="no-caps", mode=ProviderMode.SUBPROCESS,
-        command=["echo"],)
+        provider = McpServer(
+            mcp_server_id="no-caps",
+            mode=ProviderMode.SUBPROCESS,
+            command=["echo"],
+        )
         provider._state = ProviderState.READY
         provider._tools.update_from_list(
             [
@@ -190,9 +195,12 @@ class TestRecoverySagaCapabilityFilter:
         """Saga should return empty and NOT schedule for capability_violation: reason."""
         saga = McpServerRecoverySaga()
 
-        event = McpServerDegraded(mcp_server_id="blocked-provider", consecutive_failures=1,
-        total_failures=1,
-        reason="capability_violation: undeclared tools detected",)
+        event = McpServerDegraded(
+            mcp_server_id="blocked-provider",
+            consecutive_failures=1,
+            total_failures=1,
+            reason="capability_violation: undeclared tools detected",
+        )
 
         commands = saga._handle_degraded(event)
         assert commands == [], "saga should skip auto-recovery for capability violations"
@@ -208,9 +216,12 @@ class TestRecoverySagaCapabilityFilter:
         """
         saga = McpServerRecoverySaga()
 
-        event = McpServerDegraded(mcp_server_id="normal-provider", consecutive_failures=1,
-        total_failures=1,
-        reason="health_check_failed",)
+        event = McpServerDegraded(
+            mcp_server_id="normal-provider",
+            consecutive_failures=1,
+            total_failures=1,
+            reason="health_check_failed",
+        )
 
         commands = saga._handle_degraded(event)
         # Returns [] because command is scheduled asynchronously via saga_manager

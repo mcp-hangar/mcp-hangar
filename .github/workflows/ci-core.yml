@@ -5,14 +5,12 @@ on:
     branches: [main]
     paths:
       - "src/**"
-      - "enterprise/**"
       - "tests/**"
       - "pyproject.toml"
       - ".github/workflows/ci-core.yml"
   pull_request:
     paths:
       - "src/**"
-      - "enterprise/**"
       - "tests/**"
       - "pyproject.toml"
       - ".github/workflows/ci-core.yml"
@@ -48,9 +46,6 @@ jobs:
 
       - name: Type check
         run: mypy src/mcp_hangar
-
-      - name: Enterprise import boundary check
-        run: bash scripts/check_enterprise_boundary.sh
 
   test:
     runs-on: ubuntu-latest

@@ -212,9 +212,7 @@ Same API. Same reliability. Different scale.
 
 ## License
 
-Core (`src/`) is MIT licensed. Enterprise features (`enterprise/`) are BSL 1.1 licensed.
-
-See [LICENSE](LICENSE) for MIT terms and [enterprise/LICENSE.BSL](enterprise/LICENSE.BSL) for BSL terms.
+Licensed under [MIT](LICENSE).
 
 ---
 

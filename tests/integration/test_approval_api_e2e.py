@@ -11,11 +11,11 @@ from starlette.testclient import TestClient
 
 from mcp_hangar.domain.value_objects.tool_access_policy import ToolAccessPolicy
 
-from enterprise.approvals.api.routes import approval_routes
-from enterprise.approvals.delivery.noop import NoOpApprovalDelivery
-from enterprise.approvals.hold_registry import ApprovalHoldRegistry
-from enterprise.approvals.models import ApprovalState
-from enterprise.approvals.service import ApprovalGateService
+from mcp_hangar.approvals.api.routes import approval_routes
+from mcp_hangar.approvals.delivery.noop import NoOpApprovalDelivery
+from mcp_hangar.approvals.hold_registry import ApprovalHoldRegistry
+from mcp_hangar.approvals.models import ApprovalState
+from mcp_hangar.approvals.service import ApprovalGateService
 
 
 # ---------------------------------------------------------------------------
@@ -35,16 +35,16 @@ class InMemoryRepository:
 
     async def list_pending(self, mcp_server_id=None):
         return [
-            r for r in self._store.values()
-            if r.state == ApprovalState.PENDING
-            and (mcp_server_id is None or r.mcp_server_id == mcp_server_id)
+            r
+            for r in self._store.values()
+            if r.state == ApprovalState.PENDING and (mcp_server_id is None or r.mcp_server_id == mcp_server_id)
         ]
 
     async def list_by_state(self, state, mcp_server_id=None):
         return [
-            r for r in self._store.values()
-            if r.state == state
-            and (mcp_server_id is None or r.mcp_server_id == mcp_server_id)
+            r
+            for r in self._store.values()
+            if r.state == state and (mcp_server_id is None or r.mcp_server_id == mcp_server_id)
         ]
 
     async def update_state(self, approval_id, state, decided_by, decided_at, reason):

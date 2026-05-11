@@ -70,7 +70,7 @@ They are used in commit messages: `<type>(<scope>): <subject>`.
 | Scope | Description |
 |-------|-------------|
 | core | Logic in src/mcp_hangar/domain/ or application/ |
-| enterprise | Logic in enterprise/ directory |
+| enterprise | Logic in src/mcp_hangar/auth, compliance, integrations, approvals, and infrastructure/persistence |
 | cli | Command line interface and Typer registration |
 | operator | Kubernetes operator components |
 | helm | Helm chart templates and values |

@@ -12,27 +12,31 @@ class TestCloudConfig:
         assert CloudConfig.from_dict({"enabled": True}) is None
 
     def test_from_dict_enabled_with_key(self):
-        cfg = CloudConfig.from_dict({
-            "enabled": True,
-            "license_key": "hk_v1_test",
-        })
+        cfg = CloudConfig.from_dict(
+            {
+                "enabled": True,
+                "license_key": "hk_v1_test",
+            }
+        )
         assert cfg is not None
         assert cfg.license_key == "hk_v1_test"
         assert cfg.endpoint == "https://api.mcp-hangar.io"
         assert cfg.heartbeat_interval_s == 30
 
     def test_from_dict_custom_values(self):
-        cfg = CloudConfig.from_dict({
-            "enabled": True,
-            "license_key": "hk_v1_test",
-            "endpoint": "https://custom.example.com",
-            "batch_interval_s": 5,
-            "heartbeat_interval_s": 15,
-            "state_sync_interval_s": 120,
-            "buffer_max_size": 5000,
-            "max_registration_attempts": 3,
-            "dormant_probe_interval_s": 600,
-        })
+        cfg = CloudConfig.from_dict(
+            {
+                "enabled": True,
+                "license_key": "hk_v1_test",
+                "endpoint": "https://custom.example.com",
+                "batch_interval_s": 5,
+                "heartbeat_interval_s": 15,
+                "state_sync_interval_s": 120,
+                "buffer_max_size": 5000,
+                "max_registration_attempts": 3,
+                "dormant_probe_interval_s": 600,
+            }
+        )
         assert cfg is not None
         assert cfg.endpoint == "https://custom.example.com"
         assert cfg.batch_interval_s == 5

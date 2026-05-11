@@ -46,7 +46,7 @@ def db_path(tmp_path):
 @pytest.fixture
 def api_key_store(db_path):
     """Create and initialize an SQLiteApiKeyStore."""
-    from enterprise.auth.infrastructure.sqlite_store import SQLiteApiKeyStore
+    from mcp_hangar.auth.infrastructure.sqlite_store import SQLiteApiKeyStore
 
     store = SQLiteApiKeyStore(db_path=db_path)
     store.initialize()
@@ -56,7 +56,7 @@ def api_key_store(db_path):
 @pytest.fixture
 def api_key_store_with_publisher(db_path):
     """Create SQLiteApiKeyStore with an event publisher."""
-    from enterprise.auth.infrastructure.sqlite_store import SQLiteApiKeyStore
+    from mcp_hangar.auth.infrastructure.sqlite_store import SQLiteApiKeyStore
 
     publisher = Mock()
     store = SQLiteApiKeyStore(db_path=db_path, event_publisher=publisher)
@@ -67,7 +67,7 @@ def api_key_store_with_publisher(db_path):
 @pytest.fixture
 def role_store(db_path):
     """Create and initialize an SQLiteRoleStore."""
-    from enterprise.auth.infrastructure.sqlite_store import SQLiteRoleStore
+    from mcp_hangar.auth.infrastructure.sqlite_store import SQLiteRoleStore
 
     store = SQLiteRoleStore(db_path=db_path)
     store.initialize()
@@ -77,7 +77,7 @@ def role_store(db_path):
 @pytest.fixture
 def role_store_with_publisher(db_path):
     """Create SQLiteRoleStore with an event publisher."""
-    from enterprise.auth.infrastructure.sqlite_store import SQLiteRoleStore
+    from mcp_hangar.auth.infrastructure.sqlite_store import SQLiteRoleStore
 
     publisher = Mock()
     store = SQLiteRoleStore(db_path=db_path, event_publisher=publisher)
@@ -105,7 +105,7 @@ class TestSQLiteApiKeyStoreInitialize:
     """Tests for SQLiteApiKeyStore.initialize()."""
 
     def test_initialize_creates_tables(self, db_path):
-        from enterprise.auth.infrastructure.sqlite_store import SQLiteApiKeyStore
+        from mcp_hangar.auth.infrastructure.sqlite_store import SQLiteApiKeyStore
 
         store = SQLiteApiKeyStore(db_path=db_path)
         store.initialize()
@@ -166,7 +166,7 @@ class TestSQLiteApiKeyStoreInitialize:
         conn.commit()
         conn.close()
 
-        from enterprise.auth.infrastructure.sqlite_store import SQLiteApiKeyStore
+        from mcp_hangar.auth.infrastructure.sqlite_store import SQLiteApiKeyStore
 
         store = SQLiteApiKeyStore(db_path=db_path)
         store.initialize()
@@ -196,7 +196,7 @@ class TestSQLiteApiKeyStoreGetPrincipal:
             principal_id="svc-test",
             name="test-key",
         )
-        from enterprise.auth.infrastructure.api_key_authenticator import ApiKeyAuthenticator
+        from mcp_hangar.auth.infrastructure.api_key_authenticator import ApiKeyAuthenticator
 
         key_hash = ApiKeyAuthenticator._hash_key(raw_key)
         principal = api_key_store.get_principal_for_key(key_hash)
@@ -208,7 +208,7 @@ class TestSQLiteApiKeyStoreGetPrincipal:
     def test_raises_revoked_credentials_for_revoked_key(self, api_key_store):
         """Lines 178-182: revoked key raises RevokedCredentialsError."""
         raw_key = api_key_store.create_key(principal_id="svc-revoke", name="rkey")
-        from enterprise.auth.infrastructure.api_key_authenticator import ApiKeyAuthenticator
+        from mcp_hangar.auth.infrastructure.api_key_authenticator import ApiKeyAuthenticator
 
         key_hash = ApiKeyAuthenticator._hash_key(raw_key)
 
@@ -228,7 +228,7 @@ class TestSQLiteApiKeyStoreGetPrincipal:
             name="exp-key",
             expires_at=past,
         )
-        from enterprise.auth.infrastructure.api_key_authenticator import ApiKeyAuthenticator
+        from mcp_hangar.auth.infrastructure.api_key_authenticator import ApiKeyAuthenticator
 
         key_hash = ApiKeyAuthenticator._hash_key(raw_key)
 
@@ -244,7 +244,7 @@ class TestSQLiteApiKeyStoreGetPrincipal:
         # Rotate with 0 grace period so it expires immediately
         api_key_store.rotate_key(key_id, grace_period_seconds=0)
 
-        from enterprise.auth.infrastructure.api_key_authenticator import ApiKeyAuthenticator
+        from mcp_hangar.auth.infrastructure.api_key_authenticator import ApiKeyAuthenticator
 
         key_hash = ApiKeyAuthenticator._hash_key(raw_key)
 
@@ -255,13 +255,13 @@ class TestSQLiteApiKeyStoreGetPrincipal:
         """Lines 196-200: rotated key with no grace_until set rejects immediately."""
         import sqlite3
 
-        from enterprise.auth.infrastructure.sqlite_store import SQLiteApiKeyStore
+        from mcp_hangar.auth.infrastructure.sqlite_store import SQLiteApiKeyStore
 
         store = SQLiteApiKeyStore(db_path=db_path)
         store.initialize()
 
         raw_key = store.create_key(principal_id="svc-nograce", name="ngkey")
-        from enterprise.auth.infrastructure.api_key_authenticator import ApiKeyAuthenticator
+        from mcp_hangar.auth.infrastructure.api_key_authenticator import ApiKeyAuthenticator
 
         key_hash = ApiKeyAuthenticator._hash_key(raw_key)
 
@@ -286,7 +286,7 @@ class TestSQLiteApiKeyStoreGetPrincipal:
         import json
         import sqlite3
 
-        from enterprise.auth.infrastructure.sqlite_store import SQLiteApiKeyStore
+        from mcp_hangar.auth.infrastructure.sqlite_store import SQLiteApiKeyStore
 
         store = SQLiteApiKeyStore(db_path=db_path)
         store.initialize()
@@ -296,7 +296,7 @@ class TestSQLiteApiKeyStoreGetPrincipal:
             name="grp-key",
             groups=frozenset(["admin", "ops"]),
         )
-        from enterprise.auth.infrastructure.api_key_authenticator import ApiKeyAuthenticator
+        from mcp_hangar.auth.infrastructure.api_key_authenticator import ApiKeyAuthenticator
 
         key_hash = ApiKeyAuthenticator._hash_key(raw_key)
 
@@ -534,7 +534,7 @@ class TestSQLiteApiKeyStoreClose:
 
     def test_close_resets_initialized_flag(self, db_path):
         """Lines 521-528: close method."""
-        from enterprise.auth.infrastructure.sqlite_store import SQLiteApiKeyStore
+        from mcp_hangar.auth.infrastructure.sqlite_store import SQLiteApiKeyStore
 
         store = SQLiteApiKeyStore(db_path=db_path)
         store.initialize()
@@ -545,7 +545,7 @@ class TestSQLiteApiKeyStoreClose:
 
     def test_close_when_no_connection(self, db_path):
         """Close when no connection exists does not raise."""
-        from enterprise.auth.infrastructure.sqlite_store import SQLiteApiKeyStore
+        from mcp_hangar.auth.infrastructure.sqlite_store import SQLiteApiKeyStore
 
         store = SQLiteApiKeyStore(db_path=db_path)
         # Never opened connection
@@ -563,7 +563,7 @@ class TestSQLiteRoleStoreInitialize:
 
     def test_initialize_seeds_builtin_roles(self, role_store):
         """Lines 567-595: initialize creates tables and seeds builtin roles."""
-        from enterprise.auth.roles import BUILTIN_ROLES
+        from mcp_hangar.auth.roles import BUILTIN_ROLES
 
         for role_name in BUILTIN_ROLES:
             role = role_store.get_role(role_name)
@@ -601,9 +601,11 @@ class TestSQLiteRoleStoreAddRole:
         custom = Role(
             name="custom-role",
             description="A custom test role",
-            permissions=frozenset([
-                Permission(resource_type="tool", action="invoke", resource_id="*"),
-            ]),
+            permissions=frozenset(
+                [
+                    Permission(resource_type="tool", action="invoke", resource_id="*"),
+                ]
+            ),
         )
         role_store.add_role(custom)
 
@@ -781,7 +783,7 @@ class TestSQLiteRoleStoreClose:
 
     def test_close_resets_initialized_flag(self, db_path):
         """Lines 845-856: close method."""
-        from enterprise.auth.infrastructure.sqlite_store import SQLiteRoleStore
+        from mcp_hangar.auth.infrastructure.sqlite_store import SQLiteRoleStore
 
         store = SQLiteRoleStore(db_path=db_path)
         store.initialize()
@@ -790,7 +792,7 @@ class TestSQLiteRoleStoreClose:
 
     def test_close_when_no_connection(self, db_path):
         """Close without connection does not raise."""
-        from enterprise.auth.infrastructure.sqlite_store import SQLiteRoleStore
+        from mcp_hangar.auth.infrastructure.sqlite_store import SQLiteRoleStore
 
         store = SQLiteRoleStore(db_path=db_path)
         store.close()
@@ -807,7 +809,7 @@ class TestAuthProjection:
 
     def test_apply_api_key_created(self):
         """Lines 122-144: apply ApiKeyCreated event."""
-        from enterprise.auth.infrastructure.projections import AuthProjection
+        from mcp_hangar.auth.infrastructure.projections import AuthProjection
 
         proj = AuthProjection()
         event = ApiKeyCreated(
@@ -828,7 +830,7 @@ class TestAuthProjection:
 
     def test_apply_api_key_revoked(self):
         """Lines 146-158: apply ApiKeyRevoked event."""
-        from enterprise.auth.infrastructure.projections import AuthProjection
+        from mcp_hangar.auth.infrastructure.projections import AuthProjection
 
         proj = AuthProjection()
         proj.apply(
@@ -857,7 +859,7 @@ class TestAuthProjection:
 
     def test_apply_api_key_revoked_for_unknown_key_is_noop(self):
         """ApiKeyRevoked for unknown key_id does not crash."""
-        from enterprise.auth.infrastructure.projections import AuthProjection
+        from mcp_hangar.auth.infrastructure.projections import AuthProjection
 
         proj = AuthProjection()
         proj.apply(
@@ -872,7 +874,7 @@ class TestAuthProjection:
 
     def test_apply_role_assigned(self):
         """Lines 160-184: apply RoleAssigned event."""
-        from enterprise.auth.infrastructure.projections import AuthProjection
+        from mcp_hangar.auth.infrastructure.projections import AuthProjection
 
         proj = AuthProjection()
         event = RoleAssigned(
@@ -889,7 +891,7 @@ class TestAuthProjection:
 
     def test_apply_role_assigned_idempotent(self):
         """Lines 175-183: duplicate assignment is ignored."""
-        from enterprise.auth.infrastructure.projections import AuthProjection
+        from mcp_hangar.auth.infrastructure.projections import AuthProjection
 
         proj = AuthProjection()
         event = RoleAssigned(
@@ -906,7 +908,7 @@ class TestAuthProjection:
 
     def test_apply_role_revoked(self):
         """Lines 186-194: apply RoleRevoked event."""
-        from enterprise.auth.infrastructure.projections import AuthProjection
+        from mcp_hangar.auth.infrastructure.projections import AuthProjection
 
         proj = AuthProjection()
         proj.apply(
@@ -931,7 +933,7 @@ class TestAuthProjection:
 
     def test_apply_role_revoked_for_unknown_principal_is_noop(self):
         """RoleRevoked for unknown principal does not crash."""
-        from enterprise.auth.infrastructure.projections import AuthProjection
+        from mcp_hangar.auth.infrastructure.projections import AuthProjection
 
         proj = AuthProjection()
         proj.apply(
@@ -945,7 +947,7 @@ class TestAuthProjection:
 
     def test_get_keys_for_principal(self):
         """Lines 205-209: get keys for a principal."""
-        from enterprise.auth.infrastructure.projections import AuthProjection
+        from mcp_hangar.auth.infrastructure.projections import AuthProjection
 
         proj = AuthProjection()
         proj.apply(
@@ -972,7 +974,7 @@ class TestAuthProjection:
 
     def test_get_active_key_count(self):
         """Lines 211-214: count active (non-revoked) keys."""
-        from enterprise.auth.infrastructure.projections import AuthProjection
+        from mcp_hangar.auth.infrastructure.projections import AuthProjection
 
         proj = AuthProjection()
         proj.apply(
@@ -1006,7 +1008,7 @@ class TestAuthProjection:
 
     def test_has_role_with_wildcard_scope(self):
         """Lines 221-228: has_role with scope='*'."""
-        from enterprise.auth.infrastructure.projections import AuthProjection
+        from mcp_hangar.auth.infrastructure.projections import AuthProjection
 
         proj = AuthProjection()
         proj.apply(
@@ -1024,7 +1026,7 @@ class TestAuthProjection:
 
     def test_has_role_with_specific_scope(self):
         """has_role with specific scope matches global too."""
-        from enterprise.auth.infrastructure.projections import AuthProjection
+        from mcp_hangar.auth.infrastructure.projections import AuthProjection
 
         proj = AuthProjection()
         proj.apply(
@@ -1040,7 +1042,7 @@ class TestAuthProjection:
 
     def test_get_stats(self):
         """Lines 234-250: get projection statistics."""
-        from enterprise.auth.infrastructure.projections import AuthProjection
+        from mcp_hangar.auth.infrastructure.projections import AuthProjection
 
         proj = AuthProjection()
         proj.apply(
@@ -1071,14 +1073,14 @@ class TestAuthProjection:
 
     def test_catchup_without_event_store_returns_zero(self):
         """Lines 90-91: catchup with no event_store returns 0."""
-        from enterprise.auth.infrastructure.projections import AuthProjection
+        from mcp_hangar.auth.infrastructure.projections import AuthProjection
 
         proj = AuthProjection()
         assert proj.catchup() == 0
 
     def test_catchup_processes_events_from_store(self):
         """Lines 82-105: catchup reads from event store."""
-        from enterprise.auth.infrastructure.projections import AuthProjection
+        from mcp_hangar.auth.infrastructure.projections import AuthProjection
 
         mock_store = Mock(spec=IEventStore)
         event = ApiKeyCreated(
@@ -1098,7 +1100,7 @@ class TestAuthProjection:
 
     def test_apply_unrecognized_event_is_noop(self):
         """Lines 107-120: apply with unrecognized event type does nothing."""
-        from enterprise.auth.infrastructure.projections import AuthProjection
+        from mcp_hangar.auth.infrastructure.projections import AuthProjection
 
         proj = AuthProjection()
 
@@ -1113,7 +1115,7 @@ class TestAuthProjection:
 
     def test_api_key_created_with_expiry(self):
         """ApiKeyCreated event with expires_at set."""
-        from enterprise.auth.infrastructure.projections import AuthProjection
+        from mcp_hangar.auth.infrastructure.projections import AuthProjection
 
         proj = AuthProjection()
         future_ts = (datetime.now(UTC) + timedelta(days=30)).timestamp()
@@ -1141,7 +1143,7 @@ class TestAuthAuditLog:
 
     def test_apply_api_key_created_creates_entry(self):
         """Lines 282-293: audit entry for ApiKeyCreated."""
-        from enterprise.auth.infrastructure.projections import AuthAuditLog
+        from mcp_hangar.auth.infrastructure.projections import AuthAuditLog
 
         log = AuthAuditLog()
         log.apply(
@@ -1160,7 +1162,7 @@ class TestAuthAuditLog:
 
     def test_apply_api_key_revoked_creates_entry(self):
         """Lines 295-305: audit entry for ApiKeyRevoked."""
-        from enterprise.auth.infrastructure.projections import AuthAuditLog
+        from mcp_hangar.auth.infrastructure.projections import AuthAuditLog
 
         log = AuthAuditLog()
         log.apply(
@@ -1178,7 +1180,7 @@ class TestAuthAuditLog:
 
     def test_apply_role_assigned_creates_entry(self):
         """Lines 307-317: audit entry for RoleAssigned."""
-        from enterprise.auth.infrastructure.projections import AuthAuditLog
+        from mcp_hangar.auth.infrastructure.projections import AuthAuditLog
 
         log = AuthAuditLog()
         log.apply(
@@ -1196,7 +1198,7 @@ class TestAuthAuditLog:
 
     def test_apply_role_revoked_creates_entry(self):
         """Lines 319-329: audit entry for RoleRevoked."""
-        from enterprise.auth.infrastructure.projections import AuthAuditLog
+        from mcp_hangar.auth.infrastructure.projections import AuthAuditLog
 
         log = AuthAuditLog()
         log.apply(
@@ -1214,7 +1216,7 @@ class TestAuthAuditLog:
 
     def test_apply_unknown_event_returns_none(self):
         """Lines 331: unknown event returns None from _event_to_entry."""
-        from enterprise.auth.infrastructure.projections import AuthAuditLog
+        from mcp_hangar.auth.infrastructure.projections import AuthAuditLog
 
         log = AuthAuditLog()
 
@@ -1228,15 +1230,11 @@ class TestAuthAuditLog:
 
     def test_query_filter_by_principal(self):
         """Lines 354-356: query with principal_id filter."""
-        from enterprise.auth.infrastructure.projections import AuthAuditLog
+        from mcp_hangar.auth.infrastructure.projections import AuthAuditLog
 
         log = AuthAuditLog()
-        log.apply(
-            ApiKeyCreated(key_id="k1", principal_id="svc-a", key_name="k", expires_at=None, created_by="admin")
-        )
-        log.apply(
-            ApiKeyCreated(key_id="k2", principal_id="svc-b", key_name="k", expires_at=None, created_by="admin")
-        )
+        log.apply(ApiKeyCreated(key_id="k1", principal_id="svc-a", key_name="k", expires_at=None, created_by="admin"))
+        log.apply(ApiKeyCreated(key_id="k2", principal_id="svc-b", key_name="k", expires_at=None, created_by="admin"))
 
         entries = log.query(principal_id="svc-a")
         assert len(entries) == 1
@@ -1244,15 +1242,11 @@ class TestAuthAuditLog:
 
     def test_query_filter_by_event_type(self):
         """Lines 357-358: query with event_type filter."""
-        from enterprise.auth.infrastructure.projections import AuthAuditLog
+        from mcp_hangar.auth.infrastructure.projections import AuthAuditLog
 
         log = AuthAuditLog()
-        log.apply(
-            ApiKeyCreated(key_id="k1", principal_id="svc-a", key_name="k", expires_at=None, created_by="admin")
-        )
-        log.apply(
-            RoleAssigned(principal_id="svc-a", role_name="admin", scope="global", assigned_by="system")
-        )
+        log.apply(ApiKeyCreated(key_id="k1", principal_id="svc-a", key_name="k", expires_at=None, created_by="admin"))
+        log.apply(RoleAssigned(principal_id="svc-a", role_name="admin", scope="global", assigned_by="system"))
 
         entries = log.query(event_type="role_assigned")
         assert len(entries) == 1
@@ -1260,7 +1254,7 @@ class TestAuthAuditLog:
 
     def test_query_filter_by_since(self):
         """Lines 359-360: query with since filter."""
-        from enterprise.auth.infrastructure.projections import AuthAuditLog
+        from mcp_hangar.auth.infrastructure.projections import AuthAuditLog
 
         log = AuthAuditLog()
 
@@ -1279,7 +1273,7 @@ class TestAuthAuditLog:
 
     def test_query_limit(self):
         """Lines 363-364: query with limit."""
-        from enterprise.auth.infrastructure.projections import AuthAuditLog
+        from mcp_hangar.auth.infrastructure.projections import AuthAuditLog
 
         log = AuthAuditLog()
         for i in range(10):
@@ -1298,7 +1292,7 @@ class TestAuthAuditLog:
 
     def test_max_entries_trim(self):
         """Lines 277-278: entries are trimmed when over max."""
-        from enterprise.auth.infrastructure.projections import AuthAuditLog
+        from mcp_hangar.auth.infrastructure.projections import AuthAuditLog
 
         log = AuthAuditLog(max_entries=5)
         for i in range(10):
@@ -1326,7 +1320,7 @@ class TestEventSourcedApiKeyStoreLoadKey:
 
     def test_load_key_without_index_entry_and_without_snapshot(self, mock_event_store):
         """Lines 150-153, 159-165: _load_key without index_entry, rebuilds from events."""
-        from enterprise.auth.infrastructure.event_sourced_store import EventSourcedApiKeyStore
+        from mcp_hangar.auth.infrastructure.event_sourced_store import EventSourcedApiKeyStore
 
         creation_event = ApiKeyCreated(
             key_id="kid-1",
@@ -1347,7 +1341,7 @@ class TestEventSourcedApiKeyStoreLoadKey:
 
     def test_load_key_returns_none_when_no_events_no_snapshot(self, mock_event_store):
         """Lines 142-143: no events and no snapshot returns None."""
-        from enterprise.auth.infrastructure.event_sourced_store import EventSourcedApiKeyStore
+        from mcp_hangar.auth.infrastructure.event_sourced_store import EventSourcedApiKeyStore
 
         mock_event_store.list_streams.return_value = []
         mock_event_store.read_stream.return_value = []
@@ -1359,7 +1353,7 @@ class TestEventSourcedApiKeyStoreLoadKey:
 
     def test_load_key_returns_none_when_no_creation_event(self, mock_event_store):
         """Lines 162-163: no creation event in stream returns None."""
-        from enterprise.auth.infrastructure.event_sourced_store import EventSourcedApiKeyStore
+        from mcp_hangar.auth.infrastructure.event_sourced_store import EventSourcedApiKeyStore
 
         # Return a non-creation event
         revoke_event = ApiKeyRevoked(
@@ -1380,7 +1374,7 @@ class TestEventSourcedApiKeyStoreLoadKey:
 
     def test_load_key_with_snapshot(self, mock_event_store):
         """Lines 155-156: load key from snapshot."""
-        from enterprise.auth.infrastructure.event_sourced_store import EventSourcedApiKeyStore
+        from mcp_hangar.auth.infrastructure.event_sourced_store import EventSourcedApiKeyStore
 
         snapshot = ApiKeySnapshot(
             key_hash="snap-hash",
@@ -1416,7 +1410,7 @@ class TestEventSourcedApiKeyStorePublishEvents:
 
     def test_publish_events_with_publisher(self, mock_event_store):
         """Lines 181-182: events published when publisher is set."""
-        from enterprise.auth.infrastructure.event_sourced_store import EventSourcedApiKeyStore
+        from mcp_hangar.auth.infrastructure.event_sourced_store import EventSourcedApiKeyStore
 
         publisher = Mock()
         store = EventSourcedApiKeyStore(
@@ -1437,17 +1431,21 @@ class TestEventSourcedApiKeyStorePublishEvents:
 
     def test_publish_events_without_publisher(self, mock_event_store):
         """No error when publisher is None."""
-        from enterprise.auth.infrastructure.event_sourced_store import EventSourcedApiKeyStore
+        from mcp_hangar.auth.infrastructure.event_sourced_store import EventSourcedApiKeyStore
 
         store = EventSourcedApiKeyStore(event_store=mock_event_store)
         # Should not raise
-        store._publish_events([ApiKeyCreated(
-            key_id="kid",
-            principal_id="svc",
-            key_name="key",
-            expires_at=None,
-            created_by="admin",
-        )])
+        store._publish_events(
+            [
+                ApiKeyCreated(
+                    key_id="kid",
+                    principal_id="svc",
+                    key_name="key",
+                    expires_at=None,
+                    created_by="admin",
+                )
+            ]
+        )
 
 
 class TestEventSourcedApiKeyStoreSaveKey:
@@ -1455,7 +1453,7 @@ class TestEventSourcedApiKeyStoreSaveKey:
 
     def test_save_key_updates_index(self, mock_event_store):
         """Lines 205, 217-222: save_key updates the index."""
-        from enterprise.auth.infrastructure.event_sourced_store import EventSourcedApiKeyStore
+        from mcp_hangar.auth.infrastructure.event_sourced_store import EventSourcedApiKeyStore
 
         store = EventSourcedApiKeyStore(event_store=mock_event_store)
         store._index = {}
@@ -1476,7 +1474,7 @@ class TestEventSourcedApiKeyStoreSaveKey:
 
     def test_save_key_no_events_returns_early(self, mock_event_store):
         """Lines 204-205: no events to save returns early."""
-        from enterprise.auth.infrastructure.event_sourced_store import EventSourcedApiKeyStore
+        from mcp_hangar.auth.infrastructure.event_sourced_store import EventSourcedApiKeyStore
 
         store = EventSourcedApiKeyStore(event_store=mock_event_store)
 
@@ -1497,7 +1495,7 @@ class TestEventSourcedApiKeyStoreGetPrincipal:
 
     def test_returns_none_when_key_not_in_index(self, mock_event_store):
         """Lines 250-251: key not found in index."""
-        from enterprise.auth.infrastructure.event_sourced_store import EventSourcedApiKeyStore
+        from mcp_hangar.auth.infrastructure.event_sourced_store import EventSourcedApiKeyStore
 
         mock_event_store.list_streams.return_value = []
         store = EventSourcedApiKeyStore(event_store=mock_event_store)
@@ -1507,7 +1505,7 @@ class TestEventSourcedApiKeyStoreGetPrincipal:
 
     def test_returns_principal_for_valid_key(self, mock_event_store):
         """Lines 247-276: successful principal lookup."""
-        from enterprise.auth.infrastructure.event_sourced_store import EventSourcedApiKeyStore
+        from mcp_hangar.auth.infrastructure.event_sourced_store import EventSourcedApiKeyStore
 
         creation_event = ApiKeyCreated(
             key_id="kid-gp",
@@ -1527,7 +1525,7 @@ class TestEventSourcedApiKeyStoreGetPrincipal:
 
     def test_raises_revoked_for_revoked_key(self, mock_event_store):
         """Lines 259-260: revoked key raises."""
-        from enterprise.auth.infrastructure.event_sourced_store import EventSourcedApiKeyStore
+        from mcp_hangar.auth.infrastructure.event_sourced_store import EventSourcedApiKeyStore
 
         creation_event = ApiKeyCreated(
             key_id="kid-rr",
@@ -1552,7 +1550,7 @@ class TestEventSourcedApiKeyStoreGetPrincipal:
 
     def test_raises_expired_for_expired_key(self, mock_event_store):
         """Lines 262-263: expired key raises."""
-        from enterprise.auth.infrastructure.event_sourced_store import EventSourcedApiKeyStore
+        from mcp_hangar.auth.infrastructure.event_sourced_store import EventSourcedApiKeyStore
 
         past = datetime.now(UTC) - timedelta(hours=1)
         creation_event = ApiKeyCreated(
@@ -1572,7 +1570,7 @@ class TestEventSourcedApiKeyStoreGetPrincipal:
 
     def test_raises_expired_for_rotated_key_past_grace(self, mock_event_store):
         """Lines 266-271: rotated key past grace period raises."""
-        from enterprise.auth.infrastructure.event_sourced_store import EventSourcedApiKeyStore
+        from mcp_hangar.auth.infrastructure.event_sourced_store import EventSourcedApiKeyStore
 
         creation_event = ApiKeyCreated(
             key_id="kid-rg",
@@ -1600,7 +1598,7 @@ class TestEventSourcedApiKeyStoreGetPrincipal:
 
     def test_returns_none_when_load_key_returns_none(self, mock_event_store):
         """Lines 256-257: key in index but load fails returns None."""
-        from enterprise.auth.infrastructure.event_sourced_store import EventSourcedApiKeyStore
+        from mcp_hangar.auth.infrastructure.event_sourced_store import EventSourcedApiKeyStore
 
         # Build index manually
         mock_event_store.list_streams.return_value = []
@@ -1621,7 +1619,7 @@ class TestEventSourcedApiKeyStoreCreateKey:
 
     def test_create_key_returns_raw_key(self, mock_event_store):
         """Lines 289-323: create_key basic path."""
-        from enterprise.auth.infrastructure.event_sourced_store import EventSourcedApiKeyStore
+        from mcp_hangar.auth.infrastructure.event_sourced_store import EventSourcedApiKeyStore
 
         mock_event_store.list_streams.return_value = []
         store = EventSourcedApiKeyStore(event_store=mock_event_store)
@@ -1637,7 +1635,7 @@ class TestEventSourcedApiKeyStoreCreateKey:
 
     def test_create_key_raises_when_max_reached(self, mock_event_store):
         """Lines 292-294: max keys per principal."""
-        from enterprise.auth.infrastructure.event_sourced_store import EventSourcedApiKeyStore
+        from mcp_hangar.auth.infrastructure.event_sourced_store import EventSourcedApiKeyStore
 
         mock_event_store.list_streams.return_value = []
         store = EventSourcedApiKeyStore(event_store=mock_event_store)
@@ -1655,7 +1653,7 @@ class TestEventSourcedApiKeyStoreRevokeKey:
 
     def test_revoke_key_success(self, mock_event_store):
         """Lines 333-358: revoke_key finds and revokes."""
-        from enterprise.auth.infrastructure.event_sourced_store import EventSourcedApiKeyStore
+        from mcp_hangar.auth.infrastructure.event_sourced_store import EventSourcedApiKeyStore
 
         creation_event = ApiKeyCreated(
             key_id="kid-rv",
@@ -1674,7 +1672,7 @@ class TestEventSourcedApiKeyStoreRevokeKey:
 
     def test_revoke_key_not_found_returns_false(self, mock_event_store):
         """Lines 341-342: key_id not in index."""
-        from enterprise.auth.infrastructure.event_sourced_store import EventSourcedApiKeyStore
+        from mcp_hangar.auth.infrastructure.event_sourced_store import EventSourcedApiKeyStore
 
         mock_event_store.list_streams.return_value = []
         store = EventSourcedApiKeyStore(event_store=mock_event_store)
@@ -1684,7 +1682,7 @@ class TestEventSourcedApiKeyStoreRevokeKey:
 
     def test_revoke_already_revoked_returns_false(self, mock_event_store):
         """Lines 345: already revoked returns False."""
-        from enterprise.auth.infrastructure.event_sourced_store import EventSourcedApiKeyStore
+        from mcp_hangar.auth.infrastructure.event_sourced_store import EventSourcedApiKeyStore
 
         creation_event = ApiKeyCreated(
             key_id="kid-ar",
@@ -1713,7 +1711,7 @@ class TestEventSourcedApiKeyStoreListAndCount:
 
     def test_list_keys_returns_metadata(self, mock_event_store):
         """Lines 362-382: list_keys for a principal."""
-        from enterprise.auth.infrastructure.event_sourced_store import EventSourcedApiKeyStore
+        from mcp_hangar.auth.infrastructure.event_sourced_store import EventSourcedApiKeyStore
 
         creation_event = ApiKeyCreated(
             key_id="kid-lk",
@@ -1734,7 +1732,7 @@ class TestEventSourcedApiKeyStoreListAndCount:
 
     def test_list_keys_empty_principal(self, mock_event_store):
         """list_keys with no keys for principal."""
-        from enterprise.auth.infrastructure.event_sourced_store import EventSourcedApiKeyStore
+        from mcp_hangar.auth.infrastructure.event_sourced_store import EventSourcedApiKeyStore
 
         mock_event_store.list_streams.return_value = []
         store = EventSourcedApiKeyStore(event_store=mock_event_store)
@@ -1744,7 +1742,7 @@ class TestEventSourcedApiKeyStoreListAndCount:
 
     def test_count_keys_counts_valid_only(self, mock_event_store):
         """Lines 384-396: count_keys only counts valid keys."""
-        from enterprise.auth.infrastructure.event_sourced_store import EventSourcedApiKeyStore
+        from mcp_hangar.auth.infrastructure.event_sourced_store import EventSourcedApiKeyStore
 
         creation_event = ApiKeyCreated(
             key_id="kid-cnt",
@@ -1763,7 +1761,7 @@ class TestEventSourcedApiKeyStoreListAndCount:
 
     def test_count_keys_zero_for_unknown(self, mock_event_store):
         """count_keys returns 0 for unknown principal."""
-        from enterprise.auth.infrastructure.event_sourced_store import EventSourcedApiKeyStore
+        from mcp_hangar.auth.infrastructure.event_sourced_store import EventSourcedApiKeyStore
 
         mock_event_store.list_streams.return_value = []
         store = EventSourcedApiKeyStore(event_store=mock_event_store)
@@ -1776,7 +1774,7 @@ class TestEventSourcedApiKeyStoreRotateKey:
 
     def test_rotate_key_success(self, mock_event_store):
         """Lines 398-470: successful rotation."""
-        from enterprise.auth.infrastructure.event_sourced_store import EventSourcedApiKeyStore
+        from mcp_hangar.auth.infrastructure.event_sourced_store import EventSourcedApiKeyStore
 
         creation_event = ApiKeyCreated(
             key_id="kid-rot",
@@ -1797,7 +1795,7 @@ class TestEventSourcedApiKeyStoreRotateKey:
 
     def test_rotate_nonexistent_key_raises(self, mock_event_store):
         """Lines 428-429: rotate unknown key raises."""
-        from enterprise.auth.infrastructure.event_sourced_store import EventSourcedApiKeyStore
+        from mcp_hangar.auth.infrastructure.event_sourced_store import EventSourcedApiKeyStore
 
         mock_event_store.list_streams.return_value = []
         store = EventSourcedApiKeyStore(event_store=mock_event_store)
@@ -1807,7 +1805,7 @@ class TestEventSourcedApiKeyStoreRotateKey:
 
     def test_rotate_key_load_fails_raises(self, mock_event_store):
         """Lines 433-434: key in index but load returns None."""
-        from enterprise.auth.infrastructure.event_sourced_store import EventSourcedApiKeyStore
+        from mcp_hangar.auth.infrastructure.event_sourced_store import EventSourcedApiKeyStore
 
         mock_event_store.list_streams.return_value = []
         store = EventSourcedApiKeyStore(event_store=mock_event_store)
@@ -1831,7 +1829,7 @@ class TestEventSourcedRoleStoreGetRole:
 
     def test_get_builtin_role(self, mock_event_store):
         """Lines 592-596: get builtin role."""
-        from enterprise.auth.infrastructure.event_sourced_store import EventSourcedRoleStore
+        from mcp_hangar.auth.infrastructure.event_sourced_store import EventSourcedRoleStore
 
         store = EventSourcedRoleStore(event_store=mock_event_store)
         role = store.get_role("admin")
@@ -1841,7 +1839,7 @@ class TestEventSourcedRoleStoreGetRole:
 
     def test_get_custom_role(self, mock_event_store):
         """Lines 598-599: get custom role."""
-        from enterprise.auth.infrastructure.event_sourced_store import EventSourcedRoleStore
+        from mcp_hangar.auth.infrastructure.event_sourced_store import EventSourcedRoleStore
 
         store = EventSourcedRoleStore(event_store=mock_event_store)
         custom = Role(name="custom", description="test", permissions=frozenset())
@@ -1853,7 +1851,7 @@ class TestEventSourcedRoleStoreGetRole:
 
     def test_get_nonexistent_role(self, mock_event_store):
         """get_role returns None for unknown role."""
-        from enterprise.auth.infrastructure.event_sourced_store import EventSourcedRoleStore
+        from mcp_hangar.auth.infrastructure.event_sourced_store import EventSourcedRoleStore
 
         store = EventSourcedRoleStore(event_store=mock_event_store)
         assert store.get_role("phantom") is None
@@ -1864,7 +1862,7 @@ class TestEventSourcedRoleStoreAddRole:
 
     def test_add_custom_role(self, mock_event_store):
         """Lines 601-607: add custom role."""
-        from enterprise.auth.infrastructure.event_sourced_store import EventSourcedRoleStore
+        from mcp_hangar.auth.infrastructure.event_sourced_store import EventSourcedRoleStore
 
         store = EventSourcedRoleStore(event_store=mock_event_store)
         role = Role(name="tester", description="test role", permissions=frozenset())
@@ -1874,7 +1872,7 @@ class TestEventSourcedRoleStoreAddRole:
 
     def test_add_builtin_role_raises(self, mock_event_store):
         """Lines 603-604: cannot override builtin role."""
-        from enterprise.auth.infrastructure.event_sourced_store import EventSourcedRoleStore
+        from mcp_hangar.auth.infrastructure.event_sourced_store import EventSourcedRoleStore
 
         store = EventSourcedRoleStore(event_store=mock_event_store)
         role = Role(name="admin", description="override", permissions=frozenset())
@@ -1888,7 +1886,7 @@ class TestEventSourcedRoleStoreAssignRole:
 
     def test_assign_role_to_principal(self, mock_event_store):
         """Lines 626-648: assign role."""
-        from enterprise.auth.infrastructure.event_sourced_store import EventSourcedRoleStore
+        from mcp_hangar.auth.infrastructure.event_sourced_store import EventSourcedRoleStore
 
         store = EventSourcedRoleStore(event_store=mock_event_store)
         store.assign_role("svc-1", "admin", scope="global", assigned_by="system")
@@ -1897,7 +1895,7 @@ class TestEventSourcedRoleStoreAssignRole:
 
     def test_assign_unknown_role_raises(self, mock_event_store):
         """Lines 635-636: assign unknown role raises."""
-        from enterprise.auth.infrastructure.event_sourced_store import EventSourcedRoleStore
+        from mcp_hangar.auth.infrastructure.event_sourced_store import EventSourcedRoleStore
 
         store = EventSourcedRoleStore(event_store=mock_event_store)
 
@@ -1906,7 +1904,7 @@ class TestEventSourcedRoleStoreAssignRole:
 
     def test_assign_already_assigned_is_noop(self, mock_event_store):
         """Duplicate assignment does not save events."""
-        from enterprise.auth.infrastructure.event_sourced_store import EventSourcedRoleStore
+        from mcp_hangar.auth.infrastructure.event_sourced_store import EventSourcedRoleStore
 
         # First assignment - return events so it sees the role already assigned
         assign_event = RoleAssigned(
@@ -1926,7 +1924,7 @@ class TestEventSourcedRoleStoreAssignRole:
 
     def test_assign_role_publishes_events(self, mock_event_store):
         """EventSourcedRoleStore.assign_role publishes events."""
-        from enterprise.auth.infrastructure.event_sourced_store import EventSourcedRoleStore
+        from mcp_hangar.auth.infrastructure.event_sourced_store import EventSourcedRoleStore
 
         publisher = Mock()
         store = EventSourcedRoleStore(event_store=mock_event_store, event_publisher=publisher)
@@ -1942,7 +1940,7 @@ class TestEventSourcedRoleStoreRevokeRole:
 
     def test_revoke_assigned_role(self, mock_event_store):
         """Lines 650-668: revoke role."""
-        from enterprise.auth.infrastructure.event_sourced_store import EventSourcedRoleStore
+        from mcp_hangar.auth.infrastructure.event_sourced_store import EventSourcedRoleStore
 
         assign_event = RoleAssigned(
             principal_id="svc-rev",
@@ -1960,7 +1958,7 @@ class TestEventSourcedRoleStoreRevokeRole:
 
     def test_revoke_non_assigned_is_noop(self, mock_event_store):
         """Revoking a non-assigned role does not save events."""
-        from enterprise.auth.infrastructure.event_sourced_store import EventSourcedRoleStore
+        from mcp_hangar.auth.infrastructure.event_sourced_store import EventSourcedRoleStore
 
         mock_event_store.read_stream.return_value = []
         store = EventSourcedRoleStore(event_store=mock_event_store)
@@ -1970,7 +1968,7 @@ class TestEventSourcedRoleStoreRevokeRole:
 
     def test_revoke_role_publishes_events(self, mock_event_store):
         """revoke_role publishes events when publisher is set."""
-        from enterprise.auth.infrastructure.event_sourced_store import EventSourcedRoleStore
+        from mcp_hangar.auth.infrastructure.event_sourced_store import EventSourcedRoleStore
 
         assign_event = RoleAssigned(
             principal_id="svc-rpub",
@@ -1995,7 +1993,7 @@ class TestEventSourcedRoleStoreGetRolesForPrincipal:
 
     def test_returns_roles_for_principal(self, mock_event_store):
         """Lines 609-624: get roles for a principal."""
-        from enterprise.auth.infrastructure.event_sourced_store import EventSourcedRoleStore
+        from mcp_hangar.auth.infrastructure.event_sourced_store import EventSourcedRoleStore
 
         assign_event = RoleAssigned(
             principal_id="svc-grp",
@@ -2013,7 +2011,7 @@ class TestEventSourcedRoleStoreGetRolesForPrincipal:
 
     def test_returns_empty_for_no_assignments(self, mock_event_store):
         """No assignments returns empty list."""
-        from enterprise.auth.infrastructure.event_sourced_store import EventSourcedRoleStore
+        from mcp_hangar.auth.infrastructure.event_sourced_store import EventSourcedRoleStore
 
         mock_event_store.read_stream.return_value = []
         store = EventSourcedRoleStore(event_store=mock_event_store)
@@ -2027,7 +2025,7 @@ class TestEventSourcedRoleStoreListAllRoles:
 
     def test_list_all_custom_roles(self, mock_event_store):
         """Lines 670-673: list custom roles."""
-        from enterprise.auth.infrastructure.event_sourced_store import EventSourcedRoleStore
+        from mcp_hangar.auth.infrastructure.event_sourced_store import EventSourcedRoleStore
 
         store = EventSourcedRoleStore(event_store=mock_event_store)
         store.add_role(Role(name="custom-a", description="a", permissions=frozenset()))
@@ -2045,7 +2043,7 @@ class TestEventSourcedRoleStoreDeleteRole:
 
     def test_delete_custom_role(self, mock_event_store):
         """Lines 675-693: delete custom role."""
-        from enterprise.auth.infrastructure.event_sourced_store import EventSourcedRoleStore
+        from mcp_hangar.auth.infrastructure.event_sourced_store import EventSourcedRoleStore
 
         store = EventSourcedRoleStore(event_store=mock_event_store)
         store.add_role(Role(name="to-del", description="del", permissions=frozenset()))
@@ -2055,7 +2053,7 @@ class TestEventSourcedRoleStoreDeleteRole:
 
     def test_delete_builtin_raises(self, mock_event_store):
         """Lines 687-688: cannot delete builtin."""
-        from enterprise.auth.infrastructure.event_sourced_store import EventSourcedRoleStore
+        from mcp_hangar.auth.infrastructure.event_sourced_store import EventSourcedRoleStore
 
         store = EventSourcedRoleStore(event_store=mock_event_store)
 
@@ -2064,7 +2062,7 @@ class TestEventSourcedRoleStoreDeleteRole:
 
     def test_delete_nonexistent_raises(self, mock_event_store):
         """Lines 690-691: role not found."""
-        from enterprise.auth.infrastructure.event_sourced_store import EventSourcedRoleStore
+        from mcp_hangar.auth.infrastructure.event_sourced_store import EventSourcedRoleStore
 
         store = EventSourcedRoleStore(event_store=mock_event_store)
 
@@ -2077,7 +2075,7 @@ class TestEventSourcedRoleStoreUpdateRole:
 
     def test_update_custom_role(self, mock_event_store):
         """Lines 695-728: update custom role."""
-        from enterprise.auth.infrastructure.event_sourced_store import EventSourcedRoleStore
+        from mcp_hangar.auth.infrastructure.event_sourced_store import EventSourcedRoleStore
 
         store = EventSourcedRoleStore(event_store=mock_event_store)
         store.add_role(Role(name="updatable", description="old", permissions=frozenset()))
@@ -2090,7 +2088,7 @@ class TestEventSourcedRoleStoreUpdateRole:
 
     def test_update_builtin_raises(self, mock_event_store):
         """Lines 717-718: cannot update builtin."""
-        from enterprise.auth.infrastructure.event_sourced_store import EventSourcedRoleStore
+        from mcp_hangar.auth.infrastructure.event_sourced_store import EventSourcedRoleStore
 
         store = EventSourcedRoleStore(event_store=mock_event_store)
 
@@ -2099,7 +2097,7 @@ class TestEventSourcedRoleStoreUpdateRole:
 
     def test_update_nonexistent_raises(self, mock_event_store):
         """Lines 720-721: role not found."""
-        from enterprise.auth.infrastructure.event_sourced_store import EventSourcedRoleStore
+        from mcp_hangar.auth.infrastructure.event_sourced_store import EventSourcedRoleStore
 
         store = EventSourcedRoleStore(event_store=mock_event_store)
 
@@ -2112,7 +2110,7 @@ class TestEventSourcedRoleStoreLoadAssignment:
 
     def test_load_from_snapshot(self, mock_event_store):
         """Lines 525-526: load from snapshot."""
-        from enterprise.auth.infrastructure.event_sourced_store import EventSourcedRoleStore
+        from mcp_hangar.auth.infrastructure.event_sourced_store import EventSourcedRoleStore
 
         snapshot = RoleAssignmentSnapshot(
             principal_id="svc-snap",
@@ -2131,7 +2129,7 @@ class TestEventSourcedRoleStoreLoadAssignment:
 
     def test_load_from_events(self, mock_event_store):
         """Lines 527-528: load from events."""
-        from enterprise.auth.infrastructure.event_sourced_store import EventSourcedRoleStore
+        from mcp_hangar.auth.infrastructure.event_sourced_store import EventSourcedRoleStore
 
         assign_event = RoleAssigned(
             principal_id="svc-evt",
@@ -2148,7 +2146,7 @@ class TestEventSourcedRoleStoreLoadAssignment:
 
     def test_load_empty_returns_new_aggregate(self, mock_event_store):
         """Lines 529-530: no snapshot and no events returns fresh aggregate."""
-        from enterprise.auth.infrastructure.event_sourced_store import EventSourcedRoleStore
+        from mcp_hangar.auth.infrastructure.event_sourced_store import EventSourcedRoleStore
 
         mock_event_store.read_stream.return_value = []
         store = EventSourcedRoleStore(event_store=mock_event_store)
@@ -2163,7 +2161,7 @@ class TestEventSourcedRoleStorePublishEvents:
 
     def test_publish_with_publisher(self, mock_event_store):
         """Lines 533-536: publish events when publisher is set."""
-        from enterprise.auth.infrastructure.event_sourced_store import EventSourcedRoleStore
+        from mcp_hangar.auth.infrastructure.event_sourced_store import EventSourcedRoleStore
 
         publisher = Mock()
         store = EventSourcedRoleStore(event_store=mock_event_store, event_publisher=publisher)
@@ -2180,12 +2178,16 @@ class TestEventSourcedRoleStorePublishEvents:
 
     def test_publish_without_publisher(self, mock_event_store):
         """No error when publisher is None."""
-        from enterprise.auth.infrastructure.event_sourced_store import EventSourcedRoleStore
+        from mcp_hangar.auth.infrastructure.event_sourced_store import EventSourcedRoleStore
 
         store = EventSourcedRoleStore(event_store=mock_event_store)
-        store._publish_events([RoleAssigned(
-            principal_id="svc",
-            role_name="admin",
-            scope="global",
-            assigned_by="system",
-        )])
+        store._publish_events(
+            [
+                RoleAssigned(
+                    principal_id="svc",
+                    role_name="admin",
+                    scope="global",
+                    assigned_by="system",
+                )
+            ]
+        )
