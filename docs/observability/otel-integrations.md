@@ -137,14 +137,13 @@ when behavioral profiling is active. The scorer aggregates signals from
 |--------|------|-------------|
 | `mcp_hangar_tool_calls_total` | Counter | Total tool invocations |
 | `mcp_hangar_tool_call_duration_seconds` | Histogram | Tool call latency distribution |
-| `mcp_hangar_mcp_server_state` | Gauge | Current MCP server lifecycle state |
-| `mcp_hangar_cold_starts_total` | Counter | Total cold starts |
+| `mcp_hangar_mcp_server_state` | Gauge | Current MCP server lifecycle state (0=cold, 1=initializing, 2=ready, 3=degraded, 4=dead) |
+| `mcp_hangar_cold_start_phase_duration_seconds` | Histogram | Duration of cold start phases (labels: `mcp_server`, `phase`) |
+| `mcp_hangar_cold_starts_in_progress` | Gauge | Cold starts currently in progress |
 | `mcp_hangar_health_checks_total` | Counter | Total health checks |
 | `mcp_hangar_circuit_breaker_state` | Gauge | Circuit breaker state per MCP server |
 | `mcp_hangar_capability_violations_total` | Counter | Total capability violations |
-| `mcp_hangar_egress_blocked_total` | Counter | Total blocked egress attempts |
 | `mcp_hangar_detection_rule_matches_total` | Counter | Total detection rule matches (labels: `rule_id`, `severity`) |
-| `mcp_hangar_providers_quarantined` | Gauge | MCP servers currently quarantined |
 | `mcp_hangar_tool_schema_drifts_total` | Counter | Total tool schema drift detections |
 | `mcp_hangar_cost_cents_total` | Counter | Total attributed cost in hundredths of a cent (labels: `mcp_server`, `tool`, `cost_model`) |
 | `mcp_hangar_cost_attributions_total` | Counter | Total cost attribution computations (labels: `mcp_server`, `tool`) |
@@ -339,8 +338,8 @@ rate(mcp_hangar_tool_calls_total[5m])
 # 95th percentile tool call latency
 histogram_quantile(0.95, rate(mcp_hangar_tool_call_duration_seconds_bucket[5m]))
 
-# MCP servers currently in DEGRADED state
-mcp_hangar_mcp_server_state{state="DEGRADED"} == 1
+# MCP servers currently in DEGRADED state (3=degraded)
+mcp_hangar_mcp_server_state == 3
 
 # Circuit breaker open count
 mcp_hangar_circuit_breaker_state == 1
