@@ -13,9 +13,6 @@
 /src/mcp_hangar/server/api/middleware*  @mapyr  # @mcp-hangar/security
 /src/mcp_hangar/auth/                   @mapyr  # @mcp-hangar/security
 
-# Enterprise (BSL 1.1) — separate license, separate review
-/enterprise/                            @mapyr  # @mcp-hangar/maintainers
-
 # Architecture decision records — immutable after Accepted
 /docs/adr/                              @mapyr  # @mcp-hangar/maintainers
 /docs/adr/AGENTS.md                     @mapyr  # @mcp-hangar/maintainers
@@ -32,7 +29,5 @@
 /AGENTS.md                              @mapyr  # @mcp-hangar/maintainers
 /docs/development/GIT_FLOW.md           @mapyr  # @mcp-hangar/maintainers
 
-# CLA + licensing
+# Licensing
 /LICENSE                                @mapyr
-/CLA.md                                 @mapyr
-/enterprise/LICENSE.BSL                 @mapyr

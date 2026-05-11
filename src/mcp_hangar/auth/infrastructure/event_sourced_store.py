@@ -22,7 +22,7 @@ from mcp_hangar.domain.events import ApiKeyCreated, DomainEvent
 from mcp_hangar.domain.exceptions import ExpiredCredentialsError, RevokedCredentialsError
 from mcp_hangar.domain.model.event_sourced_api_key import ApiKeySnapshot, EventSourcedApiKey
 from mcp_hangar.domain.model.event_sourced_role_assignment import EventSourcedRoleAssignment, RoleAssignmentSnapshot
-from enterprise.auth.roles import BUILTIN_ROLES
+from mcp_hangar.auth.roles import BUILTIN_ROLES
 from mcp_hangar.domain.value_objects import Principal, Role
 from mcp_hangar.logging_config import get_logger
 

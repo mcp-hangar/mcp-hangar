@@ -20,7 +20,6 @@ MCP Hangar is a monorepo:
 ```
 mcp-hangar/
 ├── src/mcp_hangar/          # Python package (PyPI: mcp-hangar) -- MIT
-├── enterprise/              # Enterprise features (MIT)
 │   ├── auth/                # RBAC, API key, JWT/OIDC
 │   ├── behavioral/          # Network profiling, deviation detection
 │   ├── identity/            # Caller identity propagation, audit
@@ -53,12 +52,12 @@ src/mcp_hangar/
 │   ├── model/        # Aggregates, entities
 │   ├── services/     # Domain services
 │   ├── events.py     # Domain events
-│   ├── contracts/    # Interfaces consumed by enterprise/
+│   ├── contracts/    # Interfaces consumed by src/mcp_hangar/
 │   └── exceptions.py
 ├── application/      # Application layer
 │   ├── commands/     # CQRS commands
 │   ├── queries/      # CQRS queries
-│   ├── ports/        # Port interfaces consumed by enterprise/
+│   ├── ports/        # Port interfaces consumed by src/mcp_hangar/
 │   └── sagas/
 ├── infrastructure/   # Infrastructure adapters
 │   └── observability/  # OTLPAuditExporter
@@ -75,7 +74,7 @@ src/mcp_hangar/
 ## Licensing
 
 - **All code** -- MIT. See [LICENSE](../../LICENSE).
-- Core must **never** import from `enterprise/`. CI enforces this boundary.
+- Core and former enterprise code live in `src/mcp_hangar/`; imports stay within package boundaries.
 
 ## Code Style
 
@@ -279,7 +278,6 @@ MCP Hangar is licensed under the MIT License:
 |-----------|---------|
 | `src/mcp_hangar/` | MIT |
 | `tests/`, `docs/`, `examples/`, `monitoring/` | MIT |
-| `enterprise/` | MIT |
 
 ## Code of Conduct
 

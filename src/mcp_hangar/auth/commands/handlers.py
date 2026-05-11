@@ -19,7 +19,7 @@ from mcp_hangar.domain.value_objects import Permission, Role
 from mcp_hangar.domain.value_objects.tool_access_policy import ToolAccessPolicy
 from mcp_hangar.domain.contracts.command import CommandHandler
 from mcp_hangar.logging_config import get_logger
-from enterprise.auth.commands.commands import (
+from mcp_hangar.auth.commands.commands import (
     AssignRoleCommand,
     ClearToolAccessPolicyCommand,
     CreateApiKeyCommand,

@@ -10,7 +10,7 @@ from starlette.requests import Request
 from starlette.responses import Response
 from starlette.routing import Route
 
-from enterprise.auth.commands.commands import (
+from mcp_hangar.auth.commands.commands import (
     AssignRoleCommand,
     ClearToolAccessPolicyCommand,
     CreateApiKeyCommand,
@@ -21,7 +21,7 @@ from enterprise.auth.commands.commands import (
     SetToolAccessPolicyCommand,
     UpdateCustomRoleCommand,
 )
-from enterprise.auth.queries.queries import (
+from mcp_hangar.auth.queries.queries import (
     CheckPermissionQuery,
     GetApiKeysByPrincipalQuery,
     GetRoleQuery,

@@ -451,7 +451,7 @@ Cost attributes (`mcp.cost.cents`, `mcp.cost.model`, `mcp.cost.input_tokens`,
 ### Compliance Export Formats (Enterprise)
 
 Enterprise deployments can export audit events in SIEM-compatible formats alongside
-OTLP. Available exporters (in `enterprise/compliance/`):
+OTLP. Available exporters (in `src/mcp_hangar/compliance/`):
 
 | Format | Class | Use Case |
 |--------|-------|----------|

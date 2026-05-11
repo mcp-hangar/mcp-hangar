@@ -16,7 +16,7 @@ if sys.version_info >= (3, 14):
     pytest.skip("Langfuse uses Pydantic v1 which is incompatible with Python 3.14+", allow_module_level=True)
 
 from mcp_hangar.application.ports.observability import NullSpanHandle, ObservabilityPort
-from enterprise.integrations.langfuse import (
+from mcp_hangar.integrations.langfuse import (
     LangfuseAdapter,
     LangfuseConfig,
     LangfuseObservabilityAdapter,
@@ -111,7 +111,7 @@ class TestLangfuseAdapter:
         with (
             patch.dict("sys.modules", {"langfuse": None}),
             patch(
-                "enterprise.integrations.langfuse._langfuse_available",
+                "mcp_hangar.integrations.langfuse._langfuse_available",
                 False,
             ),
         ):

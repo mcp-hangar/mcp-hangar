@@ -98,10 +98,8 @@ jobs:
     runs-on: ubuntu-latest
 
     steps:
-      - uses: actions/checkout@v4
-
-      - name: Enforce core -> enterprise import boundary
-        run: python3 tools/check_enterprise_imports.py
+      - name: No-op (former enterprise merged into src/mcp_hangar/)
+        run: echo "Import boundary check removed — all code in src/mcp_hangar/ now"
 
   secrets-scan:
     name: Secrets Scan

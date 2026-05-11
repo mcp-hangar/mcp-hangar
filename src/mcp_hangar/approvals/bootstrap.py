@@ -28,7 +28,7 @@ def bootstrap_approvals(
     Args:
         database: Database instance for persistence.
         event_bus: Event bus for domain event publishing.
-        config: Optional config dict with enterprise.approvals settings.
+        config: Optional config dict with mcp_hangar.approvals settings.
 
     Returns:
         Configured ApprovalGateService.

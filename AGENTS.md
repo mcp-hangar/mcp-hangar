@@ -9,7 +9,7 @@
 | Language | Python 3.11+ |
 | Package manager | uv |
 | Architecture | DDD + CQRS + Event Sourcing |
-| License | MIT (core), BSL 1.1 (enterprise/) |
+| License | MIT |
 | Entry point | `mcp-hangar serve` or `python -m mcp_hangar.server` |
 
 ## Commands
@@ -122,11 +122,7 @@ mcp-hangar/
 │   │
 │   ├── cloud/                     # Bridge to hangar-cloud gRPC/REST
 │   ├── observability/             # Metrics, tracing conventions
-│   ├── bootstrap/runtime.py       # Composition root (protocols + config)
-│   └── facade.py                  # High-level API hiding complexity
-│
-├── enterprise/                    # Enterprise features (separate DDD boundary)
-│   ├── auth/
+│   ├── auth/                      # Authentication and authorization
 │   │   ├── commands/              # CreateApiKeyCommand, AssignRoleCommand
 │   │   ├── queries/               # Auth queries + handlers
 │   │   ├── infrastructure/        # Authenticators, authorizers, stores
@@ -141,7 +137,8 @@ mcp-hangar/
 │   ├── approvals/                 # Approval gate workflow
 │   ├── compliance/                # Compliance reporting
 │   ├── integrations/              # Third-party adapters (Langfuse, etc.)
-│   └── persistence/               # Shared persistence infrastructure
+│   ├── bootstrap/runtime.py       # Composition root (protocols + config)
+│   └── facade.py                  # High-level API hiding complexity
 │
 ├── tests/
 │   ├── conftest.py                # Shared fixtures, marker-based categorization
@@ -232,24 +229,20 @@ Read `docs/development/GIT_FLOW.md` for the full flow. Hard rules for agent-auth
 - **Soft LOC limit:** ≤400 lines changed (excluding tests). Larger changes require decomposition; open a parent issue first.
 - **Issue first:** open or claim an `agent_task` issue before pushing the first commit. Link via `Closes #N` (or `Refs #N` for child PRs of an epic).
 - **Forbidden paths for agent-authored PRs** (must be human-authored — see CODEOWNERS):
-  - `enterprise/` (BSL-licensed, requires CLA)
   - `src/mcp_hangar/server/security/`, `src/mcp_hangar/server/api/middleware*`
   - `docs/adr/` (ADRs are human-authored; agents may draft content in issue comments)
   - `.github/workflows/release.yml`, `pyproject.toml` version field
 - **CHANGELOG:** every non-trivial PR adds a line under `## [Unreleased]` in the appropriate section (`### Added`, `### Fixed`, `### Changed`, `### Security`). Trivial = `chore(deps)`, `ci`, `style`, `test`, pure `docs`.
 - **No emoji** anywhere in code, comments, commit messages, or docs.
 - **Squash-merge default.** Do not request merge commits.
-- **Required status checks** (must pass before merge): `pr-validation / required-check`, `enterprise-boundary`, `pr-title / validate`, `changelog / check`, `branch-name / validate`, `pr-body / validate`.
+- **Required status checks** (must pass before merge): `pr-validation / required-check`, `pr-title / validate`, `changelog / check`, `branch-name / validate`, `pr-body / validate`.
 
 For ADR work specifically, see `docs/adr/AGENTS.md` — agents may draft ADR content in issue comments but never author the PR.
 
-## Enterprise Boundary
+## Optional Modules
 
-Core (`src/`) and enterprise (`enterprise/`) are **separate DDD boundaries**.
+Auth, compliance, approvals, and integrations live under `src/mcp_hangar/` as first-class packages. Bootstrap uses try/except ImportError for graceful degradation if any module is removed or broken.
 
-- Core NEVER imports from enterprise (CI-enforced)
-- Enterprise depends on core interfaces
-- Enterprise features conditionally bootstrapped via license validation
 - Auth module has its own commands/queries/handlers/infrastructure
 
 ## Testing
@@ -269,14 +262,10 @@ Core (`src/`) and enterprise (`enterprise/`) are **separate DDD boundaries**.
 | `domain/events.py` | 1872 | 75+ event definitions (low complexity, good reference) |
 | `errors.py` | 1248 | 30+ exception types, 150 conditional branches |
 | `server/tools/batch/executor.py` | 925 | Batch execution, 8 methods averaging 90 lines each |
-| `enterprise/auth/infrastructure/sqlite_store.py` | 857 | Event-sourced auth storage |
+| `auth/infrastructure/sqlite_store.py` | 857 | Event-sourced auth storage |
 
 ## What NOT to Do
 
-- Do not statically import from `enterprise/` in `src/` code. CI enforces this via
-  `tools/check_enterprise_imports.py`. When bridging to enterprise functionality,
-  use dynamic imports via importlib (see
-  `src/mcp_hangar/server/bootstrap/enterprise.py:_import_attribute()`)
 - Do not use `shell=True` in subprocess calls (security)
 - Do not change lock acquisition order (deadlock)
 - Do not call `_get_or_create_event_handler()` under external lock

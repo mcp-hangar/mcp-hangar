@@ -52,9 +52,8 @@ jobs:
   enterprise-boundary:
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v4
-      - name: Enterprise import boundary check
-        run: bash scripts/check_enterprise_boundary.sh
+      - name: No-op (former enterprise merged into src/mcp_hangar/)
+        run: echo "Enterprise boundary check removed — all code in src/mcp_hangar/ now"
 
   # This job ensures at least one check runs for branch protection
   required-check:

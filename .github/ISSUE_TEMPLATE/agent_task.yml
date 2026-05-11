@@ -1,7 +1,7 @@
 name: Agent Task
 description: >-
   Well-scoped work for a coding agent (Copilot, Claude, etc.).
-  Do NOT use for ADRs or sensitive paths (enterprise/, security/*).
+  Do NOT use for ADRs or sensitive paths (security/*).
 title: "[AGENT] "
 labels: ["agent-friendly", "priority/p2-normal"]
 body:

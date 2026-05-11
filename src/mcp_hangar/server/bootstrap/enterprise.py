@@ -34,7 +34,7 @@ from ...infrastructure.event_store import get_event_store
 from ...logging_config import get_logger
 
 logger = get_logger(__name__)
-ENTERPRISE_ENTRY_POINT_GROUP = "mcp_hangar.enterprise"
+ENTERPRISE_ENTRY_POINT_GROUP = "mcp_hangar.extensions"
 
 
 class _FallbackAuthComponents:
@@ -123,10 +123,10 @@ def _import_attribute(module_name: str, attribute_name: str) -> Any:
 def get_auth_compat_exports() -> AuthCompatibilityExports:
     """Resolve legacy auth compatibility exports from enterprise or fallback."""
     try:
-        auth_components = _import_attribute("enterprise.auth.bootstrap", "AuthComponents")
-        null_auth_components = _import_attribute("enterprise.auth.bootstrap", "NullAuthComponents")
-        bootstrap_auth = _import_attribute("enterprise.auth.bootstrap", "bootstrap_auth")
-        parse_auth_config = _import_attribute("enterprise.auth.config", "parse_auth_config")
+        auth_components = _import_attribute("mcp_hangar.auth.bootstrap", "AuthComponents")
+        null_auth_components = _import_attribute("mcp_hangar.auth.bootstrap", "NullAuthComponents")
+        bootstrap_auth = _import_attribute("mcp_hangar.auth.bootstrap", "bootstrap_auth")
+        parse_auth_config = _import_attribute("mcp_hangar.auth.config", "parse_auth_config")
     except ImportError:
         return AuthCompatibilityExports(
             AuthComponents=_FallbackAuthComponents,
@@ -170,10 +170,10 @@ def _builtin_load_components(
 def _builtin_register_auth_cqrs(runtime: Any, auth_components: Any) -> bool:
     try:
         register_auth_command_handlers = _import_attribute(
-            "enterprise.auth.commands.handlers", "register_auth_command_handlers"
+            "mcp_hangar.auth.commands.handlers", "register_auth_command_handlers"
         )
         register_auth_query_handlers = _import_attribute(
-            "enterprise.auth.queries.handlers", "register_auth_query_handlers"
+            "mcp_hangar.auth.queries.handlers", "register_auth_query_handlers"
         )
     except ImportError:
         return False
@@ -202,13 +202,13 @@ def _builtin_extend_api_routes() -> list[Any]:
 
     routes: list[Any] = []
     try:
-        auth_routes = _import_attribute("enterprise.auth.api.routes", "auth_routes")
+        auth_routes = _import_attribute("mcp_hangar.auth.api.routes", "auth_routes")
         routes.append(Mount("/auth", routes=auth_routes))
     except ImportError:
         pass
 
     try:
-        approval_routes = _import_attribute("enterprise.approvals.api.routes", "approval_routes")
+        approval_routes = _import_attribute("mcp_hangar.approvals.api.routes", "approval_routes")
         routes.extend(cast(list[Any], approval_routes))
     except ImportError:
         pass
@@ -220,15 +220,15 @@ def _builtin_create_event_store(driver: str, config: dict[str, Any]) -> Any | No
     if driver != "sqlite":
         return None
 
-    sqlite_event_store = _import_attribute("enterprise.persistence.sqlite_event_store", "SQLiteEventStore")
+    sqlite_event_store = _import_attribute("mcp_hangar.infrastructure.persistence.sqlite_event_store", "SQLiteEventStore")
     db_path = config.get("path", "data/events.db")
     Path(db_path).parent.mkdir(parents=True, exist_ok=True)
     return sqlite_event_store(db_path)
 
 
 def _builtin_create_observability_adapter(config: Any) -> ObservabilityPort | None:
-    langfuse_config = _import_attribute("enterprise.integrations.langfuse", "LangfuseConfig")
-    adapter_type = _import_attribute("enterprise.integrations.langfuse", "LangfuseObservabilityAdapter")
+    langfuse_config = _import_attribute("mcp_hangar.integrations.langfuse", "LangfuseConfig")
+    adapter_type = _import_attribute("mcp_hangar.integrations.langfuse", "LangfuseObservabilityAdapter")
 
     adapter_config = langfuse_config(
         enabled=True,
@@ -246,12 +246,7 @@ def _builtin_auth_compat_exports() -> AuthCompatibilityExports:
     return get_auth_compat_exports()
 
 
-def _get_builtin_enterprise_provider() -> EnterpriseProvider | None:
-    try:
-        _ = importlib.import_module("enterprise")
-    except ImportError:
-        return None
-
+def _get_builtin_enterprise_provider() -> EnterpriseProvider:
     return EnterpriseProvider(
         name="builtin-enterprise",
         load_components=_builtin_load_components,

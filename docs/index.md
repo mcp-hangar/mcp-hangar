@@ -16,7 +16,7 @@ MCP Hangar is a monorepo containing multiple packages:
 | Package | Description | Location |
 |---------|-------------|----------|
 | **Core** | Python library (PyPI: `mcp-hangar`) | `src/mcp_hangar/` |
-| **Enterprise** | BSL 1.1 licensed features | `enterprise/` |
+| **Core package** | MIT-only features | `src/mcp_hangar/` |
 
 ## Features
 

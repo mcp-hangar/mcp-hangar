@@ -17,13 +17,6 @@ RUN mkdir -p /app/data && chown hangar:hangar /app/data
 COPY --from=py-builder /app/dist/*.whl /tmp/
 RUN pip install --no-cache-dir /tmp/*.whl opentelemetry-api opentelemetry-sdk opentelemetry-exporter-otlp fpdf2 websockets && rm /tmp/*.whl
 
-# Copy enterprise modules (BSL 1.1 licensed) into the runtime image.
-# The bootstrap code imports from 'enterprise.*' so the package must be
-# on PYTHONPATH.  /app is already WORKDIR, so setting PYTHONPATH=/app
-# makes 'import enterprise' resolve to /app/enterprise/.
-COPY enterprise/ ./enterprise/
-ENV PYTHONPATH=/app
-
 USER hangar
 EXPOSE 8080
 ENTRYPOINT ["mcp-hangar"]

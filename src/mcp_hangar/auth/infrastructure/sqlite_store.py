@@ -26,7 +26,7 @@ from mcp_hangar.domain.contracts.authentication import ApiKeyMetadata, IApiKeySt
 from mcp_hangar.domain.contracts.authorization import IRoleStore
 from mcp_hangar.domain.events import ApiKeyCreated, ApiKeyRevoked, KeyRotated, RoleAssigned, RoleRevoked
 from mcp_hangar.domain.exceptions import ExpiredCredentialsError, RevokedCredentialsError
-from enterprise.auth.roles import BUILTIN_ROLES
+from mcp_hangar.auth.roles import BUILTIN_ROLES
 from mcp_hangar.domain.value_objects import Permission, Principal, PrincipalId, PrincipalType, Role
 
 logger = structlog.get_logger(__name__)
@@ -795,7 +795,7 @@ class SQLiteRoleStore(IRoleStore):
         so deleting the role row automatically removes assignments.
         """
         from mcp_hangar.domain.exceptions import CannotModifyBuiltinRoleError, RoleNotFoundError
-        from enterprise.auth.roles import BUILTIN_ROLES as _BUILTIN
+        from mcp_hangar.auth.roles import BUILTIN_ROLES as _BUILTIN
 
         if role_name in _BUILTIN:
             raise CannotModifyBuiltinRoleError(role_name)
@@ -817,7 +817,7 @@ class SQLiteRoleStore(IRoleStore):
     ) -> Role:
         """Update a custom role's permissions and description."""
         from mcp_hangar.domain.exceptions import CannotModifyBuiltinRoleError, RoleNotFoundError
-        from enterprise.auth.roles import BUILTIN_ROLES as _BUILTIN
+        from mcp_hangar.auth.roles import BUILTIN_ROLES as _BUILTIN
 
         if role_name in _BUILTIN:
             raise CannotModifyBuiltinRoleError(role_name)

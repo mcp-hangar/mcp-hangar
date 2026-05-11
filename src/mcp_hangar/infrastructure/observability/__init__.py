@@ -3,10 +3,10 @@
 import importlib
 
 _ENTERPRISE_LANGFUSE_SYMBOLS = {
-    "LangfuseAdapter": "enterprise.integrations.langfuse",
-    "LangfuseConfig": "enterprise.integrations.langfuse",
-    "LangfuseObservabilityAdapter": "enterprise.integrations.langfuse",
-    "LangfuseSpanHandle": "enterprise.integrations.langfuse",
+    "LangfuseAdapter": "mcp_hangar.integrations.langfuse",
+    "LangfuseConfig": "mcp_hangar.integrations.langfuse",
+    "LangfuseObservabilityAdapter": "mcp_hangar.integrations.langfuse",
+    "LangfuseSpanHandle": "mcp_hangar.integrations.langfuse",
 }
 
 __all__: list[str] = list(_ENTERPRISE_LANGFUSE_SYMBOLS)

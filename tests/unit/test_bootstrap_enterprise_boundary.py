@@ -1,11 +1,11 @@
-"""Tests for bootstrap enterprise boundary behavior.
+"""Tests for bootstrap optional-module fallback behavior.
 
 Verifies that the server bootstraps correctly both with and without
-enterprise modules. When enterprise is absent, null/noop fallbacks
-must be used. When enterprise is present, real implementations must
-load.
+optional modules (auth, compliance, integrations, approvals). When
+these modules are unavailable, null/noop fallbacks must be used.
+When present, real implementations must load.
 
-These tests form the contract ensuring the import boundary holds
+These tests form the contract ensuring graceful degradation holds
 at runtime.
 """
 
@@ -14,23 +14,29 @@ from unittest.mock import MagicMock
 
 import pytest
 
-
-# ---------------------------------------------------------------------------
-# Helpers
-# ---------------------------------------------------------------------------
+_OPTIONAL_MODULE_PREFIXES = (
+    "mcp_hangar.auth",
+    "mcp_hangar.compliance",
+    "mcp_hangar.integrations",
+    "mcp_hangar.approvals",
+)
 
 
 def _block_enterprise_modules(monkeypatch: pytest.MonkeyPatch) -> None:
-    """Block all enterprise.* imports by setting them to None in sys.modules.
+    """Block optional module imports by setting them to None in sys.modules.
 
     Setting a module to ``None`` in ``sys.modules`` causes ``import``
     to raise ``ImportError``.
     """
-    enterprise_keys = [key for key in sys.modules if key == "enterprise" or key.startswith("enterprise.")]
-    for key in enterprise_keys:
+    keys_to_block = [
+        key
+        for key in sys.modules
+        if any(key == prefix or key.startswith(prefix + ".") for prefix in _OPTIONAL_MODULE_PREFIXES)
+    ]
+    for key in keys_to_block:
         monkeypatch.setitem(sys.modules, key, None)
-    # Also block the top-level package to prevent fresh discovery
-    monkeypatch.setitem(sys.modules, "enterprise", None)
+    for prefix in _OPTIONAL_MODULE_PREFIXES:
+        monkeypatch.setitem(sys.modules, prefix, None)
 
 
 # ---------------------------------------------------------------------------
@@ -54,7 +60,7 @@ class TestBootstrapWithoutEnterprise:
         test_mod = tmp_path / "test_auth_fallback.py"
         test_mod.write_text(
             "try:\n"
-            "    from enterprise.auth.bootstrap import AuthComponents, bootstrap_auth\n"
+            "    from mcp_hangar.auth.bootstrap import AuthComponents, bootstrap_auth\n"
             "    _available = True\n"
             "except ImportError:\n"
             "    _available = False\n"
@@ -108,12 +114,9 @@ class TestBootstrapWithoutEnterprise:
             assert result.enabled is False, "parse_auth_config(None) must return a config with enabled=False"
         # If None, that's the stub behavior -- also fine
 
-    def test_init_event_store_sqlite_fallback_without_enterprise(self, monkeypatch):
-        """When enterprise is blocked and driver='sqlite',
-        init_event_store() falls back to InMemoryEventStore."""
-        _block_enterprise_modules(monkeypatch)
-
-        from mcp_hangar.infrastructure.persistence import InMemoryEventStore
+    def test_init_event_store_sqlite_works(self):
+        """SQLiteEventStore is always available after enterprise absorption."""
+        from mcp_hangar.infrastructure.persistence.sqlite_event_store import SQLiteEventStore
         from mcp_hangar.server.bootstrap.event_store import init_event_store
 
         mock_event_bus = MagicMock()
@@ -130,11 +133,10 @@ class TestBootstrapWithoutEnterprise:
 
         init_event_store(mock_runtime, config)
 
-        # The event store set on the bus must be InMemoryEventStore
         mock_event_bus.set_event_store.assert_called_once()
         actual_store = mock_event_bus.set_event_store.call_args[0][0]
-        assert isinstance(actual_store, InMemoryEventStore), (
-            f"Expected InMemoryEventStore fallback, got {type(actual_store).__name__}"
+        assert isinstance(actual_store, SQLiteEventStore), (
+            f"Expected SQLiteEventStore, got {type(actual_store).__name__}"
         )
 
     def test_init_event_store_memory_always_works(self):
@@ -198,7 +200,7 @@ class TestBootstrapWithoutEnterprise:
         mock_auth = MagicMock()
         mock_auth.enabled = True
 
-        # Should not raise -- the import of enterprise.auth.commands.handlers
+        # Should not raise -- the import of mcp_hangar.auth.commands.handlers
         # will fail and the function will log and return.
         init_auth_cqrs(mock_runtime, mock_auth)
 
@@ -212,7 +214,7 @@ class TestBootstrapWithoutEnterprise:
         test_mod = tmp_path / "test_roles_fallback.py"
         test_mod.write_text(
             "try:\n"
-            "    from enterprise.auth.roles import BUILTIN_ROLES, list_builtin_roles\n"
+            "    from mcp_hangar.auth.roles import BUILTIN_ROLES, list_builtin_roles\n"
             "except ImportError:\n"
             "    BUILTIN_ROLES = {}\n"
             "    def list_builtin_roles():\n"
@@ -311,7 +313,7 @@ class TestBootstrapWithEnterprise:
         """When enterprise is available, BUILTIN_ROLES is populated."""
         # Import directly from enterprise to ensure we test the real module,
         # regardless of any reload effects from previous tests.
-        from enterprise.auth.roles import BUILTIN_ROLES, list_builtin_roles
+        from mcp_hangar.auth.roles import BUILTIN_ROLES, list_builtin_roles
 
         assert len(BUILTIN_ROLES) > 0, "BUILTIN_ROLES must be populated when enterprise is installed"
         role_names = list_builtin_roles()
@@ -321,7 +323,7 @@ class TestBootstrapWithEnterprise:
     def test_enterprise_auth_bootstrap_importable(self):
         """Enterprise auth bootstrap module must be importable
         when enterprise is installed."""
-        from enterprise.auth.bootstrap import AuthComponents, NullAuthComponents, bootstrap_auth
+        from mcp_hangar.auth.bootstrap import AuthComponents, NullAuthComponents, bootstrap_auth
 
         assert AuthComponents is not None
         assert NullAuthComponents is not None
@@ -330,7 +332,7 @@ class TestBootstrapWithEnterprise:
     def test_enterprise_langfuse_importable(self):
         """Enterprise Langfuse integration must be importable
         when enterprise is installed."""
-        from enterprise.integrations.langfuse import LangfuseConfig, LangfuseObservabilityAdapter
+        from mcp_hangar.integrations.langfuse import LangfuseConfig, LangfuseObservabilityAdapter
 
         assert LangfuseConfig is not None
         assert LangfuseObservabilityAdapter is not None

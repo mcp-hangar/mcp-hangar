@@ -60,20 +60,20 @@ class TestAuthContext:
     """Tests for the AuthContext frozen dataclass."""
 
     def test_is_authenticated_returns_true_for_real_user(self):
-        from enterprise.auth.infrastructure.middleware import AuthContext
+        from mcp_hangar.auth.infrastructure.middleware import AuthContext
 
         principal = _make_principal("user:bob")
         ctx = AuthContext(principal=principal, auth_method="jwt")
         assert ctx.is_authenticated() is True
 
     def test_is_authenticated_returns_false_for_anonymous(self):
-        from enterprise.auth.infrastructure.middleware import AuthContext
+        from mcp_hangar.auth.infrastructure.middleware import AuthContext
 
         ctx = AuthContext(principal=Principal.anonymous(), auth_method="anonymous")
         assert ctx.is_authenticated() is False
 
     def test_auth_context_is_frozen(self):
-        from enterprise.auth.infrastructure.middleware import AuthContext
+        from mcp_hangar.auth.infrastructure.middleware import AuthContext
 
         ctx = AuthContext(principal=_make_principal(), auth_method="api_key")
         with pytest.raises((AttributeError, FrozenInstanceError)):
@@ -97,7 +97,7 @@ class TestAuthenticationMiddleware:
         return auth
 
     def _make_middleware(self, authenticators=None, allow_anonymous=False, event_publisher=None, rate_limiter=None):
-        from enterprise.auth.infrastructure.middleware import AuthenticationMiddleware
+        from mcp_hangar.auth.infrastructure.middleware import AuthenticationMiddleware
 
         return AuthenticationMiddleware(
             authenticators=authenticators or [],
@@ -267,7 +267,7 @@ class TestAuthorizationMiddleware:
         return authz
 
     def _make_middleware(self, authorizer=None, event_publisher=None):
-        from enterprise.auth.infrastructure.middleware import AuthorizationMiddleware
+        from mcp_hangar.auth.infrastructure.middleware import AuthorizationMiddleware
 
         return AuthorizationMiddleware(
             authorizer=authorizer or self._make_authorizer(),
@@ -357,7 +357,7 @@ class TestCreateAuthRequestFromHeaders:
     """Tests for the create_auth_request_from_headers helper."""
 
     def test_creates_auth_request_with_normalized_headers(self):
-        from enterprise.auth.infrastructure.middleware import create_auth_request_from_headers
+        from mcp_hangar.auth.infrastructure.middleware import create_auth_request_from_headers
 
         req = create_auth_request_from_headers(
             headers={"Authorization": "Bearer abc", "X-Custom": "val"},
@@ -374,7 +374,7 @@ class TestCreateAuthRequestFromHeaders:
         assert req.headers.get("Authorization") == "Bearer abc"
 
     def test_defaults_for_optional_params(self):
-        from enterprise.auth.infrastructure.middleware import create_auth_request_from_headers
+        from mcp_hangar.auth.infrastructure.middleware import create_auth_request_from_headers
 
         req = create_auth_request_from_headers(headers={})
         assert req.source_ip == "unknown"
@@ -403,7 +403,7 @@ class TestAuthMiddlewareHTTP:
         return req
 
     def _make_authn_middleware(self, auth_context=None, error=None):
-        from enterprise.auth.infrastructure.middleware import AuthContext
+        from mcp_hangar.auth.infrastructure.middleware import AuthContext
 
         authn = Mock()
         if error:
@@ -415,7 +415,7 @@ class TestAuthMiddlewareHTTP:
 
     @pytest.mark.asyncio
     async def test_skip_paths_bypass_authentication(self):
-        from enterprise.auth.http_middleware import AuthMiddlewareHTTP
+        from mcp_hangar.auth.http_middleware import AuthMiddlewareHTTP
 
         authn = self._make_authn_middleware()
         call_next = AsyncMock(return_value=Mock(status_code=200))
@@ -431,7 +431,7 @@ class TestAuthMiddlewareHTTP:
 
     @pytest.mark.asyncio
     async def test_custom_skip_paths(self):
-        from enterprise.auth.http_middleware import AuthMiddlewareHTTP
+        from mcp_hangar.auth.http_middleware import AuthMiddlewareHTTP
 
         authn = self._make_authn_middleware()
         call_next = AsyncMock(return_value=Mock(status_code=200))
@@ -445,7 +445,7 @@ class TestAuthMiddlewareHTTP:
 
     @pytest.mark.asyncio
     async def test_default_skip_paths_include_ready_and_metrics(self):
-        from enterprise.auth.http_middleware import AuthMiddlewareHTTP
+        from mcp_hangar.auth.http_middleware import AuthMiddlewareHTTP
 
         authn = self._make_authn_middleware()
         call_next = AsyncMock(return_value=Mock(status_code=200))
@@ -460,8 +460,8 @@ class TestAuthMiddlewareHTTP:
 
     @pytest.mark.asyncio
     async def test_successful_auth_attaches_context_to_request_state(self):
-        from enterprise.auth.http_middleware import AuthMiddlewareHTTP
-        from enterprise.auth.infrastructure.middleware import AuthContext
+        from mcp_hangar.auth.http_middleware import AuthMiddlewareHTTP
+        from mcp_hangar.auth.infrastructure.middleware import AuthContext
 
         principal = _make_principal("user:alice")
         auth_ctx = AuthContext(principal=principal, auth_method="jwt")
@@ -479,7 +479,7 @@ class TestAuthMiddlewareHTTP:
 
     @pytest.mark.asyncio
     async def test_authentication_error_returns_401(self):
-        from enterprise.auth.http_middleware import AuthMiddlewareHTTP
+        from mcp_hangar.auth.http_middleware import AuthMiddlewareHTTP
 
         authn = self._make_authn_middleware(error=AuthenticationError("bad token"))
         call_next = AsyncMock()
@@ -498,7 +498,7 @@ class TestAuthMiddlewareHTTP:
 
     @pytest.mark.asyncio
     async def test_access_denied_error_returns_403(self):
-        from enterprise.auth.http_middleware import AuthMiddlewareHTTP
+        from mcp_hangar.auth.http_middleware import AuthMiddlewareHTTP
 
         error = AccessDeniedError(principal_id="user:bob", action="write", resource="config:main")
         authn = self._make_authn_middleware(error=error)
@@ -518,8 +518,8 @@ class TestAuthMiddlewareHTTP:
 
     @pytest.mark.asyncio
     async def test_build_auth_request_uses_client_ip(self):
-        from enterprise.auth.http_middleware import AuthMiddlewareHTTP
-        from enterprise.auth.infrastructure.middleware import AuthContext
+        from mcp_hangar.auth.http_middleware import AuthMiddlewareHTTP
+        from mcp_hangar.auth.infrastructure.middleware import AuthContext
 
         authn = Mock()
         captured_request = []
@@ -542,8 +542,8 @@ class TestAuthMiddlewareHTTP:
 
     @pytest.mark.asyncio
     async def test_build_auth_request_unknown_ip_when_no_client(self):
-        from enterprise.auth.http_middleware import AuthMiddlewareHTTP
-        from enterprise.auth.infrastructure.middleware import AuthContext
+        from mcp_hangar.auth.http_middleware import AuthMiddlewareHTTP
+        from mcp_hangar.auth.infrastructure.middleware import AuthContext
 
         authn = Mock()
         captured_request = []
@@ -566,8 +566,8 @@ class TestAuthMiddlewareHTTP:
 
     @pytest.mark.asyncio
     async def test_trusted_proxy_x_forwarded_for(self):
-        from enterprise.auth.http_middleware import AuthMiddlewareHTTP
-        from enterprise.auth.infrastructure.middleware import AuthContext
+        from mcp_hangar.auth.http_middleware import AuthMiddlewareHTTP
+        from mcp_hangar.auth.infrastructure.middleware import AuthContext
         from mcp_hangar.infrastructure.identity import TrustedProxyResolver
 
         authn = Mock()
@@ -595,8 +595,8 @@ class TestAuthMiddlewareHTTP:
 
     @pytest.mark.asyncio
     async def test_untrusted_proxy_ignores_x_forwarded_for(self):
-        from enterprise.auth.http_middleware import AuthMiddlewareHTTP
-        from enterprise.auth.infrastructure.middleware import AuthContext
+        from mcp_hangar.auth.http_middleware import AuthMiddlewareHTTP
+        from mcp_hangar.auth.infrastructure.middleware import AuthContext
 
         authn = Mock()
         captured_request = []
@@ -632,8 +632,8 @@ class TestGetPrincipalFromRequest:
     """Tests for the get_principal_from_request helper."""
 
     def test_returns_principal_when_auth_context_present(self):
-        from enterprise.auth.http_middleware import get_principal_from_request
-        from enterprise.auth.infrastructure.middleware import AuthContext
+        from mcp_hangar.auth.http_middleware import get_principal_from_request
+        from mcp_hangar.auth.infrastructure.middleware import AuthContext
 
         principal = _make_principal("user:alice")
         request = Mock()
@@ -643,7 +643,7 @@ class TestGetPrincipalFromRequest:
         assert result is principal
 
     def test_returns_none_when_no_auth_context(self):
-        from enterprise.auth.http_middleware import get_principal_from_request
+        from mcp_hangar.auth.http_middleware import get_principal_from_request
 
         request = Mock()
         request.state = SimpleNamespace()  # No 'auth' attribute
@@ -656,8 +656,8 @@ class TestRequireAuth:
     """Tests for the require_auth helper."""
 
     def test_returns_principal_when_authenticated(self):
-        from enterprise.auth.http_middleware import require_auth
-        from enterprise.auth.infrastructure.middleware import AuthContext
+        from mcp_hangar.auth.http_middleware import require_auth
+        from mcp_hangar.auth.infrastructure.middleware import AuthContext
 
         principal = _make_principal("user:bob")
         request = Mock()
@@ -667,7 +667,7 @@ class TestRequireAuth:
         assert result is principal
 
     def test_raises_missing_credentials_when_no_auth(self):
-        from enterprise.auth.http_middleware import require_auth
+        from mcp_hangar.auth.http_middleware import require_auth
 
         request = Mock()
         request.state = SimpleNamespace()
@@ -676,8 +676,8 @@ class TestRequireAuth:
             require_auth(request)
 
     def test_raises_missing_credentials_when_anonymous(self):
-        from enterprise.auth.http_middleware import require_auth
-        from enterprise.auth.infrastructure.middleware import AuthContext
+        from mcp_hangar.auth.http_middleware import require_auth
+        from mcp_hangar.auth.infrastructure.middleware import AuthContext
 
         request = Mock()
         request.state = SimpleNamespace(auth=AuthContext(principal=Principal.anonymous(), auth_method="anonymous"))
@@ -887,19 +887,19 @@ class TestAuthRoutes:
     # --- auth_routes list ---
 
     def test_auth_routes_list_is_not_empty(self):
-        from enterprise.auth.api.routes import auth_routes
+        from mcp_hangar.auth.api.routes import auth_routes
 
         assert len(auth_routes) > 0
 
     def test_auth_routes_all_are_route_instances(self):
-        from enterprise.auth.api.routes import auth_routes
+        from mcp_hangar.auth.api.routes import auth_routes
         from starlette.routing import Route
 
         for route in auth_routes:
             assert isinstance(route, Route)
 
     def test_auth_routes_contains_key_endpoints(self):
-        from enterprise.auth.api.routes import auth_routes
+        from mcp_hangar.auth.api.routes import auth_routes
 
         paths = [r.path for r in auth_routes]
         assert "/keys" in paths
@@ -912,11 +912,11 @@ class TestAuthRoutes:
 
     @pytest.mark.asyncio
     async def test_create_api_key_dispatches_command(self):
-        from enterprise.auth.api.routes import create_api_key
+        from mcp_hangar.auth.api.routes import create_api_key
 
         request = self._make_request(body={"principal_id": "user:alice", "name": "my-key"})
 
-        with patch("enterprise.auth.api.routes.dispatch_command", new_callable=AsyncMock) as mock_dispatch:
+        with patch("mcp_hangar.auth.api.routes.dispatch_command", new_callable=AsyncMock) as mock_dispatch:
             mock_dispatch.return_value = {"key_id": "k1", "raw_key": "secret"}
             response = await create_api_key(request)
 
@@ -928,7 +928,7 @@ class TestAuthRoutes:
 
     @pytest.mark.asyncio
     async def test_create_api_key_with_expires_at(self):
-        from enterprise.auth.api.routes import create_api_key
+        from mcp_hangar.auth.api.routes import create_api_key
 
         request = self._make_request(
             body={
@@ -938,7 +938,7 @@ class TestAuthRoutes:
             }
         )
 
-        with patch("enterprise.auth.api.routes.dispatch_command", new_callable=AsyncMock) as mock_dispatch:
+        with patch("mcp_hangar.auth.api.routes.dispatch_command", new_callable=AsyncMock) as mock_dispatch:
             mock_dispatch.return_value = {"key_id": "k2"}
             await create_api_key(request)
 
@@ -950,14 +950,14 @@ class TestAuthRoutes:
 
     @pytest.mark.asyncio
     async def test_revoke_api_key_dispatches_command(self):
-        from enterprise.auth.api.routes import revoke_api_key
+        from mcp_hangar.auth.api.routes import revoke_api_key
 
         request = self._make_request(
             body={"revoked_by": "admin", "reason": "compromised"},
             path_params={"key_id": "k1"},
         )
 
-        with patch("enterprise.auth.api.routes.dispatch_command", new_callable=AsyncMock) as mock_dispatch:
+        with patch("mcp_hangar.auth.api.routes.dispatch_command", new_callable=AsyncMock) as mock_dispatch:
             mock_dispatch.return_value = {"revoked": True}
             await revoke_api_key(request)
 
@@ -968,13 +968,13 @@ class TestAuthRoutes:
 
     @pytest.mark.asyncio
     async def test_revoke_api_key_handles_empty_body(self):
-        from enterprise.auth.api.routes import revoke_api_key
+        from mcp_hangar.auth.api.routes import revoke_api_key
 
         request = AsyncMock()
         request.path_params = {"key_id": "k2"}
         request.json = AsyncMock(side_effect=json.JSONDecodeError("err", "", 0))
 
-        with patch("enterprise.auth.api.routes.dispatch_command", new_callable=AsyncMock) as mock_dispatch:
+        with patch("mcp_hangar.auth.api.routes.dispatch_command", new_callable=AsyncMock) as mock_dispatch:
             mock_dispatch.return_value = {"revoked": True}
             await revoke_api_key(request)
 
@@ -986,11 +986,11 @@ class TestAuthRoutes:
 
     @pytest.mark.asyncio
     async def test_list_api_keys_dispatches_query(self):
-        from enterprise.auth.api.routes import list_api_keys
+        from mcp_hangar.auth.api.routes import list_api_keys
 
         request = self._make_request(query_params={"principal_id": "user:alice"})
 
-        with patch("enterprise.auth.api.routes.dispatch_query", new_callable=AsyncMock) as mock_dispatch:
+        with patch("mcp_hangar.auth.api.routes.dispatch_query", new_callable=AsyncMock) as mock_dispatch:
             mock_dispatch.return_value = {"keys": [], "total": 0}
             await list_api_keys(request)
 
@@ -1000,11 +1000,11 @@ class TestAuthRoutes:
 
     @pytest.mark.asyncio
     async def test_list_api_keys_include_revoked_false(self):
-        from enterprise.auth.api.routes import list_api_keys
+        from mcp_hangar.auth.api.routes import list_api_keys
 
         request = self._make_request(query_params={"principal_id": "u", "include_revoked": "false"})
 
-        with patch("enterprise.auth.api.routes.dispatch_query", new_callable=AsyncMock) as mock_dispatch:
+        with patch("mcp_hangar.auth.api.routes.dispatch_query", new_callable=AsyncMock) as mock_dispatch:
             mock_dispatch.return_value = {"keys": []}
             await list_api_keys(request)
 
@@ -1015,7 +1015,7 @@ class TestAuthRoutes:
 
     @pytest.mark.asyncio
     async def test_assign_role_dispatches_command(self):
-        from enterprise.auth.api.routes import assign_role
+        from mcp_hangar.auth.api.routes import assign_role
 
         request = self._make_request(
             body={
@@ -1026,7 +1026,7 @@ class TestAuthRoutes:
             }
         )
 
-        with patch("enterprise.auth.api.routes.dispatch_command", new_callable=AsyncMock) as mock_dispatch:
+        with patch("mcp_hangar.auth.api.routes.dispatch_command", new_callable=AsyncMock) as mock_dispatch:
             mock_dispatch.return_value = {"assigned": True}
             await assign_role(request)
 
@@ -1040,7 +1040,7 @@ class TestAuthRoutes:
 
     @pytest.mark.asyncio
     async def test_revoke_role_dispatches_command(self):
-        from enterprise.auth.api.routes import revoke_role
+        from mcp_hangar.auth.api.routes import revoke_role
 
         request = self._make_request(
             body={
@@ -1049,7 +1049,7 @@ class TestAuthRoutes:
             }
         )
 
-        with patch("enterprise.auth.api.routes.dispatch_command", new_callable=AsyncMock) as mock_dispatch:
+        with patch("mcp_hangar.auth.api.routes.dispatch_command", new_callable=AsyncMock) as mock_dispatch:
             mock_dispatch.return_value = {"revoked": True}
             await revoke_role(request)
 
@@ -1062,15 +1062,15 @@ class TestAuthRoutes:
 
     @pytest.mark.asyncio
     async def test_list_roles_dispatches_query(self):
-        from enterprise.auth.api.routes import list_roles
+        from mcp_hangar.auth.api.routes import list_roles
 
         request = self._make_request()
 
-        with patch("enterprise.auth.api.routes.dispatch_query", new_callable=AsyncMock) as mock_dispatch:
+        with patch("mcp_hangar.auth.api.routes.dispatch_query", new_callable=AsyncMock) as mock_dispatch:
             mock_dispatch.return_value = {"roles": []}
             await list_roles(request)
 
-        from enterprise.auth.queries.queries import ListBuiltinRolesQuery
+        from mcp_hangar.auth.queries.queries import ListBuiltinRolesQuery
 
         assert isinstance(mock_dispatch.call_args[0][0], ListBuiltinRolesQuery)
 
@@ -1078,7 +1078,7 @@ class TestAuthRoutes:
 
     @pytest.mark.asyncio
     async def test_create_custom_role_dispatches_command(self):
-        from enterprise.auth.api.routes import create_custom_role
+        from mcp_hangar.auth.api.routes import create_custom_role
 
         request = self._make_request(
             body={
@@ -1088,7 +1088,7 @@ class TestAuthRoutes:
             }
         )
 
-        with patch("enterprise.auth.api.routes.dispatch_command", new_callable=AsyncMock) as mock_dispatch:
+        with patch("mcp_hangar.auth.api.routes.dispatch_command", new_callable=AsyncMock) as mock_dispatch:
             mock_dispatch.return_value = {"role_name": "deployer"}
             response = await create_custom_role(request)
 
@@ -1101,11 +1101,11 @@ class TestAuthRoutes:
 
     @pytest.mark.asyncio
     async def test_get_principal_roles_dispatches_query(self):
-        from enterprise.auth.api.routes import get_principal_roles
+        from mcp_hangar.auth.api.routes import get_principal_roles
 
         request = self._make_request(query_params={"principal_id": "user:alice", "scope": "global"})
 
-        with patch("enterprise.auth.api.routes.dispatch_query", new_callable=AsyncMock) as mock_dispatch:
+        with patch("mcp_hangar.auth.api.routes.dispatch_query", new_callable=AsyncMock) as mock_dispatch:
             mock_dispatch.return_value = {"roles": []}
             await get_principal_roles(request)
 
@@ -1117,11 +1117,11 @@ class TestAuthRoutes:
 
     @pytest.mark.asyncio
     async def test_list_all_roles_dispatches_query(self):
-        from enterprise.auth.api.routes import list_all_roles
+        from mcp_hangar.auth.api.routes import list_all_roles
 
         request = self._make_request(query_params={})
 
-        with patch("enterprise.auth.api.routes.dispatch_query", new_callable=AsyncMock) as mock_dispatch:
+        with patch("mcp_hangar.auth.api.routes.dispatch_query", new_callable=AsyncMock) as mock_dispatch:
             mock_dispatch.return_value = {"roles": [], "total": 0}
             await list_all_roles(request)
 
@@ -1130,11 +1130,11 @@ class TestAuthRoutes:
 
     @pytest.mark.asyncio
     async def test_list_all_roles_exclude_builtin(self):
-        from enterprise.auth.api.routes import list_all_roles
+        from mcp_hangar.auth.api.routes import list_all_roles
 
         request = self._make_request(query_params={"include_builtin": "false"})
 
-        with patch("enterprise.auth.api.routes.dispatch_query", new_callable=AsyncMock) as mock_dispatch:
+        with patch("mcp_hangar.auth.api.routes.dispatch_query", new_callable=AsyncMock) as mock_dispatch:
             mock_dispatch.return_value = {"roles": []}
             await list_all_roles(request)
 
@@ -1145,11 +1145,11 @@ class TestAuthRoutes:
 
     @pytest.mark.asyncio
     async def test_get_role_found(self):
-        from enterprise.auth.api.routes import get_role
+        from mcp_hangar.auth.api.routes import get_role
 
         request = self._make_request(path_params={"role_name": "admin"})
 
-        with patch("enterprise.auth.api.routes.dispatch_query", new_callable=AsyncMock) as mock_dispatch:
+        with patch("mcp_hangar.auth.api.routes.dispatch_query", new_callable=AsyncMock) as mock_dispatch:
             mock_dispatch.return_value = {"found": True, "role_name": "admin"}
             response = await get_role(request)
 
@@ -1157,11 +1157,11 @@ class TestAuthRoutes:
 
     @pytest.mark.asyncio
     async def test_get_role_not_found_returns_404(self):
-        from enterprise.auth.api.routes import get_role
+        from mcp_hangar.auth.api.routes import get_role
 
         request = self._make_request(path_params={"role_name": "nonexistent"})
 
-        with patch("enterprise.auth.api.routes.dispatch_query", new_callable=AsyncMock) as mock_dispatch:
+        with patch("mcp_hangar.auth.api.routes.dispatch_query", new_callable=AsyncMock) as mock_dispatch:
             mock_dispatch.return_value = {"found": False}
             response = await get_role(request)
 
@@ -1171,11 +1171,11 @@ class TestAuthRoutes:
 
     @pytest.mark.asyncio
     async def test_delete_role_returns_204(self):
-        from enterprise.auth.api.routes import delete_role
+        from mcp_hangar.auth.api.routes import delete_role
 
         request = self._make_request(path_params={"role_name": "custom-role"})
 
-        with patch("enterprise.auth.api.routes.dispatch_command", new_callable=AsyncMock) as mock_dispatch:
+        with patch("mcp_hangar.auth.api.routes.dispatch_command", new_callable=AsyncMock) as mock_dispatch:
             mock_dispatch.return_value = None
             response = await delete_role(request)
 
@@ -1185,14 +1185,14 @@ class TestAuthRoutes:
 
     @pytest.mark.asyncio
     async def test_update_role_dispatches_command(self):
-        from enterprise.auth.api.routes import update_role
+        from mcp_hangar.auth.api.routes import update_role
 
         request = self._make_request(
             path_params={"role_name": "deployer"},
             body={"permissions": ["mcp_server:write:*"], "description": "Updated", "updated_by": "admin"},
         )
 
-        with patch("enterprise.auth.api.routes.dispatch_command", new_callable=AsyncMock) as mock_dispatch:
+        with patch("mcp_hangar.auth.api.routes.dispatch_command", new_callable=AsyncMock) as mock_dispatch:
             mock_dispatch.return_value = {"role_name": "deployer"}
             await update_role(request)
 
@@ -1205,15 +1205,15 @@ class TestAuthRoutes:
 
     @pytest.mark.asyncio
     async def test_list_principals_dispatches_query(self):
-        from enterprise.auth.api.routes import list_principals
+        from mcp_hangar.auth.api.routes import list_principals
 
         request = self._make_request()
 
-        with patch("enterprise.auth.api.routes.dispatch_query", new_callable=AsyncMock) as mock_dispatch:
+        with patch("mcp_hangar.auth.api.routes.dispatch_query", new_callable=AsyncMock) as mock_dispatch:
             mock_dispatch.return_value = {"principals": [], "total": 0}
             await list_principals(request)
 
-        from enterprise.auth.queries.queries import ListPrincipalsQuery
+        from mcp_hangar.auth.queries.queries import ListPrincipalsQuery
 
         assert isinstance(mock_dispatch.call_args[0][0], ListPrincipalsQuery)
 
@@ -1221,7 +1221,7 @@ class TestAuthRoutes:
 
     @pytest.mark.asyncio
     async def test_list_permissions_returns_permission_manifest(self):
-        from enterprise.auth.api.routes import list_permissions
+        from mcp_hangar.auth.api.routes import list_permissions
 
         request = self._make_request()
         response = await list_permissions(request)
@@ -1238,7 +1238,7 @@ class TestAuthRoutes:
 
     @pytest.mark.asyncio
     async def test_check_permission_with_action_fields(self):
-        from enterprise.auth.api.routes import check_permission
+        from mcp_hangar.auth.api.routes import check_permission
 
         request = self._make_request(
             body={
@@ -1249,7 +1249,7 @@ class TestAuthRoutes:
             }
         )
 
-        with patch("enterprise.auth.api.routes.dispatch_query", new_callable=AsyncMock) as mock_dispatch:
+        with patch("mcp_hangar.auth.api.routes.dispatch_query", new_callable=AsyncMock) as mock_dispatch:
             mock_dispatch.return_value = {"allowed": True}
             await check_permission(request)
 
@@ -1261,7 +1261,7 @@ class TestAuthRoutes:
 
     @pytest.mark.asyncio
     async def test_check_permission_with_combined_permission_string(self):
-        from enterprise.auth.api.routes import check_permission
+        from mcp_hangar.auth.api.routes import check_permission
 
         request = self._make_request(
             body={
@@ -1270,7 +1270,7 @@ class TestAuthRoutes:
             }
         )
 
-        with patch("enterprise.auth.api.routes.dispatch_query", new_callable=AsyncMock) as mock_dispatch:
+        with patch("mcp_hangar.auth.api.routes.dispatch_query", new_callable=AsyncMock) as mock_dispatch:
             mock_dispatch.return_value = {"allowed": False}
             await check_permission(request)
 
@@ -1281,7 +1281,7 @@ class TestAuthRoutes:
 
     @pytest.mark.asyncio
     async def test_check_permission_with_partial_permission_string(self):
-        from enterprise.auth.api.routes import check_permission
+        from mcp_hangar.auth.api.routes import check_permission
 
         request = self._make_request(
             body={
@@ -1290,7 +1290,7 @@ class TestAuthRoutes:
             }
         )
 
-        with patch("enterprise.auth.api.routes.dispatch_query", new_callable=AsyncMock) as mock_dispatch:
+        with patch("mcp_hangar.auth.api.routes.dispatch_query", new_callable=AsyncMock) as mock_dispatch:
             mock_dispatch.return_value = {"allowed": True}
             await check_permission(request)
 
@@ -1303,14 +1303,14 @@ class TestAuthRoutes:
 
     @pytest.mark.asyncio
     async def test_set_tool_access_policy_valid_scope(self):
-        from enterprise.auth.api.routes import set_tool_access_policy
+        from mcp_hangar.auth.api.routes import set_tool_access_policy
 
         request = self._make_request(
             path_params={"scope": "provider", "target_id": "math"},
             body={"allow_list": ["add", "subtract"], "deny_list": ["admin_*"]},
         )
 
-        with patch("enterprise.auth.api.routes.dispatch_command", new_callable=AsyncMock) as mock_dispatch:
+        with patch("mcp_hangar.auth.api.routes.dispatch_command", new_callable=AsyncMock) as mock_dispatch:
             mock_dispatch.return_value = {"status": "ok"}
             response = await set_tool_access_policy(request)
 
@@ -1322,7 +1322,7 @@ class TestAuthRoutes:
 
     @pytest.mark.asyncio
     async def test_set_tool_access_policy_invalid_scope_returns_400(self):
-        from enterprise.auth.api.routes import set_tool_access_policy
+        from mcp_hangar.auth.api.routes import set_tool_access_policy
 
         request = self._make_request(
             path_params={"scope": "invalid", "target_id": "x"},
@@ -1338,11 +1338,11 @@ class TestAuthRoutes:
 
     @pytest.mark.asyncio
     async def test_get_tool_access_policy_valid_scope(self):
-        from enterprise.auth.api.routes import get_tool_access_policy
+        from mcp_hangar.auth.api.routes import get_tool_access_policy
 
         request = self._make_request(path_params={"scope": "group", "target_id": "g1"})
 
-        with patch("enterprise.auth.api.routes.dispatch_query", new_callable=AsyncMock) as mock_dispatch:
+        with patch("mcp_hangar.auth.api.routes.dispatch_query", new_callable=AsyncMock) as mock_dispatch:
             mock_dispatch.return_value = {"allow_list": ["*"], "deny_list": []}
             response = await get_tool_access_policy(request)
 
@@ -1350,7 +1350,7 @@ class TestAuthRoutes:
 
     @pytest.mark.asyncio
     async def test_get_tool_access_policy_invalid_scope_returns_400(self):
-        from enterprise.auth.api.routes import get_tool_access_policy
+        from mcp_hangar.auth.api.routes import get_tool_access_policy
 
         request = self._make_request(path_params={"scope": "bad", "target_id": "x"})
 
@@ -1361,11 +1361,11 @@ class TestAuthRoutes:
 
     @pytest.mark.asyncio
     async def test_clear_tool_access_policy_returns_204(self):
-        from enterprise.auth.api.routes import clear_tool_access_policy
+        from mcp_hangar.auth.api.routes import clear_tool_access_policy
 
         request = self._make_request(path_params={"scope": "member", "target_id": "m1"})
 
-        with patch("enterprise.auth.api.routes.dispatch_command", new_callable=AsyncMock) as mock_dispatch:
+        with patch("mcp_hangar.auth.api.routes.dispatch_command", new_callable=AsyncMock) as mock_dispatch:
             mock_dispatch.return_value = None
             response = await clear_tool_access_policy(request)
 
@@ -1373,7 +1373,7 @@ class TestAuthRoutes:
 
     @pytest.mark.asyncio
     async def test_clear_tool_access_policy_invalid_scope_returns_400(self):
-        from enterprise.auth.api.routes import clear_tool_access_policy
+        from mcp_hangar.auth.api.routes import clear_tool_access_policy
 
         request = self._make_request(path_params={"scope": "unknown", "target_id": "x"})
 
@@ -1384,7 +1384,7 @@ class TestAuthRoutes:
 
     @pytest.mark.asyncio
     async def test_all_valid_tap_scopes_accepted(self):
-        from enterprise.auth.api.routes import set_tool_access_policy
+        from mcp_hangar.auth.api.routes import set_tool_access_policy
 
         for scope in ("provider", "group", "member"):
             request = self._make_request(
@@ -1392,7 +1392,7 @@ class TestAuthRoutes:
                 body={"allow_list": ["*"]},
             )
 
-            with patch("enterprise.auth.api.routes.dispatch_command", new_callable=AsyncMock) as mock_dispatch:
+            with patch("mcp_hangar.auth.api.routes.dispatch_command", new_callable=AsyncMock) as mock_dispatch:
                 mock_dispatch.return_value = {"ok": True}
                 response = await set_tool_access_policy(request)
                 assert response.status_code == 200, f"Scope {scope} should be accepted"

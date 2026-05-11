@@ -8,9 +8,9 @@ from typing import Any
 
 from mcp_hangar.domain.contracts.authentication import IApiKeyStore
 from mcp_hangar.domain.contracts.authorization import IRoleStore
-from enterprise.auth.roles import BUILTIN_ROLES
+from mcp_hangar.auth.roles import BUILTIN_ROLES
 from mcp_hangar.logging_config import get_logger
-from enterprise.auth.queries.queries import (
+from mcp_hangar.auth.queries.queries import (
     CheckPermissionQuery,
     GetApiKeyCountQuery,
     GetApiKeysByPrincipalQuery,

@@ -12,13 +12,13 @@ import structlog
 
 from mcp_hangar.domain.contracts.authentication import IApiKeyStore, IAuthenticator
 from mcp_hangar.domain.contracts.authorization import IAuthorizer, IRoleStore
-from enterprise.auth.infrastructure.api_key_authenticator import ApiKeyAuthenticator, InMemoryApiKeyStore
-from enterprise.auth.infrastructure.jwt_authenticator import JWKSTokenValidator, JWTAuthenticator, OIDCConfig
-from enterprise.auth.infrastructure.middleware import AuthenticationMiddleware, AuthorizationMiddleware
-from enterprise.auth.infrastructure.opa_authorizer import CombinedAuthorizer, OPAAuthorizer
-from enterprise.auth.infrastructure.rate_limiter import AuthRateLimitConfig, AuthRateLimiter
-from enterprise.auth.infrastructure.rbac_authorizer import InMemoryRoleStore, RBACAuthorizer
-from enterprise.auth.config import AuthConfig
+from mcp_hangar.auth.infrastructure.api_key_authenticator import ApiKeyAuthenticator, InMemoryApiKeyStore
+from mcp_hangar.auth.infrastructure.jwt_authenticator import JWKSTokenValidator, JWTAuthenticator, OIDCConfig
+from mcp_hangar.auth.infrastructure.middleware import AuthenticationMiddleware, AuthorizationMiddleware
+from mcp_hangar.auth.infrastructure.opa_authorizer import CombinedAuthorizer, OPAAuthorizer
+from mcp_hangar.auth.infrastructure.rate_limiter import AuthRateLimitConfig, AuthRateLimiter
+from mcp_hangar.auth.infrastructure.rbac_authorizer import InMemoryRoleStore, RBACAuthorizer
+from mcp_hangar.auth.config import AuthConfig
 
 logger = structlog.get_logger(__name__)
 
@@ -53,7 +53,7 @@ def _create_storage_backends(
         tap_store: Any = None
 
     elif driver == "event_sourcing":
-        from enterprise.auth.infrastructure.event_sourced_store import EventSourcedApiKeyStore, EventSourcedRoleStore
+        from mcp_hangar.auth.infrastructure.event_sourced_store import EventSourcedApiKeyStore, EventSourcedRoleStore
 
         if event_store is None:
             raise ValueError("event_sourcing driver requires event_store to be provided")
@@ -71,7 +71,7 @@ def _create_storage_backends(
         tap_store = None
 
     elif driver == "sqlite":
-        from enterprise.auth.infrastructure.sqlite_store import SQLiteApiKeyStore, SQLiteRoleStore
+        from mcp_hangar.auth.infrastructure.sqlite_store import SQLiteApiKeyStore, SQLiteRoleStore
 
         # Ensure directory exists
         db_path = Path(config.storage.path)
@@ -87,12 +87,12 @@ def _create_storage_backends(
         sqlite_role_store.initialize()
         role_store = sqlite_role_store
 
-        from enterprise.auth.infrastructure.sqlite_tap_store import SQLiteToolAccessPolicyStore
+        from mcp_hangar.auth.infrastructure.sqlite_tap_store import SQLiteToolAccessPolicyStore
 
         tap_store = SQLiteToolAccessPolicyStore(db_path)
 
     elif driver == "postgresql" or driver == "postgres":
-        from enterprise.auth.infrastructure.postgres_store import (
+        from mcp_hangar.auth.infrastructure.postgres_store import (
             create_postgres_connection_factory,
             PostgresApiKeyStore,
             PostgresRoleStore,

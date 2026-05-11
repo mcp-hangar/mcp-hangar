@@ -58,16 +58,16 @@ opentelemetry = [
 postgres = [
     "asyncpg>=0.29.0",
 ]
-enterprise = [
+full = [
     "fpdf2>=2.8.0",
 ]
 [project.scripts]
 mcp-hangar = "mcp_hangar.server.cli:cli_main"
-[project.entry-points."mcp_hangar.enterprise"]
-# Enterprise distributions should register a bootstrap loader callable with:
-#   load_enterprise_modules(tier, config, event_bus, event_publisher) -> EnterpriseComponents
-# Example registration from an enterprise package:
-# mcp_hangar.enterprise = "enterprise.auth.bootstrap:load_enterprise_modules"
+[project.entry-points."mcp_hangar.extensions"]
+# Extension distributions can register a bootstrap loader callable with:
+#   load_enterprise_modules(config, event_bus, event_publisher) -> EnterpriseComponents
+# Example registration from an extension package:
+# mcp_hangar.extensions = "mcp_hangar.auth.bootstrap:load_enterprise_modules"
 [project.urls]
 Homepage = "https://mcp-hangar.io"
 Documentation = "https://mcp-hangar.io/getting-started/quickstart/"

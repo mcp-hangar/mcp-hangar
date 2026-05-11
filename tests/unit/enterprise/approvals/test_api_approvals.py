@@ -11,10 +11,10 @@ import pytest
 from starlette.applications import Starlette
 from starlette.testclient import TestClient
 
-from enterprise.approvals.api.routes import approval_routes
-from enterprise.approvals.hold_registry import ApprovalHoldRegistry
-from enterprise.approvals.models import ApprovalRequest, ApprovalState
-from enterprise.approvals.service import ApprovalGateService
+from mcp_hangar.approvals.api.routes import approval_routes
+from mcp_hangar.approvals.hold_registry import ApprovalHoldRegistry
+from mcp_hangar.approvals.models import ApprovalRequest, ApprovalState
+from mcp_hangar.approvals.service import ApprovalGateService
 
 
 class FakeRepository:

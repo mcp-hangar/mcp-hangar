@@ -4,7 +4,7 @@ import asyncio
 
 import pytest
 
-from enterprise.approvals.hold_registry import ApprovalHoldRegistry
+from mcp_hangar.approvals.hold_registry import ApprovalHoldRegistry
 
 
 @pytest.fixture

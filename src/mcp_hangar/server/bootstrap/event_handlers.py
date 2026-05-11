@@ -146,7 +146,7 @@ def _create_compliance_exporter(format_name: str, output_path: str | None) -> IA
         return None
 
     try:
-        mod = importlib.import_module("enterprise.compliance")
+        mod = importlib.import_module("mcp_hangar.compliance")
         exporter_cls = getattr(mod, class_name)
         exporter: IAuditExporter = exporter_cls(output_path=output_path)
         return exporter

@@ -2,10 +2,10 @@
 
 """Built-in roles stub for core domain.
 
-Role definitions live in ``enterprise/auth/roles.py`` under BSL 1.1.
+Role definitions live in ``mcp_hangar/auth/roles.py``.
 
-This stub re-exports from enterprise when available via importlib. When
-enterprise is not installed, all role-related symbols resolve to empty
+This stub re-exports from auth when available via importlib. When
+auth is not installed, all role-related symbols resolve to empty
 defaults to allow core to function without auth features.
 """
 
@@ -31,7 +31,7 @@ _ENTERPRISE_ROLE_NAMES = (
 )
 
 try:
-    _enterprise_roles = importlib.import_module("enterprise.auth.roles")
+    _enterprise_roles = importlib.import_module("mcp_hangar.auth.roles")
     BUILTIN_ROLES = _enterprise_roles.BUILTIN_ROLES
     PERMISSIONS = _enterprise_roles.PERMISSIONS
     ROLE_ADMIN = _enterprise_roles.ROLE_ADMIN

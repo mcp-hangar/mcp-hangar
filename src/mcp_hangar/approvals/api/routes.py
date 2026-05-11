@@ -79,7 +79,7 @@ async def list_approvals(request: Request) -> HangarJSONResponse:
     state_filter = request.query_params.get("state", "pending")
     provider_id = request.query_params.get("provider_id")
 
-    from enterprise.approvals.models import ApprovalState
+    from mcp_hangar.approvals.models import ApprovalState
 
     try:
         state = ApprovalState(state_filter)

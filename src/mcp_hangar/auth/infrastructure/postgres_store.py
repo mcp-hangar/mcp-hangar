@@ -23,7 +23,7 @@ from mcp_hangar.domain.contracts.authentication import ApiKeyMetadata, IApiKeySt
 from mcp_hangar.domain.contracts.authorization import IRoleStore
 from mcp_hangar.domain.events import ApiKeyCreated, ApiKeyRevoked, KeyRotated, RoleAssigned, RoleRevoked
 from mcp_hangar.domain.exceptions import ExpiredCredentialsError, RevokedCredentialsError
-from enterprise.auth.roles import BUILTIN_ROLES
+from mcp_hangar.auth.roles import BUILTIN_ROLES
 from mcp_hangar.domain.value_objects import Permission, Principal, PrincipalId, PrincipalType, Role
 
 logger = structlog.get_logger(__name__)

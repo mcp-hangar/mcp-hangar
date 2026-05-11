@@ -9,8 +9,8 @@ Provides:
 - Auth CLI management commands
 """
 
-from enterprise.auth.bootstrap import AuthComponents, NullAuthComponents, bootstrap_auth
-from enterprise.auth.config import parse_auth_config
+from mcp_hangar.auth.bootstrap import AuthComponents, NullAuthComponents, bootstrap_auth
+from mcp_hangar.auth.config import parse_auth_config
 
 __all__ = [
     "AuthComponents",

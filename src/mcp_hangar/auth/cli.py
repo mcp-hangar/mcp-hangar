@@ -21,9 +21,9 @@ from datetime import datetime, timedelta, UTC
 import sys
 from typing import cast
 
-from enterprise.auth.roles import list_builtin_roles
-from enterprise.auth.infrastructure.api_key_authenticator import InMemoryApiKeyStore
-from enterprise.auth.infrastructure.rbac_authorizer import InMemoryRoleStore
+from mcp_hangar.auth.roles import list_builtin_roles
+from mcp_hangar.auth.infrastructure.api_key_authenticator import InMemoryApiKeyStore
+from mcp_hangar.auth.infrastructure.rbac_authorizer import InMemoryRoleStore
 
 
 def create_auth_parser(subparsers) -> argparse.ArgumentParser:
@@ -321,7 +321,7 @@ def _handle_revoke_role(args, role_store: InMemoryRoleStore) -> int:
 
 def _handle_list_roles() -> int:
     """Handle list-roles command."""
-    from enterprise.auth.roles import BUILTIN_ROLES
+    from mcp_hangar.auth.roles import BUILTIN_ROLES
 
     print("Available built-in roles:")
     print()
