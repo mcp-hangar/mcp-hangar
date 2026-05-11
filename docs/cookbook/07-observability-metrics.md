@@ -68,9 +68,9 @@ Hangar exposes Prometheus-format metrics at `/metrics`. The monitoring stack in 
 |--------|------|-------------------|
 | `mcp_hangar_tool_calls_total` | Counter | Total tool invocations per MCP server/tool |
 | `mcp_hangar_tool_call_duration_seconds` | Histogram | Latency distribution per MCP server/tool |
-| `mcp_hangar_mcp_server_state` | Gauge | Current state per MCP server (1 = active) |
-| `mcp_hangar_cold_starts_total` | Counter | Cold start count per MCP server/mode |
-| `mcp_hangar_health_checks` | Counter | Health check results per MCP server |
+| `mcp_hangar_mcp_server_state` | Gauge | Current state per MCP server (0=cold, 1=initializing, 2=ready, 3=degraded, 4=dead) |
+| `mcp_hangar_mcp_server_cold_start_seconds` | Histogram | Cold start latency per MCP server |
+| `mcp_hangar_health_checks_total` | Counter | Health check results per MCP server |
 | `mcp_hangar_circuit_breaker_state` | Gauge | Circuit breaker state per MCP server |
 
 ## Key Config Reference
@@ -80,8 +80,6 @@ No new config keys. Metrics are always available in HTTP mode.
 | Endpoint | Description |
 |----------|-------------|
 | `/metrics` | Prometheus text format |
-| `/api/observability/metrics` | JSON summary + Prometheus text |
-| `/api/observability/metrics/history` | Time-series snapshots for charts |
 
 ## What's Next
 

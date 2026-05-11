@@ -34,10 +34,6 @@ Keep both containers running.
 ```yaml
 # config.yaml — Recipe 04: Failover
 
-health_check:
-  enabled: true
-  interval_s: 30
-
 mcp_servers:
   my-mcp:
     mode: remote
