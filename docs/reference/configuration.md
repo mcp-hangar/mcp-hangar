@@ -208,25 +208,6 @@ event_store:
 | `driver` | `str` | -- | Storage driver: `sqlite` or `memory` |
 | `path` | `str` | -- | SQLite database path (sqlite driver only) |
 
-## `knowledge_base`
-
-Knowledge base storage backend.
-
-```yaml
-knowledge_base:
-  enabled: true
-  dsn: sqlite:///data/kb.db
-  pool_size: 5
-  cache_ttl_s: 300
-```
-
-| Key | Type | Default | Description |
-|-----|------|---------|-------------|
-| `enabled` | `bool` | -- | Enable knowledge base |
-| `dsn` | `str` | -- | Database connection string |
-| `pool_size` | `int` | -- | Connection pool size |
-| `cache_ttl_s` | `int` | -- | Cache TTL in seconds |
-
 ## `logging`
 
 Log output configuration.
@@ -364,29 +345,6 @@ config_reload:
 | `enabled` | `bool` | -- | Enable automatic config file watching |
 | `use_watchdog` | `bool` | -- | Use watchdog library for file system events |
 | `interval_s` | `int` | -- | Polling interval in seconds (fallback when watchdog unavailable) |
-
-## `batch`
-
-Limits for batch tool invocations via `hangar_call`.
-
-```yaml
-batch:
-  max_calls: 100
-  max_concurrency: 50
-  default_timeout: 60
-  max_timeout: 300
-  max_response_size_bytes: 10485760      # 10 MB
-  max_total_response_size_bytes: 52428800 # 50 MB
-```
-
-| Key | Type | Default | Range | Description |
-|-----|------|---------|-------|-------------|
-| `max_calls` | `int` | `100` | -- | Maximum calls per batch |
-| `max_concurrency` | `int` | `50` | -- | Maximum parallel workers per batch |
-| `default_timeout` | `float` | `60` | -- | Default batch timeout in seconds |
-| `max_timeout` | `float` | `300` | -- | Maximum allowed batch timeout |
-| `max_response_size_bytes` | `int` | `10485760` (10 MB) | -- | Maximum single response size before truncation |
-| `max_total_response_size_bytes` | `int` | `52428800` (50 MB) | -- | Maximum total batch response size |
 
 ## `groups`
 

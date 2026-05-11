@@ -47,9 +47,9 @@ List all configured MCP servers, groups, and runtime (hot-loaded) MCP servers wi
 
 | Field | Type | Description |
 |-------|------|-------------|
-| `MCP servers` | `list[object]` | Configured MCP servers with `MCP server`, `state`, `mode`, `alive`, `tools_count`, `health_status`, `tools_predefined`, `description` |
+| `mcp_servers` | `list[object]` | Configured MCP servers with `mcp_server`, `state`, `mode`, `alive`, `tools_count`, `health_status`, `tools_predefined`, `description` |
 | `groups` | `list[object]` | Groups with `group_id`, `state`, `strategy`, `healthy_count`, `total_members` |
-| `runtime_mcp_servers` | `list[object]` | Hot-loaded MCP servers with `MCP server`, `state`, `source`, `verified`, `ephemeral`, `loaded_at`, `lifetime_seconds` |
+| `runtime_mcp_servers` | `list[object]` | Hot-loaded MCP servers with `mcp_server`, `state`, `source`, `verified`, `ephemeral`, `loaded_at`, `lifetime_seconds` |
 
 **Example:**
 
@@ -76,7 +76,7 @@ Start a MCP server or group. Transitions the MCP server from COLD to READY.
 
 | Parameter | Type | Default | Description |
 |-----------|------|---------|-------------|
-| `MCP server` | `str` | required | MCP Server ID or Group ID |
+| `mcp_server` | `str` | required | MCP Server ID or Group ID |
 
 **Side Effects:** Starts MCP server process or container. State transitions from COLD to READY.
 
@@ -86,7 +86,7 @@ For a MCP server:
 
 | Field | Type | Description |
 |-------|------|-------------|
-| `MCP server` | `str` | MCP Server ID |
+| `mcp_server` | `str` | MCP Server ID |
 | `state` | `str` | New state (typically `"ready"`) |
 | `tools` | `list[str]` | Available tool names |
 
@@ -120,7 +120,7 @@ Stop a running MCP server or group.
 
 | Parameter | Type | Default | Description |
 |-----------|------|---------|-------------|
-| `MCP server` | `str` | required | MCP Server ID or Group ID |
+| `mcp_server` | `str` | required | MCP Server ID or Group ID |
 
 **Side Effects:** Stops MCP server process or container. State transitions to COLD.
 
@@ -165,7 +165,7 @@ Human-readable health dashboard with state indicators for all MCP servers and gr
 
 | Field | Type | Description |
 |-------|------|-------------|
-| `MCP servers` | `list[object]` | MCP servers with `id`, `indicator`, `state`, `mode`, `last_used` |
+| `mcp_servers` | `list[object]` | MCP servers with `id`, `indicator`, `state`, `mode`, `last_used` |
 | `groups` | `list[object]` | Groups with `id`, `indicator`, `state`, `healthy_members`, `total_members` |
 | `runtime_mcp_servers` | `list[object]` | Hot-loaded MCP servers with `id`, `indicator`, `state`, `source`, `verified` |
 | `summary` | `object` | Counts: `healthy_mcp_servers`, `total_mcp_servers`, `runtime_mcp_servers`, `runtime_healthy`, `uptime`, `uptime_seconds` |
@@ -256,7 +256,7 @@ The primary success response:
 | Field | Type | Description |
 |-------|------|-------------|
 | `status` | `str` | `"loaded"` |
-| `MCP server` | `str` | Assigned MCP server ID |
+| `mcp_server` | `str` | Assigned MCP server ID |
 | `tools` | `list[str]` | Available tool names |
 
 Other possible `status` values: `"ambiguous"` (multiple matches found, includes `matches` list), `"not_found"` (no match in registry), `"missing_secrets"` (required secrets not configured, includes `missing` list and `instructions`), `"unverified"` (MCP server not verified, use `force_unverified` to override), `"failed"` (configuration error).
@@ -279,7 +279,7 @@ Unload a hot-loaded MCP server. Only works for MCP servers loaded via `hangar_lo
 
 | Parameter | Type | Default | Description |
 |-----------|------|---------|-------------|
-| `MCP server` | `str` | required | MCP Server ID (from `hangar_load` result) |
+| `mcp_server` | `str` | required | MCP Server ID (from `hangar_load` result) |
 
 **Side Effects:** Stops the MCP server process and removes it from the runtime registry.
 
@@ -288,7 +288,7 @@ Unload a hot-loaded MCP server. Only works for MCP servers loaded via `hangar_lo
 | Field | Type | Description |
 |-------|------|-------------|
 | `status` | `str` | `"unloaded"` or `"not_hot_loaded"` or `"failed"` |
-| `MCP server` | `str` | MCP Server ID |
+| `mcp_server` | `str` | MCP Server ID |
 | `message` | `str` | Result description |
 | `lifetime_seconds` | `float` | How long the MCP server was loaded (success only) |
 
@@ -313,7 +313,7 @@ List the tools available on a MCP server or group. Tool access filtering (allow_
 
 | Parameter | Type | Default | Description |
 |-----------|------|---------|-------------|
-| `MCP server` | `str` | required | MCP Server ID or Group ID |
+| `mcp_server` | `str` | required | MCP Server ID or Group ID |
 
 **Side Effects:** May start a cold MCP server to discover its tools.
 
@@ -321,7 +321,7 @@ List the tools available on a MCP server or group. Tool access filtering (allow_
 
 | Field | Type | Description |
 |-------|------|-------------|
-| `MCP server` | `str` | MCP Server ID |
+| `mcp_server` | `str` | MCP Server ID |
 | `state` | `str` | MCP server state |
 | `predefined` | `bool` | Whether tools are predefined (not discovered at runtime) |
 | `tools` | `list[object]` | Tools with `name`, `description`, `inputSchema` |
@@ -354,7 +354,7 @@ Detailed information about a MCP server or group, including health tracking, idl
 
 | Parameter | Type | Default | Description |
 |-----------|------|---------|-------------|
-| `MCP server` | `str` | required | MCP Server ID or Group ID |
+| `mcp_server` | `str` | required | MCP Server ID or Group ID |
 
 **Side Effects:** None (read-only).
 
@@ -364,7 +364,7 @@ For a MCP server:
 
 | Field | Type | Description |
 |-------|------|-------------|
-| `MCP server` | `str` | MCP Server ID |
+| `mcp_server` | `str` | MCP Server ID |
 | `state` | `str` | Current state |
 | `mode` | `str` | MCP Server mode |
 | `alive` | `bool` | Whether the MCP server process is running |
@@ -415,7 +415,7 @@ Pre-start one or more MCP servers so the first tool call does not incur cold-sta
 
 | Parameter | Type | Default | Description |
 |-----------|------|---------|-------------|
-| `MCP servers` | `str \| None` | `None` | Comma-separated MCP server IDs. `None` warms all MCP servers. |
+| `mcp_servers` | `str \| None` | `None` | Comma-separated MCP server IDs. `None` warms all MCP servers. |
 
 **Side Effects:** Starts specified MCP server processes.
 
@@ -456,7 +456,7 @@ System-wide health summary with MCP server state counts and security information
 | Field | Type | Description |
 |-------|------|-------------|
 | `status` | `str` | Overall system status |
-| `MCP servers` | `object` | `total` and `by_state` breakdown (`cold`, `ready`, `degraded`, `dead`) |
+| `mcp_servers` | `object` | `total` and `by_state` breakdown (`cold`, `ready`, `degraded`, `dead`) |
 | `groups` | `object` | `total`, `by_state`, `total_members`, `healthy_members` |
 | `security` | `object` | Rate limiting info: `rate_limiting.active_buckets`, `rate_limiting.config` |
 
@@ -491,7 +491,7 @@ MCP Server metrics in JSON or Prometheus exposition format.
 
 | Field | Type | Description |
 |-------|------|-------------|
-| `MCP servers` | `dict[str, object]` | Per-MCP server metrics: `state`, `mode`, `tools_count`, `invocations`, `errors`, `avg_latency_ms` |
+| `mcp_servers` | `dict[str, object]` | Per-MCP server metrics: `state`, `mode`, `tools_count`, `invocations`, `errors`, `avg_latency_ms` |
 | `groups` | `dict[str, object]` | Per-group metrics: `state`, `strategy`, `total_members`, `healthy_members` |
 | `tool_calls` | `dict[str, object]` | Per-tool metrics keyed by `MCP server.tool`: `count`, `errors` |
 | `discovery` | `object` | Discovery metrics |
@@ -626,7 +626,7 @@ Approve a pending or quarantined MCP server for registration.
 
 | Parameter | Type | Default | Description |
 |-----------|------|---------|-------------|
-| `MCP server` | `str` | required | MCP Server name from `hangar_discovered` or `hangar_quarantine` output |
+| `mcp_server` | `str` | required | MCP Server name from `hangar_discovered` or `hangar_quarantine` output |
 
 **Side Effects:** Registers the MCP server in COLD state. Removes from pending or quarantine list.
 
@@ -635,7 +635,7 @@ Approve a pending or quarantined MCP server for registration.
 | Field | Type | Description |
 |-------|------|-------------|
 | `approved` | `bool` | Whether approval succeeded |
-| `MCP server` | `str` | MCP Server name |
+| `mcp_server` | `str` | MCP Server name |
 | `status` | `str` | `"registered"` on success |
 | `error` | `str` | Error message on failure |
 
