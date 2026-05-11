@@ -474,73 +474,6 @@ POST /discovery/reject/{name}
 
 ---
 
-## Catalog
-
-### List Entries
-
-```
-GET /catalog?search={query}&tags={tag1,tag2}
-```
-
-| Parameter | In | Type | Required | Description |
-|-----------|------|------|----------|-------------|
-| `search` | query | string | No | Substring search on name/description |
-| `tags` | query | string | No | Comma-separated tags (AND logic) |
-
-**Response 200:**
-
-```json
-{"entries": [...], "total": 10}
-```
-
-### Get Entry
-
-```
-GET /catalog/{entry_id}
-```
-
-**Response 200:** Catalog entry object.
-
-### Add Entry
-
-```
-POST /catalog
-```
-
-**Request body:**
-
-| Field | Type | Required | Description |
-|-------|------|----------|-------------|
-| `name` | string | Yes | MCP Server name |
-| `description` | string | Yes | Short description |
-| `mode` | string | No | Default MCP server mode |
-| `command` | list[string] | No | Default command |
-| `image` | string | No | Default Docker image |
-| `endpoint` | string | No | Default endpoint URL |
-| `tags` | list[string] | No | Searchable tags |
-
-**Response 201:** Created entry object.
-
-### Delete Entry
-
-```
-DELETE /catalog/{entry_id}
-```
-
-**Response 200:** Deletion confirmation.
-
-### Deploy Entry
-
-```
-POST /catalog/{entry_id}/deploy
-```
-
-Registers the catalog entry as a live MCP server via the CQRS pipeline.
-
-**Response 201:** Created MCP server result.
-
----
-
 ## Configuration
 
 ### Get Config
@@ -638,7 +571,7 @@ GET /system
     "total_tools": 15,
     "total_tool_calls": 42,
     "uptime_seconds": 3600.5,
-    "version": "0.12.0"
+    "version": "1.1.0"
   }
 }
 ```
@@ -687,25 +620,34 @@ DELETE /auth/keys/{key_id}
 ### List API Keys
 
 ```
-GET /auth/keys/{principal_id}
+GET /auth/keys
 ```
 
+| Parameter | In | Type | Required | Description |
+|-----------|------|------|----------|-------------|
+| `principal_id` | query | string | Yes | Principal whose keys to list |
+| `include_revoked` | query | bool | No | Include revoked keys (default `true`) |
+
 ### List All Roles
+
+```
+GET /auth/roles/all
+```
+
+| Parameter | In | Type | Required | Description |
+|-----------|------|------|----------|-------------|
+| `include_builtin` | query | bool | No | Include built-in roles (default `true`) |
+
+### List Built-in Roles
 
 ```
 GET /auth/roles
 ```
 
-### List Built-in Roles
-
-```
-GET /auth/roles/builtin
-```
-
 ### Get Role
 
 ```
-GET /auth/roles/{role_id}
+GET /auth/roles/{role_name}
 ```
 
 ### Create Custom Role
@@ -717,31 +659,37 @@ POST /auth/roles
 ### Update Custom Role
 
 ```
-PUT /auth/roles/{role_id}
+PATCH /auth/roles/{role_name}
 ```
 
 ### Delete Custom Role
 
 ```
-DELETE /auth/roles/{role_id}
+DELETE /auth/roles/{role_name}
 ```
 
 ### Assign Role
 
 ```
-POST /auth/principals/{principal_id}/roles
+POST /auth/roles/assign
 ```
 
 **Request body:**
 
 ```json
-{"role_id": "developer"}
+{"principal_id": "...", "role_name": "developer", "scope": "global", "assigned_by": "system"}
 ```
 
 ### Revoke Role
 
 ```
-DELETE /auth/principals/{principal_id}/roles/{role_id}
+DELETE /auth/roles/revoke
+```
+
+**Request body:**
+
+```json
+{"principal_id": "...", "role_name": "developer", "scope": "global", "revoked_by": "system"}
 ```
 
 ### List Principals
@@ -753,8 +701,13 @@ GET /auth/principals
 ### List Roles for Principal
 
 ```
-GET /auth/principals/{principal_id}/roles
+GET /auth/principals/roles
 ```
+
+| Parameter | In | Type | Required | Description |
+|-----------|------|------|----------|-------------|
+| `principal_id` | query | string | Yes | Principal whose roles to list |
+| `scope` | query | string | No | Scope filter (default `*` = all) |
 
 ### Check Permission
 
@@ -771,112 +724,31 @@ POST /auth/check-permission
 ### Get Tool Access Policy
 
 ```
-GET /auth/policies/{mcp_server_id}/{tool_name}
+GET /auth/policies/{scope}/{target_id}
 ```
+
+| Parameter | In | Type | Required | Description |
+|-----------|------|------|----------|-------------|
+| `scope` | path | string | Yes | `provider`, `group`, or `member` |
+| `target_id` | path | string | Yes | Identifier of the provider, group, or member |
 
 ### Set Tool Access Policy
 
 ```
-PUT /auth/policies/{mcp_server_id}/{tool_name}
+POST /auth/policies/{scope}/{target_id}
 ```
 
 **Request body:**
 
 ```json
-{"principal_id": "...", "effect": "allow"}
+{"allow_list": ["tool_a", "tool_b*"], "deny_list": ["tool_c"]}
 ```
 
 ### Clear Tool Access Policy
 
 ```
-DELETE /auth/policies/{mcp_server_id}/{tool_name}
+DELETE /auth/policies/{scope}/{target_id}
 ```
-
----
-
-## Observability
-
-### Metrics
-
-```
-GET /observability/metrics
-```
-
-**Response 200:**
-
-```json
-{"prometheus_text": "# HELP mcp_hangar_...\n...", "summary": {"tool_calls_total": 42.0}}
-```
-
-### Audit Log
-
-```
-GET /observability/audit?mcp_server_id={id}&event_type={type}&limit={n}
-```
-
-**Response 200:**
-
-```json
-{"records": [...], "total": 10}
-```
-
-### Security Events
-
-```
-GET /observability/security?limit={n}
-```
-
-**Response 200:**
-
-```json
-{"events": [...], "total": 5}
-```
-
-### Alert History
-
-```
-GET /observability/alerts?level={level}
-```
-
-| Parameter | In | Type | Required | Description |
-|-----------|------|------|----------|-------------|
-| `level` | query | string | No | `critical`, `warning`, or `info` |
-
-### Metrics History
-
-```
-GET /observability/metrics/history?minutes={n}
-```
-
-Returns time-series snapshots of Prometheus metrics for charting.
-
----
-
-## Maintenance
-
-### Compact Event Stream
-
-```
-POST /maintenance/compact
-```
-
-Deletes events preceding the latest snapshot for a given stream.
-
-**Request body:**
-
-```json
-{"stream_id": "mcp_server:math"}
-```
-
-**Response 200:**
-
-```json
-{"compacted": {"stream_id": "mcp_server:math", "events_deleted": 150}}
-```
-
-**Response 422:** Missing or empty `stream_id`.
-
-**Response 500:** No snapshot exists for the stream.
 
 ---
 
@@ -889,21 +761,5 @@ ws://host:port/api/ws/events
 ```
 
 Streams all domain events as JSON frames.
-
-### State Stream
-
-```
-ws://host:port/api/ws/state
-```
-
-Streams `McpServerStateChanged` events only.
-
-### MCP Server Log Stream
-
-```
-ws://host:port/api/ws/mcp_servers/{mcp_server_id}/logs
-```
-
-Streams stderr log lines for a specific MCP server.
 
 See the [WebSockets guide](../guides/WEBSOCKETS.md) for connection details.
