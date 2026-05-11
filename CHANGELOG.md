@@ -18,6 +18,10 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - **core:** treat `None`, `{}`, `[]`, and `""` as absent when computing tool digests to prevent spurious drift between servers that toggle between missing and empty values (#173)
 - **core:** disambiguate `interceptors/list` instance names to `mcp-hangar-validator` and `mcp-hangar-mutator` per SEP-1763 unique-name requirement (#176)
 
+### Added
+
+- **tests:** schema validation for `interceptors/list` response against local JSON Schema derived from SEP-1763 (pinned @ `5bd7ab4`) (#185)
+
 ## [1.2.0](https://github.com/mcp-hangar/mcp-hangar/compare/v1.1.0...v1.2.0) (2026-05-11)
 
 
