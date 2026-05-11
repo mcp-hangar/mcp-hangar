@@ -47,6 +47,7 @@ dev = [
     "ruff>=0.3.0",
     "mypy>=1.8.0",
     "hypothesis>=6.90.0",
+    "jsonschema>=4.20.0",
 ]
 langfuse = ["langfuse>=2.0.0"]
 opentelemetry = [
