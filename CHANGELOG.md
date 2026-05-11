@@ -23,6 +23,21 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Changed
 
+- **core:** **BREAKING** relicense from BSL 1.1 dual-license to MIT; all enterprise features are now freely available (#198)
+- **core:** remove `LicenseTier` enum, `LicenseValidation`, and license-key gating from bootstrap; `load_enterprise_modules` loads unconditionally (#196)
+- **core:** `HANGAR_LICENSE_KEY` env var is deprecated and emits `DeprecationWarning` when set (#196)
+- **core:** `EnterpriseComponents` no longer carries a `license_tier` field; `ApplicationContext.license_tier` removed (#196)
+
+### Removed
+
+- **core:** delete `enterprise/auth/license.py` (HMAC license-key validator) (#196)
+- **core:** delete `src/mcp_hangar/domain/value_objects/license.py` (`LicenseTier` enum) (#196)
+- **core:** delete `enterprise/LICENSE.BSL` and `CLA.md` (#194, #197)
+- **core:** remove CLA references from contributing guides (#197)
+- **core:** strip BSL prose from `CONTRIBUTING.md`, `ROADMAP.md`, enterprise docstrings, and `PRODUCT_ARCHITECTURE.md` decision log (#195)
+
+### Changed
+
 - **core:** **BREAKING** replace `json.dumps` with RFC 8785 JCS canonicalization in `compute_tool_digest`; all previously pinned digests must be recomputed (#171)
 - **core:** reject tool entries with missing, empty, or non-string `name` field in `compute_tool_digest` (#172)
 - **core:** rename `DigestUnknownPolicy.ALLOW_DEGRADED` to `ALLOW_UNVERIFIED`; old `allow_degraded` string accepted with `DeprecationWarning` (removal in v1.4) (#175)

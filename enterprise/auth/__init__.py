@@ -1,8 +1,5 @@
 """Enterprise authentication and authorization module.
 
-Licensed under the Business Source License 1.1.
-See enterprise/LICENSE.BSL for full terms.
-
 Provides:
 - RBAC (role-based access control)
 - API key authentication with rotation

@@ -76,9 +76,6 @@ from .truncation import ContinuationId, TruncationConfig
 # Discovery
 from .discovery import DiscoverySourceSpec
 
-# License
-from .license import LicenseTier
-
 # Tool Digest (SEP-1766)
 from .tool_digest import DigestEnforcement, DigestPolicy, DigestUnknownPolicy, ToolDigest
 
@@ -131,8 +128,6 @@ __all__ = [
     "LogLine",
     # Discovery
     "DiscoverySourceSpec",
-    # License
-    "LicenseTier",
     # Capabilities
     "EgressRule",
     "EnvironmentCapabilities",

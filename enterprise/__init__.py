@@ -1,9 +1,6 @@
 """MCP Hangar Enterprise features.
 
-Licensed under the Business Source License 1.1 (BSL 1.1).
-See enterprise/LICENSE.BSL for full terms.
-
-Enterprise features extend the MIT-licensed core with:
+Enterprise features extend the core with:
 - RBAC, API key auth, JWT/OIDC integration
 - Tool Access Policy enforcement
 - Durable event store persistence (SQLite, Postgres)

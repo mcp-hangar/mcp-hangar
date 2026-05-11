@@ -7,8 +7,7 @@ CEF format:
 
 Reference: ArcSight Common Event Format (CEF) Rev 25.
 
-This module is part of the enterprise compliance layer (BSL 1.1).
-See enterprise/LICENSE.BSL for license terms.
+This module is part of the enterprise compliance layer.
 """
 
 from datetime import datetime, timezone

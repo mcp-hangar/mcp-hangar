@@ -45,52 +45,31 @@
 
 ## 2. Licensing Model
 
-### Dual-license: MIT core + BSL 1.1 enterprise
+### MIT License
 
-| Component           | License | Scope                                                                                                                      |
-|---------------------|---------|----------------------------------------------------------------------------------------------------------------------------|
-| Core control plane  | MIT     | `src/mcp_hangar/` |
-| Enterprise features | BSL 1.1 | `enterprise/` — behavioral profiling, semantic analysis, identity propagation, compliance export |
-
-### BSL parameters
-
-- **Licensor:** Marcin (MCP Hangar project)
-- **Licensed Work:** Each release of code under `enterprise/`
-- **Change Date:** 3 years from release date of each version
-- **Change License:** MIT
-- **Additional Use Grant:** Evaluation, development, testing, and non-production use are permitted without a commercial
-  license. Production use for internal tooling of organizations with fewer than 5 MCP servers is permitted (community
-  use exception).
-
-### Why BSL over alternatives
-
-| Alternative                            | Rejected because                                                                                                                                                          |
-|----------------------------------------|---------------------------------------------------------------------------------------------------------------------------------------------------------------------------|
-| Full MIT everywhere                    | No commercial protection. Anyone can host "Hangar Enterprise" and sell your work. One-person operation cannot compete on price with a cloud provider reselling your code. |
-| Dual repo (private enterprise repo)    | Two repos to maintain solo. Merge conflicts between core and enterprise. Contributors can't read enterprise code. Enterprise buyers can't audit before purchase.          |
-| Feature flags without legal protection | Trivially bypassed. No legal recourse. Invites the Hetzner-hosted competitor problem.                                                                                     |
-| AGPL                                   | Scares away enterprise buyers. Many companies have blanket AGPL prohibition policies.                                                                                     |
-| SSPL                                   | Even more restrictive than AGPL. MongoDB backlash. Not accepted by most enterprises.                                                                                      |
+All code in the repository is licensed under the MIT License. The `enterprise/` directory is a
+code-organization concept for advanced features (RBAC, compliance, integrations), not a separate
+license boundary.
 
 ### What goes where
 
-| Feature                                            | License | Directory                                     | Rationale                                                       |
-|----------------------------------------------------|---------|-----------------------------------------------|-----------------------------------------------------------------|
-| MCP Server lifecycle, state machine, circuit breaker | MIT     | `src/`                                        | Core value, must be open for adoption                           |
-| MCP Server groups, load balancing, failover          | MIT     | `src/`                                        | Core value                                                      |
-| Health checks, Prometheus metrics, OTEL export     | MIT     | `src/`                                        | Observability foundation, enables partner integrations          |
-| K8s operator, CRDs, Helm charts                    | MIT     | `operator/`, `helm-charts/` (separate repos)  | Adoption requires open operator                                 |
-| Capability declaration schema                      | MIT     | `src/`                                        | Foundational for enforcement, must be standard                  |
-| Network policy generation                          | MIT     | `src/` + `operator/` (separate repo)          | Core enforcement, open for trust                                |
-| Violation signals and enforcement events           | MIT     | `src/`                                        | Core contract, partner backends consume these                   |
-| CLI, hot-reload, batch invocations                 | MIT     | `src/`                                        | Core DX                                                         |
-| Basic audit logging (stdout/file)                  | MIT     | `src/`                                        | Baseline visibility                                             |
-| REST API, WebSocket infrastructure                 | MIT     | `src/`                                        | API surface must be open                                        |
-| RBAC, API key auth, JWT/OIDC                       | **BSL** | `enterprise/auth/`                            | Enterprise value, commercial differentiator                     |
-| Tool Access Policies                               | **BSL** | `enterprise/auth/`                            | Governance feature, commercial differentiator                   |
-| Event sourcing persistence (SQLite/Postgres)       | **BSL** | `enterprise/persistence/`                     | Enterprise durability, commercial differentiator                |
-| Compliance export (CEF/LEEF/JSON-lines/syslog)     | **BSL** | `enterprise/compliance/`                      | Enterprise value                                                |
-| Langfuse integration                               | **BSL** | `enterprise/integrations/`                    | Partner integration, commercial value                           |
+| Feature                                            | Directory                                     | Rationale                                                       |
+|----------------------------------------------------|-----------------------------------------------|-----------------------------------------------------------------|
+| MCP Server lifecycle, state machine, circuit breaker | `src/`                                        | Core value, must be open for adoption                           |
+| MCP Server groups, load balancing, failover          | `src/`                                        | Core value                                                      |
+| Health checks, Prometheus metrics, OTEL export     | `src/`                                        | Observability foundation, enables partner integrations          |
+| K8s operator, CRDs, Helm charts                    | `operator/`, `helm-charts/` (separate repos)  | Adoption requires open operator                                 |
+| Capability declaration schema                      | `src/`                                        | Foundational for enforcement, must be standard                  |
+| Network policy generation                          | `src/` + `operator/` (separate repo)          | Core enforcement, open for trust                                |
+| Violation signals and enforcement events           | `src/`                                        | Core contract, partner backends consume these                   |
+| CLI, hot-reload, batch invocations                 | `src/`                                        | Core DX                                                         |
+| Basic audit logging (stdout/file)                  | `src/`                                        | Baseline visibility                                             |
+| REST API, WebSocket infrastructure                 | `src/`                                        | API surface must be open                                        |
+| RBAC, API key auth, JWT/OIDC                       | `enterprise/auth/`                            | Enterprise value, commercial differentiator                     |
+| Tool Access Policies                               | `enterprise/auth/`                            | Governance feature, commercial differentiator                   |
+| Event sourcing persistence (SQLite/Postgres)       | `enterprise/persistence/`                     | Enterprise durability, commercial differentiator                |
+| Compliance export (CEF/LEEF/JSON-lines/syslog)     | `enterprise/compliance/`                      | Enterprise value                                                |
+| Langfuse integration                               | `enterprise/integrations/`                    | Partner integration, commercial value                           |
 
 ### Architectural boundary
 
@@ -107,20 +86,12 @@ This is enforced by:
 
 1. CI check via `tools/check_enterprise_imports.py` — scans `src/` for static `enterprise` imports, fails on any new violation outside a tracked allowlist. Pre-commit hook (`enterprise-import-boundary`) runs the same check locally.
 2. Core defines interfaces (ports/contracts). Enterprise provides implementations.
-3. Bootstrap wiring in `server/bootstrap/` conditionally loads enterprise modules when license key is present. Dynamic imports via `_import_attribute()` are the canonical pattern and are not flagged by the boundary check.
+3. Bootstrap wiring in `server/bootstrap/` conditionally loads enterprise modules when available. Dynamic imports via `_import_attribute()` are the canonical pattern and are not flagged by the boundary check.
 
 ### Migration plan (historical — completed before v1.0.0)
 
 The enterprise/ directory migration was completed before the v1.0.0 release. Pro/Enterprise features
 were moved from `src/` to `enterprise/` and the import boundary is now CI-enforced.
-
-### CLA requirement
-
-Contributors to `enterprise/` must sign a Contributor License Agreement granting the project maintainer (Marcin) the
-right to relicense their contributions. This is necessary because BSL → MIT conversion requires licensing authority over
-all contributed code.
-
-Core (MIT) contributions do not require a CLA.
 
 ---
 
@@ -151,10 +122,10 @@ Core (MIT) contributions do not require a CLA.
 - Helm chart for K8s deployment
 - REST API and WebSocket infrastructure
 
-### Tier 1: Hangar Pro (BSL 1.1, commercial license)
+### Tier 1: Hangar Pro
 
 **Buyer:** Platform engineering team, 10-100 MCP servers
-**Entry:** Self-hosted, license key activation
+**Entry:** Self-hosted
 **Price target:** $49-99/mo per cluster (or $499-999/yr)
 **Value:** "Govern and secure your MCP servers with full visibility."
 
@@ -169,7 +140,7 @@ Core (MIT) contributions do not require a CLA.
 - Behavioral reports (per-MCP server)
 - Config export/backup
 
-### Tier 2: Hangar Enterprise (BSL 1.1, custom commercial terms)
+### Tier 2: Hangar Enterprise
 
 **Buyer:** Organization with 100+ MCP servers, compliance requirements
 **Entry:** Sales-led, consulting engagement
@@ -285,7 +256,7 @@ Phases 1-2 are complete.
 | **Container network isolation**   | Docker MCP servers can talk to anything                                      | Default-deny egress, explicit allowlist                                                                     | v0.13.0        | |
 | **Capability declaration schema** | No formal way to declare what a server needs                               | New `capabilities` config block                                                                             | v0.13.0        | |
 | **K8s NetworkPolicy generation**  | Operator doesn't create NetworkPolicies                                    | Auto-generate from CRD capabilities field                                                                   | v0.13.0        | |
-| **Licensing boundary**            | All code in MIT, no commercial protection                                  | Migrate Pro/Enterprise features to `enterprise/` under BSL 1.1                                              | v0.13.0        | In progress (v7.0 Phase 36) |
+| **Licensing boundary**            | All code in MIT, no commercial protection                                  | Migrate Pro/Enterprise features to `enterprise/` directory                                                  | v0.13.0        | Completed |
 | **Behavioral baseline storage**   | No behavioral profiling exists                                             | Network connection logging per container                                                                    | v0.14.0        | |
 | **Test coverage on auth**         | Auth stack is comprehensive but test density unclear                       | Audit test coverage, target 90%+ on auth paths                                                              | v0.13.0        | |
 | **Security scanning in CI**       | Not visible in changelog                                                   | Trivy/Grype on container images, Semgrep on source                                                          | v0.13.0        | |
@@ -345,7 +316,7 @@ Phases 1-2 are complete.
 - [ ] Performance: <5ms p99 overhead on proxy path
 - [ ] At least 3 production deployments validated
 - [x] Landing page, documentation site, blog post ready
-- [x] BSL licensing fully operational with license key validation
+- [x] MIT licensing for entire repository
 - [x] Import boundary CI check green (no enterprise imports in core)
 
 ---
@@ -356,8 +327,7 @@ Phases 1-2 are complete.
 
 ```
 mcp-hangar/
-├── LICENSE                    # MIT — applies to everything outside enterprise/
-├── CLA.md                     # Contributor License Agreement for enterprise/ contributions
+├── LICENSE                    # MIT — applies to the entire repository
 │
 ├── src/mcp_hangar/            # MIT — core control plane
 │   ├── domain/                # DDD aggregates, value objects, events, contracts
@@ -370,8 +340,7 @@ mcp-hangar/
 │   └── server/                # MCP server, REST API, WebSocket, CLI, bootstrap
 │       └── bootstrap/         # Conditionally loads enterprise/ modules when license present
 │
-├── enterprise/                # BSL 1.1 — advanced governance, enforcement, compliance
-│   ├── LICENSE.BSL            # Business Source License 1.1
+├── enterprise/                # Advanced governance, enforcement, compliance
 │   ├── auth/                  # RBAC, API key stores, JWT/OIDC, rate limiter, auth API
 │   ├── approvals/             # Approval gate workflow
 │   ├── compliance/            # SIEM export (CEF, LEEF, JSON-lines, syslog)
@@ -408,9 +377,9 @@ Enforced by `tools/check_enterprise_imports.py` (CI job `import-boundary` in `se
 
 | Date       | Decision                                                                                                         | Rationale                                                                                                                                                                                                                                   |
 |------------|------------------------------------------------------------------------------------------------------------------|---------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------|
-| 2026-03-24 | **BSL 1.1 for enterprise features, MIT for core.**                                                               | One repo, full source transparency, legal protection against commercial free-riding. BSL→MIT conversion after 3 years per release keeps the project honest. Alternatives (dual repo, AGPL, feature flags) rejected — see licensing section. |
+| 2026-03-24 | **~~BSL 1.1 for enterprise features, MIT for core.~~ Superseded: all code relicensed to MIT in v1.3.0.**         | Original: commercial protection. Dropped: complexity outweighed commercial returns. See epic #198.                                                                                                                                          |
 | 2026-03-24 | **Enterprise/ directory migration before v0.13.0.**                                                              | Licensing boundary must be established before enterprise features are developed further. Retrofitting is harder than doing it right from the start.                                                                                         |
-| 2026-03-24 | **CLA required for enterprise/ contributions.**                                                                  | BSL→MIT conversion requires licensing authority over all contributed code in the enterprise directory.                                                                                                                                      |
+| 2026-03-24 | **~~CLA required for enterprise/ contributions.~~ Dropped in v1.3.0.**                                          | No longer needed under single-MIT. Contributions flow inbound=outbound MIT.                                                                                                                                                                |
 | 2026-03-23 | Docker/K8s first. Stdio is second-class for security features.                                                   | Runtime security requires container isolation. Period.                                                                                                                                                                                      |
 | 2026-03-23 | Freeze Catalog API development.                                                                                  | Not our market. Discovery is Smithery/Registry.                                                                                                                                                                                             |
 | 2026-03-23 | Integrate with OpenTelemetry-native observability tools (for example OpenLIT) instead of trying to replace them. | Win on governance and enforcement, not on copying generic AI observability platforms.                                                                                                                                                       |

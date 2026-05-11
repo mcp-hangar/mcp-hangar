@@ -7,7 +7,6 @@ instead of importing ``enterprise.*`` modules directly.
 Supported hook names for provider implementations:
 
 - ``load_components``: bootstrap enterprise auth/approval components
-- ``validate_license_key``: resolve a ``LicenseTier`` from a raw key
 - ``register_auth_cqrs``: register auth command/query handlers
 - ``extend_api_routes``: contribute Starlette routes/mounts
 - ``create_event_store``: build enterprise-backed event stores
@@ -31,22 +30,11 @@ from typing import Any, cast
 from collections.abc import Callable
 
 from ...application.ports.observability import ObservabilityPort
-from ...domain.value_objects.license import LicenseTier
 from ...infrastructure.event_store import get_event_store
 from ...logging_config import get_logger
 
 logger = get_logger(__name__)
 ENTERPRISE_ENTRY_POINT_GROUP = "mcp_hangar.enterprise"
-
-
-@dataclass(frozen=True)
-class LicenseValidation:
-    """Core-friendly license validation result."""
-
-    tier: LicenseTier = LicenseTier.COMMUNITY
-    org: str = ""
-    grace_period: bool = False
-    error: str | None = None
 
 
 class _FallbackAuthComponents:
@@ -90,8 +78,7 @@ class EnterpriseProvider:
     """Provider hooks for optional enterprise integrations."""
 
     name: str
-    load_components: Callable[[LicenseTier, dict[str, Any], Any, Any], EnterpriseComponents] | None = None
-    validate_license_key: Callable[[str | None], LicenseValidation | Any | None] | None = None
+    load_components: Callable[[dict[str, Any], Any, Any], EnterpriseComponents] | None = None
     register_auth_cqrs: Callable[[Any, Any], bool] | None = None
     extend_api_routes: Callable[[], list[Any]] | None = None
     create_event_store: Callable[[str, dict[str, Any]], Any | None] | None = None
@@ -104,9 +91,8 @@ _REGISTERED_ENTERPRISE_PROVIDERS: dict[str, EnterpriseProvider] = {}
 
 @dataclass
 class EnterpriseComponents:
-    """Container for all enterprise module instances loaded based on license tier."""
+    """Container for all enterprise module instances."""
 
-    license_tier: LicenseTier = LicenseTier.COMMUNITY
     auth_components: Any = None
     approval_service: Any = None
 
@@ -160,18 +146,17 @@ def get_auth_compat_exports() -> AuthCompatibilityExports:
 
 
 def _builtin_load_components(
-    tier: LicenseTier,
     config: dict[str, Any],
     event_bus: Any = None,
     event_publisher: Any = None,
 ) -> EnterpriseComponents:
     exports = get_auth_compat_exports()
     if not exports.enterprise_auth_available:
-        return EnterpriseComponents(license_tier=tier)
+        return EnterpriseComponents()
 
     auth_config = exports.parse_auth_config(config.get("auth"))
     if auth_config is None or not getattr(auth_config, "enabled", False):
-        return EnterpriseComponents(license_tier=tier)
+        return EnterpriseComponents()
 
     auth_components = exports.bootstrap_auth(
         auth_config,
@@ -179,22 +164,7 @@ def _builtin_load_components(
         event_store=get_event_store(),
         event_bus=event_bus,
     )
-    return EnterpriseComponents(license_tier=tier, auth_components=auth_components)
-
-
-def _builtin_validate_license_key(raw_license_key: str | None) -> LicenseValidation:
-    try:
-        license_validator = _import_attribute("enterprise.auth.license", "LicenseValidator")
-    except ImportError:
-        return LicenseValidation()
-
-    result = license_validator().validate(raw_license_key)
-    return LicenseValidation(
-        tier=getattr(result, "tier", LicenseTier.COMMUNITY),
-        org=getattr(result, "org", ""),
-        grace_period=bool(getattr(result, "grace_period", False)),
-        error=getattr(result, "error", None),
-    )
+    return EnterpriseComponents(auth_components=auth_components)
 
 
 def _builtin_register_auth_cqrs(runtime: Any, auth_components: Any) -> bool:
@@ -285,31 +255,12 @@ def _get_builtin_enterprise_provider() -> EnterpriseProvider | None:
     return EnterpriseProvider(
         name="builtin-enterprise",
         load_components=_builtin_load_components,
-        validate_license_key=_builtin_validate_license_key,
         register_auth_cqrs=_builtin_register_auth_cqrs,
         extend_api_routes=_builtin_extend_api_routes,
         create_event_store=_builtin_create_event_store,
         create_observability_adapter=_builtin_create_observability_adapter,
         auth_compat_exports=_builtin_auth_compat_exports,
     )
-
-
-def validate_license_key(raw_license_key: str | None) -> LicenseValidation:
-    """Validate a license key through the registered enterprise boundary."""
-    for provider in get_registered_enterprise_providers():
-        if provider.validate_license_key is None:
-            continue
-        result = provider.validate_license_key(raw_license_key)
-        if result is not None:
-            return cast(LicenseValidation, result)
-
-    builtin_provider = _get_builtin_enterprise_provider()
-    if builtin_provider is not None and builtin_provider.validate_license_key is not None:
-        result = builtin_provider.validate_license_key(raw_license_key)
-        if result is not None:
-            return cast(LicenseValidation, result)
-
-    return LicenseValidation()
 
 
 def register_auth_cqrs(runtime: Any, auth_components: Any) -> bool:
@@ -375,18 +326,13 @@ def create_enterprise_observability_adapter(config: Any) -> ObservabilityPort | 
 
 
 def load_enterprise_modules(
-    tier: LicenseTier,
     config: dict[str, Any],
     event_bus: Any = None,
     event_publisher: Any = None,
 ) -> EnterpriseComponents:
-    """Load enterprise modules based on the validated license tier.
-
-    For COMMUNITY tier, no enterprise imports are attempted.  For PRO and
-    ENTERPRISE tiers, auth modules are loaded when available.
+    """Load enterprise modules unconditionally when available.
 
     Args:
-        tier: Validated license tier from LicenseValidator.
         config: Full application configuration dictionary.
         event_bus: Optional event bus for enterprise module wiring.
         event_publisher: Optional callable for publishing domain events.
@@ -394,31 +340,27 @@ def load_enterprise_modules(
     Returns:
         EnterpriseComponents with populated fields for loaded modules.
     """
-    components = EnterpriseComponents(license_tier=tier)
-
-    if tier == LicenseTier.COMMUNITY:
-        logger.info("enterprise_modules_skipped", tier="community")
-        return components
+    components = EnterpriseComponents()
 
     entry_points = tuple(importlib.metadata.entry_points(group=ENTERPRISE_ENTRY_POINT_GROUP))
 
-    provider_loaders: list[tuple[str, Callable[[LicenseTier, dict[str, Any], Any, Any], EnterpriseComponents]]] = []
+    provider_loaders: list[tuple[str, Callable[[dict[str, Any], Any, Any], EnterpriseComponents]]] = []
     if entry_points:
         for entry_point in entry_points:
             loader_fn = cast(
-                Callable[[LicenseTier, dict[str, Any], Any, Any], EnterpriseComponents],
+                Callable[[dict[str, Any], Any, Any], EnterpriseComponents],
                 entry_point.load(),
             )
             provider_loaders.append((entry_point.name, loader_fn))
     else:
         builtin_provider = _get_builtin_enterprise_provider()
         if builtin_provider is None or builtin_provider.load_components is None:
-            logger.info("enterprise_modules_unavailable", tier=tier.value, reason="no_entry_points_registered")
+            logger.info("enterprise_modules_unavailable", reason="no_entry_points_registered")
             return components
         provider_loaders.append((builtin_provider.name, builtin_provider.load_components))
 
     for provider_name, loader in provider_loaders:
-        loaded_components = loader(tier, config, event_bus, event_publisher)
+        loaded_components = loader(config, event_bus, event_publisher)
         if not isinstance(loaded_components, EnterpriseComponents):
             msg = (
                 f"Enterprise loader '{provider_name}' returned {type(loaded_components).__name__}; "
@@ -433,7 +375,6 @@ def load_enterprise_modules(
     }
     logger.info(
         "enterprise_modules_loaded",
-        tier=tier.value,
         entry_points=[provider_name for provider_name, _ in provider_loaders],
         **loaded_flags,
     )

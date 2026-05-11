@@ -20,7 +20,7 @@ MCP Hangar is a monorepo:
 ```
 mcp-hangar/
 ├── src/mcp_hangar/          # Python package (PyPI: mcp-hangar) -- MIT
-├── enterprise/              # BSL 1.1 licensed features
+├── enterprise/              # Enterprise features (MIT)
 │   ├── auth/                # RBAC, API key, JWT/OIDC
 │   ├── behavioral/          # Network profiling, deviation detection
 │   ├── identity/            # Caller identity propagation, audit
@@ -74,8 +74,7 @@ src/mcp_hangar/
 
 ## Licensing
 
-- **Core** (`src/`) -- MIT. No CLA required.
-- **Enterprise** (`enterprise/`) -- BSL 1.1. CLA required for contributions. See [CLA.md](../cla.md).
+- **All code** -- MIT. See [LICENSE](../../LICENSE).
 - Core must **never** import from `enterprise/`. CI enforces this boundary.
 
 ## Code Style
@@ -274,21 +273,13 @@ For urgent fixes on released versions, follow the [HOTFIX_RUNBOOK.md](HOTFIX_RUN
 
 ## Licensing Model
 
-MCP Hangar uses a dual-license model:
+MCP Hangar is licensed under the MIT License:
 
-| Directory | License | CLA Required |
-|-----------|---------|--------------|
-| `src/mcp_hangar/` | MIT | No |
-| `tests/`, `docs/`, `examples/`, `monitoring/` | MIT | No |
-| `enterprise/` | BSL 1.1 | **Yes** |
-
-### Contributing to enterprise/
-
-Contributions to `enterprise/` require agreeing to the [Contributor License Agreement](../cla.md). Include this statement in your PR description:
-
-> I have read and agree to the MCP Hangar Contributor License Agreement (CLA.md). My contribution to enterprise/ is my original work and I grant the rights described therein.
-
-See [CLA.md](../cla.md) for full terms. Core (MIT) contributions do not require a CLA.
+| Directory | License |
+|-----------|---------|
+| `src/mcp_hangar/` | MIT |
+| `tests/`, `docs/`, `examples/`, `monitoring/` | MIT |
+| `enterprise/` | MIT |
 
 ## Code of Conduct
 

@@ -4,8 +4,7 @@ Exports security-relevant events (tool invocations, provider state changes)
 as CEF (Common Event Format) log lines. Output is written to a configurable
 destination: file, stderr, or a callback function.
 
-This module is part of the enterprise compliance layer (BSL 1.1).
-See enterprise/LICENSE.BSL for license terms.
+This module is part of the enterprise compliance layer.
 """
 
 import logging

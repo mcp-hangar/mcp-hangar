@@ -6,7 +6,7 @@ Architecture Decision Records (ADRs).
 
 For repo-wide conventions (build commands, source layout, testing, coding
 style), see the root [`AGENTS.md`](https://github.com/mcp-hangar/mcp-hangar/blob/main/AGENTS.md).
-For contribution workflow (PRs, licensing, CLA), see
+For contribution workflow (PRs, licensing), see
 [`CONTRIBUTING.md`](https://github.com/mcp-hangar/mcp-hangar/blob/main/CONTRIBUTING.md).
 
 ---
