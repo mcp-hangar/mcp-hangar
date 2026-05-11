@@ -129,7 +129,7 @@ All endpoints return JSON. Error responses follow the envelope format:
 | `GET` | `/api/auth/permissions` | List all permissions |
 | `POST` | `/api/auth/check-permission` | Check if a principal has permission |
 | `GET` | `/api/auth/policies/{scope}/{target_id}` | Get tool access policy |
-| `POST` | `/api/auth/policies/{scope}/{target_id}` | Set tool access policy |
+| `PUT` | `/api/auth/policies/{scope}/{target_id}` | Set tool access policy |
 | `DELETE` | `/api/auth/policies/{scope}/{target_id}` | Clear tool access policy |
 
 ### Observability
