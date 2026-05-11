@@ -13,18 +13,21 @@ Your single MCP server is one crash away from downtime. What if there was a seco
 
 ## Prerequisites
 
-You need TWO running MCP servers. Start both:
+You need TWO running MCP servers. Use the in-repo test server on different
+ports:
 
 ```bash
+# Build the test MCP server (skip if already built in recipe 01)
+docker build -t mcp-math:latest examples/provider_math/
+
 # Terminal 1: Primary server on port 8080
-uvx mcp-server-fetch &
+docker run -d --name mcp-primary -p 8080:8080 mcp-math:latest
 
 # Terminal 2: Backup server on port 8081
-# (simulate by running another instance - in real world this would be a different host)
-MCP_PORT=8081 uvx mcp-server-fetch &
+docker run -d --name mcp-backup -p 8081:8080 -e MCP_PORT=8080 mcp-math:latest
 ```
 
-Keep both running.
+Keep both containers running.
 
 ## The Config
 
@@ -38,7 +41,7 @@ health_check:
 mcp_servers:
   my-mcp:
     mode: remote
-    endpoint: http://localhost:8080/sse
+    endpoint: http://localhost:8080/mcp
     description: "Primary MCP server"
     health_check_interval_s: 30
     max_consecutive_failures: 3
@@ -48,7 +51,7 @@ mcp_servers:
 
   my-mcp-backup:                           # NEW: added in this recipe
     mode: remote                           # NEW: added in this recipe
-    endpoint: http://localhost:8081/sse    # NEW: added in this recipe
+    endpoint: http://localhost:8081/mcp    # NEW: added in this recipe
     description: "Backup MCP server"       # NEW: added in this recipe
     health_check_interval_s: 30            # NEW: added in this recipe
     max_consecutive_failures: 3            # NEW: added in this recipe
@@ -124,7 +127,7 @@ Save this as `~/.config/mcp-hangar/config.yaml` (or update your existing file).
 4. Kill the primary server
 
    ```bash
-   pkill -f "mcp-server-fetch.*8080"
+   docker stop mcp-primary
    ```
 
    Primary is now dead. Backup still running.

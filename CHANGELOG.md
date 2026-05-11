@@ -35,6 +35,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 ### Fixed
 
 - **docs:** remove stale "Metrics Not Yet Implemented" section from OBSERVABILITY.md; all listed metrics are live in `metrics.py` since v1.1.0 (#135)
+- **docs:** replace broken prerequisite shell commands in cookbook recipes 01 and 04 with in-repo `examples/provider_math` Docker image (#128)
 - **ci:** release notes no longer contain literal `%0A` newlines (removed legacy set-output encoding)
 - **ci:** release body no longer has a duplicated `## What's Changed` section (removed `generate_release_notes: true`); a manual Full Changelog compare link is added instead
 - **ci:** HTML entities (`&gt;`, `&lt;`, `&amp;`) in CHANGELOG entries are decoded before writing to the release body
