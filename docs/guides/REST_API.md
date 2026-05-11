@@ -39,7 +39,7 @@ All endpoints return JSON. Error responses follow the envelope format:
 
 ```json
 {
-  "error": "ProviderNotFoundError",
+  "error": "McpServerNotFoundError",
   "message": "MCP Server 'unknown' not found",
   "status_code": 404
 }
@@ -91,13 +91,7 @@ All endpoints return JSON. Error responses follow the envelope format:
 
 ### Catalog
 
-| Method | Path | Description |
-|--------|------|-------------|
-| `GET` | `/api/catalog` | List catalog entries (`?search=`, `?tags=`) |
-| `GET` | `/api/catalog/{id}` | Get a catalog entry |
-| `POST` | `/api/catalog` | Add a custom catalog entry |
-| `DELETE` | `/api/catalog/{id}` | Remove a catalog entry |
-| `POST` | `/api/catalog/{id}/deploy` | Deploy a catalog entry as a live MCP server |
+> **Not implemented.** Catalog endpoints are planned for a future release.
 
 ### Configuration
 
@@ -115,51 +109,51 @@ All endpoints return JSON. Error responses follow the envelope format:
 |--------|------|-------------|
 | `GET` | `/api/system` | System info (uptime, version, metrics summary) |
 
-### Auth Management
+### Auth Management (Enterprise)
 
 | Method | Path | Description |
 |--------|------|-------------|
 | `POST` | `/api/auth/keys` | Create an API key |
+| `GET` | `/api/auth/keys` | List API keys |
 | `DELETE` | `/api/auth/keys/{key_id}` | Revoke an API key |
-| `GET` | `/api/auth/keys/{principal_id}` | List keys for a principal |
-| `GET` | `/api/auth/roles` | List all roles |
-| `GET` | `/api/auth/roles/builtin` | List built-in roles |
-| `GET` | `/api/auth/roles/{role_id}` | Get role details |
+| `GET` | `/api/auth/roles` | List roles |
 | `POST` | `/api/auth/roles` | Create a custom role |
-| `PUT` | `/api/auth/roles/{role_id}` | Update a custom role |
-| `DELETE` | `/api/auth/roles/{role_id}` | Delete a custom role |
-| `POST` | `/api/auth/principals/{id}/roles` | Assign a role to a principal |
-| `DELETE` | `/api/auth/principals/{id}/roles/{role_id}` | Revoke a role |
+| `GET` | `/api/auth/roles/all` | List all roles (including built-in) |
+| `POST` | `/api/auth/roles/assign` | Assign a role to a principal |
+| `DELETE` | `/api/auth/roles/revoke` | Revoke a role from a principal |
+| `GET` | `/api/auth/roles/{role_name}` | Get role details |
+| `DELETE` | `/api/auth/roles/{role_name}` | Delete a custom role |
+| `PATCH` | `/api/auth/roles/{role_name}` | Update a custom role |
 | `GET` | `/api/auth/principals` | List principals |
-| `GET` | `/api/auth/principals/{id}/roles` | List roles for a principal |
+| `GET` | `/api/auth/principals/roles` | Get roles for a principal |
+| `GET` | `/api/auth/permissions` | List all permissions |
 | `POST` | `/api/auth/check-permission` | Check if a principal has permission |
-| `GET` | `/api/auth/policies/{MCP server}/{tool}` | Get tool access policy |
-| `PUT` | `/api/auth/policies/{MCP server}/{tool}` | Set tool access policy |
-| `DELETE` | `/api/auth/policies/{MCP server}/{tool}` | Clear tool access policy |
+| `GET` | `/api/auth/policies/{scope}/{target_id}` | Get tool access policy |
+| `POST` | `/api/auth/policies/{scope}/{target_id}` | Set tool access policy |
+| `DELETE` | `/api/auth/policies/{scope}/{target_id}` | Clear tool access policy |
 
 ### Observability
 
-| Method | Path | Description |
-|--------|------|-------------|
-| `GET` | `/api/observability/metrics` | Prometheus metrics + JSON summary |
-| `GET` | `/api/observability/audit` | Audit log (`?mcp_server_id=`, `?event_type=`, `?limit=`) |
-| `GET` | `/api/observability/security` | Security events |
-| `GET` | `/api/observability/alerts` | Alert history (`?level=`) |
-| `GET` | `/api/observability/metrics/history` | Time-series metrics snapshots |
+> **Not mounted as a dedicated route group.** Metrics are served at `/metrics`
+> (outside the `/api/` prefix). Audit/security events use the domain event bus
+> and are available via the `/api/ws/events` WebSocket stream.
 
-### Maintenance
+### Health Probes
+
+These endpoints are outside the `/api/` prefix and skip authentication:
 
 | Method | Path | Description |
 |--------|------|-------------|
-| `POST` | `/api/maintenance/compact` | Compact an event stream |
+| `GET` | `/health/live` | Liveness probe |
+| `GET` | `/health/ready` | Readiness probe |
+| `GET` | `/health/startup` | Startup probe |
+| `GET` | `/metrics` | Prometheus metrics |
 
 ### WebSockets
 
 | Path | Description |
 |------|-------------|
-| `/api/ws/events` | Real-time domain event stream |
-| `/api/ws/state` | MCP server state change stream |
-| `/api/ws/MCP servers/{id}/logs` | Live log stream for a MCP server |
+| `/api/ws/events` | Real-time domain event stream (filterable) |
 
 See the [WebSockets guide](WEBSOCKETS.md) for connection details.
 
@@ -246,7 +240,7 @@ All domain exceptions are mapped to HTTP status codes:
 
 | Exception | Status Code |
 |-----------|-------------|
-| `ProviderNotFoundError` | 404 |
+| `McpServerNotFoundError` | 404 |
 | `ValidationError` | 422 |
 | `RateLimitExceeded` | 429 |
 | `CompactionError` | 500 |
