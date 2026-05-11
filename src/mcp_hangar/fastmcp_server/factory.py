@@ -325,9 +325,9 @@ class MCPServerFactory:
 
     @staticmethod
     def _register_interceptors_list(mcp: FastMCP) -> None:
-        from .interceptors_list import interceptors_list_handler
+        from .interceptors_list import register_interceptors_list
 
-        mcp.custom_route("/interceptors/list", methods=["GET"], name="interceptors_list")(interceptors_list_handler)
+        register_interceptors_list(mcp)
 
     def _run_readiness_checks(self) -> dict[str, Any]:
         """Run readiness checks.

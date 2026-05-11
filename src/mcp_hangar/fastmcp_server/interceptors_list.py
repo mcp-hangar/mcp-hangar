@@ -10,6 +10,7 @@ from __future__ import annotations
 
 from typing import Any
 
+from mcp.server.fastmcp import FastMCP
 from starlette.requests import Request
 from starlette.responses import JSONResponse
 
@@ -43,3 +44,8 @@ def interceptors_list_response() -> dict[str, Any]:
 async def interceptors_list_handler(request: Request) -> JSONResponse:
     """Handle ``GET /interceptors/list``."""
     return JSONResponse(interceptors_list_response())
+
+
+def register_interceptors_list(mcp: FastMCP) -> None:
+    """Register the ``/interceptors/list`` custom HTTP route on *mcp*."""
+    mcp.custom_route("/interceptors/list", methods=["GET"], name="interceptors_list")(interceptors_list_handler)
