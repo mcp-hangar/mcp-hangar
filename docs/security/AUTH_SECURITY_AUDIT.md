@@ -1,10 +1,10 @@
 # Authentication Security Audit
 
-Last audit date: 2026-04-23 (v1.6 security hardening refresh)
+Last audit date: 2026-04-23 (phase 6 security hardening refresh)
 
 ## Scope
 
-This audit covers the authentication, authorization, and request-enforcement paths in MCP Hangar after the v1.6 security hardening work:
+This audit covers the authentication, authorization, and request-enforcement paths in MCP Hangar after the phase 6 security hardening work:
 
 - API key and JWT/OIDC authentication
 - Role-based access control (RBAC) and `policy:write` authorization

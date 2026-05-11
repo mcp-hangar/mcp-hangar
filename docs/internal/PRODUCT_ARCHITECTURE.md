@@ -87,17 +87,9 @@
 | Basic audit logging (stdout/file)                  | MIT     | `src/`                                        | Baseline visibility                                             |
 | REST API, WebSocket infrastructure                 | MIT     | `src/`                                        | API surface must be open                                        |
 | RBAC, API key auth, JWT/OIDC                       | **BSL** | `enterprise/auth/`                            | Enterprise value, commercial differentiator                     |
-| Tool Access Policies                               | **BSL** | `enterprise/policies/`                        | Governance feature, commercial differentiator                   |
+| Tool Access Policies                               | **BSL** | `enterprise/auth/`                            | Governance feature, commercial differentiator                   |
 | Event sourcing persistence (SQLite/Postgres)       | **BSL** | `enterprise/persistence/`                     | Enterprise durability, commercial differentiator                |
-| Behavioral profiling and deviation detection       | **BSL** | `enterprise/behavioral/`                      | Core thesis of Enterprise tier                                  |
-| Caller identity propagation                        | **BSL** | `enterprise/identity/`                        | Enterprise value                                                |
-| Identity-aware audit trail                         | **BSL** | `enterprise/identity/`                        | Enterprise value                                                |
-| Compliance export (CEF/LEEF/JSON-lines)            | **BSL** | `enterprise/compliance/`                      | Enterprise value                                                |
-| Cost attribution / FinOps                          | **BSL** | `enterprise/finops/`                          | Enterprise value                                                |
-| Call sequence pattern engine                       | **BSL** | `enterprise/semantic/`                        | Core thesis of Enterprise tier                                  |
-| Detection rule packs                               | **BSL** | `enterprise/semantic/rules/`                  | Commercial IP                                                   |
-| Custom rule DSL                                    | **BSL** | `enterprise/semantic/`                        | Enterprise value                                                |
-| Agent behavior scoring                             | **BSL** | `enterprise/semantic/`                        | Enterprise value                                                |
+| Compliance export (CEF/LEEF/JSON-lines/syslog)     | **BSL** | `enterprise/compliance/`                      | Enterprise value                                                |
 | Langfuse integration                               | **BSL** | `enterprise/integrations/`                    | Partner integration, commercial value                           |
 
 ### Architectural boundary
@@ -117,30 +109,10 @@ This is enforced by:
 2. Core defines interfaces (ports/contracts). Enterprise provides implementations.
 3. Bootstrap wiring in `server/bootstrap/` conditionally loads enterprise modules when license key is present. Dynamic imports via `_import_attribute()` are the canonical pattern and are not flagged by the boundary check.
 
-### Migration plan (v0.12.0 → v0.13.0)
+### Migration plan (historical — completed before v1.0.0)
 
-Existing Pro/Enterprise features currently live in `src/`. They must move to `enterprise/` before v0.13.0 release.
-
-| Current location                                                             | Target location                                                     | Feature                                              |
-|------------------------------------------------------------------------------|---------------------------------------------------------------------|------------------------------------------------------|
-| `src/mcp_hangar/infrastructure/auth/`                                        | `enterprise/auth/`                                                  | API key stores, JWT/OIDC, RBAC, rate limiter         |
-| `src/mcp_hangar/domain/security/roles.py`                                    | `enterprise/auth/roles.py`                                          | Role definitions (contracts/interfaces stay in core) |
-| `src/mcp_hangar/server/api/auth/`                                            | `enterprise/auth/api/`                                              | Auth REST endpoints                                  |
-| `src/mcp_hangar/server/auth_bootstrap.py`                                    | `enterprise/auth/bootstrap.py`                                      | Auth DI wiring                                       |
-| `src/mcp_hangar/domain/value_objects/tool_access_policy.py`                  | Keep interface in core, move enforcement to `enterprise/policies/`  | Policy enforcement                                   |
-| `src/mcp_hangar/infrastructure/persistence/event_store.py` (SQLite/Postgres) | `enterprise/persistence/`                                           | Durable event stores (in-memory stays in core)       |
-| `src/mcp_hangar/infrastructure/observability/langfuse_adapter.py`            | `enterprise/integrations/langfuse.py`                               | Langfuse integration                                 |
-
-**Migration steps:**
-
-1. Extract interfaces/contracts for every feature being moved. Ensure they exist in `src/mcp_hangar/domain/contracts/`
-   or `src/mcp_hangar/application/ports/`.
-2. Move implementation files to `enterprise/` directory.
-3. Update bootstrap to conditionally load enterprise modules.
-4. Add CI rule: `grep -r "from enterprise" src/` must return empty.
-5. Add `enterprise/LICENSE.BSL` file.
-6. Update root `LICENSE` to clarify scope (MIT for everything outside `enterprise/`).
-7. Tag v0.13.0 with dual-license in place.
+The enterprise/ directory migration was completed before the v1.0.0 release. Pro/Enterprise features
+were moved from `src/` to `enterprise/` and the import boundary is now CI-enforced.
 
 ### CLA requirement
 
@@ -174,8 +146,8 @@ Core (MIT) contributions do not require a CLA.
 - Violation signals and enforcement events
 - Basic audit logging (stdout/file)
 - Basic status CLI views
-- CLI (`hangar init`, `hangar serve`, `hangar status`)
-- MCP tools (hangar_tools, hangar_health, hangar_invoke, etc.)
+- CLI (`mcp-hangar init`, `mcp-hangar serve`, `mcp-hangar status`)
+- MCP tools (hangar_tools, hangar_health, hangar_call, etc.)
 - Helm chart for K8s deployment
 - REST API and WebSocket infrastructure
 
@@ -210,7 +182,7 @@ Core (MIT) contributions do not require a CLA.
 - Caller identity propagation and identity-aware audit trail
 - Call sequence pattern engine (semantic analysis)
 - Pre-built detection rule packs
-- Compliance export (CEF, LEEF, JSON-lines for SIEM)
+- Compliance export (CEF, LEEF, JSON-lines, syslog for SIEM)
 - Cost attribution (FinOps per user/agent/MCP server)
 - Multi-cluster federation (H2 2026)
 - SSO / SCIM user provisioning
@@ -347,40 +319,44 @@ Phases 1-2 are complete.
 
 ---
 
-## 7. Version Plan
+## 7. Version Plan (historical)
 
-| Version     | Target Date | Theme                                             | Key Deliverables                                                                                                                                                                                                                                                                                     |
-|-------------|-------------|---------------------------------------------------|------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------|
-| **v0.13.0** | 2026-04-15  | **Kubernetes Enforcement Foundation + Licensing** | Capability declaration schema, operator enforcement loop, K8s NetworkPolicy generation, admission/policy hooks, CI security scanning, auth test hardening, OTEL semantic conventions, trace propagation, **BSL licensing in place, enterprise/ directory created, Pro/Enterprise features migrated** |
-| **v0.14.0** | 2026-05-15  | **Behavioral Profiling Alpha**                    | Network connection logging per container, behavioral baseline storage, deviation alerting, dashboard auth enforcement, OTLP completeness, partner integration recipes, violation/enforcement signal modeling, **license key infrastructure**                                                         |
-| **v0.15.0** | 2026-06-15  | **Identity & Audit**                              | Caller identity propagation, identity-aware audit trail, compliance export (CEF/JSON-lines), cost attribution MVP                                                                                                                                                                                    |
-| **v0.16.0** | 2026-07-15  | **Semantic Analysis Alpha**                       | Call sequence pattern engine, pre-built detection rules (exfiltration, escalation, recon), dashboard integration                                                                                                                                                                                     |
-| **v1.0.0**  | 2026-09-29  | **Production Release (BLACKBIRD commercial launch)** | Stability, documentation, upgrade tooling, performance benchmarks, public launch. Note: PyPI package `mcp-hangar` already at v1.0.2; this date refers to BLACKBIRD commercial platform launch.                                                                                                        |
+> **Note:** This section preserves the original pre-1.0 plan for historical context.
+> The actual release path was v0.12.0 → v1.0.0 (April 2026) → v1.1.0 (May 2026).
+> The intermediate v0.13.0-v0.17.0 releases were never shipped. Current releases
+> are tracked via release-please and the CHANGELOG.
 
-### v1.0.0 criteria
+| Version     | Target Date | Theme                                             | Outcome |
+|-------------|-------------|---------------------------------------------------|---------|
+| **v0.13.0** | 2026-04-15  | **Kubernetes Enforcement Foundation + Licensing** | Superseded by v1.0.0 |
+| **v0.14.0** | 2026-05-15  | **Behavioral Profiling Alpha**                    | Not shipped |
+| **v0.15.0** | 2026-06-15  | **Identity & Audit**                              | Not shipped |
+| **v0.16.0** | 2026-07-15  | **Semantic Analysis Alpha**                       | Not shipped |
+| **v1.0.0**  | 2026-09-29  | **Production Release**                            | Shipped April 2026 (ahead of schedule) |
 
-- [ ] All P0 items from Phases 1-3 complete and tested
+### v1.0.0 criteria (historical — v1.0.0 shipped April 2026)
+
+- [x] All P0 items from Phases 1-3 complete and tested
 - [ ] K8s operator passes CIS benchmark (scoped)
 - [ ] Docker MCP server default-deny egress enforced
-- [ ] Auth stack test coverage ≥ 90%
-- [ ] CI: Trivy, Semgrep, pip-audit, npm-audit green
-- [ ] Upgrade path documented from v0.12 → v1.0
+- [x] Auth stack test coverage ≥ 90%
+- [x] CI: Trivy, Semgrep, pip-audit, npm-audit green
+- [x] Upgrade path documented from v0.12 → v1.0
 - [ ] Performance: <5ms p99 overhead on proxy path
 - [ ] At least 3 production deployments validated
-- [ ] Landing page, documentation site, blog post ready
-- [ ] BSL licensing fully operational with license key validation
-- [ ] Import boundary CI check green (no enterprise imports in core)
+- [x] Landing page, documentation site, blog post ready
+- [x] BSL licensing fully operational with license key validation
+- [x] Import boundary CI check green (no enterprise imports in core)
 
 ---
 
-## 8. Repository Structure (Current → Target)
+## 8. Repository Structure
 
-### Target layout after v0.13.0 migration
+### Current layout (post-v1.0)
 
 ```
 mcp-hangar/
 ├── LICENSE                    # MIT — applies to everything outside enterprise/
-├── ROADMAP.md                 # Public roadmap
 ├── CLA.md                     # Contributor License Agreement for enterprise/ contributions
 │
 ├── src/mcp_hangar/            # MIT — core control plane
@@ -397,29 +373,15 @@ mcp-hangar/
 ├── enterprise/                # BSL 1.1 — advanced governance, enforcement, compliance
 │   ├── LICENSE.BSL            # Business Source License 1.1
 │   ├── auth/                  # RBAC, API key stores, JWT/OIDC, rate limiter, auth API
-│   ├── policies/              # Tool Access Policy enforcement
+│   ├── approvals/             # Approval gate workflow
+│   ├── compliance/            # SIEM export (CEF, LEEF, JSON-lines, syslog)
 │   ├── persistence/           # SQLite/Postgres event stores, durable saga state
-│   ├── behavioral/            # Network profiling, baseline, deviation detection
-│   ├── identity/              # Caller identity propagation, identity-aware audit
-│   ├── compliance/            # SIEM export (CEF, LEEF, JSON-lines)
-│   ├── finops/                # Cost attribution, token tracking
-│   ├── semantic/              # Pattern engine, detection rules, rule DSL, scoring
-│   │   └── rules/             # Pre-built detection rule packs
 │   └── integrations/          # Langfuse adapter, future partner integrations
 │
-├── packages/
-│   ├── operator/              # MIT — K8s operator (Go)
-│   ├── helm-charts/           # MIT — Helm charts
-│   └── ui/                    # Basic status views (MIT), full dashboard (enterprise/)
-│
-├── security/                  # Seccomp profiles, AppArmor, NetworkPolicy templates, detection rules
-├── benchmarks/                # Performance benchmark suite
-├── docker/                    # MCP Server container images
 ├── docs/                      # MkDocs documentation
 │   └── internal/
 │       └── PRODUCT_ARCHITECTURE.md  # This document
-├── examples/                  # Quick starts, configs
-├── monitoring/                # Grafana dashboards, Prometheus alerts
+├── tests/                     # pytest test suite
 └── scripts/                   # Install, build, CI, migration
 ```
 
