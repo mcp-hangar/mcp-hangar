@@ -11,19 +11,25 @@ You have one MCP server today. Tomorrow you'll have five. You need a control pla
 
 ## Prerequisites
 
-You need a running MCP server to point Hangar at. Use any Streamable HTTP MCP server you already have, or start a test one:
+You need a running MCP server to point Hangar at. This repo ships a test
+server in `examples/provider_math/` that runs on Streamable HTTP.
 
 ```bash
-# Option A: Using npx (Node.js)
-npx -y @anthropic/mcp-server-everything --transport sse --port 8080
+# Build the test MCP server (requires Docker)
+docker build -t mcp-math:latest examples/provider_math/
+
+# Start it on port 8080
+docker run -d --name mcp-math -p 8080:8080 mcp-math:latest
 ```
+
+Verify it is running:
 
 ```bash
-# Option B: Using uvx (Python)
-uvx mcp-server-fetch --transport sse --port 8080
+curl -s http://localhost:8080/mcp -d '{"jsonrpc":"2.0","method":"initialize","params":{"protocolVersion":"2024-11-05","capabilities":{},"clientInfo":{"name":"test","version":"1.0"}},"id":1}' \
+  -H "Content-Type: application/json" | head -c 80
 ```
 
-Keep this running in a separate terminal.
+You should see a JSON-RPC response. Keep the container running.
 
 ## The Config
 
@@ -32,7 +38,7 @@ Keep this running in a separate terminal.
 mcp_servers:
   my-mcp:
     mode: remote
-    endpoint: http://localhost:8080/sse
+    endpoint: http://localhost:8080/mcp
     description: "My remote MCP server"
     http:
       connect_timeout: 10.0
@@ -121,9 +127,17 @@ Save this as `~/.config/mcp-hangar/config.yaml` or pass it with `--config`.
 
 ## What Just Happened
 
-Hangar loaded your MCP server configuration and started in stdio mode (JSON-RPC over stdin/stdout). When you sent the `initialize` handshake, Hangar responded with its capabilities. On the first `hangar_list` call, Hangar performed a cold start: it launched the subprocess MCP server (`uvx mcp-server-fetch` in this example, or connects to remote endpoint if using `mode: remote`), sent MCP `initialize` + `tools/list` to discover available tools, and registered them in its internal registry.
+Hangar loaded your MCP server configuration and started in stdio mode (JSON-RPC over stdin/stdout). When you sent the `initialize` handshake, Hangar responded with its capabilities. On the first `hangar_list` call, Hangar performed a cold start: it connected to the remote MCP server (`examples/provider_math` in this recipe), sent MCP `initialize` + `tools/list` to discover available tools, and registered them in its internal registry.
 
 The test MCP server doesn't know Hangar exists — it sees standard MCP JSON-RPC requests. This is a transparent proxy pattern. Hangar adds nothing yet: no health checks, no circuit breaker, no authentication. That's the point — recipe 01 is the baseline.
+
+## Cleanup
+
+When you are done with this recipe (or before starting recipe 02), stop the test container:
+
+```bash
+docker rm -f mcp-math
+```
 
 ## Key Config Reference
 
