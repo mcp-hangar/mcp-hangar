@@ -2,6 +2,10 @@
 
 Deploy and manage MCP servers as native Kubernetes resources using the MCP-Hangar Operator.
 
+> **The MCP-Hangar Operator is shipped from a separate repository:
+> [hangar-operator](https://github.com/mcp-hangar/hangar-operator).**
+> Helm charts live in [helm-charts](https://github.com/mcp-hangar/helm-charts).
+
 ## Overview
 
 The MCP-Hangar Operator provides:
@@ -20,11 +24,14 @@ The MCP-Hangar Operator provides:
 
 ### Install CRDs
 
+CRDs are bundled with the operator. They are installed automatically by the Helm
+chart. To install manually:
+
 ```bash
-# Install Custom Resource Definitions
-kubectl apply -f https://raw.githubusercontent.com/mcp-hangar/mcp-hangar/main/deploy/crds/mcpserver.yaml
-kubectl apply -f https://raw.githubusercontent.com/mcp-hangar/mcp-hangar/main/deploy/crds/mcpservergroup.yaml
-kubectl apply -f https://raw.githubusercontent.com/mcp-hangar/mcp-hangar/main/deploy/crds/mcpdiscoverysource.yaml
+# Install Custom Resource Definitions (from the operator repo)
+kubectl apply -f https://raw.githubusercontent.com/mcp-hangar/hangar-operator/main/deploy/crds/mcpserver.yaml
+kubectl apply -f https://raw.githubusercontent.com/mcp-hangar/hangar-operator/main/deploy/crds/mcpservergroup.yaml
+kubectl apply -f https://raw.githubusercontent.com/mcp-hangar/hangar-operator/main/deploy/crds/mcpdiscoverysource.yaml
 
 # Verify
 kubectl get crds | grep mcp-hangar.io
@@ -34,7 +41,7 @@ kubectl get crds | grep mcp-hangar.io
 
 ```bash
 # Add Helm repository
-helm repo add mcp-hangar https://mcp-hangar.io/charts
+helm repo add mcp-hangar https://mcp-hangar.github.io/helm-charts
 helm repo update
 
 # Install operator
