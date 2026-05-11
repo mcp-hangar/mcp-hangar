@@ -6,7 +6,7 @@ MCP Hangar persists domain events in an append-only Event Store. This supports a
 
 Events are serialized as JSON and stored with:
 
-- `stream_id` (e.g. `MCP server:math`)
+- `stream_id` (e.g. `mcp_server:math`)
 - `stream_version` (0-based, optimistic concurrency)
 - `event_type` (e.g. `McpServerStarted`)
 - `data` (JSON payload)

@@ -27,9 +27,6 @@ MCP Hangar is organized as a monorepo:
 mcp-hangar/
 ├── src/mcp_hangar/     # Python package (PyPI: mcp-hangar)
 ├── enterprise/         # BSL 1.1 licensed features
-├── packages/
-│   ├── operator/       # Kubernetes operator (Go)
-│   └── helm-charts/    # Helm charts
 ```
 
 ### Python Core Package
@@ -56,22 +53,11 @@ make setup
 ## Docker
 
 ```bash
-docker pull ghcr.io/mcp-hangar/mcp-hangar:latest
+docker pull ghcr.io/mcp-hangar/mcp-hangar:1.1.0
 
 # Run with config
 docker run -v $(pwd)/config.yaml:/app/config.yaml:ro \
-  ghcr.io/mcp-hangar/mcp-hangar:latest
-```
-
-## Helm Charts
-
-```bash
-# Install mcp-hangar
-helm install mcp-hangar oci://ghcr.io/mcp-hangar/charts/mcp-hangar
-
-# Install Kubernetes operator
-helm install mcp-hangar-operator oci://ghcr.io/mcp-hangar/charts/mcp-hangar-operator \
-  --namespace mcp-system --create-namespace
+  ghcr.io/mcp-hangar/mcp-hangar:1.1.0
 ```
 
 ## Verify Installation
