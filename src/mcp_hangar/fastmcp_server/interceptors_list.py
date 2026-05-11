@@ -22,7 +22,7 @@ def interceptors_list_response() -> dict[str, Any]:
     return {
         "interceptors": [
             {
-                "name": "mcp-hangar",
+                "name": "mcp-hangar-validator",
                 "version": __version__,
                 "type": "validator",
                 "supportedEvents": ["tools/call", "tools/list"],
@@ -30,7 +30,7 @@ def interceptors_list_response() -> dict[str, Any]:
                 "trustBoundary": "host",
             },
             {
-                "name": "mcp-hangar",
+                "name": "mcp-hangar-mutator",
                 "version": __version__,
                 "type": "mutator",
                 "supportedEvents": ["tools/call"],
