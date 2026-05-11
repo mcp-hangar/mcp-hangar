@@ -10,11 +10,35 @@ Provides immutable domain primitives for tool integrity verification:
 from __future__ import annotations
 
 import re
+import warnings
 from dataclasses import dataclass
 from enum import StrEnum
 
 
 _HEX64_PATTERN = re.compile(r"^[0-9a-f]{64}$")
+
+_DEPRECATED_POLICY_ALIASES: dict[str, str] = {
+    "allow_degraded": "allow_unverified",
+}
+
+
+def normalize_unknown_policy(raw: str) -> str:
+    """Resolve deprecated policy aliases with a warning.
+
+    Accepts the old ``allow_degraded`` value and maps it to
+    ``allow_unverified``, emitting a :class:`DeprecationWarning`.
+    All other values pass through unchanged.
+    """
+    new = _DEPRECATED_POLICY_ALIASES.get(raw)
+    if new is not None:
+        warnings.warn(
+            f"DigestUnknownPolicy '{raw}' is deprecated; use '{new}'. "
+            "Will be removed in v1.4.",
+            DeprecationWarning,
+            stacklevel=2,
+        )
+        return new
+    return raw
 
 
 class DigestEnforcement(StrEnum):
@@ -28,7 +52,7 @@ class DigestEnforcement(StrEnum):
 class DigestUnknownPolicy(StrEnum):
     """How to handle tools that have no digest in the allowlist."""
 
-    ALLOW_DEGRADED = "allow_degraded"
+    ALLOW_UNVERIFIED = "allow_unverified"
     WARN = "warn"
     BLOCK = "block"
 

@@ -97,7 +97,7 @@ class DigestValidator:
     ) -> DigestValidationResult:
         unknown_policy = self._policy.unknown
 
-        if unknown_policy == DigestUnknownPolicy.ALLOW_DEGRADED:
+        if unknown_policy == DigestUnknownPolicy.ALLOW_UNVERIFIED:
             return DigestValidationResult(tool_name=tool_name, valid=True, blocked=False, event=None)
 
         event = DigestMismatchEvent(

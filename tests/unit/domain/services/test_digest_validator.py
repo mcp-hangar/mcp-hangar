@@ -39,7 +39,7 @@ def block_policy(known_digest):
 def audit_policy(known_digest):
     return DigestPolicy(
         enforcement=DigestEnforcement.AUDIT,
-        unknown=DigestUnknownPolicy.ALLOW_DEGRADED,
+        unknown=DigestUnknownPolicy.ALLOW_UNVERIFIED,
         allowlist=frozenset([known_digest]),
     )
 
@@ -145,7 +145,7 @@ class TestDigestValidatorUnknownTool:
         assert result.event is not None
         assert result.event.enforcement == "block"
 
-    def test_unknown_allow_degraded_passes(self, audit_policy, unknown_tool):
+    def test_unknown_allow_unverified_passes(self, audit_policy, unknown_tool):
         validator = DigestValidator(audit_policy)
         result = validator.validate_tool(unknown_tool, "srv1", "corr-8")
         assert result.valid is True
