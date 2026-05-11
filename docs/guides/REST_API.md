@@ -76,6 +76,9 @@ All endpoints return JSON. Error responses follow the envelope format:
 
 ### Discovery
 
+> **Note:** All discovery endpoints return 404 when no `discovery:` block is configured.
+> See the [Discovery guide](DISCOVERY.md) for setup.
+
 | Method | Path | Description |
 |--------|------|-------------|
 | `GET` | `/api/discovery/sources` | List discovery sources |
@@ -88,10 +91,6 @@ All endpoints return JSON. Error responses follow the envelope format:
 | `GET` | `/api/discovery/quarantined` | List quarantined MCP servers |
 | `POST` | `/api/discovery/approve/{name}` | Approve a pending MCP server |
 | `POST` | `/api/discovery/reject/{name}` | Reject a pending MCP server |
-
-### Catalog
-
-> **Not implemented.** Catalog endpoints are planned for a future release.
 
 ### Configuration
 
@@ -129,16 +128,10 @@ All endpoints return JSON. Error responses follow the envelope format:
 | `GET` | `/api/auth/permissions` | List all permissions |
 | `POST` | `/api/auth/check-permission` | Check if a principal has permission |
 | `GET` | `/api/auth/policies/{scope}/{target_id}` | Get tool access policy |
-| `PUT` | `/api/auth/policies/{scope}/{target_id}` | Set tool access policy |
+| `POST` | `/api/auth/policies/{scope}/{target_id}` | Set tool access policy |
 | `DELETE` | `/api/auth/policies/{scope}/{target_id}` | Clear tool access policy |
 
-### Observability
-
-> **Not mounted as a dedicated route group.** Metrics are served at `/metrics`
-> (outside the `/api/` prefix). Audit/security events use the domain event bus
-> and are available via the `/api/ws/events` WebSocket stream.
-
-### Health Probes
+### Health Probes and Metrics
 
 These endpoints are outside the `/api/` prefix and skip authentication:
 

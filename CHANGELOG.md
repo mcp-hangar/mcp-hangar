@@ -36,6 +36,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 - **core:** register `/interceptors/list` custom HTTP route on the bootstrap FastMCP instance so the endpoint is reachable at runtime; previously registered only on the factory's instance which is not served by `ServerLifecycle` (#151)
 - **docs:** fix leftover drift in cookbook recipes 02/03/04: drop phantom `health_check.enabled`/`health_check.interval_s` config keys, replace `MCP servers.<name>` with `mcp_servers.<name>` in config tables, remove fictional log strings, replace dead `uvx mcp-server-fetch` with `docker start`, fix `mode: subprocess` in recipe 01 example output (#152)
+- **docs:** REST_API.md: fix auth policies method PUT→POST, remove empty Catalog/Observability section headers, add discovery config prerequisite note (#153)
 - **observability:** restore `trace.set_tracer_provider()` call in `observability/tracing.py:214`; global Provider→McpServer rename had renamed a third-party OpenTelemetry SDK function to `set_tracer_mcp_server`, which does not exist. Tracing initialization had been failing silently in every 1.0.x and 1.1.0 build (fault barrier swallowed the AttributeError and logged at ERROR). Discovered via live smoke test of v1.1.0 in docker-compose.
 - **docs:** remove stale "Metrics Not Yet Implemented" section from OBSERVABILITY.md; all listed metrics are live in `metrics.py` since v1.1.0 (#135)
 - **docs:** replace broken prerequisite shell commands in cookbook recipes 01 and 04 with in-repo `examples/provider_math` Docker image (#128)
