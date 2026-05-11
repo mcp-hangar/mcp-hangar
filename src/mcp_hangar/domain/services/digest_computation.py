@@ -16,12 +16,21 @@ import jcs
 from mcp_hangar.domain.value_objects.tool_digest import ToolDigest
 
 
+def _is_meaningful(value: Any) -> bool:
+    if value is None:
+        return False
+    if isinstance(value, (dict, list, str)) and len(value) == 0:
+        return False
+    return True
+
+
 def compute_tool_digest(tool: dict[str, Any]) -> ToolDigest:
     """Compute the canonical SHA-256 digest of a tool schema.
 
     Canonical form: RFC 8785 JCS-serialized JSON containing only the
     fields {name, description, inputSchema, outputSchema}.
-    Fields that are None/missing are omitted from the canonical payload.
+    Fields that are None, empty dict, empty list, or empty string
+    are treated as absent and omitted from the canonical payload.
 
     Args:
         tool: Tool schema dict as returned by MCP tools/list.
@@ -41,7 +50,7 @@ def compute_tool_digest(tool: dict[str, Any]) -> ToolDigest:
 
     for field in ("description", "inputSchema", "outputSchema"):
         value = tool.get(field)
-        if value is not None:
+        if _is_meaningful(value):
             canonical_payload[field] = value
 
     serialized = jcs.canonicalize(canonical_payload)  # bytes, RFC 8785
