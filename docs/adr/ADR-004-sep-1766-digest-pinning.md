@@ -3,7 +3,6 @@
 **Status:** Accepted
 **Date:** 2026-05-01
 **Authors:** MCP Hangar Team
-**Implementation:** P1 complete in v1.2.0 (epic #118). Domain types, digest computation, and standalone validator landed in PRs #123, #136, #137, #138.
 
 ## Context
 
@@ -52,6 +51,10 @@ We will implement SEP-1766 and SEP-1763 compliance **preemptively**, treating ou
 | hangar-app | Digest management UI: approve/reject, drift alerts, tool change timeline. |
 | operator | `allowedDigests` in MCPServer/MCPServerGroup CRD. DigestPolicy CRD. |
 | mcp-hangar (Python) | Local digest computation helper. Standalone validation in non-cloud mode. |
+
+### Implementation Status
+
+P1 landed in PRs #123, #136, #137, #138 (epic #118): domain types, digest computation, and standalone validator. Targeted for v1.2.0.
 
 ## Consequences
 
