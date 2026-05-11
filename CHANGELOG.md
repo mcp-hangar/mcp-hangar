@@ -34,6 +34,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Fixed
 
+- **observability:** restore `trace.set_tracer_provider()` call in `observability/tracing.py:214`; global Provider→McpServer rename had renamed a third-party OpenTelemetry SDK function to `set_tracer_mcp_server`, which does not exist. Tracing initialization had been failing silently in every 1.0.x and 1.1.0 build (fault barrier swallowed the AttributeError and logged at ERROR). Discovered via live smoke test of v1.1.0 in docker-compose.
 - **docs:** remove stale "Metrics Not Yet Implemented" section from OBSERVABILITY.md; all listed metrics are live in `metrics.py` since v1.1.0 (#135)
 - **docs:** replace broken prerequisite shell commands in cookbook recipes 01 and 04 with in-repo `examples/provider_math` Docker image (#128)
 - **docs:** correct hangar_call format (requires `calls:[...]` array), remove phantom CLI subcommands, fix endpoint paths across cookbook recipes (#125)
