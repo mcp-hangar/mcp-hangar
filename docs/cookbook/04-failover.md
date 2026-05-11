@@ -109,7 +109,7 @@ Save this as `~/.config/mcp-hangar/config.yaml` (or update your existing file).
      sleep 0.5
      echo '{"jsonrpc":"2.0","method":"notifications/initialized","params":{}}'
      sleep 0.5
-     echo '{"jsonrpc":"2.0","method":"tools/call","params":{"name":"hangar_call","arguments":{"mcp_server":"my-mcp-group","tool":"fetch","arguments":{"url":"https://example.com"}}},"id":2}'
+     echo '{"jsonrpc":"2.0","method":"tools/call","params":{"name":"hangar_call","arguments":{"calls":[{"mcp_server":"my-mcp-group","tool":"fetch","arguments":{"url":"https://example.com"}}]}},"id":2}'
      sleep 3
    ) | mcp-hangar --config ~/.config/mcp-hangar/config.yaml serve 2>&1 | grep -E '"id":2|selected_member'
    ```
@@ -153,7 +153,7 @@ Save this as `~/.config/mcp-hangar/config.yaml` (or update your existing file).
      sleep 0.5
      echo '{"jsonrpc":"2.0","method":"notifications/initialized","params":{}}'
      sleep 0.5
-     echo '{"jsonrpc":"2.0","method":"tools/call","params":{"name":"hangar_call","arguments":{"mcp_server":"my-mcp-group","tool":"fetch","arguments":{"url":"https://example.com"}}},"id":2}'
+     echo '{"jsonrpc":"2.0","method":"tools/call","params":{"name":"hangar_call","arguments":{"calls":[{"mcp_server":"my-mcp-group","tool":"fetch","arguments":{"url":"https://example.com"}}]}},"id":2}'
      sleep 3
    ) | mcp-hangar --config ~/.config/mcp-hangar/config.yaml serve 2>&1 | grep -E '"id":2|selected_member'
    ```

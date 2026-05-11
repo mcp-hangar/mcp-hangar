@@ -45,7 +45,7 @@ discovery:                               # NEW: discovery configuration
 3. Trigger a discovery scan:
 
    ```bash
-   curl -X POST http://localhost:8000/api/discovery/sources
+   curl -X POST http://localhost:8000/api/discovery/sources/docker/scan
    ```
 
 4. Check pending MCP servers:
