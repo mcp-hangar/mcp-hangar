@@ -94,9 +94,7 @@ Save this as `~/.config/mcp-hangar/config.yaml` (or update your existing file).
    ```
 
    ```
-   INFO     member_added_to_rotation member=my-mcp group=my-mcp-group
-   INFO     member_added_to_rotation member=my-mcp-backup group=my-mcp-group
-   INFO     group_state_changed group=my-mcp-group state=healthy members=2/2
+   (log output showing both members initialized and group ready)
    ```
 
    Both MCP servers in rotation. Primary (priority 1) will handle requests.
@@ -140,7 +138,7 @@ Save this as `~/.config/mcp-hangar/config.yaml` (or update your existing file).
    WARNING  health_check_failed mcp_server=my-mcp consecutive_failures=1
    WARNING  health_check_failed mcp_server=my-mcp consecutive_failures=2
    WARNING  health_check_failed mcp_server=my-mcp consecutive_failures=3
-   INFO     member_removed_from_rotation member=my-mcp reason=health_check_failures
+   (primary removed from rotation after max consecutive failures)
    ```
 
    Primary out of rotation. Backup takes over.
@@ -168,7 +166,7 @@ Save this as `~/.config/mcp-hangar/config.yaml` (or update your existing file).
 
    ```bash
    # Restart primary
-   uvx mcp-server-fetch &
+   docker start mcp-primary
 
    # Wait for recovery
    echo "Waiting 40 seconds for primary recovery..."
@@ -179,9 +177,7 @@ Save this as `~/.config/mcp-hangar/config.yaml` (or update your existing file).
    ```
 
    ```
-   INFO     health_check_passed mcp_server=my-mcp
-   INFO     member_added_to_rotation member=my-mcp reason=health_recovered
-   INFO     group_state_changed group=my-mcp-group state=healthy members=2/2
+   (log output showing primary health check passed and MCP server returning to ready state)
    ```
 
    Primary recovered and back in rotation. Will reclaim traffic (priority 1 < priority 2).
@@ -216,10 +212,10 @@ Both MCP servers have their own health checks and circuit breakers. The group or
 
 | Key | Type | Default | Description |
 |-----|------|---------|-------------|
-| `MCP servers.<name>.strategy` | string | — | Routing strategy. Use `priority` for failover |
-| `MCP servers.<name>.members[].id` | string | — | MCP Server ID (must exist in `MCP servers:` section) |
-| `MCP servers.<name>.members[].priority` | int | `1` | Routing priority (lower number = higher priority) |
-| `MCP servers.<name>.members[].weight` | int | `1` | Weight for weighted strategies (not used with priority) |
+| `mcp_servers.<name>.strategy` | string | — | Routing strategy. Use `priority` for failover |
+| `mcp_servers.<name>.members[].id` | string | — | MCP Server ID (must exist in `mcp_servers:` section) |
+| `mcp_servers.<name>.members[].priority` | int | `1` | Routing priority (lower number = higher priority) |
+| `mcp_servers.<name>.members[].weight` | int | `1` | Weight for weighted strategies (not used with priority) |
 
 ## What's Next
 

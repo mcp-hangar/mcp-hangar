@@ -142,7 +142,7 @@ Save this as `~/.config/mcp-hangar/config.yaml` (or update your existing file).
 
 ## What Just Happened
 
-Hangar's background health check worker probes each READY MCP server every 30 seconds (configured via `health_check.interval_s`). The probe mechanism sends a `tools/list` JSON-RPC request to the MCP server with a 5-second timeout. If the MCP server responds successfully, the health check passes and `consecutive_failures` resets to 0.
+Hangar's background health check worker probes each READY MCP server every 60 seconds. The probe mechanism sends a `tools/list` JSON-RPC request to the MCP server with a 5-second timeout. If the MCP server responds successfully, the health check passes and `consecutive_failures` resets to 0.
 
 When the MCP server fails to respond, Hangar records a failure in the `HealthTracker`. After `max_consecutive_failures` (3 by default) failed checks, the MCP server state transitions from READY to DEGRADED. This transition emits a `McpServerDegraded` domain event, which updates metrics and triggers alerts.
 
@@ -157,9 +157,7 @@ State machine transitions:
 
 | Key | Type | Default | Description |
 |-----|------|---------|-------------|
-| `health_check.enabled` | bool | `true` | Enable global health checking |
-| `health_check.interval_s` | int | `30` | Default interval between checks (seconds) |
-| `health_check_interval_s` | int | `60` | Per-MCP server health check interval override |
+| `health_check_interval_s` | int | `30` | Per-MCP server health check interval (seconds) |
 | `max_consecutive_failures` | int | `3` | Failures before state transition to DEGRADED |
 
 ## What's Next
