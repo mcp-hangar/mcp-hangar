@@ -86,7 +86,7 @@ nav:
       - 06 -- Rate Limiting: cookbook/06-rate-limiting.md
       - 07 -- Observability Metrics: cookbook/07-observability-metrics.md
       - 08 -- Observability Langfuse: cookbook/08-observability-langfuse.md
-      - 09 -- Subprocess Providers: cookbook/09-subprocess-providers.md
+      - 09 -- Subprocess MCP Servers: cookbook/09-subprocess-mcp-servers.md
       - 10 -- Discovery Docker: cookbook/10-discovery-docker.md
       - 11 -- Discovery Kubernetes: cookbook/11-discovery-kubernetes.md
       - 12 -- Auth and RBAC: cookbook/12-auth-rbac.md

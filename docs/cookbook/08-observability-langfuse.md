@@ -56,7 +56,7 @@ observability:                           # NEW: Langfuse tracing
 
 ## What Just Happened
 
-The `TracedProviderService` wraps tool invocations with Langfuse spans via the `LangfuseObservabilityAdapter`. Each tool call creates a trace with child spans for cold start (if needed) and the actual MCP server call. Correlation IDs link Hangar traces to MCP server-side traces.
+The `TracedMcpServerService` wraps tool invocations with Langfuse spans via the `LangfuseObservabilityAdapter`. Each tool call creates a trace with child spans for cold start (if needed) and the actual MCP server call. Correlation IDs link Hangar traces to MCP server-side traces.
 
 ## Key Config Reference
 
@@ -71,4 +71,4 @@ The `TracedProviderService` wraps tool invocations with Langfuse spans via the `
 
 You've set up external observability. Now try running MCP servers as local subprocesses instead of remote HTTP.
 
---> [09 -- Subprocess MCP servers](09-subprocess-providers.md)
+--> [09 -- Subprocess MCP servers](09-subprocess-mcp-servers.md)

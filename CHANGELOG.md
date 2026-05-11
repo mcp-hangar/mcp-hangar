@@ -40,6 +40,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - **docs:** drop phantom config blocks (global `health_check:`, `logging:`, `metrics:`) from cookbook recipes (#126)
 - **docs:** drop phantom endpoints (Catalog, Observability, Maintenance, `/ws/state`, `/ws/logs`) from REST_API, WEBSOCKETS, and LOG_STREAMING guides; align with real router mounts and WS subscribe protocol (#132)
 - **docs:** add cross-repo operator prerequisites for Kubernetes recipes 11, 13, and KUBERNETES guide; link to `mcp-hangar/hangar-operator` and fix Helm/CRD URLs (#127)
+- **docs:** rename `09-subprocess-providers.md` to `09-subprocess-mcp-servers.md`, fix `TracedProviderService` reference in recipe 08, update nav (#129)
 - **ci:** release notes no longer contain literal `%0A` newlines (removed legacy set-output encoding)
 - **ci:** release body no longer has a duplicated `## What's Changed` section (removed `generate_release_notes: true`); a manual Full Changelog compare link is added instead
 - **ci:** HTML entities (`&gt;`, `&lt;`, `&amp;`) in CHANGELOG entries are decoded before writing to the release body
