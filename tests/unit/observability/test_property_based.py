@@ -200,7 +200,7 @@ class TestLangfuseConfigProperties:
     @settings(deadline=None)
     def test_sample_rate_validation_is_consistent(self, sample_rate: float) -> None:
         """Sample rate validation is consistent for all float values."""
-        from enterprise.integrations.langfuse import LangfuseConfig
+        from mcp_hangar.integrations.langfuse import LangfuseConfig
 
         config = LangfuseConfig(
             enabled=True,
@@ -229,7 +229,7 @@ class TestLangfuseConfigProperties:
         enabled: bool,
     ) -> None:
         """Config validation never raises exceptions."""
-        from enterprise.integrations.langfuse import LangfuseConfig
+        from mcp_hangar.integrations.langfuse import LangfuseConfig
 
         config = LangfuseConfig(
             enabled=enabled,
@@ -251,7 +251,7 @@ class TestLangfuseConfigProperties:
         secret_key: str,
     ) -> None:
         """Enabled config with non-empty keys passes validation."""
-        from enterprise.integrations.langfuse import LangfuseConfig
+        from mcp_hangar.integrations.langfuse import LangfuseConfig
 
         config = LangfuseConfig(
             enabled=True,

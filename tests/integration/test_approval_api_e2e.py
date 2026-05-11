@@ -11,11 +11,11 @@ from starlette.testclient import TestClient
 
 from mcp_hangar.domain.value_objects.tool_access_policy import ToolAccessPolicy
 
-from enterprise.approvals.api.routes import approval_routes
-from enterprise.approvals.delivery.noop import NoOpApprovalDelivery
-from enterprise.approvals.hold_registry import ApprovalHoldRegistry
-from enterprise.approvals.models import ApprovalState
-from enterprise.approvals.service import ApprovalGateService
+from mcp_hangar.approvals.api.routes import approval_routes
+from mcp_hangar.approvals.delivery.noop import NoOpApprovalDelivery
+from mcp_hangar.approvals.hold_registry import ApprovalHoldRegistry
+from mcp_hangar.approvals.models import ApprovalState
+from mcp_hangar.approvals.service import ApprovalGateService
 
 
 # ---------------------------------------------------------------------------

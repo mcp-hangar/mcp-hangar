@@ -246,7 +246,7 @@ def langfuse_container(postgres_container: dict) -> Generator[dict[str, Any], No
 @pytest.fixture
 def langfuse_config(langfuse_container: dict):
     """Create LangfuseConfig from container."""
-    from enterprise.integrations.langfuse import LangfuseConfig
+    from mcp_hangar.integrations.langfuse import LangfuseConfig
 
     return LangfuseConfig(
         enabled=True,

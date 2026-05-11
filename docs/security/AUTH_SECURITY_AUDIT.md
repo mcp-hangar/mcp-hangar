@@ -11,7 +11,7 @@ This audit covers the authentication, authorization, and request-enforcement pat
 - Tool access policies (TAP)
 - HTTP and WebSocket auth enforcement
 - Browser-oriented CSRF defense-in-depth on session suspension
-- Enterprise boundary loading between core `src/` and optional `enterprise/`
+- Core package loading between `src/` and `src/mcp_hangar/`
 
 ## Current Security Posture
 
@@ -45,7 +45,7 @@ This audit covers the authentication, authorization, and request-enforcement pat
 ### Enterprise Boundary
 
 - Core bootstrap/router code no longer scatters direct `enterprise.*` imports across server modules.
-- Optional enterprise integrations are resolved via `src/mcp_hangar/server/bootstrap/enterprise.py`.
+- Optional integrations are resolved via `src/mcp_hangar/server/bootstrap/enterprise.py`.
 - The boundary exposes provider hooks for:
   - license validation
   - auth CQRS registration

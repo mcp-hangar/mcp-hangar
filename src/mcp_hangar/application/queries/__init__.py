@@ -47,13 +47,13 @@ def __getattr__(name: str):  # noqa: ANN001
 
     if name in _ENTERPRISE_AUTH_QUERIES:
         try:
-            return getattr(importlib.import_module("enterprise.auth.queries.queries"), name)
+            return getattr(importlib.import_module("mcp_hangar.auth.queries.queries"), name)
         except ImportError as err:
             raise AttributeError(f"module {__name__!r} has no attribute {name!r} (enterprise not installed)") from err
 
     if name in _ENTERPRISE_AUTH_QUERY_HANDLERS:
         try:
-            return getattr(importlib.import_module("enterprise.auth.queries.handlers"), name)
+            return getattr(importlib.import_module("mcp_hangar.auth.queries.handlers"), name)
         except ImportError as err:
             raise AttributeError(f"module {__name__!r} has no attribute {name!r} (enterprise not installed)") from err
 

@@ -10,9 +10,9 @@ from unittest.mock import MagicMock
 
 import pytest
 
-from enterprise.approvals.hold_registry import ApprovalHoldRegistry
-from enterprise.approvals.models import ApprovalState
-from enterprise.approvals.service import ApprovalGateService
+from mcp_hangar.approvals.hold_registry import ApprovalHoldRegistry
+from mcp_hangar.approvals.models import ApprovalState
+from mcp_hangar.approvals.service import ApprovalGateService
 from mcp_hangar.domain.value_objects.tool_access_policy import ToolAccessPolicy
 
 

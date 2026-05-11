@@ -1,6 +1,6 @@
 # pyright: reportAny=false, reportUnknownVariableType=false
 
-from enterprise.auth.roles import ROLE_ADMIN, ROLE_AGENT, ROLE_DEVELOPER, ROLE_VIEWER
+from mcp_hangar.auth.roles import ROLE_ADMIN, ROLE_AGENT, ROLE_DEVELOPER, ROLE_VIEWER
 from mcp_hangar.domain.value_objects.security import (
     PERMISSION_CONFIG_RELOAD,
     PERMISSION_POLICY_WRITE,

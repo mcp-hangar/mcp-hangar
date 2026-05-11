@@ -6,7 +6,7 @@ set -euo pipefail
 : "${HEAD_SHA:?HEAD_SHA must be set}"
 : "${PR_LABELS:=}"
 
-TRIGGERING_PATTERN='^(src/|enterprise/|pyproject\.toml$|packages/(operator|helm-charts|ui)/)'
+TRIGGERING_PATTERN='^(src/|pyproject\.toml$|packages/(operator|helm-charts|ui)/)'
 
 changed_files=$(git diff --name-only "$BASE_SHA".."$HEAD_SHA")
 

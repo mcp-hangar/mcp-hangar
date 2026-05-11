@@ -113,4 +113,4 @@ result = traced_service.invoke_tool(
 - [Langfuse Documentation](https://langfuse.com/docs)
 - [MCP Protocol Specification](https://modelcontextprotocol.io/specification)
 - [ObservabilityPort Implementation](https://github.com/mcp-hangar/mcp-hangar/blob/main/src/mcp_hangar/application/ports/observability.py)
-- [LangfuseAdapter Implementation](https://github.com/mcp-hangar/mcp-hangar/blob/main/enterprise/integrations/langfuse.py)
+- [LangfuseAdapter Implementation](https://github.com/mcp-hangar/mcp-hangar/blob/main/src/mcp_hangar/integrations/langfuse.py)

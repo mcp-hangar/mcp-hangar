@@ -75,7 +75,7 @@ class TestOIDCConfig:
     """Test OIDCConfig dataclass defaults and field mappings."""
 
     def test_defaults(self):
-        from enterprise.auth.infrastructure.jwt_authenticator import OIDCConfig
+        from mcp_hangar.auth.infrastructure.jwt_authenticator import OIDCConfig
 
         config = OIDCConfig(issuer="https://auth.example.com", audience="my-api")
         assert config.issuer == "https://auth.example.com"
@@ -89,7 +89,7 @@ class TestOIDCConfig:
         assert config.max_token_lifetime == 3600
 
     def test_custom_claims(self):
-        from enterprise.auth.infrastructure.jwt_authenticator import OIDCConfig
+        from mcp_hangar.auth.infrastructure.jwt_authenticator import OIDCConfig
 
         config = OIDCConfig(
             issuer="https://x",
@@ -111,7 +111,7 @@ class TestJWTAuthenticatorSupports:
     """Test JWTAuthenticator.supports method."""
 
     def test_supports_bearer_header(self):
-        from enterprise.auth.infrastructure.jwt_authenticator import JWTAuthenticator, OIDCConfig
+        from mcp_hangar.auth.infrastructure.jwt_authenticator import JWTAuthenticator, OIDCConfig
 
         config = OIDCConfig(issuer="https://x", audience="y")
         validator = Mock(spec=ITokenValidator)
@@ -121,7 +121,7 @@ class TestJWTAuthenticatorSupports:
         assert authn.supports(request) is True
 
     def test_does_not_support_basic_auth(self):
-        from enterprise.auth.infrastructure.jwt_authenticator import JWTAuthenticator, OIDCConfig
+        from mcp_hangar.auth.infrastructure.jwt_authenticator import JWTAuthenticator, OIDCConfig
 
         config = OIDCConfig(issuer="https://x", audience="y")
         validator = Mock(spec=ITokenValidator)
@@ -131,7 +131,7 @@ class TestJWTAuthenticatorSupports:
         assert authn.supports(request) is False
 
     def test_does_not_support_missing_header(self):
-        from enterprise.auth.infrastructure.jwt_authenticator import JWTAuthenticator, OIDCConfig
+        from mcp_hangar.auth.infrastructure.jwt_authenticator import JWTAuthenticator, OIDCConfig
 
         config = OIDCConfig(issuer="https://x", audience="y")
         validator = Mock(spec=ITokenValidator)
@@ -145,7 +145,7 @@ class TestJWTAuthenticatorAuthenticate:
     """Test JWTAuthenticator.authenticate method."""
 
     def test_missing_bearer_raises(self):
-        from enterprise.auth.infrastructure.jwt_authenticator import JWTAuthenticator, OIDCConfig
+        from mcp_hangar.auth.infrastructure.jwt_authenticator import JWTAuthenticator, OIDCConfig
 
         config = OIDCConfig(issuer="https://x", audience="y")
         validator = Mock(spec=ITokenValidator)
@@ -156,7 +156,7 @@ class TestJWTAuthenticatorAuthenticate:
             authn.authenticate(request)
 
     def test_empty_bearer_token_raises(self):
-        from enterprise.auth.infrastructure.jwt_authenticator import JWTAuthenticator, OIDCConfig
+        from mcp_hangar.auth.infrastructure.jwt_authenticator import JWTAuthenticator, OIDCConfig
 
         config = OIDCConfig(issuer="https://x", audience="y")
         validator = Mock(spec=ITokenValidator)
@@ -167,7 +167,7 @@ class TestJWTAuthenticatorAuthenticate:
             authn.authenticate(request)
 
     def test_successful_authenticate(self):
-        from enterprise.auth.infrastructure.jwt_authenticator import JWTAuthenticator, OIDCConfig
+        from mcp_hangar.auth.infrastructure.jwt_authenticator import JWTAuthenticator, OIDCConfig
 
         config = OIDCConfig(issuer="https://x", audience="y", max_token_lifetime=0)
         validator = Mock(spec=ITokenValidator)
@@ -194,7 +194,7 @@ class TestJWTAuthenticatorAuthenticate:
         assert principal.metadata["issuer"] == "https://x"
 
     def test_missing_subject_claim_raises(self):
-        from enterprise.auth.infrastructure.jwt_authenticator import JWTAuthenticator, OIDCConfig
+        from mcp_hangar.auth.infrastructure.jwt_authenticator import JWTAuthenticator, OIDCConfig
 
         config = OIDCConfig(issuer="https://x", audience="y", max_token_lifetime=0)
         validator = Mock(spec=ITokenValidator)
@@ -206,7 +206,7 @@ class TestJWTAuthenticatorAuthenticate:
             authn.authenticate(request)
 
     def test_groups_as_string_converted_to_list(self):
-        from enterprise.auth.infrastructure.jwt_authenticator import JWTAuthenticator, OIDCConfig
+        from mcp_hangar.auth.infrastructure.jwt_authenticator import JWTAuthenticator, OIDCConfig
 
         config = OIDCConfig(issuer="https://x", audience="y", max_token_lifetime=0)
         validator = Mock(spec=ITokenValidator)
@@ -218,7 +218,7 @@ class TestJWTAuthenticatorAuthenticate:
         assert "single_group" in principal.groups
 
     def test_empty_groups_default(self):
-        from enterprise.auth.infrastructure.jwt_authenticator import JWTAuthenticator, OIDCConfig
+        from mcp_hangar.auth.infrastructure.jwt_authenticator import JWTAuthenticator, OIDCConfig
 
         config = OIDCConfig(issuer="https://x", audience="y", max_token_lifetime=0)
         validator = Mock(spec=ITokenValidator)
@@ -230,7 +230,7 @@ class TestJWTAuthenticatorAuthenticate:
         assert principal.groups == frozenset()
 
     def test_lifetime_enforcement_called(self):
-        from enterprise.auth.infrastructure.jwt_authenticator import JWTAuthenticator, OIDCConfig
+        from mcp_hangar.auth.infrastructure.jwt_authenticator import JWTAuthenticator, OIDCConfig
 
         config = OIDCConfig(issuer="https://x", audience="y", max_token_lifetime=100)
         validator = Mock(spec=ITokenValidator)
@@ -250,7 +250,7 @@ class TestJWTLifetimeEnforcement:
     """Test _enforce_token_lifetime edge cases."""
 
     def test_disabled_when_max_lifetime_zero(self):
-        from enterprise.auth.infrastructure.jwt_authenticator import JWTAuthenticator, OIDCConfig
+        from mcp_hangar.auth.infrastructure.jwt_authenticator import JWTAuthenticator, OIDCConfig
 
         config = OIDCConfig(issuer="https://x", audience="y", max_token_lifetime=0)
         validator = Mock(spec=ITokenValidator)
@@ -260,7 +260,7 @@ class TestJWTLifetimeEnforcement:
         authn._enforce_token_lifetime({})
 
     def test_disabled_when_max_lifetime_negative(self):
-        from enterprise.auth.infrastructure.jwt_authenticator import JWTAuthenticator, OIDCConfig
+        from mcp_hangar.auth.infrastructure.jwt_authenticator import JWTAuthenticator, OIDCConfig
 
         config = OIDCConfig(issuer="https://x", audience="y", max_token_lifetime=-1)
         validator = Mock(spec=ITokenValidator)
@@ -268,7 +268,7 @@ class TestJWTLifetimeEnforcement:
         authn._enforce_token_lifetime({})
 
     def test_missing_iat_raises(self):
-        from enterprise.auth.infrastructure.jwt_authenticator import JWTAuthenticator, OIDCConfig
+        from mcp_hangar.auth.infrastructure.jwt_authenticator import JWTAuthenticator, OIDCConfig
 
         config = OIDCConfig(issuer="https://x", audience="y", max_token_lifetime=3600)
         validator = Mock(spec=ITokenValidator)
@@ -278,7 +278,7 @@ class TestJWTLifetimeEnforcement:
             authn._enforce_token_lifetime({"exp": 9999})
 
     def test_missing_exp_raises(self):
-        from enterprise.auth.infrastructure.jwt_authenticator import JWTAuthenticator, OIDCConfig
+        from mcp_hangar.auth.infrastructure.jwt_authenticator import JWTAuthenticator, OIDCConfig
 
         config = OIDCConfig(issuer="https://x", audience="y", max_token_lifetime=3600)
         validator = Mock(spec=ITokenValidator)
@@ -292,7 +292,7 @@ class TestJWKSTokenValidator:
     """Test JWKSTokenValidator."""
 
     def test_pyjwt_not_installed_raises(self):
-        from enterprise.auth.infrastructure.jwt_authenticator import JWKSTokenValidator, OIDCConfig
+        from mcp_hangar.auth.infrastructure.jwt_authenticator import JWKSTokenValidator, OIDCConfig
 
         config = OIDCConfig(issuer="https://x", audience="y")
         validator = JWKSTokenValidator(config)
@@ -302,7 +302,7 @@ class TestJWKSTokenValidator:
                 validator.validate("some.token.here")
 
     def test_expired_signature_raises_expired_credentials(self):
-        from enterprise.auth.infrastructure.jwt_authenticator import JWKSTokenValidator, OIDCConfig
+        from mcp_hangar.auth.infrastructure.jwt_authenticator import JWKSTokenValidator, OIDCConfig
         import jwt as real_jwt
 
         config = OIDCConfig(issuer="https://x", audience="y", jwks_uri="https://x/.well-known/jwks.json")
@@ -319,7 +319,7 @@ class TestJWKSTokenValidator:
                 validator.validate("some.token.here")
 
     def test_invalid_audience_raises_invalid_credentials(self):
-        from enterprise.auth.infrastructure.jwt_authenticator import JWKSTokenValidator, OIDCConfig
+        from mcp_hangar.auth.infrastructure.jwt_authenticator import JWKSTokenValidator, OIDCConfig
         import jwt as real_jwt
 
         config = OIDCConfig(issuer="https://x", audience="y", jwks_uri="https://x/jwks")
@@ -336,7 +336,7 @@ class TestJWKSTokenValidator:
                 validator.validate("some.token.here")
 
     def test_invalid_issuer_raises_invalid_credentials(self):
-        from enterprise.auth.infrastructure.jwt_authenticator import JWKSTokenValidator, OIDCConfig
+        from mcp_hangar.auth.infrastructure.jwt_authenticator import JWKSTokenValidator, OIDCConfig
         import jwt as real_jwt
 
         config = OIDCConfig(issuer="https://x", audience="y", jwks_uri="https://x/jwks")
@@ -353,7 +353,7 @@ class TestJWKSTokenValidator:
                 validator.validate("some.token.here")
 
     def test_generic_invalid_token_raises_invalid_credentials(self):
-        from enterprise.auth.infrastructure.jwt_authenticator import JWKSTokenValidator, OIDCConfig
+        from mcp_hangar.auth.infrastructure.jwt_authenticator import JWKSTokenValidator, OIDCConfig
         import jwt as real_jwt
 
         config = OIDCConfig(issuer="https://x", audience="y", jwks_uri="https://x/jwks")
@@ -370,7 +370,7 @@ class TestJWKSTokenValidator:
                 validator.validate("some.token.here")
 
     def test_successful_validation_returns_claims(self):
-        from enterprise.auth.infrastructure.jwt_authenticator import JWKSTokenValidator, OIDCConfig
+        from mcp_hangar.auth.infrastructure.jwt_authenticator import JWKSTokenValidator, OIDCConfig
 
         config = OIDCConfig(issuer="https://x", audience="y", jwks_uri="https://x/jwks")
         validator = JWKSTokenValidator(config)
@@ -391,7 +391,7 @@ class TestJWKSTokenValidatorInitClient:
     """Test _init_jwks_client with OIDC discovery."""
 
     def test_with_explicit_jwks_uri(self):
-        from enterprise.auth.infrastructure.jwt_authenticator import JWKSTokenValidator, OIDCConfig
+        from mcp_hangar.auth.infrastructure.jwt_authenticator import JWKSTokenValidator, OIDCConfig
 
         config = OIDCConfig(
             issuer="https://auth.example.com",
@@ -406,7 +406,7 @@ class TestJWKSTokenValidatorInitClient:
             assert validator._jwks_uri == "https://auth.example.com/custom/jwks"
 
     def test_oidc_discovery_success(self):
-        from enterprise.auth.infrastructure.jwt_authenticator import JWKSTokenValidator, OIDCConfig
+        from mcp_hangar.auth.infrastructure.jwt_authenticator import JWKSTokenValidator, OIDCConfig
 
         config = OIDCConfig(issuer="https://auth.example.com", audience="y")
         validator = JWKSTokenValidator(config)
@@ -421,7 +421,7 @@ class TestJWKSTokenValidatorInitClient:
                 mock_client_cls.assert_called_once_with("https://auth.example.com/keys")
 
     def test_oidc_discovery_no_jwks_uri_raises(self):
-        from enterprise.auth.infrastructure.jwt_authenticator import JWKSTokenValidator, OIDCConfig
+        from mcp_hangar.auth.infrastructure.jwt_authenticator import JWKSTokenValidator, OIDCConfig
 
         config = OIDCConfig(issuer="https://auth.example.com", audience="y")
         validator = JWKSTokenValidator(config)
@@ -435,7 +435,7 @@ class TestJWKSTokenValidatorInitClient:
                 validator._init_jwks_client()
 
     def test_oidc_discovery_http_error_raises(self):
-        from enterprise.auth.infrastructure.jwt_authenticator import JWKSTokenValidator, OIDCConfig
+        from mcp_hangar.auth.infrastructure.jwt_authenticator import JWKSTokenValidator, OIDCConfig
         import httpx
 
         config = OIDCConfig(issuer="https://auth.example.com", audience="y")
@@ -446,7 +446,7 @@ class TestJWKSTokenValidatorInitClient:
                 validator._init_jwks_client()
 
     def test_non_https_issuer_logs_warning(self):
-        from enterprise.auth.infrastructure.jwt_authenticator import JWKSTokenValidator, OIDCConfig
+        from mcp_hangar.auth.infrastructure.jwt_authenticator import JWKSTokenValidator, OIDCConfig
 
         config = OIDCConfig(
             issuer="http://insecure-auth.example.com",
@@ -460,7 +460,7 @@ class TestJWKSTokenValidatorInitClient:
             # No exception -- just a warning logged
 
     def test_non_https_jwks_uri_discovered(self):
-        from enterprise.auth.infrastructure.jwt_authenticator import JWKSTokenValidator, OIDCConfig
+        from mcp_hangar.auth.infrastructure.jwt_authenticator import JWKSTokenValidator, OIDCConfig
 
         config = OIDCConfig(issuer="https://auth.example.com", audience="y")
         validator = JWKSTokenValidator(config)
@@ -476,7 +476,7 @@ class TestJWKSTokenValidatorInitClient:
                 mock_client_cls.assert_called_once_with("http://insecure/jwks")
 
     def test_import_error_raises_invalid_credentials(self):
-        from enterprise.auth.infrastructure.jwt_authenticator import JWKSTokenValidator, OIDCConfig
+        from mcp_hangar.auth.infrastructure.jwt_authenticator import JWKSTokenValidator, OIDCConfig
 
         config = OIDCConfig(issuer="https://auth.example.com", audience="y")
         validator = JWKSTokenValidator(config)
@@ -490,7 +490,7 @@ class TestStaticSecretTokenValidator:
     """Test StaticSecretTokenValidator."""
 
     def test_valid_token_with_hs256(self):
-        from enterprise.auth.infrastructure.jwt_authenticator import StaticSecretTokenValidator
+        from mcp_hangar.auth.infrastructure.jwt_authenticator import StaticSecretTokenValidator
         import jwt
 
         secret = "test-secret-key"
@@ -502,7 +502,7 @@ class TestStaticSecretTokenValidator:
         assert claims["sub"] == "user1"
 
     def test_expired_token_raises(self):
-        from enterprise.auth.infrastructure.jwt_authenticator import StaticSecretTokenValidator
+        from mcp_hangar.auth.infrastructure.jwt_authenticator import StaticSecretTokenValidator
         import jwt
 
         secret = "test-secret-key"
@@ -514,7 +514,7 @@ class TestStaticSecretTokenValidator:
             validator.validate(token)
 
     def test_invalid_token_raises(self):
-        from enterprise.auth.infrastructure.jwt_authenticator import StaticSecretTokenValidator
+        from mcp_hangar.auth.infrastructure.jwt_authenticator import StaticSecretTokenValidator
 
         validator = StaticSecretTokenValidator("correct-secret")
         import jwt
@@ -525,7 +525,7 @@ class TestStaticSecretTokenValidator:
             validator.validate(token)
 
     def test_with_issuer_and_audience(self):
-        from enterprise.auth.infrastructure.jwt_authenticator import StaticSecretTokenValidator
+        from mcp_hangar.auth.infrastructure.jwt_authenticator import StaticSecretTokenValidator
         import jwt
 
         secret = "test-secret-key"
@@ -541,7 +541,7 @@ class TestStaticSecretTokenValidator:
         assert claims["iss"] == "https://issuer"
 
     def test_with_wrong_issuer_raises(self):
-        from enterprise.auth.infrastructure.jwt_authenticator import StaticSecretTokenValidator
+        from mcp_hangar.auth.infrastructure.jwt_authenticator import StaticSecretTokenValidator
         import jwt
 
         secret = "test-secret-key"
@@ -556,7 +556,7 @@ class TestStaticSecretTokenValidator:
             validator.validate(token)
 
     def test_without_issuer_audience_skips_verification(self):
-        from enterprise.auth.infrastructure.jwt_authenticator import StaticSecretTokenValidator
+        from mcp_hangar.auth.infrastructure.jwt_authenticator import StaticSecretTokenValidator
         import jwt
 
         secret = "test-secret-key"
@@ -577,25 +577,25 @@ class TestOPAAuthorizerInit:
     """Test OPAAuthorizer initialization."""
 
     def test_trailing_slash_stripped_from_url(self):
-        from enterprise.auth.infrastructure.opa_authorizer import OPAAuthorizer
+        from mcp_hangar.auth.infrastructure.opa_authorizer import OPAAuthorizer
 
         opa = OPAAuthorizer("http://localhost:8181/")
         assert opa._opa_url == "http://localhost:8181"
 
     def test_leading_slash_stripped_from_policy_path(self):
-        from enterprise.auth.infrastructure.opa_authorizer import OPAAuthorizer
+        from mcp_hangar.auth.infrastructure.opa_authorizer import OPAAuthorizer
 
         opa = OPAAuthorizer("http://localhost:8181", policy_path="/v1/data/allow")
         assert opa._policy_path == "v1/data/allow"
 
     def test_timeout_set(self):
-        from enterprise.auth.infrastructure.opa_authorizer import OPAAuthorizer
+        from mcp_hangar.auth.infrastructure.opa_authorizer import OPAAuthorizer
 
         opa = OPAAuthorizer("http://localhost:8181", timeout=10.0)
         assert opa._timeout == 10.0
 
     def test_client_initially_none(self):
-        from enterprise.auth.infrastructure.opa_authorizer import OPAAuthorizer
+        from mcp_hangar.auth.infrastructure.opa_authorizer import OPAAuthorizer
 
         opa = OPAAuthorizer("http://localhost:8181")
         assert opa._client is None
@@ -605,7 +605,7 @@ class TestOPAAuthorizerEvaluate:
     """Test OPAAuthorizer.evaluate with various error scenarios."""
 
     def test_httpx_not_installed_denies(self):
-        from enterprise.auth.infrastructure.opa_authorizer import OPAAuthorizer
+        from mcp_hangar.auth.infrastructure.opa_authorizer import OPAAuthorizer
 
         opa = OPAAuthorizer("http://localhost:8181")
 
@@ -615,7 +615,7 @@ class TestOPAAuthorizerEvaluate:
             assert "httpx_not_installed" in result.reason
 
     def test_successful_allow(self):
-        from enterprise.auth.infrastructure.opa_authorizer import OPAAuthorizer
+        from mcp_hangar.auth.infrastructure.opa_authorizer import OPAAuthorizer
         import httpx
 
         opa = OPAAuthorizer("http://localhost:8181")
@@ -632,7 +632,7 @@ class TestOPAAuthorizerEvaluate:
         assert result.reason == "opa_policy"
 
     def test_successful_deny(self):
-        from enterprise.auth.infrastructure.opa_authorizer import OPAAuthorizer
+        from mcp_hangar.auth.infrastructure.opa_authorizer import OPAAuthorizer
         import httpx
 
         opa = OPAAuthorizer("http://localhost:8181")
@@ -649,7 +649,7 @@ class TestOPAAuthorizerEvaluate:
         assert result.reason == "opa_denied"
 
     def test_missing_result_key_defaults_to_deny(self):
-        from enterprise.auth.infrastructure.opa_authorizer import OPAAuthorizer
+        from mcp_hangar.auth.infrastructure.opa_authorizer import OPAAuthorizer
         import httpx
 
         opa = OPAAuthorizer("http://localhost:8181")
@@ -666,7 +666,7 @@ class TestOPAAuthorizerEvaluate:
         assert result.reason == "opa_denied"
 
     def test_connect_error_denies(self):
-        from enterprise.auth.infrastructure.opa_authorizer import OPAAuthorizer
+        from mcp_hangar.auth.infrastructure.opa_authorizer import OPAAuthorizer
         import httpx
 
         opa = OPAAuthorizer("http://localhost:8181")
@@ -680,7 +680,7 @@ class TestOPAAuthorizerEvaluate:
         assert "connection_failed" in result.reason
 
     def test_timeout_denies(self):
-        from enterprise.auth.infrastructure.opa_authorizer import OPAAuthorizer
+        from mcp_hangar.auth.infrastructure.opa_authorizer import OPAAuthorizer
         import httpx
 
         opa = OPAAuthorizer("http://localhost:8181")
@@ -694,7 +694,7 @@ class TestOPAAuthorizerEvaluate:
         assert "timeout" in result.reason
 
     def test_http_status_error_denies(self):
-        from enterprise.auth.infrastructure.opa_authorizer import OPAAuthorizer
+        from mcp_hangar.auth.infrastructure.opa_authorizer import OPAAuthorizer
         import httpx
 
         opa = OPAAuthorizer("http://localhost:8181")
@@ -711,7 +711,7 @@ class TestOPAAuthorizerEvaluate:
         assert "http_500" in result.reason
 
     def test_generic_exception_denies(self):
-        from enterprise.auth.infrastructure.opa_authorizer import OPAAuthorizer
+        from mcp_hangar.auth.infrastructure.opa_authorizer import OPAAuthorizer
         import httpx
 
         opa = OPAAuthorizer("http://localhost:8181")
@@ -725,7 +725,7 @@ class TestOPAAuthorizerEvaluate:
         assert "RuntimeError" in result.reason
 
     def test_lazy_client_initialization(self):
-        from enterprise.auth.infrastructure.opa_authorizer import OPAAuthorizer
+        from mcp_hangar.auth.infrastructure.opa_authorizer import OPAAuthorizer
 
         opa = OPAAuthorizer("http://localhost:8181", timeout=3.0)
         assert opa._client is None
@@ -748,7 +748,7 @@ class TestOPAAuthorizerBuildInput:
     """Test static build_input method."""
 
     def test_build_input_structure(self):
-        from enterprise.auth.infrastructure.opa_authorizer import OPAAuthorizer
+        from mcp_hangar.auth.infrastructure.opa_authorizer import OPAAuthorizer
 
         principal = _make_principal(
             subject="user:alice",
@@ -779,7 +779,7 @@ class TestOPAAuthorizerAuthorize:
     """Test authorize convenience method."""
 
     def test_delegates_to_build_input_and_evaluate(self):
-        from enterprise.auth.infrastructure.opa_authorizer import OPAAuthorizer
+        from mcp_hangar.auth.infrastructure.opa_authorizer import OPAAuthorizer
         import httpx
 
         opa = OPAAuthorizer("http://localhost:8181")
@@ -800,7 +800,7 @@ class TestOPAAuthorizerCloseAndContextManager:
     """Test close and context manager."""
 
     def test_close_when_client_exists(self):
-        from enterprise.auth.infrastructure.opa_authorizer import OPAAuthorizer
+        from mcp_hangar.auth.infrastructure.opa_authorizer import OPAAuthorizer
 
         opa = OPAAuthorizer("http://localhost:8181")
         mock_client = MagicMock()
@@ -811,13 +811,13 @@ class TestOPAAuthorizerCloseAndContextManager:
         assert opa._client is None
 
     def test_close_when_no_client(self):
-        from enterprise.auth.infrastructure.opa_authorizer import OPAAuthorizer
+        from mcp_hangar.auth.infrastructure.opa_authorizer import OPAAuthorizer
 
         opa = OPAAuthorizer("http://localhost:8181")
         opa.close()  # Should not raise
 
     def test_context_manager(self):
-        from enterprise.auth.infrastructure.opa_authorizer import OPAAuthorizer
+        from mcp_hangar.auth.infrastructure.opa_authorizer import OPAAuthorizer
 
         opa = OPAAuthorizer("http://localhost:8181")
         mock_client = MagicMock()
@@ -833,8 +833,8 @@ class TestCombinedAuthorizer:
     """Test CombinedAuthorizer dual strategy."""
 
     def _make_combined(self, require_both: bool = False, opa: Any = "auto"):
-        from enterprise.auth.infrastructure.opa_authorizer import CombinedAuthorizer, OPAAuthorizer
-        from enterprise.auth.infrastructure.rbac_authorizer import RBACAuthorizer
+        from mcp_hangar.auth.infrastructure.opa_authorizer import CombinedAuthorizer, OPAAuthorizer
+        from mcp_hangar.auth.infrastructure.rbac_authorizer import RBACAuthorizer
 
         rbac = MagicMock(spec=RBACAuthorizer)
         if opa == "auto":
@@ -918,7 +918,7 @@ class TestAuthCLICreateParser:
     """Test create_auth_parser builds correct argument structure."""
 
     def test_parser_has_auth_subcommands(self):
-        from enterprise.auth.cli import create_auth_parser
+        from mcp_hangar.auth.cli import create_auth_parser
 
         parent = argparse.ArgumentParser()
         subparsers = parent.add_subparsers()
@@ -930,7 +930,7 @@ class TestAuthCLICreateParser:
         assert args.name == "key1"
 
     def test_list_keys_subcommand(self):
-        from enterprise.auth.cli import create_auth_parser
+        from mcp_hangar.auth.cli import create_auth_parser
 
         parent = argparse.ArgumentParser()
         subparsers = parent.add_subparsers()
@@ -940,7 +940,7 @@ class TestAuthCLICreateParser:
         assert args.principal == "user:b"
 
     def test_revoke_key_subcommand_with_yes(self):
-        from enterprise.auth.cli import create_auth_parser
+        from mcp_hangar.auth.cli import create_auth_parser
 
         parent = argparse.ArgumentParser()
         subparsers = parent.add_subparsers()
@@ -951,7 +951,7 @@ class TestAuthCLICreateParser:
         assert args.yes is True
 
     def test_assign_role_subcommand_defaults(self):
-        from enterprise.auth.cli import create_auth_parser
+        from mcp_hangar.auth.cli import create_auth_parser
 
         parent = argparse.ArgumentParser()
         subparsers = parent.add_subparsers()
@@ -961,7 +961,7 @@ class TestAuthCLICreateParser:
         assert args.scope == "global"
 
     def test_revoke_role_subcommand(self):
-        from enterprise.auth.cli import create_auth_parser
+        from mcp_hangar.auth.cli import create_auth_parser
 
         parent = argparse.ArgumentParser()
         subparsers = parent.add_subparsers()
@@ -973,7 +973,7 @@ class TestAuthCLICreateParser:
         assert args.scope == "tenant:x"
 
     def test_create_key_with_roles_and_expires(self):
-        from enterprise.auth.cli import create_auth_parser
+        from mcp_hangar.auth.cli import create_auth_parser
 
         parent = argparse.ArgumentParser()
         subparsers = parent.add_subparsers()
@@ -1005,9 +1005,9 @@ class TestHandleAuthCommand:
     """Test handle_auth_command routing."""
 
     def test_routes_to_create_key(self, capsys):
-        from enterprise.auth.cli import handle_auth_command
-        from enterprise.auth.infrastructure.api_key_authenticator import InMemoryApiKeyStore
-        from enterprise.auth.infrastructure.rbac_authorizer import InMemoryRoleStore
+        from mcp_hangar.auth.cli import handle_auth_command
+        from mcp_hangar.auth.infrastructure.api_key_authenticator import InMemoryApiKeyStore
+        from mcp_hangar.auth.infrastructure.rbac_authorizer import InMemoryRoleStore
 
         key_store = InMemoryApiKeyStore()
         role_store = InMemoryRoleStore()
@@ -1027,9 +1027,9 @@ class TestHandleAuthCommand:
         assert "API Key created" in output
 
     def test_routes_to_list_keys_no_keys(self, capsys):
-        from enterprise.auth.cli import handle_auth_command
-        from enterprise.auth.infrastructure.api_key_authenticator import InMemoryApiKeyStore
-        from enterprise.auth.infrastructure.rbac_authorizer import InMemoryRoleStore
+        from mcp_hangar.auth.cli import handle_auth_command
+        from mcp_hangar.auth.infrastructure.api_key_authenticator import InMemoryApiKeyStore
+        from mcp_hangar.auth.infrastructure.rbac_authorizer import InMemoryRoleStore
 
         key_store = InMemoryApiKeyStore()
         role_store = InMemoryRoleStore()
@@ -1041,9 +1041,9 @@ class TestHandleAuthCommand:
         assert "No keys found" in output
 
     def test_routes_to_list_roles(self, capsys):
-        from enterprise.auth.cli import handle_auth_command
-        from enterprise.auth.infrastructure.api_key_authenticator import InMemoryApiKeyStore
-        from enterprise.auth.infrastructure.rbac_authorizer import InMemoryRoleStore
+        from mcp_hangar.auth.cli import handle_auth_command
+        from mcp_hangar.auth.infrastructure.api_key_authenticator import InMemoryApiKeyStore
+        from mcp_hangar.auth.infrastructure.rbac_authorizer import InMemoryRoleStore
 
         key_store = InMemoryApiKeyStore()
         role_store = InMemoryRoleStore()
@@ -1055,9 +1055,9 @@ class TestHandleAuthCommand:
         assert "Available built-in roles" in output
 
     def test_unknown_command_returns_1(self, capsys):
-        from enterprise.auth.cli import handle_auth_command
-        from enterprise.auth.infrastructure.api_key_authenticator import InMemoryApiKeyStore
-        from enterprise.auth.infrastructure.rbac_authorizer import InMemoryRoleStore
+        from mcp_hangar.auth.cli import handle_auth_command
+        from mcp_hangar.auth.infrastructure.api_key_authenticator import InMemoryApiKeyStore
+        from mcp_hangar.auth.infrastructure.rbac_authorizer import InMemoryRoleStore
 
         key_store = InMemoryApiKeyStore()
         role_store = InMemoryRoleStore()
@@ -1073,9 +1073,9 @@ class TestHandleCreateKey:
     """Test _handle_create_key details."""
 
     def test_create_key_with_expiration(self, capsys):
-        from enterprise.auth.cli import _handle_create_key
-        from enterprise.auth.infrastructure.api_key_authenticator import InMemoryApiKeyStore
-        from enterprise.auth.infrastructure.rbac_authorizer import InMemoryRoleStore
+        from mcp_hangar.auth.cli import _handle_create_key
+        from mcp_hangar.auth.infrastructure.api_key_authenticator import InMemoryApiKeyStore
+        from mcp_hangar.auth.infrastructure.rbac_authorizer import InMemoryRoleStore
 
         key_store = InMemoryApiKeyStore()
         role_store = InMemoryRoleStore()
@@ -1093,9 +1093,9 @@ class TestHandleCreateKey:
         assert "Expires:" in output
 
     def test_create_key_with_invalid_role_fails(self, capsys):
-        from enterprise.auth.cli import _handle_create_key
-        from enterprise.auth.infrastructure.api_key_authenticator import InMemoryApiKeyStore
-        from enterprise.auth.infrastructure.rbac_authorizer import InMemoryRoleStore
+        from mcp_hangar.auth.cli import _handle_create_key
+        from mcp_hangar.auth.infrastructure.api_key_authenticator import InMemoryApiKeyStore
+        from mcp_hangar.auth.infrastructure.rbac_authorizer import InMemoryRoleStore
 
         key_store = InMemoryApiKeyStore()
         role_store = InMemoryRoleStore()
@@ -1113,9 +1113,9 @@ class TestHandleCreateKey:
         assert "Unknown role" in stderr_output
 
     def test_create_key_with_valid_role_assigns_it(self, capsys):
-        from enterprise.auth.cli import _handle_create_key
-        from enterprise.auth.infrastructure.api_key_authenticator import InMemoryApiKeyStore
-        from enterprise.auth.infrastructure.rbac_authorizer import InMemoryRoleStore
+        from mcp_hangar.auth.cli import _handle_create_key
+        from mcp_hangar.auth.infrastructure.api_key_authenticator import InMemoryApiKeyStore
+        from mcp_hangar.auth.infrastructure.rbac_authorizer import InMemoryRoleStore
 
         key_store = InMemoryApiKeyStore()
         role_store = InMemoryRoleStore()
@@ -1133,9 +1133,9 @@ class TestHandleCreateKey:
         assert "Roles assigned: admin" in output
 
     def test_create_key_with_tenant(self, capsys):
-        from enterprise.auth.cli import _handle_create_key
-        from enterprise.auth.infrastructure.api_key_authenticator import InMemoryApiKeyStore
-        from enterprise.auth.infrastructure.rbac_authorizer import InMemoryRoleStore
+        from mcp_hangar.auth.cli import _handle_create_key
+        from mcp_hangar.auth.infrastructure.api_key_authenticator import InMemoryApiKeyStore
+        from mcp_hangar.auth.infrastructure.rbac_authorizer import InMemoryRoleStore
 
         key_store = InMemoryApiKeyStore()
         role_store = InMemoryRoleStore()
@@ -1155,8 +1155,8 @@ class TestHandleListKeys:
     """Test _handle_list_keys."""
 
     def test_list_keys_with_active_key(self, capsys):
-        from enterprise.auth.cli import _handle_list_keys
-        from enterprise.auth.infrastructure.api_key_authenticator import InMemoryApiKeyStore
+        from mcp_hangar.auth.cli import _handle_list_keys
+        from mcp_hangar.auth.infrastructure.api_key_authenticator import InMemoryApiKeyStore
 
         key_store = InMemoryApiKeyStore()
         key_store.create_key(principal_id="user:admin", name="My Key")
@@ -1169,8 +1169,8 @@ class TestHandleListKeys:
         assert "My Key" in output
 
     def test_list_keys_with_revoked_key(self, capsys):
-        from enterprise.auth.cli import _handle_list_keys
-        from enterprise.auth.infrastructure.api_key_authenticator import InMemoryApiKeyStore
+        from mcp_hangar.auth.cli import _handle_list_keys
+        from mcp_hangar.auth.infrastructure.api_key_authenticator import InMemoryApiKeyStore
 
         key_store = InMemoryApiKeyStore()
         key_store.create_key(principal_id="user:admin", name="Revoked Key")
@@ -1188,8 +1188,8 @@ class TestHandleRevokeKey:
     """Test _handle_revoke_key."""
 
     def test_revoke_nonexistent_key(self, capsys):
-        from enterprise.auth.cli import _handle_revoke_key
-        from enterprise.auth.infrastructure.api_key_authenticator import InMemoryApiKeyStore
+        from mcp_hangar.auth.cli import _handle_revoke_key
+        from mcp_hangar.auth.infrastructure.api_key_authenticator import InMemoryApiKeyStore
 
         key_store = InMemoryApiKeyStore()
         args = argparse.Namespace(key_id="nonexistent", yes=True)
@@ -1199,8 +1199,8 @@ class TestHandleRevokeKey:
         assert "not found" in stderr_output
 
     def test_revoke_already_revoked_key(self, capsys):
-        from enterprise.auth.cli import _handle_revoke_key
-        from enterprise.auth.infrastructure.api_key_authenticator import InMemoryApiKeyStore
+        from mcp_hangar.auth.cli import _handle_revoke_key
+        from mcp_hangar.auth.infrastructure.api_key_authenticator import InMemoryApiKeyStore
 
         key_store = InMemoryApiKeyStore()
         key_store.create_key(principal_id="user:admin", name="Key")
@@ -1215,8 +1215,8 @@ class TestHandleRevokeKey:
         assert "already revoked" in output
 
     def test_revoke_with_confirmation_yes(self, capsys, monkeypatch):
-        from enterprise.auth.cli import _handle_revoke_key
-        from enterprise.auth.infrastructure.api_key_authenticator import InMemoryApiKeyStore
+        from mcp_hangar.auth.cli import _handle_revoke_key
+        from mcp_hangar.auth.infrastructure.api_key_authenticator import InMemoryApiKeyStore
 
         key_store = InMemoryApiKeyStore()
         key_store.create_key(principal_id="user:admin", name="Key")
@@ -1231,8 +1231,8 @@ class TestHandleRevokeKey:
         assert "revoked" in output
 
     def test_revoke_with_confirmation_cancelled(self, capsys, monkeypatch):
-        from enterprise.auth.cli import _handle_revoke_key
-        from enterprise.auth.infrastructure.api_key_authenticator import InMemoryApiKeyStore
+        from mcp_hangar.auth.cli import _handle_revoke_key
+        from mcp_hangar.auth.infrastructure.api_key_authenticator import InMemoryApiKeyStore
 
         key_store = InMemoryApiKeyStore()
         key_store.create_key(principal_id="user:admin", name="Key")
@@ -1247,8 +1247,8 @@ class TestHandleRevokeKey:
         assert "Cancelled" in output
 
     def test_revoke_with_yes_flag_skips_confirmation(self, capsys):
-        from enterprise.auth.cli import _handle_revoke_key
-        from enterprise.auth.infrastructure.api_key_authenticator import InMemoryApiKeyStore
+        from mcp_hangar.auth.cli import _handle_revoke_key
+        from mcp_hangar.auth.infrastructure.api_key_authenticator import InMemoryApiKeyStore
 
         key_store = InMemoryApiKeyStore()
         key_store.create_key(principal_id="user:admin", name="Key")
@@ -1262,8 +1262,8 @@ class TestHandleRevokeKey:
         assert "revoked" in output.lower()
 
     def test_revoke_failure(self, capsys):
-        from enterprise.auth.cli import _handle_revoke_key
-        from enterprise.auth.infrastructure.api_key_authenticator import InMemoryApiKeyStore
+        from mcp_hangar.auth.cli import _handle_revoke_key
+        from mcp_hangar.auth.infrastructure.api_key_authenticator import InMemoryApiKeyStore
 
         key_store = InMemoryApiKeyStore()
         key_store.create_key(principal_id="user:admin", name="Key")
@@ -1284,8 +1284,8 @@ class TestHandleAssignRole:
     """Test _handle_assign_role."""
 
     def test_assign_unknown_role_fails(self, capsys):
-        from enterprise.auth.cli import _handle_assign_role
-        from enterprise.auth.infrastructure.rbac_authorizer import InMemoryRoleStore
+        from mcp_hangar.auth.cli import _handle_assign_role
+        from mcp_hangar.auth.infrastructure.rbac_authorizer import InMemoryRoleStore
 
         role_store = InMemoryRoleStore()
         args = argparse.Namespace(principal="user:a", role="nonexistent", scope="global")
@@ -1295,8 +1295,8 @@ class TestHandleAssignRole:
         assert "Unknown role" in stderr_output
 
     def test_assign_valid_role_succeeds(self, capsys):
-        from enterprise.auth.cli import _handle_assign_role
-        from enterprise.auth.infrastructure.rbac_authorizer import InMemoryRoleStore
+        from mcp_hangar.auth.cli import _handle_assign_role
+        from mcp_hangar.auth.infrastructure.rbac_authorizer import InMemoryRoleStore
 
         role_store = InMemoryRoleStore()
         args = argparse.Namespace(principal="user:a", role="admin", scope="global")
@@ -1306,8 +1306,8 @@ class TestHandleAssignRole:
         assert "Assigned role" in output
 
     def test_assign_role_with_scope(self, capsys):
-        from enterprise.auth.cli import _handle_assign_role
-        from enterprise.auth.infrastructure.rbac_authorizer import InMemoryRoleStore
+        from mcp_hangar.auth.cli import _handle_assign_role
+        from mcp_hangar.auth.infrastructure.rbac_authorizer import InMemoryRoleStore
 
         role_store = InMemoryRoleStore()
         args = argparse.Namespace(principal="user:a", role="developer", scope="tenant:acme")
@@ -1317,8 +1317,8 @@ class TestHandleAssignRole:
         assert "tenant:acme" in output
 
     def test_assign_role_value_error_caught(self, capsys):
-        from enterprise.auth.cli import _handle_assign_role
-        from enterprise.auth.infrastructure.rbac_authorizer import InMemoryRoleStore
+        from mcp_hangar.auth.cli import _handle_assign_role
+        from mcp_hangar.auth.infrastructure.rbac_authorizer import InMemoryRoleStore
 
         role_store = InMemoryRoleStore()
         role_store.assign_role = Mock(side_effect=ValueError("duplicate assignment"))
@@ -1336,8 +1336,8 @@ class TestHandleRevokeRole:
     """Test _handle_revoke_role."""
 
     def test_revoke_role_succeeds(self, capsys):
-        from enterprise.auth.cli import _handle_revoke_role
-        from enterprise.auth.infrastructure.rbac_authorizer import InMemoryRoleStore
+        from mcp_hangar.auth.cli import _handle_revoke_role
+        from mcp_hangar.auth.infrastructure.rbac_authorizer import InMemoryRoleStore
 
         role_store = InMemoryRoleStore()
         args = argparse.Namespace(principal="user:a", role="admin", scope="global")
@@ -1351,7 +1351,7 @@ class TestHandleListRoles:
     """Test _handle_list_roles."""
 
     def test_list_roles_output(self, capsys):
-        from enterprise.auth.cli import _handle_list_roles
+        from mcp_hangar.auth.cli import _handle_list_roles
 
         result = _handle_list_roles()
         assert result == 0
@@ -1370,10 +1370,10 @@ class TestCreateStorageBackendsMemory:
     """Test _create_storage_backends with memory driver."""
 
     def test_memory_driver(self):
-        from enterprise.auth.bootstrap import _create_storage_backends
-        from enterprise.auth.config import AuthConfig, StorageConfig
-        from enterprise.auth.infrastructure.api_key_authenticator import InMemoryApiKeyStore
-        from enterprise.auth.infrastructure.rbac_authorizer import InMemoryRoleStore
+        from mcp_hangar.auth.bootstrap import _create_storage_backends
+        from mcp_hangar.auth.config import AuthConfig, StorageConfig
+        from mcp_hangar.auth.infrastructure.api_key_authenticator import InMemoryApiKeyStore
+        from mcp_hangar.auth.infrastructure.rbac_authorizer import InMemoryRoleStore
 
         config = AuthConfig(storage=StorageConfig(driver="memory"))
         api_key_store, role_store, tap_store = _create_storage_backends(config)
@@ -1387,16 +1387,16 @@ class TestCreateStorageBackendsEventSourcing:
     """Test _create_storage_backends with event_sourcing driver."""
 
     def test_event_sourcing_without_event_store_raises(self):
-        from enterprise.auth.bootstrap import _create_storage_backends
-        from enterprise.auth.config import AuthConfig, StorageConfig
+        from mcp_hangar.auth.bootstrap import _create_storage_backends
+        from mcp_hangar.auth.config import AuthConfig, StorageConfig
 
         config = AuthConfig(storage=StorageConfig(driver="event_sourcing"))
         with pytest.raises(ValueError, match="requires event_store"):
             _create_storage_backends(config, event_store=None)
 
     def test_event_sourcing_with_event_store(self):
-        from enterprise.auth.bootstrap import _create_storage_backends
-        from enterprise.auth.config import AuthConfig, StorageConfig
+        from mcp_hangar.auth.bootstrap import _create_storage_backends
+        from mcp_hangar.auth.config import AuthConfig, StorageConfig
 
         config = AuthConfig(storage=StorageConfig(driver="event_sourcing"))
         mock_event_store = MagicMock()
@@ -1417,8 +1417,8 @@ class TestCreateStorageBackendsSqlite:
     """Test _create_storage_backends with sqlite driver."""
 
     def test_sqlite_driver(self, tmp_path):
-        from enterprise.auth.bootstrap import _create_storage_backends
-        from enterprise.auth.config import AuthConfig, StorageConfig
+        from mcp_hangar.auth.bootstrap import _create_storage_backends
+        from mcp_hangar.auth.config import AuthConfig, StorageConfig
 
         db_path = tmp_path / "auth" / "test.db"
         config = AuthConfig(storage=StorageConfig(driver="sqlite", path=str(db_path)))
@@ -1433,8 +1433,8 @@ class TestCreateStorageBackendsPostgres:
     """Test _create_storage_backends with postgresql driver."""
 
     def test_postgres_driver(self):
-        from enterprise.auth.bootstrap import _create_storage_backends
-        from enterprise.auth.config import AuthConfig, StorageConfig
+        from mcp_hangar.auth.bootstrap import _create_storage_backends
+        from mcp_hangar.auth.config import AuthConfig, StorageConfig
 
         config = AuthConfig(
             storage=StorageConfig(
@@ -1449,9 +1449,9 @@ class TestCreateStorageBackendsPostgres:
 
         # Patch the lazy imports for postgres stores
         with (
-            patch("enterprise.auth.infrastructure.postgres_store.create_postgres_connection_factory") as mock_factory,
-            patch("enterprise.auth.infrastructure.postgres_store.PostgresApiKeyStore") as mock_key_store_cls,
-            patch("enterprise.auth.infrastructure.postgres_store.PostgresRoleStore") as mock_role_store_cls,
+            patch("mcp_hangar.auth.infrastructure.postgres_store.create_postgres_connection_factory") as mock_factory,
+            patch("mcp_hangar.auth.infrastructure.postgres_store.PostgresApiKeyStore") as mock_key_store_cls,
+            patch("mcp_hangar.auth.infrastructure.postgres_store.PostgresRoleStore") as mock_role_store_cls,
         ):
             mock_factory.return_value = MagicMock()
             mock_key_instance = MagicMock()
@@ -1467,15 +1467,15 @@ class TestCreateStorageBackendsPostgres:
             assert tap_store is None
 
     def test_postgres_alias(self):
-        from enterprise.auth.bootstrap import _create_storage_backends
-        from enterprise.auth.config import AuthConfig, StorageConfig
+        from mcp_hangar.auth.bootstrap import _create_storage_backends
+        from mcp_hangar.auth.config import AuthConfig, StorageConfig
 
         config = AuthConfig(storage=StorageConfig(driver="postgres"))
 
         with (
-            patch("enterprise.auth.infrastructure.postgres_store.create_postgres_connection_factory") as mock_factory,
-            patch("enterprise.auth.infrastructure.postgres_store.PostgresApiKeyStore") as mock_key_store_cls,
-            patch("enterprise.auth.infrastructure.postgres_store.PostgresRoleStore") as mock_role_store_cls,
+            patch("mcp_hangar.auth.infrastructure.postgres_store.create_postgres_connection_factory") as mock_factory,
+            patch("mcp_hangar.auth.infrastructure.postgres_store.PostgresApiKeyStore") as mock_key_store_cls,
+            patch("mcp_hangar.auth.infrastructure.postgres_store.PostgresRoleStore") as mock_role_store_cls,
         ):
             mock_factory.return_value = MagicMock()
             mock_key_store_cls.return_value = MagicMock()
@@ -1489,8 +1489,8 @@ class TestCreateStorageBackendsUnknown:
     """Test _create_storage_backends with unknown driver."""
 
     def test_unknown_driver_raises(self):
-        from enterprise.auth.bootstrap import _create_storage_backends
-        from enterprise.auth.config import AuthConfig, StorageConfig
+        from mcp_hangar.auth.bootstrap import _create_storage_backends
+        from mcp_hangar.auth.config import AuthConfig, StorageConfig
 
         config = AuthConfig(storage=StorageConfig(driver="redis"))
         with pytest.raises(ValueError, match="Unknown auth storage driver"):
@@ -1501,7 +1501,7 @@ class TestAuthComponents:
     """Test AuthComponents class."""
 
     def test_enabled_with_authenticators(self):
-        from enterprise.auth.bootstrap import AuthComponents
+        from mcp_hangar.auth.bootstrap import AuthComponents
 
         authn = MagicMock()
         authn._authenticators = [MagicMock()]
@@ -1512,7 +1512,7 @@ class TestAuthComponents:
         assert components.enabled is True
 
     def test_enabled_with_no_authenticators_but_not_anonymous(self):
-        from enterprise.auth.bootstrap import AuthComponents
+        from mcp_hangar.auth.bootstrap import AuthComponents
 
         authn = MagicMock()
         authn._authenticators = []
@@ -1523,7 +1523,7 @@ class TestAuthComponents:
         assert components.enabled is True
 
     def test_not_enabled_when_empty_authenticators_and_anonymous(self):
-        from enterprise.auth.bootstrap import AuthComponents
+        from mcp_hangar.auth.bootstrap import AuthComponents
 
         authn = MagicMock()
         authn._authenticators = []
@@ -1534,7 +1534,7 @@ class TestAuthComponents:
         assert components.enabled is False
 
     def test_stores_accessible(self):
-        from enterprise.auth.bootstrap import AuthComponents
+        from mcp_hangar.auth.bootstrap import AuthComponents
 
         authn = MagicMock()
         authz = MagicMock()
@@ -1558,13 +1558,13 @@ class TestNullAuthComponents:
     """Test NullAuthComponents."""
 
     def test_enabled_returns_false(self):
-        from enterprise.auth.bootstrap import NullAuthComponents
+        from mcp_hangar.auth.bootstrap import NullAuthComponents
 
         null = NullAuthComponents()
         assert null.enabled is False
 
     def test_authn_returns_system_principal(self):
-        from enterprise.auth.bootstrap import NullAuthComponents
+        from mcp_hangar.auth.bootstrap import NullAuthComponents
 
         null = NullAuthComponents()
         # The NullAuthenticator inside should return system principal
@@ -1573,7 +1573,7 @@ class TestNullAuthComponents:
         assert principal.type.value == "system"
 
     def test_authz_allows_all(self):
-        from enterprise.auth.bootstrap import NullAuthComponents
+        from mcp_hangar.auth.bootstrap import NullAuthComponents
 
         null = NullAuthComponents()
         request = _make_authz_request()
@@ -1586,7 +1586,7 @@ class TestReplayTapPolicies:
     """Test _replay_tap_policies function."""
 
     def test_replay_provider_scope(self):
-        from enterprise.auth.bootstrap import _replay_tap_policies
+        from mcp_hangar.auth.bootstrap import _replay_tap_policies
 
         mock_tap_store = MagicMock()
         mock_tap_store.list_all_policies.return_value = [
@@ -1602,7 +1602,7 @@ class TestReplayTapPolicies:
             mock_resolver.set_mcp_server_policy.assert_called_once()
 
     def test_replay_group_scope(self):
-        from enterprise.auth.bootstrap import _replay_tap_policies
+        from mcp_hangar.auth.bootstrap import _replay_tap_policies
 
         mock_tap_store = MagicMock()
         mock_tap_store.list_all_policies.return_value = [
@@ -1618,7 +1618,7 @@ class TestReplayTapPolicies:
             mock_resolver.set_group_policy.assert_called_once()
 
     def test_replay_member_scope_with_colon(self):
-        from enterprise.auth.bootstrap import _replay_tap_policies
+        from mcp_hangar.auth.bootstrap import _replay_tap_policies
 
         mock_tap_store = MagicMock()
         mock_tap_store.list_all_policies.return_value = [
@@ -1634,7 +1634,7 @@ class TestReplayTapPolicies:
             mock_resolver.set_member_policy.assert_called_once_with("group1", "member1", ANY)
 
     def test_replay_member_scope_without_colon(self):
-        from enterprise.auth.bootstrap import _replay_tap_policies
+        from mcp_hangar.auth.bootstrap import _replay_tap_policies
 
         mock_tap_store = MagicMock()
         mock_tap_store.list_all_policies.return_value = [
@@ -1650,7 +1650,7 @@ class TestReplayTapPolicies:
             mock_resolver.set_member_policy.assert_called_once_with("standalone", "standalone", ANY)
 
     def test_replay_exception_does_not_abort(self):
-        from enterprise.auth.bootstrap import _replay_tap_policies
+        from mcp_hangar.auth.bootstrap import _replay_tap_policies
 
         mock_tap_store = MagicMock()
         mock_tap_store.list_all_policies.return_value = [
@@ -1670,7 +1670,7 @@ class TestReplayTapPolicies:
             assert mock_resolver.set_mcp_server_policy.call_count == 2
 
     def test_resolver_none_skips(self):
-        from enterprise.auth.bootstrap import _replay_tap_policies
+        from mcp_hangar.auth.bootstrap import _replay_tap_policies
 
         mock_tap_store = MagicMock()
 
@@ -1682,7 +1682,7 @@ class TestReplayTapPolicies:
             mock_tap_store.list_all_policies.assert_not_called()
 
     def test_import_error_fallback(self):
-        from enterprise.auth.bootstrap import _replay_tap_policies
+        from mcp_hangar.auth.bootstrap import _replay_tap_policies
 
         mock_tap_store = MagicMock()
         mock_tap_store.list_all_policies.return_value = []
@@ -1707,8 +1707,8 @@ class TestBootstrapAuth:
     """Test bootstrap_auth function."""
 
     def test_disabled_config_returns_null_components(self):
-        from enterprise.auth.bootstrap import bootstrap_auth, NullAuthComponents
-        from enterprise.auth.config import AuthConfig
+        from mcp_hangar.auth.bootstrap import bootstrap_auth, NullAuthComponents
+        from mcp_hangar.auth.config import AuthConfig
 
         config = AuthConfig(enabled=False)
         result = bootstrap_auth(config)
@@ -1716,8 +1716,8 @@ class TestBootstrapAuth:
         assert result.enabled is False
 
     def test_enabled_with_api_key_auth(self):
-        from enterprise.auth.bootstrap import bootstrap_auth, AuthComponents
-        from enterprise.auth.config import AuthConfig, StorageConfig, ApiKeyAuthConfig
+        from mcp_hangar.auth.bootstrap import bootstrap_auth, AuthComponents
+        from mcp_hangar.auth.config import AuthConfig, StorageConfig, ApiKeyAuthConfig
 
         config = AuthConfig(
             enabled=True,
@@ -1730,8 +1730,8 @@ class TestBootstrapAuth:
         assert len(result.authn_middleware._authenticators) >= 1
 
     def test_enabled_with_oidc_auth_incomplete_config_warns(self):
-        from enterprise.auth.bootstrap import bootstrap_auth
-        from enterprise.auth.config import AuthConfig, StorageConfig, OIDCAuthConfig, ApiKeyAuthConfig
+        from mcp_hangar.auth.bootstrap import bootstrap_auth
+        from mcp_hangar.auth.config import AuthConfig, StorageConfig, OIDCAuthConfig, ApiKeyAuthConfig
 
         config = AuthConfig(
             enabled=True,
@@ -1746,8 +1746,8 @@ class TestBootstrapAuth:
         assert authenticator_count == 0
 
     def test_enabled_with_oidc_complete_config(self):
-        from enterprise.auth.bootstrap import bootstrap_auth
-        from enterprise.auth.config import AuthConfig, StorageConfig, OIDCAuthConfig, ApiKeyAuthConfig
+        from mcp_hangar.auth.bootstrap import bootstrap_auth
+        from mcp_hangar.auth.config import AuthConfig, StorageConfig, OIDCAuthConfig, ApiKeyAuthConfig
 
         config = AuthConfig(
             enabled=True,
@@ -1759,8 +1759,8 @@ class TestBootstrapAuth:
         assert len(result.authn_middleware._authenticators) == 1
 
     def test_role_assignments_from_config(self):
-        from enterprise.auth.bootstrap import bootstrap_auth
-        from enterprise.auth.config import AuthConfig, StorageConfig, RoleAssignment, ApiKeyAuthConfig
+        from mcp_hangar.auth.bootstrap import bootstrap_auth
+        from mcp_hangar.auth.config import AuthConfig, StorageConfig, RoleAssignment, ApiKeyAuthConfig
 
         config = AuthConfig(
             enabled=True,
@@ -1776,8 +1776,8 @@ class TestBootstrapAuth:
         assert len(roles) >= 1
 
     def test_invalid_role_assignment_skipped(self):
-        from enterprise.auth.bootstrap import bootstrap_auth
-        from enterprise.auth.config import AuthConfig, StorageConfig, RoleAssignment, ApiKeyAuthConfig
+        from mcp_hangar.auth.bootstrap import bootstrap_auth
+        from mcp_hangar.auth.config import AuthConfig, StorageConfig, RoleAssignment, ApiKeyAuthConfig
 
         config = AuthConfig(
             enabled=True,
@@ -1793,9 +1793,9 @@ class TestBootstrapAuth:
         assert result is not None
 
     def test_opa_enabled_wraps_with_combined_authorizer(self):
-        from enterprise.auth.bootstrap import bootstrap_auth
-        from enterprise.auth.config import AuthConfig, StorageConfig, OPAConfig, ApiKeyAuthConfig
-        from enterprise.auth.infrastructure.opa_authorizer import CombinedAuthorizer
+        from mcp_hangar.auth.bootstrap import bootstrap_auth
+        from mcp_hangar.auth.config import AuthConfig, StorageConfig, OPAConfig, ApiKeyAuthConfig
+        from mcp_hangar.auth.infrastructure.opa_authorizer import CombinedAuthorizer
 
         config = AuthConfig(
             enabled=True,
@@ -1808,8 +1808,8 @@ class TestBootstrapAuth:
         assert isinstance(result.authz_middleware._authorizer, CombinedAuthorizer)
 
     def test_rate_limiter_disabled(self):
-        from enterprise.auth.bootstrap import bootstrap_auth
-        from enterprise.auth.config import AuthConfig, StorageConfig, RateLimitConfig, ApiKeyAuthConfig
+        from mcp_hangar.auth.bootstrap import bootstrap_auth
+        from mcp_hangar.auth.config import AuthConfig, StorageConfig, RateLimitConfig, ApiKeyAuthConfig
 
         config = AuthConfig(
             enabled=True,
@@ -1822,8 +1822,8 @@ class TestBootstrapAuth:
         assert result.authn_middleware._rate_limiter is None
 
     def test_rate_limiter_enabled(self):
-        from enterprise.auth.bootstrap import bootstrap_auth
-        from enterprise.auth.config import AuthConfig, StorageConfig, RateLimitConfig, ApiKeyAuthConfig
+        from mcp_hangar.auth.bootstrap import bootstrap_auth
+        from mcp_hangar.auth.config import AuthConfig, StorageConfig, RateLimitConfig, ApiKeyAuthConfig
 
         config = AuthConfig(
             enabled=True,
@@ -1835,8 +1835,8 @@ class TestBootstrapAuth:
         assert result.authn_middleware._rate_limiter is not None
 
     def test_tap_store_replay_called_when_present(self, tmp_path):
-        from enterprise.auth.bootstrap import bootstrap_auth
-        from enterprise.auth.config import AuthConfig, StorageConfig, ApiKeyAuthConfig
+        from mcp_hangar.auth.bootstrap import bootstrap_auth
+        from mcp_hangar.auth.config import AuthConfig, StorageConfig, ApiKeyAuthConfig
 
         db_path = tmp_path / "auth" / "test.db"
         config = AuthConfig(
@@ -1845,15 +1845,15 @@ class TestBootstrapAuth:
             api_key=ApiKeyAuthConfig(enabled=False),
         )
 
-        with patch("enterprise.auth.bootstrap._replay_tap_policies") as mock_replay:
+        with patch("mcp_hangar.auth.bootstrap._replay_tap_policies") as mock_replay:
             result = bootstrap_auth(config)
             # tap_store should be non-None for sqlite driver
             assert result.tap_store is not None
             mock_replay.assert_called_once_with(result.tap_store)
 
     def test_role_assignment_value_error_logged(self):
-        from enterprise.auth.bootstrap import bootstrap_auth
-        from enterprise.auth.config import AuthConfig, StorageConfig, RoleAssignment, ApiKeyAuthConfig
+        from mcp_hangar.auth.bootstrap import bootstrap_auth
+        from mcp_hangar.auth.config import AuthConfig, StorageConfig, RoleAssignment, ApiKeyAuthConfig
 
         config = AuthConfig(
             enabled=True,
@@ -1866,7 +1866,7 @@ class TestBootstrapAuth:
 
         # Make assign_role raise ValueError
         with patch(
-            "enterprise.auth.infrastructure.rbac_authorizer.InMemoryRoleStore.assign_role",
+            "mcp_hangar.auth.infrastructure.rbac_authorizer.InMemoryRoleStore.assign_role",
             side_effect=ValueError("test error"),
         ):
             # Should not raise -- logged and continued

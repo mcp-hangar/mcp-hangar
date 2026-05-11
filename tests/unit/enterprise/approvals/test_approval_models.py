@@ -4,7 +4,7 @@ from datetime import datetime, timedelta, UTC
 
 import pytest
 
-from enterprise.approvals.models import ApprovalRequest, ApprovalResult, ApprovalState
+from mcp_hangar.approvals.models import ApprovalRequest, ApprovalResult, ApprovalState
 
 
 def _make_request(**overrides) -> ApprovalRequest:

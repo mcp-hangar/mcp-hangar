@@ -2,7 +2,7 @@
 
 Hangar can forward audit events to a SIEM or log aggregator in a structured
 format. Four formats are supported: CEF, LEEF 2.0, JSON-lines, and RFC 5424
-syslog. All four are enterprise-licensed (BSL 1.1).
+syslog.
 
 ## Configuration
 

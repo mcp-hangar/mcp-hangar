@@ -1,6 +1,6 @@
 import json
 
-from enterprise.compliance import CEFExporter, JSONLinesExporter, LEEFExporter, SyslogExporter
+from mcp_hangar.compliance import CEFExporter, JSONLinesExporter, LEEFExporter, SyslogExporter
 
 
 def _single_line(lines: list[str]) -> str:

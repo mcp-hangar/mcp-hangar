@@ -6,9 +6,9 @@ from typing import Callable, Protocol, cast
 
 import pytest
 
-from enterprise.compliance.jsonlines_exporter import JSONLinesExporter
-from enterprise.compliance.leef_exporter import LEEFExporter
-from enterprise.compliance.syslog_exporter import SyslogExporter
+from mcp_hangar.compliance.jsonlines_exporter import JSONLinesExporter
+from mcp_hangar.compliance.leef_exporter import LEEFExporter
+from mcp_hangar.compliance.syslog_exporter import SyslogExporter
 
 
 class SupportsExport(Protocol):

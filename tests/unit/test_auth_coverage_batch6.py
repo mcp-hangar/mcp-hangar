@@ -21,22 +21,22 @@ from mcp_hangar.domain.exceptions import (
 )
 from mcp_hangar.domain.value_objects import Permission, Principal, PrincipalId, PrincipalType, Role
 
-from enterprise.auth.infrastructure.api_key_authenticator import (
+from mcp_hangar.auth.infrastructure.api_key_authenticator import (
     ApiKeyAuthenticator,
     InMemoryApiKeyStore,
     MAX_API_KEY_LENGTH,
 )
-from enterprise.auth.infrastructure.rbac_authorizer import (
+from mcp_hangar.auth.infrastructure.rbac_authorizer import (
     InMemoryRoleStore,
     RBACAuthorizer,
 )
-from enterprise.auth.infrastructure.rate_limiter import (
+from mcp_hangar.auth.infrastructure.rate_limiter import (
     AuthRateLimitConfig,
     AuthRateLimiter,
     get_auth_rate_limiter,
     set_auth_rate_limiter,
 )
-from enterprise.auth.infrastructure.constant_time import constant_time_key_lookup
+from mcp_hangar.auth.infrastructure.constant_time import constant_time_key_lookup
 
 
 # =============================================================================
@@ -254,11 +254,11 @@ class TestInMemoryApiKeyStore:
         key_hash = ApiKeyAuthenticator._hash_key(raw_key)
         metadata = store._keys[key_hash][0]
         # Rotate with large grace period
-        with patch("enterprise.auth.infrastructure.api_key_authenticator.time") as mock_time:
+        with patch("mcp_hangar.auth.infrastructure.api_key_authenticator.time") as mock_time:
             mock_time.time.return_value = 1000.0
             _ = store.rotate_key(metadata.key_id, grace_period_seconds=3600)
         # Access old key within grace period
-        with patch("enterprise.auth.infrastructure.api_key_authenticator.time") as mock_time:
+        with patch("mcp_hangar.auth.infrastructure.api_key_authenticator.time") as mock_time:
             mock_time.time.return_value = 1500.0  # Within grace period
             principal = store.get_principal_for_key(key_hash)
         assert principal is not None
@@ -271,11 +271,11 @@ class TestInMemoryApiKeyStore:
         key_hash = ApiKeyAuthenticator._hash_key(raw_key)
         metadata = store._keys[key_hash][0]
         # Rotate with short grace period
-        with patch("enterprise.auth.infrastructure.api_key_authenticator.time") as mock_time:
+        with patch("mcp_hangar.auth.infrastructure.api_key_authenticator.time") as mock_time:
             mock_time.time.return_value = 1000.0
             store.rotate_key(metadata.key_id, grace_period_seconds=10)
         # Access old key after grace period
-        with patch("enterprise.auth.infrastructure.api_key_authenticator.time") as mock_time:
+        with patch("mcp_hangar.auth.infrastructure.api_key_authenticator.time") as mock_time:
             mock_time.time.return_value = 2000.0  # Well past grace period
             with pytest.raises(ExpiredCredentialsError, match="rotated"):
                 store.get_principal_for_key(key_hash)
@@ -382,7 +382,7 @@ class TestInMemoryApiKeyStore:
         key_hash = ApiKeyAuthenticator._hash_key(raw_key)
         metadata = store._keys[key_hash][0]
 
-        with patch("enterprise.auth.infrastructure.api_key_authenticator.time") as mock_time:
+        with patch("mcp_hangar.auth.infrastructure.api_key_authenticator.time") as mock_time:
             mock_time.time.return_value = 5000.0
             new_raw = store.rotate_key(metadata.key_id, grace_period_seconds=3600, rotated_by="admin")
 
@@ -417,7 +417,7 @@ class TestInMemoryApiKeyStore:
         raw_key = store.create_key(principal_id="svc-1", name="test-key")
         key_hash = ApiKeyAuthenticator._hash_key(raw_key)
         metadata = store._keys[key_hash][0]
-        with patch("enterprise.auth.infrastructure.api_key_authenticator.time") as mock_time:
+        with patch("mcp_hangar.auth.infrastructure.api_key_authenticator.time") as mock_time:
             mock_time.time.return_value = 1000.0
             store.rotate_key(metadata.key_id)
         with pytest.raises(ValueError, match="pending rotation"):
@@ -431,7 +431,7 @@ class TestInMemoryApiKeyStore:
         key_hash = ApiKeyAuthenticator._hash_key(raw_key)
         metadata = store._keys[key_hash][0]
         # Rotate should succeed despite event publish failure
-        with patch("enterprise.auth.infrastructure.api_key_authenticator.time") as mock_time:
+        with patch("mcp_hangar.auth.infrastructure.api_key_authenticator.time") as mock_time:
             mock_time.time.return_value = 1000.0
             new_raw = store.rotate_key(metadata.key_id)
         assert new_raw.startswith("mcp_")
@@ -822,7 +822,7 @@ class TestAuthRateLimiter:
     def test_check_rate_limit_no_previous_attempts(self):
         """Lines 143-149: IP with no tracker is allowed."""
         limiter = self._make_limiter()
-        with patch("enterprise.auth.infrastructure.rate_limiter.time") as mock_time:
+        with patch("mcp_hangar.auth.infrastructure.rate_limiter.time") as mock_time:
             mock_time.time.return_value = 1000.0
             result = limiter.check_rate_limit("1.2.3.4")
         assert result.allowed is True
@@ -833,7 +833,7 @@ class TestAuthRateLimiter:
         config = AuthRateLimitConfig(max_attempts=2, window_seconds=60, lockout_seconds=300)
         limiter = self._make_limiter(config=config)
 
-        with patch("enterprise.auth.infrastructure.rate_limiter.time") as mock_time:
+        with patch("mcp_hangar.auth.infrastructure.rate_limiter.time") as mock_time:
             mock_time.time.return_value = 1000.0
             limiter.record_failure("1.2.3.4")
             limiter.record_failure("1.2.3.4")
@@ -861,7 +861,7 @@ class TestAuthRateLimiter:
         )
         limiter = self._make_limiter(config=config, event_publisher=publisher)
 
-        with patch("enterprise.auth.infrastructure.rate_limiter.time") as mock_time:
+        with patch("mcp_hangar.auth.infrastructure.rate_limiter.time") as mock_time:
             mock_time.time.return_value = 1000.0
             limiter.record_failure("1.2.3.4")
             limiter.record_failure("1.2.3.4")
@@ -890,7 +890,7 @@ class TestAuthRateLimiter:
         publisher = Mock()
         limiter = self._make_limiter(config=config, event_publisher=publisher)
 
-        with patch("enterprise.auth.infrastructure.rate_limiter.time") as mock_time:
+        with patch("mcp_hangar.auth.infrastructure.rate_limiter.time") as mock_time:
             # First lockout: 10 seconds
             mock_time.time.return_value = 1000.0
             limiter.record_failure("1.2.3.4")
@@ -918,7 +918,7 @@ class TestAuthRateLimiter:
         )
         limiter = self._make_limiter(config=config)
 
-        with patch("enterprise.auth.infrastructure.rate_limiter.time") as mock_time:
+        with patch("mcp_hangar.auth.infrastructure.rate_limiter.time") as mock_time:
             mock_time.time.return_value = 1000.0
             limiter.record_failure("1.2.3.4")
             result = limiter.check_rate_limit("1.2.3.4")
@@ -939,7 +939,7 @@ class TestAuthRateLimiter:
         config = AuthRateLimitConfig(max_attempts=5, window_seconds=60)
         limiter = self._make_limiter(config=config)
 
-        with patch("enterprise.auth.infrastructure.rate_limiter.time") as mock_time:
+        with patch("mcp_hangar.auth.infrastructure.rate_limiter.time") as mock_time:
             mock_time.time.return_value = 1000.0
             limiter.record_failure("1.2.3.4")
             limiter.record_failure("1.2.3.4")
@@ -957,7 +957,7 @@ class TestAuthRateLimiter:
     def test_record_failure_creates_tracker(self):
         """Lines 236-246: record_failure creates tracker and appends timestamp."""
         limiter = self._make_limiter()
-        with patch("enterprise.auth.infrastructure.rate_limiter.time") as mock_time:
+        with patch("mcp_hangar.auth.infrastructure.rate_limiter.time") as mock_time:
             mock_time.time.return_value = 1000.0
             limiter.record_failure("1.2.3.4")
         assert "1.2.3.4" in limiter._trackers
@@ -971,7 +971,7 @@ class TestAuthRateLimiter:
     def test_record_success_clears_tracker(self):
         """Lines 257-269: record_success deletes tracker."""
         limiter = self._make_limiter()
-        with patch("enterprise.auth.infrastructure.rate_limiter.time") as mock_time:
+        with patch("mcp_hangar.auth.infrastructure.rate_limiter.time") as mock_time:
             mock_time.time.return_value = 1000.0
             limiter.record_failure("1.2.3.4")
         limiter.record_success("1.2.3.4")
@@ -983,7 +983,7 @@ class TestAuthRateLimiter:
         config = AuthRateLimitConfig(max_attempts=1, window_seconds=60, lockout_seconds=300)
         limiter = self._make_limiter(config=config, event_publisher=publisher)
 
-        with patch("enterprise.auth.infrastructure.rate_limiter.time") as mock_time:
+        with patch("mcp_hangar.auth.infrastructure.rate_limiter.time") as mock_time:
             mock_time.time.return_value = 1000.0
             limiter.record_failure("1.2.3.4")
             limiter.check_rate_limit("1.2.3.4")  # Triggers lockout
@@ -999,7 +999,7 @@ class TestAuthRateLimiter:
         """Lines 258-268: no unlock event if tracker exists but not locked."""
         publisher = Mock()
         limiter = self._make_limiter(event_publisher=publisher)
-        with patch("enterprise.auth.infrastructure.rate_limiter.time") as mock_time:
+        with patch("mcp_hangar.auth.infrastructure.rate_limiter.time") as mock_time:
             mock_time.time.return_value = 1000.0
             limiter.record_failure("1.2.3.4")
         limiter.record_success("1.2.3.4")
@@ -1019,7 +1019,7 @@ class TestAuthRateLimiter:
         """Lines 291-301: get_status with recent attempts."""
         config = AuthRateLimitConfig(max_attempts=5, window_seconds=60)
         limiter = self._make_limiter(config=config)
-        with patch("enterprise.auth.infrastructure.rate_limiter.time") as mock_time:
+        with patch("mcp_hangar.auth.infrastructure.rate_limiter.time") as mock_time:
             mock_time.time.return_value = 1000.0
             limiter.record_failure("1.2.3.4")
             limiter.record_failure("1.2.3.4")
@@ -1033,7 +1033,7 @@ class TestAuthRateLimiter:
         config = AuthRateLimitConfig(max_attempts=1, window_seconds=60, lockout_seconds=300)
         limiter = self._make_limiter(config=config)
 
-        with patch("enterprise.auth.infrastructure.rate_limiter.time") as mock_time:
+        with patch("mcp_hangar.auth.infrastructure.rate_limiter.time") as mock_time:
             mock_time.time.return_value = 1000.0
             limiter.record_failure("1.2.3.4")
             limiter.check_rate_limit("1.2.3.4")  # Triggers lockout
@@ -1047,7 +1047,7 @@ class TestAuthRateLimiter:
         config = AuthRateLimitConfig(max_attempts=1, window_seconds=60, lockout_seconds=300)
         limiter = self._make_limiter(config=config, event_publisher=publisher)
 
-        with patch("enterprise.auth.infrastructure.rate_limiter.time") as mock_time:
+        with patch("mcp_hangar.auth.infrastructure.rate_limiter.time") as mock_time:
             mock_time.time.return_value = 1000.0
             limiter.record_failure("1.2.3.4")
             limiter.check_rate_limit("1.2.3.4")  # Lock out
@@ -1065,7 +1065,7 @@ class TestAuthRateLimiter:
         config = AuthRateLimitConfig(max_attempts=1, window_seconds=60, lockout_seconds=300)
         limiter = self._make_limiter(config=config, event_publisher=publisher)
 
-        with patch("enterprise.auth.infrastructure.rate_limiter.time") as mock_time:
+        with patch("mcp_hangar.auth.infrastructure.rate_limiter.time") as mock_time:
             mock_time.time.return_value = 1000.0
             limiter.record_failure("1.2.3.4")
             limiter.check_rate_limit("1.2.3.4")  # Lock out
@@ -1082,7 +1082,7 @@ class TestAuthRateLimiter:
         """Lines 323-334: clear specific IP that is not locked does not publish event."""
         publisher = Mock()
         limiter = self._make_limiter(event_publisher=publisher)
-        with patch("enterprise.auth.infrastructure.rate_limiter.time") as mock_time:
+        with patch("mcp_hangar.auth.infrastructure.rate_limiter.time") as mock_time:
             mock_time.time.return_value = 1000.0
             limiter.record_failure("1.2.3.4")
         limiter.clear("1.2.3.4")
@@ -1097,7 +1097,7 @@ class TestAuthRateLimiter:
         """Lines 341-343: _maybe_cleanup only runs when interval exceeded."""
         config = AuthRateLimitConfig(cleanup_interval=600)
         limiter = self._make_limiter(config=config)
-        with patch("enterprise.auth.infrastructure.rate_limiter.time") as mock_time:
+        with patch("mcp_hangar.auth.infrastructure.rate_limiter.time") as mock_time:
             mock_time.time.return_value = 1000.0
             limiter.record_failure("1.2.3.4")
             # check_rate_limit calls _maybe_cleanup
@@ -1112,7 +1112,7 @@ class TestAuthRateLimiter:
         config = AuthRateLimitConfig(max_attempts=5, window_seconds=60, cleanup_interval=10)
         limiter = self._make_limiter(config=config, event_publisher=publisher)
 
-        with patch("enterprise.auth.infrastructure.rate_limiter.time") as mock_time:
+        with patch("mcp_hangar.auth.infrastructure.rate_limiter.time") as mock_time:
             mock_time.time.return_value = 1000.0
             limiter.record_failure("old-ip")
 
@@ -1132,7 +1132,7 @@ class TestAuthRateLimiter:
         )
         limiter = self._make_limiter(config=config)
 
-        with patch("enterprise.auth.infrastructure.rate_limiter.time") as mock_time:
+        with patch("mcp_hangar.auth.infrastructure.rate_limiter.time") as mock_time:
             mock_time.time.return_value = 1000.0
             limiter.record_failure("locked-ip")
             limiter.check_rate_limit("locked-ip")  # Triggers lockout
@@ -1153,7 +1153,7 @@ class TestAuthRateLimiter:
         )
         limiter = self._make_limiter(config=config, event_publisher=publisher)
 
-        with patch("enterprise.auth.infrastructure.rate_limiter.time") as mock_time:
+        with patch("mcp_hangar.auth.infrastructure.rate_limiter.time") as mock_time:
             mock_time.time.return_value = 1000.0
             limiter.record_failure("expired-lockout-ip")
             limiter.check_rate_limit("expired-lockout-ip")
@@ -1173,7 +1173,7 @@ class TestAuthRateLimiter:
         config = AuthRateLimitConfig(max_attempts=5, window_seconds=60, cleanup_interval=10)
         limiter = self._make_limiter(config=config)
 
-        with patch("enterprise.auth.infrastructure.rate_limiter.time") as mock_time:
+        with patch("mcp_hangar.auth.infrastructure.rate_limiter.time") as mock_time:
             mock_time.time.return_value = 1000.0
             limiter.record_failure("recent-ip")
 
@@ -1187,7 +1187,7 @@ class TestAuthRateLimiter:
         config = AuthRateLimitConfig(window_seconds=60, cleanup_interval=10)
         limiter = self._make_limiter(config=config)
 
-        with patch("enterprise.auth.infrastructure.rate_limiter.time") as mock_time:
+        with patch("mcp_hangar.auth.infrastructure.rate_limiter.time") as mock_time:
             mock_time.time.return_value = 1000.0
             limiter.record_failure("ip1")
             limiter.record_failure("ip2")
@@ -1202,7 +1202,7 @@ class TestAuthRateLimiter:
         config = AuthRateLimitConfig(max_attempts=1, window_seconds=60, lockout_seconds=10)
         limiter = self._make_limiter(config=config, event_publisher=publisher)
 
-        with patch("enterprise.auth.infrastructure.rate_limiter.time") as mock_time:
+        with patch("mcp_hangar.auth.infrastructure.rate_limiter.time") as mock_time:
             mock_time.time.return_value = 1000.0
             limiter.record_failure("1.2.3.4")
             # This should not raise despite publisher failure
@@ -1225,13 +1225,13 @@ class TestModuleLevelRateLimiter:
 
     def teardown_method(self):
         """Reset global state between tests."""
-        import enterprise.auth.infrastructure.rate_limiter as rl_module
+        import mcp_hangar.auth.infrastructure.rate_limiter as rl_module
 
         rl_module._default_limiter = None
 
     def test_get_auth_rate_limiter_creates_default(self):
         """Lines 404-406: get_auth_rate_limiter creates default when None."""
-        import enterprise.auth.infrastructure.rate_limiter as rl_module
+        import mcp_hangar.auth.infrastructure.rate_limiter as rl_module
 
         rl_module._default_limiter = None
         limiter = get_auth_rate_limiter()
@@ -1240,7 +1240,7 @@ class TestModuleLevelRateLimiter:
 
     def test_get_auth_rate_limiter_returns_same_instance(self):
         """get_auth_rate_limiter is idempotent."""
-        import enterprise.auth.infrastructure.rate_limiter as rl_module
+        import mcp_hangar.auth.infrastructure.rate_limiter as rl_module
 
         rl_module._default_limiter = None
         limiter1 = get_auth_rate_limiter()

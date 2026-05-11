@@ -47,7 +47,7 @@
 
 ### MIT License
 
-All code in the repository is licensed under the MIT License. The `enterprise/` directory is a
+All code in the repository is licensed under the MIT License. The `src/mcp_hangar/` package is a
 code-organization concept for advanced features (RBAC, compliance, integrations), not a separate
 license boundary.
 
@@ -65,21 +65,21 @@ license boundary.
 | CLI, hot-reload, batch invocations                 | `src/`                                        | Core DX                                                         |
 | Basic audit logging (stdout/file)                  | `src/`                                        | Baseline visibility                                             |
 | REST API, WebSocket infrastructure                 | `src/`                                        | API surface must be open                                        |
-| RBAC, API key auth, JWT/OIDC                       | `enterprise/auth/`                            | Enterprise value, commercial differentiator                     |
-| Tool Access Policies                               | `enterprise/auth/`                            | Governance feature, commercial differentiator                   |
-| Event sourcing persistence (SQLite/Postgres)       | `enterprise/persistence/`                     | Enterprise durability, commercial differentiator                |
-| Compliance export (CEF/LEEF/JSON-lines/syslog)     | `enterprise/compliance/`                      | Enterprise value                                                |
-| Langfuse integration                               | `enterprise/integrations/`                    | Partner integration, commercial value                           |
+| RBAC, API key auth, JWT/OIDC                       | `src/mcp_hangar/auth/`                        | Enterprise value, commercial differentiator                     |
+| Tool Access Policies                               | `src/mcp_hangar/auth/`                        | Governance feature, commercial differentiator                   |
+| Event sourcing persistence (SQLite/Postgres)       | `src/mcp_hangar/infrastructure/persistence/`  | Enterprise durability, commercial differentiator                |
+| Compliance export (CEF/LEEF/JSON-lines/syslog)     | `src/mcp_hangar/compliance/`                  | Enterprise value                                                |
+| Langfuse integration                               | `src/mcp_hangar/integrations/`                | Partner integration, commercial value                           |
 
 ### Architectural boundary
 
-Enterprise features consume core interfaces. Core never imports from `enterprise/`. The boundary is a one-way
+Enterprise features consume core interfaces. Core never imports from `src/mcp_hangar/`. The boundary is a one-way
 dependency:
 
 ```
-enterprise/  ──depends-on──►  src/mcp_hangar/domain/contracts/
-enterprise/  ──depends-on──►  src/mcp_hangar/application/ports/
-enterprise/  ──never──►       imports from enterprise/ in core
+src/mcp_hangar/  ──depends-on──►  src/mcp_hangar/domain/contracts/
+src/mcp_hangar/  ──depends-on──►  src/mcp_hangar/application/ports/
+src/mcp_hangar/  ──never──►       imports from former enterprise modules in core
 ```
 
 This is enforced by:
@@ -90,8 +90,8 @@ This is enforced by:
 
 ### Migration plan (historical — completed before v1.0.0)
 
-The enterprise/ directory migration was completed before the v1.0.0 release. Pro/Enterprise features
-were moved from `src/` to `enterprise/` and the import boundary is now CI-enforced.
+The `src/mcp_hangar/` package absorbed former enterprise features before the v1.0.0 release.
+The import boundary is now CI-enforced.
 
 ---
 
@@ -256,7 +256,7 @@ Phases 1-2 are complete.
 | **Container network isolation**   | Docker MCP servers can talk to anything                                      | Default-deny egress, explicit allowlist                                                                     | v0.13.0        | |
 | **Capability declaration schema** | No formal way to declare what a server needs                               | New `capabilities` config block                                                                             | v0.13.0        | |
 | **K8s NetworkPolicy generation**  | Operator doesn't create NetworkPolicies                                    | Auto-generate from CRD capabilities field                                                                   | v0.13.0        | |
-| **Licensing boundary**            | All code in MIT, no commercial protection                                  | Migrate Pro/Enterprise features to `enterprise/` directory                                                  | v0.13.0        | Completed |
+| **Licensing boundary**            | All code in MIT, no commercial protection                                  | Migrate Pro/Enterprise features into `src/mcp_hangar/`                                                     | v0.13.0        | Completed |
 | **Behavioral baseline storage**   | No behavioral profiling exists                                             | Network connection logging per container                                                                    | v0.14.0        | |
 | **Test coverage on auth**         | Auth stack is comprehensive but test density unclear                       | Audit test coverage, target 90%+ on auth paths                                                              | v0.13.0        | |
 | **Security scanning in CI**       | Not visible in changelog                                                   | Trivy/Grype on container images, Semgrep on source                                                          | v0.13.0        | |
@@ -265,7 +265,7 @@ Phases 1-2 are complete.
 | **Trace context propagation**     | Cross-system traces depend on ad hoc correlation                           | Standardize agent -> Hangar -> MCP server trace propagation for audit and enforcement paths                   | v0.13.0        | **DONE** (v6.0 Phase 32) |
 | **Operator enforcement loop**     | Operator reconciles state, but not full governance posture                 | Make operator the primary engine for capability enforcement, NetworkPolicy rollout, and violation signaling | v0.13.0        | |
 | **Admission/policy hooks**        | K8s integration is not yet policy-driven enough                            | Validate and reject unsafe specs before runtime using admission and policy integrations                     | v0.13.0        | |
-| **Import boundary enforcement**   | No CI rule prevents core from importing enterprise                         | Add CI check: `src/` must never import from `enterprise/`                                                   | v0.13.0        | **DONE** (TASK-P0-1) |
+| **Import boundary enforcement**   | No CI rule prevents core from importing enterprise                         | Add CI check: `src/` must never import from `src/mcp_hangar/`                                               | v0.13.0        | **DONE** (TASK-P0-1) |
 
 ### Important (before first paying customer)
 
@@ -331,20 +331,20 @@ mcp-hangar/
 │
 ├── src/mcp_hangar/            # MIT — core control plane
 │   ├── domain/                # DDD aggregates, value objects, events, contracts
-│   │   ├── contracts/         # Interfaces consumed by enterprise/ (one-way dependency)
+│   │   ├── contracts/         # Interfaces consumed by src/mcp_hangar/ (one-way dependency)
 │   │   └── ...
 │   ├── application/           # CQRS commands, queries, handlers, ports
-│   │   ├── ports/             # Port interfaces consumed by enterprise/ (one-way dependency)
+│   │   ├── ports/             # Port interfaces consumed by src/mcp_hangar/ (one-way dependency)
 │   │   └── ...
 │   ├── infrastructure/        # Core adapters (in-memory stores, Docker, K8s, OTEL)
 │   └── server/                # MCP server, REST API, WebSocket, CLI, bootstrap
-│       └── bootstrap/         # Conditionally loads enterprise/ modules when license present
+│       └── bootstrap/         # Conditionally loads src/mcp_hangar modules when license present
 │
-├── enterprise/                # Advanced governance, enforcement, compliance
+├── src/mcp_hangar/            # Advanced governance, enforcement, compliance
 │   ├── auth/                  # RBAC, API key stores, JWT/OIDC, rate limiter, auth API
 │   ├── approvals/             # Approval gate workflow
 │   ├── compliance/            # SIEM export (CEF, LEEF, JSON-lines, syslog)
-│   ├── persistence/           # SQLite/Postgres event stores, durable saga state
+│   ├── infrastructure/persistence/  # SQLite/Postgres event stores, durable saga state
 │   └── integrations/          # Langfuse adapter, future partner integrations
 │
 ├── docs/                      # MkDocs documentation
@@ -379,7 +379,7 @@ Enforced by `tools/check_enterprise_imports.py` (CI job `import-boundary` in `se
 |------------|------------------------------------------------------------------------------------------------------------------|---------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------|
 | 2026-03-24 | **~~BSL 1.1 for enterprise features, MIT for core.~~ Superseded: all code relicensed to MIT in v1.3.0.**         | Original: commercial protection. Dropped: complexity outweighed commercial returns. See epic #198.                                                                                                                                          |
 | 2026-03-24 | **Enterprise/ directory migration before v0.13.0.**                                                              | Licensing boundary must be established before enterprise features are developed further. Retrofitting is harder than doing it right from the start.                                                                                         |
-| 2026-03-24 | **~~CLA required for enterprise/ contributions.~~ Dropped in v1.3.0.**                                          | No longer needed under single-MIT. Contributions flow inbound=outbound MIT.                                                                                                                                                                |
+| 2026-03-24 | **~~CLA required for former enterprise contributions.~~ Dropped in v1.3.0.**                                   | No longer needed under single-MIT. Contributions flow inbound=outbound MIT.                                                                                                                                                                |
 | 2026-03-23 | Docker/K8s first. Stdio is second-class for security features.                                                   | Runtime security requires container isolation. Period.                                                                                                                                                                                      |
 | 2026-03-23 | Freeze Catalog API development.                                                                                  | Not our market. Discovery is Smithery/Registry.                                                                                                                                                                                             |
 | 2026-03-23 | Integrate with OpenTelemetry-native observability tools (for example OpenLIT) instead of trying to replace them. | Win on governance and enforcement, not on copying generic AI observability platforms.                                                                                                                                                       |
