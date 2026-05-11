@@ -76,6 +76,33 @@ class TestComputeToolDigest:
         without = sample_tool
         assert compute_tool_digest(with_none).sha256 == compute_tool_digest(without).sha256
 
+    def test_empty_output_schema_equals_absent(self):
+        tool_absent = {"name": "x"}
+        tool_empty = {"name": "x", "outputSchema": {}}
+        assert compute_tool_digest(tool_absent).sha256 == compute_tool_digest(tool_empty).sha256
+
+    def test_empty_description_equals_absent(self):
+        tool_absent = {"name": "x"}
+        tool_empty = {"name": "x", "description": ""}
+        assert compute_tool_digest(tool_absent).sha256 == compute_tool_digest(tool_empty).sha256
+
+    def test_empty_input_schema_equals_absent(self):
+        tool_absent = {"name": "x"}
+        tool_empty = {"name": "x", "inputSchema": {}}
+        assert compute_tool_digest(tool_absent).sha256 == compute_tool_digest(tool_empty).sha256
+
+    def test_empty_list_input_schema_equals_absent(self):
+        tool_absent = {"name": "x"}
+        tool_empty = {"name": "x", "inputSchema": []}
+        assert compute_tool_digest(tool_absent).sha256 == compute_tool_digest(tool_empty).sha256
+
+    def test_populated_values_are_meaningful(self):
+        base = {"name": "x"}
+        with_desc = {"name": "x", "description": "d"}
+        with_schema = {"name": "x", "inputSchema": {"type": "object"}}
+        assert compute_tool_digest(base).sha256 != compute_tool_digest(with_desc).sha256
+        assert compute_tool_digest(base).sha256 != compute_tool_digest(with_schema).sha256
+
     def test_extra_fields_ignored(self, sample_tool):
         with_extra = {**sample_tool, "annotations": {"readOnly": True}, "extra_field": "ignored"}
         assert compute_tool_digest(sample_tool).sha256 == compute_tool_digest(with_extra).sha256
