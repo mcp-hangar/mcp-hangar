@@ -22,16 +22,22 @@ auth:
 ### 2. Create an API Key
 
 ```bash
-# Using CLI (once implemented)
-mcp-hangar auth create-key \
-  --principal "service:my-app" \
-  --name "My App Key" \
-  --role developer
+# Via the REST API (there is no auth CLI subcommand)
+curl -X POST http://localhost:8000/api/auth/keys \
+  -H "X-API-Key: <admin-key>" \
+  -H "Content-Type: application/json" \
+  -d '{
+    "principal": "service:my-app",
+    "name": "My App Key",
+    "role": "developer"
+  }'
 
-# Output:
-# API Key created for service:my-app
-# Key: mcp_aBcDeFgHiJkLmNoPqRsTuVwXyZ...
-# ⚠️  Save this key now - it cannot be retrieved later!
+# Response:
+# {
+#   "key": "mcp_aBcDeFgHiJkLmNoPqRsTuVwXyZ...",
+#   "principal": "service:my-app"
+# }
+# Save this key now - it cannot be retrieved later!
 ```
 
 ### 3. Use the API Key
@@ -114,13 +120,17 @@ auth:
       scope: "tenant:data-team"
 ```
 
-#### Dynamic (via CLI)
+#### Dynamic (via REST API)
 
 ```bash
-mcp-hangar auth assign-role \
-  --principal "user:john@company.com" \
-  --role developer \
-  --scope global
+curl -X POST http://localhost:8000/api/auth/roles/assign \
+  -H "X-API-Key: <admin-key>" \
+  -H "Content-Type: application/json" \
+  -d '{
+    "principal": "user:john@company.com",
+    "role": "developer",
+    "scope": "global"
+  }'
 ```
 
 ## Security Best Practices
@@ -131,11 +141,15 @@ Always use HTTPS for MCP endpoints in production. The auth system will warn if O
 
 ### 2. Configure Trusted Proxies
 
-If behind a load balancer, configure trusted proxies for correct client IP detection:
+If behind a load balancer, configure trusted proxies for correct client IP detection.
+Trusted proxies are set programmatically via `FastMCPServerConfig`:
 
-```yaml
-# In ServerConfig or via builder
-trusted_proxies: ["10.0.0.0/8", "172.16.0.0/12"]
+```python
+from mcp_hangar.fastmcp_server.config import FastMCPServerConfig
+
+config = FastMCPServerConfig(
+    trusted_proxies=frozenset(["10.0.0.0/8", "172.16.0.0/12"]),
+)
 ```
 
 ### 3. Rotate API Keys Regularly
@@ -143,10 +157,14 @@ trusted_proxies: ["10.0.0.0/8", "172.16.0.0/12"]
 Set expiration for API keys and rotate them periodically:
 
 ```bash
-mcp-hangar auth create-key \
-  --principal "service:ci" \
-  --name "CI Pipeline Key" \
-  --expires 30  # Expires in 30 days
+curl -X POST http://localhost:8000/api/auth/keys \
+  -H "X-API-Key: <admin-key>" \
+  -H "Content-Type: application/json" \
+  -d '{
+    "principal": "service:ci",
+    "name": "CI Pipeline Key",
+    "expires_in_days": 30
+  }'
 ```
 
 ### 4. Use Tenant Isolation
@@ -188,7 +206,7 @@ These are logged and can be sent to your observability stack.
 ### "Access denied"
 
 - The principal doesn't have the required role
-- Check role assignments with `mcp-hangar auth list-roles`
+- Check role assignments via the REST API (`GET /api/auth/roles`)
 - Verify the scope matches
 
 ## API Reference

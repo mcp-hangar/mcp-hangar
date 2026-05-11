@@ -42,6 +42,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - **docs:** add cross-repo operator prerequisites for Kubernetes recipes 11, 13, and KUBERNETES guide; link to `mcp-hangar/hangar-operator` and fix Helm/CRD URLs (#127)
 - **docs:** rename `09-subprocess-providers.md` to `09-subprocess-mcp-servers.md`, fix `TracedProviderService` reference in recipe 08, update nav (#129)
 - **docs:** clean up Provider to McpServer artifacts in guides: rename PROVIDER_GROUPS.md, fix class names (ProviderInfo, ProviderNotFoundError, TracedProviderService), fix code-fence field names (#133)
+- **docs:** drop phantom `mcp-hangar auth` CLI subcommands from AUTHENTICATION.md (replace with REST API equivalents), fix stale metric suffixes in BATCH_INVOCATIONS.md and DISCOVERY.md, remove phantom `mcp-hangar mcp_server start` from OBSERVABILITY.md (#134)
 - **ci:** release notes no longer contain literal `%0A` newlines (removed legacy set-output encoding)
 - **ci:** release body no longer has a duplicated `## What's Changed` section (removed `generate_release_notes: true`); a manual Full Changelog compare link is added instead
 - **ci:** HTML entities (`&gt;`, `&lt;`, `&amp;`) in CHANGELOG entries are decoded before writing to the release body
