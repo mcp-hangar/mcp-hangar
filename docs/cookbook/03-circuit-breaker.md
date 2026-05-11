@@ -74,11 +74,10 @@ Save this as `~/.config/mcp-hangar/config.yaml` (or update your existing file).
 
    Circuit breaker is CLOSED (normal operation). Call succeeded.
 
-3. Kill the MCP server to simulate failures
+3. Stop the MCP server to simulate failures
 
    ```bash
-   ps aux | grep mcp-server | grep -v grep
-   kill <PID>
+   docker stop mcp-math
    ```
 
    MCP Server is now dead.
@@ -101,11 +100,11 @@ Save this as `~/.config/mcp-hangar/config.yaml` (or update your existing file).
 
    ```
    Attempt 1...
-   WARNING  tool_call_failed mcp_server=my-mcp-group error=Connection refused
+   (error output — connection refused or timeout)
    Attempt 2...
-   WARNING  tool_call_failed mcp_server=my-mcp-group error=Connection refused
+   (error output — connection refused or timeout)
    Attempt 3...
-   WARNING  circuit_breaker_opened group=my-mcp-group failures=3
+   (error output — circuit breaker opened after 3 failures)
    ```
 
    After 3 failures, circuit opens.
@@ -124,7 +123,7 @@ Save this as `~/.config/mcp-hangar/config.yaml` (or update your existing file).
    ```
 
    ```
-   ERROR    call_rejected_circuit_open group=my-mcp-group
+   (error output — request rejected immediately, circuit is open)
 
    real    0m2.1s
    ```
@@ -139,16 +138,12 @@ Save this as `~/.config/mcp-hangar/config.yaml` (or update your existing file).
    tail -5 /tmp/hangar-circuit.log
    ```
 
-   ```
-   INFO     circuit_reset_timeout_elapsed group=my-mcp-group
-   ```
-
-   Circuit automatically transitions from OPEN to CLOSED after `reset_timeout_s`.
+   After `reset_timeout_s` elapses, the circuit automatically transitions from OPEN back to CLOSED.
 
 7. Restart MCP server and verify recovery
 
    ```bash
-   uvx mcp-server-fetch &
+   docker start mcp-math
    sleep 2
 
    (
@@ -188,12 +183,12 @@ They complement each other. Health checks catch dead MCP servers. Circuit breake
 
 | Key | Type | Default | Description |
 |-----|------|---------|-------------|
-| `MCP servers.<name>.mode` | string | — | Set to `group` for MCP server groups |
-| `MCP servers.<name>.strategy` | string | `round_robin` | Load balancing strategy |
-| `MCP servers.<name>.min_healthy` | int | `1` | Minimum healthy members required |
-| `MCP servers.<name>.circuit_breaker.failure_threshold` | int | `10` | Consecutive failures before circuit opens |
-| `MCP servers.<name>.circuit_breaker.reset_timeout_s` | float | `60.0` | Seconds before circuit auto-closes |
-| `MCP servers.<name>.members` | list | — | List of MCP server IDs or inline definitions |
+| `mcp_servers.<name>.mode` | string | — | Set to `group` for MCP server groups |
+| `mcp_servers.<name>.strategy` | string | `round_robin` | Load balancing strategy |
+| `mcp_servers.<name>.min_healthy` | int | `1` | Minimum healthy members required |
+| `mcp_servers.<name>.circuit_breaker.failure_threshold` | int | `10` | Consecutive failures before circuit opens |
+| `mcp_servers.<name>.circuit_breaker.reset_timeout_s` | float | `60.0` | Seconds before circuit auto-closes |
+| `mcp_servers.<name>.members` | list | — | List of MCP server IDs or inline definitions |
 
 ## What's Next
 

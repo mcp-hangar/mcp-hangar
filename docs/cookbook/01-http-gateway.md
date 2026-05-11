@@ -105,7 +105,7 @@ Save this as `~/.config/mcp-hangar/config.yaml` or pass it with `--config`.
    ```
 
    ```json
-   {"jsonrpc":"2.0","id":2,"result":{"content":[{"type":"text","text":"...\"mcp_server\": \"my-mcp\", \"state\": \"ready\", \"mode\": \"subprocess\", \"tools_count\": 2..."}]}}
+   {"jsonrpc":"2.0","id":2,"result":{"content":[{"type":"text","text":"...\"mcp_server\": \"my-mcp\", \"state\": \"ready\", \"mode\": \"remote\", \"tools_count\": 2..."}]}}
    ```
 
    MCP Server transitioned to READY and discovered tools.
