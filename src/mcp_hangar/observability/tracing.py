@@ -210,8 +210,8 @@ def init_tracing(
             logger.warning("tracing_no_exporters_configured")
             return False
 
-        # Set global tracer mcp_server
-        trace.set_tracer_mcp_server(_tracer_mcp_server)
+        # Register the global tracer provider (third-party OTel API)
+        trace.set_tracer_provider(_tracer_mcp_server)
         _initialized = True
 
         logger.info(
