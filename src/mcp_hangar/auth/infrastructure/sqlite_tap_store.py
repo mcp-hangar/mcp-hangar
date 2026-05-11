@@ -55,7 +55,7 @@ class SQLiteToolAccessPolicyStore:
             new_conn.execute("PRAGMA journal_mode=WAL")
             new_conn.execute("PRAGMA foreign_keys=ON")
             self._local.connection = new_conn
-        result: sqlite3.Connection = getattr(self._local, "connection")
+        result: sqlite3.Connection = self._local.connection
         return result
 
     def _init_schema(self) -> None:

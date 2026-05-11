@@ -266,7 +266,7 @@ def bootstrap(
     )
 
     # Wire enterprise components with null fallbacks
-    auth_components = mcp_hangar.auth_components if mcp_hangar.auth_components is not None else NullAuthComponents()
+    auth_components = enterprise.auth_components if enterprise.auth_components is not None else NullAuthComponents()
 
     init_auth_cqrs(runtime, auth_components)
 

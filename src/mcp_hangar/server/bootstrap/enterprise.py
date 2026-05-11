@@ -220,7 +220,9 @@ def _builtin_create_event_store(driver: str, config: dict[str, Any]) -> Any | No
     if driver != "sqlite":
         return None
 
-    sqlite_event_store = _import_attribute("mcp_hangar.infrastructure.persistence.sqlite_event_store", "SQLiteEventStore")
+    sqlite_event_store = _import_attribute(
+        "mcp_hangar.infrastructure.persistence.sqlite_event_store", "SQLiteEventStore",
+    )
     db_path = config.get("path", "data/events.db")
     Path(db_path).parent.mkdir(parents=True, exist_ok=True)
     return sqlite_event_store(db_path)

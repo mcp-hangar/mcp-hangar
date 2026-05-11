@@ -341,7 +341,7 @@ class TestThreadSafety:
                     span.end_success({"result": 2})
                     adapter.record_score("trace", "test", 1.0)
                     adapter.record_health_check("math", True, 10.0)
-            except Exception as e:
+            except Exception as e:  # noqa: BLE001
                 errors.append(e)
 
         threads = [threading.Thread(target=worker) for _ in range(10)]
@@ -365,7 +365,7 @@ class TestThreadSafety:
                     span.end_success({"result": 2})
                     adapter.record_score("trace", "test", 1.0)
                     adapter.flush()
-            except Exception as e:
+            except Exception as e:  # noqa: BLE001
                 errors.append(e)
 
         threads = [threading.Thread(target=worker) for _ in range(10)]

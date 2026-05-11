@@ -3,7 +3,7 @@
 Follows the same async pattern as audit_repository.py.
 """
 
-from datetime import datetime, timezone
+from datetime import datetime
 from typing import Any, Protocol
 
 from ..models import ApprovalRequest, ApprovalState

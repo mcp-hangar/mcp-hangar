@@ -10,7 +10,7 @@ Reference: ArcSight Common Event Format (CEF) Rev 25.
 This module is part of the enterprise compliance layer.
 """
 
-from datetime import datetime, timezone
+from datetime import datetime, UTC
 
 from mcp_hangar.application.event_handlers.audit_handler import AuditRecord
 
@@ -104,7 +104,7 @@ def _format_cef_timestamp(dt: datetime) -> str:
         Millisecond epoch as string.
     """
     if dt.tzinfo is None:
-        dt = dt.replace(tzinfo=timezone.utc)
+        dt = dt.replace(tzinfo=UTC)
     return str(int(dt.timestamp() * 1000))
 
 

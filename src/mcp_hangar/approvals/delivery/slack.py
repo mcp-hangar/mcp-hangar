@@ -133,7 +133,7 @@ class SlackApprovalDelivery:
                     )
         except ImportError:
             logger.error("slack_delivery_requires_httpx")
-        except Exception:
+        except Exception:  # noqa: BLE001
             logger.warning(
                 "slack_delivery_failed",
                 approval_id=request.approval_id,

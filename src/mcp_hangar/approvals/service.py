@@ -14,7 +14,7 @@ import concurrent.futures
 import hashlib
 import json
 import uuid
-from datetime import datetime, timedelta, timezone
+from datetime import datetime, timedelta, UTC
 from typing import Any
 
 from mcp_hangar.domain.events import (
@@ -108,7 +108,7 @@ class ApprovalGateService:
 
             approval_id = str(uuid.uuid4())
             gate_span.set_attribute("approval.id", approval_id)
-            now = datetime.now(timezone.utc)
+            now = datetime.now(UTC)
             sanitized_args = _sanitize_arguments(arguments)
             args_hash = _hash_arguments(sanitized_args)
             expires_at = now + timedelta(seconds=policy.approval_timeout_seconds)
@@ -143,7 +143,7 @@ class ApprovalGateService:
 
             try:
                 await self._delivery.send(request)
-            except Exception:
+            except Exception:  # noqa: BLE001
                 logger.warning(
                     "approval_delivery_failed",
                     approval_id=approval_id,
@@ -166,7 +166,7 @@ class ApprovalGateService:
                 updated = await self._repository.get(approval_id)
                 decided_by = updated.decided_by if updated and updated.decided_by is not None else "unknown"
                 decided_at = (
-                    updated.decided_at if updated and updated.decided_at is not None else datetime.now(timezone.utc)
+                    updated.decided_at if updated and updated.decided_at is not None else datetime.now(UTC)
                 )
 
                 await self._publish(
@@ -186,7 +186,7 @@ class ApprovalGateService:
                 updated = await self._repository.get(approval_id)
                 decided_by = updated.decided_by if updated and updated.decided_by is not None else "unknown"
                 decided_at = (
-                    updated.decided_at if updated and updated.decided_at is not None else datetime.now(timezone.utc)
+                    updated.decided_at if updated and updated.decided_at is not None else datetime.now(UTC)
                 )
                 reason = updated.reason if updated else None
 
@@ -204,7 +204,7 @@ class ApprovalGateService:
                 return ApprovalResult.denied(approval_id, reason)
 
             # Timeout
-            expired_at = datetime.now(timezone.utc)
+            expired_at = datetime.now(UTC)
             await self._repository.update_state(approval_id, ApprovalState.EXPIRED, None, expired_at, None)
 
             await self._publish(
@@ -231,7 +231,7 @@ class ApprovalGateService:
             return False
 
         # Store decided_by/reason before resolving the hold so check() can read them
-        decided_at = datetime.now(timezone.utc)
+        decided_at = datetime.now(UTC)
         state = ApprovalState.APPROVED if approved else ApprovalState.DENIED
         await self._repository.update_state(approval_id, state, decided_by, decided_at, reason)
 
@@ -246,5 +246,5 @@ class ApprovalGateService:
         loop = asyncio.get_running_loop()
         try:
             await loop.run_in_executor(_publish_executor, self._event_bus.publish, event)
-        except Exception:
+        except Exception:  # noqa: BLE001
             logger.warning("approval_event_publish_failed", exc_info=True)

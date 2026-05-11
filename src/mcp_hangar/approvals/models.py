@@ -5,12 +5,12 @@ ApprovalResult is the value object returned to the tool wrapper.
 """
 
 from dataclasses import dataclass
-from datetime import datetime, timezone
+from datetime import datetime, UTC
 from enum import Enum
 from typing import Any
 
 
-class ApprovalState(str, Enum):
+class ApprovalState(str, Enum):  # noqa: UP042
     PENDING = "pending"
     APPROVED = "approved"
     DENIED = "denied"
@@ -90,7 +90,7 @@ class ApprovalRequest:
             raise ValueError(f"Cannot approve request in state {self.state}")
         self.state = ApprovalState.APPROVED
         self.decided_by = decided_by
-        self.decided_at = datetime.now(timezone.utc)
+        self.decided_at = datetime.now(UTC)
 
     def deny(self, decided_by: str, reason: str | None = None) -> None:
         """Transition PENDING -> DENIED."""
@@ -98,7 +98,7 @@ class ApprovalRequest:
             raise ValueError(f"Cannot deny request in state {self.state}")
         self.state = ApprovalState.DENIED
         self.decided_by = decided_by
-        self.decided_at = datetime.now(timezone.utc)
+        self.decided_at = datetime.now(UTC)
         self.reason = reason
 
     def expire(self) -> None:
@@ -106,7 +106,7 @@ class ApprovalRequest:
         if self.state != ApprovalState.PENDING:
             return
         self.state = ApprovalState.EXPIRED
-        self.decided_at = datetime.now(timezone.utc)
+        self.decided_at = datetime.now(UTC)
 
 
 @dataclass(frozen=True)
