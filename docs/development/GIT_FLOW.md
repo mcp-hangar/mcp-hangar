@@ -11,9 +11,9 @@ ADR governance rules reside in docs/adr/AGENTS.md.
 General repository conventions, such as language requirements and source layout, are in the root AGENTS.md.
 External contributors should also consult CONTRIBUTING.md for environment setup.
 
-Rules defined here are currently considered soft-law for the v0.x lifecycle.
-Most conventions are not yet machine-enforced by CI.
-Formal enforcement details are tracked in Section 12.
+Rules defined here are enforced by CI via required status checks (pr-title.yml,
+branch-name.yml, changelog-check.yml, pr-body.yml, pr-validation.yml, security.yml).
+Enforcement details are listed in Section 12.
 
 ## Decision log
 
@@ -24,10 +24,10 @@ The following table tracks the evolution of git and workflow standards.
 | 1 | Merge strategy | squash-merge by default | - |
 | 2 | Issue # in branch name | optional (not required) | - |
 | 3 | Discussions categories | defer until sustained external traffic exists | Original proposed 4 categories. Final decision defers implementation to avoid maintaining empty forums while traffic is low. |
-| 4 | Stale bot | 180-day for v0.x, drop to 90d post-1.0 | v0.x requires more flexibility for experimental features. Post-1.0 will tighten to 90 days for higher maintenance standards. |
+| 4 | Stale bot | 90-day stale, 30-day close (applied via stale.yml) | Tightened from 180/90 post-1.0 per PR #113. |
 | 5 | CC scope list | 13 approved, 3 rejected, 1 deferred | Auth, events, and cqrs were collapsed into core or security to reduce noise. Proto deferred pending higher change frequency. |
 | 6 | Release cadence | ad-hoc, release-please planned | - |
-| 7 | Deprecation policy | pre-1.0 SemVer allows breaking in any minor | v0.x projects prioritize velocity over stability. ADR-008 will formalize the stricter post-1.0 policy later. |
+| 7 | Deprecation policy | post-1.0 SemVer: deprecate in minor, remove in next major | Project is at v1.1.0. Breaking changes require a major version bump. |
 | 8 | Dependabot auto-merge | auto-merge dev, actions, and runtime CVE patches | Runtime CVE patches are included in auto-merge to maintain security posture with minimal manual intervention. |
 | 9 | ADR authorship | agents may draft, maintainer authors PR | - |
 | 10 | Pre-release flow location | documented in this file (section 9) | - |
@@ -111,12 +111,12 @@ flowchart TD
     H --> I[Implement hotfix]
     I --> J[Manual tag vX.Y.Z-hotfix.N]
     J --> K[Cherry-pick to main]
-    K --> L[Refer to HOTFIX_RUNBOOK.md TBD]
+     K --> L[See HOTFIX_RUNBOOK.md]
 ```
 
 Hotfix branches must branch from the specific version tag where the bug exists.
 Manual tagging is required before cherry-picking the fix back to the main branch.
-Detailed operational steps are located in the HOTFIX_RUNBOOK.md placeholder.
+Detailed operational steps are located in [HOTFIX_RUNBOOK.md](HOTFIX_RUNBOOK.md).
 
 ## Flow 2: Feature
 
@@ -172,19 +172,13 @@ Agents may draft ADRs in issue comments but never author the PR.
 
 <a id="deprecation-policy"></a>
 
-## Pre-1.0 vs Post-1.0 deprecation policy
+## Deprecation policy
 
-The project follows a two-stage deprecation policy depending on major version.
+The project is at v1.1.0 and follows standard SemVer deprecation rules:
 
-Pre-1.0:
-SemVer permits breaking changes in any minor version.
-This is an explicit policy to allow for rapid iteration on core domain models.
-Consumers should pin to exact minor versions if they require stability.
-
-Post-1.0:
-Deprecations must be marked in at least one minor release.
-Removal occurs earliest in the next major release.
-ADR-008 will formalize this post-1.0 behavior.
+- Deprecations must be marked in at least one minor release.
+- Removal occurs earliest in the next major release.
+- ADR-008 will formalize additional deprecation workflow details.
 
 ## Pre-release flow
 
@@ -232,16 +226,9 @@ Detailed manual steps are in [HOTFIX_RUNBOOK.md](HOTFIX_RUNBOOK.md).
 - release-please.yml (automated version bump and Release PR)
 - security.yml (static analysis and boundary checks)
 
-### Active after sibling tickets merge
-
 - stale bot (stale.yml)
 - Dependabot auto-merge (dependabot-automerge.yml)
 
-### Soft-law (documented here, not auto-enforced -- parking lot)
+### Reviewer-only (not auto-enforced)
 
-- Conventional Commit types/scopes: violation caught by reviewer, not by CI.
-- Squash convention: violation caught by reviewer, not by CI.
-- Branch naming: violation caught by reviewer, not by CI.
-- [Unreleased] CHANGELOG entry: violation caught by reviewer, not by CI.
-- PR body sections: violation caught by reviewer, not by CI.
 - Deprecation policy: violation caught by reviewer, not by CI.

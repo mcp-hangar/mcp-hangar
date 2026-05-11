@@ -26,7 +26,7 @@ Branch protection on `main` ensures that every commit landing in the default bra
 
 | Check name | Workflow file | What it enforces |
 |---|---|---|
-| `pr-validation / required-check` | `ci.yml` | Paths-filter summary gate |
+| `pr-validation / required-check` | `pr-validation.yml` | Paths-filter summary gate |
 | `enterprise-boundary` | `security.yml` | No cross-boundary imports |
 | `pr-title / validate` | `pr-title.yml` | Conventional Commits title |
 | `changelog / check` | `changelog-check.yml` | CHANGELOG entry present |

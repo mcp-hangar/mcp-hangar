@@ -145,8 +145,8 @@ See [Git Flow](GIT_FLOW.md) for branching conventions, merge strategy, and commi
 4. Run checks:
 
    ```bash
-   pre-commit install --hook-type pre-commit --hook-type commit-msg
-   pytest -v -m "not slow"
+   pre-commit install --hook-type pre-commit
+   pytest -v
    pre-commit run --all-files
    ```
 
@@ -154,19 +154,7 @@ See [Git Flow](GIT_FLOW.md) for branching conventions, merge strategy, and commi
 
 ### PR Template
 
-```markdown
-## Description
-Brief description.
-
-## Type
-- [ ] Bug fix
-- [ ] New feature
-- [ ] Breaking change
-
-## Testing
-- [ ] Unit tests added
-- [ ] All tests pass
-```
+PRs must follow the template in [`.github/PULL_REQUEST_TEMPLATE.md`](https://github.com/mcp-hangar/mcp-hangar/blob/main/.github/PULL_REQUEST_TEMPLATE.md). Required sections are enforced by the `pr-body / validate` CI check.
 
 ## Architecture Guidelines
 
@@ -228,42 +216,9 @@ MCP Hangar uses automated CI/CD for releases. The process ensures quality throug
 
 ### Creating a Release
 
-#### Option 1: Automated (Recommended)
+Releases are automated via [release-please](https://github.com/googleapis/release-please). When Conventional Commit PRs merge to `main`, release-please maintains a long-running Release PR that bumps the version and updates the changelog. Merging that PR creates the version tag, which `release.yml` consumes to publish to PyPI and GHCR.
 
-Use the GitHub Actions workflow:
-
-1. Go to **Actions** → **Version Bump**
-2. Click **Run workflow**
-3. Select bump type: `patch`, `minor`, or `major`
-4. Optionally select pre-release suffix (`alpha.1`, `beta.1`, `rc.1`)
-5. Run (or use **dry run** to preview)
-
-The workflow will:
-
-- Update version in `pyproject.toml`
-- Update `CHANGELOG.md` with release date
-- Create and push the version tag
-- Trigger the release pipeline automatically
-
-#### Option 2: Manual
-
-```bash
-# 1. Update version in pyproject.toml
-sed -i '' 's/version = ".*"/version = "1.2.0"/' pyproject.toml
-
-# 2. Update CHANGELOG.md - move Unreleased items to new version section
-
-# 3. Commit changes
-git add pyproject.toml CHANGELOG.md
-git commit -m "chore: bump version to 1.2.0"
-
-# 4. Create annotated tag
-git tag -a v1.2.0 -m "Release v1.2.0"
-
-# 5. Push
-git push origin main
-git push origin v1.2.0
-```
+See [RELEASE.md](../runbooks/RELEASE.md) for the full operational runbook.
 
 ### Pre-release Versions
 
@@ -315,24 +270,7 @@ Each release produces:
 
 ### Hotfix Process
 
-For urgent fixes on released versions:
-
-```bash
-# 1. Create hotfix branch from tag
-git checkout -b hotfix/1.0.1 v1.0.0
-
-# 2. Apply fix, add tests
-
-# 3. Update version and changelog
-# 4. Tag and push
-
-git tag -a v1.0.1 -m "Hotfix: description"
-git push origin v1.0.1
-
-# 5. Cherry-pick to main if applicable
-git checkout main
-git cherry-pick <commit-hash>
-```
+For urgent fixes on released versions, follow the [HOTFIX_RUNBOOK.md](HOTFIX_RUNBOOK.md).
 
 ## Licensing Model
 
