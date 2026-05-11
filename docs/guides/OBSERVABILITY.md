@@ -204,8 +204,35 @@ sum(rate(mcp_hangar_health_checks_total{result="healthy"}[5m])) by (mcp_server)
 
 | Metric | Type | Labels | Description |
 |--------|------|--------|-------------|
-| `mcp_hangar_mcp_server_starts_total` | Counter | MCP server | MCP Server start attempts |
-| `mcp_hangar_mcp_server_initialized` | Gauge | MCP server | 1 if MCP server has been initialized |
+| `mcp_hangar_mcp_server_state` | Gauge | mcp_server | Current state (0=cold, 1=initializing, 2=ready, 3=degraded, 4=dead) |
+| `mcp_hangar_mcp_server_up` | Gauge | mcp_server | 1 if MCP server is reachable |
+| `mcp_hangar_mcp_server_starts_total` | Counter | mcp_server | MCP server start attempts |
+| `mcp_hangar_mcp_server_initialized` | Gauge | mcp_server | 1 if MCP server has been initialized |
+| `mcp_hangar_mcp_server_cold_start_seconds` | Histogram | mcp_server | Cold start latency |
+| `mcp_hangar_mcp_server_cold_start_in_progress` | Gauge | mcp_server | 1 if cold start is in progress |
+
+#### Discovery
+
+| Metric | Type | Labels | Description |
+|--------|------|--------|-------------|
+| `mcp_hangar_discovery_mcp_servers` | Gauge | source | Discovered MCP servers per source |
+| `mcp_hangar_discovery_registrations_total` | Counter | source | New registrations |
+| `mcp_hangar_discovery_errors_total` | Counter | source | Errors by source |
+| `mcp_hangar_discovery_cycle_duration_seconds` | Histogram | source | Discovery cycle duration |
+
+#### HTTP Transport
+
+| Metric | Type | Labels | Description |
+|--------|------|--------|-------------|
+| `mcp_hangar_http_requests_total` | Counter | method, status | HTTP requests to remote MCP servers |
+| `mcp_hangar_http_request_duration_seconds` | Histogram | method | HTTP request latency |
+| `mcp_hangar_http_connections` | Gauge | mcp_server | Active HTTP connections |
+
+#### Rate Limiting
+
+| Metric | Type | Labels | Description |
+|--------|------|--------|-------------|
+| `mcp_hangar_rate_limit_hits_total` | Counter | principal | Rate limit rejections |
 
 #### GC (Garbage Collection)
 
@@ -213,18 +240,6 @@ sum(rate(mcp_hangar_health_checks_total{result="healthy"}[5m])) by (mcp_server)
 |--------|------|--------|-------------|
 | `mcp_hangar_gc_cycles_total` | Counter | - | GC cycle executions |
 | `mcp_hangar_gc_cycle_duration_seconds` | Histogram | - | GC cycle duration |
-
-### Metrics Not Yet Implemented
-
-The following metrics are defined in code but not currently populated. They are planned for future releases:
-
-- `mcp_hangar_mcp_server_state` - MCP server state gauge (cold/ready/degraded/dead)
-- `mcp_hangar_mcp_server_up` - MCP Server availability
-- `mcp_hangar_mcp_server_cold_start_seconds` - Cold start latency histogram
-- `mcp_hangar_discovery_*` - Auto-discovery metrics
-- `mcp_hangar_http_*` - HTTP transport metrics (for remote MCP servers)
-- `mcp_hangar_rate_limit_hits_total` - Rate limiting metrics
-- `mcp_hangar_connections_*` - Connection tracking
 
 ## Grafana Dashboards
 
