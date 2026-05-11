@@ -62,7 +62,11 @@ EventBus.publish()
 
 ### Interceptor Discoverability
 
-`GET /interceptors/list` returns mcp-hangar's capabilities as a SEP-1763 interceptor:
+`GET /interceptors/list` returns mcp-hangar's capabilities as a SEP-1763 interceptor.
+This is exposed as a plain HTTP endpoint (not a JSON-RPC method) because the MCP
+Python SDK does not yet support custom JSON-RPC method registration for non-standard
+methods. Once SDK support lands, this should migrate to a JSON-RPC `interceptors/list`
+method per SEP-1763 (PR #2624).
 
 ```json
 {
@@ -70,12 +74,18 @@ EventBus.publish()
     {
       "name": "mcp-hangar",
       "version": "<package version>",
-      "types": ["validator", "mutator", "observer"],
-      "capabilities": {
-        "failOpen": true,
-        "auditMode": true,
-        "trustBoundaryAware": true
-      }
+      "type": "validator",
+      "supportedEvents": ["tools/call", "tools/list"],
+      "modes": ["audit", "enforce"],
+      "trustBoundary": "host"
+    },
+    {
+      "name": "mcp-hangar",
+      "version": "<package version>",
+      "type": "mutator",
+      "supportedEvents": ["tools/call"],
+      "modes": ["enforce"],
+      "trustBoundary": "host"
     }
   ]
 }

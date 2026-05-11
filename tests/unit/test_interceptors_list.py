@@ -5,14 +5,16 @@ from starlette.testclient import TestClient
 from starlette.applications import Starlette
 from starlette.routing import Route
 
+from mcp.server.fastmcp import FastMCP
+
 from mcp_hangar.fastmcp_server.interceptors_list import (
     interceptors_list_handler,
     interceptors_list_response,
+    register_interceptors_list,
 )
 
 
 class TestInterceptorsListResponse:
-
     def test_response_shape(self):
         data = interceptors_list_response()
         assert "interceptors" in data
@@ -41,12 +43,13 @@ class TestInterceptorsListResponse:
 
 
 class TestInterceptorsListEndpoint:
-
     @pytest.fixture()
     def client(self) -> TestClient:
-        app = Starlette(routes=[
-            Route("/interceptors/list", interceptors_list_handler, methods=["GET"]),
-        ])
+        app = Starlette(
+            routes=[
+                Route("/interceptors/list", interceptors_list_handler, methods=["GET"]),
+            ]
+        )
         return TestClient(app)
 
     def test_get_returns_200(self, client: TestClient):
@@ -62,3 +65,26 @@ class TestInterceptorsListEndpoint:
     def test_post_not_allowed(self, client: TestClient):
         resp = client.post("/interceptors/list")
         assert resp.status_code == 405
+
+
+class TestRegisterInterceptorsList:
+    def test_register_adds_one_custom_route(self):
+        mcp = FastMCP("test-interceptors")
+        before = len(mcp._custom_starlette_routes)
+        register_interceptors_list(mcp)
+        assert len(mcp._custom_starlette_routes) == before + 1
+
+    def test_registered_route_path(self):
+        mcp = FastMCP("test-interceptors")
+        register_interceptors_list(mcp)
+        route = mcp._custom_starlette_routes[-1]
+        assert route.path == "/interceptors/list"
+
+    def test_registered_route_serves_200(self):
+        mcp = FastMCP("test-interceptors")
+        register_interceptors_list(mcp)
+        app = mcp.streamable_http_app()
+        client = TestClient(app)
+        resp = client.get("/interceptors/list")
+        assert resp.status_code == 200
+        assert "interceptors" in resp.json()

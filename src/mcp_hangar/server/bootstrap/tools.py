@@ -18,7 +18,7 @@ logger = get_logger(__name__)
 
 
 def register_all_tools(mcp_server: FastMCP) -> None:
-    """Register all MCP tools on the server.
+    """Register all MCP tools and custom HTTP routes on the server.
 
     Args:
         mcp_server: FastMCP server instance.
@@ -31,4 +31,9 @@ def register_all_tools(mcp_server: FastMCP) -> None:
     register_group_tools(mcp_server)
     register_batch_tools(mcp_server)
     register_continuation_tools(mcp_server)
+
+    from ...fastmcp_server.interceptors_list import register_interceptors_list
+
+    register_interceptors_list(mcp_server)
+
     logger.info("mcp_tools_registered")
