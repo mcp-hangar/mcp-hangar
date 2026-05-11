@@ -16,8 +16,8 @@ We have implemented the Saga pattern to manage distributed, multi-step business 
 
 We support three primary saga types:
 
-1. **MCP Server Failover Saga** (`mcp_hangar.application.sagas.mcp_server_failover_saga.ProviderFailoverSaga`): Orchestrates primary-to-backup MCP server transitions in three steps (start backup, await primary, failback).
-2. **MCP Server Recovery Saga** (`mcp_hangar.application.sagas.mcp_server_recovery_saga.ProviderRecoverySaga`): Automatically restarts degraded MCP servers with backoff.
+1. **MCP Server Failover Saga** (`mcp_hangar.application.sagas.mcp_server_failover_saga.McpServerFailoverSaga`): Orchestrates primary-to-backup MCP server transitions in three steps (start backup, await primary, failback).
+2. **MCP Server Recovery Saga** (`mcp_hangar.application.sagas.mcp_server_recovery_saga.McpServerRecoverySaga`): Automatically restarts degraded MCP servers with backoff.
 3. **Group Rebalance Saga** (`mcp_hangar.application.sagas.group_rebalance_saga.GroupRebalanceSaga`): Manages load balancing and re-distribution of MCP servers within a group.
 
 ### Implementation Details

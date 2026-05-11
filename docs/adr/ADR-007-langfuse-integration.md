@@ -25,8 +25,8 @@ We will integrate MCP Hangar with [Langfuse](https://langfuse.com), an open-sour
 ┌─────────────────────────────────────────────────────────────┐
 │                   Application Layer                          │
 │  ┌───────────────────┐  ┌─────────────────────────────────┐ │
-│  │ ObservabilityPort │◄─│ TracedProviderService           │ │
-│  │     (interface)   │  │ (decorator for ProviderService) │ │
+│  │ ObservabilityPort │◄─│ TracedMcpServerService          │ │
+│  │     (interface)   │  │ (decorator for McpServerService) │ │
 │  └───────────────────┘  └─────────────────────────────────┘ │
 └─────────────────────────────────────────────────────────────┘
                               │
@@ -50,7 +50,7 @@ We will integrate MCP Hangar with [Langfuse](https://langfuse.com), an open-sour
    - Easy testing with `NullObservabilityAdapter`
    - Future support for other platforms (e.g., Weights & Biases, LangSmith)
 
-2. **Decorator Pattern**: `TracedProviderService` wraps `ProviderService` rather than modifying it, preserving the original service and allowing optional tracing.
+2. **Decorator Pattern**: `TracedMcpServerService` wraps `McpServerService` rather than modifying it, preserving the original service and allowing optional tracing.
 
 3. **Optional Dependency**: Langfuse SDK is an optional dependency (`pip install mcp-hangar[observability]`). When not installed, the system gracefully falls back to `NullObservabilityAdapter`.
 
@@ -112,5 +112,5 @@ result = traced_service.invoke_tool(
 
 - [Langfuse Documentation](https://langfuse.com/docs)
 - [MCP Protocol Specification](https://modelcontextprotocol.io/specification)
-- [ObservabilityPort Implementation](/mcp_hangar/application/ports/observability.py)
-- [LangfuseAdapter Implementation](/mcp_hangar/infrastructure/observability/langfuse_adapter.py)
+- [ObservabilityPort Implementation](https://github.com/mcp-hangar/mcp-hangar/blob/main/src/mcp_hangar/application/ports/observability.py)
+- [LangfuseAdapter Implementation](https://github.com/mcp-hangar/mcp-hangar/blob/main/enterprise/integrations/langfuse.py)
