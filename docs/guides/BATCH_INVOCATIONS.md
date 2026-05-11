@@ -292,9 +292,9 @@ Prometheus metrics for batch operations:
 
 ```
 mcp_hangar_batch_calls_total{result="success|partial|failure|validation_error"}
-mcp_hangar_batch_size_histogram{}
-mcp_hangar_batch_duration_seconds{}
-mcp_hangar_batch_concurrency_gauge{}
+mcp_hangar_batch_size_bucket{}
+mcp_hangar_batch_duration_seconds_bucket{}
+mcp_hangar_batch_concurrency{}
 mcp_hangar_batch_truncations_total{reason="per_call|total_size"}
 mcp_hangar_batch_circuit_breaker_rejections_total{mcp_server="..."}
 mcp_hangar_batch_cancellations_total{reason="timeout|fail_fast"}
@@ -330,7 +330,7 @@ If you were using the previous tools, here's how to migrate:
 1. **Use retry for external calls** - Set `max_retries=3` for fetch, database, and network operations
 2. **Group related calls** - Batch calls that can run independently
 3. **Set appropriate timeouts** - Use per-call timeouts for varying workloads
-4. **Monitor metrics** - Watch `batch_duration_seconds` and `batch_size_histogram`
+4. **Monitor metrics** - Watch `mcp_hangar_batch_duration_seconds` and `mcp_hangar_batch_size`
 5. **Handle partial failures** - Check `succeeded` and `failed` counts
 6. **Use fail-fast sparingly** - Only when all-or-nothing is required
 

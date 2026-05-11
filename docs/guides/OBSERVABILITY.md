@@ -704,10 +704,11 @@ If `MCPHangarHighConsecutiveFailures` fires:
 
 1. Check MCP server logs for errors
 2. Verify MCP server command/configuration
-3. Test MCP server manually:
+3. Restart the MCP server by restarting Hangar or invoking the MCP server
+   (the first tool call triggers a cold start):
 
    ```bash
-   mcp-hangar mcp_server start <mcp-server-id>
+   mcp-hangar status
    ```
 
 ### MCP Server Start Errors

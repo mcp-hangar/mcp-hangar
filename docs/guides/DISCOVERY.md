@@ -158,7 +158,7 @@ discovery:
 
 | Metric | Description |
 |--------|-------------|
-| `mcp_hangar_discovery_providers_total` | MCP servers per source |
+| `mcp_hangar_discovery_mcp_servers` | MCP servers per source (Gauge) |
 | `mcp_hangar_discovery_registrations_total` | New registrations |
 | `mcp_hangar_discovery_errors_total` | Errors by source |
-| `mcp_hangar_discovery_latency_seconds` | Cycle duration |
+| `mcp_hangar_discovery_cycle_duration_seconds` | Cycle duration (Histogram) |
