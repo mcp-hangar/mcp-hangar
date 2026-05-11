@@ -3,7 +3,6 @@
 **Status:** Accepted
 **Date:** 2026-05-01
 **Authors:** MCP Hangar Team
-**Implementation:** P1 complete in v1.2.0 (epic #118). Hook model, IMutator contract, MutatorPipeline, ResponseTruncator, wildcard subscriptions, and interceptors/list landed in PRs #136, #137, #138.
 
 ## Context
 
@@ -56,6 +55,10 @@ We will align hangar-agent with the SEP-1763 spec (PR #2624) as it evolves, posi
 | Mutator scope (initial) | PII redaction, argument schema enforcement, response truncation | Highest customer demand; builds on existing truncation infrastructure |
 | Hook model migration | Internal abstraction layer; expose spec-compliant hooks externally, keep internal event types for backward compat | Non-breaking migration path |
 | Working group engagement | Monitor and contribute when spec touches sidecar runtime | Influence spec toward our architecture without over-committing |
+
+### Implementation Status
+
+P1 landed in PRs #136, #137, #138 (epic #118): hook model, IMutator contract, MutatorPipeline, ResponseTruncator, wildcard subscriptions, and interceptors/list. Targeted for v1.2.0.
 
 ## Consequences
 

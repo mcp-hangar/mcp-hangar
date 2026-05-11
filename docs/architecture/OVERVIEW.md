@@ -19,6 +19,8 @@ MCP Hangar is organized as a monorepo:
 - **GC** -- Automatic shutdown of idle MCP servers
 - **CQRS** -- Command/Query separation with domain events
 - **Event Sourcing** -- Append-only event store for auditing and state reconstruction
+- **Digest Pinning** -- SHA-256 tool digest verification (ADR-004)
+- **Interceptor Framework** -- Pre/post hooks and response mutation pipeline (ADR-005)
 
 ## Layer Structure (DDD + CQRS)
 
@@ -30,8 +32,8 @@ src/mcp_hangar/
 |   +-- model/        Aggregates: MCP Server, McpServerGroup
 |   +-- events.py     Domain events
 |   +-- exceptions.py Exception hierarchy
-|   +-- value_objects/ ProviderId, ProviderMode, IdleTTL, etc.
-|   +-- contracts/    Interfaces (IMetricsPublisher, ProviderRuntime)
+|   +-- value_objects/ McpServerId, McpServerMode, IdleTTL, etc.
+|   +-- contracts/    Interfaces (IMetricsPublisher, IMcpServerRuntime)
 |   +-- security/     Rate limiting, input validation
 |
 +-- application/      Use cases and orchestration
@@ -39,20 +41,20 @@ src/mcp_hangar/
 |   +-- queries/      Query handlers (CQRS read side)
 |   +-- sagas/        Long-running processes (recovery, failover)
 |   +-- event_handlers/ React to domain events
-|   +-- services/     Application services (TracedProviderService)
+|   +-- services/     Application services (TracedMcpServerService)
 |   +-- ports/        Port interfaces (ObservabilityPort)
 |
 +-- infrastructure/   External concerns (implements domain contracts)
 |   +-- discovery/    Docker, K8s, filesystem, entrypoint sources
 |   +-- persistence/  Repositories, Event Store (SQLite, in-memory)
-|   +-- catalog/      Catalog repository
+|   +-- registry/     Registry client
 |   +-- event_bus.py  In-process event bus
 |   +-- command_bus.py CQRS command dispatcher
 |   +-- query_bus.py  CQRS query dispatcher
 |
 +-- server/           Protocol and transport layer
     +-- api/          REST API (Starlette routes)
-    |   +-- ws/       WebSocket endpoints (events, state, logs)
+    |   +-- ws/       WebSocket endpoint (events)
     +-- bootstrap/    DI composition root
     +-- cli/          CLI (typer-based)
     +-- tools/        MCP tool implementations
@@ -87,7 +89,7 @@ src/mcp_hangar/
 +--------v-----------v--------------------------------------------+
 |                    Infrastructure                                |
 |  StdioClient | DockerLauncher | EventStore | HealthTracker       |
-|  Discovery Sources | Catalog Repository | Log Buffers            |
+|  Discovery Sources | Registry Client | Log Buffers               |
 +------------------------------------------------------------------+
 ```
 
@@ -127,9 +129,9 @@ There is no direct DEGRADED -> READY transition. Degraded MCP servers must reini
 
 Commands modify state, queries read state. They never mix.
 
-- **Commands**: `StartProviderCommand`, `CreateProviderCommand`, `CreateGroupCommand`, etc.
-- **Queries**: `ListProvidersQuery`, `GetProviderQuery`, `GetSystemMetricsQuery`, etc.
-- **Events**: `McpServerStarted`, `McpServerStopped`, `ToolInvocationCompleted`, etc.
+- **Commands**: `StartMcpServerCommand`, `CreateMcpServerCommand`, `CreateGroupCommand`, etc.
+- **Queries**: `ListMcpServersQuery`, `GetMcpServerQuery`, `GetSystemMetricsQuery`, etc.
+- **Events**: `McpServerStarted`, `ToolInvocationCompleted`, `McpServerHealthCheckFailed`, etc.
 
 All state changes emit domain events via `AggregateRoot._record_event()`. Events are persisted to the Event Store for auditing and can be replayed. See [Event Sourcing](EVENT_SOURCING.md).
 
@@ -137,10 +139,13 @@ All state changes emit domain events via `AggregateRoot._record_event()`. Events
 
 ### Lock Hierarchy
 
-Acquire in order to avoid deadlocks:
+Acquire in order to avoid deadlocks (see `infrastructure/lock_hierarchy.py`):
 
-1. `MCP Server.lock` (per-MCP server)
-2. `StdioClient.pending_lock` (per-client)
+```
+PROVIDER(10) < PROVIDER_GROUP(11) < EVENT_BUS(20) < EVENT_STORE(30) < SAGA_MANAGER(40) < STDIO_CLIENT(50)
+```
+
+`TrackedLock` enforces this ordering at runtime.
 
 ### Threads
 

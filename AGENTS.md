@@ -9,7 +9,7 @@
 | Language | Python 3.11+ |
 | Package manager | uv |
 | Architecture | DDD + CQRS + Event Sourcing |
-| License | BSL 1.1 (core), Enterprise (auth module) |
+| License | MIT (core), BSL 1.1 (enterprise/) |
 | Entry point | `mcp-hangar serve` or `python -m mcp_hangar.server` |
 
 ## Commands
@@ -45,45 +45,45 @@ uv build
 mcp-hangar/
 ├── src/mcp_hangar/
 │   ├── domain/                    # DDD core -- owns ALL contracts
-│   │   ├── model/                 # Aggregates: Provider (1367 LOC), ProviderGroup, Tenant
+│   │   ├── model/                 # Aggregates: McpServer (1383 LOC), McpServerGroup, Tenant
 │   │   │   ├── aggregate.py       # Base AggregateRoot with event collection
-│   │   │   ├── provider.py        # Main aggregate: state machine, health, circuit breaker
-│   │   │   ├── event_sourced_provider.py  # Rebuilds from event stream + snapshots
-│   │   │   ├── provider_group.py  # Load balancing, failover
+│   │   │   ├── mcp_server.py      # Main aggregate: state machine, health, circuit breaker
+│   │   │   ├── event_sourced_mcp_server.py  # Rebuilds from event stream + snapshots
+│   │   │   ├── mcp_server_group.py  # Load balancing, failover
 │   │   │   └── circuit_breaker.py # Circuit breaker state machine
-│   │   ├── contracts/             # 17 interfaces (Dependency Inversion Principle)
+│   │   ├── contracts/             # 32 interfaces (Dependency Inversion Principle)
 │   │   │   ├── command.py         # CommandHandler ABC
 │   │   │   ├── event_bus.py       # IEventBus
 │   │   │   ├── event_store.py     # IEventStore
-│   │   │   ├── persistence.py     # IAuditRepository, IProviderConfigRepository
+│   │   │   ├── persistence.py     # IAuditRepository, IMcpServerConfigRepository
 │   │   │   ├── authentication.py  # IAuthenticator
 │   │   │   └── authorization.py   # IAuthorizer
 │   │   ├── value_objects/         # Immutable domain primitives
-│   │   │   ├── provider.py        # ProviderState enum, ProviderMode, ProviderId
+│   │   │   ├── mcp_server.py      # McpServerState enum, McpServerMode, McpServerId
 │   │   │   ├── config.py          # CommandLine, DockerImage, Endpoint
 │   │   │   ├── security.py        # Principal, Role, Permission
-│   │   │   └── capabilities.py    # ProviderCapabilities, ViolationType
-│   │   ├── events.py              # 40+ domain events (1327 LOC)
+│   │   │   └── capabilities.py    # McpServerCapabilities, ViolationType
+│   │   ├── events.py              # 75+ domain events (1872 LOC)
 │   │   ├── exceptions.py          # Domain-specific errors
 │   │   ├── services/              # Domain services (stateless logic)
-│   │   │   └── provider_launcher/ # Subprocess/Docker launcher (shell=False enforced)
+│   │   │   └── mcp_server_launcher/ # Subprocess/Docker launcher (shell=False enforced)
 │   │   ├── security/              # Input validation, rate limiting
 │   │   ├── discovery/             # Conflict resolution (static always wins)
-│   │   └── repository.py          # IProviderRepository + InMemoryProviderRepository
+│   │   └── repository.py          # IMcpServerRepository + InMemoryMcpServerRepository
 │   │
 │   ├── application/               # CQRS handlers + sagas
 │   │   ├── commands/              # 30+ command types with handlers
-│   │   │   ├── commands.py        # StartProviderCommand, InvokeToolCommand, etc.
-│   │   │   ├── handlers.py        # Command handlers (BaseProviderHandler pattern)
+│   │   │   ├── commands.py        # StartMcpServerCommand, InvokeToolCommand, etc.
+│   │   │   ├── handlers.py        # Command handlers (BaseMcpServerHandler pattern)
 │   │   │   ├── crud_commands.py   # Create/Update/Delete commands
 │   │   │   └── crud_handlers.py   # CRUD handlers with DIP
 │   │   ├── queries/               # Read-side queries + handlers
-│   │   │   ├── queries.py         # ListProvidersQuery, GetProviderQuery, etc.
+│   │   │   ├── queries.py         # ListMcpServersQuery, GetMcpServerQuery, etc.
 │   │   │   └── handlers.py        # Return read models (flattened projections)
 │   │   ├── event_handlers/        # 8 subscribers: logging, metrics, audit, security
 │   │   ├── sagas/                 # Long-running transactions
-│   │   │   ├── provider_failover_saga.py   # 3-step failover with compensation
-│   │   │   ├── provider_recovery_saga.py   # Auto-restart degraded providers
+│   │   │   ├── mcp_server_failover_saga.py   # 3-step failover with compensation
+│   │   │   ├── mcp_server_recovery_saga.py   # Auto-restart degraded providers
 │   │   │   └── group_rebalance_saga.py     # Rebalance on member failure
 │   │   ├── ports/                 # ICommandBus, IQueryBus, ISagaManager
 │   │   ├── read_models/           # Denormalized query projections
@@ -107,7 +107,7 @@ mcp-hangar/
 │   ├── server/                    # HTTP/WebSocket/CLI/MCP protocol
 │   │   ├── api/                   # FastAPI REST endpoints
 │   │   │   ├── router.py          # Route registration
-│   │   │   ├── providers.py       # /api/providers CRUD
+│   │   │   ├── mcp_servers.py     # /api/mcp_servers CRUD
 │   │   │   ├── tools.py           # Tool invocation
 │   │   │   ├── middleware.py      # Auth, error handling, CORS
 │   │   │   └── ws/                # WebSocket real-time events
@@ -139,7 +139,9 @@ mcp-hangar/
 │   │   ├── cli.py                 # mcp-hangar auth <subcommand>
 │   │   └── bootstrap.py           # Auth component bootstrap
 │   ├── approvals/                 # Approval gate workflow
-│   └── compliance/                # Compliance reporting
+│   ├── compliance/                # Compliance reporting
+│   ├── integrations/              # Third-party adapters (Langfuse, etc.)
+│   └── persistence/               # Shared persistence infrastructure
 │
 ├── tests/
 │   ├── conftest.py                # Shared fixtures, marker-based categorization
@@ -162,17 +164,17 @@ mcp-hangar/
 
 ## Architecture
 
-### Provider State Machine
+### McpServer State Machine
 
 ```
 COLD --> INITIALIZING --> READY --> DEGRADED --> DEAD
   ^                        |  ^        |
   |                        |  |        |
-  +--- StopProvider -------+  +--------+
+  +--- StopMcpServer ------+  +--------+
                                recovery
 ```
 
-States managed by `Provider` aggregate root. Transitions emit domain events. Circuit breaker tracks consecutive failures.
+States managed by `McpServer` aggregate root. Transitions emit domain events. Circuit breaker tracks consecutive failures.
 
 ### CQRS Flow
 
@@ -183,7 +185,7 @@ CLI/API request
 CommandBus.dispatch(command)  -->  CommandHandler.handle()
     |                                    |
     v                                    v
-Middleware pipeline              Provider aggregate mutates
+Middleware pipeline              McpServer aggregate mutates
 (validation, tracing)            Events collected on aggregate
     |                                    |
     v                                    v
@@ -215,7 +217,7 @@ Always acquire locks in ascending order. `TrackedLock` enforces this at runtime.
 - **Explicit event publishing**: handlers call `event_bus.publish()` after persistence
 - **Value objects are frozen dataclasses**: immutable, validated at construction
 - **Single-flight for cold starts**: 10 parallel tool calls to cold provider start it once
-- **Hot-loading**: `RuntimeProviderStore` for dynamically loaded providers (separate from static config)
+- **Hot-loading**: `RuntimeMcpServerStore` for dynamically loaded providers (separate from static config)
 - **No DI framework**: explicit wiring in `server/bootstrap/` modules
 
 ## Git Workflow for Agents
@@ -223,8 +225,9 @@ Always acquire locks in ascending order. `TrackedLock` enforces this at runtime.
 Read `docs/development/GIT_FLOW.md` for the full flow. Hard rules for agent-authored PRs:
 
 - **One PR, one goal, one Conventional Commit scope.** No mixed-scope changes.
-- **Branch:** `<type>/<scope>-<slug>` where `<type>` is one of `feat|fix|perf|refactor|docs|test|build|ci|chore`. Agent prefix `copilot/<task>-<slug>` is also valid.
+- **Branch:** `<type>/<scope>-<slug>` where `<type>` is one of `feat|fix|perf|refactor|docs|test|build|ci|chore|revert|security`. Agent prefix `copilot/<task>-<slug>` is also valid.
 - **PR title** is the Conventional Commit subject (squash-merge propagates it). Example: `feat(core): add capability validation cache`.
+- **CC scopes** (enforced by CI): `core`, `enterprise`, `cli`, `operator`, `helm`, `ui`, `observability`, `security`, `docs`, `deps`, `release`, `infra`, `tests`, `repo`.
 - **PR body** follows `.github/PULL_REQUEST_TEMPLATE.md` — fill every section including Agent metadata.
 - **Soft LOC limit:** ≤400 lines changed (excluding tests). Larger changes require decomposition; open a parent issue first.
 - **Issue first:** open or claim an `agent_task` issue before pushing the first commit. Link via `Closes #N` (or `Refs #N` for child PRs of an epic).
@@ -236,6 +239,7 @@ Read `docs/development/GIT_FLOW.md` for the full flow. Hard rules for agent-auth
 - **CHANGELOG:** every non-trivial PR adds a line under `## [Unreleased]` in the appropriate section (`### Added`, `### Fixed`, `### Changed`, `### Security`). Trivial = `chore(deps)`, `ci`, `style`, `test`, pure `docs`.
 - **No emoji** anywhere in code, comments, commit messages, or docs.
 - **Squash-merge default.** Do not request merge commits.
+- **Required status checks** (must pass before merge): `pr-validation / required-check`, `enterprise-boundary`, `pr-title / validate`, `changelog / check`, `branch-name / validate`, `pr-body / validate`.
 
 For ADR work specifically, see `docs/adr/AGENTS.md` — agents may draft ADR content in issue comments but never author the PR.
 
@@ -261,11 +265,11 @@ Core (`src/`) and enterprise (`enterprise/`) are **separate DDD boundaries**.
 
 | File | Lines | Why it matters |
 |------|-------|----------------|
-| `domain/model/provider.py` | 1368 | Main aggregate: 51 methods, state machine + circuit breaker |
-| `domain/events.py` | 1327 | 40+ event definitions (low complexity, good reference) |
-| `errors.py` | 1234 | 30+ exception types, 150 conditional branches |
-| `server/tools/batch/executor.py` | 901 | Batch execution, 8 methods averaging 90 lines each |
-| `enterprise/auth/infrastructure/sqlite_store.py` | 856 | Event-sourced auth storage |
+| `domain/model/mcp_server.py` | 1383 | Main aggregate: 51 methods, state machine + circuit breaker |
+| `domain/events.py` | 1872 | 75+ event definitions (low complexity, good reference) |
+| `errors.py` | 1248 | 30+ exception types, 150 conditional branches |
+| `server/tools/batch/executor.py` | 925 | Batch execution, 8 methods averaging 90 lines each |
+| `enterprise/auth/infrastructure/sqlite_store.py` | 857 | Event-sourced auth storage |
 
 ## What NOT to Do
 

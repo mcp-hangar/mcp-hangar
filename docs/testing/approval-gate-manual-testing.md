@@ -1,10 +1,10 @@
-# Manual Testing Guide: Approval Gate (v0.13.0)
+# Manual Testing Guide: Approval Gate
 
 ## Prerequisites
 
 - Python 3.11+ with `uv` installed
 - Node.js 18+ (for dashboard)
-- mcp-hangar checked out on `feature/enterprise-migration`
+- mcp-hangar checked out on `main`
 - Optional: Slack workspace with webhook configured
 
 ---

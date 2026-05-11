@@ -33,15 +33,9 @@ uv run pytest tests/ -v
 uv run pre-commit run --all-files
 ```
 
-#### Step 2: Initiate Version Bump (Automated)
+#### Step 2: Initiate Release (Automated via release-please)
 
-1. Navigate to **GitHub → Actions → Version Bump**
-2. Click **Run workflow**
-3. Select parameters:
-   - `bump_type`: `patch` | `minor` | `major`
-   - `prerelease`: empty for stable, or `rc.1` for release candidate
-   - `dry_run`: `true` to preview changes first
-4. Monitor workflow execution
+Releases are driven by [release-please](https://github.com/googleapis/release-please). When Conventional Commit PRs merge to `main`, release-please opens a release PR that bumps the version and updates the changelog. Merging that PR triggers the release pipeline.
 
 #### Step 3: Monitor Release Pipeline
 
@@ -104,7 +98,7 @@ git checkout -b hotfix/X.Y.Z vX.Y.Z-1  # e.g., hotfix/1.0.1 from v1.0.0
 # ...
 
 # Run tests
-uv run pytest tests/ -v -m "not slow"
+uv run pytest tests/ -v
 ```
 
 #### Step 3: Update Version and Changelog
@@ -154,11 +148,7 @@ PyPI doesn't allow re-uploading deleted versions. Instead:
 
 1. **Yank the version** (marks as not recommended):
 
-   ```bash
-   # Via PyPI web interface or:
-   pip install twine
-   twine yank mcp-hangar -v X.Y.Z
-   ```
+   Use the PyPI web interface: navigate to `https://pypi.org/manage/project/mcp-hangar/release/X.Y.Z/`, then click "Yank". There is no CLI command for yanking.
 
 2. **Release a new patch version** with the fix or revert.
 

@@ -8,7 +8,7 @@
 
 MCP Hangar manages complex MCP server lifecycles and tool invocations while serving high-volume read requests for MCP server status and metrics. A traditional CRUD-based architecture where the same models are used for both reading and writing leads to several problems:
 
-1. **Model Overload**: Aggregate roots like `MCP Server` become bloated with read-only logic and DTO transformations.
+1. **Model Overload**: Aggregate roots like `McpServer` become bloated with read-only logic and DTO transformations.
 2. **Performance Constraints**: Complex queries often require joins or data transformations that are inefficient when executed against normalized domain models.
 3. **Scalability**: Scaling write operations (state transitions, circuit breaking) independently from read operations (dashboard views, tool listing) is difficult.
 

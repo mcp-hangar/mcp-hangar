@@ -58,7 +58,7 @@ mcp-hangar init [OPTIONS]
 |--------|-------|------|---------|-------------|
 | `--non-interactive` | `-y` | FLAG | false | Run without prompts, using defaults |
 | `--bundle` | `-b` | TEXT | - | MCP Server bundle to install |
-| `--MCP servers` | - | TEXT | - | Comma-separated list of MCP servers |
+| `--mcp-servers` | - | TEXT | - | Comma-separated list of MCP servers |
 | `--config-path` | - | PATH | - | Custom path for config file |
 | `--claude-config` | - | PATH | - | Custom path to Claude Desktop config |
 | `--skip-claude` | - | FLAG | false | Skip Claude Desktop config modification |
@@ -112,14 +112,14 @@ Display health dashboard of all configured MCP servers with real-time updates.
 ### Synopsis
 
 ```bash
-mcp-hangar status [OPTIONS] [PROVIDER]
+mcp-hangar status [OPTIONS] [MCP_SERVER]
 ```
 
 ### Arguments
 
 | Argument | Required | Description |
 |----------|----------|-------------|
-| `PROVIDER` | No | Show detailed status for specific MCP server |
+| `MCP_SERVER` | No | Show detailed status for specific MCP server |
 
 ### Options
 
