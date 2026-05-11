@@ -5,6 +5,32 @@
 > **Time:** 15 minutes
 > **Adds:** Auto-discover MCP servers from Kubernetes annotations
 
+## Prerequisites
+
+This recipe requires the **MCP-Hangar Operator** running in your cluster.
+The operator ships from a separate repository:
+<https://github.com/mcp-hangar/hangar-operator>.
+
+Install via Helm (from the [helm-charts](https://github.com/mcp-hangar/helm-charts) repo):
+
+```bash
+helm repo add mcp-hangar https://mcp-hangar.github.io/helm-charts
+helm repo update
+helm install mcp-hangar-operator mcp-hangar/mcp-hangar-operator \
+  --namespace mcp-system \
+  --create-namespace
+```
+
+Verify the CRDs are installed:
+
+```bash
+kubectl get crd | grep mcp-hangar.io
+# Expected:
+#   mcpservers.mcp-hangar.io
+#   mcpservergroups.mcp-hangar.io
+#   mcpdiscoverysources.mcp-hangar.io
+```
+
 ## The Problem
 
 You run MCP servers as Kubernetes services. Teams deploy and scale MCP servers independently. You need Hangar to discover them from annotations without manual config updates.

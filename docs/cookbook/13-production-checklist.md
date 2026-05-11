@@ -51,7 +51,11 @@
 
 ## Kubernetes (if applicable)
 
-- [ ] MCP-Hangar Operator installed
+> The MCP-Hangar Operator is an external component shipped from
+> [hangar-operator](https://github.com/mcp-hangar/hangar-operator).
+> See [Recipe 11](11-discovery-kubernetes.md#prerequisites) for install instructions.
+
+- [ ] MCP-Hangar Operator installed (see [Recipe 11 prerequisites](11-discovery-kubernetes.md#prerequisites))
 - [ ] CRDs applied (`MCPServer`, `MCPServerGroup`, `MCPDiscoverySource`)
 - [ ] RBAC (Kubernetes) configured for operator service account
 - [ ] Network policies restricting MCP server-to-MCP server communication
