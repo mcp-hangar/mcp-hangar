@@ -7,6 +7,7 @@ from mcp_hangar.domain.value_objects.tool_digest import (
     DigestPolicy,
     DigestUnknownPolicy,
     ToolDigest,
+    normalize_unknown_policy,
 )
 
 
@@ -105,12 +106,33 @@ class TestDigestUnknownPolicy:
     """DigestUnknownPolicy enum values."""
 
     def test_values(self):
-        assert DigestUnknownPolicy.ALLOW_DEGRADED == "allow_degraded"
+        assert DigestUnknownPolicy.ALLOW_UNVERIFIED == "allow_unverified"
         assert DigestUnknownPolicy.WARN == "warn"
         assert DigestUnknownPolicy.BLOCK == "block"
 
     def test_from_string(self):
-        assert DigestUnknownPolicy("allow_degraded") == DigestUnknownPolicy.ALLOW_DEGRADED
+        assert DigestUnknownPolicy("allow_unverified") == DigestUnknownPolicy.ALLOW_UNVERIFIED
+
+
+class TestNormalizeUnknownPolicy:
+    """Deprecation shim for allow_degraded -> allow_unverified."""
+
+    def test_deprecated_alias_returns_new_value(self):
+        with pytest.warns(DeprecationWarning, match="allow_degraded.*deprecated.*allow_unverified"):
+            result = normalize_unknown_policy("allow_degraded")
+        assert result == "allow_unverified"
+
+    def test_deprecated_alias_mentions_removal_version(self):
+        with pytest.warns(DeprecationWarning, match="v1\\.4"):
+            normalize_unknown_policy("allow_degraded")
+
+    def test_current_values_pass_through(self):
+        assert normalize_unknown_policy("allow_unverified") == "allow_unverified"
+        assert normalize_unknown_policy("warn") == "warn"
+        assert normalize_unknown_policy("block") == "block"
+
+    def test_unknown_value_passes_through(self):
+        assert normalize_unknown_policy("something_else") == "something_else"
 
 
 class TestDigestPolicy:
@@ -148,7 +170,7 @@ class TestDigestPolicy:
     def test_empty_allowlist(self):
         policy = DigestPolicy(
             enforcement=DigestEnforcement.AUDIT,
-            unknown=DigestUnknownPolicy.ALLOW_DEGRADED,
+            unknown=DigestUnknownPolicy.ALLOW_UNVERIFIED,
             allowlist=frozenset(),
         )
         assert policy.get_expected_digest("anything") is None
