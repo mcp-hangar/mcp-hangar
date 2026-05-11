@@ -165,9 +165,7 @@ class ApprovalGateService:
                 # State already updated by resolve() -- just reload for event data
                 updated = await self._repository.get(approval_id)
                 decided_by = updated.decided_by if updated and updated.decided_by is not None else "unknown"
-                decided_at = (
-                    updated.decided_at if updated and updated.decided_at is not None else datetime.now(UTC)
-                )
+                decided_at = updated.decided_at if updated and updated.decided_at is not None else datetime.now(UTC)
 
                 await self._publish(
                     ToolApprovalGranted(
@@ -185,9 +183,7 @@ class ApprovalGateService:
                 # State already updated by resolve() -- just reload for event data
                 updated = await self._repository.get(approval_id)
                 decided_by = updated.decided_by if updated and updated.decided_by is not None else "unknown"
-                decided_at = (
-                    updated.decided_at if updated and updated.decided_at is not None else datetime.now(UTC)
-                )
+                decided_at = updated.decided_at if updated and updated.decided_at is not None else datetime.now(UTC)
                 reason = updated.reason if updated else None
 
                 await self._publish(
