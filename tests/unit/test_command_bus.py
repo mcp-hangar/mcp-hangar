@@ -46,9 +46,12 @@ class TestCommands:
 
     def test_invoke_tool_command(self):
         """Test InvokeToolCommand creation."""
-        cmd = InvokeToolCommand(mcp_server_id="test-provider", tool_name="add",
-        arguments={"a": 1, "b": 2},
-        timeout=30.0,)
+        cmd = InvokeToolCommand(
+            mcp_server_id="test-provider",
+            tool_name="add",
+            arguments={"a": 1, "b": 2},
+            timeout=30.0,
+        )
 
         assert cmd.mcp_server_id == "test-provider"
         assert cmd.tool_name == "add"

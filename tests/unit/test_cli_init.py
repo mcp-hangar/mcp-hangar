@@ -91,7 +91,8 @@ class TestConfigFileManager:
         assert provider is not None
 
         config_str = manager.generate_initial_config(
-            mcp_servers=[provider], configs={"filesystem": {"path": "/home/user/documents"}},
+            mcp_servers=[provider],
+            configs={"filesystem": {"path": "/home/user/documents"}},
         )
 
         assert "/home/user/documents" in config_str
@@ -104,7 +105,8 @@ class TestConfigFileManager:
         assert provider is not None
 
         config_str = manager.generate_initial_config(
-            mcp_servers=[provider], configs={"github": {"use_env": "GITHUB_TOKEN"}},
+            mcp_servers=[provider],
+            configs={"github": {"use_env": "GITHUB_TOKEN"}},
         )
 
         assert "env:" in config_str

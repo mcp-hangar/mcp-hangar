@@ -314,26 +314,38 @@ class TestHealthSummary:
 
     def test_all_ready(self):
         """Should return True when all providers are ready."""
-        summary = HealthSummary(mcp_servers={"math": "ready", "fetch": "ready"}, ready_count=2,
-        total_count=2,)
+        summary = HealthSummary(
+            mcp_servers={"math": "ready", "fetch": "ready"},
+            ready_count=2,
+            total_count=2,
+        )
         assert summary.all_ready is True
 
     def test_not_all_ready(self):
         """Should return False when not all providers are ready."""
-        summary = HealthSummary(mcp_servers={"math": "ready", "fetch": "cold"}, ready_count=1,
-        total_count=2,)
+        summary = HealthSummary(
+            mcp_servers={"math": "ready", "fetch": "cold"},
+            ready_count=1,
+            total_count=2,
+        )
         assert summary.all_ready is False
 
     def test_any_ready(self):
         """Should return True when at least one provider is ready."""
-        summary = HealthSummary(mcp_servers={"math": "ready", "fetch": "cold"}, ready_count=1,
-        total_count=2,)
+        summary = HealthSummary(
+            mcp_servers={"math": "ready", "fetch": "cold"},
+            ready_count=1,
+            total_count=2,
+        )
         assert summary.any_ready is True
 
     def test_none_ready(self):
         """Should return False when no providers are ready."""
-        summary = HealthSummary(mcp_servers={"math": "cold", "fetch": "cold"}, ready_count=0,
-        total_count=2,)
+        summary = HealthSummary(
+            mcp_servers={"math": "cold", "fetch": "cold"},
+            ready_count=0,
+            total_count=2,
+        )
         assert summary.any_ready is False
 
 

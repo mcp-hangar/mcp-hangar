@@ -35,16 +35,16 @@ class InMemoryRepository:
 
     async def list_pending(self, mcp_server_id=None):
         return [
-            r for r in self._store.values()
-            if r.state == ApprovalState.PENDING
-            and (mcp_server_id is None or r.mcp_server_id == mcp_server_id)
+            r
+            for r in self._store.values()
+            if r.state == ApprovalState.PENDING and (mcp_server_id is None or r.mcp_server_id == mcp_server_id)
         ]
 
     async def list_by_state(self, state, mcp_server_id=None):
         return [
-            r for r in self._store.values()
-            if r.state == state
-            and (mcp_server_id is None or r.mcp_server_id == mcp_server_id)
+            r
+            for r in self._store.values()
+            if r.state == state and (mcp_server_id is None or r.mcp_server_id == mcp_server_id)
         ]
 
     async def update_state(self, approval_id, state, decided_by, decided_at, reason):

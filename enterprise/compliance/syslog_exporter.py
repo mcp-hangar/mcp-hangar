@@ -57,9 +57,7 @@ def _format_structured_data(record: AuditRecord) -> str:
         "fromState": data.get("from_state"),
         "toState": data.get("to_state"),
     }
-    params = " ".join(
-        f'{key}="{_escape_sd_value(str(value))}"' for key, value in fields.items() if value is not None
-    )
+    params = " ".join(f'{key}="{_escape_sd_value(str(value))}"' for key, value in fields.items() if value is not None)
     return f"[{SD_ID}{(' ' + params) if params else ''}]"
 
 
@@ -69,10 +67,7 @@ def _format_message(record: AuditRecord) -> str:
         return f"Provider {record.provider_id} state changed from {data.get('from_state')} to {data.get('to_state')}"
     status = data.get("status")
     status_text = str(status).lower() if status is not None else record.event_type.lower()
-    return (
-        f"Tool {data.get('tool_name')} on provider {record.provider_id} "
-        f"{status_text}"
-    )
+    return f"Tool {data.get('tool_name')} on provider {record.provider_id} {status_text}"
 
 
 def _format_record(record: AuditRecord) -> str:

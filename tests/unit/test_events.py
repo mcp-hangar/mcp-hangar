@@ -9,9 +9,12 @@ from mcp_hangar.infrastructure.event_bus import EventBus, get_event_bus, reset_e
 
 def test_event_to_dict():
     """Test that events can be serialized to dict."""
-    event = McpServerStarted(mcp_server_id="test_provider", mode="subprocess",
-    tools_count=5,
-    startup_duration_ms=123.45,)
+    event = McpServerStarted(
+        mcp_server_id="test_provider",
+        mode="subprocess",
+        tools_count=5,
+        startup_duration_ms=123.45,
+    )
 
     event_dict = event.to_dict()
 
@@ -166,10 +169,13 @@ def test_metrics_handler_multiple_invocations():
 
     # Simulate multiple invocations
     for i in range(10):
-        event = ToolInvocationCompleted(mcp_server_id="test_provider", tool_name="add",
-        correlation_id=f"corr_{i}",
-        duration_ms=float(i * 10),
-        result_size_bytes=100,)
+        event = ToolInvocationCompleted(
+            mcp_server_id="test_provider",
+            tool_name="add",
+            correlation_id=f"corr_{i}",
+            duration_ms=float(i * 10),
+            result_size_bytes=100,
+        )
         handler.handle(event)
 
     metrics = handler.get_metrics("test_provider")

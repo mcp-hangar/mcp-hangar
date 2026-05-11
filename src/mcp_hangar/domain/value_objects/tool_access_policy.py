@@ -347,7 +347,7 @@ class _CompositePolicy(ToolAccessPolicy):
         if isinstance(narrower, _CompositePolicy) and narrower._check:
             narrower_check = narrower._check
             return _CompositePolicy(
-                check=lambda name: ((base_check(name) if base_check else True) and narrower_check(name)),
+                check=lambda name: (base_check(name) if base_check else True) and narrower_check(name),
                 description=f"{self._description} & {narrower._description}",
                 approval_patterns=merged_approval,
                 merged_timeout=merged_timeout,

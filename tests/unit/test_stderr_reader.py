@@ -19,9 +19,12 @@ from mcp_hangar.infrastructure.persistence.log_buffer import ProviderLogBuffer
 
 
 def _make_provider(mcp_server_id: str = "test-p", log_buffer: IProviderLogBuffer | None = None) -> McpServer:
-    return McpServer(mcp_server_id=mcp_server_id, mode="subprocess",
-    command=[sys.executable, "-c", "pass"],
-    log_buffer=log_buffer,)
+    return McpServer(
+        mcp_server_id=mcp_server_id,
+        mode="subprocess",
+        command=[sys.executable, "-c", "pass"],
+        log_buffer=log_buffer,
+    )
 
 
 def _make_buffer(mcp_server_id: str = "test-p") -> ProviderLogBuffer:

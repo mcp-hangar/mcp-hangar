@@ -16,13 +16,9 @@ class ApprovalRepository(Protocol):
 
     async def get(self, approval_id: str) -> ApprovalRequest | None: ...
 
-    async def list_pending(
-        self, provider_id: str | None = None
-    ) -> list[ApprovalRequest]: ...
+    async def list_pending(self, provider_id: str | None = None) -> list[ApprovalRequest]: ...
 
-    async def list_by_state(
-        self, state: ApprovalState, provider_id: str | None = None
-    ) -> list[ApprovalRequest]: ...
+    async def list_by_state(self, state: ApprovalState, provider_id: str | None = None) -> list[ApprovalRequest]: ...
 
     async def update_state(
         self,
@@ -119,14 +115,10 @@ class SqliteApprovalRepository:
                 return None
             return self._row_to_request(row)
 
-    async def list_pending(
-        self, provider_id: str | None = None
-    ) -> list[ApprovalRequest]:
+    async def list_pending(self, provider_id: str | None = None) -> list[ApprovalRequest]:
         return await self.list_by_state(ApprovalState.PENDING, provider_id)
 
-    async def list_by_state(
-        self, state: ApprovalState, provider_id: str | None = None
-    ) -> list[ApprovalRequest]:
+    async def list_by_state(self, state: ApprovalState, provider_id: str | None = None) -> list[ApprovalRequest]:
         await self._ensure_table()
         async with self._db.connection() as conn:
             if provider_id:

@@ -26,16 +26,16 @@ class FakeRepository:
 
     async def list_pending(self, mcp_server_id=None):
         return [
-            r for r in self._store.values()
-            if r.state == ApprovalState.PENDING
-            and (mcp_server_id is None or r.mcp_server_id == mcp_server_id)
+            r
+            for r in self._store.values()
+            if r.state == ApprovalState.PENDING and (mcp_server_id is None or r.mcp_server_id == mcp_server_id)
         ]
 
     async def list_by_state(self, state, mcp_server_id=None):
         return [
-            r for r in self._store.values()
-            if r.state == state
-            and (mcp_server_id is None or r.mcp_server_id == mcp_server_id)
+            r
+            for r in self._store.values()
+            if r.state == state and (mcp_server_id is None or r.mcp_server_id == mcp_server_id)
         ]
 
     async def update_state(self, approval_id, state, decided_by, decided_at, reason):
@@ -95,14 +95,16 @@ def service(repo, hold_registry, event_bus, delivery):
 
 
 class TestApprovalGateServiceCheck:
-
     async def test_check_tool_not_on_approval_list_returns_not_required(self, service):
         """Tool not requiring approval returns immediately."""
         policy = ToolAccessPolicy(allow_list=("search",))
-        result = await service.check(mcp_server_id="notion", tool_name="search",
-        arguments={},
-        policy=policy,
-        correlation_id="corr-1",)
+        result = await service.check(
+            mcp_server_id="notion",
+            tool_name="search",
+            arguments={},
+            policy=policy,
+            correlation_id="corr-1",
+        )
         assert result.approved is True
         assert result.approval_id is None
 
@@ -137,10 +139,13 @@ class TestApprovalGateServiceCheck:
 
         asyncio.create_task(approve_after_register())
 
-        result = await service.check(mcp_server_id="notion", tool_name="update_page",
-        arguments={"page_id": "abc"},
-        policy=policy,
-        correlation_id="corr-2",)
+        result = await service.check(
+            mcp_server_id="notion",
+            tool_name="update_page",
+            arguments={"page_id": "abc"},
+            policy=policy,
+            correlation_id="corr-2",
+        )
         assert result.approved is True
         assert result.approval_id is not None
 
@@ -173,10 +178,13 @@ class TestApprovalGateServiceCheck:
 
         asyncio.create_task(deny_after_register())
 
-        result = await service.check(mcp_server_id="notion", tool_name="update_page",
-        arguments={},
-        policy=policy,
-        correlation_id="corr-3",)
+        result = await service.check(
+            mcp_server_id="notion",
+            tool_name="update_page",
+            arguments={},
+            policy=policy,
+            correlation_id="corr-3",
+        )
         assert result.approved is False
         assert result.error_code == "approval_denied"
 
@@ -191,10 +199,13 @@ class TestApprovalGateServiceCheck:
             approval_timeout_seconds=0,  # immediate timeout
         )
 
-        result = await service.check(mcp_server_id="notion", tool_name="update_page",
-        arguments={},
-        policy=policy,
-        correlation_id="corr-4",)
+        result = await service.check(
+            mcp_server_id="notion",
+            tool_name="update_page",
+            arguments={},
+            policy=policy,
+            correlation_id="corr-4",
+        )
         assert result.approved is False
         assert result.error_code == "approval_timeout"
 
@@ -209,10 +220,13 @@ class TestApprovalGateServiceCheck:
             approval_timeout_seconds=0,
         )
 
-        await service.check(mcp_server_id="notion", tool_name="update_page",
-        arguments={"page_id": "abc", "api_token": "secret123"},
-        policy=policy,
-        correlation_id="corr-5",)
+        await service.check(
+            mcp_server_id="notion",
+            tool_name="update_page",
+            arguments={"page_id": "abc", "api_token": "secret123"},
+            policy=policy,
+            correlation_id="corr-5",
+        )
 
         # Check persisted request has sanitized args
         requests = list(repo._store.values())
@@ -227,17 +241,19 @@ class TestApprovalGateServiceCheck:
             approval_timeout_seconds=0,
         )
 
-        await service.check(mcp_server_id="notion", tool_name="update_page",
-        arguments={},
-        policy=policy,
-        correlation_id="corr-6",)
+        await service.check(
+            mcp_server_id="notion",
+            tool_name="update_page",
+            arguments={},
+            policy=policy,
+            correlation_id="corr-6",
+        )
 
         assert len(delivery.sent) == 1
         assert delivery.sent[0].tool_name == "update_page"
 
 
 class TestApprovalGateServiceResolve:
-
     async def test_resolve_nonexistent_returns_false(self, service):
         result = await service.resolve("nonexistent", True, "admin@test.com")
         assert result is False

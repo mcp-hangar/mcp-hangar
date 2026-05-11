@@ -38,8 +38,11 @@ class TestRepositorySnapshotSaveViaEventStore:
         self, repo: EventSourcedProviderRepository, event_store: InMemoryEventStore
     ):
         """Repository saves snapshot using event_store.save_snapshot() after snapshot_interval events."""
-        provider = EventSourcedProvider(mcp_server_id="test-provider", mode="subprocess",
-        command=["python", "-m", "test"],)
+        provider = EventSourcedProvider(
+            mcp_server_id="test-provider",
+            mode="subprocess",
+            command=["python", "-m", "test"],
+        )
 
         # Record enough events to trigger snapshot (interval=3)
         provider._record_event(
@@ -49,10 +52,13 @@ class TestRepositorySnapshotSaveViaEventStore:
             McpServerStarted(mcp_server_id="test-provider", mode="subprocess", tools_count=2, startup_duration_ms=50.0)
         )
         provider._record_event(
-            ToolInvocationCompleted(mcp_server_id="test-provider", tool_name="add",
-            correlation_id="corr-1",
-            duration_ms=10.0,
-            result_size_bytes=100,)
+            ToolInvocationCompleted(
+                mcp_server_id="test-provider",
+                tool_name="add",
+                correlation_id="corr-1",
+                duration_ms=10.0,
+                result_size_bytes=100,
+            )
         )
 
         # Save config first
@@ -71,8 +77,11 @@ class TestRepositorySnapshotSaveViaEventStore:
         self, repo: EventSourcedProviderRepository, event_store: InMemoryEventStore
     ):
         """Repository does not save snapshot before reaching snapshot_interval."""
-        provider = EventSourcedProvider(mcp_server_id="test-provider", mode="subprocess",
-        command=["python", "-m", "test"],)
+        provider = EventSourcedProvider(
+            mcp_server_id="test-provider",
+            mode="subprocess",
+            command=["python", "-m", "test"],
+        )
 
         # Record fewer events than interval (interval=3)
         provider._record_event(
@@ -110,8 +119,11 @@ class TestRepositorySnapshotLoadViaEventStore:
     ):
         """Repository loads from snapshot then replays subsequent events."""
         # First, create a provider and accumulate events to create a snapshot
-        provider = EventSourcedProvider(mcp_server_id="test-provider", mode="subprocess",
-        command=["python", "-m", "test"],)
+        provider = EventSourcedProvider(
+            mcp_server_id="test-provider",
+            mode="subprocess",
+            command=["python", "-m", "test"],
+        )
 
         # Record events to trigger snapshot
         provider._record_event(
@@ -121,10 +133,13 @@ class TestRepositorySnapshotLoadViaEventStore:
             McpServerStarted(mcp_server_id="test-provider", mode="subprocess", tools_count=2, startup_duration_ms=50.0)
         )
         provider._record_event(
-            ToolInvocationCompleted(mcp_server_id="test-provider", tool_name="add",
-            correlation_id="corr-1",
-            duration_ms=10.0,
-            result_size_bytes=100,)
+            ToolInvocationCompleted(
+                mcp_server_id="test-provider",
+                tool_name="add",
+                correlation_id="corr-1",
+                duration_ms=10.0,
+                result_size_bytes=100,
+            )
         )
 
         repo._save_config("test-provider", provider)
@@ -132,10 +147,13 @@ class TestRepositorySnapshotLoadViaEventStore:
 
         # Add more events after snapshot
         provider._record_event(
-            ToolInvocationCompleted(mcp_server_id="test-provider", tool_name="multiply",
-            correlation_id="corr-2",
-            duration_ms=20.0,
-            result_size_bytes=200,)
+            ToolInvocationCompleted(
+                mcp_server_id="test-provider",
+                tool_name="multiply",
+                correlation_id="corr-2",
+                duration_ms=20.0,
+                result_size_bytes=200,
+            )
         )
         repo.add("test-provider", provider)
 
@@ -151,8 +169,11 @@ class TestRepositorySnapshotLoadViaEventStore:
         self, repo: EventSourcedProviderRepository, event_store: InMemoryEventStore
     ):
         """Repository loads correctly via full replay when no snapshot exists."""
-        provider = EventSourcedProvider(mcp_server_id="test-provider", mode="subprocess",
-        command=["python", "-m", "test"],)
+        provider = EventSourcedProvider(
+            mcp_server_id="test-provider",
+            mode="subprocess",
+            command=["python", "-m", "test"],
+        )
 
         # Record only 1 event (below snapshot interval)
         provider._record_event(
@@ -186,20 +207,29 @@ class TestRepositorySnapshotStateEquivalence:
         events_to_record = [
             McpServerStateChanged(mcp_server_id="test-provider", old_state="cold", new_state="initializing"),
             McpServerStarted(mcp_server_id="test-provider", mode="subprocess", tools_count=2, startup_duration_ms=50.0),
-            ToolInvocationCompleted(mcp_server_id="test-provider", tool_name="add",
-            correlation_id="corr-1",
-            duration_ms=10.0,
-            result_size_bytes=100,),
-            ToolInvocationCompleted(mcp_server_id="test-provider", tool_name="multiply",
-            correlation_id="corr-2",
-            duration_ms=20.0,
-            result_size_bytes=200,),
+            ToolInvocationCompleted(
+                mcp_server_id="test-provider",
+                tool_name="add",
+                correlation_id="corr-1",
+                duration_ms=10.0,
+                result_size_bytes=100,
+            ),
+            ToolInvocationCompleted(
+                mcp_server_id="test-provider",
+                tool_name="multiply",
+                correlation_id="corr-2",
+                duration_ms=20.0,
+                result_size_bytes=200,
+            ),
         ]
 
         # Create provider with applied events (from_events applies them, updating state)
-        provider = EventSourcedProvider.from_events(mcp_server_id="test-provider", mode="subprocess",
-        events=events_to_record,
-        command=["python", "-m", "test"],)
+        provider = EventSourcedProvider.from_events(
+            mcp_server_id="test-provider",
+            mode="subprocess",
+            events=events_to_record,
+            command=["python", "-m", "test"],
+        )
 
         # Re-record events as uncommitted so repo.add() persists them
         for event in events_to_record:
@@ -213,9 +243,12 @@ class TestRepositorySnapshotStateEquivalence:
         loaded_from_snapshot = repo.get("test-provider")
 
         # Build state from full replay (no snapshot)
-        full_replay = EventSourcedProvider.from_events(mcp_server_id="test-provider", mode="subprocess",
-        events=events_to_record,
-        command=["python", "-m", "test"],)
+        full_replay = EventSourcedProvider.from_events(
+            mcp_server_id="test-provider",
+            mode="subprocess",
+            events=events_to_record,
+            command=["python", "-m", "test"],
+        )
 
         # Both should have the same provider state (lifecycle phase)
         assert loaded_from_snapshot is not None
@@ -236,8 +269,11 @@ class TestRepositoryBackwardCompatibility:
             snapshot_interval=3,
         )
 
-        provider = EventSourcedProvider(mcp_server_id="test-provider", mode="subprocess",
-        command=["python", "-m", "test"],)
+        provider = EventSourcedProvider(
+            mcp_server_id="test-provider",
+            mode="subprocess",
+            command=["python", "-m", "test"],
+        )
 
         provider._record_event(
             McpServerStateChanged(mcp_server_id="test-provider", old_state="cold", new_state="initializing")
@@ -246,10 +282,13 @@ class TestRepositoryBackwardCompatibility:
             McpServerStarted(mcp_server_id="test-provider", mode="subprocess", tools_count=2, startup_duration_ms=50.0)
         )
         provider._record_event(
-            ToolInvocationCompleted(mcp_server_id="test-provider", tool_name="add",
-            correlation_id="corr-1",
-            duration_ms=10.0,
-            result_size_bytes=100,)
+            ToolInvocationCompleted(
+                mcp_server_id="test-provider",
+                tool_name="add",
+                correlation_id="corr-1",
+                duration_ms=10.0,
+                result_size_bytes=100,
+            )
         )
 
         repo._save_config("test-provider", provider)

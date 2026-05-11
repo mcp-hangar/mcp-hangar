@@ -77,9 +77,12 @@ class TestInMemoryEventStore:
         """Test appending events to a new stream."""
         store = InMemoryEventStore()
 
-        event = McpServerStarted(mcp_server_id="p1", mode="subprocess",
-        tools_count=5,
-        startup_duration_ms=100.0,)
+        event = McpServerStarted(
+            mcp_server_id="p1",
+            mode="subprocess",
+            tools_count=5,
+            startup_duration_ms=100.0,
+        )
 
         version = store.append("p1", [event], expected_version=-1)
 

@@ -306,14 +306,20 @@ class TestInputValidatorExtended:
 
     def test_validate_all_combines_results(self):
         v = InputValidator()
-        result = v.validate_all(mcp_server_id="valid_id", tool_name="valid_tool",
-        timeout=30.0,)
+        result = v.validate_all(
+            mcp_server_id="valid_id",
+            tool_name="valid_tool",
+            timeout=30.0,
+        )
         assert result.valid
 
     def test_validate_all_with_invalid_inputs(self):
         v = InputValidator()
-        result = v.validate_all(mcp_server_id="", tool_name="",
-        timeout=-1,)
+        result = v.validate_all(
+            mcp_server_id="",
+            tool_name="",
+            timeout=-1,
+        )
         assert not result.valid
         assert len(result.errors) >= 3
 

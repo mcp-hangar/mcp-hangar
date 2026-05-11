@@ -38,9 +38,7 @@ def _build_slack_blocks(request: ApprovalRequest) -> list[dict[str, Any]]:
     args_text = _sanitize_for_display(request.arguments)
     expires_in = max(
         0,
-        int(
-            (request.expires_at - request.requested_at).total_seconds() / 60
-        ),
+        int((request.expires_at - request.requested_at).total_seconds() / 60),
     )
 
     return [

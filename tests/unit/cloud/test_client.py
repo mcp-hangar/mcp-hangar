@@ -25,9 +25,9 @@ class TestCloudClient:
     @pytest.mark.asyncio
     async def test_register_sets_agent_id(self, config):
         client = CloudClient(config)
-        client._http.post = AsyncMock(return_value=_mock_response(
-            {"agent_id": "ag_123", "tenant_id": "t_456", "config": {}}
-        ))
+        client._http.post = AsyncMock(
+            return_value=_mock_response({"agent_id": "ag_123", "tenant_id": "t_456", "config": {}})
+        )
         data = await client.register()
         assert data["agent_id"] == "ag_123"
         assert client.agent_id == "ag_123"

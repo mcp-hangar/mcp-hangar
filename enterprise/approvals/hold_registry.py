@@ -58,9 +58,7 @@ class ApprovalHoldRegistry:
         if entry is None:
             return None
         try:
-            signaled = await asyncio.to_thread(
-                entry.event.wait, float(timeout_seconds)
-            )
+            signaled = await asyncio.to_thread(entry.event.wait, float(timeout_seconds))
             if signaled:
                 return entry.approved
             return None

@@ -103,11 +103,14 @@ class TestEventRedaction:
 
     def test_redaction_applied_in_on_event(self):
         conn = _make_connector()
-        event = _make_event("ToolInvocationRequested", {
-            "arguments": {"password": "hunter2"},
-            "identity_context": {"user": "root"},
-            "mcp_server_id": "test",
-        })
+        event = _make_event(
+            "ToolInvocationRequested",
+            {
+                "arguments": {"password": "hunter2"},
+                "identity_context": {"user": "root"},
+                "mcp_server_id": "test",
+            },
+        )
         conn.on_event(event)
         buffered = conn._buffer.drain(1)[0]
         assert "arguments" not in buffered

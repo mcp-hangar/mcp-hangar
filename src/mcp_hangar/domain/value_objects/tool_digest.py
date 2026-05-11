@@ -32,8 +32,7 @@ def normalize_unknown_policy(raw: str) -> str:
     new = _DEPRECATED_POLICY_ALIASES.get(raw)
     if new is not None:
         warnings.warn(
-            f"DigestUnknownPolicy '{raw}' is deprecated; use '{new}'. "
-            "Will be removed in v1.4.",
+            f"DigestUnknownPolicy '{raw}' is deprecated; use '{new}'. Will be removed in v1.4.",
             DeprecationWarning,
             stacklevel=2,
         )

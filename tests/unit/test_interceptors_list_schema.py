@@ -65,7 +65,6 @@ INTERCEPTOR_SCHEMA = {
 
 
 class TestInterceptorsListSchema:
-
     def test_response_validates_against_schema(self):
         response = interceptors_list_response()
         jsonschema.validate(response, INTERCEPTOR_SCHEMA)
@@ -73,9 +72,7 @@ class TestInterceptorsListSchema:
     def test_names_are_unique(self):
         response = interceptors_list_response()
         names = [i["name"] for i in response["interceptors"]]
-        assert len(names) == len(set(names)), (
-            f"Interceptor names must be unique per SEP-1763. Duplicates: {names}"
-        )
+        assert len(names) == len(set(names)), f"Interceptor names must be unique per SEP-1763. Duplicates: {names}"
 
     def test_schema_rejects_missing_name(self):
         bad = {"interceptors": [{"type": "validator"}]}

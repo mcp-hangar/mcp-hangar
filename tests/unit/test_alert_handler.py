@@ -182,9 +182,12 @@ class TestAlertEventHandler:
         sink = CallbackAlertSink(alerts.append)
         handler = AlertEventHandler(sinks=[sink], degradation_threshold=5)
 
-        event = McpServerDegraded(mcp_server_id="test-provider", consecutive_failures=2,
-        total_failures=5,
-        reason="timeout",)
+        event = McpServerDegraded(
+            mcp_server_id="test-provider",
+            consecutive_failures=2,
+            total_failures=5,
+            reason="timeout",
+        )
 
         handler.handle(event)
 
@@ -199,9 +202,12 @@ class TestAlertEventHandler:
         sink = CallbackAlertSink(alerts.append)
         handler = AlertEventHandler(sinks=[sink], degradation_threshold=3)
 
-        event = McpServerDegraded(mcp_server_id="test-provider", consecutive_failures=5,
-        total_failures=10,
-        reason="timeout",)
+        event = McpServerDegraded(
+            mcp_server_id="test-provider",
+            consecutive_failures=5,
+            total_failures=10,
+            reason="timeout",
+        )
 
         handler.handle(event)
 
@@ -244,11 +250,14 @@ class TestAlertEventHandler:
         sink = CallbackAlertSink(alerts.append)
         handler = AlertEventHandler(sinks=[sink])
 
-        event = ToolInvocationFailed(mcp_server_id="test-provider", tool_name="add",
-        correlation_id="corr-123",
-        duration_ms=50.0,
-        error_message="timeout",
-        error_type="TimeoutError",)
+        event = ToolInvocationFailed(
+            mcp_server_id="test-provider",
+            tool_name="add",
+            correlation_id="corr-123",
+            duration_ms=50.0,
+            error_message="timeout",
+            error_type="TimeoutError",
+        )
 
         handler.handle(event)
 
@@ -262,8 +271,11 @@ class TestAlertEventHandler:
         sink = CallbackAlertSink(alerts.append)
         handler = AlertEventHandler(sinks=[sink], health_failure_threshold=5)
 
-        event = HealthCheckFailed(mcp_server_id="test-provider", consecutive_failures=2,
-        error_message="connection refused",)
+        event = HealthCheckFailed(
+            mcp_server_id="test-provider",
+            consecutive_failures=2,
+            error_message="connection refused",
+        )
 
         handler.handle(event)
 
@@ -275,8 +287,11 @@ class TestAlertEventHandler:
         sink = CallbackAlertSink(alerts.append)
         handler = AlertEventHandler(sinks=[sink], health_failure_threshold=3)
 
-        event = HealthCheckFailed(mcp_server_id="test-provider", consecutive_failures=5,
-        error_message="connection refused",)
+        event = HealthCheckFailed(
+            mcp_server_id="test-provider",
+            consecutive_failures=5,
+            error_message="connection refused",
+        )
 
         handler.handle(event)
 
@@ -291,9 +306,12 @@ class TestAlertEventHandler:
         handler = AlertEventHandler(sinks=[sink])
 
         # McpServerStarted is not an alertable event
-        event = McpServerStarted(mcp_server_id="test-provider", mode="subprocess",
-        tools_count=5,
-        startup_duration_ms=100.0,)
+        event = McpServerStarted(
+            mcp_server_id="test-provider",
+            mode="subprocess",
+            tools_count=5,
+            startup_duration_ms=100.0,
+        )
 
         handler.handle(event)
 
@@ -317,9 +335,12 @@ class TestAlertEventHandler:
         sink = CallbackAlertSink(alerts.append)
         handler = AlertEventHandler(sinks=[sink])
 
-        event = McpServerDegraded(mcp_server_id="test", consecutive_failures=5,
-        total_failures=10,
-        reason="timeout",)
+        event = McpServerDegraded(
+            mcp_server_id="test",
+            consecutive_failures=5,
+            total_failures=10,
+            reason="timeout",
+        )
 
         handler.handle(event)
 
@@ -335,16 +356,22 @@ class TestAlertEventHandler:
         handler = AlertEventHandler(sinks=[sink])
 
         handler.handle(
-            McpServerDegraded(mcp_server_id="p1", consecutive_failures=3,
-            total_failures=5,
-            reason="error",)
+            McpServerDegraded(
+                mcp_server_id="p1",
+                consecutive_failures=3,
+                total_failures=5,
+                reason="error",
+            )
         )
         handler.handle(
-            ToolInvocationFailed(mcp_server_id="p2", tool_name="add",
-            correlation_id="c1",
-            duration_ms=50.0,
-            error_message="timeout",
-            error_type="TimeoutError",)
+            ToolInvocationFailed(
+                mcp_server_id="p2",
+                tool_name="add",
+                correlation_id="c1",
+                duration_ms=50.0,
+                error_message="timeout",
+                error_type="TimeoutError",
+            )
         )
 
         assert len(alerts) == 2
@@ -358,9 +385,12 @@ class TestAlertEventHandler:
         handler = AlertEventHandler(sinks=[sink])
 
         handler.handle(
-            McpServerDegraded(mcp_server_id="p1", consecutive_failures=3,
-            total_failures=5,
-            reason="error",)
+            McpServerDegraded(
+                mcp_server_id="p1",
+                consecutive_failures=3,
+                total_failures=5,
+                reason="error",
+            )
         )
 
         assert len(handler.alerts_sent) == 1
@@ -371,9 +401,12 @@ class TestAlertEventHandler:
         handler = AlertEventHandler()
 
         handler.handle(
-            McpServerDegraded(mcp_server_id="p1", consecutive_failures=3,
-            total_failures=5,
-            reason="error",)
+            McpServerDegraded(
+                mcp_server_id="p1",
+                consecutive_failures=3,
+                total_failures=5,
+                reason="error",
+            )
         )
 
         assert len(handler.alerts_sent) == 1

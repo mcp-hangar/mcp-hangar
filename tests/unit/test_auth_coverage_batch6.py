@@ -854,7 +854,9 @@ class TestAuthRateLimiter:
         """Lines 166-177: expired lockout clears locked_until, publishes event."""
         publisher = Mock()
         config = AuthRateLimitConfig(
-            max_attempts=2, window_seconds=60, lockout_seconds=10,
+            max_attempts=2,
+            window_seconds=60,
+            lockout_seconds=10,
             cleanup_interval=99999,  # Prevent cleanup
         )
         limiter = self._make_limiter(config=config, event_publisher=publisher)
@@ -878,8 +880,11 @@ class TestAuthRateLimiter:
     def test_check_rate_limit_escalation(self):
         """Lines 188-194: lockout escalation with factor."""
         config = AuthRateLimitConfig(
-            max_attempts=1, window_seconds=60, lockout_seconds=10,
-            lockout_escalation_factor=2.0, max_lockout_seconds=3600,
+            max_attempts=1,
+            window_seconds=60,
+            lockout_seconds=10,
+            lockout_escalation_factor=2.0,
+            max_lockout_seconds=3600,
             cleanup_interval=99999,
         )
         publisher = Mock()
@@ -904,8 +909,11 @@ class TestAuthRateLimiter:
     def test_check_rate_limit_escalation_capped(self):
         """Lines 189-193: lockout capped at max_lockout_seconds."""
         config = AuthRateLimitConfig(
-            max_attempts=1, window_seconds=60, lockout_seconds=1000,
-            lockout_escalation_factor=10.0, max_lockout_seconds=2000,
+            max_attempts=1,
+            window_seconds=60,
+            lockout_seconds=1000,
+            lockout_escalation_factor=10.0,
+            max_lockout_seconds=2000,
             cleanup_interval=99999,
         )
         limiter = self._make_limiter(config=config)
@@ -1117,7 +1125,9 @@ class TestAuthRateLimiter:
     def test_do_cleanup_keeps_locked_trackers(self):
         """Lines 358-359: cleanup keeps locked IPs."""
         config = AuthRateLimitConfig(
-            max_attempts=1, window_seconds=60, lockout_seconds=3600,
+            max_attempts=1,
+            window_seconds=60,
+            lockout_seconds=3600,
             cleanup_interval=10,
         )
         limiter = self._make_limiter(config=config)
@@ -1136,7 +1146,9 @@ class TestAuthRateLimiter:
         """Lines 364-371: cleanup removes expired lockout and publishes event."""
         publisher = Mock()
         config = AuthRateLimitConfig(
-            max_attempts=1, window_seconds=60, lockout_seconds=10,
+            max_attempts=1,
+            window_seconds=60,
+            lockout_seconds=10,
             cleanup_interval=10,
         )
         limiter = self._make_limiter(config=config, event_publisher=publisher)
@@ -1214,11 +1226,13 @@ class TestModuleLevelRateLimiter:
     def teardown_method(self):
         """Reset global state between tests."""
         import enterprise.auth.infrastructure.rate_limiter as rl_module
+
         rl_module._default_limiter = None
 
     def test_get_auth_rate_limiter_creates_default(self):
         """Lines 404-406: get_auth_rate_limiter creates default when None."""
         import enterprise.auth.infrastructure.rate_limiter as rl_module
+
         rl_module._default_limiter = None
         limiter = get_auth_rate_limiter()
         assert limiter is not None
@@ -1227,6 +1241,7 @@ class TestModuleLevelRateLimiter:
     def test_get_auth_rate_limiter_returns_same_instance(self):
         """get_auth_rate_limiter is idempotent."""
         import enterprise.auth.infrastructure.rate_limiter as rl_module
+
         rl_module._default_limiter = None
         limiter1 = get_auth_rate_limiter()
         limiter2 = get_auth_rate_limiter()

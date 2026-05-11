@@ -20,19 +20,25 @@ class TestProviderTestResult:
 
     def test_success_result(self):
         """Should create success result."""
-        result = ProviderTestResult(mcp_server_id="test", success=True,
-        state="ready",
-        duration_ms=100.0,)
+        result = ProviderTestResult(
+            mcp_server_id="test",
+            success=True,
+            state="ready",
+            duration_ms=100.0,
+        )
         assert result.success is True
         assert result.error is None
 
     def test_failure_result(self):
         """Should create failure result with error."""
-        result = ProviderTestResult(mcp_server_id="test", success=False,
-        state="dead",
-        duration_ms=50.0,
-        error="Connection refused",
-        suggestion="Check endpoint",)
+        result = ProviderTestResult(
+            mcp_server_id="test",
+            success=False,
+            state="dead",
+            duration_ms=50.0,
+            error="Connection refused",
+            suggestion="Check endpoint",
+        )
         assert result.success is False
         assert result.error == "Connection refused"
         assert result.suggestion == "Check endpoint"
@@ -136,7 +142,10 @@ class TestTestSingleProvider:
         """Should return failure when provider fails to start."""
         from mcp_hangar.domain.exceptions import McpServerStartError
 
-        mock_provider_class.side_effect = McpServerStartError(mcp_server_id="test", reason="Failed to connect",)
+        mock_provider_class.side_effect = McpServerStartError(
+            mcp_server_id="test",
+            reason="Failed to connect",
+        )
 
         result = _test_single_provider(
             mcp_server_id="test",

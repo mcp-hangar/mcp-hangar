@@ -235,8 +235,11 @@ class TestCreateProgressTracker:
         def cb(stage, msg, elapsed):
             callback_calls.append(stage)
 
-        tracker = create_progress_tracker(mcp_server="test", operation="op",
-        callback=cb,)
+        tracker = create_progress_tracker(
+            mcp_server="test",
+            operation="op",
+            callback=cb,
+        )
         tracker.report(ProgressStage.READY, "Ready")
 
         assert len(callback_calls) == 1

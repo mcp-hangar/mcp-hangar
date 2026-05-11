@@ -29,6 +29,7 @@ from mcp_hangar.domain.value_objects import Principal, PrincipalId, PrincipalTyp
 # Helpers
 # ---------------------------------------------------------------------------
 
+
 def _make_principal(
     subject: str = "user123",
     tenant_id: str | None = None,
@@ -978,10 +979,23 @@ class TestAuthCLICreateParser:
         subparsers = parent.add_subparsers()
         auth_parser = create_auth_parser(subparsers)
 
-        args = auth_parser.parse_args([
-            "create-key", "--principal", "user:a", "--name", "key1",
-            "--role", "admin", "--role", "dev", "--expires", "30", "--tenant", "acme",
-        ])
+        args = auth_parser.parse_args(
+            [
+                "create-key",
+                "--principal",
+                "user:a",
+                "--name",
+                "key1",
+                "--role",
+                "admin",
+                "--role",
+                "dev",
+                "--expires",
+                "30",
+                "--tenant",
+                "acme",
+            ]
+        )
         assert args.role == ["admin", "dev"]
         assert args.expires == 30
         assert args.tenant == "acme"
@@ -1389,7 +1403,9 @@ class TestCreateStorageBackendsEventSourcing:
         mock_event_bus = MagicMock()
 
         api_key_store, role_store, tap_store = _create_storage_backends(
-            config, event_store=mock_event_store, event_bus=mock_event_bus,
+            config,
+            event_store=mock_event_store,
+            event_bus=mock_event_bus,
         )
         assert tap_store is None
         # Stores should be EventSourced instances
@@ -1432,14 +1448,11 @@ class TestCreateStorageBackendsPostgres:
         )
 
         # Patch the lazy imports for postgres stores
-        with patch(
-            "enterprise.auth.infrastructure.postgres_store.create_postgres_connection_factory"
-        ) as mock_factory, patch(
-            "enterprise.auth.infrastructure.postgres_store.PostgresApiKeyStore"
-        ) as mock_key_store_cls, patch(
-            "enterprise.auth.infrastructure.postgres_store.PostgresRoleStore"
-        ) as mock_role_store_cls:
-
+        with (
+            patch("enterprise.auth.infrastructure.postgres_store.create_postgres_connection_factory") as mock_factory,
+            patch("enterprise.auth.infrastructure.postgres_store.PostgresApiKeyStore") as mock_key_store_cls,
+            patch("enterprise.auth.infrastructure.postgres_store.PostgresRoleStore") as mock_role_store_cls,
+        ):
             mock_factory.return_value = MagicMock()
             mock_key_instance = MagicMock()
             mock_role_instance = MagicMock()
@@ -1459,14 +1472,11 @@ class TestCreateStorageBackendsPostgres:
 
         config = AuthConfig(storage=StorageConfig(driver="postgres"))
 
-        with patch(
-            "enterprise.auth.infrastructure.postgres_store.create_postgres_connection_factory"
-        ) as mock_factory, patch(
-            "enterprise.auth.infrastructure.postgres_store.PostgresApiKeyStore"
-        ) as mock_key_store_cls, patch(
-            "enterprise.auth.infrastructure.postgres_store.PostgresRoleStore"
-        ) as mock_role_store_cls:
-
+        with (
+            patch("enterprise.auth.infrastructure.postgres_store.create_postgres_connection_factory") as mock_factory,
+            patch("enterprise.auth.infrastructure.postgres_store.PostgresApiKeyStore") as mock_key_store_cls,
+            patch("enterprise.auth.infrastructure.postgres_store.PostgresRoleStore") as mock_role_store_cls,
+        ):
             mock_factory.return_value = MagicMock()
             mock_key_store_cls.return_value = MagicMock()
             mock_role_store_cls.return_value = MagicMock()

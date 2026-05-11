@@ -522,8 +522,11 @@ class TestProviderGroupLockHierarchy:
 
                 provider2.ensure_ready = MagicMock(side_effect=slow_start)
                 with group._lock:
-                    member = GroupMember(mcp_server=provider2, weight=1,
-                    priority=1,)
+                    member = GroupMember(
+                        mcp_server=provider2,
+                        weight=1,
+                        priority=1,
+                    )
                     group._members["p-start"] = member
 
                 group.start_all()

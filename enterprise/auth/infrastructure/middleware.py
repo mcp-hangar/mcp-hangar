@@ -16,8 +16,18 @@ import structlog
 
 from mcp_hangar.domain.contracts.authentication import AuthRequest, IAuthenticator
 from mcp_hangar.domain.contracts.authorization import AuthorizationRequest, IAuthorizer
-from mcp_hangar.domain.events import AuthenticationFailed, AuthenticationSucceeded, AuthorizationDenied, AuthorizationGranted
-from mcp_hangar.domain.exceptions import AccessDeniedError, AuthenticationError, MissingCredentialsError, RateLimitExceededError
+from mcp_hangar.domain.events import (
+    AuthenticationFailed,
+    AuthenticationSucceeded,
+    AuthorizationDenied,
+    AuthorizationGranted,
+)
+from mcp_hangar.domain.exceptions import (
+    AccessDeniedError,
+    AuthenticationError,
+    MissingCredentialsError,
+    RateLimitExceededError,
+)
 from mcp_hangar.domain.value_objects import Principal
 from .rate_limiter import AuthRateLimiter
 

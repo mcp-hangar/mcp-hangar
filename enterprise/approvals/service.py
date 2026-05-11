@@ -38,9 +38,7 @@ logger = get_logger(__name__)
 # executor.  The batch executor's worker threads block on future.result() via
 # run_coroutine_threadsafe; if _publish() used asyncio.to_thread (default
 # executor), it would compete for the same threads -> circular wait.
-_publish_executor = concurrent.futures.ThreadPoolExecutor(
-    max_workers=4, thread_name_prefix="approval-publish"
-)
+_publish_executor = concurrent.futures.ThreadPoolExecutor(max_workers=4, thread_name_prefix="approval-publish")
 
 
 def _sanitize_arguments(arguments: dict[str, Any]) -> dict[str, Any]:
@@ -155,9 +153,7 @@ class ApprovalGateService:
             with tracer.start_as_current_span("approval_gate.wait_for_decision") as wait_span:
                 wait_span.set_attribute("approval.id", approval_id)
                 wait_span.set_attribute("approval.timeout_seconds", policy.approval_timeout_seconds)
-                decision = await self._hold_registry.wait(
-                    approval_id, policy.approval_timeout_seconds
-                )
+                decision = await self._hold_registry.wait(approval_id, policy.approval_timeout_seconds)
                 if decision is True:
                     wait_span.set_attribute("approval.decision", "approved")
                 elif decision is False:
@@ -209,9 +205,7 @@ class ApprovalGateService:
 
             # Timeout
             expired_at = datetime.now(timezone.utc)
-            await self._repository.update_state(
-                approval_id, ApprovalState.EXPIRED, None, expired_at, None
-            )
+            await self._repository.update_state(approval_id, ApprovalState.EXPIRED, None, expired_at, None)
 
             await self._publish(
                 ToolApprovalExpired(
@@ -239,9 +233,7 @@ class ApprovalGateService:
         # Store decided_by/reason before resolving the hold so check() can read them
         decided_at = datetime.now(timezone.utc)
         state = ApprovalState.APPROVED if approved else ApprovalState.DENIED
-        await self._repository.update_state(
-            approval_id, state, decided_by, decided_at, reason
-        )
+        await self._repository.update_state(approval_id, state, decided_by, decided_at, reason)
 
         return await self._hold_registry.resolve(approval_id, approved)
 

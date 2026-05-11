@@ -31,14 +31,17 @@ def test_memory_container() -> None:
     logger.info(f"Data directory: {data_dir.absolute()}")
 
     # Create provider with container mode
-    provider = McpServer(mcp_server_id="memory", mode="container",
-    image="mcp-memory:latest",
-    volumes=["./data:/app/data:rw"],
-    env={"MEMORY_FILE_PATH": "/app/data/memory.jsonl"},
-    resources={"memory": "512m", "cpu": "1.0"},
-    network="none",
-    read_only=False,  # Allow writes to /app/data
-    idle_ttl_s=300,)
+    provider = McpServer(
+        mcp_server_id="memory",
+        mode="container",
+        image="mcp-memory:latest",
+        volumes=["./data:/app/data:rw"],
+        env={"MEMORY_FILE_PATH": "/app/data/memory.jsonl"},
+        resources={"memory": "512m", "cpu": "1.0"},
+        network="none",
+        read_only=False,  # Allow writes to /app/data
+        idle_ttl_s=300,
+    )
 
     print(f"\n📦 Provider created: {provider.mcp_server_id}")
     print(f"   Mode: {provider._mode}")

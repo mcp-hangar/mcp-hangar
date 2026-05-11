@@ -28,9 +28,9 @@ class FakeRepository:
 
     async def list_pending(self, mcp_server_id=None):
         return [
-            r for r in self._store.values()
-            if r.state == ApprovalState.PENDING
-            and (mcp_server_id is None or r.mcp_server_id == mcp_server_id)
+            r
+            for r in self._store.values()
+            if r.state == ApprovalState.PENDING and (mcp_server_id is None or r.mcp_server_id == mcp_server_id)
         ]
 
     async def update_state(self, approval_id, state, decided_by, decided_at, reason):
@@ -88,23 +88,23 @@ def service(repo, hold_registry, event_bus, delivery):
 
 
 class TestFreePassesEnterpriseCatches:
-
     @pytest.mark.asyncio
     async def test_free_no_approval_list_passes_immediately(self, service):
         policy = ToolAccessPolicy(allow_list=("update_page",))
 
-        result = await service.check(mcp_server_id="notion", tool_name="update_page",
-        arguments={"page_id": "abc"},
-        policy=policy,
-        correlation_id="free-corr-1",)
+        result = await service.check(
+            mcp_server_id="notion",
+            tool_name="update_page",
+            arguments={"page_id": "abc"},
+            policy=policy,
+            correlation_id="free-corr-1",
+        )
 
         assert result.approved is True
         assert result.approval_id is None
 
     @pytest.mark.asyncio
-    async def test_enterprise_approval_list_holds_execution(
-        self, service, hold_registry, event_bus, delivery
-    ):
+    async def test_enterprise_approval_list_holds_execution(self, service, hold_registry, event_bus, delivery):
         policy = ToolAccessPolicy(
             approval_list=("update_page",),
             approval_timeout_seconds=5,
@@ -127,10 +127,13 @@ class TestFreePassesEnterpriseCatches:
 
         asyncio.create_task(approve_after_register())
 
-        result = await service.check(mcp_server_id="notion", tool_name="update_page",
-        arguments={"page_id": "abc"},
-        policy=policy,
-        correlation_id="enterprise-corr-1",)
+        result = await service.check(
+            mcp_server_id="notion",
+            tool_name="update_page",
+            arguments={"page_id": "abc"},
+            policy=policy,
+            correlation_id="enterprise-corr-1",
+        )
 
         assert result.approved is True
         assert result.approval_id is not None
@@ -144,9 +147,7 @@ class TestFreePassesEnterpriseCatches:
         assert "ToolApprovalGranted" in event_types
 
     @pytest.mark.asyncio
-    async def test_enterprise_approval_denied_blocks_execution(
-        self, service, hold_registry, event_bus, delivery
-    ):
+    async def test_enterprise_approval_denied_blocks_execution(self, service, hold_registry, event_bus, delivery):
         policy = ToolAccessPolicy(
             approval_list=("update_page",),
             approval_timeout_seconds=5,
@@ -169,10 +170,13 @@ class TestFreePassesEnterpriseCatches:
 
         asyncio.create_task(deny_after_register())
 
-        result = await service.check(mcp_server_id="notion", tool_name="update_page",
-        arguments={"page_id": "abc"},
-        policy=policy,
-        correlation_id="enterprise-corr-2",)
+        result = await service.check(
+            mcp_server_id="notion",
+            tool_name="update_page",
+            arguments={"page_id": "abc"},
+            policy=policy,
+            correlation_id="enterprise-corr-2",
+        )
 
         assert result.approved is False
         assert result.error_code == "approval_denied"
@@ -189,10 +193,13 @@ class TestFreePassesEnterpriseCatches:
             approval_timeout_seconds=0,
         )
 
-        result = await service.check(mcp_server_id="notion", tool_name="update_page",
-        arguments={"page_id": "abc"},
-        policy=policy,
-        correlation_id="enterprise-corr-3",)
+        result = await service.check(
+            mcp_server_id="notion",
+            tool_name="update_page",
+            arguments={"page_id": "abc"},
+            policy=policy,
+            correlation_id="enterprise-corr-3",
+        )
 
         assert result.approved is False
         assert result.error_code == "approval_timeout"
@@ -207,27 +214,31 @@ class TestFreePassesEnterpriseCatches:
     async def test_free_tool_not_on_any_list_passes(self, service):
         policy = ToolAccessPolicy()
 
-        result = await service.check(mcp_server_id="notion", tool_name="search",
-        arguments={"query": "test"},
-        policy=policy,
-        correlation_id="free-corr-2",)
+        result = await service.check(
+            mcp_server_id="notion",
+            tool_name="search",
+            arguments={"query": "test"},
+            policy=policy,
+            correlation_id="free-corr-2",
+        )
 
         assert result.approved is True
         assert result.approval_id is None
 
     @pytest.mark.asyncio
-    async def test_enterprise_sensitive_args_redacted_before_hold(
-        self, service, repo
-    ):
+    async def test_enterprise_sensitive_args_redacted_before_hold(self, service, repo):
         policy = ToolAccessPolicy(
             approval_list=("update_page",),
             approval_timeout_seconds=0,
         )
 
-        await service.check(mcp_server_id="notion", tool_name="update_page",
-        arguments={"page_id": "abc", "api_token": "secret-value"},
-        policy=policy,
-        correlation_id="enterprise-corr-4",)
+        await service.check(
+            mcp_server_id="notion",
+            tool_name="update_page",
+            arguments={"page_id": "abc", "api_token": "secret-value"},
+            policy=policy,
+            correlation_id="enterprise-corr-4",
+        )
 
         requests = list(repo._store.values())
         assert len(requests) == 1

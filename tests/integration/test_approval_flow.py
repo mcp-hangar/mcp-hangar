@@ -42,16 +42,14 @@ class FakeRepository:
         return [
             r
             for r in self._store.values()
-            if r.state == ApprovalState.PENDING
-            and (mcp_server_id is None or r.mcp_server_id == mcp_server_id)
+            if r.state == ApprovalState.PENDING and (mcp_server_id is None or r.mcp_server_id == mcp_server_id)
         ]
 
     async def list_by_state(self, state, mcp_server_id=None):
         return [
             r
             for r in self._store.values()
-            if r.state == state
-            and (mcp_server_id is None or r.mcp_server_id == mcp_server_id)
+            if r.state == state and (mcp_server_id is None or r.mcp_server_id == mcp_server_id)
         ]
 
     async def update_state(self, approval_id, state, decided_by, decided_at, reason):
@@ -121,9 +119,7 @@ def gate_service(repository, hold_registry, event_bus, delivery):
 class TestApprovalFlowApprove:
     """Full approve flow: check -> hold -> resolve(approve) -> granted."""
 
-    async def test_approve_flow_returns_granted(
-        self, gate_service, hold_registry, event_bus, repository
-    ):
+    async def test_approve_flow_returns_granted(self, gate_service, hold_registry, event_bus, repository):
         policy = ToolAccessPolicy(approval_list=("delete_*",))
 
         async def resolve_after_delay():
@@ -157,9 +153,7 @@ class TestApprovalFlowApprove:
         assert len(granted) == 1
         assert granted[0].decided_by == "admin@test"
 
-    async def test_approve_flow_persists_state(
-        self, gate_service, hold_registry, event_bus, repository
-    ):
+    async def test_approve_flow_persists_state(self, gate_service, hold_registry, event_bus, repository):
         policy = ToolAccessPolicy(approval_list=("run_query",))
 
         async def resolve_after_delay():
@@ -189,18 +183,14 @@ class TestApprovalFlowApprove:
 class TestApprovalFlowDeny:
     """Full deny flow: check -> hold -> resolve(deny) -> denied."""
 
-    async def test_deny_flow_returns_denied_with_reason(
-        self, gate_service, hold_registry, event_bus, repository
-    ):
+    async def test_deny_flow_returns_denied_with_reason(self, gate_service, hold_registry, event_bus, repository):
         policy = ToolAccessPolicy(approval_list=("deploy_*",))
 
         async def resolve_after_delay():
             await asyncio.sleep(0.05)
             pending = await repository.list_pending()
             approval_id = pending[0].approval_id
-            await gate_service.resolve(
-                approval_id, approved=False, decided_by="sec@test", reason="Too risky"
-            )
+            await gate_service.resolve(approval_id, approved=False, decided_by="sec@test", reason="Too risky")
 
         resolve_task = asyncio.create_task(resolve_after_delay())
 
@@ -226,9 +216,7 @@ class TestApprovalFlowDeny:
 class TestApprovalFlowTimeout:
     """Timeout flow: check -> hold -> timeout -> expired."""
 
-    async def test_timeout_returns_expired(
-        self, gate_service, hold_registry, event_bus
-    ):
+    async def test_timeout_returns_expired(self, gate_service, hold_registry, event_bus):
         policy = ToolAccessPolicy(
             approval_list=("dangerous_*",),
             approval_timeout_seconds=1,
@@ -252,9 +240,7 @@ class TestApprovalFlowTimeout:
 class TestApprovalFlowBypass:
     """Bypass cases: no approval needed, deny_list override."""
 
-    async def test_no_approval_needed_returns_immediately(
-        self, gate_service, event_bus
-    ):
+    async def test_no_approval_needed_returns_immediately(self, gate_service, event_bus):
         policy = ToolAccessPolicy(approval_list=("delete_*",))
 
         result = await gate_service.check(
@@ -269,9 +255,7 @@ class TestApprovalFlowBypass:
         assert result.approval_id is None
         assert len(event_bus.events) == 0
 
-    async def test_deny_list_takes_precedence_over_approval(
-        self, gate_service, event_bus
-    ):
+    async def test_deny_list_takes_precedence_over_approval(self, gate_service, event_bus):
         policy = ToolAccessPolicy(
             deny_list=("delete_*",),
             approval_list=("delete_*",),
@@ -294,9 +278,7 @@ class TestApprovalFlowBypass:
 class TestApprovalFlowSanitization:
     """Verify sensitive arguments are sanitized before persistence."""
 
-    async def test_sensitive_args_are_redacted(
-        self, gate_service, hold_registry, repository
-    ):
+    async def test_sensitive_args_are_redacted(self, gate_service, hold_registry, repository):
         policy = ToolAccessPolicy(
             approval_list=("connect_*",),
             approval_timeout_seconds=1,
@@ -326,9 +308,7 @@ class TestApprovalFlowSanitization:
 class TestApprovalFlowConcurrency:
     """Multiple concurrent approval flows should not interfere."""
 
-    async def test_concurrent_approvals(
-        self, gate_service, hold_registry, repository
-    ):
+    async def test_concurrent_approvals(self, gate_service, hold_registry, repository):
         policy = ToolAccessPolicy(
             approval_list=("action_*",),
             approval_timeout_seconds=5,

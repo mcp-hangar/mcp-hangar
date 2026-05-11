@@ -601,9 +601,11 @@ class TestSQLiteRoleStoreAddRole:
         custom = Role(
             name="custom-role",
             description="A custom test role",
-            permissions=frozenset([
-                Permission(resource_type="tool", action="invoke", resource_id="*"),
-            ]),
+            permissions=frozenset(
+                [
+                    Permission(resource_type="tool", action="invoke", resource_id="*"),
+                ]
+            ),
         )
         role_store.add_role(custom)
 
@@ -1231,12 +1233,8 @@ class TestAuthAuditLog:
         from enterprise.auth.infrastructure.projections import AuthAuditLog
 
         log = AuthAuditLog()
-        log.apply(
-            ApiKeyCreated(key_id="k1", principal_id="svc-a", key_name="k", expires_at=None, created_by="admin")
-        )
-        log.apply(
-            ApiKeyCreated(key_id="k2", principal_id="svc-b", key_name="k", expires_at=None, created_by="admin")
-        )
+        log.apply(ApiKeyCreated(key_id="k1", principal_id="svc-a", key_name="k", expires_at=None, created_by="admin"))
+        log.apply(ApiKeyCreated(key_id="k2", principal_id="svc-b", key_name="k", expires_at=None, created_by="admin"))
 
         entries = log.query(principal_id="svc-a")
         assert len(entries) == 1
@@ -1247,12 +1245,8 @@ class TestAuthAuditLog:
         from enterprise.auth.infrastructure.projections import AuthAuditLog
 
         log = AuthAuditLog()
-        log.apply(
-            ApiKeyCreated(key_id="k1", principal_id="svc-a", key_name="k", expires_at=None, created_by="admin")
-        )
-        log.apply(
-            RoleAssigned(principal_id="svc-a", role_name="admin", scope="global", assigned_by="system")
-        )
+        log.apply(ApiKeyCreated(key_id="k1", principal_id="svc-a", key_name="k", expires_at=None, created_by="admin"))
+        log.apply(RoleAssigned(principal_id="svc-a", role_name="admin", scope="global", assigned_by="system"))
 
         entries = log.query(event_type="role_assigned")
         assert len(entries) == 1
@@ -1441,13 +1435,17 @@ class TestEventSourcedApiKeyStorePublishEvents:
 
         store = EventSourcedApiKeyStore(event_store=mock_event_store)
         # Should not raise
-        store._publish_events([ApiKeyCreated(
-            key_id="kid",
-            principal_id="svc",
-            key_name="key",
-            expires_at=None,
-            created_by="admin",
-        )])
+        store._publish_events(
+            [
+                ApiKeyCreated(
+                    key_id="kid",
+                    principal_id="svc",
+                    key_name="key",
+                    expires_at=None,
+                    created_by="admin",
+                )
+            ]
+        )
 
 
 class TestEventSourcedApiKeyStoreSaveKey:
@@ -2183,9 +2181,13 @@ class TestEventSourcedRoleStorePublishEvents:
         from enterprise.auth.infrastructure.event_sourced_store import EventSourcedRoleStore
 
         store = EventSourcedRoleStore(event_store=mock_event_store)
-        store._publish_events([RoleAssigned(
-            principal_id="svc",
-            role_name="admin",
-            scope="global",
-            assigned_by="system",
-        )])
+        store._publish_events(
+            [
+                RoleAssigned(
+                    principal_id="svc",
+                    role_name="admin",
+                    scope="global",
+                    assigned_by="system",
+                )
+            ]
+        )
