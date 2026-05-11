@@ -87,8 +87,7 @@ v1.x.
   surpassing it).
 - **Forensic-grade audit:** complete provenance chain PID -> cgroup ->
   container -> pod -> workspace -> user -> workflow run ID.
-- **BSL 1.1 Enterprise gating:** Tetragon backend and forensic chain in
-  Enterprise tier; OSS Agent stays on NetworkPolicy + tool registry.
+- **MIT-licensed:** Tetragon backend and forensic chain ship under MIT alongside the OSS Agent; no tier split.
 - **MCP DSL:** unified expressiveness -- protocol-level (workspace, tool,
   server) and process-level (binary, capability, syscall) constraints in a
   single policy.

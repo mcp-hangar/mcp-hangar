@@ -133,8 +133,7 @@ foundational -- they must be open for trust and adoption.*
 
 **Goal:** Know what your MCP servers do -- not what they say they do.
 
-*Behavioral profiling features are developed under [BSL 1.1](enterprise/LICENSE.BSL) in the `enterprise/behavioral/`
-directory.*
+*Behavioral profiling features are developed under [MIT](LICENSE) in `src/mcp_hangar/`.*
 
 | Item                               | Description                                                                                                                                         | Priority | Status |
 |------------------------------------|-----------------------------------------------------------------------------------------------------------------------------------------------------|----------|--------|
@@ -148,8 +147,7 @@ directory.*
 
 **Goal:** Full chain-of-custody from user to agent to tool call to result.
 
-*Identity propagation and compliance export features are developed under [BSL 1.1](enterprise/LICENSE.BSL) in
-the `enterprise/identity/` and `enterprise/compliance/` directories.*
+*Identity propagation and compliance export features are developed under [MIT](LICENSE) in `src/mcp_hangar/`.*
 
 | Item                                    | Description                                                                                                                                                                     | Priority | Status |
 |-----------------------------------------|---------------------------------------------------------------------------------------------------------------------------------------------------------------------------------|----------|--------|
@@ -164,8 +162,7 @@ the `enterprise/identity/` and `enterprise/compliance/` directories.*
 
 **Goal:** Detect malicious or anomalous agent behavior patterns.
 
-*Semantic analysis features are developed under [BSL 1.1](enterprise/LICENSE.BSL) in the `enterprise/semantic/`
-directory.*
+*Semantic analysis features are developed under [MIT](LICENSE) in `src/mcp_hangar/`.*
 
 | Item                             | Description                                                                                                                                                                  | Priority | Status |
 |----------------------------------|------------------------------------------------------------------------------------------------------------------------------------------------------------------------------|----------|--------|

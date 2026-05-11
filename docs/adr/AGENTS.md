@@ -44,7 +44,7 @@ Write an ADR when **all** of the following are true:
 | Roadmap-level planning | "Ship v2.0 in Q3 2027" | Belongs in `ROADMAP.md`. |
 | Customer commitments | "Onboard XTB by Q2" | Business document, not architecture. |
 | Feature designs implementing an existing ADR | "Add KubeArmor TracingPolicy translator" | Implementation of ADR-006, not a new decision. |
-| Open questions awaiting resolution | "BSL or MIT for Tetragon backend?" | Track in issues until decided, then write ADR. |
+| Open questions awaiting resolution | "Which LSM hook order for KubeArmor + Tetragon?" | Track in issues until decided, then write ADR. |
 
 ---
 
