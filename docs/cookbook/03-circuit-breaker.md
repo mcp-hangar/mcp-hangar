@@ -16,14 +16,10 @@ Health checks tell you the patient is dead. Circuit breakers stop you from perfo
 ```yaml
 # config.yaml — Recipe 03: Circuit Breaker
 
-health_check:
-  enabled: true
-  interval_s: 30
-
 mcp_servers:
   my-mcp:
     mode: remote
-    endpoint: http://localhost:8080/sse
+    endpoint: http://localhost:8080/mcp
     description: "My remote MCP server"
     health_check_interval_s: 30
     max_consecutive_failures: 3

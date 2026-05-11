@@ -102,7 +102,7 @@ export MCP_RATE_LIMIT_BURST=10       # NEW: allow short bursts up to 10
 
 ## What Just Happened
 
-The `RateLimitMiddleware` in the command bus pipeline tracks requests per principal (or per IP for anonymous requests). When the rate exceeds `max_requests_per_minute`, subsequent requests receive `429 Too Many Requests`. The `burst_size` allows short spikes above the steady-state rate.
+Rate limiting is enforced per-tool via `check_rate_limit()`. When the rate exceeds `MCP_RATE_LIMIT_RPS` (requests per second), subsequent requests receive `429 Too Many Requests`. The `MCP_RATE_LIMIT_BURST` setting allows short spikes above the steady-state rate.
 
 Rate limiting applies to both MCP tool calls and REST API requests.
 

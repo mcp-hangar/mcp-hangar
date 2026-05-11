@@ -14,14 +14,10 @@ Your MCP server from recipe 01 crashes at 3 AM. Hangar doesn't know. It keeps se
 ```yaml
 # config.yaml — Recipe 02: Health Checks
 
-health_check:                              # NEW: added in this recipe
-  enabled: true                            # NEW: added in this recipe
-  interval_s: 30                           # NEW: added in this recipe
-
 mcp_servers:
   my-mcp:
     mode: remote
-    endpoint: http://localhost:8080/sse
+    endpoint: http://localhost:8080/mcp
     description: "My remote MCP server"
     health_check_interval_s: 30            # NEW: added in this recipe
     max_consecutive_failures: 3            # NEW: added in this recipe

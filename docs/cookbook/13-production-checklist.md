@@ -9,7 +9,6 @@
 - [ ] API keys created for each service principal
 - [ ] RBAC roles assigned with least-privilege
 - [ ] Tool access policies set for sensitive tools
-- [ ] `MCP_AUTH_SECRET` set to a stable, random value (not auto-generated)
 - [ ] Secrets use environment variable interpolation (`${VAR}`), not plain text in config
 - [ ] Docker MCP servers use `read_only: true` and `network: none` where possible
 
@@ -37,15 +36,14 @@
 
 ## Configuration
 
-- [ ] Config file validated (`mcp-hangar validate config.yaml`)
-- [ ] Hot-reload tested (`kill -HUP` or file edit)
-- [ ] Config backup strategy in place (use `/api/config/backup`)
+- [ ] Config file reviewed for correctness (no `validate` subcommand exists)
+- [ ] Hot-reload tested via `mcp-hangar add` API (no SIGHUP handler exists)
 - [ ] Environment-specific configs separated (dev/staging/prod)
 
 ## Deployment
 
 - [ ] Running behind a reverse proxy (nginx, Caddy, Envoy)
-- [ ] Health check endpoint exposed for orchestrator (`/api/system`)
+- [ ] Health probe endpoints exposed for orchestrator (`/health/live`, `/health/ready`, `/health/startup`)
 - [ ] Graceful shutdown configured (SIGTERM handling)
 - [ ] Resource limits set (memory, CPU) for container deployments
 - [ ] Persistent volume for event store SQLite database
