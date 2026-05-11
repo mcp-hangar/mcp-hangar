@@ -86,13 +86,13 @@ Create `~/.config/mcp-hangar/config.yaml`:
 mcp_servers:
   filesystem:
     mode: subprocess
-    command: [npx, -y, "@anthropic/mcp-server-filesystem"]
+    command: [npx, -y, "@modelcontextprotocol/server-filesystem"]
     args: [/Users/your-username/Documents]
     idle_ttl_s: 300
 
   fetch:
     mode: subprocess
-    command: [npx, -y, "@anthropic/mcp-server-fetch"]
+    command: [npx, -y, "@modelcontextprotocol/server-fetch"]
     idle_ttl_s: 300
 ```
 
