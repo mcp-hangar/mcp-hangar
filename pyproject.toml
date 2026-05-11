@@ -35,6 +35,7 @@ dependencies = [
     "questionary>=2.0.0",
     "python-multipart>=0.0.22",
     "protobuf>=6.33.5",
+    "jcs>=0.2.1",
 ]
 [project.optional-dependencies]
 dev = [

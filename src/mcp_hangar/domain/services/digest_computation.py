@@ -2,13 +2,16 @@
 
 Produces deterministic SHA-256 fingerprints from tool schema dicts,
 enabling drift detection and allowlist-based pinning.
+
+Uses RFC 8785 (JCS) canonicalization for cross-SDK interoperability.
 """
 
 from __future__ import annotations
 
 import hashlib
-import json
 from typing import Any
+
+import jcs
 
 from mcp_hangar.domain.value_objects.tool_digest import ToolDigest
 
@@ -16,8 +19,8 @@ from mcp_hangar.domain.value_objects.tool_digest import ToolDigest
 def compute_tool_digest(tool: dict[str, Any]) -> ToolDigest:
     """Compute the canonical SHA-256 digest of a tool schema.
 
-    Canonical form: JSON with sorted keys, no whitespace separators,
-    and only the fields {name, description, inputSchema, outputSchema}.
+    Canonical form: RFC 8785 JCS-serialized JSON containing only the
+    fields {name, description, inputSchema, outputSchema}.
     Fields that are None/missing are omitted from the canonical payload.
 
     Args:
@@ -28,27 +31,20 @@ def compute_tool_digest(tool: dict[str, Any]) -> ToolDigest:
         ToolDigest with the computed sha256 hex string.
 
     Raises:
-        ValueError: If tool has no 'name' key.
+        ValueError: If tool has no 'name' key or name is not a non-empty string.
     """
     name = tool.get("name")
-    if not name:
-        raise ValueError("tool dict must contain a non-empty 'name' key")
+    if not isinstance(name, str) or not name:
+        raise ValueError("tool missing required string field 'name'")
 
     canonical_payload: dict[str, Any] = {"name": name}
 
-    description = tool.get("description")
-    if description is not None:
-        canonical_payload["description"] = description
+    for field in ("description", "inputSchema", "outputSchema"):
+        value = tool.get(field)
+        if value is not None:
+            canonical_payload[field] = value
 
-    input_schema = tool.get("inputSchema")
-    if input_schema is not None:
-        canonical_payload["inputSchema"] = input_schema
-
-    output_schema = tool.get("outputSchema")
-    if output_schema is not None:
-        canonical_payload["outputSchema"] = output_schema
-
-    serialized = json.dumps(canonical_payload, sort_keys=True, separators=(",", ":"))
-    sha256_hex = hashlib.sha256(serialized.encode("utf-8")).hexdigest()
+    serialized = jcs.canonicalize(canonical_payload)  # bytes, RFC 8785
+    sha256_hex = hashlib.sha256(serialized).hexdigest()
 
     return ToolDigest(tool_name=name, sha256=sha256_hex)
