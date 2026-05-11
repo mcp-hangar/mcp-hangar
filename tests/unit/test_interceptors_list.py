@@ -22,7 +22,7 @@ class TestInterceptorsListResponse:
 
     def test_interceptor_fields(self):
         interceptor = interceptors_list_response()["interceptors"][0]
-        assert interceptor["name"] == "mcp-hangar"
+        assert interceptor["name"] == "mcp-hangar-validator"
         assert isinstance(interceptor["version"], str)
         assert interceptor["type"] == "validator"
         assert interceptor["supportedEvents"] == ["tools/call", "tools/list"]
@@ -31,7 +31,7 @@ class TestInterceptorsListResponse:
 
     def test_mutator_entry(self):
         mutator = interceptors_list_response()["interceptors"][1]
-        assert mutator["name"] == "mcp-hangar"
+        assert mutator["name"] == "mcp-hangar-mutator"
         assert mutator["type"] == "mutator"
         assert mutator["supportedEvents"] == ["tools/call"]
         assert mutator["modes"] == ["enforce"]
@@ -40,6 +40,11 @@ class TestInterceptorsListResponse:
     def test_version_is_nonempty(self):
         interceptor = interceptors_list_response()["interceptors"][0]
         assert len(interceptor["version"]) > 0
+
+    def test_interceptor_names_are_unique(self):
+        data = interceptors_list_response()
+        names = [i["name"] for i in data["interceptors"]]
+        assert len(names) == len(set(names))
 
 
 class TestInterceptorsListEndpoint:
