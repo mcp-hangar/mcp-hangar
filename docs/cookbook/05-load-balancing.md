@@ -59,12 +59,18 @@ mcp_servers:
    my-mcp-group    group     ready    strategy=round_robin  members=3/3 healthy
    ```
 
-3. Make several tool calls and observe distribution:
+3. Make several tool calls through the group and observe distribution in
+   the logs. Use the JSON-RPC approach from recipe 03:
 
    ```bash
-   mcp-hangar call my-mcp-group my-tool '{}'
-   mcp-hangar call my-mcp-group my-tool '{}'
-   mcp-hangar call my-mcp-group my-tool '{}'
+   (
+     echo '{"jsonrpc":"2.0","method":"initialize","params":{"protocolVersion":"2024-11-05","capabilities":{},"clientInfo":{"name":"test","version":"1.0"}},"id":1}'
+     sleep 0.5
+     echo '{"jsonrpc":"2.0","method":"notifications/initialized","params":{}}'
+     sleep 0.5
+     echo '{"jsonrpc":"2.0","method":"tools/call","params":{"name":"hangar_call","arguments":{"calls":[{"mcp_server":"my-mcp-group","tool":"add","arguments":{"a":1,"b":2}}]}},"id":2}'
+     sleep 2
+   ) | mcp-hangar serve 2>/dev/null | grep '"id":2'
    ```
 
    Each call routes to a different member in round-robin order.

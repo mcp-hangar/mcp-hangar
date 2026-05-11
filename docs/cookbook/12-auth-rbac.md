@@ -73,19 +73,19 @@ auth:                                    # NEW: authentication config
 5. Assign a role:
 
    ```bash
-   curl -X POST http://localhost:8000/api/auth/principals/service:my-app/roles \
+   curl -X POST http://localhost:8000/api/auth/roles/assign \
      -H "X-API-Key: mcp_admin_key..." \
      -H "Content-Type: application/json" \
-     -d '{"role_id": "developer"}'
+     -d '{"principal_id": "service:my-app", "role_name": "developer"}'
    ```
 
 6. Set a tool access policy:
 
    ```bash
-   curl -X PUT http://localhost:8000/api/auth/policies/my-mcp/dangerous-tool \
+   curl -X POST http://localhost:8000/api/auth/policies/provider/my-mcp \
      -H "X-API-Key: mcp_admin_key..." \
      -H "Content-Type: application/json" \
-     -d '{"principal_id": "service:my-app", "effect": "deny"}'
+     -d '{"allow_list": ["service:my-app"], "deny_list": []}'
    ```
 
 ## What Just Happened

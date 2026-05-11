@@ -42,14 +42,22 @@ mcp_servers:
    math    subprocess    cold    tools=0    idle
    ```
 
-3. Invoke a tool -- this triggers a cold start:
+3. Invoke a tool -- this triggers a cold start. Use the JSON-RPC protocol
+   via stdio:
 
    ```bash
-   mcp-hangar call math add '{"a": 1, "b": 2}'
+   (
+     echo '{"jsonrpc":"2.0","method":"initialize","params":{"protocolVersion":"2024-11-05","capabilities":{},"clientInfo":{"name":"test","version":"1.0"}},"id":1}'
+     sleep 0.5
+     echo '{"jsonrpc":"2.0","method":"notifications/initialized","params":{}}'
+     sleep 0.5
+     echo '{"jsonrpc":"2.0","method":"tools/call","params":{"name":"hangar_call","arguments":{"calls":[{"mcp_server":"math","tool":"add","arguments":{"a":1,"b":2}}]}},"id":2}'
+     sleep 2
+   ) | mcp-hangar serve 2>/dev/null | grep '"id":2'
    ```
 
    ```
-   Result: 3
+   {"jsonrpc":"2.0","id":2,"result":{"content":[{"type":"text","text":"{\"result\": 3}"}]}}
    ```
 
 4. Check status again -- MCP server is now READY:
