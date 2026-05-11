@@ -5,6 +5,13 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [Unreleased]
+
+### Changed
+
+- **core:** **BREAKING** replace `json.dumps` with RFC 8785 JCS canonicalization in `compute_tool_digest`; all previously pinned digests must be recomputed (#171)
+- **core:** reject tool entries with missing, empty, or non-string `name` field in `compute_tool_digest` (#172)
+
 ## [1.2.0](https://github.com/mcp-hangar/mcp-hangar/compare/v1.1.0...v1.2.0) (2026-05-11)
 
 

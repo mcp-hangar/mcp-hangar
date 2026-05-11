@@ -712,6 +712,15 @@ wheels = [
 ]
 
 [[package]]
+name = "jcs"
+version = "0.2.1"
+source = { registry = "https://pypi.org/simple" }
+sdist = { url = "https://files.pythonhosted.org/packages/47/e5/9d547f0d42ba00f68eec773aa7b2145e0c0335eb632cbaf519f480a429af/jcs-0.2.1.tar.gz", hash = "sha256:9f20360b2f3b0a410d65493b448f96306d80e37fb46283f3f4aa5db2c7c1472b", size = 6886, upload-time = "2022-04-10T14:41:24.904Z" }
+wheels = [
+    { url = "https://files.pythonhosted.org/packages/c0/d4/9a99bc15266a842bd14a1913afdb05182888ebab035666c1ce8a64537ca2/jcs-0.2.1-py3-none-any.whl", hash = "sha256:e23a3e1de60f832d33cd811bb9c3b3be79219cdf95f63b88f0972732c3fa8476", size = 7603, upload-time = "2022-04-10T14:41:23.207Z" },
+]
+
+[[package]]
 name = "jiter"
 version = "0.13.0"
 source = { registry = "https://pypi.org/simple" }
@@ -945,13 +954,14 @@ wheels = [
 
 [[package]]
 name = "mcp-hangar"
-version = "1.1.0"
+version = "1.2.0"
 source = { editable = "." }
 dependencies = [
     { name = "aiosqlite" },
     { name = "cryptography" },
     { name = "docker" },
     { name = "httpx" },
+    { name = "jcs" },
     { name = "mcp" },
     { name = "prometheus-client" },
     { name = "protobuf" },
@@ -1007,6 +1017,7 @@ requires-dist = [
     { name = "fpdf2", marker = "extra == 'enterprise'", specifier = ">=2.8.0" },
     { name = "httpx", specifier = ">=0.25.0" },
     { name = "hypothesis", marker = "extra == 'dev'", specifier = ">=6.90.0" },
+    { name = "jcs", specifier = ">=0.2.1" },
     { name = "langfuse", marker = "extra == 'langfuse'", specifier = ">=2.0.0" },
     { name = "mcp", specifier = ">=1.0.0" },
     { name = "mypy", marker = "extra == 'dev'", specifier = ">=1.8.0" },
