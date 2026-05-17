@@ -51,11 +51,11 @@ lists above. Tool prefixes also valid: `dependabot/*`, `copilot/<task>-<slug>`,
 ## Schema source of truth
 
 Type and scope vocabulary, plus all rules, are defined in
-`docs/development/GIT_FLOW.md` and enforced at merge time by the
+`https://github.com/mcp-hangar/docs/blob/main/development/GIT_FLOW.md` and enforced at merge time by the
 `pr-title / validate` workflow. Since the repository uses squash-merge
 exclusively, every commit on main carries the validated PR title.
 
 ## References
 
-- `docs/development/GIT_FLOW.md` -- Conventional Commits scope reference
+- `https://github.com/mcp-hangar/docs/blob/main/development/GIT_FLOW.md` -- Conventional Commits scope reference
 - `AGENTS.md` -- Git Workflow for Agents, including forbidden paths

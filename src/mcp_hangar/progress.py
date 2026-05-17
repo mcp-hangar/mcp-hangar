@@ -19,7 +19,6 @@ Usage with callback::
     tracker.report(ProgressStage.LAUNCHING, "Starting...")
     tracker.complete(result)
 
-See docs/guides/UX_IMPROVEMENTS.md for more examples.
 """
 
 import asyncio

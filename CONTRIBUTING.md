@@ -1,6 +1,6 @@
 # Contributing
 
-See [docs/development/CONTRIBUTING.md](docs/development/CONTRIBUTING.md) for the full contributing guide.
+See [docs/development/CONTRIBUTING.md](https://github.com/mcp-hangar/docs/blob/main/development/CONTRIBUTING.md) for the full contributing guide.
 
 ## Monorepo Structure
 
@@ -12,7 +12,7 @@ MCP Hangar is a monorepo containing multiple packages:
 
 ## Quick Start
 
-See [Git Flow](docs/development/GIT_FLOW.md) for branching conventions and commit scopes.
+See [Git Flow](https://github.com/mcp-hangar/docs/blob/main/development/GIT_FLOW.md) for branching conventions and commit scopes.
 
 ```bash
 git clone https://github.com/mcp-hangar/mcp-hangar.git
