@@ -219,7 +219,7 @@ Always acquire locks in ascending order. `TrackedLock` enforces this at runtime.
 
 ## Git Workflow for Agents
 
-Read `docs/development/GIT_FLOW.md` for the full flow. Hard rules for agent-authored PRs:
+Read `https://github.com/mcp-hangar/docs/blob/main/development/GIT_FLOW.md` for the full flow. Hard rules for agent-authored PRs:
 
 - **One PR, one goal, one Conventional Commit scope.** No mixed-scope changes.
 - **Branch:** `<type>/<scope>-<slug>` where `<type>` is one of `feat|fix|perf|refactor|docs|test|build|ci|chore|revert|security`. Agent prefix `copilot/<task>-<slug>` is also valid.
@@ -230,14 +230,14 @@ Read `docs/development/GIT_FLOW.md` for the full flow. Hard rules for agent-auth
 - **Issue first:** open or claim an `agent_task` issue before pushing the first commit. Link via `Closes #N` (or `Refs #N` for child PRs of an epic).
 - **Forbidden paths for agent-authored PRs** (must be human-authored — see CODEOWNERS):
   - `src/mcp_hangar/server/security/`, `src/mcp_hangar/server/api/middleware*`
-  - `docs/adr/` (ADRs are human-authored; agents may draft content in issue comments)
+  - `https://github.com/mcp-hangar/docs/blob/main/adr/` (ADRs are human-authored; agents may draft content in issue comments)
   - `.github/workflows/release.yml`, `pyproject.toml` version field
 - **CHANGELOG:** every non-trivial PR adds a line under `## [Unreleased]` in the appropriate section (`### Added`, `### Fixed`, `### Changed`, `### Security`). Trivial = `chore(deps)`, `ci`, `style`, `test`, pure `docs`.
 - **No emoji** anywhere in code, comments, commit messages, or docs.
 - **Squash-merge default.** Do not request merge commits.
 - **Required status checks** (must pass before merge): `pr-validation / required-check`, `pr-title / validate`, `changelog / check`, `branch-name / validate`, `pr-body / validate`.
 
-For ADR work specifically, see `docs/adr/AGENTS.md` — agents may draft ADR content in issue comments but never author the PR.
+For ADR work specifically, see `docs/internal/ADR_AGENTS.md` — agents may draft ADR content in issue comments but never author the PR.
 
 ## Optional Modules
 

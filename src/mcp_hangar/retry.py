@@ -21,7 +21,6 @@ Usage example::
     def call_mcp_server():
         return risky_operation()
 
-See docs/guides/UX_IMPROVEMENTS.md for more examples.
 """
 
 import asyncio

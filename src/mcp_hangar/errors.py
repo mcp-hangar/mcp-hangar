@@ -48,7 +48,6 @@ Factory functions for common error types:
 - create_argument_tool_error() - Invalid arguments (with schema hints)
 - create_mcp_server_error() - Generic mcp_server error
 
-See docs/guides/UX_IMPROVEMENTS.md for more examples.
 """
 
 from collections.abc import Callable

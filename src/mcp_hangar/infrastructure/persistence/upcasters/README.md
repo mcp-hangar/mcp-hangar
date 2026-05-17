@@ -4,7 +4,7 @@ This directory is for concrete upcasters used to evolve persisted event payload 
 
 The full documentation lives in the MkDocs site:
 
-- `docs/architecture/EVENT_SOURCING.md`
+- `https://github.com/mcp-hangar/docs/blob/main/architecture/EVENT_SOURCING.md`
 
 Quick rules:
 

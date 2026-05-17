@@ -48,5 +48,5 @@ checklist: when updating either, update both.
 ## References
 
 - `.github/PULL_REQUEST_TEMPLATE.md` -- canonical body schema
-- `docs/development/GIT_FLOW.md` -- full repo flow conventions
+- `https://github.com/mcp-hangar/docs/blob/main/development/GIT_FLOW.md` -- full repo flow conventions
 - `scripts/check_pr_body.sh` -- validator implementation

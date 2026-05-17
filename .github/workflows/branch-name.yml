@@ -39,5 +39,5 @@ jobs:
           echo "::error::Branch name '$BRANCH' does not match GIT_FLOW.md conventions."
           echo "Expected: <type>/<slug> where type is feat|fix|perf|refactor|docs|test|build|ci|chore."
           echo "Or: hotfix/vX.Y.Z, dependabot/*, copilot/*, release-please--*."
-          echo "See: https://github.com/mcp-hangar/mcp-hangar/blob/main/docs/development/GIT_FLOW.md#branch-naming-and-merge-strategy"
+          echo "See: https://github.com/mcp-hangar/docs/blob/main/development/GIT_FLOW.md#branch-naming-and-merge-strategy"
           exit 1
