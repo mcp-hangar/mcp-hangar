@@ -207,12 +207,6 @@ The Langfuse integration variables also follow the `MCP_*` convention in v1.0:
 | `HANGAR_LANGFUSE_SCRUB_INPUTS` | `MCP_LANGFUSE_SCRUB_INPUTS` |
 | `HANGAR_LANGFUSE_SCRUB_OUTPUTS` | `MCP_LANGFUSE_SCRUB_OUTPUTS` |
 
-### License key
-
-| Old | New |
-|-----|-----|
-| `HANGAR_LICENSE_KEY` | `MCP_LICENSE_KEY` |
-
 ---
 
 ## Repository URL migration (v0.7.0)
@@ -323,8 +317,9 @@ bootstrap(config_dict=my_config)
 **Applies to:** v1.0 (new in this release)
 
 Starting with v0.13.0, enterprise features (auth, RBAC, behavioral profiling,
-compliance export, Langfuse integration) are moving from the core package to the
-`enterprise/` directory under BSL 1.1 licensing.
+compliance export, Langfuse integration) moved from the core package to the
+`enterprise/` directory. As of v1.3.0, the `enterprise/` directory was absorbed
+back into `src/mcp_hangar/` and the entire codebase is licensed under MIT.
 
 ### What moved
 
@@ -340,14 +335,11 @@ compliance export, Langfuse integration) are moving from the core package to the
 
 ### Impact on deployments
 
-- **Open source users (MIT):** No impact. Core features (provider lifecycle,
-  health checks, circuit breaker, groups, load balancing, failover, Prometheus
-  metrics, OTEL export, CLI, hot-reload, batch invocations) remain in the MIT
-  core.
-- **Enterprise users (BSL):** Set the `MCP_LICENSE_KEY` environment variable.
-  The bootstrap process automatically loads enterprise modules when a valid
-  license key is present. Without the key, enterprise features are replaced by
-  no-op implementations.
+- **All users:** No license key or tier distinction applies. All features
+  (provider lifecycle, health checks, circuit breaker, groups, load balancing,
+  failover, Prometheus metrics, OTEL export, CLI, hot-reload, batch invocations,
+  auth, RBAC, behavioral profiling, compliance export, Langfuse integration) are
+  unconditionally available under MIT.
 
 ### Import boundary
 
@@ -581,11 +573,6 @@ The old registry names were removed in v0.4.0. See
 
 v1.0 only reads `MCP_*` variables. See
 [Environment variables](#environment-variables).
-
-### Enterprise features not loading
-
-Ensure `MCP_LICENSE_KEY` is set (not `HANGAR_LICENSE_KEY`). Check bootstrap
-logs for "enterprise modules loaded" or "no license key found, using defaults".
 
 ### CRD conflicts after operator upgrade
 
