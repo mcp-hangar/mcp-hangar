@@ -5,6 +5,19 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [1.2.2](https://github.com/mcp-hangar/mcp-hangar/compare/v1.2.1...v1.2.2) (2026-05-17)
+
+
+### Fixed
+
+* **core:** remove CLA nav entry and fix ruff formatting in cef_formatter ([753d485](https://github.com/mcp-hangar/mcp-hangar/commit/753d485617781b3bfcf7c06c3540d3e0dfd071e9))
+
+
+### Changed
+
+* **core:** absorb enterprise/ into src/mcp_hangar/ ([#201](https://github.com/mcp-hangar/mcp-hangar/issues/201)) ([010f2a0](https://github.com/mcp-hangar/mcp-hangar/commit/010f2a01f55130596a8934f56f5fcf65bff05229))
+* **docs:** move adr/AGENTS.md to docs/internal/ADR_AGENTS.md ([4be7c4f](https://github.com/mcp-hangar/mcp-hangar/commit/4be7c4f2172295e5dff87bd47d3c6ee3d9f42c2e))
+
 ## [Unreleased]
 
 ### Changed
