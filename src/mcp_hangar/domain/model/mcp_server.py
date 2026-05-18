@@ -1312,11 +1312,35 @@ class McpServer(AggregateRoot):
                 "meta": dict(self._meta),
             }
 
+
+    _SECRET_KEYS = frozenset({"bearer_token", "api_key", "basic_password"})
+
+    @staticmethod
+    def _redact_auth_config(auth: dict[str, Any]) -> dict[str, Any]:
+        """Return a copy of auth config with secret values redacted.
+
+        Args:
+            auth: Authentication configuration dict.
+
+        Returns:
+            Copy with sensitive values replaced by [REDACTED].
+        """
+        redacted = {}
+        for k, v in auth.items():
+            if k in McpServer._SECRET_KEYS and isinstance(v, str):
+                redacted[k] = "[REDACTED]"
+            else:
+                redacted[k] = v
+        return redacted
+
     def to_config_dict(self) -> dict[str, Any]:
         """Return YAML-compatible config spec dict.
 
         Returns the minimal representation for round-trip:
         load_config(to_config_dict()) produces an equivalent McpServer.
+        Note: auth secrets are redacted (bearer_token, api_key, basic_password
+        replaced with [REDACTED]) since output is used in API responses and logs.
+        This means the output is NOT suitable for lossless round-trip of secrets.
 
         Returns:
             Dictionary of mcp_server configuration fields, omitting optional
@@ -1345,6 +1369,13 @@ class McpServer(AggregateRoot):
             spec["read_only"] = False
         if self._capabilities is not None:
             spec["capabilities"] = self._capabilities  # Phase 38: serialization in future plan
+        if self._mode == McpServerMode.REMOTE:
+            if self._auth_config:
+                spec["auth"] = self._redact_auth_config(self._auth_config)
+            if self._tls_config:
+                spec["tls"] = dict(self._tls_config)
+            if self._http_config:
+                spec["http"] = dict(self._http_config)
         return spec
 
     def update_config(
