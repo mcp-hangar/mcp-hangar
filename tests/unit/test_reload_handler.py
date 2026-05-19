@@ -157,6 +157,9 @@ class TestReloadConfigurationHandler:
         existing_provider._user = None
         existing_provider._description = None
         existing_provider._tools = Mock(to_dict=lambda: None)
+        existing_provider._auth_config = None
+        existing_provider._tls_config = None
+        existing_provider._http_config = None
         existing_provider.stop.return_value = None
 
         mock_repository.get_all.return_value = {"old-provider": existing_provider}
@@ -205,6 +208,9 @@ class TestReloadConfigurationHandler:
         existing_provider._user = None
         existing_provider._description = None
         existing_provider._tools = Mock(to_dict=lambda: None)
+        existing_provider._auth_config = None
+        existing_provider._tls_config = None
+        existing_provider._http_config = None
         existing_provider.stop.return_value = None
 
         mock_repository.get_all.return_value = {"test-provider": existing_provider}
@@ -260,6 +266,9 @@ class TestReloadConfigurationHandler:
         existing_provider._user = None
         existing_provider._description = None
         existing_provider._tools = Mock(to_dict=lambda: None)
+        existing_provider._auth_config = None
+        existing_provider._tls_config = None
+        existing_provider._http_config = None
 
         mock_repository.get_all.return_value = {"test-provider": existing_provider}
         mock_repository.get.return_value = existing_provider
@@ -314,6 +323,9 @@ class TestReloadConfigurationHandler:
         existing_provider._user = None
         existing_provider._description = None
         existing_provider._tools = Mock(to_dict=lambda: None)
+        existing_provider._auth_config = None
+        existing_provider._tls_config = None
+        existing_provider._http_config = None
         existing_provider.stop.return_value = None
         existing_provider.shutdown.return_value = None
 

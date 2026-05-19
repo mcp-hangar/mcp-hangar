@@ -1312,7 +1312,6 @@ class McpServer(AggregateRoot):
                 "meta": dict(self._meta),
             }
 
-
     _SECRET_KEYS = frozenset({"bearer_token", "api_key", "basic_password"})
 
     @staticmethod
