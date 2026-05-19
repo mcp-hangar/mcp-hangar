@@ -20,6 +20,10 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Fixed
+
+- **core:** serialize auth/tls/http config in `to_config_dict()` for remote providers; auth secrets redacted with `[REDACTED]`; hot-reload now detects auth config changes via `_get_mcp_server_spec()`
+
 ### Changed
 - Public documentation migrated to dedicated [docs repository](https://github.com/mcp-hangar/docs). Internal docs remain in `docs/internal/`.
 

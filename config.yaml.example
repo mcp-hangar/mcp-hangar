@@ -95,6 +95,30 @@ providers:
   #       max_memory_mb: 256
   #       max_cpu_percent: 25.0
 
+  # Remote — HTTP MCP server with bearer-token auth
+  # Connect to any hosted MCP provider that requires authentication.
+  # remote-search:
+  #   mode: remote
+  #   endpoint: https://mcp.example.com/sse
+  #   auth:
+  #     type: bearer
+  #     token: \${MCP_SEARCH_TOKEN}   # Set in environment or .env
+  #   idle_ttl_s: 600
+  #   max_concurrency: 5
+
+  # Remote — HTTP MCP server with API-key auth
+  # Some providers use a custom header for authentication.
+  # remote-translate:
+  #   mode: remote
+  #   endpoint: https://translate.example.com/mcp
+  #   auth:
+  #     type: api_key
+  #     header: X-API-Key              # Custom header name (default: X-API-Key)
+  #     key: \${TRANSLATE_API_KEY}
+  #   tls:
+  #     verify: true                   # Verify TLS certificates (default: true)
+  #   idle_ttl_s: 300
+
   # Provider Group
   # math-cluster:
   #   mode: group

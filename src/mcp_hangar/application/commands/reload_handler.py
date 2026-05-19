@@ -274,6 +274,9 @@ class ReloadConfigurationHandler(CommandHandler):
             "user": mcp_server._user,
             "description": mcp_server._description,
             "tools": mcp_server._tools.to_dict() if hasattr(mcp_server._tools, "to_dict") else None,
+            "auth": mcp_server._auth_config,
+            "tls": mcp_server._tls_config,
+            "http": mcp_server._http_config,
         }
 
     def _config_differs(self, old_spec: dict[str, Any], new_spec: dict[str, Any]) -> bool:
