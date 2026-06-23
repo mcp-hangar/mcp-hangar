@@ -17,10 +17,12 @@ from ...application.event_handlers.risk_scoring_handler import RiskScoringEventH
 from ...application.ports.observability import IAuditExporter, NullAuditExporter
 from ...domain.contracts.cost import NullCostAttributor
 from ...domain.contracts.risk import NullRiskScorer
+from ...application.event_handlers.tool_projection_handler import ToolProjectionPopulationHandler
 from ...domain.events import (
     BehavioralDeviationDetected,
     CapabilityViolationDetected,
     DetectionRuleMatched,
+    McpServerStarted,
     McpServerStateChanged,
     ToolInvocationCompleted,
     ToolInvocationFailed,
@@ -52,6 +54,10 @@ def init_event_handlers(runtime: "Runtime") -> None:
     runtime.event_bus.subscribe_to_all(audit_handler.handle)
 
     runtime.event_bus.subscribe_to_all(runtime.security_handler.handle)
+
+    # Populate the tool-projection registry from discovered tools on server start (#248)
+    tool_projection_handler = ToolProjectionPopulationHandler(repository=runtime.repository)
+    runtime.event_bus.subscribe(McpServerStarted, tool_projection_handler.handle)
 
     otlp_audit_exporter: IAuditExporter
     if os.getenv("OTEL_EXPORTER_OTLP_ENDPOINT"):
@@ -117,6 +123,7 @@ def init_event_handlers(runtime: "Runtime") -> None:
             "alert",
             "audit",
             "security",
+            "tool_projection_population",
             "otlp_audit",
             "compliance" if compliance_format else None,
             "detection_enforcement",
