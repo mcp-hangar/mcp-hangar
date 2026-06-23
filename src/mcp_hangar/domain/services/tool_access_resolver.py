@@ -7,7 +7,7 @@ Caches effective policies per-member for performance.
 
 import logging
 import threading
-from typing import TYPE_CHECKING, Any
+from typing import TYPE_CHECKING, Any, Literal
 
 from ..model.tool_catalog import ToolSchema
 from ..value_objects import ToolAccessPolicy
@@ -16,6 +16,23 @@ if TYPE_CHECKING:
     pass
 
 logger = logging.getLogger(__name__)
+
+# Topology modes for unauthenticated-caller resolution.
+#   "egress"     – server is a back-end proxy used by trusted callers; no
+#                  caller identity → fall back to the server-level policy.
+#                  This is the default (backward-compatible).
+#   "front_door" – server faces untrusted/external callers; no caller
+#                  identity → DENY.  Absence of mode defaults to "egress"
+#                  (not "front_door") so existing deployments are not
+#                  broken, but a deployment that explicitly sets
+#                  "front_door" is never silently promoted to the wider
+#                  egress behaviour.
+TopologyMode = Literal["egress", "front_door"]
+_DEFAULT_MODE: TopologyMode = "egress"
+
+# Sentinel policy that denies every tool.  deny_list=("*",) matches any
+# tool name via fnmatch, so is_tool_allowed() returns False for all names.
+_DENY_ALL_POLICY: ToolAccessPolicy = ToolAccessPolicy(deny_list=("*",))
 
 
 class ToolAccessResolver:
@@ -48,6 +65,11 @@ class ToolAccessResolver:
         self._member_mcp_server_mapping: dict[tuple[str, str], str] = {}
         # Maps (mcp_server_id, tenant_id) -> ToolAccessPolicy for standalone server→member merge
         self._standalone_member_policies: dict[tuple[str, str], ToolAccessPolicy] = {}
+
+        # Topology mode controls what happens when caller has no identity
+        # (member_id is None and no group context).
+        # See module-level TopologyMode for semantics.
+        self._topology_mode: TopologyMode = _DEFAULT_MODE
 
     def set_mcp_server_policy(self, mcp_server_id: str, policy: ToolAccessPolicy) -> None:
         """Set the tool access policy for a mcp_server.
@@ -136,6 +158,22 @@ class ToolAccessResolver:
             # Invalidate cache for this (server, member) pair
             cache_key = f"mcp_server:{mcp_server_id}:member:{member_id}"
             self._policy_cache.pop(cache_key, None)
+
+    def set_topology_mode(self, mode: TopologyMode) -> None:
+        """Set the topology mode that controls unauthenticated-caller resolution.
+
+        Args:
+            mode: "egress" (default) or "front_door".
+                  "egress"     – member_id=None → server-level policy (backward compat).
+                  "front_door" – member_id=None → DENY (fail-closed for external callers).
+        """
+        with self._lock:
+            self._topology_mode = mode
+            # Invalidate the cache keyed without a member_id so the new
+            # mode is reflected immediately on the next resolve call.
+            keys_to_remove = [k for k in self._policy_cache if ":member:" not in k]
+            for key in keys_to_remove:
+                self._policy_cache.pop(key, None)
 
     def remove_mcp_server_policy(self, mcp_server_id: str) -> None:
         """Remove tool access policy for a mcp_server.
@@ -241,6 +279,13 @@ class ToolAccessResolver:
         else:
             mcp_server_policy = ToolAccessPolicy.merge(global_policy, explicit_mcp_server_policy)
 
+        # Fail-closed default: in front_door mode a caller with NO tenant
+        # identity (member_id is None) is DENIED regardless of target. This
+        # fires before the standalone/group branches below so an unauthenticated
+        # external caller can never reach a tool via the group path either.
+        if member_id is None and self._topology_mode == "front_door":
+            return _DENY_ALL_POLICY
+
         # If member_id present but no group_id: server→member merge (standalone tenant policy)
         if member_id and not group_id:
             standalone_member_policy = self._standalone_member_policies.get(
@@ -248,7 +293,8 @@ class ToolAccessResolver:
             )
             return ToolAccessPolicy.merge(mcp_server_policy, standalone_member_policy)
 
-        # If no group context at all, just return mcp_server policy
+        # If no group context at all (egress mode here — front_door already
+        # returned above; member_id is None), fall back to server-level policy.
         if not group_id:
             return mcp_server_policy
 
@@ -417,7 +463,7 @@ class ToolAccessResolver:
             }
 
     def clear_all(self) -> None:
-        """Clear all policies and caches.
+        """Clear all policies, caches, and topology mode (resets to default).
 
         Useful for testing or complete config reload.
         """
@@ -428,6 +474,7 @@ class ToolAccessResolver:
             self._member_policies.clear()
             self._member_mcp_server_mapping.clear()
             self._standalone_member_policies.clear()
+            self._topology_mode = _DEFAULT_MODE
 
 
 # Global singleton instance
