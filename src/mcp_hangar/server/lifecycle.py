@@ -216,6 +216,41 @@ class ServerLifecycle:
             Route("/metrics", metrics_endpoint, methods=["GET"]),
         ]
 
+        # Register RFC 9728 Protected Resource Metadata endpoint (unauthenticated discovery).
+        # The endpoint is placed on the aux app (outside auth enforcement) so clients can
+        # reach it before obtaining a token.  When OIDC is not configured / no issuer is
+        # set, we return 404 — there is nothing to advertise.
+        _oidc_issuer = (
+            auth_components.oidc_issuer
+            if auth_components and hasattr(auth_components, "oidc_issuer")
+            else ""
+        )
+        _oidc_resource_uri_cfg = (
+            auth_components.oidc_resource_uri
+            if auth_components and hasattr(auth_components, "oidc_resource_uri")
+            else ""
+        )
+
+        from ..auth.prm import build_prm_response, build_resource_base_url
+
+        def prm_endpoint(request):
+            """RFC 9728 Protected Resource Metadata (unauthenticated discovery).
+
+            Returns 404 when no OIDC issuer is configured — nothing to advertise.
+            """
+            if not _oidc_issuer:
+                return JSONResponse(
+                    {"error": "not_found", "message": "No OIDC issuer configured"},
+                    status_code=404,
+                )
+            resource_base = _oidc_resource_uri_cfg or build_resource_base_url(request.scope)
+            return JSONResponse(
+                build_prm_response(issuer=_oidc_issuer, resource_uri=resource_base),
+                media_type="application/json",
+            )
+
+        routes.append(Route("/.well-known/oauth-protected-resource", prm_endpoint, methods=["GET"]))
+
         # Create REST API router for /api/* endpoints
         # Stdio mode: pass auth_components from context for consistency.
         # Auth enforcement on REST API applies even in stdio mode when auth is configured.
@@ -234,11 +269,19 @@ class ServerLifecycle:
         all_routes = routes + [Mount("/api", app=api_app)]
         aux_app = Starlette(routes=all_routes)
 
+        _PRM_PATH = "/.well-known/oauth-protected-resource"
+
         async def combined_app(scope, receive, send):
             """Combined ASGI app that routes to aux (health/metrics/api) or MCP."""
             if scope["type"] in ("http", "websocket"):
                 path = scope.get("path", "")
-                if path.startswith("/health/") or path == "/metrics" or path == "/api" or path.startswith("/api/"):
+                if (
+                    path.startswith("/health/")
+                    or path == "/metrics"
+                    or path == _PRM_PATH
+                    or path == "/api"
+                    or path.startswith("/api/")
+                ):
                     await aux_app(scope, receive, send)
                     return
             await mcp_app(scope, receive, send)
