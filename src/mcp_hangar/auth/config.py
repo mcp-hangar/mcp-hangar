@@ -38,6 +38,10 @@ class OIDCAuthConfig:
         email_claim: JWT claim for email address.
         max_token_lifetime_seconds: Maximum allowed token lifetime (exp - iat) in seconds.
             Value of 0 means disabled. Default: 3600.
+        resource_uri: Public URI of this resource server (RFC 9728 "resource" field).
+            When set, this overrides the request Host for PRM and WWW-Authenticate
+            construction (preferred: proxies make the Host header unreliable).
+            When unset, the URI is derived from the incoming request's scheme+host.
     """
 
     enabled: bool = False
@@ -45,6 +49,7 @@ class OIDCAuthConfig:
     audience: str = ""
     jwks_uri: str | None = None
     client_id: str | None = None
+    resource_uri: str = ""
 
     # Claim mappings
     subject_claim: str = "sub"
@@ -229,6 +234,7 @@ def parse_auth_config(config_dict: dict[str, Any] | None) -> AuthConfig:
         tenant_claim=oidc_dict.get("tenant_claim", "tenant_id"),
         email_claim=oidc_dict.get("email_claim", "email"),
         max_token_lifetime_seconds=max_token_lifetime_seconds,
+        resource_uri=oidc_dict.get("resource_uri", ""),
     )
 
     # Parse OPA config

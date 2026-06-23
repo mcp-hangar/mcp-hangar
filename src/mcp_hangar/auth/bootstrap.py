@@ -143,6 +143,10 @@ class AuthComponents:
         api_key_store: API key storage (for key management).
         role_store: Role storage (for role management).
         tap_store: Tool access policy storage (for TAP management).
+        oidc_issuer: OIDC issuer URL when Bearer/OIDC auth is configured; empty string otherwise.
+            Used to populate the PRM endpoint and WWW-Authenticate header (RFC 9728).
+        oidc_resource_uri: Configured public resource URI (from auth.oidc.resource_uri).
+            When set, overrides Host-derived URL in PRM / WWW-Authenticate responses.
     """
 
     def __init__(
@@ -152,12 +156,16 @@ class AuthComponents:
         api_key_store: IApiKeyStore | None = None,
         role_store: IRoleStore | None = None,
         tap_store: Any | None = None,
+        oidc_issuer: str = "",
+        oidc_resource_uri: str = "",
     ):
         self.authn_middleware = authn_middleware
         self.authz_middleware = authz_middleware
         self.api_key_store = api_key_store
         self.role_store = role_store
         self.tap_store = tap_store
+        self.oidc_issuer = oidc_issuer
+        self.oidc_resource_uri = oidc_resource_uri
 
     @property
     def enabled(self) -> bool:
@@ -412,4 +420,6 @@ def bootstrap_auth(
         api_key_store=api_key_store,
         role_store=role_store,
         tap_store=tap_store,
+        oidc_issuer=config.oidc.issuer if config.oidc.enabled and config.oidc.issuer else "",
+        oidc_resource_uri=config.oidc.resource_uri,
     )

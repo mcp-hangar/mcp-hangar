@@ -55,12 +55,16 @@ class AuthMiddlewareHTTP(BaseHTTPMiddleware):
     _authn: AuthenticationMiddleware
     _skip_paths: list[str]
     _trusted_proxies: TrustedProxyResolver
+    _oidc_issuer: str
+    _oidc_resource_uri: str
 
     def __init__(
         self,
         app: ASGIApp,
         authn: AuthenticationMiddleware,
         skip_paths: list[str] | None = None,
+        oidc_issuer: str = "",
+        oidc_resource_uri: str = "",
     ) -> None:
         """Initialize the HTTP auth middleware.
 
@@ -68,11 +72,17 @@ class AuthMiddlewareHTTP(BaseHTTPMiddleware):
             app: The ASGI application.
             authn: Authentication middleware to use.
             skip_paths: Paths to skip authentication (e.g., ["/health", "/metrics"]).
+            oidc_issuer: OIDC issuer URL; when non-empty, the Bearer challenge includes
+                resource_metadata per RFC 9728.
+            oidc_resource_uri: Configured public resource URI; overrides Host-derived
+                base URL in WWW-Authenticate when set.
         """
         super().__init__(app)
         self._authn = authn
         self._skip_paths = skip_paths or ["/health", "/ready", "/_ready", "/metrics"]
         self._trusted_proxies = TrustedProxyResolver()
+        self._oidc_issuer = oidc_issuer
+        self._oidc_resource_uri = oidc_resource_uri
 
     async def dispatch(self, request: Request, call_next: RequestResponseEndpoint) -> Response:
         """Process request through authentication middleware.
@@ -98,6 +108,13 @@ class AuthMiddlewareHTTP(BaseHTTPMiddleware):
             return await call_next(request)
 
         except AuthenticationError as e:
+            # RFC 9728: include resource_metadata in Bearer challenge when OIDC is active.
+            if self._oidc_issuer:
+                from mcp_hangar.auth.prm import build_resource_base_url, build_www_authenticate
+                resource_base = self._oidc_resource_uri or build_resource_base_url(request.scope)
+                www_auth = build_www_authenticate(resource_base)
+            else:
+                www_auth = "Bearer, ApiKey"
             return JSONResponse(
                 status_code=401,
                 content={
@@ -105,7 +122,7 @@ class AuthMiddlewareHTTP(BaseHTTPMiddleware):
                     "message": e.message,
                     "details": e.details,
                 },
-                headers={"WWW-Authenticate": "Bearer, ApiKey"},
+                headers={"WWW-Authenticate": www_auth},
             )
 
         except AccessDeniedError as e:

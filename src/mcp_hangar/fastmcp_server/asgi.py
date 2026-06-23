@@ -184,9 +184,13 @@ def create_auth_combined_app(
     Returns:
         Combined ASGI app with auth middleware.
     """
+    from ..auth.prm import build_resource_base_url, build_www_authenticate
     from ..domain.contracts.authentication import AuthRequest
     from ..domain.exceptions import AccessDeniedError, AuthenticationError
     from ..server.api.middleware import _store_auth_context
+
+    _oidc_issuer = getattr(auth_components, "oidc_issuer", "")
+    _oidc_resource_uri_cfg = getattr(auth_components, "oidc_resource_uri", "")
 
     skip_paths = set(config.auth_skip_paths)
     trusted_proxies = config.trusted_proxies
@@ -258,13 +262,19 @@ def create_auth_combined_app(
                 identity_context_var.reset(token)
 
         except AuthenticationError as e:
+            # RFC 9728: include resource_metadata in Bearer challenge when OIDC is active.
+            if _oidc_issuer:
+                resource_base = _oidc_resource_uri_cfg or build_resource_base_url(scope)
+                www_auth = build_www_authenticate(resource_base)
+            else:
+                www_auth = "Bearer, ApiKey"
             response = JSONResponse(
                 status_code=401,
                 content={
                     "error": "authentication_failed",
                     "message": e.message,
                 },
-                headers={"WWW-Authenticate": "Bearer, ApiKey"},
+                headers={"WWW-Authenticate": www_auth},
             )
             await response(scope, receive, send)
 
