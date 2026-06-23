@@ -20,9 +20,14 @@ from typing import Any, cast
 
 
 from ....application.commands import InvokeToolCommand, StartMcpServerCommand
-from ....domain.events import BatchCallCompleted, BatchInvocationCompleted, BatchInvocationRequested
+from ....domain.events import (
+    BatchCallCompleted,
+    BatchInvocationCompleted,
+    BatchInvocationRequested,
+    ToolWithdrawnRejected,
+)
 from ....context import get_identity_context
-from ....domain.services import get_tool_access_resolver
+from ....domain.services import get_tool_access_resolver, get_tool_projection_registry
 from ....infrastructure.single_flight import SingleFlight
 from ....logging_config import get_logger
 from ....observability.tracing import extract_trace_context, get_tracer
@@ -652,6 +657,36 @@ class BatchExecutor:
                 success=False,
                 error="Tool not available for this mcp_server",
                 error_type="ToolAccessDeniedError",
+                elapsed_ms=(time.perf_counter() - call_start) * 1000,
+            )
+
+        # Check tool withdrawal status BEFORE backend invoke (#231).
+        # Guarantee: per-process-after-reload (registry is config-reload-driven; runtime
+        # mutation is #235). Rejection is envelope-level; protocol-clean -32601 is #232.
+        # Semantics: proj is None → registry unpopulated → do NOT block (safe default).
+        # Only an explicit is_withdrawn_for() == True causes rejection.
+        _proj_registry = get_tool_projection_registry()
+        _proj = _proj_registry.resolve(call.mcp_server, call.tool, _caller_tenant_id)
+        if _proj is not None and _proj.is_withdrawn_for(_caller_tenant_id):
+            logger.info(
+                "tool_withdrawn_rejected",
+                mcp_server_id=call.mcp_server,
+                tool=call.tool,
+                tenant_id=_caller_tenant_id,
+            )
+            ctx.event_bus.publish(
+                ToolWithdrawnRejected(
+                    tenant_id=_caller_tenant_id,
+                    mcp_server=call.mcp_server,
+                    tool=call.tool,
+                )
+            )
+            return CallResult(
+                index=call.index,
+                call_id=call.call_id,
+                success=False,
+                error=f"Tool '{call.tool}' is withdrawn for this tenant",
+                error_type="ToolWithdrawnError",
                 elapsed_ms=(time.perf_counter() - call_start) * 1000,
             )
 

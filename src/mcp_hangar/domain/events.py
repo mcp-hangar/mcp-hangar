@@ -1864,6 +1864,37 @@ class ToolApprovalExpired(DomainEvent):
         super().__init__()
 
 
+# =============================================================================
+# Tool Withdrawal Events (#231 — call-path enforcement)
+# =============================================================================
+
+
+@dataclass
+class ToolWithdrawnRejected(DomainEvent):
+    """Published when a tool call is rejected because the tool is withdrawn for the caller.
+
+    Enforcement guarantee: **per-process-after-reload** — the registry is
+    config-reload-driven (#230); withdrawal takes effect on the replica that
+    reloaded. Fleet-wide synchronous withdrawal requires shared state (out of
+    scope). Rejection is **envelope-level** (``CallResult(success=False)``);
+    protocol-clean JSON-RPC ``-32601`` on a single ``tools/call`` is #232-gated.
+
+    Attributes:
+        tenant_id: Tenant whose call was rejected (may be None for anonymous callers).
+        mcp_server: MCP server identifier owning the withdrawn tool.
+        tool: Name of the withdrawn tool.
+        schema_version: Event schema version.
+    """
+
+    tenant_id: str | None
+    mcp_server: str
+    tool: str
+    schema_version: int = 1
+
+    def __post_init__(self):
+        super().__init__()
+
+
 # Legacy aliases for renamed classes -- public API back-compat.
 # Remove together with the deprecated `provider_id` kwarg (planned 2026-Q3).
 ProviderLoadAttempted = McpServerLoadAttempted
