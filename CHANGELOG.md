@@ -8,6 +8,28 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 ## [1.3.0](https://github.com/mcp-hangar/mcp-hangar/compare/v1.2.3...v1.3.0) (2026-06-23)
 
 
+### Highlights
+
+**Per-tenant tool governance for external agents.** Hangar can now act as a front
+door: external agents authenticate over OAuth (discoverable per RFC 9728), are
+identified per tenant, and see and invoke only the tools their tenant is allowed —
+enforced on every call, independent of the client's cached tool list.
+
+- **Front-door mode** (`tool_access.mode: front_door`) — opt-in. Unauthenticated
+  callers are denied; the default `egress` behavior is unchanged.
+- **Per-tenant tool access** — member-scope allow/deny policy resolved on the live
+  call path.
+- **Tool withdrawal** — withdraw a tool for a tenant via config (reload) or the
+  runtime admin API; rejected at call time. The guarantee is per-process-after-reload
+  (fleet-wide synchronous withdrawal is future work).
+- **Flat tool re-export** — in front-door mode, external agents see clean backend
+  tool names instead of the `hangar_*` meta-API.
+- **OAuth Resource Server discovery** (RFC 9728) — Protected Resource Metadata and a
+  `WWW-Authenticate` challenge advertise the authorization server. Hangar validates
+  tokens; it does not issue them. Multi-issuer trust and audience binding are
+  tracked as follow-ups.
+
+
 ### Added
 
 * **core:** add front_door fail-closed default for unauthenticated calls ([#242](https://github.com/mcp-hangar/mcp-hangar/issues/242)) ([b4d3200](https://github.com/mcp-hangar/mcp-hangar/commit/b4d32002a12e8fdb82b212dfdb13c5a83910a5bb)), closes [#236](https://github.com/mcp-hangar/mcp-hangar/issues/236)
