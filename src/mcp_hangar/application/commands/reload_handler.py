@@ -159,6 +159,14 @@ class ReloadConfigurationHandler(CommandHandler):
             resolver.clear_all()
             logger.debug("tool_access_policies_cleared_for_reload")
 
+            # 4b. Clear config-withdrawal overlay before reload so that
+            # removing a withdrawal from config actually restores the tool.
+            # Withdrawals will be re-applied by _load_mcp_server_config.
+            from ..read_models.tool_projection import get_tool_projection_registry
+
+            get_tool_projection_registry().clear_config_withdrawals()
+            logger.debug("config_withdrawals_cleared_for_reload")
+
             # 5. Load new configuration (adds new and updates existing)
             if self._config_loader is not None:
                 self._config_loader.apply_mcp_servers(new_mcp_servers_config)
