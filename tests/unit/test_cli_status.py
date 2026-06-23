@@ -86,10 +86,10 @@ class TestGetStatusFromConfig:
 mcp_servers:
   fetch:
     mode: subprocess
-    command: [npx, -y, "@anthropic/mcp-server-fetch"]
+    command: [npx, -y, "@example/mcp-server-fetch"]
   memory:
     mode: subprocess
-    command: [npx, -y, "@anthropic/mcp-server-memory"]
+    command: [npx, -y, "@example/mcp-server-memory"]
 """
             )
 

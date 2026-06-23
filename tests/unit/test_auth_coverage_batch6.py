@@ -554,14 +554,14 @@ class TestRBACAuthorizer:
         store = Mock(spec=IRoleStore)
 
         def get_roles(principal_id: str, scope: str = "*") -> list[Role]:
-            if scope == "tenant:acme" and principal_id == "user-1":
+            if scope == "tenant:x" and principal_id == "user-1":
                 return [role]
             return []
 
         store.get_roles_for_principal.side_effect = get_roles
         auth = RBACAuthorizer(role_store=store)
 
-        principal = self._make_principal(tenant_id="acme")
+        principal = self._make_principal(tenant_id="x")
         request = AuthorizationRequest(
             principal=principal,
             action="update",
@@ -578,14 +578,14 @@ class TestRBACAuthorizer:
         store = Mock(spec=IRoleStore)
 
         def get_roles(principal_id: str, scope: str = "*") -> list[Role]:
-            if scope == "tenant:acme" and principal_id == "group:auditors":
+            if scope == "tenant:x" and principal_id == "group:auditors":
                 return [role]
             return []
 
         store.get_roles_for_principal.side_effect = get_roles
         auth = RBACAuthorizer(role_store=store)
 
-        principal = self._make_principal(groups=frozenset({"auditors"}), tenant_id="acme")
+        principal = self._make_principal(groups=frozenset({"auditors"}), tenant_id="x")
         request = AuthorizationRequest(
             principal=principal,
             action="read",
@@ -650,7 +650,7 @@ class TestInMemoryRoleStore:
         """Line 229: specific scope returns only roles in that scope."""
         store = InMemoryRoleStore()
         store.assign_role("user-1", "admin", scope="global")
-        store.assign_role("user-1", "viewer", scope="tenant:acme")
+        store.assign_role("user-1", "viewer", scope="tenant:x")
         roles = store.get_roles_for_principal("user-1", scope="global")
         assert len(roles) == 1
         assert roles[0].name == "admin"
@@ -659,7 +659,7 @@ class TestInMemoryRoleStore:
         """Lines 223-226: scope='*' returns all scopes."""
         store = InMemoryRoleStore()
         store.assign_role("user-1", "admin", scope="global")
-        store.assign_role("user-1", "viewer", scope="tenant:acme")
+        store.assign_role("user-1", "viewer", scope="tenant:x")
         roles = store.get_roles_for_principal("user-1", scope="*")
         assert len(roles) == 2
         role_names = {r.name for r in roles}
@@ -751,12 +751,12 @@ class TestInMemoryRoleStore:
         """Lines 356-360: list_assignments returns scope->role mapping."""
         store = InMemoryRoleStore()
         store.assign_role("user-1", "admin", scope="global")
-        store.assign_role("user-1", "viewer", scope="tenant:acme")
+        store.assign_role("user-1", "viewer", scope="tenant:x")
         assignments = store.list_assignments("user-1")
         assert "global" in assignments
         assert "admin" in assignments["global"]
-        assert "tenant:acme" in assignments
-        assert "viewer" in assignments["tenant:acme"]
+        assert "tenant:x" in assignments
+        assert "viewer" in assignments["tenant:x"]
 
     def test_list_assignments_empty_principal(self):
         store = InMemoryRoleStore()
@@ -767,7 +767,7 @@ class TestInMemoryRoleStore:
         """Lines 368-371: clear_assignments removes all roles for principal."""
         store = InMemoryRoleStore()
         store.assign_role("user-1", "admin", scope="global")
-        store.assign_role("user-1", "viewer", scope="tenant:acme")
+        store.assign_role("user-1", "viewer", scope="tenant:x")
         store.clear_assignments("user-1")
         assert store.list_assignments("user-1") == {}
 

@@ -38,7 +38,7 @@ def _display_search_results(results: list[McpServerDefinition]) -> str | None:
         result = results[0]
         console.print(f"\n[bold]Found:[/bold] {result.name} - {result.description}")
         if result.official:
-            console.print("[dim]Official Anthropic mcp_server[/dim]")
+            console.print("[dim]Official first-party mcp_server[/dim]")
 
         confirm = questionary.confirm("Install this mcp_server?", default=True).ask()
         return result.name if confirm else None

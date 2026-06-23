@@ -14,7 +14,7 @@ class McpServerDefinition:
 
     name: str
     description: str
-    package: str  # npx package name (e.g., @anthropic/mcp-server-fetch)
+    package: str  # npx package name (e.g., @example/mcp-server-fetch)
     category: str
     install_type: str = "npx"  # primary: npx, uvx, docker, binary
     uvx_package: str | None = None  # uvx package name if available (e.g., mcp-server-fetch)

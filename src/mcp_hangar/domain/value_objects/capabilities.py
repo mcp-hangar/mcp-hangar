@@ -16,7 +16,7 @@ Example configuration:
         capabilities:
           network:
             egress:
-              - host: api.openai.com
+              - host: api.example.com
                 port: 443
                 protocol: https
               - host: "*.internal.corp"
@@ -30,7 +30,7 @@ Example configuration:
             temp_allowed: true
           environment:
             required:
-              - OPENAI_API_KEY
+              - EXAMPLE_API_KEY
             optional:
               - LOG_LEVEL
           tools:
@@ -78,7 +78,7 @@ class EgressRule:
     """Single allowed egress destination for a mcp_server.
 
     Attributes:
-        host: Hostname or glob pattern (e.g. "api.openai.com" or "*.internal.corp").
+        host: Hostname or glob pattern (e.g. "api.example.com" or "*.internal.corp").
         port: TCP port number. Use 0 to allow any port.
         protocol: Application protocol hint ("https", "http", "grpc", "any").
     """

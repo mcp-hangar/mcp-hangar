@@ -1021,7 +1021,7 @@ class TestAuthRoutes:
             body={
                 "principal_id": "user:alice",
                 "role_name": "admin",
-                "scope": "tenant:acme",
+                "scope": "tenant:x",
                 "assigned_by": "superadmin",
             }
         )
@@ -1033,7 +1033,7 @@ class TestAuthRoutes:
         cmd = mock_dispatch.call_args[0][0]
         assert cmd.principal_id == "user:alice"
         assert cmd.role_name == "admin"
-        assert cmd.scope == "tenant:acme"
+        assert cmd.scope == "tenant:x"
         assert cmd.assigned_by == "superadmin"
 
     # --- revoke_role ---

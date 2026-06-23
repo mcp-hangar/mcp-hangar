@@ -54,7 +54,7 @@ class TestProviderDefinition:
         definition = ProviderDefinition(
             name="github",
             description="GitHub provider",
-            package="@anthropic/mcp-server-github",
+            package="@example/mcp-server-github",
             requires_config=True,
             config_type=ConfigType.SECRET,
             config_prompt="GitHub token",
@@ -143,7 +143,7 @@ class TestDefinitionsRegistry:
         definition = get_provider_definition("filesystem")
         assert definition is not None
         assert definition.name == "filesystem"
-        assert definition.package == "@anthropic/mcp-server-filesystem"
+        assert definition.package == "@example/mcp-server-filesystem"
 
     def test_get_provider_definition_unknown(self):
         """get_provider_definition returns None for unknown providers."""

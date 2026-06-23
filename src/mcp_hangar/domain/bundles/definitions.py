@@ -66,7 +66,7 @@ class McpServerDefinition:
     """McpServers that conflict with this one."""
 
     official: bool = True
-    """Whether this is an official Anthropic mcp_server."""
+    """Whether this is an official first-party mcp_server."""
 
     category: str = ""
     """Category for grouping (e.g., 'filesystem', 'api', 'database')."""
@@ -102,7 +102,7 @@ PROVIDERS: dict[str, McpServerDefinition] = {
     "filesystem": McpServerDefinition(
         name="filesystem",
         description="Read and write local files",
-        package="@anthropic/mcp-server-filesystem",
+        package="@example/mcp-server-filesystem",
         install_type=InstallType.NPX,
         requires_config=True,
         config_type=ConfigType.PATH,
@@ -112,7 +112,7 @@ PROVIDERS: dict[str, McpServerDefinition] = {
     "fetch": McpServerDefinition(
         name="fetch",
         description="Make HTTP requests to fetch web content",
-        package="@anthropic/mcp-server-fetch",
+        package="@example/mcp-server-fetch",
         install_type=InstallType.NPX,
         requires_config=False,
         category="network",
@@ -120,7 +120,7 @@ PROVIDERS: dict[str, McpServerDefinition] = {
     "memory": McpServerDefinition(
         name="memory",
         description="Persistent key-value storage for context",
-        package="@anthropic/mcp-server-memory",
+        package="@example/mcp-server-memory",
         install_type=InstallType.NPX,
         requires_config=False,
         category="storage",
@@ -129,7 +129,7 @@ PROVIDERS: dict[str, McpServerDefinition] = {
     "github": McpServerDefinition(
         name="github",
         description="GitHub repos, issues, PRs",
-        package="@anthropic/mcp-server-github",
+        package="@example/mcp-server-github",
         install_type=InstallType.NPX,
         requires_config=True,
         config_type=ConfigType.SECRET,
@@ -140,7 +140,7 @@ PROVIDERS: dict[str, McpServerDefinition] = {
     "git": McpServerDefinition(
         name="git",
         description="Local git operations",
-        package="@anthropic/mcp-server-git",
+        package="@example/mcp-server-git",
         install_type=InstallType.NPX,
         requires_config=False,
         category="vcs",
@@ -148,7 +148,7 @@ PROVIDERS: dict[str, McpServerDefinition] = {
     "gitlab": McpServerDefinition(
         name="gitlab",
         description="GitLab repos, issues, MRs",
-        package="@anthropic/mcp-server-gitlab",
+        package="@example/mcp-server-gitlab",
         install_type=InstallType.NPX,
         requires_config=True,
         config_type=ConfigType.SECRET,
@@ -161,7 +161,7 @@ PROVIDERS: dict[str, McpServerDefinition] = {
     "sqlite": McpServerDefinition(
         name="sqlite",
         description="Query SQLite databases",
-        package="@anthropic/mcp-server-sqlite",
+        package="@example/mcp-server-sqlite",
         install_type=InstallType.NPX,
         requires_config=True,
         config_type=ConfigType.PATH,
@@ -171,7 +171,7 @@ PROVIDERS: dict[str, McpServerDefinition] = {
     "postgres": McpServerDefinition(
         name="postgres",
         description="Query PostgreSQL databases",
-        package="@anthropic/mcp-server-postgres",
+        package="@example/mcp-server-postgres",
         install_type=InstallType.NPX,
         requires_config=True,
         config_type=ConfigType.SECRET,
@@ -183,7 +183,7 @@ PROVIDERS: dict[str, McpServerDefinition] = {
     "slack": McpServerDefinition(
         name="slack",
         description="Slack workspace integration",
-        package="@anthropic/mcp-server-slack",
+        package="@example/mcp-server-slack",
         install_type=InstallType.NPX,
         requires_config=True,
         config_type=ConfigType.SECRET,
@@ -195,7 +195,7 @@ PROVIDERS: dict[str, McpServerDefinition] = {
     "puppeteer": McpServerDefinition(
         name="puppeteer",
         description="Browser automation with Puppeteer",
-        package="@anthropic/mcp-server-puppeteer",
+        package="@example/mcp-server-puppeteer",
         install_type=InstallType.NPX,
         requires_config=False,
         category="automation",
@@ -204,7 +204,7 @@ PROVIDERS: dict[str, McpServerDefinition] = {
     "brave-search": McpServerDefinition(
         name="brave-search",
         description="Web search via Brave Search API",
-        package="@anthropic/mcp-server-brave-search",
+        package="@example/mcp-server-brave-search",
         install_type=InstallType.NPX,
         requires_config=True,
         config_type=ConfigType.SECRET,
@@ -215,7 +215,7 @@ PROVIDERS: dict[str, McpServerDefinition] = {
     "google-maps": McpServerDefinition(
         name="google-maps",
         description="Google Maps and Places API",
-        package="@anthropic/mcp-server-google-maps",
+        package="@example/mcp-server-google-maps",
         install_type=InstallType.NPX,
         requires_config=True,
         config_type=ConfigType.SECRET,
@@ -227,7 +227,7 @@ PROVIDERS: dict[str, McpServerDefinition] = {
     "time": McpServerDefinition(
         name="time",
         description="Current time and timezone operations",
-        package="@anthropic/mcp-server-time",
+        package="@example/mcp-server-time",
         install_type=InstallType.NPX,
         requires_config=False,
         category="utility",
@@ -236,7 +236,7 @@ PROVIDERS: dict[str, McpServerDefinition] = {
     "sequential-thinking": McpServerDefinition(
         name="sequential-thinking",
         description="Step-by-step reasoning tool",
-        package="@anthropic/mcp-server-sequential-thinking",
+        package="@example/mcp-server-sequential-thinking",
         install_type=InstallType.NPX,
         requires_config=False,
         category="reasoning",
