@@ -21,6 +21,7 @@ from typing import Any, cast
 
 from ....application.commands import InvokeToolCommand, StartMcpServerCommand
 from ....domain.events import BatchCallCompleted, BatchInvocationCompleted, BatchInvocationRequested
+from ....context import get_identity_context
 from ....domain.services import get_tool_access_resolver
 from ....infrastructure.single_flight import SingleFlight
 from ....logging_config import get_logger
@@ -602,7 +603,12 @@ class BatchExecutor:
                 )
 
         # Check tool access policy BEFORE starting mcp_server or executing
-        # This is config-driven filtering, identity-agnostic (runs before RBAC)
+        # Reads caller tenant_id from the propagated identity context (set by IdentityMiddleware,
+        # carried into this worker thread via copy_context() — see PR #239).
+        _identity_ctx = get_identity_context()
+        _caller_tenant_id: str | None = (
+            _identity_ctx.caller.tenant_id if _identity_ctx is not None else None
+        )
         resolver = get_tool_access_resolver()
         tracer = get_tracer(__name__)
         with tracer.start_as_current_span("policy.check_access") as policy_span:
@@ -617,12 +623,14 @@ class BatchExecutor:
                     mcp_server_id=call.mcp_server,
                     tool_name=call.tool,
                     group_id=call.mcp_server,
+                    member_id=_caller_tenant_id,
                 )
             else:
-                # For standalone mcp_servers
+                # For standalone mcp_servers: server→member merge when tenant is known
                 allowed = resolver.is_tool_allowed(
                     mcp_server_id=call.mcp_server,
                     tool_name=call.tool,
+                    member_id=_caller_tenant_id,
                 )
             policy_span.set_attribute("policy.allowed", allowed)
 
