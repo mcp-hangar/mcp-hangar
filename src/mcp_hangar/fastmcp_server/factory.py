@@ -110,6 +110,7 @@ class MCPServerFactory:
         self._register_core_tools(mcp)
         self._register_discovery_tools(mcp)
         self._register_interceptors_list(mcp)
+        self._maybe_register_flat_tool_handlers(mcp)
 
         self._mcp = mcp
         logger.info(
@@ -328,6 +329,22 @@ class MCPServerFactory:
         from .interceptors_list import register_interceptors_list
 
         register_interceptors_list(mcp)
+
+    @staticmethod
+    def _maybe_register_flat_tool_handlers(mcp: FastMCP) -> None:
+        """Replace tools/list and tools/call handlers in front_door mode.
+
+        In front_door mode, external agents see flat backend tool names instead
+        of the hangar_* meta-API.  In egress mode this is a no-op — the
+        default hangar_* surface is preserved unchanged.
+        """
+        from ..domain.services.tool_access_resolver import get_tool_access_resolver
+        from .flat_tool_projection import register_flat_tool_handlers
+
+        resolver = get_tool_access_resolver()
+        if resolver.topology_mode == "front_door":
+            register_flat_tool_handlers(mcp)
+            logger.info("flat_tool_handlers_registered", topology_mode="front_door")
 
     def _run_readiness_checks(self) -> dict[str, Any]:
         """Run readiness checks.
