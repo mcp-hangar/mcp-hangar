@@ -41,6 +41,27 @@ def __getattr__(name: str) -> object:
         from . import mcp_server_launcher as launcher_module
 
         return getattr(launcher_module, name)
+
+    if name in {
+        "get_tool_projection_registry",
+        "reset_tool_projection_registry",
+        "ToolProjection",
+        "ToolProjectionRegistry",
+    }:
+        from mcp_hangar.application.read_models.tool_projection import (
+            get_tool_projection_registry,
+            reset_tool_projection_registry,
+            ToolProjection,
+            ToolProjectionRegistry,
+        )
+
+        return {
+            "get_tool_projection_registry": get_tool_projection_registry,
+            "reset_tool_projection_registry": reset_tool_projection_registry,
+            "ToolProjection": ToolProjection,
+            "ToolProjectionRegistry": ToolProjectionRegistry,
+        }[name]
+
     raise AttributeError(f"module {__name__!r} has no attribute {name!r}")
 
 
@@ -64,4 +85,8 @@ __all__ = [
     "ToolAccessResolver",
     "get_tool_access_resolver",
     "reset_tool_access_resolver",
+    "ToolProjection",
+    "ToolProjectionRegistry",
+    "get_tool_projection_registry",
+    "reset_tool_projection_registry",
 ]
