@@ -11,6 +11,9 @@ from starlette.applications import Starlette
 from starlette.responses import JSONResponse, PlainTextResponse
 from starlette.routing import Route
 
+from ..context import identity_context_var
+from ..domain.value_objects.identity import CallerIdentity, IdentityContext
+from ..domain.value_objects.security import PrincipalType
 from ..logging_config import get_logger
 
 if TYPE_CHECKING:
@@ -18,6 +21,65 @@ if TYPE_CHECKING:
     from .config import ServerConfig
 
 logger = get_logger(__name__)
+
+
+def _principal_to_identity_context(principal: Any) -> IdentityContext:
+    """Bridge an authenticated Principal to an IdentityContext for identity_context_var.
+
+    Mapping rules:
+    - PrincipalType.USER        → principal_type "user",    user_id = principal.id.value
+    - PrincipalType.SERVICE_ACCOUNT → principal_type "service", user_id = principal.id.value
+    - PrincipalType.SYSTEM      → principal_type "service"  (system is a non-human identity;
+                                  closest valid literal is "service"), user_id = principal.id.value
+    - Anonymous (id == "anonymous") → principal_type "anonymous", user_id = None
+    - tenant_id passes through from Principal.tenant_id.
+
+    CallerIdentity.__post_init__ requires user_id non-None for "user"/"service".
+    We fall back to "anonymous" only if principal_type would require a user_id but
+    the id is somehow empty (defensive — should not happen in practice).
+    """
+    if principal is None or principal.is_anonymous():
+        return IdentityContext(
+            caller=CallerIdentity(
+                user_id=None,
+                agent_id=None,
+                session_id=None,
+                principal_type="anonymous",
+                tenant_id=None,
+            )
+        )
+
+    principal_id_value: str = principal.id.value
+    p_type = principal.type  # PrincipalType enum
+
+    if p_type == PrincipalType.USER:
+        mapped_type: str = "user"
+    else:
+        # SERVICE_ACCOUNT and SYSTEM both map to "service"
+        mapped_type = "service"
+
+    # CallerIdentity requires user_id non-None for "user"/"service".
+    # Guard: if somehow the id is empty, fall back to anonymous rather than crashing.
+    if not principal_id_value:
+        return IdentityContext(
+            caller=CallerIdentity(
+                user_id=None,
+                agent_id=None,
+                session_id=None,
+                principal_type="anonymous",
+                tenant_id=principal.tenant_id,
+            )
+        )
+
+    return IdentityContext(
+        caller=CallerIdentity(
+            user_id=principal_id_value,
+            agent_id=None,
+            session_id=None,
+            principal_type=mapped_type,  # type: ignore[arg-type]
+            tenant_id=principal.tenant_id,
+        )
+    )
 
 
 def create_health_routes(
@@ -185,7 +247,15 @@ def create_auth_combined_app(
         try:
             auth_context = auth_components.authn_middleware.authenticate(auth_request)
             _store_auth_context(scope, auth_context)
-            await mcp_app(scope, receive, send)
+            # Bridge: propagate the authenticated Principal into identity_context_var
+            # so the batch executor and per-tenant enforcement (#229/#236/#231) can
+            # read caller.tenant_id for this request.
+            identity_ctx = _principal_to_identity_context(getattr(auth_context, "principal", None))
+            token = identity_context_var.set(identity_ctx)
+            try:
+                await mcp_app(scope, receive, send)
+            finally:
+                identity_context_var.reset(token)
 
         except AuthenticationError as e:
             response = JSONResponse(
