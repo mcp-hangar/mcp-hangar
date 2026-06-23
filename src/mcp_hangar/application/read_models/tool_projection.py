@@ -25,6 +25,9 @@ if TYPE_CHECKING:
 
 logger = logging.getLogger(__name__)
 
+# Sentinel: marks a config withdrawal that applies to ALL tenants.
+_ALL_TENANTS = object()
+
 
 # ---------------------------------------------------------------------------
 # Read-model
@@ -87,6 +90,10 @@ class ToolProjectionRegistry:
         self._projections: dict[tuple[str, str], ToolProjection] = {}
         # Tracks whether the registry has been populated at least once
         self._built: bool = False
+        # Config-withdrawal overlay: (mcp_server, tool) -> set of tenant_ids or _ALL_TENANTS sentinel.
+        # Populated at config-load time; re-applied on every reload.
+        # _ALL_TENANTS sentinel means withdrawn for every tenant (no per-tenant check needed).
+        self._config_withdrawals: dict[tuple[str, str], object] = {}
 
     # ------------------------------------------------------------------
     # Population (called by bootstrap / config-reload)
@@ -149,6 +156,64 @@ class ToolProjectionRegistry:
             )
 
     # ------------------------------------------------------------------
+    # Config-withdrawal overlay (populated at config-load time)
+    # ------------------------------------------------------------------
+
+    def set_config_withdrawal(
+        self,
+        mcp_server: str,
+        tool: str,
+        tenant_id: str | None = None,
+    ) -> None:
+        """Mark a tool as withdrawn via config.
+
+        Args:
+            mcp_server: Owning mcp_server identifier.
+            tool: Tool name.
+            tenant_id: If ``None``, the tool is withdrawn for ALL tenants.
+                Otherwise only for the given tenant.
+        """
+        key = (mcp_server, tool)
+        with self._lock:
+            current = self._config_withdrawals.get(key)
+            if tenant_id is None:
+                # ALL-tenants sentinel — overrides any per-tenant set.
+                self._config_withdrawals[key] = _ALL_TENANTS
+            elif current is _ALL_TENANTS:
+                # Already withdrawn for all — keep the broader rule.
+                pass
+            else:
+                if current is None:
+                    self._config_withdrawals[key] = {tenant_id}
+                else:
+                    # current is a set[str]
+                    current.add(tenant_id)  # type: ignore[union-attr]
+        logger.debug(
+            "config_withdrawal_set",
+            extra={"mcp_server": mcp_server, "tool": tool, "tenant_id": tenant_id},
+        )
+
+    def clear_config_withdrawals(self) -> None:
+        """Remove all config-declared withdrawals.
+
+        Called before re-applying config on reload so that removing a
+        withdrawal from the config file actually restores the tool.
+        """
+        with self._lock:
+            self._config_withdrawals.clear()
+        logger.debug("config_withdrawals_cleared")
+
+    def _is_config_withdrawn_for(self, mcp_server: str, tool: str, tenant_id: str | None) -> bool:
+        """Return True if (mcp_server, tool) is config-withdrawn for tenant_id."""
+        entry = self._config_withdrawals.get((mcp_server, tool))
+        if entry is None:
+            return False
+        if entry is _ALL_TENANTS:
+            return True
+        # entry is a set[str]
+        return tenant_id is not None and tenant_id in entry  # type: ignore[operator]
+
+    # ------------------------------------------------------------------
     # Query API (read-only)
     # ------------------------------------------------------------------
 
@@ -160,10 +225,16 @@ class ToolProjectionRegistry:
     ) -> ToolProjection | None:
         """Return the :class:`ToolProjection` for *(mcp_server, tool)*.
 
-        Returns ``None`` when the tool is unknown.  The *tenant_id* argument
-        is available for callers that want to inspect effective status
-        immediately; the returned projection carries ``tenant_overrides`` so
-        callers can also call :meth:`ToolProjection.is_withdrawn_for`.
+        Consults the config-withdrawal overlay first.  If the tool is
+        config-withdrawn for *tenant_id* (or for ALL tenants), a projection
+        marked ``withdrawn`` is returned even when the tool has not yet been
+        discovered (no ``build_from_tools`` call).  A placeholder digest with
+        all-zero hex is used for undiscovered tools — it is valid per the
+        :class:`~domain.value_objects.tool_digest.ToolDigest` schema (64 hex
+        chars) and carries no semantic meaning.
+
+        Returns ``None`` only when the tool is completely unknown (not in the
+        discovered store AND not config-withdrawn for this tenant).
 
         Args:
             mcp_server: Owning mcp_server identifier.
@@ -176,7 +247,65 @@ class ToolProjectionRegistry:
             The matching :class:`ToolProjection`, or ``None``.
         """
         with self._lock:
-            return self._projections.get((mcp_server, tool))
+            discovered = self._projections.get((mcp_server, tool))
+            config_withdrawn = self._is_config_withdrawn_for(mcp_server, tool, tenant_id)
+
+            if not config_withdrawn:
+                # No config overlay applies — return discovered projection as-is.
+                return discovered
+
+            # Config overlay applies: return a withdrawn projection.
+            if discovered is not None:
+                # Discovered projection exists — augment it with tenant_overrides so
+                # is_withdrawn_for() returns True for the relevant tenants.
+                entry = self._config_withdrawals.get((mcp_server, tool))
+                if entry is _ALL_TENANTS:
+                    # Withdrawn for all: set base status to withdrawn.
+                    return ToolProjection(
+                        mcp_server=discovered.mcp_server,
+                        tool=discovered.tool,
+                        schema=discovered.schema,
+                        digest=discovered.digest,
+                        status="withdrawn",
+                        tenant_overrides=discovered.tenant_overrides,
+                    )
+                else:
+                    # Per-tenant set: merge config tenants into tenant_overrides.
+                    merged_overrides = dict(discovered.tenant_overrides)
+                    for tid in entry:  # type: ignore[union-attr]
+                        merged_overrides[tid] = "withdrawn"
+                    return ToolProjection(
+                        mcp_server=discovered.mcp_server,
+                        tool=discovered.tool,
+                        schema=discovered.schema,
+                        digest=discovered.digest,
+                        status=discovered.status,
+                        tenant_overrides=merged_overrides,
+                    )
+
+            # Tool not yet discovered — synthesize a minimal withdrawn projection.
+            # Placeholder digest: 64 zeros (valid hex, no semantic meaning).
+            placeholder_digest = ToolDigest(tool_name=tool, sha256="0" * 64)
+            entry = self._config_withdrawals.get((mcp_server, tool))
+            if entry is _ALL_TENANTS:
+                return ToolProjection(
+                    mcp_server=mcp_server,
+                    tool=tool,
+                    schema={},
+                    digest=placeholder_digest,
+                    status="withdrawn",
+                )
+            else:
+                # Per-tenant withdrawal — only this tenant sees withdrawn.
+                overrides = dict.fromkeys(entry, "withdrawn")  # type: ignore[arg-type]
+                return ToolProjection(
+                    mcp_server=mcp_server,
+                    tool=tool,
+                    schema={},
+                    digest=placeholder_digest,
+                    status="active",
+                    tenant_overrides=overrides,
+                )
 
     def list_for_server(self, mcp_server: str) -> list[ToolProjection]:
         """Return all projections for *mcp_server* (snapshot)."""
@@ -193,13 +322,15 @@ class ToolProjectionRegistry:
     # ------------------------------------------------------------------
 
     def invalidate(self) -> None:
-        """Discard all cached projections.
+        """Discard all cached projections and config-withdrawal overlay.
 
         Called on config reload so the registry is rebuilt on the next
-        :meth:`build_from_tools` call.
+        :meth:`build_from_tools` call and config withdrawals are re-applied
+        from the fresh config (via :meth:`set_config_withdrawal`).
         """
         with self._lock:
             self._projections.clear()
+            self._config_withdrawals.clear()
             self._built = False
             logger.debug("tool_projection_registry_invalidated")
 

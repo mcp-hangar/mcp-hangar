@@ -377,6 +377,56 @@ def _load_mcp_server_config(mcp_server_id: str, spec_dict: dict[str, Any]) -> Mc
                             error=str(e),
                         )
 
+    # Parse per-server config-declared tool withdrawals.
+    # Schema (under each mcp_server entry):
+    #
+    #   tool_projection:
+    #     withdrawn: [legacy_search]                    # withdrawn for ALL tenants
+    #     tenant_overrides:
+    #       "tenant:openai": { withdrawn: [beta_tool] } # withdrawn for that tenant only
+    #
+    # These withdrawals are applied as a config-overlay on the ToolProjectionRegistry
+    # so that resolve() returns a withdrawn projection for the named tools even before
+    # they are discovered by build_from_tools (see #244 design note).
+    tool_projection_config = spec_dict.get("tool_projection")
+    if isinstance(tool_projection_config, dict):
+        from ..application.read_models.tool_projection import get_tool_projection_registry
+
+        tp_registry = get_tool_projection_registry()
+
+        # Global withdrawals (all tenants)
+        global_withdrawn = tool_projection_config.get("withdrawn", [])
+        if isinstance(global_withdrawn, list):
+            for tool_name in global_withdrawn:
+                if isinstance(tool_name, str) and tool_name:
+                    tp_registry.set_config_withdrawal(mcp_server_id, tool_name, tenant_id=None)
+                    logger.debug(
+                        "config_withdrawal_registered",
+                        mcp_server_id=mcp_server_id,
+                        tool=tool_name,
+                        tenant_id=None,
+                    )
+
+        # Per-tenant withdrawals
+        tenant_overrides_config = tool_projection_config.get("tenant_overrides", {})
+        if isinstance(tenant_overrides_config, dict):
+            for tenant_id_key, tenant_spec in tenant_overrides_config.items():
+                if not isinstance(tenant_spec, dict):
+                    continue
+                tenant_withdrawn = tenant_spec.get("withdrawn", [])
+                if isinstance(tenant_withdrawn, list):
+                    for tool_name in tenant_withdrawn:
+                        if isinstance(tool_name, str) and tool_name:
+                            tp_registry.set_config_withdrawal(
+                                mcp_server_id, tool_name, tenant_id=tenant_id_key
+                            )
+                            logger.debug(
+                                "config_withdrawal_registered",
+                                mcp_server_id=mcp_server_id,
+                                tool=tool_name,
+                                tenant_id=tenant_id_key,
+                            )
+
     # Register per-mcp_server concurrency limit if specified
     mcp_server_max_concurrency = spec_dict.get("max_concurrency")
     if mcp_server_max_concurrency is not None:
