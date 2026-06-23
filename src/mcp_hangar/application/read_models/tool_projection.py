@@ -94,6 +94,9 @@ class ToolProjectionRegistry:
         # Populated at config-load time; re-applied on every reload.
         # _ALL_TENANTS sentinel means withdrawn for every tenant (no per-tenant check needed).
         self._config_withdrawals: dict[tuple[str, str], object] = {}
+        # Runtime-withdrawal overlay: survives config reloads (clear_config_withdrawals does NOT touch this).
+        # Same shape as _config_withdrawals: (mcp_server, tool) -> set[str] | _ALL_TENANTS.
+        self._runtime_withdrawals: dict[tuple[str, str], object] = {}
 
     # ------------------------------------------------------------------
     # Population (called by bootstrap / config-reload)
@@ -198,6 +201,9 @@ class ToolProjectionRegistry:
 
         Called before re-applying config on reload so that removing a
         withdrawal from the config file actually restores the tool.
+
+        IMPORTANT: Does NOT touch ``_runtime_withdrawals`` — runtime
+        withdrawals are intentionally reload-safe (issue #235).
         """
         with self._lock:
             self._config_withdrawals.clear()
@@ -212,6 +218,96 @@ class ToolProjectionRegistry:
             return True
         # entry is a set[str]
         return tenant_id is not None and tenant_id in entry  # type: ignore[operator]
+
+    # ------------------------------------------------------------------
+    # Runtime-withdrawal overlay (survives config reloads)
+    # ------------------------------------------------------------------
+
+    def withdraw(
+        self,
+        mcp_server: str,
+        tool: str,
+        tenant_id: str | None = None,
+    ) -> None:
+        """Mark a tool as withdrawn at runtime (survives config reload).
+
+        Args:
+            mcp_server: Owning mcp_server identifier.
+            tool: Tool name.
+            tenant_id: If ``None``, the tool is withdrawn for ALL tenants.
+                Otherwise only for the given tenant.
+        """
+        key = (mcp_server, tool)
+        with self._lock:
+            current = self._runtime_withdrawals.get(key)
+            if tenant_id is None:
+                self._runtime_withdrawals[key] = _ALL_TENANTS
+            elif current is _ALL_TENANTS:
+                pass  # Already covers all tenants.
+            else:
+                if current is None:
+                    self._runtime_withdrawals[key] = {tenant_id}
+                else:
+                    current.add(tenant_id)  # type: ignore[union-attr]
+        logger.debug(
+            "runtime_withdrawal_set",
+            extra={"mcp_server": mcp_server, "tool": tool, "tenant_id": tenant_id},
+        )
+
+    def restore(
+        self,
+        mcp_server: str,
+        tool: str,
+        tenant_id: str | None = None,
+    ) -> None:
+        """Remove a runtime withdrawal for a tool.
+
+        Affects ONLY the runtime overlay; a config-declared withdrawal
+        independently persists (effective = config OR runtime).
+
+        Args:
+            mcp_server: Owning mcp_server identifier.
+            tool: Tool name.
+            tenant_id: If ``None``, removes the runtime withdrawal for ALL
+                tenants (clears the entire key). Otherwise removes the given
+                tenant from the per-tenant set.
+        """
+        key = (mcp_server, tool)
+        with self._lock:
+            current = self._runtime_withdrawals.get(key)
+            if current is None:
+                return  # Nothing to restore.
+            if tenant_id is None:
+                # Remove the entire entry → no runtime withdrawal remains.
+                del self._runtime_withdrawals[key]
+            elif current is _ALL_TENANTS:
+                # Can't partially remove from an ALL-tenants entry; do nothing
+                # to avoid accidentally re-enabling for all other tenants.
+                pass
+            else:
+                # current is a set[str]
+                current.discard(tenant_id)  # type: ignore[union-attr]
+                if not current:
+                    del self._runtime_withdrawals[key]
+        logger.debug(
+            "runtime_withdrawal_restored",
+            extra={"mcp_server": mcp_server, "tool": tool, "tenant_id": tenant_id},
+        )
+
+    def _is_runtime_withdrawn_for(self, mcp_server: str, tool: str, tenant_id: str | None) -> bool:
+        """Return True if (mcp_server, tool) is runtime-withdrawn for tenant_id."""
+        entry = self._runtime_withdrawals.get((mcp_server, tool))
+        if entry is None:
+            return False
+        if entry is _ALL_TENANTS:
+            return True
+        return tenant_id is not None and tenant_id in entry  # type: ignore[operator]
+
+    def _is_withdrawn_for(self, mcp_server: str, tool: str, tenant_id: str | None) -> bool:
+        """Return True if config OR runtime says (mcp_server, tool) is withdrawn for tenant_id."""
+        return self._is_config_withdrawn_for(mcp_server, tool, tenant_id) or self._is_runtime_withdrawn_for(
+            mcp_server, tool, tenant_id
+        )
 
     # ------------------------------------------------------------------
     # Query API (read-only)
@@ -248,19 +344,23 @@ class ToolProjectionRegistry:
         """
         with self._lock:
             discovered = self._projections.get((mcp_server, tool))
-            config_withdrawn = self._is_config_withdrawn_for(mcp_server, tool, tenant_id)
+            withdrawn = self._is_withdrawn_for(mcp_server, tool, tenant_id)
 
-            if not config_withdrawn:
-                # No config overlay applies — return discovered projection as-is.
+            if not withdrawn:
+                # Neither config nor runtime overlay applies — return discovered as-is.
                 return discovered
 
-            # Config overlay applies: return a withdrawn projection.
+            # At least one overlay applies: build a withdrawn projection.
+            # Collect ALL tenants withdrawn by either overlay for per-tenant synthesis.
+            config_entry = self._config_withdrawals.get((mcp_server, tool))
+            runtime_entry = self._runtime_withdrawals.get((mcp_server, tool))
+
+            # Is it a blanket (ALL-tenants) withdrawal from either source?
+            all_tenants_withdrawn = config_entry is _ALL_TENANTS or runtime_entry is _ALL_TENANTS
+
             if discovered is not None:
-                # Discovered projection exists — augment it with tenant_overrides so
-                # is_withdrawn_for() returns True for the relevant tenants.
-                entry = self._config_withdrawals.get((mcp_server, tool))
-                if entry is _ALL_TENANTS:
-                    # Withdrawn for all: set base status to withdrawn.
+                # Discovered projection exists — augment it so is_withdrawn_for() fires.
+                if all_tenants_withdrawn:
                     return ToolProjection(
                         mcp_server=discovered.mcp_server,
                         tool=discovered.tool,
@@ -270,10 +370,12 @@ class ToolProjectionRegistry:
                         tenant_overrides=discovered.tenant_overrides,
                     )
                 else:
-                    # Per-tenant set: merge config tenants into tenant_overrides.
+                    # Merge per-tenant sets from both overlays.
                     merged_overrides = dict(discovered.tenant_overrides)
-                    for tid in entry:  # type: ignore[union-attr]
-                        merged_overrides[tid] = "withdrawn"
+                    for entry in (config_entry, runtime_entry):
+                        if entry is not None and entry is not _ALL_TENANTS:
+                            for tid in entry:  # type: ignore[union-attr]
+                                merged_overrides[tid] = "withdrawn"
                     return ToolProjection(
                         mcp_server=discovered.mcp_server,
                         tool=discovered.tool,
@@ -286,8 +388,7 @@ class ToolProjectionRegistry:
             # Tool not yet discovered — synthesize a minimal withdrawn projection.
             # Placeholder digest: 64 zeros (valid hex, no semantic meaning).
             placeholder_digest = ToolDigest(tool_name=tool, sha256="0" * 64)
-            entry = self._config_withdrawals.get((mcp_server, tool))
-            if entry is _ALL_TENANTS:
+            if all_tenants_withdrawn:
                 return ToolProjection(
                     mcp_server=mcp_server,
                     tool=tool,
@@ -296,8 +397,12 @@ class ToolProjectionRegistry:
                     status="withdrawn",
                 )
             else:
-                # Per-tenant withdrawal — only this tenant sees withdrawn.
-                overrides = dict.fromkeys(entry, "withdrawn")  # type: ignore[arg-type]
+                # Collect union of per-tenant entries from both overlays.
+                merged_tenants: set[str] = set()
+                for entry in (config_entry, runtime_entry):
+                    if entry is not None and entry is not _ALL_TENANTS:
+                        merged_tenants.update(entry)  # type: ignore[arg-type]
+                overrides = dict.fromkeys(merged_tenants, "withdrawn")
                 return ToolProjection(
                     mcp_server=mcp_server,
                     tool=tool,
@@ -322,15 +427,16 @@ class ToolProjectionRegistry:
     # ------------------------------------------------------------------
 
     def invalidate(self) -> None:
-        """Discard all cached projections and config-withdrawal overlay.
+        """Discard all cached projections, config-withdrawal overlay, and runtime overlay.
 
-        Called on config reload so the registry is rebuilt on the next
-        :meth:`build_from_tools` call and config withdrawals are re-applied
-        from the fresh config (via :meth:`set_config_withdrawal`).
+        Full reset — intended for testing only.  In production, config reload
+        calls :meth:`clear_config_withdrawals` (which preserves runtime
+        withdrawals) rather than this method.
         """
         with self._lock:
             self._projections.clear()
             self._config_withdrawals.clear()
+            self._runtime_withdrawals.clear()
             self._built = False
             logger.debug("tool_projection_registry_invalidated")
 

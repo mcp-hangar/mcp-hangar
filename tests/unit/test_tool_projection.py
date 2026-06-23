@@ -355,19 +355,23 @@ class TestToolProjectionRegistryInvalidation:
 
 
 # ---------------------------------------------------------------------------
-# No mutation API exposed
+# Mutation API surface (runtime withdrawal — issue #235)
 # ---------------------------------------------------------------------------
 
-class TestNoMutationApi:
-    """Registry must NOT expose runtime mutation methods (#235 scope)."""
+class TestMutationApi:
+    """Registry exposes runtime mutation methods as of #235 (withdraw/restore).
 
-    def test_no_withdraw_method(self, registry):
-        """withdraw() must not exist on the registry."""
-        assert not hasattr(registry, "withdraw")
+    set_status() and update_projection() remain unexposed — only the
+    targeted runtime-withdrawal overlay is added.
+    """
 
-    def test_no_restore_method(self, registry):
-        """restore() must not exist on the registry."""
-        assert not hasattr(registry, "restore")
+    def test_withdraw_method_exists(self, registry):
+        """withdraw() must exist on the registry (added by #235)."""
+        assert hasattr(registry, "withdraw")
+
+    def test_restore_method_exists(self, registry):
+        """restore() must exist on the registry (added by #235)."""
+        assert hasattr(registry, "restore")
 
     def test_no_set_status_method(self, registry):
         """set_status() must not exist on the registry."""
