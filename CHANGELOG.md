@@ -5,6 +5,14 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [1.2.3](https://github.com/mcp-hangar/mcp-hangar/compare/v1.2.2...v1.2.3) (2026-06-23)
+
+
+### Fixed
+
+* **core:** add auth/tls/http config serialization to to_config_dict() ([#209](https://github.com/mcp-hangar/mcp-hangar/issues/209)) ([0df37d6](https://github.com/mcp-hangar/mcp-hangar/commit/0df37d6a8f6ad3b0287a6cd07c1e2e8895d1e6f2))
+* **security:** make _sanitize() recursive to strip nested secrets ([#210](https://github.com/mcp-hangar/mcp-hangar/issues/210)) ([cfd2a0f](https://github.com/mcp-hangar/mcp-hangar/commit/cfd2a0f863e5d3c812ea6a4d7e79657e287c91b6)), closes [#206](https://github.com/mcp-hangar/mcp-hangar/issues/206)
+
 ## [1.2.2](https://github.com/mcp-hangar/mcp-hangar/compare/v1.2.1...v1.2.2) (2026-05-17)
 
 
