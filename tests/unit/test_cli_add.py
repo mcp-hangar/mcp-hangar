@@ -97,7 +97,7 @@ class TestConfigFileManager:
 mcp_servers:
   memory:
     mode: subprocess
-    command: [npx, -y, "@anthropic/mcp-server-memory"]
+    command: [npx, -y, "@example/mcp-server-memory"]
 """
             )
             manager = ConfigFileManager(config_path)

@@ -343,7 +343,7 @@ def _load_mcp_server_config(mcp_server_id: str, spec_dict: dict[str, Any]) -> Mc
     # Parse per-tenant (member-scope) tool access policies:
     # tool_access:
     #   member:
-    #     "tenant:openai":
+    #     "tenant:a":
     #       deny_list: [dangerous_tool]
     tool_access_config = spec_dict.get("tool_access")
     if isinstance(tool_access_config, dict):
@@ -381,9 +381,9 @@ def _load_mcp_server_config(mcp_server_id: str, spec_dict: dict[str, Any]) -> Mc
     # Schema (under each mcp_server entry):
     #
     #   tool_projection:
-    #     withdrawn: [legacy_search]                    # withdrawn for ALL tenants
+    #     withdrawn: [legacy_tool]                      # withdrawn for ALL tenants
     #     tenant_overrides:
-    #       "tenant:openai": { withdrawn: [beta_tool] } # withdrawn for that tenant only
+    #       "tenant:a": { withdrawn: [beta_tool] }      # withdrawn for that tenant only
     #
     # These withdrawals are applied as a config-overlay on the ToolProjectionRegistry
     # so that resolve() returns a withdrawn projection for the named tools even before

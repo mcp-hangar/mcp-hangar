@@ -28,14 +28,14 @@ from mcp_hangar.server.tools.batch import BatchExecutor, CallSpec
 # Helpers
 # ---------------------------------------------------------------------------
 
-_SERVER = "offers_server"
-_TOOL = "search_offers"
+_SERVER = "server_a"
+_TOOL = "read_item"
 
 
 def _make_tool(name: str = _TOOL) -> ToolSchema:
     return ToolSchema(
         name=name,
-        description="Search offers",
+        description="A tool",
         input_schema={"type": "object", "properties": {}},
     )
 
@@ -138,7 +138,7 @@ class TestToolWithdrawalEnforcement:
             mock_context.command_bus.send.assert_called_once()
 
     def test_withdrawn_tenant_is_blocked(self, mock_context):
-        """After withdrawing search_offers for tenant:A, A's call returns ToolWithdrawnError
+        """After withdrawing the tool for tenant:A, A's call returns ToolWithdrawnError
         and command_bus.send is NOT called (backend is never reached).
 
         Per-process-after-reload guarantee: this tests the post-reload steady state.
@@ -157,7 +157,7 @@ class TestToolWithdrawalEnforcement:
         mock_context.command_bus.send.assert_not_called()
 
     def test_non_withdrawn_tenant_still_succeeds(self, mock_context):
-        """Tenant B is unaffected when search_offers is withdrawn only for tenant:A."""
+        """Tenant B is unaffected when the tool is withdrawn only for tenant:A."""
         registry = get_tool_projection_registry()
         registry.build_from_tools(
             _SERVER,

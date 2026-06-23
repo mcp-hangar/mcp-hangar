@@ -21,8 +21,8 @@ from mcp_hangar.domain.value_objects.capabilities import (
 
 class TestEgressRule:
     def test_valid_egress_rule(self) -> None:
-        rule = EgressRule(host="api.openai.com", port=443, protocol="https")
-        assert rule.host == "api.openai.com"
+        rule = EgressRule(host="api.example.com", port=443, protocol="https")
+        assert rule.host == "api.example.com"
         assert rule.port == 443
         assert rule.protocol == "https"
 
@@ -65,7 +65,7 @@ class TestNetworkCapabilities:
         assert net.egress[0].host == "*"
 
     def test_egress_coerced_to_tuple(self) -> None:
-        rule = EgressRule(host="api.openai.com", port=443)
+        rule = EgressRule(host="api.example.com", port=443)
         net = NetworkCapabilities(egress=[rule])  # type: ignore[arg-type]
         assert isinstance(net.egress, tuple)
 
@@ -87,10 +87,10 @@ class TestFilesystemCapabilities:
 class TestEnvironmentCapabilities:
     def test_all_declared(self) -> None:
         env = EnvironmentCapabilities(
-            required=("OPENAI_API_KEY",),
+            required=("EXAMPLE_API_KEY",),
             optional=("LOG_LEVEL", "DEBUG"),
         )
-        assert env.all_declared() == {"OPENAI_API_KEY", "LOG_LEVEL", "DEBUG"}
+        assert env.all_declared() == {"EXAMPLE_API_KEY", "LOG_LEVEL", "DEBUG"}
 
     def test_empty_by_default(self) -> None:
         env = EnvironmentCapabilities()
@@ -143,7 +143,7 @@ class TestProviderCapabilities:
         assert cap.has_egress_rules() is False
 
     def test_has_egress_rules_true_when_declared(self) -> None:
-        rule = EgressRule(host="api.openai.com", port=443)
+        rule = EgressRule(host="api.example.com", port=443)
         cap = McpServerCapabilities(
             network=NetworkCapabilities(egress=(rule,)),
         )
@@ -171,7 +171,7 @@ class TestProviderCapabilitiesFromDict:
         config = {
             "network": {
                 "egress": [
-                    {"host": "api.openai.com", "port": 443, "protocol": "https"},
+                    {"host": "api.example.com", "port": 443, "protocol": "https"},
                     {"host": "*.internal.corp", "port": 8080, "protocol": "http"},
                 ],
                 "dns_allowed": False,
@@ -183,7 +183,7 @@ class TestProviderCapabilitiesFromDict:
                 "temp_allowed": False,
             },
             "environment": {
-                "required": ["OPENAI_API_KEY"],
+                "required": ["EXAMPLE_API_KEY"],
                 "optional": ["LOG_LEVEL"],
             },
             "tools": {
@@ -200,7 +200,7 @@ class TestProviderCapabilitiesFromDict:
 
         # Network
         assert len(cap.network.egress) == 2
-        assert cap.network.egress[0].host == "api.openai.com"
+        assert cap.network.egress[0].host == "api.example.com"
         assert cap.network.egress[0].port == 443
         assert cap.network.egress[1].host == "*.internal.corp"
         assert cap.network.egress[1].port == 8080
@@ -214,7 +214,7 @@ class TestProviderCapabilitiesFromDict:
         assert cap.filesystem.temp_allowed is False
 
         # Environment
-        assert cap.environment.required == ("OPENAI_API_KEY",)
+        assert cap.environment.required == ("EXAMPLE_API_KEY",)
         assert cap.environment.optional == ("LOG_LEVEL",)
 
         # Tools
@@ -294,7 +294,7 @@ class TestFromDictRoundTrip:
         """Verify from_dict produces same result as direct construction."""
         direct = McpServerCapabilities(
             network=NetworkCapabilities(
-                egress=(EgressRule(host="api.openai.com", port=443, protocol="https"),),
+                egress=(EgressRule(host="api.example.com", port=443, protocol="https"),),
                 dns_allowed=True,
                 loopback_allowed=False,
             ),
@@ -303,7 +303,7 @@ class TestFromDictRoundTrip:
         from_dict_result = McpServerCapabilities.from_dict(
             {
                 "network": {
-                    "egress": [{"host": "api.openai.com", "port": 443, "protocol": "https"}],
+                    "egress": [{"host": "api.example.com", "port": 443, "protocol": "https"}],
                     "dns_allowed": True,
                     "loopback_allowed": False,
                 },
@@ -323,13 +323,13 @@ class TestProviderConfigCapabilities:
                 "mode": "subprocess",
                 "command": ["python", "-m", "test_server"],
                 "capabilities": {
-                    "network": {"egress": [{"host": "api.openai.com", "port": 443}]},
+                    "network": {"egress": [{"host": "api.example.com", "port": 443}]},
                     "enforcement_mode": "alert",
                 },
             },
         )
         assert config.capabilities is not None
-        assert config.capabilities.network.egress[0].host == "api.openai.com"
+        assert config.capabilities.network.egress[0].host == "api.example.com"
         assert config.capabilities.enforcement_mode == "alert"
 
     def test_config_from_dict_without_capabilities(self) -> None:

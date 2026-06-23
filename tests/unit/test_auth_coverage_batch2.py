@@ -1310,11 +1310,11 @@ class TestHandleAssignRole:
         from mcp_hangar.auth.infrastructure.rbac_authorizer import InMemoryRoleStore
 
         role_store = InMemoryRoleStore()
-        args = argparse.Namespace(principal="user:a", role="developer", scope="tenant:acme")
+        args = argparse.Namespace(principal="user:a", role="developer", scope="tenant:x")
         result = _handle_assign_role(args, role_store)
         assert result == 0
         output = capsys.readouterr().out
-        assert "tenant:acme" in output
+        assert "tenant:x" in output
 
     def test_assign_role_value_error_caught(self, capsys):
         from mcp_hangar.auth.cli import _handle_assign_role
