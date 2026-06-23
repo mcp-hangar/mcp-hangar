@@ -50,14 +50,14 @@ class TestNetworkObservation:
         obs = NetworkObservation(
             timestamp=1234567890.0,
             mcp_server_id="math",
-            destination_host="api.openai.com",
+            destination_host="api.example.com",
             destination_port=443,
             protocol="https",
             direction="outbound",
         )
         assert obs.timestamp == 1234567890.0
         assert obs.mcp_server_id == "math"
-        assert obs.destination_host == "api.openai.com"
+        assert obs.destination_host == "api.example.com"
         assert obs.destination_port == 443
         assert obs.protocol == "https"
         assert obs.direction == "outbound"
@@ -66,7 +66,7 @@ class TestNetworkObservation:
         obs = NetworkObservation(
             timestamp=1234567890.0,
             mcp_server_id="math",
-            destination_host="api.openai.com",
+            destination_host="api.example.com",
             destination_port=443,
             protocol="https",
             direction="outbound",
@@ -79,7 +79,7 @@ class TestNetworkObservation:
             NetworkObservation(
                 timestamp=1234567890.0,
                 mcp_server_id="",
-                destination_host="api.openai.com",
+                destination_host="api.example.com",
                 destination_port=443,
                 protocol="https",
                 direction="outbound",
@@ -101,7 +101,7 @@ class TestNetworkObservation:
             NetworkObservation(
                 timestamp=1234567890.0,
                 mcp_server_id="math",
-                destination_host="api.openai.com",
+                destination_host="api.example.com",
                 destination_port=-1,
                 protocol="https",
                 direction="outbound",
@@ -112,7 +112,7 @@ class TestNetworkObservation:
             NetworkObservation(
                 timestamp=1234567890.0,
                 mcp_server_id="math",
-                destination_host="api.openai.com",
+                destination_host="api.example.com",
                 destination_port=65536,
                 protocol="https",
                 direction="outbound",
@@ -122,7 +122,7 @@ class TestNetworkObservation:
         obs = NetworkObservation(
             timestamp=1234567890.0,
             mcp_server_id="math",
-            destination_host="api.openai.com",
+            destination_host="api.example.com",
             destination_port=0,
             protocol="tcp",
             direction="outbound",
@@ -133,7 +133,7 @@ class TestNetworkObservation:
         obs = NetworkObservation(
             timestamp=1234567890.0,
             mcp_server_id="math",
-            destination_host="api.openai.com",
+            destination_host="api.example.com",
             destination_port=65535,
             protocol="tcp",
             direction="outbound",
@@ -240,7 +240,7 @@ class TestNullBehavioralProfiler:
         obs = NetworkObservation(
             timestamp=1234567890.0,
             mcp_server_id="math",
-            destination_host="api.openai.com",
+            destination_host="api.example.com",
             destination_port=443,
             protocol="https",
             direction="outbound",

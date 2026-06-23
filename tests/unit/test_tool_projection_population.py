@@ -62,56 +62,56 @@ def reset_registry():
 
 class TestToolProjectionPopulationHandler:
     def test_populates_registry_on_started(self):
-        repo = _StubRepo({"allegro": _StubServer([_make_tool("search"), _make_tool("get_offer")])})
+        repo = _StubRepo({"server_a": _StubServer([_make_tool("read_item"), _make_tool("get_item")])})
         handler = ToolProjectionPopulationHandler(repository=repo)
 
-        handler.handle(_started_event("allegro", 2))
+        handler.handle(_started_event("server_a", 2))
 
         registry = get_tool_projection_registry()
-        names = {p.tool for p in registry.list_for_server("allegro")}
-        assert names == {"search", "get_offer"}
-        proj = registry.resolve("allegro", "search", tenant_id=None)
+        names = {p.tool for p in registry.list_for_server("server_a")}
+        assert names == {"read_item", "get_item"}
+        proj = registry.resolve("server_a", "read_item", tenant_id=None)
         assert proj is not None
         assert proj.status == "active"
         assert proj.digest is not None
 
     def test_restart_replaces_stale_projections(self):
-        repo_servers = {"allegro": _StubServer([_make_tool("search"), _make_tool("legacy")])}
+        repo_servers = {"server_a": _StubServer([_make_tool("read_item"), _make_tool("legacy")])}
         repo = _StubRepo(repo_servers)
         handler = ToolProjectionPopulationHandler(repository=repo)
-        handler.handle(_started_event("allegro", 2))
+        handler.handle(_started_event("server_a", 2))
 
         # Re-discovery: legacy tool gone.
-        repo_servers["allegro"] = _StubServer([_make_tool("search")])
-        handler.handle(_started_event("allegro", 1))
+        repo_servers["server_a"] = _StubServer([_make_tool("read_item")])
+        handler.handle(_started_event("server_a", 1))
 
         registry = get_tool_projection_registry()
-        names = {p.tool for p in registry.list_for_server("allegro")}
-        assert names == {"search"}
+        names = {p.tool for p in registry.list_for_server("server_a")}
+        assert names == {"read_item"}
 
     def test_withdrawal_overlay_composes_with_discovered_tool(self):
         registry = get_tool_projection_registry()
         # A config withdrawal registered before discovery.
-        registry.set_config_withdrawal("allegro", "search", tenant_id="tenant:openai")
+        registry.set_config_withdrawal("server_a", "read_item", tenant_id="tenant:a")
 
-        repo = _StubRepo({"allegro": _StubServer([_make_tool("search")])})
-        ToolProjectionPopulationHandler(repository=repo).handle(_started_event("allegro", 1))
+        repo = _StubRepo({"server_a": _StubServer([_make_tool("read_item")])})
+        ToolProjectionPopulationHandler(repository=repo).handle(_started_event("server_a", 1))
 
         # Discovered AND config-withdrawn for that tenant → resolves withdrawn.
-        proj = registry.resolve("allegro", "search", tenant_id="tenant:openai")
+        proj = registry.resolve("server_a", "read_item", tenant_id="tenant:a")
         assert proj is not None
-        assert proj.is_withdrawn_for("tenant:openai")
+        assert proj.is_withdrawn_for("tenant:a")
         # Other tenant: discovered, active.
-        assert not registry.resolve("allegro", "search", tenant_id="tenant:acme").is_withdrawn_for("tenant:acme")
+        assert not registry.resolve("server_a", "read_item", tenant_id="tenant:b").is_withdrawn_for("tenant:b")
 
     def test_runtime_withdrawal_composes_with_discovered_tool(self):
         registry = get_tool_projection_registry()
-        registry.withdraw("allegro", "search")  # all tenants, runtime
+        registry.withdraw("server_a", "read_item")  # all tenants, runtime
 
-        repo = _StubRepo({"allegro": _StubServer([_make_tool("search")])})
-        ToolProjectionPopulationHandler(repository=repo).handle(_started_event("allegro", 1))
+        repo = _StubRepo({"server_a": _StubServer([_make_tool("read_item")])})
+        ToolProjectionPopulationHandler(repository=repo).handle(_started_event("server_a", 1))
 
-        assert registry.resolve("allegro", "search", tenant_id=None).is_withdrawn_for(None)
+        assert registry.resolve("server_a", "read_item", tenant_id=None).is_withdrawn_for(None)
 
     def test_unknown_server_is_noop(self):
         handler = ToolProjectionPopulationHandler(repository=_StubRepo({}))
@@ -120,7 +120,7 @@ class TestToolProjectionPopulationHandler:
         assert get_tool_projection_registry().list_for_server("missing") == []
 
     def test_ignores_non_started_events(self):
-        repo = _StubRepo({"allegro": _StubServer([_make_tool("search")])})
+        repo = _StubRepo({"server_a": _StubServer([_make_tool("read_item")])})
         handler = ToolProjectionPopulationHandler(repository=repo)
-        handler.handle(McpServerStopped(mcp_server_id="allegro", reason="test"))
-        assert get_tool_projection_registry().list_for_server("allegro") == []
+        handler.handle(McpServerStopped(mcp_server_id="server_a", reason="test"))
+        assert get_tool_projection_registry().list_for_server("server_a") == []

@@ -59,7 +59,7 @@ class TestDockerLauncherNetworkMode:
         """Capabilities with egress rules -> no --network none (allow bridge)."""
         caps = McpServerCapabilities(
             network=NetworkCapabilities(
-                egress=(EgressRule(host="api.openai.com", port=443, protocol="https"),),
+                egress=(EgressRule(host="api.example.com", port=443, protocol="https"),),
             ),
         )
         launcher = self._make_launcher(enable_network=False)  # enable_network should be overridden
@@ -96,7 +96,7 @@ class TestDockerLauncherNetworkMode:
         caps = McpServerCapabilities(
             network=NetworkCapabilities(
                 egress=(
-                    EgressRule(host="api.openai.com", port=443),
+                    EgressRule(host="api.example.com", port=443),
                     EgressRule(host="*.internal.corp", port=443),
                     EgressRule(host="redis.cache.local", port=6379, protocol="tcp"),
                 ),
