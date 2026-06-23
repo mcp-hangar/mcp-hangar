@@ -5,6 +5,29 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [1.3.0](https://github.com/mcp-hangar/mcp-hangar/compare/v1.2.3...v1.3.0) (2026-06-23)
+
+
+### Added
+
+* **core:** add front_door fail-closed default for unauthenticated calls ([#242](https://github.com/mcp-hangar/mcp-hangar/issues/242)) ([b4d3200](https://github.com/mcp-hangar/mcp-hangar/commit/b4d32002a12e8fdb82b212dfdb13c5a83910a5bb)), closes [#236](https://github.com/mcp-hangar/mcp-hangar/issues/236)
+* **core:** add runtime tool withdraw/restore mutation API ([#246](https://github.com/mcp-hangar/mcp-hangar/issues/246)) ([b72b43e](https://github.com/mcp-hangar/mcp-hangar/commit/b72b43e8f9ab4554245ad9f501c915c0c1243ac6)), closes [#235](https://github.com/mcp-hangar/mcp-hangar/issues/235)
+* **core:** add tenant_id to CallerIdentity from JWT claim ([#238](https://github.com/mcp-hangar/mcp-hangar/issues/238)) ([0d85e36](https://github.com/mcp-hangar/mcp-hangar/commit/0d85e3669c50fa20e8e16a56c7bc123d9ec6cd4c)), closes [#228](https://github.com/mcp-hangar/mcp-hangar/issues/228)
+* **core:** add ToolProjectionRegistry read-model ([#237](https://github.com/mcp-hangar/mcp-hangar/issues/237)) ([93b00c4](https://github.com/mcp-hangar/mcp-hangar/commit/93b00c4e8a4a45172356dfb7879ceea91cd31930)), closes [#230](https://github.com/mcp-hangar/mcp-hangar/issues/230)
+* **core:** enforce tool withdrawal on the call path ([#243](https://github.com/mcp-hangar/mcp-hangar/issues/243)) ([40dcb77](https://github.com/mcp-hangar/mcp-hangar/commit/40dcb77ee37cb0e8bdb870ce8d9a3840c1618da5)), closes [#231](https://github.com/mcp-hangar/mcp-hangar/issues/231)
+* **core:** flat per-tenant tool re-export in front_door mode ([#252](https://github.com/mcp-hangar/mcp-hangar/issues/252)) ([a8ecd17](https://github.com/mcp-hangar/mcp-hangar/commit/a8ecd178a0f9cc3c4b62fe6bb0b4fcc8c8093d93)), closes [#232](https://github.com/mcp-hangar/mcp-hangar/issues/232)
+* **core:** populate tool withdrawal from config (reload-driven overlay) ([#245](https://github.com/mcp-hangar/mcp-hangar/issues/245)) ([ba1b6af](https://github.com/mcp-hangar/mcp-hangar/commit/ba1b6af4975a017a72c37f23a6bf3891d28599c4)), closes [#244](https://github.com/mcp-hangar/mcp-hangar/issues/244)
+* **core:** populate ToolProjectionRegistry from tool discovery ([#250](https://github.com/mcp-hangar/mcp-hangar/issues/250)) ([02adbc5](https://github.com/mcp-hangar/mcp-hangar/commit/02adbc5c9f97beff8308d07bed72562232ce0e13)), closes [#248](https://github.com/mcp-hangar/mcp-hangar/issues/248)
+* **core:** resolve member-scope tool policy on the live call path ([#241](https://github.com/mcp-hangar/mcp-hangar/issues/241)) ([152ca0e](https://github.com/mcp-hangar/mcp-hangar/commit/152ca0e123eee67493a5a15d41bb1631af27504e)), closes [#229](https://github.com/mcp-hangar/mcp-hangar/issues/229)
+* **security:** advertise OAuth Protected Resource Metadata (RFC 9728) ([#257](https://github.com/mcp-hangar/mcp-hangar/issues/257)) ([d5a6089](https://github.com/mcp-hangar/mcp-hangar/commit/d5a6089f7f9fae1174f772d95f78bbb1e19867a7)), closes [#256](https://github.com/mcp-hangar/mcp-hangar/issues/256)
+
+
+### Fixed
+
+* **core:** bind caller identity on the MCP request path ([#249](https://github.com/mcp-hangar/mcp-hangar/issues/249)) ([af636cd](https://github.com/mcp-hangar/mcp-hangar/commit/af636cda084eacbcd22666c5f17ffeb3c79be156)), closes [#247](https://github.com/mcp-hangar/mcp-hangar/issues/247)
+* **core:** propagate request context into batch worker threads ([#239](https://github.com/mcp-hangar/mcp-hangar/issues/239)) ([bad09d7](https://github.com/mcp-hangar/mcp-hangar/commit/bad09d78a354750be59c19c2324a4eaebe97c343)), closes [#227](https://github.com/mcp-hangar/mcp-hangar/issues/227)
+* **core:** satisfy mypy and ruff format CI gates ([#258](https://github.com/mcp-hangar/mcp-hangar/issues/258)) ([d7a2a53](https://github.com/mcp-hangar/mcp-hangar/commit/d7a2a53825df6f86803a2402bf70eaba01ab1eda))
+
 ## [1.2.3](https://github.com/mcp-hangar/mcp-hangar/compare/v1.2.2...v1.2.3) (2026-06-23)
 
 
