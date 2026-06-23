@@ -471,6 +471,42 @@ def _load_group_config(group_id: str, spec_dict: dict[str, Any]) -> None:
     )
 
 
+def _init_topology_mode_from_config(full_config: dict[str, Any]) -> None:
+    """Apply tool_access.mode from the top-level config to the resolver.
+
+    Valid values: "egress" (default, backward-compatible) | "front_door".
+    Absent or unrecognised mode → "egress" (not "front_door"), ensuring that
+    deployments that never set the key are not silently broken.  Only an
+    explicit "front_door" value activates the fail-closed default.
+
+    Args:
+        full_config: Full configuration dictionary.
+    """
+    from ..domain.services import get_tool_access_resolver
+    from ..domain.services.tool_access_resolver import TopologyMode
+
+    tool_access_config = full_config.get("tool_access", {})
+    raw_mode = tool_access_config.get("mode") if isinstance(tool_access_config, dict) else None
+
+    if raw_mode == "front_door":
+        mode: TopologyMode = "front_door"
+    else:
+        # Default to egress for backward compatibility.  Unknown values are
+        # treated as egress and a warning is logged so operators notice typos
+        # without causing a service interruption.
+        if raw_mode is not None and raw_mode != "egress":
+            logger.warning(
+                "unknown_tool_access_mode_defaulting_to_egress",
+                mode=raw_mode,
+                hint="Valid values are 'egress' and 'front_door'",
+            )
+        mode = "egress"
+
+    resolver = get_tool_access_resolver()
+    resolver.set_topology_mode(mode)
+    logger.debug("tool_access_topology_mode_set", mode=mode)
+
+
 def _init_concurrency_from_config(full_config: dict[str, Any]) -> None:
     """Initialize the ConcurrencyManager from configuration.
 
@@ -554,6 +590,7 @@ def load_configuration(config_path: str | None = None) -> dict[str, Any]:
         logger.info("loading_config_from_file", config_path=config_path)
         full_config = load_config_from_file(config_path)
         _init_concurrency_from_config(full_config)
+        _init_topology_mode_from_config(full_config)
         load_config(full_config.get("mcp_servers", {}))
         return full_config
     else:
