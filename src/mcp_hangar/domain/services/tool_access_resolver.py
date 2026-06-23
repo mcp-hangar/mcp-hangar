@@ -307,12 +307,14 @@ class ToolAccessResolver:
         # Get group policy
         group_policy = self._group_policies.get(group_id, ToolAccessPolicy())
 
-        # Get member policy
-        member_key = (group_id, member_id)
-        member_policy = self._member_policies.get(member_key, ToolAccessPolicy())
-
-        # If member maps to a different mcp_server, also get that mcp_server's policy
-        mapped_mcp_server_id = self._member_mcp_server_mapping.get(member_key)
+        # Get member policy (only when a concrete member_id is present;
+        # a group context without a member resolves to server+group only).
+        member_policy = ToolAccessPolicy()
+        mapped_mcp_server_id: str | None = None
+        if member_id is not None:
+            member_key = (group_id, member_id)
+            member_policy = self._member_policies.get(member_key, ToolAccessPolicy())
+            mapped_mcp_server_id = self._member_mcp_server_mapping.get(member_key)
         if mapped_mcp_server_id and mapped_mcp_server_id != mcp_server_id:
             mapped_mcp_server_policy = self._mcp_server_policies.get(mapped_mcp_server_id, ToolAccessPolicy())
             # Merge mapped mcp_server policy with base mcp_server policy

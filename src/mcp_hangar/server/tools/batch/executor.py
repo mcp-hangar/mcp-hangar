@@ -27,7 +27,8 @@ from ....domain.events import (
     ToolWithdrawnRejected,
 )
 from ....context import get_identity_context
-from ....domain.services import get_tool_access_resolver, get_tool_projection_registry
+from ....application.read_models.tool_projection import get_tool_projection_registry
+from ....domain.services import get_tool_access_resolver
 from ....infrastructure.single_flight import SingleFlight
 from ....logging_config import get_logger
 from ....observability.tracing import extract_trace_context, get_tracer
@@ -611,9 +612,7 @@ class BatchExecutor:
         # Reads caller tenant_id from the propagated identity context (set by IdentityMiddleware,
         # carried into this worker thread via copy_context() — see PR #239).
         _identity_ctx = get_identity_context()
-        _caller_tenant_id: str | None = (
-            _identity_ctx.caller.tenant_id if _identity_ctx is not None else None
-        )
+        _caller_tenant_id: str | None = _identity_ctx.caller.tenant_id if _identity_ctx is not None else None
         resolver = get_tool_access_resolver()
         tracer = get_tracer(__name__)
         with tracer.start_as_current_span("policy.check_access") as policy_span:

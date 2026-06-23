@@ -417,9 +417,7 @@ def _load_mcp_server_config(mcp_server_id: str, spec_dict: dict[str, Any]) -> Mc
                 if isinstance(tenant_withdrawn, list):
                     for tool_name in tenant_withdrawn:
                         if isinstance(tool_name, str) and tool_name:
-                            tp_registry.set_config_withdrawal(
-                                mcp_server_id, tool_name, tenant_id=tenant_id_key
-                            )
+                            tp_registry.set_config_withdrawal(mcp_server_id, tool_name, tenant_id=tenant_id_key)
                             logger.debug(
                                 "config_withdrawal_registered",
                                 mcp_server_id=mcp_server_id,

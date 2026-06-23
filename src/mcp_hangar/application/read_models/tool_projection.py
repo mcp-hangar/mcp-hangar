@@ -25,8 +25,15 @@ if TYPE_CHECKING:
 
 logger = logging.getLogger(__name__)
 
-# Sentinel: marks a config withdrawal that applies to ALL tenants.
-_ALL_TENANTS = object()
+
+class _AllTenants:
+    """Sentinel type: a withdrawal entry that applies to ALL tenants."""
+
+
+# Sentinel value: marks a withdrawal that applies to ALL tenants.
+# An overlay entry is therefore `set[str] | _AllTenants`; narrow with
+# `isinstance(entry, set)` to operate on the per-tenant set.
+_ALL_TENANTS = _AllTenants()
 
 
 # ---------------------------------------------------------------------------
@@ -93,10 +100,10 @@ class ToolProjectionRegistry:
         # Config-withdrawal overlay: (mcp_server, tool) -> set of tenant_ids or _ALL_TENANTS sentinel.
         # Populated at config-load time; re-applied on every reload.
         # _ALL_TENANTS sentinel means withdrawn for every tenant (no per-tenant check needed).
-        self._config_withdrawals: dict[tuple[str, str], object] = {}
+        self._config_withdrawals: dict[tuple[str, str], set[str] | _AllTenants] = {}
         # Runtime-withdrawal overlay: survives config reloads (clear_config_withdrawals does NOT touch this).
         # Same shape as _config_withdrawals: (mcp_server, tool) -> set[str] | _ALL_TENANTS.
-        self._runtime_withdrawals: dict[tuple[str, str], object] = {}
+        self._runtime_withdrawals: dict[tuple[str, str], set[str] | _AllTenants] = {}
 
     # ------------------------------------------------------------------
     # Population (called by bootstrap / config-reload)
@@ -129,9 +136,7 @@ class ToolProjectionRegistry:
         for tool_schema in tools:
             tool_dict = tool_schema.to_dict()
             digest = compute_tool_digest(tool_dict)
-            base_status: Literal["active", "withdrawn"] = status_overrides.get(
-                tool_schema.name, "active"
-            )
+            base_status: Literal["active", "withdrawn"] = status_overrides.get(tool_schema.name, "active")
             per_tenant = dict(tenant_overrides.get(tool_schema.name, {}))
             projection = ToolProjection(
                 mcp_server=mcp_server,
@@ -182,15 +187,11 @@ class ToolProjectionRegistry:
             if tenant_id is None:
                 # ALL-tenants sentinel — overrides any per-tenant set.
                 self._config_withdrawals[key] = _ALL_TENANTS
-            elif current is _ALL_TENANTS:
-                # Already withdrawn for all — keep the broader rule.
-                pass
-            else:
-                if current is None:
-                    self._config_withdrawals[key] = {tenant_id}
-                else:
-                    # current is a set[str]
-                    current.add(tenant_id)  # type: ignore[union-attr]
+            elif isinstance(current, set):
+                current.add(tenant_id)
+            elif current is None:
+                self._config_withdrawals[key] = {tenant_id}
+            # else: current is _ALL_TENANTS — already the broader rule, keep it.
         logger.debug(
             "config_withdrawal_set",
             extra={"mcp_server": mcp_server, "tool": tool, "tenant_id": tenant_id},
@@ -242,13 +243,11 @@ class ToolProjectionRegistry:
             current = self._runtime_withdrawals.get(key)
             if tenant_id is None:
                 self._runtime_withdrawals[key] = _ALL_TENANTS
-            elif current is _ALL_TENANTS:
-                pass  # Already covers all tenants.
-            else:
-                if current is None:
-                    self._runtime_withdrawals[key] = {tenant_id}
-                else:
-                    current.add(tenant_id)  # type: ignore[union-attr]
+            elif isinstance(current, set):
+                current.add(tenant_id)
+            elif current is None:
+                self._runtime_withdrawals[key] = {tenant_id}
+            # else: current is _ALL_TENANTS — already covers all tenants, keep it.
         logger.debug(
             "runtime_withdrawal_set",
             extra={"mcp_server": mcp_server, "tool": tool, "tenant_id": tenant_id},
@@ -280,15 +279,12 @@ class ToolProjectionRegistry:
             if tenant_id is None:
                 # Remove the entire entry → no runtime withdrawal remains.
                 del self._runtime_withdrawals[key]
-            elif current is _ALL_TENANTS:
-                # Can't partially remove from an ALL-tenants entry; do nothing
-                # to avoid accidentally re-enabling for all other tenants.
-                pass
-            else:
-                # current is a set[str]
-                current.discard(tenant_id)  # type: ignore[union-attr]
+            elif isinstance(current, set):
+                current.discard(tenant_id)
                 if not current:
                     del self._runtime_withdrawals[key]
+            # else: current is _ALL_TENANTS — can't partially remove from an
+            # ALL-tenants entry; do nothing to avoid re-enabling other tenants.
         logger.debug(
             "runtime_withdrawal_restored",
             extra={"mcp_server": mcp_server, "tool": tool, "tenant_id": tenant_id},
@@ -373,8 +369,8 @@ class ToolProjectionRegistry:
                     # Merge per-tenant sets from both overlays.
                     merged_overrides = dict(discovered.tenant_overrides)
                     for entry in (config_entry, runtime_entry):
-                        if entry is not None and entry is not _ALL_TENANTS:
-                            for tid in entry:  # type: ignore[union-attr]
+                        if isinstance(entry, set):
+                            for tid in entry:
                                 merged_overrides[tid] = "withdrawn"
                     return ToolProjection(
                         mcp_server=discovered.mcp_server,

@@ -50,9 +50,7 @@ async def withdraw_tool(request: Request) -> HangarJSONResponse:
     ctx = get_context()
     ctx.event_bus.publish(ToolWithdrawn(tenant_id=tenant_id, mcp_server=server, tool=tool))
 
-    return HangarJSONResponse(
-        {"withdrawn": True, "mcp_server": server, "tool": tool, "tenant_id": tenant_id}
-    )
+    return HangarJSONResponse({"withdrawn": True, "mcp_server": server, "tool": tool, "tenant_id": tenant_id})
 
 
 async def restore_tool(request: Request) -> HangarJSONResponse:
@@ -88,9 +86,7 @@ async def restore_tool(request: Request) -> HangarJSONResponse:
     ctx = get_context()
     ctx.event_bus.publish(ToolRestored(tenant_id=tenant_id, mcp_server=server, tool=tool))
 
-    return HangarJSONResponse(
-        {"restored": True, "mcp_server": server, "tool": tool, "tenant_id": tenant_id}
-    )
+    return HangarJSONResponse({"restored": True, "mcp_server": server, "tool": tool, "tenant_id": tenant_id})
 
 
 # Route definitions for mounting in the API router

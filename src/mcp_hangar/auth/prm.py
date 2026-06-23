@@ -10,10 +10,13 @@ any token-validation logic. Hangar remains a pure Resource Server.
 
 from __future__ import annotations
 
+from collections.abc import MutableMapping
+from typing import Any
+
 _PRM_PATH = "/.well-known/oauth-protected-resource"
 
 
-def build_resource_base_url(scope: dict) -> str:
+def build_resource_base_url(scope: MutableMapping[str, Any]) -> str:
     """Derive the base URL (scheme + host) from an ASGI scope.
 
     Used as a fallback when no configured resource_uri is available.

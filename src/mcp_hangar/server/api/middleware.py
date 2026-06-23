@@ -60,14 +60,16 @@ _CSRF_BYPASS_AUTH_SCHEME = "bearer "
 _BROWSER_HINT_HEADERS = ("origin", "referer", "cookie")
 _SESSION_SUSPEND_PATH_RE = re.compile(r"^/sessions/(?P<session_id>[^/]+)/suspend/?$")
 _VALID_SESSION_ID_RE = re.compile(r"^[a-zA-Z0-9_-]{1,128}$")
-_DEFAULT_AUTH_SKIP_PATHS = frozenset({
-    "/health/live",
-    "/health/ready",
-    "/health/startup",
-    "/metrics",
-    # RFC 9728 discovery — must be reachable before the client has a token.
-    "/.well-known/oauth-protected-resource",
-})
+_DEFAULT_AUTH_SKIP_PATHS = frozenset(
+    {
+        "/health/live",
+        "/health/ready",
+        "/health/startup",
+        "/metrics",
+        # RFC 9728 discovery — must be reachable before the client has a token.
+        "/.well-known/oauth-protected-resource",
+    }
+)
 
 
 class _AuthLoggerAdapter:
@@ -265,6 +267,7 @@ class AuthEnforcementMiddleware:
             # RFC 9728: advertise resource_metadata in Bearer challenge when OIDC active.
             if self._oidc_issuer and isinstance(exc, AuthenticationError):
                 from ...auth.prm import build_resource_base_url, build_www_authenticate
+
                 resource_base = self._oidc_resource_uri or build_resource_base_url(scope)
                 www_auth = build_www_authenticate(resource_base)
             else:
@@ -310,6 +313,7 @@ class AuthMiddlewareHTTP(BaseHTTPMiddleware):
             # RFC 9728: advertise resource_metadata in Bearer challenge when OIDC active.
             if self._oidc_issuer:
                 from ...auth.prm import build_resource_base_url, build_www_authenticate
+
                 resource_base = self._oidc_resource_uri or build_resource_base_url(request.scope)
                 www_auth = build_www_authenticate(resource_base)
             else:

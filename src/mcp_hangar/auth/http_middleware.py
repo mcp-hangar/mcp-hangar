@@ -111,6 +111,7 @@ class AuthMiddlewareHTTP(BaseHTTPMiddleware):
             # RFC 9728: include resource_metadata in Bearer challenge when OIDC is active.
             if self._oidc_issuer:
                 from mcp_hangar.auth.prm import build_resource_base_url, build_www_authenticate
+
                 resource_base = self._oidc_resource_uri or build_resource_base_url(request.scope)
                 www_auth = build_www_authenticate(resource_base)
             else:
