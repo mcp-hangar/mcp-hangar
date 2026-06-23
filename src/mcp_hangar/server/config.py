@@ -340,6 +340,43 @@ def _load_mcp_server_config(mcp_server_id: str, spec_dict: dict[str, Any]) -> Mc
             has_deny_list=bool(tools_access_policy.deny_list),
         )
 
+    # Parse per-tenant (member-scope) tool access policies:
+    # tool_access:
+    #   member:
+    #     "tenant:openai":
+    #       deny_list: [dangerous_tool]
+    tool_access_config = spec_dict.get("tool_access")
+    if isinstance(tool_access_config, dict):
+        from ..domain.model.mcp_server_config import ToolsConfig
+
+        member_policies_config = tool_access_config.get("member", {})
+        if isinstance(member_policies_config, dict):
+            resolver = get_tool_access_resolver()
+            for tenant_id, member_policy_spec in member_policies_config.items():
+                if not isinstance(member_policy_spec, dict):
+                    continue
+                allow_list = member_policy_spec.get("allow_list", [])
+                deny_list = member_policy_spec.get("deny_list", [])
+                if allow_list or deny_list:
+                    try:
+                        member_tools_cfg = ToolsConfig(allow_list=allow_list, deny_list=deny_list)
+                        member_policy = member_tools_cfg.to_policy()
+                        resolver.set_standalone_member_policy(mcp_server_id, tenant_id, member_policy)
+                        logger.debug(
+                            "standalone_member_tool_access_policy_set",
+                            mcp_server_id=mcp_server_id,
+                            tenant_id=tenant_id,
+                            has_allow_list=bool(member_policy.allow_list),
+                            has_deny_list=bool(member_policy.deny_list),
+                        )
+                    except ValueError as e:
+                        logger.warning(
+                            "invalid_standalone_member_tools_access_config",
+                            mcp_server_id=mcp_server_id,
+                            tenant_id=tenant_id,
+                            error=str(e),
+                        )
+
     # Register per-mcp_server concurrency limit if specified
     mcp_server_max_concurrency = spec_dict.get("max_concurrency")
     if mcp_server_max_concurrency is not None:

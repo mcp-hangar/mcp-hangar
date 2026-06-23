@@ -34,6 +34,7 @@ class ToolAccessResolver:
         # Cache key format:
         # - "mcp_server:{mcp_server_id}" for standalone mcp_servers
         # - "group:{group_id}:member:{member_id}" for group members
+        # - "mcp_server:{mcp_server_id}:member:{member_id}" for standalone server→member
         self._policy_cache: dict[str, ToolAccessPolicy] = {}
 
         # Policy sources - set by external config loader
@@ -45,6 +46,8 @@ class ToolAccessResolver:
         self._member_policies: dict[tuple[str, str], ToolAccessPolicy] = {}
         # Maps (group_id, member_id) -> mcp_server_id (for resolving member's mcp_server)
         self._member_mcp_server_mapping: dict[tuple[str, str], str] = {}
+        # Maps (mcp_server_id, tenant_id) -> ToolAccessPolicy for standalone server→member merge
+        self._standalone_member_policies: dict[tuple[str, str], ToolAccessPolicy] = {}
 
     def set_mcp_server_policy(self, mcp_server_id: str, policy: ToolAccessPolicy) -> None:
         """Set the tool access policy for a mcp_server.
@@ -111,6 +114,29 @@ class ToolAccessResolver:
             cache_key = f"group:{group_id}:member:{member_id}"
             self._policy_cache.pop(cache_key, None)
 
+    def set_standalone_member_policy(
+        self,
+        mcp_server_id: str,
+        member_id: str,
+        policy: ToolAccessPolicy,
+    ) -> None:
+        """Set a per-tenant policy for a standalone mcp_server (server→member merge).
+
+        Args:
+            mcp_server_id: McpServer identifier.
+            member_id: Tenant/member identifier (e.g. ``tenant:openai``).
+            policy: Tool access policy for this member.
+        """
+        key = (mcp_server_id, member_id)
+        with self._lock:
+            if policy.is_unrestricted():
+                self._standalone_member_policies.pop(key, None)
+            else:
+                self._standalone_member_policies[key] = policy
+            # Invalidate cache for this (server, member) pair
+            cache_key = f"mcp_server:{mcp_server_id}:member:{member_id}"
+            self._policy_cache.pop(cache_key, None)
+
     def remove_mcp_server_policy(self, mcp_server_id: str) -> None:
         """Remove tool access policy for a mcp_server.
 
@@ -171,6 +197,8 @@ class ToolAccessResolver:
         # Build cache key
         if group_id and member_id:
             cache_key = f"group:{group_id}:member:{member_id}"
+        elif member_id and not group_id:
+            cache_key = f"mcp_server:{mcp_server_id}:member:{member_id}"
         else:
             cache_key = f"mcp_server:{mcp_server_id}"
 
@@ -213,8 +241,15 @@ class ToolAccessResolver:
         else:
             mcp_server_policy = ToolAccessPolicy.merge(global_policy, explicit_mcp_server_policy)
 
-        # If no group context, just return mcp_server policy
-        if not group_id or not member_id:
+        # If member_id present but no group_id: server→member merge (standalone tenant policy)
+        if member_id and not group_id:
+            standalone_member_policy = self._standalone_member_policies.get(
+                (mcp_server_id, member_id), ToolAccessPolicy()
+            )
+            return ToolAccessPolicy.merge(mcp_server_policy, standalone_member_policy)
+
+        # If no group context at all, just return mcp_server policy
+        if not group_id:
             return mcp_server_policy
 
         # Get group policy
@@ -334,7 +369,12 @@ class ToolAccessResolver:
         cache_key = f"mcp_server:{mcp_server_id}"
         self._policy_cache.pop(cache_key, None)
 
-        # Remove any member caches that reference this mcp_server
+        # Remove standalone server→member cache entries for this mcp_server
+        keys_to_remove = [k for k in self._policy_cache if k.startswith(f"mcp_server:{mcp_server_id}:member:")]
+        for key in keys_to_remove:
+            self._policy_cache.pop(key, None)
+
+        # Remove any group member caches that reference this mcp_server
         keys_to_remove = []
         for member_key, mapped_mcp_server in self._member_mcp_server_mapping.items():
             if mapped_mcp_server == mcp_server_id:
@@ -387,6 +427,7 @@ class ToolAccessResolver:
             self._group_policies.clear()
             self._member_policies.clear()
             self._member_mcp_server_mapping.clear()
+            self._standalone_member_policies.clear()
 
 
 # Global singleton instance
