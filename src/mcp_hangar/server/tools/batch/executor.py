@@ -12,6 +12,7 @@ Provides parallel execution of batch invocations with:
 from concurrent.futures import as_completed, ThreadPoolExecutor
 import asyncio
 import atexit
+import contextvars
 import json
 import threading
 import time
@@ -290,10 +291,18 @@ class BatchExecutor:
                 )
 
                 # Execute calls in thread pool — all submitted at once, semaphores
-                # provide backpressure (not sequential chunking)
+                # provide backpressure (not sequential chunking).
+                # copy_context() snapshots the calling thread's contextvars
+                # (identity_context_var, OTel trace context, structlog ctx, …)
+                # so each worker inherits the per-request context rather than
+                # getting the default empty context that ThreadPoolExecutor
+                # would otherwise provide.
+                # IMPORTANT: each call gets its own copy — a Context object
+                # cannot be entered by more than one thread simultaneously.
                 with ThreadPoolExecutor(max_workers=effective_workers) as executor:
                     futures = {
                         executor.submit(
+                            contextvars.copy_context().run,
                             self._execute_call,
                             call,
                             cancel_event,
