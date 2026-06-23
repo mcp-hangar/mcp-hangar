@@ -146,7 +146,7 @@ class ToolAccessResolver:
 
         Args:
             mcp_server_id: McpServer identifier.
-            member_id: Tenant/member identifier (e.g. ``tenant:openai``).
+            member_id: Tenant/member identifier (e.g. ``tenant:a``).
             policy: Tool access policy for this member.
         """
         key = (mcp_server_id, member_id)

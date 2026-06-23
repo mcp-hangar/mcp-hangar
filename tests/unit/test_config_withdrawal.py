@@ -30,11 +30,11 @@ from mcp_hangar.server.tools.batch import BatchExecutor, CallSpec
 # Constants
 # ---------------------------------------------------------------------------
 
-_SERVER = "allegro"
-_TOOL = "legacy_search"
+_SERVER = "server_a"
+_TOOL = "legacy_tool"
 _TOOL_B = "beta_tool"
-_TENANT_A = "tenant:openai"
-_TENANT_B = "tenant:other"
+_TENANT_A = "tenant:a"
+_TENANT_B = "tenant:b"
 
 
 # ---------------------------------------------------------------------------

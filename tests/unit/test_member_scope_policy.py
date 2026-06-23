@@ -81,14 +81,14 @@ class TestStandaloneMemberPolicyResolver:
         resolver.set_mcp_server_policy("myserver", server_policy)
 
         member_policy = ToolAccessPolicy(deny_list=("delete_data",))
-        resolver.set_standalone_member_policy("myserver", "tenant:openai", member_policy)
+        resolver.set_standalone_member_policy("myserver", "tenant:a", member_policy)
 
         # Without member context: server policy allows delete_data
         assert resolver.is_tool_allowed("myserver", "delete_data")
 
         # With tenant context: member deny overrides
-        assert not resolver.is_tool_allowed("myserver", "delete_data", member_id="tenant:openai")
-        assert resolver.is_tool_allowed("myserver", "get_data", member_id="tenant:openai")
+        assert not resolver.is_tool_allowed("myserver", "delete_data", member_id="tenant:a")
+        assert resolver.is_tool_allowed("myserver", "get_data", member_id="tenant:a")
 
     def test_different_tenant_still_allowed(self, resolver):
         """A different tenant with no member policy sees the server policy only."""
@@ -96,10 +96,10 @@ class TestStandaloneMemberPolicyResolver:
         resolver.set_mcp_server_policy("myserver", server_policy)
 
         member_policy = ToolAccessPolicy(deny_list=("delete_data",))
-        resolver.set_standalone_member_policy("myserver", "tenant:openai", member_policy)
+        resolver.set_standalone_member_policy("myserver", "tenant:a", member_policy)
 
-        # tenant:acme has no member policy → falls back to server policy
-        assert resolver.is_tool_allowed("myserver", "delete_data", member_id="tenant:acme")
+        # tenant:b has no member policy → falls back to server policy
+        assert resolver.is_tool_allowed("myserver", "delete_data", member_id="tenant:b")
 
     def test_member_id_none_returns_server_policy(self, resolver):
         """member_id=None → server-level resolution (backward compat)."""
@@ -107,7 +107,7 @@ class TestStandaloneMemberPolicyResolver:
         resolver.set_mcp_server_policy("myserver", server_policy)
 
         member_policy = ToolAccessPolicy(deny_list=("safe_tool",))
-        resolver.set_standalone_member_policy("myserver", "tenant:openai", member_policy)
+        resolver.set_standalone_member_policy("myserver", "tenant:a", member_policy)
 
         # No member context — only server policy applies
         policy = resolver.resolve_effective_policy("myserver")
