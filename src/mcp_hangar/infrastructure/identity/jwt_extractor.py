@@ -10,6 +10,7 @@ The JWT claims mapping is configurable:
     agent_id  -> CallerIdentity.agent_id  (custom claim)
     sid       -> CallerIdentity.session_id
     type      -> CallerIdentity.principal_type
+    tenant_id -> CallerIdentity.tenant_id  (configurable; default matches auth oidc.tenant_claim; absent → None)
     jti       -> IdentityContext.correlation_id
 """
 
@@ -56,6 +57,7 @@ class JWTIdentityExtractor:
         agent_id_claim: str = "agent_id",
         session_id_claim: str = "sid",
         principal_type_claim: str = "type",
+        tenant_claim: str = "tenant_id",
         correlation_id_claim: str = "jti",
     ) -> None:
         self._secret_or_key = secret_or_key
@@ -68,6 +70,7 @@ class JWTIdentityExtractor:
         self._agent_id_claim = agent_id_claim
         self._session_id_claim = session_id_claim
         self._principal_type_claim = principal_type_claim
+        self._tenant_claim = tenant_claim
         self._correlation_id_claim = correlation_id_claim
 
     def extract(
@@ -138,6 +141,7 @@ class JWTIdentityExtractor:
         agent_id = claims.get(self._agent_id_claim)
         session_id = claims.get(self._session_id_claim)
         principal_type = claims.get(self._principal_type_claim, "user")
+        tenant_id = claims.get(self._tenant_claim)
         correlation_id = claims.get(self._correlation_id_claim)
 
         if not user_id:
@@ -153,6 +157,7 @@ class JWTIdentityExtractor:
                 agent_id=str(agent_id) if agent_id else None,
                 session_id=str(session_id) if session_id else None,
                 principal_type=principal_type,
+                tenant_id=str(tenant_id) if tenant_id else None,
             )
         except ValueError as e:
             logger.warning("jwt_identity_construction_failed", error=str(e))

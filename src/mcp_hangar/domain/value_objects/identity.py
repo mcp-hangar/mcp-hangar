@@ -14,6 +14,7 @@ class CallerIdentity:
     agent_id: str | None
     session_id: str | None
     principal_type: PrincipalType = "anonymous"
+    tenant_id: str | None = None
 
     def __post_init__(self) -> None:
         """Validate identity consistency."""
@@ -35,5 +36,6 @@ class IdentityContext:
             "agent_id": self.caller.agent_id,
             "session_id": self.caller.session_id,
             "principal_type": self.caller.principal_type,
+            "tenant_id": self.caller.tenant_id,
             "correlation_id": self.correlation_id,
         }
