@@ -221,9 +221,7 @@ class ServerLifecycle:
         # reach it before obtaining a token.  When OIDC is not configured / no issuer is
         # set, we return 404 — there is nothing to advertise.
         _oidc_issuer = (
-            auth_components.oidc_issuer
-            if auth_components and hasattr(auth_components, "oidc_issuer")
-            else ""
+            auth_components.oidc_issuer if auth_components and hasattr(auth_components, "oidc_issuer") else ""
         )
         _oidc_resource_uri_cfg = (
             auth_components.oidc_resource_uri
