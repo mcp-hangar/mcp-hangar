@@ -67,6 +67,36 @@ class TestCallerIdentity:
         with pytest.raises((AttributeError, FrozenInstanceError)):
             identity.user_id = "u2"
 
+    def test_tenant_id_defaults_to_none(self):
+        identity = CallerIdentity(
+            user_id="u1",
+            agent_id=None,
+            session_id=None,
+            principal_type="user",
+        )
+        assert identity.tenant_id is None
+
+    def test_tenant_id_set(self):
+        identity = CallerIdentity(
+            user_id="u1",
+            agent_id=None,
+            session_id=None,
+            principal_type="user",
+            tenant_id="tenant-xyz",
+        )
+        assert identity.tenant_id == "tenant-xyz"
+
+    def test_tenant_id_does_not_affect_validation(self):
+        """Existing __post_init__ validation is unaffected by tenant_id."""
+        with pytest.raises(ValueError, match="user_id cannot be None"):
+            CallerIdentity(
+                user_id=None,
+                agent_id=None,
+                session_id=None,
+                principal_type="user",
+                tenant_id="tenant-xyz",
+            )
+
 
 class TestIdentityContext:
     """Tests for IdentityContext value object."""
@@ -87,6 +117,7 @@ class TestIdentityContext:
             "agent_id": "a1",
             "session_id": "s1",
             "principal_type": "user",
+            "tenant_id": None,
             "correlation_id": "corr-42",
         }
 
@@ -103,6 +134,23 @@ class TestIdentityContext:
         assert d["user_id"] is None
         assert d["agent_id"] == "a1"
         assert d["correlation_id"] is None
+        assert d["tenant_id"] is None
+
+    def test_to_dict_with_tenant_id(self):
+        ctx = IdentityContext(
+            caller=CallerIdentity(
+                user_id="u1",
+                agent_id=None,
+                session_id=None,
+                principal_type="user",
+                tenant_id="tenant-abc",
+            ),
+            correlation_id="corr-1",
+        )
+        d = ctx.to_dict()
+        assert d["tenant_id"] == "tenant-abc"
+        assert d["user_id"] == "u1"
+        assert d["correlation_id"] == "corr-1"
 
 
 class TestHeaderIdentityExtractor:
