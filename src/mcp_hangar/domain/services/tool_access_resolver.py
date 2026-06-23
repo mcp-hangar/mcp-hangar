@@ -159,6 +159,12 @@ class ToolAccessResolver:
             cache_key = f"mcp_server:{mcp_server_id}:member:{member_id}"
             self._policy_cache.pop(cache_key, None)
 
+    @property
+    def topology_mode(self) -> TopologyMode:
+        """Return the current topology mode."""
+        with self._lock:
+            return self._topology_mode
+
     def set_topology_mode(self, mode: TopologyMode) -> None:
         """Set the topology mode that controls unauthenticated-caller resolution.
 
