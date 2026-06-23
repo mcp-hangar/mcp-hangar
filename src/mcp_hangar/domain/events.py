@@ -1870,6 +1870,53 @@ class ToolApprovalExpired(DomainEvent):
 
 
 @dataclass
+class ToolWithdrawn(DomainEvent):
+    """Published when an operator withdraws a tool at runtime via the admin API.
+
+    This is a runtime (process-local) withdrawal that survives config reloads.
+    Fleet-wide propagation requires shared state (out of scope — issue #235).
+
+    Attributes:
+        tenant_id: Tenant for whom the tool is withdrawn, or ``None`` for ALL tenants.
+        mcp_server: MCP server identifier owning the tool.
+        tool: Name of the withdrawn tool.
+        schema_version: Event schema version.
+    """
+
+    tenant_id: str | None
+    mcp_server: str
+    tool: str
+    schema_version: int = 1
+
+    def __post_init__(self):
+        super().__init__()
+
+
+@dataclass
+class ToolRestored(DomainEvent):
+    """Published when an operator restores a runtime-withdrawn tool via the admin API.
+
+    Affects ONLY the runtime overlay; a config-declared withdrawal
+    independently persists (effective = config OR runtime).
+
+    Attributes:
+        tenant_id: Tenant for whom the tool is restored, or ``None`` meaning the
+            entire runtime entry was removed.
+        mcp_server: MCP server identifier owning the tool.
+        tool: Name of the restored tool.
+        schema_version: Event schema version.
+    """
+
+    tenant_id: str | None
+    mcp_server: str
+    tool: str
+    schema_version: int = 1
+
+    def __post_init__(self):
+        super().__init__()
+
+
+@dataclass
 class ToolWithdrawnRejected(DomainEvent):
     """Published when a tool call is rejected because the tool is withdrawn for the caller.
 

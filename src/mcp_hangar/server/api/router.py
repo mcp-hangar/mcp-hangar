@@ -44,6 +44,7 @@ def create_api_router(auth_components: Any = None) -> Starlette:
     Returns:
         Starlette application serving the REST API.
     """
+    from .admin_tools import admin_tools_routes
     from .config import config_routes
     from .discovery import discovery_routes
     from .groups import group_routes
@@ -64,6 +65,7 @@ def create_api_router(auth_components: Any = None) -> Starlette:
         Mount("/tools", routes=tools_routes),
         Mount("/ws", routes=ws_routes),
         Mount("/agent/policy", routes=agent_policy_routes),
+        Mount("/admin/tools", routes=admin_tools_routes),
     ]
 
     routes.extend(get_enterprise_api_routes())
