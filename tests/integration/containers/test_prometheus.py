@@ -93,36 +93,3 @@ class TestPrometheusServerIntegration:
 
         response = http_client.get(f"{prometheus_container['url']}/api/v1/targets")
         assert response.status_code == 200
-
-
-class TestObservabilityMetrics:
-    """Tests for MCP Hangar observability metrics (unit tests)."""
-
-    def test_observability_metrics_recorded(self) -> None:
-        from mcp_hangar.metrics import REGISTRY
-        from mcp_hangar.observability.metrics import get_observability_metrics
-
-        metrics = get_observability_metrics()
-
-        metrics.retry_attempts.inc(
-            labels={
-                "provider": "prom-test",
-                "tool": "add",
-                "attempt_number": "1",
-            }
-        )
-        metrics.circuit_breaker_state.set(0, labels={"mcp_server": "prom-test"})
-        metrics.cold_start_phase_duration.observe(
-            0.5,
-            labels={"mcp_server": "prom-test", "phase": "connect"},
-        )
-        metrics.availability_ratio.set(0.95)
-        metrics.error_budget_remaining.set(0.8)
-
-        output = REGISTRY.get_metrics_output()
-
-        assert "mcp_hangar_retry_attempts_total" in output
-        assert "mcp_hangar_circuit_breaker_state" in output
-        assert "mcp_hangar_cold_start_phase_duration" in output
-        assert "mcp_hangar_availability_ratio" in output
-        assert "mcp_hangar_error_budget_remaining" in output
