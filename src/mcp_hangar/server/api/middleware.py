@@ -229,7 +229,7 @@ class AuthEnforcementMiddleware:
     _authn: Any
     _skip_paths: frozenset[str]
     _trusted_proxies: TrustedProxyResolver
-    _oidc_issuer: str
+    _oidc_issuers: list[str]
     _oidc_resource_uri: str
 
     def __init__(
@@ -238,14 +238,14 @@ class AuthEnforcementMiddleware:
         authn: Any,
         skip_paths: frozenset[str] | None = None,
         trusted_proxies: TrustedProxyResolver | None = None,
-        oidc_issuer: str = "",
+        oidc_issuers: list[str] | None = None,
         oidc_resource_uri: str = "",
     ) -> None:
         self.app = app
         self._authn = authn
         self._skip_paths = skip_paths or _DEFAULT_AUTH_SKIP_PATHS
         self._trusted_proxies = trusted_proxies or TrustedProxyResolver()
-        self._oidc_issuer = oidc_issuer
+        self._oidc_issuers = oidc_issuers if oidc_issuers is not None else []
         self._oidc_resource_uri = oidc_resource_uri
 
     async def __call__(self, scope: Scope, receive: Receive, send: Send) -> None:
@@ -265,7 +265,7 @@ class AuthEnforcementMiddleware:
             await self.app(scope, receive, send)
         except (AuthenticationError, AccessDeniedError) as exc:
             # RFC 9728: advertise resource_metadata in Bearer challenge when OIDC active.
-            if self._oidc_issuer and isinstance(exc, AuthenticationError):
+            if self._oidc_issuers and isinstance(exc, AuthenticationError):
                 from ...auth.prm import build_resource_base_url, build_www_authenticate
 
                 resource_base = self._oidc_resource_uri or build_resource_base_url(scope)
@@ -281,7 +281,7 @@ class AuthMiddlewareHTTP(BaseHTTPMiddleware):
     _authn: Any
     _skip_paths: frozenset[str]
     _trusted_proxies: TrustedProxyResolver
-    _oidc_issuer: str
+    _oidc_issuers: list[str]
     _oidc_resource_uri: str
 
     def __init__(
@@ -289,14 +289,14 @@ class AuthMiddlewareHTTP(BaseHTTPMiddleware):
         app: ASGIApp,
         authn: Any,
         skip_paths: frozenset[str] | None = None,
-        oidc_issuer: str = "",
+        oidc_issuers: list[str] | None = None,
         oidc_resource_uri: str = "",
     ) -> None:
         super().__init__(app)
         self._authn = authn
         self._skip_paths = skip_paths or _DEFAULT_AUTH_SKIP_PATHS
         self._trusted_proxies = TrustedProxyResolver()
-        self._oidc_issuer = oidc_issuer
+        self._oidc_issuers = oidc_issuers if oidc_issuers is not None else []
         self._oidc_resource_uri = oidc_resource_uri
 
     async def dispatch(self, request: Request, call_next: RequestResponseEndpoint) -> Response:
@@ -311,7 +311,7 @@ class AuthMiddlewareHTTP(BaseHTTPMiddleware):
             return await call_next(request)
         except AuthenticationError as exc:
             # RFC 9728: advertise resource_metadata in Bearer challenge when OIDC active.
-            if self._oidc_issuer:
+            if self._oidc_issuers:
                 from ...auth.prm import build_resource_base_url, build_www_authenticate
 
                 resource_base = self._oidc_resource_uri or build_resource_base_url(request.scope)
@@ -354,7 +354,7 @@ def create_auth_enforced_app(
         inner_app,
         authn=authn,
         skip_paths=skip_paths,
-        oidc_issuer=getattr(auth_components, "oidc_issuer", ""),
+        oidc_issuers=getattr(auth_components, "oidc_issuers", []),
         oidc_resource_uri=getattr(auth_components, "oidc_resource_uri", ""),
     )
 

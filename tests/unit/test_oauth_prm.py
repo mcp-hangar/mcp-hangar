@@ -57,7 +57,7 @@ def _make_prm_app(oidc_issuer: str, resource_uri_cfg: str = "") -> Starlette:
             )
         resource_base = _oidc_resource_uri_cfg or build_resource_base_url(request.scope)
         return JSONResponse(
-            build_prm_response(issuer=_oidc_issuer, resource_uri=resource_base),
+            build_prm_response(issuers=[_oidc_issuer], resource_uri=resource_base),
             media_type="application/json",
         )
 
@@ -77,7 +77,7 @@ class TestPrmHelpers:
         assert prm_url("https://mcp.example.com/") == "https://mcp.example.com/.well-known/oauth-protected-resource"
 
     def test_build_prm_response_structure(self):
-        body = build_prm_response(issuer=_ISSUER, resource_uri=_RESOURCE)
+        body = build_prm_response(issuers=[_ISSUER], resource_uri=_RESOURCE)
         assert body["resource"] == _RESOURCE
         assert body["authorization_servers"] == [_ISSUER]
 
@@ -176,7 +176,7 @@ class TestPrmSkipPaths:
 class TestAuthEnforcementMiddlewareWWWAuthenticate:
     """Test the raw ASGI AuthEnforcementMiddleware via a Starlette TestClient wrapper."""
 
-    def _make_client(self, oidc_issuer: str, resource_uri: str = "") -> TestClient:
+    def _make_client(self, oidc_issuers: list[str], resource_uri: str = "") -> TestClient:
         from mcp_hangar.domain.exceptions import AuthenticationError
 
         authn = _make_authn_that_raises(AuthenticationError("bad token"))
@@ -187,7 +187,7 @@ class TestAuthEnforcementMiddlewareWWWAuthenticate:
         mw = AuthEnforcementMiddleware(
             dummy_app,
             authn=authn,
-            oidc_issuer=oidc_issuer,
+            oidc_issuers=oidc_issuers,
             oidc_resource_uri=resource_uri,
         )
         # TestClient can drive a raw ASGI app directly.
@@ -195,7 +195,7 @@ class TestAuthEnforcementMiddlewareWWWAuthenticate:
 
     def test_www_authenticate_with_oidc_has_resource_metadata(self):
         """When OIDC is configured, 401 must include resource_metadata in Bearer challenge."""
-        client = self._make_client(oidc_issuer=_ISSUER, resource_uri=_RESOURCE)
+        client = self._make_client(oidc_issuers=[_ISSUER], resource_uri=_RESOURCE)
         response = client.get("/mcp")
         assert response.status_code == 401
         www_auth = response.headers.get("www-authenticate", "")
@@ -205,7 +205,7 @@ class TestAuthEnforcementMiddlewareWWWAuthenticate:
 
     def test_www_authenticate_without_oidc_is_plain(self):
         """When no OIDC issuer, Bearer challenge stays as plain 'Bearer, ApiKey'."""
-        client = self._make_client(oidc_issuer="")
+        client = self._make_client(oidc_issuers=[])
         response = client.get("/mcp")
         assert response.status_code == 401
         www_auth = response.headers.get("www-authenticate", "")
@@ -219,7 +219,7 @@ class TestAuthEnforcementMiddlewareWWWAuthenticate:
 
 
 class TestAuthMiddlewareHTTPWWWAuthenticate:
-    def _make_client(self, oidc_issuer: str, resource_uri: str = "") -> TestClient:
+    def _make_client(self, oidc_issuers: list[str], resource_uri: str = "") -> TestClient:
         from mcp_hangar.domain.exceptions import AuthenticationError
 
         authn = _make_authn_that_raises(AuthenticationError("bad token"))
@@ -231,13 +231,13 @@ class TestAuthMiddlewareHTTPWWWAuthenticate:
         app.add_middleware(
             AuthMiddlewareHTTP,
             authn=authn,
-            oidc_issuer=oidc_issuer,
+            oidc_issuers=oidc_issuers,
             oidc_resource_uri=resource_uri,
         )
         return TestClient(app, raise_server_exceptions=False)
 
     def test_401_with_oidc_has_resource_metadata(self):
-        client = self._make_client(oidc_issuer=_ISSUER, resource_uri=_RESOURCE)
+        client = self._make_client(oidc_issuers=[_ISSUER], resource_uri=_RESOURCE)
         response = client.get("/protected")
         assert response.status_code == 401
         www_auth = response.headers.get("www-authenticate", "")
@@ -247,7 +247,7 @@ class TestAuthMiddlewareHTTPWWWAuthenticate:
         assert expected_prm in www_auth
 
     def test_401_without_oidc_is_plain_bearer(self):
-        client = self._make_client(oidc_issuer="")
+        client = self._make_client(oidc_issuers=[])
         response = client.get("/protected")
         assert response.status_code == 401
         www_auth = response.headers.get("www-authenticate", "")
@@ -278,5 +278,5 @@ class TestAuthDisabledNoRegression:
             pass
 
         mw = AuthEnforcementMiddleware(dummy, authn=authn)
-        # oidc_issuer defaults to "" — ensure no AttributeError and plain header
-        assert mw._oidc_issuer == ""
+        # oidc_issuers defaults to [] — ensure no AttributeError and plain header
+        assert mw._oidc_issuers == []

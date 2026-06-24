@@ -59,15 +59,40 @@ class JWTAuthenticator(IAuthenticator):
     Validates signature, expiration, issuer, and audience.
     """
 
-    def __init__(self, config: OIDCConfig, token_validator: ITokenValidator):
+    def __init__(
+        self,
+        config: OIDCConfig,
+        token_validator: ITokenValidator,
+        issuer_configs: dict[str, OIDCConfig] | None = None,
+    ):
         """Initialize the JWT authenticator.
 
         Args:
-            config: OIDC configuration with issuer, audience, and claim mappings.
-            token_validator: Validator for JWT signature and structure.
+            config: Default OIDC configuration with issuer, audience, and claim
+                mappings. Used for single-issuer setups and as the fallback when a
+                validated token's ``iss`` is not in ``issuer_configs``.
+            token_validator: Validator for JWT signature and structure (may be a
+                multi-issuer validator).
+            issuer_configs: Optional per-issuer config map keyed by issuer string.
+                When the validated token's ``iss`` matches a key, that issuer's
+                claim mappings and lifetime limit are used instead of ``config`` --
+                so a multi-issuer registry honors each issuer's own claim names.
         """
         self._config = config
         self._validator = token_validator
+        self._issuer_configs = issuer_configs or {}
+
+    def _config_for_claims(self, claims: dict[str, Any]) -> OIDCConfig:
+        """Select the OIDC config matching a validated token's ``iss`` claim.
+
+        Falls back to the default ``self._config`` for single-issuer setups or if
+        the issuer is not registered (which cannot happen post-validation, since an
+        untrusted issuer is already rejected upstream).
+        """
+        issuer = claims.get("iss")
+        if issuer and issuer in self._issuer_configs:
+            return self._issuer_configs[issuer]
+        return self._config
 
     def supports(self, request: AuthRequest) -> bool:
         """Check if request has Bearer token."""
@@ -130,8 +155,10 @@ class JWTAuthenticator(IAuthenticator):
             InvalidCredentialsError: If required claims (iat, exp) are missing.
             TokenLifetimeExceededError: If token lifetime exceeds max_token_lifetime.
         """
+        config = self._config_for_claims(claims)
+
         # Skip check if disabled
-        if self._config.max_token_lifetime <= 0:
+        if config.max_token_lifetime <= 0:
             return
 
         # Validate required claims for lifetime check
@@ -151,10 +178,10 @@ class JWTAuthenticator(IAuthenticator):
         token_lifetime = claims["exp"] - claims["iat"]
 
         # Enforce maximum lifetime
-        if token_lifetime > self._config.max_token_lifetime:
+        if token_lifetime > config.max_token_lifetime:
             raise TokenLifetimeExceededError(
                 actual_lifetime=token_lifetime,
-                max_lifetime=self._config.max_token_lifetime,
+                max_lifetime=config.max_token_lifetime,
             )
 
     def _claims_to_principal(self, claims: dict[str, Any]) -> Principal:
@@ -169,19 +196,21 @@ class JWTAuthenticator(IAuthenticator):
         Raises:
             InvalidCredentialsError: If required claims are missing.
         """
-        subject = claims.get(self._config.subject_claim)
+        config = self._config_for_claims(claims)
+
+        subject = claims.get(config.subject_claim)
         if not subject:
             raise InvalidCredentialsError(
-                message=f"Missing {self._config.subject_claim} claim in JWT",
+                message=f"Missing {config.subject_claim} claim in JWT",
                 auth_method="jwt",
             )
 
-        groups = claims.get(self._config.groups_claim, [])
+        groups = claims.get(config.groups_claim, [])
         if isinstance(groups, str):
             groups = [groups]
 
-        tenant_id = claims.get(self._config.tenant_claim)
-        email = claims.get(self._config.email_claim)
+        tenant_id = claims.get(config.tenant_claim)
+        email = claims.get(config.email_claim)
 
         return Principal(
             id=PrincipalId(subject),
@@ -340,6 +369,82 @@ class JWKSTokenValidator(ITokenValidator):
 
         self._jwks_uri = jwks_uri
         self._jwks_client = jwt.PyJWKClient(jwks_uri)
+
+
+class MultiIssuerTokenValidator(ITokenValidator):
+    """Routes JWT validation to a per-issuer validator by the token's ``iss`` claim.
+
+    Trusts MULTIPLE issuers. Each wrapped :class:`JWKSTokenValidator` keeps its own
+    OIDC configuration (issuer, audience, JWKS client). Tokens are dispatched to the
+    matching validator based on their ``iss`` claim, and full signature, issuer,
+    audience, and lifetime verification happens inside that validator unchanged.
+
+    Fail-closed contract (this is a security trust boundary):
+        * A token whose ``iss`` claim is missing, empty, or not a registered issuer
+          is rejected with :class:`InvalidCredentialsError` — even if it is otherwise
+          well-formed and correctly signed.
+        * There is NO default/fallback issuer. An unrecognized issuer never reaches
+          any wrapped validator.
+        * The set of trusted issuers is never leaked in error messages.
+    """
+
+    def __init__(self, validators: list[JWKSTokenValidator]):
+        """Initialize the multi-issuer validator.
+
+        Args:
+            validators: Per-issuer JWKS validators. The registry is keyed by each
+                validator's configured issuer (``validator._config.issuer``); the
+                ``iss`` claim of an incoming token is matched against these keys.
+        """
+        self._validators: dict[str, JWKSTokenValidator] = {
+            validator._config.issuer: validator for validator in validators
+        }
+
+    def validate(self, token: str) -> dict:
+        """Validate a JWT by routing it to the validator for its ``iss`` claim.
+
+        Args:
+            token: The JWT string to validate.
+
+        Returns:
+            Dictionary of validated claims from the matching per-issuer validator.
+
+        Raises:
+            InvalidCredentialsError: If the token cannot be decoded, has no ``iss``
+                claim, or names an issuer that is not registered (fail-closed).
+            ExpiredCredentialsError: If the matching validator finds the token expired.
+        """
+        try:
+            import jwt
+        except ImportError as e:
+            raise InvalidCredentialsError(
+                message="JWT validation requires PyJWT library. Install with: pip install pyjwt[crypto]",
+                auth_method="jwt",
+            ) from e
+
+        # Read the unverified 'iss' claim only to select a validator. Signature
+        # verification is intentionally deferred to the chosen validator.
+        try:
+            unverified = jwt.decode(token, options={"verify_signature": False})
+        except jwt.InvalidTokenError as e:
+            raise InvalidCredentialsError(
+                message="Invalid JWT token",
+                auth_method="jwt",
+            ) from e
+
+        issuer = unverified.get("iss")
+        validator = self._validators.get(issuer) if issuer else None
+
+        if validator is None:
+            # Fail-closed: missing/empty or unrecognized issuer is rejected without
+            # disclosing the set of trusted issuers.
+            logger.warning("jwt_unknown_issuer", issuer=issuer)
+            raise InvalidCredentialsError(
+                message="Untrusted JWT issuer",
+                auth_method="jwt",
+            )
+
+        return validator.validate(token)
 
 
 class StaticSecretTokenValidator(ITokenValidator):

@@ -13,12 +13,17 @@ import structlog
 from mcp_hangar.domain.contracts.authentication import IApiKeyStore, IAuthenticator
 from mcp_hangar.domain.contracts.authorization import IAuthorizer, IRoleStore
 from mcp_hangar.auth.infrastructure.api_key_authenticator import ApiKeyAuthenticator, InMemoryApiKeyStore
-from mcp_hangar.auth.infrastructure.jwt_authenticator import JWKSTokenValidator, JWTAuthenticator, OIDCConfig
+from mcp_hangar.auth.infrastructure.jwt_authenticator import (
+    JWKSTokenValidator,
+    JWTAuthenticator,
+    MultiIssuerTokenValidator,
+    OIDCConfig,
+)
 from mcp_hangar.auth.infrastructure.middleware import AuthenticationMiddleware, AuthorizationMiddleware
 from mcp_hangar.auth.infrastructure.opa_authorizer import CombinedAuthorizer, OPAAuthorizer
 from mcp_hangar.auth.infrastructure.rate_limiter import AuthRateLimitConfig, AuthRateLimiter
 from mcp_hangar.auth.infrastructure.rbac_authorizer import InMemoryRoleStore, RBACAuthorizer
-from mcp_hangar.auth.config import AuthConfig
+from mcp_hangar.auth.config import AuthConfig, OIDCIssuerConfig
 
 logger = structlog.get_logger(__name__)
 
@@ -145,6 +150,10 @@ class AuthComponents:
         tap_store: Tool access policy storage (for TAP management).
         oidc_issuer: OIDC issuer URL when Bearer/OIDC auth is configured; empty string otherwise.
             Used to populate the PRM endpoint and WWW-Authenticate header (RFC 9728).
+            For multi-issuer configs this holds the first trusted issuer for backward
+            compatibility; a later slice migrates consumers to ``oidc_issuers``.
+        oidc_issuers: All trusted OIDC issuer URLs when Bearer/OIDC auth is configured.
+            Empty list when OIDC is disabled or unconfigured.
         oidc_resource_uri: Configured public resource URI (from auth.oidc.resource_uri).
             When set, overrides Host-derived URL in PRM / WWW-Authenticate responses.
     """
@@ -157,6 +166,7 @@ class AuthComponents:
         role_store: IRoleStore | None = None,
         tap_store: Any | None = None,
         oidc_issuer: str = "",
+        oidc_issuers: list[str] | None = None,
         oidc_resource_uri: str = "",
     ):
         self.authn_middleware = authn_middleware
@@ -165,6 +175,7 @@ class AuthComponents:
         self.role_store = role_store
         self.tap_store = tap_store
         self.oidc_issuer = oidc_issuer
+        self.oidc_issuers = oidc_issuers if oidc_issuers is not None else []
         self.oidc_resource_uri = oidc_resource_uri
 
     @property
@@ -304,25 +315,39 @@ def bootstrap_auth(
         )
         logger.info("api_key_auth_enabled", header_name=config.api_key.header_name)
 
-    # Initialize OIDC/JWT authentication
+    # Initialize OIDC/JWT authentication (single or multi-issuer trust registry)
+    issuer_cfgs: list[OIDCIssuerConfig] = []
     if config.oidc.enabled:
-        if not config.oidc.issuer or not config.oidc.audience:
+        issuer_cfgs = config.oidc.resolved_issuers()
+        if not issuer_cfgs:
             logger.warning("oidc_config_incomplete", issuer=config.oidc.issuer, audience=config.oidc.audience)
         else:
-            oidc_config = OIDCConfig(
-                issuer=config.oidc.issuer,
-                audience=config.oidc.audience,
-                jwks_uri=config.oidc.jwks_uri,
-                client_id=config.oidc.client_id,
-                subject_claim=config.oidc.subject_claim,
-                groups_claim=config.oidc.groups_claim,
-                tenant_claim=config.oidc.tenant_claim,
-                email_claim=config.oidc.email_claim,
-                max_token_lifetime=config.oidc.max_token_lifetime_seconds,
+            oidc_configs = [
+                OIDCConfig(
+                    issuer=entry.issuer,
+                    audience=entry.audience,
+                    jwks_uri=entry.jwks_uri,
+                    client_id=entry.client_id,
+                    subject_claim=entry.subject_claim,
+                    groups_claim=entry.groups_claim,
+                    tenant_claim=entry.tenant_claim,
+                    email_claim=entry.email_claim,
+                    max_token_lifetime=entry.max_token_lifetime_seconds,
+                )
+                for entry in issuer_cfgs
+            ]
+            validators = [JWKSTokenValidator(oidc_config) for oidc_config in oidc_configs]
+            multi_validator = MultiIssuerTokenValidator(validators)
+            # Per-issuer config map so the authenticator applies each issuer's own
+            # claim mappings and lifetime limit (selected by the validated `iss`);
+            # the first config is the fallback default for single-issuer setups.
+            issuer_config_map = {oidc_config.issuer: oidc_config for oidc_config in oidc_configs}
+            authenticators.append(JWTAuthenticator(oidc_configs[0], multi_validator, issuer_configs=issuer_config_map))
+            logger.info(
+                "oidc_auth_enabled",
+                issuer_count=len(issuer_cfgs),
+                issuers=[c.issuer for c in issuer_cfgs],
             )
-            token_validator = JWKSTokenValidator(oidc_config)
-            authenticators.append(JWTAuthenticator(oidc_config, token_validator))
-            logger.info("oidc_auth_enabled", issuer=config.oidc.issuer)
 
     # Initialize rate limiter for brute-force protection
     rate_limiter = AuthRateLimiter(
@@ -420,6 +445,7 @@ def bootstrap_auth(
         api_key_store=api_key_store,
         role_store=role_store,
         tap_store=tap_store,
-        oidc_issuer=config.oidc.issuer if config.oidc.enabled and config.oidc.issuer else "",
+        oidc_issuer=issuer_cfgs[0].issuer if issuer_cfgs else "",
+        oidc_issuers=[c.issuer for c in issuer_cfgs],
         oidc_resource_uri=config.oidc.resource_uri,
     )
