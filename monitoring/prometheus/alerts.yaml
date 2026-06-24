@@ -284,35 +284,57 @@ groups:
           description: "Calls are queuing for concurrency slots: {{ $value | humanize }}/s"
 
   # ============================================================================
-  # PLACEHOLDER ALERTS - Uncomment when metrics are implemented
+  # AVAILABILITY & TRANSPORT - mcp_server state, discovery, and remote transport
   # ============================================================================
-  #
-  # - name: mcp-hangar-future
-  #   rules:
-  #     # Provider state alerts (needs mcp_hangar_mcp_server_state metric)
-  #     # - alert: MCPHangarProviderDegraded
-  #     #   expr: mcp_hangar_mcp_server_state == 3
-  #     #   for: 5m
-  #     #   labels:
-  #     #     severity: warning
-  #     #   annotations:
-  #     #     summary: "Provider {{ $labels.mcp_server }} degraded"
-  #
-  #     # - alert: MCPHangarAllProvidersDown
-  #     #   expr: sum(mcp_hangar_mcp_server_up) == 0 and sum(mcp_hangar_mcp_server_info) > 0
-  #     #   for: 1m
-  #     #   labels:
-  #     #     severity: critical
-  #
-  #     # Discovery alerts (needs mcp_hangar_discovery_* metrics)
-  #     # - alert: MCPHangarDiscoverySourceUnhealthy
-  #     #   expr: mcp_hangar_discovery_sources_healthy == 0
-  #     #   for: 5m
-  #
-  #     # HTTP transport alerts (needs mcp_hangar_http_* metrics)
-  #     # - alert: MCPHangarRemoteProviderUnreachable
-  #     #   expr: increase(mcp_hangar_http_errors_total{error_type="connection_refused"}[5m]) > 10
-  #
-  #     # Rate limiting alerts (needs mcp_hangar_rate_limit_hits_total metric)
-  #     # - alert: MCPHangarHighRateLimitHits
-  #     #   expr: sum(rate(mcp_hangar_rate_limit_hits_total[5m])) by (result) > 1
+  - name: mcp-hangar-availability
+    rules:
+      # --- Provider state ---
+      - alert: MCPHangarProviderDegraded
+        expr: mcp_hangar_mcp_server_state == 3
+        for: 5m
+        labels:
+          severity: warning
+        annotations:
+          summary: "Provider {{ $labels.mcp_server }} degraded"
+          description: "Provider has been in the degraded state (3) for 5m"
+          runbook_url: "https://docs.mcp-hangar.io/runbooks/provider-unhealthy"
+
+      - alert: MCPHangarAllProvidersDown
+        expr: sum(mcp_hangar_mcp_server_up) == 0 and sum(mcp_hangar_mcp_server_info) > 0
+        for: 1m
+        labels:
+          severity: critical
+        annotations:
+          summary: "All providers are down"
+          description: "No provider reports up while at least one is configured"
+          runbook_url: "https://docs.mcp-hangar.io/runbooks/not-responding"
+
+      # --- Discovery ---
+      - alert: MCPHangarDiscoverySourceUnhealthy
+        expr: mcp_hangar_discovery_sources_healthy == 0
+        for: 5m
+        labels:
+          severity: warning
+        annotations:
+          summary: "No healthy discovery sources"
+          description: "All configured discovery sources are reporting unhealthy"
+
+      # --- Remote transport ---
+      - alert: MCPHangarRemoteProviderUnreachable
+        expr: increase(mcp_hangar_http_errors_total{error_type="connection_refused"}[5m]) > 10
+        for: 5m
+        labels:
+          severity: warning
+        annotations:
+          summary: "Remote provider {{ $labels.mcp_server }} unreachable"
+          description: "{{ $value }} connection-refused errors in the last 5m"
+
+      # --- Rate limiting ---
+      - alert: MCPHangarHighRateLimitRejections
+        expr: sum(rate(mcp_hangar_rate_limit_hits_total{result="rejected"}[5m])) > 1
+        for: 5m
+        labels:
+          severity: warning
+        annotations:
+          summary: "High rate-limit rejections"
+          description: "Requests are being rate-limited: {{ $value | humanize }}/s"
