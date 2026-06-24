@@ -7,9 +7,9 @@ import json
 import httpx
 
 from mcp_hangar.domain.contracts.authentication import AuthRequest
-from mcp_hangar.infrastructure.auth.jwt_authenticator import JWKSTokenValidator, JWTAuthenticator, OIDCConfig
-from mcp_hangar.server.auth_bootstrap import bootstrap_auth
-from mcp_hangar.server.auth_config import AuthConfig, OIDCAuthConfig
+from mcp_hangar.auth.infrastructure.jwt_authenticator import JWKSTokenValidator, JWTAuthenticator, OIDCConfig
+from mcp_hangar.auth.bootstrap import bootstrap_auth
+from mcp_hangar.auth.config import AuthConfig, OIDCAuthConfig
 
 KEYCLOAK_URL = "http://localhost:8080"
 REALM = "mcp-hangar"

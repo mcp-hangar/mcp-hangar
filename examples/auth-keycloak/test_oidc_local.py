@@ -86,7 +86,7 @@ def test_jwt_authenticator(token: str):
     """Test the MCP-Hangar JWT authenticator with the token."""
     try:
         from mcp_hangar.domain.contracts.authentication import AuthRequest
-        from mcp_hangar.infrastructure.auth.jwt_authenticator import JWKSTokenValidator, JWTAuthenticator, OIDCConfig
+        from mcp_hangar.auth.infrastructure.jwt_authenticator import JWKSTokenValidator, JWTAuthenticator, OIDCConfig
 
         # Configure for Keycloak
         config = OIDCConfig(

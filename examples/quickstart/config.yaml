@@ -2,7 +2,7 @@ logging:
   level: INFO
   json_format: true
 
-providers:
+mcp_servers:
   openai-proxy:
     mode: docker
     image: my-org/openai-mcp:latest

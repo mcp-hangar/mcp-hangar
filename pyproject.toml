@@ -124,7 +124,7 @@ show_error_codes = true
 ignore_missing_imports = true
 # disable_error_code intentionally absent -- per-module overrides below
 # carry the technical debt explicitly. Goal: zero per-module overrides
-# by 2026-Q4 (see ROADMAP / TASK-P1-5 phases 2 and 3).
+# by 2026-Q4 (tracked in the issue tracker; see TODO(mypy-phase-3) above).
 [[tool.mypy.overrides]]
 module = [
     "docker.*",

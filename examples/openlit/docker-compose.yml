@@ -4,7 +4,7 @@
 #   Hangar (OTLP) -> OTEL Collector -> OpenLIT
 #
 # MCP spans visible in OpenLIT trace explorer with governance attributes:
-#   mcp.provider.id, mcp.tool.name, mcp.tool.status, mcp.user.id, etc.
+#   mcp.server.id, mcp.tool.name, mcp.tool.status, mcp.user.id, etc.
 #
 # Usage:
 #   docker-compose up
