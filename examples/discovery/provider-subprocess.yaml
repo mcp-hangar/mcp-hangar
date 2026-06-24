@@ -1,5 +1,5 @@
 # Example Provider Discovery Configuration
-# Place YAML files in /etc/mcp-hangar/providers.d/ for filesystem discovery
+# Place YAML files in /etc/mcp-hangar/mcp_servers.d/ for filesystem discovery
 
 # Example 1: Subprocess provider
 name: custom-math

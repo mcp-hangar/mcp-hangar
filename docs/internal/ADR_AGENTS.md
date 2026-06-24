@@ -41,7 +41,7 @@ Write an ADR when **all** of the following are true:
 | Validation steps or spikes | "Run Tetragon on Talos+k3s this week" | Operational, not architectural. Track in issues. |
 | Library swaps that are easily reversible | "Switch from `httpx` to `aiohttp`" | Low reversal cost. |
 | Code style decisions | "Use 120-char lines" | Covered by linter config (`.markdownlint.json`, `ruff`). |
-| Roadmap-level planning | "Ship v2.0 in Q3 2027" | Belongs in `ROADMAP.md`. |
+| Roadmap-level planning | "Ship v2.0 in Q3 2027" | Belongs in `ROADMAP.md` (strategy) or the issue tracker (delivery). |
 | Customer commitments | "Onboard XTB by Q2" | Business document, not architecture. |
 | Feature designs implementing an existing ADR | "Add KubeArmor TracingPolicy translator" | Implementation of ADR-006, not a new decision. |
 | Open questions awaiting resolution | "Which LSM hook order for KubeArmor + Tetragon?" | Track in issues until decided, then write ADR. |
