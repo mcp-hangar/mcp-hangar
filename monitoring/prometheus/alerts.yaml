@@ -240,6 +240,50 @@ groups:
           description: "Tool call rate: {{ $value }}/s"
 
   # ============================================================================
+  # GOVERNANCE ALERTS - security, policy, and concurrency signals
+  # ============================================================================
+  - name: mcp-hangar-governance
+    rules:
+      # --- Security / Risk ---
+      - alert: MCPHangarCriticalDetectionMatch
+        expr: sum(rate(mcp_hangar_detection_rule_matches_total{severity="critical"}[5m])) > 0
+        for: 0m
+        labels:
+          severity: critical
+        annotations:
+          summary: "Critical detection rule matched"
+          description: "Critical-severity detection matches: {{ $value | humanize }}/s"
+          runbook_url: "https://docs.mcp-hangar.io/runbooks/detection-match"
+
+      - alert: MCPHangarCapabilityViolations
+        expr: sum(rate(mcp_hangar_capability_violations_total[5m])) by (mcp_server) > 0
+        for: 5m
+        labels:
+          severity: warning
+        annotations:
+          summary: "Capability violations on {{ $labels.mcp_server }}"
+          description: "Sustained capability violations: {{ $value | humanize }}/s"
+
+      - alert: MCPHangarEnforcementActionsActive
+        expr: sum(rate(mcp_hangar_enforcement_actions_total[5m])) by (action) > 0
+        for: 5m
+        labels:
+          severity: warning
+        annotations:
+          summary: "Enforcement action {{ $labels.action }} firing"
+          description: "Automated enforcement active: {{ $value | humanize }}/s"
+
+      # --- Concurrency saturation ---
+      - alert: MCPHangarConcurrencyQueueBuildup
+        expr: sum(rate(mcp_hangar_batch_concurrency_queued_total[5m])) by (mcp_server) > 1
+        for: 5m
+        labels:
+          severity: warning
+        annotations:
+          summary: "Concurrency queue buildup on {{ $labels.mcp_server }}"
+          description: "Calls are queuing for concurrency slots: {{ $value | humanize }}/s"
+
+  # ============================================================================
   # PLACEHOLDER ALERTS - Uncomment when metrics are implemented
   # ============================================================================
   #
