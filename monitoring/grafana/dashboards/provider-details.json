@@ -13,7 +13,7 @@
       "gridPos": { "h": 1, "w": 24, "x": 0, "y": 0 },
       "id": 1,
       "panels": [],
-      "title": "Provider: $provider",
+      "title": "Provider: $mcp_server",
       "type": "row"
     },
     {
@@ -34,7 +34,7 @@
       "gridPos": { "h": 4, "w": 4, "x": 0, "y": 1 },
       "id": 2,
       "options": { "colorMode": "background", "graphMode": "none", "justifyMode": "center", "orientation": "auto", "reduceOptions": { "calcs": ["lastNotNull"], "fields": "", "values": false }, "textMode": "value" },
-      "targets": [{ "expr": "mcp_hangar_provider_state{provider=~\"$provider\"}", "legendFormat": "State", "refId": "A" }],
+      "targets": [{ "expr": "mcp_hangar_mcp_server_state{mcp_server=~\"$mcp_server\"}", "legendFormat": "State", "refId": "A" }],
       "title": "State",
       "type": "stat"
     },
@@ -44,7 +44,7 @@
       "gridPos": { "h": 4, "w": 4, "x": 4, "y": 1 },
       "id": 3,
       "options": { "colorMode": "value", "graphMode": "area", "justifyMode": "auto", "orientation": "auto", "reduceOptions": { "calcs": ["lastNotNull"], "fields": "", "values": false } },
-      "targets": [{ "expr": "sum(rate(mcp_hangar_tool_calls_total{provider=~\"$provider\"}[5m]))", "legendFormat": "RPS", "refId": "A" }],
+      "targets": [{ "expr": "sum(rate(mcp_hangar_tool_calls_total{mcp_server=~\"$mcp_server\"}[5m]))", "legendFormat": "RPS", "refId": "A" }],
       "title": "Request Rate",
       "type": "stat"
     },
@@ -54,7 +54,7 @@
       "gridPos": { "h": 4, "w": 4, "x": 8, "y": 1 },
       "id": 4,
       "options": { "colorMode": "value", "graphMode": "area", "justifyMode": "auto", "orientation": "auto", "reduceOptions": { "calcs": ["lastNotNull"], "fields": "", "values": false } },
-      "targets": [{ "expr": "sum(rate(mcp_hangar_tool_call_errors_total{provider=~\"$provider\"}[5m])) / (sum(rate(mcp_hangar_tool_calls_total{provider=~\"$provider\"}[5m])) + 0.001)", "legendFormat": "Error Rate", "refId": "A" }],
+      "targets": [{ "expr": "sum(rate(mcp_hangar_tool_call_errors_total{mcp_server=~\"$mcp_server\"}[5m])) / (sum(rate(mcp_hangar_tool_calls_total{mcp_server=~\"$mcp_server\"}[5m])) + 0.001)", "legendFormat": "Error Rate", "refId": "A" }],
       "title": "Error Rate",
       "type": "stat"
     },
@@ -64,7 +64,7 @@
       "gridPos": { "h": 4, "w": 4, "x": 12, "y": 1 },
       "id": 5,
       "options": { "colorMode": "value", "graphMode": "area", "justifyMode": "auto", "orientation": "auto", "reduceOptions": { "calcs": ["lastNotNull"], "fields": "", "values": false } },
-      "targets": [{ "expr": "histogram_quantile(0.95, sum(rate(mcp_hangar_tool_call_duration_seconds_bucket{provider=~\"$provider\"}[5m])) by (le))", "legendFormat": "P95", "refId": "A" }],
+      "targets": [{ "expr": "histogram_quantile(0.95, sum(rate(mcp_hangar_tool_call_duration_seconds_bucket{mcp_server=~\"$mcp_server\"}[5m])) by (le))", "legendFormat": "P95", "refId": "A" }],
       "title": "P95 Latency",
       "type": "stat"
     },
@@ -74,7 +74,7 @@
       "gridPos": { "h": 4, "w": 4, "x": 16, "y": 1 },
       "id": 6,
       "options": { "colorMode": "value", "graphMode": "none", "justifyMode": "auto", "orientation": "auto", "reduceOptions": { "calcs": ["lastNotNull"], "fields": "", "values": false } },
-      "targets": [{ "expr": "mcp_hangar_health_check_consecutive_failures{provider=~\"$provider\"}", "legendFormat": "Failures", "refId": "A" }],
+      "targets": [{ "expr": "mcp_hangar_health_check_consecutive_failures{mcp_server=~\"$mcp_server\"}", "legendFormat": "Failures", "refId": "A" }],
       "title": "Health Failures",
       "type": "stat"
     },
@@ -84,7 +84,7 @@
       "gridPos": { "h": 4, "w": 4, "x": 20, "y": 1 },
       "id": 7,
       "options": { "colorMode": "value", "graphMode": "area", "justifyMode": "auto", "orientation": "auto", "reduceOptions": { "calcs": ["lastNotNull"], "fields": "", "values": false } },
-      "targets": [{ "expr": "mcp_hangar_connections_active{provider=~\"$provider\"}", "legendFormat": "Connections", "refId": "A" }],
+      "targets": [{ "expr": "mcp_hangar_connections_active{mcp_server=~\"$mcp_server\"}", "legendFormat": "Connections", "refId": "A" }],
       "title": "Active Connections",
       "type": "stat"
     },
@@ -103,8 +103,8 @@
       "id": 11,
       "options": { "legend": { "calcs": ["mean", "max"], "displayMode": "table", "placement": "bottom" }, "tooltip": { "mode": "multi", "sort": "desc" } },
       "targets": [
-        { "expr": "sum(rate(mcp_hangar_tool_calls_total{provider=~\"$provider\", status=\"success\"}[5m])) by (tool)", "legendFormat": "{{ tool }} (success)", "refId": "A" },
-        { "expr": "sum(rate(mcp_hangar_tool_calls_total{provider=~\"$provider\", status=\"error\"}[5m])) by (tool)", "legendFormat": "{{ tool }} (error)", "refId": "B" }
+        { "expr": "sum(rate(mcp_hangar_tool_calls_total{mcp_server=~\"$mcp_server\", status=\"success\"}[5m])) by (tool)", "legendFormat": "{{ tool }} (success)", "refId": "A" },
+        { "expr": "sum(rate(mcp_hangar_tool_calls_total{mcp_server=~\"$mcp_server\", status=\"error\"}[5m])) by (tool)", "legendFormat": "{{ tool }} (error)", "refId": "B" }
       ],
       "title": "Request Rate by Tool",
       "type": "timeseries"
@@ -116,9 +116,9 @@
       "id": 12,
       "options": { "legend": { "calcs": ["mean", "max"], "displayMode": "table", "placement": "bottom" }, "tooltip": { "mode": "multi", "sort": "desc" } },
       "targets": [
-        { "expr": "histogram_quantile(0.50, sum(rate(mcp_hangar_tool_call_duration_seconds_bucket{provider=~\"$provider\"}[5m])) by (le, tool))", "legendFormat": "{{ tool }} P50", "refId": "A" },
-        { "expr": "histogram_quantile(0.95, sum(rate(mcp_hangar_tool_call_duration_seconds_bucket{provider=~\"$provider\"}[5m])) by (le, tool))", "legendFormat": "{{ tool }} P95", "refId": "B" },
-        { "expr": "histogram_quantile(0.99, sum(rate(mcp_hangar_tool_call_duration_seconds_bucket{provider=~\"$provider\"}[5m])) by (le, tool))", "legendFormat": "{{ tool }} P99", "refId": "C" }
+        { "expr": "histogram_quantile(0.50, sum(rate(mcp_hangar_tool_call_duration_seconds_bucket{mcp_server=~\"$mcp_server\"}[5m])) by (le, tool))", "legendFormat": "{{ tool }} P50", "refId": "A" },
+        { "expr": "histogram_quantile(0.95, sum(rate(mcp_hangar_tool_call_duration_seconds_bucket{mcp_server=~\"$mcp_server\"}[5m])) by (le, tool))", "legendFormat": "{{ tool }} P95", "refId": "B" },
+        { "expr": "histogram_quantile(0.99, sum(rate(mcp_hangar_tool_call_duration_seconds_bucket{mcp_server=~\"$mcp_server\"}[5m])) by (le, tool))", "legendFormat": "{{ tool }} P99", "refId": "C" }
       ],
       "title": "Latency by Tool",
       "type": "timeseries"
@@ -137,7 +137,7 @@
       "gridPos": { "h": 8, "w": 12, "x": 0, "y": 15 },
       "id": 21,
       "options": { "legend": { "calcs": [], "displayMode": "list", "placement": "bottom" }, "tooltip": { "mode": "single", "sort": "none" } },
-      "targets": [{ "expr": "mcp_hangar_provider_state{provider=~\"$provider\"}", "legendFormat": "State", "refId": "A" }],
+      "targets": [{ "expr": "mcp_hangar_mcp_server_state{mcp_server=~\"$mcp_server\"}", "legendFormat": "State", "refId": "A" }],
       "title": "State History",
       "type": "timeseries"
     },
@@ -148,9 +148,9 @@
       "id": 22,
       "options": { "legend": { "calcs": ["sum"], "displayMode": "table", "placement": "bottom" }, "tooltip": { "mode": "multi", "sort": "desc" } },
       "targets": [
-        { "expr": "sum(rate(mcp_hangar_health_checks_total{provider=~\"$provider\", result=\"healthy\"}[5m]))", "legendFormat": "Healthy", "refId": "A" },
-        { "expr": "sum(rate(mcp_hangar_health_checks_total{provider=~\"$provider\", result=\"unhealthy\"}[5m]))", "legendFormat": "Unhealthy", "refId": "B" },
-        { "expr": "sum(rate(mcp_hangar_health_checks_total{provider=~\"$provider\", result=\"cold\"}[5m]))", "legendFormat": "Cold", "refId": "C" }
+        { "expr": "sum(rate(mcp_hangar_health_checks_total{mcp_server=~\"$mcp_server\", result=\"healthy\"}[5m]))", "legendFormat": "Healthy", "refId": "A" },
+        { "expr": "sum(rate(mcp_hangar_health_checks_total{mcp_server=~\"$mcp_server\", result=\"unhealthy\"}[5m]))", "legendFormat": "Unhealthy", "refId": "B" },
+        { "expr": "sum(rate(mcp_hangar_health_checks_total{mcp_server=~\"$mcp_server\", result=\"cold\"}[5m]))", "legendFormat": "Cold", "refId": "C" }
       ],
       "title": "Health Check Results",
       "type": "timeseries"
@@ -170,8 +170,8 @@
       "id": 31,
       "options": { "legend": { "calcs": ["mean"], "displayMode": "table", "placement": "bottom" }, "tooltip": { "mode": "multi", "sort": "desc" } },
       "targets": [
-        { "expr": "sum(rate(mcp_hangar_messages_sent_total{provider=~\"$provider\"}[5m])) by (method)", "legendFormat": "sent: {{ method }}", "refId": "A" },
-        { "expr": "sum(rate(mcp_hangar_messages_received_total{provider=~\"$provider\"}[5m])) by (type)", "legendFormat": "recv: {{ type }}", "refId": "B" }
+        { "expr": "sum(rate(mcp_hangar_messages_sent_total{mcp_server=~\"$mcp_server\"}[5m])) by (method)", "legendFormat": "sent: {{ method }}", "refId": "A" },
+        { "expr": "sum(rate(mcp_hangar_messages_received_total{mcp_server=~\"$mcp_server\"}[5m])) by (type)", "legendFormat": "recv: {{ type }}", "refId": "B" }
       ],
       "title": "JSON-RPC Messages",
       "type": "timeseries"
@@ -182,7 +182,7 @@
       "gridPos": { "h": 8, "w": 12, "x": 12, "y": 24 },
       "id": 32,
       "options": { "legend": { "calcs": ["sum"], "displayMode": "table", "placement": "bottom" }, "tooltip": { "mode": "multi", "sort": "desc" } },
-      "targets": [{ "expr": "sum(rate(mcp_hangar_tool_call_errors_total{provider=~\"$provider\"}[5m])) by (tool, error_type)", "legendFormat": "{{ tool }}: {{ error_type }}", "refId": "A" }],
+      "targets": [{ "expr": "sum(rate(mcp_hangar_tool_call_errors_total{mcp_server=~\"$mcp_server\"}[5m])) by (tool, error_type)", "legendFormat": "{{ tool }}: {{ error_type }}", "refId": "A" }],
       "title": "Errors by Tool & Type",
       "type": "timeseries"
     }
@@ -194,7 +194,7 @@
   "templating": {
     "list": [
       { "current": { "selected": false, "text": "Prometheus", "value": "prometheus" }, "hide": 0, "includeAll": false, "label": "Datasource", "multi": false, "name": "datasource", "options": [], "query": "prometheus", "refresh": 1, "type": "datasource" },
-      { "allValue": ".*", "current": { "selected": false, "text": "All", "value": "$__all" }, "datasource": { "type": "prometheus", "uid": "${datasource}" }, "definition": "label_values(mcp_hangar_provider_state, provider)", "hide": 0, "includeAll": true, "label": "Provider", "multi": true, "name": "provider", "options": [], "query": { "query": "label_values(mcp_hangar_provider_state, provider)", "refId": "StandardVariableQuery" }, "refresh": 2, "sort": 1, "type": "query" }
+      { "allValue": ".*", "current": { "selected": false, "text": "All", "value": "$__all" }, "datasource": { "type": "prometheus", "uid": "${datasource}" }, "definition": "label_values(mcp_hangar_mcp_server_state, mcp_server)", "hide": 0, "includeAll": true, "label": "Provider", "multi": true, "name": "mcp_server", "options": [], "query": { "query": "label_values(mcp_hangar_mcp_server_state, mcp_server)", "refId": "StandardVariableQuery" }, "refresh": 2, "sort": 1, "type": "query" }
     ]
   },
   "time": { "from": "now-1h", "to": "now" },

@@ -52,7 +52,7 @@
       "gridPos": { "h": 4, "w": 6, "x": 18, "y": 1 },
       "id": 5,
       "options": { "colorMode": "value", "graphMode": "none", "justifyMode": "center", "orientation": "auto", "reduceOptions": { "calcs": ["lastNotNull"], "fields": "", "values": false }, "textMode": "value" },
-      "targets": [{ "expr": "count(mcp_hangar_provider_up == 1)", "legendFormat": "Healthy", "refId": "A" }],
+      "targets": [{ "expr": "count(mcp_hangar_mcp_server_up == 1)", "legendFormat": "Healthy", "refId": "A" }],
       "title": "Healthy Providers",
       "type": "stat"
     },
@@ -70,7 +70,7 @@
       "gridPos": { "h": 5, "w": 6, "x": 0, "y": 6 },
       "id": 11,
       "options": { "colorMode": "value", "graphMode": "area", "justifyMode": "auto", "orientation": "auto", "reduceOptions": { "calcs": ["lastNotNull"], "fields": "", "values": false } },
-      "targets": [{ "expr": "1 - (sum(mcp_hangar_provider_up) / count(mcp_hangar_provider_up))", "legendFormat": "Unavailability", "refId": "A" }],
+      "targets": [{ "expr": "1 - (sum(mcp_hangar_mcp_server_up) / count(mcp_hangar_mcp_server_up))", "legendFormat": "Unavailability", "refId": "A" }],
       "title": "Provider Unavailability",
       "description": "Alert threshold: 20%",
       "type": "stat"
@@ -122,7 +122,7 @@
       "gridPos": { "h": 8, "w": 12, "x": 0, "y": 12 },
       "id": 21,
       "options": { "legend": { "calcs": ["mean", "max"], "displayMode": "table", "placement": "bottom" }, "tooltip": { "mode": "multi", "sort": "desc" } },
-      "targets": [{ "expr": "sum(rate(mcp_hangar_tool_call_errors_total[5m])) by (provider) / (sum(rate(mcp_hangar_tool_calls_total[5m])) by (provider) + 0.001)", "legendFormat": "{{ provider }}", "refId": "A" }],
+      "targets": [{ "expr": "sum(rate(mcp_hangar_tool_call_errors_total[5m])) by (mcp_server) / (sum(rate(mcp_hangar_tool_calls_total[5m])) by (mcp_server) + 0.001)", "legendFormat": "{{ mcp_server }}", "refId": "A" }],
       "title": "Error Rate by Provider (threshold: 10%)",
       "type": "timeseries"
     },
@@ -132,7 +132,7 @@
       "gridPos": { "h": 8, "w": 12, "x": 12, "y": 12 },
       "id": 22,
       "options": { "legend": { "calcs": ["mean", "max"], "displayMode": "table", "placement": "bottom" }, "tooltip": { "mode": "multi", "sort": "desc" } },
-      "targets": [{ "expr": "histogram_quantile(0.95, sum(rate(mcp_hangar_tool_call_duration_seconds_bucket[5m])) by (le, provider))", "legendFormat": "{{ provider }}", "refId": "A" }],
+      "targets": [{ "expr": "histogram_quantile(0.95, sum(rate(mcp_hangar_tool_call_duration_seconds_bucket[5m])) by (le, mcp_server))", "legendFormat": "{{ mcp_server }}", "refId": "A" }],
       "title": "P95 Latency by Provider (threshold: 5s)",
       "type": "timeseries"
     },
@@ -142,7 +142,7 @@
       "gridPos": { "h": 8, "w": 12, "x": 0, "y": 20 },
       "id": 23,
       "options": { "legend": { "calcs": ["max"], "displayMode": "table", "placement": "bottom" }, "tooltip": { "mode": "multi", "sort": "desc" } },
-      "targets": [{ "expr": "mcp_hangar_health_check_consecutive_failures", "legendFormat": "{{ provider }}", "refId": "A" }],
+      "targets": [{ "expr": "mcp_hangar_health_check_consecutive_failures", "legendFormat": "{{ mcp_server }}", "refId": "A" }],
       "title": "Consecutive Health Failures (threshold: 3)",
       "type": "timeseries"
     },
@@ -152,7 +152,7 @@
       "gridPos": { "h": 8, "w": 12, "x": 12, "y": 20 },
       "id": 24,
       "options": { "legend": { "calcs": [], "displayMode": "table", "placement": "bottom" }, "tooltip": { "mode": "multi", "sort": "desc" } },
-      "targets": [{ "expr": "mcp_hangar_provider_state", "legendFormat": "{{ provider }}", "refId": "A" }],
+      "targets": [{ "expr": "mcp_hangar_mcp_server_state", "legendFormat": "{{ mcp_server }}", "refId": "A" }],
       "title": "Provider State History",
       "type": "timeseries"
     },
@@ -179,7 +179,7 @@
       "targets": [{ "expr": "ALERTS{alertname=~\"MCPHangar.*\"}", "format": "table", "instant": true, "legendFormat": "", "refId": "A" }],
       "title": "Active MCP Hangar Alerts",
       "transformations": [
-        { "id": "organize", "options": { "excludeByName": { "Time": true, "__name__": true, "job": true }, "indexByName": { "alertname": 0, "alertstate": 1, "severity": 2, "provider": 3 }, "renameByName": {} } }
+        { "id": "organize", "options": { "excludeByName": { "Time": true, "__name__": true, "job": true }, "indexByName": { "alertname": 0, "alertstate": 1, "severity": 2, "mcp_server": 3 }, "renameByName": {} } }
       ],
       "type": "table"
     }

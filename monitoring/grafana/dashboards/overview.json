@@ -56,7 +56,7 @@
       },
       "targets": [
         {
-          "expr": "sum(mcp_hangar_provider_up) / (count(mcp_hangar_provider_up) + 0.001)",
+          "expr": "sum(mcp_hangar_mcp_server_up) / (count(mcp_hangar_mcp_server_up) + 0.001)",
           "legendFormat": "Availability",
           "refId": "A"
         }
@@ -85,7 +85,7 @@
       },
       "targets": [
         {
-          "expr": "sum(mcp_hangar_provider_up)",
+          "expr": "sum(mcp_hangar_mcp_server_up)",
           "legendFormat": "Ready",
           "refId": "A"
         }
@@ -114,7 +114,7 @@
       },
       "targets": [
         {
-          "expr": "count(mcp_hangar_provider_info)",
+          "expr": "count(mcp_hangar_mcp_server_info)",
           "legendFormat": "Total",
           "refId": "A"
         }
@@ -268,13 +268,13 @@
       },
       "targets": [
         {
-          "expr": "sum(rate(mcp_hangar_tool_calls_total{status=\"success\"}[5m])) by (provider)",
-          "legendFormat": "{{ provider }} (success)",
+          "expr": "sum(rate(mcp_hangar_tool_calls_total{status=\"success\"}[5m])) by (mcp_server)",
+          "legendFormat": "{{ mcp_server }} (success)",
           "refId": "A"
         },
         {
-          "expr": "sum(rate(mcp_hangar_tool_calls_total{status=\"error\"}[5m])) by (provider)",
-          "legendFormat": "{{ provider }} (error)",
+          "expr": "sum(rate(mcp_hangar_tool_calls_total{status=\"error\"}[5m])) by (mcp_server)",
+          "legendFormat": "{{ mcp_server }} (error)",
           "refId": "B"
         }
       ],
@@ -318,8 +318,8 @@
       },
       "targets": [
         {
-          "expr": "sum(rate(mcp_hangar_tool_call_errors_total[5m])) by (provider) / (sum(rate(mcp_hangar_tool_calls_total[5m])) by (provider) + 0.001)",
-          "legendFormat": "{{ provider }}",
+          "expr": "sum(rate(mcp_hangar_tool_call_errors_total[5m])) by (mcp_server) / (sum(rate(mcp_hangar_tool_calls_total[5m])) by (mcp_server) + 0.001)",
+          "legendFormat": "{{ mcp_server }}",
           "refId": "A"
         }
       ],
@@ -425,8 +425,8 @@
       },
       "targets": [
         {
-          "expr": "mcp_hangar_provider_state",
-          "legendFormat": "{{ provider }}",
+          "expr": "mcp_hangar_mcp_server_state",
+          "legendFormat": "{{ mcp_server }}",
           "refId": "A"
         }
       ],
@@ -471,7 +471,7 @@
       "targets": [
         {
           "expr": "mcp_hangar_health_check_consecutive_failures",
-          "legendFormat": "{{ provider }}",
+          "legendFormat": "{{ mcp_server }}",
           "refId": "A"
         }
       ],
@@ -515,8 +515,8 @@
       },
       "targets": [
         {
-          "expr": "histogram_quantile(0.95, sum(rate(mcp_hangar_provider_cold_start_seconds_bucket[15m])) by (le, provider))",
-          "legendFormat": "{{ provider }}",
+          "expr": "histogram_quantile(0.95, sum(rate(mcp_hangar_mcp_server_cold_start_seconds_bucket[15m])) by (le, mcp_server))",
+          "legendFormat": "{{ mcp_server }}",
           "refId": "A"
         }
       ],
@@ -564,8 +564,8 @@
       },
       "targets": [
         {
-          "expr": "sum(increase(mcp_hangar_provider_starts_total[1h])) by (provider, result)",
-          "legendFormat": "{{ provider }} ({{ result }})",
+          "expr": "sum(increase(mcp_hangar_mcp_server_starts_total[1h])) by (mcp_server, result)",
+          "legendFormat": "{{ mcp_server }} ({{ result }})",
           "refId": "A"
         }
       ],
@@ -780,8 +780,8 @@
       },
       "targets": [
         {
-          "expr": "sum(rate(mcp_hangar_http_requests_total[5m])) by (provider)",
-          "legendFormat": "{{ provider }}",
+          "expr": "sum(rate(mcp_hangar_http_requests_total[5m])) by (mcp_server)",
+          "legendFormat": "{{ mcp_server }}",
           "refId": "A"
         }
       ],
@@ -825,8 +825,8 @@
       },
       "targets": [
         {
-          "expr": "histogram_quantile(0.95, sum(rate(mcp_hangar_http_request_duration_seconds_bucket[5m])) by (le, provider))",
-          "legendFormat": "{{ provider }}",
+          "expr": "histogram_quantile(0.95, sum(rate(mcp_hangar_http_request_duration_seconds_bucket[5m])) by (le, mcp_server))",
+          "legendFormat": "{{ mcp_server }}",
           "refId": "A"
         }
       ],
@@ -870,8 +870,8 @@
       },
       "targets": [
         {
-          "expr": "sum(rate(mcp_hangar_http_errors_total[5m])) by (provider, error_type)",
-          "legendFormat": "{{ provider }}: {{ error_type }}",
+          "expr": "sum(rate(mcp_hangar_http_errors_total[5m])) by (mcp_server, error_type)",
+          "legendFormat": "{{ mcp_server }}: {{ error_type }}",
           "refId": "A"
         }
       ],
@@ -944,8 +944,8 @@
       },
       "targets": [
         {
-          "expr": "sum(rate(mcp_hangar_http_retries_total[5m])) by (provider, retry_reason)",
-          "legendFormat": "{{ provider }}: {{ retry_reason }}",
+          "expr": "sum(rate(mcp_hangar_http_retries_total[5m])) by (mcp_server, retry_reason)",
+          "legendFormat": "{{ mcp_server }}: {{ retry_reason }}",
           "refId": "A"
         }
       ],
@@ -1035,17 +1035,17 @@
       },
       "targets": [
         {
-          "expr": "mcp_hangar_discovery_providers{status=\"discovered\"}",
+          "expr": "mcp_hangar_discovery_mcp_servers{status=\"discovered\"}",
           "legendFormat": "{{ source_type }} discovered",
           "refId": "A"
         },
         {
-          "expr": "mcp_hangar_discovery_providers{status=\"registered\"}",
+          "expr": "mcp_hangar_discovery_mcp_servers{status=\"registered\"}",
           "legendFormat": "{{ source_type }} registered",
           "refId": "B"
         },
         {
-          "expr": "mcp_hangar_discovery_providers{status=\"quarantined\"}",
+          "expr": "mcp_hangar_discovery_mcp_servers{status=\"quarantined\"}",
           "legendFormat": "{{ source_type }} quarantined",
           "refId": "C"
         }
@@ -1238,8 +1238,8 @@
       },
       "targets": [
         {
-          "expr": "sum(mcp_hangar_connections_active) by (provider)",
-          "legendFormat": "{{ provider }}",
+          "expr": "sum(mcp_hangar_connections_active) by (mcp_server)",
+          "legendFormat": "{{ mcp_server }}",
           "refId": "A"
         }
       ],
@@ -1328,7 +1328,7 @@
       },
       "targets": [
         {
-          "expr": "sum(increase(mcp_hangar_gc_providers_collected_total[1h])) by (reason)",
+          "expr": "sum(increase(mcp_hangar_gc_mcp_servers_collected_total[1h])) by (reason)",
           "legendFormat": "{{ reason }}",
           "refId": "A"
         }
@@ -1426,8 +1426,8 @@
       },
       "targets": [
         {
-          "expr": "sum(rate(mcp_hangar_rate_limit_hits_total[5m])) by (endpoint)",
-          "legendFormat": "{{ endpoint }}",
+          "expr": "sum(rate(mcp_hangar_rate_limit_hits_total[5m])) by (result)",
+          "legendFormat": "{{ result }}",
           "refId": "A"
         }
       ],
@@ -1460,14 +1460,14 @@
         "allValue": ".*",
         "current": { "selected": true, "text": "All", "value": "$__all" },
         "datasource": { "type": "prometheus", "uid": "${datasource}" },
-        "definition": "label_values(mcp_hangar_provider_info, provider)",
+        "definition": "label_values(mcp_hangar_mcp_server_info, mcp_server)",
         "hide": 0,
         "includeAll": true,
         "label": "Provider",
         "multi": true,
-        "name": "provider",
+        "name": "mcp_server",
         "options": [],
-        "query": { "query": "label_values(mcp_hangar_provider_info, provider)", "refId": "StandardVariableQuery" },
+        "query": { "query": "label_values(mcp_hangar_mcp_server_info, mcp_server)", "refId": "StandardVariableQuery" },
         "refresh": 2,
         "regex": "",
         "skipUrlSync": false,
