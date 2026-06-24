@@ -951,13 +951,15 @@ ENFORCEMENT_ACTIONS_TOTAL = Counter(
 # -----------------------------------------------------------------------------
 
 COST_CENTS_TOTAL = Counter(
-    name="mcp_hangar_cost_cents_total",
+    # The registry appends "_total" to counter names on exposition; the base
+    # name must NOT include it, or the series renders as "..._total_total".
+    name="mcp_hangar_cost_cents",
     description="Total attributed cost in hundredths of a cent",
     labels=["mcp_server", "tool", "cost_model"],
 )
 
 COST_ATTRIBUTIONS_TOTAL = Counter(
-    name="mcp_hangar_cost_attributions_total",
+    name="mcp_hangar_cost_attributions",
     description="Total number of cost attribution computations",
     labels=["mcp_server", "tool"],
 )
