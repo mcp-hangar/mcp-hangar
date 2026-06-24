@@ -18,7 +18,6 @@ Usage:
 """
 
 from mcp_hangar.observability.health import get_health_endpoint, HealthCheck, HealthEndpoint, HealthStatus
-from mcp_hangar.observability.metrics import CircuitState, get_observability_metrics, ObservabilityMetrics
 from mcp_hangar.observability.tracing import (
     extract_trace_context,
     get_current_span_id,
@@ -43,10 +42,6 @@ __all__ = [
     "extract_trace_context",
     "get_current_trace_id",
     "get_current_span_id",
-    # Metrics
-    "ObservabilityMetrics",
-    "get_observability_metrics",
-    "CircuitState",
     # Health
     "HealthStatus",
     "HealthCheck",
