@@ -5,6 +5,30 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [Unreleased]
+
+### Changed
+
+- **core:** **BREAKING** relicense from BSL 1.1 dual-license to MIT; all enterprise features are now freely available (#198)
+- **core:** remove `LicenseTier` enum, `LicenseValidation`, and license-key gating from bootstrap; `load_enterprise_modules` loads unconditionally (#196)
+- **core:** `HANGAR_LICENSE_KEY` env var is deprecated and emits `DeprecationWarning` when set (#196)
+- **core:** `EnterpriseComponents` no longer carries a `license_tier` field; `ApplicationContext.license_tier` removed (#196)
+- **core:** reject tool entries with missing, empty, or non-string `name` field in `compute_tool_digest` (#172)
+- Public documentation migrated to dedicated [docs repository](https://github.com/mcp-hangar/docs). Internal docs remain in `docs/internal/`.
+
+### Removed
+
+- **core:** delete `enterprise/auth/license.py` (HMAC license-key validator) (#196)
+- **core:** delete `src/mcp_hangar/domain/value_objects/license.py` (`LicenseTier` enum) (#196)
+- **core:** delete `enterprise/LICENSE.BSL` and `CLA.md` (#194, #197)
+- **core:** remove CLA references from contributing guides (#197)
+- **core:** strip BSL prose from `CONTRIBUTING.md`, `ROADMAP.md`, enterprise docstrings, and `PRODUCT_ARCHITECTURE.md` decision log (#195)
+- **observability:** remove unused `Metrics.COLD_STARTS_TOTAL`, `Metrics.EGRESS_BLOCKED_TOTAL`, and `Metrics.PROVIDERS_QUARANTINED` constants — they had no backing metric in `metrics.py`
+
+### Added
+
+- **tests:** schema validation for `interceptors/list` response against local JSON Schema derived from SEP-1763 (pinned @ `5bd7ab4`) (#185)
+
 ## [1.3.0](https://github.com/mcp-hangar/mcp-hangar/compare/v1.2.3...v1.3.0) (2026-06-23)
 
 
@@ -71,15 +95,6 @@ enforced on every call, independent of the client's cached tool list.
 * **core:** absorb enterprise/ into src/mcp_hangar/ ([#201](https://github.com/mcp-hangar/mcp-hangar/issues/201)) ([010f2a0](https://github.com/mcp-hangar/mcp-hangar/commit/010f2a01f55130596a8934f56f5fcf65bff05229))
 * **docs:** move adr/AGENTS.md to docs/internal/ADR_AGENTS.md ([4be7c4f](https://github.com/mcp-hangar/mcp-hangar/commit/4be7c4f2172295e5dff87bd47d3c6ee3d9f42c2e))
 
-## [Unreleased]
-
-### Fixed
-
-- **core:** serialize auth/tls/http config in `to_config_dict()` for remote providers; auth secrets redacted with `[REDACTED]`; hot-reload now detects auth config changes via `_get_mcp_server_spec()`
-
-### Changed
-- Public documentation migrated to dedicated [docs repository](https://github.com/mcp-hangar/docs). Internal docs remain in `docs/internal/`.
-
 ## [1.2.1](https://github.com/mcp-hangar/mcp-hangar/compare/v1.2.0...v1.2.1) (2026-05-11)
 
 
@@ -93,39 +108,6 @@ enforced on every call, independent of the client's cached tool list.
 ### Changed
 
 * **core:** rename ALLOW_DEGRADED to ALLOW_UNVERIFIED in DigestUnknownPolicy ([#189](https://github.com/mcp-hangar/mcp-hangar/issues/189)) ([00a44b4](https://github.com/mcp-hangar/mcp-hangar/commit/00a44b4fddae32fec1538c6b0517eed6c1311756)), closes [#175](https://github.com/mcp-hangar/mcp-hangar/issues/175)
-
-## [Unreleased]
-
-### Changed
-
-- **core:** **BREAKING** relicense from BSL 1.1 dual-license to MIT; all enterprise features are now freely available (#198)
-- **core:** remove `LicenseTier` enum, `LicenseValidation`, and license-key gating from bootstrap; `load_enterprise_modules` loads unconditionally (#196)
-- **core:** `HANGAR_LICENSE_KEY` env var is deprecated and emits `DeprecationWarning` when set (#196)
-- **core:** `EnterpriseComponents` no longer carries a `license_tier` field; `ApplicationContext.license_tier` removed (#196)
-- **core:** absorbed `enterprise/` modules (auth, compliance, approvals, integrations, persistence) into `src/mcp_hangar/`; single unified package (#200)
-
-### Removed
-
-- **core:** delete `enterprise/auth/license.py` (HMAC license-key validator) (#196)
-- **core:** delete `src/mcp_hangar/domain/value_objects/license.py` (`LicenseTier` enum) (#196)
-- **core:** delete `enterprise/LICENSE.BSL` and `CLA.md` (#194, #197)
-- **core:** remove CLA references from contributing guides (#197)
-- **core:** strip BSL prose from `CONTRIBUTING.md`, `ROADMAP.md`, enterprise docstrings, and `PRODUCT_ARCHITECTURE.md` decision log (#195)
-
-### Changed
-
-- **core:** **BREAKING** replace `json.dumps` with RFC 8785 JCS canonicalization in `compute_tool_digest`; all previously pinned digests must be recomputed (#171)
-- **core:** reject tool entries with missing, empty, or non-string `name` field in `compute_tool_digest` (#172)
-- **core:** rename `DigestUnknownPolicy.ALLOW_DEGRADED` to `ALLOW_UNVERIFIED`; old `allow_degraded` string accepted with `DeprecationWarning` (removal in v1.4) (#175)
-
-### Fixed
-
-- **core:** treat `None`, `{}`, `[]`, and `""` as absent when computing tool digests to prevent spurious drift between servers that toggle between missing and empty values (#173)
-- **core:** disambiguate `interceptors/list` instance names to `mcp-hangar-validator` and `mcp-hangar-mutator` per SEP-1763 unique-name requirement (#176)
-
-### Added
-
-- **tests:** schema validation for `interceptors/list` response against local JSON Schema derived from SEP-1763 (pinned @ `5bd7ab4`) (#185)
 
 ## [1.2.0](https://github.com/mcp-hangar/mcp-hangar/compare/v1.1.0...v1.2.0) (2026-05-11)
 
@@ -174,55 +156,6 @@ enforced on every call, independent of the client's cached tool list.
 * **ci:** bump actions/add-to-project from v1 to v2 ([#100](https://github.com/mcp-hangar/mcp-hangar/issues/100)) ([b248fa1](https://github.com/mcp-hangar/mcp-hangar/commit/b248fa152a09a9686141daa41f9d9dd6059ca699))
 * **ci:** fix release notes %0A encoding, duplicate What's Changed, and HTML entities ([#109](https://github.com/mcp-hangar/mcp-hangar/issues/109)) ([7d2e691](https://github.com/mcp-hangar/mcp-hangar/commit/7d2e6915bf6e84265174c852754e01b1be731395))
 
-## [Unreleased]
-
-### Added
-
-- End-to-end observability and compliance loop: cost attribution in audit spans, risk score normalization and emission, compliance exporter deprecation rename, dynamic enterprise bootstrap (#106)
-- Branch name validator workflow enforcing GIT_FLOW.md naming conventions on PRs
-- GitHub Projects v2 board setup script and auto-add workflow
-- actionlint CI workflow to validate `.github/workflows/` YAML on PRs, push to main, and weekly schedule (#111)
-- **core:** ADR-004 digest pinning domain types (`ToolDigest`, `DigestPolicy`, `DigestMismatchEvent`), canonical SHA-256 computation helper, and standalone `DigestValidator` service (#119)
-- **core:** ADR-005 P1 interceptor framework: `Hook`/`HookPhase` value objects, `IHookSubscriber` contract, EventBus hook fan-out, and `GET /interceptors/list` endpoint for SEP-1763 discoverability (#120)
-- **core:** ADR-005 P1 mutator framework: `IMutator` contract, `MutationContext`/`MutationResult` VOs, priority-based `MutatorPipeline`, `ResponseTruncator` mutator with `ResponseTruncated` event (#121)
-- **core:** ADR-005 wildcard event subscription patterns via `EventPattern` value object and `compile_event_patterns()` helper (#122)
-- **core:** Epic #118 closure: end-to-end integration test for ADR-004/ADR-005 pipeline, ADR implementation status annotations, and interceptor framework architecture doc
-
-### Fixed
-
-- **core:** register `/interceptors/list` custom HTTP route on the bootstrap FastMCP instance so the endpoint is reachable at runtime; previously registered only on the factory's instance which is not served by `ServerLifecycle` (#151)
-- **docs:** ADR-001: fix `MCP Server` casing to `McpServer`; ADR-003: rename `ProviderFailoverSaga`/`ProviderRecoverySaga` to `McpServerFailoverSaga`/`McpServerRecoverySaga`; ADR-004/005: move `Implementation:` header to governance-compliant subsection, fix premature `v1.2.0` claim; ADR-007: rename `TracedProviderService` to `TracedMcpServerService`, fix broken langfuse adapter path (#161)
-- **docs:** fix leftover drift in cookbook recipes 02/03/04: drop phantom `health_check.enabled`/`health_check.interval_s` config keys, replace `MCP servers.<name>` with `mcp_servers.<name>` in config tables, remove fictional log strings, replace dead `uvx mcp-server-fetch` with `docker start`, fix `mode: subprocess` in recipe 01 example output (#152)
-- **docs:** REST_API.md: fix auth policies method PUT→POST, remove empty Catalog/Observability section headers, add discovery config prerequisite note (#153)
-- **docs:** AGENTS.md: fix license MIT/BSL inversion, rename Provider→McpServer in source layout/state machine/CQRS diagrams, add `revert`/`security` CC types and enumerate all 14 CC scopes, list required CI status checks, update interface count (17→32) and LOC figures, add missing `integrations/` and `persistence/` to enterprise layout (#158)
-- **docs:** reference docs: drop phantom Catalog/Observability/Maintenance endpoint groups and phantom WS endpoints from rest-api.md, fix all auth endpoint methods and paths to match `enterprise/auth/api/routes.py`, drop phantom `knowledge_base` and `batch` config sections from configuration.md, fix `MCP server` field names to `mcp_server` in tools.md parameter tables, fix `--MCP servers` flag and `PROVIDER` arg names in cli.md (#159)
-- **docs:** OVERVIEW.md: add ADR-004/005 subsystems, expand lock hierarchy to 6 levels, fix Provider→McpServer renames, replace phantom `infrastructure/catalog/` with `registry/`, fix WS endpoint count; installation.md: drop phantom `packages/operator` and `packages/helm-charts`, pin Docker image to 1.1.0; RELEASE.md: replace non-existent `twine yank` with PyPI web UI instructions, replace phantom Version Bump workflow with release-please; quickstart.md: fix `@anthropic/` to `@modelcontextprotocol/` package names; approval-gate-manual-testing.md: remove stale v0.13.0 version and branch reference (#162)
-- **docs:** GIT_FLOW.md: reframe from v0.x soft-law to v1.x CI-enforced rules, update stale bot and deprecation policy decisions, remove obsolete soft-law parking lot; CONTRIBUTING.md: replace phantom Version Bump workflow with release-please, remove stale commit-msg hook, link to actual PR template, defer hotfix to HOTFIX_RUNBOOK.md; BRANCH_PROTECTION.md: fix `ci.yml` to `pr-validation.yml` (#160)
-- **docs:** otel-integrations.md: remove phantom metrics (`cold_starts_total`, `egress_blocked_total`, `providers_quarantined`), fix PromQL `state` label to numeric gauge, add state value legend; AUTH_SECURITY_AUDIT.md: fix leaked `v1.6` internal phase number; PRODUCT_ARCHITECTURE.md: fix phantom enterprise subdirs, `hangar`→`mcp-hangar` CLI, `hangar_invoke`→`hangar_call`, add syslog to compliance formats, mark sections 7+8 as historical/rewrite for v1.x (#163)
-- **observability:** restore `trace.set_tracer_provider()` call in `observability/tracing.py:214`; global Provider→McpServer rename had renamed a third-party OpenTelemetry SDK function to `set_tracer_mcp_server`, which does not exist. Tracing initialization had been failing silently in every 1.0.x and 1.1.0 build (fault barrier swallowed the AttributeError and logged at ERROR). Discovered via live smoke test of v1.1.0 in docker-compose.
-- **docs:** remove stale "Metrics Not Yet Implemented" section from OBSERVABILITY.md; all listed metrics are live in `metrics.py` since v1.1.0 (#135)
-- **docs:** replace broken prerequisite shell commands in cookbook recipes 01 and 04 with in-repo `examples/provider_math` Docker image (#128)
-- **docs:** correct hangar_call format (requires `calls:[...]` array), remove phantom CLI subcommands, fix endpoint paths across cookbook recipes (#125)
-- **docs:** drop phantom config blocks (global `health_check:`, `logging:`, `metrics:`) from cookbook recipes (#126)
-- **docs:** drop phantom endpoints (Catalog, Observability, Maintenance, `/ws/state`, `/ws/logs`) from REST_API, WEBSOCKETS, and LOG_STREAMING guides; align with real router mounts and WS subscribe protocol (#132)
-- **docs:** add cross-repo operator prerequisites for Kubernetes recipes 11, 13, and KUBERNETES guide; link to `mcp-hangar/hangar-operator` and fix Helm/CRD URLs (#127)
-- **docs:** rename `09-subprocess-providers.md` to `09-subprocess-mcp-servers.md`, fix `TracedProviderService` reference in recipe 08, update nav (#129)
-- **docs:** clean up Provider to McpServer artifacts in guides: rename PROVIDER_GROUPS.md, fix class names (ProviderInfo, ProviderNotFoundError, TracedProviderService), fix code-fence field names (#133)
-- **docs:** drop phantom `mcp-hangar auth` CLI subcommands from AUTHENTICATION.md (replace with REST API equivalents), fix stale metric suffixes in BATCH_INVOCATIONS.md and DISCOVERY.md, remove phantom `mcp-hangar mcp_server start` from OBSERVABILITY.md (#134)
-- **ci:** release notes no longer contain literal `%0A` newlines (removed legacy set-output encoding)
-- **ci:** release body no longer has a duplicated `## What's Changed` section (removed `generate_release_notes: true`); a manual Full Changelog compare link is added instead
-- **ci:** HTML entities (`&gt;`, `&lt;`, `&amp;`) in CHANGELOG entries are decoded before writing to the release body
-- **ci:** PR-only checks (`pr-title`, `commitlint`, `changelog`, `pr-body`) no longer emit ghost failed runs on push to main (removed from required status checks; they still gate PR merges implicitly)
-
-### Security
-
-- **ci:** scope `dependabot-automerge` `pull_request_target` to `branches: [main]` with explicit event types (#112)
-
-### Changed
-
-- **ci:** remove commitlint workflow, config, and pre-commit hook; `pr-title.yml` is now the sole Conventional Commits gate (#130)
-- **repo:** disable rebase-merge and merge-commit; squash-merge only guarantees validated PR titles land on main (#130)
-
 ## [1.0.3](https://github.com/mcp-hangar/mcp-hangar/compare/v1.0.2...v1.0.3) (2026-05-10)
 
 
@@ -246,28 +179,6 @@ enforced on every call, independent of the client's cached tool list.
 * clean up Provider -&gt; McpServer legacy shims in events and commands ([e4aa6db](https://github.com/mcp-hangar/mcp-hangar/commit/e4aa6dbbbd179469b7eb095935226c2a57e9a77e))
 * eliminate all static enterprise imports in core (TASK-P0-2, TASK-PRECOMMIT-FIX) ([53c2b73](https://github.com/mcp-hangar/mcp-hangar/commit/53c2b73780dd818263204e8923ef8f518e6be52a))
 * reuse thread-local event loop in approval gate instead of creating per call ([a7a4338](https://github.com/mcp-hangar/mcp-hangar/commit/a7a4338e3314e469195e1f0d62a5c17899531f9e))
-
-## [Unreleased]
-
-### Added
-
-- **OTEL Caller/Cost Attributes (B-13)**: New `mcp.caller.*` (type, id, roles) and `mcp.cost.*` (cents, model, input_tokens, output_tokens, currency) attribute namespaces in `observability/conventions.py`. Caller identity is automatically propagated from event `identity_context` through the OTLP audit exporter.
-- **FinOps Cost Attribution (B-12)**: `CostRecord` value object, `ICostAttributor` contract with `DefaultCostAttributor` implementation supporting token, duration, fixed, and composite pricing models with specificity-based rule matching. `CostAttributionEventHandler` computes cost on every `ToolInvocationCompleted` event. New Prometheus metrics: `mcp_hangar_cost_cents_total`, `mcp_hangar_cost_attributions_total`.
-- **Export Formats (B-11)**: Three new enterprise compliance exporters implementing `IAuditExporter`: `JSONLinesExporter` (one JSON object per line), `LEEFExporter` (IBM QRadar LEEF 2.0), `SyslogExporter` (RFC 5424 structured data). All support file, callback, or stderr output.
-- **Agent Behavior Scoring (B-04)**: `RiskScore` value object, `IRiskScorer` contract with `WeightedRiskScorer` implementation using exponential time decay (configurable half-life). `RiskScoringEventHandler` subscribes to `BehavioralDeviationDetected`, `DetectionRuleMatched`, and `CapabilityViolationDetected` events to aggregate per-server and per-session anomaly scores.
-- Copilot custom instructions for PR descriptions and commit messages, aligning generated content with repo CC schema and PR template
-- release-please workflow for automated version bumps, changelog sectioning, and tag-driven releases
-
-### Fixed
-
-- PR body validator: handle CRLF line endings in event payload (was reporting all sections empty)
-- commitlint: relax subject-case rule to allow file references and acronyms (was blocking any commit mentioning CHANGELOG.md, MCP, OAuth, etc.)
-- GIT_FLOW.md: add `repo` to approved CC scopes for root-level governance files
-- pip-audit `--skip-editable` to prevent circular self-lookup on Release PRs
-
-### Removed
-
-- `version-bump.yml` workflow superseded by release-please
 
 ## [1.0.2] - 2026-04-24
 

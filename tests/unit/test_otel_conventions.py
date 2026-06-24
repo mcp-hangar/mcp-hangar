@@ -104,12 +104,6 @@ class TestMetricNames:
     def test_capability_violations_metric(self) -> None:
         assert Metrics.CAPABILITY_VIOLATIONS_TOTAL == "mcp_hangar_capability_violations_total"
 
-    def test_egress_blocked_metric(self) -> None:
-        assert Metrics.EGRESS_BLOCKED_TOTAL == "mcp_hangar_egress_blocked_total"
-
-    def test_quarantined_metric(self) -> None:
-        assert Metrics.PROVIDERS_QUARANTINED == "mcp_hangar_mcp_servers_quarantined"
-
 
 class TestSetGovernanceAttributes:
     """Tests for the set_governance_attributes convenience helper."""
