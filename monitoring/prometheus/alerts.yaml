@@ -73,7 +73,7 @@ groups:
         labels:
           severity: critical
         annotations:
-          summary: "Provider {{ $labels.provider }} critically unhealthy"
+          summary: "Provider {{ $labels.mcp_server }} critically unhealthy"
           description: "{{ $value }} consecutive health check failures"
           runbook_url: "https://docs.mcp-hangar.io/runbooks/provider-unhealthy"
 
@@ -89,19 +89,19 @@ groups:
         labels:
           severity: warning
         annotations:
-          summary: "Provider {{ $labels.provider }} failing health checks"
+          summary: "Provider {{ $labels.mcp_server }} failing health checks"
           description: "{{ $value }} consecutive health check failures"
           runbook_url: "https://docs.mcp-hangar.io/runbooks/health-failures"
 
       - alert: MCPHangarHealthCheckSlow
         expr: |
-          histogram_quantile(0.95, sum(rate(mcp_hangar_health_check_duration_seconds_bucket[5m])) by (le, provider))
+          histogram_quantile(0.95, sum(rate(mcp_hangar_health_check_duration_seconds_bucket[5m])) by (le, mcp_server))
           > 5
         for: 5m
         labels:
           severity: warning
         annotations:
-          summary: "Slow health checks for {{ $labels.provider }}"
+          summary: "Slow health checks for {{ $labels.mcp_server }}"
           description: "P95 health check duration: {{ $value | humanizeDuration }}"
 
       # --- Latency ---
@@ -130,24 +130,24 @@ groups:
 
       - alert: MCPHangarHighLatencyByTool
         expr: |
-          histogram_quantile(0.95, sum(rate(mcp_hangar_tool_call_duration_seconds_bucket[5m])) by (le, provider, tool))
+          histogram_quantile(0.95, sum(rate(mcp_hangar_tool_call_duration_seconds_bucket[5m])) by (le, mcp_server, tool))
           > 5
         for: 5m
         labels:
           severity: warning
         annotations:
-          summary: "High latency for {{ $labels.provider }}/{{ $labels.tool }}"
+          summary: "High latency for {{ $labels.mcp_server }}/{{ $labels.tool }}"
           description: "P95 latency: {{ $value | humanizeDuration }}"
 
       # --- Cold Start Frequency ---
       - alert: MCPHangarFrequentColdStarts
         expr: |
-          sum(rate(mcp_hangar_provider_starts_total[15m])) by (provider) > 0.1
+          sum(rate(mcp_hangar_mcp_server_starts_total[15m])) by (mcp_server) > 0.1
         for: 10m
         labels:
           severity: warning
         annotations:
-          summary: "Frequent cold starts for {{ $labels.provider }}"
+          summary: "Frequent cold starts for {{ $labels.mcp_server }}"
           description: "Consider increasing idle_ttl. Rate: {{ $value }}/s"
 
       # --- Batch ---
@@ -223,12 +223,12 @@ groups:
   - name: mcp-hangar-info
     rules:
       - alert: MCPHangarProviderStarted
-        expr: increase(mcp_hangar_provider_starts_total[1m]) > 0
+        expr: increase(mcp_hangar_mcp_server_starts_total[1m]) > 0
         for: 0m
         labels:
           severity: info
         annotations:
-          summary: "Provider {{ $labels.provider }} started"
+          summary: "Provider {{ $labels.mcp_server }} started"
 
       - alert: MCPHangarHighToolCallVolume
         expr: sum(rate(mcp_hangar_tool_calls_total[5m])) > 100
@@ -245,17 +245,17 @@ groups:
   #
   # - name: mcp-hangar-future
   #   rules:
-  #     # Provider state alerts (needs mcp_hangar_provider_state metric)
+  #     # Provider state alerts (needs mcp_hangar_mcp_server_state metric)
   #     # - alert: MCPHangarProviderDegraded
-  #     #   expr: mcp_hangar_provider_state == 3
+  #     #   expr: mcp_hangar_mcp_server_state == 3
   #     #   for: 5m
   #     #   labels:
   #     #     severity: warning
   #     #   annotations:
-  #     #     summary: "Provider {{ $labels.provider }} degraded"
+  #     #     summary: "Provider {{ $labels.mcp_server }} degraded"
   #
   #     # - alert: MCPHangarAllProvidersDown
-  #     #   expr: sum(mcp_hangar_provider_up) == 0 and sum(mcp_hangar_provider_info) > 0
+  #     #   expr: sum(mcp_hangar_mcp_server_up) == 0 and sum(mcp_hangar_mcp_server_info) > 0
   #     #   for: 1m
   #     #   labels:
   #     #     severity: critical
@@ -271,4 +271,4 @@ groups:
   #
   #     # Rate limiting alerts (needs mcp_hangar_rate_limit_hits_total metric)
   #     # - alert: MCPHangarHighRateLimitHits
-  #     #   expr: sum(rate(mcp_hangar_rate_limit_hits_total[5m])) by (endpoint) > 1
+  #     #   expr: sum(rate(mcp_hangar_rate_limit_hits_total[5m])) by (result) > 1
