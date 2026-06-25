@@ -49,11 +49,13 @@ def build_www_authenticate(resource_base: str) -> str:
     return f'Bearer resource_metadata="{prm_url(resource_base)}", ApiKey'
 
 
-def build_prm_response(issuer: str, resource_uri: str) -> dict:
+def build_prm_response(issuers: list[str], resource_uri: str) -> dict:
     """Build the PRM JSON body (RFC 9728 §3).
 
     Args:
-        issuer: OIDC issuer URL from auth.oidc.issuer.
+        issuers: All trusted OIDC issuer URLs from auth.oidc. Each is advertised
+            as an authorization server so clients can discover every issuer this
+            resource server accepts tokens from.
         resource_uri: Absolute URI identifying this resource server.
 
     Returns:
@@ -61,5 +63,5 @@ def build_prm_response(issuer: str, resource_uri: str) -> dict:
     """
     return {
         "resource": resource_uri,
-        "authorization_servers": [issuer],
+        "authorization_servers": list(issuers),
     }

@@ -220,8 +220,8 @@ class ServerLifecycle:
         # The endpoint is placed on the aux app (outside auth enforcement) so clients can
         # reach it before obtaining a token.  When OIDC is not configured / no issuer is
         # set, we return 404 — there is nothing to advertise.
-        _oidc_issuer = (
-            auth_components.oidc_issuer if auth_components and hasattr(auth_components, "oidc_issuer") else ""
+        _oidc_issuers: list[str] = (
+            auth_components.oidc_issuers if auth_components and hasattr(auth_components, "oidc_issuers") else []
         )
         _oidc_resource_uri_cfg = (
             auth_components.oidc_resource_uri
@@ -236,14 +236,14 @@ class ServerLifecycle:
 
             Returns 404 when no OIDC issuer is configured — nothing to advertise.
             """
-            if not _oidc_issuer:
+            if not _oidc_issuers:
                 return JSONResponse(
                     {"error": "not_found", "message": "No OIDC issuer configured"},
                     status_code=404,
                 )
             resource_base = _oidc_resource_uri_cfg or build_resource_base_url(request.scope)
             return JSONResponse(
-                build_prm_response(issuer=_oidc_issuer, resource_uri=resource_base),
+                build_prm_response(issuers=_oidc_issuers, resource_uri=resource_base),
                 media_type="application/json",
             )
 

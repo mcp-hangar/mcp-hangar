@@ -23,6 +23,41 @@ class ApiKeyAuthConfig:
 
 
 @dataclass
+class OIDCIssuerConfig:
+    """Per-issuer OIDC trust entry.
+
+    Represents a single authorization server that this resource server
+    trusts. Multiple entries enable multi-issuer support.
+
+    Attributes:
+        issuer: OIDC issuer URL (e.g., https://auth.company.com).
+        audience: Expected audience claim value.
+        jwks_uri: JWKS endpoint URL (auto-discovered from issuer if None).
+        client_id: Optional client ID for additional validation.
+        subject_claim: JWT claim for subject identifier.
+        groups_claim: JWT claim for group memberships.
+        tenant_claim: JWT claim for tenant identifier.
+        email_claim: JWT claim for email address.
+        max_token_lifetime_seconds: Maximum allowed token lifetime (exp - iat) in seconds.
+            Value of 0 means disabled. Default: 3600.
+    """
+
+    issuer: str = ""
+    audience: str = ""
+    jwks_uri: str | None = None
+    client_id: str | None = None
+
+    # Claim mappings
+    subject_claim: str = "sub"
+    groups_claim: str = "groups"
+    tenant_claim: str = "tenant_id"
+    email_claim: str = "email"
+
+    # Lifetime enforcement
+    max_token_lifetime_seconds: int = 3600
+
+
+@dataclass
 class OIDCAuthConfig:
     """OIDC/JWT authentication configuration.
 
@@ -42,6 +77,8 @@ class OIDCAuthConfig:
             When set, this overrides the request Host for PRM and WWW-Authenticate
             construction (preferred: proxies make the Host header unreliable).
             When unset, the URI is derived from the incoming request's scheme+host.
+        issuers: List of trusted authorization servers (multi-issuer support).
+            When non-empty, takes precedence over the legacy single-issuer fields.
     """
 
     enabled: bool = False
@@ -59,6 +96,34 @@ class OIDCAuthConfig:
 
     # Lifetime enforcement
     max_token_lifetime_seconds: int = 3600
+
+    # Multi-issuer trust entries
+    issuers: list[OIDCIssuerConfig] = field(default_factory=list)
+
+    def resolved_issuers(self) -> list[OIDCIssuerConfig]:
+        """Return the effective list of trusted issuers.
+
+        Prefers the explicit ``issuers`` list. Falls back to synthesizing a
+        single entry from the legacy top-level fields for backward
+        compatibility. Returns an empty list if neither is configured.
+        """
+        if self.issuers:
+            return self.issuers
+        if self.issuer:
+            return [
+                OIDCIssuerConfig(
+                    issuer=self.issuer,
+                    audience=self.audience,
+                    jwks_uri=self.jwks_uri,
+                    client_id=self.client_id,
+                    subject_claim=self.subject_claim,
+                    groups_claim=self.groups_claim,
+                    tenant_claim=self.tenant_claim,
+                    email_claim=self.email_claim,
+                    max_token_lifetime_seconds=self.max_token_lifetime_seconds,
+                )
+            ]
+        return []
 
 
 @dataclass
@@ -223,6 +288,27 @@ def parse_auth_config(config_dict: dict[str, Any] | None) -> AuthConfig:
     default_lifetime = oidc_dict.get("max_token_lifetime_seconds", 3600)
     max_token_lifetime_seconds = int(os.environ.get("MCP_JWT_MAX_TOKEN_LIFETIME", str(default_lifetime)))
 
+    # Parse per-issuer trust entries. Omitted fields inherit the top-level
+    # oidc.* values so per-issuer claim mappings fall back to the globals.
+    issuers: list[OIDCIssuerConfig] = []
+    for issuer_dict in oidc_dict.get("issuers", []):
+        if isinstance(issuer_dict, dict):
+            issuers.append(
+                OIDCIssuerConfig(
+                    issuer=issuer_dict.get("issuer", oidc_dict.get("issuer", "")),
+                    audience=issuer_dict.get("audience", oidc_dict.get("audience", "")),
+                    jwks_uri=issuer_dict.get("jwks_uri", oidc_dict.get("jwks_uri")),
+                    client_id=issuer_dict.get("client_id", oidc_dict.get("client_id")),
+                    subject_claim=issuer_dict.get("subject_claim", oidc_dict.get("subject_claim", "sub")),
+                    groups_claim=issuer_dict.get("groups_claim", oidc_dict.get("groups_claim", "groups")),
+                    tenant_claim=issuer_dict.get("tenant_claim", oidc_dict.get("tenant_claim", "tenant_id")),
+                    email_claim=issuer_dict.get("email_claim", oidc_dict.get("email_claim", "email")),
+                    max_token_lifetime_seconds=issuer_dict.get(
+                        "max_token_lifetime_seconds", max_token_lifetime_seconds
+                    ),
+                )
+            )
+
     oidc_config = OIDCAuthConfig(
         enabled=oidc_dict.get("enabled", False),
         issuer=oidc_dict.get("issuer", ""),
@@ -235,6 +321,7 @@ def parse_auth_config(config_dict: dict[str, Any] | None) -> AuthConfig:
         email_claim=oidc_dict.get("email_claim", "email"),
         max_token_lifetime_seconds=max_token_lifetime_seconds,
         resource_uri=oidc_dict.get("resource_uri", ""),
+        issuers=issuers,
     )
 
     # Parse OPA config
