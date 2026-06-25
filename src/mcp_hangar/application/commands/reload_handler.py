@@ -167,6 +167,12 @@ class ReloadConfigurationHandler(CommandHandler):
             get_tool_projection_registry().clear_config_withdrawals()
             logger.debug("config_withdrawals_cleared_for_reload")
 
+            # 4c. Clear config-pin overlay (and reset enforcement to block)
+            # before reload so that removing a pin from config reverts to the
+            # strict default. Pins will be re-applied by _load_mcp_server_config.
+            get_tool_projection_registry().clear_config_pins()
+            logger.debug("config_pins_cleared_for_reload")
+
             # 5. Load new configuration (adds new and updates existing)
             if self._config_loader is not None:
                 self._config_loader.apply_mcp_servers(new_mcp_servers_config)

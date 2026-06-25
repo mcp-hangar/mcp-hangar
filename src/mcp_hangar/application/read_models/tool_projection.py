@@ -18,7 +18,7 @@ from dataclasses import dataclass, field
 from typing import TYPE_CHECKING, Literal
 
 from ...domain.services.digest_computation import compute_tool_digest
-from ...domain.value_objects.tool_digest import ToolDigest
+from ...domain.value_objects.tool_digest import DigestEnforcement, ToolDigest
 
 if TYPE_CHECKING:
     from ...domain.model.tool_catalog import ToolSchema
@@ -104,6 +104,11 @@ class ToolProjectionRegistry:
         # Runtime-withdrawal overlay: survives config reloads (clear_config_withdrawals does NOT touch this).
         # Same shape as _config_withdrawals: (mcp_server, tool) -> set[str] | _ALL_TENANTS.
         self._runtime_withdrawals: dict[tuple[str, str], set[str] | _AllTenants] = {}
+        # Config-pin overlay: (mcp_server, tool) -> {tenant_id -> pinned ToolDigest}.
+        # Populated at config-load time; re-applied on every reload (#233).
+        self._config_pins: dict[tuple[str, str], dict[str, ToolDigest]] = {}
+        # Digest-enforcement mode for pin mismatches; defaults to the strictest (block).
+        self._digest_enforcement: DigestEnforcement = DigestEnforcement.BLOCK
 
     # ------------------------------------------------------------------
     # Population (called by bootstrap / config-reload)
@@ -219,6 +224,66 @@ class ToolProjectionRegistry:
             return True
         # entry is a set[str]
         return tenant_id is not None and tenant_id in entry  # type: ignore[operator]
+
+    # ------------------------------------------------------------------
+    # Config-pin overlay (populated at config-load time)
+    # ------------------------------------------------------------------
+
+    def set_config_pin(
+        self,
+        mcp_server: str,
+        tool: str,
+        tenant_id: str,
+        digest: ToolDigest,
+    ) -> None:
+        """Pin a tool to a specific digest for a tenant via config.
+
+        Args:
+            mcp_server: Owning mcp_server identifier.
+            tool: Tool name.
+            tenant_id: Tenant the pin applies to.
+            digest: The :class:`~domain.value_objects.tool_digest.ToolDigest`
+                the tool is expected to match for this tenant.
+        """
+        with self._lock:
+            self._config_pins.setdefault((mcp_server, tool), {})[tenant_id] = digest
+        logger.debug(
+            "config_pin_set",
+            extra={"mcp_server": mcp_server, "tool": tool, "tenant_id": tenant_id},
+        )
+
+    def set_digest_enforcement(self, mode: DigestEnforcement) -> None:
+        """Set the digest-enforcement mode applied to pin mismatches."""
+        with self._lock:
+            self._digest_enforcement = mode
+        logger.debug("digest_enforcement_set", extra={"mode": mode.value})
+
+    def resolve_pin(self, mcp_server: str, tool: str, tenant_id: str | None) -> ToolDigest | None:
+        """Return the pinned digest for *(mcp_server, tool)* and *tenant_id*.
+
+        Returns ``None`` when *tenant_id* is ``None`` or no pin is registered.
+        """
+        if tenant_id is None:
+            return None
+        with self._lock:
+            return self._config_pins.get((mcp_server, tool), {}).get(tenant_id)
+
+    def digest_enforcement(self) -> DigestEnforcement:
+        """Return the current digest-enforcement mode."""
+        with self._lock:
+            return self._digest_enforcement
+
+    def clear_config_pins(self) -> None:
+        """Remove all config-declared pins and reset enforcement to block.
+
+        Called before re-applying config on reload so that removing a pin (or
+        the ``digest_enforcement`` setting) from the config file actually
+        reverts to the strict default (#233).
+        """
+        with self._lock:
+            self._config_pins.clear()
+            self._digest_enforcement = DigestEnforcement.BLOCK
+        logger.debug("config_pins_cleared")
 
     # ------------------------------------------------------------------
     # Runtime-withdrawal overlay (survives config reloads)
@@ -423,16 +488,18 @@ class ToolProjectionRegistry:
     # ------------------------------------------------------------------
 
     def invalidate(self) -> None:
-        """Discard all cached projections, config-withdrawal overlay, and runtime overlay.
+        """Discard all cached projections, overlays, and pin state.
 
         Full reset — intended for testing only.  In production, config reload
         calls :meth:`clear_config_withdrawals` (which preserves runtime
-        withdrawals) rather than this method.
+        withdrawals) and :meth:`clear_config_pins` rather than this method.
         """
         with self._lock:
             self._projections.clear()
             self._config_withdrawals.clear()
             self._runtime_withdrawals.clear()
+            self._config_pins.clear()
+            self._digest_enforcement = DigestEnforcement.BLOCK
             self._built = False
             logger.debug("tool_projection_registry_invalidated")
 

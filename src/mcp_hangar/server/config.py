@@ -17,6 +17,7 @@ from ..domain.exceptions import ConfigurationError
 from ..domain.model import LoadBalancerStrategy, McpServer, McpServerGroup
 from ..domain.security.input_validator import validate_mcp_server_id
 from ..domain.value_objects.capabilities import McpServerCapabilities
+from ..domain.value_objects.tool_digest import DigestEnforcement, ToolDigest
 from ..logging_config import get_logger
 
 from .state import get_group_rebalance_saga, get_runtime, GROUPS
@@ -394,6 +395,18 @@ def _load_mcp_server_config(mcp_server_id: str, spec_dict: dict[str, Any]) -> Mc
 
         tp_registry = get_tool_projection_registry()
 
+        # Digest-enforcement mode for pin mismatches (audit/warn/block).
+        enforcement_raw = tool_projection_config.get("digest_enforcement")
+        if enforcement_raw is not None:
+            try:
+                tp_registry.set_digest_enforcement(DigestEnforcement(enforcement_raw))
+            except ValueError:
+                logger.warning(
+                    "invalid_digest_enforcement_config",
+                    mcp_server_id=mcp_server_id,
+                    value=enforcement_raw,
+                )
+
         # Global withdrawals (all tenants)
         global_withdrawn = tool_projection_config.get("withdrawn", [])
         if isinstance(global_withdrawn, list):
@@ -424,6 +437,31 @@ def _load_mcp_server_config(mcp_server_id: str, spec_dict: dict[str, Any]) -> Mc
                                 tool=tool_name,
                                 tenant_id=tenant_id_key,
                             )
+
+                # Per-tenant digest pins: {tool_name: sha256_hex}.
+                tenant_pins = tenant_spec.get("pins", {})
+                if isinstance(tenant_pins, dict):
+                    for tool_name, sha256 in tenant_pins.items():
+                        if not (isinstance(tool_name, str) and tool_name and isinstance(sha256, str)):
+                            continue
+                        try:
+                            digest = ToolDigest(tool_name=tool_name, sha256=sha256)
+                        except ValueError as e:
+                            logger.warning(
+                                "invalid_config_digest_pin",
+                                mcp_server_id=mcp_server_id,
+                                tool=tool_name,
+                                tenant_id=tenant_id_key,
+                                error=str(e),
+                            )
+                            continue
+                        tp_registry.set_config_pin(mcp_server_id, tool_name, tenant_id_key, digest)
+                        logger.debug(
+                            "config_digest_pin_registered",
+                            mcp_server_id=mcp_server_id,
+                            tool=tool_name,
+                            tenant_id=tenant_id_key,
+                        )
 
     # Register per-mcp_server concurrency limit if specified
     mcp_server_max_concurrency = spec_dict.get("max_concurrency")
