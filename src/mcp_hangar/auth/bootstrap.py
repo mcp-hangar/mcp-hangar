@@ -322,10 +322,18 @@ def bootstrap_auth(
         if not issuer_cfgs:
             logger.warning("oidc_config_incomplete", issuer=config.oidc.issuer, audience=config.oidc.audience)
         else:
+            # RFC 8707 resource binding: when a resource URI is configured, every
+            # accepted token's `aud` must match it (the same value advertised as
+            # PRM `resource`), so a token minted for another resource is rejected.
+            # This intentionally overrides any per-issuer `audience`. Without a
+            # configured resource URI we fall back to the per-issuer audience
+            # (the Host-derived PRM value is advertisement-only and never trusted
+            # as a validation audience).
+            resource_audience = config.oidc.resource_uri
             oidc_configs = [
                 OIDCConfig(
                     issuer=entry.issuer,
-                    audience=entry.audience,
+                    audience=resource_audience or entry.audience,
                     jwks_uri=entry.jwks_uri,
                     client_id=entry.client_id,
                     subject_claim=entry.subject_claim,
@@ -347,6 +355,8 @@ def bootstrap_auth(
                 "oidc_auth_enabled",
                 issuer_count=len(issuer_cfgs),
                 issuers=[c.issuer for c in issuer_cfgs],
+                resource=resource_audience or None,
+                audience_bound_to_resource=bool(resource_audience),
             )
 
     # Initialize rate limiter for brute-force protection
