@@ -29,6 +29,8 @@ from ....domain.events import (
 from ....context import get_identity_context
 from ....application.read_models.tool_projection import get_tool_projection_registry
 from ....domain.services import get_tool_access_resolver
+from ....domain.services.digest_validator import DigestValidator
+from ....domain.value_objects import DigestPolicy, DigestUnknownPolicy
 from ....infrastructure.single_flight import SingleFlight
 from ....logging_config import get_logger
 from ....observability.tracing import extract_trace_context, get_tracer
@@ -688,6 +690,37 @@ class BatchExecutor:
                 error_type="ToolWithdrawnError",
                 elapsed_ms=(time.perf_counter() - call_start) * 1000,
             )
+
+        # Per-tenant digest pin enforcement (#233): if the caller's tenant pinned
+        # this tool to an approved digest, validate the backend's current schema
+        # against it and enforce per the configured mode. This is the first call
+        # site for DigestValidator. No pin -> unchanged behavior.
+        _pin = _proj_registry.resolve_pin(call.mcp_server, call.tool, _caller_tenant_id)
+        if _pin is not None and _proj is not None:
+            _digest_result = DigestValidator(
+                DigestPolicy(
+                    enforcement=_proj_registry.digest_enforcement(),
+                    unknown=DigestUnknownPolicy.BLOCK,
+                    allowlist=frozenset({_pin}),
+                )
+            ).validate_tool(_proj.schema, call.mcp_server, call.call_id)
+            if _digest_result.event is not None:
+                ctx.event_bus.publish(_digest_result.event)
+            if _digest_result.blocked:
+                logger.info(
+                    "tool_digest_pin_rejected",
+                    mcp_server_id=call.mcp_server,
+                    tool=call.tool,
+                    tenant_id=_caller_tenant_id,
+                )
+                return CallResult(
+                    index=call.index,
+                    call_id=call.call_id,
+                    success=False,
+                    error=f"Tool '{call.tool}' schema does not match the digest pinned for this tenant",
+                    error_type="ToolDigestMismatchError",
+                    elapsed_ms=(time.perf_counter() - call_start) * 1000,
+                )
 
         # Check circuit breaker / health degradation (for non-group mcp_servers)
         if not is_group and mcp_server_obj:
