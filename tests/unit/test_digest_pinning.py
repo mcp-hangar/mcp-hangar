@@ -112,12 +112,12 @@ class TestRegistryPinOverlay:
     def test_clear_config_pins_removes_pins_and_resets_enforcement(self) -> None:
         registry = ToolProjectionRegistry()
         registry.set_config_pin(_SERVER, _TOOL, _TENANT_A, _stale_pin())
-        registry.set_digest_enforcement(DigestEnforcement.WARN)
+        registry.set_digest_enforcement(_SERVER, DigestEnforcement.WARN)
 
         registry.clear_config_pins()
 
         assert registry.resolve_pin(_SERVER, _TOOL, _TENANT_A) is None
-        assert registry.digest_enforcement() is DigestEnforcement.BLOCK
+        assert registry.digest_enforcement(_SERVER) is DigestEnforcement.BLOCK
 
 
 # ---------------------------------------------------------------------------
@@ -131,22 +131,22 @@ class TestEnforcementMode:
     def test_default_enforcement_is_block(self) -> None:
         registry = ToolProjectionRegistry()
 
-        assert registry.digest_enforcement() is DigestEnforcement.BLOCK
+        assert registry.digest_enforcement(_SERVER) is DigestEnforcement.BLOCK
 
     def test_set_digest_enforcement_takes_effect(self) -> None:
         registry = ToolProjectionRegistry()
 
-        registry.set_digest_enforcement(DigestEnforcement.WARN)
+        registry.set_digest_enforcement(_SERVER, DigestEnforcement.WARN)
 
-        assert registry.digest_enforcement() is DigestEnforcement.WARN
+        assert registry.digest_enforcement(_SERVER) is DigestEnforcement.WARN
 
     def test_clear_resets_enforcement_to_block(self) -> None:
         registry = ToolProjectionRegistry()
-        registry.set_digest_enforcement(DigestEnforcement.AUDIT)
+        registry.set_digest_enforcement(_SERVER, DigestEnforcement.AUDIT)
 
         registry.clear_config_pins()
 
-        assert registry.digest_enforcement() is DigestEnforcement.BLOCK
+        assert registry.digest_enforcement(_SERVER) is DigestEnforcement.BLOCK
 
 
 # ---------------------------------------------------------------------------
@@ -166,7 +166,7 @@ class TestDigestEnforcementViaPolicy:
     ):
         return DigestValidator(
             DigestPolicy(
-                enforcement=registry.digest_enforcement(),
+                enforcement=registry.digest_enforcement(_SERVER),
                 unknown=DigestUnknownPolicy.BLOCK,
                 allowlist=frozenset({pin}),
             )
@@ -195,7 +195,7 @@ class TestDigestEnforcementViaPolicy:
 
     def test_warn_mismatch_does_not_block_but_emits_event(self) -> None:
         registry = ToolProjectionRegistry()
-        registry.set_digest_enforcement(DigestEnforcement.WARN)
+        registry.set_digest_enforcement(_SERVER, DigestEnforcement.WARN)
         schema = _tool_schema().to_dict()
 
         result = self._validate(registry, schema, _stale_pin())
@@ -206,7 +206,7 @@ class TestDigestEnforcementViaPolicy:
 
     def test_audit_mismatch_does_not_block_but_emits_event(self) -> None:
         registry = ToolProjectionRegistry()
-        registry.set_digest_enforcement(DigestEnforcement.AUDIT)
+        registry.set_digest_enforcement(_SERVER, DigestEnforcement.AUDIT)
         schema = _tool_schema().to_dict()
 
         result = self._validate(registry, schema, _stale_pin())
@@ -251,7 +251,7 @@ class TestFullChain:
 
         result = DigestValidator(
             DigestPolicy(
-                enforcement=registry.digest_enforcement(),
+                enforcement=registry.digest_enforcement(_SERVER),
                 unknown=DigestUnknownPolicy.BLOCK,
                 allowlist=frozenset({resolved_pin}),
             )
@@ -275,7 +275,7 @@ class TestFullChain:
 
         result = DigestValidator(
             DigestPolicy(
-                enforcement=registry.digest_enforcement(),
+                enforcement=registry.digest_enforcement(_SERVER),
                 unknown=DigestUnknownPolicy.BLOCK,
                 allowlist=frozenset({resolved_pin}),
             )
@@ -333,7 +333,7 @@ class TestConfigParsing:
         assert pin is not None
         assert pin.sha256 == _STALE_SHA
         assert pin.tool_name == _TOOL
-        assert registry.digest_enforcement() is DigestEnforcement.WARN
+        assert registry.digest_enforcement(_SERVER) is DigestEnforcement.WARN
 
     def test_invalid_enforcement_is_skipped(self) -> None:
         self._load(
@@ -349,7 +349,7 @@ class TestConfigParsing:
 
         registry = get_tool_projection_registry()
         # Enforcement falls back to the strict default; the (valid) pin still lands.
-        assert registry.digest_enforcement() is DigestEnforcement.BLOCK
+        assert registry.digest_enforcement(_SERVER) is DigestEnforcement.BLOCK
         assert registry.resolve_pin(_SERVER, _TOOL, "t1") is not None
 
     def test_malformed_digest_is_skipped(self) -> None:
@@ -367,4 +367,28 @@ class TestConfigParsing:
         registry = get_tool_projection_registry()
         # The malformed pin is warn-skipped (no raise), so no pin is registered.
         assert registry.resolve_pin(_SERVER, _TOOL, "t1") is None
-        assert registry.digest_enforcement() is DigestEnforcement.BLOCK
+        assert registry.digest_enforcement(_SERVER) is DigestEnforcement.BLOCK
+
+    def test_non_string_pin_value_is_skipped(self) -> None:
+        # A non-string pin value (e.g. a number or nested mapping) is warn-skipped
+        # without raising, and registers no pin (#278).
+        self._load(
+            self._spec(
+                {
+                    "tenant_overrides": {
+                        "t1": {"pins": {_TOOL: 12345}},
+                    },
+                }
+            )
+        )
+
+        registry = get_tool_projection_registry()
+        assert registry.resolve_pin(_SERVER, _TOOL, "t1") is None
+
+    def test_enforcement_is_scoped_per_server(self) -> None:
+        # digest_enforcement set for one server does not affect another (#278).
+        self._load(self._spec({"digest_enforcement": "audit"}))
+
+        registry = get_tool_projection_registry()
+        assert registry.digest_enforcement(_SERVER) is DigestEnforcement.AUDIT
+        assert registry.digest_enforcement("some-other-server") is DigestEnforcement.BLOCK

@@ -47,6 +47,7 @@ class DigestValidator:
         tool: dict[str, Any],
         mcp_server_id: str,
         correlation_id: str,
+        tenant_id: str | None = None,
     ) -> DigestValidationResult:
         """Validate a single tool schema against the digest policy.
 
@@ -54,6 +55,8 @@ class DigestValidator:
             tool: Tool schema dict (from tools/list response).
             mcp_server_id: Identifier of the MCP server providing the tool.
             correlation_id: Request correlation ID for audit trail.
+            tenant_id: Tenant whose pin is being checked (per-tenant pinning);
+                recorded on any emitted DigestMismatchEvent.
 
         Returns:
             DigestValidationResult with validation outcome and optional event.
@@ -62,7 +65,9 @@ class DigestValidator:
         expected = self._policy.get_expected_digest(observed.tool_name)
 
         if expected is None:
-            return self._handle_unknown_tool(observed.tool_name, observed.sha256, mcp_server_id, correlation_id)
+            return self._handle_unknown_tool(
+                observed.tool_name, observed.sha256, mcp_server_id, correlation_id, tenant_id
+            )
 
         if expected.sha256 == observed.sha256:
             return DigestValidationResult(tool_name=observed.tool_name, valid=True, blocked=False, event=None)
@@ -73,6 +78,7 @@ class DigestValidator:
             observed_digest=observed.sha256,
             mcp_server_id=mcp_server_id,
             correlation_id=correlation_id,
+            tenant_id=tenant_id,
         )
 
     def validate_tool_list(
@@ -94,6 +100,7 @@ class DigestValidator:
         observed_digest: str,
         mcp_server_id: str,
         correlation_id: str,
+        tenant_id: str | None = None,
     ) -> DigestValidationResult:
         unknown_policy = self._policy.unknown
 
@@ -107,6 +114,7 @@ class DigestValidator:
             observed_digest=observed_digest,
             enforcement=unknown_policy.value,
             correlation_id=correlation_id,
+            tenant_id=tenant_id,
         )
 
         blocked = unknown_policy == DigestUnknownPolicy.BLOCK
@@ -119,6 +127,7 @@ class DigestValidator:
         observed_digest: str,
         mcp_server_id: str,
         correlation_id: str,
+        tenant_id: str | None = None,
     ) -> DigestValidationResult:
         enforcement = self._policy.enforcement
 
@@ -129,6 +138,7 @@ class DigestValidator:
             observed_digest=observed_digest,
             enforcement=enforcement.value,
             correlation_id=correlation_id,
+            tenant_id=tenant_id,
         )
 
         blocked = enforcement == DigestEnforcement.BLOCK
