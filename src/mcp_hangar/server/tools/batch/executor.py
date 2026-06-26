@@ -30,7 +30,7 @@ from ....context import get_identity_context
 from ....application.read_models.tool_projection import get_tool_projection_registry
 from ....domain.services import get_tool_access_resolver
 from ....domain.services.digest_validator import DigestValidator
-from ....domain.value_objects import DigestPolicy, DigestUnknownPolicy
+from ....domain.value_objects import DigestEnforcement, DigestPolicy, DigestUnknownPolicy
 from ....infrastructure.single_flight import SingleFlight
 from ....logging_config import get_logger
 from ....observability.tracing import extract_trace_context, get_tracer
@@ -693,20 +693,37 @@ class BatchExecutor:
 
         # Per-tenant digest pin enforcement (#233): if the caller's tenant pinned
         # this tool to an approved digest, validate the backend's current schema
-        # against it and enforce per the configured mode. This is the first call
-        # site for DigestValidator. No pin -> unchanged behavior.
+        # against it and enforce per the server's configured mode. This is the
+        # first call site for DigestValidator. No pin -> unchanged behavior.
+        # NOTE: the withdrawal check above takes precedence -- a withdrawn tool is
+        # rejected before reaching here, so no mismatch event fires for a tool that
+        # is both withdrawn and pinned.
         _pin = _proj_registry.resolve_pin(call.mcp_server, call.tool, _caller_tenant_id)
         if _pin is not None and _proj is not None:
-            _digest_result = DigestValidator(
-                DigestPolicy(
-                    enforcement=_proj_registry.digest_enforcement(),
-                    unknown=DigestUnknownPolicy.BLOCK,
-                    allowlist=frozenset({_pin}),
+            _enforcement = _proj_registry.digest_enforcement(call.mcp_server)
+            try:
+                _digest_result = DigestValidator(
+                    DigestPolicy(
+                        enforcement=_enforcement,
+                        unknown=DigestUnknownPolicy.BLOCK,
+                        allowlist=frozenset({_pin}),
+                    )
+                ).validate_tool(_proj.schema, call.mcp_server, call.call_id, tenant_id=_caller_tenant_id)
+                _digest_blocked = _digest_result.blocked
+                _digest_event = _digest_result.event
+            except Exception:  # noqa: BLE001 -- a malformed projection schema must not 500 the call path
+                # Cannot compute/verify the digest: fail closed under block, else allow.
+                logger.warning(
+                    "tool_digest_pin_unverifiable",
+                    mcp_server_id=call.mcp_server,
+                    tool=call.tool,
+                    tenant_id=_caller_tenant_id,
                 )
-            ).validate_tool(_proj.schema, call.mcp_server, call.call_id)
-            if _digest_result.event is not None:
-                ctx.event_bus.publish(_digest_result.event)
-            if _digest_result.blocked:
+                _digest_blocked = _enforcement == DigestEnforcement.BLOCK
+                _digest_event = None
+            if _digest_event is not None:
+                ctx.event_bus.publish(_digest_event)
+            if _digest_blocked:
                 logger.info(
                     "tool_digest_pin_rejected",
                     mcp_server_id=call.mcp_server,

@@ -399,7 +399,7 @@ def _load_mcp_server_config(mcp_server_id: str, spec_dict: dict[str, Any]) -> Mc
         enforcement_raw = tool_projection_config.get("digest_enforcement")
         if enforcement_raw is not None:
             try:
-                tp_registry.set_digest_enforcement(DigestEnforcement(enforcement_raw))
+                tp_registry.set_digest_enforcement(mcp_server_id, DigestEnforcement(enforcement_raw))
             except ValueError:
                 logger.warning(
                     "invalid_digest_enforcement_config",
@@ -442,7 +442,16 @@ def _load_mcp_server_config(mcp_server_id: str, spec_dict: dict[str, Any]) -> Mc
                 tenant_pins = tenant_spec.get("pins", {})
                 if isinstance(tenant_pins, dict):
                     for tool_name, sha256 in tenant_pins.items():
-                        if not (isinstance(tool_name, str) and tool_name and isinstance(sha256, str)):
+                        if not (isinstance(tool_name, str) and tool_name):
+                            continue
+                        if not isinstance(sha256, str):
+                            logger.warning(
+                                "invalid_config_digest_pin",
+                                mcp_server_id=mcp_server_id,
+                                tool=tool_name,
+                                tenant_id=tenant_id_key,
+                                error="pin value must be a string sha256",
+                            )
                             continue
                         try:
                             digest = ToolDigest(tool_name=tool_name, sha256=sha256)

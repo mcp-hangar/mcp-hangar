@@ -1493,6 +1493,8 @@ class DigestMismatchEvent(DomainEvent):
         observed_digest: The computed digest of the tool's current schema.
         enforcement: The DigestEnforcement value applied.
         correlation_id: Request correlation ID for audit trail linkage.
+        tenant_id: Tenant whose pin was evaluated (per-tenant pinning, #278); None
+            for non-tenant-scoped digest checks.
         schema_version: Event schema version.
     """
 
@@ -1502,6 +1504,7 @@ class DigestMismatchEvent(DomainEvent):
     observed_digest: str | None
     enforcement: str
     correlation_id: str
+    tenant_id: str | None = None
     schema_version: int = 1
 
     def __post_init__(self):
