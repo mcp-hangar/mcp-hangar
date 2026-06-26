@@ -5,6 +5,29 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [1.4.0](https://github.com/mcp-hangar/mcp-hangar/compare/v1.3.0...v1.4.0) (2026-06-26)
+
+
+### Added
+
+* **core:** per-tenant tool digest pinning on the call path ([#276](https://github.com/mcp-hangar/mcp-hangar/issues/276)) ([0d2b2f2](https://github.com/mcp-hangar/mcp-hangar/commit/0d2b2f26161314bbe40e17d1669010f573e9bff2)), closes [#233](https://github.com/mcp-hangar/mcp-hangar/issues/233) [#226](https://github.com/mcp-hangar/mcp-hangar/issues/226)
+* **observability:** activate availability and transport alerts ([#269](https://github.com/mcp-hangar/mcp-hangar/issues/269)) ([774cb8f](https://github.com/mcp-hangar/mcp-hangar/commit/774cb8f27b4ebce379ccee69dd462f97c3053770)), closes [#268](https://github.com/mcp-hangar/mcp-hangar/issues/268)
+* **observability:** add governance dashboard and alerts for cost, security, and concurrency metrics ([#267](https://github.com/mcp-hangar/mcp-hangar/issues/267)) ([ced19dc](https://github.com/mcp-hangar/mcp-hangar/commit/ced19dc1d0dbe9cdb10636a0417689ee258a83d8)), closes [#261](https://github.com/mcp-hangar/mcp-hangar/issues/261) [#266](https://github.com/mcp-hangar/mcp-hangar/issues/266)
+* **security:** bind token audience to resource URI (RFC 8707) ([#274](https://github.com/mcp-hangar/mcp-hangar/issues/274)) ([783b34b](https://github.com/mcp-hangar/mcp-hangar/commit/783b34b2837c379a66e6ae457e75185615ade1f8)), closes [#255](https://github.com/mcp-hangar/mcp-hangar/issues/255) [#253](https://github.com/mcp-hangar/mcp-hangar/issues/253)
+* **security:** multi-issuer trust registry for OAuth Resource Server ([#273](https://github.com/mcp-hangar/mcp-hangar/issues/273)) ([2a7bd3e](https://github.com/mcp-hangar/mcp-hangar/commit/2a7bd3e6b02faa92fd7441fabe2a35d54e6c27b3)), closes [#254](https://github.com/mcp-hangar/mcp-hangar/issues/254) [#253](https://github.com/mcp-hangar/mcp-hangar/issues/253)
+
+
+### Fixed
+
+* **core:** cost counters emit a doubled _total suffix ([#266](https://github.com/mcp-hangar/mcp-hangar/issues/266)) ([b05cd5c](https://github.com/mcp-hangar/mcp-hangar/commit/b05cd5c7800d5bd3f9dbbb297d6ec5104fd962d9)), closes [#265](https://github.com/mcp-hangar/mcp-hangar/issues/265)
+* **observability:** align monitoring dashboards and alerts with mcp_server rename ([#263](https://github.com/mcp-hangar/mcp-hangar/issues/263)) ([db3f7a6](https://github.com/mcp-hangar/mcp-hangar/commit/db3f7a6e348b595516b57f94d70a1e557e47eb5e)), closes [#260](https://github.com/mcp-hangar/mcp-hangar/issues/260)
+* **security:** reject non-string iss claim instead of raising 500 ([#279](https://github.com/mcp-hangar/mcp-hangar/issues/279)) ([ea1035f](https://github.com/mcp-hangar/mcp-hangar/commit/ea1035f6212e3d35a4f391c962048c7cba8e3bf4)), closes [#277](https://github.com/mcp-hangar/mcp-hangar/issues/277)
+
+
+### Changed
+
+* **observability:** remove dead ObservabilityMetrics registry ([#272](https://github.com/mcp-hangar/mcp-hangar/issues/272)) ([b93382a](https://github.com/mcp-hangar/mcp-hangar/commit/b93382a0ac3835cf102d3ee4595bd0fc974a7372)), closes [#271](https://github.com/mcp-hangar/mcp-hangar/issues/271)
+
 ## [Unreleased]
 
 ### Changed
