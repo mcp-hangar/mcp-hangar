@@ -344,6 +344,13 @@ def bootstrap_auth(
                 )
                 for entry in issuer_cfgs
             ]
+            # Warn on duplicate issuer strings: the validator registry and the
+            # per-issuer config map are keyed by issuer, so a duplicate silently
+            # drops the earlier entry (last-wins).
+            _issuers = [c.issuer for c in oidc_configs]
+            _dupes = sorted({i for i in _issuers if _issuers.count(i) > 1})
+            if _dupes:
+                logger.warning("oidc_duplicate_issuers", issuers=_dupes)
             validators = [JWKSTokenValidator(oidc_config) for oidc_config in oidc_configs]
             multi_validator = MultiIssuerTokenValidator(validators)
             # Per-issuer config map so the authenticator applies each issuer's own
