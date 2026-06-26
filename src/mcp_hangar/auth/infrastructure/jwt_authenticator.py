@@ -433,11 +433,14 @@ class MultiIssuerTokenValidator(ITokenValidator):
             ) from e
 
         issuer = unverified.get("iss")
-        validator = self._validators.get(issuer) if issuer else None
+        # Route only on a non-empty string iss. A non-string iss (JSON array/object)
+        # is unhashable and would raise TypeError from dict.get -> guard so it fails
+        # closed as a clean 401 instead of escaping as a 500.
+        validator = self._validators.get(issuer) if isinstance(issuer, str) and issuer else None
 
         if validator is None:
-            # Fail-closed: missing/empty or unrecognized issuer is rejected without
-            # disclosing the set of trusted issuers.
+            # Fail-closed: missing/empty/non-string or unrecognized issuer is rejected
+            # without disclosing the set of trusted issuers.
             logger.warning("jwt_unknown_issuer", issuer=issuer)
             raise InvalidCredentialsError(
                 message="Untrusted JWT issuer",
