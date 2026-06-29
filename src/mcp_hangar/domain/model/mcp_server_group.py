@@ -4,7 +4,9 @@ A McpServerGroup is an aggregate root that manages multiple McpServer instances
 as a single logical unit with automatic load balancing and failover.
 """
 
-from dataclasses import dataclass
+from collections.abc import Mapping
+from dataclasses import dataclass, field
+import hashlib
 import threading
 import time
 from typing import Any, TYPE_CHECKING
@@ -22,6 +24,32 @@ if TYPE_CHECKING:
     from ...infrastructure.lock_hierarchy import TrackedLock
 
 logger = get_logger(__name__)
+
+
+@dataclass(frozen=True)
+class CanaryPolicy:
+    """Per-tenant routing policy for a group: explicit pins + a sticky canary split.
+
+    Resolution order (see :meth:`resolve`): an explicit per-tenant pin wins;
+    otherwise a deterministic, cross-process-stable split routes ``split_pct``
+    percent of tenants (bucketed by a SHA-256 of ``tenant_id``) to
+    ``canary_member``; otherwise None, meaning "use the load-balancer strategy".
+    """
+
+    canary_member: str = ""
+    split_pct: int = 0
+    pinned_tenants: Mapping[str, str] = field(default_factory=dict)
+
+    def resolve(self, tenant_id: str) -> str | None:
+        """Return the member id this tenant should route to, or None for the LB."""
+        pinned = self.pinned_tenants.get(tenant_id)
+        if pinned:
+            return pinned
+        if self.canary_member and self.split_pct > 0:
+            bucket = int(hashlib.sha256(tenant_id.encode()).hexdigest(), 16) % 100
+            if bucket < self.split_pct:
+                return self.canary_member
+        return None
 
 
 # --- Group-specific Domain Events ---
@@ -214,6 +242,8 @@ class McpServerGroup(AggregateRoot):
         self._state = GroupState.INACTIVE
         self._members: dict[str, GroupMember] = {}
         self._load_balancer = LoadBalancer(strategy)
+        # Optional per-tenant canary/version routing policy (config-driven).
+        self._canary: CanaryPolicy | None = None
 
         # Circuit breaker (extracted for SRP)
         self._circuit_breaker = CircuitBreaker(
@@ -466,12 +496,25 @@ class McpServerGroup(AggregateRoot):
 
     # --- Load Balancing ---
 
+    def set_canary_policy(self, policy: "CanaryPolicy | None") -> None:
+        """Set (or clear) the per-tenant canary/version routing policy."""
+        with self._lock:
+            self._canary = policy
+
     def select_member(self) -> McpServer | None:
-        """
-        Select a member for the next request using load balancer.
+        """Select a member for the next request using the load-balancer strategy."""
+        return self.select_member_for(None)
+
+    def select_member_for(self, tenant_id: str | None) -> McpServer | None:
+        """Select a member, applying per-tenant canary routing when configured.
+
+        Resolution: an explicit per-tenant pin, then a sticky canary split
+        (deterministic by ``tenant_id``), then the load-balancer strategy. A
+        pinned/canary target that is not in rotation falls back to the LB pick,
+        so routing never sends traffic to an out-of-rotation member.
 
         Returns:
-            Selected mcp_server or None if no healthy members available
+            Selected mcp_server or None if no healthy members available.
         """
         with self._lock:
             if not self._circuit_breaker.allow_request():
@@ -482,6 +525,21 @@ class McpServerGroup(AggregateRoot):
             available = [m for m in self._members.values() if m.in_rotation]
             if not available:
                 return None
+
+            # Per-tenant canary/version routing (explicit pin or sticky split).
+            if tenant_id is not None and self._canary is not None:
+                target_id = self._canary.resolve(tenant_id)
+                if target_id is not None:
+                    target = self._members.get(target_id)
+                    if target is not None and target.in_rotation:
+                        target.last_selected_at = time.time()
+                        return target.mcp_server
+                    logger.warning(
+                        "canary_target_unavailable_fallback_lb",
+                        group_id=str(self.id),
+                        tenant_id=tenant_id,
+                        target=target_id,
+                    )
 
             selected = self._load_balancer.select(available)
             if selected:

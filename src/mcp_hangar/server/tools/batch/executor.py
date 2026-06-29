@@ -593,19 +593,26 @@ class BatchExecutor:
         if call.timeout is not None:
             effective_timeout = min(call.timeout, remaining_global)
 
-        # Get mcp_server (or group). For a group, select a member NOW via the
-        # group's load-balancer so the rest of the pipeline -- cold-start, circuit
-        # breaker, dispatch -- targets a real backend. Policy, withdrawal, and
-        # digest-pin checks below still key on the logical group id (call.mcp_server);
-        # only execution is routed to the selected member.
+        # Read caller tenant_id first: a group's member selection may be
+        # tenant-aware (per-tenant canary / version routing, #275). The identity
+        # is set by IdentityMiddleware and carried into this worker thread via
+        # copy_context() (PR #239).
+        _identity_ctx = get_identity_context()
+        _caller_tenant_id: str | None = _identity_ctx.caller.tenant_id if _identity_ctx is not None else None
+
+        # Get mcp_server (or group). For a group, select a member NOW (tenant-aware
+        # when a canary policy is set) so the rest of the pipeline -- cold-start,
+        # circuit breaker, dispatch -- targets a real backend. Policy, withdrawal,
+        # and digest-pin checks below still key on the logical group id.
         mcp_server_obj = ctx.get_mcp_server(call.mcp_server)
         is_group = False
+        group_obj = None
         target_server_id = call.mcp_server
         if not mcp_server_obj:
             group_obj = GROUPS.get(call.mcp_server)
             if group_obj:
                 is_group = True
-                selected_member = group_obj.select_member()
+                selected_member = group_obj.select_member_for(_caller_tenant_id)
                 if selected_member is None:
                     return CallResult(
                         index=call.index,
@@ -627,11 +634,7 @@ class BatchExecutor:
                     elapsed_ms=(time.perf_counter() - call_start) * 1000,
                 )
 
-        # Check tool access policy BEFORE starting mcp_server or executing
-        # Reads caller tenant_id from the propagated identity context (set by IdentityMiddleware,
-        # carried into this worker thread via copy_context() — see PR #239).
-        _identity_ctx = get_identity_context()
-        _caller_tenant_id: str | None = _identity_ctx.caller.tenant_id if _identity_ctx is not None else None
+        # Check tool access policy BEFORE starting mcp_server or executing.
         resolver = get_tool_access_resolver()
         tracer = get_tracer(__name__)
         with tracer.start_as_current_span("policy.check_access") as policy_span:
@@ -835,7 +838,18 @@ class BatchExecutor:
                         wait_ms=round(wait_s * 1000, 2),
                     )
 
-                return self._invoke_with_retry(call, cancel_event, effective_timeout, call_start, ctx, target_server_id)
+                result = self._invoke_with_retry(
+                    call, cancel_event, effective_timeout, call_start, ctx, target_server_id
+                )
+
+        # Feed the group health tracker so its circuit-breaker and member rotation
+        # react to actual invoke outcomes (enables failover on the call path, #275).
+        if is_group and group_obj is not None:
+            if result.success:
+                group_obj.report_success(target_server_id)
+            else:
+                group_obj.report_failure(target_server_id)
+        return result
 
     def _invoke_with_retry(
         self,

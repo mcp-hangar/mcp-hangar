@@ -86,14 +86,14 @@ class TestGroupInvokeRouting:
     def test_group_call_dispatches_to_selected_member(self, mock_context):
         ctx, exec_groups, val_groups = mock_context
         group = Mock()
-        group.select_member.return_value = _member(_MEMBER)
+        group.select_member_for.return_value = _member(_MEMBER)
         exec_groups.get.return_value = group
         val_groups.get.return_value = group
 
         result = _execute()
 
         assert result.results[0].success is True
-        group.select_member.assert_called()  # member selection happened on the invoke path
+        group.select_member_for.assert_called()  # member selection happened on the invoke path
         commands = _sent_invoke_commands(ctx)
         assert len(commands) == 1
         # Dispatched to the MEMBER id, not the group id.
@@ -103,7 +103,7 @@ class TestGroupInvokeRouting:
     def test_group_with_no_available_member_fails_cleanly(self, mock_context):
         ctx, exec_groups, val_groups = mock_context
         group = Mock()
-        group.select_member.return_value = None  # all members out of rotation / circuit open
+        group.select_member_for.return_value = None  # all members out of rotation / circuit open
         exec_groups.get.return_value = group
         val_groups.get.return_value = group
 
@@ -112,3 +112,46 @@ class TestGroupInvokeRouting:
         assert result.results[0].success is False
         assert result.results[0].error_type == "NoAvailableMemberError"
         assert _sent_invoke_commands(ctx) == []  # never dispatched
+
+
+class TestCanaryRoutingAndHealthFeedback:
+    """Member selection is tenant-aware (#275) and invoke outcomes feed group health."""
+
+    def test_tenant_id_is_passed_to_member_selection(self, mock_context):
+        ctx, exec_groups, val_groups = mock_context
+        group = Mock()
+        group.select_member_for.return_value = _member(_MEMBER)
+        exec_groups.get.return_value = group
+        val_groups.get.return_value = group
+
+        _execute(tenant_id="tenant:acme")
+
+        # The caller tenant drives per-tenant canary/version routing.
+        group.select_member_for.assert_called_once_with("tenant:acme")
+
+    def test_successful_call_reports_member_success(self, mock_context):
+        ctx, exec_groups, val_groups = mock_context
+        group = Mock()
+        group.select_member_for.return_value = _member(_MEMBER)
+        exec_groups.get.return_value = group
+        val_groups.get.return_value = group
+
+        result = _execute()
+
+        assert result.results[0].success is True
+        group.report_success.assert_called_once_with(_MEMBER)
+        group.report_failure.assert_not_called()
+
+    def test_failed_call_reports_member_failure(self, mock_context):
+        ctx, exec_groups, val_groups = mock_context
+        group = Mock()
+        group.select_member_for.return_value = _member(_MEMBER)
+        exec_groups.get.return_value = group
+        val_groups.get.return_value = group
+        ctx.command_bus.send.side_effect = RuntimeError("backend down")
+
+        result = _execute()
+
+        assert result.results[0].success is False
+        group.report_failure.assert_called_once_with(_MEMBER)
+        group.report_success.assert_not_called()
