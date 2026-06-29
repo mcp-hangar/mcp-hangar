@@ -107,8 +107,10 @@ class ToolProjectionRegistry:
         # Config-pin overlay: (mcp_server, tool) -> {tenant_id -> pinned ToolDigest}.
         # Populated at config-load time; re-applied on every reload (#233).
         self._config_pins: dict[tuple[str, str], dict[str, ToolDigest]] = {}
-        # Digest-enforcement mode for pin mismatches; defaults to the strictest (block).
-        self._digest_enforcement: DigestEnforcement = DigestEnforcement.BLOCK
+        # Per-mcp_server digest-enforcement mode for pin mismatches; an unset
+        # server defaults to the strictest (block). Scoped per server so one
+        # server's `audit` cannot downgrade another server's pins (#278).
+        self._digest_enforcement: dict[str, DigestEnforcement] = {}
 
     # ------------------------------------------------------------------
     # Population (called by bootstrap / config-reload)
@@ -252,11 +254,11 @@ class ToolProjectionRegistry:
             extra={"mcp_server": mcp_server, "tool": tool, "tenant_id": tenant_id},
         )
 
-    def set_digest_enforcement(self, mode: DigestEnforcement) -> None:
-        """Set the digest-enforcement mode applied to pin mismatches."""
+    def set_digest_enforcement(self, mcp_server: str, mode: DigestEnforcement) -> None:
+        """Set the digest-enforcement mode applied to *mcp_server*'s pin mismatches."""
         with self._lock:
-            self._digest_enforcement = mode
-        logger.debug("digest_enforcement_set", extra={"mode": mode.value})
+            self._digest_enforcement[mcp_server] = mode
+        logger.debug("digest_enforcement_set", extra={"mcp_server": mcp_server, "mode": mode.value})
 
     def resolve_pin(self, mcp_server: str, tool: str, tenant_id: str | None) -> ToolDigest | None:
         """Return the pinned digest for *(mcp_server, tool)* and *tenant_id*.
@@ -268,10 +270,10 @@ class ToolProjectionRegistry:
         with self._lock:
             return self._config_pins.get((mcp_server, tool), {}).get(tenant_id)
 
-    def digest_enforcement(self) -> DigestEnforcement:
-        """Return the current digest-enforcement mode."""
+    def digest_enforcement(self, mcp_server: str) -> DigestEnforcement:
+        """Return the digest-enforcement mode for *mcp_server* (block if unset)."""
         with self._lock:
-            return self._digest_enforcement
+            return self._digest_enforcement.get(mcp_server, DigestEnforcement.BLOCK)
 
     def clear_config_pins(self) -> None:
         """Remove all config-declared pins and reset enforcement to block.
@@ -282,7 +284,7 @@ class ToolProjectionRegistry:
         """
         with self._lock:
             self._config_pins.clear()
-            self._digest_enforcement = DigestEnforcement.BLOCK
+            self._digest_enforcement.clear()
         logger.debug("config_pins_cleared")
 
     # ------------------------------------------------------------------
@@ -499,7 +501,7 @@ class ToolProjectionRegistry:
             self._config_withdrawals.clear()
             self._runtime_withdrawals.clear()
             self._config_pins.clear()
-            self._digest_enforcement = DigestEnforcement.BLOCK
+            self._digest_enforcement.clear()
             self._built = False
             logger.debug("tool_projection_registry_invalidated")
 
