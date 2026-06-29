@@ -593,13 +593,30 @@ class BatchExecutor:
         if call.timeout is not None:
             effective_timeout = min(call.timeout, remaining_global)
 
-        # Get mcp_server (or group)
+        # Get mcp_server (or group). For a group, select a member NOW via the
+        # group's load-balancer so the rest of the pipeline -- cold-start, circuit
+        # breaker, dispatch -- targets a real backend. Policy, withdrawal, and
+        # digest-pin checks below still key on the logical group id (call.mcp_server);
+        # only execution is routed to the selected member.
         mcp_server_obj = ctx.get_mcp_server(call.mcp_server)
         is_group = False
+        target_server_id = call.mcp_server
         if not mcp_server_obj:
             group_obj = GROUPS.get(call.mcp_server)
             if group_obj:
                 is_group = True
+                selected_member = group_obj.select_member()
+                if selected_member is None:
+                    return CallResult(
+                        index=call.index,
+                        call_id=call.call_id,
+                        success=False,
+                        error=f"No available member in group '{call.mcp_server}'",
+                        error_type="NoAvailableMemberError",
+                        elapsed_ms=(time.perf_counter() - call_start) * 1000,
+                    )
+                mcp_server_obj = selected_member
+                target_server_id = selected_member.id.value
             elif not ctx.mcp_server_exists(call.mcp_server):
                 return CallResult(
                     index=call.index,
@@ -739,10 +756,11 @@ class BatchExecutor:
                     elapsed_ms=(time.perf_counter() - call_start) * 1000,
                 )
 
-        # Check circuit breaker / health degradation (for non-group mcp_servers)
-        if not is_group and mcp_server_obj:
+        # Check circuit breaker / health degradation of the resolved target
+        # (a standalone server, or the selected group member).
+        if mcp_server_obj:
             if hasattr(mcp_server_obj, "health") and mcp_server_obj.health.should_degrade():
-                BATCH_CIRCUIT_BREAKER_REJECTIONS_TOTAL.inc(mcp_server=call.mcp_server)
+                BATCH_CIRCUIT_BREAKER_REJECTIONS_TOTAL.inc(mcp_server=target_server_id)
                 return CallResult(
                     index=call.index,
                     call_id=call.call_id,
@@ -765,14 +783,15 @@ class BatchExecutor:
                 return approval_result
             approval_span.set_attribute("approval.result", "not_required")
 
-        # Single-flight cold start (only for non-group mcp_servers)
-        if not is_group and mcp_server_obj and mcp_server_obj.state.value == "cold":
+        # Single-flight cold start of the resolved target (standalone server or
+        # the selected group member).
+        if mcp_server_obj and mcp_server_obj.state.value == "cold":
             with tracer.start_as_current_span("mcp_server.cold_start") as cs_span:
-                cs_span.set_attribute("mcp.server.id", call.mcp_server)
+                cs_span.set_attribute("mcp.server.id", target_server_id)
                 try:
                     self._single_flight.do(
-                        call.mcp_server,
-                        lambda: ctx.command_bus.send(StartMcpServerCommand(mcp_server_id=call.mcp_server)),
+                        target_server_id,
+                        lambda: ctx.command_bus.send(StartMcpServerCommand(mcp_server_id=target_server_id)),
                     )
                     cs_span.set_attribute("cold_start.result", "success")
                 except Exception as e:  # noqa: BLE001 -- fault-barrier: mcp_server start failure must return error result, not crash batch
@@ -816,7 +835,7 @@ class BatchExecutor:
                         wait_ms=round(wait_s * 1000, 2),
                     )
 
-                return self._invoke_with_retry(call, cancel_event, effective_timeout, call_start, ctx)
+                return self._invoke_with_retry(call, cancel_event, effective_timeout, call_start, ctx, target_server_id)
 
     def _invoke_with_retry(
         self,
@@ -825,6 +844,7 @@ class BatchExecutor:
         effective_timeout: float,
         call_start: float,
         ctx: Any,
+        target_server_id: str | None = None,
     ) -> CallResult:
         """Perform the tool invocation, optionally with retries.
 
@@ -846,13 +866,17 @@ class BatchExecutor:
         # Define the invocation operation for retry
         tracer = get_tracer(__name__)
 
+        # Dispatch to the resolved target: the selected group member when
+        # call.mcp_server is a group, otherwise the server itself.
+        dispatch_server_id = target_server_id or call.mcp_server
+
         def do_invoke() -> dict[str, Any]:
             with tracer.start_as_current_span("command.send.InvokeToolCommand") as cmd_span:
-                cmd_span.set_attribute("mcp.server.id", call.mcp_server)
+                cmd_span.set_attribute("mcp.server.id", dispatch_server_id)
                 cmd_span.set_attribute("mcp.tool.name", call.tool)
                 cmd_span.set_attribute("command.timeout", effective_timeout)
                 command = InvokeToolCommand(
-                    mcp_server_id=call.mcp_server,
+                    mcp_server_id=dispatch_server_id,
                     tool_name=call.tool,
                     arguments=call.arguments,
                     timeout=effective_timeout,
