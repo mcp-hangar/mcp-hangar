@@ -557,6 +557,40 @@ def _load_group_config(group_id: str, spec_dict: dict[str, Any]) -> None:
 
     _load_group_members(group, group_id, spec_dict.get("members", []))
 
+    # Parse per-tenant canary / version routing policy (#275). Targets are
+    # validated against actual group members; invalid entries are warn-skipped.
+    canary_config = spec_dict.get("canary")
+    if isinstance(canary_config, dict):
+        from ..domain.model.mcp_server_group import CanaryPolicy
+
+        canary_member = canary_config.get("member", "") or ""
+        split_pct = canary_config.get("split_pct", 0)
+        if not isinstance(split_pct, int) or isinstance(split_pct, bool) or not (0 <= split_pct <= 100):
+            logger.warning("invalid_canary_split_pct", group_id=group_id, value=split_pct)
+            split_pct = 0
+        if canary_member and group.get_member(canary_member) is None:
+            logger.warning("canary_member_not_in_group", group_id=group_id, member=canary_member)
+            canary_member = ""
+        pinned: dict[str, str] = {}
+        pinned_raw = canary_config.get("pinned_tenants", {})
+        if isinstance(pinned_raw, dict):
+            for tenant, member_id in pinned_raw.items():
+                if isinstance(tenant, str) and isinstance(member_id, str) and group.get_member(member_id) is not None:
+                    pinned[tenant] = member_id
+                else:
+                    logger.warning("invalid_canary_pin", group_id=group_id, tenant=tenant, member=member_id)
+        if canary_member or pinned:
+            group.set_canary_policy(
+                CanaryPolicy(canary_member=canary_member, split_pct=split_pct, pinned_tenants=pinned)
+            )
+            logger.info(
+                "group_canary_policy_set",
+                group_id=group_id,
+                canary_member=canary_member or None,
+                split_pct=split_pct,
+                pins=len(pinned),
+            )
+
     GROUPS[group_id] = group
     logger.info(
         "group_loaded",
