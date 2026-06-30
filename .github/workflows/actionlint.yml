@@ -26,4 +26,14 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
-      - uses: rhysd/actionlint@v1
+      - name: Download actionlint
+        id: get_actionlint
+        shell: bash
+        run: bash <(curl -sSfL https://raw.githubusercontent.com/rhysd/actionlint/main/scripts/download-actionlint.bash)
+      - name: Lint workflows
+        shell: bash
+        # -shellcheck= disables shellcheck integration: this gate validates
+        # workflow YAML, expressions, and action refs (its stated purpose), not
+        # shell style inside run: blocks. actionlint's own checks (incl.
+        # script-injection [expression]) stay active.
+        run: ${{ steps.get_actionlint.outputs.executable }} -color -shellcheck=
