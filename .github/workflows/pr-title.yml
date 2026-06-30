@@ -38,6 +38,7 @@ jobs:
             core
             enterprise
             cli
+            ci
             operator
             helm
             ui
