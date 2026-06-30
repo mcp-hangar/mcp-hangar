@@ -52,7 +52,11 @@ jobs:
           requireScope: true
           subjectPattern: ^[a-z].*[^.]$
           subjectPatternError: "Subject must start lowercase and not end with a period."
-          headerPattern: '^(\w+)(?:\(([^)]+)\))?(!)?: (.+)$'
+          # No custom headerPattern: the action's built-in conventional-commits
+          # parser handles `type(scope)!: subject` correctly. The previous custom
+          # pattern had 4 groups but no headerPatternCorrespondence, so it mapped
+          # the breaking-change `!` group as the subject -> "No subject found"; it
+          # only ever "worked" because it was invalid unquoted YAML and ignored.
           validateSingleCommit: false
 
       - name: Reject emoji in title
