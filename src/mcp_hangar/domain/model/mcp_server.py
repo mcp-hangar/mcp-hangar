@@ -43,6 +43,16 @@ from .tool_catalog import ToolCatalog, ToolSchema
 logger = get_logger(__name__)
 
 
+# MCP protocol version Hangar advertises to upstream MCP servers during the
+# outbound startup handshake. Centralised here (previously hardcoded inline in
+# _perform_mcp_handshake) so the stateless _meta version negotiation
+# (WS-1 #339 / #291) and any future version bump have a single source of truth.
+SUPPORTED_PROTOCOL_VERSION = "2024-11-05"
+
+# clientInfo Hangar presents to upstream servers on the outbound handshake.
+HANGAR_CLIENT_INFO = {"name": "mcp-registry", "version": "1.0.0"}
+
+
 # Valid state transitions
 VALID_TRANSITIONS = {
     McpServerState.COLD: {McpServerState.INITIALIZING},
@@ -742,9 +752,9 @@ class McpServer(AggregateRoot):
         init_resp = client.call(
             "initialize",
             {
-                "protocolVersion": "2024-11-05",
+                "protocolVersion": SUPPORTED_PROTOCOL_VERSION,
                 "capabilities": {},
-                "clientInfo": {"name": "mcp-registry", "version": "1.0.0"},
+                "clientInfo": dict(HANGAR_CLIENT_INFO),
             },
         )
 
