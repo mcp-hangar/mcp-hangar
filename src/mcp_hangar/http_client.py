@@ -27,6 +27,7 @@ from . import metrics as prometheus_metrics
 from .domain.exceptions import ClientError
 from .logging_config import get_logger
 from .observability.tracing import inject_trace_context
+from .protocol import inject_protocol_meta
 
 logger = get_logger(__name__)
 
@@ -305,7 +306,7 @@ class HttpClient:
             "jsonrpc": "2.0",
             "id": request_id,
             "method": method,
-            "params": params,
+            "params": inject_protocol_meta(params),
         }
 
         # Use endpoint directly - it should already include the full MCP path

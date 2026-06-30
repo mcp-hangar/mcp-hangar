@@ -11,6 +11,7 @@ import uuid
 
 from .domain.exceptions import ClientError
 from .logging_config import get_logger
+from .protocol import inject_protocol_meta
 
 if TYPE_CHECKING:
     from .infrastructure.lock_hierarchy import TrackedLock
@@ -193,7 +194,7 @@ class StdioClient:
             "jsonrpc": "2.0",
             "id": request_id,
             "method": method,
-            "params": params,
+            "params": inject_protocol_meta(params),
         }
 
         try:
