@@ -1,0 +1,39 @@
+# Live (black-box) feature verification. Opt-in: runs on demand and nightly,
+# NOT on pull requests. Tiers whose prerequisites are absent skip cleanly, so
+# T0 always runs; T1 (compose) and T2 (Keycloak) are filled in as harnesses land.
+name: live-verify
+
+on:
+  workflow_dispatch:
+    inputs:
+      marker:
+        description: "pytest marker expression to select tiers"
+        default: "live"
+        required: false
+  schedule:
+    - cron: "0 3 * * *" # nightly 03:00 UTC
+
+concurrency:
+  group: live-verify-${{ github.ref }}
+  cancel-in-progress: true
+
+permissions:
+  contents: read
+
+jobs:
+  live:
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Install uv
+        uses: astral-sh/setup-uv@v5
+
+      - name: Sync dependencies
+        run: uv sync --all-extras
+
+      - name: Run live verification
+        env:
+          MCP_HANGAR_LIVE_VERIFY: "1"
+        run: uv run pytest tests/live -m "${{ github.event.inputs.marker || 'live' }}" -o addopts="" --timeout=180 -ra

@@ -149,6 +149,10 @@ pythonpath = ["src", "."]
 markers = [
     "benchmark: performance benchmarks (deselect with '-m not benchmark')",
     "security: security-related tests",
+    "live: black-box live verification against a running hangar (opt-in; skips without prerequisites)",
+    "t0: live tier 0 -- single process + stub backend",
+    "t1: live tier 1 -- multi-backend / groups (needs compose)",
+    "t2: live tier 2 -- auth / IdP (needs Keycloak)",
 ]
 [dependency-groups]
 dev = [
