@@ -44,13 +44,18 @@ logger = get_logger(__name__)
 
 
 # MCP protocol version Hangar advertises to upstream MCP servers during the
-# outbound startup handshake. Centralised here (previously hardcoded inline in
-# _perform_mcp_handshake) so the stateless _meta version negotiation
-# (WS-1 #339 / #291) and any future version bump have a single source of truth.
-SUPPORTED_PROTOCOL_VERSION = "2024-11-05"
+# outbound startup handshake. Single source of truth for the stateless _meta
+# version negotiation (WS-1 #339 / #291) and version bumps. Targets the
+# 2026-07-28 revision; a legacy upstream downgrades in its initialize response.
+SUPPORTED_PROTOCOL_VERSION = "2026-07-28"
 
 # clientInfo Hangar presents to upstream servers on the outbound handshake.
 HANGAR_CLIENT_INFO = {"name": "mcp-registry", "version": "1.0.0"}
+
+# JSON-RPC "method not found". A stateless MCP server (SEP-2575) removed the
+# `initialize` handler and answers with this code; we treat it as "this upstream
+# is stateless, skip the handshake" rather than a startup failure.
+_JSONRPC_METHOD_NOT_FOUND = -32601
 
 
 # Valid state transitions
@@ -745,8 +750,12 @@ class McpServer(AggregateRoot):
         return self._image
 
     def _perform_mcp_handshake(self, client: Any) -> None:
-        """Perform MCP initialize and tools/list handshake."""
-        # Initialize
+        """Perform the MCP startup handshake and tools/list discovery.
+
+        Legacy upstreams answer ``initialize``; stateless upstreams (SEP-2575)
+        removed it and reply method-not-found, which is tolerated rather than
+        treated as a startup failure. Either way we then discover tools.
+        """
         # Note: timeout is handled by the client's configuration
         # (StdioClient: 15s default, HttpClient: configured read_timeout)
         init_resp = client.call(
@@ -758,8 +767,12 @@ class McpServer(AggregateRoot):
             },
         )
 
-        if "error" in init_resp:
-            error_msg = init_resp["error"].get("message", "unknown")
+        init_error = init_resp.get("error")
+        if init_error is not None and init_error.get("code") == _JSONRPC_METHOD_NOT_FOUND:
+            # Stateless upstream (SEP-2575): no initialize handshake. Expected.
+            logger.info("mcp_handshake_stateless_upstream", mcp_server_id=self.mcp_server_id)
+        elif init_error is not None:
+            error_msg = init_error.get("message", "unknown")
             self._log_client_error(client, error_msg)
 
             # Collect full diagnostics for user-friendly error
