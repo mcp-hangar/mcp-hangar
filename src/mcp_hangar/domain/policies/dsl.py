@@ -18,15 +18,21 @@ The grammar (v1)::
     hooks:
       - hook: "tcp_connect" | "sk_alloc" | "execve" | "openat"
         action: "alert" | "block"
-        match:                      # optional
-          remote_host: "<str>"      # tcp_connect only (CIDR or hostname)
+        match:                      # optional; an EMPTY match means match-all
+          remote_host: "<str>"      # tcp_connect only (non-empty string)
           remote_port: <int 1..65535>  # tcp_connect only
-          binary: "<str>"           # execve only
-          path: "<str>"             # openat only
+          binary: "<str>"           # execve only (non-empty string)
+          path: "<str>"             # openat only (non-empty string)
+
+An empty ``match`` matches every event for the hook; with ``action: block`` that
+means "block ALL occurrences of the hook" -- a deliberately broad hammer, so
+declare it consciously. v1 validates only value *types/shape* (non-empty string,
+port range); filter *semantics* (is this a valid CIDR / hostname / path?) are
+deferred to the backend compiler, not checked here.
 
 Parsing is pure and deterministic: the same input ``dict`` always yields an
-equal :class:`PolicyDSL`. Validation failures raise :class:`ValueError` with a
-message that includes the offending value.
+equal (and hashable) :class:`PolicyDSL`. Validation failures raise
+:class:`ValueError` with a message that includes the offending value.
 """
 
 from __future__ import annotations
@@ -73,16 +79,25 @@ _MAX_PORT = 65535
 class HookRule:
     """A single validated enforcement rule within a policy.
 
+    Immutable AND hashable (usable in ``set``/``dict``): filters are stored as a
+    sorted tuple of pairs (``match_pairs``); read them as a mapping via the
+    :attr:`match` property.
+
     Attributes:
         hook: One of :data:`ALLOWED_HOOKS`.
         action: One of :data:`ALLOWED_ACTIONS`.
-        match: Immutable mapping of validated filter keys for this hook. Empty
-            when the rule has no ``match`` filters.
+        match_pairs: Validated filter ``(key, value)`` pairs in sorted key order.
+            Empty when the rule has no ``match`` filters (i.e. match-all).
     """
 
     hook: str
     action: str
-    match: Mapping[str, Any]
+    match_pairs: tuple[tuple[str, str | int], ...] = ()
+
+    @property
+    def match(self) -> Mapping[str, str | int]:
+        """Validated match filters as a read-only mapping (empty if none)."""
+        return MappingProxyType(dict(self.match_pairs))
 
 
 @dataclass(frozen=True)
@@ -116,25 +131,29 @@ def _validate_str_filter(key: str, value: Any) -> str:
     return value
 
 
-def _validate_match(hook: str, match: Any) -> Mapping[str, Any]:
-    """Validate a hook's ``match`` filters against the keys allowed for ``hook``."""
+def _validate_match(hook: str, match: Any) -> tuple[tuple[str, str | int], ...]:
+    """Validate a hook's ``match`` filters against the keys allowed for ``hook``.
+
+    Returns the validated filters as a sorted, hashable tuple of ``(key, value)``
+    pairs (empty tuple when there are no filters).
+    """
     if match is None:
-        return MappingProxyType({})
+        return ()
     if not isinstance(match, Mapping):
         raise ValueError(f"match must be a mapping, got {match!r}")
 
     allowed = _MATCH_KEYS_BY_HOOK[hook]
-    validated: dict[str, Any] = {}
+    validated: list[tuple[str, str | int]] = []
     # Iterate in sorted key order for deterministic construction.
     for key in sorted(match):
         if key not in allowed:
             raise ValueError(f"match key {key!r} is not valid for hook {hook!r}; allowed keys: {list(allowed)}")
         value = match[key]
         if key == "remote_port":
-            validated[key] = _validate_remote_port(value)
+            validated.append((key, _validate_remote_port(value)))
         else:
-            validated[key] = _validate_str_filter(key, value)
-    return MappingProxyType(validated)
+            validated.append((key, _validate_str_filter(key, value)))
+    return tuple(validated)
 
 
 def _validate_hook(index: int, raw: Any) -> HookRule:
@@ -158,8 +177,8 @@ def _validate_hook(index: int, raw: Any) -> HookRule:
     if action not in ALLOWED_ACTIONS:
         raise ValueError(f"hooks[{index}] has invalid action {action!r}; allowed: {list(ALLOWED_ACTIONS)}")
 
-    match = _validate_match(hook, raw.get("match"))
-    return HookRule(hook=hook, action=action, match=match)
+    match_pairs = _validate_match(hook, raw.get("match"))
+    return HookRule(hook=hook, action=action, match_pairs=match_pairs)
 
 
 def parse_policy(data: Any) -> PolicyDSL:
