@@ -52,6 +52,25 @@ from .models import BatchResult, CallResult, CallSpec, MAX_RESPONSE_SIZE_BYTES, 
 
 logger = get_logger(__name__)
 
+
+def _inbound_trace_meta(ctx: Any) -> dict[str, str]:
+    """Read SEP-414 trace keys from the inbound request's ``params._meta``.
+
+    Returns only ``traceparent``/``tracestate`` (``baggage`` is deliberately
+    excluded pending cross-tenant scrubbing). Best-effort fault barrier: trace
+    context is a convention (SEP-414 MAY), so any failure to read it returns
+    ``{}`` and never breaks the call.
+    """
+    try:
+        req_meta = ctx.request_context.meta
+        if req_meta is None:
+            return {}
+        dumped = req_meta.model_dump(exclude_none=True) if hasattr(req_meta, "model_dump") else dict(req_meta)
+        return {k: str(v) for k, v in dumped.items() if k in ("traceparent", "tracestate") and isinstance(v, str)}
+    except Exception:  # noqa: BLE001 -- fault barrier: trace reading must not break invocation
+        return {}
+
+
 _approval_loop_local = threading.local()
 _all_approval_loops: set[asyncio.AbstractEventLoop] = set()
 
@@ -523,11 +542,11 @@ class BatchExecutor:
         ctx = get_context()
         call_start = time.perf_counter()
 
-        # Extract W3C TraceContext from call metadata for distributed tracing.
-        # If the agent passed traceparent, spans created for this call become
-        # children of the agent's trace rather than new root spans.
+        # Extract W3C TraceContext for distributed tracing. Per SEP-414 it travels
+        # in the inbound request's params._meta (un-prefixed traceparent/tracestate);
+        # fall back to the legacy call.metadata field. _meta wins when both present.
         metadata = call.metadata or {}
-        parent_context = extract_trace_context(metadata)
+        parent_context = extract_trace_context({**metadata, **_inbound_trace_meta(ctx)})
 
         # Create a span for this batch call, parented to the agent's trace
         # context when traceparent was provided. This links the Hangar span
