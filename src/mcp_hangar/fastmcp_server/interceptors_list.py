@@ -16,13 +16,18 @@ from starlette.responses import JSONResponse
 
 from mcp_hangar import __version__
 
+#: Reverse-DNS extension identifiers (SEP-2133). The vendor prefix is the
+#: reversed ``mcp-hangar.io`` domain, giving a globally unambiguous namespace.
+VALIDATOR_ID = "io.mcp-hangar.validator"
+MUTATOR_ID = "io.mcp-hangar.mutator"
+
 
 def interceptors_list_response() -> dict[str, Any]:
     """Build the ``interceptors/list`` response payload."""
     return {
         "interceptors": [
             {
-                "name": "mcp-hangar-validator",
+                "name": VALIDATOR_ID,
                 "version": __version__,
                 "type": "validator",
                 "supportedEvents": ["tools/call", "tools/list"],
@@ -30,7 +35,7 @@ def interceptors_list_response() -> dict[str, Any]:
                 "trustBoundary": "host",
             },
             {
-                "name": "mcp-hangar-mutator",
+                "name": MUTATOR_ID,
                 "version": __version__,
                 "type": "mutator",
                 "supportedEvents": ["tools/call"],

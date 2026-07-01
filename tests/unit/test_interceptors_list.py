@@ -8,6 +8,8 @@ from starlette.routing import Route
 from mcp.server.fastmcp import FastMCP
 
 from mcp_hangar.fastmcp_server.interceptors_list import (
+    MUTATOR_ID,
+    VALIDATOR_ID,
     interceptors_list_handler,
     interceptors_list_response,
     register_interceptors_list,
@@ -22,7 +24,8 @@ class TestInterceptorsListResponse:
 
     def test_interceptor_fields(self):
         interceptor = interceptors_list_response()["interceptors"][0]
-        assert interceptor["name"] == "mcp-hangar-validator"
+        assert interceptor["name"] == VALIDATOR_ID
+        assert interceptor["name"] == "io.mcp-hangar.validator"
         assert isinstance(interceptor["version"], str)
         assert interceptor["type"] == "validator"
         assert interceptor["supportedEvents"] == ["tools/call", "tools/list"]
@@ -31,7 +34,8 @@ class TestInterceptorsListResponse:
 
     def test_mutator_entry(self):
         mutator = interceptors_list_response()["interceptors"][1]
-        assert mutator["name"] == "mcp-hangar-mutator"
+        assert mutator["name"] == MUTATOR_ID
+        assert mutator["name"] == "io.mcp-hangar.mutator"
         assert mutator["type"] == "mutator"
         assert mutator["supportedEvents"] == ["tools/call"]
         assert mutator["modes"] == ["enforce"]
