@@ -25,6 +25,7 @@ from mcp_hangar.observability.tracing import (
     get_tracer,
     init_tracing,
     inject_trace_context,
+    scrub_baggage_for_tenant,
     shutdown_tracing,
     trace_span,
     trace_tool_invocation,
@@ -40,6 +41,7 @@ __all__ = [
     "trace_span",
     "inject_trace_context",
     "extract_trace_context",
+    "scrub_baggage_for_tenant",
     "get_current_trace_id",
     "get_current_span_id",
     # Health
