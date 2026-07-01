@@ -1279,6 +1279,12 @@ class CapabilityViolationDetected(DomainEvent):
     destination: str | None = None
     severity: str = "high"
     schema_version: int = 2
+    # Process attribution (populated by the Tetragon backend / hangar-agent; #331/#333).
+    process_pid: int | None = None
+    container_id: str | None = None
+    pod_name: str | None = None
+    pod_namespace: str | None = None
+    node_name: str | None = None
 
     def __init__(
         self,
@@ -1289,6 +1295,11 @@ class CapabilityViolationDetected(DomainEvent):
         destination: str | None = None,
         severity: str = "high",
         schema_version: int = 2,
+        process_pid: int | None = None,
+        container_id: str | None = None,
+        pod_name: str | None = None,
+        pod_namespace: str | None = None,
+        node_name: str | None = None,
         **kwargs: object,
     ):
         self.mcp_server_id = _resolve_legacy_mcp_server_id(mcp_server_id, kwargs)
@@ -1298,6 +1309,11 @@ class CapabilityViolationDetected(DomainEvent):
         self.destination = destination
         self.severity = severity
         self.schema_version = schema_version
+        self.process_pid = process_pid
+        self.container_id = container_id
+        self.pod_name = pod_name
+        self.pod_namespace = pod_namespace
+        self.node_name = node_name
         if kwargs:
             unexpected = ", ".join(sorted(kwargs))
             raise TypeError(f"Unexpected keyword argument(s): {unexpected}")
@@ -1329,6 +1345,12 @@ class EgressBlocked(DomainEvent):
     protocol: str
     enforcement_source: str = "networkpolicy"
     schema_version: int = 1
+    # Process attribution (populated by the Tetragon backend / hangar-agent; #331/#333).
+    process_pid: int | None = None
+    container_id: str | None = None
+    pod_name: str | None = None
+    pod_namespace: str | None = None
+    node_name: str | None = None
 
     def __init__(
         self,
@@ -1338,6 +1360,11 @@ class EgressBlocked(DomainEvent):
         protocol: str = "",
         enforcement_source: str = "networkpolicy",
         schema_version: int = 1,
+        process_pid: int | None = None,
+        container_id: str | None = None,
+        pod_name: str | None = None,
+        pod_namespace: str | None = None,
+        node_name: str | None = None,
         **kwargs: object,
     ):
         self.mcp_server_id = _resolve_legacy_mcp_server_id(mcp_server_id, kwargs)
@@ -1346,6 +1373,11 @@ class EgressBlocked(DomainEvent):
         self.protocol = protocol
         self.enforcement_source = enforcement_source
         self.schema_version = schema_version
+        self.process_pid = process_pid
+        self.container_id = container_id
+        self.pod_name = pod_name
+        self.pod_namespace = pod_namespace
+        self.node_name = node_name
         if kwargs:
             unexpected = ", ".join(sorted(kwargs))
             raise TypeError(f"Unexpected keyword argument(s): {unexpected}")
