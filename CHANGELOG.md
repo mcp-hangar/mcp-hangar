@@ -37,6 +37,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 - **core:** add a fail-closed `TaskOwnershipRegistry` binding `taskId` to its owning tenant/principal, to authorize `tasks/*` access (#319)
 - **core:** interceptor Validator framework — `IValidator` contract + fail-closed `ValidatorPipeline` + a reference `PayloadSizeValidator`; validators default to `failOpen=false` per PR #2624 (#314)
+- **core:** add a fail-closed `TaskConsentGate` that gates mid-flight task input (`input_required` / `tasks/update`), rejecting answers with no pending consent (#322)
 
 ### Changed
 
