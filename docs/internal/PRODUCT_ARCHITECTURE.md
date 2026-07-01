@@ -390,6 +390,17 @@ grep -rniE "sampling/|roots/|logging/setLevel|notifications/message" src/mcp_han
 # (no matches)
 ```
 
+### Multi-tenant isolation model
+
+Two independent mechanisms are easy to conflate; they answer different questions.
+
+- **Audience (`aud`)** validates that an inbound token was issued *for the Hangar resource server*, per RFC 8707. Hangar binds `aud` to a single, global Hangar resource URI (see `src/mcp_hangar/auth/bootstrap.py`). This is a resource-binding control — it proves "this token is for Hangar" — not a tenant-scoping control.
+- **`tenant_id` + per-tenant projection** enforce cross-tenant separation. The `tenant_id` JWT claim identifies the calling tenant, and the per-tenant tool projection plus the member-scope access policy (#237 / #241) decide which backend tools that tenant may see and invoke.
+
+There is deliberately no per-tenant audience. A caller carrying `tenant_id="A"` can never see or invoke another tenant's tools, because the projection read-model and the member-scope resolver filter every `tools/list` and every call by the caller's `tenant_id` — independently of the (shared) audience. This boundary is exercised by `tests/unit/test_cross_tenant_isolation.py`.
+
+A per-tenant-resource-URI model (interpretation B), where each tenant would receive its own distinct `aud` value, was considered and deliberately deferred: it would push tenancy into the token-issuance and audience-validation path without strengthening the boundary that the `tenant_id` claim and per-tenant projection already enforce.
+
 ---
 
 ## 10. Competitive Intelligence — Key Gaps They Have
@@ -421,3 +432,4 @@ grep -rniE "sampling/|roots/|logging/setLevel|notifications/message" src/mcp_han
 | 2026-03-23 | v1.0.0 target: September 2026.                                                                                   | 6-month window before major vendors enter MCP observability.                                                                                                                                                                                |
 | 2026-03-23 | Position as "runtime security," not "control plane."                                                             | "Control plane" is generic. "Runtime security and governance" is specific and defensible.                                                                                                                                                   |
 | 2026-06-30 | Do not intercept or govern MCP `sampling/*`, `roots/*`, or `logging` methods; pass through unchanged.            | These surfaces are deprecated upstream (SEP-2577, spec 2026-07-28). Hangar's audit is OTEL/event-sourced, not MCP-`logging`-based. See section 9.                                                                                            |
+| 2026-07-01 | Audience (`aud`) binds tokens to the shared Hangar RS (RFC 8707); cross-tenant isolation is enforced by the `tenant_id` claim plus per-tenant projection (#237 / #241), not by a per-tenant audience. Per-tenant-resource-URI (interpretation B) deferred. | A per-tenant `aud` would not strengthen a boundary already enforced by the projection read-model and member-scope policy; it would only complicate token issuance and audience validation. See section 9 and issue #312.                       |
