@@ -91,7 +91,7 @@ def serve_command(
     """Start the MCP Hangar server.
 
     By default, runs in stdio mode for Claude Desktop integration.
-    Use --http for HTTP mode with SSE transport.
+    Use --http for HTTP mode with Streamable HTTP transport.
 
     Examples:
         mcp-hangar serve
