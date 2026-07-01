@@ -17,6 +17,19 @@ execution:
   max_concurrency: 50                # Global limit across all providers (default: 50)
   default_provider_concurrency: 10   # Default per-provider limit (default: 10)
 
+# ---------------------------------------------------------------------------
+# Interceptors — opt-in built-in request validators (OFF by default)
+# ---------------------------------------------------------------------------
+# Register built-in validators that gate every tools/call before it runs.
+# Absent or empty -> no validators registered -> no behavior change.
+# Each entry's `type` selects a built-in validator; the remaining keys are
+# passed as parameters to that validator.
+#
+# interceptors:
+#   validators:
+#     - type: payload_size     # cap inbound tools/call payload size (fail-closed)
+#       max_bytes: 1000000     # deny requests whose JSON payload exceeds this
+
 providers:
   # Subprocess — uses default per-provider concurrency (10)
   math:

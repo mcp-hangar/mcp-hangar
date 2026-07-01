@@ -25,6 +25,7 @@ import uuid
 
 from mcp.server.fastmcp import FastMCP
 
+from ....application.services.interceptor_registry import build_validator_pipeline
 from ....logging_config import get_logger
 from ....metrics import BATCH_CALLS_TOTAL, BATCH_VALIDATION_FAILURES_TOTAL
 from ....observability.tracing import get_tracer
@@ -58,6 +59,30 @@ logger = get_logger(__name__)
 
 # Global executor instance
 _executor = BatchExecutor()
+
+
+def configure_interceptors(validator_specs: list[dict[str, Any]] | None = None) -> None:
+    """Rebuild the global executor with an opt-in interceptor configuration.
+
+    Called ONCE at startup after config load. Off by default: an empty or
+    absent ``validator_specs`` yields an empty ValidatorPipeline, so no
+    validators run and behavior is unchanged.
+
+    Args:
+        validator_specs: The parsed ``interceptors.validators`` list (each item
+            a dict with a ``type`` key + per-type params), or ``None`` to
+            register no validators.
+
+    Raises:
+        ValueError: If a spec names an unknown validator type (see
+            :func:`build_validator_pipeline`).
+    """
+    global _executor
+    _executor = BatchExecutor(validator_pipeline=build_validator_pipeline(validator_specs))
+    logger.info(
+        "interceptors_configured",
+        validator_count=len(validator_specs) if validator_specs else 0,
+    )
 
 
 def hangar_call(
@@ -289,6 +314,7 @@ __all__ = [
     # Main API
     "hangar_call",
     "register_batch_tools",
+    "configure_interceptors",
     # Models
     "BatchResult",
     "CallResult",

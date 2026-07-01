@@ -679,6 +679,29 @@ def _init_concurrency_from_config(full_config: dict[str, Any]) -> None:
     )
 
 
+def _init_interceptors_from_config(full_config: dict[str, Any]) -> None:
+    """Register opt-in built-in interceptors (validators) from configuration.
+
+    Reads the optional top-level ``interceptors.validators`` list and rebuilds
+    the batch executor's ValidatorPipeline accordingly. **Off by default:** an
+    absent or empty section registers no validators, preserving current
+    behavior (the tool-call path runs an empty pipeline).
+
+    Args:
+        full_config: Full configuration dictionary.
+    """
+    from .tools.batch import configure_interceptors
+
+    interceptors_config = full_config.get("interceptors")
+    validator_specs = None
+    if isinstance(interceptors_config, dict):
+        raw = interceptors_config.get("validators")
+        if isinstance(raw, list):
+            validator_specs = raw
+
+    configure_interceptors(validator_specs)
+
+
 class ServerConfigLoader:
     """IConfigLoader implementation backed by server-layer config functions.
 
@@ -720,6 +743,7 @@ def load_configuration(config_path: str | None = None) -> dict[str, Any]:
         full_config = load_config_from_file(config_path)
         _init_concurrency_from_config(full_config)
         _init_topology_mode_from_config(full_config)
+        _init_interceptors_from_config(full_config)
         load_config(full_config.get("mcp_servers", {}))
         return full_config
     else:
