@@ -360,7 +360,33 @@ Enforced by `tools/check_enterprise_imports.py` (CI job `import-boundary` in `se
 
 ---
 
-## 9. Competitive Intelligence — Key Gaps They Have
+## 9. MCP Surface Coverage — Deliberate Non-Interception
+
+Hangar governs the MCP surfaces where runtime security and governance add value: `tools/*` (invocation, capability enforcement, behavioral profiling, RBAC, approval gates), plus lifecycle, health, and telemetry concerns.
+
+Hangar deliberately does **not** intercept or govern the following MCP methods. This traffic passes through to upstream MCP servers unchanged, and upstream responses pass back unchanged:
+
+- **Sampling** (`sampling/*`, e.g. `sampling/createMessage`) — server-initiated LLM completions handled by the client.
+- **Roots** (`roots/*`, e.g. `roots/list`, `notifications/roots/list_changed`) — client-exposed filesystem/workspace roots.
+- **MCP Logging** (`logging/setLevel`, `notifications/message`) — protocol-level log messages emitted by servers.
+
+### Why this is by design
+
+1. **These surfaces are deprecated upstream.** Under MCP spec 2026-07-28 (SEP-2577), Roots, Sampling, and MCP Logging are deprecated and annotation-only, with a 12-month migration window. Implementations MUST still handle them during that window, and new work SHOULD NOT adopt them. Building governance on top of a deprecated surface would be wasted effort with a known removal horizon; transparent pass-through keeps Hangar compatible without coupling to a sunsetting feature.
+2. **Hangar's audit is OTEL and event-sourced, not MCP-`logging`-based.** The audit pipeline (`src/mcp_hangar/observability/`, `src/mcp_hangar/compliance/`) is built on OpenTelemetry traces and an event-sourced audit log, independent of the MCP protocol `logging` methods. Hangar does not need to intercept `logging/setLevel` or `notifications/message` to produce its own audit trail, and it does not repurpose that channel.
+
+### Evidence
+
+There is no interception handling for these methods in the codebase. Confirm with:
+
+```bash
+grep -rniE "sampling/|roots/|logging/setLevel|notifications/message" src/mcp_hangar
+# (no matches)
+```
+
+---
+
+## 10. Competitive Intelligence — Key Gaps They Have
 
 | Competitor               | What they lack (our opportunity)                                                                                                                                                                                                                                            |
 |--------------------------|-----------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------|
@@ -373,7 +399,7 @@ Enforced by `tools/check_enterprise_imports.py` (CI job `import-boundary` in `se
 
 ---
 
-## 10. Decision Log
+## 11. Decision Log
 
 | Date       | Decision                                                                                                         | Rationale                                                                                                                                                                                                                                   |
 |------------|------------------------------------------------------------------------------------------------------------------|---------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------|
@@ -388,3 +414,4 @@ Enforced by `tools/check_enterprise_imports.py` (CI job `import-boundary` in `se
 | 2026-03-23 | Three-tier product model (Core/Pro/Enterprise).                                                                  | Need open source adoption funnel AND revenue path.                                                                                                                                                                                          |
 | 2026-03-23 | v1.0.0 target: September 2026.                                                                                   | 6-month window before major vendors enter MCP observability.                                                                                                                                                                                |
 | 2026-03-23 | Position as "runtime security," not "control plane."                                                             | "Control plane" is generic. "Runtime security and governance" is specific and defensible.                                                                                                                                                   |
+| 2026-06-30 | Do not intercept or govern MCP `sampling/*`, `roots/*`, or `logging` methods; pass through unchanged.            | These surfaces are deprecated upstream (SEP-2577, spec 2026-07-28). Hangar's audit is OTEL/event-sourced, not MCP-`logging`-based. See section 9.                                                                                            |
