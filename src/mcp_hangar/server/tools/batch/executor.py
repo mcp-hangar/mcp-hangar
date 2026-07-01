@@ -20,6 +20,8 @@ from typing import Any, cast
 
 
 from ....application.commands import InvokeToolCommand, StartMcpServerCommand
+from ....application.services.validator_pipeline import ValidatorPipeline
+from ....domain.contracts.validator import ValidationContext
 from ....domain.events import (
     BatchCallCompleted,
     BatchInvocationCompleted,
@@ -123,11 +125,19 @@ class BatchExecutor:
     entire batch wave to complete.
     """
 
-    def __init__(self, concurrency_manager: ConcurrencyManager | None = None):
+    def __init__(
+        self,
+        concurrency_manager: ConcurrencyManager | None = None,
+        validator_pipeline: ValidatorPipeline | None = None,
+    ):
         self._single_flight = SingleFlight(cache_results=False)
         self._active_batches = 0
         self._active_lock = threading.Lock()
         self._concurrency_manager = concurrency_manager
+        # Interceptor validator pipeline. Defaults to a fresh EMPTY pipeline
+        # (no validators registered), so it always allows -- preserving current
+        # behavior. Fail-closed only takes effect once validators are registered.
+        self._validator_pipeline = validator_pipeline if validator_pipeline is not None else ValidatorPipeline()
 
     @property
     def concurrency_manager(self) -> ConcurrencyManager:
@@ -230,6 +240,35 @@ class BatchExecutor:
             )
 
         # Approved -- continue execution
+        return None
+
+    def _check_validators(self, call: CallSpec) -> CallResult | None:
+        """Run the interceptor ValidatorPipeline against this tool call.
+
+        Fail-closed but behavior-preserving: with the default empty pipeline no
+        validators run, so this always returns None (proceed). Once validators
+        are registered, an enforced denial short-circuits the call BEFORE the
+        approval gate and invoke.
+
+        Returns None if the call is allowed (continue execution). Returns a
+        CallResult if a validator denied the call.
+        """
+        ctx = ValidationContext(
+            method="tools/call",
+            direction="request",
+            payload={"name": call.tool, "arguments": call.arguments or {}},
+            correlation_id=call.call_id,
+        )
+        result = self._validator_pipeline.execute(ctx)
+        if not result.allowed:
+            return CallResult(
+                index=call.index,
+                call_id=call.call_id,
+                success=False,
+                error=result.reason or "Denied by validator",
+                error_type="ValidatorDenied",
+                elapsed_ms=0,
+            )
         return None
 
     def execute(
@@ -791,6 +830,13 @@ class BatchExecutor:
                     error_type="CircuitBreakerOpen",
                     elapsed_ms=(time.perf_counter() - call_start) * 1000,
                 )
+
+        # Interceptor validators: gate the request payload fail-closed BEFORE
+        # prompting for approval, so a validator denial short-circuits without
+        # blocking on a human decision. Empty pipeline (default) always allows.
+        if (denied := self._check_validators(call)) is not None:
+            denied.elapsed_ms = (time.perf_counter() - call_start) * 1000
+            return denied
 
         # Approval gate: check if the tool requires human approval before execution.
         # The policy is set by the agent via POST /api/agent/policy.
