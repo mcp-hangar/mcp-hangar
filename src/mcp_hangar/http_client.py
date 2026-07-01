@@ -26,7 +26,8 @@ import httpx
 from . import metrics as prometheus_metrics
 from .domain.exceptions import ClientError
 from .logging_config import get_logger
-from .observability.tracing import inject_trace_context
+from .context import get_identity_context
+from .observability.tracing import inject_trace_context, scrub_baggage_for_tenant
 from .protocol import inject_protocol_meta
 
 logger = get_logger(__name__)
@@ -302,10 +303,17 @@ class HttpClient:
 
         request_id = str(uuid.uuid4())
 
+        # Resolve the tenant this outbound request is attributed to, so we can
+        # strip any cross-tenant / untrusted W3C baggage before it leaves.
+        _identity = get_identity_context()
+        _tenant_id = _identity.caller.tenant_id if _identity and _identity.caller else None
+
         params = inject_protocol_meta(params)
         # SEP-414: carry W3C trace context in params._meta (not only HTTP headers),
         # so it survives across MCP hops regardless of transport.
         inject_trace_context(params["_meta"])
+        # Fail-safe cross-tenant scrub: drop untrusted/cross-tenant baggage on outbound.
+        scrub_baggage_for_tenant(params["_meta"], _tenant_id)
         request_body = {
             "jsonrpc": "2.0",
             "id": request_id,
@@ -332,6 +340,8 @@ class HttpClient:
             # Build per-request headers: W3C TraceContext + MCP session ID.
             extra_headers: dict[str, str] = {}
             inject_trace_context(extra_headers)
+            # Fail-safe cross-tenant scrub: drop untrusted/cross-tenant baggage on outbound.
+            scrub_baggage_for_tenant(extra_headers, _tenant_id)
             if self._mcp_session_id:
                 extra_headers["Mcp-Session-Id"] = self._mcp_session_id
 
