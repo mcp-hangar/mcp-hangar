@@ -35,6 +35,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Changed
 
+- **core:** outbound HTTP requests carry W3C trace context (`traceparent`/`tracestate`) in `params._meta` per SEP-414, in addition to HTTP headers (#294)
 - **core:** outbound requests to upstream MCP servers carry the protocol version and client info in per-request `_meta`, so stateless upstreams (SEP-2575, no initialize handshake) still receive protocol context (#291)
 - **core:** outbound handshake to upstream MCP servers targets MCP protocol revision `2026-07-28` and tolerates stateless upstreams (servers without an `initialize` handler) instead of failing startup (#341)
 - **core:** **BREAKING** relicense from BSL 1.1 dual-license to MIT; all enterprise features are now freely available (#198)

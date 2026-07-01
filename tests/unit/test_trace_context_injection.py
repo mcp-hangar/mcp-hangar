@@ -33,10 +33,10 @@ class TestHttpTraceContextInjection:
             with patch.object(client._client, "post", return_value=mock_response):
                 client.call("tools/call", {"name": "my_tool", "arguments": {}})
 
-            mock_inject.assert_called_once()
-            # The first argument should be a dict (the headers carrier)
-            call_args = mock_inject.call_args
-            assert isinstance(call_args[0][0], dict), "inject_trace_context must be called with a dict carrier"
+            # Called twice: once for params._meta (SEP-414) and once for HTTP headers.
+            assert mock_inject.call_count == 2
+            for call_args in mock_inject.call_args_list:
+                assert isinstance(call_args.args[0], dict), "inject_trace_context must be called with a dict carrier"
 
     def test_outbound_headers_contain_traceparent_when_trace_active(self) -> None:
         """Headers passed to HTTP request include traceparent when an active trace exists."""
