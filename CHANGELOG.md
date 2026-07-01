@@ -12,6 +12,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - **core:** add the MCP policy DSL parser/validator (v1 grammar; hooks tcp_connect/sk_alloc/execve/openat) per ADR-006, backend-agnostic and compiler-ready (#329)
 - **core:** enforcement events (`CapabilityViolationDetected`, `EgressBlocked`) carry optional process-attribution fields (pid/container/pod/node) for the Tetragon backend and forensic chain (#331)
 - **core:** opt-in interceptor configuration -- register built-in validators (e.g. `payload_size`) via an `interceptors:` config section; off by default, no behavior change (#314)
+- **core:** GovernedTaskStore binds each MCP task to its owning tenant/principal and fail-closed-authorizes tasks/* access, wiring the TaskOwnershipRegistry into the (experimental) task lifecycle (#319)
 
 ## [1.4.0](https://github.com/mcp-hangar/mcp-hangar/compare/v1.3.0...v1.4.0) (2026-06-29)
 
