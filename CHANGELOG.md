@@ -33,6 +33,10 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Added
+
+- **core:** interceptor Validator framework — `IValidator` contract + fail-closed `ValidatorPipeline` + a reference `PayloadSizeValidator`; validators default to `failOpen=false` per PR #2624 (#314)
+
 ### Changed
 
 - **core:** interceptor IDs use reverse-DNS extension identifiers (`io.mcp-hangar.validator`/`io.mcp-hangar.mutator`) per SEP-2133 (#315)
