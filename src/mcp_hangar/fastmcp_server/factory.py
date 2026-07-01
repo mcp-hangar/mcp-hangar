@@ -4,6 +4,8 @@ The factory encapsulates all dependencies needed to create an MCP server,
 enabling proper dependency injection and testability.
 """
 
+from __future__ import annotations
+
 from typing import Any, TYPE_CHECKING
 
 from mcp.server.fastmcp import FastMCP
@@ -14,6 +16,7 @@ from .asgi import create_auth_combined_app, create_combined_asgi_app, create_hea
 from .config import HangarFunctions, ServerConfig
 
 if TYPE_CHECKING:
+    from ..domain.services.task_ownership import TaskOwnershipRegistry
     from .builder import MCPServerFactoryBuilder
 
 logger = get_logger(__name__)
@@ -52,7 +55,7 @@ class MCPServerFactory:
         self,
         hangar: HangarFunctions,
         config: ServerConfig | None = None,
-        auth_components: "Any" = None,
+        auth_components: Any = None,
     ):
         """Initialize factory with dependencies.
 
@@ -65,9 +68,12 @@ class MCPServerFactory:
         self._config = config or ServerConfig()
         self._auth_components = auth_components
         self._mcp: FastMCP | None = None
+        # Shared registry binding MCP task handles to their owning
+        # tenant/principal; populated when governed tasks are enabled.
+        self._task_ownership_registry: TaskOwnershipRegistry | None = None
 
     @classmethod
-    def builder(cls) -> "MCPServerFactoryBuilder":
+    def builder(cls) -> MCPServerFactoryBuilder:
         """Create a builder for fluent configuration.
 
         Returns:
@@ -111,6 +117,7 @@ class MCPServerFactory:
         self._register_discovery_tools(mcp)
         self._register_interceptors_list(mcp)
         self._maybe_register_flat_tool_handlers(mcp)
+        self._enable_governed_tasks(mcp)
 
         self._mcp = mcp
         logger.info(
@@ -323,6 +330,27 @@ class MCPServerFactory:
             if hgr.metrics is None:
                 return {"error": "Metrics not available"}
             return hgr.metrics(format=format)
+
+    def _enable_governed_tasks(self, mcp: FastMCP) -> None:
+        """Enable the experimental MCP task API behind an ownership-governed store.
+
+        Binds each MCP task to its owning tenant/principal and authorizes every
+        ``tasks/*`` access fail-closed via a shared ``TaskOwnershipRegistry``.
+
+        WARNING: built on the EXPERIMENTAL mcp task API
+        (``mcp.server.experimental``, mcp 1.26.0); enabling this advertises the
+        server ``tasks`` capability and the wire format may churn.
+        """
+        from ..application.tasks import GovernedTaskStore
+        from ..domain.services.task_ownership import TaskOwnershipRegistry
+
+        registry = TaskOwnershipRegistry()
+        store = GovernedTaskStore(registry=registry)
+        self._task_ownership_registry = registry
+        # FastMCP wraps a low-level Server exposed as ``_mcp_server``; its
+        # ``experimental`` API is where task support is enabled.
+        mcp._mcp_server.experimental.enable_tasks(store=store)
+        logger.info("governed_tasks_enabled")
 
     @staticmethod
     def _register_interceptors_list(mcp: FastMCP) -> None:
