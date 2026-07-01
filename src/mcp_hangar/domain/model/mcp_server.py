@@ -5,6 +5,7 @@ import time
 from typing import Any, TYPE_CHECKING, cast
 
 from ...logging_config import get_logger
+from ...protocol import HANGAR_CLIENT_INFO, SUPPORTED_PROTOCOL_VERSION
 
 if TYPE_CHECKING:
     from ...infrastructure.lock_hierarchy import TrackedLock
@@ -43,14 +44,9 @@ from .tool_catalog import ToolCatalog, ToolSchema
 logger = get_logger(__name__)
 
 
-# MCP protocol version Hangar advertises to upstream MCP servers during the
-# outbound startup handshake. Single source of truth for the stateless _meta
-# version negotiation (WS-1 #339 / #291) and version bumps. Targets the
-# 2026-07-28 revision; a legacy upstream downgrades in its initialize response.
-SUPPORTED_PROTOCOL_VERSION = "2026-07-28"
-
-# clientInfo Hangar presents to upstream servers on the outbound handshake.
-HANGAR_CLIENT_INFO = {"name": "mcp-registry", "version": "1.0.0"}
+# SUPPORTED_PROTOCOL_VERSION / HANGAR_CLIENT_INFO live in the leaf `protocol`
+# module (re-exported above) so the transport clients can share them without a
+# domain -> transport import. Re-export keeps existing import sites working.
 
 # JSON-RPC "method not found". A stateless MCP server (SEP-2575) removed the
 # `initialize` handler and answers with this code; we treat it as "this upstream
