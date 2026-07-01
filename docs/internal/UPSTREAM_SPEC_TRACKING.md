@@ -9,6 +9,7 @@ Track the upstream MCP status the interceptor/governance extension depends on.
 **Current status:** PR #2624 is OPEN / experimental in the `modelcontextprotocol/experimental-ext-interceptors` repository (not merged into core spec).
 
 **Spec shape:**
+
 - Model: Validator + Mutator
 - Methods: `interceptors/list` and `interceptor/invoke`
 - Hook objects carry `events` and `phase` fields
