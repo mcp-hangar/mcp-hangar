@@ -3,7 +3,7 @@
 > **Classification:** Internal — do not publish
 > **Author:** Marcin
 > **Date:** 2026-03-24
-> **Purpose:** Define product tiers, hardening priorities, cut list, and deployment focus
+> **Purpose:** Capture product identity, hardening priorities, cut list, and deployment focus. The historical commercial tier/pricing model (§3, §7) is retained for context only — Hangar is now pure MIT with no tiers, pricing, or license keys.
 
 ---
 
@@ -97,6 +97,12 @@ The import boundary is now CI-enforced.
 
 ## 3. Product Tiers
 
+> **Historical (pre-2026 commercial model).** Hangar is now pure MIT: no tiers, no pricing, no
+> license keys; all features are freely available and inbound=outbound. The tier, pricing, and
+> consulting content below is retained for history and does **not** describe the current product.
+> The Tier-0 capability list remains an accurate description of the (now universally available)
+> feature set; the "Pro"/"Enterprise"/"Advisory" pricing and gating are superseded.
+
 ### Tier 0: Hangar Core (Open Source, MIT)
 
 **Buyer:** Individual developer, small team, OSS community
@@ -126,7 +132,7 @@ The import boundary is now CI-enforced.
 
 **Buyer:** Platform engineering team, 10-100 MCP servers
 **Entry:** Self-hosted
-**Price target:** $49-99/mo per cluster (or $499-999/yr)
+**Price target:** ~~$49-99/mo per cluster (or $499-999/yr)~~ — historical; free under MIT
 **Value:** "Govern and secure your MCP servers with full visibility."
 
 **Adds on top of Core:**
@@ -144,7 +150,7 @@ The import boundary is now CI-enforced.
 
 **Buyer:** Organization with 100+ MCP servers, compliance requirements
 **Entry:** Sales-led, consulting engagement
-**Price target:** €2,000-5,000/mo or annual contract
+**Price target:** ~~€2,000-5,000/mo or annual contract~~ — historical; free under MIT
 **Value:** "Runtime security and compliance for MCP at scale."
 
 **Adds on top of Pro:**
@@ -163,7 +169,7 @@ The import boundary is now CI-enforced.
 
 **Buyer:** Any organization deploying MCP servers
 **Entry:** Direct outreach, inbound from content/newsletter
-**Price:** €800-1,200/day
+**Price:** ~~€800-1,200/day~~ — historical; consulting model never operated
 
 **Offerings:**
 
@@ -277,7 +283,7 @@ Phases 1-2 are complete.
 | **Error handling audit**       | Exception hygiene improved in v0.11.0                                              | Full audit of error surfaces exposed to users                                                | v0.14.0        | |
 | **OTLP completeness**          | Traces exist, but partner story needs explicit completeness across telemetry types | Ensure security-relevant traces, metrics, and logs/audit signals are exportable through OTLP | v0.14.0        | **DONE** (v6.0 Phase 33) |
 | **Integration recipes**        | OTEL partner story is implied, not operationalized                                 | Publish reference deployments for OpenLIT, OTEL Collector, Langfuse, and Grafana             | v0.14.0        | **DONE** (v6.0 Phase 34) |
-| **License key infrastructure** | No mechanism to activate Pro/Enterprise                                            | Implement license key validation in bootstrap; enterprise modules load conditionally         | v0.14.0        | |
+| **License key infrastructure** | No mechanism to activate Pro/Enterprise                                            | ~~Implement license key validation in bootstrap; enterprise modules load conditionally~~     | v0.14.0        | Dropped (pure MIT — no license keys; all modules load freely) |
 
 ### Nice-to-have (H2 2026)
 
