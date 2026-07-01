@@ -49,6 +49,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 ### Changed
 
 - **core:** the interceptor ValidatorPipeline now runs on the tool-call path; registered validators deny fail-closed before invoke (empty/no-op by default) (#314)
+- **core:** the interceptor MutatorPipeline now runs on the tool-call path (request/response payload transform; empty/no-op by default) (#314)
 - **core:** interceptor IDs use reverse-DNS extension identifiers (`io.mcp-hangar.validator`/`io.mcp-hangar.mutator`) per SEP-2133 (#315)
 - **core:** inbound trace context is read from the request's `params._meta` (SEP-414), falling back to the legacy `metadata` field, so agent traces link end-to-end (#294)
 - **core:** outbound HTTP requests carry W3C trace context (`traceparent`/`tracestate`) in `params._meta` per SEP-414, in addition to HTTP headers (#294)
