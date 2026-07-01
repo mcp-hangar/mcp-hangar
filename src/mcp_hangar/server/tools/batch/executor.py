@@ -16,11 +16,13 @@ import contextvars
 import json
 import threading
 import time
-from typing import Any, cast
+from typing import Any, cast, Literal
 
 
 from ....application.commands import InvokeToolCommand, StartMcpServerCommand
+from ....application.services.mutator_pipeline import MutatorPipeline
 from ....application.services.validator_pipeline import ValidatorPipeline
+from ....domain.contracts.mutator import MutationContext
 from ....domain.contracts.validator import ValidationContext
 from ....domain.events import (
     BatchCallCompleted,
@@ -129,6 +131,7 @@ class BatchExecutor:
         self,
         concurrency_manager: ConcurrencyManager | None = None,
         validator_pipeline: ValidatorPipeline | None = None,
+        mutator_pipeline: MutatorPipeline | None = None,
     ):
         self._single_flight = SingleFlight(cache_results=False)
         self._active_batches = 0
@@ -138,6 +141,10 @@ class BatchExecutor:
         # (no validators registered), so it always allows -- preserving current
         # behavior. Fail-closed only takes effect once validators are registered.
         self._validator_pipeline = validator_pipeline if validator_pipeline is not None else ValidatorPipeline()
+        # Interceptor mutator pipeline. Defaults to a fresh EMPTY pipeline (no
+        # mutators registered), so payloads pass through unchanged -- preserving
+        # current behavior. Transforms only take effect once mutators are registered.
+        self._mutator_pipeline = mutator_pipeline if mutator_pipeline is not None else MutatorPipeline()
 
     @property
     def concurrency_manager(self) -> ConcurrencyManager:
@@ -270,6 +277,29 @@ class BatchExecutor:
                 elapsed_ms=0,
             )
         return None
+
+    def _mutate(
+        self,
+        method: str,
+        direction: Literal["request", "response"],
+        payload: dict[str, Any],
+        correlation_id: str,
+    ) -> dict[str, Any]:
+        """Run the interceptor MutatorPipeline over a tool-call payload.
+
+        Behavior-preserving: with the default empty pipeline no mutators run, so
+        the payload is returned unchanged. Once mutators are registered, the
+        applicable ones transform the payload in priority order and the
+        (possibly changed) payload is returned.
+        """
+        ctx = MutationContext(
+            method=method,
+            direction=direction,
+            payload=payload,
+            correlation_id=correlation_id,
+        )
+        result = self._mutator_pipeline.execute(ctx)
+        return result.payload
 
     def execute(
         self,
@@ -949,6 +979,11 @@ class BatchExecutor:
         # call.mcp_server is a group, otherwise the server itself.
         dispatch_server_id = target_server_id or call.mcp_server
 
+        # Interceptor mutators (request): transform the outgoing arguments payload
+        # once, before dispatch (and before any retry). Empty pipeline (default)
+        # returns the arguments unchanged, preserving current behavior.
+        mutated_arguments = self._mutate("tools/call", "request", call.arguments or {}, call.call_id)
+
         def do_invoke() -> dict[str, Any]:
             with tracer.start_as_current_span("command.send.InvokeToolCommand") as cmd_span:
                 cmd_span.set_attribute("mcp.server.id", dispatch_server_id)
@@ -957,7 +992,7 @@ class BatchExecutor:
                 command = InvokeToolCommand(
                     mcp_server_id=dispatch_server_id,
                     tool_name=call.tool,
-                    arguments=call.arguments,
+                    arguments=mutated_arguments,
                     timeout=effective_timeout,
                 )
                 result = ctx.command_bus.send(command)
@@ -1038,6 +1073,11 @@ class BatchExecutor:
                     error_type=error_type,
                     elapsed_ms=elapsed_ms,
                 )
+
+        # Interceptor mutators (response): transform the returned result payload
+        # after a successful invoke, before the size check and building the
+        # success CallResult. Empty pipeline (default) returns it unchanged.
+        result = self._mutate("tools/call", "response", cast(dict[str, Any], result), call.call_id)
 
         elapsed_ms = (time.perf_counter() - call_start) * 1000
 
