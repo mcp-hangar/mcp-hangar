@@ -302,11 +302,15 @@ class HttpClient:
 
         request_id = str(uuid.uuid4())
 
+        params = inject_protocol_meta(params)
+        # SEP-414: carry W3C trace context in params._meta (not only HTTP headers),
+        # so it survives across MCP hops regardless of transport.
+        inject_trace_context(params["_meta"])
         request_body = {
             "jsonrpc": "2.0",
             "id": request_id,
             "method": method,
-            "params": inject_protocol_meta(params),
+            "params": params,
         }
 
         # Use endpoint directly - it should already include the full MCP path
