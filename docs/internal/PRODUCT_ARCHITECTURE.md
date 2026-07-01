@@ -259,9 +259,9 @@ Phases 1-2 are complete.
 
 | Area                              | Gap                                                                        | Action                                                                                                      | Target version | Status |
 |-----------------------------------|----------------------------------------------------------------------------|-------------------------------------------------------------------------------------------------------------|----------------|--------|
-| **Container network isolation**   | Docker MCP servers can talk to anything                                      | Default-deny egress, explicit allowlist                                                                     | v0.13.0        | |
-| **Capability declaration schema** | No formal way to declare what a server needs                               | New `capabilities` config block                                                                             | v0.13.0        | |
-| **K8s NetworkPolicy generation**  | Operator doesn't create NetworkPolicies                                    | Auto-generate from CRD capabilities field                                                                   | v0.13.0        | |
+| **Container network isolation**   | Docker MCP servers can talk to anything                                      | Default-deny egress, explicit allowlist                                                                     | v0.13.0        | **Done / shipped v1.0** (operator NetworkPolicy backend) |
+| **Capability declaration schema** | No formal way to declare what a server needs                               | New `capabilities` config block                                                                             | v0.13.0        | **Done / shipped v1.0** (operator CRD `spec.capabilities.network.egress`) |
+| **K8s NetworkPolicy generation**  | Operator doesn't create NetworkPolicies                                    | Auto-generate from CRD capabilities field                                                                   | v0.13.0        | **Done / shipped v1.0** (operator `pkg/networkpolicy`, reconciled per MCPServer) |
 | **Licensing boundary**            | All code in MIT, no commercial protection                                  | Migrate Pro/Enterprise features into `src/mcp_hangar/`                                                     | v0.13.0        | Completed |
 | **Behavioral baseline storage**   | No behavioral profiling exists                                             | Network connection logging per container                                                                    | v0.14.0        | |
 | **Test coverage on auth**         | Auth stack is comprehensive but test density unclear                       | Audit test coverage, target 90%+ on auth paths                                                              | v0.13.0        | |
@@ -293,6 +293,30 @@ Phases 1-2 are complete.
 | Seccomp profiles                   | Not shipped     | Create and ship default MCP server seccomp profile |
 | Multi-cluster federation           | Not implemented | Design doc first, implement when demand validated  |
 | SCIM provisioning                  | Not implemented | Enterprise tier only                               |
+
+### Enforcement state (reconciled 2026-07-01)
+
+Per the #295 enforcement audit (operator + helm-charts, read-only), the §6
+"Not implemented" cells above were a stale 2026-03-24 snapshot that ADR-006
+already overtook. The reconciled state:
+
+- **NetworkPolicy L3/L4 egress enforcement shipped in v1.0**, implemented in the
+  operator repo (`pkg/networkpolicy/builder.go`, reconciled with owner references
+  in `internal/controller/mcpserver_controller.go`), driven by the CRD
+  `spec.capabilities.network.egress` field plus an always-on CEL wildcard-egress
+  gate and an off-by-default validating admission webhook. This is the shipping
+  v1.0 enforcement backend, exactly as ADR-006 states.
+- **Tetragon (ADR-006 v1.5) is not yet built** — zero references in either repo.
+  It is cleanly buildable on the existing backend-agnostic capability schema and
+  reconcile seams; tracked as WS-9.
+- **Forensic / provenance chain (v2.0) is not buildable on what exists** — it
+  needs process attribution that NetworkPolicy structurally cannot provide, and
+  is gated on Tetragon landing first; tracked as WS-10 (sequence strictly after
+  WS-9).
+- **Known gap:** host/FQDN-only egress rules are not enforced at L3/L4 — they
+  emit a port-only NetworkPolicy, so the SSRF vector ADR-006 claims to close is
+  closed only for CIDR-based rules. This is the biggest remaining gap in the v1.0
+  backend and should be filed against the operator repo.
 
 ---
 
