@@ -19,6 +19,9 @@ HANGAR_CLIENT_INFO = {"name": "mcp-registry", "version": "1.0.0"}
 # Reverse-DNS _meta keys per the MCP spec namespace (SEP-2575 stateless model).
 _META_PROTOCOL_VERSION_KEY = "io.modelcontextprotocol/protocolVersion"
 _META_CLIENT_INFO_KEY = "io.modelcontextprotocol/clientInfo"
+# Client capabilities travel under the same reverse-DNS namespace on the inbound
+# path (read by mcp_hangar.negotiation); Hangar does not inject this outbound.
+_META_CAPABILITIES_KEY = "io.modelcontextprotocol/capabilities"
 
 
 def inject_protocol_meta(params: dict[str, Any]) -> dict[str, Any]:

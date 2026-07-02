@@ -49,6 +49,7 @@ from ....metrics import (
     BATCH_TRUNCATIONS_TOTAL,
     TOOL_ACCESS_DENIED_TOTAL,
 )
+from ....negotiation import read_protocol_negotiation, set_current_protocol_negotiation
 from ....retry import retry_sync, RetryPolicy, RetryResult
 from ...context import get_context
 from ...state import GROUPS
@@ -74,6 +75,24 @@ def _inbound_trace_meta(ctx: Any) -> dict[str, str]:
         return {k: str(v) for k, v in dumped.items() if k in ("traceparent", "tracestate") and isinstance(v, str)}
     except Exception:  # noqa: BLE001 -- fault barrier: trace reading must not break invocation
         return {}
+
+
+def _inbound_meta_dict(ctx: Any) -> dict[str, Any] | None:
+    """Return the inbound request's ``params._meta`` as a plain dict, or ``None``.
+
+    Best-effort fault barrier mirroring ``_inbound_trace_meta``: pydantic ``Meta``
+    models are dumped, plain mappings are copied, and any failure yields ``None``
+    so a missing/malformed ``_meta`` never breaks the call.
+    """
+    try:
+        req_meta = ctx.request_context.meta
+        if req_meta is None:
+            return None
+        if hasattr(req_meta, "model_dump"):
+            return dict(req_meta.model_dump(exclude_none=True))
+        return dict(req_meta)
+    except Exception:  # noqa: BLE001 -- fault barrier: meta reading must not break invocation
+        return None
 
 
 def _is_task_result(result: dict[str, Any]) -> bool:
@@ -351,6 +370,13 @@ class BatchExecutor:
             BatchResult with all call results.
         """
         ctx = get_context()
+
+        # Stateless negotiation (SEP-2575): the client conveys its protocolVersion
+        # and capabilities per request in params._meta (no initialize handshake).
+        # Read them once at ingress and publish to a request-scoped contextvar that
+        # batch worker threads inherit via copy_context(). Additive: no gating here.
+        set_current_protocol_negotiation(read_protocol_negotiation(_inbound_meta_dict(ctx)))
+
         start_time = time.perf_counter()
         cancel_event = threading.Event()
         results: list[CallResult | None] = [None] * len(calls)

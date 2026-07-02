@@ -9,6 +9,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Added
 
+- **core:** read the client `protocolVersion`/capabilities from inbound `params._meta` per request (stateless negotiation, no session handshake), exposed via request context (#291)
 - **security:** projected `tools/list` responses advertise a tenant-scoped `cacheScope` (SEP-2549) so downstream caches cannot serve one tenant's list to another; fail-closed to the narrowest scope when the tenant is unknown (#292)
 - **core:** add the MCP policy DSL parser/validator (v1 grammar; hooks tcp_connect/sk_alloc/execve/openat) per ADR-006, backend-agnostic and compiler-ready (#329)
 - **core:** enforcement events (`CapabilityViolationDetected`, `EgressBlocked`) carry optional process-attribution fields (pid/container/pod/node) for the Tetragon backend and forensic chain (#331)
