@@ -22,6 +22,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 ### Changed
 
 - **core:** reject upstream MCP task handles with a clear error instead of passing through an untracked, unusable handle (relay-only; task results are not yet governed) (#302)
+- **core:** the transport `Mcp-Session-Id` handling is deprecated and guarded per SEP-2567 (stateless); it is only echoed for legacy session-based upstreams that established a session, and a `stateless_upstream` flag disables it outright. The audit `session_id` correlation is unchanged (#337)
 
 ### Security
 
