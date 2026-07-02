@@ -48,6 +48,8 @@ try:
     from opentelemetry.sdk.trace.export import BatchSpanProcessor, ConsoleSpanExporter
     from opentelemetry.sdk.trace import TracerProvider
     from opentelemetry import trace
+    from opentelemetry.baggage.propagation import W3CBaggagePropagator
+    from opentelemetry.propagators.composite import CompositePropagator
     from opentelemetry.trace.propagation.tracecontext import TraceContextTextMapPropagator
     from opentelemetry.trace import Status, StatusCode
 
@@ -109,6 +111,35 @@ class NoOpTracer:
 
 
 _noop_tracer = NoOpTracer()
+
+# W3C baggage handling (SEP-414).
+#
+# Baggage is a set of opaque, application-defined key/value pairs propagated
+# alongside trace context. Unlike traceparent/tracestate (which are safe,
+# structural trace identifiers), baggage can carry arbitrary caller-supplied
+# data and therefore MUST NOT be allowed to leak across a tenant boundary.
+#
+# Hangar owns a dedicated baggage namespace: entries whose keys start with
+# ``HANGAR_BAGGAGE_PREFIX`` are considered "Hangar-set" (trusted, produced by
+# Hangar itself in the current request context). Everything else is treated as
+# untrusted / cross-origin baggage and is dropped on the outbound path.
+BAGGAGE_HEADER = "baggage"
+HANGAR_BAGGAGE_PREFIX = "hangar."
+# Optional tenant marker Hangar may set to bind baggage to a single tenant.
+HANGAR_BAGGAGE_TENANT_KEY = "hangar.tenant"
+
+
+def _get_propagator() -> Any:
+    """Build the composite propagator used for inbound/outbound context.
+
+    Composes the existing W3C TraceContext propagator (traceparent/tracestate)
+    with the W3C Baggage propagator so that ``baggage`` is extracted from
+    inbound carriers (making it available in-context) and injected onto
+    outbound carriers. Trace-context behavior is unchanged: it is still the
+    first propagator in the composite and continues to handle traceparent /
+    tracestate exactly as before.
+    """
+    return CompositePropagator([TraceContextTextMapPropagator(), W3CBaggagePropagator()])
 
 
 def is_tracing_enabled() -> bool:
@@ -350,16 +381,22 @@ def inject_trace_context(carrier: dict[str, str]) -> None:
     Args:
         carrier: Dict to inject trace context into.
 
+    Injects W3C TraceContext (traceparent/tracestate) and W3C ``baggage`` from
+    the current OTel context. Trace-context behavior is unchanged. Baggage that
+    happens to be present in the current context (for example, extracted from an
+    inbound request) is injected too; callers on a tenant-crossing outbound path
+    MUST additionally run :func:`scrub_baggage_for_tenant` to strip untrusted /
+    cross-tenant baggage before sending.
+
     Example:
         headers = {}
         inject_trace_context(headers)
-        # headers now contains traceparent, tracestate
+        # headers now contains traceparent, tracestate (and baggage, if any)
     """
     if not OTEL_AVAILABLE or not _initialized:
         return
 
-    propagator = TraceContextTextMapPropagator()
-    propagator.inject(carrier)
+    _get_propagator().inject(carrier)
 
 
 def extract_trace_context(carrier: dict[str, str]) -> Any:
@@ -371,6 +408,10 @@ def extract_trace_context(carrier: dict[str, str]) -> Any:
     Returns:
         OpenTelemetry context or None.
 
+    Extracts W3C TraceContext (traceparent/tracestate) and W3C ``baggage`` from
+    the carrier so both are available in the returned context. Trace-context
+    behavior is unchanged.
+
     Example:
         context = extract_trace_context(request.headers)
         with tracer.start_as_current_span("handle", context=context):
@@ -379,8 +420,73 @@ def extract_trace_context(carrier: dict[str, str]) -> Any:
     if not OTEL_AVAILABLE or not _initialized:
         return None
 
-    propagator = TraceContextTextMapPropagator()
-    return propagator.extract(carrier)
+    return _get_propagator().extract(carrier)
+
+
+def scrub_baggage_for_tenant(carrier: dict[str, str], current_tenant_id: str | None) -> None:
+    """Strip cross-tenant / untrusted W3C ``baggage`` from an OUTBOUND carrier.
+
+    Baggage keys and values are opaque and application-defined, so Hangar cannot
+    reliably reason about the tenant-safety of arbitrary entries it did not
+    create. This function is therefore **conservative by default**: it drops any
+    baggage that is not attributable to Hangar in the current single-tenant
+    request context.
+
+    The rule (fail-safe against cross-tenant leak):
+
+    * Keep only entries in the Hangar-owned namespace (keys starting with
+      ``HANGAR_BAGGAGE_PREFIX``). These are entries Hangar itself set in the
+      current request context; inbound-originated / third-party baggage is
+      dropped.
+    * If a Hangar tenant marker (``HANGAR_BAGGAGE_TENANT_KEY``) is present and
+      its value does not match ``current_tenant_id``, treat the whole carrier as
+      cross-tenant and drop **all** baggage. A ``current_tenant_id`` of ``None``
+      means "tenant unknown", which is also treated as a mismatch — when we
+      cannot prove same-tenant, we do not forward.
+
+    The ``baggage`` carrier entry is removed entirely when nothing survives.
+
+    This mechanism is intentionally strict and refinable later (for example, an
+    allowlist of forwardable inbound keys once their provenance can be trusted).
+    It operates purely on the carrier string and does not depend on OTEL being
+    installed, so it remains a hard boundary even when tracing is disabled.
+
+    Args:
+        carrier: Outbound carrier dict (e.g. HTTP headers or MCP ``_meta``)
+            that may contain a ``baggage`` entry. Mutated in place.
+        current_tenant_id: The tenant the outbound request is attributed to, or
+            ``None`` if unknown.
+    """
+    raw = carrier.get(BAGGAGE_HEADER)
+    if not raw:
+        return
+
+    kept: list[str] = []
+    for item in raw.split(","):
+        item = item.strip()
+        if not item or "=" not in item:
+            continue
+        # A baggage member is "key=value" optionally followed by ";properties".
+        key_part, value_part = item.split("=", 1)
+        key = key_part.strip()
+
+        if not key.startswith(HANGAR_BAGGAGE_PREFIX):
+            # Untrusted / inbound-originated / cross-origin baggage: drop.
+            continue
+
+        if key == HANGAR_BAGGAGE_TENANT_KEY:
+            value = value_part.split(";", 1)[0].strip()
+            if current_tenant_id is None or value != current_tenant_id:
+                # Explicit cross-tenant signal: drop ALL baggage, not just this entry.
+                carrier.pop(BAGGAGE_HEADER, None)
+                return
+
+        kept.append(item)
+
+    if kept:
+        carrier[BAGGAGE_HEADER] = ",".join(kept)
+    else:
+        carrier.pop(BAGGAGE_HEADER, None)
 
 
 def get_current_trace_id() -> str | None:
