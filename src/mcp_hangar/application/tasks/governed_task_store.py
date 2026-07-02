@@ -38,18 +38,27 @@ unattributed caller can only reach unattributed tasks and can NEVER reach a
 task owned by an attributed tenant/principal. This keeps the store usable on
 the system path while denying any cross-check that cannot be attributed.
 
-Stages: this is Stage 1 (bind + authorize). Digest re-check on ``store_result``
-is Stage 2 (#320); consent gating is a later stage (#322).
+Stages: Stage 1 is ownership bind + authorize. Stage 2 (#320) extends digest
+pinning across the task lifecycle: ``create_task`` binds the task to the tool
+digest pinned on the invoke path (read from the current-tool contextvar) and
+``get_result`` re-verifies the tool's CURRENT digest fail-closed on drift.
+Consent gating is a later stage (#322).
 """
 
 from __future__ import annotations
+
+import threading
 
 from mcp.shared.exceptions import McpError
 from mcp.shared.experimental.tasks.in_memory_task_store import InMemoryTaskStore
 from mcp.shared.experimental.tasks.store import TaskStore
 from mcp.types import INVALID_PARAMS, ErrorData, Result, Task, TaskMetadata, TaskStatus
 
+from mcp_hangar.application.read_models.tool_projection import get_tool_projection_registry
+from mcp_hangar.application.tasks.tool_pin_context import get_current_tool_pin
 from mcp_hangar.context import get_identity_context
+from mcp_hangar.domain.services.digest_computation import compute_tool_digest
+from mcp_hangar.domain.services.task_digest_guard import TaskDigestGuard
 from mcp_hangar.domain.services.task_ownership import TaskOwner, TaskOwnershipRegistry
 from mcp_hangar.logging_config import get_logger
 
@@ -84,29 +93,56 @@ class GovernedTaskStore(TaskStore):
         self,
         inner: TaskStore | None = None,
         registry: TaskOwnershipRegistry | None = None,
+        digest_guard: TaskDigestGuard | None = None,
     ) -> None:
         self._inner: TaskStore = inner if inner is not None else InMemoryTaskStore()
         self._registry: TaskOwnershipRegistry = registry if registry is not None else TaskOwnershipRegistry()
+        self._digest_guard: TaskDigestGuard = digest_guard if digest_guard is not None else TaskDigestGuard()
+        # task_id -> (mcp_server, tool_name) for tasks bound to a pinned digest.
+        # Records which tool a task's result must be re-verified against; a task
+        # absent from this map was created without a pin (re-verify is skipped).
+        # Guarded by a lock because create_task may run on a background task
+        # while get_result runs on the retrieving request.
+        self._task_tools: dict[str, tuple[str, str]] = {}
+        self._task_tools_lock = threading.Lock()
 
     @property
     def registry(self) -> TaskOwnershipRegistry:
         """The ownership registry backing this store (for shared wiring/tests)."""
         return self._registry
 
+    @property
+    def digest_guard(self) -> TaskDigestGuard:
+        """The digest guard backing this store (for shared wiring/tests)."""
+        return self._digest_guard
+
     async def create_task(
         self,
         metadata: TaskMetadata,
         task_id: str | None = None,
     ) -> Task:
-        """Create a task on the inner store and bind it to the current caller."""
+        """Create a task on the inner store, binding owner and pinned digest.
+
+        Beyond the Stage 1 ownership binding, if the invoke path pinned a tool
+        digest for this request (surfaced via the current-tool contextvar,
+        #320), the task is bound to that digest so its result can be re-verified
+        fail-closed on retrieval. The task's ``(mcp_server, tool)`` is recorded
+        so the tool's current schema can be looked up at that later time.
+        """
         task = await self._inner.create_task(metadata, task_id)
         owner = _current_caller()
         self._registry.register(task.taskId, owner)
+        pin = get_current_tool_pin()
+        if pin is not None:
+            self._digest_guard.pin(task.taskId, pin.pinned_digest)
+            with self._task_tools_lock:
+                self._task_tools[task.taskId] = (pin.mcp_server, pin.tool_name)
         logger.debug(
             "governed_task_created",
             task_id=task.taskId,
             tenant_id=owner.tenant_id,
             has_principal=owner.principal_id is not None,
+            digest_pinned=pin is not None,
         )
         return task
 
@@ -117,10 +153,54 @@ class GovernedTaskStore(TaskStore):
         return await self._inner.get_task(task_id)
 
     async def get_result(self, task_id: str) -> Result | None:
-        """Return the task result only if the current caller owns it, else ``None``."""
+        """Return the task result, re-verifying a pinned tool digest fail-closed.
+
+        Ownership is checked first (Stage 1): a non-owner gets ``None`` and
+        cannot distinguish "not found" from "not yours". If the caller owns the
+        task and it was bound to a tool digest at creation (#320), the tool's
+        CURRENT schema is re-digested and compared against the pinned digest;
+        on drift -- or if the tool's current schema cannot be verified -- the
+        result is withheld and an ``McpError`` is raised (fail-closed). A task
+        created without a pin is unaffected.
+        """
         if not self._authorized(task_id):
             return None
+        self._verify_pinned_digest(task_id)
         return await self._inner.get_result(task_id)
+
+    def _verify_pinned_digest(self, task_id: str) -> None:
+        """Fail closed unless the tool's current digest matches the task's pin.
+
+        No-op for a task created without a pinned digest. Raises ``McpError``
+        (``INVALID_PARAMS``) when the tool's current schema drifted from -- or
+        can no longer be verified against -- the digest pinned at creation.
+        """
+        with self._task_tools_lock:
+            bound = self._task_tools.get(task_id)
+        if bound is None:
+            return  # Task was not created under a pin: nothing to re-verify.
+        mcp_server, tool_name = bound
+        observed: str | None = None
+        try:
+            projection = get_tool_projection_registry().resolve(mcp_server, tool_name)
+            if projection is not None:
+                observed = compute_tool_digest(projection.schema).sha256
+        except Exception:  # noqa: BLE001 -- any lookup/compute failure is a fail-closed verification failure
+            observed = None
+        if observed is None or not self._digest_guard.verify(task_id, observed):
+            logger.warning(
+                "governed_task_digest_drift",
+                task_id=task_id,
+                mcp_server=mcp_server,
+                tool=tool_name,
+                verifiable=observed is not None,
+            )
+            raise McpError(
+                ErrorData(
+                    code=INVALID_PARAMS,
+                    message="tool digest drifted since task creation",
+                )
+            )
 
     async def update_task(
         self,
@@ -138,6 +218,9 @@ class GovernedTaskStore(TaskStore):
         deleted = await self._inner.delete_task(task_id)
         if deleted:
             self._registry.discard(task_id)
+            self._digest_guard.discard(task_id)
+            with self._task_tools_lock:
+                self._task_tools.pop(task_id, None)
         return deleted
 
     async def list_tasks(
@@ -162,8 +245,10 @@ class GovernedTaskStore(TaskStore):
     async def store_result(self, task_id: str, result: Result) -> None:
         """Delegate to the inner store (internal lifecycle).
 
-        Stage 2 (#320) will re-check the pinned response digest here before
-        storing a task result; Stage 1 only delegates.
+        Stage 2 (#320) re-verifies the pinned tool digest on RETRIEVAL
+        (:meth:`get_result`), reflecting the tool's schema at the moment the
+        caller reads the result. Storing the completed result is left to the
+        inner store and is not gated here.
         """
         await self._inner.store_result(task_id, result)
 

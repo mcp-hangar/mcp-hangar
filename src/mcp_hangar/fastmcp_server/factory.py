@@ -16,6 +16,7 @@ from .asgi import create_auth_combined_app, create_combined_asgi_app, create_hea
 from .config import HangarFunctions, ServerConfig
 
 if TYPE_CHECKING:
+    from ..domain.services.task_digest_guard import TaskDigestGuard
     from ..domain.services.task_ownership import TaskOwnershipRegistry
     from .builder import MCPServerFactoryBuilder
 
@@ -71,6 +72,9 @@ class MCPServerFactory:
         # Shared registry binding MCP task handles to their owning
         # tenant/principal; populated when governed tasks are enabled.
         self._task_ownership_registry: TaskOwnershipRegistry | None = None
+        # Shared guard binding MCP task handles to the tool digest pinned on the
+        # invoke path; re-verified fail-closed on result retrieval (#320).
+        self._task_digest_guard: TaskDigestGuard | None = None
 
     @classmethod
     def builder(cls) -> MCPServerFactoryBuilder:
@@ -342,11 +346,14 @@ class MCPServerFactory:
         server ``tasks`` capability and the wire format may churn.
         """
         from ..application.tasks import GovernedTaskStore
+        from ..domain.services.task_digest_guard import TaskDigestGuard
         from ..domain.services.task_ownership import TaskOwnershipRegistry
 
         registry = TaskOwnershipRegistry()
-        store = GovernedTaskStore(registry=registry)
+        digest_guard = TaskDigestGuard()
+        store = GovernedTaskStore(registry=registry, digest_guard=digest_guard)
         self._task_ownership_registry = registry
+        self._task_digest_guard = digest_guard
         # FastMCP wraps a low-level Server exposed as ``_mcp_server``; its
         # ``experimental`` API is where task support is enabled.
         mcp._mcp_server.experimental.enable_tasks(store=store)

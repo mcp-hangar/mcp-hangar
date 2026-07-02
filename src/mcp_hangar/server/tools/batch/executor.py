@@ -21,6 +21,7 @@ from typing import Any, cast, Literal
 
 from ....application.commands import InvokeToolCommand, StartMcpServerCommand
 from ....application.services.mutator_pipeline import MutatorPipeline
+from ....application.tasks.tool_pin_context import CurrentToolPin, set_current_tool_pin
 from ....application.services.validator_pipeline import ValidatorPipeline
 from ....domain.contracts.mutator import MutationContext
 from ....domain.contracts.validator import ValidationContext
@@ -846,6 +847,19 @@ class BatchExecutor:
                     error_type="ToolDigestMismatchError",
                     elapsed_ms=(time.perf_counter() - call_start) * 1000,
                 )
+            # Pin verified: bind the tool's approved digest to the request
+            # context so that if this call is task-augmented and returns a task
+            # handle, GovernedTaskStore.create_task pins the task to this digest
+            # and re-verifies it fail-closed on result retrieval (#320). Each
+            # batch call runs in its own contextvars.copy_context() (see
+            # execute()), so this set is confined to the current call.
+            set_current_tool_pin(
+                CurrentToolPin(
+                    mcp_server=call.mcp_server,
+                    tool_name=call.tool,
+                    pinned_digest=_pin.sha256,
+                )
+            )
 
         # Check circuit breaker / health degradation of the resolved target
         # (a standalone server, or the selected group member).
