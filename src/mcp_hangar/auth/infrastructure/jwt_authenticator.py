@@ -35,6 +35,12 @@ class OIDCConfig:
         email_claim: JWT claim for email (default: email).
         max_token_lifetime: Maximum allowed token lifetime (exp - iat) in seconds.
             Value of 0 means disabled (no lifetime check). Default: 3600.
+        require_tenant: Fail-closed multi-tenant gate. When True, a validated token
+            whose ``tenant_claim`` is absent or empty is REJECTED instead of being
+            silently treated as a global/no-tenant principal. Enable this on
+            multi-tenant deployments so a token that does not name a tenant cannot
+            act across tenant boundaries. Default False (single-tenant / no-OIDC
+            deployments are unaffected).
     """
 
     issuer: str
@@ -50,6 +56,9 @@ class OIDCConfig:
 
     # Lifetime enforcement
     max_token_lifetime: int = 3600
+
+    # Multi-tenant fail-closed gate
+    require_tenant: bool = False
 
 
 class JWTAuthenticator(IAuthenticator):
@@ -210,6 +219,26 @@ class JWTAuthenticator(IAuthenticator):
             groups = [groups]
 
         tenant_id = claims.get(config.tenant_claim)
+
+        # Fail-closed multi-tenant enforcement (#312): in multi-tenant mode the
+        # effective tenant derives SOLELY from this validated claim, so a token
+        # that names no tenant must not be admitted as a global/any-tenant
+        # principal -- that would let it act across tenant boundaries. Reject an
+        # absent or empty tenant claim. Single-tenant / no-OIDC deployments leave
+        # ``require_tenant`` False and are unaffected.
+        if config.require_tenant and (tenant_id is None or (isinstance(tenant_id, str) and not tenant_id.strip())):
+            logger.warning(
+                "jwt_missing_tenant_claim",
+                tenant_claim=config.tenant_claim,
+                issuer=claims.get("iss"),
+                subject=subject,
+                reason="cross_tenant_rejected",
+            )
+            raise InvalidCredentialsError(
+                message="Missing required tenant claim",
+                auth_method="jwt",
+            )
+
         email = claims.get(config.email_claim)
 
         return Principal(

@@ -40,6 +40,9 @@ class OIDCIssuerConfig:
         email_claim: JWT claim for email address.
         max_token_lifetime_seconds: Maximum allowed token lifetime (exp - iat) in seconds.
             Value of 0 means disabled. Default: 3600.
+        require_tenant: Fail-closed multi-tenant gate. When True, tokens from this
+            issuer that carry no (or an empty) ``tenant_claim`` are rejected instead
+            of being admitted as a global/no-tenant principal. Default False.
     """
 
     issuer: str = ""
@@ -55,6 +58,9 @@ class OIDCIssuerConfig:
 
     # Lifetime enforcement
     max_token_lifetime_seconds: int = 3600
+
+    # Multi-tenant fail-closed gate
+    require_tenant: bool = False
 
 
 @dataclass
@@ -79,6 +85,11 @@ class OIDCAuthConfig:
             When unset, the URI is derived from the incoming request's scheme+host.
         issuers: List of trusted authorization servers (multi-issuer support).
             When non-empty, takes precedence over the legacy single-issuer fields.
+        require_tenant: Fail-closed multi-tenant gate applied to every trusted
+            issuer (unless a per-issuer entry overrides it). When True, a validated
+            token with no (or empty) tenant claim is rejected rather than admitted
+            as a global/no-tenant principal, preventing cross-tenant token use.
+            Default False so single-tenant / no-OIDC deployments are unaffected.
     """
 
     enabled: bool = False
@@ -96,6 +107,9 @@ class OIDCAuthConfig:
 
     # Lifetime enforcement
     max_token_lifetime_seconds: int = 3600
+
+    # Multi-tenant fail-closed gate (inherited by per-issuer entries)
+    require_tenant: bool = False
 
     # Multi-issuer trust entries
     issuers: list[OIDCIssuerConfig] = field(default_factory=list)
@@ -121,6 +135,7 @@ class OIDCAuthConfig:
                     tenant_claim=self.tenant_claim,
                     email_claim=self.email_claim,
                     max_token_lifetime_seconds=self.max_token_lifetime_seconds,
+                    require_tenant=self.require_tenant,
                 )
             ]
         return []
@@ -306,6 +321,7 @@ def parse_auth_config(config_dict: dict[str, Any] | None) -> AuthConfig:
                     max_token_lifetime_seconds=issuer_dict.get(
                         "max_token_lifetime_seconds", max_token_lifetime_seconds
                     ),
+                    require_tenant=issuer_dict.get("require_tenant", oidc_dict.get("require_tenant", False)),
                 )
             )
 
@@ -321,6 +337,7 @@ def parse_auth_config(config_dict: dict[str, Any] | None) -> AuthConfig:
         email_claim=oidc_dict.get("email_claim", "email"),
         max_token_lifetime_seconds=max_token_lifetime_seconds,
         resource_uri=oidc_dict.get("resource_uri", ""),
+        require_tenant=oidc_dict.get("require_tenant", False),
         issuers=issuers,
     )
 

@@ -21,6 +21,10 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 - **core:** reject upstream MCP task handles with a clear error instead of passing through an untracked, unusable handle (relay-only; task results are not yet governed) (#302)
 
+### Security
+
+- **security:** enforce per-tenant isolation -- require the token tenant claim in multi-tenant mode and derive the effective tenant solely from the validated token (never client-supplied), failing closed to prevent cross-tenant token use (#312)
+
 ## [1.4.0](https://github.com/mcp-hangar/mcp-hangar/compare/v1.3.0...v1.4.0) (2026-06-29)
 
 
