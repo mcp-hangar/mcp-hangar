@@ -358,11 +358,11 @@ class TestFlatListToolsHandler:
                     return_value=resolver,
                 ),
             ):
-                tools = await captured_list_fn()
+                result = await captured_list_fn()
         finally:
             identity_context_var.reset(token)
 
-        tool_names = [t.name for t in tools]
+        tool_names = [t.name for t in result.tools]
         assert "read_item" in tool_names
         assert "get_item" in tool_names
         # No hangar_* tools
@@ -419,11 +419,11 @@ class TestFlatListToolsHandler:
                     return_value=resolver,
                 ),
             ):
-                tools = await captured_list_fn()
+                result = await captured_list_fn()
         finally:
             identity_context_var.reset(token)
 
-        tool_names = [t.name for t in tools]
+        tool_names = [t.name for t in result.tools]
         assert "delete_item" not in tool_names
         assert "read_item" in tool_names
 
@@ -477,22 +477,28 @@ class TestFlatListToolsHandler:
         ):
             token_a = identity_context_var.set(_make_identity("tenant:a"))
             try:
-                tools_a = await captured_list_fn()
+                result_a = await captured_list_fn()
             finally:
                 identity_context_var.reset(token_a)
 
             token_b = identity_context_var.set(_make_identity("tenant:b"))
             try:
-                tools_b = await captured_list_fn()
+                result_b = await captured_list_fn()
             finally:
                 identity_context_var.reset(token_b)
 
-        names_a = {t.name for t in tools_a}
-        names_b = {t.name for t in tools_b}
+        names_a = {t.name for t in result_a.tools}
+        names_b = {t.name for t in result_b.tools}
         assert "delete_item" in names_a
         assert "delete_item" not in names_b
         assert "read_item" in names_a
         assert "read_item" in names_b
+
+        # Cross-tenant cache isolation (issue #292): each tenant's list carries a
+        # distinct SEP-2549 cacheScope so a downstream cache cannot cross tenants.
+        assert result_a.meta is not None
+        assert result_b.meta is not None
+        assert result_a.meta["cacheScope"] != result_b.meta["cacheScope"]
 
 
 # ---------------------------------------------------------------------------

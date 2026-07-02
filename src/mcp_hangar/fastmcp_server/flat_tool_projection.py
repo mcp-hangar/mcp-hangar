@@ -40,12 +40,19 @@ surface is fully intact.
 
 from __future__ import annotations
 
+import hashlib
 import logging
+import uuid
 from typing import TYPE_CHECKING, Any
 
 from mcp.server.fastmcp import FastMCP
 from mcp.shared.exceptions import McpError
-from mcp.types import METHOD_NOT_FOUND, ErrorData, Tool as MCPTool
+from mcp.types import (
+    METHOD_NOT_FOUND,
+    ErrorData,
+    ListToolsResult,
+    Tool as MCPTool,
+)
 
 from ..application.read_models.tool_projection import get_tool_projection_registry
 from ..context import get_identity_context
@@ -56,6 +63,89 @@ if TYPE_CHECKING:
     pass
 
 logger = logging.getLogger(__name__)
+
+# --- SEP-2549 cache-scope advertisement for projected lists (issue #292) ------
+#
+# SEP-2549 defines ``cacheScope`` / ``ttlMs`` as caching hints on list results so
+# downstream caches know whether — and for how long — a list response may be
+# reused.  ``mcp.types.ListToolsResult`` predates the SEP and has no typed
+# top-level ``cacheScope`` / ``ttlMs`` fields (only ``_meta``/``nextCursor``/
+# ``tools``), so we advertise the hints under the result's ``_meta`` using the
+# SEP-2549 field names.
+#
+# Cross-tenant isolation is the whole point here.  The hangar fronts MANY tenants
+# behind a SINGLE endpoint, and each tenant's ``tools/list`` is a distinct,
+# per-request projection.  SEP-2549's bare ``"private"`` enum relies on the
+# downstream cache correctly keying by authorization context; if it does not, it
+# could serve tenant A's list to tenant B.  To make cross-tenant reuse
+# STRUCTURALLY impossible even for a naive cache that keys only on the advertised
+# scope, we emit a DISTINCT, stable, opaque scope TOKEN per tenant instead of a
+# shared constant.
+#
+# Fail-closed: when the tenant is unknown (``None``/empty) we emit a unique,
+# non-shareable per-request ``no-store`` token so a cache can never get a second
+# hit on it — never a shared or global scope.
+CACHE_SCOPE_META_KEY = "cacheScope"
+CACHE_TTL_META_KEY = "ttlMs"
+
+# Conservative freshness hint (SEP-2549 ``ttlMs`` is in milliseconds).  Small on
+# purpose: the projection is cheap to rebuild and changes to a tenant's tool
+# surface (withdrawals, policy edits) must propagate quickly.
+PROJECTED_LIST_CACHE_TTL_MS = 5_000
+
+# Prefix for real, per-tenant shareable-within-tenant scope tokens.
+_TENANT_SCOPE_PREFIX = "tenant"
+# Prefix for the fail-closed, non-shareable per-request scope tokens.
+_NO_STORE_SCOPE_PREFIX = "no-store"
+
+
+def derive_tenant_cache_scope(tenant_id: str | None) -> str:
+    """Derive a per-tenant SEP-2549 ``cacheScope`` token (pure, unit-testable).
+
+    Properties (relied on by the cross-tenant isolation tests):
+
+    * Two DIFFERENT tenants get DIFFERENT tokens.
+    * The SAME tenant gets the SAME token every time (stable).
+    * It is NEVER a shared/global constant across tenants.
+    * FAIL CLOSED: an unknown tenant (``None`` or empty) yields a unique,
+      non-shareable per-request ``no-store`` token that a cache can never reuse,
+      and which can never equal a real tenant's token.
+
+    The tenant id is hashed so the raw tenant identifier does not leak into the
+    advertised scope; the hash is stable, so the token is stable per tenant.
+
+    Args:
+        tenant_id: The calling tenant's id, or ``None``/empty if unknown.
+
+    Returns:
+        An opaque, per-tenant (or per-request, when unknown) scope token.
+    """
+    if not tenant_id:
+        # Unknown tenant -> narrowest possible scope.  A fresh uuid guarantees
+        # the token is unique to this single response, so any downstream cache
+        # keyed on it can never produce a cross-request (or cross-tenant) hit.
+        return f"{_NO_STORE_SCOPE_PREFIX}:{uuid.uuid4().hex}"
+
+    digest = hashlib.sha256(tenant_id.encode("utf-8")).hexdigest()[:32]
+    return f"{_TENANT_SCOPE_PREFIX}:{digest}"
+
+
+def build_projected_list_cache_meta(tenant_id: str | None) -> dict[str, Any]:
+    """Build the ``_meta`` cache-scope block for a projected list response.
+
+    Attaches the SEP-2549 ``cacheScope`` (per-tenant, fail-closed) and a
+    conservative ``ttlMs`` freshness hint.
+
+    Args:
+        tenant_id: The calling tenant's id, or ``None`` if unknown.
+
+    Returns:
+        A ``_meta`` dict carrying ``cacheScope`` and ``ttlMs``.
+    """
+    return {
+        CACHE_SCOPE_META_KEY: derive_tenant_cache_scope(tenant_id),
+        CACHE_TTL_META_KEY: PROJECTED_LIST_CACHE_TTL_MS,
+    }
 
 
 def _build_flat_map(
@@ -184,7 +274,7 @@ def register_flat_tool_handlers(mcp: FastMCP) -> None:
     low = mcp._mcp_server  # The MCPServer (lowlevel)
 
     @low.list_tools()
-    async def _flat_list_tools() -> list[MCPTool]:
+    async def _flat_list_tools() -> ListToolsResult:
         """Per-request filtered tools/list for front_door mode.
 
         Reads tenant_id from the identity context (bound at request time by
@@ -193,12 +283,21 @@ def register_flat_tool_handlers(mcp: FastMCP) -> None:
         both member-scope policy (resolver.filter_tools) and withdrawal status.
         hangar_* meta-tools are intentionally absent — external agents must not
         see the control plane surface.
+
+        The response advertises a per-tenant SEP-2549 ``cacheScope`` under
+        ``_meta`` (fail-closed to a non-shareable ``no-store`` token when the
+        tenant is unknown) so a downstream cache can never serve one tenant's
+        list to another (issue #292).
         """
         identity = get_identity_context()
         tenant_id: str | None = identity.caller.tenant_id if identity is not None else None
 
         flat_map = _build_flat_map(tenant_id)
-        return _build_mcp_tool_list(flat_map)
+        tools = _build_mcp_tool_list(flat_map)
+        return ListToolsResult(
+            tools=tools,
+            _meta=build_projected_list_cache_meta(tenant_id),
+        )
 
     @low.call_tool(validate_input=False)
     async def _flat_call_tool(name: str, arguments: dict[str, Any]) -> Any:
@@ -219,8 +318,6 @@ def register_flat_tool_handlers(mcp: FastMCP) -> None:
           which surfaces as a CallToolResult(isError=True).  The backend is
           never invoked.
         """
-        import uuid
-
         from mcp.types import CallToolResult, TextContent
 
         identity = get_identity_context()
