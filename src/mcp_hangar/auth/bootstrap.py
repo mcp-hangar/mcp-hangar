@@ -341,6 +341,7 @@ def bootstrap_auth(
                     tenant_claim=entry.tenant_claim,
                     email_claim=entry.email_claim,
                     max_token_lifetime=entry.max_token_lifetime_seconds,
+                    require_tenant=entry.require_tenant,
                 )
                 for entry in issuer_cfgs
             ]
@@ -364,6 +365,7 @@ def bootstrap_auth(
                 issuers=[c.issuer for c in issuer_cfgs],
                 resource=resource_audience or None,
                 audience_bound_to_resource=bool(resource_audience),
+                require_tenant=any(c.require_tenant for c in oidc_configs),
             )
 
     # Initialize rate limiter for brute-force protection
