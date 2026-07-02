@@ -15,6 +15,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - **core:** propagate W3C `baggage` (SEP-414) with a fail-safe cross-tenant scrub that drops untrusted/cross-tenant baggage on outbound (#294)
 - **core:** GovernedTaskStore binds each MCP task to its owning tenant/principal and fail-closed-authorizes tasks/* access, wiring the TaskOwnershipRegistry into the (experimental) task lifecycle (#319)
 - **core:** digest pinning now spans the task lifecycle -- a task inherits its tool's pinned digest and the result is re-verified against the tool's current digest, failing closed on drift (#320)
+- **core:** advertise Hangar governance (interceptors, digest pinning) as SEP-2133 extensions under `capabilities.experimental` (reverse-DNS, opt-in, off by default) (#316)
 
 ### Changed
 

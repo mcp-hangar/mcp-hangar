@@ -122,6 +122,7 @@ class MCPServerFactory:
         self._register_interceptors_list(mcp)
         self._maybe_register_flat_tool_handlers(mcp)
         self._enable_governed_tasks(mcp)
+        self._advertise_governance_extensions(mcp)
 
         self._mcp = mcp
         logger.info(
@@ -358,6 +359,35 @@ class MCPServerFactory:
         # ``experimental`` API is where task support is enabled.
         mcp._mcp_server.experimental.enable_tasks(store=store)
         logger.info("governed_tasks_enabled")
+
+    @staticmethod
+    def _advertise_governance_extensions(mcp: FastMCP) -> None:
+        """Advertise Hangar governance as SEP-2133 experimental extensions.
+
+        Injects the governance descriptor map (reverse-DNS keys) into the
+        server's advertised ``capabilities.experimental``. This is a PURE
+        DECLARATION of availability -- no behavior changes; every advertised
+        extension is off by default / opt-in. Only governance that is
+        actually enforced today is advertised (see ``governance_extensions``).
+        """
+        from mcp.server.lowlevel.server import NotificationOptions
+
+        from .governance_extensions import governance_experimental_capabilities
+
+        server = mcp._mcp_server
+        extensions = governance_experimental_capabilities()
+        original = server.create_initialization_options
+
+        def _with_governance(
+            notification_options: NotificationOptions | None = None,
+            experimental_capabilities: dict[str, dict[str, Any]] | None = None,
+        ) -> Any:
+            merged: dict[str, dict[str, Any]] = dict(extensions)
+            if experimental_capabilities:
+                merged.update(experimental_capabilities)
+            return original(notification_options, merged)
+
+        server.create_initialization_options = _with_governance  # type: ignore[method-assign]
 
     @staticmethod
     def _register_interceptors_list(mcp: FastMCP) -> None:
