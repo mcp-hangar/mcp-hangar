@@ -28,6 +28,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 ### Security
 
 - **security:** enforce per-tenant isolation -- require the token tenant claim in multi-tenant mode and derive the effective tenant solely from the validated token (never client-supplied), failing closed to prevent cross-tenant token use (#312)
+- **security:** opt-in strict per-tenant audience binding (RFC 8707) -- when enabled, a token's `aud` must match the claimed tenant's resource, rejecting cross-tenant replay at the token layer; off by default (#373)
 
 ### Fixed
 

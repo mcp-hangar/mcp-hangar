@@ -43,6 +43,15 @@ class OIDCIssuerConfig:
         require_tenant: Fail-closed multi-tenant gate. When True, tokens from this
             issuer that carry no (or an empty) ``tenant_claim`` are rejected instead
             of being admitted as a global/no-tenant principal. Default False.
+        strict_tenant_audience: Opt-in strict per-tenant audience binding (RFC 8707).
+            When True, the token's ``aud`` must equal the resource explicitly mapped
+            to the claimed tenant in ``tenant_audiences``; a token minted for tenant
+            A's resource is rejected when presented for any other tenant. Default
+            False (single-global-audience behavior is unchanged).
+        tenant_audiences: Explicit tenant -> expected audience/resource URI map used
+            when ``strict_tenant_audience`` is True. Explicit (auditable) mapping is
+            preferred over templating. A tenant absent from this map is rejected
+            fail-closed; the global ``audience`` is never a fallback in strict mode.
     """
 
     issuer: str = ""
@@ -61,6 +70,10 @@ class OIDCIssuerConfig:
 
     # Multi-tenant fail-closed gate
     require_tenant: bool = False
+
+    # Strict per-tenant audience binding (RFC 8707), opt-in
+    strict_tenant_audience: bool = False
+    tenant_audiences: dict[str, str] = field(default_factory=dict)
 
 
 @dataclass
@@ -90,6 +103,14 @@ class OIDCAuthConfig:
             token with no (or empty) tenant claim is rejected rather than admitted
             as a global/no-tenant principal, preventing cross-tenant token use.
             Default False so single-tenant / no-OIDC deployments are unaffected.
+        strict_tenant_audience: Opt-in strict per-tenant audience binding (RFC 8707),
+            inherited by per-issuer entries. When True, a token's ``aud`` must match
+            the resource mapped to its claimed tenant in ``tenant_audiences``,
+            rejecting cross-tenant token replay at the token layer. Default False.
+        tenant_audiences: Explicit tenant -> expected audience/resource URI map used
+            when ``strict_tenant_audience`` is True (inherited by per-issuer entries
+            unless overridden). Explicit and auditable; a tenant absent from the map
+            is rejected fail-closed with no fallback to the global ``audience``.
     """
 
     enabled: bool = False
@@ -110,6 +131,10 @@ class OIDCAuthConfig:
 
     # Multi-tenant fail-closed gate (inherited by per-issuer entries)
     require_tenant: bool = False
+
+    # Strict per-tenant audience binding (RFC 8707), opt-in (inherited per issuer)
+    strict_tenant_audience: bool = False
+    tenant_audiences: dict[str, str] = field(default_factory=dict)
 
     # Multi-issuer trust entries
     issuers: list[OIDCIssuerConfig] = field(default_factory=list)
@@ -136,6 +161,8 @@ class OIDCAuthConfig:
                     email_claim=self.email_claim,
                     max_token_lifetime_seconds=self.max_token_lifetime_seconds,
                     require_tenant=self.require_tenant,
+                    strict_tenant_audience=self.strict_tenant_audience,
+                    tenant_audiences=dict(self.tenant_audiences),
                 )
             ]
         return []
@@ -254,6 +281,22 @@ class AuthConfig:
     role_assignments: list[RoleAssignment] = field(default_factory=list)
 
 
+def _parse_tenant_audiences(raw: Any) -> dict[str, str]:
+    """Coerce a raw config value into a ``{tenant_id: audience}`` string map.
+
+    Non-dict inputs yield an empty map. Only entries whose key and value are both
+    non-empty strings are kept -- a malformed mapping must never silently admit a
+    tenant with an implicit/empty expected audience (fail-closed by omission).
+    """
+    if not isinstance(raw, dict):
+        return {}
+    result: dict[str, str] = {}
+    for key, value in raw.items():
+        if isinstance(key, str) and isinstance(value, str) and key.strip() and value.strip():
+            result[key] = value
+    return result
+
+
 def parse_auth_config(config_dict: dict[str, Any] | None) -> AuthConfig:
     """Parse auth configuration from dictionary.
 
@@ -303,6 +346,11 @@ def parse_auth_config(config_dict: dict[str, Any] | None) -> AuthConfig:
     default_lifetime = oidc_dict.get("max_token_lifetime_seconds", 3600)
     max_token_lifetime_seconds = int(os.environ.get("MCP_JWT_MAX_TOKEN_LIFETIME", str(default_lifetime)))
 
+    # Top-level strict per-tenant audience map (RFC 8707). Coerce to a plain
+    # {str: str} dict; malformed entries are dropped rather than trusted.
+    top_tenant_audiences = _parse_tenant_audiences(oidc_dict.get("tenant_audiences", {}))
+    top_strict_tenant_audience = oidc_dict.get("strict_tenant_audience", False)
+
     # Parse per-issuer trust entries. Omitted fields inherit the top-level
     # oidc.* values so per-issuer claim mappings fall back to the globals.
     issuers: list[OIDCIssuerConfig] = []
@@ -322,6 +370,12 @@ def parse_auth_config(config_dict: dict[str, Any] | None) -> AuthConfig:
                         "max_token_lifetime_seconds", max_token_lifetime_seconds
                     ),
                     require_tenant=issuer_dict.get("require_tenant", oidc_dict.get("require_tenant", False)),
+                    strict_tenant_audience=issuer_dict.get("strict_tenant_audience", top_strict_tenant_audience),
+                    tenant_audiences=(
+                        _parse_tenant_audiences(issuer_dict["tenant_audiences"])
+                        if "tenant_audiences" in issuer_dict
+                        else dict(top_tenant_audiences)
+                    ),
                 )
             )
 
@@ -338,6 +392,8 @@ def parse_auth_config(config_dict: dict[str, Any] | None) -> AuthConfig:
         max_token_lifetime_seconds=max_token_lifetime_seconds,
         resource_uri=oidc_dict.get("resource_uri", ""),
         require_tenant=oidc_dict.get("require_tenant", False),
+        strict_tenant_audience=top_strict_tenant_audience,
+        tenant_audiences=top_tenant_audiences,
         issuers=issuers,
     )
 
