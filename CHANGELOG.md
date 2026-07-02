@@ -16,6 +16,10 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - **core:** GovernedTaskStore binds each MCP task to its owning tenant/principal and fail-closed-authorizes tasks/* access, wiring the TaskOwnershipRegistry into the (experimental) task lifecycle (#319)
 - **core:** digest pinning now spans the task lifecycle -- a task inherits its tool's pinned digest and the result is re-verified against the tool's current digest, failing closed on drift (#320)
 
+### Changed
+
+- **core:** reject upstream MCP task handles with a clear error instead of passing through an untracked, unusable handle (relay-only; task results are not yet governed) (#302)
+
 ## [1.4.0](https://github.com/mcp-hangar/mcp-hangar/compare/v1.3.0...v1.4.0) (2026-06-29)
 
 

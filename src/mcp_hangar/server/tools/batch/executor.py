@@ -76,6 +76,25 @@ def _inbound_trace_meta(ctx: Any) -> dict[str, str]:
         return {}
 
 
+def _is_task_result(result: dict[str, Any]) -> bool:
+    """Return True if an upstream ``tools/call`` result is an MCP task handle.
+
+    An ``mcp.types.CreateTaskResult`` carries a ``task`` object (a ``Task`` with
+    ``taskId``/``status``) and NO ``content`` -- distinct from a normal
+    ``CallToolResult`` which carries ``content``. So the upstream result is a
+    task result iff it contains a ``task`` object bearing a task id or status.
+
+    Defensive: accepts an arbitrary dict, tolerates a non-dict ``task`` value or
+    a malformed shape, and only returns True for the task-handle shape.
+    """
+    if not isinstance(result, dict):
+        return False
+    task = result.get("task")
+    if not isinstance(task, dict):
+        return False
+    return any(key in task for key in ("taskId", "task_id", "id", "status"))
+
+
 _approval_loop_local = threading.local()
 _all_approval_loops: set[asyncio.AbstractEventLoop] = set()
 
@@ -950,6 +969,32 @@ class BatchExecutor:
                 result = self._invoke_with_retry(
                     call, cancel_event, effective_timeout, call_start, ctx, target_server_id
                 )
+
+        # Reject upstream MCP task handles (relay-only, ADR-008). Hangar does not
+        # yet relay or govern task results, so a passed-through CreateTaskResult
+        # would be an untracked, unusable handle: the client's follow-up
+        # tasks/get would hit GovernedTaskStore and get "Task not found". Turn
+        # that accidental fail-closed into a deliberate, clean rejection here --
+        # before the outcome is treated as a success (group health, return).
+        if result.success and isinstance(result.result, dict) and _is_task_result(result.result):
+            logger.warning(
+                "upstream_task_result_rejected",
+                mcp_server=call.mcp_server,
+                tool=call.tool,
+                call_id=call.call_id,
+            )
+            return CallResult(
+                index=call.index,
+                call_id=call.call_id,
+                success=False,
+                error=(
+                    "Upstream returned an MCP task handle; Hangar does not yet relay "
+                    "or govern task results (relay-only, ADR-008). The task is not "
+                    "tracked, so the handle is unusable."
+                ),
+                error_type="TaskRelayNotSupported",
+                elapsed_ms=result.elapsed_ms,
+            )
 
         # Feed the group health tracker so its circuit-breaker and member rotation
         # react to actual invoke outcomes (enables failover on the call path, #275).
