@@ -342,6 +342,8 @@ def bootstrap_auth(
                     email_claim=entry.email_claim,
                     max_token_lifetime=entry.max_token_lifetime_seconds,
                     require_tenant=entry.require_tenant,
+                    strict_tenant_audience=entry.strict_tenant_audience,
+                    tenant_audiences=dict(entry.tenant_audiences),
                 )
                 for entry in issuer_cfgs
             ]
@@ -366,6 +368,7 @@ def bootstrap_auth(
                 resource=resource_audience or None,
                 audience_bound_to_resource=bool(resource_audience),
                 require_tenant=any(c.require_tenant for c in oidc_configs),
+                strict_tenant_audience=any(c.strict_tenant_audience for c in oidc_configs),
             )
 
     # Initialize rate limiter for brute-force protection

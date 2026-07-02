@@ -4,7 +4,7 @@ Provides authenticator and token validator for JWT-based authentication
 with OIDC support (JWKS validation, standard claims).
 """
 
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from typing import Any, TYPE_CHECKING
 
 import structlog
@@ -41,6 +41,15 @@ class OIDCConfig:
             multi-tenant deployments so a token that does not name a tenant cannot
             act across tenant boundaries. Default False (single-tenant / no-OIDC
             deployments are unaffected).
+        strict_tenant_audience: Opt-in strict per-tenant audience binding (RFC 8707).
+            When True, after the tenant claim is extracted the token's ``aud`` must
+            equal the resource mapped to that tenant in ``tenant_audiences``; a
+            mismatch (or a tenant with no mapping) is rejected fail-closed. This
+            makes cross-tenant token replay structurally impossible at the token
+            layer, independent of the tenant claim. Default False.
+        tenant_audiences: Explicit ``{tenant_id: expected_audience}`` map consulted
+            only when ``strict_tenant_audience`` is True. The global ``audience`` is
+            never used as a fallback for an unmapped tenant.
     """
 
     issuer: str
@@ -59,6 +68,10 @@ class OIDCConfig:
 
     # Multi-tenant fail-closed gate
     require_tenant: bool = False
+
+    # Strict per-tenant audience binding (RFC 8707), opt-in
+    strict_tenant_audience: bool = False
+    tenant_audiences: dict[str, str] = field(default_factory=dict)
 
 
 class JWTAuthenticator(IAuthenticator):
@@ -239,6 +252,17 @@ class JWTAuthenticator(IAuthenticator):
                 auth_method="jwt",
             )
 
+        # Strict per-tenant audience binding (#373, RFC 8707): when enabled, the
+        # token's `aud` must equal the resource EXPLICITLY mapped to the claimed
+        # tenant. This binds each token to one tenant's resource at the token
+        # layer, so a token minted for tenant A's resource is rejected when its
+        # claim maps to a different resource (or to nothing) -- cross-tenant
+        # replay is structurally impossible, independent of the tenant claim.
+        # Fail-closed: an unmapped tenant is rejected; the global audience is
+        # never a fallback here.
+        if config.strict_tenant_audience:
+            self._enforce_tenant_audience(claims, tenant_id, subject, config)
+
         email = claims.get(config.email_claim)
 
         return Principal(
@@ -253,6 +277,60 @@ class JWTAuthenticator(IAuthenticator):
                 "expires_at": claims.get("exp"),
             },
         )
+
+    def _enforce_tenant_audience(
+        self,
+        claims: dict[str, Any],
+        tenant_id: Any,
+        subject: Any,
+        config: OIDCConfig,
+    ) -> None:
+        """Reject a token whose ``aud`` is not bound to its claimed tenant (#373).
+
+        Emits a ``jwt_cross_tenant_audience`` audit event and raises
+        :class:`InvalidCredentialsError` (fail-closed) when the claimed tenant has
+        no configured audience mapping, or when the token's ``aud`` does not
+        include that tenant's mapped resource.
+
+        Args:
+            claims: Validated JWT claims (source of the ``aud`` value).
+            tenant_id: The tenant extracted from the validated tenant claim.
+            subject: The token subject (for audit context only).
+            config: The issuer config carrying the tenant -> audience map.
+
+        Raises:
+            InvalidCredentialsError: If the tenant is unmapped or the ``aud`` does
+                not match the tenant's mapped resource.
+        """
+        expected = config.tenant_audiences.get(tenant_id) if isinstance(tenant_id, str) and tenant_id else None
+        if not expected:
+            # Unmapped tenant (or no tenant claim at all) -> reject fail-closed.
+            logger.warning(
+                "jwt_cross_tenant_audience",
+                reason="tenant_audience_unmapped",
+                tenant_id=tenant_id,
+                issuer=claims.get("iss"),
+                subject=subject,
+            )
+            raise InvalidCredentialsError(
+                message="No audience mapping for tenant",
+                auth_method="jwt",
+            )
+
+        token_aud = claims.get("aud")
+        auds = [token_aud] if isinstance(token_aud, str) else list(token_aud or [])
+        if expected not in auds:
+            logger.warning(
+                "jwt_cross_tenant_audience",
+                reason="cross_tenant_audience",
+                tenant_id=tenant_id,
+                issuer=claims.get("iss"),
+                subject=subject,
+            )
+            raise InvalidCredentialsError(
+                message="Token audience does not match tenant resource",
+                auth_method="jwt",
+            )
 
 
 class JWKSTokenValidator(ITokenValidator):
@@ -303,11 +381,21 @@ class JWKSTokenValidator(ITokenValidator):
             assert self._jwks_client is not None
             signing_key = self._jwks_client.get_signing_key_from_jwt(token)
 
+            # In strict per-tenant mode (#373) the token's `aud` names ONE tenant's
+            # resource, so signature-time verification must accept any configured
+            # tenant resource (PyJWT treats a list as "match at least one"). The
+            # precise tenant<->aud binding is then enforced per claim in
+            # JWTAuthenticator._enforce_tenant_audience. Otherwise verify against
+            # the single global audience exactly as before.
+            audience: str | list[str] = self._config.audience
+            if self._config.strict_tenant_audience and self._config.tenant_audiences:
+                audience = list(dict.fromkeys(self._config.tenant_audiences.values()))
+
             claims = jwt.decode(
                 token,
                 signing_key.key,
                 algorithms=["RS256", "ES256"],
-                audience=self._config.audience,
+                audience=audience,
                 issuer=self._config.issuer,
                 options={
                     "verify_exp": True,
