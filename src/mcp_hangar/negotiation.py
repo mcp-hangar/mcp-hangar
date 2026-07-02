@@ -41,7 +41,10 @@ class ProtocolNegotiation:
     """
 
     protocol_version: str = SUPPORTED_PROTOCOL_VERSION
-    capabilities: Mapping[str, Any] = field(default=_EMPTY_CAPABILITIES)
+    # default_factory (not default=): a bare mappingproxy default is rejected by
+    # Python 3.11's dataclass as a "mutable default"; the factory returns the
+    # shared frozen empty mapping, so this stays immutable and 3.11-safe.
+    capabilities: Mapping[str, Any] = field(default_factory=lambda: _EMPTY_CAPABILITIES)
 
 
 def read_protocol_negotiation(meta: Mapping[str, Any] | None) -> ProtocolNegotiation:
