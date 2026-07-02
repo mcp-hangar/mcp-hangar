@@ -14,6 +14,7 @@ from starlette.applications import Starlette
 from ..logging_config import get_logger
 from .asgi import create_auth_combined_app, create_combined_asgi_app, create_health_routes
 from .config import HangarFunctions, ServerConfig
+from .front_door_routing import FrontDoorRoutingMiddleware
 
 if TYPE_CHECKING:
     from ..domain.services.task_digest_guard import TaskDigestGuard
@@ -153,7 +154,14 @@ class MCPServerFactory:
         from ..server.api import create_api_router
 
         mcp = self.create_server()
-        mcp_app = mcp.streamable_http_app()
+        mcp_app: Any = mcp.streamable_http_app()
+
+        # SEP-2243: route the stateless front door on Mcp-Method / Mcp-Name
+        # headers (with header<->body consistency enforced) instead of session
+        # affinity. Pre-SEP-2243 requests without these headers pass through
+        # unchanged (content-based routing). Identity, tenant, per-tenant canary
+        # routing, and the audit session_id are untouched by this wrapper.
+        mcp_app = FrontDoorRoutingMiddleware(mcp_app, mcp_path=self._config.streamable_http_path)
 
         # Log if auth is configured
         if self._config.auth_enabled and self._auth_components:

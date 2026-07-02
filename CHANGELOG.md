@@ -19,6 +19,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Changed
 
+- **core:** the stateless front door routes on `Mcp-Method`/`Mcp-Name` headers instead of session affinity (SEP-2243/SEP-2567); per-tenant canary routing and audit correlation are unchanged (#336)
 - **core:** reject upstream MCP task handles with a clear error instead of passing through an untracked, unusable handle (relay-only; task results are not yet governed) (#302)
 
 ## [1.4.0](https://github.com/mcp-hangar/mcp-hangar/compare/v1.3.0...v1.4.0) (2026-06-29)
