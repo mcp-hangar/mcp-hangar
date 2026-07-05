@@ -120,6 +120,18 @@ class TestJWTAuthenticatorSupports:
         request = _make_auth_request({"Authorization": "Bearer eyJ..."})
         assert authn.supports(request) is True
 
+    def test_supports_lowercase_authorization_header(self):
+        # HTTP transports normalise header keys to lowercase; a real Bearer token
+        # must still be recognised (regression for #311). See jwt_authenticator.supports.
+        from mcp_hangar.auth.infrastructure.jwt_authenticator import JWTAuthenticator, OIDCConfig
+
+        config = OIDCConfig(issuer="https://x", audience="y")
+        validator = Mock(spec=ITokenValidator)
+        authn = JWTAuthenticator(config, validator)
+
+        request = _make_auth_request({"authorization": "Bearer eyJ..."})
+        assert authn.supports(request) is True
+
     def test_does_not_support_basic_auth(self):
         from mcp_hangar.auth.infrastructure.jwt_authenticator import JWTAuthenticator, OIDCConfig
 

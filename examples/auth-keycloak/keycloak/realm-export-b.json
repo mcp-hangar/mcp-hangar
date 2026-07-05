@@ -1,5 +1,5 @@
 {
-  "realm": "mcp-hangar",
+  "realm": "mcp-hangar-b",
   "enabled": true,
   "sslRequired": "none",
   "registrationAllowed": false,
@@ -49,7 +49,7 @@
   "users": [
     {
       "username": "admin",
-      "email": "admin@example.com",
+      "email": "admin@example.org",
       "emailVerified": true,
       "enabled": true,
       "firstName": "Admin",
@@ -64,12 +64,12 @@
       "realmRoles": ["admin"],
       "groups": ["/platform-engineering"],
       "attributes": {
-        "tenant_id": ["acme"]
+        "tenant_id": ["umbrella"]
       }
     },
     {
       "username": "developer",
-      "email": "developer@example.com",
+      "email": "developer@example.org",
       "emailVerified": true,
       "enabled": true,
       "firstName": "Dev",
@@ -84,12 +84,12 @@
       "realmRoles": ["developer"],
       "groups": ["/developers"],
       "attributes": {
-        "tenant_id": ["acme"]
+        "tenant_id": ["umbrella"]
       }
     },
     {
       "username": "viewer",
-      "email": "viewer@example.com",
+      "email": "viewer@example.org",
       "emailVerified": true,
       "enabled": true,
       "firstName": "View",
@@ -104,7 +104,7 @@
       "realmRoles": ["viewer"],
       "groups": ["/viewers"],
       "attributes": {
-        "tenant_id": ["globex"]
+        "tenant_id": ["initech"]
       }
     }
   ],

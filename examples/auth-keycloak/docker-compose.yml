@@ -16,7 +16,10 @@ services:
     ports:
       - "8080:8080"
     volumes:
-      - ./keycloak/realm-export.json:/opt/keycloak/data/import/realm-export.json:ro
+      # Mount the whole import dir so ALL realm exports are imported
+      # (--import-realm imports every *.json in this directory): realm
+      # `mcp-hangar` (issuer A) and `mcp-hangar-b` (issuer B) for multi-issuer tests.
+      - ./keycloak:/opt/keycloak/data/import:ro
     healthcheck:
       test: ["CMD-SHELL", "exec 3<>/dev/tcp/127.0.0.1/8080"]
       interval: 10s
