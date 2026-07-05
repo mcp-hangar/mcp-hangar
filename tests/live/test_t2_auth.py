@@ -26,6 +26,7 @@ from __future__ import annotations
 
 from collections.abc import Iterator
 from pathlib import Path
+import json
 import sys
 import time
 
@@ -305,3 +306,101 @@ def test_rbac_denies_unprivileged_and_allows_privileged(hangar_rbac: str, keyclo
         timeout=10.0,
     )
     assert allowed.status_code == 201, allowed.text
+
+
+# --- tool:invoke on the MCP hangar_call path (#385) ---------------------------
+#
+# The REST test above guards a REST endpoint. This one closes the remaining
+# fail-open gap: the MCP ``hangar_call`` tool-invoke path must enforce
+# ``tool:invoke`` too. It drives the SAME hangar over the REAL MCP surface
+# (streamable-HTTP ``/mcp``) with real Keycloak tokens, exactly as a client
+# would, and asserts the batch's per-call outcome:
+#   * viewer  (group:viewers  -> role viewer,    NO tool:invoke) -> DENIED
+#   * developer(group:developers-> role developer, HAS tool:invoke) -> ALLOWED
+# The token authenticates in both cases (valid signature, trusted issuer, tenant
+# present), so only the assigned role decides whether the tool call is invoked.
+
+
+def _invoke_hangar_call(base_url: str, token: str, calls: list[dict]) -> object:
+    """Call the ``hangar_call`` tool over streamable-HTTP with a Bearer token."""
+    import asyncio
+
+    from mcp import ClientSession
+    from mcp.client.streamable_http import streamablehttp_client
+
+    headers = {"Authorization": f"Bearer {token}"}
+
+    async def _run() -> object:
+        async with streamablehttp_client(f"{base_url}/mcp", headers=headers) as (read, write, _):
+            async with ClientSession(read, write) as session:
+                await session.initialize()
+                return await session.call_tool("hangar_call", {"calls": calls})
+
+    return asyncio.run(_run())
+
+
+def _batch_from_result(result: object) -> dict:
+    """Extract the ``hangar_call`` batch dict (has a ``results`` list) from a CallToolResult."""
+    structured = getattr(result, "structuredContent", None)
+    if isinstance(structured, dict):
+        if "results" in structured:
+            return structured
+        inner = structured.get("result")
+        if isinstance(inner, dict) and "results" in inner:
+            return inner
+    for block in getattr(result, "content", None) or []:
+        text = getattr(block, "text", None)
+        if not text:
+            continue
+        try:
+            data = json.loads(text)
+        except (ValueError, TypeError):
+            continue
+        if isinstance(data, dict) and "results" in data:
+            return data
+    raise AssertionError(f"could not parse hangar_call batch from result: {result!r}")
+
+
+def test_hangar_call_enforces_tool_invoke_viewer_denied_developer_allowed(hangar_rbac: str, keycloak_token) -> None:
+    """Claim: the MCP hangar_call path enforces tool:invoke (viewer denied, developer allowed).
+
+    ONE tool invocation (``math.add`` via ``hangar_call`` over ``/mcp``), TWO real
+    realm-A tokens minted by the live Keycloak:
+
+    * ``viewer`` -> ``group:viewers`` -> role ``viewer`` (no ``tool:invoke``): the
+      per-call result is DENIED fail-closed (``success=false``,
+      ``error_type="AuthorizationDenied"``) and the tool is NOT executed.
+    * ``developer`` -> ``group:developers`` -> role ``developer`` (has
+      ``tool:invoke``): the call is ALLOWED by the authorization gate and passes
+      through to the backend invoke path (it is never an ``AuthorizationDenied``).
+
+    Both tokens authenticate (valid signature, trusted issuer, tenant present),
+    so only the assigned role changes the outcome -- proving enforcement is
+    role-driven on the tool-invoke path, not a property of the token. The
+    developer arm asserts the authorization decision only (not the backend's
+    execution result), so the security invariant does not hinge on the ``math``
+    subprocess successfully cold-starting in every environment.
+    """
+    calls = [{"mcp_server": "math", "tool": "add", "arguments": {"a": 1, "b": 2}}]
+
+    # Negative control: a read-only viewer must be denied the tool invocation.
+    viewer = keycloak_token(realm="mcp-hangar", username="viewer", password="view123")
+    viewer_batch = _batch_from_result(_invoke_hangar_call(hangar_rbac, viewer, calls))
+    viewer_call = viewer_batch["results"][0]
+    assert viewer_call["success"] is False, viewer_batch
+    assert viewer_call["error_type"] == "AuthorizationDenied", viewer_batch
+
+    # Positive control: a developer holding tool:invoke is ALLOWED past the authz
+    # gate. Assert the authorization decision (not the backend's execution
+    # outcome): the call either succeeds or fails for a non-authorization,
+    # backend-execution reason -- it is never denied by authorization. This keeps
+    # the security claim robust to the ``math`` subprocess failing to start in a
+    # constrained CI/sandbox.
+    developer = keycloak_token(realm="mcp-hangar", username="developer", password="dev123")
+    dev_batch = _batch_from_result(_invoke_hangar_call(hangar_rbac, developer, calls))
+    dev_call = dev_batch["results"][0]
+    assert dev_call["error_type"] not in {"AuthorizationDenied", "MissingCredentialsError"}, dev_batch
+    if dev_call["success"] is not True:
+        # Reached the backend invoke path (e.g. cold-start), proving the authz
+        # gate let the developer through -- not an authorization rejection.
+        assert dev_call["result"] == {"result": 3.0} or dev_call["error_type"] not in (None, ""), dev_batch
