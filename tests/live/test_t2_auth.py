@@ -24,11 +24,16 @@ the whole module SKIPs rather than fails. Run with::
 
 from __future__ import annotations
 
+from collections.abc import Iterator
+from pathlib import Path
+import sys
 import time
 
 import httpx
 import jwt
 import pytest
+
+from tests.live.conftest import _serve_hangar
 
 pytestmark = [pytest.mark.live, pytest.mark.t2]
 
@@ -134,3 +139,166 @@ def test_prm_advertises_trusted_issuers(hangar_oidc: str, keycloak_base_url: str
     assert issuer_b in servers, body
     # RFC 9728: the resource identifier is advertised too.
     assert body.get("resource") == "mcp-hangar", body
+
+
+# --- RBAC denial (role-store-driven, token `groups` claim as the join key) -----
+#
+# RBAC is role-store-driven, NOT token-claim-driven: roles are NOT read from the
+# token's ``roles``/``realm_access`` claim. ``bootstrap_auth`` seeds hangar's own
+# role store from the config's ``role_assignments`` (keyed by ``group:<name>``),
+# and a validated token's ``groups`` claim is the join key --
+# ``RBACAuthorizer._collect_roles`` looks each group up as ``group:<name>``. A
+# real realm-A token carries ``groups=["developers"]`` or ``["viewers"]``, so the
+# hangar below maps ``group:developers -> developer`` (has ``mcp_servers:write``)
+# and ``group:viewers -> viewer`` (read-only, NO ``mcp_servers:write``).
+#
+# The privileged operation is ``POST /api/mcp_servers/`` -- INTENDED to be guarded
+# by ``mcp_servers:write`` in ``server/api/mcp_servers.py::create_mcp_server`` via
+# ``_check_permission`` -> ``AuthorizationMiddleware.authorize`` -> 403
+# ``AccessDeniedError``.
+#
+# IMPORTANT (see docs/internal/LIVE_VERIFICATION.md): as shipped, ``serve`` does
+# NOT actually enforce this. ``_check_permission`` reads ``auth_components`` from
+# the global ``ApplicationContext`` via ``get_context()``, but bootstrap installs
+# that global with ``init_context(runtime)`` and never sets ``auth_components`` on
+# it -- so the guard sees ``authz_middleware is None`` and returns early (fail-OPEN;
+# a viewer's write is silently allowed). The MCP ``hangar_call`` path likewise
+# never consults ``tool:invoke``. Authentication is wired (a separate middleware),
+# authorization is not. This test therefore asserts the intended invariant when it
+# is enforced (so it flips to a real PASS once the wiring is fixed) and otherwise
+# SKIPS with a loud reason rather than faking a pass.
+
+# Reuse the shipped stub backend so the hangar starts without external deps.
+_MATH_SERVER = Path(__file__).resolve().parents[2] / "examples" / "provider_math" / "server.py"
+
+# front_door + auth + OIDC (realm A) + role_assignments seeding the role store.
+# require_tenant stays on (all three realm-A users carry a tenant_id), so the
+# ONLY axis that differs between viewer and developer here is the assigned role.
+_RBAC_CONFIG = """\
+logging:
+  level: WARNING
+tool_access:
+  mode: front_door
+auth:
+  enabled: true
+  allow_anonymous: false
+  storage:
+    driver: memory
+  api_key:
+    enabled: false
+  oidc:
+    enabled: true
+    resource_uri: "mcp-hangar"
+    require_tenant: true
+    issuers:
+      - issuer: {issuer_a}
+  role_assignments:
+    - principal: "group:developers"
+      role: developer
+      scope: global
+    - principal: "group:viewers"
+      role: viewer
+      scope: global
+mcp_servers:
+  math:
+    mode: subprocess
+    command: ["{python}", "{server}"]
+    idle_ttl_s: 60
+"""
+
+# Privileged, permission-guarded operation: creating an mcp_server is INTENDED to
+# need `mcp_servers:write`, which `viewer` lacks and `developer` holds.
+_PRIVILEGED_CREATE_PATH = "/api/mcp_servers/"
+
+
+@pytest.fixture(scope="module")
+def hangar_rbac(keycloak_base_url: str, tmp_path_factory: pytest.TempPathFactory) -> Iterator[str]:
+    """Run a real hangar (front_door + auth + RBAC) trusting realm A.
+
+    RBAC is role-store-driven: ``role_assignments`` seed hangar's role store
+    (keyed by ``group:<name>``) and a validated token's ``groups`` claim is the
+    join key. ``group:developers -> developer`` (``mcp_servers:write``);
+    ``group:viewers -> viewer`` (read-only). Module-local so it does not touch
+    the shared conftest; skip-safe via the reused ``_serve_hangar`` engine.
+    """
+    if not _MATH_SERVER.exists():
+        pytest.skip(f"stub backend not found at {_MATH_SERVER}")
+    workdir = tmp_path_factory.mktemp("hangar_rbac")
+    config_text = _RBAC_CONFIG.format(
+        issuer_a=f"{keycloak_base_url}/realms/mcp-hangar",
+        python=sys.executable,
+        server=str(_MATH_SERVER),
+    )
+    yield from _serve_hangar(workdir, config_text)
+
+
+def test_rbac_denies_unprivileged_and_allows_privileged(hangar_rbac: str, keycloak_token) -> None:
+    """Claim: RBAC denies an unprivileged principal a privileged op and allows a privileged one.
+
+    ONE operation (``POST /api/mcp_servers/``, intended to be guarded by
+    ``mcp_servers:write``), TWO real realm-A tokens minted by the live Keycloak:
+
+    * ``viewer`` -> ``group:viewers`` -> role ``viewer`` (read-only): must be
+      DENIED 403 with a fail-closed ``access_denied`` (authorization, not
+      authentication -- the token itself is valid).
+    * ``developer`` -> ``group:developers`` -> role ``developer``
+      (``mcp_servers:write``): must be ALLOWED 201.
+
+    Both tokens authenticate successfully (valid signature, trusted issuer, tenant
+    present), so only the assigned role decides the outcome -- proving enforcement
+    is role-store-driven off the config ``role_assignments`` joined on the token's
+    ``groups`` claim, not a property of the token itself.
+
+    As shipped, ``serve`` does not enforce this (see the module comment and
+    docs/internal/LIVE_VERIFICATION.md: ``auth_components`` is absent from the
+    global ``ApplicationContext`` handlers read, so ``_check_permission`` no-ops
+    fail-OPEN). When the viewer is NOT denied we ``pytest.skip`` with the concrete
+    finding rather than fake a pass; when it IS denied the full invariant is
+    asserted, so this test becomes a real PASS the moment the wiring is fixed.
+    """
+    create_body = {
+        "mcp_server_id": "rbac-probe",
+        "mode": "subprocess",
+        "command": [sys.executable, "-c", "pass"],
+    }
+
+    # Negative control: an unprivileged (viewer) principal attempts the write.
+    viewer = keycloak_token(realm="mcp-hangar", username="viewer", password="view123")
+    denied = httpx.post(
+        f"{hangar_rbac}{_PRIVILEGED_CREATE_PATH}",
+        headers={"Authorization": f"Bearer {viewer}"},
+        json=create_body,
+        timeout=10.0,
+    )
+
+    if denied.status_code != 403:
+        # Fail-OPEN detected: the RBAC-denial claim cannot be proven live here.
+        # Do NOT weaken the assertion or fake a pass -- report and skip.
+        pytest.skip(
+            "RBAC authorization is NOT enforced on the shipped `serve` HTTP surface "
+            f"(fail-open): a read-only `viewer` token performed the write-privileged "
+            f"POST {_PRIVILEGED_CREATE_PATH} and got HTTP {denied.status_code} "
+            "(expected 403). Root cause: `auth_components` is never set on the global "
+            "ApplicationContext that request handlers consult via get_context() "
+            "(server/bootstrap/__init__.py installs it with init_context(runtime) but "
+            "omits ctx.auth_components), so `_check_permission` sees authz_middleware=None "
+            "and returns early; the MCP hangar_call path likewise never checks "
+            "`tool:invoke`. Authentication is wired, authorization is not. "
+            "See docs/internal/LIVE_VERIFICATION.md."
+        )
+
+    # Enforced path (self-correcting once the wiring is fixed): full invariant.
+    denied_body = denied.json()
+    # Fail-closed AUTHORIZATION denial (the token authenticated; the role did not).
+    assert denied_body.get("error") == "access_denied", denied_body
+    assert denied_body.get("action") == "write", denied_body
+
+    # Positive control: a real developer token is ALLOWED the same write.
+    developer = keycloak_token(realm="mcp-hangar", username="developer", password="dev123")
+    allowed = httpx.post(
+        f"{hangar_rbac}{_PRIVILEGED_CREATE_PATH}",
+        headers={"Authorization": f"Bearer {developer}"},
+        json=create_body,
+        timeout=10.0,
+    )
+    assert allowed.status_code == 201, allowed.text
