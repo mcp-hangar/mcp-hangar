@@ -290,8 +290,11 @@ def test_rbac_denies_unprivileged_and_allows_privileged(hangar_rbac: str, keyclo
     # Enforced path (self-correcting once the wiring is fixed): full invariant.
     denied_body = denied.json()
     # Fail-closed AUTHORIZATION denial (the token authenticated; the role did not).
-    assert denied_body.get("error") == "access_denied", denied_body
-    assert denied_body.get("action") == "write", denied_body
+    # The error is a structured object: {"error": {"code": "AccessDeniedError",
+    # "details": {"action": ...}, "message": ...}}.
+    err = denied_body.get("error")
+    assert isinstance(err, dict) and err.get("code") == "AccessDeniedError", denied_body
+    assert err.get("details", {}).get("action") == "write", denied_body
 
     # Positive control: a real developer token is ALLOWED the same write.
     developer = keycloak_token(realm="mcp-hangar", username="developer", password="dev123")

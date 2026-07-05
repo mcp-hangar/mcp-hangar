@@ -71,12 +71,14 @@ live) · 🔴 no coverage at all · ⬜ live test not yet written.
 | RFC 8707 audience binding: token without matching `aud` rejected (#274) | HTTP token | rejection | `tests/live/test_t2_auth.py::test_aud_mismatch_is_rejected` | ✅ |
 | PRM advertises all trusted issuers; 401 carries `WWW-Authenticate: resource_metadata` (RFC 9728) | `GET /.well-known/oauth-protected-resource` | `authorization_servers` list, header | `tests/live/test_t2_auth.py::test_prm_advertises_trusted_issuers` (+ `WWW-Authenticate` asserted in deny/untrusted tests) | ✅ |
 | API-key rotation + grace; old key honored then rejected | REST/MCP with keys | accept→grace→reject | unit only | 🔴 |
-| RBAC: a role lacking a permission is denied on a real call | HTTP `POST /api/mcp_servers/` (write) / MCP `hangar_call` | 403 for `viewer`, 2xx for `developer` | `tests/live/test_t2_auth.py::test_rbac_denies_unprivileged_and_allows_privileged` (live probe; **currently SKIPS** — see note) | 🔴 |
+| RBAC: a role lacking a permission is denied on a real call | HTTP `POST /api/mcp_servers/` (write) / MCP `hangar_call` | 403 for `viewer`, 2xx for `developer` | `tests/live/test_t2_auth.py::test_rbac_denies_unprivileged_and_allows_privileged` (live probe; passes with the #386 wiring fix) | ✅ |
 
-> **RBAC live finding (fail-OPEN).** The RBAC-denial row stays 🔴 because the claim
-> could NOT be proven live: on the shipped `serve` HTTP surface a read-only `viewer`
+> **RBAC live finding (fail-OPEN → FIXED in #386).** This probe originally surfaced a
+> fail-OPEN gap: on the shipped `serve` HTTP surface a read-only `viewer`
 > OIDC token performed a write-privileged `POST /api/mcp_servers/` and received `201`
-> (identical to `developer`), i.e. authorization is not enforced. RBAC is
+> (identical to `developer`), i.e. authorization was not enforced. Root cause below;
+> fixed by wiring `auth_components` onto the context in #386, after which the probe
+> passes live (`viewer` → 403 `AccessDeniedError`, `developer` → 201). RBAC is
 > role-store-driven (roles seeded from config `role_assignments`, keyed by
 > `group:<name>` and joined on the token's `groups` claim; NOT taken from the token's
 > `roles` claim), and the role store is populated correctly — but the per-endpoint
