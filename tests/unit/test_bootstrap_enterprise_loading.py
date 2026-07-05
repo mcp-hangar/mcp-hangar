@@ -2,10 +2,8 @@
 
 # pyright: reportAny=false, reportMissingParameterType=false, reportPrivateLocalImportUsage=false, reportUnannotatedClassAttribute=false, reportUnknownArgumentType=false, reportUnknownLambdaType=false, reportUnknownMemberType=false, reportUnknownParameterType=false, reportUnknownVariableType=false, reportUnusedCallResult=false
 
-import logging
 from unittest.mock import MagicMock
 
-import pytest
 
 
 class _FakeEntryPoint:
@@ -156,3 +154,42 @@ class TestBootstrapLicenseKeyDeprecation:
             assert len(w) == 1
             assert issubclass(w[0].category, DeprecationWarning)
             assert "deprecated" in str(w[0].message).lower()
+
+
+class TestAuthComponentsWiredIntoContext:
+    """Regression for the fail-open RBAC bug: bootstrap must wire auth_components
+    onto the global ApplicationContext, else _check_permission reads None and
+    fail-OPENs (returns early), disabling RBAC enforcement entirely."""
+
+    def test_bootstrap_wires_auth_components_onto_context(self, monkeypatch):
+        import sys
+        from unittest.mock import MagicMock
+
+        from mcp_hangar.server.bootstrap import bootstrap
+        from mcp_hangar.server.bootstrap.enterprise import EnterpriseComponents
+        from mcp_hangar.server.context import get_context, reset_context
+
+        sentinel_authz = object()
+        auth_components = MagicMock()
+        auth_components.authz_middleware = sentinel_authz
+        auth_components.enabled = True
+
+        # `mcp_hangar.server.bootstrap` (attribute) is shadowed by the re-exported
+        # bootstrap function; patch the real package module via sys.modules.
+        bs_mod = sys.modules["mcp_hangar.server.bootstrap"]
+        monkeypatch.setattr(
+            bs_mod,
+            "load_enterprise_modules",
+            lambda *a, **k: EnterpriseComponents(auth_components=auth_components),
+        )
+
+        reset_context()
+        try:
+            bootstrap(config_dict={})
+            ctx = get_context()
+            # The wiring under test: the API permission guard reaches
+            # authz_middleware only via ctx.auth_components.
+            assert ctx.auth_components is auth_components
+            assert getattr(ctx.auth_components, "authz_middleware", None) is sentinel_authz
+        finally:
+            reset_context()

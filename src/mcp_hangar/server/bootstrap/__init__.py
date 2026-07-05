@@ -270,6 +270,14 @@ def bootstrap(
 
     init_auth_cqrs(runtime, auth_components)
 
+    # Wire auth components onto the global application context so the API
+    # permission guard (`_check_permission`, server/api/mcp_servers.py) can reach
+    # the authz middleware. `init_context()` ran earlier with no auth_components,
+    # so without this the guard reads `auth_components=None`, finds
+    # `authz_middleware is None`, and fail-OPENs (returns early) -- disabling RBAC
+    # enforcement entirely (any authenticated principal passes every check). (SECURITY)
+    get_context().auth_components = auth_components
+
     # Initialize retry configuration
     init_retry_config(full_config)
 
