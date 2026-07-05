@@ -32,6 +32,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - **security:** wire auth components onto the application context at bootstrap so the API permission guard actually enforces RBAC -- previously `auth_components` was never set on the global context, so `_check_permission` read `None`, found no authz middleware, and fail-OPENed (returned early), letting any authenticated principal pass every check regardless of role
 - **security:** bridge the authenticated caller identity into the tool-call path over streamable-HTTP (hangar_call now reads the principal from the request context), so per-tenant enforcement (canary routing, per-tenant tool withdrawal) is no longer silently bypassed with a null tenant over HTTP (#384)
 - **security:** enforce `tool:invoke` authorization on the `hangar_call` tool path -- a principal lacking the permission is denied fail-closed (previously RBAC covered only the REST API, so any caller could invoke tools regardless of role) (#385)
+- **security:** apply the per-tenant tool-access policy to the `hangar_tools`/`hangar_details` listing path -- the listing helpers filtered on the server-level policy only (no `member_id`), so a tool denied for a tenant was rejected on `hangar_call` yet still advertised in the listing (fail-OPEN on visibility); the listing now bridges the caller identity from the request principal and keys the resolver on the caller tenant, so listing and invocation agree
 
 ### Fixed
 
