@@ -41,7 +41,7 @@ live) · 🔴 no coverage at all · ⬜ live test not yet written.
 | `hangar_call` runs a batch in parallel and returns each result | MCP `hangar_call` | result payloads, wall-clock < sum | internal only (`test_trace_propagation_e2e`, `test_batch_invoke`) | 🟡 |
 | Management tools return correct shapes (`hangar_list`/`details`/`health`/`start`/`stop`/`load`/`warm`/`status`/`tools`/`metrics`/`reload_config`/`quarantine`/`sources`) | MCP tools | tool result JSON | unit only | 🟡 |
 | Lifecycle COLD→READY→DEGRADED→DEAD + single-flight cold start | MCP `hangar_load`/`hangar_call` | state via `hangar_status` | internal (`test_e2e_mcp_flow`) | 🟡 |
-| Tool-access policy (glob allow/deny, 3-level merge) blocks a denied tool on a real call **and** hides it from `hangar_tools` | MCP `hangar_call`/`hangar_tools` | rejection + filtered listing | internal resolver (`test_tool_filtering`) | 🟡 |
+| Tool-access policy (glob allow/deny, 3-level merge) blocks a denied tool on a real call **and** hides it from `hangar_tools` | MCP `hangar_call`/`hangar_tools` | rejection + filtered listing | `tests/live/test_t0_tool_access.py` (per-tenant deny over `/mcp` with an `X-API-Key` tenant: denied tool `success=False` on `hangar_call` AND absent from `hangar_tools`, allowed tool callable + listed). Fixed a fail-OPEN on the listing half — see note below. | ✅ |
 | Per-tenant withdrawal rejects a withdrawn tool on the call path; config-reload restores it | MCP `hangar_call` + reload | `CallResult(success=False)` then success | `tests/live/test_t0_withdrawal.py` (live: a tool withdrawn for tenant A is rejected on A's `hangar_call` with `ToolWithdrawnError`, while tenant B and A's other tools succeed -- proving the executor's per-tenant withdrawal check AND that the caller identity bridged over streamable-HTTP by #387 reaches it). Config-reload *restore* remains unit-only (`test_config_withdrawal::test_reload_clears_then_reapplies_withdrawals`). | ✅ |
 | Digest pinning blocks a drifted tool and emits `DigestMismatchEvent` (#276/#280) | MCP `hangar_call` | rejection + event | `tests/live/test_t0_digest.py` (real API-key tenant + `provider_identity` stub: a tool pinned to a stale digest is rejected `CallResult(success=False, error_type="ToolDigestMismatchError")` and never dispatched; a matching pin is allowed). Enforcement confirmed **already fail-closed** over HTTP -- per-tenant identity (via `X-API-Key`) reaches the executor and the pin fires. `DigestMismatchEvent` emission on that same branch is unit-covered (`tests/unit/test_digest_pinning_executor.py`); it is internal, not observable over HTTP. | ✅ |
 | Flat per-tenant re-export surfaces tools under flat names | MCP `tools/list` | re-exported names | unit only | 🔴 |
@@ -50,6 +50,22 @@ live) · 🔴 no coverage at all · ⬜ live test not yet written.
 | Hot reload via SIGHUP / `hangar_reload_config` takes effect | signal + MCP tool | reloaded state | file-watch real, effect mocked | 🟡 |
 | OTEL trace context (W3C) propagates Agent→hangar→backend | MCP `hangar_call` + collector | correlated spans | mocked ctx | 🟡 |
 | Audit log / CEF emitted on a real invocation | MCP `hangar_call` | CEF line in sink | exporter unit-ish | 🟡 |
+
+> **Tool-access live finding (fail-OPEN on listing → FIXED).** Driving a per-tenant
+> `deny_list` over the real `/mcp` surface surfaced a split-brain: the invoke path
+> (`hangar_call` → `BatchExecutor`) correctly rejected the denied tool
+> (`ToolAccessDeniedError`) because it keys the resolver on the caller
+> `member_id=<tenant>`, but `hangar_tools` still LISTED it. Root cause: the listing
+> helpers (`_get_tools_for_mcp_server`, `hangar_details`) called
+> `resolver.filter_tools(...)` with NO `member_id`, so only the server-level policy
+> applied and the per-tenant deny was ignored — a fail-OPEN on the visibility half
+> of the claim (denied on call, yet advertised). The tenant was unavailable to the
+> listing thread for the same reason as the group canary gap: over streamable-HTTP
+> the ASGI auth layer's `identity_context_var` is not propagated into FastMCP's
+> per-session tool task. Fixed by reading the caller tenant in the listing path
+> (`server/tools/mcp_server.py::_caller_tenant_id`, bridging the request's
+> authenticated principal exactly as `hangar_call` does) and passing `member_id` to
+> the resolver, so listing and invocation now agree.
 
 ### T1 — multi-backend / groups
 

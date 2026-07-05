@@ -14,12 +14,50 @@ from mcp.server.fastmcp import FastMCP
 from ...application.commands import StartMcpServerCommand
 from ...application.mcp.tooling import mcp_tool_wrapper
 from ...application.queries import GetMcpServerQuery, GetMcpServerToolsQuery
+from ...context import get_identity_context
 from ...domain.services import get_tool_access_resolver
 from ...metrics import TOOLS_FILTERED_TOTAL
 from ..context import get_context
 from ..validation import check_rate_limit, tool_error_hook, tool_error_mapper, validate_mcp_server_id_input
 
 logger = logging.getLogger(__name__)
+
+
+def _caller_tenant_id() -> str | None:
+    """Return the calling request's tenant_id, or None when no identity is bound.
+
+    The tenant is the key the tool-access resolver merges a standalone
+    server→member policy on. Listing MUST read it so a tool DENIED for this tenant
+    is HIDDEN here too -- matching the invoke path (hangar_call → BatchExecutor),
+    which keys the same policy on member_id=<caller tenant>. Without it the listing
+    fails open: the denied tool is rejected on invoke yet stays visible here.
+
+    Resolution mirrors the hangar_call bridge (server/tools/batch/__init__.py):
+    over streamable-HTTP the ASGI auth wrapper's ``identity_context_var`` is NOT
+    propagated into the per-session tool task, so it is usually None here. The
+    FastMCP request context IS reachable (the SDK sets ``request_ctx`` in the same
+    task that runs this tool), and the auth middleware stored the authenticated
+    principal on ``request.state.auth``. Prefer a bound identity context; else
+    bridge the principal to its tenant. Fully fault-barriered: stdio / no-request /
+    unauthenticated paths yield None (server-level policy only), never an error.
+    """
+    identity = get_identity_context()
+    if identity is not None:
+        return identity.caller.tenant_id
+    try:
+        from mcp.server.lowlevel.server import request_ctx
+
+        request_context = request_ctx.get(None)
+        auth_state = getattr(getattr(request_context, "request", None), "state", None)
+        principal = getattr(getattr(auth_state, "auth", None), "principal", None)
+        if principal is not None:
+            from ...fastmcp_server.asgi import _principal_to_identity_context
+
+            return _principal_to_identity_context(principal).caller.tenant_id
+    except Exception:  # noqa: BLE001 -- identity bridging must never break tool listing
+        return None
+    return None
+
 
 # =============================================================================
 # Helper Functions
@@ -74,12 +112,13 @@ def _get_tools_for_mcp_server(mcp_server: str) -> dict[str, Any]:
     mcp_server_obj = ctx.get_mcp_server(mcp_server)
     assert mcp_server_obj is not None, f"Server {mcp_server} not found"
     resolver = get_tool_access_resolver()
+    tenant_id = _caller_tenant_id()
 
     # If mcp_server has predefined tools, return them without starting
     if mcp_server_obj.has_tools:
         tools = mcp_server_obj.tools.list_tools()
-        # Apply tool access filtering
-        filtered_tools = resolver.filter_tools(mcp_server_id=mcp_server, tools=tools)
+        # Apply tool access filtering (server→member merge for the caller tenant)
+        filtered_tools = resolver.filter_tools(mcp_server_id=mcp_server, tools=tools, member_id=tenant_id)
 
         if len(filtered_tools) < len(tools):
             filtered_count = len(tools) - len(filtered_tools)
@@ -104,8 +143,8 @@ def _get_tools_for_mcp_server(mcp_server: str) -> dict[str, Any]:
     query = GetMcpServerToolsQuery(mcp_server_id=mcp_server)
     tools = ctx.query_bus.execute(query)
 
-    # Apply tool access filtering
-    filtered_tools = resolver.filter_tools(mcp_server_id=mcp_server, tools=tools)
+    # Apply tool access filtering (server→member merge for the caller tenant)
+    filtered_tools = resolver.filter_tools(mcp_server_id=mcp_server, tools=tools, member_id=tenant_id)
 
     if len(filtered_tools) < len(tools):
         filtered_count = len(tools) - len(filtered_tools)
@@ -276,10 +315,10 @@ def register_mcp_server_tools(mcp: FastMCP) -> None:
         resolver = get_tool_access_resolver()
         result["tools_policy"] = resolver.get_policy_summary(mcp_server)
 
-        # Filter tools in the response if present
+        # Filter tools in the response if present (server→member merge for the caller tenant)
         if "tools" in result and result["tools"]:
             original_count = len(result["tools"])
-            result["tools"] = resolver.filter_tool_dicts(mcp_server, result["tools"])
+            result["tools"] = resolver.filter_tool_dicts(mcp_server, result["tools"], member_id=_caller_tenant_id())
             filtered_count = original_count - len(result["tools"])
             if filtered_count > 0:
                 result["tools_policy"]["filtered_count"] = filtered_count

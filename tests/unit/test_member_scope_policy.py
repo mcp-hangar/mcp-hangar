@@ -112,7 +112,7 @@ class TestStandaloneMemberPolicyResolver:
         # No member context — only server policy applies
         policy = resolver.resolve_effective_policy("myserver")
         assert not policy.is_tool_allowed("dangerous_tool")  # server deny
-        assert policy.is_tool_allowed("safe_tool")           # NOT in server deny
+        assert policy.is_tool_allowed("safe_tool")  # NOT in server deny
 
     def test_member_policy_cannot_readd_server_denied_tool(self, resolver):
         """Merge semantics: member policy cannot re-add a server-denied tool."""
@@ -285,3 +285,92 @@ class TestMemberScopePolicyExecutor:
         assert result.results[0].success is False
         assert result.results[0].error_type == "ToolAccessDeniedError"
         mock_context.command_bus.send.assert_not_called()
+
+
+# ---------------------------------------------------------------------------
+# Listing-level tests (hangar_tools must hide what the invoke path denies)
+# ---------------------------------------------------------------------------
+
+
+class TestMemberScopePolicyListing:
+    """``hangar_tools`` listing keys the SAME per-tenant policy on the caller.
+
+    Regression: the listing helper previously called ``resolver.filter_tools``
+    WITHOUT ``member_id``, so a tool denied for a tenant was rejected on the
+    invoke path yet stayed VISIBLE in ``hangar_tools`` -- a fail-open on the
+    visibility half of the tool-access-policy claim. These lock the two halves
+    together: a tenant-denied tool is HIDDEN, matching the invoke denial.
+    """
+
+    def _make_identity(self, tenant_id: str | None) -> IdentityContext:
+        caller = CallerIdentity(
+            user_id=None,
+            agent_id=None,
+            session_id=None,
+            principal_type="anonymous",
+            tenant_id=tenant_id,
+        )
+        return IdentityContext(caller=caller)
+
+    def _tool(self, name: str) -> Mock:
+        t = Mock()
+        t.name = name
+        t.to_dict.return_value = {"name": name, "description": "", "inputSchema": {}}
+        return t
+
+    def _server_ctx(self) -> Mock:
+        server_obj = Mock(has_tools=True, state=Mock(value="ready"), tools_predefined=True)
+        server_obj.tools.list_tools.return_value = [self._tool("get_item"), self._tool("delete_item")]
+        ctx = Mock()
+        ctx.get_mcp_server.return_value = server_obj
+        return ctx
+
+    def _list_for_tenant(self, tenant_id: str | None) -> set[str]:
+        from mcp_hangar.server.tools.mcp_server import _get_tools_for_mcp_server
+
+        ctx = self._server_ctx()
+        token = identity_context_var.set(self._make_identity(tenant_id) if tenant_id is not None else None)
+        try:
+            with patch("mcp_hangar.server.tools.mcp_server.get_context", return_value=ctx):
+                result = _get_tools_for_mcp_server("myserver")
+        finally:
+            identity_context_var.reset(token)
+        return {t["name"] for t in result["tools"]}
+
+    def test_listing_hides_tenant_denied_tool(self):
+        """A tool denied for the caller tenant is HIDDEN from the listing."""
+        from mcp_hangar.domain.services import get_tool_access_resolver
+
+        get_tool_access_resolver().set_standalone_member_policy(
+            "myserver", "tenant:blocked", ToolAccessPolicy(deny_list=("delete_item",))
+        )
+
+        names = self._list_for_tenant("tenant:blocked")
+        assert "delete_item" not in names  # denied for this tenant → hidden
+        assert "get_item" in names
+
+    def test_listing_shows_tool_for_unrestricted_tenant(self):
+        """A different tenant (no member policy) still sees the tool."""
+        from mcp_hangar.domain.services import get_tool_access_resolver
+
+        get_tool_access_resolver().set_standalone_member_policy(
+            "myserver", "tenant:blocked", ToolAccessPolicy(deny_list=("delete_item",))
+        )
+
+        names = self._list_for_tenant("tenant:allowed")
+        assert names == {"get_item", "delete_item"}
+
+    def test_listing_no_identity_falls_back_to_server_policy(self):
+        """No caller identity → server-level policy only (backward compat)."""
+        from mcp_hangar.domain.services import get_tool_access_resolver
+
+        resolver = get_tool_access_resolver()
+        # A member deny must NOT leak to an identity-less caller; a server deny must.
+        resolver.set_standalone_member_policy(
+            "myserver", "tenant:blocked", ToolAccessPolicy(deny_list=("delete_item",))
+        )
+        resolver.set_mcp_server_policy("myserver", ToolAccessPolicy(deny_list=("get_item",)))
+
+        names = self._list_for_tenant(None)
+        assert "delete_item" in names  # member-only deny does not apply without identity
+        assert "get_item" not in names  # server-level deny still applies
