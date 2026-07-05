@@ -38,6 +38,7 @@ from .concurrency import (
     init_concurrency_manager,
     reset_concurrency_manager,
 )
+from ...context import get_context
 from .executor import BatchExecutor, format_result_dict
 from .models import (
     BatchResult,
@@ -84,6 +85,99 @@ def configure_interceptors(validator_specs: list[dict[str, Any]] | None = None) 
         "interceptors_configured",
         validator_count=len(validator_specs) if validator_specs else 0,
     )
+
+
+def _authorize_calls(
+    calls: list[dict[str, Any]],
+    call_ids: list[str],
+    ctx: Context | None,
+    batch_id: str,
+) -> dict[int, CallResult]:
+    """Enforce ``tool:invoke`` authorization for each call, fail-closed.
+
+    Mirrors the REST guard ``_check_permission`` (server/api/mcp_servers.py) so
+    the ``hangar_call`` tool-invoke path enforces the same RBAC as the REST API
+    (previously RBAC #386 covered only REST, so any caller could invoke tools):
+
+    - authz middleware NOT configured (stdio / no-auth / local) -> allow all
+      (returns ``{}``; backward compatible, does not break local use).
+    - auth IS configured but the principal is missing/anonymous -> deny all.
+    - else authorize each call's tool (``action="invoke"``,
+      ``resource_type="tool"``, ``resource_id=<tool>``); a denial -- or any
+      authorizer error -- yields a denied ``CallResult`` for that call only.
+
+    Returns a mapping of original call index -> denied ``CallResult``. Indexes
+    absent from the mapping are authorized and proceed to execution.
+
+    Fully fault-barriered: a missing app/request context (stdio) leaves behavior
+    unchanged (allow), because no authz middleware is resolvable.
+    """
+    # Resolve the authz middleware. A missing app context (stdio/local) or an
+    # unconfigured middleware means auth is off -> allow (backward compatible).
+    try:
+        auth_components = getattr(get_context(), "auth_components", None)
+    except Exception:  # noqa: BLE001 -- no app context (stdio/local) -> auth off, allow
+        auth_components = None
+    authz = getattr(auth_components, "authz_middleware", None)
+    if authz is None:
+        return {}
+
+    # Auth IS configured: resolve the authenticated principal bridged onto the
+    # inbound request by the auth middleware (request.state.auth.principal).
+    try:
+        _auth_state = getattr(getattr(getattr(ctx, "request_context", None), "request", None), "state", None)
+        principal = getattr(getattr(_auth_state, "auth", None), "principal", None)
+    except Exception:  # noqa: BLE001 -- fault barrier: identity lookup must not crash the call path
+        principal = None
+
+    denied: dict[int, CallResult] = {}
+
+    # Missing/anonymous principal under configured auth -> deny the whole batch.
+    if principal is None or principal.is_anonymous():
+        logger.warning(
+            "hangar_call_authorization_denied",
+            batch_id=batch_id,
+            reason="missing_credentials",
+            call_count=len(calls),
+        )
+        for i, _call in enumerate(calls):
+            denied[i] = CallResult(
+                index=i,
+                call_id=call_ids[i],
+                success=False,
+                error="Authentication required to invoke tools",
+                error_type="AuthorizationDenied",
+                elapsed_ms=0.0,
+            )
+        return denied
+
+    # Per-call authorization: a principal lacking tool:invoke (e.g. viewer) is
+    # denied fail-closed; authorized principals (e.g. developer) proceed.
+    for i, call in enumerate(calls):
+        tool = call.get("tool", "")
+        try:
+            authz.authorize(
+                principal=principal,
+                action="invoke",
+                resource_type="tool",
+                resource_id=tool,
+            )
+        except Exception as exc:  # noqa: BLE001 -- fail-closed: any authz denial/error rejects this call
+            logger.warning(
+                "hangar_call_authorization_denied",
+                batch_id=batch_id,
+                tool=tool,
+                reason=type(exc).__name__,
+            )
+            denied[i] = CallResult(
+                index=i,
+                call_id=call_ids[i],
+                success=False,
+                error=f"Not authorized to invoke tool '{tool}': tool:invoke permission required",
+                error_type="AuthorizationDenied",
+                elapsed_ms=0.0,
+            )
+    return denied
 
 
 def hangar_call(
@@ -256,19 +350,37 @@ def hangar_call(
                 ],
             }
 
-        # Build call specs with retry configuration
-        call_specs = [
-            CallSpec(
-                index=i,
-                call_id=str(uuid.uuid4()),
-                mcp_server=call["mcp_server"],
-                tool=call["tool"],
-                arguments=call["arguments"],
-                timeout=call.get("timeout"),
-                max_retries=max_attempts,  # Internal field uses max_retries
+        # Stable call ids, one per call, shared by the authorization gate and the
+        # executed call specs so a denied and an executed call carry the same id.
+        call_ids = [str(uuid.uuid4()) for _ in calls]
+
+        # Authorization gate (fail-closed): enforce tool:invoke per call BEFORE
+        # execution, mirroring the REST guard. Denied calls never reach the
+        # executor; authorized calls proceed. No-auth/stdio -> allow all.
+        with tracer.start_as_current_span("hangar_call.authorize") as authz_span:
+            denied_by_index = _authorize_calls(calls, call_ids, ctx, batch_id)
+            authz_span.set_attribute("authz.denied_count", len(denied_by_index))
+
+        # Build call specs for the AUTHORIZED calls only. Give the executor a
+        # contiguous index space (it sizes its result list by len(specs)); the
+        # original call index is remembered in exec_to_orig for remapping back.
+        call_specs: list[CallSpec] = []
+        exec_to_orig: list[int] = []
+        for i, call in enumerate(calls):
+            if i in denied_by_index:
+                continue
+            call_specs.append(
+                CallSpec(
+                    index=len(call_specs),
+                    call_id=call_ids[i],
+                    mcp_server=call["mcp_server"],
+                    tool=call["tool"],
+                    arguments=call["arguments"],
+                    timeout=call.get("timeout"),
+                    max_retries=max_attempts,  # Internal field uses max_retries
+                )
             )
-            for i, call in enumerate(calls)
-        ]
+            exec_to_orig.append(i)
 
         # Bridge the authenticated caller identity into the tool-call path over
         # streamable-HTTP. FastMCP's streamable-HTTP transport runs tool calls in
@@ -296,33 +408,56 @@ def hangar_call(
             except Exception:  # noqa: BLE001 -- identity bridging must never break the call path
                 _identity_token = None
 
-        # Execute batch -- the executor uses ThreadPoolExecutor internally
-        # for parallel call execution.
-        try:
-            result = _executor.execute(
-                batch_id=batch_id,
-                calls=call_specs,
-                max_concurrency=max_concurrency,
-                global_timeout=timeout,
-                fail_fast=fail_fast,
-            )
-        finally:
-            if _identity_token is not None:
-                identity_context_var.reset(_identity_token)
+        # Execute the authorized calls -- the executor uses ThreadPoolExecutor
+        # internally for parallel call execution. If every call was denied by the
+        # authorization gate, skip the executor entirely.
+        executed: list[CallResult] = []
+        exec_elapsed_ms = 0.0
+        if call_specs:
+            try:
+                result = _executor.execute(
+                    batch_id=batch_id,
+                    calls=call_specs,
+                    max_concurrency=max_concurrency,
+                    global_timeout=timeout,
+                    fail_fast=fail_fast,
+                )
+            finally:
+                if _identity_token is not None:
+                    identity_context_var.reset(_identity_token)
+            executed = result.results
+            exec_elapsed_ms = result.elapsed_ms
+        elif _identity_token is not None:
+            identity_context_var.reset(_identity_token)
 
-        root_span.set_attribute("batch.result", "success" if result.success else "failure")
-        root_span.set_attribute("batch.succeeded", result.succeeded)
-        root_span.set_attribute("batch.failed", result.failed)
+        # Merge authorization denials with executed results into original order.
+        merged: list[CallResult | None] = [None] * len(calls)
+        for orig_index, denied_result in denied_by_index.items():
+            merged[orig_index] = denied_result
+        for r in executed:
+            orig_index = exec_to_orig[r.index]
+            r.index = orig_index  # remap the executor's contiguous index back
+            merged[orig_index] = r
+
+        final_results = [r for r in merged if r is not None]
+        succeeded = sum(1 for r in final_results if r.success)
+        failed = len(final_results) - succeeded
+        success = failed == 0
+
+        root_span.set_attribute("batch.result", "success" if success else "failure")
+        root_span.set_attribute("batch.succeeded", succeeded)
+        root_span.set_attribute("batch.failed", failed)
+        root_span.set_attribute("batch.authz_denied", len(denied_by_index))
 
         # Convert to dict response
         return {
-            "batch_id": result.batch_id,
-            "success": result.success,
-            "total": result.total,
-            "succeeded": result.succeeded,
-            "failed": result.failed,
-            "elapsed_ms": round(result.elapsed_ms, 2),
-            "results": [format_result_dict(r) for r in result.results],
+            "batch_id": batch_id,
+            "success": success,
+            "total": len(final_results),
+            "succeeded": succeeded,
+            "failed": failed,
+            "elapsed_ms": round(exec_elapsed_ms, 2),
+            "results": [format_result_dict(r) for r in final_results],
         }
 
 
