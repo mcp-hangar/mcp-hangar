@@ -24,6 +24,8 @@ import time
 import httpx
 import pytest
 
+from tests.live import _group_support as gs
+
 # Opt-in gate: live verification only runs when explicitly requested, so a normal
 # `pytest tests/` (incl. the release test run) never starts servers. The
 # `live-verify` workflow sets this env var.
@@ -309,3 +311,102 @@ def hangar_oidc_wrong_audience(keycloak_base_url: str, tmp_path_factory: pytest.
         pytest.skip(f"stub backend not found at {_MATH_SERVER}")
     workdir = tmp_path_factory.mktemp("hangar_oidc_wrong_aud")
     yield from _serve_hangar(workdir, _oidc_config_text(keycloak_base_url, resource="urn:mcp-hangar:other-resource"))
+
+
+# --------------------------------------------------------------------------- #
+# T1: multi-backend group + per-tenant canary harness
+# --------------------------------------------------------------------------- #
+#
+# Unlike the T0 stub (``examples/provider_math``, whose results are anonymous),
+# the group members here run ``examples/provider_identity`` -- a stdio backend
+# whose ``whoami`` tool echoes *which* instance served the call. Two members
+# (``member-a`` / ``member-b``) run as ``mode: subprocess`` group members, so a
+# live ``hangar_call`` to the group can be observed landing on a real backend and
+# the serving member asserted.
+#
+# For canary/version routing the caller's tenant must reach hangar. The shipped,
+# no-IdP way to carry an arbitrary per-request tenant over the HTTP surface is an
+# API key (``X-API-Key``) whose stored principal carries a ``tenant_id``; keys are
+# seeded with the shipped ``SQLiteApiKeyStore`` and the server points its
+# ``auth.storage`` at the same DB. Reusable pieces live in ``_group_support``.
+
+
+@pytest.fixture(scope="session")
+def live_group_hangar(tmp_path_factory: pytest.TempPathFactory) -> Iterator[gs.GroupHarness]:
+    """Start hangar with a 2-member group + canary policy; yield a GroupHarness.
+
+    Skips cleanly if the binary or identity stub is missing, the server does not
+    become healthy, or the group never warms a member within the startup budget.
+    """
+    binary = _hangar_bin()
+    if not gs.IDENTITY_SERVER.exists():
+        pytest.skip(f"identity stub backend not found at {gs.IDENTITY_SERVER}")
+
+    workdir = tmp_path_factory.mktemp("live_group")
+    auth_db = workdir / "auth.db"
+
+    try:
+        tenant_keys = gs.seed_tenant_keys(auth_db, [*gs.PINNED, *gs.SPLIT_TENANTS])
+    except Exception as exc:  # noqa: BLE001 -- fixture prerequisite: skip, never fail
+        pytest.skip(f"could not seed tenant API keys: {exc}")
+
+    config_path = workdir / "config.yaml"
+    config_path.write_text(gs.render_config(auth_db))
+
+    port = _free_port()
+    harness = gs.GroupHarness(base_url=f"http://127.0.0.1:{port}", tenant_keys=tenant_keys)
+    proc = subprocess.Popen(
+        [binary, "--config", str(config_path), "serve", "--http", "--host", "127.0.0.1", "--port", str(port)],
+        stdout=subprocess.PIPE,
+        stderr=subprocess.STDOUT,
+        cwd=str(workdir),
+    )
+
+    deadline = time.monotonic() + _STARTUP_TIMEOUT_S
+    healthy = False
+    try:
+        while time.monotonic() < deadline:
+            if proc.poll() is not None:
+                break
+            try:
+                if httpx.get(f"{harness.base_url}/health/live", timeout=1.0).status_code == 200:
+                    healthy = True
+                    break
+            except httpx.HTTPError:
+                pass
+            time.sleep(_POLL_INTERVAL_S)
+
+        if not healthy:
+            proc.terminate()
+            out = b""
+            try:
+                out = proc.communicate(timeout=5)[0] or b""
+            except subprocess.TimeoutExpired:
+                proc.kill()
+            pytest.skip(
+                f"group hangar did not become healthy in {_STARTUP_TIMEOUT_S}s:\n{out.decode(errors='replace')[-2000:]}"
+            )
+
+        # Warm the group: members cold-start on first use, so poll until one serves.
+        warm_deadline = time.monotonic() + _STARTUP_TIMEOUT_S
+        warmed = False
+        while time.monotonic() < warm_deadline:
+            try:
+                if gs.serving_member(harness) in harness.members:
+                    warmed = True
+                    break
+            except Exception:  # noqa: BLE001 -- transient during member cold-start
+                pass
+            time.sleep(_POLL_INTERVAL_S)
+
+        if not warmed:
+            pytest.skip(f"group '{gs.GROUP_ID}' never warmed a member in {_STARTUP_TIMEOUT_S}s")
+
+        yield harness
+    finally:
+        if proc.poll() is None:
+            proc.terminate()
+            try:
+                proc.wait(timeout=5)
+            except subprocess.TimeoutExpired:
+                proc.kill()

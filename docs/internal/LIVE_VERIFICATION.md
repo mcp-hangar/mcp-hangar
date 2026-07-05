@@ -55,8 +55,8 @@ live) · 🔴 no coverage at all · ⬜ live test not yet written.
 
 | Claim | Driven via | Observable proof | Existing coverage | Status |
 |-------|-----------|------------------|-------------------|--------|
-| `hangar_call` to a group routes to a selected member (#282) | MCP `hangar_call` | call reaches a member backend | unit only (`test_group_invoke_routing`) | 🔴 |
-| Canary: a pinned tenant deterministically hits its member; a split routes ~split_pct (#283) | MCP `hangar_call` per tenant | which member served | unit only (`test_canary_routing`) | 🔴 |
+| `hangar_call` to a group routes to a selected member (#282) | MCP `hangar_call` | call reaches a member backend | `tests/live/test_t1_groups.py::test_group_invocation_routes_to_a_member` (2 subprocess `provider_identity` members; `whoami` echoes the server) | ✅ |
+| Canary: a pinned tenant deterministically hits its member; a split routes ~split_pct (#283) | MCP `hangar_call` per tenant | which member served | `tests/live/test_t1_groups.py::test_canary_pins_a_tenant_to_a_version` (attempts real per-tenant routing; **skips** live -- the caller `tenant_id` set by the ASGI auth layer is not propagated into FastMCP's stateful per-session task, so the executor sees no identity over the streamable-HTTP tool surface). Resolution + #283 bucketing proven by `test_canary_routing`. | 🟡 |
 | Failover: a failed member leaves rotation; `report_failure` feeds the group breaker | MCP `hangar_call` under fault | next call avoids the dead member | internal `select_member` only | 🟡 |
 | Load-balancing strategies distribute across members | MCP `hangar_call` ×N | member distribution | internal only | 🟡 |
 | Discovery (filesystem/container) surfaces backends via `hangar_discover`/`discovered`/`sources` | MCP tools | discovered set | internal + **non-gating** script | 🟡 |
