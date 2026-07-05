@@ -74,20 +74,19 @@ def _hangar_bin() -> str:
     return binary
 
 
-@pytest.fixture(scope="session")
-def live_http_hangar(tmp_path_factory: pytest.TempPathFactory) -> Iterator[str]:
-    """Start `mcp-hangar serve --http` on loopback and yield its base URL.
+def _serve_hangar(workdir: Path, config_text: str) -> Iterator[str]:
+    """Start `mcp-hangar serve --http` with ``config_text`` and yield its base URL.
 
-    Skips cleanly if the binary is missing or the server does not become healthy
-    within the startup budget. Loopback binding needs no auth.
+    Shared engine for every "run a real hangar over HTTP" fixture. Writes the
+    config into ``workdir``, binds a free loopback port, polls ``/health/live``
+    until healthy, then yields the base URL and tears the process down on exit.
+    Skips cleanly (never fails) if the binary is missing or the server does not
+    become healthy within the startup budget.
     """
     binary = _hangar_bin()
-    if not _MATH_SERVER.exists():
-        pytest.skip(f"stub backend not found at {_MATH_SERVER}")
 
-    workdir = tmp_path_factory.mktemp("live_hangar")
     config_path = workdir / "config.yaml"
-    config_path.write_text(_MINIMAL_CONFIG.format(python=sys.executable, server=str(_MATH_SERVER)))
+    config_path.write_text(config_text)
 
     port = _free_port()
     base_url = f"http://127.0.0.1:{port}"
@@ -132,3 +131,181 @@ def live_http_hangar(tmp_path_factory: pytest.TempPathFactory) -> Iterator[str]:
                 proc.wait(timeout=5)
             except subprocess.TimeoutExpired:
                 proc.kill()
+
+
+@pytest.fixture(scope="session")
+def live_http_hangar(tmp_path_factory: pytest.TempPathFactory) -> Iterator[str]:
+    """Start `mcp-hangar serve --http` on loopback and yield its base URL.
+
+    Skips cleanly if the binary is missing or the server does not become healthy
+    within the startup budget. Loopback binding needs no auth.
+    """
+    if not _MATH_SERVER.exists():
+        pytest.skip(f"stub backend not found at {_MATH_SERVER}")
+
+    workdir = tmp_path_factory.mktemp("live_hangar")
+    yield from _serve_hangar(workdir, _MINIMAL_CONFIG.format(python=sys.executable, server=str(_MATH_SERVER)))
+
+
+# --- T2: live OIDC / Keycloak (real IdP) --------------------------------------
+#
+# These fixtures drive a REAL Keycloak (issuer A = realm `mcp-hangar`, issuer B =
+# realm `mcp-hangar-b`) and a REAL hangar with OIDC auth enabled. Everything is
+# skip-safe: if Keycloak or Docker is unavailable, tests SKIP (never fail). We
+# reuse an already-running Keycloak and never tear down an IdP we did not start.
+
+# Keycloak base URL: reuse an already-running instance; override for elsewhere.
+_KEYCLOAK_BASE_URL = os.environ.get("MCP_HANGAR_KEYCLOAK_URL", "http://localhost:8080")
+_REALM_A = "mcp-hangar"
+_REALM_B = "mcp-hangar-b"
+_COMPOSE_FILE = Path(__file__).resolve().parents[2] / "examples" / "auth-keycloak" / "docker-compose.yml"
+_KEYCLOAK_START_TIMEOUT_S = 120.0
+
+
+def _realm_discovery_ok(base_url: str, realm: str) -> bool:
+    """Return True if the realm's OIDC discovery endpoint answers 200."""
+    try:
+        resp = httpx.get(f"{base_url}/realms/{realm}/.well-known/openid-configuration", timeout=2.0)
+        return resp.status_code == 200
+    except httpx.HTTPError:
+        return False
+
+
+def _realms_ready(base_url: str) -> bool:
+    return _realm_discovery_ok(base_url, _REALM_A) and _realm_discovery_ok(base_url, _REALM_B)
+
+
+@pytest.fixture(scope="session")
+def keycloak_base_url() -> str:
+    """Return a reachable Keycloak base URL exposing realms A and B, else skip.
+
+    Reuses an already-running Keycloak (never torn down here). If none answers,
+    tries ``docker compose up -d keycloak`` from the auth-keycloak example and
+    waits for both realms to import. Skips (never fails) when Docker or Keycloak
+    are unavailable or the required realms never appear.
+    """
+    base_url = _KEYCLOAK_BASE_URL
+    if _realms_ready(base_url):
+        return base_url
+
+    # Not reachable: attempt to start it from the shipped compose file. We only
+    # ever start it here; teardown of a Keycloak we started is left to the
+    # operator (compose keeps it running for reuse across the suite).
+    if shutil.which("docker") is None or not _COMPOSE_FILE.exists():
+        pytest.skip(f"Keycloak not reachable at {base_url}; Docker/compose unavailable to start it")
+    try:
+        subprocess.run(
+            ["docker", "compose", "-f", str(_COMPOSE_FILE), "up", "-d", "keycloak"],
+            check=True,
+            capture_output=True,
+            timeout=180,
+        )
+    except (subprocess.CalledProcessError, subprocess.TimeoutExpired, OSError) as exc:
+        pytest.skip(f"could not start Keycloak via docker compose: {exc}")
+
+    deadline = time.monotonic() + _KEYCLOAK_START_TIMEOUT_S
+    while time.monotonic() < deadline:
+        if _realms_ready(base_url):
+            return base_url
+        time.sleep(2.0)
+    pytest.skip(f"Keycloak at {base_url} did not import realms {_REALM_A!r} + {_REALM_B!r} in time")
+
+
+@pytest.fixture(scope="session")
+def keycloak_token(keycloak_base_url: str):
+    """Return a helper that mints real access tokens via the OIDC password grant.
+
+    Usage: ``keycloak_token(realm, username, password, client_id="mcp-cli")``.
+    Skips (never fails) if the grant does not succeed.
+    """
+
+    def _mint(realm: str, username: str, password: str, client_id: str = "mcp-cli") -> str:
+        resp = httpx.post(
+            f"{keycloak_base_url}/realms/{realm}/protocol/openid-connect/token",
+            data={
+                "grant_type": "password",
+                "client_id": client_id,
+                "username": username,
+                "password": password,
+            },
+            timeout=10.0,
+        )
+        if resp.status_code != 200:
+            pytest.skip(f"password grant failed for {realm}/{username}: {resp.status_code} {resp.text[:200]}")
+        token = resp.json().get("access_token")
+        if not token:
+            pytest.skip(f"no access_token in token response for {realm}/{username}")
+        return str(token)
+
+    return _mint
+
+
+# Hangar config trusting both Keycloak realms. front_door topology + auth on,
+# OIDC multi-issuer registry, audience/resource bound to `mcp-hangar` (RFC 8707),
+# require_tenant on (so a token with no tenant claim is rejected fail-closed).
+_OIDC_CONFIG = """\
+logging:
+  level: WARNING
+tool_access:
+  mode: front_door
+auth:
+  enabled: true
+  allow_anonymous: false
+  storage:
+    driver: memory
+  api_key:
+    enabled: false
+  oidc:
+    enabled: true
+    resource_uri: "{resource}"
+    require_tenant: true
+    issuers:
+      - issuer: {issuer_a}
+      - issuer: {issuer_b}
+  role_assignments:
+    - principal: "group:developers"
+      role: developer
+      scope: global
+mcp_servers:
+  math:
+    mode: subprocess
+    command: ["{python}", "{server}"]
+    idle_ttl_s: 60
+"""
+
+
+def _oidc_config_text(keycloak_base_url: str, resource: str) -> str:
+    return _OIDC_CONFIG.format(
+        resource=resource,
+        issuer_a=f"{keycloak_base_url}/realms/{_REALM_A}",
+        issuer_b=f"{keycloak_base_url}/realms/{_REALM_B}",
+        python=sys.executable,
+        server=str(_MATH_SERVER),
+    )
+
+
+@pytest.fixture(scope="session")
+def hangar_oidc(keycloak_base_url: str, tmp_path_factory: pytest.TempPathFactory) -> Iterator[str]:
+    """Run a real hangar (front_door + auth) trusting Keycloak realms A and B.
+
+    Resource/audience bound to ``mcp-hangar`` (matches the tokens' aud), OIDC
+    multi-issuer registry (A + B), ``require_tenant`` on. Yields the base URL;
+    skip-safe.
+    """
+    if not _MATH_SERVER.exists():
+        pytest.skip(f"stub backend not found at {_MATH_SERVER}")
+    workdir = tmp_path_factory.mktemp("hangar_oidc")
+    yield from _serve_hangar(workdir, _oidc_config_text(keycloak_base_url, resource="mcp-hangar"))
+
+
+@pytest.fixture(scope="session")
+def hangar_oidc_wrong_audience(keycloak_base_url: str, tmp_path_factory: pytest.TempPathFactory) -> Iterator[str]:
+    """Same as ``hangar_oidc`` but expecting a DIFFERENT resource/audience.
+
+    A real realm-A token (aud=``mcp-hangar``) must fail audience validation here,
+    exercising RFC 8707 resource binding. Yields the base URL; skip-safe.
+    """
+    if not _MATH_SERVER.exists():
+        pytest.skip(f"stub backend not found at {_MATH_SERVER}")
+    workdir = tmp_path_factory.mktemp("hangar_oidc_wrong_aud")
+    yield from _serve_hangar(workdir, _oidc_config_text(keycloak_base_url, resource="urn:mcp-hangar:other-resource"))

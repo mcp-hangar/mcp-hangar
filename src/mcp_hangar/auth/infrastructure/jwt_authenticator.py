@@ -117,8 +117,15 @@ class JWTAuthenticator(IAuthenticator):
         return self._config
 
     def supports(self, request: AuthRequest) -> bool:
-        """Check if request has Bearer token."""
-        auth_header = request.headers.get("Authorization", "")
+        """Check if request has Bearer token.
+
+        ``AuthRequest.headers`` is documented as case-insensitive, but HTTP
+        transports normalise header keys to lowercase (``authorization``) while
+        callers/tests use the canonical ``Authorization``. Look up both so a real
+        Bearer token from the HTTP path is not silently ignored (which would fail
+        closed to "no authenticator matched"). Mirrors ApiKeyAuthenticator.
+        """
+        auth_header = request.headers.get("Authorization") or request.headers.get("authorization") or ""
         return auth_header.startswith("Bearer ")
 
     def authenticate(self, request: AuthRequest) -> Principal:
@@ -134,7 +141,7 @@ class JWTAuthenticator(IAuthenticator):
             InvalidCredentialsError: If token is invalid or malformed.
             ExpiredCredentialsError: If token has expired.
         """
-        auth_header = request.headers.get("Authorization", "")
+        auth_header = request.headers.get("Authorization") or request.headers.get("authorization") or ""
 
         if not auth_header.startswith("Bearer "):
             raise InvalidCredentialsError(

@@ -65,11 +65,11 @@ live) · 🔴 no coverage at all · ⬜ live test not yet written.
 
 | Claim | Driven via | Observable proof | Existing coverage | Status |
 |-------|-----------|------------------|-------------------|--------|
-| `front_door` mode DENIES an unauthenticated request (fail-closed) | HTTP/MCP no token | 401/deny, not silent allow | 🔴 none | 🔴 |
-| A signed OIDC token authenticates; `tenant_id` extracted from the claim | HTTP + Keycloak token | authenticated principal | unit only | 🔴 |
-| Multi-issuer: tokens from ≥2 trusted issuers both validate; untrusted issuer rejected (#273) | HTTP + 2 issuers | accept/reject | unit only | 🔴 |
-| RFC 8707 audience binding: token without matching `aud` rejected (#274) | HTTP token | rejection | unit only | 🔴 |
-| PRM advertises all trusted issuers; 401 carries `WWW-Authenticate: resource_metadata` (RFC 9728) | `GET /.well-known/oauth-protected-resource` | `authorization_servers` list, header | unit only | 🔴 |
+| `front_door` mode DENIES an unauthenticated request (fail-closed) | HTTP/MCP no token | 401/deny, not silent allow | `tests/live/test_t2_auth.py::test_unauthenticated_front_door_call_is_denied` | ✅ |
+| A signed OIDC token authenticates; `tenant_id` extracted from the claim | HTTP + Keycloak token | authenticated principal (tenant proven fail-closed via `require_tenant`) | `tests/live/test_t2_auth.py::test_valid_oidc_token_authenticates_and_carries_tenant` | ✅ |
+| Multi-issuer: tokens from ≥2 trusted issuers both validate; untrusted issuer rejected (#273) | HTTP + 2 issuers | accept/reject | `tests/live/test_t2_auth.py::test_realm_b_token_is_accepted`, `::test_token_from_untrusted_issuer_is_rejected` | ✅ |
+| RFC 8707 audience binding: token without matching `aud` rejected (#274) | HTTP token | rejection | `tests/live/test_t2_auth.py::test_aud_mismatch_is_rejected` | ✅ |
+| PRM advertises all trusted issuers; 401 carries `WWW-Authenticate: resource_metadata` (RFC 9728) | `GET /.well-known/oauth-protected-resource` | `authorization_servers` list, header | `tests/live/test_t2_auth.py::test_prm_advertises_trusted_issuers` (+ `WWW-Authenticate` asserted in deny/untrusted tests) | ✅ |
 | API-key rotation + grace; old key honored then rejected | REST/MCP with keys | accept→grace→reject | unit only | 🔴 |
 | RBAC: a role lacking a permission is denied on a real call | MCP `hangar_call` | denial | unit only | 🔴 |
 
@@ -78,7 +78,7 @@ live) · 🔴 no coverage at all · ⬜ live test not yet written.
 Ranked by risk × recency — these are unit/internal only and should get live tests first:
 
 1. **The entire real MCP tool surface** — nothing drives `hangar_call`/`hangar_*` over MCP. Standing up T0 against the stub backend unlocks most of the T0 rows at once.
-2. **Auth / front_door (T2)** — multi-issuer (#273), audience binding (#274), `front_door` fail-closed DENY, OIDC, RBAC: the security boundary is unit-only.
+2. **Auth / front_door (T2)** — multi-issuer (#273), audience binding (#274), `front_door` fail-closed DENY, OIDC tenant extraction, and PRM are now proven live against a real Keycloak (`tests/live/test_t2_auth.py`). Still unit-only: API-key rotation/grace and RBAC permission denial on a real call.
 3. **Group invocation + canary (T1, #282/#283)** — routing is proven with mocks; never with a real call routed to a member.
 4. **Per-tenant projection on the call path (T0)** — withdrawal enforcement, reload restore, digest pinning (#276/#280): the executor path is unverified live.
 5. **Continuation** (`hangar_fetch_continuation`/`delete_continuation`) — untested beyond the truncator unit.
