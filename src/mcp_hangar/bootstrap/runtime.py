@@ -31,6 +31,42 @@ from ..infrastructure.persistence import (
 )
 from ..infrastructure.query_bus import get_query_bus, QueryBus
 
+# Default command-bus rate limit (used when neither config nor env is set).
+DEFAULT_RATE_LIMIT_RPS = "10"
+DEFAULT_RATE_LIMIT_BURST = "20"
+
+
+def resolve_rate_limit_config(
+    rate_limit: dict[str, Any] | None = None,
+    env: dict[str, str] | None = None,
+) -> RateLimitConfig:
+    """Resolve the command-bus rate limit.
+
+    Precedence for both ``rps`` and ``burst``: config value > env var > default.
+
+    Args:
+        rate_limit: Optional ``rate_limit`` config section
+            (``{"rps": <int>, "burst": <int>}``; both keys optional).
+        env: Optional environment mapping (defaults to ``os.environ``).
+
+    Returns:
+        A ``RateLimitConfig`` with the resolved ``requests_per_second`` / ``burst_size``.
+    """
+    env = dict(os.environ) if env is None else env
+    rate_limit = rate_limit or {}
+
+    rps = rate_limit.get("rps")
+    requests_per_second = float(rps if rps is not None else env.get("MCP_RATE_LIMIT_RPS", DEFAULT_RATE_LIMIT_RPS))
+
+    burst = rate_limit.get("burst")
+    burst_size = int(burst if burst is not None else env.get("MCP_RATE_LIMIT_BURST", DEFAULT_RATE_LIMIT_BURST))
+
+    return RateLimitConfig(
+        requests_per_second=requests_per_second,
+        burst_size=burst_size,
+    )
+
+
 # =============================================================================
 # Protocol Interfaces for Runtime Dependencies
 # =============================================================================
@@ -178,6 +214,7 @@ def create_runtime(
     persistence_config: PersistenceConfig | None = None,
     observability_config: ObservabilityConfig | None = None,
     env: dict[str, str] | None = None,
+    rate_limit: dict[str, Any] | None = None,
 ) -> Runtime:
     """Create runtime dependencies explicitly.
 
@@ -189,6 +226,9 @@ def create_runtime(
         persistence_config: Optional persistence configuration.
         observability_config: Optional observability configuration.
         env: Optional environment mapping (defaults to os.environ).
+        rate_limit: Optional ``rate_limit`` config section
+            (``{"rps": <int>, "burst": <int>}``). Values take precedence over the
+            ``MCP_RATE_LIMIT_RPS`` / ``MCP_RATE_LIMIT_BURST`` env vars.
 
     Returns:
         Runtime container.
@@ -200,10 +240,8 @@ def create_runtime(
     cb = command_bus or get_command_bus()
     qb = query_bus or get_query_bus()
 
-    rate_limit_config = RateLimitConfig(
-        requests_per_second=float(env.get("MCP_RATE_LIMIT_RPS", "10")),
-        burst_size=int(env.get("MCP_RATE_LIMIT_BURST", "20")),
-    )
+    # Precedence: config value > env var > default.
+    rate_limit_config = resolve_rate_limit_config(rate_limit, env)
     rate_limiter = get_rate_limiter(rate_limit_config)
 
     input_validator = InputValidator(

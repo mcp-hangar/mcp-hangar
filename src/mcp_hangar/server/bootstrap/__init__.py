@@ -207,11 +207,7 @@ def bootstrap(
     # Ensure data directory exists
     _ensure_data_dir()
 
-    # Initialize runtime and context
-    runtime = get_runtime()
-    init_context(runtime)
-
-    # Load configuration early (needed for event store config)
+    # Load configuration early (needed for runtime rate-limit and event store config)
     if config_dict is not None:
         # Use provided config dict, merge with defaults
         full_config = load_configuration(None)
@@ -222,6 +218,11 @@ def bootstrap(
             load_config(mcp_servers_config)
     else:
         full_config = load_configuration(config_path)
+
+    # Initialize runtime and context. The rate_limit section (config > env > default)
+    # is applied when the runtime singleton is first constructed.
+    runtime = get_runtime(rate_limit=full_config.get("rate_limit"))
+    init_context(runtime)
 
     # Initialize observability (tracing, Langfuse) early
     _, observability_adapter = init_observability(full_config)

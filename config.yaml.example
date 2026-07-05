@@ -155,6 +155,15 @@ providers:
 #     - type: docker
 #       mode: additive
 
+# Command-bus rate limit (optional)
+# Token-bucket rate limit applied to the command bus. Both keys are optional.
+# Precedence: this config section > MCP_RATE_LIMIT_RPS / MCP_RATE_LIMIT_BURST env
+# vars > built-in defaults. Omit the section entirely to keep the env/default
+# behavior. Current defaults: rps=10, burst=20.
+# rate_limit:
+#   rps: 10      # tokens (requests) added per second
+#   burst: 20    # maximum burst capacity (bucket size)
+
 # Observability - Langfuse integration (optional)
 # Provides end-to-end tracing for MCP tool invocations
 # observability:
