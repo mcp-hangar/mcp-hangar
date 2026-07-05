@@ -61,7 +61,9 @@ def _spy_executor(monkeypatch):
     identity the executor would observe at call time."""
     captured: dict[str, Any] = {}
 
-    def _fake_execute(*, batch_id: str, calls, max_concurrency, global_timeout, fail_fast) -> BatchResult:
+    def _fake_execute(
+        *, batch_id: str, calls, max_concurrency, global_timeout, fail_fast, request_ctx=None
+    ) -> BatchResult:
         ident = get_identity_context()
         captured["identity"] = ident
         captured["tenant"] = ident.caller.tenant_id if ident is not None else None
