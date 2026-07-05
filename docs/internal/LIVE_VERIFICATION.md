@@ -70,7 +70,7 @@ live) · 🔴 no coverage at all · ⬜ live test not yet written.
 | Multi-issuer: tokens from ≥2 trusted issuers both validate; untrusted issuer rejected (#273) | HTTP + 2 issuers | accept/reject | `tests/live/test_t2_auth.py::test_realm_b_token_is_accepted`, `::test_token_from_untrusted_issuer_is_rejected` | ✅ |
 | RFC 8707 audience binding: token without matching `aud` rejected (#274) | HTTP token | rejection | `tests/live/test_t2_auth.py::test_aud_mismatch_is_rejected` | ✅ |
 | PRM advertises all trusted issuers; 401 carries `WWW-Authenticate: resource_metadata` (RFC 9728) | `GET /.well-known/oauth-protected-resource` | `authorization_servers` list, header | `tests/live/test_t2_auth.py::test_prm_advertises_trusted_issuers` (+ `WWW-Authenticate` asserted in deny/untrusted tests) | ✅ |
-| API-key rotation + grace; old key honored then rejected | REST/MCP with keys | accept→grace→reject | unit only | 🔴 |
+| API-key rotation + grace; old key honored then rejected | REST/MCP with keys | accept→grace→reject | `tests/live/test_t2_apikey.py` (valid→200; rotated old key honored in grace + new key works; post-grace old key→401; revoked→401; all fail-closed) | ✅ |
 | RBAC: a role lacking a permission is denied on a real call | HTTP `POST /api/mcp_servers/` (write) / MCP `hangar_call` | 403 for `viewer`, 2xx for `developer` | `tests/live/test_t2_auth.py::test_rbac_denies_unprivileged_and_allows_privileged` (live probe; passes with the #386 wiring fix) | ✅ |
 
 > **RBAC live finding (fail-OPEN → FIXED in #386).** This probe originally surfaced a
@@ -96,7 +96,7 @@ live) · 🔴 no coverage at all · ⬜ live test not yet written.
 Ranked by risk × recency — these are unit/internal only and should get live tests first:
 
 1. **The entire real MCP tool surface** — nothing drives `hangar_call`/`hangar_*` over MCP. Standing up T0 against the stub backend unlocks most of the T0 rows at once.
-2. **Auth / front_door (T2)** — multi-issuer (#273), audience binding (#274), `front_door` fail-closed DENY, OIDC tenant extraction, and PRM are now proven live against a real Keycloak (`tests/live/test_t2_auth.py`). Still unit-only: API-key rotation/grace. RBAC permission denial now has a live probe (`test_rbac_denies_unprivileged_and_allows_privileged`) that surfaced a fail-OPEN gap — authorization is not enforced on the `serve` surface (see the RBAC note above); it stays 🔴 and skips until the wiring is fixed.
+2. **Auth / front_door (T2)** — multi-issuer (#273), audience binding (#274), `front_door` fail-closed DENY, OIDC tenant extraction, and PRM are now proven live against a real Keycloak (`tests/live/test_t2_auth.py`). API-key rotation/grace is now proven live on the real `serve --http` surface (`tests/live/test_t2_apikey.py`): a rotated key is honored during its grace window then rejected fail-closed once grace elapses, and a revoked key is rejected immediately. RBAC permission denial now has a live probe (`test_rbac_denies_unprivileged_and_allows_privileged`) that surfaced a fail-OPEN gap — authorization is not enforced on the `serve` surface (see the RBAC note above); it stays 🔴 and skips until the wiring is fixed.
 3. **Group invocation + canary (T1, #282/#283)** — routing is proven with mocks; never with a real call routed to a member.
 4. **Per-tenant projection on the call path (T0)** — withdrawal enforcement, reload restore, digest pinning (#276/#280): the executor path is unverified live.
 5. **Continuation** (`hangar_fetch_continuation`/`delete_continuation`) — untested beyond the truncator unit.
