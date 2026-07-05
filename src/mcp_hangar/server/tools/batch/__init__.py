@@ -23,9 +23,10 @@ Example:
 from typing import Any
 import uuid
 
-from mcp.server.fastmcp import FastMCP
+from mcp.server.fastmcp import Context, FastMCP
 
 from ....application.services.interceptor_registry import build_validator_pipeline
+from ....context import get_identity_context, identity_context_var
 from ....logging_config import get_logger
 from ....metrics import BATCH_CALLS_TOTAL, BATCH_VALIDATION_FAILURES_TOTAL
 from ....observability.tracing import get_tracer
@@ -91,6 +92,7 @@ def hangar_call(
     timeout: float = DEFAULT_TIMEOUT,
     fail_fast: bool = False,
     max_attempts: int = 1,
+    ctx: Context | None = None,
 ) -> dict[str, Any]:
     """Invoke tools on MCP mcp_servers (single or batch).
 
@@ -268,15 +270,45 @@ def hangar_call(
             for i, call in enumerate(calls)
         ]
 
+        # Bridge the authenticated caller identity into the tool-call path over
+        # streamable-HTTP. FastMCP's streamable-HTTP transport runs tool calls in
+        # a per-session task decoupled from the ASGI auth wrapper coroutine that
+        # sets identity_context_var, so that contextvar is None here for an
+        # authenticated HTTP caller. The FastMCP-injected request context, however,
+        # IS reachable, and the auth middleware stored the principal on the request
+        # (request.state.auth). Read it and set identity_context_var so the executor
+        # -- which snapshots contextvars into its worker threads via copy_context --
+        # sees the real tenant for per-tenant enforcement (canary routing #283,
+        # per-tenant tool withdrawal). Fully fault-barriered: stdio / no-request /
+        # unauthenticated paths leave identity as None (existing fallback unchanged).
+        # We only bridge when identity is not already bound (never override the ASGI
+        # wrapper when it did propagate). The token is reset in finally to avoid
+        # leaking identity across calls in a reused per-session task.
+        _identity_token = None
+        if get_identity_context() is None:
+            try:
+                _auth = getattr(getattr(getattr(ctx, "request_context", None), "request", None), "state", None)
+                _principal = getattr(getattr(_auth, "auth", None), "principal", None)
+                if _principal is not None:
+                    from ....fastmcp_server.asgi import _principal_to_identity_context
+
+                    _identity_token = identity_context_var.set(_principal_to_identity_context(_principal))
+            except Exception:  # noqa: BLE001 -- identity bridging must never break the call path
+                _identity_token = None
+
         # Execute batch -- the executor uses ThreadPoolExecutor internally
         # for parallel call execution.
-        result = _executor.execute(
-            batch_id=batch_id,
-            calls=call_specs,
-            max_concurrency=max_concurrency,
-            global_timeout=timeout,
-            fail_fast=fail_fast,
-        )
+        try:
+            result = _executor.execute(
+                batch_id=batch_id,
+                calls=call_specs,
+                max_concurrency=max_concurrency,
+                global_timeout=timeout,
+                fail_fast=fail_fast,
+            )
+        finally:
+            if _identity_token is not None:
+                identity_context_var.reset(_identity_token)
 
         root_span.set_attribute("batch.result", "success" if result.success else "failure")
         root_span.set_attribute("batch.succeeded", result.succeeded)

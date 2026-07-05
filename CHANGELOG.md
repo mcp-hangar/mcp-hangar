@@ -30,6 +30,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - **security:** enforce per-tenant isolation -- require the token tenant claim in multi-tenant mode and derive the effective tenant solely from the validated token (never client-supplied), failing closed to prevent cross-tenant token use (#312)
 - **security:** opt-in strict per-tenant audience binding (RFC 8707) -- when enabled, a token's `aud` must match the claimed tenant's resource, rejecting cross-tenant replay at the token layer; off by default (#373)
 - **security:** wire auth components onto the application context at bootstrap so the API permission guard actually enforces RBAC -- previously `auth_components` was never set on the global context, so `_check_permission` read `None`, found no authz middleware, and fail-OPENed (returned early), letting any authenticated principal pass every check regardless of role
+- **security:** bridge the authenticated caller identity into the tool-call path over streamable-HTTP (hangar_call now reads the principal from the request context), so per-tenant enforcement (canary routing, per-tenant tool withdrawal) is no longer silently bypassed with a null tenant over HTTP (#384)
 
 ### Fixed
 
