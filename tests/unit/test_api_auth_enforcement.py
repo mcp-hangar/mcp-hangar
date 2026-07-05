@@ -132,4 +132,47 @@ class TestSystemMeEndpoint:
         from mcp_hangar.server.api.system import system_routes
 
         me_route = next(r for r in system_routes if r.path == "/me")
-        assert "GET" in me_route.methods
+        assert me_route.methods is not None and "GET" in me_route.methods
+
+
+class TestCheckPermissionEnforcement:
+    """Guards the RBAC enforcement path (#386): `_check_permission` must ENFORCE
+    when the authz middleware is wired onto the context, and returns early ONLY
+    when no authz middleware is present (the pre-#386 fail-open condition).
+
+    The bootstrap *wiring* itself (get_context().auth_components is set) is
+    regression-covered by the live T2 RBAC probe
+    (tests/live/test_t2_auth.py::test_rbac_denies_unprivileged_and_allows_privileged).
+    """
+
+    def test_check_permission_enforces_when_authz_is_wired(self, monkeypatch):
+        import pytest
+        from unittest.mock import MagicMock
+
+        from mcp_hangar.server.api import mcp_servers as api
+
+        authz = MagicMock()
+        authz.authorize.side_effect = PermissionError("access denied")
+        ctx = MagicMock()
+        ctx.auth_components.authz_middleware = authz
+        monkeypatch.setattr(api, "get_context", lambda: ctx)
+
+        request = MagicMock()
+        request.state.auth.principal.is_anonymous.return_value = False
+
+        with pytest.raises(PermissionError):
+            api._check_permission(request, resource_type="mcp_servers", action="write")
+        authz.authorize.assert_called_once()
+
+    def test_check_permission_returns_early_only_without_authz_middleware(self, monkeypatch):
+        from unittest.mock import MagicMock
+
+        from mcp_hangar.server.api import mcp_servers as api
+
+        # The pre-#386 fail-OPEN condition: no auth_components on the context.
+        ctx = MagicMock()
+        ctx.auth_components = None
+        monkeypatch.setattr(api, "get_context", lambda: ctx)
+
+        # No authz middleware -> guard returns without enforcing (no raise).
+        api._check_permission(MagicMock(), resource_type="mcp_servers", action="write")
