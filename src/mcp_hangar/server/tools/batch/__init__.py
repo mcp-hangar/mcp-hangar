@@ -421,6 +421,12 @@ def hangar_call(
                     max_concurrency=max_concurrency,
                     global_timeout=timeout,
                     fail_fast=fail_fast,
+                    # Thread the real FastMCP request context so the executor reads
+                    # inbound trace context + protocol negotiation from the actual
+                    # params._meta over streamable-HTTP (the ApplicationContext has
+                    # none). None on stdio -> defaults, unchanged. Identity bridging
+                    # above (#387) is untouched.
+                    request_ctx=ctx,
                 )
             finally:
                 if _identity_token is not None:

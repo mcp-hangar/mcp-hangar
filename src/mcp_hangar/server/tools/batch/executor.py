@@ -347,6 +347,7 @@ class BatchExecutor:
         max_concurrency: int,
         global_timeout: float,
         fail_fast: bool,
+        request_ctx: Any | None = None,
     ) -> BatchResult:
         """Execute batch of calls in parallel.
 
@@ -365,6 +366,13 @@ class BatchExecutor:
             max_concurrency: Maximum parallel workers for this batch.
             global_timeout: Global timeout for entire batch.
             fail_fast: Abort on first error if True.
+            request_ctx: The real FastMCP request ``Context`` (when invoked over an
+                MCP transport), used solely to read the inbound ``params._meta``
+                for trace context and protocol negotiation. ``None`` on the
+                stdio / no-request path, in which case both default (empty trace /
+                supported protocol version) exactly as before. Distinct from the
+                ApplicationContext returned by ``get_context()``, which has no
+                ``request_context`` and is still used for the event/command buses.
 
         Returns:
             BatchResult with all call results.
@@ -375,7 +383,11 @@ class BatchExecutor:
         # and capabilities per request in params._meta (no initialize handshake).
         # Read them once at ingress and publish to a request-scoped contextvar that
         # batch worker threads inherit via copy_context(). Additive: no gating here.
-        set_current_protocol_negotiation(read_protocol_negotiation(_inbound_meta_dict(ctx)))
+        # Over streamable-HTTP the inbound _meta lives on the FastMCP request_ctx
+        # (the ApplicationContext has no request_context), so read from request_ctx;
+        # when it is None (stdio / no request) the helper yields None and negotiation
+        # falls back to the default supported version -- unchanged behavior.
+        set_current_protocol_negotiation(read_protocol_negotiation(_inbound_meta_dict(request_ctx)))
 
         start_time = time.perf_counter()
         cancel_event = threading.Event()
@@ -451,6 +463,7 @@ class BatchExecutor:
                             cancel_event,
                             global_timeout,
                             start_time,
+                            request_ctx,
                         ): call.index
                         for call in calls
                     }
@@ -629,6 +642,7 @@ class BatchExecutor:
         cancel_event: threading.Event,
         global_timeout: float,
         batch_start_time: float,
+        request_ctx: Any | None = None,
     ) -> CallResult:
         """Execute a single call within the batch.
 
@@ -650,6 +664,10 @@ class BatchExecutor:
             cancel_event: Event to check for cancellation.
             global_timeout: Global batch timeout.
             batch_start_time: When batch started (for remaining time calculation).
+            request_ctx: The real FastMCP request ``Context`` (or ``None`` on the
+                stdio / no-request path), used to read the inbound ``params._meta``
+                for W3C trace context. Distinct from the ApplicationContext returned
+                by ``get_context()``.
 
         Returns:
             CallResult for this call.
@@ -660,8 +678,11 @@ class BatchExecutor:
         # Extract W3C TraceContext for distributed tracing. Per SEP-414 it travels
         # in the inbound request's params._meta (un-prefixed traceparent/tracestate);
         # fall back to the legacy call.metadata field. _meta wins when both present.
+        # The inbound _meta lives on the FastMCP request_ctx (the ApplicationContext
+        # has no request_context); when request_ctx is None the helper yields {} and
+        # only call.metadata is used -- the pre-bridge default, unchanged.
         metadata = call.metadata or {}
-        parent_context = extract_trace_context({**metadata, **_inbound_trace_meta(ctx)})
+        parent_context = extract_trace_context({**metadata, **_inbound_trace_meta(request_ctx)})
 
         # Create a span for this batch call, parented to the agent's trace
         # context when traceparent was provided. This links the Hangar span

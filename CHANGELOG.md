@@ -39,6 +39,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - **auth:** the OIDC/JWT authenticator now matches the `Authorization` header case-insensitively, so a real Bearer token from the HTTP transport (which normalises header keys to lowercase) is authenticated instead of silently falling through to "no authenticator matched" (#311)
 - **core:** `ProtocolNegotiation.capabilities` uses `default_factory` instead of a bare `mappingproxy` default, which Python 3.11's dataclass rejects as a mutable default -- this was breaking test collection on 3.11 across the whole suite (#291)
 - **security:** fail-closed `ui://` (MCP Apps) resource guard -- per-tenant allowlist + restrictive CSP + mandatory consent gate; `ui://` denied by default (#328)
+- **core:** inbound trace context and protocol-version/capability negotiation now reach the executor over streamable-HTTP (`hangar_call` threads the request context in), instead of silently defaulting; identity bridging (#387) unchanged (#294)
 
 ## [1.4.0](https://github.com/mcp-hangar/mcp-hangar/compare/v1.3.0...v1.4.0) (2026-06-29)
 
