@@ -3,7 +3,14 @@
 Validates our response against a JSON Schema derived from the SEP-1763
 Interceptor interface definition at:
 
-    modelcontextprotocol/experimental-ext-interceptors @ 5bd7ab4
+    modelcontextprotocol/experimental-ext-interceptors @ 99bc7c9
+
+Re-pinned 5bd7ab4 -> 99bc7c9 for issue #401 (6 commits ahead). The notable
+drift is upstream #25 ("Align capability key to SEP-2133 extensions format"),
+which moved the interceptor capability to the reverse-DNS key
+``io.modelcontextprotocol/interceptors``; the SEP prose ``Interceptor``
+interface at 99bc7c9 also carries optional ``failOpen`` / ``priorityHint`` /
+``compat`` / ``configSchema`` fields, reflected in INTERCEPTOR_SCHEMA_V2 below.
 
 The upstream repo does not publish a machine-readable JSON Schema, so we
 maintain a local schema that mirrors the spec. When bumping the pinned
@@ -89,8 +96,12 @@ class TestInterceptorsListSchema:
             jsonschema.validate(bad, INTERCEPTOR_SCHEMA)
 
 
-# PR #2624-aligned shape (pinned head 8029c78). Each interceptor carries a
-# "hooks" array of {events, phase} and "validation"/"mutation" type labels.
+# PR #2624-aligned shape, mirrored against the SEP prose Interceptor interface
+# at experimental-ext-interceptors 99bc7c9. Each interceptor carries a "hooks"
+# array of {events, phase} and "validation"/"mutation" type labels, plus the
+# optional failOpen / priorityHint / compat / configSchema fields the interface
+# defines. "trustBoundary" is a Hangar-local extension field (not in the SEP
+# interface); it is retained on our response and allowed here.
 INTERCEPTOR_SCHEMA_V2 = {
     "$schema": "https://json-schema.org/draft/2020-12/schema",
     "type": "object",
@@ -110,6 +121,31 @@ INTERCEPTOR_SCHEMA_V2 = {
                     "description": {"type": "string"},
                     "type": {"type": "string", "enum": ["validation", "mutation"]},
                     "mode": {"type": "string", "enum": ["active", "audit"]},
+                    "failOpen": {"type": "boolean"},
+                    "priorityHint": {
+                        "oneOf": [
+                            {"type": "integer"},
+                            {
+                                "type": "object",
+                                "additionalProperties": False,
+                                "properties": {
+                                    "request": {"type": "integer"},
+                                    "response": {"type": "integer"},
+                                },
+                            },
+                        ],
+                    },
+                    "compat": {
+                        "type": "object",
+                        "required": ["minProtocol"],
+                        "additionalProperties": False,
+                        "properties": {
+                            "minProtocol": {"type": "string"},
+                            "maxProtocol": {"type": "string"},
+                        },
+                    },
+                    "configSchema": {"type": "object"},
+                    # Hangar-local extension field (not in the SEP interface).
                     "trustBoundary": {"type": "string"},
                     "hooks": {
                         "type": "array",
@@ -131,6 +167,8 @@ INTERCEPTOR_SCHEMA_V2 = {
                 },
             },
         },
+        # ListInterceptorsResult carries an optional pagination cursor upstream.
+        "nextCursor": {"type": "string"},
     },
 }
 
@@ -152,3 +190,21 @@ class TestInterceptorsListSchemaV2:
         }
         with pytest.raises(jsonschema.ValidationError):
             jsonschema.validate(bad, INTERCEPTOR_SCHEMA_V2)
+
+    def test_v2_schema_accepts_99bc7c9_optional_fields(self):
+        # Optional fields added to the SEP Interceptor interface at 99bc7c9.
+        entry = {
+            "interceptors": [
+                {
+                    "name": "content-filter",
+                    "type": "mutation",
+                    "hooks": [{"events": ["tools/call"], "phase": "request"}],
+                    "failOpen": False,
+                    "priorityHint": {"request": -1000, "response": 1000},
+                    "compat": {"minProtocol": "2025-06-18"},
+                    "configSchema": {"type": "object"},
+                }
+            ],
+            "nextCursor": "opaque",
+        }
+        jsonschema.validate(entry, INTERCEPTOR_SCHEMA_V2)
