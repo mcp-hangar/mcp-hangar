@@ -11,7 +11,11 @@ fi
 
 stripped=$(echo "$PR_BODY" | tr -d '\r' | sed 's/<!--.*-->//g' | sed '/<!--/,/-->/d')
 
-required_sections=("## Why" "## What" "## How tested" "## Risk and rollback" "## CHANGELOG note")
+# Only the two sections that carry real signal are required: motivation and
+# verification. "What" is usually the CC title; "Risk and rollback" is optional;
+# "CHANGELOG note" is redundant with the separate changelog-check (label or
+# CHANGELOG.md entry). Keep the `trivial` label as the escape hatch.
+required_sections=("## Why" "## How tested")
 failed=false
 
 for section in "${required_sections[@]}"; do
