@@ -17,6 +17,18 @@ execution:
   max_concurrency: 50                # Global limit across all providers (default: 50)
   default_provider_concurrency: 10   # Default per-provider limit (default: 10)
 
+# ---------------------------------------------------------------------------
+# Rate limit — command-bus token bucket
+# ---------------------------------------------------------------------------
+# Throttles command dispatch (per command type) using a token-bucket limiter.
+# Values here take precedence over the MCP_RATE_LIMIT_RPS / MCP_RATE_LIMIT_BURST
+# env vars, which remain as a fallback. Omit this section to keep the env/default
+# behavior (10 rps, burst 20). Raise these when large batch sweeps exhaust the
+# default bucket and trip the group circuit breaker.
+rate_limit:
+  rps: 10      # Tokens refilled per second (default: 10)
+  burst: 20    # Maximum burst capacity / bucket size (default: 20)
+
 providers:
   # Subprocess — uses default per-provider concurrency (10)
   math:
