@@ -75,6 +75,7 @@ class PersistentAuditStore(AuditStore):
         limit: int = 100,
         caller_user_id: str | None = None,
         provider_id: str | None = None,
+        task_id: str | None = None,
     ) -> list[AuditRecord]:
         """Query audit records.
 
@@ -84,6 +85,8 @@ class PersistentAuditStore(AuditStore):
             since: Filter records after this time
             limit: Maximum records to return
             caller_user_id: Filter by caller user ID
+            provider_id: Legacy alias for mcp_server_id
+            task_id: Filter by async task ID (task lifecycle trail)
 
         Returns:
             List of audit records
