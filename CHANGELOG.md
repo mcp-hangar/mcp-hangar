@@ -53,6 +53,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Added
 
+- **core:** reconcile the interceptor surface with MCP PR #2624 — add `interceptor/invoke`, hook objects carrying `events` + `phase` (`request`/`response`), and phase-aware hook delivery on the request/response path. Opt-in and behind capability negotiation (header `MCP-Interceptor-Ext: sep-2624` or `?ext=sep-2624`); the default `interceptors/list` shape is unchanged. Pinned to PR #2624 head `8029c78` (OPEN — wire format may still move) (#317)
 - **tests:** schema validation for `interceptors/list` response against local JSON Schema derived from SEP-1763 (pinned @ `5bd7ab4`) (#185)
 
 ## [1.3.0](https://github.com/mcp-hangar/mcp-hangar/compare/v1.2.3...v1.3.0) (2026-06-23)

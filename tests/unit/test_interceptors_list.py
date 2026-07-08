@@ -73,17 +73,19 @@ class TestInterceptorsListEndpoint:
 
 
 class TestRegisterInterceptorsList:
-    def test_register_adds_one_custom_route(self):
+    def test_register_adds_two_custom_routes(self):
         mcp = FastMCP("test-interceptors")
         before = len(mcp._custom_starlette_routes)
         register_interceptors_list(mcp)
-        assert len(mcp._custom_starlette_routes) == before + 1
+        # interceptors/list + interceptor/invoke (PR #2624).
+        assert len(mcp._custom_starlette_routes) == before + 2
 
     def test_registered_route_path(self):
         mcp = FastMCP("test-interceptors")
         register_interceptors_list(mcp)
-        route = mcp._custom_starlette_routes[-1]
-        assert route.path == "/interceptors/list"
+        paths = {r.path for r in mcp._custom_starlette_routes}
+        assert "/interceptors/list" in paths
+        assert "/interceptor/invoke" in paths
 
     def test_registered_route_serves_200(self):
         mcp = FastMCP("test-interceptors")
