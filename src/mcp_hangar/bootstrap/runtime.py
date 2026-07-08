@@ -17,7 +17,7 @@ from ..application.event_handlers import get_security_handler
 from ..application.ports.observability import NullObservabilityAdapter, ObservabilityPort
 from ..domain.repository import InMemoryMcpServerRepository, IMcpServerRepository
 from ..domain.security.input_validator import InputValidator
-from ..domain.security.rate_limiter import get_rate_limiter, RateLimitConfig
+from ..domain.security.rate_limiter import get_rate_limiter, InMemoryRateLimiter, RateLimitConfig
 from ..infrastructure.command_bus import CommandBus, get_command_bus
 from ..infrastructure.event_bus import EventBus, get_event_bus
 from ..infrastructure.persistence import (
@@ -169,6 +169,77 @@ class Runtime:
     observability: ObservabilityPort | None = None
 
 
+def resolve_rate_limit_config(
+    rate_limit_section: dict[str, Any] | None = None,
+    *,
+    env: dict[str, str] | None = None,
+) -> RateLimitConfig:
+    """Resolve the command-bus rate-limit config with config-over-env precedence.
+
+    Precedence (highest first):
+        1. ``config.yaml`` ``rate_limit.rps`` / ``rate_limit.burst`` (if present)
+        2. ``MCP_RATE_LIMIT_RPS`` / ``MCP_RATE_LIMIT_BURST`` env vars
+        3. Built-in defaults (10 rps, burst 20)
+
+    Args:
+        rate_limit_section: The ``rate_limit`` mapping from config.yaml, or None.
+        env: Optional environment mapping (defaults to os.environ).
+
+    Returns:
+        A validated :class:`RateLimitConfig`.
+    """
+    env = dict(os.environ) if env is None else env
+    section = rate_limit_section or {}
+
+    rps = section.get("rps")
+    burst = section.get("burst")
+
+    return RateLimitConfig(
+        requests_per_second=float(rps) if rps is not None else float(env.get("MCP_RATE_LIMIT_RPS", "10")),
+        burst_size=int(burst) if burst is not None else int(env.get("MCP_RATE_LIMIT_BURST", "20")),
+    )
+
+
+def apply_rate_limit_config(
+    runtime: Runtime,
+    full_config: dict[str, Any],
+    *,
+    env: dict[str, str] | None = None,
+) -> RateLimitConfig:
+    """Apply the config.yaml ``rate_limit`` section onto an existing runtime.
+
+    The runtime's rate limiter is constructed from env defaults during lazy
+    startup (before config.yaml is loaded). This re-resolves the effective
+    config with config-over-env precedence and applies it to the already
+    constructed limiter, so declarative ``config.yaml`` tuning takes effect.
+
+    Args:
+        runtime: The runtime whose rate limiter should be updated in place.
+        full_config: The full configuration dictionary (may contain ``rate_limit``).
+        env: Optional environment mapping (defaults to os.environ).
+
+    Returns:
+        The effective :class:`RateLimitConfig` that was applied.
+    """
+    rate_limit_section = full_config.get("rate_limit")
+    if rate_limit_section is not None and not isinstance(rate_limit_section, dict):
+        rate_limit_section = None
+
+    effective = resolve_rate_limit_config(rate_limit_section, env=env)
+
+    limiter = runtime.rate_limiter
+    if isinstance(limiter, InMemoryRateLimiter):
+        limiter.config = effective
+        # Drop any buckets built with the previous config so new limits apply.
+        limiter.reset_all()
+
+    # Runtime is frozen; update the field so logging/serialization report the
+    # effective config rather than the env-derived bootstrap value.
+    object.__setattr__(runtime, "rate_limit_config", effective)
+
+    return effective
+
+
 def create_runtime(
     *,
     repository: IMcpServerRepository | None = None,
@@ -200,10 +271,7 @@ def create_runtime(
     cb = command_bus or get_command_bus()
     qb = query_bus or get_query_bus()
 
-    rate_limit_config = RateLimitConfig(
-        requests_per_second=float(env.get("MCP_RATE_LIMIT_RPS", "10")),
-        burst_size=int(env.get("MCP_RATE_LIMIT_BURST", "20")),
-    )
+    rate_limit_config = resolve_rate_limit_config(env=env)
     rate_limiter = get_rate_limiter(rate_limit_config)
 
     input_validator = InputValidator(
