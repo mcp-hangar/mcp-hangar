@@ -237,6 +237,11 @@ def bootstrap(
     # Initialize saga with persistence
     saga_state_store = init_saga(full_config)
 
+    # Apply config.yaml rate_limit overrides (config takes precedence over env)
+    from ...bootstrap.runtime import apply_rate_limit_config
+
+    apply_rate_limit_config(runtime, full_config)
+
     logger.info(
         "security_config_loaded",
         rate_limit_rps=runtime.rate_limit_config.requests_per_second,
