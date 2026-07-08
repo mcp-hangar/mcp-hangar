@@ -219,6 +219,84 @@ class ToolInvocationFailed(DomainEvent):
         super().__init__()
 
 
+# Task Lifecycle Events
+#
+# One logical async task (e.g. an MCP/A2A tasks/* action) spans many round
+# trips, unlike the single synchronous invoke captured by the tool-invocation
+# events above. These events capture the full async lifecycle so the audit
+# trail reflects the whole action, keyed on task_id. Every event carries
+# tenant_id + task_id + correlation_id so the trail is reconstructable per
+# task_id and attributable per tenant.
+
+
+@dataclass
+class TaskCreated(DomainEvent):
+    """Published when an async task is created."""
+
+    task_id: str
+    tenant_id: str | None = None
+    correlation_id: str = ""
+    mcp_server_id: str | None = None
+    tool_name: str = ""
+
+    def __post_init__(self):
+        super().__init__()
+
+
+@dataclass
+class TaskInputRequired(DomainEvent):
+    """Published when an in-flight task pauses awaiting caller input."""
+
+    task_id: str
+    tenant_id: str | None = None
+    correlation_id: str = ""
+    message: str = ""
+
+    def __post_init__(self):
+        super().__init__()
+
+
+@dataclass
+class TaskCompleted(DomainEvent):
+    """Published when a task finishes successfully."""
+
+    task_id: str
+    tenant_id: str | None = None
+    correlation_id: str = ""
+    duration_ms: float = 0.0
+
+    def __post_init__(self):
+        super().__init__()
+
+
+@dataclass
+class TaskFailed(DomainEvent):
+    """Published when a task terminates with an error."""
+
+    task_id: str
+    tenant_id: str | None = None
+    correlation_id: str = ""
+    error_type: str = ""
+    error_message: str = ""
+
+    def __post_init__(self):
+        super().__init__()
+
+
+@dataclass
+class TaskCancelled(DomainEvent):
+    """Published when a task is cancelled before completion."""
+
+    task_id: str
+    tenant_id: str | None = None
+    correlation_id: str = ""
+    reason: str = ""
+    cancelled_by: str = ""
+
+    def __post_init__(self):
+        super().__init__()
+
+
 # Health Check Events
 
 
