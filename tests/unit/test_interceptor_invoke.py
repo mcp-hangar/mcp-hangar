@@ -53,8 +53,13 @@ def bus_recorder():
 class TestPinnedRevision:
     def test_pin_recorded(self):
         assert SEP_2624_PR == 2624
-        # Explicit upstream head SHA the wire format is pinned to.
+        # SEP prose head SHA (PR #2624) -- unchanged; only the schema pin moved.
         assert SEP_2624_PIN == "8029c78ae88a3aadeb83c2f63cbbf2f04ec43e3a"
+
+    def test_capability_key_is_sep2133_reverse_dns(self):
+        # experimental-ext-interceptors #25 (99bc7c9) realigned the capability
+        # key to the SEP-2133 extensions format; our gate value mirrors it.
+        assert INTERCEPTOR_EXT_VALUE == "io.modelcontextprotocol/interceptors"
 
 
 class TestInterceptorInvokeResult:
@@ -155,7 +160,7 @@ class TestCapabilityNegotiationGating:
         assert "hooks" in entry
 
     def test_list_negotiated_via_query_param(self):
-        resp = _list_client().get("/interceptors/list?ext=sep-2624")
+        resp = _list_client().get(f"/interceptors/list?ext={INTERCEPTOR_EXT_VALUE}")
         assert resp.json()["interceptors"][0]["type"] == "validation"
 
     def test_invoke_not_exposed_without_negotiation(self, bus_recorder):

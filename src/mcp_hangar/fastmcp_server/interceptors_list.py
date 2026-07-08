@@ -22,6 +22,23 @@ default so clients that do not negotiate the extension are unaffected. The
 PR #2624-aligned shape (``hooks`` array with ``events`` + ``phase``, and the
 ``interceptor/invoke`` method) is served ONLY when the extension is negotiated
 via the capability header/query below.
+
+Capability key (SEP-2133 extensions format)
+--------------------------------------------
+The negotiated wire shape is reconciled against the interceptor JSON schema
+repo, re-pinned in ``tests/unit/test_interceptors_list_schema.py``:
+
+    repo:   modelcontextprotocol/experimental-ext-interceptors
+    commit: 99bc7c9 (was 5bd7ab4; bumped for issue #401)
+
+Upstream #25 (``99bc7c9``, "Align capability key to SEP-2133 extensions
+format") moved the interceptor capability from the short key ``interceptors``
+under ``Capabilities.Experimental`` to the reverse-DNS key
+``io.modelcontextprotocol/interceptors`` under ``Capabilities.Extensions``. Our
+gate value (below) mirrors that key so a client negotiating per current upstream
+lands on the same identifier. (The initialize-time ``capabilities.extensions``
+handshake is not reachable from custom HTTP routes, so we carry the key over a
+header/query gate instead.)
 """
 
 from __future__ import annotations
@@ -48,12 +65,17 @@ SEP_2624_PR = 2624
 SEP_2624_PIN = "8029c78ae88a3aadeb83c2f63cbbf2f04ec43e3a"
 
 # --- Capability negotiation (WS-3 T3 posture: off by default, opt-in). ---------
-# A client signals it has negotiated the PR #2624 extension by sending the header
-# ``MCP-Interceptor-Ext: sep-2624`` (or the ``?ext=sep-2624`` query param on GET).
-# When absent the extension stays hidden: ``interceptors/list`` returns the legacy
-# v1.2 shape and ``interceptor/invoke`` is not exposed (404).
+# A client signals it has negotiated the interceptor extension by sending the
+# header ``MCP-Interceptor-Ext: io.modelcontextprotocol/interceptors`` (or the
+# ``?ext=io.modelcontextprotocol/interceptors`` query param on GET). When absent
+# the extension stays hidden: ``interceptors/list`` returns the legacy v1.2 shape
+# and ``interceptor/invoke`` is not exposed (404).
+#
+# The negotiation value is the SEP-2133 reverse-DNS extension key adopted upstream
+# in experimental-ext-interceptors #25 (99bc7c9). It replaces the pre-realignment
+# ``sep-2624`` token shipped in #400 -- see the module docstring for the rationale.
 INTERCEPTOR_EXT_HEADER = "MCP-Interceptor-Ext"
-INTERCEPTOR_EXT_VALUE = "sep-2624"
+INTERCEPTOR_EXT_VALUE = "io.modelcontextprotocol/interceptors"
 
 # Interceptor types per PR #2624 (``validation`` / ``mutation``).
 _VALIDATOR = "mcp-hangar-validator"
