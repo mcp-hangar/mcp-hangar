@@ -4,6 +4,7 @@ from pathlib import Path
 from typing import Any, TYPE_CHECKING
 
 from ...domain.contracts.event_store import NullEventStore
+from ...domain.exceptions import ConfigurationError
 from ...logging_config import get_logger
 from .enterprise import create_enterprise_event_store
 
@@ -50,37 +51,18 @@ def init_event_store(runtime: "Runtime", config: dict[str, Any]) -> None:
         logger.info("event_store_initialized", driver="memory")
     elif driver == "sqlite":
         db_path = event_store_config.get("path", "data/events.db")
-        # SQLiteEventStore requires the persistence module.
-        # Fallback to in-memory when persistence module is unavailable.
         try:
             Path(db_path).parent.mkdir(parents=True, exist_ok=True)
             _result = create_enterprise_event_store(driver, event_store_config)
             if _result is None:
-                raise ImportError
+                raise ConfigurationError("SQLite event store is unavailable")
             event_store = _result
             logger.info("event_store_initialized", driver="sqlite", path=db_path)
-        except ImportError:
-            logger.warning(
-                "event_store_sqlite_unavailable",
-                fallback="memory",
-                hint="SQLite event store could not be loaded.",
-            )
-            from ...infrastructure.persistence import InMemoryEventStore
-
-            event_store = InMemoryEventStore()
-            logger.info("event_store_initialized", driver="memory", reason="sqlite_unavailable")
-            runtime.event_bus.set_event_store(event_store)
-            return
         except OSError as e:
-            logger.warning(
-                "event_store_sqlite_fallback_to_memory",
-                error=str(e),
-                path=db_path,
-            )
-            from ...infrastructure.persistence import InMemoryEventStore
-
-            event_store = InMemoryEventStore()
-            logger.info("event_store_initialized", driver="memory", reason="sqlite_unavailable")
+            raise ConfigurationError(
+                f"SQLite event store path is unavailable: {db_path}",
+                details={"path": db_path, "error": str(e)},
+            ) from e
     else:
         logger.warning(
             "unknown_event_store_driver",

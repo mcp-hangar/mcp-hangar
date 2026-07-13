@@ -960,13 +960,15 @@ class McpServer(AggregateRoot):
         idt_ctx = get_identity_context()
         identity_context_dict = idt_ctx.to_dict() if idt_ctx else None
 
-        # Lock cycle 1: Validation, ensure ready, check tool, maybe prepare refresh
+        # Wait outside the invocation lock so a concurrent starter can finalize
+        # state and signal every cold-start waiter.
+        self.ensure_ready()
+
+        # Lock cycle 1: Validation, check tool, maybe prepare refresh
         needs_refresh = False
         tool_found = False
         client = None
         with self._lock:
-            self.ensure_ready()
-
             if self._tools.has(tool_name):
                 tool_found = True
             elif not self._refresh_in_progress:

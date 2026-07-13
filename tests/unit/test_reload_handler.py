@@ -182,7 +182,8 @@ class TestReloadConfigurationHandler:
 
             assert result["success"] is True
             assert "old-provider" in result["mcp_servers_removed"]
-            existing_provider.stop.assert_called_once_with(reason="config_reload")
+            existing_provider.shutdown.assert_called_once()
+            existing_provider.stop.assert_not_called()
             mock_repository.remove.assert_called_once_with("old-provider")
 
         finally:
@@ -241,7 +242,8 @@ class TestReloadConfigurationHandler:
 
             assert result["success"] is True
             assert "test-provider" in result["mcp_servers_updated"]
-            existing_provider.stop.assert_called_once_with(reason="config_reload")
+            existing_provider.shutdown.assert_called_once()
+            existing_provider.stop.assert_not_called()
 
         finally:
             os.unlink(config_path)
@@ -303,8 +305,8 @@ class TestReloadConfigurationHandler:
         finally:
             os.unlink(config_path)
 
-    def test_reload_graceful_vs_immediate(self, handler, mock_repository, mock_event_bus):
-        """Should respect graceful flag when stopping providers."""
+    def test_reload_uses_shutdown_for_removed_provider(self, handler, mock_repository, mock_event_bus):
+        """Reload uses the supported shutdown lifecycle API."""
         # Create existing provider
         existing_provider = Mock(spec=McpServer)
         existing_provider._mode = Mock(value="subprocess")
@@ -339,7 +341,6 @@ class TestReloadConfigurationHandler:
             config_path = f.name
 
         try:
-            # Test graceful=False
             command = ReloadConfigurationCommand(
                 config_path=config_path,
                 graceful=False,
@@ -351,5 +352,52 @@ class TestReloadConfigurationHandler:
             existing_provider.shutdown.assert_called_once()
             existing_provider.stop.assert_not_called()
 
+        finally:
+            os.unlink(config_path)
+
+    def test_reload_fails_when_existing_provider_cannot_shutdown(self, handler, mock_repository, mock_event_bus):
+        """A failed shutdown must not be reported as a successful reload."""
+        existing_provider = Mock(spec=McpServer)
+        existing_provider._mode = Mock(value="subprocess")
+        existing_provider._command = ["old", "command"]
+        existing_provider._image = None
+        existing_provider._endpoint = None
+        existing_provider._env = {}
+        existing_provider._idle_ttl = Mock(seconds=300)
+        existing_provider._health_check_interval = Mock(seconds=60)
+        existing_provider._health = Mock(max_consecutive_failures=3)
+        existing_provider._volumes = []
+        existing_provider._build = None
+        existing_provider._resources = {}
+        existing_provider._network = "none"
+        existing_provider._read_only = True
+        existing_provider._user = None
+        existing_provider._description = None
+        existing_provider._tools = Mock(to_dict=lambda: None)
+        existing_provider._auth_config = None
+        existing_provider._tls_config = None
+        existing_provider._http_config = None
+        existing_provider.shutdown.side_effect = RuntimeError("process did not exit")
+
+        mock_repository.get_all.return_value = {"old-provider": existing_provider}
+
+        with tempfile.NamedTemporaryFile(mode="w", suffix=".yaml", delete=False) as f:
+            yaml.dump({"mcp_servers": {}}, f)
+            config_path = f.name
+
+        try:
+            with patch("mcp_hangar.server.config.load_config") as load_config:
+                with pytest.raises(ConfigurationError, match="Failed to stop mcp_server 'old-provider'"):
+                    handler.handle(ReloadConfigurationCommand(config_path=config_path))
+
+            existing_provider.shutdown.assert_called_once()
+            mock_repository.remove.assert_not_called()
+            load_config.assert_not_called()
+            failure_events = [
+                call.args[0]
+                for call in mock_event_bus.publish.call_args_list
+                if isinstance(call.args[0], ConfigurationReloadFailed)
+            ]
+            assert len(failure_events) == 1
         finally:
             os.unlink(config_path)
