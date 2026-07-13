@@ -172,6 +172,12 @@ providers:
 #   enabled: true                       # Enable event persistence (default: true)
 #   driver: sqlite                      # Options: sqlite, memory
 #   path: data/events.db                # Path to SQLite database file
+#   # When driver is "sqlite" and the path is not writable (e.g. a read-only
+#   # deploy), startup FAILS FAST rather than silently degrading to a
+#   # non-durable in-memory store and losing the audit trail. Set this to true
+#   # to explicitly accept a non-durable in-memory fallback instead of failing.
+#   # When the fallback is taken, /health/ready reports 503 (durability lost).
+#   allow_memory_fallback: false        # Opt in to non-durable fallback (default: false)
 
 # Logging configuration
 logging:
