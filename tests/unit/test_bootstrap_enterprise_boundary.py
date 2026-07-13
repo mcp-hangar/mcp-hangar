@@ -180,7 +180,7 @@ class TestBootstrapWithoutEnterprise:
 
         monkeypatch.setattr(event_store_module.Path, "mkdir", fail_mkdir)
 
-        with pytest.raises(ConfigurationError, match="SQLite event store path is unavailable"):
+        with pytest.raises(ConfigurationError, match="is not writable"):
             event_store_module.init_event_store(mock_runtime, config)
 
         mock_runtime.event_bus.set_event_store.assert_not_called()

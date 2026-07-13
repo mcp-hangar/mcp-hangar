@@ -4,6 +4,7 @@ from pathlib import Path
 from typing import Any, TYPE_CHECKING
 
 from ...domain.contracts.event_store import NullEventStore
+from ...domain.exceptions import ConfigurationError
 from ...logging_config import get_logger
 from ...observability.health import (
     EventStoreDurabilityStatus,
@@ -18,12 +19,15 @@ if TYPE_CHECKING:
 logger = get_logger(__name__)
 
 
-class EventStoreConfigurationError(RuntimeError):
+class EventStoreConfigurationError(ConfigurationError):
     """Raised when a durable event store cannot be initialized as configured.
 
     Surfaces (instead of silently degrading to a non-durable in-memory store)
     when the configured SQLite driver cannot be used -- e.g. the path/dir is
     not writable on a read-only deploy, or the SQLite backend is unavailable.
+
+    Subclasses the domain :class:`ConfigurationError` so callers that guard the
+    configuration boundary on that type also catch this fail-fast case.
     """
 
 
