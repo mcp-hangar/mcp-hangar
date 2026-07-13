@@ -4,6 +4,13 @@ from unittest.mock import Mock, patch
 
 import pytest
 
+try:
+    import opentelemetry.sdk.trace.export  # noqa: F401
+
+    _OTEL_SDK_AVAILABLE = True
+except ImportError:
+    _OTEL_SDK_AVAILABLE = False
+
 from mcp_hangar.observability.tracing import (
     get_current_span_id,
     get_current_trace_id,
@@ -148,8 +155,14 @@ class TestGetCurrentSpanId:
 class TestMeteredSpanExporter:
     """Tests for the _MeteredSpanExporter export-failure meter.
 
-    Requires the OpenTelemetry SDK; skipped when it is not installed.
+    Requires the OpenTelemetry SDK; the whole class is skipped when it is not
+    installed (the ``opentelemetry`` extra is not part of the default test env).
     """
+
+    pytestmark = pytest.mark.skipif(
+        not _OTEL_SDK_AVAILABLE,
+        reason="requires the opentelemetry extra",
+    )
 
     @staticmethod
     def _failures_total() -> float:
@@ -159,7 +172,6 @@ class TestMeteredSpanExporter:
         return samples[0].value if samples else 0.0
 
     def _wrapper(self, inner):
-        pytest.importorskip("opentelemetry.sdk.trace.export")
         from mcp_hangar.observability.tracing import _MeteredSpanExporter
 
         return _MeteredSpanExporter(inner)
