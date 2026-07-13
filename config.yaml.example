@@ -36,6 +36,25 @@ providers:
     command: [python, -m, examples.provider_math.server]
     idle_ttl_s: 180
     # max_concurrency: 10   # Per-provider limit (inherits default_provider_concurrency)
+    #
+    # `tools:` is OVERLOADED — it accepts two distinct forms:
+    #
+    #   1. A LIST of tool SCHEMAS (shown below) = a PRE-START VISIBILITY
+    #      PROJECTION. It lets the tool be listed before the provider is
+    #      started. It is NOT an access policy and NOT authoritative.
+    #      On start, the provider's dynamic `tools/list` REPLACES this
+    #      projection entirely. If the provider does not return a tool named
+    #      here, that tool becomes uncallable and invoking it raises
+    #      "Tool not found: <name>" (a WARNING is logged at start naming any
+    #      such unconfirmed static tool).
+    #
+    #   2. A DICT with `allow:` / `deny:` = an ACCESS POLICY that filters
+    #      which discovered tools are exposed, e.g.:
+    #        tools:
+    #          allow: [add, subtract]
+    #          deny: [dangerous_tool]
+    #
+    # The list form below is the pre-start SCHEMA projection:
     tools:
       - name: add
         description: "Add two numbers"
@@ -183,10 +202,14 @@ providers:
 # event_store:
 #   enabled: true                       # Enable event persistence (default: true)
 #   driver: sqlite                      # Options: sqlite, memory
-#   path: data/events.db                # Writable path to SQLite database file
+#   path: data/events.db                # Path to SQLite database file
+#   # When driver is "sqlite" and the path is not writable (e.g. a read-only
+#   # deploy), startup FAILS FAST rather than silently degrading to a
+#   # non-durable in-memory store and losing the audit trail. Set this to true
+#   # to explicitly accept a non-durable in-memory fallback instead of failing.
+#   # When the fallback is taken, /health/ready reports 503 (durability lost).
+#   allow_memory_fallback: false        # Opt in to non-durable fallback (default: false)
 #
-# A configured sqlite store is durable and must be writable. Hangar fails
-# startup instead of silently falling back to memory if this path is unavailable.
 # Use driver: memory only when volatile event history is explicitly acceptable.
 
 # Logging configuration

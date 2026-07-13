@@ -1,8 +1,9 @@
 """Unit tests for risk scoring."""
 
+from collections.abc import Callable
 from dataclasses import FrozenInstanceError
 import importlib
-from typing import Callable, Protocol, cast
+from typing import Protocol, cast
 
 import pytest
 
@@ -47,7 +48,9 @@ class TestRiskScoreValueObjects:
         score = RiskScore(score=12.5)
 
         with pytest.raises(FrozenInstanceError):
-            setattr(score, "score", 99.0)
+            # setattr (not direct assignment) keeps the frozen-dataclass __setattr__
+            # hook engaged so it raises; a plain `score.score = ...` would trip mypy.
+            setattr(score, "score", 99.0)  # noqa: B010
 
 
 class TestNullRiskScorer:

@@ -17,6 +17,20 @@ from starlette.websockets import WebSocketDisconnect
 # ---------------------------------------------------------------------------
 
 
+def _wait_for_timeout(awaitable: object, *args: object, **kwargs: object) -> object:
+    """``asyncio.wait_for`` stand-in that simulates an immediate timeout.
+
+    The real ``wait_for`` awaits the coroutine it is given; a bare
+    ``side_effect=asyncio.TimeoutError`` skips that, leaking the wrapped
+    coroutine (``receive_json``/``Queue.get``/``Event.wait``) as
+    ``RuntimeWarning: coroutine ... was never awaited``. Closing it first keeps
+    the timeout semantics without the leak.
+    """
+    if asyncio.iscoroutine(awaitable):
+        awaitable.close()
+    raise TimeoutError
+
+
 def make_ws_mock(receive_sequence: list[object] | None = None) -> MagicMock:
     """Build an AsyncMock WebSocket that returns items from receive_sequence.
 
@@ -80,7 +94,7 @@ class TestWsEventsEndpoint:
 
                     # To exit the loop, trigger WebSocketDisconnect after ping
                     ws.send_json = AsyncMock(side_effect=WebSocketDisconnect)
-                    with patch("asyncio.wait_for", side_effect=asyncio.TimeoutError):
+                    with patch("asyncio.wait_for", side_effect=_wait_for_timeout):
                         try:
                             await ws_events_endpoint(ws)
                         except Exception:  # noqa: BLE001
@@ -162,7 +176,7 @@ class TestWsEventsEndpoint:
                     mock_cm.register = MagicMock()
                     mock_cm.unregister = MagicMock()
 
-                    with patch("asyncio.wait_for", side_effect=asyncio.TimeoutError):
+                    with patch("asyncio.wait_for", side_effect=_wait_for_timeout):
                         try:
                             await ws_events_endpoint(ws)
                         except Exception:  # noqa: BLE001
@@ -217,7 +231,7 @@ class TestWsEventsEndpoint:
                     mock_cm.register = MagicMock()
                     mock_cm.unregister = MagicMock()
 
-                    with patch("asyncio.wait_for", side_effect=asyncio.TimeoutError):
+                    with patch("asyncio.wait_for", side_effect=_wait_for_timeout):
                         try:
                             await ws_events_endpoint(ws)
                         except Exception:  # noqa: BLE001
@@ -294,7 +308,7 @@ class TestWsEventsEndpoint:
                     mock_cm.register = MagicMock()
                     mock_cm.unregister = MagicMock()
 
-                    with patch("asyncio.wait_for", side_effect=asyncio.TimeoutError):
+                    with patch("asyncio.wait_for", side_effect=_wait_for_timeout):
                         try:
                             await ws_events_endpoint(ws)
                         except Exception:  # noqa: BLE001
@@ -317,6 +331,9 @@ class TestWsEventsEndpoint:
 
         async def controlled_wait_for(coro, timeout):
             """First call: filter timeout. Second call: queue get timeout (triggers ping)."""
+            # Close the wrapped coroutine so it isn't reported as never awaited.
+            if asyncio.iscoroutine(coro):
+                coro.close()
             pong_timeout_calls[0] += 1
             if pong_timeout_calls[0] <= 2:
                 raise TimeoutError
