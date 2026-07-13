@@ -356,6 +356,7 @@ def bootstrap(
     ctx.groups = GROUPS  # Wire shared GROUPS dict so API reads/writes use same instance
     ctx.load_mcp_server_handler = load_handler
     ctx.unload_mcp_server_handler = unload_handler
+    ctx.discovery_orchestrator = discovery_orchestrator
     ctx.discovery_registry = discovery_registry
     ctx.full_config = full_config  # Store for config round-trip serialization
     if enterprise.approval_service is not None:
