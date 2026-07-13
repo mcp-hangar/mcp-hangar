@@ -964,6 +964,18 @@ COST_ATTRIBUTIONS_TOTAL = Counter(
     labels=["mcp_server", "tool"],
 )
 
+# -----------------------------------------------------------------------------
+# OTLP Trace Export Metrics
+# -----------------------------------------------------------------------------
+
+OTLP_EXPORT_FAILURES_TOTAL = Counter(
+    # BatchSpanProcessor exports on a background thread and swallows failures,
+    # so a down/unreachable collector is otherwise silent. This counter makes
+    # that signal observable; each failed batch also drops its buffered spans.
+    name="mcp_hangar_otlp_export_failures",
+    description="Total number of failed OTLP span-export batches (collector unreachable or export error)",
+)
+
 
 # =============================================================================
 # Register All Metrics
@@ -1034,6 +1046,8 @@ def _register_all_metrics():
         # Cost attribution metrics
         COST_CENTS_TOTAL,
         COST_ATTRIBUTIONS_TOTAL,
+        # OTLP trace export metrics
+        OTLP_EXPORT_FAILURES_TOTAL,
     ]
 
     # Concurrency metrics (defined above alongside other batch metrics)
@@ -1265,6 +1279,17 @@ def record_detection_rule_match(rule_id: str, severity: str) -> None:
         severity: Severity of the match (critical, high, medium, low).
     """
     DETECTION_RULE_MATCHES_TOTAL.inc(rule_id=rule_id, severity=severity)
+
+
+def record_otlp_export_failure() -> None:
+    """Record a failed OTLP span-export batch.
+
+    Called when the OTLP exporter's ``export()`` returns a failure result or
+    raises. The export runs on the BatchSpanProcessor's background thread and
+    would otherwise fail silently, so this counter is the observable signal of
+    a down or unreachable collector (and of the spans dropped with that batch).
+    """
+    OTLP_EXPORT_FAILURES_TOTAL.inc()
 
 
 def record_enforcement_action(action: str, rule_id: str) -> None:
