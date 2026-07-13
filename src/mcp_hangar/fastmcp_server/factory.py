@@ -121,6 +121,7 @@ class MCPServerFactory:
         self._register_core_tools(mcp)
         self._register_discovery_tools(mcp)
         self._register_interceptors_list(mcp)
+        self._register_server_discover(mcp)
         self._maybe_register_flat_tool_handlers(mcp)
         self._enable_governed_tasks(mcp)
         self._advertise_governance_extensions(mcp)
@@ -402,6 +403,19 @@ class MCPServerFactory:
         from .interceptors_list import register_interceptors_list
 
         register_interceptors_list(mcp)
+
+    @staticmethod
+    def _register_server_discover(mcp: FastMCP) -> None:
+        """Register the SEP-2575 ``server/discover`` entry point (#290).
+
+        Exposes the per-tenant projection surface as a stateless discover
+        result, in addition to ``tools/list``. Tenant scoping and isolation
+        are inherited from the projection read-model — this is a no-op in
+        terms of enforcement, purely an alternate read entry point.
+        """
+        from .server_discover import register_server_discover
+
+        register_server_discover(mcp)
 
     @staticmethod
     def _maybe_register_flat_tool_handlers(mcp: FastMCP) -> None:

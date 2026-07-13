@@ -18,8 +18,15 @@ from ..events import DomainEvent
 class HookPhase(StrEnum):
     """Execution phase within the SEP-1763 trust-boundary ordering.
 
-    Phases mirror the interceptor execution model:
+    The internal phases (PRE_VALIDATE .. OBSERVE) mirror the local
+    interceptor execution model:
     Validate -> Mutate -> Send (outbound) / Validate -> Mutate -> Process (inbound).
+
+    REQUEST and RESPONSE are the two wire-level phases defined by MCP
+    PR #2624 (SEP-1763/SEP-2624), where a Lifecycle Event is either being
+    initiated (``request``) or completed (``response``). They are used for
+    phase-aware ``interceptor/invoke`` delivery and are kept as the exact
+    spec string values so hooks reconcile 1:1 with the pinned wire format.
     """
 
     PRE_VALIDATE = "pre_validate"
@@ -27,6 +34,9 @@ class HookPhase(StrEnum):
     PRE_MUTATE = "pre_mutate"
     POST_MUTATE = "post_mutate"
     OBSERVE = "observe"
+    # Wire-level phases per MCP PR #2624 (see module/interceptors_list pin).
+    REQUEST = "request"
+    RESPONSE = "response"
 
 
 @dataclass(frozen=True)

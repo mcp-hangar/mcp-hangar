@@ -164,6 +164,44 @@ class TestBootstrapWithoutEnterprise:
             f"Expected InMemoryEventStore for memory driver, got {type(actual_store).__name__}"
         )
 
+    def test_init_event_store_sqlite_unwritable_path_raises(self, monkeypatch, tmp_path):
+        """A configured durable store must not silently fall back to memory."""
+        import importlib
+
+        from mcp_hangar.domain.exceptions import ConfigurationError
+
+        event_store_module = importlib.import_module("mcp_hangar.server.bootstrap.event_store")
+
+        mock_runtime = MagicMock()
+        config = {"event_store": {"enabled": True, "driver": "sqlite", "path": str(tmp_path / "events.db")}}
+
+        def fail_mkdir(*args, **kwargs):
+            raise OSError("read-only file system")
+
+        monkeypatch.setattr(event_store_module.Path, "mkdir", fail_mkdir)
+
+        with pytest.raises(ConfigurationError, match="is not writable"):
+            event_store_module.init_event_store(mock_runtime, config)
+
+        mock_runtime.event_bus.set_event_store.assert_not_called()
+
+    def test_init_event_store_sqlite_unavailable_raises(self, monkeypatch):
+        """An unavailable durable implementation must not become memory storage."""
+        import importlib
+
+        from mcp_hangar.domain.exceptions import ConfigurationError
+
+        event_store_module = importlib.import_module("mcp_hangar.server.bootstrap.event_store")
+        mock_runtime = MagicMock()
+        config = {"event_store": {"enabled": True, "driver": "sqlite", "path": "data/events.db"}}
+
+        monkeypatch.setattr(event_store_module, "create_enterprise_event_store", lambda *_: None)
+
+        with pytest.raises(ConfigurationError, match="SQLite event store is unavailable"):
+            event_store_module.init_event_store(mock_runtime, config)
+
+        mock_runtime.event_bus.set_event_store.assert_not_called()
+
     def test_init_auth_cqrs_skips_when_auth_disabled(self):
         """When auth_components.enabled is False, init_auth_cqrs() returns
         without error and without registering handlers."""

@@ -27,6 +27,19 @@ from .base import McpServerLauncher
 
 logger = get_logger(__name__)
 
+# Actionable guidance shared by the "no runtime" start errors below.
+#
+# `mode: docker` / `mode: container` shells out to a podman or docker CLI on the
+# host (see `_find_runtime`). That CLI is NOT present inside the stock Hangar
+# container image (Dockerfile ships python:3.11-slim with no container runtime),
+# so container-mode providers cannot be launched from within that image.
+_HOST_RUNTIME_HINT = (
+    "mode: docker/container requires a podman or docker CLI on the host running "
+    "Hangar; it is not available inside the stock Hangar container image. Either "
+    "run Hangar in host mode on a machine with a container runtime installed, or "
+    "use a subprocess provider (mode: subprocess) instead."
+)
+
 
 @dataclass
 class ContainerConfig:
@@ -145,12 +158,12 @@ class ContainerLauncher(McpServerLauncher):
         if preference != "auto":
             raise McpServerStartError(
                 mcp_server_id="container_launcher",
-                reason=f"Container runtime '{preference}' not found in PATH",
+                reason=(f"Container runtime '{preference}' not found on PATH. {_HOST_RUNTIME_HINT}"),
             )
 
         raise McpServerStartError(
             mcp_server_id="container_launcher",
-            reason="No container runtime found. Install podman or docker.",
+            reason=(f"No container runtime (podman or docker) found on PATH. {_HOST_RUNTIME_HINT}"),
         )
 
     def _find_runtime(self, preference: str) -> str | None:

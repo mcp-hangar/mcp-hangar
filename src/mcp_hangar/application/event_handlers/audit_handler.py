@@ -31,6 +31,8 @@ class AuditRecord:
     caller_agent_id: str | None = None
     caller_session_id: str | None = None
     caller_principal_type: str | None = None
+    task_id: str | None = None
+    tenant_id: str | None = None
 
     @property
     def provider_id(self) -> str | None:
@@ -52,6 +54,8 @@ class AuditRecord:
             "caller_agent_id": self.caller_agent_id,
             "caller_session_id": self.caller_session_id,
             "caller_principal_type": self.caller_principal_type,
+            "task_id": self.task_id,
+            "tenant_id": self.tenant_id,
         }
 
     def to_json(self) -> str:
@@ -76,6 +80,7 @@ class AuditStore(ABC):
         limit: int = 100,
         caller_user_id: str | None = None,
         provider_id: str | None = None,
+        task_id: str | None = None,
     ) -> list[AuditRecord]:
         """Query audit records."""
         pass
@@ -103,13 +108,17 @@ class InMemoryAuditStore(AuditStore):
         limit: int = 100,
         caller_user_id: str | None = None,
         provider_id: str | None = None,
+        task_id: str | None = None,
     ) -> list[AuditRecord]:
-        """Query audit records with optional filters."""
+        """Query audit records with optional filters.
+
+        When ``task_id`` is supplied, all lifecycle records for that task are
+        returned, letting callers reconstruct the full async trail for a task.
+        """
         if mcp_server_id is None:
             mcp_server_id = provider_id
-        from typing import Any
 
-        results: list[Any] = []
+        results: list[AuditRecord] = []
         for record in reversed(self._records):  # Most recent first
             if len(results) >= limit:
                 break
@@ -122,6 +131,8 @@ class InMemoryAuditStore(AuditStore):
             if since and record.recorded_at < since:
                 continue
             if caller_user_id and record.caller_user_id != caller_user_id:
+                continue
+            if task_id and record.task_id != task_id:
                 continue
 
             results.append(record)
@@ -156,6 +167,7 @@ class LogAuditStore(AuditStore):
         limit: int = 100,
         caller_user_id: str | None = None,
         provider_id: str | None = None,
+        task_id: str | None = None,
     ) -> list[AuditRecord]:
         """Query is not supported for log store."""
         raise NotImplementedError("Log audit store does not support queries")
@@ -202,6 +214,11 @@ class AuditEventHandler:
         # Extract mcp_server_id if available
         mcp_server_id = getattr(event, "mcp_server_id", None)
 
+        # Extract task lifecycle keys (task_id/tenant_id) from events that carry
+        # them, so the full async trail is reconstructable per task_id (#321).
+        task_id = getattr(event, "task_id", None)
+        tenant_id = getattr(event, "tenant_id", None)
+
         # Extract identity_context from events that carry it
         # (ToolInvocationRequested/Completed/Failed have identity_context field)
         identity_context = getattr(event, "identity_context", None)
@@ -227,6 +244,8 @@ class AuditEventHandler:
             caller_agent_id=caller_agent_id,
             caller_session_id=caller_session_id,
             caller_principal_type=caller_principal_type,
+            task_id=task_id if isinstance(task_id, str) else None,
+            tenant_id=tenant_id if isinstance(tenant_id, str) else None,
         )
 
         try:
@@ -247,8 +266,13 @@ class AuditEventHandler:
         limit: int = 100,
         caller_user_id: str | None = None,
         provider_id: str | None = None,
+        task_id: str | None = None,
     ) -> list[AuditRecord]:
-        """Query audit records."""
+        """Query audit records.
+
+        Pass ``task_id`` to reconstruct the full lifecycle trail
+        (created -> ... -> completed/failed/cancelled) for one task.
+        """
         if mcp_server_id is None:
             mcp_server_id = provider_id
         return self._store.query(
@@ -257,6 +281,7 @@ class AuditEventHandler:
             since=since,
             limit=limit,
             caller_user_id=caller_user_id,
+            task_id=task_id,
         )
 
 

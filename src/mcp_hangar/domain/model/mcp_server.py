@@ -176,11 +176,21 @@ class McpServer(AggregateRoot):
         self._meta: dict[str, Any] = {}
         self._last_used: float = 0.0
 
-        # Pre-load tools from configuration (allows visibility before start)
+        # Pre-load tools from configuration (allows visibility before start).
+        #
+        # A statically-configured `tools:` list is a PRE-START VISIBILITY
+        # PROJECTION only. On start, the provider's dynamic `tools/list` is
+        # authoritative and REPLACES this projection (see
+        # _perform_mcp_handshake). A statically-listed tool that the provider
+        # does not return will be uncallable and raise ToolNotFoundError at
+        # invocation. We retain the predefined names so start can warn on any
+        # unconfirmed static tool (observability only -- no behavior change).
         self._tools_predefined = False
+        self._tools_predefined_names: frozenset[str] = frozenset()
         if tools:
             self._tools.update_from_list(tools)
             self._tools_predefined = True
+            self._tools_predefined_names = frozenset(self._tools.list_names())
 
         # Concurrent startup coordination
         # _ready_event is set initially (no one waiting). Cleared when a thread
@@ -799,6 +809,21 @@ class McpServer(AggregateRoot):
         tool_list = tools_resp.get("result", {}).get("tools", [])
         self._tools.update_from_list(tool_list)
 
+        # Observability: the dynamic tools/list above is authoritative and has
+        # just replaced any static pre-start projection. Surface the silent
+        # mismatch when a statically pre-configured tool is not confirmed by
+        # the provider -- such a tool is now uncallable and will raise
+        # ToolNotFoundError at invocation. This is a WARNING only; it does not
+        # change behavior (making static authoritative is a separate decision).
+        if self._tools_predefined_names:
+            missing = sorted(name for name in self._tools_predefined_names if not self._tools.has(name))
+            if missing:
+                logger.warning(
+                    f"static_tools_unconfirmed: {self.mcp_server_id}, tools={missing} -- "
+                    "statically-configured tool(s) not returned by the provider's tools/list; "
+                    "they are uncallable and will raise ToolNotFoundError at invocation"
+                )
+
     def _log_client_error(self, client: Any, error_msg: str) -> None:
         """Log detailed error info including stderr and exit code for debugging."""
         proc = getattr(client, "process", None)
@@ -979,13 +1004,15 @@ class McpServer(AggregateRoot):
         idt_ctx = get_identity_context()
         identity_context_dict = idt_ctx.to_dict() if idt_ctx else None
 
-        # Lock cycle 1: Validation, ensure ready, check tool, maybe prepare refresh
+        # Wait outside the invocation lock so a concurrent starter can finalize
+        # state and signal every cold-start waiter.
+        self.ensure_ready()
+
+        # Lock cycle 1: Validation, check tool, maybe prepare refresh
         needs_refresh = False
         tool_found = False
         client = None
         with self._lock:
-            self.ensure_ready()
-
             if self._tools.has(tool_name):
                 tool_found = True
             elif not self._refresh_in_progress:
@@ -1124,12 +1151,54 @@ class McpServer(AggregateRoot):
                     {"tool_name": tool_name, "correlation_id": correlation_id},
                 )
 
+            result = response.get("result", {})
+
+            # A backend tool result with isError:true is a tool-level failure,
+            # even though the JSON-RPC envelope carries no protocol error. Map it
+            # to a failure here (the single authoritative point) so downstream
+            # health, batch counts, and events all reflect reality. The front
+            # door still re-surfaces the raw result verbatim to the caller.
+            if isinstance(result, dict) and result.get("isError"):
+                # Tool-level errors live in the content blocks (typically
+                # [{"type": "text", "text": ...}]), not the JSON-RPC error
+                # envelope. Extract the text for diagnostics.
+                content = result.get("content")
+                error_msg = "tool reported isError"
+                if isinstance(content, list):
+                    texts = [str(block["text"]) for block in content if isinstance(block, dict) and block.get("text")]
+                    if texts:
+                        error_msg = "; ".join(texts)
+
+                self._health.record_invocation_failure()
+
+                duration_ms = (time.time() - start_time) * 1000
+                self._record_event(
+                    ToolInvocationFailed(
+                        mcp_server_id=self.mcp_server_id,
+                        tool_name=tool_name,
+                        correlation_id=correlation_id,
+                        duration_ms=duration_ms,
+                        error_message=error_msg,
+                        error_type="tool_error",
+                        identity_context=identity_context_dict,
+                    )
+                )
+
+                raise ToolInvocationError(
+                    self.mcp_server_id,
+                    f"tool_error: {error_msg}",
+                    {
+                        "tool_name": tool_name,
+                        "correlation_id": correlation_id,
+                        "is_error": True,
+                        "content": result.get("content"),
+                    },
+                )
+
             # Success
             duration_ms = (time.time() - start_time) * 1000
             self._health.record_success()
             self._last_used = time.time()
-
-            result = response.get("result", {})
 
             self._record_event(
                 ToolInvocationCompleted(

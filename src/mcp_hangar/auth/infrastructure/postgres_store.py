@@ -19,7 +19,7 @@ import secrets
 
 import structlog
 
-from mcp_hangar.domain.contracts.authentication import ApiKeyMetadata, IApiKeyStore
+from mcp_hangar.domain.contracts.authentication import ApiKeyMetadata, IApiKeyStore, IInitialAdminBootstrapStore
 from mcp_hangar.domain.contracts.authorization import IRoleStore
 from mcp_hangar.domain.events import ApiKeyCreated, ApiKeyRevoked, KeyRotated, RoleAssigned, RoleRevoked
 from mcp_hangar.domain.exceptions import ExpiredCredentialsError, RevokedCredentialsError
@@ -58,6 +58,14 @@ CREATE INDEX IF NOT EXISTS idx_api_keys_expires_at ON api_keys(expires_at) WHERE
 -- Add rotation columns if they don't exist (migration)
 ALTER TABLE api_keys ADD COLUMN IF NOT EXISTS rotated_to_key_id VARCHAR(32);
 ALTER TABLE api_keys ADD COLUMN IF NOT EXISTS grace_until TIMESTAMP WITH TIME ZONE;
+
+-- Singleton durable claim for the initial API-key administrator.
+CREATE TABLE IF NOT EXISTS initial_admin_bootstrap (
+    singleton BOOLEAN PRIMARY KEY DEFAULT TRUE CHECK (singleton),
+    principal_id VARCHAR(256) NOT NULL,
+    key_id VARCHAR(32) NOT NULL,
+    created_at TIMESTAMP WITH TIME ZONE NOT NULL DEFAULT NOW()
+);
 """
 
 # SQL Schema for Roles
@@ -86,7 +94,7 @@ CREATE INDEX IF NOT EXISTS idx_role_assignments_principal_scope
 """
 
 
-class PostgresApiKeyStore(IApiKeyStore):
+class PostgresApiKeyStore(IApiKeyStore, IInitialAdminBootstrapStore):
     """PostgreSQL-based API key store.
 
     Features:
@@ -117,6 +125,9 @@ class PostgresApiKeyStore(IApiKeyStore):
         self._get_connection = connection_factory
         self._prefix = table_prefix
         self._table = f"{table_prefix}api_keys" if table_prefix else "api_keys"
+        self._roles_table = f"{table_prefix}roles" if table_prefix else "roles"
+        self._assignments_table = f"{table_prefix}role_assignments" if table_prefix else "role_assignments"
+        self._bootstrap_table = f"{table_prefix}initial_admin_bootstrap" if table_prefix else "initial_admin_bootstrap"
         self._event_publisher = event_publisher
 
     def initialize(self) -> None:
@@ -124,6 +135,7 @@ class PostgresApiKeyStore(IApiKeyStore):
         schema = API_KEYS_SCHEMA
         if self._prefix:
             schema = schema.replace("api_keys", self._table)
+            schema = schema.replace("initial_admin_bootstrap", self._bootstrap_table)
 
         with self._get_connection() as conn:
             with conn.cursor() as cur:
@@ -299,6 +311,75 @@ class PostgresApiKeyStore(IApiKeyStore):
                 )
 
             return raw_key
+
+    def bootstrap_initial_admin(
+        self,
+        principal_id: str,
+        key_name: str,
+        groups: frozenset[str] | None = None,
+        tenant_id: str | None = None,
+        actor: str = "local-cli-bootstrap",
+    ) -> tuple[str, str] | None:
+        """Atomically create the first API-key administrator, if unclaimed."""
+        from .api_key_authenticator import ApiKeyAuthenticator
+
+        with self._get_connection() as conn, conn.cursor() as cur:
+            try:
+                cur.execute(
+                    f"""
+                    INSERT INTO {self._bootstrap_table} (singleton, principal_id, key_id)
+                    VALUES (TRUE, %s, %s)
+                    ON CONFLICT (singleton) DO NOTHING
+                    RETURNING singleton
+                    """,
+                    (principal_id, "pending"),
+                )
+                if cur.fetchone() is None:
+                    conn.rollback()
+                    return None
+
+                cur.execute(f"SELECT 1 FROM {self._roles_table} WHERE name = 'admin'")
+                if cur.fetchone() is None:
+                    raise ValueError("Built-in admin role is not initialized")
+
+                raw_key = ApiKeyAuthenticator.generate_key()
+                key_hash = ApiKeyAuthenticator._hash_key(raw_key)
+                key_id = secrets.token_urlsafe(8)
+                cur.execute(
+                    f"""
+                    INSERT INTO {self._table}
+                    (key_hash, key_id, principal_id, name, tenant_id, groups)
+                    VALUES (%s, %s, %s, %s, %s, %s)
+                    """,
+                    (key_hash, key_id, principal_id, key_name, tenant_id, json.dumps(list(groups or []))),
+                )
+                cur.execute(
+                    f"""
+                    INSERT INTO {self._assignments_table} (principal_id, role_name, scope, assigned_by)
+                    VALUES (%s, 'admin', 'global', %s)
+                    """,
+                    (principal_id, actor),
+                )
+                cur.execute(
+                    f"UPDATE {self._bootstrap_table} SET key_id = %s WHERE singleton = TRUE",
+                    (key_id,),
+                )
+                conn.commit()
+            except Exception:
+                conn.rollback()
+                raise
+
+        logger.info("initial_admin_bootstrapped", key_id=key_id, principal_id=principal_id)
+        if self._event_publisher:
+            self._event_publisher(
+                ApiKeyCreated(
+                    key_id=key_id, principal_id=principal_id, key_name=key_name, expires_at=None, created_by=actor
+                )
+            )
+            self._event_publisher(
+                RoleAssigned(principal_id=principal_id, role_name="admin", scope="global", assigned_by=actor)
+            )
+        return raw_key, key_id
 
     def revoke_key(self, key_id: str, revoked_by: str | None = None, reason: str | None = None) -> bool:
         """Revoke an API key.

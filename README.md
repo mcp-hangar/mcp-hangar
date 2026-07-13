@@ -1,83 +1,27 @@
 # MCP Hangar
 
+**Open-source control plane for MCP servers -- lifecycle, governance, and observability for your server fleet.**
+
 [![PyPI](https://img.shields.io/pypi/v/mcp-hangar)](https://pypi.org/project/mcp-hangar/)
-[![Python 3.11+](https://img.shields.io/badge/python-3.11+-blue.svg)](https://www.python.org/downloads/)
+[![CI](https://github.com/mcp-hangar/mcp-hangar/actions/workflows/ci-core.yml/badge.svg)](https://github.com/mcp-hangar/mcp-hangar/actions/workflows/ci-core.yml)
 [![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](https://opensource.org/licenses/MIT)
 
-**Production-grade infrastructure for Model Context Protocol.**
+## Why
 
-MCP Hangar is a control plane for MCP servers. It manages MCP server lifecycle, parallel tool execution, security governance, and observability -- so you don't have to.
+In MCP, the tool list is a hint the client caches; the call path is the only surface a provider mediates in real time. Every governance primitive worth having -- revocation, per-tenant scoping, audit -- attaches there, or attaches to nothing. Hangar puts a control plane on that seam: one mediated path for lifecycle, policy, and telemetry across your whole MCP server fleet.
 
-## Quick Start
+> Background: [The Advisory List -- Why MCP Governance Lives at the Call Path](https://whyisthisdown.com/posts/the-advisory-list)
 
-**30 seconds to working MCP servers:**
-
-```bash
-curl -sSL https://mcp-hangar.io/install.sh | bash && mcp-hangar init -y && mcp-hangar serve
-```
-
-That's it. Filesystem, fetch, and memory MCP servers are now available to Claude.
-
-<details>
-<summary>What just happened?</summary>
-
-1. **Install** - Downloaded and installed `mcp-hangar` via pip/uv
-2. **Init** - Created `~/.config/mcp-hangar/config.yaml` with starter MCP servers
-3. **Serve** - Started the MCP server (stdio mode for Claude Desktop)
-
-The `init -y` flag uses sensible defaults:
-
-- Detects available runtimes (uvx preferred, npx fallback)
-- Configures starter bundle: filesystem, fetch, memory
-- Runs a smoke test to verify MCP servers start correctly
-- Updates Claude Desktop config automatically
-
-</details>
-
-### Manual Setup
+## Install
 
 ```bash
-# 1. Install
 pip install mcp-hangar
 # or: uv pip install mcp-hangar
-
-# 2. Initialize with wizard
-mcp-hangar init
-
-# 3. Start server
-mcp-hangar serve
 ```
 
-### HTTP Mode
+## Quickstart
 
-```bash
-# Start with HTTP transport and REST API
-mcp-hangar serve --http --port 8000
-
-# REST API:  http://localhost:8000/api/
-```
-
-## What It Does
-
-**Parallel execution.** Your AI agent calls 5 tools sequentially -- each takes 200ms, that's 1 second of waiting. `hangar_call` runs them in parallel. 200ms total.
-
-```
-hangar_call(calls=[
-    {"mcp_server": "github", "tool": "search_repos", "arguments": {"query": "mcp"}},
-    {"mcp_server": "slack", "tool": "post_message", "arguments": {"channel": "#dev"}},
-    {"mcp_server": "internal-api", "tool": "get_status", "arguments": {}}
-])
-```
-
-Single MCP tool call. Parallel execution. All results returned together.
-
-**Lifecycle management.** Lazy loading, health checks, automatic restart, graceful shutdown. MCP servers start on first use, stay warm while active, shut down after idle TTL.
-
-**Single-flight cold starts.** When 10 parallel calls hit a cold MCP server, it initializes once -- not 10 times.
-
-**Circuit breaker.** One failing MCP server doesn't kill your batch. Automatic isolation and recovery.
-
-## Configuration
+Point Hangar at an MCP server in `config.yaml`:
 
 ```yaml
 mcp_servers:
@@ -86,134 +30,68 @@ mcp_servers:
     command: [uvx, mcp-server-github]
     env:
       GITHUB_TOKEN: ${GITHUB_TOKEN}
-
-  slack:
-    mode: subprocess
-    command: [uvx, mcp-server-slack]
-
-  internal-api:
-    mode: remote
-    endpoint: "http://localhost:8080"
-
-  custom-server:
-    mode: docker
-    image: my-registry/mcp-server:latest
-    container:
-      command: ["python", "-m", "custom_entrypoint"]
 ```
 
-### Claude Desktop Integration
+Then serve it:
 
-`mcp-hangar init` auto-configures Claude Desktop. For manual setup, add to your Claude Desktop config:
-
-**macOS:** `~/Library/Application Support/Claude/claude_desktop_config.json`
-**Linux:** `~/.config/Claude/claude_desktop_config.json`
-**Windows:** `%APPDATA%\Claude\claude_desktop_config.json`
-
-```json
-{
-  "mcpServers": {
-    "hangar": {
-      "command": "mcp-hangar",
-      "args": ["serve", "--config", "~/.config/mcp-hangar/config.yaml"]
-    }
-  }
-}
+```bash
+mcp-hangar serve --config config.yaml                     # stdio (Claude Desktop)
+mcp-hangar serve --config config.yaml --http --port 8000  # HTTP + REST API at /api/
 ```
 
-Restart Claude Desktop. Done.
+Or skip the config entirely -- get filesystem, fetch, and memory servers wired into Claude Desktop in one line:
 
-## Python API
-
-For programmatic use (scripts, pipelines, custom integrations):
-
-```python
-from mcp_hangar import Hangar, HangarConfig
-
-# Async
-async with Hangar.from_config("config.yaml") as hangar:
-    result = await hangar.invoke("math", "add", {"a": 1, "b": 2})
-
-# Sync wrapper
-from mcp_hangar import SyncHangar
-
-with SyncHangar.from_config("config.yaml") as hangar:
-    result = hangar.invoke("math", "add", {"a": 1, "b": 2})
-
-# Programmatic config
-config = (
-    HangarConfig()
-    .add_mcp_server("math", command=["python", "-m", "math_server"])
-    .add_mcp_server("fetch", mode="docker", image="mcp/fetch:latest")
-    .build()
-)
-hangar = Hangar(config)
+```bash
+curl -sSL https://mcp-hangar.io/install.sh | bash && mcp-hangar init -y && mcp-hangar serve
 ```
 
-## Security & Governance (1.0)
+## What you get
 
-- **Capability declaration.** Declare what each MCP server can access (network, filesystem, environment). Violations are detected and reported.
-- **Behavioral profiling.** Baseline MCP server behavior, detect deviations (new destinations, protocol drift, frequency anomalies). Learning and enforcing modes.
-- **Tool schema drift detection.** Track tool schema changes across MCP server updates.
-- **Network connection monitoring.** `/proc/net/tcp` parsing, Docker and Kubernetes monitors with audit events.
-- **RBAC.** Role-based access control with tool-level policies. API key and JWT/OIDC authentication.
-- **Approval gate.** Human-in-the-loop approval for sensitive tool calls.
+- **Parallel tool calls** -- one `hangar_call` fans out to many MCP servers concurrently; all results returned together.
+- **Lifecycle management** -- lazy start, health checks, single-flight cold starts, idle shutdown, and per-server circuit breaking.
+- **Hot config reload** -- add or withdraw servers and tools via file watch, no restart.
+- **Per-tenant tool projection** -- front-door mode presents a different executable surface per caller, fail-closed on unknown identity.
+- **OAuth ingress** -- advertise as an RFC 9728 protected resource and challenge external agents for verified tokens.
+- **Observability built in** -- OpenTelemetry traces, Prometheus metrics, structured logs, and an event-sourced audit trail.
 
-## Observability
+## Configuring `tools:`
 
-- **OpenTelemetry.** Distributed tracing with W3C trace context propagation across MCP servers.
-- **Prometheus metrics.** MCP server state, tool calls, health checks, circuit breaker, concurrency, batch execution.
-- **Grafana dashboards.** Pre-built overview and per-MCP server deep dive dashboards.
-- **Structured logging.** Correlation IDs across parallel calls. JSON log format for production.
-- **Audit trail.** Event-sourced audit log with OTLP export for security-relevant events.
+The per-server `tools:` key is overloaded and accepts two distinct forms:
 
-## Advanced Configuration
+- A **list of tool schemas** is a **pre-start visibility projection**. It lets a
+  tool be listed before its provider has started, so callers can see it up
+  front. It is not an access policy. On start, the provider's dynamic
+  `tools/list` is **authoritative and replaces this projection entirely** — a
+  statically-listed tool that the provider does not return becomes uncallable
+  and fails with `Tool not found: <name>` at invocation (a warning naming the
+  unconfirmed tool is logged at start).
+
+- A **dict with `allow:` / `deny:`** is an **access policy** (glob-pattern,
+  three-level merge) that filters which discovered tools are exposed.
 
 ```yaml
 mcp_servers:
-  fast-mcp-server:
+  math:
     mode: subprocess
-    command: ["python", "fast.py"]
-    idle_ttl_s: 300              # Shutdown after 5min idle
-    health_check_interval_s: 60  # Check health every minute
-    max_consecutive_failures: 3  # Circuit breaker threshold
-    max_concurrency: 5           # Per-MCP server concurrency limit
-    tools:
-      deny_list: [delete_*]      # Tool access filtering
-
-execution:
-  max_concurrency: 50            # Global concurrency limit
-  default_mcp_server_concurrency: 10
-
-truncation:
-  enabled: true
-  max_batch_size_bytes: 950000   # Under Claude's 1MB limit
-
-config_reload:
-  enabled: true                  # Live config reload via file watch
+    command: [python, -m, examples.provider_math.server]
+    tools:                     # list form: pre-start schema projection
+      - name: add
+        description: "Add two numbers"
+        inputSchema: { type: object, properties: { a: { type: number } } }
+  github:
+    mode: subprocess
+    command: [uvx, mcp-server-github]
+    tools:                     # dict form: allow/deny access policy
+      allow: [create_issue, list_issues]
+      deny: [delete_repository]
 ```
-
-## Scales With You
-
-- **Home lab:** 2 MCP servers, zero config complexity
-- **Team setup:** Shared MCP servers, Docker containers, hot-reload
-- **Enterprise:** 50+ MCP servers, behavioral profiling, RBAC, approval gates, Kubernetes operator
-
-Same API. Same reliability. Different scale.
 
 ## Documentation
 
-- [Getting Started](https://www.mcp-hangar.io/docs/oss/getting-started/quickstart)
-- [Configuration Reference](https://mcp-hangar.io/reference/configuration/)
-- [REST API Guide](https://www.mcp-hangar.io/docs/oss/reference/configuration)
-- [Observability Setup](https://www.mcp-hangar.io/docs/oss/guides/OBSERVABILITY)
-- [Authentication & RBAC](https://www.mcp-hangar.io/docs/oss/guides/AUTHENTICATION)
-- [Cookbook](https://www.mcp-hangar.io/docs/oss/cookbook/)
+- [Getting Started](https://mcp-hangar.io/docs/getting-started/quickstart) &middot; [Configuration](https://mcp-hangar.io/docs/reference/configuration) &middot; [Python API](https://mcp-hangar.io/docs/guides/FACADE_API)
+- [Governance & Front Door](https://mcp-hangar.io/docs/guides/FRONT_DOOR) &middot; [Authentication & RBAC](https://mcp-hangar.io/docs/guides/AUTHENTICATION) &middot; [Observability](https://mcp-hangar.io/docs/guides/OBSERVABILITY)
+- [Kubernetes operator](https://github.com/mcp-hangar/mcp-hangar-operator) &middot; [Helm charts](https://github.com/mcp-hangar/helm-charts) &middot; [All docs](https://mcp-hangar.io/docs)
 
 ## License
 
-Licensed under [MIT](LICENSE).
-
----
-
-[Docs](https://mcp-hangar.io) | [PyPI](https://pypi.org/project/mcp-hangar/) | [GitHub](https://github.com/mcp-hangar/mcp-hangar)
+[MIT](LICENSE)

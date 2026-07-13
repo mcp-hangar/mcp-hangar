@@ -286,6 +286,25 @@ class EventBus(IEventBus):
         stream_id = f"{aggregate_type}:{aggregate_id}"
         return self.publish_to_stream(stream_id, events, expected_version)
 
+    def publish_hook(self, event: DomainEvent, phase: HookPhase) -> None:
+        """Deliver a phase-tagged hook to hook subscribers (MCP PR #2624).
+
+        Unlike :meth:`publish`, this does NOT run flat event handlers or
+        persist the event; it delivers a single ``Hook`` carrying the given
+        wire-level phase (``HookPhase.REQUEST`` / ``HookPhase.RESPONSE``).
+        This is the phase-aware delivery path used by ``interceptor/invoke``,
+        letting subscribers observe both the request and response legs.
+
+        Args:
+            event: The domain event to wrap.
+            phase: Wire-level phase for this delivery.
+        """
+        tracer = get_tracer(__name__)
+        with tracer.start_as_current_span(f"event.publish_hook.{phase.value}") as span:
+            span.set_attribute("event.type", event.__class__.__name__)
+            span.set_attribute("hook.phase", phase.value)
+            self._publish_hook(event, phase, span)
+
     def _publish_hook(self, event: DomainEvent, phase: HookPhase, span: object) -> None:
         with self._lock:
             subscribers = list(self._hook_subscribers)
