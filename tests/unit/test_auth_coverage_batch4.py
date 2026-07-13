@@ -313,6 +313,40 @@ class TestPostgresApiKeyStore:
                 raw_key = store.create_key(principal_id="p1", name="k1")
         assert raw_key == "mcp_raw"
 
+    def test_bootstrap_initial_admin_commits_metadata_only(self):
+        publisher = Mock()
+        store, mock_conn, mock_cursor = self._make_store(event_publisher=publisher)
+        mock_cursor.fetchone.side_effect = [(True,), (1,)]
+
+        with patch("mcp_hangar.auth.infrastructure.api_key_authenticator.ApiKeyAuthenticator") as mock_auth:
+            mock_auth.generate_key.return_value = "mcp_raw_key"
+            mock_auth._hash_key.return_value = "key_hash"
+            with patch("mcp_hangar.auth.infrastructure.postgres_store.secrets.token_urlsafe", return_value="key_id"):
+                result = store.bootstrap_initial_admin("service:bootstrap", "initial admin")
+
+        assert result == ("mcp_raw_key", "key_id")
+        mock_conn.commit.assert_called_once()
+        assert [type(call.args[0]).__name__ for call in publisher.call_args_list] == ["ApiKeyCreated", "RoleAssigned"]
+        assert all("mcp_raw_key" not in repr(call.args[0]) for call in publisher.call_args_list)
+
+    def test_bootstrap_initial_admin_loser_rolls_back_without_events(self):
+        publisher = Mock()
+        store, mock_conn, mock_cursor = self._make_store(event_publisher=publisher)
+        mock_cursor.fetchone.return_value = None
+
+        assert store.bootstrap_initial_admin("service:bootstrap", "initial admin") is None
+        mock_conn.rollback.assert_called_once()
+        publisher.assert_not_called()
+
+    def test_bootstrap_initial_admin_failure_rolls_back_claim(self):
+        store, mock_conn, mock_cursor = self._make_store()
+        mock_cursor.fetchone.side_effect = [(True,), None]
+
+        with pytest.raises(ValueError, match="admin role"):
+            store.bootstrap_initial_admin("service:bootstrap", "initial admin")
+
+        mock_conn.rollback.assert_called_once()
+
     def test_revoke_key_success(self):
         store, mock_conn, mock_cursor = self._make_store()
         # First fetchone returns principal_id row, second returns RETURNING row

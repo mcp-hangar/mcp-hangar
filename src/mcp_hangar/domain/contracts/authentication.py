@@ -252,6 +252,27 @@ class IApiKeyStore(Protocol):
         ...
 
 
+@runtime_checkable
+class IInitialAdminBootstrapStore(Protocol):
+    """Durable, transactional bootstrap for the first API-key administrator."""
+
+    @abstractmethod
+    def bootstrap_initial_admin(
+        self,
+        principal_id: str,
+        key_name: str,
+        groups: frozenset[str] | None = None,
+        tenant_id: str | None = None,
+        actor: str = "local-cli-bootstrap",
+    ) -> tuple[str, str] | None:
+        """Create the singleton initial admin key and global admin assignment.
+
+        Returns the raw key and key ID to the sole successful caller, or None
+        when another caller has already completed the bootstrap.
+        """
+        ...
+
+
 class NullAuthenticator:
     """No-op authenticator. Returns anonymous system principal for all requests.
 
