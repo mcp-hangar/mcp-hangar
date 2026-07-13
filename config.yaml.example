@@ -183,7 +183,11 @@ providers:
 # event_store:
 #   enabled: true                       # Enable event persistence (default: true)
 #   driver: sqlite                      # Options: sqlite, memory
-#   path: data/events.db                # Path to SQLite database file
+#   path: data/events.db                # Writable path to SQLite database file
+#
+# A configured sqlite store is durable and must be writable. Hangar fails
+# startup instead of silently falling back to memory if this path is unavailable.
+# Use driver: memory only when volatile event history is explicitly acceptable.
 
 # Logging configuration
 logging:

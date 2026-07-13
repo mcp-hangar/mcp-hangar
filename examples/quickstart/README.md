@@ -51,6 +51,24 @@ Then restart:
 docker compose restart mcp-hangar
 ```
 
+## Tracing
+
+Distributed tracing is enabled by default and exports spans over OTLP/gRPC to
+`http://localhost:4317`. If no collector is listening there, export runs on a
+background thread and never blocks the MCP path, but the OTLP exporter logs
+periodic `Failed to export traces ... UNAVAILABLE` / `Transient error ... retrying`
+warnings. Failed export batches (and the spans dropped with them) are counted in
+the `mcp_hangar_otlp_export_failures_total` metric on `/metrics`.
+
+To silence that noise when running locally without a collector, disable tracing:
+
+```bash
+MCP_TRACING_ENABLED=false docker compose up -d
+```
+
+Or point it at a real collector via `OTEL_EXPORTER_OTLP_ENDPOINT` (see
+`examples/otel-collector/`).
+
 ## Cleanup
 
 ```bash
