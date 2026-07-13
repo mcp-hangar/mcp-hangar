@@ -54,6 +54,38 @@ curl -sSL https://mcp-hangar.io/install.sh | bash && mcp-hangar init -y && mcp-h
 - **OAuth ingress** -- advertise as an RFC 9728 protected resource and challenge external agents for verified tokens.
 - **Observability built in** -- OpenTelemetry traces, Prometheus metrics, structured logs, and an event-sourced audit trail.
 
+## Configuring `tools:`
+
+The per-server `tools:` key is overloaded and accepts two distinct forms:
+
+- A **list of tool schemas** is a **pre-start visibility projection**. It lets a
+  tool be listed before its provider has started, so callers can see it up
+  front. It is not an access policy. On start, the provider's dynamic
+  `tools/list` is **authoritative and replaces this projection entirely** — a
+  statically-listed tool that the provider does not return becomes uncallable
+  and fails with `Tool not found: <name>` at invocation (a warning naming the
+  unconfirmed tool is logged at start).
+
+- A **dict with `allow:` / `deny:`** is an **access policy** (glob-pattern,
+  three-level merge) that filters which discovered tools are exposed.
+
+```yaml
+mcp_servers:
+  math:
+    mode: subprocess
+    command: [python, -m, examples.provider_math.server]
+    tools:                     # list form: pre-start schema projection
+      - name: add
+        description: "Add two numbers"
+        inputSchema: { type: object, properties: { a: { type: number } } }
+  github:
+    mode: subprocess
+    command: [uvx, mcp-server-github]
+    tools:                     # dict form: allow/deny access policy
+      allow: [create_issue, list_issues]
+      deny: [delete_repository]
+```
+
 ## Documentation
 
 - [Getting Started](https://mcp-hangar.io/docs/getting-started/quickstart) &middot; [Configuration](https://mcp-hangar.io/docs/reference/configuration) &middot; [Python API](https://mcp-hangar.io/docs/guides/FACADE_API)

@@ -165,11 +165,21 @@ class McpServer(AggregateRoot):
         self._meta: dict[str, Any] = {}
         self._last_used: float = 0.0
 
-        # Pre-load tools from configuration (allows visibility before start)
+        # Pre-load tools from configuration (allows visibility before start).
+        #
+        # A statically-configured `tools:` list is a PRE-START VISIBILITY
+        # PROJECTION only. On start, the provider's dynamic `tools/list` is
+        # authoritative and REPLACES this projection (see
+        # _perform_mcp_handshake). A statically-listed tool that the provider
+        # does not return will be uncallable and raise ToolNotFoundError at
+        # invocation. We retain the predefined names so start can warn on any
+        # unconfirmed static tool (observability only -- no behavior change).
         self._tools_predefined = False
+        self._tools_predefined_names: frozenset[str] = frozenset()
         if tools:
             self._tools.update_from_list(tools)
             self._tools_predefined = True
+            self._tools_predefined_names = frozenset(self._tools.list_names())
 
         # Concurrent startup coordination
         # _ready_event is set initially (no one waiting). Cleared when a thread
@@ -779,6 +789,21 @@ class McpServer(AggregateRoot):
 
         tool_list = tools_resp.get("result", {}).get("tools", [])
         self._tools.update_from_list(tool_list)
+
+        # Observability: the dynamic tools/list above is authoritative and has
+        # just replaced any static pre-start projection. Surface the silent
+        # mismatch when a statically pre-configured tool is not confirmed by
+        # the provider -- such a tool is now uncallable and will raise
+        # ToolNotFoundError at invocation. This is a WARNING only; it does not
+        # change behavior (making static authoritative is a separate decision).
+        if self._tools_predefined_names:
+            missing = sorted(name for name in self._tools_predefined_names if not self._tools.has(name))
+            if missing:
+                logger.warning(
+                    f"static_tools_unconfirmed: {self.mcp_server_id}, tools={missing} -- "
+                    "statically-configured tool(s) not returned by the provider's tools/list; "
+                    "they are uncallable and will raise ToolNotFoundError at invocation"
+                )
 
     def _log_client_error(self, client: Any, error_msg: str) -> None:
         """Log detailed error info including stderr and exit code for debugging."""
