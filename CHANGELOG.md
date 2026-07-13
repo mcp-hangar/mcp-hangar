@@ -5,6 +5,12 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [Unreleased]
+
+### Fixed
+
+- **core:** treat a backend MCP tool result with `isError: true` as a tool failure instead of a success, so per-call results, batch `succeeded`/`failed` counts, health, and `ToolInvocationFailed` events reflect reality ([#423](https://github.com/mcp-hangar/mcp-hangar/issues/423))
+
 ## [1.4.0](https://github.com/mcp-hangar/mcp-hangar/compare/v1.3.0...v1.4.0) (2026-06-29)
 
 

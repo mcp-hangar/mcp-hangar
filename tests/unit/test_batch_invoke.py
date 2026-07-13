@@ -375,6 +375,31 @@ class TestBatchExecution:
         assert result.succeeded == 2
         assert result.failed == 2
 
+    def test_tool_iserror_counts_as_failure(self, mock_context, mock_providers_for_execution):
+        """A domain isError:true surfaces as ToolInvocationError -> batch succeeded:0 failed:1."""
+        from mcp_hangar.domain.exceptions import ToolInvocationError
+
+        def mock_send(cmd):
+            raise ToolInvocationError("math", "tool_error: EROFS: read-only file system")
+
+        mock_context.command_bus.send.side_effect = mock_send
+
+        executor = BatchExecutor()
+        calls = [CallSpec(index=0, call_id="call-1", mcp_server="math", tool="write", arguments={"path": "/x"})]
+
+        result = executor.execute(
+            batch_id="batch-1",
+            calls=calls,
+            max_concurrency=1,
+            global_timeout=60.0,
+            fail_fast=False,
+        )
+
+        assert result.total == 1
+        assert result.succeeded == 0
+        assert result.failed == 1
+        assert result.success is False
+
     def test_fail_fast_stops_on_error(self, mock_context, mock_providers_for_execution):
         """Fail-fast mode stops on first error."""
         call_count = [0]

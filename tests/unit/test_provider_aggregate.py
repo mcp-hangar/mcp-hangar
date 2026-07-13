@@ -805,3 +805,88 @@ class TestInvokeToolRefresh:
         result = provider.invoke_tool("calculator", {"expression": "6*7"})
 
         assert result == {"content": [{"type": "text", "text": "42"}]}
+
+
+class TestInvokeToolIsError:
+    """A backend CallToolResult with isError:true must be treated as a failure."""
+
+    def _make_ready_provider_with_tool(self, tool_name="writer"):
+        from mcp_hangar.domain.model.tool_catalog import ToolSchema
+
+        provider = McpServer(
+            mcp_server_id="test",
+            mode="subprocess",
+            command=["python", "-m", "test"],
+        )
+        mock_client = MagicMock()
+        mock_client.is_alive.return_value = True
+
+        with provider._lock:
+            provider._state = ProviderState.READY
+            provider._client = mock_client
+        provider._tools.add(ToolSchema(name=tool_name, description="Writer", input_schema={}))
+        return provider, mock_client
+
+    def test_iserror_result_raises_tool_invocation_error(self):
+        """isError:true -> invoke_tool raises ToolInvocationError carrying the content text."""
+        from mcp_hangar.domain.exceptions import ToolInvocationError
+
+        provider, mock_client = self._make_ready_provider_with_tool()
+        mock_client.call.return_value = {
+            "result": {"content": [{"type": "text", "text": "EROFS: read-only file system"}], "isError": True}
+        }
+
+        try:
+            provider.invoke_tool("writer", {"path": "/x"})
+        except ToolInvocationError as exc:
+            assert "EROFS" in str(exc)
+        else:
+            raise AssertionError("expected ToolInvocationError for isError:true result")
+
+    def test_iserror_result_emits_failed_not_completed(self):
+        """isError:true -> ToolInvocationFailed emitted, ToolInvocationCompleted is NOT."""
+        from mcp_hangar.domain.events import ToolInvocationCompleted, ToolInvocationFailed
+        from mcp_hangar.domain.exceptions import ToolInvocationError
+
+        provider, mock_client = self._make_ready_provider_with_tool()
+        mock_client.call.return_value = {"result": {"content": [{"type": "text", "text": "boom"}], "isError": True}}
+
+        try:
+            provider.invoke_tool("writer", {})
+        except ToolInvocationError:
+            pass
+
+        events = provider.collect_events()
+        assert any(isinstance(e, ToolInvocationFailed) for e in events), "expected ToolInvocationFailed"
+        assert not any(isinstance(e, ToolInvocationCompleted) for e in events), (
+            "ToolInvocationCompleted must NOT be emitted for an isError result"
+        )
+        failed = next(e for e in events if isinstance(e, ToolInvocationFailed))
+        assert failed.error_type == "tool_error"
+        assert "boom" in failed.error_message
+
+    def test_iserror_result_records_invocation_failure(self):
+        """isError:true -> health records a failure, not a success."""
+        from mcp_hangar.domain.exceptions import ToolInvocationError
+
+        provider, mock_client = self._make_ready_provider_with_tool()
+        mock_client.call.return_value = {"result": {"content": [], "isError": True}}
+
+        before = provider._health._total_failures
+        try:
+            provider.invoke_tool("writer", {})
+        except ToolInvocationError:
+            pass
+        assert provider._health._total_failures == before + 1
+
+    def test_iserror_false_still_succeeds(self):
+        """Regression guard: isError:false (or absent) still records success and returns result."""
+        from mcp_hangar.domain.events import ToolInvocationCompleted
+
+        provider, mock_client = self._make_ready_provider_with_tool()
+        mock_client.call.return_value = {"result": {"content": [{"text": "ok"}], "isError": False}}
+
+        result = provider.invoke_tool("writer", {})
+        assert result == {"content": [{"text": "ok"}], "isError": False}
+        events = provider.collect_events()
+        assert any(isinstance(e, ToolInvocationCompleted) for e in events)
