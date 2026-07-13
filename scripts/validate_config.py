@@ -121,11 +121,28 @@ def validate_provider(name: str, config: dict[str, Any], result: ValidationResul
 
         # Validate volumes format
         volumes = config.get("volumes", [])
+        has_writable_volume = False
         for vol in volumes:
             if not isinstance(vol, str) or ":" not in vol:
                 result.add_warning(
                     f"Provider '{name}': invalid volume format '{vol}' (expected 'host:container[:mode]')"
                 )
+                continue
+            # A volume is writable unless it explicitly declares the 'ro' mode.
+            # Format: host:container[:mode]; Docker defaults to read-write when no mode is given.
+            mode_suffix = vol.split(":")[2] if vol.count(":") >= 2 else ""
+            if mode_suffix != "ro":
+                has_writable_volume = True
+
+        # Warn when a read-only container has no writable mount. Stateful providers
+        # (those that write to disk) will hit EROFS at runtime with no config-time signal.
+        # read_only defaults to true (see ContainerConfig), so an unset value is treated as true.
+        if config.get("read_only", True) and not has_writable_volume:
+            result.add_warning(
+                f"Provider '{name}': read-only container with no writable (':rw') volume. "
+                "Stateful providers that write to disk will fail with EROFS at runtime; "
+                "add a writable volume mount or set 'read_only: false' if writes are needed."
+            )
 
         # Validate command format (optional)
         command = config.get("command")
