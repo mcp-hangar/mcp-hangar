@@ -5,6 +5,15 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [Unreleased]
+
+### Changed
+
+- **core:** clarify that `mode: docker`/`container` requires a podman or docker CLI on the host; the no-runtime start error and `config.yaml.example` now state that container mode is unsupported inside the stock Hangar container image and advise running in host mode or using a subprocess provider ([#429](https://github.com/mcp-hangar/mcp-hangar/issues/429))
+### Fixed
+
+- **core:** treat a backend MCP tool result with `isError: true` as a tool failure instead of a success, so per-call results, batch `succeeded`/`failed` counts, health, and `ToolInvocationFailed` events reflect reality ([#423](https://github.com/mcp-hangar/mcp-hangar/issues/423))
+
 ## [1.4.0](https://github.com/mcp-hangar/mcp-hangar/compare/v1.3.0...v1.4.0) (2026-06-29)
 
 
@@ -43,6 +52,14 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - **core:** reject tool entries with missing, empty, or non-string `name` field in `compute_tool_digest` (#172)
 - Public documentation migrated to dedicated [docs repository](https://github.com/mcp-hangar/docs). Internal docs remain in `docs/internal/`.
 
+### Fixed
+
+- **core:** run discovery on a dedicated lifecycle event loop so blocking discovery sources cannot block HTTP serving and shutdown awaits cleanup on the same loop (#436)
+- **core:** expose bootstrapped discovery sources and pending providers through the canonical `/api/discovery` REST endpoint prefix (#434)
+- **core:** reload configured mcp_servers through their supported shutdown lifecycle API and fail the reload when the old runtime cannot be stopped (#433)
+- **core:** allow every concurrent cold-start waiter to invoke after the shared startup succeeds instead of timing out while the provider reaches READY (#435)
+- **core:** fail startup when a configured SQLite event store is unavailable instead of silently falling back to volatile memory storage (#428)
+
 ### Removed
 
 - **core:** delete `enterprise/auth/license.py` (HMAC license-key validator) (#196)
@@ -60,10 +77,12 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - **tests:** schema validation for `interceptors/list` response against local JSON Schema derived from SEP-1763 (pinned @ `99bc7c9`) (#185, #401)
 - **core:** add a SEP-2575 (Stateless MCP) `server/discover` entry point backed by the existing per-tenant projection read-model (#237). It returns the tenant-scoped tool surface — identical to the tenant's `tools/list` projection — alongside `supportedVersions`, `capabilities`, and `serverInfo`, so a stateless client can discover exactly the tools its tenant may call in one call. Tenant scoping and isolation are inherited from the projection (tenant A never sees tenant B's tools) (#290)
 - **observability:** add `mcp_hangar_otlp_export_failures_total` counter, incremented via a `SpanExporter` decorator when an OTLP span-export batch fails (collector unreachable/export error), so otherwise-silent background export failures and dropped spans are observable on `/metrics`; document the `MCP_TRACING_ENABLED=false` off-switch for running locally without a collector (#402)
+- **observability:** add `mcp_hangar_otlp_export_failures_total` counter, incremented via a `SpanExporter` decorator when an OTLP span-export batch fails (collector unreachable/export error), so otherwise-silent background export failures and dropped spans are observable on `/metrics`; document the `MCP_TRACING_ENABLED=false` off-switch for running locally without a collector (#418)
 
 ### Fixed
 
 - **core:** re-pin the interceptor JSON schema (`5bd7ab4` → `99bc7c9`) and reconcile the capability-negotiation key with the SEP-2133 extensions format adopted upstream in experimental-ext-interceptors #25; the `interceptor/invoke` + negotiated `interceptors/list` gate now keys on `io.modelcontextprotocol/interceptors` (was `sep-2624`), so clients negotiating per current upstream reach the gate. Off-by-default posture preserved (#401)
+- **core:** group circuit breaker no longer blocks member selection while a healthy member remains in rotation; the group CB now only vetoes selection when no member is in rotation (the group genuinely down), so an evicted primary failing over to a healthy backup is served instead of returning "No available member" (#425)
 - **cli:** accept `--config`/`-c` on the `serve` subcommand so `mcp-hangar serve --config X` no longer fails with "No such option"; emit the unambiguous global-first arg order (`["--config", path, "serve"]`) in the generated Claude Desktop config so `mcp-hangar init` produces an entry that actually starts (#417)
 
 ## [1.3.0](https://github.com/mcp-hangar/mcp-hangar/compare/v1.2.3...v1.3.0) (2026-06-23)

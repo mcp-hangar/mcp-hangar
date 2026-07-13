@@ -985,13 +985,15 @@ class McpServer(AggregateRoot):
         idt_ctx = get_identity_context()
         identity_context_dict = idt_ctx.to_dict() if idt_ctx else None
 
-        # Lock cycle 1: Validation, ensure ready, check tool, maybe prepare refresh
+        # Wait outside the invocation lock so a concurrent starter can finalize
+        # state and signal every cold-start waiter.
+        self.ensure_ready()
+
+        # Lock cycle 1: Validation, check tool, maybe prepare refresh
         needs_refresh = False
         tool_found = False
         client = None
         with self._lock:
-            self.ensure_ready()
-
             if self._tools.has(tool_name):
                 tool_found = True
             elif not self._refresh_in_progress:
@@ -1130,12 +1132,54 @@ class McpServer(AggregateRoot):
                     {"tool_name": tool_name, "correlation_id": correlation_id},
                 )
 
+            result = response.get("result", {})
+
+            # A backend tool result with isError:true is a tool-level failure,
+            # even though the JSON-RPC envelope carries no protocol error. Map it
+            # to a failure here (the single authoritative point) so downstream
+            # health, batch counts, and events all reflect reality. The front
+            # door still re-surfaces the raw result verbatim to the caller.
+            if isinstance(result, dict) and result.get("isError"):
+                # Tool-level errors live in the content blocks (typically
+                # [{"type": "text", "text": ...}]), not the JSON-RPC error
+                # envelope. Extract the text for diagnostics.
+                content = result.get("content")
+                error_msg = "tool reported isError"
+                if isinstance(content, list):
+                    texts = [str(block["text"]) for block in content if isinstance(block, dict) and block.get("text")]
+                    if texts:
+                        error_msg = "; ".join(texts)
+
+                self._health.record_invocation_failure()
+
+                duration_ms = (time.time() - start_time) * 1000
+                self._record_event(
+                    ToolInvocationFailed(
+                        mcp_server_id=self.mcp_server_id,
+                        tool_name=tool_name,
+                        correlation_id=correlation_id,
+                        duration_ms=duration_ms,
+                        error_message=error_msg,
+                        error_type="tool_error",
+                        identity_context=identity_context_dict,
+                    )
+                )
+
+                raise ToolInvocationError(
+                    self.mcp_server_id,
+                    f"tool_error: {error_msg}",
+                    {
+                        "tool_name": tool_name,
+                        "correlation_id": correlation_id,
+                        "is_error": True,
+                        "content": result.get("content"),
+                    },
+                )
+
             # Success
             duration_ms = (time.time() - start_time) * 1000
             self._health.record_success()
             self._last_used = time.time()
-
-            result = response.get("result", {})
 
             self._record_event(
                 ToolInvocationCompleted(
