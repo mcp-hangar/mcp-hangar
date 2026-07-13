@@ -21,8 +21,13 @@ class TestHookPhase:
         assert HookPhase.POST_MUTATE == "post_mutate"
         assert HookPhase.OBSERVE == "observe"
 
+    def test_wire_phases_match_pr2624(self):
+        # PR #2624 wire-level phases use exactly these string values.
+        assert HookPhase.REQUEST == "request"
+        assert HookPhase.RESPONSE == "response"
+
     def test_phase_count(self):
-        assert len(HookPhase) == 5
+        assert len(HookPhase) == 7
 
     def test_phase_from_string(self):
         assert HookPhase("pre_validate") is HookPhase.PRE_VALIDATE

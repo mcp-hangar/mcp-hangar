@@ -126,6 +126,6 @@ class ClaudeDesktopManager:
         return {
             "mcp-hangar": {
                 "command": "mcp-hangar",
-                "args": ["serve", "--config", str(hangar_config_path)],
+                "args": ["--config", str(hangar_config_path), "serve"],
             }
         }

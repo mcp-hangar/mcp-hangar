@@ -31,6 +31,7 @@ import os
 from typing import Any, TypeVar
 
 from mcp_hangar.logging_config import get_logger
+from mcp_hangar.metrics import record_otlp_export_failure
 from mcp_hangar.observability.conventions import MCP, McpServer
 
 logger = get_logger(__name__)
@@ -45,7 +46,12 @@ _initialized = False
 # Check if OpenTelemetry is available
 try:
     from opentelemetry.sdk.resources import Resource, SERVICE_NAME
-    from opentelemetry.sdk.trace.export import BatchSpanProcessor, ConsoleSpanExporter
+    from opentelemetry.sdk.trace.export import (
+        BatchSpanProcessor,
+        ConsoleSpanExporter,
+        SpanExporter,
+        SpanExportResult,
+    )
     from opentelemetry.sdk.trace import TracerProvider
     from opentelemetry import trace
     from opentelemetry.baggage.propagation import W3CBaggagePropagator
@@ -75,6 +81,41 @@ try:
 except ImportError:
     JAEGER_AVAILABLE = False
     JaegerExporter = None
+
+
+if OTEL_AVAILABLE:
+
+    class _MeteredSpanExporter(SpanExporter):
+        """Wrap a SpanExporter to make export failures observable.
+
+        ``BatchSpanProcessor`` calls ``export()`` on a background thread and
+        swallows failures, so an unreachable collector is silent and the spans
+        buffered in that batch are dropped without a metric. This decorator
+        increments ``mcp_hangar_otlp_export_failures_total`` when the wrapped
+        exporter returns a failure result or raises. It never changes export
+        semantics: the inner result (or exception) is propagated unchanged, so
+        the SDK's own retry/backoff behaviour is preserved and the MCP path is
+        never blocked.
+        """
+
+        def __init__(self, inner: SpanExporter) -> None:
+            self._inner = inner
+
+        def export(self, spans: Any) -> "SpanExportResult":
+            try:
+                result = self._inner.export(spans)
+            except Exception:
+                record_otlp_export_failure()
+                raise
+            if result is not SpanExportResult.SUCCESS:
+                record_otlp_export_failure()
+            return result
+
+        def shutdown(self) -> None:
+            self._inner.shutdown()
+
+        def force_flush(self, timeout_millis: int = 30000) -> bool:
+            return bool(self._inner.force_flush(timeout_millis))
 
 
 class NoOpSpan:
@@ -207,7 +248,7 @@ def init_tracing(
         if OTLP_AVAILABLE and otlp_endpoint:
             try:
                 otlp_exporter = OTLPSpanExporter(endpoint=otlp_endpoint, insecure=True)
-                _tracer_mcp_server.add_span_processor(BatchSpanProcessor(otlp_exporter))
+                _tracer_mcp_server.add_span_processor(BatchSpanProcessor(_MeteredSpanExporter(otlp_exporter)))
                 exporters_added += 1
                 logger.info("tracing_otlp_exporter_added", endpoint=otlp_endpoint)
             except Exception as e:  # noqa: BLE001 -- fault-barrier: exporter init must not crash tracing setup

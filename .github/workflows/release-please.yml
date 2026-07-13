@@ -13,9 +13,20 @@ permissions:
 jobs:
   release-please:
     runs-on: ubuntu-latest
+    # Surface the secret as an env var: the `secrets` context is not available
+    # in a step-level `if:`, but `env` is, so this is how the app-token step
+    # conditions on whether the credential is configured.
+    env:
+      RELEASE_BOT_APP_ID: ${{ secrets.RELEASE_BOT_APP_ID }}
     steps:
+      # Mint a GitHub App token so the release PR triggers downstream CI.
+      # Only runs when the app credentials are configured; otherwise the step
+      # is skipped and release-please falls back to the built-in GITHUB_TOKEN
+      # below (its own default), so the release pipeline never hard-fails on a
+      # missing/rotated app secret.
       - uses: actions/create-github-app-token@v1
         id: app-token
+        if: ${{ env.RELEASE_BOT_APP_ID != '' }}
         with:
           app-id: ${{ secrets.RELEASE_BOT_APP_ID }}
           private-key: ${{ secrets.RELEASE_BOT_PRIVATE_KEY }}
@@ -23,4 +34,4 @@ jobs:
         with:
           config-file: release-please-config.json
           manifest-file: .release-please-manifest.json
-          token: ${{ steps.app-token.outputs.token }}
+          token: ${{ steps.app-token.outputs.token || secrets.GITHUB_TOKEN }}

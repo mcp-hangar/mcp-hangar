@@ -9,6 +9,7 @@ import pytest
 from mcp_hangar.bootstrap.runtime import (
     DEFAULT_RATE_LIMIT_BURST,
     DEFAULT_RATE_LIMIT_RPS,
+    apply_rate_limit_config,
     create_runtime,
     resolve_rate_limit_config,
 )
@@ -109,3 +110,66 @@ def test_create_runtime_config_wins_over_env():
     assert isinstance(runtime.rate_limiter, InMemoryRateLimiter)
     assert runtime.rate_limiter.config.requests_per_second == 3.0
     assert runtime.rate_limiter.config.burst_size == 4
+
+
+class TestApplyRateLimitConfig:
+    """The config value must flow into the constructed RateLimiter."""
+
+    def test_config_flows_into_constructed_rate_limiter(self):
+        runtime = create_runtime(env={})
+        assert isinstance(runtime.rate_limiter, InMemoryRateLimiter)
+        # Baseline env/default behavior.
+        assert runtime.rate_limiter.config.requests_per_second == 10.0
+        assert runtime.rate_limiter.config.burst_size == 20
+
+        effective = apply_rate_limit_config(
+            runtime,
+            {"rate_limit": {"rps": 42, "burst": 84}},
+            env={},
+        )
+
+        assert effective.requests_per_second == 42.0
+        assert effective.burst_size == 84
+        # Flows into the actual limiter instance...
+        assert runtime.rate_limiter.config.requests_per_second == 42.0
+        assert runtime.rate_limiter.config.burst_size == 84
+        # ...and the runtime's reported config.
+        assert runtime.rate_limit_config.requests_per_second == 42.0
+        assert runtime.rate_limit_config.burst_size == 84
+
+    def test_absent_section_preserves_env_default(self):
+        runtime = create_runtime(env={"MCP_RATE_LIMIT_RPS": "15", "MCP_RATE_LIMIT_BURST": "30"})
+        assert runtime.rate_limiter.config.requests_per_second == 15.0
+
+        # No rate_limit section -> env/default behavior unchanged.
+        apply_rate_limit_config(
+            runtime,
+            {"mcp_servers": {}},
+            env={"MCP_RATE_LIMIT_RPS": "15", "MCP_RATE_LIMIT_BURST": "30"},
+        )
+
+        assert runtime.rate_limiter.config.requests_per_second == 15.0
+        assert runtime.rate_limiter.config.burst_size == 30
+
+    def test_new_buckets_use_updated_config(self):
+        runtime = create_runtime(env={})
+        limiter = runtime.rate_limiter
+        assert isinstance(limiter, InMemoryRateLimiter)
+
+        # Force a bucket under the old config.
+        limiter.consume("SomeCommand")
+
+        apply_rate_limit_config(runtime, {"rate_limit": {"rps": 5, "burst": 3}}, env={})
+
+        # Old bucket dropped; a freshly created bucket reflects the new burst limit.
+        result = limiter.check("SomeCommand")
+        assert result.limit == 3
+
+
+class TestCreateRuntimeEnvBaseline:
+    """create_runtime keeps env-only backward-compatible behavior."""
+
+    def test_env_only_construction(self):
+        runtime = create_runtime(env={"MCP_RATE_LIMIT_RPS": "7", "MCP_RATE_LIMIT_BURST": "9"})
+        assert runtime.rate_limit_config.requests_per_second == 7.0
+        assert runtime.rate_limit_config.burst_size == 9

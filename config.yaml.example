@@ -8,8 +8,8 @@
 # and batches. Two levels of concurrency limiting apply simultaneously:
 #
 #   Global semaphore (execution.max_concurrency)
-#     +-- Provider A semaphore (providers.A.max_concurrency)
-#     +-- Provider B semaphore (providers.B.max_concurrency)
+#     +-- Provider A semaphore (mcp_servers.A.max_concurrency)
+#     +-- Provider B semaphore (mcp_servers.B.max_concurrency)
 #
 # A call must acquire BOTH the global and the provider slot before executing.
 # Set to 0 or omit for unlimited (not recommended in production).
@@ -30,13 +30,44 @@ execution:
 #     - type: payload_size     # cap inbound tools/call payload size (fail-closed)
 #       max_bytes: 1000000     # deny requests whose JSON payload exceeds this
 
-providers:
+# ---------------------------------------------------------------------------
+# Rate limit — command-bus token bucket
+# ---------------------------------------------------------------------------
+# Throttles command dispatch (per command type) using a token-bucket limiter.
+# Values here take precedence over the MCP_RATE_LIMIT_RPS / MCP_RATE_LIMIT_BURST
+# env vars, which remain as a fallback. Omit this section to keep the env/default
+# behavior (10 rps, burst 20). Raise these when large batch sweeps exhaust the
+# default bucket and trip the group circuit breaker.
+rate_limit:
+  rps: 10      # Tokens refilled per second (default: 10)
+  burst: 20    # Maximum burst capacity / bucket size (default: 20)
+
+mcp_servers:
   # Subprocess — uses default per-provider concurrency (10)
   math:
     mode: subprocess
     command: [python, -m, examples.provider_math.server]
     idle_ttl_s: 180
     # max_concurrency: 10   # Per-provider limit (inherits default_provider_concurrency)
+    #
+    # `tools:` is OVERLOADED — it accepts two distinct forms:
+    #
+    #   1. A LIST of tool SCHEMAS (shown below) = a PRE-START VISIBILITY
+    #      PROJECTION. It lets the tool be listed before the provider is
+    #      started. It is NOT an access policy and NOT authoritative.
+    #      On start, the provider's dynamic `tools/list` REPLACES this
+    #      projection entirely. If the provider does not return a tool named
+    #      here, that tool becomes uncallable and invoking it raises
+    #      "Tool not found: <name>" (a WARNING is logged at start naming any
+    #      such unconfirmed static tool).
+    #
+    #   2. A DICT with `allow:` / `deny:` = an ACCESS POLICY that filters
+    #      which discovered tools are exposed, e.g.:
+    #        tools:
+    #          allow: [add, subtract]
+    #          deny: [dangerous_tool]
+    #
+    # The list form below is the pre-start SCHEMA projection:
     tools:
       - name: add
         description: "Add two numbers"
@@ -46,6 +77,18 @@ providers:
             a: { type: number }
             b: { type: number }
           required: [a, b]
+
+  # ---------------------------------------------------------------------------
+  # Container providers (mode: container / mode: docker)
+  # ---------------------------------------------------------------------------
+  # HOST DEPLOYMENT REQUIRED. Container mode shells out to a podman or docker
+  # CLI on the host running Hangar. That CLI is NOT present inside the stock
+  # Hangar container image (python:3.11-slim ships no container runtime), so
+  # container-mode providers cannot be launched from within that image and will
+  # fail fast at startup with "No container runtime ... found on PATH".
+  # To use container mode, run Hangar in host mode on a machine that has podman
+  # or docker installed, or use a subprocess provider (mode: subprocess) instead.
+  # ---------------------------------------------------------------------------
 
   # Container - SQLite
   # Build: podman build -t localhost/mcp-sqlite -f docker/Dockerfile.sqlite .
@@ -182,6 +225,14 @@ providers:
 #   enabled: true                       # Enable event persistence (default: true)
 #   driver: sqlite                      # Options: sqlite, memory
 #   path: data/events.db                # Path to SQLite database file
+#   # When driver is "sqlite" and the path is not writable (e.g. a read-only
+#   # deploy), startup FAILS FAST rather than silently degrading to a
+#   # non-durable in-memory store and losing the audit trail. Set this to true
+#   # to explicitly accept a non-durable in-memory fallback instead of failing.
+#   # When the fallback is taken, /health/ready reports 503 (durability lost).
+#   allow_memory_fallback: false        # Opt in to non-durable fallback (default: false)
+#
+# Use driver: memory only when volatile event history is explicitly acceptable.
 
 # Logging configuration
 logging:

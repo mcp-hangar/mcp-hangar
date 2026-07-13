@@ -13,8 +13,6 @@ jobs:
     runs-on: ubuntu-latest
     outputs:
       core: ${{ steps.filter.outputs.core }}
-      operator: ${{ steps.filter.outputs.operator }}
-      helm: ${{ steps.filter.outputs.helm }}
       docs: ${{ steps.filter.outputs.docs }}
 
     steps:
@@ -26,10 +24,6 @@ jobs:
           filters: |
             core:
               - 'src/**'
-            operator:
-              - 'packages/operator/**'
-            helm:
-              - 'packages/helm-charts/**'
             docs:
               - 'docs/**'
               - 'mkdocs.yml'
@@ -45,8 +39,6 @@ jobs:
           echo "| Package | Changed |" >> $GITHUB_STEP_SUMMARY
           echo "|---------|---------|" >> $GITHUB_STEP_SUMMARY
           echo "| Core | ${{ needs.detect-changes.outputs.core }} |" >> $GITHUB_STEP_SUMMARY
-          echo "| Operator | ${{ needs.detect-changes.outputs.operator }} |" >> $GITHUB_STEP_SUMMARY
-          echo "| Helm | ${{ needs.detect-changes.outputs.helm }} |" >> $GITHUB_STEP_SUMMARY
           echo "| Docs | ${{ needs.detect-changes.outputs.docs }} |" >> $GITHUB_STEP_SUMMARY
 
   enterprise-boundary:

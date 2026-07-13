@@ -513,17 +513,23 @@ class McpServerGroup(AggregateRoot):
         pinned/canary target that is not in rotation falls back to the LB pick,
         so routing never sends traffic to an out-of-rotation member.
 
+        The group-level circuit breaker never vetoes a healthy remaining
+        member: as long as at least one member is still ``in_rotation`` it is
+        selectable, even while the group CB is open. The CB only blocks when no
+        member remains in rotation -- that is when the group is genuinely down,
+        which is the breaker's real purpose. This prevents a primary eviction
+        (which opens the group CB) from taking down an otherwise-healthy backup.
+
         Returns:
             Selected mcp_server or None if no healthy members available.
         """
         with self._lock:
-            if not self._circuit_breaker.allow_request():
-                return None
-
             self._check_circuit_recovery()
 
             available = [m for m in self._members.values() if m.in_rotation]
             if not available:
+                # No member remains in rotation: honor the group circuit
+                # breaker and reject rather than hammer a genuinely-down group.
                 return None
 
             # Per-tenant canary/version routing (explicit pin or sticky split).

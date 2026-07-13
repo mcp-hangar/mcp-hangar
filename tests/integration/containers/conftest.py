@@ -43,7 +43,7 @@ except ImportError:
 def skip_if_no_testcontainers():
     """Skip test if testcontainers is not installed."""
     if not TESTCONTAINERS_AVAILABLE:
-        pytest.skip("testcontainers not installed. Run: pip install mcp-hangar[testcontainers]")
+        pytest.skip("testcontainers not installed. Run: pip install mcp-hangar[containers]")
 
 
 def skip_if_no_httpx():
@@ -112,8 +112,7 @@ if TESTCONTAINERS_AVAILABLE:
             super().__init__(image=image, **kwargs)
             self.with_exposed_ports(9090)
             self.with_command(
-                "--config.file=/etc/prometheus/prometheus.yml",
-                "--web.enable-lifecycle",
+                "--config.file=/etc/prometheus/prometheus.yml --web.enable-lifecycle"
             )
 
         def get_api_url(self) -> str:
@@ -124,9 +123,9 @@ if TESTCONTAINERS_AVAILABLE:
     class MCPProviderContainer(DockerContainer):
         """Generic MCP Provider container for testing."""
 
-        def __init__(self, image: str, provider_name: str, port: int = 8080, **kwargs):
+        def __init__(self, image: str, mcp_server_name: str, port: int = 8080, **kwargs):
             super().__init__(image=image, **kwargs)
-            self.provider_name = provider_name
+            self.mcp_server_name = mcp_server_name
             self._port = port
             self.with_exposed_ports(port)
 
@@ -152,7 +151,7 @@ def postgres_container() -> Generator[dict[str, Any], None, None]:
 
     container = PostgresContainer(
         image="postgres:15-alpine",
-        user="mcp_test",
+        username="mcp_test",
         password="mcp_test_password",
         dbname="mcp_hangar_test",
     )

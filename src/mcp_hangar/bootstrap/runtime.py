@@ -17,7 +17,7 @@ from ..application.event_handlers import get_security_handler
 from ..application.ports.observability import NullObservabilityAdapter, ObservabilityPort
 from ..domain.repository import InMemoryMcpServerRepository, IMcpServerRepository
 from ..domain.security.input_validator import InputValidator
-from ..domain.security.rate_limiter import get_rate_limiter, RateLimitConfig
+from ..domain.security.rate_limiter import get_rate_limiter, InMemoryRateLimiter, RateLimitConfig
 from ..infrastructure.command_bus import CommandBus, get_command_bus
 from ..infrastructure.event_bus import EventBus, get_event_bus
 from ..infrastructure.persistence import (
@@ -203,6 +203,46 @@ class Runtime:
     # Observability components (optional)
     observability_config: ObservabilityConfig | None = None
     observability: ObservabilityPort | None = None
+
+
+def apply_rate_limit_config(
+    runtime: Runtime,
+    full_config: dict[str, Any],
+    *,
+    env: dict[str, str] | None = None,
+) -> RateLimitConfig:
+    """Apply the config.yaml ``rate_limit`` section onto an existing runtime.
+
+    The runtime's rate limiter is constructed from env defaults during lazy
+    startup (before config.yaml is loaded). This re-resolves the effective
+    config with config-over-env precedence and applies it to the already
+    constructed limiter, so declarative ``config.yaml`` tuning takes effect.
+
+    Args:
+        runtime: The runtime whose rate limiter should be updated in place.
+        full_config: The full configuration dictionary (may contain ``rate_limit``).
+        env: Optional environment mapping (defaults to os.environ).
+
+    Returns:
+        The effective :class:`RateLimitConfig` that was applied.
+    """
+    rate_limit_section = full_config.get("rate_limit")
+    if rate_limit_section is not None and not isinstance(rate_limit_section, dict):
+        rate_limit_section = None
+
+    effective = resolve_rate_limit_config(rate_limit_section, env=env)
+
+    limiter = runtime.rate_limiter
+    if isinstance(limiter, InMemoryRateLimiter):
+        limiter.config = effective
+        # Drop any buckets built with the previous config so new limits apply.
+        limiter.reset_all()
+
+    # Runtime is frozen; update the field so logging/serialization report the
+    # effective config rather than the env-derived bootstrap value.
+    object.__setattr__(runtime, "rate_limit_config", effective)
+
+    return effective
 
 
 def create_runtime(

@@ -1,7 +1,11 @@
 """Tests for SagaStateStore persistence and saga serialization."""
 
 import json
+from collections.abc import Iterator
+from pathlib import Path
 from unittest.mock import MagicMock
+
+import pytest
 
 from mcp_hangar.domain.model.circuit_breaker import CircuitBreaker, CircuitBreakerConfig, CircuitState
 from mcp_hangar.infrastructure.persistence.database_common import (
@@ -29,12 +33,25 @@ from mcp_hangar.application.sagas.mcp_server_failover_saga import (
 from mcp_hangar.application.sagas.mcp_server_recovery_saga import McpServerRecoverySaga
 
 
+@pytest.fixture
+def factory() -> Iterator[SQLiteConnectionFactory]:
+    """Provide an in-memory SQLite connection factory and close it on teardown.
+
+    Closing avoids leaking the persistent in-memory connection, which otherwise
+    surfaces as ``ResourceWarning: unclosed database`` at interpreter GC time.
+    """
+    f = SQLiteConnectionFactory(SQLiteConfig(path=":memory:"))
+    try:
+        yield f
+    finally:
+        f.close()
+
+
 class TestSagaStateStoreCheckpoint:
     """Test SagaStateStore.checkpoint() persistence."""
 
-    def test_checkpoint_persists_state(self):
+    def test_checkpoint_persists_state(self, factory: SQLiteConnectionFactory) -> None:
         """Test that checkpoint() writes state to SQLite and load() retrieves it."""
-        factory = SQLiteConnectionFactory(SQLiteConfig(path=":memory:"))
         store = SagaStateStore(factory)
 
         state_data = {"retry_state": {"p1": {"retries": 2}}}
@@ -45,9 +62,8 @@ class TestSagaStateStoreCheckpoint:
         assert result["state_data"] == state_data
         assert result["last_event_position"] == 42
 
-    def test_checkpoint_overwrites_previous_state(self):
+    def test_checkpoint_overwrites_previous_state(self, factory: SQLiteConnectionFactory) -> None:
         """Test that checkpoint() with same saga_type+saga_id overwrites previous state."""
-        factory = SQLiteConnectionFactory(SQLiteConfig(path=":memory:"))
         store = SagaStateStore(factory)
 
         store.checkpoint("mcp_server_recovery", "saga-123", {"version": 1}, 10)
@@ -62,9 +78,8 @@ class TestSagaStateStoreCheckpoint:
 class TestSagaStateStoreLoad:
     """Test SagaStateStore.load() retrieval."""
 
-    def test_load_returns_none_for_unknown_saga_type(self):
+    def test_load_returns_none_for_unknown_saga_type(self, factory: SQLiteConnectionFactory) -> None:
         """Test that load() returns None for an unknown saga_type."""
-        factory = SQLiteConnectionFactory(SQLiteConfig(path=":memory:"))
         store = SagaStateStore(factory)
 
         result = store.load("nonexistent_saga")
@@ -74,25 +89,22 @@ class TestSagaStateStoreLoad:
 class TestSagaStateStoreIdempotency:
     """Test SagaStateStore.mark_processed() and is_processed()."""
 
-    def test_mark_processed_and_is_processed(self):
+    def test_mark_processed_and_is_processed(self, factory: SQLiteConnectionFactory) -> None:
         """Test that mark_processed() records event position and is_processed() returns True."""
-        factory = SQLiteConnectionFactory(SQLiteConfig(path=":memory:"))
         store = SagaStateStore(factory)
 
         store.mark_processed("mcp_server_recovery", 42)
 
         assert store.is_processed("mcp_server_recovery", 42) is True
 
-    def test_is_processed_returns_false_for_unrecorded_position(self):
+    def test_is_processed_returns_false_for_unrecorded_position(self, factory: SQLiteConnectionFactory) -> None:
         """Test that is_processed() returns False for an unrecorded position."""
-        factory = SQLiteConnectionFactory(SQLiteConfig(path=":memory:"))
         store = SagaStateStore(factory)
 
         assert store.is_processed("mcp_server_recovery", 99) is False
 
-    def test_is_processed_returns_false_for_different_saga_type(self):
+    def test_is_processed_returns_false_for_different_saga_type(self, factory: SQLiteConnectionFactory) -> None:
         """Test that is_processed() is scoped to saga_type."""
-        factory = SQLiteConnectionFactory(SQLiteConfig(path=":memory:"))
         store = SagaStateStore(factory)
 
         store.mark_processed("mcp_server_recovery", 42)
@@ -103,9 +115,8 @@ class TestSagaStateStoreIdempotency:
 class TestSagaStateStoreMigrations:
     """Test that MigrationRunner creates the expected tables."""
 
-    def test_migrations_create_saga_state_table(self):
+    def test_migrations_create_saga_state_table(self, factory: SQLiteConnectionFactory) -> None:
         """Test that the migration creates saga_state and saga_idempotency tables."""
-        factory = SQLiteConnectionFactory(SQLiteConfig(path=":memory:"))
         runner = MigrationRunner(factory, SAGA_STORE_MIGRATIONS, table_name="saga_state_migrations")
         applied = runner.run()
 
@@ -309,7 +320,14 @@ class TestBootstrapSagaWiring:
         config = {"event_store": {"driver": "sqlite", "path": "data/events.db"}}
         store = _create_saga_state_store(config)
 
-        assert isinstance(store, SagaStateStore)
+        try:
+            assert isinstance(store, SagaStateStore)
+        finally:
+            # The bootstrap helper builds an internal file-backed factory whose
+            # connection would otherwise leak (ResourceWarning: unclosed database)
+            # and leave a stray data/saga_state.db behind.
+            store._conn_factory.close()  # type: ignore[union-attr]
+            Path("data/saga_state.db").unlink(missing_ok=True)
 
     def test_init_saga_uses_null_store_when_no_event_store(self):
         """init_saga() uses NullSagaStateStore when event_store is not configured."""
@@ -327,11 +345,10 @@ class TestBootstrapSagaWiring:
 
         assert isinstance(store, NullSagaStateStore)
 
-    def test_restore_saga_state_loads_recovery_saga(self):
+    def test_restore_saga_state_loads_recovery_saga(self, factory: SQLiteConnectionFactory) -> None:
         """init_saga helper restores McpServerRecoverySaga state from store."""
         from mcp_hangar.server.bootstrap.cqrs import _restore_saga_state
 
-        factory = SQLiteConnectionFactory(SQLiteConfig(path=":memory:"))
         store = SagaStateStore(factory)
 
         # Pre-populate state in the store
@@ -343,11 +360,10 @@ class TestBootstrapSagaWiring:
 
         assert saga._retry_state["p1"]["retries"] == 3
 
-    def test_restore_saga_state_loads_failover_saga(self):
+    def test_restore_saga_state_loads_failover_saga(self, factory: SQLiteConnectionFactory) -> None:
         """init_saga helper restores McpServerFailoverEventSaga state from store."""
         from mcp_hangar.server.bootstrap.cqrs import _restore_saga_state
 
-        factory = SQLiteConnectionFactory(SQLiteConfig(path=":memory:"))
         store = SagaStateStore(factory)
 
         # Pre-populate state
@@ -366,11 +382,10 @@ class TestBootstrapSagaWiring:
 
         assert saga._failover_configs["p1"].primary_id == "p1"
 
-    def test_restore_saga_state_handles_missing_state(self):
+    def test_restore_saga_state_handles_missing_state(self, factory: SQLiteConnectionFactory) -> None:
         """init_saga helper handles missing persisted state gracefully (first boot)."""
         from mcp_hangar.server.bootstrap.cqrs import _restore_saga_state
 
-        factory = SQLiteConnectionFactory(SQLiteConfig(path=":memory:"))
         store = SagaStateStore(factory)
 
         saga = McpServerRecoverySaga()
@@ -380,11 +395,10 @@ class TestBootstrapSagaWiring:
         # State should be default (empty)
         assert saga._retry_state == {}
 
-    def test_restore_group_circuit_breakers(self):
+    def test_restore_group_circuit_breakers(self, factory: SQLiteConnectionFactory) -> None:
         """Circuit breaker state is restored for provider groups from saga state store."""
         from mcp_hangar.server.bootstrap.cqrs import _restore_group_circuit_breakers
 
-        factory = SQLiteConnectionFactory(SQLiteConfig(path=":memory:"))
         store = SagaStateStore(factory)
 
         # Pre-populate CB state in the store
@@ -411,11 +425,10 @@ class TestBootstrapSagaWiring:
         assert new_cb.state == CircuitState.OPEN
         assert new_cb.failure_count == 5
 
-    def test_save_group_circuit_breakers(self):
+    def test_save_group_circuit_breakers(self, factory: SQLiteConnectionFactory) -> None:
         """save_group_circuit_breakers persists CB state for all groups."""
         from mcp_hangar.server.bootstrap.cqrs import save_group_circuit_breakers
 
-        factory = SQLiteConnectionFactory(SQLiteConfig(path=":memory:"))
         store = SagaStateStore(factory)
 
         # Create a mock group with open CB
