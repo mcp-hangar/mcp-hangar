@@ -1,6 +1,7 @@
 """Container-backed discovery lifecycle regression tests."""
 
 import asyncio
+import os
 from pathlib import Path
 import subprocess
 from unittest.mock import MagicMock
@@ -13,12 +14,31 @@ from mcp_hangar.infrastructure.discovery.docker_source import DockerDiscoverySou
 from mcp_hangar.server.lifecycle import ServerLifecycle
 
 
+def _docker_compatible_socket() -> str | None:
+    """Return a local Podman/Docker Unix socket usable by the Docker SDK."""
+    for value in (os.environ.get("PODMAN_SOCKET"), os.environ.get("DOCKER_HOST")):
+        if value:
+            path = value.removeprefix("unix://")
+            if Path(path).is_socket():
+                return path
+
+    for path in (
+        Path.home() / ".local/share/containers/podman/machine/podman.sock",
+        Path("/run/podman/podman.sock"),
+        Path("/var/run/podman/podman.sock"),
+    ):
+        if path.is_socket():
+            return str(path)
+
+    return None
+
+
 @pytest.mark.container
 def test_podman_discovery_shutdown_closes_lifecycle_loop():
     """A labeled Podman container is discovered and its source loop shuts down cleanly."""
-    socket_path = "/run/podman/podman.sock"
-    if not Path(socket_path).is_socket():
-        pytest.skip("Podman Docker-compatible Unix socket is unavailable on this host")
+    socket_path = _docker_compatible_socket()
+    if socket_path is None:
+        pytest.skip("No local Podman/Docker-compatible Unix socket is available")
 
     container_id = subprocess.check_output(
         [
