@@ -397,6 +397,69 @@ def reset_health_endpoint() -> None:
     """Reset health endpoint singleton (for testing)."""
     global _health_endpoint
     _health_endpoint = None
+    set_event_store_durability_status(None)
+
+
+# Event-store durability posture
+@dataclass
+class EventStoreDurabilityStatus:
+    """Durability posture of the active event store.
+
+    Recorded at bootstrap so readiness can report when the store is running
+    in-memory (non-durable) even though a durable driver was configured -- a
+    degraded state in which the audit/event-sourcing trail is lost on restart.
+    """
+
+    configured_driver: str
+    durable: bool
+    degraded: bool
+    detail: str = ""
+
+
+_event_store_durability: EventStoreDurabilityStatus | None = None
+
+
+def set_event_store_durability_status(status: EventStoreDurabilityStatus | None) -> None:
+    """Record the durability posture of the active event store."""
+    global _event_store_durability
+    _event_store_durability = status
+
+
+def get_event_store_durability_status() -> EventStoreDurabilityStatus | None:
+    """Return the recorded event-store durability posture, if any."""
+    return _event_store_durability
+
+
+def create_event_store_durability_health_check() -> HealthCheck:
+    """Create a readiness check for event-store durability.
+
+    Fails (critical -> unhealthy/503) when the store has degraded to an
+    in-memory (non-durable) implementation while a durable driver was
+    configured. An explicitly configured ``memory`` driver is healthy: the
+    non-durability was an intentional operator choice, not a silent
+    degradation.
+
+    Returns:
+        HealthCheck instance.
+    """
+
+    def check() -> bool:
+        status = get_event_store_durability_status()
+        if status is None:
+            return True  # unknown / not initialized -> vacuously healthy
+        return not status.degraded
+
+    return HealthCheck(
+        name="event_store_durability",
+        check_fn=check,
+        description="Event store is durable when a durable driver is configured",
+        critical=True,
+    )
+
+
+def register_event_store_durability_check() -> None:
+    """Register the event-store durability readiness check on the singleton."""
+    get_health_endpoint().register_check(create_event_store_durability_health_check())
 
 
 # Built-in health checks

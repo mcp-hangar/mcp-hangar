@@ -17,7 +17,7 @@ from pathlib import Path
 import signal
 import sys
 import threading
-from typing import TYPE_CHECKING
+from typing import Any, TYPE_CHECKING
 
 import yaml
 
@@ -204,19 +204,35 @@ class ServerLifecycle:
             """Liveness check - is the process alive?"""
             return JSONResponse({"status": "healthy"})
 
+        from ..observability.health import get_event_store_durability_status
+
         def readiness_endpoint(request):
             """Readiness check - can we handle traffic?"""
             repository = get_runtime().repository
             ready_count = sum(1 for p in repository.get_all().values() if p.state.value == "ready")
             total_count = repository.count()
             is_ready = ready_count > 0 or total_count == 0
+
+            # Fail readiness when the event store silently degraded to a
+            # non-durable in-memory store while a durable driver was configured.
+            durability = get_event_store_durability_status()
+            event_store_ok = durability is None or not durability.degraded
+
+            body: dict[str, Any] = {
+                "status": "healthy" if (is_ready and event_store_ok) else "unhealthy",
+                "ready_mcp_servers": ready_count,
+                "total_mcp_servers": total_count,
+            }
+            if not event_store_ok and durability is not None:
+                body["event_store"] = {
+                    "status": "unhealthy",
+                    "configured_driver": durability.configured_driver,
+                    "durable": durability.durable,
+                    "detail": durability.detail,
+                }
             return JSONResponse(
-                {
-                    "status": "healthy" if is_ready else "unhealthy",
-                    "ready_mcp_servers": ready_count,
-                    "total_mcp_servers": total_count,
-                },
-                status_code=200 if is_ready else 503,
+                body,
+                status_code=200 if (is_ready and event_store_ok) else 503,
             )
 
         def startup_endpoint(request):
