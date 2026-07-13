@@ -125,24 +125,23 @@ class ReloadConfigurationHandler(CommandHandler):
                 mcp_server = current_mcp_servers.get(mcp_server_id)
                 if mcp_server:
                     try:
-                        if command.graceful:
-                            # Graceful shutdown with idle wait
-                            mcp_server.stop(reason="config_reload")
-                        else:
-                            # Immediate shutdown
-                            mcp_server.shutdown()
+                        # McpServer exposes shutdown() as its lifecycle API.
+                        # Stop failures must abort reload rather than report a
+                        # successful replacement with the old runtime still alive.
+                        mcp_server.shutdown()
 
                         logger.info(
                             "mcp_server_stopped_for_reload",
                             mcp_server_id=mcp_server_id,
                             graceful=command.graceful,
                         )
-                    except Exception as e:  # noqa: BLE001 -- fault-barrier: stop failure must not prevent reload of other mcp_servers
-                        logger.warning(
+                    except Exception as e:  # noqa: BLE001 -- preserve the shutdown failure as a reload failure
+                        logger.error(
                             "mcp_server_stop_failed_during_reload",
                             mcp_server_id=mcp_server_id,
                             error=str(e),
                         )
+                        raise ConfigurationError(f"Failed to stop mcp_server '{mcp_server_id}' for reload: {e}") from e
 
             # 2. Remove deleted mcp_servers from repository
             for mcp_server_id in removed_ids:

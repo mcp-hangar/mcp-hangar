@@ -1,6 +1,15 @@
 """Tests for observability/tracing module."""
 
-from unittest.mock import patch
+from unittest.mock import Mock, patch
+
+import pytest
+
+try:
+    import opentelemetry.sdk.trace.export  # noqa: F401
+
+    _OTEL_SDK_AVAILABLE = True
+except ImportError:
+    _OTEL_SDK_AVAILABLE = False
 
 from mcp_hangar.observability.tracing import (
     get_current_span_id,
@@ -141,3 +150,81 @@ class TestGetCurrentSpanId:
         result = get_current_span_id()
         # May be None or string depending on context
         assert result is None or isinstance(result, str)
+
+
+class TestMeteredSpanExporter:
+    """Tests for the _MeteredSpanExporter export-failure meter.
+
+    Requires the OpenTelemetry SDK; the whole class is skipped when it is not
+    installed (the ``opentelemetry`` extra is not part of the default test env).
+    """
+
+    pytestmark = pytest.mark.skipif(
+        not _OTEL_SDK_AVAILABLE,
+        reason="requires the opentelemetry extra",
+    )
+
+    @staticmethod
+    def _failures_total() -> float:
+        from mcp_hangar.metrics import OTLP_EXPORT_FAILURES_TOTAL
+
+        samples = OTLP_EXPORT_FAILURES_TOTAL.collect()
+        return samples[0].value if samples else 0.0
+
+    def _wrapper(self, inner):
+        from mcp_hangar.observability.tracing import _MeteredSpanExporter
+
+        return _MeteredSpanExporter(inner)
+
+    def test_success_does_not_increment(self):
+        """A successful export must not increment the failure counter."""
+        from opentelemetry.sdk.trace.export import SpanExportResult
+
+        inner = Mock()
+        inner.export.return_value = SpanExportResult.SUCCESS
+        wrapper = self._wrapper(inner)
+
+        before = self._failures_total()
+        result = wrapper.export(["span"])
+
+        assert result is SpanExportResult.SUCCESS
+        assert self._failures_total() == before
+        inner.export.assert_called_once_with(["span"])
+
+    def test_failure_result_increments(self):
+        """A FAILURE result must increment the failure counter."""
+        from opentelemetry.sdk.trace.export import SpanExportResult
+
+        inner = Mock()
+        inner.export.return_value = SpanExportResult.FAILURE
+        wrapper = self._wrapper(inner)
+
+        before = self._failures_total()
+        result = wrapper.export(["span"])
+
+        assert result is SpanExportResult.FAILURE  # propagated unchanged
+        assert self._failures_total() == before + 1
+
+    def test_raised_exception_increments_and_propagates(self):
+        """A raising export must increment the counter and re-raise."""
+        inner = Mock()
+        inner.export.side_effect = ConnectionError("collector down")
+        wrapper = self._wrapper(inner)
+
+        before = self._failures_total()
+        with pytest.raises(ConnectionError):
+            wrapper.export(["span"])
+
+        assert self._failures_total() == before + 1
+
+    def test_shutdown_and_flush_delegate(self):
+        """Lifecycle calls must delegate to the wrapped exporter."""
+        inner = Mock()
+        inner.force_flush.return_value = True
+        wrapper = self._wrapper(inner)
+
+        wrapper.shutdown()
+        inner.shutdown.assert_called_once()
+
+        assert wrapper.force_flush(1234) is True
+        inner.force_flush.assert_called_once_with(1234)
