@@ -1,8 +1,9 @@
 """Unit tests for enterprise compliance export formats."""
 
+from collections.abc import Callable
 import json
 import re
-from typing import Callable, Protocol, cast
+from typing import Protocol, cast
 
 import pytest
 
