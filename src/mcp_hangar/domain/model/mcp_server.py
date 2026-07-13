@@ -1107,12 +1107,54 @@ class McpServer(AggregateRoot):
                     {"tool_name": tool_name, "correlation_id": correlation_id},
                 )
 
+            result = response.get("result", {})
+
+            # A backend tool result with isError:true is a tool-level failure,
+            # even though the JSON-RPC envelope carries no protocol error. Map it
+            # to a failure here (the single authoritative point) so downstream
+            # health, batch counts, and events all reflect reality. The front
+            # door still re-surfaces the raw result verbatim to the caller.
+            if isinstance(result, dict) and result.get("isError"):
+                # Tool-level errors live in the content blocks (typically
+                # [{"type": "text", "text": ...}]), not the JSON-RPC error
+                # envelope. Extract the text for diagnostics.
+                content = result.get("content")
+                error_msg = "tool reported isError"
+                if isinstance(content, list):
+                    texts = [str(block["text"]) for block in content if isinstance(block, dict) and block.get("text")]
+                    if texts:
+                        error_msg = "; ".join(texts)
+
+                self._health.record_invocation_failure()
+
+                duration_ms = (time.time() - start_time) * 1000
+                self._record_event(
+                    ToolInvocationFailed(
+                        mcp_server_id=self.mcp_server_id,
+                        tool_name=tool_name,
+                        correlation_id=correlation_id,
+                        duration_ms=duration_ms,
+                        error_message=error_msg,
+                        error_type="tool_error",
+                        identity_context=identity_context_dict,
+                    )
+                )
+
+                raise ToolInvocationError(
+                    self.mcp_server_id,
+                    f"tool_error: {error_msg}",
+                    {
+                        "tool_name": tool_name,
+                        "correlation_id": correlation_id,
+                        "is_error": True,
+                        "content": result.get("content"),
+                    },
+                )
+
             # Success
             duration_ms = (time.time() - start_time) * 1000
             self._health.record_success()
             self._last_used = time.time()
-
-            result = response.get("result", {})
 
             self._record_event(
                 ToolInvocationCompleted(
