@@ -8,8 +8,8 @@
 # and batches. Two levels of concurrency limiting apply simultaneously:
 #
 #   Global semaphore (execution.max_concurrency)
-#     +-- Provider A semaphore (providers.A.max_concurrency)
-#     +-- Provider B semaphore (providers.B.max_concurrency)
+#     +-- Provider A semaphore (mcp_servers.A.max_concurrency)
+#     +-- Provider B semaphore (mcp_servers.B.max_concurrency)
 #
 # A call must acquire BOTH the global and the provider slot before executing.
 # Set to 0 or omit for unlimited (not recommended in production).
@@ -29,7 +29,7 @@ rate_limit:
   rps: 10      # Tokens refilled per second (default: 10)
   burst: 20    # Maximum burst capacity / bucket size (default: 20)
 
-providers:
+mcp_servers:
   # Subprocess — uses default per-provider concurrency (10)
   math:
     mode: subprocess
