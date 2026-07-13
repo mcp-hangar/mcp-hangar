@@ -22,7 +22,7 @@ import threading
 
 import structlog
 
-from mcp_hangar.domain.contracts.authentication import ApiKeyMetadata, IApiKeyStore
+from mcp_hangar.domain.contracts.authentication import ApiKeyMetadata, IApiKeyStore, IInitialAdminBootstrapStore
 from mcp_hangar.domain.contracts.authorization import IRoleStore
 from mcp_hangar.domain.events import ApiKeyCreated, ApiKeyRevoked, KeyRotated, RoleAssigned, RoleRevoked
 from mcp_hangar.domain.exceptions import ExpiredCredentialsError, RevokedCredentialsError
@@ -81,10 +81,18 @@ CREATE TABLE IF NOT EXISTS role_assignments (
 
 CREATE INDEX IF NOT EXISTS idx_role_assignments_principal_scope
     ON role_assignments(principal_id, scope);
+
+-- Singleton durable claim for the initial API-key administrator.
+CREATE TABLE IF NOT EXISTS initial_admin_bootstrap (
+    singleton INTEGER PRIMARY KEY CHECK (singleton = 1),
+    principal_id TEXT NOT NULL,
+    key_id TEXT NOT NULL,
+    created_at TEXT NOT NULL
+);
 """
 
 
-class SQLiteApiKeyStore(IApiKeyStore):
+class SQLiteApiKeyStore(IApiKeyStore, IInitialAdminBootstrapStore):
     """SQLite-based API key store.
 
     Suitable for single-instance deployments or development.
@@ -314,6 +322,73 @@ class SQLiteApiKeyStore(IApiKeyStore):
             )
 
         return raw_key
+
+    def bootstrap_initial_admin(
+        self,
+        principal_id: str,
+        key_name: str,
+        groups: frozenset[str] | None = None,
+        tenant_id: str | None = None,
+        actor: str = "local-cli-bootstrap",
+    ) -> tuple[str, str] | None:
+        """Atomically create the first API-key administrator, if unclaimed."""
+        from .api_key_authenticator import ApiKeyAuthenticator
+
+        conn = self._get_connection()
+        try:
+            conn.execute("BEGIN IMMEDIATE")
+            claim = conn.execute(
+                """
+                INSERT OR IGNORE INTO initial_admin_bootstrap
+                (singleton, principal_id, key_id, created_at) VALUES (1, ?, ?, ?)
+                """,
+                (principal_id, "pending", datetime.now(UTC).isoformat()),
+            )
+            if claim.rowcount == 0:
+                conn.rollback()
+                return None
+
+            if conn.execute("SELECT 1 FROM roles WHERE name = 'admin'").fetchone() is None:
+                raise ValueError("Built-in admin role is not initialized")
+
+            raw_key = ApiKeyAuthenticator.generate_key()
+            key_hash = ApiKeyAuthenticator._hash_key(raw_key)
+            key_id = secrets.token_urlsafe(8)
+            now = datetime.now(UTC).isoformat()
+            conn.execute(
+                """
+                INSERT INTO api_keys
+                (key_hash, key_id, principal_id, name, tenant_id, groups, created_at)
+                VALUES (?, ?, ?, ?, ?, ?, ?)
+                """,
+                (key_hash, key_id, principal_id, key_name, tenant_id, json.dumps(list(groups or [])), now),
+            )
+            conn.execute(
+                """
+                INSERT INTO role_assignments (principal_id, role_name, scope, assigned_at, assigned_by)
+                VALUES (?, 'admin', 'global', ?, ?)
+                """,
+                (principal_id, now, actor),
+            )
+            conn.execute(
+                "UPDATE initial_admin_bootstrap SET key_id = ?, created_at = ? WHERE singleton = 1", (key_id, now)
+            )
+            conn.commit()
+        except Exception:
+            conn.rollback()
+            raise
+
+        logger.info("initial_admin_bootstrapped", key_id=key_id, principal_id=principal_id)
+        if self._event_publisher:
+            self._event_publisher(
+                ApiKeyCreated(
+                    key_id=key_id, principal_id=principal_id, key_name=key_name, expires_at=None, created_by=actor
+                )
+            )
+            self._event_publisher(
+                RoleAssigned(principal_id=principal_id, role_name="admin", scope="global", assigned_by=actor)
+            )
+        return raw_key, key_id
 
     def revoke_key(self, key_id: str, revoked_by: str | None = None, reason: str | None = None) -> bool:
         """Revoke an API key.
