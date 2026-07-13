@@ -88,7 +88,7 @@ class TestServerLifecycle:
             assert worker.start.call_count == 1
 
     def test_lifecycle_start_with_discovery(self):
-        """start() should start discovery orchestrator if present."""
+        """Discovery starts through the dedicated long-lived loop."""
         mock_runtime = MagicMock()
         mock_runtime.repository.get_all_ids.return_value = []
         mock_mcp = MagicMock()
@@ -105,11 +105,32 @@ class TestServerLifecycle:
 
         lifecycle = ServerLifecycle(ctx)
 
-        with patch("mcp_hangar.server.lifecycle.asyncio") as mock_asyncio:
+        with patch.object(lifecycle, "_start_discovery") as start_discovery:
             lifecycle.start()
 
-        # Discovery orchestrator start should be called via asyncio.run
-        mock_asyncio.run.assert_called_once()
+        start_discovery.assert_called_once()
+
+    def test_discovery_start_and_stop_share_dedicated_loop(self, mock_context):
+        """Discovery lifecycle work stays off the HTTP and stdio transport loops."""
+        loops = []
+
+        async def start():
+            loops.append(asyncio.get_running_loop())
+
+        async def stop():
+            loops.append(asyncio.get_running_loop())
+
+        mock_context.discovery_orchestrator = MagicMock()
+        mock_context.discovery_orchestrator.start.side_effect = start
+        mock_context.discovery_orchestrator.stop.side_effect = stop
+        mock_context.discovery_orchestrator.get_stats.return_value = {"sources_count": 1}
+        lifecycle = ServerLifecycle(mock_context)
+
+        lifecycle.start()
+        lifecycle.shutdown()
+
+        assert len(loops) == 2
+        assert loops[0] is loops[1]
 
     def test_lifecycle_shutdown(self, mock_context):
         """shutdown() should stop all components."""
