@@ -324,7 +324,7 @@ class TestBootstrap:
         mock_parse_auth = MagicMock(return_value={})
         mock_bootstrap_auth = MagicMock()
         mock_bootstrap_auth.return_value.enabled = False
-        mock_get_context = MagicMock()
+        mock_get_context = MagicMock(return_value=MagicMock())
 
         # Patch paths - use the actual module paths where functions are called
         patches = [
@@ -363,6 +363,7 @@ class TestBootstrap:
             "fastmcp": mock_fastmcp,
             "reg_tools": mock_reg_tools,
             "create_workers": mock_create_workers,
+            "get_context": mock_get_context,
         }
 
         # Stop all patches
@@ -397,6 +398,16 @@ class TestBootstrap:
         ctx = bootstrap()
 
         assert ctx.discovery_orchestrator is None
+
+    def test_bootstrap_wires_discovery_orchestrator_to_api_context(self, mock_dependencies):
+        """The REST API reads the bootstrapped discovery orchestrator."""
+        mock_dependencies["load_config"].return_value = {"discovery": {"enabled": True}}
+        orchestrator = MagicMock()
+
+        with patch("mcp_hangar.server.bootstrap.create_discovery_orchestrator", return_value=orchestrator):
+            bootstrap()
+
+        assert mock_dependencies["get_context"].return_value.discovery_orchestrator is orchestrator
 
     def test_bootstrap_creates_mcp_server(self, mock_dependencies):
         """Bootstrap should create FastMCP server."""

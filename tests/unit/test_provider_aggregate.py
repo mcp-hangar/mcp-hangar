@@ -4,6 +4,8 @@ import threading
 import time
 from unittest.mock import MagicMock, patch
 
+import pytest
+
 from mcp_hangar.domain.events import McpServerStopped
 from mcp_hangar.domain.exceptions import CannotStartProviderError, ProviderStartError
 from mcp_hangar.domain.model import McpServer, ProviderState
@@ -718,6 +720,45 @@ class TestInvokeToolRefresh:
         )
         # Lock should NOT have been held during tools/list RPC
         assert lock_held_during_refresh["held"] is False, "Lock must not be held during tools/list RPC"
+
+    @pytest.mark.parametrize("call_count", [1, 10, 50])
+    def test_concurrent_cold_start_invocations_complete_for_all_waiters(self, call_count):
+        """Cold-start waiters must not hold the lock needed to finalize startup."""
+        provider = McpServer(
+            mcp_server_id="test",
+            mode="subprocess",
+            command=["python", "-m", "test"],
+            tools=[{"name": "add", "description": "Add", "inputSchema": {}}],
+        )
+        startup_count = {"calls": 0}
+        results = []
+        errors = []
+
+        def slow_create_client():
+            startup_count["calls"] += 1
+            time.sleep(0.1)
+            client = MagicMock()
+            client.is_alive.return_value = True
+            client.call.return_value = {"result": {"content": [{"text": "ok"}]}}
+            return client
+
+        def invoke():
+            try:
+                results.append(provider.invoke_tool("add", {}))
+            except Exception as error:  # noqa: BLE001 -- collect concurrent call failures for assertion
+                errors.append(error)
+
+        with patch.object(provider, "_create_client", side_effect=slow_create_client):
+            with patch.object(provider, "_perform_mcp_handshake"):
+                threads = [threading.Thread(target=invoke) for _ in range(call_count)]
+                for thread in threads:
+                    thread.start()
+                for thread in threads:
+                    thread.join(timeout=5)
+
+        assert startup_count["calls"] == 1
+        assert not errors
+        assert len(results) == call_count
 
     def test_concurrent_invoke_tool_only_one_refresh_rpc(self):
         """Concurrent invoke_tool() calls with stale tools -- only one tools/list refresh RPC."""
