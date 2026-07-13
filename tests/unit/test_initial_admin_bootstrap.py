@@ -49,6 +49,29 @@ def test_sqlite_bootstrap_creates_admin_key_and_assignment(sqlite_stores):
     assert restarted_store.bootstrap_initial_admin("service:other", "other admin") is None
 
 
+def test_reinitializing_role_store_preserves_admin_assignment(sqlite_stores):
+    """Re-seeding built-in roles on restart must not cascade-wipe assignments.
+
+    Regression: ``initialize()`` seeded built-in roles with ``INSERT OR REPLACE``,
+    which deletes the existing row on conflict; ``role_assignments.role_name`` has
+    ``ON DELETE CASCADE``, so every restart / ``bootstrap_auth`` call silently
+    dropped the bootstrapped admin's assignment. The seed now upserts in place.
+    """
+    db_path, key_store, role_store = sqlite_stores
+
+    assert key_store.bootstrap_initial_admin("service:bootstrap", "initial admin") is not None
+    assert {r.name for r in role_store.get_roles_for_principal("service:bootstrap")} == {"admin"}
+
+    # Simulate a restart: a fresh role store re-runs initialize() (re-seeds the
+    # built-in roles, including "admin"). The prior assignment must survive.
+    restarted_role_store = SQLiteRoleStore(db_path)
+    restarted_role_store.initialize()
+    try:
+        assert {r.name for r in restarted_role_store.get_roles_for_principal("service:bootstrap")} == {"admin"}
+    finally:
+        restarted_role_store.close()
+
+
 def test_sqlite_bootstrap_has_exactly_one_concurrent_winner(sqlite_stores):
     db_path, _, _ = sqlite_stores
 

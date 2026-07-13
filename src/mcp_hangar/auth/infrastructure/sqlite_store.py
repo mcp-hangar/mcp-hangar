@@ -658,10 +658,22 @@ class SQLiteRoleStore(IRoleStore):
                 ]
             )
 
+            # Upsert in place (NOT INSERT OR REPLACE): role_assignments.role_name
+            # has ON DELETE CASCADE, and INSERT OR REPLACE deletes the existing
+            # row on conflict -- which would cascade-wipe every assignment to a
+            # built-in role each time the store is initialized (i.e. on every
+            # process start / bootstrap_auth), silently dropping the bootstrapped
+            # admin. ON CONFLICT ... DO UPDATE mutates the row in place, so
+            # assignments survive. Matches the PostgreSQL store's seed.
             conn.execute(
                 """
-                INSERT OR REPLACE INTO roles (name, description, permissions, is_builtin, created_at, updated_at)
+                INSERT INTO roles (name, description, permissions, is_builtin, created_at, updated_at)
                 VALUES (?, ?, ?, 1, ?, ?)
+                ON CONFLICT(name) DO UPDATE SET
+                    description = excluded.description,
+                    permissions = excluded.permissions,
+                    is_builtin = excluded.is_builtin,
+                    updated_at = excluded.updated_at
             """,
                 (role_name, role.description, permissions_json, now, now),
             )
@@ -711,10 +723,17 @@ class SQLiteRoleStore(IRoleStore):
         )
 
         now = datetime.now(UTC).isoformat()
+        # Upsert in place rather than INSERT OR REPLACE: replacing a role that
+        # already has assignments would cascade-delete them (see initialize()).
         conn.execute(
             """
-            INSERT OR REPLACE INTO roles (name, description, permissions, is_builtin, created_at, updated_at)
+            INSERT INTO roles (name, description, permissions, is_builtin, created_at, updated_at)
             VALUES (?, ?, ?, 0, ?, ?)
+            ON CONFLICT(name) DO UPDATE SET
+                description = excluded.description,
+                permissions = excluded.permissions,
+                is_builtin = excluded.is_builtin,
+                updated_at = excluded.updated_at
         """,
             (role.name, role.description, permissions_json, now, now),
         )
