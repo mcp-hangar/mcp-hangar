@@ -15,6 +15,18 @@ from mcp_hangar.server.cli import CLIConfig
 from mcp_hangar.server.lifecycle import _setup_signal_handlers, run_server, ServerLifecycle
 
 
+def _close_run_coro(coro: object, *args: object, **kwargs: object) -> None:
+    """``asyncio.run`` stand-in that closes the coroutine it is handed.
+
+    ``run_http`` builds an inner ``run_server()`` coroutine and passes it to
+    ``asyncio.run``. A plain MagicMock never awaits it, leaking it as
+    ``RuntimeWarning: coroutine 'run_server' was never awaited``; closing it
+    keeps the mocked-out behaviour without the warning.
+    """
+    if asyncio.iscoroutine(coro):
+        coro.close()
+
+
 class TestServerLifecycle:
     """Tests for ServerLifecycle class."""
 
@@ -177,7 +189,7 @@ class TestServerLifecycle:
 
         try:
             with patch("asyncio.run") as mock_asyncio_run:
-                mock_asyncio_run.return_value = None
+                mock_asyncio_run.side_effect = _close_run_coro
 
                 lifecycle = ServerLifecycle(mock_context)
                 lifecycle.run_http("127.0.0.1", 9000)
@@ -194,8 +206,13 @@ class TestServerLifecycle:
         sys.modules["uvicorn"] = mock_uvicorn
 
         try:
+
+            def _close_then_interrupt(coro: object, *args: object, **kwargs: object) -> None:
+                _close_run_coro(coro)
+                raise KeyboardInterrupt
+
             with patch("asyncio.run") as mock_asyncio_run:
-                mock_asyncio_run.side_effect = KeyboardInterrupt()
+                mock_asyncio_run.side_effect = _close_then_interrupt
 
                 lifecycle = ServerLifecycle(mock_context)
                 # Should not raise

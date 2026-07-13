@@ -1201,6 +1201,9 @@ class TestSQLiteToolAccessPolicyStore:
         def get_conn():
             conn = store._get_connection()
             connections.append(id(conn))
+            # store.close() only closes the calling thread's connection, so each
+            # worker must close its own to avoid leaking it (ResourceWarning).
+            conn.close()
 
         t1 = threading.Thread(target=get_conn)
         t2 = threading.Thread(target=get_conn)

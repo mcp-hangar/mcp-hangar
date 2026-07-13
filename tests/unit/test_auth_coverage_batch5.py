@@ -50,7 +50,10 @@ def api_key_store(db_path):
 
     store = SQLiteApiKeyStore(db_path=db_path)
     store.initialize()
-    return store
+    try:
+        yield store
+    finally:
+        store.close()
 
 
 @pytest.fixture
@@ -61,7 +64,10 @@ def api_key_store_with_publisher(db_path):
     publisher = Mock()
     store = SQLiteApiKeyStore(db_path=db_path, event_publisher=publisher)
     store.initialize()
-    return store, publisher
+    try:
+        yield store, publisher
+    finally:
+        store.close()
 
 
 @pytest.fixture
@@ -71,7 +77,10 @@ def role_store(db_path):
 
     store = SQLiteRoleStore(db_path=db_path)
     store.initialize()
-    return store
+    try:
+        yield store
+    finally:
+        store.close()
 
 
 @pytest.fixture
@@ -82,7 +91,10 @@ def role_store_with_publisher(db_path):
     publisher = Mock()
     store = SQLiteRoleStore(db_path=db_path, event_publisher=publisher)
     store.initialize()
-    return store, publisher
+    try:
+        yield store, publisher
+    finally:
+        store.close()
 
 
 @pytest.fixture
@@ -108,9 +120,12 @@ class TestSQLiteApiKeyStoreInitialize:
         from mcp_hangar.auth.infrastructure.sqlite_store import SQLiteApiKeyStore
 
         store = SQLiteApiKeyStore(db_path=db_path)
-        store.initialize()
-        # Verify initialized flag is set
-        assert store._initialized is True
+        try:
+            store.initialize()
+            # Verify initialized flag is set
+            assert store._initialized is True
+        finally:
+            store.close()
 
     def test_initialize_early_return_when_already_initialized(self, api_key_store):
         """Line 133: early return when _initialized is True."""
@@ -170,6 +185,7 @@ class TestSQLiteApiKeyStoreInitialize:
 
         store = SQLiteApiKeyStore(db_path=db_path)
         store.initialize()
+        store.close()
 
         # Verify columns now exist by inserting with them
         conn2 = sqlite3.connect(str(db_path))
@@ -261,6 +277,7 @@ class TestSQLiteApiKeyStoreGetPrincipal:
         store.initialize()
 
         raw_key = store.create_key(principal_id="svc-nograce", name="ngkey")
+        store.close()
         from mcp_hangar.auth.infrastructure.api_key_authenticator import ApiKeyAuthenticator
 
         key_hash = ApiKeyAuthenticator._hash_key(raw_key)
@@ -278,8 +295,11 @@ class TestSQLiteApiKeyStoreGetPrincipal:
         store2 = SQLiteApiKeyStore(db_path=db_path)
         store2.initialize()
 
-        with pytest.raises(ExpiredCredentialsError, match="rotated"):
-            store2.get_principal_for_key(key_hash)
+        try:
+            with pytest.raises(ExpiredCredentialsError, match="rotated"):
+                store2.get_principal_for_key(key_hash)
+        finally:
+            store2.close()
 
     def test_get_principal_parses_groups_and_metadata(self, db_path):
         """Lines 227-236: groups and metadata parsing."""
@@ -296,6 +316,7 @@ class TestSQLiteApiKeyStoreGetPrincipal:
             name="grp-key",
             groups=frozenset(["admin", "ops"]),
         )
+        store.close()
         from mcp_hangar.auth.infrastructure.api_key_authenticator import ApiKeyAuthenticator
 
         key_hash = ApiKeyAuthenticator._hash_key(raw_key)
@@ -311,10 +332,13 @@ class TestSQLiteApiKeyStoreGetPrincipal:
 
         store2 = SQLiteApiKeyStore(db_path=db_path)
         store2.initialize()
-        principal = store2.get_principal_for_key(key_hash)
+        try:
+            principal = store2.get_principal_for_key(key_hash)
 
-        assert principal is not None
-        assert "admin" in principal.groups
+            assert principal is not None
+            assert "admin" in principal.groups
+        finally:
+            store2.close()
         assert "ops" in principal.groups
         assert principal.metadata.get("extra") == "data"
 
