@@ -46,6 +46,18 @@ providers:
             b: { type: number }
           required: [a, b]
 
+  # ---------------------------------------------------------------------------
+  # Container providers (mode: container / mode: docker)
+  # ---------------------------------------------------------------------------
+  # HOST DEPLOYMENT REQUIRED. Container mode shells out to a podman or docker
+  # CLI on the host running Hangar. That CLI is NOT present inside the stock
+  # Hangar container image (python:3.11-slim ships no container runtime), so
+  # container-mode providers cannot be launched from within that image and will
+  # fail fast at startup with "No container runtime ... found on PATH".
+  # To use container mode, run Hangar in host mode on a machine that has podman
+  # or docker installed, or use a subprocess provider (mode: subprocess) instead.
+  # ---------------------------------------------------------------------------
+
   # Container - SQLite
   # Build: podman build -t localhost/mcp-sqlite -f docker/Dockerfile.sqlite .
   # sqlite:
@@ -178,6 +190,8 @@ providers:
 #   # to explicitly accept a non-durable in-memory fallback instead of failing.
 #   # When the fallback is taken, /health/ready reports 503 (durability lost).
 #   allow_memory_fallback: false        # Opt in to non-durable fallback (default: false)
+#
+# Use driver: memory only when volatile event history is explicitly acceptable.
 
 # Logging configuration
 logging:

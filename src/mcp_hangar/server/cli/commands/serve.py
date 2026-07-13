@@ -6,6 +6,7 @@ maintaining backward compatibility with the original CLI behavior.
 """
 
 import os
+from pathlib import Path
 from typing import Annotated
 
 import typer
@@ -13,6 +14,15 @@ import typer
 
 def serve_command(
     ctx: typer.Context,
+    config: Annotated[
+        Path | None,
+        typer.Option(
+            "--config",
+            "-c",
+            help="Path to config.yaml file",
+            envvar="MCP_CONFIG",
+        ),
+    ] = None,
     http: Annotated[
         bool,
         typer.Option(
@@ -96,10 +106,17 @@ def serve_command(
     Examples:
         mcp-hangar serve
         mcp-hangar serve --http --port 8000
+        mcp-hangar serve --config config.yaml
         mcp-hangar --config config.yaml serve
     """
     # Get global options
     global_opts = ctx.obj
+
+    # A --config passed to `serve` overrides the top-level option; when it is
+    # absent, fall back to the value resolved by the main CLI callback. This
+    # lets both `mcp-hangar --config X serve` and `mcp-hangar serve --config X`
+    # work.
+    resolved_config = config if config is not None else getattr(global_opts, "config", None)
 
     # Build CLIConfig for backward compatibility with existing server code
     from ..cli_compat import CLIConfig
@@ -113,7 +130,7 @@ def serve_command(
         http_mode=http_mode,
         http_host=host,
         http_port=port,
-        config_path=str(global_opts.config) if global_opts.config else None,
+        config_path=str(resolved_config) if resolved_config else None,
         log_file=log_file,
         log_level=log_level.upper(),
         json_logs=json_logs,
