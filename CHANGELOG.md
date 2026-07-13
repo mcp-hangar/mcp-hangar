@@ -44,6 +44,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Fixed
 
+- **core:** allow every concurrent cold-start waiter to invoke after the shared startup succeeds instead of timing out while the provider reaches READY (#435)
 - **core:** fail startup when a configured SQLite event store is unavailable instead of silently falling back to volatile memory storage (#428)
 
 ### Removed
