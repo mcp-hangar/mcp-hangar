@@ -42,6 +42,10 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - **core:** reject tool entries with missing, empty, or non-string `name` field in `compute_tool_digest` (#172)
 - Public documentation migrated to dedicated [docs repository](https://github.com/mcp-hangar/docs). Internal docs remain in `docs/internal/`.
 
+### Fixed
+
+- **core:** fail startup when a configured SQLite event store is unavailable instead of silently falling back to volatile memory storage (#428)
+
 ### Removed
 
 - **core:** delete `enterprise/auth/license.py` (HMAC license-key validator) (#196)
