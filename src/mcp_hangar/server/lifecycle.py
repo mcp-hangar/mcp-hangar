@@ -16,6 +16,7 @@ import ipaddress
 from pathlib import Path
 import signal
 import sys
+import threading
 from typing import TYPE_CHECKING
 
 import yaml
@@ -61,6 +62,8 @@ class ServerLifecycle:
         self._context = context
         self._running = False
         self._shutdown_requested = False
+        self._discovery_loop: asyncio.AbstractEventLoop | None = None
+        self._discovery_thread: threading.Thread | None = None
 
     @property
     def is_running(self) -> bool:
@@ -92,11 +95,39 @@ class ServerLifecycle:
             workers=[w.task for w in self._context.background_workers],
         )
 
-        # Start discovery orchestrator
-        if self._context.discovery_orchestrator:
-            asyncio.run(self._context.discovery_orchestrator.start())
-            stats = self._context.discovery_orchestrator.get_stats()
-            logger.info("discovery_started", sources_count=stats["sources_count"])
+        self._start_discovery()
+
+    def _start_discovery(self) -> None:
+        """Start discovery on a dedicated long-lived event loop."""
+        orchestrator = self._context.discovery_orchestrator
+        if orchestrator is None:
+            return
+
+        ready = threading.Event()
+
+        def run_loop() -> None:
+            loop = asyncio.new_event_loop()
+            asyncio.set_event_loop(loop)
+            self._discovery_loop = loop
+            ready.set()
+            loop.run_forever()
+            loop.close()
+
+        self._discovery_thread = threading.Thread(target=run_loop, name="mcp-hangar-discovery", daemon=True)
+        self._discovery_thread.start()
+        ready.wait()
+
+        assert self._discovery_loop is not None
+        try:
+            asyncio.run_coroutine_threadsafe(orchestrator.start(), self._discovery_loop).result()
+        except Exception:
+            self._discovery_loop.call_soon_threadsafe(self._discovery_loop.stop)
+            self._discovery_thread.join()
+            self._discovery_loop = None
+            self._discovery_thread = None
+            raise
+
+        logger.info("discovery_started", sources_count=orchestrator.get_stats()["sources_count"])
 
     def run_stdio(self) -> None:
         """Run MCP server in stdio mode. Blocks until exit.
@@ -304,8 +335,11 @@ class ServerLifecycle:
         async def run_server():
             server = uvicorn.Server(config)
             logger.info("http_server_started", host=host, port=port, endpoint="/mcp")
-            await server.serve()
-            logger.info("http_server_stopped")
+            try:
+                await server.serve()
+            finally:
+                self.shutdown()
+                logger.info("http_server_stopped")
 
         try:
             asyncio.run(run_server())
@@ -341,10 +375,29 @@ class ServerLifecycle:
 
         self._cleanup_runtime_mcp_servers()
 
+        self._stop_discovery()
         self._context.shutdown()
         self._running = False
 
         logger.info("server_lifecycle_shutdown_complete")
+
+    def _stop_discovery(self) -> None:
+        """Await discovery cleanup, then stop and join its dedicated loop."""
+        orchestrator = self._context.discovery_orchestrator
+        loop = self._discovery_loop
+        thread = self._discovery_thread
+        if orchestrator is None or loop is None or thread is None:
+            return
+
+        try:
+            asyncio.run_coroutine_threadsafe(orchestrator.stop(), loop).result()
+        except Exception as e:  # noqa: BLE001 -- shutdown must continue after discovery cleanup failure
+            logger.warning("discovery_orchestrator_stop_failed", error=str(e))
+        finally:
+            loop.call_soon_threadsafe(loop.stop)
+            thread.join()
+            self._discovery_loop = None
+            self._discovery_thread = None
 
     def _cleanup_runtime_mcp_servers(self) -> None:
         """Cleanup all hot-loaded runtime mcp_servers."""
@@ -547,7 +600,7 @@ def run_server(cli_config: CLIConfig) -> None:
     lifecycle = ServerLifecycle(context)
     _setup_signal_handlers(lifecycle)
 
-    # Start background components
+    # Start background components and the dedicated discovery lifecycle loop.
     lifecycle.start()
 
     # Start cloud connector (runs in dedicated daemon thread)

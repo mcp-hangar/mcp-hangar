@@ -20,7 +20,6 @@ Key principle: Bootstrap returns a fully configured but NOT running application.
 Starting is handled by the lifecycle module.
 """
 
-import asyncio
 import os
 import warnings
 from dataclasses import dataclass, field
@@ -132,13 +131,6 @@ class ApplicationContext:
                     task=worker.task,
                     error=str(e),
                 )
-
-        # Stop discovery orchestrator
-        if self.discovery_orchestrator:
-            try:
-                asyncio.run(self.discovery_orchestrator.stop())
-            except Exception as e:  # noqa: BLE001 -- fault-barrier: shutdown must complete even if discovery stop fails
-                logger.warning("discovery_orchestrator_stop_failed", error=str(e))
 
         # Save circuit breaker state for mcp_server groups before stopping
         if self.saga_state_store is not None:
@@ -356,6 +348,7 @@ def bootstrap(
     ctx.groups = GROUPS  # Wire shared GROUPS dict so API reads/writes use same instance
     ctx.load_mcp_server_handler = load_handler
     ctx.unload_mcp_server_handler = unload_handler
+    ctx.discovery_orchestrator = discovery_orchestrator
     ctx.discovery_registry = discovery_registry
     ctx.full_config = full_config  # Store for config round-trip serialization
     if enterprise.approval_service is not None:
