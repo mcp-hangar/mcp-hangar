@@ -4,7 +4,6 @@ from pathlib import Path
 from typing import Any, TYPE_CHECKING
 
 from ...domain.contracts.event_store import NullEventStore
-from ...domain.exceptions import ConfigurationError
 from ...logging_config import get_logger
 from ...observability.health import (
     EventStoreDurabilityStatus,
@@ -101,7 +100,7 @@ def init_event_store(runtime: "Runtime", config: dict[str, Any]) -> None:
             Path(db_path).parent.mkdir(parents=True, exist_ok=True)
             _result = create_enterprise_event_store(driver, event_store_config)
             if _result is None:
-                raise ConfigurationError("SQLite event store is unavailable")
+                raise EventStoreConfigurationError("SQLite event store is unavailable")
             event_store = _result
             logger.info("event_store_initialized", driver="sqlite", path=db_path)
             set_event_store_durability_status(
