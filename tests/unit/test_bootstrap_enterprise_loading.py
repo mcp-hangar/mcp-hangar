@@ -2,10 +2,7 @@
 
 # pyright: reportAny=false, reportMissingParameterType=false, reportPrivateLocalImportUsage=false, reportUnannotatedClassAttribute=false, reportUnknownArgumentType=false, reportUnknownLambdaType=false, reportUnknownMemberType=false, reportUnknownParameterType=false, reportUnknownVariableType=false, reportUnusedCallResult=false
 
-import logging
 from unittest.mock import MagicMock
-
-import pytest
 
 
 class _FakeEntryPoint:

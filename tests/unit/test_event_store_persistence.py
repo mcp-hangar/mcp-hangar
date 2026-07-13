@@ -3,6 +3,7 @@
 Covers SQLiteEventStore and InMemoryEventStore from persistence module.
 """
 
+from collections.abc import Iterator
 from pathlib import Path
 import threading
 
@@ -11,6 +12,18 @@ import pytest
 from mcp_hangar.domain.contracts.event_store import ConcurrencyError, NullEventStore
 from mcp_hangar.domain.events import McpServerStarted, McpServerStateChanged, McpServerStopped, ToolInvocationCompleted
 from mcp_hangar.infrastructure.persistence import InMemoryEventStore, SQLiteEventStore
+
+
+def _close_event_store(store: SQLiteEventStore) -> None:
+    """Close a SQLiteEventStore's in-memory persistent connection.
+
+    SQLiteEventStore has no public ``close()``; for ``:memory:`` stores it holds
+    a single persistent connection that otherwise leaks as
+    ``ResourceWarning: unclosed database`` at GC time.
+    """
+    conn = getattr(store, "_persistent_conn", None)
+    if conn is not None:
+        conn.close()
 
 
 class TestNullEventStore:
@@ -229,9 +242,13 @@ class TestSQLiteEventStorePersistence:
     """Tests for SQLiteEventStore from persistence module."""
 
     @pytest.fixture
-    def store(self) -> SQLiteEventStore:
+    def store(self) -> Iterator[SQLiteEventStore]:
         """Create in-memory SQLite store for testing."""
-        return SQLiteEventStore(":memory:")
+        s = SQLiteEventStore(":memory:")
+        try:
+            yield s
+        finally:
+            _close_event_store(s)
 
     def test_append_to_new_stream(self, store: SQLiteEventStore):
         event = McpServerStarted(
@@ -436,9 +453,13 @@ class TestSQLiteEventStoreSnapshots:
     """Tests for SQLiteEventStore snapshot methods."""
 
     @pytest.fixture
-    def store(self) -> SQLiteEventStore:
+    def store(self) -> Iterator[SQLiteEventStore]:
         """Create in-memory SQLite store for testing."""
-        return SQLiteEventStore(":memory:")
+        s = SQLiteEventStore(":memory:")
+        try:
+            yield s
+        finally:
+            _close_event_store(s)
 
     def test_save_and_load_snapshot_roundtrip(self, store: SQLiteEventStore):
         state = {"mcp_server_id": "math", "mode": "subprocess", "state": "READY", "version": 5}
