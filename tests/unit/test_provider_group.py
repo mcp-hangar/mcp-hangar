@@ -161,21 +161,57 @@ class TestLoadBalancing:
 
         assert selected is None
 
-    def test_select_member_returns_none_when_circuit_open(self):
-        """Should return None when circuit breaker is open."""
+    def test_select_member_serves_healthy_backup_when_primary_evicted_and_circuit_open(self):
+        """A healthy backup must stay selectable after the group circuit
+        breaker opens from the primary's eviction (LIVE-P1-01).
+
+        Regression: the group CB used to veto selection *before* checking
+        member health, so an evicted primary that opened the group CB took the
+        whole group offline even though a healthy backup remained in rotation.
+        """
         group = McpServerGroup(
             group_id="test-group",
             auto_start=False,
+            unhealthy_threshold=2,
+            circuit_failure_threshold=2,
+        )
+        primary = create_mock_provider("primary")
+        backup = create_mock_provider("backup")
+        group.add_member(primary)
+        group.add_member(backup)
+        group.get_member("primary").in_rotation = True
+        group.get_member("backup").in_rotation = True
+
+        # Two failures on the primary: evict it AND open the group CB.
+        group.report_failure("primary")
+        group.report_failure("primary")
+
+        assert group.circuit_open is True
+        assert group.get_member("primary").in_rotation is False
+        assert group.get_member("backup").in_rotation is True
+
+        # The healthy backup must still be selected despite the open group CB.
+        selected = group.select_member()
+
+        assert selected is backup
+
+    def test_select_member_returns_none_when_circuit_open_and_no_member_in_rotation(self):
+        """The open circuit breaker still (correctly) blocks selection when no
+        member remains in rotation -- the group is genuinely down."""
+        group = McpServerGroup(
+            group_id="test-group",
+            auto_start=False,
+            unhealthy_threshold=1,
             circuit_failure_threshold=1,
         )
         provider = create_mock_provider("provider-1")
         group.add_member(provider)
-        member = group.get_member("provider-1")
-        member.in_rotation = True
+        group.get_member("provider-1").in_rotation = True
 
-        # Open circuit breaker via report_failure
+        # One failure evicts the only member AND opens the group CB.
         group.report_failure("provider-1")
         assert group.circuit_open is True
+        assert group.get_member("provider-1").in_rotation is False
 
         selected = group.select_member()
 
