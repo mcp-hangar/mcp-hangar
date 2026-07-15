@@ -2,13 +2,15 @@
 
 See [docs/development/CONTRIBUTING.md](https://github.com/mcp-hangar/docs/blob/main/development/CONTRIBUTING.md) for the full contributing guide.
 
-## Monorepo Structure
+## Repository Structure
 
-MCP Hangar is a monorepo containing multiple packages:
+The Python core lives at the repository root. Related components — the
+Kubernetes operator, agent, Helm charts, and Terraform provider — live in
+separate repositories under the [mcp-hangar org](https://github.com/mcp-hangar).
 
 | Package | Language | Location |
 |---------|----------|----------|
-| Core | Python | `packages/core/` |
+| Core | Python | `src/mcp_hangar/` (repo root) |
 
 ## Quick Start
 
@@ -18,13 +20,11 @@ See [Git Flow](https://github.com/mcp-hangar/docs/blob/main/development/GIT_FLOW
 git clone https://github.com/mcp-hangar/mcp-hangar.git
 cd mcp-hangar
 
-# Python core development
-cd packages/core
+# Python core development (from the repo root)
 pip install -e ".[dev]"
 pytest
 
-# Or use root Makefile
-cd ../..
+# Or use the root Makefile
 make setup
 make test
 ```

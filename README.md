@@ -52,6 +52,7 @@ curl -sSL https://mcp-hangar.io/install.sh | bash && mcp-hangar init -y && mcp-h
 - **Hot config reload** -- add or withdraw servers and tools via file watch, no restart.
 - **Per-tenant tool projection** -- front-door mode presents a different executable surface per caller, fail-closed on unknown identity.
 - **OAuth ingress** -- advertise as an RFC 9728 protected resource and challenge external agents for verified tokens.
+- **Auth & RBAC** -- API-key and OIDC/JWT identity with role-based access; bootstrap the first administrator with `mcp-hangar auth bootstrap-admin`, and every call carries a verified principal into the audit trail.
 - **Observability built in** -- OpenTelemetry traces, Prometheus metrics, structured logs, and an event-sourced audit trail.
 
 ## Configuring `tools:`
