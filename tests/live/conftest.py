@@ -161,7 +161,7 @@ KEYCLOAK_USERS = {
 # denied, OIDC issuer trusted, groups claim mapped to roles).
 _AUTH_CONFIG = """\
 logging:
-  level: WARNING
+  level: DEBUG
 auth:
   enabled: true
   allow_anonymous: false
@@ -291,6 +291,7 @@ def auth_http_hangar(
         stdout=logf,
         stderr=subprocess.STDOUT,
         cwd=str(workdir),
+        env={**os.environ, "PYTHONUNBUFFERED": "1"},
     )
 
     deadline = time.monotonic() + _STARTUP_TIMEOUT_S
@@ -326,7 +327,7 @@ def auth_http_hangar(
         logf.close()
 
 
-def _hangar_log_tail(limit: int = 3000) -> str:
+def _hangar_log_tail(limit: int = 9000) -> str:
     """Tail of the auth hangar's captured stdout/stderr, for failure diagnostics."""
     if _AUTH_HANGAR_LOG is None or not _AUTH_HANGAR_LOG.exists():
         return "(no hangar log captured)"
