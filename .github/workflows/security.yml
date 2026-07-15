@@ -32,7 +32,10 @@ jobs:
 
       - name: Install dependencies
         run: |
-          python -m pip install --upgrade pip
+          # Upgrade the ambient build tooling too: the runner ships an older
+          # setuptools/wheel that pip-audit flags (e.g. PYSEC-2026-3447), even
+          # though the project builds with hatchling and does not depend on it.
+          python -m pip install --upgrade pip setuptools wheel
           pip install pip-audit safety
 
       - name: Run pip-audit
