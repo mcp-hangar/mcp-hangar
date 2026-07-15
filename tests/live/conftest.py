@@ -166,9 +166,11 @@ auth:
   allow_anonymous: false
   oidc:
     enabled: true
-    issuer: {issuer}
-    audience: mcp-hangar
     groups_claim: groups
+    issuers:
+      - issuer: {issuer}
+        audience: mcp-hangar
+        jwks_uri: {issuer}/protocol/openid-connect/certs
   role_assignments:
     - principal: "group:platform-engineering"
       role: admin
