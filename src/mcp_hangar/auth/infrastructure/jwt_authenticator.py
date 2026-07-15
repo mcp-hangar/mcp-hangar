@@ -94,10 +94,19 @@ class JWTAuthenticator(IAuthenticator):
             return self._issuer_configs[issuer]
         return self._config
 
+    @staticmethod
+    def _authorization_header(request: AuthRequest) -> str:
+        """Read the Authorization header case-insensitively.
+
+        The HTTP middleware normalizes header names to lowercase (ASGI headers
+        are already lowercase), so a case-sensitive ``get("Authorization")``
+        would miss the real ``authorization`` key and reject every bearer token.
+        """
+        return request.headers.get("Authorization") or request.headers.get("authorization") or ""
+
     def supports(self, request: AuthRequest) -> bool:
         """Check if request has Bearer token."""
-        auth_header = request.headers.get("Authorization", "")
-        return auth_header.startswith("Bearer ")
+        return self._authorization_header(request).startswith("Bearer ")
 
     def authenticate(self, request: AuthRequest) -> Principal:
         """Authenticate using JWT token.
@@ -112,7 +121,7 @@ class JWTAuthenticator(IAuthenticator):
             InvalidCredentialsError: If token is invalid or malformed.
             ExpiredCredentialsError: If token has expired.
         """
-        auth_header = request.headers.get("Authorization", "")
+        auth_header = self._authorization_header(request)
 
         if not auth_header.startswith("Bearer "):
             raise InvalidCredentialsError(
