@@ -6,7 +6,7 @@ apiVersion: mcp-hangar.io/v1alpha1
 kind: MCPDiscoverySource
 metadata:
   name: team-providers
-  namespace: mcp-system
+  namespace: mcp-hangar
 spec:
   # Discover from namespaces with specific labels
   type: Namespace

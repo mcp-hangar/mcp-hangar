@@ -7,8 +7,9 @@ Each module implements a subcommand:
 - remove: Remove mcp_servers
 - serve: Start the MCP server
 - completion: Shell completion scripts
+- auth: Authentication administration (bootstrap-admin)
 """
 
-from . import add, completion, init, remove, serve, status
+from . import add, auth, completion, init, remove, serve, status
 
-__all__ = ["init", "status", "add", "remove", "serve", "completion"]
+__all__ = ["init", "status", "add", "remove", "serve", "completion", "auth"]

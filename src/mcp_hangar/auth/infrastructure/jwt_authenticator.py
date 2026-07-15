@@ -116,17 +116,19 @@ class JWTAuthenticator(IAuthenticator):
             return self._issuer_configs[issuer]
         return self._config
 
-    def supports(self, request: AuthRequest) -> bool:
-        """Check if request has Bearer token.
+    @staticmethod
+    def _authorization_header(request: AuthRequest) -> str:
+        """Read the Authorization header case-insensitively.
 
-        ``AuthRequest.headers`` is documented as case-insensitive, but HTTP
-        transports normalise header keys to lowercase (``authorization``) while
-        callers/tests use the canonical ``Authorization``. Look up both so a real
-        Bearer token from the HTTP path is not silently ignored (which would fail
-        closed to "no authenticator matched"). Mirrors ApiKeyAuthenticator.
+        The HTTP middleware normalizes header names to lowercase (ASGI headers
+        are already lowercase), so a case-sensitive ``get("Authorization")``
+        would miss the real ``authorization`` key and reject every bearer token.
         """
-        auth_header = request.headers.get("Authorization") or request.headers.get("authorization") or ""
-        return auth_header.startswith("Bearer ")
+        return request.headers.get("Authorization") or request.headers.get("authorization") or ""
+
+    def supports(self, request: AuthRequest) -> bool:
+        """Check if request has Bearer token."""
+        return self._authorization_header(request).startswith("Bearer ")
 
     def authenticate(self, request: AuthRequest) -> Principal:
         """Authenticate using JWT token.
@@ -141,7 +143,7 @@ class JWTAuthenticator(IAuthenticator):
             InvalidCredentialsError: If token is invalid or malformed.
             ExpiredCredentialsError: If token has expired.
         """
-        auth_header = request.headers.get("Authorization") or request.headers.get("authorization") or ""
+        auth_header = self._authorization_header(request)
 
         if not auth_header.startswith("Bearer "):
             raise InvalidCredentialsError(

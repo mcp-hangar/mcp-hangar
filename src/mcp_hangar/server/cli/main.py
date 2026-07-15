@@ -125,7 +125,7 @@ def main_callback(
 # Import and register subcommand modules
 def _register_commands():
     """Register all subcommand modules."""
-    from .commands import add, completion, init, remove, serve, status
+    from .commands import add, auth, completion, init, remove, serve, status
 
     app.add_typer(init.app, name="init")
     app.command(name="status")(status.status_command)
@@ -133,6 +133,7 @@ def _register_commands():
     app.command(name="remove")(remove.remove_command)
     app.command(name="serve")(serve.serve_command)
     app.add_typer(completion.app, name="completion")
+    app.add_typer(auth.app, name="auth")
 
 
 # Register commands on import
