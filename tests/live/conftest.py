@@ -161,7 +161,7 @@ KEYCLOAK_USERS = {
 # denied, OIDC issuer trusted, groups claim mapped to roles).
 _AUTH_CONFIG = """\
 logging:
-  level: DEBUG
+  level: WARNING
 auth:
   enabled: true
   allow_anonymous: false
