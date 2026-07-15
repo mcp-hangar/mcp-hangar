@@ -5,6 +5,38 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [1.5.0](https://github.com/mcp-hangar/mcp-hangar/compare/v1.4.0...v1.5.0) (2026-07-15)
+
+
+### Added
+
+* **cli:** add `auth bootstrap-admin` command (durable initial admin) ([#463](https://github.com/mcp-hangar/mcp-hangar/issues/463)) ([57b21fc](https://github.com/mcp-hangar/mcp-hangar/commit/57b21fc5816b8daf980c7272f4bae0fc94b3e9be)), closes [#451](https://github.com/mcp-hangar/mcp-hangar/issues/451) [#452](https://github.com/mcp-hangar/mcp-hangar/issues/452)
+* **core:** add interceptor/invoke + phase-aware hooks, pinned to MCP PR [#2624](https://github.com/mcp-hangar/mcp-hangar/issues/2624) ([#400](https://github.com/mcp-hangar/mcp-hangar/issues/400)) ([3a0e2b5](https://github.com/mcp-hangar/mcp-hangar/commit/3a0e2b5d4df67821aa743fb69ff64ab037b5b28e))
+* **core:** add server/discover entry point backed by the per-tenant projection ([#407](https://github.com/mcp-hangar/mcp-hangar/issues/407)) ([6713cbd](https://github.com/mcp-hangar/mcp-hangar/commit/6713cbdef243977d36e3bfc30f24f4c3dc0c758d))
+* **core:** configurable command-bus rate limit via config.yaml ([#398](https://github.com/mcp-hangar/mcp-hangar/issues/398)) ([a891496](https://github.com/mcp-hangar/mcp-hangar/commit/a89149610ebbf2337bc97253483840875e3339f8))
+* **core:** emit task-lifecycle audit events (created/input_required/completed/failed/cancelled) ([#399](https://github.com/mcp-hangar/mcp-hangar/issues/399)) ([eb399bc](https://github.com/mcp-hangar/mcp-hangar/commit/eb399bcf8d0075721f95ba9a9abb9f3738d914f5))
+* **observability:** meter OTLP export failures and document the tracing off-switch ([#419](https://github.com/mcp-hangar/mcp-hangar/issues/419)) ([515c57c](https://github.com/mcp-hangar/mcp-hangar/commit/515c57c7538e0c5959fd1f8fe566572592448637))
+* **security:** atomically bootstrap the first API-key admin ([#456](https://github.com/mcp-hangar/mcp-hangar/issues/456)) ([9239705](https://github.com/mcp-hangar/mcp-hangar/commit/92397054a3d181c3ffe713a6c4022de6fad32250))
+
+
+### Fixed
+
+* **ci:** repair actionlint gate (broken action ref) and the YAML it flags ([#287](https://github.com/mcp-hangar/mcp-hangar/issues/287)) ([ee5de14](https://github.com/mcp-hangar/mcp-hangar/commit/ee5de144eea5c0fc3d8cb3dbefcbb7238c67b152))
+* **cli:** accept --config after serve and fix generated Claude Desktop config ([#420](https://github.com/mcp-hangar/mcp-hangar/issues/420)) ([9068161](https://github.com/mcp-hangar/mcp-hangar/commit/9068161b4a6e0c2a72579841550ba081d3f440b5)), closes [#417](https://github.com/mcp-hangar/mcp-hangar/issues/417)
+* **core:** clarify that mode:docker requires a host container CLI ([#430](https://github.com/mcp-hangar/mcp-hangar/issues/430)) ([732de25](https://github.com/mcp-hangar/mcp-hangar/commit/732de255652b8a579cac97392230457cf3acb25b)), closes [#429](https://github.com/mcp-hangar/mcp-hangar/issues/429)
+* **core:** config.yaml.example uses mcp_servers: (loader requires it, not providers:) ([#458](https://github.com/mcp-hangar/mcp-hangar/issues/458)) ([498b312](https://github.com/mcp-hangar/mcp-hangar/commit/498b312fcf993041abfebd462688cf939faa4a0d)), closes [#457](https://github.com/mcp-hangar/mcp-hangar/issues/457)
+* **core:** expose bootstrapped discovery through REST ([#442](https://github.com/mcp-hangar/mcp-hangar/issues/442)) ([1c2280c](https://github.com/mcp-hangar/mcp-hangar/commit/1c2280c2870a1718743b5f80af2090e2468093a4))
+* **core:** fail fast when SQLite event store is unavailable ([#438](https://github.com/mcp-hangar/mcp-hangar/issues/438)) ([a1be5db](https://github.com/mcp-hangar/mcp-hangar/commit/a1be5db4a5f965d06adabf97dde0420c2ad2c59b))
+* **core:** fail-fast on unwritable SQLite event store and add a durability readiness check ([#448](https://github.com/mcp-hangar/mcp-hangar/issues/448)) ([77f84cc](https://github.com/mcp-hangar/mcp-hangar/commit/77f84ccff9560a7d0eaf93a70f0fda9ce49a8d6a))
+* **core:** group circuit breaker no longer blocks a healthy remaining member ([#426](https://github.com/mcp-hangar/mcp-hangar/issues/426)) ([0b9cdc8](https://github.com/mcp-hangar/mcp-hangar/commit/0b9cdc89b9e8b0de8aa1349aecc39ba4e10fa1eb)), closes [#425](https://github.com/mcp-hangar/mcp-hangar/issues/425)
+* **core:** make EventStoreConfigurationError a ConfigurationError subclass ([#459](https://github.com/mcp-hangar/mcp-hangar/issues/459)) ([42cce1a](https://github.com/mcp-hangar/mcp-hangar/commit/42cce1ada6a2a70375a7e338405e7de2508defbb))
+* **core:** re-pin interceptor schema to 99bc7c9 and reconcile SEP-2133 capability key ([#405](https://github.com/mcp-hangar/mcp-hangar/issues/405)) ([c972adf](https://github.com/mcp-hangar/mcp-hangar/commit/c972adf04aea89afe1fba49665e26f69ea5180b6))
+* **core:** run discovery on a dedicated lifecycle loop ([#446](https://github.com/mcp-hangar/mcp-hangar/issues/446)) ([4eee12c](https://github.com/mcp-hangar/mcp-hangar/commit/4eee12c2efe9490e5b41602f07da6301c3df3b95))
+* **core:** treat MCP tool result isError as a failure ([#427](https://github.com/mcp-hangar/mcp-hangar/issues/427)) ([8ed7405](https://github.com/mcp-hangar/mcp-hangar/commit/8ed7405abb7b56e4e5744e2d71b199178f73d60f)), closes [#423](https://github.com/mcp-hangar/mcp-hangar/issues/423)
+* **core:** unblock concurrent cold-start waiters ([#440](https://github.com/mcp-hangar/mcp-hangar/issues/440)) ([9721349](https://github.com/mcp-hangar/mcp-hangar/commit/972134906eca086bea028c0ff5f77e6d631c7958))
+* **core:** use supported lifecycle API during reload ([#441](https://github.com/mcp-hangar/mcp-hangar/issues/441)) ([98f09f1](https://github.com/mcp-hangar/mcp-hangar/commit/98f09f1cc5ec8949ce01cbf8660d809c406e76e1))
+* **security:** read the Authorization header case-insensitively in JWTAuthenticator ([#472](https://github.com/mcp-hangar/mcp-hangar/issues/472)) ([7863848](https://github.com/mcp-hangar/mcp-hangar/commit/78638482741b7ca6e5b341a678453d6820ab3519))
+
 ## [Unreleased]
 
 ### Added
