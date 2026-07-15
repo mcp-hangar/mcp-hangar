@@ -39,18 +39,6 @@ def _decode_claims(token: str) -> dict:
     return json.loads(base64.urlsafe_b64decode(payload))
 
 
-@pytest.mark.xfail(
-    reason=(
-        "serve --http rejects a valid Keycloak token as auth_method:none. The token "
-        "checks out (iss/aud=mcp-hangar/groups all match the loaded config) and "
-        "parse_auth_config maps the YAML correctly, yet no OIDC issuer initialization "
-        "is logged at startup and every JWT is refused. Undetermined from the live "
-        "harness: likely a serve --http OIDC/JWKS wiring gap (possibly a real bug this "
-        "harness surfaced). Tracked for product-side investigation; kept xfail so the "
-        "harness ships and the other three T2 claims stay enforced."
-    ),
-    strict=False,
-)
 def test_valid_oidc_token_authenticates(auth_http_hangar: str, keycloak_token, auth_hangar_log) -> None:
     """Claim: a signed OIDC token from the trusted issuer passes the auth gate."""
     token = keycloak_token("admin")
