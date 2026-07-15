@@ -141,6 +141,7 @@ def live_http_hangar(tmp_path_factory: pytest.TempPathFactory) -> Iterator[str]:
 # binary, a healthy startup) is absent, so this stays safe to run anywhere.
 # ---------------------------------------------------------------------------
 
+_AUTH_HANGAR_LOG: Path | None = None  # set by auth_http_hangar; read by diagnostics
 _KEYCLOAK_DIR = Path(__file__).resolve().parents[2] / "examples" / "auth-keycloak"
 _KEYCLOAK_COMPOSE = _KEYCLOAK_DIR / "docker-compose.yml"
 _KEYCLOAK_URL = "http://localhost:8080"
@@ -281,9 +282,13 @@ def auth_http_hangar(
 
     port = _free_port()
     base_url = f"http://127.0.0.1:{port}"
+    log_path = workdir / "hangar.log"
+    global _AUTH_HANGAR_LOG
+    _AUTH_HANGAR_LOG = log_path
+    logf = log_path.open("wb")
     proc = subprocess.Popen(
         [binary, "--config", str(config_path), "serve", "--http", "--host", "127.0.0.1", "--port", str(port)],
-        stdout=subprocess.PIPE,
+        stdout=logf,
         stderr=subprocess.STDOUT,
         cwd=str(workdir),
     )
@@ -303,13 +308,12 @@ def auth_http_hangar(
             time.sleep(_POLL_INTERVAL_S)
         if not healthy:
             proc.terminate()
-            out = b""
             try:
-                out = proc.communicate(timeout=5)[0] or b""
+                proc.wait(timeout=5)
             except subprocess.TimeoutExpired:
                 proc.kill()
             pytest.skip(
-                f"auth hangar did not become healthy in {_STARTUP_TIMEOUT_S}s:\n{out.decode(errors='replace')[-2000:]}"
+                f"auth hangar did not become healthy in {_STARTUP_TIMEOUT_S}s:\n{_hangar_log_tail()}"
             )
         yield base_url
     finally:
@@ -319,3 +323,17 @@ def auth_http_hangar(
                 proc.wait(timeout=5)
             except subprocess.TimeoutExpired:
                 proc.kill()
+        logf.close()
+
+
+def _hangar_log_tail(limit: int = 3000) -> str:
+    """Tail of the auth hangar's captured stdout/stderr, for failure diagnostics."""
+    if _AUTH_HANGAR_LOG is None or not _AUTH_HANGAR_LOG.exists():
+        return "(no hangar log captured)"
+    return _AUTH_HANGAR_LOG.read_text(errors="replace")[-limit:]
+
+
+@pytest.fixture()
+def auth_hangar_log():
+    """Return a callable yielding the auth hangar's log tail (for diagnostics)."""
+    return _hangar_log_tail

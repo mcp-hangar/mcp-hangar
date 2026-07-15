@@ -30,9 +30,19 @@ def test_unauthenticated_front_door_call_is_denied(auth_http_hangar: str) -> Non
     )
 
 
-def test_valid_oidc_token_authenticates(auth_http_hangar: str, keycloak_token) -> None:
+def _decode_claims(token: str) -> dict:
+    import base64
+    import json
+
+    payload = token.split(".")[1]
+    payload += "=" * (-len(payload) % 4)
+    return json.loads(base64.urlsafe_b64decode(payload))
+
+
+def test_valid_oidc_token_authenticates(auth_http_hangar: str, keycloak_token, auth_hangar_log) -> None:
     """Claim: a signed OIDC token from the trusted issuer passes the auth gate."""
     token = keycloak_token("admin")
+    claims = _decode_claims(token)
     resp = httpx.get(
         f"{auth_http_hangar}{_PROTECTED_PATH}",
         headers={"Authorization": f"Bearer {token}"},
@@ -41,7 +51,10 @@ def test_valid_oidc_token_authenticates(auth_http_hangar: str, keycloak_token) -
     # The gate accepts the token: anything but 401/403 means auth succeeded (the
     # concrete status depends on how /mcp treats a plain GET).
     assert resp.status_code not in (401, 403), (
-        f"a valid admin token should authenticate, got {resp.status_code}: {resp.text[:300]}"
+        f"a valid admin token should authenticate, got {resp.status_code}: {resp.text[:300]}\n"
+        f"token claims: iss={claims.get('iss')!r} aud={claims.get('aud')!r} "
+        f"azp={claims.get('azp')!r} groups={claims.get('groups')!r} alg-hdr\n"
+        f"---- hangar log tail ----\n{auth_hangar_log()}"
     )
 
 
