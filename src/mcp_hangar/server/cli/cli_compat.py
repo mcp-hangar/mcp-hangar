@@ -57,12 +57,6 @@ class CLIConfig:
     unsafe_no_auth: bool = False
     """Allow non-loopback HTTP binding without authentication enabled."""
 
-    cloud_key: str | None = None
-    """License key for Hangar Cloud connectivity."""
-
-    cloud_url: str | None = None
-    """Hangar Cloud API endpoint override."""
-
 
 def parse_args(args: list[str] | None = None) -> CLIConfig:
     """Parse command line arguments.

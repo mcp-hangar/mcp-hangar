@@ -30,7 +30,6 @@ from .roles import (
     list_builtin_roles,
     list_permissions,
     PERMISSIONS,
-    ROLE_AGENT,
     ROLE_ADMIN,
     ROLE_AUDITOR,
     ROLE_DEVELOPER,
@@ -80,7 +79,6 @@ __all__ = [
     # Roles & Permissions
     "BUILTIN_ROLES",
     "PERMISSIONS",
-    "ROLE_AGENT",
     "ROLE_ADMIN",
     "ROLE_DEVELOPER",
     "ROLE_PROVIDER_ADMIN",
