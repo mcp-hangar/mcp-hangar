@@ -774,7 +774,7 @@ class BatchExecutor:
                 )
 
         # Approval gate: check if the tool requires human approval before execution.
-        # The policy is set by the agent via POST /api/agent/policy.
+        # The policy is configured via the server config and applied to the ToolAccessResolver.
         # Uses the resolver's effective policy (mcp_server-specific or _global fallback).
         with tracer.start_as_current_span("approval_gate.check") as approval_span:
             approval_span.set_attribute("mcp.server.id", call.mcp_server)
