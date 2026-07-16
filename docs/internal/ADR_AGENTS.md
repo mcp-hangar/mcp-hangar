@@ -1,8 +1,10 @@
 # AGENTS.md -- ADR Governance
 
-This file governs all files inside `docs/adr/`. It is read by AI coding
-agents and human contributors before creating, modifying, or referencing
-Architecture Decision Records (ADRs).
+This file governs the Architecture Decision Records (ADRs) maintained in the
+[`mcp-hangar/docs`](https://github.com/mcp-hangar/docs) repository's
+[`adr/`](https://github.com/mcp-hangar/docs/tree/main/adr) directory. It is
+read by AI coding agents and human contributors before creating, modifying,
+or referencing ADRs.
 
 For repo-wide conventions (build commands, source layout, testing, coding
 style), see the root [`AGENTS.md`](https://github.com/mcp-hangar/mcp-hangar/blob/main/AGENTS.md).
@@ -13,15 +15,16 @@ For contribution workflow (PRs, licensing), see
 
 ## 1. Purpose and audience
 
-The `docs/adr/` directory contains every Architecture Decision Record for
-MCP Hangar. Each ADR captures a single architectural decision: the context,
-the decision itself, and the consequences. ADRs are the project's long-term
-memory for decisions that constrain future work.
+The [`adr/`](https://github.com/mcp-hangar/docs/tree/main/adr) directory in
+the `mcp-hangar/docs` repository contains every Architecture Decision Record
+for MCP Hangar. Each ADR captures a single architectural decision: the
+context, the decision itself, and the consequences. ADRs are the project's
+long-term memory for decisions that constrain future work.
 
 **Primary readers:** AI coding agents (GitHub Copilot, Claude Code, Cursor,
 etc.) and human contributors. Both audiences must be able to write a
 compliant ADR after reading this file and one example (e.g.,
-[ADR-001](ADR-001-cqrs.md)).
+[ADR-001](https://github.com/mcp-hangar/docs/blob/main/adr/ADR-001-cqrs.md)).
 
 ---
 
@@ -56,12 +59,13 @@ Write an ADR when **all** of the following are true:
 | Sequence | Monotonic across the project. Never reuse a number. Never renumber. |
 | Slug | Names the decision, not just the topic area. Good: `ADR-001-cqrs.md`, `ADR-007-langfuse-integration.md`. Bad: `ADR-008-security.md`. |
 | Timestamps | None. No date prefixes. |
-| Folders | Flat. No sub-directories inside `docs/adr/`. |
+| Folders | Flat. No sub-directories inside `adr/` in the `mcp-hangar/docs` repository. |
 
-To determine the next number, list existing files:
+To determine the next number, list existing files from a checkout of
+`mcp-hangar/docs`:
 
 ```bash
-ls docs/adr/ADR-*.md | tail -1
+ls adr/ADR-*.md | tail -1
 ```
 
 ---
@@ -117,15 +121,15 @@ optional `## Alternatives Considered` section (see section 7).
 The decision in declarative form. Sub-sections (`###`) are encouraged for
 technical detail:
 
-- Design choices in table form: see [ADR-004](ADR-004-sep-1766-digest-pinning.md).
-- Component-by-component breakdown: see [ADR-001](ADR-001-cqrs.md).
-- Alignment maps and gap analysis: see [ADR-005](ADR-005-sep-1763-interceptor-compliance.md).
+- Design choices in table form: see [ADR-004](https://github.com/mcp-hangar/docs/blob/main/adr/ADR-004-sep-1766-digest-pinning.md).
+- Component-by-component breakdown: see [ADR-001](https://github.com/mcp-hangar/docs/blob/main/adr/ADR-001-cqrs.md).
+- Alignment maps and gap analysis: see [ADR-005](https://github.com/mcp-hangar/docs/blob/main/adr/ADR-005-sep-1763-interceptor-compliance.md).
 
 ### `## Consequences`
 
 Must contain both `### Positive` and `### Negative` sub-sections.
 May contain `### Neutral` for trade-offs that are neither strictly positive
-nor negative (see [ADR-007](ADR-007-langfuse-integration.md) for the
+nor negative (see [ADR-007](https://github.com/mcp-hangar/docs/blob/main/adr/ADR-007-langfuse-integration.md) for the
 pattern).
 
 ---
@@ -139,7 +143,7 @@ These sections are permitted but not required. They appear after
 
 Used when alternatives analysis is too long for the Context section.
 Format as a numbered list with explicit rejection or deferral status per
-option. See [ADR-007](ADR-007-langfuse-integration.md) for the canonical
+option. See [ADR-007](https://github.com/mcp-hangar/docs/blob/main/adr/ADR-007-langfuse-integration.md) for the canonical
 pattern:
 
 ```markdown
@@ -155,9 +159,9 @@ pattern:
 ### `## References`
 
 Links to specs, prior art, related ADRs, or implementation files. Used by
-[ADR-004](ADR-004-sep-1766-digest-pinning.md),
-[ADR-005](ADR-005-sep-1763-interceptor-compliance.md), and
-[ADR-007](ADR-007-langfuse-integration.md).
+[ADR-004](https://github.com/mcp-hangar/docs/blob/main/adr/ADR-004-sep-1766-digest-pinning.md),
+[ADR-005](https://github.com/mcp-hangar/docs/blob/main/adr/ADR-005-sep-1763-interceptor-compliance.md), and
+[ADR-007](https://github.com/mcp-hangar/docs/blob/main/adr/ADR-007-langfuse-integration.md).
 
 ### Decision sub-sections
 
@@ -166,9 +170,9 @@ are encouraged when they fit:
 
 | Sub-section | Where used | Purpose |
 |-------------|-----------|---------|
-| `### Risks and Mitigations` | [ADR-004](ADR-004-sep-1766-digest-pinning.md) Consequences | Table: Risk / Likelihood / Impact / Mitigation |
-| `### Upstream Tracking` | [ADR-005](ADR-005-sep-1763-interceptor-compliance.md) Consequences | Checklist for decisions tied to evolving external specs |
-| `### Implementation Details` | [ADR-001](ADR-001-cqrs.md) Decision | File paths and component details |
+| `### Risks and Mitigations` | [ADR-004](https://github.com/mcp-hangar/docs/blob/main/adr/ADR-004-sep-1766-digest-pinning.md) Consequences | Table: Risk / Likelihood / Impact / Mitigation |
+| `### Upstream Tracking` | [ADR-005](https://github.com/mcp-hangar/docs/blob/main/adr/ADR-005-sep-1763-interceptor-compliance.md) Consequences | Checklist for decisions tied to evolving external specs |
+| `### Implementation Details` | [ADR-001](https://github.com/mcp-hangar/docs/blob/main/adr/ADR-001-cqrs.md) Decision | File paths and component details |
 
 ---
 
@@ -220,7 +224,7 @@ edits to an Accepted ADR:
 > 2. In ADR-012, reference ADR-006 in Context or References.
 > 3. Update ADR-006 Status line to
 >    `**Status:** Superseded by [ADR-012](ADR-012-kubearmor-primary.md)`.
-> 4. Update `docs/adr/README.md` index in the same PR.
+> 4. Update `adr/README.md` in the `mcp-hangar/docs` repository in the same PR.
 
 ---
 
@@ -274,15 +278,18 @@ Both updates happen in the same pull request.
 
 ## 12. README.md maintenance rule
 
-`docs/adr/README.md` is the index and glossary for ADRs. It must be
-updated in the **same pull request** as any of the following changes:
+[`adr/README.md`](https://github.com/mcp-hangar/docs/blob/main/adr/README.md)
+in the `mcp-hangar/docs` repository is the index and glossary for ADRs. It
+must be updated in the **same pull request** as any of the following
+changes:
 
 - New ADR added.
 - ADR status changed (including supersession).
 - ADR renamed or removed.
 
 The README structure is maintained by a separate task. See
-[README.md](README.md) for the current index and glossary.
+[`adr/README.md`](https://github.com/mcp-hangar/docs/blob/main/adr/README.md)
+for the current index and glossary.
 
 ---
 
@@ -302,15 +309,15 @@ The README structure is maintained by a separate task. See
 
 Before creating or modifying any ADR, confirm:
 
-- [ ] Read this file (`docs/adr/AGENTS.md`) in full.
-- [ ] List existing ADRs to determine the next available number:
-      `ls docs/adr/ADR-*.md | tail -1`
+- [ ] Read this file (`docs/internal/ADR_AGENTS.md`) in full.
+- [ ] List existing ADRs to determine the next available number, from a
+      checkout of `mcp-hangar/docs`: `ls adr/ADR-*.md | tail -1`
 - [ ] Read at least two existing Accepted ADRs as style reference
-      (e.g., [ADR-001](ADR-001-cqrs.md) and
-      [ADR-007](ADR-007-langfuse-integration.md)).
+      (e.g., [ADR-001](https://github.com/mcp-hangar/docs/blob/main/adr/ADR-001-cqrs.md) and
+      [ADR-007](https://github.com/mcp-hangar/docs/blob/main/adr/ADR-007-langfuse-integration.md)).
 - [ ] Confirm the decision warrants an ADR (section 2 criteria met).
-- [ ] Confirm no existing ADR already covers this decision
-      (`grep -l "<keyword>" docs/adr/ADR-*.md`).
+- [ ] Confirm no existing ADR already covers this decision, from a checkout
+      of `mcp-hangar/docs` (`grep -l "<keyword>" adr/ADR-*.md`).
 - [ ] Read root [`AGENTS.md`](https://github.com/mcp-hangar/mcp-hangar/blob/main/AGENTS.md) for repo-wide conventions
       if this is your first task in this repository.
 
@@ -320,10 +327,10 @@ Before creating or modifying any ADR, confirm:
 
 After creating or modifying any ADR, confirm:
 
-- [ ] `docs/adr/README.md` updated in the same PR (new entry, status
-      change, or supersession reflected).
-- [ ] Markdownlint passes:
-      `npx markdownlint-cli docs/adr/<file>.md` (config:
+- [ ] `adr/README.md` in the `mcp-hangar/docs` repository updated in the
+      same PR (new entry, status change, or supersession reflected).
+- [ ] Markdownlint passes, from a checkout of `mcp-hangar/docs`:
+      `npx markdownlint-cli adr/<file>.md` (config:
       `.markdownlint.json`).
 - [ ] All internal cross-references resolve (relative links to other ADRs
       point to existing files).
@@ -354,4 +361,4 @@ Mechanically checkable. Use these for automated or manual review.
 | No forbidden sections | No `## TL;DR`, `## Problem`, `## Open questions`, `## Validation steps`, `## Phasing`, `## Next sections` |
 | No extra header fields | No `**Scope:**`, `**Supersedes:**`, `**Owner:**` lines in header block |
 | Internal links resolve | All `[ADR-NNN](ADR-NNN-*.md)` links point to existing files |
-| README.md in sync | Every `ADR-*.md` file (excluding review/supplementary files) has a corresponding entry in `docs/adr/README.md` |
+| README.md in sync | Every `ADR-*.md` file (excluding review/supplementary files) has a corresponding entry in `adr/README.md` in the `mcp-hangar/docs` repository |
