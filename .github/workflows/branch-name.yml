@@ -1,4 +1,4 @@
-# Enforces branch naming per GIT_FLOW.md section "Branch naming and merge strategy".
+# Thin caller -- logic lives in mcp-hangar/.github (reusable).
 name: branch-name
 
 on:
@@ -9,37 +9,6 @@ concurrency:
   group: ${{ github.workflow }}-${{ github.ref }}
   cancel-in-progress: true
 
-permissions:
-  pull-requests: read
-
 jobs:
-  validate:
-    runs-on: ubuntu-latest
-    steps:
-      - name: Validate branch name
-        env:
-          BRANCH: ${{ github.head_ref }}
-        run: |
-          set -euo pipefail
-          # Tool prefixes pass without restriction
-          if [[ "$BRANCH" =~ ^(dependabot|copilot)/ ]] || [[ "$BRANCH" =~ ^release-please-- ]]; then
-            echo "::notice::Branch name '$BRANCH' is a recognized tool prefix."
-            exit 0
-          fi
-          # Standard CC-typed branches. Slug allows dots and digits so version
-          # numbers work (e.g. chore/bump-mcp-sdk-1.28.1). Types match pr-title.
-          if [[ "$BRANCH" =~ ^(feat|fix|perf|refactor|docs|test|build|ci|chore|revert|security)/[a-z0-9][a-z0-9._-]*$ ]]; then
-            echo "::notice::Branch name '$BRANCH' is valid."
-            exit 0
-          fi
-          # Hotfix: hotfix/vX.Y.Z
-          if [[ "$BRANCH" =~ ^hotfix/v[0-9]+\.[0-9]+\.[0-9]+$ ]]; then
-            echo "::notice::Branch name '$BRANCH' is a valid hotfix."
-            exit 0
-          fi
-          echo "::error::Branch name '$BRANCH' does not match GIT_FLOW.md conventions."
-          echo "Expected: <type>/<slug> where type is feat|fix|perf|refactor|docs|test|build|ci|chore|revert|security."
-          echo "Slug is lowercase [a-z0-9._-], starting with a letter or digit (dots allowed, e.g. fix/bump-1.28.1)."
-          echo "Or: hotfix/vX.Y.Z, dependabot/*, copilot/*, release-please--*."
-          echo "See: https://github.com/mcp-hangar/docs/blob/main/development/GIT_FLOW.md#branch-naming-and-merge-strategy"
-          exit 1
+  branch-name:
+    uses: mcp-hangar/.github/.github/workflows/branch-name.yml@main
