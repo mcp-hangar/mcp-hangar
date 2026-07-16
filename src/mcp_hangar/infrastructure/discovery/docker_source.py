@@ -286,17 +286,23 @@ class DockerDiscoverySource(DiscoverySource):
             mode = "container"  # Normalize
 
         elif mode in ("http", "sse"):
-            # HTTP mode: connect to running container
-            ip = self._get_container_ip(container)
-            if not ip:
-                logger.warning(f"Container {name} has no IP, skipping")
+            # HTTP mode: connect to running container.
+            #
+            # The documented deployment (examples/quickstart/config.yaml) runs
+            # Hangar on the host, so prefer the container's published host-port
+            # binding (reachable from the host) over its internal bridge-network
+            # IP (unreachable from the host in the common Podman-on-macOS case).
+            port = int(labels.get(f"{self.LABEL_PREFIX}port", "8080"))
+            resolved = self._get_host_endpoint(container, port)
+            if not resolved:
+                logger.debug(f"Container {name} has no IP, skipping")
                 return None
 
-            port = int(labels.get(f"{self.LABEL_PREFIX}port", "8080"))
+            host, resolved_port = resolved
             connection_info = {
-                "host": ip,
-                "port": port,
-                "endpoint": f"http://{ip}:{port}",
+                "host": host,
+                "port": resolved_port,
+                "endpoint": f"http://{host}:{resolved_port}",
             }
         else:
             logger.warning(f"Unknown mode '{mode}' for container {name}")
@@ -329,6 +335,53 @@ class DockerDiscoverySource(DiscoverySource):
                     return str(ip)
         except Exception:  # noqa: BLE001 -- infra-boundary: best-effort container IP extraction
             pass
+        return None
+
+    def _get_host_endpoint(self, container: Any, port: int) -> tuple[str, int] | None:
+        """Resolve a reachable (host, port) for a container's labeled port.
+
+        Prefers the published host-port binding from ``NetworkSettings.Ports``
+        (e.g. ``-p 18080:8080``), which is reachable from a host-mode Hangar
+        process -- the only documented deployment topology for container
+        discovery. Falls back to the container's internal bridge-network IP
+        and the container-side port only when there is no host binding (e.g.
+        Hangar itself runs as a container on the same network as the
+        discovered container).
+
+        Args:
+            container: Docker/Podman container object.
+            port: Container-side port from the ``mcp.hangar.port`` label.
+
+        Returns:
+            (host, port) tuple reachable from the host, or None if the
+            container has neither a published host port nor a network IP
+            (e.g. still starting or stopped).
+        """
+        try:
+            ports = container.attrs.get("NetworkSettings", {}).get("Ports", {}) or {}
+        except Exception:  # noqa: BLE001 -- infra-boundary: best-effort port-mapping extraction
+            ports = {}
+
+        for proto in ("tcp", "udp"):
+            for binding in ports.get(f"{port}/{proto}") or []:
+                host_port = binding.get("HostPort")
+                if not host_port:
+                    continue
+                try:
+                    resolved_port = int(host_port)
+                except (TypeError, ValueError):
+                    continue
+                host_ip = binding.get("HostIp") or "127.0.0.1"
+                if host_ip in ("0.0.0.0", "::", ""):
+                    host_ip = "127.0.0.1"
+                return host_ip, resolved_port
+
+        # No published host binding -- fall back to the internal network IP
+        # (reachable only when Hangar shares the container's network).
+        ip = self._get_container_ip(container)
+        if ip:
+            return ip, port
+
         return None
 
     async def health_check(self) -> bool:

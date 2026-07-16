@@ -57,6 +57,53 @@ class TestLoadConfigFromFile:
         with pytest.raises(ValueError):
             load_config_from_file(str(config_file))
 
+    def test_discovery_only_config_defaults_mcp_servers_to_empty(self, tmp_path):
+        """Issue #483: discovery.enabled=True with no mcp_servers section should load."""
+        config_file = tmp_path / "config.yaml"
+        config_data = {
+            "discovery": {
+                "enabled": True,
+                "sources": [{"type": "docker"}],
+            },
+        }
+        config_file.write_text(yaml.dump(config_data))
+
+        result = load_config_from_file(str(config_file))
+
+        assert result["mcp_servers"] == {}
+        assert result["discovery"]["enabled"] is True
+
+    def test_discovery_disabled_and_missing_mcp_servers_still_raises(self, tmp_path):
+        """discovery.enabled=False (or absent) does not exempt the mcp_servers check."""
+        config_file = tmp_path / "config.yaml"
+        config_data = {"discovery": {"enabled": False}}
+        config_file.write_text(yaml.dump(config_data))
+
+        with pytest.raises(ValueError, match="missing 'mcp_servers' section"):
+            load_config_from_file(str(config_file))
+
+    def test_discovery_section_without_enabled_key_still_raises(self, tmp_path):
+        """A `discovery:` section that never sets `enabled` does not bypass the check."""
+        config_file = tmp_path / "config.yaml"
+        config_data = {"discovery": {"sources": []}}
+        config_file.write_text(yaml.dump(config_data))
+
+        with pytest.raises(ValueError, match="missing 'mcp_servers' section"):
+            load_config_from_file(str(config_file))
+
+    def test_existing_mcp_servers_untouched_when_discovery_also_enabled(self, tmp_path):
+        """A config with both a static mcp_servers section and discovery loads normally."""
+        config_file = tmp_path / "config.yaml"
+        config_data = {
+            "mcp_servers": {"static-provider": {"mode": "subprocess", "command": ["cmd"]}},
+            "discovery": {"enabled": True},
+        }
+        config_file.write_text(yaml.dump(config_data))
+
+        result = load_config_from_file(str(config_file))
+
+        assert result["mcp_servers"] == {"static-provider": {"mode": "subprocess", "command": ["cmd"]}}
+
     def test_handles_complex_config(self, tmp_path):
         """Should handle complex configuration with all sections."""
         config_file = tmp_path / "config.yaml"

@@ -39,6 +39,10 @@ mcp-hangar serve --config config.yaml                     # stdio (Claude Deskto
 mcp-hangar serve --config config.yaml --http --port 8000  # HTTP + REST API at /api/
 ```
 
+> The 1.5 server refuses to bind a non-loopback interface without auth. For a
+> quick/insecure demo, pass `--unsafe-no-auth`; for anything real, configure
+> the `auth` block.
+
 Or skip the config entirely -- get filesystem, fetch, and memory servers wired into Claude Desktop in one line:
 
 ```bash
