@@ -7,6 +7,10 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Security
+
+* **security:** require `mcp>=1.28.1` to pull in the fix for CVE-2026-59950 (MCP Python SDK WebSocket server transport missing Host/Origin validation, HIGH). The published constraint was `mcp>=1.0.0`, so installs could still resolve a vulnerable SDK even though the dev lock had moved.
+
 ### Fixed
 
 * **core:** discovered `http`/`sse` containers now prefer the published host-port binding over the internal bridge-network IP, so they are reachable from the documented host-mode deployment ([#481](https://github.com/mcp-hangar/mcp-hangar/issues/481))
