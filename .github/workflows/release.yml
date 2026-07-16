@@ -336,7 +336,7 @@ jobs:
             ## Links
             - [PyPI Package](https://pypi.org/project/mcp-hangar/${{ needs.validate.outputs.version }}/)
             - [Docker Image](https://ghcr.io/${{ github.repository }}:${{ needs.validate.outputs.version }})
-            - [Documentation](https://${{ github.repository_owner }}.github.io/mcp-hangar/)
+            - [Documentation](https://mcp-hangar.io)
 
             ${{ steps.changelog.outputs.full_changelog_line }}
           prerelease: ${{ needs.validate.outputs.is_prerelease == 'true' }}
