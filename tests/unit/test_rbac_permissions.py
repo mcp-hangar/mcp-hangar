@@ -1,6 +1,6 @@
 # pyright: reportAny=false, reportUnknownVariableType=false
 
-from mcp_hangar.auth.roles import ROLE_ADMIN, ROLE_AGENT, ROLE_DEVELOPER, ROLE_VIEWER
+from mcp_hangar.auth.roles import ROLE_ADMIN, ROLE_DEVELOPER, ROLE_VIEWER
 from mcp_hangar.domain.value_objects.security import (
     PERMISSION_CONFIG_RELOAD,
     PERMISSION_POLICY_WRITE,
@@ -43,10 +43,3 @@ def test_viewer_role_is_read_only_for_provider_api() -> None:
     assert ROLE_VIEWER.has_permission("mcp_servers", "read")
     assert not ROLE_VIEWER.has_permission("mcp_servers", "write")
     assert not ROLE_VIEWER.has_permission("mcp_servers", "lifecycle")
-
-
-def test_agent_role_has_policy_write_only() -> None:
-    assert ROLE_AGENT.has_permission("policy", "write")
-    assert not ROLE_AGENT.has_permission("mcp_servers", "read")
-    assert not ROLE_AGENT.has_permission("mcp_servers", "write")
-    assert not ROLE_AGENT.has_permission("mcp_servers", "lifecycle")

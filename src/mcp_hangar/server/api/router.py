@@ -53,7 +53,6 @@ def create_api_router(auth_components: Any = None) -> Starlette:
     from .system import system_routes
     from .tools import tools_routes
     from .ws import ws_routes
-    from .agent_policy import agent_policy_routes
 
     routes: list[BaseRoute] = [
         Mount("/mcp_servers", routes=mcp_server_routes),
@@ -64,7 +63,6 @@ def create_api_router(auth_components: Any = None) -> Starlette:
         Mount("/system", routes=system_routes),
         Mount("/tools", routes=tools_routes),
         Mount("/ws", routes=ws_routes),
-        Mount("/agent/policy", routes=agent_policy_routes),
         Mount("/admin/tools", routes=admin_tools_routes),
     ]
 
