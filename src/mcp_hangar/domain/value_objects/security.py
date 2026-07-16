@@ -246,10 +246,3 @@ PERMISSION_PROVIDERS_WRITE = Permission(resource_type="mcp_servers", action="wri
 PERMISSION_PROVIDERS_LIFECYCLE = Permission(resource_type="mcp_servers", action="lifecycle")
 PERMISSION_POLICY_WRITE = Permission(resource_type="policy", action="write")
 PERMISSION_CONFIG_RELOAD = Permission(resource_type="config", action="reload")
-
-
-AGENT_ROLE = Role(
-    name="agent",
-    permissions=frozenset([PERMISSION_POLICY_WRITE]),
-    description="Push runtime tool access policies from hangar-agent",
-)

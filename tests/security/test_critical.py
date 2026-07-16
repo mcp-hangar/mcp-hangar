@@ -8,7 +8,6 @@ from unittest.mock import AsyncMock, MagicMock
 
 import pytest
 from starlette.middleware.trustedhost import TrustedHostMiddleware
-from starlette.testclient import TestClient
 
 from mcp_hangar.domain.exceptions import MissingCredentialsError
 from mcp_hangar.server.api.middleware import get_cors_config
@@ -18,21 +17,6 @@ from mcp_hangar.server.bootstrap import ApplicationContext
 
 
 pytestmark = pytest.mark.security
-
-
-def test_k1_agent_policy_rejects_unauthenticated_and_spoofed_header() -> None:
-    client = TestClient(create_api_router(), base_url="http://localhost")
-    payload: dict[str, object] = {"version": 1, "tool_policies": []}
-
-    response = client.post("/agent/policy/", json=payload)
-    assert response.status_code in {401, 403}
-
-    spoofed = client.post(
-        "/agent/policy/",
-        json=payload,
-        headers={"x-hangar-agent-internal": "true"},
-    )
-    assert spoofed.status_code in {401, 403}
 
 
 def test_k2_websocket_without_valid_auth_is_rejected() -> None:

@@ -239,8 +239,6 @@ ROLE_SERVICE_ACCOUNT = Role(
     ),
 )
 
-ROLE_AGENT = core_security.AGENT_ROLE
-
 # Role registry for easy lookup
 BUILTIN_ROLES: dict[str, Role] = {
     "admin": ROLE_ADMIN,
@@ -249,7 +247,6 @@ BUILTIN_ROLES: dict[str, Role] = {
     "viewer": ROLE_VIEWER,
     "auditor": ROLE_AUDITOR,
     "service-account": ROLE_SERVICE_ACCOUNT,
-    "agent": ROLE_AGENT,
 }
 
 

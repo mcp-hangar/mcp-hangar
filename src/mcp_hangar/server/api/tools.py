@@ -1,6 +1,6 @@
 """REST API endpoint for listing all tools across all mcp_servers.
 
-Used by hangar-agent supervisor to sync tool inventory to hangar-cloud.
+Exposes GET /tools for querying the aggregated tool inventory.
 """
 
 from starlette.requests import Request
