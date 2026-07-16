@@ -5,6 +5,15 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [1.5.1](https://github.com/mcp-hangar/mcp-hangar/compare/v1.5.0...v1.5.1) (2026-07-16)
+
+
+### Fixed
+
+* **core:** resolve discovery/config review findings ([#481](https://github.com/mcp-hangar/mcp-hangar/issues/481), [#483](https://github.com/mcp-hangar/mcp-hangar/issues/483), [#484](https://github.com/mcp-hangar/mcp-hangar/issues/484)) ([#493](https://github.com/mcp-hangar/mcp-hangar/issues/493)) ([1600c54](https://github.com/mcp-hangar/mcp-hangar/commit/1600c543ecf6e3fa8d8af1b63f842c1339e46740))
+* **repo:** add basic client scope to keycloak example realm so tokens carry sub ([#476](https://github.com/mcp-hangar/mcp-hangar/issues/476)) ([2c1e9f4](https://github.com/mcp-hangar/mcp-hangar/commit/2c1e9f4d3d673fb142cf5d8e217a8d8f89dc2da6))
+* **security:** require mcp&gt;=1.28.1 (CVE-2026-59950) ([#497](https://github.com/mcp-hangar/mcp-hangar/issues/497)) ([5ba85d1](https://github.com/mcp-hangar/mcp-hangar/commit/5ba85d18c5c655d47092906e6577597528afa4dc))
+
 ## [Unreleased]
 
 ### Security
