@@ -3,7 +3,7 @@ name: Project Add
 on:
   issues:
     types: [opened, reopened]
-  pull_request:
+  pull_request_target:
     types: [opened, reopened, ready_for_review]
 
 concurrency:
