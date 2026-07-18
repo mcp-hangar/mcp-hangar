@@ -1,6 +1,6 @@
 # MCP Hangar
 
-**Open-source control plane for MCP servers -- lifecycle, governance, and observability for your server fleet.**
+**The policy enforcement plane for MCP -- deterministic admission and egress policy, attributable audit, and SIEM export for your MCP server fleet. MIT, self-hosted, no SaaS.**
 
 [![PyPI](https://img.shields.io/pypi/v/mcp-hangar)](https://pypi.org/project/mcp-hangar/)
 [![CI](https://github.com/mcp-hangar/mcp-hangar/actions/workflows/ci-core.yml/badge.svg)](https://github.com/mcp-hangar/mcp-hangar/actions/workflows/ci-core.yml)
@@ -8,7 +8,7 @@
 
 ## Why
 
-In MCP, the tool list is a hint the client caches; the call path is the only surface a provider mediates in real time. Every governance primitive worth having -- revocation, per-tenant scoping, audit -- attaches there, or attaches to nothing. Hangar puts a control plane on that seam: one mediated path for lifecycle, policy, and telemetry across your whole MCP server fleet.
+In MCP, the tool list is a hint the client caches; the call path is the only surface a provider mediates in real time. Every governance primitive worth having -- revocation, per-tenant scoping, audit -- attaches there, or attaches to nothing. Hangar puts a policy enforcement plane on that seam: one mediated path for lifecycle, policy, and telemetry across your whole MCP server fleet.
 
 > Background: [The Advisory List -- Why MCP Governance Lives at the Call Path](https://whyisthisdown.com/posts/the-advisory-list)
 
