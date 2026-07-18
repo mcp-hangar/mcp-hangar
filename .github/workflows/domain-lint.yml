@@ -1,0 +1,8 @@
+name: domain-lint
+on:
+  pull_request:
+  push:
+    branches: [main]
+jobs:
+  domain:
+    uses: mcp-hangar/.github/.github/workflows/domain-lint.yml@main
