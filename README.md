@@ -96,6 +96,7 @@ mcp_servers:
 - [Getting Started](https://mcp-hangar.io/docs/getting-started/quickstart) &middot; [Configuration](https://mcp-hangar.io/docs/reference/configuration) &middot; [Python API](https://mcp-hangar.io/docs/guides/FACADE_API)
 - [Governance & Front Door](https://mcp-hangar.io/docs/guides/FRONT_DOOR) &middot; [Authentication & RBAC](https://mcp-hangar.io/docs/guides/AUTHENTICATION) &middot; [Observability](https://mcp-hangar.io/docs/guides/OBSERVABILITY)
 - [Kubernetes operator](https://github.com/mcp-hangar/mcp-hangar-operator) &middot; [Helm charts](https://github.com/mcp-hangar/helm-charts) &middot; [All docs](https://mcp-hangar.io/docs)
+- [Release compatibility matrix](https://github.com/mcp-hangar/docs/blob/main/operations/RELEASE_COMPATIBILITY.md) &middot; which core, operator, and chart versions are released and tested together
 
 ## License
 
