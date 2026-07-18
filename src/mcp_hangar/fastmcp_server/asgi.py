@@ -162,6 +162,73 @@ def create_combined_asgi_app(
     return combined_app
 
 
+def _strip_host_port(host: str) -> str:
+    """Return the hostname from a Host header, dropping the port.
+
+    Handles ``host:port``, bracketed IPv6 ``[::1]:port``, and bare hostnames /
+    IPv4 / bracketless IPv6 (left unchanged).
+    """
+    host = host.strip()
+    if host.startswith("["):  # [::1]:8000 -> ::1
+        return host[1:].split("]", 1)[0]
+    if host.count(":") == 1:  # host:port -> host
+        return host.rsplit(":", 1)[0]
+    return host
+
+
+def _ws_handshake_allowed(scope: dict) -> tuple[bool, str]:
+    """Validate a non-``/api/`` WebSocket handshake at the Hangar edge.
+
+    Defense-in-depth against DNS rebinding / cross-origin WebSocket abuse
+    (CVE-2026-59950 class): the SDK terminates the MCP protocol, but Hangar is
+    the trust boundary and should not rely solely on the SDK for origin checks.
+
+    Posture (see #498):
+
+    - **Loopback connections are trusted** (local, no browser same-origin or
+      rebinding threat) and always pass.
+    - On **non-loopback** connections (fail-closed):
+      - **Origin** is browser-scoped -- a *present* Origin must be in the
+        allowlist (``MCP_CORS_ORIGINS``); a *missing* Origin is a non-browser
+        client (no same-origin policy to bypass) and is allowed, auth still
+        applies.
+      - **Host** must be in the trusted-hosts allowlist (``MCP_TRUSTED_HOSTS`` --
+        the same list the REST API's TrustedHostMiddleware uses). ``*`` disables
+        the check.
+
+    Returns ``(allowed, reason)``; ``reason`` is a short tag for logging.
+    """
+    import os
+
+    from ..server.api.middleware import get_cors_config
+    from ..server.lifecycle import _is_loopback_host
+
+    server = scope.get("server")
+    if server and _is_loopback_host(str(server[0])):
+        return True, ""
+
+    headers = {
+        key.decode("latin-1").lower(): value.decode("latin-1")
+        for key, value in scope.get("headers", [])
+    }
+    origin = headers.get("origin")
+    host = headers.get("host", "")
+
+    if origin is not None:
+        allowed_origins = set(get_cors_config()["allow_origins"])
+        if "*" not in allowed_origins and origin not in allowed_origins:
+            return False, f"origin_not_allowed:{origin}"
+
+    trusted_env = os.environ.get(
+        "MCP_TRUSTED_HOSTS", "localhost,127.0.0.1,::1,testserver"
+    )
+    trusted_hosts = [h.strip() for h in trusted_env.split(",") if h.strip()]
+    if "*" not in trusted_hosts and _strip_host_port(host) not in trusted_hosts:
+        return False, f"host_not_allowed:{host or '<missing>'}"
+
+    return True, ""
+
+
 def create_auth_combined_app(
     aux_app: Starlette,
     mcp_app: Any,
@@ -219,9 +286,16 @@ def create_auth_combined_app(
             await api_app(api_scope, receive, send)
             return
 
-        # For non-API HTTP scopes, apply authentication before forwarding to mcp_app.
+        # Non-HTTP (WebSocket) on non-/api/ paths. The MCP protocol carries no auth
+        # here, but Hangar is the trust boundary and validates the handshake
+        # Origin/Host before forwarding (DNS-rebinding / cross-origin defense; #498).
         if scope_type != "http":
-            # WebSocket on non-/api/ paths goes to mcp_app without auth (MCP protocol).
+            allowed, reason = _ws_handshake_allowed(scope)
+            if not allowed:
+                logger.warning("ws_handshake_rejected", reason=reason, path=path)
+                await receive()  # drain the websocket.connect event
+                await send({"type": "websocket.close", "code": 1008})
+                return
             await mcp_app(scope, receive, send)
             return
 
