@@ -207,10 +207,7 @@ def _ws_handshake_allowed(scope: dict) -> tuple[bool, str]:
     if server and _is_loopback_host(str(server[0])):
         return True, ""
 
-    headers = {
-        key.decode("latin-1").lower(): value.decode("latin-1")
-        for key, value in scope.get("headers", [])
-    }
+    headers = {key.decode("latin-1").lower(): value.decode("latin-1") for key, value in scope.get("headers", [])}
     origin = headers.get("origin")
     host = headers.get("host", "")
 
@@ -219,9 +216,7 @@ def _ws_handshake_allowed(scope: dict) -> tuple[bool, str]:
         if "*" not in allowed_origins and origin not in allowed_origins:
             return False, f"origin_not_allowed:{origin}"
 
-    trusted_env = os.environ.get(
-        "MCP_TRUSTED_HOSTS", "localhost,127.0.0.1,::1,testserver"
-    )
+    trusted_env = os.environ.get("MCP_TRUSTED_HOSTS", "localhost,127.0.0.1,::1,testserver")
     trusted_hosts = [h.strip() for h in trusted_env.split(",") if h.strip()]
     if "*" not in trusted_hosts and _strip_host_port(host) not in trusted_hosts:
         return False, f"host_not_allowed:{host or '<missing>'}"
