@@ -83,7 +83,7 @@ jobs:
         run: docker build -t mcp-hangar:scan .
 
       - name: Run Trivy vulnerability scanner
-        uses: aquasecurity/trivy-action@v0.35.0
+        uses: aquasecurity/trivy-action@v0.36.0
         with:
           image-ref: "mcp-hangar:scan"
           format: "sarif"
