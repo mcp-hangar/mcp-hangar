@@ -655,6 +655,10 @@ class McpServer(AggregateRoot):
         if self._log_buffer is not None:
             self._start_stderr_reader(client)
 
+        from ...metrics import set_connection_active
+
+        set_connection_active(self.mcp_server_id, True)
+
         return client
 
     def _start_stderr_reader(self, client: Any) -> None:
@@ -954,6 +958,9 @@ class McpServer(AggregateRoot):
             except Exception:  # noqa: BLE001 -- fault-barrier: cleanup must not mask original startup error
                 pass
             self._client = None
+            from ...metrics import set_connection_active
+
+            set_connection_active(self.mcp_server_id, False)
 
         self._health.record_failure()
 
@@ -1375,6 +1382,9 @@ class McpServer(AggregateRoot):
             except Exception as e:  # noqa: BLE001 -- fault-barrier: shutdown cleanup must not propagate
                 logger.warning(f"shutdown_error: {self.mcp_server_id}, error={e}")
             self._client = None
+            from ...metrics import set_connection_active
+
+            set_connection_active(self.mcp_server_id, False)
 
         self._state = McpServerState.COLD
         self._increment_version()

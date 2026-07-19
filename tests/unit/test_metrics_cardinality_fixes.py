@@ -41,3 +41,19 @@ def test_events_compacted_has_no_stream_id_label() -> None:
     out = m.get_metrics()
     assert "mcp_hangar_events_compacted_total" in out
     assert "stream_id" not in out
+
+
+def test_connection_active_gauge_toggles() -> None:
+    m.set_connection_active("srv-conn-a", True)
+    assert 'mcp_hangar_connections_active{mcp_server="srv-conn-a"} 1' in m.get_metrics()
+    m.set_connection_active("srv-conn-a", False)
+    assert 'mcp_hangar_connections_active{mcp_server="srv-conn-a"} 0' in m.get_metrics()
+
+
+def test_redundant_connection_metrics_removed() -> None:
+    # connections_total and connection_duration_seconds were deleted (audit).
+    out = m.get_metrics()
+    assert "mcp_hangar_connections_total" not in out
+    assert "mcp_hangar_connection_duration_seconds" not in out
+    assert not hasattr(m, "CONNECTIONS_TOTAL")
+    assert not hasattr(m, "CONNECTION_DURATION_SECONDS")
