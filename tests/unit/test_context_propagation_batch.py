@@ -20,9 +20,7 @@ from mcp_hangar.server.tools.batch import BatchExecutor, CallSpec
 # Module-level ContextVar used across tests
 # ---------------------------------------------------------------------------
 
-_test_var: contextvars.ContextVar[str | None] = contextvars.ContextVar(
-    "test_propagation_var", default=None
-)
+_test_var: contextvars.ContextVar[str | None] = contextvars.ContextVar("test_propagation_var", default=None)
 
 
 # ---------------------------------------------------------------------------
@@ -107,8 +105,7 @@ class TestContextVarPropagationIntoWorkers:
         assert result.success is True, f"Batch failed: {result}"
         assert len(observed) == 1, "spy_send should have been called exactly once"
         assert observed[0] == sentinel, (
-            f"Worker saw {observed[0]!r}; expected {sentinel!r}. "
-            "copy_context() may not be propagating the contextvar."
+            f"Worker saw {observed[0]!r}; expected {sentinel!r}. copy_context() may not be propagating the contextvar."
         )
 
     def test_contextvar_isolation_between_calls(self, mock_context):
@@ -151,9 +148,7 @@ class TestContextVarPropagationIntoWorkers:
         assert len(observed) == 3
         # All workers must see the sentinel — not None (leaked default) or
         # values written by sibling workers.
-        assert all(v == sentinel for v in observed), (
-            f"Some workers saw unexpected values: {observed}"
-        )
+        assert all(v == sentinel for v in observed), f"Some workers saw unexpected values: {observed}"
 
     def test_contextvar_default_without_copy_context(self):
         """Baseline: ThreadPoolExecutor without copy_context sees default (None).
@@ -179,6 +174,5 @@ class TestContextVarPropagationIntoWorkers:
 
         # Without copy_context the worker gets the default (None)
         assert seen == [None], (
-            "Expected None without copy_context(); got: "
-            f"{seen}. Python may have changed contextvar defaults."
+            f"Expected None without copy_context(); got: {seen}. Python may have changed contextvar defaults."
         )

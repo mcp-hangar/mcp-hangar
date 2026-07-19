@@ -112,7 +112,7 @@ class TestStandaloneMemberPolicyResolver:
         # No member context — only server policy applies
         policy = resolver.resolve_effective_policy("myserver")
         assert not policy.is_tool_allowed("dangerous_tool")  # server deny
-        assert policy.is_tool_allowed("safe_tool")           # NOT in server deny
+        assert policy.is_tool_allowed("safe_tool")  # NOT in server deny
 
     def test_member_policy_cannot_readd_server_denied_tool(self, resolver):
         """Merge semantics: member policy cannot re-add a server-denied tool."""

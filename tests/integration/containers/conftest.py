@@ -111,9 +111,7 @@ if TESTCONTAINERS_AVAILABLE:
         def __init__(self, image: str = "prom/prometheus:v2.47.0", **kwargs):
             super().__init__(image=image, **kwargs)
             self.with_exposed_ports(9090)
-            self.with_command(
-                "--config.file=/etc/prometheus/prometheus.yml --web.enable-lifecycle"
-            )
+            self.with_command("--config.file=/etc/prometheus/prometheus.yml --web.enable-lifecycle")
 
         def get_api_url(self) -> str:
             host = self.get_container_host_ip()

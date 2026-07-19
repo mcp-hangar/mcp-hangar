@@ -170,9 +170,7 @@ class TestConfigWithdrawalOverlay:
         proj_b = registry.resolve(_SERVER, _TOOL_B, tenant_id=_TENANT_B)
         assert proj_b is None, "undiscovered tool with no overlay for tenant B returns None (safe allow)"
 
-    def test_resolve_returns_none_when_no_config_withdrawal_and_not_discovered(
-        self, registry: ToolProjectionRegistry
-    ):
+    def test_resolve_returns_none_when_no_config_withdrawal_and_not_discovered(self, registry: ToolProjectionRegistry):
         """resolve() returns None when tool is neither config-withdrawn nor discovered."""
         # No withdrawal set, no build_from_tools → safe default: None → not blocked.
         assert registry.resolve(_SERVER, _TOOL) is None
@@ -203,9 +201,7 @@ class TestConfigWithdrawalOverlay:
 
         assert registry.resolve(_SERVER, _TOOL) is None
 
-    def test_config_withdrawal_overlay_plus_discovered_tool_all_tenants(
-        self, registry: ToolProjectionRegistry
-    ):
+    def test_config_withdrawal_overlay_plus_discovered_tool_all_tenants(self, registry: ToolProjectionRegistry):
         """When a discovered tool is globally config-withdrawn, it returns withdrawn status."""
         registry.build_from_tools(_SERVER, [_make_tool(_TOOL)])
         registry.set_config_withdrawal(_SERVER, _TOOL, tenant_id=None)
@@ -214,9 +210,7 @@ class TestConfigWithdrawalOverlay:
         assert proj is not None
         assert proj.is_withdrawn_for(_TENANT_B), "discovered tool must be withdrawn for all tenants"
 
-    def test_config_withdrawal_overlay_plus_discovered_tool_per_tenant(
-        self, registry: ToolProjectionRegistry
-    ):
+    def test_config_withdrawal_overlay_plus_discovered_tool_per_tenant(self, registry: ToolProjectionRegistry):
         """Per-tenant overlay merges into discovered tool's tenant_overrides."""
         registry.build_from_tools(_SERVER, [_make_tool(_TOOL)])
         registry.set_config_withdrawal(_SERVER, _TOOL, tenant_id=_TENANT_A)
