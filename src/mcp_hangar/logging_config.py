@@ -56,6 +56,32 @@ def _sanitize_sensitive_data(
     return cast(dict[str, Any], redact(event_dict))
 
 
+def _redact_secret_values(_logger: Any, _method_name: str, event_dict: MutableMapping[str, Any]) -> Mapping[str, Any]:
+    """Scrub secret *values* (tokens, keys, JWTs) from every string in the record.
+
+    Complements ``_sanitize_sensitive_data`` (which redacts by key name only):
+    this catches a secret embedded in the message string or under a non-matching
+    key, using the shared builtin-pattern redactor. Long-string redaction is off,
+    so it only rewrites recognizable token shapes.
+    """
+    from .domain.security.redactor import get_default_redactor
+
+    redactor = get_default_redactor()
+
+    def scrub(obj: Any, depth: int = 0) -> Any:
+        if depth > 5:
+            return obj
+        if isinstance(obj, str):
+            return redactor.redact(obj)
+        if isinstance(obj, dict):
+            return {k: scrub(v, depth + 1) for k, v in obj.items()}
+        if isinstance(obj, list):
+            return [scrub(item, depth + 1) for item in obj]
+        return obj
+
+    return cast(dict[str, Any], scrub(event_dict))
+
+
 def _drop_color_message_key(_logger: Any, _method_name: str, event_dict: MutableMapping[str, Any]) -> Mapping[str, Any]:
     """Remove the color_message key that uvicorn adds."""
     event_dict.pop("color_message", None)
@@ -91,6 +117,7 @@ def setup_logging(
         structlog.processors.StackInfoRenderer(),
         _add_service_context,
         _sanitize_sensitive_data,
+        _redact_secret_values,
         _drop_color_message_key,
         structlog.processors.UnicodeDecoder(),
     ]
