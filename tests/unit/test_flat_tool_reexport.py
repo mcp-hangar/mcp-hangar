@@ -152,9 +152,7 @@ class TestBuildFlatMap:
     def test_policy_denied_tool_excluded(self, registry, resolver):
         """A tool denied by member-scope policy is absent from the flat map."""
         _populate_registry(registry, "server_a", ["read_item", "delete_item"])
-        resolver.set_standalone_member_policy(
-            "server_a", "tenant:a", ToolAccessPolicy(deny_list=("delete_item",))
-        )
+        resolver.set_standalone_member_policy("server_a", "tenant:a", ToolAccessPolicy(deny_list=("delete_item",)))
 
         with (
             patch(
@@ -175,9 +173,7 @@ class TestBuildFlatMap:
         """tenant:a and tenant:b receive different flat maps when policies differ."""
         _populate_registry(registry, "server_a", ["read_item", "delete_item"])
         # tenant:b cannot use delete_item
-        resolver.set_standalone_member_policy(
-            "server_a", "tenant:b", ToolAccessPolicy(deny_list=("delete_item",))
-        )
+        resolver.set_standalone_member_policy("server_a", "tenant:b", ToolAccessPolicy(deny_list=("delete_item",)))
 
         with (
             patch(
@@ -319,6 +315,7 @@ class TestFlatListToolsHandler:
                 nonlocal captured_list_fn
                 captured_list_fn = fn
                 return fn
+
             return decorator
 
         def fake_call_tool(*, validate_input=True):
@@ -326,6 +323,7 @@ class TestFlatListToolsHandler:
                 nonlocal captured_call_fn
                 captured_call_fn = fn
                 return fn
+
             return decorator
 
         mcp_mock._mcp_server.list_tools = fake_list_tools
@@ -384,11 +382,13 @@ class TestFlatListToolsHandler:
                 nonlocal captured_list_fn
                 captured_list_fn = fn
                 return fn
+
             return decorator
 
         def fake_call_tool(*, validate_input=True):
             def decorator(fn):
                 return fn
+
             return decorator
 
         mcp_mock._mcp_server.list_tools = fake_list_tools
@@ -431,9 +431,7 @@ class TestFlatListToolsHandler:
     async def test_two_tenants_different_lists(self, populated_registry, resolver):
         """Two tenants with different policies receive different tool lists."""
         _populate_registry(populated_registry, "server_a", ["read_item", "delete_item"])
-        resolver.set_standalone_member_policy(
-            "server_a", "tenant:b", ToolAccessPolicy(deny_list=("delete_item",))
-        )
+        resolver.set_standalone_member_policy("server_a", "tenant:b", ToolAccessPolicy(deny_list=("delete_item",)))
 
         mcp_mock = MagicMock()
         captured_list_fn = None
@@ -443,11 +441,13 @@ class TestFlatListToolsHandler:
                 nonlocal captured_list_fn
                 captured_list_fn = fn
                 return fn
+
             return decorator
 
         def fake_call_tool(*, validate_input=True):
             def decorator(fn):
                 return fn
+
             return decorator
 
         mcp_mock._mcp_server.list_tools = fake_list_tools
@@ -512,12 +512,14 @@ class TestFlatCallToolHandler:
             def decorator(fn):
                 captured["list"] = fn
                 return fn
+
             return decorator
 
         def fake_call_tool(*, validate_input=True):
             def decorator(fn):
                 captured["call"] = fn
                 return fn
+
             return decorator
 
         mcp_mock._mcp_server.list_tools = fake_list_tools
@@ -567,9 +569,7 @@ class TestFlatCallToolHandler:
         assert exc_info.value.error.code == METHOD_NOT_FOUND
 
     @pytest.mark.asyncio
-    async def test_valid_call_routes_through_enforcement_and_returns_result(
-        self, registry, resolver
-    ):
+    async def test_valid_call_routes_through_enforcement_and_returns_result(self, registry, resolver):
         """A valid flat call goes through BatchExecutor and returns the backend result."""
         _populate_registry(registry, "server_a", ["read_item"])
         _, call_fn = self._capture_handlers(registry, resolver)
@@ -631,9 +631,7 @@ class TestFlatCallToolHandler:
         """A tool denied by policy returns an isError CallToolResult, not invoked on backend."""
         _populate_registry(registry, "server_a", ["read_item", "delete_item"])
         # Deny delete_item for tenant:a
-        resolver.set_standalone_member_policy(
-            "server_a", "tenant:a", ToolAccessPolicy(deny_list=("delete_item",))
-        )
+        resolver.set_standalone_member_policy("server_a", "tenant:a", ToolAccessPolicy(deny_list=("delete_item",)))
         _, call_fn = self._capture_handlers(registry, resolver)
 
         identity = _make_identity("tenant:a")
@@ -823,9 +821,7 @@ class TestFactoryModeGate:
         resolver = get_tool_access_resolver()
         resolver.set_topology_mode("egress")
 
-        with patch(
-            "mcp_hangar.fastmcp_server.flat_tool_projection.register_flat_tool_handlers"
-        ) as mock_register:
+        with patch("mcp_hangar.fastmcp_server.flat_tool_projection.register_flat_tool_handlers") as mock_register:
             factory = MCPServerFactory(self._make_hangar())
             factory.create_server()
             mock_register.assert_not_called()
@@ -839,9 +835,7 @@ class TestFactoryModeGate:
         resolver = get_tool_access_resolver()
         assert resolver.topology_mode == "egress"
 
-        with patch(
-            "mcp_hangar.fastmcp_server.flat_tool_projection.register_flat_tool_handlers"
-        ) as mock_register:
+        with patch("mcp_hangar.fastmcp_server.flat_tool_projection.register_flat_tool_handlers") as mock_register:
             factory = MCPServerFactory(self._make_hangar())
             factory.create_server()
             mock_register.assert_not_called()

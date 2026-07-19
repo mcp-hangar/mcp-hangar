@@ -157,9 +157,7 @@ class TestTopologyModeResolver:
         """
         resolver.set_topology_mode("front_door")
         resolver.set_mcp_server_policy("srv", ToolAccessPolicy(allow_list=("read", "write")))
-        resolver.set_standalone_member_policy(
-            "srv", "tenant:alice", ToolAccessPolicy(deny_list=("write",))
-        )
+        resolver.set_standalone_member_policy("srv", "tenant:alice", ToolAccessPolicy(deny_list=("write",)))
 
         # Authenticated caller: member merge applies, NOT deny-all.
         assert resolver.is_tool_allowed("srv", "read", member_id="tenant:alice")

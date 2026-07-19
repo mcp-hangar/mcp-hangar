@@ -186,9 +186,7 @@ class TestRuntimeWithdrawalOverlay:
         assert proj_b is not None
         assert proj_b.is_withdrawn_for(_TENANT_B)
 
-    def test_runtime_withdrawal_survives_clear_config_withdrawals(
-        self, registry: ToolProjectionRegistry
-    ):
+    def test_runtime_withdrawal_survives_clear_config_withdrawals(self, registry: ToolProjectionRegistry):
         """KEY TEST: clear_config_withdrawals() must NOT erase runtime withdrawals."""
         registry.withdraw(_SERVER, _TOOL, tenant_id=None)
         # Simulate a config reload (only clears config overlay, not runtime).
@@ -269,9 +267,7 @@ class TestRuntimeWithdrawalEndToEnd:
         registry.clear_config_withdrawals()
 
         result = _execute(mock_context, tenant_id=_TENANT_A)
-        assert result.results[0].success is False, (
-            "runtime withdrawal must survive config reload"
-        )
+        assert result.results[0].success is False, "runtime withdrawal must survive config reload"
         assert result.results[0].error_type == "ToolWithdrawnError"
 
     def test_withdraw_emits_rejected_event(self, mock_context):
