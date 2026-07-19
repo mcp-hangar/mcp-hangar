@@ -33,7 +33,7 @@ from ....domain.services.digest_validator import DigestValidator
 from ....domain.value_objects import DigestEnforcement, DigestPolicy, DigestUnknownPolicy
 from ....infrastructure.single_flight import SingleFlight
 from ....logging_config import get_logger
-from ....observability.tracing import extract_trace_context, get_tracer
+from ....observability.tracing import extract_trace_context, get_tracer, mark_span_error
 from ....metrics import (
     BATCH_CALLS_TOTAL,
     BATCH_CANCELLATIONS_TOTAL,
@@ -543,7 +543,7 @@ class BatchExecutor:
             span.set_attribute("mcp.server.id", call.mcp_server)
             span.set_attribute("gen_ai.tool.name", call.tool)
             span.set_attribute("batch.call.id", call.call_id)
-            return self._execute_call_inner(
+            result = self._execute_call_inner(
                 call,
                 cancel_event,
                 global_timeout,
@@ -551,6 +551,12 @@ class BatchExecutor:
                 ctx,
                 call_start,
             )
+            # The inner call handles failures as data (CallResult), so the span
+            # never sees an exception. Mark it ERROR explicitly so failing tool
+            # calls are filterable as error traces instead of looking successful.
+            if not result.success:
+                mark_span_error(span, result.error)
+            return result
 
     def _execute_call_inner(
         self,
