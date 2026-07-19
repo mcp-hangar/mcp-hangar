@@ -26,7 +26,7 @@ import httpx
 from . import metrics as prometheus_metrics
 from .domain.exceptions import ClientError
 from .logging_config import get_logger
-from .observability.tracing import inject_trace_context
+from .observability.tracing import inject_trace_context, upstream_call_span
 
 logger = get_logger(__name__)
 
@@ -324,18 +324,22 @@ class HttpClient:
         mcp_server_label = self._mcp_server_id or self._host
 
         try:
-            # Build per-request headers: W3C TraceContext + MCP session ID.
-            extra_headers: dict[str, str] = {}
-            inject_trace_context(extra_headers)
-            if self._mcp_session_id:
-                extra_headers["Mcp-Session-Id"] = self._mcp_session_id
+            # CLIENT span at the upstream boundary (OTel GenAI/MCP semconv),
+            # opened before injection so the traceparent written into the
+            # request headers parents the upstream's span to this one.
+            with upstream_call_span(method, params):
+                # Build per-request headers: W3C TraceContext + MCP session ID.
+                extra_headers: dict[str, str] = {}
+                inject_trace_context(extra_headers)
+                if self._mcp_session_id:
+                    extra_headers["Mcp-Session-Id"] = self._mcp_session_id
 
-            response = self._client.post(
-                url,
-                json=request_body,
-                headers=extra_headers if extra_headers else None,
-                timeout=timeout,
-            )
+                response = self._client.post(
+                    url,
+                    json=request_body,
+                    headers=extra_headers if extra_headers else None,
+                    timeout=timeout,
+                )
 
             duration_s = time.time() - start_time
             duration_ms = duration_s * 1000

@@ -228,3 +228,117 @@ class TestMeteredSpanExporter:
 
         assert wrapper.force_flush(1234) is True
         inner.force_flush.assert_called_once_with(1234)
+
+
+@pytest.mark.skipif(not _OTEL_SDK_AVAILABLE, reason="requires opentelemetry-sdk")
+class TestBuildSampler:
+    """_build_sampler honors OTEL_TRACES_SAMPLER / OTEL_TRACES_SAMPLER_ARG."""
+
+    @staticmethod
+    def _build(name=None, arg=None):
+        from mcp_hangar.observability import tracing
+
+        env = {}
+        if name is not None:
+            env["OTEL_TRACES_SAMPLER"] = name
+        if arg is not None:
+            env["OTEL_TRACES_SAMPLER_ARG"] = arg
+        with patch.dict("os.environ", env, clear=False):
+            # Ensure a clean read even if the vars are absent
+            for key in ("OTEL_TRACES_SAMPLER", "OTEL_TRACES_SAMPLER_ARG"):
+                if key not in env:
+                    import os
+
+                    os.environ.pop(key, None)
+            return tracing._build_sampler()
+
+    def test_default_is_parentbased_always_on(self):
+        from opentelemetry.sdk.trace.sampling import ParentBased
+
+        s = self._build()
+        assert isinstance(s, ParentBased)
+        assert "AlwaysOn" in s.get_description()
+
+    def test_always_off(self):
+        s = self._build("always_off")
+        assert s.get_description() == "AlwaysOffSampler"
+
+    def test_always_on(self):
+        s = self._build("always_on")
+        assert s.get_description() == "AlwaysOnSampler"
+
+    def test_traceidratio_uses_arg(self):
+        from opentelemetry.sdk.trace.sampling import TraceIdRatioBased
+
+        s = self._build("traceidratio", "0.25")
+        assert isinstance(s, TraceIdRatioBased)
+        assert abs(s.rate - 0.25) < 1e-9
+
+    def test_traceidratio_invalid_arg_falls_back_to_one(self):
+        from opentelemetry.sdk.trace.sampling import TraceIdRatioBased
+
+        s = self._build("traceidratio", "not-a-number")
+        assert isinstance(s, TraceIdRatioBased)
+        assert abs(s.rate - 1.0) < 1e-9
+
+    def test_parentbased_traceidratio(self):
+        from opentelemetry.sdk.trace.sampling import ParentBased
+
+        s = self._build("parentbased_traceidratio", "0.1")
+        assert isinstance(s, ParentBased)
+
+    def test_unknown_falls_back_to_parentbased_always_on(self):
+        from opentelemetry.sdk.trace.sampling import ParentBased
+
+        s = self._build("bogus-sampler")
+        assert isinstance(s, ParentBased)
+        assert "AlwaysOn" in s.get_description()
+
+
+@pytest.mark.skipif(not _OTEL_SDK_AVAILABLE, reason="requires opentelemetry-sdk")
+class TestUpstreamCallSpan:
+    """upstream_call_span emits a SpanKind.CLIENT span with GenAI/MCP semconv attrs."""
+
+    @staticmethod
+    def _exporter_and_provider():
+        from opentelemetry.sdk.trace import TracerProvider
+        from opentelemetry.sdk.trace.export import SimpleSpanProcessor
+        from opentelemetry.sdk.trace.export.in_memory_span_exporter import InMemorySpanExporter
+
+        exporter = InMemorySpanExporter()
+        provider = TracerProvider()
+        provider.add_span_processor(SimpleSpanProcessor(exporter))
+        return exporter, provider
+
+    def _run(self, method, params):
+        from mcp_hangar.observability import tracing
+
+        # Patch get_tracer (not the global provider — OTel only lets you set
+        # that once per process, so per-test exporters wouldn't wire up).
+        exporter, provider = self._exporter_and_provider()
+        test_tracer = provider.get_tracer("test")
+        try:
+            with patch.object(tracing, "get_tracer", lambda name=None: test_tracer):
+                with tracing.upstream_call_span(method, params):
+                    pass
+            return exporter.get_finished_spans()
+        finally:
+            provider.shutdown()
+
+    def test_tools_call_span_is_client_kind_with_tool_attrs(self):
+        from opentelemetry.trace import SpanKind
+
+        spans = self._run("tools/call", {"name": "add", "arguments": {"a": 1}})
+        assert len(spans) == 1
+        span = spans[0]
+        assert span.kind == SpanKind.CLIENT
+        assert span.name == "execute_tool add"
+        assert span.attributes.get("gen_ai.tool.name") == "add"
+        assert span.attributes.get("gen_ai.operation.name") == "execute_tool"
+        assert span.attributes.get("mcp.method.name") == "tools/call"
+
+    def test_non_tool_method_span_named_by_method(self):
+        spans = self._run("tools/list", {})
+        assert len(spans) == 1
+        assert spans[0].name == "tools/list"
+        assert spans[0].attributes.get("mcp.method.name") == "tools/list"

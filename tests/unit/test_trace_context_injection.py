@@ -1,7 +1,5 @@
 """Tests for outbound W3C TraceContext injection in HTTP provider calls."""
 
-import pathlib
-
 import pytest
 from unittest.mock import MagicMock, patch
 
@@ -92,13 +90,81 @@ class TestHttpTraceContextInjection:
             otel_trace.set_tracer_provider(old_provider)
 
 
-class TestStdioNoTraceInjection:
-    """StdioClient does NOT inject trace context (stdio has no header mechanism)."""
+class TestStdioTraceContextInjection:
+    """StdioClient propagates W3C TraceContext into the MCP request `_meta` field.
 
-    def test_stdio_client_has_no_inject_trace_context_call(self) -> None:
-        """Confirm stdio_client.py does not import inject_trace_context."""
-        src = pathlib.Path("src/mcp_hangar/stdio_client.py").read_text()
-        assert "inject_trace_context" not in src, (
-            "StdioClient must not inject trace context (stdio has no header mechanism). "
-            "This is expected and correct per deployment focus: K8s/Docker first, stdio maintenance-only."
+    stdio has no headers, but MCP's `_meta` is the metadata channel — mirroring
+    the HTTP transport keeps distributed tracing intact across stdio upstreams.
+    """
+
+    @staticmethod
+    def _mock_client():
+        import subprocess
+        from mcp_hangar.stdio_client import StdioClient
+
+        mock_popen = MagicMock(spec=subprocess.Popen)
+        mock_popen.pid = 4242
+        mock_popen.stdin = MagicMock()
+        mock_popen.stdout = MagicMock()
+        mock_popen.stderr = MagicMock()
+        mock_popen.poll.return_value = None
+        mock_popen.stdout.readline.return_value = ""
+        with patch("mcp_hangar.stdio_client.threading.Thread"):
+            return StdioClient(mock_popen), mock_popen
+
+    def test_stdio_request_meta_contains_traceparent_when_trace_active(self) -> None:
+        """The request written to stdin carries `_meta.traceparent` under an active trace."""
+        import json
+        from queue import Queue
+
+        pytest.importorskip("opentelemetry.sdk.trace")
+        from opentelemetry.sdk.trace import TracerProvider
+        from opentelemetry import trace as otel_trace
+
+        client, mock_popen = self._mock_client()
+
+        written: list[str] = []
+        mock_popen.stdin.write.side_effect = lambda data: written.append(data)
+
+        provider = TracerProvider()
+        old_provider = otel_trace.get_tracer_provider()
+        otel_trace.set_tracer_provider(provider)
+        try:
+            tracer = otel_trace.get_tracer("test")
+            with patch("mcp_hangar.observability.tracing._initialized", True):
+                with tracer.start_as_current_span("parent"):
+                    with patch.object(Queue, "get", return_value={"jsonrpc": "2.0", "result": {}}):
+                        client.call("tools/call", {"name": "t", "arguments": {}})
+        finally:
+            otel_trace.set_tracer_provider(old_provider)
+
+        assert written, "expected a request to be written to stdin"
+        sent = json.loads(written[0])
+        assert "traceparent" in sent["params"].get("_meta", {}), (
+            f"expected traceparent in _meta, got params={sent['params']}"
         )
+
+    def test_stdio_injection_does_not_mutate_caller_params(self) -> None:
+        """Injecting `_meta` must not mutate the caller's params dict."""
+        from queue import Queue
+
+        pytest.importorskip("opentelemetry.sdk.trace")
+        from opentelemetry.sdk.trace import TracerProvider
+        from opentelemetry import trace as otel_trace
+
+        client, _ = self._mock_client()
+        caller_params: dict = {"name": "t", "arguments": {}}
+
+        provider = TracerProvider()
+        old_provider = otel_trace.get_tracer_provider()
+        otel_trace.set_tracer_provider(provider)
+        try:
+            tracer = otel_trace.get_tracer("test")
+            with patch("mcp_hangar.observability.tracing._initialized", True):
+                with tracer.start_as_current_span("parent"):
+                    with patch.object(Queue, "get", return_value={"jsonrpc": "2.0", "result": {}}):
+                        client.call("tools/call", caller_params)
+        finally:
+            otel_trace.set_tracer_provider(old_provider)
+
+        assert "_meta" not in caller_params, "caller's params dict must not be mutated"
