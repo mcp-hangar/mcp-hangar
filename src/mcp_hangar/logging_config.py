@@ -31,6 +31,28 @@ def _add_service_context(_logger: Any, _method_name: str, event_dict: MutableMap
     return event_dict
 
 
+def _add_trace_context(_logger: Any, _method_name: str, event_dict: MutableMapping[str, Any]) -> Mapping[str, Any]:
+    """Correlate logs with traces: add trace_id/span_id when inside an OTel span.
+
+    A no-op when tracing is unavailable, uninitialized, or there is no active
+    span. Imported lazily to avoid a circular import with the tracing module
+    (which imports this one for its logger). Never lets a tracing error break a
+    log call.
+    """
+    try:
+        from .observability.tracing import get_current_span_id, get_current_trace_id
+
+        trace_id = get_current_trace_id()
+        if trace_id:
+            event_dict["trace_id"] = trace_id
+            span_id = get_current_span_id()
+            if span_id:
+                event_dict["span_id"] = span_id
+    except Exception:  # noqa: BLE001 -- fault-barrier: logging must not fail on tracing
+        pass
+    return event_dict
+
+
 def _sanitize_sensitive_data(
     _logger: Any, _method_name: str, event_dict: MutableMapping[str, Any]
 ) -> Mapping[str, Any]:
@@ -116,6 +138,7 @@ def setup_logging(
         structlog.processors.TimeStamper(fmt="iso"),
         structlog.processors.StackInfoRenderer(),
         _add_service_context,
+        _add_trace_context,
         _sanitize_sensitive_data,
         _redact_secret_values,
         _drop_color_message_key,
