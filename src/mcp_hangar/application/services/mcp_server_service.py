@@ -163,7 +163,7 @@ class McpServerService:
         tracer = get_tracer(__name__)
         with tracer.start_as_current_span("mcp_server.invoke_tool") as span:
             span.set_attribute("mcp.server.id", mcp_server_id)
-            span.set_attribute("mcp.tool.name", tool_name)
+            span.set_attribute("gen_ai.tool.name", tool_name)
             span.set_attribute("mcp_server.timeout", timeout)
             result = mcp_server.invoke_tool(tool_name, arguments, timeout)
             span.set_attribute("mcp.tool.status", "success")

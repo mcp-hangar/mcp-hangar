@@ -102,7 +102,7 @@ class ApprovalGateService:
         tracer = get_tracer(__name__)
         with tracer.start_as_current_span("approval_gate.flow") as gate_span:
             gate_span.set_attribute("mcp.server.id", resolved_provider_id)
-            gate_span.set_attribute("mcp.tool.name", tool_name)
+            gate_span.set_attribute("gen_ai.tool.name", tool_name)
             gate_span.set_attribute("approval.channel", policy.approval_channel)
             gate_span.set_attribute("approval.timeout_seconds", policy.approval_timeout_seconds)
 
