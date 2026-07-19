@@ -262,6 +262,43 @@ class ToolAccessDeniedError(ToolError):
         self.tool_name = tool_name
 
 
+class EgressPolicyDeniedError(ToolError):
+    """Raised when an MCPEgressPolicy denies a tool call.
+
+    Either the tool name matched a deny rule (or fell to a Deny default), or the
+    arguments tripped a deterministic constraint (secret pattern / size limit).
+    The caller-facing message is generic; the specific reason is carried in
+    ``details`` for the audit trail.
+    """
+
+    def __init__(self, mcp_server_id: str, tool_name: str, reason: str):
+        super().__init__(
+            message="Tool call denied by egress policy",
+            mcp_server_id=mcp_server_id,
+            operation="invoke",
+            details={"tool_name": tool_name, "reason": reason},
+        )
+        self.tool_name = tool_name
+        self.reason = reason
+
+
+class EgressPolicyApprovalRequiredError(ToolError):
+    """Raised when an MCPEgressPolicy routes a tool call to approval.
+
+    The call is blocked until it is approved out of band. (Wiring this into the
+    interactive approval queue is a follow-up; today it fails closed.)
+    """
+
+    def __init__(self, mcp_server_id: str, tool_name: str):
+        super().__init__(
+            message="Tool call requires approval",
+            mcp_server_id=mcp_server_id,
+            operation="invoke",
+            details={"tool_name": tool_name, "reason": "require_approval"},
+        )
+        self.tool_name = tool_name
+
+
 # --- Client/Communication Exceptions ---
 
 
