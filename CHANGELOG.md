@@ -24,6 +24,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Security
 
+* **core:** L7 argument scanning now fails closed on un-serializable tool-call arguments (e.g. a circular reference) instead of raising — an unscannable payload is reported as a violation rather than crashing the evaluation — and skips serialization entirely when no argument rules are configured. Found by adversarial testing ([mcp-hangar-operator#53](https://github.com/mcp-hangar/mcp-hangar-operator/issues/53))
 * **security:** require `mcp>=1.28.1` to pull in the fix for CVE-2026-59950 (MCP Python SDK WebSocket server transport missing Host/Origin validation, HIGH). The published constraint was `mcp>=1.0.0`, so installs could still resolve a vulnerable SDK even though the dev lock had moved.
 * **core:** validate WebSocket handshake `Origin`/`Host` at the Hangar ASGI edge before forwarding non-`/api/` connections to the SDK app (DNS-rebinding / cross-origin defense-in-depth, the CVE-2026-59950 class at our own trust boundary). Loopback is trusted; non-loopback is fail-closed — a present `Origin` must be allow-listed (`MCP_CORS_ORIGINS`), a missing one is allowed (non-browser client, auth still applies), and the `Host` must be in `MCP_TRUSTED_HOSTS` ([#498](https://github.com/mcp-hangar/mcp-hangar/issues/498))
 

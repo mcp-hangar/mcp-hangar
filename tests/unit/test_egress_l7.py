@@ -92,6 +92,20 @@ def test_scan_arguments_nested_dict() -> None:
     assert scan_arguments({"outer": {"inner": AWS_KEY}}, rules)
 
 
+def test_scan_arguments_unserializable_fails_closed() -> None:
+    circular: dict[str, object] = {}
+    circular["self"] = circular
+    violations = scan_arguments(circular, ArgumentRules(max_payload_bytes=10))
+    assert violations and "serialized" in violations[0]
+
+
+def test_scan_arguments_no_rules_skips_serialization() -> None:
+    # An unserializable payload with no rules must not crash -- and must be clean.
+    circular: dict[str, object] = {}
+    circular["self"] = circular
+    assert scan_arguments(circular, ArgumentRules()) == []
+
+
 # --- full evaluation -------------------------------------------------------
 
 

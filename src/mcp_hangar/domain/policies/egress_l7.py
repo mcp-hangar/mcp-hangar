@@ -183,16 +183,21 @@ def evaluate_tool(tool_name: str, rules: ToolRules, default_action: ToolAction) 
     return default_action, f"tool {tool_name!r} matched no rule; applying default action"
 
 
-def _serialize_arguments(arguments: Any) -> str:
+def _serialize_arguments(arguments: Any) -> str | None:
     """Canonicalize tool-call arguments to a string for size and secret scanning.
 
     A string is used as-is; anything else is JSON-serialized deterministically
-    (sorted keys), with non-JSON values coerced via ``str`` so scanning never
-    fails on an exotic payload.
+    (sorted keys), with non-JSON values coerced via ``str``. Returns None if the
+    payload cannot be serialized at all (e.g. a circular reference) so the caller
+    can fail closed rather than crash -- tool arguments arrive as decoded JSON in
+    practice, so this only guards against pathological internal callers.
     """
     if isinstance(arguments, str):
         return arguments
-    return json.dumps(arguments, sort_keys=True, ensure_ascii=False, separators=(",", ":"), default=str)
+    try:
+        return json.dumps(arguments, sort_keys=True, ensure_ascii=False, separators=(",", ":"), default=str)
+    except (TypeError, ValueError):
+        return None
 
 
 def scan_arguments(arguments: Any, rules: ArgumentRules) -> list[str]:
@@ -200,8 +205,16 @@ def scan_arguments(arguments: Any, rules: ArgumentRules) -> list[str]:
 
     Empty list means the arguments are clean. Unknown secret-pattern group names
     are ignored (they should be caught by CRD validation, not fail closed here).
+    Arguments that cannot be serialized for inspection fail closed (a violation).
     """
+    # Nothing to check -- avoid serializing (and any cost/crash) when unconstrained.
+    if not rules.secret_patterns and rules.max_payload_bytes is None:
+        return []
+
     payload = _serialize_arguments(arguments)
+    if payload is None:
+        return ["arguments could not be serialized for policy inspection"]
+
     violations: list[str] = []
 
     if rules.max_payload_bytes is not None:
