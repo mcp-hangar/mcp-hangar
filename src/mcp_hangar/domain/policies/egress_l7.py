@@ -114,6 +114,53 @@ class L7Policy:
     arguments: ArgumentRules = field(default_factory=ArgumentRules)
     default_action: ToolAction = ToolAction.DENY
 
+    @classmethod
+    def from_dict(cls, data: dict[str, Any]) -> L7Policy:
+        """Parse the wire form the operator compiles from an MCPEgressPolicy.
+
+        Wire shape (camelCase, matching the CRD)::
+
+            {
+              "tools": {"allow": [...], "deny": [...], "requireApproval": [...]},
+              "arguments": {"secretPatterns": [...], "maxPayloadBytes": 262144},
+              "defaultAction": "Deny"
+            }
+
+        Missing sections default to empty; ``defaultAction`` defaults to Deny.
+        Raises ValueError on a malformed payload.
+        """
+        if not isinstance(data, dict):
+            raise ValueError("L7 policy must be a JSON object")
+
+        default_raw = str(data.get("defaultAction", "Deny")).lower()
+        if default_raw not in ("allow", "deny"):
+            raise ValueError(f"invalid defaultAction {data.get('defaultAction')!r} (want Allow|Deny)")
+
+        tools_d = data.get("tools") or {}
+        args_d = data.get("arguments") or {}
+        if not isinstance(tools_d, dict) or not isinstance(args_d, dict):
+            raise ValueError("L7 policy 'tools' and 'arguments' must be objects")
+
+        def _globs(key: str) -> tuple[str, ...]:
+            raw = tools_d.get(key) or []
+            if not isinstance(raw, list) or not all(isinstance(g, str) for g in raw):
+                raise ValueError(f"tools.{key} must be a list of strings")
+            return tuple(raw)
+
+        secret_patterns = args_d.get("secretPatterns") or []
+        if not isinstance(secret_patterns, list) or not all(isinstance(p, str) for p in secret_patterns):
+            raise ValueError("arguments.secretPatterns must be a list of strings")
+
+        max_bytes = args_d.get("maxPayloadBytes")
+        if max_bytes is not None and (not isinstance(max_bytes, int) or isinstance(max_bytes, bool) or max_bytes < 0):
+            raise ValueError("arguments.maxPayloadBytes must be a non-negative integer")
+
+        return cls(
+            tools=ToolRules(allow=_globs("allow"), deny=_globs("deny"), require_approval=_globs("requireApproval")),
+            arguments=ArgumentRules(secret_patterns=tuple(secret_patterns), max_payload_bytes=max_bytes),
+            default_action=ToolAction(default_raw),
+        )
+
 
 @dataclass(frozen=True)
 class Decision:

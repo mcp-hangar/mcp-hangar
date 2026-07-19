@@ -2,6 +2,8 @@
 
 from __future__ import annotations
 
+import pytest
+
 from mcp_hangar.domain.policies.egress_l7 import (
     ArgumentRules,
     evaluate,
@@ -132,3 +134,54 @@ def test_evaluate_denied_tool_short_circuits() -> None:
 def test_evaluate_default_deny() -> None:
     policy = L7Policy(tools=ToolRules(allow=("get_*",)), default_action=ToolAction.DENY)
     assert evaluate("write_file", {}, policy).action is ToolAction.DENY
+
+
+# --- from_dict (wire form) -------------------------------------------------
+
+
+def test_from_dict_full() -> None:
+    p = L7Policy.from_dict(
+        {
+            "tools": {"allow": ["get_*"], "deny": ["delete_*"], "requireApproval": ["create_*"]},
+            "arguments": {"secretPatterns": ["aws-keys", "jwt"], "maxPayloadBytes": 1024},
+            "defaultAction": "Deny",
+        }
+    )
+    assert p.tools.allow == ("get_*",)
+    assert p.tools.deny == ("delete_*",)
+    assert p.tools.require_approval == ("create_*",)
+    assert p.arguments.secret_patterns == ("aws-keys", "jwt")
+    assert p.arguments.max_payload_bytes == 1024
+    assert p.default_action is ToolAction.DENY
+
+
+def test_from_dict_defaults_and_case() -> None:
+    p = L7Policy.from_dict({"defaultAction": "allow"})
+    assert p.tools.allow == () and p.tools.deny == ()
+    assert p.arguments.secret_patterns == () and p.arguments.max_payload_bytes is None
+    assert p.default_action is ToolAction.ALLOW
+    # defaultAction defaults to Deny when omitted.
+    assert L7Policy.from_dict({}).default_action is ToolAction.DENY
+
+
+def test_from_dict_roundtrips_through_evaluate() -> None:
+    p = L7Policy.from_dict({"tools": {"deny": ["delete_*"]}, "defaultAction": "Allow"})
+    assert evaluate("delete_repo", {}, p).action is ToolAction.DENY
+    assert evaluate("get_user", {}, p).action is ToolAction.ALLOW
+
+
+@pytest.mark.parametrize(
+    "bad",
+    [
+        {"defaultAction": "maybe"},
+        {"tools": {"allow": "get_*"}},  # not a list
+        {"tools": {"deny": [1, 2]}},  # not strings
+        {"arguments": {"maxPayloadBytes": -5}},
+        {"arguments": {"maxPayloadBytes": "big"}},
+        {"arguments": {"secretPatterns": "aws-keys"}},
+        "not-an-object",
+    ],
+)
+def test_from_dict_rejects_malformed(bad: object) -> None:
+    with pytest.raises((ValueError, TypeError)):
+        L7Policy.from_dict(bad)  # type: ignore[arg-type]

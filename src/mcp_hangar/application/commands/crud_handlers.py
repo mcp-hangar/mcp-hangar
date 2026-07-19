@@ -26,6 +26,7 @@ from .crud_commands import (
     DeleteGroupCommand,
     DeleteMcpServerCommand,
     RemoveGroupMemberCommand,
+    SetL7PolicyCommand,
     UpdateGroupCommand,
     UpdateMcpServerCommand,
 )
@@ -172,6 +173,38 @@ class UpdateMcpServerHandler(CommandHandler):
             source=command.source,
         )
         return {"mcp_server_id": command.mcp_server_id, "updated": True}
+
+
+class SetL7PolicyHandler(CommandHandler):
+    """Handler for SetL7PolicyCommand.
+
+    Attaches, replaces, or clears the L7 egress policy on an existing McpServer
+    via McpServer.set_l7_policy(). Raises McpServerNotFoundError if not found.
+    """
+
+    def __init__(self, repository: IMcpServerRepository, event_bus: Any) -> None:
+        self._repository = repository
+        self._event_bus = event_bus
+
+    def handle(self, command: SetL7PolicyCommand) -> dict[str, Any]:
+        """Set (or clear) the mcp_server's L7 policy.
+
+        Raises:
+            McpServerNotFoundError: If mcp_server does not exist.
+        """
+        mcp_server = self._repository.get(command.mcp_server_id)
+        if mcp_server is None:
+            raise McpServerNotFoundError(command.mcp_server_id)
+
+        cast(McpServer, mcp_server).set_l7_policy(command.policy)
+
+        logger.info(
+            "mcp_server_l7_policy_set",
+            mcp_server_id=command.mcp_server_id,
+            cleared=command.policy is None,
+            source=command.source,
+        )
+        return {"mcp_server_id": command.mcp_server_id, "l7_policy_set": command.policy is not None}
 
 
 class DeleteMcpServerHandler(CommandHandler):
@@ -533,6 +566,7 @@ def register_crud_handlers(
     # McpServer handlers
     command_bus.register(CreateMcpServerCommand, CreateMcpServerHandler(repository=repository, event_bus=event_bus))
     command_bus.register(UpdateMcpServerCommand, UpdateMcpServerHandler(repository=repository, event_bus=event_bus))
+    command_bus.register(SetL7PolicyCommand, SetL7PolicyHandler(repository=repository, event_bus=event_bus))
     command_bus.register(DeleteMcpServerCommand, DeleteMcpServerHandler(repository=repository, event_bus=event_bus))
 
     # Group handlers (require groups dict)
