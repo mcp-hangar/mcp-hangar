@@ -69,8 +69,8 @@ class LangfuseConfig:
     host: str = "https://cloud.langfuse.com"
     flush_interval_s: float = 1.0
     sample_rate: float = 1.0
-    scrub_inputs: bool = False
-    scrub_outputs: bool = False
+    scrub_inputs: bool = True
+    scrub_outputs: bool = True
 
     def validate(self) -> list[str]:
         """Validate configuration, return list of errors."""
