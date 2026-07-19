@@ -66,11 +66,6 @@ containers = [
 ]
 [project.scripts]
 mcp-hangar = "mcp_hangar.server.cli:cli_main"
-[project.entry-points."mcp_hangar.extensions"]
-# Extension distributions can register a bootstrap loader callable with:
-#   load_enterprise_modules(config, event_bus, event_publisher) -> EnterpriseComponents
-# Example registration from an extension package:
-# mcp_hangar.extensions = "mcp_hangar.auth.bootstrap:load_enterprise_modules"
 [project.urls]
 Homepage = "https://mcp-hangar.io"
 Documentation = "https://mcp-hangar.io/getting-started/quickstart/"
