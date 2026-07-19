@@ -11,6 +11,7 @@ import uuid
 
 from .domain.exceptions import ClientError
 from .logging_config import get_logger
+from .observability.tracing import inject_trace_context, upstream_call_span
 
 if TYPE_CHECKING:
     from .infrastructure.lock_hierarchy import TrackedLock
@@ -189,38 +190,54 @@ class StdioClient:
         with self.pending_lock:
             self.pending[request_id] = pending
 
-        request = {
-            "jsonrpc": "2.0",
-            "id": request_id,
-            "method": method,
-            "params": params,
-        }
+        # CLIENT span at the upstream boundary (OTel GenAI/MCP semconv). Opened
+        # before injection so the trace context written into `_meta` parents the
+        # upstream's span to this one.
+        with upstream_call_span(method, params):
+            # Propagate the active trace context to the upstream server over
+            # stdio. W3C traceparent/tracestate go in the MCP `_meta` field
+            # (mirrors the HTTP transport, which injects into request headers).
+            # Servers that don't understand _meta ignore it. Copy params so the
+            # caller's dict is never mutated.
+            carrier: dict[str, str] = {}
+            inject_trace_context(carrier)
+            if carrier:
+                meta = dict(params.get("_meta") or {})
+                meta.update(carrier)
+                params = {**params, "_meta": meta}
 
-        try:
-            request_str = json.dumps(request) + "\n"
-            logger.info(
-                "stdio_client_sending_request",
-                method=method,
-                pid=self.process.pid,
-                alive=self.process.poll() is None,
-            )
-            assert self.process.stdin is not None
-            self.process.stdin.write(request_str)
-            self.process.stdin.flush()
-            logger.debug("stdio_client_request_sent")
-        except Exception as e:  # noqa: BLE001 -- infra-boundary: write failure wrapped as ClientError
-            logger.error("stdio_client_write_failed", error=str(e))
-            with self.pending_lock:
-                self.pending.pop(request_id, None)
-            raise ClientError(f"write_failed: {e}") from e
+            request = {
+                "jsonrpc": "2.0",
+                "id": request_id,
+                "method": method,
+                "params": params,
+            }
 
-        try:
-            response = result_queue.get(timeout=timeout)
-            return response
-        except Empty:
-            with self.pending_lock:
-                self.pending.pop(request_id, None)
-            raise TimeoutError(f"timeout: {method} after {timeout}s") from None
+            try:
+                request_str = json.dumps(request) + "\n"
+                logger.info(
+                    "stdio_client_sending_request",
+                    method=method,
+                    pid=self.process.pid,
+                    alive=self.process.poll() is None,
+                )
+                assert self.process.stdin is not None
+                self.process.stdin.write(request_str)
+                self.process.stdin.flush()
+                logger.debug("stdio_client_request_sent")
+            except Exception as e:  # noqa: BLE001 -- infra-boundary: write failure wrapped as ClientError
+                logger.error("stdio_client_write_failed", error=str(e))
+                with self.pending_lock:
+                    self.pending.pop(request_id, None)
+                raise ClientError(f"write_failed: {e}") from e
+
+            try:
+                response = result_queue.get(timeout=timeout)
+                return response
+            except Empty:
+                with self.pending_lock:
+                    self.pending.pop(request_id, None)
+                raise TimeoutError(f"timeout: {method} after {timeout}s") from None
 
     def is_alive(self) -> bool:
         """Check if the underlying process is still running."""
