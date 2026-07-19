@@ -740,6 +740,19 @@ DISCOVERY_LAST_CYCLE_TIMESTAMP = Gauge(
     labels=["source_type"],
 )
 
+DISCOVERY_VALIDATION_FAILURES_TOTAL = Counter(
+    name="mcp_hangar_discovery_validation_failures",
+    description="Total discovery validation failures",
+    labels=["source_type", "validation_type"],
+)
+
+DISCOVERY_VALIDATION_DURATION_SECONDS = Histogram(
+    name="mcp_hangar_discovery_validation_duration_seconds",
+    description="Duration of discovery validation in seconds",
+    labels=["source_type"],
+    buckets=(0.01, 0.025, 0.05, 0.1, 0.25, 0.5, 1.0, 2.5, 5.0, 10.0),
+)
+
 # -----------------------------------------------------------------------------
 # HTTP Transport Metrics (for remote mcp_servers)
 # -----------------------------------------------------------------------------
@@ -1027,6 +1040,8 @@ def _register_all_metrics():
         DISCOVERY_QUARANTINE_TOTAL,
         DISCOVERY_ERRORS_TOTAL,
         DISCOVERY_LAST_CYCLE_TIMESTAMP,
+        DISCOVERY_VALIDATION_FAILURES_TOTAL,
+        DISCOVERY_VALIDATION_DURATION_SECONDS,
         # HTTP transport metrics
         HTTP_REQUESTS_TOTAL,
         HTTP_REQUEST_DURATION_SECONDS,
@@ -1398,6 +1413,26 @@ def record_discovery_error(source_type: str, error_type: str):
         error_type: Type of error
     """
     DISCOVERY_ERRORS_TOTAL.inc(source_type=source_type, error_type=error_type)
+
+
+def record_discovery_validation_failure(source_type: str, validation_type: str):
+    """Record a discovery validation failure.
+
+    Args:
+        source_type: Type of source
+        validation_type: The validation result/type that failed
+    """
+    DISCOVERY_VALIDATION_FAILURES_TOTAL.inc(source_type=source_type, validation_type=validation_type)
+
+
+def record_discovery_validation_duration(source_type: str, duration: float):
+    """Record the duration of a discovery validation.
+
+    Args:
+        source_type: Type of source
+        duration: Validation duration in seconds
+    """
+    DISCOVERY_VALIDATION_DURATION_SECONDS.observe(duration, source_type=source_type)
 
 
 # =============================================================================
