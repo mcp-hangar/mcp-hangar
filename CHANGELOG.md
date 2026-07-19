@@ -5,6 +5,43 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [1.6.0](https://github.com/mcp-hangar/mcp-hangar/compare/v1.5.1...v1.6.0) (2026-07-19)
+
+
+### Added
+
+* **core:** add L7 egress policy engine ([#526](https://github.com/mcp-hangar/mcp-hangar/issues/526)) ([575602d](https://github.com/mcp-hangar/mcp-hangar/commit/575602d1fc28b8f784169157470e2d6e3ddd2ec7))
+* **core:** enforce L7 egress policy at the tool-invocation chokepoint ([#527](https://github.com/mcp-hangar/mcp-hangar/issues/527)) ([2d22ad9](https://github.com/mcp-hangar/mcp-hangar/commit/2d22ad99b1ad5458ae61d9e715941540916abb9d))
+* **core:** receive compiled L7 egress policy over the REST API ([#528](https://github.com/mcp-hangar/mcp-hangar/issues/528)) ([0825a47](https://github.com/mcp-hangar/mcp-hangar/commit/0825a47bbf6888b4f88e126c942a824b060649a8))
+* **observability:** add telemetry-health alerts (OTLP export + discovery validation) ([#541](https://github.com/mcp-hangar/mcp-hangar/issues/541)) ([393f492](https://github.com/mcp-hangar/mcp-hangar/commit/393f492229f0a02762153a0b6b3a1482f2bdc138))
+* **observability:** trace the upstream call boundary (client spans, stdio propagation, sampler) ([#537](https://github.com/mcp-hangar/mcp-hangar/issues/537)) ([63bad07](https://github.com/mcp-hangar/mcp-hangar/commit/63bad0737305de542881974ca8cd4bd4682d177f))
+* **observability:** wire transport message metrics; drop never-emitted pool/SSE gauges ([#540](https://github.com/mcp-hangar/mcp-hangar/issues/540)) ([9d3ed15](https://github.com/mcp-hangar/mcp-hangar/commit/9d3ed15764d0d013b850a59f8e055b426b0b4d0d))
+
+
+### Fixed
+
+* **core:** consolidate discovery metrics onto the scraped registry ([#534](https://github.com/mcp-hangar/mcp-hangar/issues/534)) ([d699ff0](https://github.com/mcp-hangar/mcp-hangar/commit/d699ff027d6259dd3751ecfb9f6434b1b3ffdb53))
+* **core:** emit the cost-attribution metrics ([#535](https://github.com/mcp-hangar/mcp-hangar/issues/535)) ([275de80](https://github.com/mcp-hangar/mcp-hangar/commit/275de802cf6757b61f580d9252420ff479a6c30d))
+* **core:** L7 argument scan fails closed on unserializable arguments ([#529](https://github.com/mcp-hangar/mcp-hangar/issues/529)) ([a14bb2e](https://github.com/mcp-hangar/mcp-hangar/commit/a14bb2ebc6580ab80098ef07fb1bd4242ac42b3a))
+* **core:** redact secret values in logs and the log buffer ([#530](https://github.com/mcp-hangar/mcp-hangar/issues/530)) ([1374da8](https://github.com/mcp-hangar/mcp-hangar/commit/1374da8730e3c5af84bf32e0a9c128d863883170))
+* **core:** scrub Langfuse tool inputs/outputs by default ([#531](https://github.com/mcp-hangar/mcp-hangar/issues/531)) ([98a2cb9](https://github.com/mcp-hangar/mcp-hangar/commit/98a2cb907692f77547c4a2ab639bc2e9dbf190c5))
+* **core:** wire connections_active; delete the redundant connection metrics ([#536](https://github.com/mcp-hangar/mcp-hangar/issues/536)) ([81accc1](https://github.com/mcp-hangar/mcp-hangar/commit/81accc19a0680b2a1d5463b68420f77f5be490c5))
+* **metrics:** stop poisoning the latency histogram; drop stream_id label ([#532](https://github.com/mcp-hangar/mcp-hangar/issues/532)) ([55abc52](https://github.com/mcp-hangar/mcp-hangar/commit/55abc5261627ad6101fddc229c271fea87fc1de0))
+* **observability:** correlate logs with traces (trace_id/span_id) ([#533](https://github.com/mcp-hangar/mcp-hangar/issues/533)) ([29ea16b](https://github.com/mcp-hangar/mcp-hangar/commit/29ea16b09cf3fe751b0b296b1f0e608034e27c42))
+* **observability:** mark a failed tool call's span as ERROR ([#544](https://github.com/mcp-hangar/mcp-hangar/issues/544)) ([43848e9](https://github.com/mcp-hangar/mcp-hangar/commit/43848e9349968219003a6975ea4056dd9098b5f7))
+* **observability:** stop logging expected stdio shutdowns as errors ([#542](https://github.com/mcp-hangar/mcp-hangar/issues/542)) ([11ef2c7](https://github.com/mcp-hangar/mcp-hangar/commit/11ef2c7e5049c4951c68e16ca44db2419eb58a78))
+
+
+### Changed
+
+* **core:** collapse the vestigial enterprise plugin boundary ([#538](https://github.com/mcp-hangar/mcp-hangar/issues/538)) ([1813dcd](https://github.com/mcp-hangar/mcp-hangar/commit/1813dcdaecf29d4469ee0adb96d5555553a81ecc))
+* **observability:** align tool-invocation spans to OTel GenAI/MCP semconv ([#539](https://github.com/mcp-hangar/mcp-hangar/issues/539)) ([d705c8f](https://github.com/mcp-hangar/mcp-hangar/commit/d705c8f20763137fda61bb7b537330c7d3357592))
+
+
+### Security
+
+* **core:** validate WebSocket handshake Origin/Host at the edge ([#524](https://github.com/mcp-hangar/mcp-hangar/issues/524)) ([403ec6c](https://github.com/mcp-hangar/mcp-hangar/commit/403ec6c700173faed3cf3da324993b0fc92d267c))
+
 ## [1.5.1](https://github.com/mcp-hangar/mcp-hangar/compare/v1.5.0...v1.5.1) (2026-07-16)
 
 
