@@ -217,6 +217,29 @@ groups:
           summary: "MCP Hangar CPU usage > 80%"
           description: "CPU usage: {{ $value | humanizePercentage }}"
 
+      # --- Observability / Telemetry Health ---
+      # These guard the telemetry pipeline itself: a silent OTLP export failure
+      # means traces are being dropped (you go blind without any app-level error).
+      - alert: MCPHangarTelemetryExportFailing
+        expr: |
+          rate(mcp_hangar_otlp_export_failures_total[5m]) > 0
+        for: 10m
+        labels:
+          severity: warning
+        annotations:
+          summary: "OTLP span export is failing"
+          description: "Hangar is dropping spans ({{ $value | humanize }}/s export failures) -- the OTLP collector is likely unreachable and distributed traces are being lost."
+
+      - alert: MCPHangarDiscoveryValidationFailing
+        expr: |
+          rate(mcp_hangar_discovery_validation_failures_total[15m]) > 0
+        for: 15m
+        labels:
+          severity: warning
+        annotations:
+          summary: "Discovery is rejecting servers on validation"
+          description: "Discovered MCP servers are failing validation ({{ $value | humanize }}/s) and are not being registered -- check the discovery source and server specs."
+
   # ============================================================================
   # INFO ALERTS - For dashboards and tracking
   # ============================================================================
