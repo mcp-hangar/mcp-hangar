@@ -675,16 +675,22 @@ class McpServer(AggregateRoot):
         if stderr_pipe is None:
             return
 
+        from ..security.redactor import get_default_redactor
         from ..value_objects.log import LogLine
 
         mcp_server_id = self.mcp_server_id
         # self._log_buffer is guaranteed non-None here: _create_client guards with `if self._log_buffer is not None`
         log_buffer: IMcpServerLogBuffer = self._log_buffer  # type: ignore[assignment]
+        redactor = get_default_redactor()
 
         def _reader() -> None:
             try:
                 for raw_line in stderr_pipe:
-                    content = raw_line.rstrip("\n")
+                    # Redact at the source: MCP-server stderr routinely contains
+                    # tokens/keys/connection strings, and this content is served
+                    # verbatim by the /logs API. Scrub before it ever enters the
+                    # buffer so every downstream consumer is safe.
+                    content = redactor.redact(raw_line.rstrip("\n"))
                     log_buffer.append(
                         LogLine(
                             mcp_server_id=mcp_server_id,
