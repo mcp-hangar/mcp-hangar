@@ -775,24 +775,6 @@ HTTP_RETRIES_TOTAL = Counter(
     labels=["mcp_server", "retry_reason"],  # retry_reason: 502, 503, 504, connection_error
 )
 
-HTTP_CONNECTION_POOL_SIZE = Gauge(
-    name="mcp_hangar_http_connection_pool_size",
-    description="Current number of connections in HTTP connection pool",
-    labels=["mcp_server"],
-)
-
-HTTP_SSE_STREAMS_ACTIVE = Gauge(
-    name="mcp_hangar_http_sse_streams_active",
-    description="Number of active SSE streams to remote mcp_servers",
-    labels=["mcp_server"],
-)
-
-HTTP_SSE_EVENTS_TOTAL = Counter(
-    name="mcp_hangar_http_sse_events",
-    description="Total number of SSE events received from remote mcp_servers",
-    labels=["mcp_server", "event_type"],  # event_type: message, notification, error
-)
-
 # -----------------------------------------------------------------------------
 # Batch Invocation Metrics
 # -----------------------------------------------------------------------------
@@ -1038,9 +1020,6 @@ def _register_all_metrics():
         HTTP_REQUEST_DURATION_SECONDS,
         HTTP_ERRORS_TOTAL,
         HTTP_RETRIES_TOTAL,
-        HTTP_CONNECTION_POOL_SIZE,
-        HTTP_SSE_STREAMS_ACTIVE,
-        HTTP_SSE_EVENTS_TOTAL,
         # Batch invocation metrics
         BATCH_CALLS_TOTAL,
         BATCH_VALIDATION_FAILURES_TOTAL,
@@ -1265,6 +1244,45 @@ def set_connection_active(mcp_server: str, active: bool) -> None:
         active: True when a client is connected/ready, False on close.
     """
     CONNECTIONS_ACTIVE.set(1 if active else 0, mcp_server=mcp_server)
+
+
+def classify_jsonrpc_message(message: dict) -> str:
+    """Classify a received JSON-RPC message as response / notification / error.
+
+    - ``error``: carries a top-level ``error`` member.
+    - ``notification``: a request with no ``id`` (server-initiated).
+    - ``response``: everything else (a normal result envelope).
+    """
+    if "error" in message:
+        return "error"
+    if "method" in message and "id" not in message:
+        return "notification"
+    return "response"
+
+
+def record_message_sent(mcp_server: str, method: str, size_bytes: int) -> None:
+    """Record an outgoing JSON-RPC message to an upstream server.
+
+    Args:
+        mcp_server: The upstream server ID (``"unknown"`` if unlabeled).
+        method: JSON-RPC method (e.g. ``tools/call``).
+        size_bytes: Serialized request size in bytes.
+    """
+    MESSAGES_SENT_TOTAL.inc(mcp_server=mcp_server, method=method)
+    MESSAGE_SIZE_BYTES.observe(size_bytes, mcp_server=mcp_server, direction="sent")
+
+
+def record_message_received(mcp_server: str, message_type: str, size_bytes: int) -> None:
+    """Record an incoming JSON-RPC message from an upstream server.
+
+    Args:
+        mcp_server: The upstream server ID (``"unknown"`` if unlabeled).
+        message_type: ``response`` / ``notification`` / ``error`` (see
+            :func:`classify_jsonrpc_message`).
+        size_bytes: Raw message size in bytes.
+    """
+    MESSAGES_RECEIVED_TOTAL.inc(mcp_server=mcp_server, type=message_type)
+    MESSAGE_SIZE_BYTES.observe(size_bytes, mcp_server=mcp_server, direction="received")
 
 
 def record_cost(mcp_server: str, tool: str, cost_cents: int, cost_model: str) -> None:

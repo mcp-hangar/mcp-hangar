@@ -334,6 +334,9 @@ class HttpClient:
                 if self._mcp_session_id:
                     extra_headers["Mcp-Session-Id"] = self._mcp_session_id
 
+                prometheus_metrics.record_message_sent(
+                    mcp_server_label, method, len(json.dumps(request_body).encode())
+                )
                 response = self._client.post(
                     url,
                     json=request_body,
@@ -386,6 +389,12 @@ class HttpClient:
 
             try:
                 result = response.json()
+                if isinstance(result, dict):
+                    prometheus_metrics.record_message_received(
+                        mcp_server_label,
+                        prometheus_metrics.classify_jsonrpc_message(result),
+                        len(response.content),
+                    )
                 return cast(dict[str, Any], result)
             except json.JSONDecodeError as e:
                 prometheus_metrics.HTTP_ERRORS_TOTAL.inc(mcp_server=mcp_server_label, error_type="json_decode_error")

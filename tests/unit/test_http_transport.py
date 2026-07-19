@@ -188,6 +188,7 @@ class TestHttpClient:
         mock_response.status_code = 200
         mock_response.headers = {"Content-Type": "application/json"}
         mock_response.json.return_value = {"jsonrpc": "2.0", "id": "test", "result": {"value": 42}}
+        mock_response.content = b'{"jsonrpc":"2.0","id":"test","result":{"value":42}}'
         mock_httpx_client.post.return_value = mock_response
 
         with patch.object(HttpClient, "_create_client", return_value=mock_httpx_client):

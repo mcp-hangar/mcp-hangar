@@ -9,6 +9,7 @@ import time
 from typing import Any, TYPE_CHECKING
 import uuid
 
+from . import metrics as prometheus_metrics
 from .domain.exceptions import ClientError
 from .logging_config import get_logger
 from .observability.tracing import inject_trace_context, upstream_call_span
@@ -34,14 +35,17 @@ class StdioClient:
     Handles message correlation, timeouts, and process lifecycle.
     """
 
-    def __init__(self, popen: subprocess.Popen):
+    def __init__(self, popen: subprocess.Popen, mcp_server_id: str | None = None):
         """
         Initialize client with a running subprocess.
 
         Args:
             popen: subprocess.Popen instance with stdin/stdout pipes
+            mcp_server_id: Upstream server ID, used to label transport metrics.
+                Falls back to "unknown" when unset.
         """
         self.process = popen
+        self.mcp_server_id = mcp_server_id
         self.pending: dict[str, PendingRequest] = {}
         # Lock hierarchy level: STDIO_CLIENT (50)
         # Safe to acquire after: PROVIDER, EVENT_BUS, EVENT_STORE
@@ -89,6 +93,12 @@ class StdioClient:
                 except json.JSONDecodeError as e:
                     logger.error("stdio_client_malformed_json", preview=line[:100], error=str(e))
                     continue
+
+                prometheus_metrics.record_message_received(
+                    self.mcp_server_id or "unknown",
+                    prometheus_metrics.classify_jsonrpc_message(msg),
+                    len(line),
+                )
 
                 msg_id = msg.get("id")
 
@@ -215,6 +225,9 @@ class StdioClient:
 
             try:
                 request_str = json.dumps(request) + "\n"
+                prometheus_metrics.record_message_sent(
+                    self.mcp_server_id or "unknown", method, len(request_str)
+                )
                 logger.info(
                     "stdio_client_sending_request",
                     method=method,

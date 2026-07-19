@@ -650,6 +650,11 @@ class McpServer(AggregateRoot):
         config = self._get_launch_config()
         client = launcher.launch(**config)
 
+        # stdio transports start unlabeled; tag them so their message metrics
+        # carry this server's ID (HTTP clients are labeled at construction).
+        if getattr(client, "mcp_server_id", "unset") is None:
+            client.mcp_server_id = str(self.mcp_server_id)
+
         # Start live stderr-reader thread if a log buffer is configured and the
         # client has a process with a stderr pipe (subprocess/docker/container modes).
         if self._log_buffer is not None:
