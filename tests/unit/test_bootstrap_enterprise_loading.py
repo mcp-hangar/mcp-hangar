@@ -1,17 +1,8 @@
-"""Tests for entry point-based enterprise bootstrap loading."""
+"""Tests for the optional auth/approval component loader (bootstrap.enterprise)."""
 
-# pyright: reportAny=false, reportMissingParameterType=false, reportPrivateLocalImportUsage=false, reportUnannotatedClassAttribute=false, reportUnknownArgumentType=false, reportUnknownLambdaType=false, reportUnknownMemberType=false, reportUnknownParameterType=false, reportUnknownVariableType=false, reportUnusedCallResult=false
+# pyright: reportAny=false, reportMissingParameterType=false, reportPrivateLocalImportUsage=false, reportUnannotatedClassAttribute=false, reportUnknownArgumentType=false, reportUnknownLambdaType=false, reportUnknownMemberType=false, reportUnknownParameterType=false, reportUnusedCallResult=false
 
 from unittest.mock import MagicMock
-
-
-class _FakeEntryPoint:
-    def __init__(self, name: str, loader):
-        self.name = name
-        self._loader = loader
-
-    def load(self):
-        return self._loader
 
 
 # ---------------------------------------------------------------------------
@@ -46,75 +37,68 @@ class TestEnterpriseComponents:
 
 
 class TestLoadEnterpriseModules:
-    """Verify unconditional enterprise module loading."""
+    """The loader wires the in-core auth module directly (no plugin discovery)."""
 
-    def test_no_entry_points_returns_empty(self, monkeypatch):
-        """Without entry points, returns EnterpriseComponents with all fields None."""
-        from mcp_hangar.server.bootstrap import enterprise as enterprise_bootstrap
+    def test_no_auth_config_returns_empty(self):
+        """With auth absent/disabled, returns EnterpriseComponents with all fields None."""
         from mcp_hangar.server.bootstrap.enterprise import load_enterprise_modules
-
-        monkeypatch.setattr(enterprise_bootstrap.importlib.metadata, "entry_points", lambda **kwargs: ())
 
         ec = load_enterprise_modules({})
         assert ec.auth_components is None
+        assert ec.approval_service is None
 
-    def test_registered_loader_populates_auth(self, monkeypatch):
-        """Registered enterprise loader callable populates auth components."""
-        from mcp_hangar.server.bootstrap import enterprise as enterprise_bootstrap
-        from mcp_hangar.server.bootstrap.enterprise import EnterpriseComponents, load_enterprise_modules
+    def test_unavailable_auth_module_returns_empty(self, monkeypatch):
+        """When the auth module is not installed, returns empty components."""
+        from mcp_hangar.server.bootstrap import enterprise as eb
 
-        auth_components = MagicMock()
-
-        def loader(config, event_bus, event_publisher):
-            assert config == {"auth": {"enabled": True}}
-            assert event_bus == "bus"
-            assert event_publisher == "publisher"
-            return EnterpriseComponents(auth_components=auth_components)
-
-        monkeypatch.setattr(
-            enterprise_bootstrap.importlib.metadata,
-            "entry_points",
-            lambda **kwargs: (_FakeEntryPoint("enterprise-auth", loader),),
+        fake_exports = eb.AuthCompatibilityExports(
+            AuthComponents=object,
+            NullAuthComponents=object,
+            bootstrap_auth=lambda *a, **k: None,
+            parse_auth_config=lambda _raw: None,
+            enterprise_auth_available=False,
         )
+        monkeypatch.setattr(eb, "get_auth_compat_exports", lambda: fake_exports)
 
-        ec = load_enterprise_modules(
+        ec = eb.load_enterprise_modules({"auth": {"enabled": True}})
+        assert ec.auth_components is None
+
+    def test_auth_enabled_populates_components(self, monkeypatch):
+        """When auth is enabled, the loader builds auth components directly."""
+        from mcp_hangar.server.bootstrap import enterprise as eb
+
+        sentinel = MagicMock()
+
+        class _Cfg:
+            enabled = True
+
+        captured = {}
+
+        def _bootstrap_auth(cfg, **kwargs):
+            captured["cfg"] = cfg
+            captured["kwargs"] = kwargs
+            return sentinel
+
+        fake_exports = eb.AuthCompatibilityExports(
+            AuthComponents=object,
+            NullAuthComponents=object,
+            bootstrap_auth=_bootstrap_auth,
+            parse_auth_config=lambda _raw: _Cfg(),
+            enterprise_auth_available=True,
+        )
+        monkeypatch.setattr(eb, "get_auth_compat_exports", lambda: fake_exports)
+        monkeypatch.setattr(eb, "get_event_store", lambda: "event-store")
+
+        ec = eb.load_enterprise_modules(
             {"auth": {"enabled": True}},
             event_bus="bus",
             event_publisher="publisher",
         )
-        assert ec.auth_components is auth_components
+        assert ec.auth_components is sentinel
         assert ec.approval_service is None
-
-    def test_multiple_registered_loaders_merge_components(self, monkeypatch):
-        """Multiple enterprise loaders can contribute different component types."""
-        from mcp_hangar.server.bootstrap import enterprise as enterprise_bootstrap
-        from mcp_hangar.server.bootstrap.enterprise import EnterpriseComponents, load_enterprise_modules
-
-        auth_components = MagicMock()
-        approval_service = MagicMock()
-
-        monkeypatch.setattr(
-            enterprise_bootstrap.importlib.metadata,
-            "entry_points",
-            lambda **kwargs: (
-                _FakeEntryPoint(
-                    "enterprise-auth",
-                    lambda config, event_bus, event_publisher: EnterpriseComponents(
-                        auth_components=auth_components,
-                    ),
-                ),
-                _FakeEntryPoint(
-                    "enterprise-approvals",
-                    lambda config, event_bus, event_publisher: EnterpriseComponents(
-                        approval_service=approval_service,
-                    ),
-                ),
-            ),
-        )
-
-        ec = load_enterprise_modules({})
-        assert ec.auth_components is auth_components
-        assert ec.approval_service is approval_service
+        assert captured["kwargs"]["event_bus"] == "bus"
+        assert captured["kwargs"]["event_publisher"] == "publisher"
+        assert captured["kwargs"]["event_store"] == "event-store"
 
 
 # ---------------------------------------------------------------------------
