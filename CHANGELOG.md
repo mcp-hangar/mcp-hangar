@@ -32,6 +32,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Fixed
 
+* **metrics:** the tool-call latency histogram (`mcp_hangar_tool_call_duration_seconds`) no longer records a 0-second observation for every failed call — failures carried no real duration and poisoned the p50/p95/p99 percentiles. Duration is observed only for successful calls; failures are still counted via `mcp_hangar_tool_call_errors_total`. Found by the observability audit
+* **metrics:** drop the unbounded `stream_id` label from `mcp_hangar_events_compacted_total` — stream IDs are per-stream identifiers and were a cardinality bomb. Compaction is now a fleet-wide counter. Found by the observability audit
 * **core:** discovered `http`/`sse` containers now prefer the published host-port binding over the internal bridge-network IP, so they are reachable from the documented host-mode deployment ([#481](https://github.com/mcp-hangar/mcp-hangar/issues/481))
 * **core:** allow a discovery-only `config.yaml` (`discovery.enabled: true`, no top-level `mcp_servers`) to load instead of raising ([#483](https://github.com/mcp-hangar/mcp-hangar/issues/483))
 * **core:** log the transient "container has no IP" discovery skip at debug instead of warning ([#484](https://github.com/mcp-hangar/mcp-hangar/issues/484))
