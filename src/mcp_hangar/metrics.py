@@ -582,22 +582,15 @@ HEALTH_CHECK_CONSECUTIVE_FAILURES = Gauge(
 
 CONNECTIONS_ACTIVE = Gauge(
     name="mcp_hangar_connections_active",
-    description="Number of active connections to mcp_servers",
+    description="Whether a client connection to the mcp_server is currently open (1/0)",
     labels=["mcp_server"],
 )
 
-CONNECTIONS_TOTAL = Counter(
-    name="mcp_hangar_connections",
-    description="Total number of connections established",
-    labels=["mcp_server", "result"],
-)
-
-CONNECTION_DURATION_SECONDS = Histogram(
-    name="mcp_hangar_connection_duration_seconds",
-    description="Duration of mcp_server connections in seconds",
-    labels=["mcp_server"],
-    buckets=(1, 5, 10, 30, 60, 300, 600, 1800, 3600),
-)
+# CONNECTIONS_TOTAL and CONNECTION_DURATION_SECONDS were removed by the
+# observability audit: never emitted, no dashboard/alert referenced them, and
+# they duplicated the server-lifecycle signals (starts_total, cold_start_seconds,
+# server lifetime). connections_active is kept and now wired (a provider-details
+# panel uses it).
 
 # -----------------------------------------------------------------------------
 # Message Metrics
@@ -1017,8 +1010,6 @@ def _register_all_metrics():
         HEALTH_CHECK_DURATION_SECONDS,
         HEALTH_CHECK_CONSECUTIVE_FAILURES,
         CONNECTIONS_ACTIVE,
-        CONNECTIONS_TOTAL,
-        CONNECTION_DURATION_SECONDS,
         MESSAGES_SENT_TOTAL,
         MESSAGES_RECEIVED_TOTAL,
         MESSAGE_SIZE_BYTES,
@@ -1264,6 +1255,16 @@ def record_events_compacted(stream_id: str, count: int) -> None:
         # stream_id kept in the signature for callers/logging but intentionally
         # not used as a metric label (unbounded cardinality).
         EVENTS_COMPACTED_TOTAL.inc(count)
+
+
+def set_connection_active(mcp_server: str, active: bool) -> None:
+    """Set whether a client connection to a server is currently open.
+
+    Args:
+        mcp_server: The server ID.
+        active: True when a client is connected/ready, False on close.
+    """
+    CONNECTIONS_ACTIVE.set(1 if active else 0, mcp_server=mcp_server)
 
 
 def record_cost(mcp_server: str, tool: str, cost_cents: int, cost_model: str) -> None:
