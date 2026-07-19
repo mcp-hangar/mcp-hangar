@@ -35,9 +35,7 @@ def test_remote_missing_origin_is_allowed_browser_scoped():
 
 
 def test_remote_disallowed_origin_is_rejected():
-    allowed, reason = _ws_handshake_allowed(
-        _scope(headers={"origin": "http://evil.example", "host": "localhost"})
-    )
+    allowed, reason = _ws_handshake_allowed(_scope(headers={"origin": "http://evil.example", "host": "localhost"}))
     assert allowed is False
     assert reason.startswith("origin_not_allowed")
 
@@ -45,9 +43,7 @@ def test_remote_disallowed_origin_is_rejected():
 def test_remote_allowed_origin_passes(monkeypatch):
     monkeypatch.setenv("MCP_CORS_ORIGINS", "https://app.example.com")
     monkeypatch.setenv("MCP_TRUSTED_HOSTS", "app.example.com")
-    allowed, _ = _ws_handshake_allowed(
-        _scope(headers={"origin": "https://app.example.com", "host": "app.example.com"})
-    )
+    allowed, _ = _ws_handshake_allowed(_scope(headers={"origin": "https://app.example.com", "host": "app.example.com"}))
     assert allowed is True
 
 

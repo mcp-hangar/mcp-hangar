@@ -77,12 +77,8 @@ def test_token_from_untrusted_issuer_is_rejected(auth_http_hangar: str) -> None:
 
 def test_prm_advertises_trusted_issuer(auth_http_hangar: str) -> None:
     """Claim: GET /.well-known/oauth-protected-resource lists the trusted issuer (RFC 9728)."""
-    resp = httpx.get(
-        f"{auth_http_hangar}/.well-known/oauth-protected-resource", timeout=10.0
-    )
-    assert resp.status_code == 200, (
-        f"the PRM endpoint should be public and return 200, got {resp.status_code}"
-    )
+    resp = httpx.get(f"{auth_http_hangar}/.well-known/oauth-protected-resource", timeout=10.0)
+    assert resp.status_code == 200, f"the PRM endpoint should be public and return 200, got {resp.status_code}"
     body = resp.json()
     servers = body.get("authorization_servers", [])
     assert any(_REALM in str(s) for s in servers), (

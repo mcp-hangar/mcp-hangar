@@ -151,9 +151,9 @@ _KEYCLOAK_READY_TIMEOUT_S = 180.0
 
 # Users seeded by keycloak/realm-export.json (username, password, group -> role).
 KEYCLOAK_USERS = {
-    "admin": "admin123",       # group platform-engineering -> admin
-    "developer": "dev123",     # group developers          -> developer
-    "viewer": "view123",       # group viewers             -> viewer
+    "admin": "admin123",  # group platform-engineering -> admin
+    "developer": "dev123",  # group developers          -> developer
+    "viewer": "view123",  # group viewers             -> viewer
 }
 
 # Hangar auth config that matches the exported realm (front-door: anonymous
@@ -189,9 +189,7 @@ mcp_servers:
 
 def _compose_cmd() -> list[str]:
     """Return a working `docker compose` (v2) or `docker-compose` invocation, or skip."""
-    if shutil.which("docker") and subprocess.run(
-        ["docker", "compose", "version"], capture_output=True
-    ).returncode == 0:
+    if shutil.which("docker") and subprocess.run(["docker", "compose", "version"], capture_output=True).returncode == 0:
         return ["docker", "compose"]
     if shutil.which("docker-compose"):
         return ["docker-compose"]
@@ -230,9 +228,7 @@ def keycloak() -> Iterator[str]:
             time.sleep(1.0)
         if not ready:
             logs = subprocess.run([*base, "logs", "keycloak"], capture_output=True, text=True)
-            pytest.skip(
-                f"Keycloak not ready in {_KEYCLOAK_READY_TIMEOUT_S}s:\n{logs.stdout[-2000:]}"
-            )
+            pytest.skip(f"Keycloak not ready in {_KEYCLOAK_READY_TIMEOUT_S}s:\n{logs.stdout[-2000:]}")
         yield _ISSUER
     finally:
         subprocess.run([*base, "down", "-v"], capture_output=True)
@@ -263,9 +259,7 @@ def keycloak_token(keycloak: str):
 
 
 @pytest.fixture(scope="session")
-def auth_http_hangar(
-    keycloak: str, tmp_path_factory: pytest.TempPathFactory
-) -> Iterator[str]:
+def auth_http_hangar(keycloak: str, tmp_path_factory: pytest.TempPathFactory) -> Iterator[str]:
     """Start `mcp-hangar serve --http` with OIDC auth trusting the example realm."""
     binary = _hangar_bin()
     if not _MATH_SERVER.exists():
@@ -273,9 +267,7 @@ def auth_http_hangar(
 
     workdir = tmp_path_factory.mktemp("live_auth_hangar")
     config_path = workdir / "config.yaml"
-    config_path.write_text(
-        _AUTH_CONFIG.format(issuer=keycloak, python=sys.executable, server=str(_MATH_SERVER))
-    )
+    config_path.write_text(_AUTH_CONFIG.format(issuer=keycloak, python=sys.executable, server=str(_MATH_SERVER)))
 
     port = _free_port()
     base_url = f"http://127.0.0.1:{port}"

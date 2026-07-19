@@ -25,6 +25,7 @@ from mcp_hangar.domain.value_objects.tool_digest import ToolDigest
 # Helpers
 # ---------------------------------------------------------------------------
 
+
 def _make_tool(name: str, description: str = "A tool") -> ToolSchema:
     return ToolSchema(
         name=name,
@@ -40,6 +41,7 @@ def _make_digest(name: str) -> ToolDigest:
 # ---------------------------------------------------------------------------
 # Fixtures
 # ---------------------------------------------------------------------------
+
 
 @pytest.fixture
 def registry():
@@ -58,6 +60,7 @@ def reset_global():
 # ---------------------------------------------------------------------------
 # ToolProjection unit tests
 # ---------------------------------------------------------------------------
+
 
 class TestToolProjection:
     """Tests for the ToolProjection read-model."""
@@ -173,6 +176,7 @@ class TestToolProjection:
 # ToolProjectionRegistry — build from discovery
 # ---------------------------------------------------------------------------
 
+
 class TestToolProjectionRegistryBuild:
     """Registry builds projections from discovered tools."""
 
@@ -280,6 +284,7 @@ class TestToolProjectionRegistryBuild:
 # ToolProjectionRegistry — tenant-aware resolve
 # ---------------------------------------------------------------------------
 
+
 class TestToolProjectionRegistryResolve:
     """resolve() must honor tenant_overrides over base status."""
 
@@ -317,6 +322,7 @@ class TestToolProjectionRegistryResolve:
 # ---------------------------------------------------------------------------
 # Cache invalidation
 # ---------------------------------------------------------------------------
+
 
 class TestToolProjectionRegistryInvalidation:
     """Cache invalidates on config reload (invalidate())."""
@@ -358,6 +364,7 @@ class TestToolProjectionRegistryInvalidation:
 # Mutation API surface (runtime withdrawal — issue #235)
 # ---------------------------------------------------------------------------
 
+
 class TestMutationApi:
     """Registry exposes runtime mutation methods as of #235 (withdraw/restore).
 
@@ -387,6 +394,7 @@ class TestMutationApi:
 # Thread-safety
 # ---------------------------------------------------------------------------
 
+
 class TestToolProjectionRegistryThreadSafety:
     """Basic thread-safety smoke test."""
 
@@ -409,9 +417,7 @@ class TestToolProjectionRegistryThreadSafety:
             except Exception as exc:  # noqa: BLE001
                 errors.append(exc)
 
-        threads = [threading.Thread(target=build)] + [
-            threading.Thread(target=resolve) for _ in range(4)
-        ]
+        threads = [threading.Thread(target=build)] + [threading.Thread(target=resolve) for _ in range(4)]
         for t in threads:
             t.start()
         for t in threads:
@@ -423,6 +429,7 @@ class TestToolProjectionRegistryThreadSafety:
 # ---------------------------------------------------------------------------
 # Singleton accessor
 # ---------------------------------------------------------------------------
+
 
 class TestSingletonAccessor:
     """get_tool_projection_registry() returns the process-global singleton."""

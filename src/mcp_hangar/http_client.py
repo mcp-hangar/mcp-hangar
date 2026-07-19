@@ -334,9 +334,7 @@ class HttpClient:
                 if self._mcp_session_id:
                     extra_headers["Mcp-Session-Id"] = self._mcp_session_id
 
-                prometheus_metrics.record_message_sent(
-                    mcp_server_label, method, len(json.dumps(request_body).encode())
-                )
+                prometheus_metrics.record_message_sent(mcp_server_label, method, len(json.dumps(request_body).encode()))
                 response = self._client.post(
                     url,
                     json=request_body,
