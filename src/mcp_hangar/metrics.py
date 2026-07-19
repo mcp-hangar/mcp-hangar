@@ -883,7 +883,8 @@ CIRCUIT_BREAKER_STATE = Gauge(
 EVENTS_COMPACTED_TOTAL = Counter(
     name="mcp_hangar_events_compacted",
     description="Total number of events removed by stream compaction",
-    labels=["stream_id"],
+    # No per-stream label: stream IDs are unbounded identifiers and would be a
+    # cardinality bomb. Compaction is a fleet-wide signal; aggregate is enough.
 )
 
 # -----------------------------------------------------------------------------
@@ -1118,11 +1119,18 @@ def init_metrics(version: str = "1.0.0"):
 
 
 def observe_tool_call(mcp_server: str, tool: str, duration: float, success: bool, error_type: str | None = None):
-    """Record a tool call observation."""
+    """Record a tool call observation.
+
+    The duration histogram observes only successful calls: failures carry no
+    meaningful duration (the failure path has none to report), and recording a
+    0-second observation for every failure poisons the latency percentiles.
+    Failures are counted separately via TOOL_CALL_ERRORS_TOTAL.
+    """
     status = "success" if success else "error"
     TOOL_CALLS_TOTAL.inc(mcp_server=mcp_server, tool=tool, status=status)
-    TOOL_CALL_DURATION_SECONDS.observe(duration, mcp_server=mcp_server, tool=tool)
-    if not success and error_type:
+    if success:
+        TOOL_CALL_DURATION_SECONDS.observe(duration, mcp_server=mcp_server, tool=tool)
+    elif error_type:
         TOOL_CALL_ERRORS_TOTAL.inc(mcp_server=mcp_server, tool=tool, error_type=error_type)
 
 
@@ -1238,7 +1246,9 @@ def record_events_compacted(stream_id: str, count: int) -> None:
         count: Number of events removed.
     """
     if count > 0:
-        EVENTS_COMPACTED_TOTAL.inc(count, stream_id=stream_id)
+        # stream_id kept in the signature for callers/logging but intentionally
+        # not used as a metric label (unbounded cardinality).
+        EVENTS_COMPACTED_TOTAL.inc(count)
 
 
 def record_capability_violation(mcp_server: str, violation_type: str) -> None:
