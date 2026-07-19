@@ -1266,6 +1266,19 @@ def record_events_compacted(stream_id: str, count: int) -> None:
         EVENTS_COMPACTED_TOTAL.inc(count)
 
 
+def record_cost(mcp_server: str, tool: str, cost_cents: int, cost_model: str) -> None:
+    """Record attributed cost for a tool invocation.
+
+    Args:
+        mcp_server: The server the tool ran on.
+        tool: The tool name.
+        cost_cents: Attributed cost (hundredths of a cent) to add.
+        cost_model: The pricing model used for attribution.
+    """
+    COST_CENTS_TOTAL.inc(cost_cents, mcp_server=mcp_server, tool=tool, cost_model=cost_model)
+    COST_ATTRIBUTIONS_TOTAL.inc(mcp_server=mcp_server, tool=tool)
+
+
 def record_capability_violation(mcp_server: str, violation_type: str) -> None:
     """Record a capability violation detection.
 
