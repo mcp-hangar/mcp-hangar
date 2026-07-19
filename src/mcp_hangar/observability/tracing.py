@@ -32,7 +32,7 @@ from typing import Any, TypeVar
 
 from mcp_hangar.logging_config import get_logger
 from mcp_hangar.metrics import record_otlp_export_failure
-from mcp_hangar.observability.conventions import MCP, McpServer
+from mcp_hangar.observability.conventions import GenAI, MCP, McpServer
 
 logger = get_logger(__name__)
 
@@ -363,12 +363,14 @@ def trace_tool_invocation(
             tracer = get_tracer(__name__)
 
             with tracer.start_as_current_span(
-                f"tool.invoke.{tool_name}",
+                f"execute_tool {tool_name}",
                 kind=trace.SpanKind.CLIENT if OTEL_AVAILABLE else None,
             ) as span:
                 # Set standard attributes
                 span.set_attribute(McpServer.ID, mcp_server_id)
-                span.set_attribute(MCP.TOOL_NAME, tool_name)
+                span.set_attribute(GenAI.TOOL_NAME, tool_name)
+                span.set_attribute(GenAI.OPERATION_NAME, "execute_tool")
+                span.set_attribute(MCP.METHOD_NAME, "tools/call")
                 span.set_attribute("mcp.timeout_seconds", timeout)
 
                 try:
@@ -442,13 +444,13 @@ def upstream_call_span(method: str, params: dict[str, Any] | None = None):
             ``params["name"]`` for the span name and gen_ai.tool.name.
     """
     params = params or {}
-    attributes: dict[str, Any] = {"mcp.method.name": method}
+    attributes: dict[str, Any] = {MCP.METHOD_NAME: method}
     if method == "tools/call":
         tool = params.get("name")
         name = f"execute_tool {tool}" if tool else "execute_tool"
-        attributes["gen_ai.operation.name"] = "execute_tool"
+        attributes[GenAI.OPERATION_NAME] = "execute_tool"
         if tool:
-            attributes["gen_ai.tool.name"] = tool
+            attributes[GenAI.TOOL_NAME] = tool
     else:
         name = method
 

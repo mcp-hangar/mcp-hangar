@@ -541,7 +541,7 @@ class BatchExecutor:
             **span_ctx_kwargs,
         ) as span:
             span.set_attribute("mcp.server.id", call.mcp_server)
-            span.set_attribute("mcp.tool.name", call.tool)
+            span.set_attribute("gen_ai.tool.name", call.tool)
             span.set_attribute("batch.call.id", call.call_id)
             return self._execute_call_inner(
                 call,
@@ -639,7 +639,7 @@ class BatchExecutor:
         tracer = get_tracer(__name__)
         with tracer.start_as_current_span("policy.check_access") as policy_span:
             policy_span.set_attribute("mcp.server.id", call.mcp_server)
-            policy_span.set_attribute("mcp.tool.name", call.tool)
+            policy_span.set_attribute("gen_ai.tool.name", call.tool)
             policy_span.set_attribute("policy.is_group", is_group)
             if is_group:
                 group_obj = GROUPS.get(call.mcp_server)
@@ -778,7 +778,7 @@ class BatchExecutor:
         # Uses the resolver's effective policy (mcp_server-specific or _global fallback).
         with tracer.start_as_current_span("approval_gate.check") as approval_span:
             approval_span.set_attribute("mcp.server.id", call.mcp_server)
-            approval_span.set_attribute("mcp.tool.name", call.tool)
+            approval_span.set_attribute("gen_ai.tool.name", call.tool)
             approval_result = self._check_approval_gate(call, resolver, ctx)
             if approval_result is not None:
                 approval_span.set_attribute("approval.result", approval_result.error_type or "denied")
@@ -887,7 +887,7 @@ class BatchExecutor:
         def do_invoke() -> dict[str, Any]:
             with tracer.start_as_current_span("command.send.InvokeToolCommand") as cmd_span:
                 cmd_span.set_attribute("mcp.server.id", dispatch_server_id)
-                cmd_span.set_attribute("mcp.tool.name", call.tool)
+                cmd_span.set_attribute("gen_ai.tool.name", call.tool)
                 cmd_span.set_attribute("command.timeout", effective_timeout)
                 command = InvokeToolCommand(
                     mcp_server_id=dispatch_server_id,
@@ -905,7 +905,7 @@ class BatchExecutor:
             with tracer.start_as_current_span("invoke_with_retry") as retry_span:
                 retry_span.set_attribute("retry.max_attempts", call.max_retries)
                 retry_span.set_attribute("mcp.server.id", call.mcp_server)
-                retry_span.set_attribute("mcp.tool.name", call.tool)
+                retry_span.set_attribute("gen_ai.tool.name", call.tool)
                 policy = RetryPolicy(max_attempts=call.max_retries)
                 retry_result = retry_sync(
                     operation=do_invoke,
