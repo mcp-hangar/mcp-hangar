@@ -78,8 +78,12 @@ class StdioClient:
             try:
                 line = self.process.stdout.readline()
                 if not line:
-                    # EOF reached, process died
-                    logger.warning("stdio_client_eof_on_stdout")
+                    # EOF: process exited. Expected when we closed it (idle
+                    # shutdown), otherwise the process died on its own.
+                    if self.closed:
+                        logger.debug("stdio_client_eof_on_stdout", expected=True)
+                    else:
+                        logger.warning("stdio_client_eof_on_stdout")
                     stderr_msg = self._capture_process_stderr()
                     self._last_stderr = stderr_msg
                     break
@@ -125,11 +129,16 @@ class StdioClient:
     def _capture_process_stderr(self) -> str | None:
         """Capture and log stderr from the process for debugging. Returns stderr text."""
         stderr_text = None
+        # An exit we initiated (close() / idle shutdown sets self.closed first)
+        # is expected: log it at info so it doesn't inflate the error stream and
+        # trip log-based error alerting. Only an unsolicited exit is an error.
+        expected = self.closed
+        log = logger.info if expected else logger.error
         try:
             # Log exit code
             rc = self.process.poll()
             if rc is not None:
-                logger.error("stdio_client_process_exited", exit_code=rc)
+                log("stdio_client_process_exited", exit_code=rc, expected=expected)
 
             # Try to read stderr if available
             stderr = getattr(self.process, "stderr", None)
@@ -145,7 +154,7 @@ class StdioClient:
                             # Log first 2000 chars to avoid log spam
                             if len(err_text) > 2000:
                                 err_text = err_text[:2000] + "... (truncated)"
-                            logger.error("stdio_client_process_stderr", stderr=err_text)
+                            log("stdio_client_process_stderr", stderr=err_text, expected=expected)
                             stderr_text = err_text
                 except Exception as read_err:  # noqa: BLE001 -- fault-barrier: stderr capture must not crash diagnostics
                     logger.debug("stdio_client_stderr_read_failed", error=str(read_err))
@@ -225,9 +234,7 @@ class StdioClient:
 
             try:
                 request_str = json.dumps(request) + "\n"
-                prometheus_metrics.record_message_sent(
-                    self.mcp_server_id or "unknown", method, len(request_str)
-                )
+                prometheus_metrics.record_message_sent(self.mcp_server_id or "unknown", method, len(request_str))
                 logger.info(
                     "stdio_client_sending_request",
                     method=method,
