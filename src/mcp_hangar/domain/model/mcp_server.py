@@ -8,6 +8,7 @@ from ...logging_config import get_logger
 
 if TYPE_CHECKING:
     from ...infrastructure.lock_hierarchy import TrackedLock
+    from ..policies.egress_l7 import L7Policy
 
 from ..contracts.log_buffer import IMcpServerLogBuffer
 from ..contracts.metrics_publisher import IMetricsPublisher, NullMetricsPublisher
@@ -28,6 +29,8 @@ from ..events import (
 )
 from ..exceptions import (
     CannotStartMcpServerError,
+    EgressPolicyApprovalRequiredError,
+    EgressPolicyDeniedError,
     InvalidStateTransitionError,
     McpServerStartError,
     ToolInvocationError,
@@ -106,6 +109,8 @@ class McpServer(AggregateRoot):
         log_buffer: IMcpServerLogBuffer | None = None,
         # Capability declarations (Phase 38)
         capabilities: McpServerCapabilities | None = None,
+        # L7 egress policy (MCPEgressPolicy); None = no enforcement
+        l7_policy: "L7Policy | None" = None,
     ):
         super().__init__()
 
@@ -156,6 +161,10 @@ class McpServer(AggregateRoot):
 
         # Capability declarations (Phase 38)
         self._capabilities = capabilities
+
+        # L7 egress policy (MCPEgressPolicy). None means no L7 enforcement; when
+        # set, invoke_tool evaluates every tool call against it.
+        self._l7_policy = l7_policy
 
         # State
         self._state = McpServerState.COLD
@@ -323,6 +332,19 @@ class McpServer(AggregateRoot):
     def mode(self) -> McpServerMode:
         """McpServer mode enum."""
         return self._mode
+
+    @property
+    def l7_policy(self) -> "L7Policy | None":
+        """The L7 egress policy enforced on tool calls, or None if unset."""
+        return self._l7_policy
+
+    def set_l7_policy(self, policy: "L7Policy | None") -> None:
+        """Attach, replace, or clear the L7 egress policy.
+
+        Used to populate the policy from its source (the operator's compiled
+        MCPEgressPolicy). Clearing (None) disables L7 enforcement for this server.
+        """
+        self._l7_policy = policy
 
     @property
     def mode_str(self) -> str:
@@ -984,6 +1006,18 @@ class McpServer(AggregateRoot):
         correlation_id = str(CorrelationId())
         idt_ctx = get_identity_context()
         identity_context_dict = idt_ctx.to_dict() if idt_ctx else None
+
+        # L7 egress policy (MCPEgressPolicy): evaluate the tool call before we
+        # wake the server or touch the upstream, so a denied or approval-gated
+        # call never reaches the wire (and never cold-starts a server).
+        if self._l7_policy is not None:
+            from ..policies.egress_l7 import ToolAction, evaluate
+
+            decision = evaluate(tool_name, arguments, self._l7_policy)
+            if decision.action is ToolAction.DENY:
+                raise EgressPolicyDeniedError(self.mcp_server_id, tool_name, "; ".join(decision.reasons))
+            if decision.action is ToolAction.REQUIRE_APPROVAL:
+                raise EgressPolicyApprovalRequiredError(self.mcp_server_id, tool_name)
 
         # Wait outside the invocation lock so a concurrent starter can finalize
         # state and signal every cold-start waiter.
