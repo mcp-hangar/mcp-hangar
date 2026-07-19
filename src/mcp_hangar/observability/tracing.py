@@ -458,6 +458,21 @@ def upstream_call_span(method: str, params: dict[str, Any] | None = None):
         yield span
 
 
+def mark_span_error(span: Any, description: str | None = None) -> None:
+    """Set ERROR status on a span. Safe for NoOp spans and when OTel is absent.
+
+    Use when a failure is handled as data (e.g. converted to a result object)
+    rather than raised, so the span would otherwise stay UNSET and the failing
+    operation would look successful in the trace UI.
+    """
+    if not OTEL_AVAILABLE:
+        return
+    try:
+        span.set_status(Status(StatusCode.ERROR, description or ""))
+    except Exception:  # noqa: BLE001 -- fault-barrier: tracing must not break the traced path
+        pass
+
+
 def inject_trace_context(carrier: dict[str, str]) -> None:
     """Inject trace context into carrier dict for propagation.
 
