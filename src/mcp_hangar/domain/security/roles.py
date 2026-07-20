@@ -19,7 +19,6 @@ _ENTERPRISE_ROLE_NAMES = (
     "BUILTIN_ROLES",
     "PERMISSIONS",
     "ROLE_ADMIN",
-    "ROLE_AGENT",
     "ROLE_AUDITOR",
     "ROLE_DEVELOPER",
     "ROLE_PROVIDER_ADMIN",
@@ -35,7 +34,6 @@ try:
     BUILTIN_ROLES = _enterprise_roles.BUILTIN_ROLES
     PERMISSIONS = _enterprise_roles.PERMISSIONS
     ROLE_ADMIN = _enterprise_roles.ROLE_ADMIN
-    ROLE_AGENT = _enterprise_roles.ROLE_AGENT
     ROLE_AUDITOR = _enterprise_roles.ROLE_AUDITOR
     ROLE_DEVELOPER = _enterprise_roles.ROLE_DEVELOPER
     ROLE_PROVIDER_ADMIN = _enterprise_roles.ROLE_PROVIDER_ADMIN
@@ -51,7 +49,6 @@ except ImportError:
     PERMISSIONS: dict[str, "Permission"] = {}  # type: ignore[no-redef]  # fallback stubs when enterprise not installed
 
     ROLE_ADMIN = None
-    ROLE_AGENT = None
     ROLE_AUDITOR = None
     ROLE_DEVELOPER = None
     ROLE_PROVIDER_ADMIN = None
@@ -73,7 +70,6 @@ except ImportError:
 __all__ = [
     "BUILTIN_ROLES",
     "PERMISSIONS",
-    "ROLE_AGENT",
     "ROLE_ADMIN",
     "ROLE_AUDITOR",
     "ROLE_DEVELOPER",

@@ -9,8 +9,10 @@ import time
 from typing import Any, TYPE_CHECKING
 import uuid
 
+from . import metrics as prometheus_metrics
 from .domain.exceptions import ClientError
 from .logging_config import get_logger
+from .observability.tracing import inject_trace_context, upstream_call_span
 from .protocol import inject_protocol_meta
 
 if TYPE_CHECKING:
@@ -34,14 +36,17 @@ class StdioClient:
     Handles message correlation, timeouts, and process lifecycle.
     """
 
-    def __init__(self, popen: subprocess.Popen):
+    def __init__(self, popen: subprocess.Popen, mcp_server_id: str | None = None):
         """
         Initialize client with a running subprocess.
 
         Args:
             popen: subprocess.Popen instance with stdin/stdout pipes
+            mcp_server_id: Upstream server ID, used to label transport metrics.
+                Falls back to "unknown" when unset.
         """
         self.process = popen
+        self.mcp_server_id = mcp_server_id
         self.pending: dict[str, PendingRequest] = {}
         # Lock hierarchy level: STDIO_CLIENT (50)
         # Safe to acquire after: PROVIDER, EVENT_BUS, EVENT_STORE
@@ -74,8 +79,12 @@ class StdioClient:
             try:
                 line = self.process.stdout.readline()
                 if not line:
-                    # EOF reached, process died
-                    logger.warning("stdio_client_eof_on_stdout")
+                    # EOF: process exited. Expected when we closed it (idle
+                    # shutdown), otherwise the process died on its own.
+                    if self.closed:
+                        logger.debug("stdio_client_eof_on_stdout", expected=True)
+                    else:
+                        logger.warning("stdio_client_eof_on_stdout")
                     stderr_msg = self._capture_process_stderr()
                     self._last_stderr = stderr_msg
                     break
@@ -89,6 +98,12 @@ class StdioClient:
                 except json.JSONDecodeError as e:
                     logger.error("stdio_client_malformed_json", preview=line[:100], error=str(e))
                     continue
+
+                prometheus_metrics.record_message_received(
+                    self.mcp_server_id or "unknown",
+                    prometheus_metrics.classify_jsonrpc_message(msg),
+                    len(line),
+                )
 
                 msg_id = msg.get("id")
 
@@ -115,11 +130,16 @@ class StdioClient:
     def _capture_process_stderr(self) -> str | None:
         """Capture and log stderr from the process for debugging. Returns stderr text."""
         stderr_text = None
+        # An exit we initiated (close() / idle shutdown sets self.closed first)
+        # is expected: log it at info so it doesn't inflate the error stream and
+        # trip log-based error alerting. Only an unsolicited exit is an error.
+        expected = self.closed
+        log = logger.info if expected else logger.error
         try:
             # Log exit code
             rc = self.process.poll()
             if rc is not None:
-                logger.error("stdio_client_process_exited", exit_code=rc)
+                log("stdio_client_process_exited", exit_code=rc, expected=expected)
 
             # Try to read stderr if available
             stderr = getattr(self.process, "stderr", None)
@@ -135,7 +155,7 @@ class StdioClient:
                             # Log first 2000 chars to avoid log spam
                             if len(err_text) > 2000:
                                 err_text = err_text[:2000] + "... (truncated)"
-                            logger.error("stdio_client_process_stderr", stderr=err_text)
+                            log("stdio_client_process_stderr", stderr=err_text, expected=expected)
                             stderr_text = err_text
                 except Exception as read_err:  # noqa: BLE001 -- fault-barrier: stderr capture must not crash diagnostics
                     logger.debug("stdio_client_stderr_read_failed", error=str(read_err))
@@ -190,38 +210,52 @@ class StdioClient:
         with self.pending_lock:
             self.pending[request_id] = pending
 
-        request = {
-            "jsonrpc": "2.0",
-            "id": request_id,
-            "method": method,
-            "params": inject_protocol_meta(params),
-        }
+        # CLIENT span at the upstream boundary (OTel GenAI/MCP semconv). Opened
+        # before injection so the trace context written into `_meta` parents the
+        # upstream's span to this one.
+        with upstream_call_span(method, params):
+            # Inject Hangar protocol metadata, then propagate the active trace
+            # context to the upstream over stdio: W3C traceparent/tracestate go
+            # in the MCP `_meta` field (mirrors the HTTP transport, which injects
+            # into request headers). Servers that don't understand `_meta` ignore
+            # it. inject_protocol_meta returns a fresh dict, so the caller's is
+            # never mutated.
+            params = inject_protocol_meta(params)
+            inject_trace_context(params["_meta"])
 
-        try:
-            request_str = json.dumps(request) + "\n"
-            logger.info(
-                "stdio_client_sending_request",
-                method=method,
-                pid=self.process.pid,
-                alive=self.process.poll() is None,
-            )
-            assert self.process.stdin is not None
-            self.process.stdin.write(request_str)
-            self.process.stdin.flush()
-            logger.debug("stdio_client_request_sent")
-        except Exception as e:  # noqa: BLE001 -- infra-boundary: write failure wrapped as ClientError
-            logger.error("stdio_client_write_failed", error=str(e))
-            with self.pending_lock:
-                self.pending.pop(request_id, None)
-            raise ClientError(f"write_failed: {e}") from e
+            request = {
+                "jsonrpc": "2.0",
+                "id": request_id,
+                "method": method,
+                "params": params,
+            }
 
-        try:
-            response = result_queue.get(timeout=timeout)
-            return response
-        except Empty:
-            with self.pending_lock:
-                self.pending.pop(request_id, None)
-            raise TimeoutError(f"timeout: {method} after {timeout}s") from None
+            try:
+                request_str = json.dumps(request) + "\n"
+                prometheus_metrics.record_message_sent(self.mcp_server_id or "unknown", method, len(request_str))
+                logger.info(
+                    "stdio_client_sending_request",
+                    method=method,
+                    pid=self.process.pid,
+                    alive=self.process.poll() is None,
+                )
+                assert self.process.stdin is not None
+                self.process.stdin.write(request_str)
+                self.process.stdin.flush()
+                logger.debug("stdio_client_request_sent")
+            except Exception as e:  # noqa: BLE001 -- infra-boundary: write failure wrapped as ClientError
+                logger.error("stdio_client_write_failed", error=str(e))
+                with self.pending_lock:
+                    self.pending.pop(request_id, None)
+                raise ClientError(f"write_failed: {e}") from e
+
+            try:
+                response = result_queue.get(timeout=timeout)
+                return response
+            except Empty:
+                with self.pending_lock:
+                    self.pending.pop(request_id, None)
+                raise TimeoutError(f"timeout: {method} after {timeout}s") from None
 
     def is_alive(self) -> bool:
         """Check if the underlying process is still running."""

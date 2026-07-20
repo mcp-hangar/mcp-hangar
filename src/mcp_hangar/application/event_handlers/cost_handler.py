@@ -37,6 +37,15 @@ class CostAttributionEventHandler:
         if cost_record.cost_cents == 0:
             return
 
+        from ...metrics import record_cost
+
+        record_cost(
+            mcp_server=cost_record.mcp_server_id,
+            tool=cost_record.tool_name,
+            cost_cents=cost_record.cost_cents,
+            cost_model=str(cost_record.cost_model),
+        )
+
         logger.debug(
             "cost_attributed",
             mcp_server_id=cost_record.mcp_server_id,

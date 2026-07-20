@@ -25,7 +25,6 @@ if TYPE_CHECKING:
 # Import main metrics for unified observability
 from mcp_hangar import metrics as main_metrics
 
-from .discovery_metrics import get_discovery_metrics
 from .lifecycle_manager import DiscoveryLifecycleManager
 from .security_validator import SecurityConfig, SecurityValidator
 
@@ -136,7 +135,6 @@ class DiscoveryOrchestrator:
             check_interval=self.config.check_interval_s,
             drain_timeout=self.config.drain_timeout_s,
         )
-        self._metrics = get_discovery_metrics()
 
         # Callbacks for registry integration
         self.on_register: RegistrationCallback | None = None
@@ -232,7 +230,7 @@ class DiscoveryOrchestrator:
                 break
             except Exception as e:  # noqa: BLE001 -- fault-barrier: discovery loop error must not crash background task
                 logger.error(f"Error in discovery loop: {e}")
-                self._metrics.inc_errors(source="orchestrator", error_type=type(e).__name__)
+                main_metrics.record_discovery_error(source_type="orchestrator", error_type=type(e).__name__)
 
     async def run_discovery_cycle(self) -> DiscoveryCycleResult:
         """Run a single discovery cycle.
@@ -273,7 +271,7 @@ class DiscoveryOrchestrator:
             except Exception as e:  # noqa: BLE001 -- fault-barrier: cycle failure must not crash orchestrator
                 logger.error(f"Discovery cycle failed: {e}")
                 result.error_count += 1
-                self._metrics.inc_errors(source="orchestrator", error_type=type(e).__name__)
+                main_metrics.record_discovery_error(source_type="orchestrator", error_type=type(e).__name__)
                 cycle_span.record_exception(e)
 
             # Calculate duration
@@ -285,8 +283,6 @@ class DiscoveryOrchestrator:
             cycle_span.set_attribute("discovery.error_count", result.error_count)
             cycle_span.set_attribute("discovery.duration_ms", round(result.duration_ms, 2))
 
-        # Update internal metrics
-        self._metrics.observe_cycle_duration(duration_seconds)
         self._last_cycle = datetime.now(UTC)
 
         # Update main metrics for unified observability
@@ -363,9 +359,9 @@ class DiscoveryOrchestrator:
             # Validate mcp_server
             validation_report = await self._validator.validate(mcp_server)
 
-            self._metrics.observe_validation_duration(
-                source=mcp_server.source_type,
-                duration_seconds=validation_report.duration_ms / 1000,
+            main_metrics.record_discovery_validation_duration(
+                source_type=mcp_server.source_type,
+                duration=validation_report.duration_ms / 1000,
             )
             prov_span.set_attribute("discovery.validation_passed", validation_report.is_passed)
 
@@ -373,14 +369,13 @@ class DiscoveryOrchestrator:
                 # Handle validation failure
                 logger.warning(f"McpServer '{mcp_server.name}' failed validation: {validation_report.reason}")
 
-                self._metrics.inc_validation_failures(
-                    source=mcp_server.source_type,
+                main_metrics.record_discovery_validation_failure(
+                    source_type=mcp_server.source_type,
                     validation_type=validation_report.result.value,
                 )
 
                 if self.config.security.quarantine_on_failure:
                     self._lifecycle_manager.quarantine(mcp_server, validation_report.reason)
-                    self._metrics.inc_quarantine(reason=validation_report.result.value)
                     main_metrics.record_discovery_quarantine(reason=validation_report.result.value)
                     prov_span.set_attribute("discovery.result", "quarantined")
                     return "quarantined"
@@ -405,13 +400,13 @@ class DiscoveryOrchestrator:
             # Track in lifecycle manager
             if existing:
                 self._lifecycle_manager.update_mcp_server(mcp_server)
-                self._metrics.inc_registrations(source=mcp_server.source_type)
+                main_metrics.record_discovery_registration(source_type=mcp_server.source_type)
                 prov_span.set_attribute("discovery.result", "updated")
                 return "updated"
             else:
                 self._lifecycle_manager.add_mcp_server(mcp_server)
                 self._validator.record_registration(mcp_server)
-                self._metrics.inc_registrations(source=mcp_server.source_type)
+                main_metrics.record_discovery_registration(source_type=mcp_server.source_type)
                 prov_span.set_attribute("discovery.result", "registered")
                 return "registered"
 
@@ -425,7 +420,6 @@ class DiscoveryOrchestrator:
         mcp_server = self._lifecycle_manager.get_mcp_server(name)
         if mcp_server:
             self._validator.record_deregistration(mcp_server)
-            self._metrics.inc_deregistrations(source=mcp_server.source_type, reason=reason)
             main_metrics.record_discovery_deregistration(source_type=mcp_server.source_type, reason=reason)
 
         if self.on_deregister:
@@ -490,7 +484,7 @@ class DiscoveryOrchestrator:
                     return {"approved": False, "mcp_server": name, "error": str(e)}
 
             self._validator.record_registration(mcp_server)
-            self._metrics.inc_registrations(source=mcp_server.source_type)
+            main_metrics.record_discovery_registration(source_type=mcp_server.source_type)
 
             return {"approved": True, "mcp_server": name, "status": "registered"}
 

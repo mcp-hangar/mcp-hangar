@@ -1,70 +1,33 @@
-# Enforces Conventional Commits per GIT_FLOW.md decision #1 and CC scope reference.
+# Thin caller -- logic lives in mcp-hangar/.github (reusable). Only the repo's
+# scope list is local. Edit the reusable there to change behavior everywhere.
 name: pr-title
 
 on:
   pull_request:
-    types: [opened, edited, synchronize, ready_for_review]
+    types: [opened, edited, synchronize, ready_for_review, reopened]
 
 concurrency:
   group: ${{ github.workflow }}-${{ github.ref }}
-  cancel-in-progress: true
-
-permissions:
-  pull-requests: read
+  cancel-in-progress: false
 
 jobs:
-  validate:
-    runs-on: ubuntu-latest
-    if: ${{ !startsWith(github.head_ref, 'release-please--') }}
-    steps:
-      - name: Validate PR title (Conventional Commits)
-        uses: amannn/action-semantic-pull-request@v5
-        env:
-          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
-        with:
-          types: |
-            feat
-            fix
-            perf
-            refactor
-            docs
-            test
-            build
-            ci
-            chore
-            revert
-            security
-          scopes: |
-            core
-            enterprise
-            cli
-            ci
-            operator
-            helm
-            ui
-            observability
-            security
-            docs
-            deps
-            release
-            infra
-            tests
-            repo
-          requireScope: true
-          subjectPattern: ^[a-z].*[^.]$
-          subjectPatternError: "Subject must start lowercase and not end with a period."
-          # No custom headerPattern: the action's built-in conventional-commits
-          # parser handles `type(scope)!: subject` correctly. The previous custom
-          # pattern had 4 groups but no headerPatternCorrespondence, so it mapped
-          # the breaking-change `!` group as the subject -> "No subject found"; it
-          # only ever "worked" because it was invalid unquoted YAML and ignored.
-          validateSingleCommit: false
-
-      - name: Reject emoji in title
-        env:
-          TITLE: ${{ github.event.pull_request.title }}
-        run: |
-          if echo "$TITLE" | grep -qP '[\x{1F300}-\x{1F9FF}]|[\x{2600}-\x{26FF}]|[\x{2700}-\x{27BF}]'; then
-            echo "::error::PR title contains emoji. See GIT_FLOW.md."
-            exit 1
-          fi
+  pr-title:
+    uses: mcp-hangar/.github/.github/workflows/pr-title.yml@main
+    with:
+      scopes: |
+        core
+        enterprise
+        cli
+        ci
+        operator
+        helm
+        ui
+        observability
+        security
+        docs
+        deps
+        deps-dev
+        release
+        infra
+        tests
+        repo

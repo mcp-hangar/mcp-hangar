@@ -1,21 +1,11 @@
-"""Core enterprise boundary and provider registry.
+"""Optional auth / approval component loader.
 
-This module is the only core-side boundary that knows how to reach optional
-enterprise functionality. Core bootstrap/router code imports helpers from here
-instead of importing ``enterprise.*`` modules directly.
-
-Supported hook names for provider implementations:
-
-- ``load_components``: bootstrap enterprise auth/approval components
-- ``register_auth_cqrs``: register auth command/query handlers
-- ``extend_api_routes``: contribute Starlette routes/mounts
-- ``create_event_store``: build enterprise-backed event stores
-- ``create_observability_adapter``: build enterprise observability adapters
-- ``auth_compat_exports``: provide legacy bootstrap auth exports
-
-Entry points remain supported, but when no entry points are registered the core
-falls back to a local provider that loads ``enterprise`` modules through
-``importlib`` so the monorepo layout continues to work.
+Bootstraps the in-core auth and approval modules when they are configured and
+available. Historically this was a plugin boundary that discovered a *separate*
+enterprise package via ``mcp_hangar.extensions`` entry points; that package/tier
+was retired, so the indirection (provider registry + entry-point discovery) is
+gone and the built-in modules are loaded directly. The public functions and the
+``EnterpriseComponents`` container are unchanged so callers stay stable.
 """
 
 # pyright: reportExplicitAny=false, reportAny=false, reportMissingTypeArgument=false, reportUnknownParameterType=false, reportUnknownVariableType=false
@@ -23,7 +13,6 @@ falls back to a local provider that loads ``enterprise`` modules through
 from __future__ import annotations
 
 import importlib
-import importlib.metadata
 from dataclasses import dataclass
 from pathlib import Path
 from typing import Any, cast
@@ -34,11 +23,10 @@ from ...infrastructure.event_store import get_event_store
 from ...logging_config import get_logger
 
 logger = get_logger(__name__)
-ENTERPRISE_ENTRY_POINT_GROUP = "mcp_hangar.extensions"
 
 
 class _FallbackAuthComponents:
-    """Stub AuthComponents used when enterprise auth is unavailable."""
+    """Stub AuthComponents used when the auth module is unavailable."""
 
     enabled: bool = False
     api_key_store: Any = None
@@ -49,16 +37,16 @@ class _FallbackAuthComponents:
 
 
 class _FallbackNullAuthComponents(_FallbackAuthComponents):
-    """Null/noop auth implementation used when enterprise is unavailable."""
+    """Null/noop auth implementation used when the auth module is unavailable."""
 
 
 def _fallback_bootstrap_auth(_config: Any = None, **_kwargs: Any) -> _FallbackNullAuthComponents:
-    """Return noop auth components when enterprise is not installed."""
+    """Return noop auth components when the auth module is not installed."""
     return _FallbackNullAuthComponents()
 
 
 def _fallback_parse_auth_config(_raw: dict[str, Any] | None = None) -> None:
-    """Return empty config when enterprise is not installed."""
+    """Return empty config when the auth module is not installed."""
     return None
 
 
@@ -73,46 +61,12 @@ class AuthCompatibilityExports:
     enterprise_auth_available: bool
 
 
-@dataclass(frozen=True)
-class EnterpriseProvider:
-    """Provider hooks for optional enterprise integrations."""
-
-    name: str
-    load_components: Callable[[dict[str, Any], Any, Any], EnterpriseComponents] | None = None
-    register_auth_cqrs: Callable[[Any, Any], bool] | None = None
-    extend_api_routes: Callable[[], list[Any]] | None = None
-    create_event_store: Callable[[str, dict[str, Any]], Any | None] | None = None
-    create_observability_adapter: Callable[[Any], ObservabilityPort | None] | None = None
-    auth_compat_exports: Callable[[], AuthCompatibilityExports] | None = None
-
-
-_REGISTERED_ENTERPRISE_PROVIDERS: dict[str, EnterpriseProvider] = {}
-
-
 @dataclass
 class EnterpriseComponents:
-    """Container for all enterprise module instances."""
+    """Container for the optional auth / approval component instances."""
 
     auth_components: Any = None
     approval_service: Any = None
-
-
-def _merge_enterprise_components(base: EnterpriseComponents, loaded: EnterpriseComponents) -> None:
-    """Merge plugin-provided enterprise components into the result container."""
-    if loaded.auth_components is not None:
-        base.auth_components = loaded.auth_components
-    if loaded.approval_service is not None:
-        base.approval_service = loaded.approval_service
-
-
-def register_enterprise_provider(provider: EnterpriseProvider) -> None:
-    """Register a core-visible enterprise provider."""
-    _REGISTERED_ENTERPRISE_PROVIDERS[provider.name] = provider
-
-
-def get_registered_enterprise_providers() -> tuple[EnterpriseProvider, ...]:
-    """Return registered providers in deterministic insertion order."""
-    return tuple(_REGISTERED_ENTERPRISE_PROVIDERS.values())
 
 
 def _import_attribute(module_name: str, attribute_name: str) -> Any:
@@ -121,7 +75,7 @@ def _import_attribute(module_name: str, attribute_name: str) -> Any:
 
 
 def get_auth_compat_exports() -> AuthCompatibilityExports:
-    """Resolve legacy auth compatibility exports from enterprise or fallback."""
+    """Resolve legacy auth compatibility exports from the auth module or fallback."""
     try:
         auth_components = _import_attribute("mcp_hangar.auth.bootstrap", "AuthComponents")
         null_auth_components = _import_attribute("mcp_hangar.auth.bootstrap", "NullAuthComponents")
@@ -145,13 +99,24 @@ def get_auth_compat_exports() -> AuthCompatibilityExports:
     )
 
 
-def _builtin_load_components(
+def load_enterprise_modules(
     config: dict[str, Any],
     event_bus: Any = None,
     event_publisher: Any = None,
 ) -> EnterpriseComponents:
+    """Load the optional auth components when auth is configured and available.
+
+    Args:
+        config: Full application configuration dictionary.
+        event_bus: Optional event bus for auth module wiring.
+        event_publisher: Optional callable for publishing domain events.
+
+    Returns:
+        EnterpriseComponents populated when auth is enabled, otherwise empty.
+    """
     exports = get_auth_compat_exports()
     if not exports.enterprise_auth_available:
+        logger.info("optional_components_unavailable", reason="auth_module_not_installed")
         return EnterpriseComponents()
 
     auth_config = exports.parse_auth_config(config.get("auth"))
@@ -164,10 +129,18 @@ def _builtin_load_components(
         event_store=get_event_store(),
         event_bus=event_bus,
     )
-    return EnterpriseComponents(auth_components=auth_components)
+    components = EnterpriseComponents(auth_components=auth_components)
+    logger.info(
+        "optional_components_loaded",
+        auth=components.auth_components is not None,
+        approvals=components.approval_service is not None,
+    )
+    return components
 
 
-def _builtin_register_auth_cqrs(runtime: Any, auth_components: Any) -> bool:
+def register_auth_cqrs(runtime: Any, auth_components: Any) -> bool:
+    """Register auth CQRS handlers on the runtime buses. Returns False when the
+    auth module is not installed."""
     try:
         register_auth_command_handlers = _import_attribute(
             "mcp_hangar.auth.commands.handlers", "register_auth_command_handlers"
@@ -197,7 +170,8 @@ def _builtin_register_auth_cqrs(runtime: Any, auth_components: Any) -> bool:
     return True
 
 
-def _builtin_extend_api_routes() -> list[Any]:
+def get_enterprise_api_routes() -> list[Any]:
+    """Return Starlette routes contributed by the optional auth / approval modules."""
     from starlette.routing import Mount
 
     routes: list[Any] = []
@@ -216,7 +190,8 @@ def _builtin_extend_api_routes() -> list[Any]:
     return routes
 
 
-def _builtin_create_event_store(driver: str, config: dict[str, Any]) -> Any | None:
+def create_enterprise_event_store(driver: str, config: dict[str, Any]) -> Any | None:
+    """Build a persistent event store for the given driver, if supported."""
     if driver != "sqlite":
         return None
 
@@ -229,7 +204,8 @@ def _builtin_create_event_store(driver: str, config: dict[str, Any]) -> Any | No
     return sqlite_event_store(db_path)
 
 
-def _builtin_create_observability_adapter(config: Any) -> ObservabilityPort | None:
+def create_enterprise_observability_adapter(config: Any) -> ObservabilityPort | None:
+    """Build the Langfuse observability adapter from config."""
     langfuse_config = _import_attribute("mcp_hangar.integrations.langfuse", "LangfuseConfig")
     adapter_type = _import_attribute("mcp_hangar.integrations.langfuse", "LangfuseObservabilityAdapter")
 
@@ -243,138 +219,3 @@ def _builtin_create_observability_adapter(config: Any) -> ObservabilityPort | No
         scrub_outputs=config.scrub_outputs,
     )
     return cast(ObservabilityPort, adapter_type(adapter_config))
-
-
-def _builtin_auth_compat_exports() -> AuthCompatibilityExports:
-    return get_auth_compat_exports()
-
-
-def _get_builtin_enterprise_provider() -> EnterpriseProvider:
-    return EnterpriseProvider(
-        name="builtin-enterprise",
-        load_components=_builtin_load_components,
-        register_auth_cqrs=_builtin_register_auth_cqrs,
-        extend_api_routes=_builtin_extend_api_routes,
-        create_event_store=_builtin_create_event_store,
-        create_observability_adapter=_builtin_create_observability_adapter,
-        auth_compat_exports=_builtin_auth_compat_exports,
-    )
-
-
-def register_auth_cqrs(runtime: Any, auth_components: Any) -> bool:
-    """Register enterprise auth CQRS handlers through the provider boundary."""
-    for provider in get_registered_enterprise_providers():
-        if provider.register_auth_cqrs is not None and provider.register_auth_cqrs(runtime, auth_components):
-            return True
-
-    builtin_provider = _get_builtin_enterprise_provider()
-    if builtin_provider is not None and builtin_provider.register_auth_cqrs is not None:
-        return builtin_provider.register_auth_cqrs(runtime, auth_components)
-
-    return False
-
-
-def get_enterprise_api_routes() -> list[Any]:
-    """Return Starlette routes contributed by enterprise providers."""
-    routes: list[Any] = []
-    for provider in get_registered_enterprise_providers():
-        if provider.extend_api_routes is not None:
-            routes.extend(provider.extend_api_routes())
-
-    if routes:
-        return routes
-
-    builtin_provider = _get_builtin_enterprise_provider()
-    if builtin_provider is not None and builtin_provider.extend_api_routes is not None:
-        return builtin_provider.extend_api_routes()
-
-    return []
-
-
-def create_enterprise_event_store(driver: str, config: dict[str, Any]) -> Any | None:
-    """Ask enterprise providers to create an event store for the given driver."""
-    for provider in get_registered_enterprise_providers():
-        if provider.create_event_store is None:
-            continue
-        event_store = provider.create_event_store(driver, config)
-        if event_store is not None:
-            return event_store
-
-    builtin_provider = _get_builtin_enterprise_provider()
-    if builtin_provider is not None and builtin_provider.create_event_store is not None:
-        return builtin_provider.create_event_store(driver, config)
-
-    return None
-
-
-def create_enterprise_observability_adapter(config: Any) -> ObservabilityPort | None:
-    """Ask enterprise providers to create an observability adapter."""
-    for provider in get_registered_enterprise_providers():
-        if provider.create_observability_adapter is None:
-            continue
-        adapter = provider.create_observability_adapter(config)
-        if adapter is not None:
-            return adapter
-
-    builtin_provider = _get_builtin_enterprise_provider()
-    if builtin_provider is not None and builtin_provider.create_observability_adapter is not None:
-        return builtin_provider.create_observability_adapter(config)
-
-    return None
-
-
-def load_enterprise_modules(
-    config: dict[str, Any],
-    event_bus: Any = None,
-    event_publisher: Any = None,
-) -> EnterpriseComponents:
-    """Load enterprise modules unconditionally when available.
-
-    Args:
-        config: Full application configuration dictionary.
-        event_bus: Optional event bus for enterprise module wiring.
-        event_publisher: Optional callable for publishing domain events.
-
-    Returns:
-        EnterpriseComponents with populated fields for loaded modules.
-    """
-    components = EnterpriseComponents()
-
-    entry_points = tuple(importlib.metadata.entry_points(group=ENTERPRISE_ENTRY_POINT_GROUP))
-
-    provider_loaders: list[tuple[str, Callable[[dict[str, Any], Any, Any], EnterpriseComponents]]] = []
-    if entry_points:
-        for entry_point in entry_points:
-            loader_fn = cast(
-                Callable[[dict[str, Any], Any, Any], EnterpriseComponents],
-                entry_point.load(),
-            )
-            provider_loaders.append((entry_point.name, loader_fn))
-    else:
-        builtin_provider = _get_builtin_enterprise_provider()
-        if builtin_provider is None or builtin_provider.load_components is None:
-            logger.info("enterprise_modules_unavailable", reason="no_entry_points_registered")
-            return components
-        provider_loaders.append((builtin_provider.name, builtin_provider.load_components))
-
-    for provider_name, loader in provider_loaders:
-        loaded_components = loader(config, event_bus, event_publisher)
-        if not isinstance(loaded_components, EnterpriseComponents):
-            msg = (
-                f"Enterprise loader '{provider_name}' returned {type(loaded_components).__name__}; "
-                "expected EnterpriseComponents"
-            )
-            raise TypeError(msg)
-        _merge_enterprise_components(components, loaded_components)
-
-    loaded_flags = {
-        "auth": components.auth_components is not None,
-        "approvals": components.approval_service is not None,
-    }
-    logger.info(
-        "enterprise_modules_loaded",
-        entry_points=[provider_name for provider_name, _ in provider_loaders],
-        **loaded_flags,
-    )
-
-    return components

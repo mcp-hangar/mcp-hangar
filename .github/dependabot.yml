@@ -1,0 +1,37 @@
+# Dependabot version-updates (security updates run separately, no config needed).
+# Grouped minor+patch so a week's routine bumps arrive as one reviewable PR;
+# majors come individually so they get scrutiny. Conventional-commit titles
+# (`chore(deps):` / `ci(deps):`) satisfy the reusable pr-title validator, and
+# ci-core runs the full suite on these because uv.lock/pyproject are in its
+# path filter (#494).
+version: 2
+updates:
+  - package-ecosystem: "uv"
+    directory: "/"
+    schedule:
+      interval: "weekly"
+      day: "monday"
+    open-pull-requests-limit: 10
+    commit-message:
+      prefix: "chore"
+      include: "scope"
+    groups:
+      python-minor-patch:
+        update-types:
+          - "minor"
+          - "patch"
+
+  - package-ecosystem: "github-actions"
+    directory: "/"
+    schedule:
+      interval: "weekly"
+      day: "monday"
+    open-pull-requests-limit: 5
+    commit-message:
+      prefix: "ci"
+      include: "scope"
+    groups:
+      github-actions:
+        update-types:
+          - "minor"
+          - "patch"

@@ -17,7 +17,7 @@ from pathlib import Path
 import signal
 import sys
 import threading
-from typing import Any, TYPE_CHECKING
+from typing import Any
 
 import yaml
 
@@ -27,9 +27,6 @@ from .bootstrap import ApplicationContext, bootstrap
 from .cli.cli_compat import CLIConfig
 from .config import load_config_from_file
 from .state import get_discovery_orchestrator, get_runtime_mcp_servers
-
-if TYPE_CHECKING:
-    from ..cloud.config import CloudConfig
 
 logger = get_logger(__name__)
 
@@ -547,34 +544,6 @@ def _setup_logging_from_config(cli_config: CLIConfig) -> None:
     setup_logging(level=log_level, json_format=json_format, log_file=log_file)
 
 
-def _resolve_cloud_config(cli_config: CLIConfig, full_config: dict[str, object]) -> "CloudConfig | None":
-    """Build CloudConfig from CLI flags + config.yaml cloud: section.
-
-    CLI flags (--cloud-key, --cloud-url) take precedence over config.yaml.
-    Returns None when cloud connectivity is not requested.
-    """
-    from ..cloud.config import CloudConfig
-
-    # Start from config.yaml cloud: section
-    raw_cloud_section = full_config.get("cloud", {})
-    cloud_section: dict[str, object] = {}
-    if isinstance(raw_cloud_section, dict):
-        cloud_section = {str(key): value for key, value in raw_cloud_section.items()}
-
-    # CLI --cloud-key overrides config
-    cli_key = getattr(cli_config, "cloud_key", None)
-    if cli_key:
-        cloud_section["license_key"] = cli_key
-        cloud_section["enabled"] = True
-
-    # CLI --cloud-url overrides config
-    cli_url = getattr(cli_config, "cloud_url", None)
-    if cli_url:
-        cloud_section["endpoint"] = cli_url
-
-    return CloudConfig.from_dict(cloud_section)
-
-
 def run_server(cli_config: CLIConfig) -> None:
     """Main entry point that ties everything together.
 
@@ -602,26 +571,12 @@ def run_server(cli_config: CLIConfig) -> None:
     # Bootstrap application
     context = bootstrap(cli_config.config_path)
 
-    # Initialize cloud connector if license key is provided (CLI flag or config)
-    cloud_connector = None
-    cloud_cfg = _resolve_cloud_config(cli_config, context.config)
-    if cloud_cfg is not None:
-        from ..cloud.connector import CloudConnector
-
-        cloud_connector = CloudConnector(config=cloud_cfg, mcp_servers=context.runtime.repository)
-        # Subscribe to all domain events (handler is synchronous, just pushes to buffer)
-        context.runtime.event_bus.subscribe_to_all(cloud_connector.on_event)
-
     # Create lifecycle manager
     lifecycle = ServerLifecycle(context)
     _setup_signal_handlers(lifecycle)
 
     # Start background components and the dedicated discovery lifecycle loop.
     lifecycle.start()
-
-    # Start cloud connector (runs in dedicated daemon thread)
-    if cloud_connector is not None:
-        cloud_connector.start()
 
     # Log ready state
     mcp_server_ids = list(context.runtime.repository.get_all_ids())
@@ -642,8 +597,6 @@ def run_server(cli_config: CLIConfig) -> None:
             lifecycle.run_stdio()
     finally:
         # Ensure cleanup on exit
-        if cloud_connector is not None:
-            cloud_connector.stop()
         lifecycle.shutdown()
 
 

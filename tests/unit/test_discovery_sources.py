@@ -336,3 +336,28 @@ class TestDiscoveryMetricsIntegration:
             in metrics_output
         )
         assert 'mcp_hangar_discovery_quarantine_total{reason="namespace_denied"}' in metrics_output
+
+    def test_consolidated_discovery_metrics_are_scraped(self):
+        """Registrations, errors, and validation metrics reach the scraped registry.
+
+        Regression for the observability audit: these used to be recorded only to
+        a second prometheus_client registry that /metrics never serialized.
+        """
+        from mcp_hangar.metrics import (
+            get_metrics,
+            record_discovery_error,
+            record_discovery_registration,
+            record_discovery_validation_duration,
+            record_discovery_validation_failure,
+        )
+
+        record_discovery_registration("docker")
+        record_discovery_error("orchestrator", "ValueError")
+        record_discovery_validation_failure("docker", "schema_invalid")
+        record_discovery_validation_duration("docker", 0.02)
+
+        out = get_metrics()
+        assert 'mcp_hangar_discovery_registrations_total{source_type="docker"}' in out
+        assert 'mcp_hangar_discovery_errors_total{error_type="ValueError",source_type="orchestrator"}' in out
+        assert "mcp_hangar_discovery_validation_failures_total" in out
+        assert "mcp_hangar_discovery_validation_duration_seconds_bucket" in out

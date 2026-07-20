@@ -5,6 +5,52 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [1.6.0](https://github.com/mcp-hangar/mcp-hangar/compare/v1.5.1...v1.6.0) (2026-07-19)
+
+
+### Added
+
+* **core:** add L7 egress policy engine ([#526](https://github.com/mcp-hangar/mcp-hangar/issues/526)) ([575602d](https://github.com/mcp-hangar/mcp-hangar/commit/575602d1fc28b8f784169157470e2d6e3ddd2ec7))
+* **core:** enforce L7 egress policy at the tool-invocation chokepoint ([#527](https://github.com/mcp-hangar/mcp-hangar/issues/527)) ([2d22ad9](https://github.com/mcp-hangar/mcp-hangar/commit/2d22ad99b1ad5458ae61d9e715941540916abb9d))
+* **core:** receive compiled L7 egress policy over the REST API ([#528](https://github.com/mcp-hangar/mcp-hangar/issues/528)) ([0825a47](https://github.com/mcp-hangar/mcp-hangar/commit/0825a47bbf6888b4f88e126c942a824b060649a8))
+* **observability:** add telemetry-health alerts (OTLP export + discovery validation) ([#541](https://github.com/mcp-hangar/mcp-hangar/issues/541)) ([393f492](https://github.com/mcp-hangar/mcp-hangar/commit/393f492229f0a02762153a0b6b3a1482f2bdc138))
+* **observability:** trace the upstream call boundary (client spans, stdio propagation, sampler) ([#537](https://github.com/mcp-hangar/mcp-hangar/issues/537)) ([63bad07](https://github.com/mcp-hangar/mcp-hangar/commit/63bad0737305de542881974ca8cd4bd4682d177f))
+* **observability:** wire transport message metrics; drop never-emitted pool/SSE gauges ([#540](https://github.com/mcp-hangar/mcp-hangar/issues/540)) ([9d3ed15](https://github.com/mcp-hangar/mcp-hangar/commit/9d3ed15764d0d013b850a59f8e055b426b0b4d0d))
+
+
+### Fixed
+
+* **core:** consolidate discovery metrics onto the scraped registry ([#534](https://github.com/mcp-hangar/mcp-hangar/issues/534)) ([d699ff0](https://github.com/mcp-hangar/mcp-hangar/commit/d699ff027d6259dd3751ecfb9f6434b1b3ffdb53))
+* **core:** emit the cost-attribution metrics ([#535](https://github.com/mcp-hangar/mcp-hangar/issues/535)) ([275de80](https://github.com/mcp-hangar/mcp-hangar/commit/275de802cf6757b61f580d9252420ff479a6c30d))
+* **core:** L7 argument scan fails closed on unserializable arguments ([#529](https://github.com/mcp-hangar/mcp-hangar/issues/529)) ([a14bb2e](https://github.com/mcp-hangar/mcp-hangar/commit/a14bb2ebc6580ab80098ef07fb1bd4242ac42b3a))
+* **core:** redact secret values in logs and the log buffer ([#530](https://github.com/mcp-hangar/mcp-hangar/issues/530)) ([1374da8](https://github.com/mcp-hangar/mcp-hangar/commit/1374da8730e3c5af84bf32e0a9c128d863883170))
+* **core:** scrub Langfuse tool inputs/outputs by default ([#531](https://github.com/mcp-hangar/mcp-hangar/issues/531)) ([98a2cb9](https://github.com/mcp-hangar/mcp-hangar/commit/98a2cb907692f77547c4a2ab639bc2e9dbf190c5))
+* **core:** wire connections_active; delete the redundant connection metrics ([#536](https://github.com/mcp-hangar/mcp-hangar/issues/536)) ([81accc1](https://github.com/mcp-hangar/mcp-hangar/commit/81accc19a0680b2a1d5463b68420f77f5be490c5))
+* **metrics:** stop poisoning the latency histogram; drop stream_id label ([#532](https://github.com/mcp-hangar/mcp-hangar/issues/532)) ([55abc52](https://github.com/mcp-hangar/mcp-hangar/commit/55abc5261627ad6101fddc229c271fea87fc1de0))
+* **observability:** correlate logs with traces (trace_id/span_id) ([#533](https://github.com/mcp-hangar/mcp-hangar/issues/533)) ([29ea16b](https://github.com/mcp-hangar/mcp-hangar/commit/29ea16b09cf3fe751b0b296b1f0e608034e27c42))
+* **observability:** mark a failed tool call's span as ERROR ([#544](https://github.com/mcp-hangar/mcp-hangar/issues/544)) ([43848e9](https://github.com/mcp-hangar/mcp-hangar/commit/43848e9349968219003a6975ea4056dd9098b5f7))
+* **observability:** stop logging expected stdio shutdowns as errors ([#542](https://github.com/mcp-hangar/mcp-hangar/issues/542)) ([11ef2c7](https://github.com/mcp-hangar/mcp-hangar/commit/11ef2c7e5049c4951c68e16ca44db2419eb58a78))
+
+
+### Changed
+
+* **core:** collapse the vestigial enterprise plugin boundary ([#538](https://github.com/mcp-hangar/mcp-hangar/issues/538)) ([1813dcd](https://github.com/mcp-hangar/mcp-hangar/commit/1813dcdaecf29d4469ee0adb96d5555553a81ecc))
+* **observability:** align tool-invocation spans to OTel GenAI/MCP semconv ([#539](https://github.com/mcp-hangar/mcp-hangar/issues/539)) ([d705c8f](https://github.com/mcp-hangar/mcp-hangar/commit/d705c8f20763137fda61bb7b537330c7d3357592))
+
+
+### Security
+
+* **core:** validate WebSocket handshake Origin/Host at the edge ([#524](https://github.com/mcp-hangar/mcp-hangar/issues/524)) ([403ec6c](https://github.com/mcp-hangar/mcp-hangar/commit/403ec6c700173faed3cf3da324993b0fc92d267c))
+
+## [1.5.1](https://github.com/mcp-hangar/mcp-hangar/compare/v1.5.0...v1.5.1) (2026-07-16)
+
+
+### Fixed
+
+* **core:** resolve discovery/config review findings ([#481](https://github.com/mcp-hangar/mcp-hangar/issues/481), [#483](https://github.com/mcp-hangar/mcp-hangar/issues/483), [#484](https://github.com/mcp-hangar/mcp-hangar/issues/484)) ([#493](https://github.com/mcp-hangar/mcp-hangar/issues/493)) ([1600c54](https://github.com/mcp-hangar/mcp-hangar/commit/1600c543ecf6e3fa8d8af1b63f842c1339e46740))
+* **repo:** add basic client scope to keycloak example realm so tokens carry sub ([#476](https://github.com/mcp-hangar/mcp-hangar/issues/476)) ([2c1e9f4](https://github.com/mcp-hangar/mcp-hangar/commit/2c1e9f4d3d673fb142cf5d8e217a8d8f89dc2da6))
+* **security:** require mcp&gt;=1.28.1 (CVE-2026-59950) ([#497](https://github.com/mcp-hangar/mcp-hangar/issues/497)) ([5ba85d1](https://github.com/mcp-hangar/mcp-hangar/commit/5ba85d18c5c655d47092906e6577597528afa4dc))
+
 ## [Unreleased]
 
 ### Added
@@ -31,6 +77,87 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - **core:** add a SEP-2575 (Stateless MCP) `server/discover` entry point backed by the existing per-tenant projection read-model (#237). It returns the tenant-scoped tool surface — identical to the tenant's `tools/list` projection — alongside `supportedVersions`, `capabilities`, and `serverInfo`, so a stateless client can discover exactly the tools its tenant may call in one call. Tenant scoping and isolation are inherited from the projection (tenant A never sees tenant B's tools) (#290)
 - **observability:** add `mcp_hangar_otlp_export_failures_total` counter, incremented via a `SpanExporter` decorator when an OTLP span-export batch fails (collector unreachable/export error), so otherwise-silent background export failures and dropped spans are observable on `/metrics`; document the `MCP_TRACING_ENABLED=false` off-switch for running locally without a collector (#402)
 - **observability:** add `mcp_hangar_otlp_export_failures_total` counter, incremented via a `SpanExporter` decorator when an OTLP span-export batch fails (collector unreachable/export error), so otherwise-silent background export failures and dropped spans are observable on `/metrics`; document the `MCP_TRACING_ENABLED=false` off-switch for running locally without a collector (#418)
+* **core:** add the L7 egress policy engine (`domain.policies.egress_l7`): deterministic tool-call matching (glob allow / deny / require-approval with a policy default action) and argument scanning (named secret-pattern groups reusing the output redactor's value-regexes, plus a payload-size limit). Pure and deterministic — no ML. This is the core-side half of `MCPEgressPolicy` ([mcp-hangar-operator#53](https://github.com/mcp-hangar/mcp-hangar-operator/issues/53))
+* **core:** receive the compiled L7 egress policy from the operator over the REST API — `POST/PUT /api/mcp_servers/{id}/l7_policy` (set/replace) and `DELETE` (clear), guarded by the `mcp_servers:write` permission. Adds `L7Policy.from_dict` (parses the operator's camelCase wire form) and a `SetL7PolicyCommand`/handler that calls `McpServer.set_l7_policy`, closing the operator→core transport so an `MCPEgressPolicy` drives L7 enforcement end to end ([mcp-hangar-operator#53](https://github.com/mcp-hangar/mcp-hangar-operator/issues/53))
+* **core:** enforce the L7 egress policy at the tool-invocation chokepoint. `McpServer` carries an optional L7 policy; `invoke_tool` evaluates every call against it before waking the server or touching the upstream — a denied call raises `EgressPolicyDeniedError`, an approval-gated one raises `EgressPolicyApprovalRequiredError`, and neither reaches the wire. No policy attached means no enforcement (unchanged behavior). Populating the policy from the operator's compiled `MCPEgressPolicy` is the remaining transport step ([mcp-hangar-operator#53](https://github.com/mcp-hangar/mcp-hangar-operator/issues/53))
+* **observability:** trace the upstream call boundary. Outgoing MCP RPCs (`tools/call`, `tools/list`, `initialize`) are now `SpanKind.CLIENT` spans named per OTel GenAI/MCP semconv (`execute_tool {tool}`, with `gen_ai.tool.name` / `gen_ai.operation.name` / `mcp.method.name`) so an upstream's server span parents correctly to the gateway. The stdio transport now propagates W3C trace context into the MCP `_meta` field, mirroring the HTTP header injection, so distributed tracing survives stdio upstreams too. `init_tracing` now honors `OTEL_TRACES_SAMPLER` / `OTEL_TRACES_SAMPLER_ARG` (`always_on`/`always_off`/`traceidratio`/`parentbased_*`), which the hand-built `TracerProvider` previously ignored despite the documented contract
+
+* **observability:** add two telemetry-health Prometheus alerts (`monitoring/prometheus/alerts.yaml`): `MCPHangarTelemetryExportFailing` (fires on `rate(mcp_hangar_otlp_export_failures_total[5m]) > 0` — a silent OTLP export failure means traces are being dropped with no app-level error) and `MCPHangarDiscoveryValidationFailing` (discovered servers being rejected on validation). Closes a coverage gap for two emitted-but-unalerted signals; validated with `promtool check rules`
+
+### Changed
+
+* **observability:** align tool-invocation spans to OTel GenAI/MCP semantic conventions. The application-layer span is renamed `tool.invoke.{tool}` → `execute_tool {tool}` (matching the transport CLIENT span from the previous change), and the tool-name / token attributes move to semconv: `mcp.tool.name` → `gen_ai.tool.name`, `mcp.cost.input_tokens` / `mcp.cost.output_tokens` → `gen_ai.usage.input_tokens` / `gen_ai.usage.output_tokens`, with `gen_ai.operation.name` and `mcp.method.name` now also set. **Breaking for consumers that query the old span/OTLP-audit attribute names.** The Hangar-specific governance namespaces (`mcp.enforcement.*`, `mcp.risk.*`, `mcp.audit.*`, `mcp.cost.cents`/`model`/`currency`, `mcp.session.id`, …) are unchanged — they have no semconv equivalent. Also restores OTLP audit-log export, which a botched `Provider`→`McpServer` rename had silently disabled (the `LoggerMcpServer` import always failed, pinning `OTEL_LOGS_AVAILABLE` to false). Found continuing the observability audit
+
+### Security
+
+* **core:** Langfuse tracing now scrubs tool-call inputs and outputs by **default** (`scrub_inputs`/`scrub_outputs` default to true) — the exporter previously shipped full argument and result payloads to Langfuse unless explicitly disabled. Set them false to send full content for debugging. Found by the observability audit
+* **core:** redact secret *values* (AWS/GitHub/Slack/Stripe keys, JWTs, bearer tokens, …) across the logging pipeline and the MCP-server log buffer. The value-level `OutputRedactor` is now a structlog processor (complementing the existing key-name redaction) and is applied to subprocess `stderr` at the source before it enters the buffer — so the `GET /mcp_servers/{id}/logs` API can no longer serve raw secrets that an MCP server printed to stderr. Long-string redaction stays off, so only recognizable token shapes are rewritten. Found by the observability audit
+* **core:** L7 argument scanning now fails closed on un-serializable tool-call arguments (e.g. a circular reference) instead of raising — an unscannable payload is reported as a violation rather than crashing the evaluation — and skips serialization entirely when no argument rules are configured. Found by adversarial testing ([mcp-hangar-operator#53](https://github.com/mcp-hangar/mcp-hangar-operator/issues/53))
+* **security:** require `mcp>=1.28.1` to pull in the fix for CVE-2026-59950 (MCP Python SDK WebSocket server transport missing Host/Origin validation, HIGH). The published constraint was `mcp>=1.0.0`, so installs could still resolve a vulnerable SDK even though the dev lock had moved.
+* **core:** validate WebSocket handshake `Origin`/`Host` at the Hangar ASGI edge before forwarding non-`/api/` connections to the SDK app (DNS-rebinding / cross-origin defense-in-depth, the CVE-2026-59950 class at our own trust boundary). Loopback is trusted; non-loopback is fail-closed — a present `Origin` must be allow-listed (`MCP_CORS_ORIGINS`), a missing one is allowed (non-browser client, auth still applies), and the `Host` must be in `MCP_TRUSTED_HOSTS` ([#498](https://github.com/mcp-hangar/mcp-hangar/issues/498))
+
+### Fixed
+
+* **metrics:** wire `mcp_hangar_connections_active` (set 1 when a server's client connects, 0 on close/shutdown) so the provider-details "Active Connections" panel has data, and **remove** the never-emitted `mcp_hangar_connections_total` / `mcp_hangar_connection_duration_seconds` — no dashboard or alert referenced them and they duplicated the server-lifecycle signals. Found by the observability audit
+* **metrics:** wire the transport message metrics — `mcp_hangar_messages_sent` (by `method`), `mcp_hangar_messages_received` (by `type`: response/notification/error), and the `mcp_hangar_message_size_bytes` payload-size histogram (by `direction`) — at the stdio and HTTP transport boundaries, labeled per upstream server. These were defined but never emitted, so the protocol-level and payload-size panels stayed empty. **Removed** three never-emitted metrics that have nothing to populate them: `mcp_hangar_http_connection_pool_size` (httpx pool internals aren't exposed) and `mcp_hangar_http_sse_streams_active` / `mcp_hangar_http_sse_events` (the streaming-SSE reader path is unused — SSE responses are batch-parsed). Repurposed the dead "Active SSE Streams" dashboard panel to a messages-sent rate. Found by the observability audit
+* **metrics:** emit the cost-attribution metrics (`mcp_hangar_cost_cents_total`, `mcp_hangar_cost_attributions_total`). The cost handler computed per-invocation cost via the `ICostAttributor` port and published a report event, but never fed the Prometheus metrics its docstring promised — so the governance dashboard's cost panels stayed empty even with a real attributor configured. Now wired (a no-op under the default `NullCostAttributor`). Found by the observability audit
+* **metrics:** consolidate discovery metrics onto the single scraped registry. Discovery registrations, errors, validation failures, and validation durations were recorded only to a second `prometheus_client` registry that the `/metrics` endpoint never serialized — so they were silently dropped, and cycle/quarantine/deregistration were double-recorded. Removed the dead secondary system (`application/discovery/discovery_metrics.py`), added the two missing metrics (`mcp_hangar_discovery_validation_failures_total`, `mcp_hangar_discovery_validation_duration_seconds`) to the primary registry, and rewired the orchestrator through it. Found by the observability audit
+* **observability:** stop logging expected stdio-server shutdowns as errors. When Hangar closes a subprocess server (idle-TTL expiry / explicit stop), `close()` sets the client closed before terminating, so the reader thread's `stdio_client_process_exited` (+ any drained stderr) was logged at ERROR on every graceful shutdown — inflating the error stream and any log-based alerting. These are now logged at `info` with `expected=true` when we initiated the exit; an unsolicited process death is still an ERROR. Found reviewing live logs in Loki
+* **observability:** mark a failed tool call's span as ERROR. The batch executor handles failures as data (`CallResult.success=False`), so the `batch.call.{tool}` span never saw an exception and stayed UNSET — a failing tool call looked like a successful trace and couldn't be filtered as an error in Jaeger/Tempo. It now sets ERROR status (with the failure message) when the call fails. Added a NoOp-safe `mark_span_error` helper. Found reviewing the error path on the live stack
+* **observability:** correlate logs with traces — every log record emitted inside an OpenTelemetry span now carries `trace_id`/`span_id`, so you can pivot from a log line to its trace. A no-op when tracing is off or there is no active span, and it never lets a tracing error break a log call. Found by the observability audit
+* **metrics:** the tool-call latency histogram (`mcp_hangar_tool_call_duration_seconds`) no longer records a 0-second observation for every failed call — failures carried no real duration and poisoned the p50/p95/p99 percentiles. Duration is observed only for successful calls; failures are still counted via `mcp_hangar_tool_call_errors_total`. Found by the observability audit
+* **metrics:** drop the unbounded `stream_id` label from `mcp_hangar_events_compacted_total` — stream IDs are per-stream identifiers and were a cardinality bomb. Compaction is now a fleet-wide counter. Found by the observability audit
+* **core:** discovered `http`/`sse` containers now prefer the published host-port binding over the internal bridge-network IP, so they are reachable from the documented host-mode deployment ([#481](https://github.com/mcp-hangar/mcp-hangar/issues/481))
+* **core:** allow a discovery-only `config.yaml` (`discovery.enabled: true`, no top-level `mcp_servers`) to load instead of raising ([#483](https://github.com/mcp-hangar/mcp-hangar/issues/483))
+* **core:** log the transient "container has no IP" discovery skip at debug instead of warning ([#484](https://github.com/mcp-hangar/mcp-hangar/issues/484))
+
+### Removed
+
+* **core:** retire the Hangar Cloud connector (`src/mcp_hangar/cloud/`), the `POST /agent/policy` endpoint, the `--cloud-key`/`--cloud-url` CLI flags, and the `agent` RBAC role, as the hangar-agent / Hangar Cloud product tier is retired. `PolicyPushRejected` is intentionally kept (deprecated, producer-less) so already-persisted events still replay; `policy:write` remains and is granted via the `admin` role.
+
+## [1.5.0](https://github.com/mcp-hangar/mcp-hangar/compare/v1.4.0...v1.5.0) (2026-07-15)
+
+
+### Added
+
+* **cli:** add `auth bootstrap-admin` command (durable initial admin) ([#463](https://github.com/mcp-hangar/mcp-hangar/issues/463)) ([57b21fc](https://github.com/mcp-hangar/mcp-hangar/commit/57b21fc5816b8daf980c7272f4bae0fc94b3e9be)), closes [#451](https://github.com/mcp-hangar/mcp-hangar/issues/451) [#452](https://github.com/mcp-hangar/mcp-hangar/issues/452)
+* **core:** add interceptor/invoke + phase-aware hooks, pinned to MCP `modelcontextprotocol/modelcontextprotocol#2624` ([#400](https://github.com/mcp-hangar/mcp-hangar/issues/400)) ([3a0e2b5](https://github.com/mcp-hangar/mcp-hangar/commit/3a0e2b5d4df67821aa743fb69ff64ab037b5b28e))
+* **core:** add server/discover entry point backed by the per-tenant projection ([#407](https://github.com/mcp-hangar/mcp-hangar/issues/407)) ([6713cbd](https://github.com/mcp-hangar/mcp-hangar/commit/6713cbdef243977d36e3bfc30f24f4c3dc0c758d))
+* **core:** configurable command-bus rate limit via config.yaml ([#398](https://github.com/mcp-hangar/mcp-hangar/issues/398)) ([a891496](https://github.com/mcp-hangar/mcp-hangar/commit/a89149610ebbf2337bc97253483840875e3339f8))
+* **core:** emit task-lifecycle audit events (created/input_required/completed/failed/cancelled) ([#399](https://github.com/mcp-hangar/mcp-hangar/issues/399)) ([eb399bc](https://github.com/mcp-hangar/mcp-hangar/commit/eb399bcf8d0075721f95ba9a9abb9f3738d914f5))
+* **observability:** meter OTLP export failures and document the tracing off-switch ([#419](https://github.com/mcp-hangar/mcp-hangar/issues/419)) ([515c57c](https://github.com/mcp-hangar/mcp-hangar/commit/515c57c7538e0c5959fd1f8fe566572592448637))
+* **security:** atomically bootstrap the first API-key admin ([#456](https://github.com/mcp-hangar/mcp-hangar/issues/456)) ([9239705](https://github.com/mcp-hangar/mcp-hangar/commit/92397054a3d181c3ffe713a6c4022de6fad32250))
+
+
+### Fixed
+
+* **ci:** repair actionlint gate (broken action ref) and the YAML it flags ([#287](https://github.com/mcp-hangar/mcp-hangar/issues/287)) ([ee5de14](https://github.com/mcp-hangar/mcp-hangar/commit/ee5de144eea5c0fc3d8cb3dbefcbb7238c67b152))
+* **cli:** accept --config after serve and fix generated Claude Desktop config ([#420](https://github.com/mcp-hangar/mcp-hangar/issues/420)) ([9068161](https://github.com/mcp-hangar/mcp-hangar/commit/9068161b4a6e0c2a72579841550ba081d3f440b5)), closes [#417](https://github.com/mcp-hangar/mcp-hangar/issues/417)
+* **core:** clarify that mode:docker requires a host container CLI ([#430](https://github.com/mcp-hangar/mcp-hangar/issues/430)) ([732de25](https://github.com/mcp-hangar/mcp-hangar/commit/732de255652b8a579cac97392230457cf3acb25b)), closes [#429](https://github.com/mcp-hangar/mcp-hangar/issues/429)
+* **core:** config.yaml.example uses mcp_servers: (loader requires it, not providers:) ([#458](https://github.com/mcp-hangar/mcp-hangar/issues/458)) ([498b312](https://github.com/mcp-hangar/mcp-hangar/commit/498b312fcf993041abfebd462688cf939faa4a0d)), closes [#457](https://github.com/mcp-hangar/mcp-hangar/issues/457)
+* **core:** expose bootstrapped discovery through REST ([#442](https://github.com/mcp-hangar/mcp-hangar/issues/442)) ([1c2280c](https://github.com/mcp-hangar/mcp-hangar/commit/1c2280c2870a1718743b5f80af2090e2468093a4))
+* **core:** fail fast when SQLite event store is unavailable ([#438](https://github.com/mcp-hangar/mcp-hangar/issues/438)) ([a1be5db](https://github.com/mcp-hangar/mcp-hangar/commit/a1be5db4a5f965d06adabf97dde0420c2ad2c59b))
+* **core:** fail-fast on unwritable SQLite event store and add a durability readiness check ([#448](https://github.com/mcp-hangar/mcp-hangar/issues/448)) ([77f84cc](https://github.com/mcp-hangar/mcp-hangar/commit/77f84ccff9560a7d0eaf93a70f0fda9ce49a8d6a))
+* **core:** group circuit breaker no longer blocks a healthy remaining member ([#426](https://github.com/mcp-hangar/mcp-hangar/issues/426)) ([0b9cdc8](https://github.com/mcp-hangar/mcp-hangar/commit/0b9cdc89b9e8b0de8aa1349aecc39ba4e10fa1eb)), closes [#425](https://github.com/mcp-hangar/mcp-hangar/issues/425)
+* **core:** make EventStoreConfigurationError a ConfigurationError subclass ([#459](https://github.com/mcp-hangar/mcp-hangar/issues/459)) ([42cce1a](https://github.com/mcp-hangar/mcp-hangar/commit/42cce1ada6a2a70375a7e338405e7de2508defbb))
+* **core:** re-pin interceptor schema to 99bc7c9 and reconcile SEP-2133 capability key ([#405](https://github.com/mcp-hangar/mcp-hangar/issues/405)) ([c972adf](https://github.com/mcp-hangar/mcp-hangar/commit/c972adf04aea89afe1fba49665e26f69ea5180b6))
+* **core:** run discovery on a dedicated lifecycle loop ([#446](https://github.com/mcp-hangar/mcp-hangar/issues/446)) ([4eee12c](https://github.com/mcp-hangar/mcp-hangar/commit/4eee12c2efe9490e5b41602f07da6301c3df3b95))
+* **core:** treat MCP tool result isError as a failure ([#427](https://github.com/mcp-hangar/mcp-hangar/issues/427)) ([8ed7405](https://github.com/mcp-hangar/mcp-hangar/commit/8ed7405abb7b56e4e5744e2d71b199178f73d60f)), closes [#423](https://github.com/mcp-hangar/mcp-hangar/issues/423)
+* **core:** unblock concurrent cold-start waiters ([#440](https://github.com/mcp-hangar/mcp-hangar/issues/440)) ([9721349](https://github.com/mcp-hangar/mcp-hangar/commit/972134906eca086bea028c0ff5f77e6d631c7958))
+* **core:** use supported lifecycle API during reload ([#441](https://github.com/mcp-hangar/mcp-hangar/issues/441)) ([98f09f1](https://github.com/mcp-hangar/mcp-hangar/commit/98f09f1cc5ec8949ce01cbf8660d809c406e76e1))
+* **security:** read the Authorization header case-insensitively in JWTAuthenticator ([#472](https://github.com/mcp-hangar/mcp-hangar/issues/472)) ([7863848](https://github.com/mcp-hangar/mcp-hangar/commit/78638482741b7ca6e5b341a678453d6820ab3519))
+
+## [Unreleased]
+
+### Added
+- **cli:** `mcp-hangar auth bootstrap-admin --config PATH --principal PRINCIPAL` grants the one-time initial global admin using the server's own durable auth backend (reuses `bootstrap_auth()`, never an in-memory store). Fails closed when auth is disabled, anonymous access is allowed, or the storage driver is non-durable (`memory`/`event_sourcing`); a second run is refused without mutating storage. No credential is printed -- the grant is a global admin role for an existing external principal ([#451](https://github.com/mcp-hangar/mcp-hangar/issues/451))
+
+### Fixed
+- **security:** `JWTAuthenticator` read the `Authorization` header case-sensitively (`get("Authorization")`), but the HTTP auth middleware lowercases header names (ASGI headers already are), so `supports()` never matched a bearer request -- every valid OIDC/JWT token over `serve --http` was rejected as `auth_method: none` and OIDC bearer auth was non-functional on the HTTP surface. Now reads the header case-insensitively, matching `ApiKeyAuthenticator` ([#471](https://github.com/mcp-hangar/mcp-hangar/issues/471))
+- **security:** the SQLite role store seeded built-in roles with `INSERT OR REPLACE`, which deletes the conflicting row; because `role_assignments.role_name` has `ON DELETE CASCADE`, re-initializing the store (every process start / `bootstrap_auth`) silently cascade-wiped every assignment to a built-in role -- dropping the bootstrapped admin on the next restart. The seed (and `add_role`) now upsert in place via `ON CONFLICT(name) DO UPDATE`, matching the PostgreSQL store, so assignments survive ([#451](https://github.com/mcp-hangar/mcp-hangar/issues/451))
+- **core:** `EventStoreConfigurationError` now subclasses the domain `ConfigurationError` (was `RuntimeError`), so the event-store fail-fast surfaces as a configuration error at the config boundary; realigned the enterprise-boundary tests that asserted the pre-`#428` exception type/message, unbreaking `CI - Core` on `main`
+- **core:** `config.yaml.example` used a `providers:` server section, but the loader requires `mcp_servers:` and raises `Invalid configuration: missing 'mcp_servers' section` -- copying the example verbatim failed to start. Renamed to `mcp_servers:` (and the `mcp_servers.*.max_concurrency` doc path)
+
 
 ### Changed
 

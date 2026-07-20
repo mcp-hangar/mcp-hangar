@@ -1,6 +1,6 @@
 # MCP Hangar
 
-**Open-source control plane for MCP servers -- lifecycle, governance, and observability for your server fleet.**
+**The policy enforcement plane for MCP -- deterministic admission and egress policy, attributable audit, and SIEM export for your MCP server fleet. MIT, self-hosted, no SaaS.**
 
 [![PyPI](https://img.shields.io/pypi/v/mcp-hangar)](https://pypi.org/project/mcp-hangar/)
 [![CI](https://github.com/mcp-hangar/mcp-hangar/actions/workflows/ci-core.yml/badge.svg)](https://github.com/mcp-hangar/mcp-hangar/actions/workflows/ci-core.yml)
@@ -8,7 +8,7 @@
 
 ## Why
 
-In MCP, the tool list is a hint the client caches; the call path is the only surface a provider mediates in real time. Every governance primitive worth having -- revocation, per-tenant scoping, audit -- attaches there, or attaches to nothing. Hangar puts a control plane on that seam: one mediated path for lifecycle, policy, and telemetry across your whole MCP server fleet.
+In MCP, the tool list is a hint the client caches; the call path is the only surface a provider mediates in real time. Every governance primitive worth having -- revocation, per-tenant scoping, audit -- attaches there, or attaches to nothing. Hangar puts a policy enforcement plane on that seam: one mediated path for lifecycle, policy, and telemetry across your whole MCP server fleet.
 
 > Background: [The Advisory List -- Why MCP Governance Lives at the Call Path](https://whyisthisdown.com/posts/the-advisory-list)
 
@@ -38,6 +38,10 @@ Then serve it:
 mcp-hangar serve --config config.yaml                     # stdio (Claude Desktop)
 mcp-hangar serve --config config.yaml --http --port 8000  # HTTP + REST API at /api/
 ```
+
+> The 1.5 server refuses to bind a non-loopback interface without auth. For a
+> quick/insecure demo, pass `--unsafe-no-auth`; for anything real, configure
+> the `auth` block.
 
 Or skip the config entirely -- get filesystem, fetch, and memory servers wired into Claude Desktop in one line:
 
@@ -92,6 +96,7 @@ mcp_servers:
 - [Getting Started](https://mcp-hangar.io/docs/getting-started/quickstart) &middot; [Configuration](https://mcp-hangar.io/docs/reference/configuration) &middot; [Python API](https://mcp-hangar.io/docs/guides/FACADE_API)
 - [Governance & Front Door](https://mcp-hangar.io/docs/guides/FRONT_DOOR) &middot; [Authentication & RBAC](https://mcp-hangar.io/docs/guides/AUTHENTICATION) &middot; [Observability](https://mcp-hangar.io/docs/guides/OBSERVABILITY)
 - [Kubernetes operator](https://github.com/mcp-hangar/mcp-hangar-operator) &middot; [Helm charts](https://github.com/mcp-hangar/helm-charts) &middot; [All docs](https://mcp-hangar.io/docs)
+- [Release compatibility matrix](https://github.com/mcp-hangar/docs/blob/main/operations/RELEASE_COMPATIBILITY.md) &middot; which core, operator, and chart versions are released and tested together
 
 ## License
 

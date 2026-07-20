@@ -8,7 +8,7 @@ produce the correct span attribute names and values when the SDK is active.
 import pytest
 from unittest.mock import MagicMock
 
-from mcp_hangar.observability.conventions import MCP, McpServer
+from mcp_hangar.observability.conventions import GenAI, MCP, McpServer
 
 
 @pytest.fixture(autouse=True)
@@ -48,7 +48,7 @@ class TestOtelSpanAttributesIntegration:
     """Real OTEL SDK span attribute tests."""
 
     def test_tool_invoke_span_has_correct_name(self, otel_setup) -> None:
-        """Span name is 'tool.invoke.{tool_name}'."""
+        """Span name is 'execute_tool {tool_name}' (OTel GenAI semconv)."""
         from mcp_hangar.application.services.traced_mcp_server_service import TracedMcpServerService
         from mcp_hangar.application.ports.observability import NullObservabilityAdapter
 
@@ -91,7 +91,7 @@ class TestOtelSpanAttributesIntegration:
 
         spans = otel_setup.get_finished_spans()
         tool_span = next(s for s in spans if "my_special_tool" in s.name)
-        assert tool_span.attributes.get(MCP.TOOL_NAME) == "my_special_tool"
+        assert tool_span.attributes.get(GenAI.TOOL_NAME) == "my_special_tool"
 
     def test_tool_invoke_span_status_ok_on_success(self, otel_setup) -> None:
         """Successful invocation: span status code is UNSET (OK)."""
@@ -106,7 +106,7 @@ class TestOtelSpanAttributesIntegration:
         svc.invoke_tool("p", "t", {})
 
         spans = otel_setup.get_finished_spans()
-        tool_span = next(s for s in spans if ".t" in s.name or s.name.split(".")[-1] == "t")
+        tool_span = next(s for s in spans if s.name == "execute_tool t" or s.name.endswith(" t"))
         assert tool_span.status.status_code in (StatusCode.UNSET, StatusCode.OK)
 
     def test_tool_invoke_span_status_error_on_failure(self, otel_setup) -> None:

@@ -9,7 +9,7 @@ MIT licensed -- part of core observability infrastructure.
 import time
 
 from ...logging_config import get_logger
-from ...observability.conventions import MCP, Caller, Cost, McpServer
+from ...observability.conventions import MCP, Caller, Cost, GenAI, McpServer
 
 logger = get_logger(__name__)
 
@@ -17,7 +17,7 @@ logger = get_logger(__name__)
 try:
     from opentelemetry._logs import get_logger as otel_get_logger
     from opentelemetry._logs import SeverityNumber
-    from opentelemetry.sdk._logs import LoggerMcpServer  # noqa: F401
+    from opentelemetry.sdk._logs import LoggerProvider  # noqa: F401
 
     OTEL_LOGS_AVAILABLE = True
 except ImportError:
@@ -100,7 +100,7 @@ class OTLPAuditExporter:
             attributes: dict = {
                 "mcp.event.name": "tool_invocation",
                 McpServer.ID: mcp_server_id,
-                MCP.TOOL_NAME: tool_name,
+                GenAI.TOOL_NAME: tool_name,
                 MCP.TOOL_STATUS: status,
                 MCP.TOOL_DURATION_MS: duration_ms,
             }
@@ -121,9 +121,9 @@ class OTLPAuditExporter:
             if cost_model is not None:
                 attributes[Cost.MODEL] = cost_model
             if cost_input_tokens is not None:
-                attributes[Cost.INPUT_TOKENS] = cost_input_tokens
+                attributes[GenAI.USAGE_INPUT_TOKENS] = cost_input_tokens
             if cost_output_tokens is not None:
-                attributes[Cost.OUTPUT_TOKENS] = cost_output_tokens
+                attributes[GenAI.USAGE_OUTPUT_TOKENS] = cost_output_tokens
 
             self._emit_log_record(attributes)
 

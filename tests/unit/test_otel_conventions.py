@@ -6,6 +6,7 @@ from mcp_hangar.observability.conventions import (
     Caller,
     Cost,
     Enforcement,
+    GenAI,
     Health,
     MCP,
     Metrics,
@@ -73,7 +74,7 @@ class TestKeyAttributes:
         assert McpServer.ID == "mcp.server.id"
 
     def test_tool_name(self) -> None:
-        assert MCP.TOOL_NAME == "mcp.tool.name"
+        assert GenAI.TOOL_NAME == "gen_ai.tool.name"
 
     def test_enforcement_action(self) -> None:
         assert Enforcement.ACTION == "mcp.enforcement.action"
@@ -119,7 +120,7 @@ class TestSetGovernanceAttributes:
 
         calls = {call.args[0]: call.args[1] for call in span.set_attribute.call_args_list}
         assert calls[McpServer.ID] == "math"
-        assert calls[MCP.TOOL_NAME] == "add"
+        assert calls[GenAI.TOOL_NAME] == "add"
 
     def test_does_not_set_none_values(self) -> None:
         """None arguments must not produce empty span attributes."""
@@ -208,8 +209,8 @@ class TestSetGovernanceAttributes:
         calls = {call.args[0]: call.args[1] for call in span.set_attribute.call_args_list}
         assert calls[Cost.CENTS] == 150
         assert calls[Cost.MODEL] == "token"
-        assert calls[Cost.INPUT_TOKENS] == 500
-        assert calls[Cost.OUTPUT_TOKENS] == 200
+        assert calls[GenAI.USAGE_INPUT_TOKENS] == 500
+        assert calls[GenAI.USAGE_OUTPUT_TOKENS] == 200
         assert calls[Cost.CURRENCY] == "USD"
 
     def test_does_not_set_caller_cost_when_none(self) -> None:
@@ -246,10 +247,10 @@ class TestTracingUsesConventionConstants:
         # raw string literal should not appear -- the constant Provider.ID should be used instead
         assert '"mcp.server.id"' not in src, "tracing.py must use Provider.ID constant, not raw string 'mcp.server.id'"
 
-    def test_no_raw_mcp_tool_name_string_in_tracing(self) -> None:
+    def test_no_raw_tool_name_string_in_tracing(self) -> None:
         import pathlib
 
         src = pathlib.Path("src/mcp_hangar/observability/tracing.py").read_text()
-        assert '"mcp.tool.name"' not in src, (
-            "tracing.py must use MCP.TOOL_NAME constant, not raw string 'mcp.tool.name'"
+        assert '"gen_ai.tool.name"' not in src, (
+            "tracing.py must use GenAI.TOOL_NAME constant, not the raw string 'gen_ai.tool.name'"
         )
