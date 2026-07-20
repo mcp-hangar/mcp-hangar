@@ -163,8 +163,8 @@ jobs:
       run:
         working-directory: .
     environment:
-      name: ${{ needs.validate.outputs.is_prerelease == 'true' && 'testpypi' || 'pypi' }}
-      url: ${{ needs.validate.outputs.is_prerelease == 'true' && 'https://test.pypi.org/p/mcp-hangar' || 'https://pypi.org/p/mcp-hangar' }}
+      name: pypi
+      url: https://pypi.org/p/mcp-hangar
     permissions:
       id-token: write  # Required for trusted publishing and OIDC signing
       attestations: write  # Required for build provenance attestations
@@ -195,15 +195,12 @@ jobs:
           pip install twine
           twine check dist/*
 
-      - name: Publish to TestPyPI (prereleases)
-        if: needs.validate.outputs.is_prerelease == 'true'
-        uses: pypa/gh-action-pypi-publish@release/v1
-        with:
-          repository-url: https://test.pypi.org/legacy/
-          packages-dir: dist/
-
-      - name: Publish to PyPI (stable releases)
-        if: needs.validate.outputs.is_prerelease == 'false'
+      # Prereleases (alpha/beta/rc) and stable releases both publish to prod PyPI.
+      # pip ignores prereleases unless --pre or an explicit prerelease pin is used,
+      # so an alpha on prod PyPI never affects a plain `pip install mcp-hangar`.
+      # (TestPyPI was dropped: its trusted-publisher was never configured, and prod
+      # PyPI already hosts the `pypi` environment's trusted publisher.)
+      - name: Publish to PyPI
         uses: pypa/gh-action-pypi-publish@release/v1
         with:
           packages-dir: dist/
