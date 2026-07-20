@@ -204,6 +204,9 @@ jobs:
         uses: pypa/gh-action-pypi-publish@release/v1
         with:
           packages-dir: dist/
+          # Idempotent: a re-run/recovery of an already-published version is a
+          # no-op instead of a hard failure (PyPI rejects duplicate uploads).
+          skip-existing: true
 
   # Build and publish Docker images
   publish-docker:
@@ -239,6 +242,10 @@ jobs:
             type=semver,pattern={{major}}.{{minor}}
             type=semver,pattern={{major}},enable=${{ !startsWith(github.ref, 'refs/tags/v0.') }}
             type=raw,value=latest,enable=${{ needs.validate.outputs.is_prerelease == 'false' }}
+            # Explicit version tag from the validated release version, so a
+            # workflow_dispatch run (github.ref is a branch, not a tag) still
+            # gets an image tag — the semver patterns above only fire on a tag ref.
+            type=raw,value=${{ needs.validate.outputs.version }}
 
       - name: Build and push Docker image
         id: docker-build
@@ -318,6 +325,9 @@ jobs:
         uses: softprops/action-gh-release@v2
         with:
           name: "v${{ needs.validate.outputs.version }}"
+          # Explicit tag so a workflow_dispatch run (github.ref is a branch)
+          # attaches the release to the version tag instead of failing.
+          tag_name: "v${{ needs.validate.outputs.version }}"
           body: |
             ## What's Changed
 
