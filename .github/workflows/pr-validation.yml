@@ -41,15 +41,9 @@ jobs:
           echo "| Core | ${{ needs.detect-changes.outputs.core }} |" >> $GITHUB_STEP_SUMMARY
           echo "| Docs | ${{ needs.detect-changes.outputs.docs }} |" >> $GITHUB_STEP_SUMMARY
 
-  enterprise-boundary:
-    runs-on: ubuntu-latest
-    steps:
-      - name: No-op (former enterprise merged into src/mcp_hangar/)
-        run: echo "Enterprise boundary check removed — all code in src/mcp_hangar/ now"
-
   # This job ensures at least one check runs for branch protection
   required-check:
     runs-on: ubuntu-latest
-    needs: [detect-changes, enterprise-boundary]
+    needs: [detect-changes]
     steps:
       - run: echo "PR validation complete"

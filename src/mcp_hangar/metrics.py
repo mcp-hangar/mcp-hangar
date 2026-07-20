@@ -582,22 +582,15 @@ HEALTH_CHECK_CONSECUTIVE_FAILURES = Gauge(
 
 CONNECTIONS_ACTIVE = Gauge(
     name="mcp_hangar_connections_active",
-    description="Number of active connections to mcp_servers",
+    description="Whether a client connection to the mcp_server is currently open (1/0)",
     labels=["mcp_server"],
 )
 
-CONNECTIONS_TOTAL = Counter(
-    name="mcp_hangar_connections",
-    description="Total number of connections established",
-    labels=["mcp_server", "result"],
-)
-
-CONNECTION_DURATION_SECONDS = Histogram(
-    name="mcp_hangar_connection_duration_seconds",
-    description="Duration of mcp_server connections in seconds",
-    labels=["mcp_server"],
-    buckets=(1, 5, 10, 30, 60, 300, 600, 1800, 3600),
-)
+# CONNECTIONS_TOTAL and CONNECTION_DURATION_SECONDS were removed by the
+# observability audit: never emitted, no dashboard/alert referenced them, and
+# they duplicated the server-lifecycle signals (starts_total, cold_start_seconds,
+# server lifetime). connections_active is kept and now wired (a provider-details
+# panel uses it).
 
 # -----------------------------------------------------------------------------
 # Message Metrics
@@ -740,6 +733,19 @@ DISCOVERY_LAST_CYCLE_TIMESTAMP = Gauge(
     labels=["source_type"],
 )
 
+DISCOVERY_VALIDATION_FAILURES_TOTAL = Counter(
+    name="mcp_hangar_discovery_validation_failures",
+    description="Total discovery validation failures",
+    labels=["source_type", "validation_type"],
+)
+
+DISCOVERY_VALIDATION_DURATION_SECONDS = Histogram(
+    name="mcp_hangar_discovery_validation_duration_seconds",
+    description="Duration of discovery validation in seconds",
+    labels=["source_type"],
+    buckets=(0.01, 0.025, 0.05, 0.1, 0.25, 0.5, 1.0, 2.5, 5.0, 10.0),
+)
+
 # -----------------------------------------------------------------------------
 # HTTP Transport Metrics (for remote mcp_servers)
 # -----------------------------------------------------------------------------
@@ -767,24 +773,6 @@ HTTP_RETRIES_TOTAL = Counter(
     name="mcp_hangar_http_retries",
     description="Total number of HTTP request retries",
     labels=["mcp_server", "retry_reason"],  # retry_reason: 502, 503, 504, connection_error
-)
-
-HTTP_CONNECTION_POOL_SIZE = Gauge(
-    name="mcp_hangar_http_connection_pool_size",
-    description="Current number of connections in HTTP connection pool",
-    labels=["mcp_server"],
-)
-
-HTTP_SSE_STREAMS_ACTIVE = Gauge(
-    name="mcp_hangar_http_sse_streams_active",
-    description="Number of active SSE streams to remote mcp_servers",
-    labels=["mcp_server"],
-)
-
-HTTP_SSE_EVENTS_TOTAL = Counter(
-    name="mcp_hangar_http_sse_events",
-    description="Total number of SSE events received from remote mcp_servers",
-    labels=["mcp_server", "event_type"],  # event_type: message, notification, error
 )
 
 # -----------------------------------------------------------------------------
@@ -883,7 +871,8 @@ CIRCUIT_BREAKER_STATE = Gauge(
 EVENTS_COMPACTED_TOTAL = Counter(
     name="mcp_hangar_events_compacted",
     description="Total number of events removed by stream compaction",
-    labels=["stream_id"],
+    # No per-stream label: stream IDs are unbounded identifiers and would be a
+    # cardinality bomb. Compaction is a fleet-wide signal; aggregate is enough.
 )
 
 # -----------------------------------------------------------------------------
@@ -1003,8 +992,6 @@ def _register_all_metrics():
         HEALTH_CHECK_DURATION_SECONDS,
         HEALTH_CHECK_CONSECUTIVE_FAILURES,
         CONNECTIONS_ACTIVE,
-        CONNECTIONS_TOTAL,
-        CONNECTION_DURATION_SECONDS,
         MESSAGES_SENT_TOTAL,
         MESSAGES_RECEIVED_TOTAL,
         MESSAGE_SIZE_BYTES,
@@ -1026,14 +1013,13 @@ def _register_all_metrics():
         DISCOVERY_QUARANTINE_TOTAL,
         DISCOVERY_ERRORS_TOTAL,
         DISCOVERY_LAST_CYCLE_TIMESTAMP,
+        DISCOVERY_VALIDATION_FAILURES_TOTAL,
+        DISCOVERY_VALIDATION_DURATION_SECONDS,
         # HTTP transport metrics
         HTTP_REQUESTS_TOTAL,
         HTTP_REQUEST_DURATION_SECONDS,
         HTTP_ERRORS_TOTAL,
         HTTP_RETRIES_TOTAL,
-        HTTP_CONNECTION_POOL_SIZE,
-        HTTP_SSE_STREAMS_ACTIVE,
-        HTTP_SSE_EVENTS_TOTAL,
         # Batch invocation metrics
         BATCH_CALLS_TOTAL,
         BATCH_VALIDATION_FAILURES_TOTAL,
@@ -1118,11 +1104,18 @@ def init_metrics(version: str = "1.0.0"):
 
 
 def observe_tool_call(mcp_server: str, tool: str, duration: float, success: bool, error_type: str | None = None):
-    """Record a tool call observation."""
+    """Record a tool call observation.
+
+    The duration histogram observes only successful calls: failures carry no
+    meaningful duration (the failure path has none to report), and recording a
+    0-second observation for every failure poisons the latency percentiles.
+    Failures are counted separately via TOOL_CALL_ERRORS_TOTAL.
+    """
     status = "success" if success else "error"
     TOOL_CALLS_TOTAL.inc(mcp_server=mcp_server, tool=tool, status=status)
-    TOOL_CALL_DURATION_SECONDS.observe(duration, mcp_server=mcp_server, tool=tool)
-    if not success and error_type:
+    if success:
+        TOOL_CALL_DURATION_SECONDS.observe(duration, mcp_server=mcp_server, tool=tool)
+    elif error_type:
         TOOL_CALL_ERRORS_TOTAL.inc(mcp_server=mcp_server, tool=tool, error_type=error_type)
 
 
@@ -1238,7 +1231,71 @@ def record_events_compacted(stream_id: str, count: int) -> None:
         count: Number of events removed.
     """
     if count > 0:
-        EVENTS_COMPACTED_TOTAL.inc(count, stream_id=stream_id)
+        # stream_id kept in the signature for callers/logging but intentionally
+        # not used as a metric label (unbounded cardinality).
+        EVENTS_COMPACTED_TOTAL.inc(count)
+
+
+def set_connection_active(mcp_server: str, active: bool) -> None:
+    """Set whether a client connection to a server is currently open.
+
+    Args:
+        mcp_server: The server ID.
+        active: True when a client is connected/ready, False on close.
+    """
+    CONNECTIONS_ACTIVE.set(1 if active else 0, mcp_server=mcp_server)
+
+
+def classify_jsonrpc_message(message: dict) -> str:
+    """Classify a received JSON-RPC message as response / notification / error.
+
+    - ``error``: carries a top-level ``error`` member.
+    - ``notification``: a request with no ``id`` (server-initiated).
+    - ``response``: everything else (a normal result envelope).
+    """
+    if "error" in message:
+        return "error"
+    if "method" in message and "id" not in message:
+        return "notification"
+    return "response"
+
+
+def record_message_sent(mcp_server: str, method: str, size_bytes: int) -> None:
+    """Record an outgoing JSON-RPC message to an upstream server.
+
+    Args:
+        mcp_server: The upstream server ID (``"unknown"`` if unlabeled).
+        method: JSON-RPC method (e.g. ``tools/call``).
+        size_bytes: Serialized request size in bytes.
+    """
+    MESSAGES_SENT_TOTAL.inc(mcp_server=mcp_server, method=method)
+    MESSAGE_SIZE_BYTES.observe(size_bytes, mcp_server=mcp_server, direction="sent")
+
+
+def record_message_received(mcp_server: str, message_type: str, size_bytes: int) -> None:
+    """Record an incoming JSON-RPC message from an upstream server.
+
+    Args:
+        mcp_server: The upstream server ID (``"unknown"`` if unlabeled).
+        message_type: ``response`` / ``notification`` / ``error`` (see
+            :func:`classify_jsonrpc_message`).
+        size_bytes: Raw message size in bytes.
+    """
+    MESSAGES_RECEIVED_TOTAL.inc(mcp_server=mcp_server, type=message_type)
+    MESSAGE_SIZE_BYTES.observe(size_bytes, mcp_server=mcp_server, direction="received")
+
+
+def record_cost(mcp_server: str, tool: str, cost_cents: int, cost_model: str) -> None:
+    """Record attributed cost for a tool invocation.
+
+    Args:
+        mcp_server: The server the tool ran on.
+        tool: The tool name.
+        cost_cents: Attributed cost (hundredths of a cent) to add.
+        cost_model: The pricing model used for attribution.
+    """
+    COST_CENTS_TOTAL.inc(cost_cents, mcp_server=mcp_server, tool=tool, cost_model=cost_model)
+    COST_ATTRIBUTIONS_TOTAL.inc(mcp_server=mcp_server, tool=tool)
 
 
 def record_capability_violation(mcp_server: str, violation_type: str) -> None:
@@ -1388,6 +1445,26 @@ def record_discovery_error(source_type: str, error_type: str):
         error_type: Type of error
     """
     DISCOVERY_ERRORS_TOTAL.inc(source_type=source_type, error_type=error_type)
+
+
+def record_discovery_validation_failure(source_type: str, validation_type: str):
+    """Record a discovery validation failure.
+
+    Args:
+        source_type: Type of source
+        validation_type: The validation result/type that failed
+    """
+    DISCOVERY_VALIDATION_FAILURES_TOTAL.inc(source_type=source_type, validation_type=validation_type)
+
+
+def record_discovery_validation_duration(source_type: str, duration: float):
+    """Record the duration of a discovery validation.
+
+    Args:
+        source_type: Type of source
+        duration: Validation duration in seconds
+    """
+    DISCOVERY_VALIDATION_DURATION_SECONDS.observe(duration, source_type=source_type)
 
 
 # =============================================================================

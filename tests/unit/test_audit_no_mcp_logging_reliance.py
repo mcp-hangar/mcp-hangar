@@ -67,7 +67,7 @@ def test_full_audit_pipeline_emits_via_otel_structured_exporter() -> None:
     attributes = mock_emit.call_args[0][0]
     # OTEL semantic-convention attributes prove the structured exporter emitted.
     assert attributes.get("mcp.server.id") == "math"
-    assert attributes.get("mcp.tool.name") == "add"
+    assert attributes.get("gen_ai.tool.name") == "add"
     assert any(key.startswith("mcp.") for key in attributes)
 
 

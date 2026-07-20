@@ -292,3 +292,18 @@ class OutputRedactor:
                 return True
 
         return False
+
+
+# Shared, process-wide redactor for observability sinks (logs, log buffer,
+# trace payloads). Long-string redaction is OFF: it applies only the builtin
+# token-shape patterns (AWS/GitHub/Slack/Stripe/JWT/…), so it catches real
+# secrets without mangling arbitrary long values in log/trace fields.
+_default_redactor: "OutputRedactor | None" = None
+
+
+def get_default_redactor() -> "OutputRedactor":
+    """Return the shared value-level secret redactor for observability sinks."""
+    global _default_redactor
+    if _default_redactor is None:
+        _default_redactor = OutputRedactor(redact_long_strings=False)
+    return _default_redactor

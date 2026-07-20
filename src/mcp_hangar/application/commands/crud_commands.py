@@ -6,6 +6,7 @@ a single intent to mutate state. Handlers receive these via the command bus.
 
 from dataclasses import dataclass, field
 
+from ...domain.policies.egress_l7 import L7Policy
 from .commands import Command
 
 
@@ -72,6 +73,24 @@ class UpdateMcpServerCommand(Command):
     env: dict[str, str] | None = None
     idle_ttl_s: int | None = None
     health_check_interval_s: int | None = None
+    source: str = "api"
+
+
+@dataclass(frozen=True)
+class SetL7PolicyCommand(Command):
+    """Attach, replace, or clear the L7 egress policy on an existing mcp_server.
+
+    Delivered by the operator when it compiles an MCPEgressPolicy. A None policy
+    clears enforcement.
+
+    Attributes:
+        mcp_server_id: Identifier of the mcp_server to govern.
+        policy: The compiled L7 policy, or None to clear it.
+        source: Who set this policy ("api", "operator").
+    """
+
+    mcp_server_id: str
+    policy: L7Policy | None = None
     source: str = "api"
 
 

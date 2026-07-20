@@ -27,7 +27,11 @@ from . import metrics as prometheus_metrics
 from .domain.exceptions import ClientError
 from .logging_config import get_logger
 from .context import get_identity_context
-from .observability.tracing import inject_trace_context, scrub_baggage_for_tenant
+from .observability.tracing import (
+    inject_trace_context,
+    scrub_baggage_for_tenant,
+    upstream_call_span,
+)
 from .protocol import inject_protocol_meta
 
 logger = get_logger(__name__)
@@ -353,23 +357,28 @@ class HttpClient:
         mcp_server_label = self._mcp_server_id or self._host
 
         try:
-            # Build per-request headers: W3C TraceContext (+ deprecated session id).
-            extra_headers: dict[str, str] = {}
-            inject_trace_context(extra_headers)
-            # Fail-safe cross-tenant scrub: drop untrusted/cross-tenant baggage on outbound.
-            scrub_baggage_for_tenant(extra_headers, _tenant_id)
-            # DEPRECATED (SEP-2567): only echo the transport Mcp-Session-Id for a
-            # legacy session-based upstream that established one. Declaring the
-            # upstream stateless keeps _mcp_session_id None, so this is skipped.
-            if not self._http_config.stateless_upstream and self._mcp_session_id:
-                extra_headers["Mcp-Session-Id"] = self._mcp_session_id
+            # CLIENT span at the upstream boundary (OTel GenAI/MCP semconv),
+            # opened before injection so the traceparent written into the
+            # request headers parents the upstream's span to this one.
+            with upstream_call_span(method, params):
+                # Build per-request headers: W3C TraceContext (+ deprecated session id).
+                extra_headers: dict[str, str] = {}
+                inject_trace_context(extra_headers)
+                # Fail-safe cross-tenant scrub: drop untrusted/cross-tenant baggage on outbound.
+                scrub_baggage_for_tenant(extra_headers, _tenant_id)
+                # DEPRECATED (SEP-2567): only echo the transport Mcp-Session-Id for a
+                # legacy session-based upstream that established one. Declaring the
+                # upstream stateless keeps _mcp_session_id None, so this is skipped.
+                if not self._http_config.stateless_upstream and self._mcp_session_id:
+                    extra_headers["Mcp-Session-Id"] = self._mcp_session_id
 
-            response = self._client.post(
-                url,
-                json=request_body,
-                headers=extra_headers if extra_headers else None,
-                timeout=timeout,
-            )
+                prometheus_metrics.record_message_sent(mcp_server_label, method, len(json.dumps(request_body).encode()))
+                response = self._client.post(
+                    url,
+                    json=request_body,
+                    headers=extra_headers if extra_headers else None,
+                    timeout=timeout,
+                )
 
             duration_s = time.time() - start_time
             duration_ms = duration_s * 1000
@@ -418,6 +427,12 @@ class HttpClient:
 
             try:
                 result = response.json()
+                if isinstance(result, dict):
+                    prometheus_metrics.record_message_received(
+                        mcp_server_label,
+                        prometheus_metrics.classify_jsonrpc_message(result),
+                        len(response.content),
+                    )
                 return cast(dict[str, Any], result)
             except json.JSONDecodeError as e:
                 prometheus_metrics.HTTP_ERRORS_TOTAL.inc(mcp_server=mcp_server_label, error_type="json_decode_error")

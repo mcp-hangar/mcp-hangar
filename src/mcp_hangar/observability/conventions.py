@@ -9,19 +9,22 @@ consume without Hangar-specific plugins.
 Usage example::
 
     from opentelemetry import trace
-    from mcp_hangar.observability.conventions import MCP, Enforcement, McpServer
+    from mcp_hangar.observability.conventions import GenAI, MCP, Enforcement, McpServer
 
     tracer = trace.get_tracer("mcp_hangar")
-    with tracer.start_as_current_span("tool.invoke") as span:
+    with tracer.start_as_current_span("execute_tool read_file") as span:
         span.set_attribute(McpServer.ID, "my-mcp_server")
-        span.set_attribute(MCP.TOOL_NAME, "read_file")
+        span.set_attribute(GenAI.TOOL_NAME, "read_file")
         span.set_attribute(MCP.USER_ID, request.user_id)
         span.set_attribute(Enforcement.POLICY_RESULT, "allow")
 
 Versioning:
-    When adding new attributes, never rename or remove existing ones.
-    Additions are backwards-compatible. Breaking changes require a new
-    conventions module version (conventions_v2.py).
+    Attribute names that have an OTel semantic-convention equivalent follow it
+    (``gen_ai.*`` for tool execution, ``mcp.method.name``/``mcp.session.id`` for
+    the MCP protocol). The remaining ``mcp.*`` governance namespaces
+    (enforcement, risk, audit, behavioral, caller, cost) are Hangar-specific and
+    have no semconv equivalent. Prefer additive changes; a rename is a breaking
+    change for span consumers, so coordinate it (as the semconv cutover did).
 
 References:
     - OpenTelemetry Semantic Conventions: https://opentelemetry.io/docs/concepts/semantic-conventions/
@@ -56,11 +59,32 @@ class McpServer:
     ENFORCEMENT_MODE = "mcp.server.enforcement_mode"
 
 
+class GenAI:
+    """OTel GenAI semantic-convention attributes for tool execution.
+
+    These follow the OpenTelemetry GenAI conventions so GenAI-aware backends
+    (and the OTel Collector) recognize Hangar's tool invocations without
+    Hangar-specific mapping. Span name for a tool call is ``execute_tool {tool}``.
+    """
+
+    #: Operation name; ``"execute_tool"`` for a tool invocation.
+    OPERATION_NAME = "gen_ai.operation.name"
+
+    #: Tool name as advertised by the mcp_server (semconv: gen_ai.tool.name).
+    TOOL_NAME = "gen_ai.tool.name"
+
+    #: Input tokens consumed (LLM-backed tools).
+    USAGE_INPUT_TOKENS = "gen_ai.usage.input_tokens"
+
+    #: Output tokens produced (LLM-backed tools).
+    USAGE_OUTPUT_TOKENS = "gen_ai.usage.output_tokens"
+
+
 class MCP:
     """Attributes describing an MCP tool invocation."""
 
-    #: Tool name as advertised by the mcp_server.
-    TOOL_NAME = "mcp.tool.name"
+    #: MCP protocol method name (semconv: mcp.method.name), e.g. "tools/call".
+    METHOD_NAME = "mcp.method.name"
 
     #: Tool call duration in milliseconds (use histogram metric instead when possible).
     TOOL_DURATION_MS = "mcp.tool.duration_ms"
@@ -233,12 +257,6 @@ class Cost:
     #: Pricing model used for attribution ("token", "duration", "fixed", "composite").
     MODEL = "mcp.cost.model"
 
-    #: Input tokens consumed (LLM-backed tools).
-    INPUT_TOKENS = "mcp.cost.input_tokens"
-
-    #: Output tokens produced (LLM-backed tools).
-    OUTPUT_TOKENS = "mcp.cost.output_tokens"
-
     #: Currency code (ISO 4217, default "USD").
     CURRENCY = "mcp.cost.currency"
 
@@ -335,7 +353,9 @@ def set_governance_attributes(
         cost_currency: Optional. ISO 4217 currency code.
     """
     span.set_attribute(McpServer.ID, mcp_server_id)
-    span.set_attribute(MCP.TOOL_NAME, tool_name)
+    span.set_attribute(GenAI.TOOL_NAME, tool_name)
+    span.set_attribute(GenAI.OPERATION_NAME, "execute_tool")
+    span.set_attribute(MCP.METHOD_NAME, "tools/call")
 
     if mode is not None:
         span.set_attribute(McpServer.MODE, mode)
@@ -364,9 +384,9 @@ def set_governance_attributes(
     if cost_model is not None:
         span.set_attribute(Cost.MODEL, cost_model)
     if cost_input_tokens is not None:
-        span.set_attribute(Cost.INPUT_TOKENS, cost_input_tokens)
+        span.set_attribute(GenAI.USAGE_INPUT_TOKENS, cost_input_tokens)
     if cost_output_tokens is not None:
-        span.set_attribute(Cost.OUTPUT_TOKENS, cost_output_tokens)
+        span.set_attribute(GenAI.USAGE_OUTPUT_TOKENS, cost_output_tokens)
     if cost_currency is not None:
         span.set_attribute(Cost.CURRENCY, cost_currency)
     if risk_score is not None:

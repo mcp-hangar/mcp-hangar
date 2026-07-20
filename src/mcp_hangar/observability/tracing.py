@@ -32,7 +32,7 @@ from typing import Any, TypeVar
 
 from mcp_hangar.logging_config import get_logger
 from mcp_hangar.metrics import record_otlp_export_failure
-from mcp_hangar.observability.conventions import MCP, McpServer
+from mcp_hangar.observability.conventions import GenAI, MCP, McpServer
 
 logger = get_logger(__name__)
 
@@ -53,6 +53,12 @@ try:
         SpanExportResult,
     )
     from opentelemetry.sdk.trace import TracerProvider
+    from opentelemetry.sdk.trace.sampling import (
+        ALWAYS_OFF,
+        ALWAYS_ON,
+        ParentBased,
+        TraceIdRatioBased,
+    )
     from opentelemetry import trace
     from opentelemetry.baggage.propagation import W3CBaggagePropagator
     from opentelemetry.propagators.composite import CompositePropagator
@@ -189,6 +195,40 @@ def is_tracing_enabled() -> bool:
     return enabled in ("true", "1", "yes") and OTEL_AVAILABLE
 
 
+def _build_sampler() -> Any:
+    """Build a sampler from OTEL_TRACES_SAMPLER / OTEL_TRACES_SAMPLER_ARG.
+
+    We construct the TracerProvider by hand, so the SDK's standard env-var
+    auto-configuration for sampling never runs. This mirrors that contract so
+    OTEL_TRACES_SAMPLER actually takes effect (the docstring long claimed
+    support that was never wired). Defaults to parentbased_always_on, matching
+    the SDK default. For ratio samplers, OTEL_TRACES_SAMPLER_ARG is the ratio
+    in [0, 1]; a missing/invalid arg falls back to 1.0 (sample everything).
+    """
+    name = os.getenv("OTEL_TRACES_SAMPLER", "parentbased_always_on").strip().lower()
+    arg = os.getenv("OTEL_TRACES_SAMPLER_ARG", "")
+
+    def _ratio(default: float) -> float:
+        try:
+            return float(arg)
+        except (TypeError, ValueError):
+            return default
+
+    if name == "always_on":
+        return ALWAYS_ON
+    if name == "always_off":
+        return ALWAYS_OFF
+    if name == "traceidratio":
+        return TraceIdRatioBased(_ratio(1.0))
+    if name == "parentbased_always_off":
+        return ParentBased(ALWAYS_OFF)
+    if name == "parentbased_traceidratio":
+        return ParentBased(TraceIdRatioBased(_ratio(1.0)))
+    if name != "parentbased_always_on":
+        logger.warning("tracing_unknown_sampler", sampler=name, fallback="parentbased_always_on")
+    return ParentBased(ALWAYS_ON)
+
+
 def init_tracing(
     service_name: str = "mcp-hangar",
     otlp_endpoint: str | None = None,
@@ -239,7 +279,9 @@ def init_tracing(
         )
 
         # Create tracer mcp_server
-        _tracer_mcp_server = TracerProvider(resource=resource)
+        sampler = _build_sampler()
+        _tracer_mcp_server = TracerProvider(resource=resource, sampler=sampler)
+        logger.info("tracing_sampler_configured", sampler=type(sampler).__name__)
 
         # Add exporters
         exporters_added = 0
@@ -352,12 +394,14 @@ def trace_tool_invocation(
             tracer = get_tracer(__name__)
 
             with tracer.start_as_current_span(
-                f"tool.invoke.{tool_name}",
+                f"execute_tool {tool_name}",
                 kind=trace.SpanKind.CLIENT if OTEL_AVAILABLE else None,
             ) as span:
                 # Set standard attributes
                 span.set_attribute(McpServer.ID, mcp_server_id)
-                span.set_attribute(MCP.TOOL_NAME, tool_name)
+                span.set_attribute(GenAI.TOOL_NAME, tool_name)
+                span.set_attribute(GenAI.OPERATION_NAME, "execute_tool")
+                span.set_attribute(MCP.METHOD_NAME, "tools/call")
                 span.set_attribute("mcp.timeout_seconds", timeout)
 
                 try:
@@ -414,6 +458,50 @@ def trace_span(
             for key, value in attributes.items():
                 span.set_attribute(key, value)
         yield span
+
+
+@contextmanager
+def upstream_call_span(method: str, params: dict[str, Any] | None = None):
+    """CLIENT span for an outgoing MCP RPC to an upstream server.
+
+    Wrap the transport call with this so the RPC is a proper SpanKind.CLIENT
+    span and the trace context injected downstream (HTTP headers or stdio
+    `_meta`) parents the upstream's server span to this one. Names/attributes
+    follow OTel GenAI/MCP semconv. No-op when tracing is disabled.
+
+    Args:
+        method: JSON-RPC method (e.g. "tools/call", "tools/list", "initialize").
+        params: Request params; for tools/call the tool name is read from
+            ``params["name"]`` for the span name and gen_ai.tool.name.
+    """
+    params = params or {}
+    attributes: dict[str, Any] = {MCP.METHOD_NAME: method}
+    if method == "tools/call":
+        tool = params.get("name")
+        name = f"execute_tool {tool}" if tool else "execute_tool"
+        attributes[GenAI.OPERATION_NAME] = "execute_tool"
+        if tool:
+            attributes[GenAI.TOOL_NAME] = tool
+    else:
+        name = method
+
+    with trace_span(name, attributes=attributes, kind="client") as span:
+        yield span
+
+
+def mark_span_error(span: Any, description: str | None = None) -> None:
+    """Set ERROR status on a span. Safe for NoOp spans and when OTel is absent.
+
+    Use when a failure is handled as data (e.g. converted to a result object)
+    rather than raised, so the span would otherwise stay UNSET and the failing
+    operation would look successful in the trace UI.
+    """
+    if not OTEL_AVAILABLE:
+        return
+    try:
+        span.set_status(Status(StatusCode.ERROR, description or ""))
+    except Exception:  # noqa: BLE001 -- fault-barrier: tracing must not break the traced path
+        pass
 
 
 def inject_trace_context(carrier: dict[str, str]) -> None:

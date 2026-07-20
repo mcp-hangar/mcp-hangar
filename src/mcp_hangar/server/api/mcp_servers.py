@@ -16,8 +16,10 @@ from ...application.commands.commands import StartMcpServerCommand, StopMcpServe
 from ...application.commands.crud_commands import (
     CreateMcpServerCommand,
     DeleteMcpServerCommand,
+    SetL7PolicyCommand,
     UpdateMcpServerCommand,
 )
+from ...domain.policies.egress_l7 import L7Policy
 from ...application.queries.queries import (
     GetMcpServerHealthQuery,
     GetMcpServerQuery,
@@ -337,6 +339,51 @@ async def delete_mcp_server(request: Request) -> HangarJSONResponse:
     return HangarJSONResponse(result)
 
 
+async def set_l7_policy(request: Request) -> HangarJSONResponse:
+    """Attach or replace the L7 egress policy on an mcp_server.
+
+    Path params:
+        mcp_server_id: McpServer identifier.
+
+    Request body (JSON): the compiled L7 policy the operator derived from an
+    MCPEgressPolicy -- ``tools`` (allow/deny/requireApproval globs),
+    ``arguments`` (secretPatterns, maxPayloadBytes), ``defaultAction``.
+
+    Returns:
+        JSON with {"mcp_server_id": ..., "l7_policy_set": true}, status 200.
+
+    Raises:
+        McpServerNotFoundError: If mcp_server does not exist (-> 404).
+    """
+    _check_permission(request, resource_type="mcp_servers", action="write")
+    mcp_server_id = request.path_params["mcp_server_id"]
+    body = await request.json()
+    try:
+        policy = L7Policy.from_dict(body)
+    except (ValueError, TypeError) as exc:
+        return HangarJSONResponse({"error": "invalid_l7_policy", "detail": str(exc)}, status_code=400)
+    result = await dispatch_command(SetL7PolicyCommand(mcp_server_id=mcp_server_id, policy=policy, source="operator"))
+    return HangarJSONResponse(result)
+
+
+async def clear_l7_policy(request: Request) -> HangarJSONResponse:
+    """Clear the L7 egress policy on an mcp_server (disables L7 enforcement).
+
+    Path params:
+        mcp_server_id: McpServer identifier.
+
+    Returns:
+        JSON with {"mcp_server_id": ..., "l7_policy_set": false}, status 200.
+
+    Raises:
+        McpServerNotFoundError: If mcp_server does not exist (-> 404).
+    """
+    _check_permission(request, resource_type="mcp_servers", action="write")
+    mcp_server_id = request.path_params["mcp_server_id"]
+    result = await dispatch_command(SetL7PolicyCommand(mcp_server_id=mcp_server_id, policy=None, source="operator"))
+    return HangarJSONResponse(result)
+
+
 # Route definitions for mounting in the API router
 mcp_server_routes = [
     Route("/", list_mcp_servers, methods=["GET"]),
@@ -344,6 +391,8 @@ mcp_server_routes = [
     Route("/{mcp_server_id:str}", get_mcp_server, methods=["GET"]),
     Route("/{mcp_server_id:str}", update_mcp_server, methods=["PUT", "PATCH"]),
     Route("/{mcp_server_id:str}", delete_mcp_server, methods=["DELETE"]),
+    Route("/{mcp_server_id:str}/l7_policy", set_l7_policy, methods=["POST", "PUT"]),
+    Route("/{mcp_server_id:str}/l7_policy", clear_l7_policy, methods=["DELETE"]),
     Route("/{mcp_server_id:str}/start", start_mcp_server, methods=["POST"]),
     Route("/{mcp_server_id:str}/stop", stop_mcp_server, methods=["POST"]),
     Route("/{mcp_server_id:str}/block", block_mcp_server, methods=["POST"]),

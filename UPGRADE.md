@@ -422,7 +422,7 @@ helm upgrade mcp-hangar mcp-hangar/mcp-hangar \
 
 ### Helm values changes
 
-Review your `values.yaml` for these additions in the hangar-cloud chart:
+Review your `values.yaml` for these additions in the mcp-hangar chart:
 
 ```yaml
 # Authentication (required for enterprise features)

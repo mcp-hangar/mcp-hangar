@@ -8,7 +8,7 @@ class TestOTLPAuditExporter:
 
     def test_export_tool_invocation_success_emits_log_record(self) -> None:
         from mcp_hangar.infrastructure.observability.otlp_audit_exporter import OTLPAuditExporter
-        from mcp_hangar.observability.conventions import MCP, McpServer
+        from mcp_hangar.observability.conventions import GenAI, MCP, McpServer
 
         exporter = OTLPAuditExporter()
 
@@ -22,7 +22,7 @@ class TestOTLPAuditExporter:
             mock_emit.assert_called_once()
             record = mock_emit.call_args[0][0]
             assert record.get(McpServer.ID) == "math"
-            assert record.get(MCP.TOOL_NAME) == "add"
+            assert record.get(GenAI.TOOL_NAME) == "add"
             assert record.get(MCP.TOOL_STATUS) == "success"
 
     def test_export_tool_invocation_error_includes_error_type(self) -> None:
@@ -96,7 +96,7 @@ class TestOTLPAuditExporter:
 
     def test_export_tool_invocation_includes_cost_attributes(self) -> None:
         from mcp_hangar.infrastructure.observability.otlp_audit_exporter import OTLPAuditExporter
-        from mcp_hangar.observability.conventions import Cost
+        from mcp_hangar.observability.conventions import Cost, GenAI
 
         exporter = OTLPAuditExporter()
 
@@ -114,8 +114,8 @@ class TestOTLPAuditExporter:
             record = mock_emit.call_args[0][0]
             assert record[Cost.CENTS] == 250
             assert record[Cost.MODEL] == "token"
-            assert record[Cost.INPUT_TOKENS] == 1000
-            assert record[Cost.OUTPUT_TOKENS] == 500
+            assert record[GenAI.USAGE_INPUT_TOKENS] == 1000
+            assert record[GenAI.USAGE_OUTPUT_TOKENS] == 500
 
     def test_export_tool_invocation_omits_none_caller_cost(self) -> None:
         from mcp_hangar.infrastructure.observability.otlp_audit_exporter import OTLPAuditExporter

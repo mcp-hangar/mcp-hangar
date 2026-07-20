@@ -9,6 +9,7 @@ from ...protocol import HANGAR_CLIENT_INFO, SUPPORTED_PROTOCOL_VERSION
 
 if TYPE_CHECKING:
     from ...infrastructure.lock_hierarchy import TrackedLock
+    from ..policies.egress_l7 import L7Policy
 
 from ..contracts.log_buffer import IMcpServerLogBuffer
 from ..contracts.metrics_publisher import IMetricsPublisher, NullMetricsPublisher
@@ -29,6 +30,8 @@ from ..events import (
 )
 from ..exceptions import (
     CannotStartMcpServerError,
+    EgressPolicyApprovalRequiredError,
+    EgressPolicyDeniedError,
     InvalidStateTransitionError,
     McpServerStartError,
     ToolInvocationError,
@@ -117,6 +120,8 @@ class McpServer(AggregateRoot):
         log_buffer: IMcpServerLogBuffer | None = None,
         # Capability declarations (Phase 38)
         capabilities: McpServerCapabilities | None = None,
+        # L7 egress policy (MCPEgressPolicy); None = no enforcement
+        l7_policy: "L7Policy | None" = None,
     ):
         super().__init__()
 
@@ -167,6 +172,10 @@ class McpServer(AggregateRoot):
 
         # Capability declarations (Phase 38)
         self._capabilities = capabilities
+
+        # L7 egress policy (MCPEgressPolicy). None means no L7 enforcement; when
+        # set, invoke_tool evaluates every tool call against it.
+        self._l7_policy = l7_policy
 
         # State
         self._state = McpServerState.COLD
@@ -334,6 +343,19 @@ class McpServer(AggregateRoot):
     def mode(self) -> McpServerMode:
         """McpServer mode enum."""
         return self._mode
+
+    @property
+    def l7_policy(self) -> "L7Policy | None":
+        """The L7 egress policy enforced on tool calls, or None if unset."""
+        return self._l7_policy
+
+    def set_l7_policy(self, policy: "L7Policy | None") -> None:
+        """Attach, replace, or clear the L7 egress policy.
+
+        Used to populate the policy from its source (the operator's compiled
+        MCPEgressPolicy). Clearing (None) disables L7 enforcement for this server.
+        """
+        self._l7_policy = policy
 
     @property
     def mode_str(self) -> str:
@@ -639,10 +661,19 @@ class McpServer(AggregateRoot):
         config = self._get_launch_config()
         client = launcher.launch(**config)
 
+        # stdio transports start unlabeled; tag them so their message metrics
+        # carry this server's ID (HTTP clients are labeled at construction).
+        if getattr(client, "mcp_server_id", "unset") is None:
+            client.mcp_server_id = str(self.mcp_server_id)
+
         # Start live stderr-reader thread if a log buffer is configured and the
         # client has a process with a stderr pipe (subprocess/docker/container modes).
         if self._log_buffer is not None:
             self._start_stderr_reader(client)
+
+        from ...metrics import set_connection_active
+
+        set_connection_active(self.mcp_server_id, True)
 
         return client
 
@@ -664,16 +695,22 @@ class McpServer(AggregateRoot):
         if stderr_pipe is None:
             return
 
+        from ..security.redactor import get_default_redactor
         from ..value_objects.log import LogLine
 
         mcp_server_id = self.mcp_server_id
         # self._log_buffer is guaranteed non-None here: _create_client guards with `if self._log_buffer is not None`
         log_buffer: IMcpServerLogBuffer = self._log_buffer  # type: ignore[assignment]
+        redactor = get_default_redactor()
 
         def _reader() -> None:
             try:
                 for raw_line in stderr_pipe:
-                    content = raw_line.rstrip("\n")
+                    # Redact at the source: MCP-server stderr routinely contains
+                    # tokens/keys/connection strings, and this content is served
+                    # verbatim by the /logs API. Scrub before it ever enters the
+                    # buffer so every downstream consumer is safe.
+                    content = redactor.redact(raw_line.rstrip("\n"))
                     log_buffer.append(
                         LogLine(
                             mcp_server_id=mcp_server_id,
@@ -945,6 +982,9 @@ class McpServer(AggregateRoot):
             except Exception:  # noqa: BLE001 -- fault-barrier: cleanup must not mask original startup error
                 pass
             self._client = None
+            from ...metrics import set_connection_active
+
+            set_connection_active(self.mcp_server_id, False)
 
         self._health.record_failure()
 
@@ -1003,6 +1043,18 @@ class McpServer(AggregateRoot):
         correlation_id = str(CorrelationId())
         idt_ctx = get_identity_context()
         identity_context_dict = idt_ctx.to_dict() if idt_ctx else None
+
+        # L7 egress policy (MCPEgressPolicy): evaluate the tool call before we
+        # wake the server or touch the upstream, so a denied or approval-gated
+        # call never reaches the wire (and never cold-starts a server).
+        if self._l7_policy is not None:
+            from ..policies.egress_l7 import ToolAction, evaluate
+
+            decision = evaluate(tool_name, arguments, self._l7_policy)
+            if decision.action is ToolAction.DENY:
+                raise EgressPolicyDeniedError(self.mcp_server_id, tool_name, "; ".join(decision.reasons))
+            if decision.action is ToolAction.REQUIRE_APPROVAL:
+                raise EgressPolicyApprovalRequiredError(self.mcp_server_id, tool_name)
 
         # Wait outside the invocation lock so a concurrent starter can finalize
         # state and signal every cold-start waiter.
@@ -1354,6 +1406,9 @@ class McpServer(AggregateRoot):
             except Exception as e:  # noqa: BLE001 -- fault-barrier: shutdown cleanup must not propagate
                 logger.warning(f"shutdown_error: {self.mcp_server_id}, error={e}")
             self._client = None
+            from ...metrics import set_connection_active
+
+            set_connection_active(self.mcp_server_id, False)
 
         self._state = McpServerState.COLD
         self._increment_version()

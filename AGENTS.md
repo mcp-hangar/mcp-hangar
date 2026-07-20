@@ -120,7 +120,6 @@ mcp-hangar/
 │   │   └── tools/                 # MCP tool implementations
 │   │       └── batch/             # Batch executor with concurrency control
 │   │
-│   ├── cloud/                     # Bridge to hangar-cloud gRPC/REST
 │   ├── observability/             # Metrics, tracing conventions
 │   ├── auth/                      # Authentication and authorization
 │   │   ├── commands/              # CreateApiKeyCommand, AssignRoleCommand

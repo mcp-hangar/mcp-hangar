@@ -1,6 +1,6 @@
 [project]
 name = "mcp-hangar"
-version = "1.5.0"
+version = "1.6.0"
 description = "Production-grade infrastructure for Model Context Protocol"
 readme = "README.md"
 license = {text = "MIT"}
@@ -20,7 +20,7 @@ classifiers = [
     "Topic :: System :: Systems Administration",
 ]
 dependencies = [
-    "mcp>=1.0.0",
+    "mcp>=1.28.1",
     "structlog>=24.0.0",
     "pydantic>=2.0.0",
     "httpx>=0.25.0",
@@ -66,11 +66,6 @@ containers = [
 ]
 [project.scripts]
 mcp-hangar = "mcp_hangar.server.cli:cli_main"
-[project.entry-points."mcp_hangar.extensions"]
-# Extension distributions can register a bootstrap loader callable with:
-#   load_enterprise_modules(config, event_bus, event_publisher) -> EnterpriseComponents
-# Example registration from an extension package:
-# mcp_hangar.extensions = "mcp_hangar.auth.bootstrap:load_enterprise_modules"
 [project.urls]
 Homepage = "https://mcp-hangar.io"
 Documentation = "https://mcp-hangar.io/getting-started/quickstart/"

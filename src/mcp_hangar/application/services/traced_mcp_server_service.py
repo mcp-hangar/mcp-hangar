@@ -111,7 +111,7 @@ class TracedMcpServerService:
         """
         tracer = get_tracer(__name__)
 
-        with tracer.start_as_current_span(f"tool.invoke.{tool_name}") as otel_span:
+        with tracer.start_as_current_span(f"execute_tool {tool_name}") as otel_span:
             set_governance_attributes(
                 otel_span,
                 mcp_server_id=mcp_server_id,

@@ -11,6 +11,17 @@ from .dsl import (
     parse_policy,
     PolicyDSL,
 )
+from .egress_l7 import (
+    ArgumentRules,
+    Decision,
+    evaluate,
+    evaluate_tool,
+    KNOWN_SECRET_PATTERN_GROUPS,
+    L7Policy,
+    scan_arguments,
+    ToolAction,
+    ToolRules,
+)
 from .mcp_server_health import (
     classify_mcp_server_health,
     classify_mcp_server_health_from_mcp_server,
@@ -21,12 +32,21 @@ from .mcp_server_health import (
 __all__ = [
     "ALLOWED_ACTIONS",
     "ALLOWED_HOOKS",
+    "ArgumentRules",
+    "Decision",
     "HookRule",
+    "KNOWN_SECRET_PATTERN_GROUPS",
+    "L7Policy",
     "McpServerHealthClassification",
     "PolicyDSL",
+    "ToolAction",
+    "ToolRules",
     "classify_mcp_server_health",
     "classify_mcp_server_health_from_mcp_server",
+    "evaluate",
+    "evaluate_tool",
     "parse_policy",
+    "scan_arguments",
     "to_health_status_string",
 ]
 

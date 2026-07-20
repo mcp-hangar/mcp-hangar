@@ -5,7 +5,7 @@ from unittest.mock import MagicMock, patch
 
 from mcp_hangar.application.services.traced_mcp_server_service import TracedMcpServerService
 from mcp_hangar.application.ports.observability import NullObservabilityAdapter
-from mcp_hangar.observability.conventions import MCP, McpServer
+from mcp_hangar.observability.conventions import GenAI, MCP, McpServer
 
 
 def _make_service(invoke_result: dict | None = None, invoke_raises: Exception | None = None):
@@ -26,7 +26,7 @@ class TestTracedProviderServiceOtelSpan:
     """TracedProviderService must create OTEL spans for tool invocations."""
 
     def test_invoke_tool_creates_otel_span(self) -> None:
-        """invoke_tool creates an OTEL span named 'tool.invoke'."""
+        """invoke_tool creates an OTEL span named 'execute_tool {tool}'."""
         svc = _make_service()
 
         with patch("mcp_hangar.application.services.traced_provider_service.get_tracer") as mock_tracer_fn:
@@ -44,7 +44,7 @@ class TestTracedProviderServiceOtelSpan:
             assert "tool" in span_name or "invoke" in span_name
 
     def test_invoke_tool_span_carries_governance_attributes(self) -> None:
-        """invoke_tool span carries Provider.ID and MCP.TOOL_NAME attributes."""
+        """invoke_tool span carries Provider.ID and GenAI.TOOL_NAME attributes."""
         svc = _make_service()
 
         with patch("mcp_hangar.application.services.traced_provider_service.get_tracer") as mock_tracer_fn:
@@ -59,7 +59,7 @@ class TestTracedProviderServiceOtelSpan:
 
             set_calls = {c.args[0]: c.args[1] for c in mock_span.set_attribute.call_args_list}
             assert set_calls.get(McpServer.ID) == "math"
-            assert set_calls.get(MCP.TOOL_NAME) == "add"
+            assert set_calls.get(GenAI.TOOL_NAME) == "add"
 
     def test_invoke_tool_span_sets_success_status(self) -> None:
         """Successful invocation sets MCP.TOOL_STATUS to 'success'."""

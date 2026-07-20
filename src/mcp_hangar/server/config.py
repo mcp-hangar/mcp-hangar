@@ -99,8 +99,23 @@ def load_config_from_file(config_path: str) -> dict[str, Any]:
     with open(path) as f:
         config = yaml.safe_load(f)
 
-    if not config or "mcp_servers" not in config:
+    if not config:
         raise ValueError(f"Invalid configuration: missing 'mcp_servers' section in {config_path}")
+
+    if "mcp_servers" not in config:
+        # A discovery-only deployment (e.g. container providers found via
+        # `discovery.enabled: true`) legitimately has no static mcp_servers
+        # section -- servers arrive later via discovery bootstrap. Default to
+        # an empty map in that case instead of hard-failing config load.
+        # Configs with neither a static section nor a server source configured
+        # are still rejected, since that is almost always a typo (e.g. the
+        # Helm chart rendering `providers:` instead of `mcp_servers:`, see
+        # mcp-hangar/helm-charts#15).
+        discovery_config = config.get("discovery")
+        discovery_enabled = isinstance(discovery_config, dict) and bool(discovery_config.get("enabled", False))
+        if not discovery_enabled:
+            raise ValueError(f"Invalid configuration: missing 'mcp_servers' section in {config_path}")
+        config["mcp_servers"] = {}
 
     return cast(dict[str, Any], config)
 

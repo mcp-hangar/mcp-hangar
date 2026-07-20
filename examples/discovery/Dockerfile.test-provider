@@ -1,10 +1,12 @@
 # Dockerfile for test MCP provider
 # Build: podman build -t mcp-test-provider -f Dockerfile.test-provider .
-# Run: podman run -d --name mcp-test \
+# Run: podman run -d -i --name mcp-test \
 #        --label mcp.hangar.enabled=true \
 #        --label mcp.hangar.name=mcp-test \
 #        --label mcp.hangar.mode=stdio \
 #        mcp-test-provider
+# Note: -i (keep STDIN open) is required -- this is a stdio MCP server, and
+# without an open stdin it reads EOF immediately and the container exits.
 
 FROM python:3.11-slim
 

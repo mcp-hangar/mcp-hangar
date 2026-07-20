@@ -899,12 +899,12 @@
       },
       "targets": [
         {
-          "expr": "sum(mcp_hangar_http_sse_streams_active)",
-          "legendFormat": "Active SSE",
+          "expr": "sum(rate(mcp_hangar_messages_sent_total[5m]))",
+          "legendFormat": "Msgs sent/s",
           "refId": "A"
         }
       ],
-      "title": "Active SSE Streams",
+      "title": "Messages Sent Rate",
       "type": "stat"
     },
     {

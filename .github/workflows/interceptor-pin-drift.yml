@@ -1,0 +1,51 @@
+# Drift detection for the experimental interceptor SEP pin (ADR-012).
+#
+# The interceptor surface validates against a schema we vendor locally, derived
+# by hand from modelcontextprotocol/experimental-ext-interceptors @ ${PINNED_SHA}
+# (SEP-2133). Per ADR-012 we bump that pin on a DELIBERATE cadence, not
+# reactively. This scheduled check flags when upstream has moved so a re-pin is a
+# planned decision -- it never touches code, it only opens an informational issue.
+# PINNED_SHA below is the canonical machine-readable pin; bumping it and
+# re-deriving the vendored schema (tests/unit/test_interceptors_list_schema.py)
+# go together.
+name: interceptor-pin-drift
+
+on:
+  schedule:
+    - cron: "0 7 * * 1"  # weekly, Monday 07:00 UTC
+  workflow_dispatch:
+
+permissions:
+  contents: read
+  issues: write
+
+env:
+  UPSTREAM: modelcontextprotocol/experimental-ext-interceptors
+  PINNED_SHA: 99bc7c9
+
+jobs:
+  drift:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Compare pinned SHA to upstream HEAD
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          set -euo pipefail
+          head="$(gh api "repos/${UPSTREAM}/commits/HEAD" --jq '.sha')"
+          short="${head:0:7}"
+          echo "pinned=${PINNED_SHA} upstream_head=${short}"
+          if [ "${short}" = "${PINNED_SHA}" ]; then
+            echo "No drift; interceptor pin is current."
+            exit 0
+          fi
+          echo "::warning::Interceptor pin ${PINNED_SHA} is behind upstream ${short} (ADR-012)."
+          title="interceptor pin drift: upstream moved to ${short}"
+          body="The vendored interceptor schema is pinned to \`${PINNED_SHA}\` (ADR-012), but \`${UPSTREAM}\` HEAD is now \`${short}\`. Per the deliberate-cadence policy, review the upstream diff and decide whether to bump the pin + re-derive the vendored schema (tests/unit/test_interceptors_list_schema.py), or hold. Informational -- not a forced bump."
+          existing="$(gh issue list -R "${GITHUB_REPOSITORY}" --state open --search "in:title interceptor pin drift" --json number --jq '.[0].number // ""')"
+          if [ -n "${existing}" ]; then
+            gh issue comment "${existing}" -R "${GITHUB_REPOSITORY}" --body "Still drifted: upstream HEAD is now \`${short}\`."
+          else
+            gh issue create -R "${GITHUB_REPOSITORY}" --title "${title}" --body "${body}" --label "type/chore" \
+              || gh issue create -R "${GITHUB_REPOSITORY}" --title "${title}" --body "${body}"
+          fi

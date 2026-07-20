@@ -399,6 +399,243 @@ class TestHealthCheck:
         assert result is True
 
 
+def _make_http_container(
+    *,
+    name: str = "math-provider",
+    mode: str = "http",
+    port_label: str = "8080",
+    ports: dict | None = None,
+    networks: dict | None = None,
+):
+    """Build a MagicMock container labeled for http/sse discovery.
+
+    Args:
+        ports: NetworkSettings.Ports mapping (published host bindings).
+        networks: NetworkSettings.Networks mapping (internal bridge IPs).
+    """
+    container = MagicMock()
+    container.id = "abc123def456789"
+    container.name = name
+    container.status = "running"
+    container.labels = {
+        "mcp.hangar.enabled": "true",
+        "mcp.hangar.name": name,
+        "mcp.hangar.mode": mode,
+        "mcp.hangar.port": port_label,
+    }
+    container.image = MagicMock()
+    container.image.tags = ["math-provider:test"]
+    container.image.id = "sha256:abc123def456"
+    container.attrs = {
+        "NetworkSettings": {
+            "Ports": ports or {},
+            "Networks": networks or {},
+        }
+    }
+    return container
+
+
+class TestGetHostEndpoint:
+    """Tests for _get_host_endpoint() -- issue #481.
+
+    http/sse discovery must prefer the published host-port binding over the
+    container's internal bridge-network IP, since the documented deployment
+    runs Hangar on the host (unreachable from the container's bridge
+    network, e.g. Podman-on-macOS).
+    """
+
+    def test_prefers_published_host_port_over_bridge_ip(self, mock_docker):
+        from mcp_hangar.infrastructure.discovery.docker_source import DockerDiscoverySource
+
+        container = _make_http_container(
+            ports={"8080/tcp": [{"HostIp": "0.0.0.0", "HostPort": "18080"}]},
+            networks={"bridge": {"IPAddress": "10.88.0.23"}},
+        )
+
+        source = DockerDiscoverySource()
+        result = source._get_host_endpoint(container, 8080)
+
+        assert result == ("127.0.0.1", 18080)
+
+    def test_normalizes_0000_host_ip_to_loopback(self, mock_docker):
+        from mcp_hangar.infrastructure.discovery.docker_source import DockerDiscoverySource
+
+        container = _make_http_container(ports={"8080/tcp": [{"HostIp": "0.0.0.0", "HostPort": "18080"}]})
+
+        source = DockerDiscoverySource()
+        host, port = source._get_host_endpoint(container, 8080)
+
+        assert host == "127.0.0.1"
+        assert port == 18080
+
+    def test_normalizes_ipv6_any_host_ip_to_loopback(self, mock_docker):
+        from mcp_hangar.infrastructure.discovery.docker_source import DockerDiscoverySource
+
+        container = _make_http_container(ports={"8080/tcp": [{"HostIp": "::", "HostPort": "18080"}]})
+
+        source = DockerDiscoverySource()
+        host, port = source._get_host_endpoint(container, 8080)
+
+        assert host == "127.0.0.1"
+        assert port == 18080
+
+    def test_preserves_explicit_host_ip_binding(self, mock_docker):
+        from mcp_hangar.infrastructure.discovery.docker_source import DockerDiscoverySource
+
+        container = _make_http_container(ports={"8080/tcp": [{"HostIp": "192.168.1.50", "HostPort": "18080"}]})
+
+        source = DockerDiscoverySource()
+        host, port = source._get_host_endpoint(container, 8080)
+
+        assert host == "192.168.1.50"
+        assert port == 18080
+
+    def test_falls_back_to_bridge_ip_when_no_host_binding(self, mock_docker):
+        """No published host port (e.g. Hangar itself runs on the same network)."""
+        from mcp_hangar.infrastructure.discovery.docker_source import DockerDiscoverySource
+
+        container = _make_http_container(
+            ports={},
+            networks={"bridge": {"IPAddress": "10.88.0.23"}},
+        )
+
+        source = DockerDiscoverySource()
+        host, port = source._get_host_endpoint(container, 8080)
+
+        assert host == "10.88.0.23"
+        assert port == 8080  # container-side port, since we're on its network
+
+    def test_falls_back_when_port_binding_is_null(self, mock_docker):
+        """Docker/Podman report `null` for exposed-but-unpublished ports."""
+        from mcp_hangar.infrastructure.discovery.docker_source import DockerDiscoverySource
+
+        container = _make_http_container(
+            ports={"8080/tcp": None},
+            networks={"bridge": {"IPAddress": "10.88.0.23"}},
+        )
+
+        source = DockerDiscoverySource()
+        host, port = source._get_host_endpoint(container, 8080)
+
+        assert host == "10.88.0.23"
+        assert port == 8080
+
+    def test_returns_none_when_no_host_binding_and_no_ip(self, mock_docker):
+        """Starting/stopped container: no host port, no network IP yet."""
+        from mcp_hangar.infrastructure.discovery.docker_source import DockerDiscoverySource
+
+        container = _make_http_container(ports={}, networks={})
+
+        source = DockerDiscoverySource()
+        result = source._get_host_endpoint(container, 8080)
+
+        assert result is None
+
+
+class TestParseContainerHttpMode:
+    """Tests for _parse_container() http/sse endpoint resolution -- issue #481."""
+
+    def test_http_mode_endpoint_uses_published_host_port(self, mock_docker):
+        from mcp_hangar.infrastructure.discovery.docker_source import DockerDiscoverySource
+
+        container = _make_http_container(
+            mode="http",
+            port_label="8080",
+            ports={"8080/tcp": [{"HostIp": "0.0.0.0", "HostPort": "18080"}]},
+            networks={"bridge": {"IPAddress": "10.88.0.23"}},
+        )
+
+        source = DockerDiscoverySource()
+        result = source._parse_container(container)
+
+        assert result is not None
+        assert result.connection_info["host"] == "127.0.0.1"
+        assert result.connection_info["port"] == 18080
+        assert result.connection_info["endpoint"] == "http://127.0.0.1:18080"
+
+    def test_sse_mode_endpoint_uses_published_host_port(self, mock_docker):
+        from mcp_hangar.infrastructure.discovery.docker_source import DockerDiscoverySource
+
+        container = _make_http_container(
+            mode="sse",
+            port_label="9000",
+            ports={"9000/tcp": [{"HostIp": "0.0.0.0", "HostPort": "29000"}]},
+        )
+
+        source = DockerDiscoverySource()
+        result = source._parse_container(container)
+
+        assert result is not None
+        assert result.connection_info["endpoint"] == "http://127.0.0.1:29000"
+
+    def test_http_mode_falls_back_to_bridge_ip_without_publish(self, mock_docker):
+        from mcp_hangar.infrastructure.discovery.docker_source import DockerDiscoverySource
+
+        container = _make_http_container(
+            mode="http",
+            ports={},
+            networks={"bridge": {"IPAddress": "10.88.0.23"}},
+        )
+
+        source = DockerDiscoverySource()
+        result = source._parse_container(container)
+
+        assert result is not None
+        assert result.connection_info["endpoint"] == "http://10.88.0.23:8080"
+
+    def test_http_mode_returns_none_when_unreachable(self, mock_docker):
+        from mcp_hangar.infrastructure.discovery.docker_source import DockerDiscoverySource
+
+        container = _make_http_container(mode="http", ports={}, networks={})
+
+        source = DockerDiscoverySource()
+        result = source._parse_container(container)
+
+        assert result is None
+
+    def test_no_ip_skip_is_logged_at_debug_not_warning(self, mock_docker):
+        """Issue #484: the expected/transient no-IP skip must log at debug, not warning."""
+        from mcp_hangar.infrastructure.discovery import docker_source
+        from mcp_hangar.infrastructure.discovery.docker_source import DockerDiscoverySource
+
+        container = _make_http_container(mode="http", ports={}, networks={})
+
+        source = DockerDiscoverySource()
+        with patch.object(docker_source, "logger") as mock_logger:
+            result = source._parse_container(container)
+
+        assert result is None
+        mock_logger.warning.assert_not_called()
+        mock_logger.debug.assert_called_once()
+        assert "no IP" in mock_logger.debug.call_args[0][0]
+
+    def test_container_mode_unaffected_by_host_port_logic(self, mock_docker):
+        """Container/stdio-mode discovery does not consult ports/IP at all."""
+        from mcp_hangar.infrastructure.discovery.docker_source import DockerDiscoverySource
+
+        container = MagicMock()
+        container.id = "aaa111bbb222ccc"
+        container.name = "stdio-provider"
+        container.status = "running"
+        container.labels = {
+            "mcp.hangar.enabled": "true",
+            "mcp.hangar.name": "stdio-provider",
+            "mcp.hangar.mode": "container",
+        }
+        container.image = MagicMock()
+        container.image.tags = ["stdio:latest"]
+        container.image.id = "sha256:abc123def456"
+        container.attrs = {"NetworkSettings": {"Ports": {}, "Networks": {}}}
+
+        source = DockerDiscoverySource()
+        result = source._parse_container(container)
+
+        assert result is not None
+        assert result.mode == "container"
+        assert "host" not in result.connection_info
+        assert "endpoint" not in result.connection_info
+
+
 class TestInitConfiguration:
     """Tests for __init__ reconnection configuration."""
 

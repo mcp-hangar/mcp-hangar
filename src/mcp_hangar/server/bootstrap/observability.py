@@ -27,8 +27,8 @@ Or via config.yaml:
         secret_key: ${LANGFUSE_SECRET_KEY}
         host: https://cloud.langfuse.com
         sample_rate: 1.0
-        scrub_inputs: false
-        scrub_outputs: false
+        scrub_inputs: true
+        scrub_outputs: true
 """
 
 from dataclasses import dataclass
@@ -63,8 +63,8 @@ class LangfuseBootstrapConfig:
     secret_key: str = ""
     host: str = "https://cloud.langfuse.com"
     sample_rate: float = 1.0
-    scrub_inputs: bool = False
-    scrub_outputs: bool = False
+    scrub_inputs: bool = True
+    scrub_outputs: bool = True
 
 
 @dataclass
@@ -107,8 +107,8 @@ def _parse_observability_config(config: dict[str, Any]) -> ObservabilityConfig:
         secret_key=os.getenv("LANGFUSE_SECRET_KEY", _expand_env(langfuse_dict.get("secret_key", ""))),
         host=os.getenv("LANGFUSE_HOST", langfuse_dict.get("host", "https://cloud.langfuse.com")),
         sample_rate=float(os.getenv("MCP_LANGFUSE_SAMPLE_RATE", str(langfuse_dict.get("sample_rate", 1.0)))),
-        scrub_inputs=_get_bool_env("MCP_LANGFUSE_SCRUB_INPUTS", langfuse_dict.get("scrub_inputs", False)),
-        scrub_outputs=_get_bool_env("MCP_LANGFUSE_SCRUB_OUTPUTS", langfuse_dict.get("scrub_outputs", False)),
+        scrub_inputs=_get_bool_env("MCP_LANGFUSE_SCRUB_INPUTS", langfuse_dict.get("scrub_inputs", True)),
+        scrub_outputs=_get_bool_env("MCP_LANGFUSE_SCRUB_OUTPUTS", langfuse_dict.get("scrub_outputs", True)),
     )
 
     return ObservabilityConfig(tracing=tracing, langfuse=langfuse)
