@@ -26,13 +26,18 @@ try:  # SDK v2 renamed McpError -> MCPError (mcp.shared.exceptions still exists)
 except ImportError:  # SDK v1
     from mcp.shared.exceptions import McpError
 
-try:  # SDK v2: FastMCP -> MCPServer; Context moved to mcp.server.mcpserver.
-    from mcp.server.mcpserver import (
-        Context,
-        MCPServer as FastMCP,
-    )
-except ImportError:  # SDK v1
+from typing import TYPE_CHECKING
+
+if TYPE_CHECKING:
+    # Static typing follows the SDK v1 FastMCP surface until the pin flips to v2,
+    # so mypy keeps checking the server surface (the runtime resolution below
+    # would otherwise degrade FastMCP to Any under ignore_missing_imports).
     from mcp.server.fastmcp import Context, FastMCP
+else:
+    try:  # SDK v2: FastMCP -> MCPServer; Context moved to mcp.server.mcpserver.
+        from mcp.server.mcpserver import Context, MCPServer as FastMCP
+    except ImportError:  # SDK v1
+        from mcp.server.fastmcp import Context, FastMCP
 
 # Protocol version constants.
 DEFAULT_NEGOTIATED_VERSION = _t.DEFAULT_NEGOTIATED_VERSION
