@@ -39,6 +39,24 @@ else:
     except ImportError:  # SDK v1
         from mcp.server.fastmcp import Context, FastMCP
 
+def current_request_context():
+    """Best-effort access to the ambient MCP request context, or ``None``.
+
+    SDK v1 exposes the in-flight request on the module-level ``request_ctx``
+    ContextVar (``mcp.server.lowlevel.server``). SDK v2 removed that ambient var:
+    the request context is passed explicitly to a tool via its ``Context``
+    (``Context.request_context``), so there is no ambient equivalent. Callers
+    that only have this fallback therefore get ``None`` on v2 and must degrade
+    gracefully (they are fault-barriered to server-level policy). Threading the
+    v2 ``Context`` through to those sites is a follow-up under #547.
+    """
+    try:  # SDK v1: ambient request ContextVar.
+        from mcp.server.lowlevel.server import request_ctx
+    except ImportError:  # SDK v2: no ambient request_ctx (Context is passed explicitly).
+        return None
+    return request_ctx.get(None)
+
+
 # Protocol version constants.
 DEFAULT_NEGOTIATED_VERSION = _t.DEFAULT_NEGOTIATED_VERSION
 LATEST_PROTOCOL_VERSION = _t.LATEST_PROTOCOL_VERSION
@@ -62,6 +80,7 @@ __all__ = [
     "FastMCP",
     "Context",
     "McpError",
+    "current_request_context",
     "DEFAULT_NEGOTIATED_VERSION",
     "LATEST_PROTOCOL_VERSION",
     "INVALID_PARAMS",
