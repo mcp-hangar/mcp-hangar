@@ -91,19 +91,19 @@ def _hangar_call(base_url: str, api_key: str, tool: str, arguments: dict[str, An
     (``success`` / ``error_type`` / ``result``).
     """
     from mcp import ClientSession
-    from mcp.client.streamable_http import streamablehttp_client
+    from tests.live._mcp_client import open_mcp_streams
 
     headers = {"X-API-Key": api_key}
 
     async def _call() -> dict[str, Any]:
-        async with streamablehttp_client(f"{base_url}/mcp", headers=headers) as (read, write, _):
+        async with open_mcp_streams(f"{base_url}/mcp", headers) as (read, write, _):
             async with ClientSession(read, write) as session:
                 await session.initialize()
                 result = await session.call_tool(
                     "hangar_call",
                     {"calls": [{"mcp_server": "math", "tool": tool, "arguments": arguments}]},
                 )
-                data = result.structuredContent
+                data = getattr(result, "structured_content", None) or getattr(result, "structuredContent", None)
                 if not (isinstance(data, dict) and (data.get("results") or data.get("result"))):
                     text = "".join(getattr(c, "text", "") for c in result.content if getattr(c, "type", None) == "text")
                     data = json.loads(text) if text else {}

@@ -326,12 +326,13 @@ def _invoke_hangar_call(base_url: str, token: str, calls: list[dict]) -> object:
     import asyncio
 
     from mcp import ClientSession
-    from mcp.client.streamable_http import streamablehttp_client
+
+    from tests.live._mcp_client import open_mcp_streams
 
     headers = {"Authorization": f"Bearer {token}"}
 
     async def _run() -> object:
-        async with streamablehttp_client(f"{base_url}/mcp", headers=headers) as (read, write, _):
+        async with open_mcp_streams(f"{base_url}/mcp", headers) as (read, write, _):
             async with ClientSession(read, write) as session:
                 await session.initialize()
                 return await session.call_tool("hangar_call", {"calls": calls})
@@ -341,7 +342,7 @@ def _invoke_hangar_call(base_url: str, token: str, calls: list[dict]) -> object:
 
 def _batch_from_result(result: object) -> dict:
     """Extract the ``hangar_call`` batch dict (has a ``results`` list) from a CallToolResult."""
-    structured = getattr(result, "structuredContent", None)
+    structured = getattr(result, "structured_content", None) or getattr(result, "structuredContent", None)
     if isinstance(structured, dict):
         if "results" in structured:
             return structured

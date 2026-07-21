@@ -2,16 +2,24 @@
 
 import os
 
-from mcp.server.fastmcp import FastMCP
+try:  # SDK v2: FastMCP -> MCPServer; host/port bind at run(), not construction.
+    from mcp.server.mcpserver import MCPServer as FastMCP
+
+    _MCP_V2 = True
+except ImportError:  # SDK v1
+    from mcp.server.fastmcp import FastMCP
+
+    _MCP_V2 = False
+
+_HOST = os.environ.get("MCP_HOST", "0.0.0.0")
+_PORT = int(os.environ.get("MCP_PORT", "8080"))
 
 # Disable DNS rebinding protection so the provider accepts requests
 # from any host within the container network (e.g. math-provider:8080).
-mcp = FastMCP(
-    "math-provider",
-    host=os.environ.get("MCP_HOST", "0.0.0.0"),
-    port=int(os.environ.get("MCP_PORT", "8080")),
-    transport_security=None,
-)
+if _MCP_V2:
+    mcp = FastMCP("math-provider")
+else:
+    mcp = FastMCP("math-provider", host=_HOST, port=_PORT, transport_security=None)
 
 
 @mcp.tool(name="add")
@@ -103,6 +111,8 @@ def main():
     transport = os.environ.get("MCP_TRANSPORT", "streamable-http")
     if transport == "stdio":
         mcp.run(transport="stdio")
+    elif _MCP_V2:
+        mcp.run(transport="streamable-http", host=_HOST, port=_PORT)
     else:
         mcp.run(transport="streamable-http")
 

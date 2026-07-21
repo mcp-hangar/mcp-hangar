@@ -205,7 +205,7 @@ def serving_member(harness: GroupHarness, tenant_id: str | None = None, tool: st
     import time
 
     from mcp import ClientSession
-    from mcp.client.streamable_http import streamablehttp_client
+    from tests.live._mcp_client import open_mcp_streams
 
     headers: dict[str, str] = {}
     lookup = tenant_id if tenant_id is not None else WARM_KEY
@@ -215,7 +215,7 @@ def serving_member(harness: GroupHarness, tenant_id: str | None = None, tool: st
     headers["X-API-Key"] = key
 
     async def _call() -> str | None:
-        async with streamablehttp_client(f"{harness.base_url}/mcp", headers=headers) as (read, write, _):
+        async with open_mcp_streams(f"{harness.base_url}/mcp", headers) as (read, write, _):
             async with ClientSession(read, write) as session:
                 await session.initialize()
                 result = await session.call_tool(
