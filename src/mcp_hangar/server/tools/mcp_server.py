@@ -45,9 +45,9 @@ def _caller_tenant_id() -> str | None:
     if identity is not None:
         return identity.caller.tenant_id
     try:
-        from mcp.server.lowlevel.server import request_ctx
+        from mcp_hangar._sdk_compat import current_request_context
 
-        request_context = request_ctx.get(None)
+        request_context = current_request_context()
         auth_state = getattr(getattr(request_context, "request", None), "state", None)
         principal = getattr(getattr(auth_state, "auth", None), "principal", None)
         if principal is not None:
