@@ -154,6 +154,10 @@ warn_return_any = false
 testpaths = ["tests"]
 asyncio_mode = "auto"
 addopts = "-v --cov=mcp_hangar --cov-report=term-missing"
+# Per-test hang guard: fail (with a stack dump) instead of hanging so one wedged
+# test can't burn a CI job to the 6h ceiling (which cancelled a release). 300s is
+# far above any real test; the whole unit suite runs in well under a minute.
+timeout = 300
 pythonpath = ["src", "."]
 markers = [
     "benchmark: performance benchmarks (deselect with '-m not benchmark')",
