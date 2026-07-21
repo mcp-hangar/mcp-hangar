@@ -931,3 +931,107 @@ class TestInvokeToolIsError:
         assert result == {"content": [{"text": "ok"}], "isError": False}
         events = provider.collect_events()
         assert any(isinstance(e, ToolInvocationCompleted) for e in events)
+
+
+class TestRelayRequest:
+    """Test relay_request(): non-cold-starting raw JSON-RPC relay (ADR-014 task relay)."""
+
+    def _make_ready_provider(self):
+        """Create a provider in READY state with a live mock client."""
+        provider = McpServer(
+            mcp_server_id="test",
+            mode="subprocess",
+            command=["python", "-m", "test"],
+        )
+        mock_client = MagicMock()
+        mock_client.is_alive.return_value = True
+        with provider._lock:
+            provider._state = ProviderState.READY
+            provider._client = mock_client
+        return provider, mock_client
+
+    def test_relay_forwards_method_and_params_and_returns_raw_dict(self):
+        """relay_request forwards method+params verbatim and returns the raw response dict."""
+        provider, mock_client = self._make_ready_provider()
+        raw = {"result": {"task": {"taskId": "t-1", "status": "completed"}}}
+        mock_client.call.return_value = raw
+
+        params = {"taskId": "t-1"}
+        result = provider.relay_request("tasks/get", params, timeout=12.0)
+
+        # Returned verbatim (same object, not unwrapped/interpreted).
+        assert result is raw
+        mock_client.call.assert_called_once_with("tasks/get", params, timeout=12.0)
+
+    def test_relay_returns_error_envelope_verbatim(self):
+        """An upstream JSON-RPC error envelope is returned as-is, not raised."""
+        provider, mock_client = self._make_ready_provider()
+        raw = {"error": {"code": -32001, "message": "unknown task"}}
+        mock_client.call.return_value = raw
+
+        result = provider.relay_request("tasks/result", {"taskId": "gone"})
+        assert result is raw
+
+    def test_relay_none_client_raises_without_cold_start(self):
+        """A None client raises relay-unavailable WITHOUT cold-starting."""
+        from mcp_hangar.domain.exceptions import ToolInvocationError
+
+        provider = McpServer(
+            mcp_server_id="test",
+            mode="subprocess",
+            command=["python", "-m", "test"],
+        )
+        # COLD, no client set.
+        with (
+            patch.object(provider, "ensure_ready") as mock_ensure,
+            patch.object(provider, "_start") as mock_start,
+            patch.object(provider, "_create_client") as mock_create,
+        ):
+            with pytest.raises(ToolInvocationError):
+                provider.relay_request("tasks/get", {"taskId": "t-1"})
+            mock_ensure.assert_not_called()
+            mock_start.assert_not_called()
+            mock_create.assert_not_called()
+
+    def test_relay_dead_client_raises_without_cold_start(self):
+        """A not-alive client raises relay-unavailable WITHOUT cold-starting or calling."""
+        from mcp_hangar.domain.exceptions import ToolInvocationError
+
+        provider, mock_client = self._make_ready_provider()
+        mock_client.is_alive.return_value = False
+
+        with patch.object(provider, "ensure_ready") as mock_ensure, patch.object(provider, "_start") as mock_start:
+            with pytest.raises(ToolInvocationError):
+                provider.relay_request("tasks/cancel", {"taskId": "t-1"})
+            mock_ensure.assert_not_called()
+            mock_start.assert_not_called()
+            mock_client.call.assert_not_called()
+
+    def test_relay_transport_error_wrapped_as_tool_invocation_error(self):
+        """A transport OSError/TimeoutError propagates as ToolInvocationError (matches invoke_tool)."""
+        from mcp_hangar.domain.exceptions import ToolInvocationError
+
+        provider, mock_client = self._make_ready_provider()
+        mock_client.call.side_effect = TimeoutError("boom")
+
+        with pytest.raises(ToolInvocationError):
+            provider.relay_request("tasks/get", {"taskId": "t-1"})
+
+    def test_relay_does_not_hold_lock_during_call(self):
+        """relay_request does NOT hold the lock during the network .call."""
+        provider, mock_client = self._make_ready_provider()
+        lock_held = {"during_call": None}
+
+        def mock_call(method, params, timeout=None):
+            acquired = provider._lock.acquire(blocking=False)
+            if acquired:
+                provider._lock.release()
+                lock_held["during_call"] = False
+            else:
+                lock_held["during_call"] = True
+            return {"result": {}}
+
+        mock_client.call.side_effect = mock_call
+
+        provider.relay_request("tasks/get", {"taskId": "t-1"})
+        assert lock_held["during_call"] is False, "Lock must not be held during relay .call"
