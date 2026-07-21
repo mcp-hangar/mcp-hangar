@@ -32,14 +32,14 @@ def _caller_tenant_id() -> str | None:
     which keys the same policy on member_id=<caller tenant>. Without it the listing
     fails open: the denied tool is rejected on invoke yet stays visible here.
 
-    Resolution mirrors the hangar_call bridge (server/tools/batch/__init__.py):
-    over streamable-HTTP the ASGI auth wrapper's ``identity_context_var`` is NOT
-    propagated into the per-session tool task, so it is usually None here. The
-    FastMCP request context IS reachable (the SDK sets ``request_ctx`` in the same
-    task that runs this tool), and the auth middleware stored the authenticated
-    principal on ``request.state.auth``. Prefer a bound identity context; else
-    bridge the principal to its tenant. Fully fault-barriered: stdio / no-request /
-    unauthenticated paths yield None (server-level policy only), never an error.
+    Over streamable-HTTP the ASGI auth wrapper's ``identity_context_var`` is not
+    propagated into the per-session tool task. Since #576 that is bridged centrally
+    in ``mcp_tool_wrapper`` (it injects the request Context and sets
+    ``identity_context_var`` from the authenticated principal before the tool body
+    runs), so on SDK v2 ``get_identity_context()`` is populated here. The
+    ``current_request_context()`` fallback below is the SDK v1 path (v2 removed that
+    ambient ``request_ctx``, so it returns None there). Fully fault-barriered: stdio
+    / no-request / unauthenticated paths yield None (server-level policy only).
     """
     identity = get_identity_context()
     if identity is not None:
