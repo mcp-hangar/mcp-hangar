@@ -59,8 +59,12 @@ def lowlevel_server(mcp):
     FastMCP (v1) exposes it as ``._mcp_server``; MCPServer (v2) as
     ``._lowlevel_server``. Both carry ``add_request_handler`` / ``middleware`` /
     ``create_initialization_options`` / ``get_capabilities``.
+
+    Prefers ``_mcp_server`` (the v1 name — absent on real v2 servers, so it falls
+    through there) so that test doubles which set up ``_mcp_server`` still work
+    (a Mock auto-creates both attributes).
     """
-    return getattr(mcp, "_lowlevel_server", None) or mcp._mcp_server
+    return getattr(mcp, "_mcp_server", None) or mcp._lowlevel_server
 
 
 def new_mcp_server(name: str, **extra) -> FastMCP:

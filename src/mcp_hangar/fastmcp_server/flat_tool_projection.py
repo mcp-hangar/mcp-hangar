@@ -45,7 +45,7 @@ import logging
 import uuid
 from typing import TYPE_CHECKING, Any
 
-from mcp_hangar._sdk_compat import FastMCP
+from mcp_hangar._sdk_compat import FastMCP, lowlevel_server
 from mcp_hangar._sdk_compat import (
     METHOD_NOT_FOUND,
     ListToolsResult,
@@ -270,9 +270,8 @@ def register_flat_tool_handlers(mcp: FastMCP) -> None:
     Args:
         mcp: The FastMCP server instance to modify.
     """
-    low = mcp._mcp_server  # The MCPServer (lowlevel)
+    low = lowlevel_server(mcp)
 
-    @low.list_tools()
     async def _flat_list_tools() -> ListToolsResult:
         """Per-request filtered tools/list for front_door mode.
 
@@ -298,7 +297,6 @@ def register_flat_tool_handlers(mcp: FastMCP) -> None:
             _meta=build_projected_list_cache_meta(tenant_id),
         )
 
-    @low.call_tool(validate_input=False)
     async def _flat_call_tool(name: str, arguments: dict[str, Any]) -> Any:
         """Flat tool call dispatch for front_door mode.
 
@@ -317,7 +315,7 @@ def register_flat_tool_handlers(mcp: FastMCP) -> None:
           which surfaces as a CallToolResult(isError=True).  The backend is
           never invoked.
         """
-        from mcp_hangar._sdk_compat import CallToolResult, TextContent
+        from mcp_hangar._sdk_compat import CallToolResult
 
         identity = get_identity_context()
         tenant_id: str | None = identity.caller.tenant_id if identity is not None else None
@@ -357,10 +355,37 @@ def register_flat_tool_handlers(mcp: FastMCP) -> None:
         if not result.success:
             # Surface enforcement failures as tool errors (isError=True),
             # not as unhandled exceptions, so the MCP envelope stays valid.
-            return CallToolResult(
-                content=[TextContent(type="text", text=result.error or "tool call failed")],
-                isError=True,
+            return CallToolResult.model_validate(
+                {
+                    "content": [{"type": "text", "text": result.error or "tool call failed"}],
+                    "isError": True,
+                }
             )
 
         # Success — return the raw result dict; the lowlevel handler wraps it.
         return result.result if result.result is not None else {}
+
+    # Register the handlers, replacing the defaults. SDK v1's lowlevel Server
+    # exposes list_tools()/call_tool() registration decorators; SDK v2 dropped
+    # them for add_request_handler(method, params_type, handler) with a
+    # (ctx, params) -> HandlerResult signature.
+    if hasattr(low, "list_tools"):  # SDK v1
+        low.list_tools()(_flat_list_tools)
+        low.call_tool(validate_input=False)(_flat_call_tool)
+    else:  # SDK v2
+        from mcp_types import CallToolRequestParams, PaginatedRequestParams
+
+        from mcp_hangar._sdk_compat import CallToolResult
+
+        async def _list_v2(ctx: Any, params: Any) -> ListToolsResult:
+            return await _flat_list_tools()
+
+        async def _call_v2(ctx: Any, params: Any) -> Any:
+            out = await _flat_call_tool(params.name, params.arguments or {})
+            if isinstance(out, CallToolResult):  # error path already built one
+                return out
+            # success path returned the raw backend result dict; wrap it.
+            return CallToolResult.model_validate(out) if out else CallToolResult(content=[])
+
+        low.add_request_handler("tools/list", PaginatedRequestParams, _list_v2)
+        low.add_request_handler("tools/call", CallToolRequestParams, _call_v2)
