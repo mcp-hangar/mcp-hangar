@@ -23,7 +23,7 @@ from typing import Any, cast
 
 import pytest
 
-from mcp.server.fastmcp import Context
+from mcp_hangar._sdk_compat import Context
 
 import mcp_hangar.server.tools.batch as batch
 from mcp_hangar.context import get_identity_context, identity_context_var

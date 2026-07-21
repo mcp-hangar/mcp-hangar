@@ -10,16 +10,23 @@ deterministic and independent of any discovery state.
 
 from __future__ import annotations
 
-from collections.abc import Iterator
-from contextlib import contextmanager
-from typing import Any
-
-from mcp.shared.exceptions import McpError
-from mcp.shared.experimental.tasks.in_memory_task_store import InMemoryTaskStore
-from mcp.types import Result, TaskMetadata
 import pytest
 
-from mcp_hangar.application.tasks import governed_task_store as gts_module
+# GovernedTaskStore builds on the SDK v1 experimental task store, which SDK v2
+# removed (its v2 rebuild is tracked in #322). Skip this module on v2.
+pytest.importorskip(
+    "mcp.shared.experimental.tasks.store",
+    reason="v1-only dormant task governance; v2 rebuild in #322",
+)
+
+from collections.abc import Iterator  # noqa: E402
+from contextlib import contextmanager  # noqa: E402
+from typing import Any  # noqa: E402
+
+from mcp.shared.experimental.tasks.in_memory_task_store import InMemoryTaskStore  # noqa: E402
+
+from mcp_hangar._sdk_compat import McpError, Result, TaskMetadata  # noqa: E402
+from mcp_hangar.application.tasks import governed_task_store as gts_module  # noqa: E402
 from mcp_hangar.application.tasks.governed_task_store import GovernedTaskStore
 from mcp_hangar.application.tasks.tool_pin_context import (
     CurrentToolPin,
