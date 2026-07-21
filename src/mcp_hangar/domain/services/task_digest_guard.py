@@ -96,9 +96,7 @@ class TaskDigestGuard:
                 if time.monotonic() - ts <= self._ttl:
                     # Live entry: same digest refreshes TTL; different digest fails closed.
                     if cur_digest != tool_digest:
-                        raise TaskDigestConflictError(
-                            f"task key {key!r} is already pinned to a different digest"
-                        )
+                        raise TaskDigestConflictError(f"task key {key!r} is already pinned to a different digest")
                     self._store.move_to_end(key)
                     self._store[key] = (tool_digest, time.monotonic())
                     return

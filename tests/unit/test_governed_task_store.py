@@ -240,8 +240,15 @@ def test_anonymous_caller_cannot_reach_attributed_task(store: GovernedTaskStore)
 def test_mint_id_precedence_taskid_over_task_id_over_id(store: GovernedTaskStore) -> None:
     # All three present -> taskId wins.
     t_all = store.mint_from_upstream(
-        {"taskId": "A", "task_id": "B", "id": "C", "status": "working",
-         "createdAt": "x", "lastUpdatedAt": "y", "ttl": 1}
+        {
+            "taskId": "A",
+            "task_id": "B",
+            "id": "C",
+            "status": "working",
+            "createdAt": "x",
+            "lastUpdatedAt": "y",
+            "ttl": 1,
+        }
     )
     assert t_all.task_id == "A"
     # taskId absent -> task_id wins over id.
@@ -249,9 +256,7 @@ def test_mint_id_precedence_taskid_over_task_id_over_id(store: GovernedTaskStore
         {"task_id": "B", "id": "C", "status": "working", "createdAt": "x", "lastUpdatedAt": "y", "ttl": 1}
     )
     assert t.task_id == "B"
-    t2 = store.mint_from_upstream(
-        {"id": "C", "status": "working", "createdAt": "x", "lastUpdatedAt": "y", "ttl": 1}
-    )
+    t2 = store.mint_from_upstream({"id": "C", "status": "working", "createdAt": "x", "lastUpdatedAt": "y", "ttl": 1})
     assert t2.task_id == "C"
 
 

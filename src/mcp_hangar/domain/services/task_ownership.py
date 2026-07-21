@@ -107,9 +107,7 @@ class TaskOwnershipRegistry:
                 if time.monotonic() - ts <= self._ttl:
                     # Live entry: same owner refreshes TTL; different owner fails closed.
                     if cur_owner != owner:
-                        raise TaskOwnerConflictError(
-                            f"task key {key!r} is already bound to a different owner"
-                        )
+                        raise TaskOwnerConflictError(f"task key {key!r} is already bound to a different owner")
                     self._store.move_to_end(key)
                     self._store[key] = (owner, time.monotonic())
                     return
