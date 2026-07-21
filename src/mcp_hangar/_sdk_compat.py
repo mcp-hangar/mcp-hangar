@@ -127,6 +127,8 @@ Task = _t.Task
 TaskMetadata = _t.TaskMetadata
 TaskStatus = _t.TaskStatus
 RequestParams = _t.RequestParams
+# v1 nested it as RequestParams.Meta; v2 promotes it to mcp_types.RequestParamsMeta.
+RequestParamsMeta = getattr(_t, "RequestParamsMeta", None) or RequestParams.Meta
 
 __all__ = [
     "FastMCP",
@@ -151,4 +153,5 @@ __all__ = [
     "TaskMetadata",
     "TaskStatus",
     "RequestParams",
+    "RequestParamsMeta",
 ]

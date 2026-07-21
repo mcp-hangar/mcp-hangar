@@ -10,9 +10,11 @@ def _ctx(meta: object) -> SimpleNamespace:
 
 
 def test_reads_traceparent_and_tracestate_and_excludes_baggage() -> None:
-    from mcp_hangar._sdk_compat import RequestParams
+    from mcp_hangar._sdk_compat import RequestParamsMeta
 
-    meta = RequestParams.Meta.model_validate({"traceparent": "00-abc-def-01", "tracestate": "x=1", "baggage": "k=v"})
+    # v1 RequestParams.Meta is a pydantic model; v2 RequestParamsMeta is a TypedDict.
+    raw = {"traceparent": "00-abc-def-01", "tracestate": "x=1", "baggage": "k=v"}
+    meta = RequestParamsMeta.model_validate(raw) if hasattr(RequestParamsMeta, "model_validate") else raw
 
     out = _inbound_trace_meta(_ctx(meta))
 

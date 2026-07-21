@@ -11,6 +11,7 @@ from unittest.mock import Mock
 
 import pytest
 
+from mcp_hangar._sdk_compat import lowlevel_server
 from mcp_hangar.fastmcp_server import HangarFunctions, MCPServerFactory
 from mcp_hangar.fastmcp_server.governance_extensions import (
     DIGEST_PINNING_ID,
@@ -73,7 +74,7 @@ class TestAdvertisedServerCapabilities:
     def _experimental(self, mock_registry):
         factory = MCPServerFactory(mock_registry)
         server = factory.create_server()
-        init_options = server._mcp_server.create_initialization_options()
+        init_options = lowlevel_server(server).create_initialization_options()
         return init_options.capabilities.experimental or {}
 
     def test_capabilities_experimental_contains_governance_keys(self, mock_registry):
