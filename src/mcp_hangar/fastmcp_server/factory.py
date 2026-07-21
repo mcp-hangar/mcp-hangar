@@ -355,6 +355,16 @@ class MCPServerFactory:
         (``mcp.server.experimental``, mcp 1.26.0); enabling this advertises the
         server ``tasks`` capability and the wire format may churn.
         """
+        from .._sdk_compat import HAS_EXPERIMENTAL_TASKS
+
+        if not HAS_EXPERIMENTAL_TASKS:
+            # SDK v2 removed mcp.shared.experimental.tasks (the store API this
+            # governs). Task governance stays dormant on v2 — the same net effect
+            # as the relay-only stance (ADR-008); its rebuild on the native v2
+            # Tasks extension is tracked in #322 / ADR-014.
+            logger.info("governed_tasks_skipped_no_experimental_api")
+            return
+
         from ..application.tasks import GovernedTaskStore
         from ..domain.services.task_digest_guard import TaskDigestGuard
         from ..domain.services.task_ownership import TaskOwnershipRegistry
