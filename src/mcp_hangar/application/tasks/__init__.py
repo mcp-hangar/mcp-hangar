@@ -1,25 +1,13 @@
-"""Application-layer wiring for MCP experimental task support.
+"""Application-layer wiring for MCP task relay governance (ADR-014).
 
-Hosts the ownership-governed ``TaskStore`` that binds each task to its owning
-tenant/principal and fail-closed-authorizes ``tasks/*`` access.
+Hosts the v2-native :class:`GovernedTaskStore` -- a synchronous in-memory
+governance ledger that binds each relayed task to its owning tenant/principal
+and pinned tool digest, keeps an upstream-truth snapshot, and fail-closed-
+authorizes ``tasks/*`` access. It holds governance metadata ONLY (never results
+or execution state) and has no dependence on the removed SDK v1 experimental
+task store, so it imports and constructs standalone on SDK v2.
 """
 
-from typing import TYPE_CHECKING
-
-if TYPE_CHECKING:
-    from mcp_hangar.application.tasks.governed_task_store import GovernedTaskStore
+from mcp_hangar.application.tasks.governed_task_store import GovernedTaskStore
 
 __all__ = ["GovernedTaskStore"]
-
-
-def __getattr__(name: str):
-    # Lazy (PEP 562): ``governed_task_store`` imports the SDK v1
-    # ``mcp.shared.experimental.tasks`` store, which SDK v2 removed. Importing it
-    # lazily keeps ``import mcp_hangar.application.tasks`` safe on v2 — the module
-    # is only loaded when GovernedTaskStore is actually accessed, which happens
-    # only behind the HAS_EXPERIMENTAL_TASKS guard in the factory (dormant on v2).
-    if name == "GovernedTaskStore":
-        from mcp_hangar.application.tasks.governed_task_store import GovernedTaskStore
-
-        return GovernedTaskStore
-    raise AttributeError(f"module {__name__!r} has no attribute {name!r}")
