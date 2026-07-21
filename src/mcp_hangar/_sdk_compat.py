@@ -54,6 +54,12 @@ try:
 except ImportError:
     HAS_EXPERIMENTAL_TASKS = False
 
+# SDK v2 promotes Tasks out of ``experimental`` into a first-class negotiated
+# protocol extension (``mcp_types.CreateTaskResult`` et al.). This flag gates the
+# v2-native task-relay governance (ADR-014 relay-with-governance / #322); the v1
+# HAS_EXPERIMENTAL_TASKS above is now only a legacy no-op marker.
+HAS_NATIVE_TASKS = hasattr(_t, "CreateTaskResult")
+
 
 def lowlevel_server(mcp):
     """Return the wrapped low-level MCP ``Server``.
@@ -137,11 +143,32 @@ RequestParams = _t.RequestParams
 # v1 nested it as RequestParams.Meta; v2 promotes it to mcp_types.RequestParamsMeta.
 RequestParamsMeta = getattr(_t, "RequestParamsMeta", None) or RequestParams.Meta  # type: ignore[attr-defined]
 
+# v2-native Tasks extension surface (ADR-014). Absent on v1 -> None (this module
+# still imports on either generation); callers gate on HAS_NATIVE_TASKS before use.
+CreateTaskResult = getattr(_t, "CreateTaskResult", None)
+GetTaskRequestParams = getattr(_t, "GetTaskRequestParams", None)
+GetTaskResult = getattr(_t, "GetTaskResult", None)
+GetTaskPayloadRequestParams = getattr(_t, "GetTaskPayloadRequestParams", None)
+GetTaskPayloadResult = getattr(_t, "GetTaskPayloadResult", None)
+CancelTaskRequestParams = getattr(_t, "CancelTaskRequestParams", None)
+CancelTaskResult = getattr(_t, "CancelTaskResult", None)
+ListTasksResult = getattr(_t, "ListTasksResult", None)
+PaginatedRequestParams = getattr(_t, "PaginatedRequestParams", None)
+TaskStatusNotification = getattr(_t, "TaskStatusNotification", None)
+ServerCapabilities = getattr(_t, "ServerCapabilities", None)
+ServerTasksCapability = getattr(_t, "ServerTasksCapability", None)
+ServerTasksRequestsCapability = getattr(_t, "ServerTasksRequestsCapability", None)
+TasksToolsCapability = getattr(_t, "TasksToolsCapability", None)
+TasksCallCapability = getattr(_t, "TasksCallCapability", None)
+TasksListCapability = getattr(_t, "TasksListCapability", None)
+TasksCancelCapability = getattr(_t, "TasksCancelCapability", None)
+
 __all__ = [
     "FastMCP",
     "Context",
     "McpError",
     "HAS_EXPERIMENTAL_TASKS",
+    "HAS_NATIVE_TASKS",
     "lowlevel_server",
     "new_mcp_server",
     "make_mcp_error",
@@ -161,4 +188,21 @@ __all__ = [
     "TaskStatus",
     "RequestParams",
     "RequestParamsMeta",
+    "CreateTaskResult",
+    "GetTaskRequestParams",
+    "GetTaskResult",
+    "GetTaskPayloadRequestParams",
+    "GetTaskPayloadResult",
+    "CancelTaskRequestParams",
+    "CancelTaskResult",
+    "ListTasksResult",
+    "PaginatedRequestParams",
+    "TaskStatusNotification",
+    "ServerCapabilities",
+    "ServerTasksCapability",
+    "ServerTasksRequestsCapability",
+    "TasksToolsCapability",
+    "TasksCallCapability",
+    "TasksListCapability",
+    "TasksCancelCapability",
 ]

@@ -297,6 +297,30 @@ class TaskCancelled(DomainEvent):
         super().__init__()
 
 
+@dataclass
+class DigestMismatchInTask(DomainEvent):
+    """Published when a relayed task's pinned tool digest drifts at result time.
+
+    The task-keyed counterpart of :class:`DigestMismatchEvent` (ADR-014 relay-with-
+    governance / #320): when ``get_result`` re-verifies a task's pinned tool digest
+    and finds drift (or an unverifiable schema), the task is failed fail-closed and
+    this event is emitted onto the append-only provenance chain, keyed by the task
+    plus its ``target_server_id`` (task_ids are unique only per-upstream).
+    """
+
+    task_id: str
+    target_server_id: str = ""
+    tenant_id: str | None = None
+    correlation_id: str = ""
+    mcp_server_id: str | None = None
+    tool_name: str = ""
+    expected_digest: str = ""
+    observed_digest: str | None = None
+
+    def __post_init__(self):
+        super().__init__()
+
+
 # Health Check Events
 
 
