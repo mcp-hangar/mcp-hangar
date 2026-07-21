@@ -37,6 +37,7 @@ dependencies = [
     "python-multipart>=0.0.22",
     "protobuf>=6.33.5",
     "jcs>=0.2.1",
+    "click>=8.3.3",  # security floor: PYSEC-2026-2132 (click.edit() command injection); transitive via typer
 ]
 [project.optional-dependencies]
 dev = [
