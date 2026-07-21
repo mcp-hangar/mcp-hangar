@@ -39,6 +39,7 @@ else:
     except ImportError:  # SDK v1
         from mcp.server.fastmcp import Context, FastMCP
 
+
 def current_request_context():
     """Best-effort access to the ambient MCP request context, or ``None``.
 
