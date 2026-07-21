@@ -45,7 +45,7 @@ import logging
 import uuid
 from typing import TYPE_CHECKING, Any
 
-from mcp.server.fastmcp import FastMCP
+from mcp_hangar._sdk_compat import FastMCP
 from mcp_hangar._sdk_compat import (
     METHOD_NOT_FOUND,
     ErrorData,

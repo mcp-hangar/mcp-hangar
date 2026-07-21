@@ -26,6 +26,14 @@ try:  # SDK v2 renamed McpError -> MCPError (mcp.shared.exceptions still exists)
 except ImportError:  # SDK v1
     from mcp.shared.exceptions import McpError
 
+try:  # SDK v2: FastMCP -> MCPServer; Context moved to mcp.server.mcpserver.
+    from mcp.server.mcpserver import (
+        Context,
+        MCPServer as FastMCP,
+    )
+except ImportError:  # SDK v1
+    from mcp.server.fastmcp import Context, FastMCP
+
 # Protocol version constants.
 DEFAULT_NEGOTIATED_VERSION = _t.DEFAULT_NEGOTIATED_VERSION
 LATEST_PROTOCOL_VERSION = _t.LATEST_PROTOCOL_VERSION
@@ -46,6 +54,8 @@ TaskMetadata = _t.TaskMetadata
 TaskStatus = _t.TaskStatus
 
 __all__ = [
+    "FastMCP",
+    "Context",
     "McpError",
     "DEFAULT_NEGOTIATED_VERSION",
     "LATEST_PROTOCOL_VERSION",

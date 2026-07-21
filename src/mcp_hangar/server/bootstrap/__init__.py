@@ -26,7 +26,7 @@ from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Any, cast, TYPE_CHECKING
 
-from mcp.server.fastmcp import FastMCP
+from mcp_hangar._sdk_compat import FastMCP
 
 from ...application.commands.load_handlers import LoadMcpServerHandler, UnloadMcpServerHandler
 from ...application.discovery import DiscoveryOrchestrator

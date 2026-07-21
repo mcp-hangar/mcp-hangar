@@ -3,7 +3,7 @@
 Uses ApplicationContext for dependency injection (DIP).
 """
 
-from mcp.server.fastmcp import FastMCP
+from mcp_hangar._sdk_compat import FastMCP
 
 from ...application.mcp.tooling import key_global, mcp_tool_wrapper
 from ..context import get_context

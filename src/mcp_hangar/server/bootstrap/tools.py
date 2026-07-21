@@ -1,6 +1,6 @@
 """MCP tools registration."""
 
-from mcp.server.fastmcp import FastMCP
+from mcp_hangar._sdk_compat import FastMCP
 
 from ...logging_config import get_logger
 from ..tools import (

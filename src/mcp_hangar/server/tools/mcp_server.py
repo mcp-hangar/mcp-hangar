@@ -9,7 +9,7 @@ Note: Tool invocation is handled by hangar_call in batch/.
 import logging
 from typing import Any
 
-from mcp.server.fastmcp import FastMCP
+from mcp_hangar._sdk_compat import FastMCP
 
 from ...application.commands import StartMcpServerCommand
 from ...application.mcp.tooling import mcp_tool_wrapper

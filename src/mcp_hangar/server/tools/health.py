@@ -6,7 +6,7 @@ All operations are QUERY operations - read only, no side effects.
 
 from typing import Any
 
-from mcp.server.fastmcp import FastMCP
+from mcp_hangar._sdk_compat import FastMCP
 
 from ... import metrics as m
 from ...application.mcp.tooling import key_global, mcp_tool_wrapper

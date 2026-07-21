@@ -4,7 +4,7 @@ Provides the hangar_fetch_continuation MCP tool that allows clients
 to retrieve the complete content when a batch response was truncated.
 """
 
-from mcp.server.fastmcp import FastMCP
+from mcp_hangar._sdk_compat import FastMCP
 
 from ...logging_config import get_logger
 from ..bootstrap.truncation import get_response_cache

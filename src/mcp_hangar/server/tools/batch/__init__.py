@@ -23,7 +23,7 @@ Example:
 from typing import Any
 import uuid
 
-from mcp.server.fastmcp import Context, FastMCP
+from mcp_hangar._sdk_compat import Context, FastMCP
 
 from ....application.services.interceptor_registry import build_validator_pipeline
 from ....context import get_identity_context, identity_context_var

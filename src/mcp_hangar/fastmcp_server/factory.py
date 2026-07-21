@@ -8,7 +8,7 @@ from __future__ import annotations
 
 from typing import Any, TYPE_CHECKING
 
-from mcp.server.fastmcp import FastMCP
+from mcp_hangar._sdk_compat import FastMCP
 from starlette.applications import Starlette
 
 from ..logging_config import get_logger
