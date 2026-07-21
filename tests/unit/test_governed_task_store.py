@@ -7,17 +7,24 @@ and no task leakage across tenants.
 
 from __future__ import annotations
 
-from collections.abc import Iterator
-from contextlib import contextmanager
-
-from mcp.shared.exceptions import McpError
-from mcp.shared.experimental.tasks.in_memory_task_store import InMemoryTaskStore
-from mcp.types import TaskMetadata
 import pytest
 
-from mcp_hangar.application.tasks.governed_task_store import GovernedTaskStore
-from mcp_hangar.context import identity_context_var
-from mcp_hangar.domain.value_objects.identity import CallerIdentity, IdentityContext
+# GovernedTaskStore builds on the SDK v1 experimental task store, which SDK v2
+# removed (its v2 rebuild is tracked in #322). Skip this module on v2.
+pytest.importorskip(
+    "mcp.shared.experimental.tasks.store",
+    reason="v1-only dormant task governance; v2 rebuild in #322",
+)
+
+from collections.abc import Iterator  # noqa: E402
+from contextlib import contextmanager  # noqa: E402
+
+from mcp.shared.experimental.tasks.in_memory_task_store import InMemoryTaskStore  # noqa: E402
+
+from mcp_hangar._sdk_compat import McpError, TaskMetadata  # noqa: E402
+from mcp_hangar.application.tasks.governed_task_store import GovernedTaskStore  # noqa: E402
+from mcp_hangar.context import identity_context_var  # noqa: E402
+from mcp_hangar.domain.value_objects.identity import CallerIdentity, IdentityContext  # noqa: E402
 
 
 @contextmanager

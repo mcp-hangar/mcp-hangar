@@ -8,7 +8,7 @@ from __future__ import annotations
 
 from typing import Any, TYPE_CHECKING
 
-from mcp_hangar._sdk_compat import FastMCP
+from mcp_hangar._sdk_compat import FastMCP, new_mcp_server
 from starlette.applications import Starlette
 
 from ..logging_config import get_logger
@@ -109,8 +109,8 @@ class MCPServerFactory:
         if self._mcp is not None:
             return self._mcp
 
-        mcp = FastMCP(
-            name="mcp-hangar",
+        mcp = new_mcp_server(
+            "mcp-hangar",
             host=self._config.host,
             port=self._config.port,
             streamable_http_path=self._config.streamable_http_path,

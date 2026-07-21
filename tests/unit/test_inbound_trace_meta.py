@@ -10,7 +10,7 @@ def _ctx(meta: object) -> SimpleNamespace:
 
 
 def test_reads_traceparent_and_tracestate_and_excludes_baggage() -> None:
-    from mcp.types import RequestParams
+    from mcp_hangar._sdk_compat import RequestParams
 
     meta = RequestParams.Meta.model_validate({"traceparent": "00-abc-def-01", "tracestate": "x=1", "baggage": "k=v"})
 

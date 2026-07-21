@@ -29,7 +29,7 @@ from unittest.mock import Mock, patch
 
 import pytest
 
-from mcp.server.fastmcp import Context
+from mcp_hangar._sdk_compat import Context
 
 import mcp_hangar.server.tools.batch as batch
 from mcp_hangar.negotiation import get_current_protocol_negotiation

@@ -53,6 +53,33 @@ except ImportError:
     HAS_EXPERIMENTAL_TASKS = False
 
 
+def new_mcp_server(name: str, **extra) -> FastMCP:
+    """Construct the FastMCP/MCPServer, passing only kwargs its ``__init__`` accepts.
+
+    FastMCP (v1) takes ``host`` / ``port`` / ``streamable_http_path`` / ``sse_path``
+    / ``message_path``; MCPServer (v2) does not (host/port bind via the host
+    uvicorn instead). Filtering by the constructor signature keeps one call site
+    working on both generations.
+    """
+    import inspect
+
+    accepted = set(inspect.signature(FastMCP.__init__).parameters)
+    return FastMCP(name=name, **{k: v for k, v in extra.items() if k in accepted})
+
+
+def make_mcp_error(code: int, message: str, data=None):
+    """Build an ``McpError`` / ``MCPError`` across SDK versions.
+
+    v1 wraps an ``ErrorData`` (``McpError(ErrorData(code, message))``); v2 takes
+    ``MCPError(code, message, data)`` positionally.
+    """
+    import inspect
+
+    if "error" in inspect.signature(McpError.__init__).parameters:  # SDK v1
+        return McpError(ErrorData(code=code, message=message, data=data))
+    return McpError(code, message, data)  # SDK v2
+
+
 def current_request_context():
     """Best-effort access to the ambient MCP request context, or ``None``.
 
@@ -89,12 +116,15 @@ Tool = _t.Tool
 Task = _t.Task
 TaskMetadata = _t.TaskMetadata
 TaskStatus = _t.TaskStatus
+RequestParams = _t.RequestParams
 
 __all__ = [
     "FastMCP",
     "Context",
     "McpError",
     "HAS_EXPERIMENTAL_TASKS",
+    "new_mcp_server",
+    "make_mcp_error",
     "current_request_context",
     "DEFAULT_NEGOTIATED_VERSION",
     "LATEST_PROTOCOL_VERSION",
@@ -109,4 +139,5 @@ __all__ = [
     "Task",
     "TaskMetadata",
     "TaskStatus",
+    "RequestParams",
 ]

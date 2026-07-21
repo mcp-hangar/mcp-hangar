@@ -48,10 +48,9 @@ from typing import TYPE_CHECKING, Any
 from mcp_hangar._sdk_compat import FastMCP
 from mcp_hangar._sdk_compat import (
     METHOD_NOT_FOUND,
-    ErrorData,
     ListToolsResult,
-    McpError,
     Tool as MCPTool,
+    make_mcp_error,
 )
 
 from ..application.read_models.tool_projection import get_tool_projection_registry
@@ -329,12 +328,7 @@ def register_flat_tool_handlers(mcp: FastMCP) -> None:
 
         if name not in flat_map:
             # Unknown flat name → -32601 (method/tool not found).
-            raise McpError(
-                ErrorData(
-                    code=METHOD_NOT_FOUND,
-                    message=f"Tool '{name}' not found",
-                )
-            )
+            raise make_mcp_error(METHOD_NOT_FOUND, f"Tool '{name}' not found")
 
         mcp_server_id, tool_name = flat_map[name]
 
