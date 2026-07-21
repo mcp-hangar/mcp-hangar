@@ -167,7 +167,7 @@ def tool_access_hangar(tmp_path_factory: pytest.TempPathFactory) -> Iterator[_Ac
 
 def _extract_dict(result: object, key: str) -> dict:
     """Extract a dict carrying ``key`` from a CallToolResult (structured or text)."""
-    structured = getattr(result, "structuredContent", None)
+    structured = getattr(result, "structured_content", None) or getattr(result, "structuredContent", None)
     if isinstance(structured, dict):
         if key in structured:
             return structured
@@ -192,12 +192,12 @@ def _mcp_call(harness: _AccessHarness, tool: str, arguments: dict) -> object:
     import asyncio
 
     from mcp import ClientSession
-    from mcp.client.streamable_http import streamablehttp_client
+    from tests.live._mcp_client import open_mcp_streams
 
     headers = {"X-API-Key": harness.api_key}
 
     async def _run() -> object:
-        async with streamablehttp_client(f"{harness.base_url}/mcp", headers=headers) as (read, write, _):
+        async with open_mcp_streams(f"{harness.base_url}/mcp", headers) as (read, write, _):
             async with ClientSession(read, write) as session:
                 await session.initialize()
                 return await session.call_tool(tool, arguments)

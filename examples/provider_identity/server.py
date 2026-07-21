@@ -15,17 +15,25 @@ It speaks MCP over **stdio** by default (the transport hangar uses for
 import os
 import sys
 
-from mcp.server.fastmcp import FastMCP
+try:  # SDK v2: FastMCP -> MCPServer; host/port bind at run(), not construction.
+    from mcp.server.mcpserver import MCPServer as FastMCP
+
+    _MCP_V2 = True
+except ImportError:  # SDK v1
+    from mcp.server.fastmcp import FastMCP
+
+    _MCP_V2 = False
 
 # Identity precedence: first CLI arg, then env var, then a placeholder.
 _IDENTITY = (sys.argv[1] if len(sys.argv) > 1 else "") or os.environ.get("PROVIDER_IDENTITY", "unknown")
 
-mcp = FastMCP(
-    f"identity-provider[{_IDENTITY}]",
-    host=os.environ.get("MCP_HOST", "127.0.0.1"),
-    port=int(os.environ.get("MCP_PORT", "8080")),
-    transport_security=None,
-)
+_HOST = os.environ.get("MCP_HOST", "127.0.0.1")
+_PORT = int(os.environ.get("MCP_PORT", "8080"))
+
+if _MCP_V2:
+    mcp = FastMCP(f"identity-provider[{_IDENTITY}]")
+else:
+    mcp = FastMCP(f"identity-provider[{_IDENTITY}]", host=_HOST, port=_PORT, transport_security=None)
 
 
 @mcp.tool(name="whoami")
@@ -58,10 +66,12 @@ def main():
     MCP_TRANSPORT=streamable-http for a standalone HTTP backend.
     """
     transport = os.environ.get("MCP_TRANSPORT", "stdio")
-    if transport == "streamable-http":
-        mcp.run(transport="streamable-http")
-    else:
+    if transport != "streamable-http":
         mcp.run(transport="stdio")
+    elif _MCP_V2:
+        mcp.run(transport="streamable-http", host=_HOST, port=_PORT)
+    else:
+        mcp.run(transport="streamable-http")
 
 
 if __name__ == "__main__":

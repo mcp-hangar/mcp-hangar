@@ -130,10 +130,10 @@ def _first_call_result(base_url: str, api_key: str, tool: str, arguments: dict |
     per-call result dict (``{success, error_type, ...}``) from the batch envelope.
     """
     from mcp import ClientSession
-    from mcp.client.streamable_http import streamablehttp_client
+    from tests.live._mcp_client import open_mcp_streams
 
     async def _call() -> dict:
-        async with streamablehttp_client(f"{base_url}/mcp", headers={"X-API-Key": api_key}) as (read, write, _):
+        async with open_mcp_streams(f"{base_url}/mcp", {"X-API-Key": api_key}) as (read, write, _):
             async with ClientSession(read, write) as session:
                 await session.initialize()
                 res = await session.call_tool(
@@ -154,7 +154,7 @@ def _unwrap_batch(call_tool_result: object) -> dict:
     Prefers ``structuredContent`` and falls back to scanning text content for the
     JSON envelope, so the test is resilient to how FastMCP serialises the return.
     """
-    data = getattr(call_tool_result, "structuredContent", None)
+    data = getattr(call_tool_result, "structured_content", None) or getattr(call_tool_result, "structuredContent", None)
     if isinstance(data, dict) and "results" in data:
         return data
     for chunk in getattr(call_tool_result, "content", []) or []:
