@@ -8,7 +8,7 @@ from __future__ import annotations
 
 from typing import Any, TYPE_CHECKING
 
-from mcp_hangar._sdk_compat import FastMCP, new_mcp_server
+from mcp_hangar._sdk_compat import FastMCP, lowlevel_server, new_mcp_server
 from starlette.applications import Starlette
 
 from ..logging_config import get_logger
@@ -376,7 +376,7 @@ class MCPServerFactory:
         self._task_digest_guard = digest_guard
         # FastMCP wraps a low-level Server exposed as ``_mcp_server``; its
         # ``experimental`` API is where task support is enabled.
-        mcp._mcp_server.experimental.enable_tasks(store=store)
+        lowlevel_server(mcp).experimental.enable_tasks(store=store)
         logger.info("governed_tasks_enabled")
 
     @staticmethod
@@ -393,7 +393,7 @@ class MCPServerFactory:
 
         from .governance_extensions import governance_experimental_capabilities
 
-        server = mcp._mcp_server
+        server = lowlevel_server(mcp)
         extensions = governance_experimental_capabilities()
         original = server.create_initialization_options
 
@@ -406,7 +406,7 @@ class MCPServerFactory:
                 merged.update(experimental_capabilities)
             return original(notification_options, merged)
 
-        server.create_initialization_options = _with_governance  # type: ignore[method-assign]
+        server.create_initialization_options = _with_governance
 
     @staticmethod
     def _register_interceptors_list(mcp: FastMCP) -> None:
