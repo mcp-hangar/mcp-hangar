@@ -18,7 +18,7 @@ Usage:
     run_server(cli_config)
 """
 
-from mcp.server.fastmcp import FastMCP
+from mcp_hangar._sdk_compat import FastMCP
 
 # Public API imports
 from .bootstrap import (

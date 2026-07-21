@@ -47,7 +47,7 @@ import time
 import uuid
 from typing import Any
 
-from mcp.server.fastmcp import FastMCP
+from mcp_hangar._sdk_compat import FastMCP
 from starlette.requests import Request
 from starlette.responses import JSONResponse
 

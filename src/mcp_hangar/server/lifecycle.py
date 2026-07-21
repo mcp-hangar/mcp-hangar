@@ -176,10 +176,13 @@ class ServerLifecycle:
 
         logger.info("starting_http_server", host=host, port=port)
 
-        # Update FastMCP settings for HTTP mode
+        # Update FastMCP settings for HTTP mode. FastMCP (SDK v1) carries
+        # host/port on .settings; MCPServer (SDK v2) has no .settings, and the
+        # host uvicorn below binds host/port directly, so this is a no-op there.
         mcp_server = self._context.mcp_server
-        mcp_server.settings.host = host
-        mcp_server.settings.port = port
+        if hasattr(mcp_server, "settings"):
+            mcp_server.settings.host = host
+            mcp_server.settings.port = port
 
         # Get the MCP app from FastMCP
         mcp_app = mcp_server.streamable_http_app()
