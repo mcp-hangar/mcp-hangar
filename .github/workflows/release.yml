@@ -91,6 +91,10 @@ jobs:
     needs: validate
     if: ${{ github.event.inputs.skip_tests != 'true' }}
     runs-on: ubuntu-latest
+    # Backstop for a hung test/step: the whole suite runs in a few minutes, so a
+    # job running long means something wedged -- fail fast instead of burning to
+    # the 6h GitHub ceiling (which cancelled a prior release on 3.12).
+    timeout-minutes: 30
     defaults:
       run:
         working-directory: .
