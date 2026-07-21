@@ -40,6 +40,19 @@ else:
         from mcp.server.fastmcp import Context, FastMCP
 
 
+# SDK v1 shipped a pluggable task store under ``mcp.shared.experimental.tasks``
+# that GovernedTaskStore builds on; SDK v2 removed that namespace entirely (the
+# native v2 Tasks extension is a different mechanism). Callers use this flag to
+# keep the dormant task-governance wiring off on v2 — its rebuild on the v2
+# Tasks extension is tracked in #322 / ADR-014.
+try:
+    import mcp.shared.experimental.tasks.store as _tasks_store  # noqa: F401
+
+    HAS_EXPERIMENTAL_TASKS = True
+except ImportError:
+    HAS_EXPERIMENTAL_TASKS = False
+
+
 def current_request_context():
     """Best-effort access to the ambient MCP request context, or ``None``.
 
@@ -81,6 +94,7 @@ __all__ = [
     "FastMCP",
     "Context",
     "McpError",
+    "HAS_EXPERIMENTAL_TASKS",
     "current_request_context",
     "DEFAULT_NEGOTIATED_VERSION",
     "LATEST_PROTOCOL_VERSION",
