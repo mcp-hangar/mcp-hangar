@@ -49,10 +49,18 @@ from __future__ import annotations
 
 import threading
 
-from mcp.shared.exceptions import McpError
 from mcp.shared.experimental.tasks.in_memory_task_store import InMemoryTaskStore
 from mcp.shared.experimental.tasks.store import TaskStore
-from mcp.types import INVALID_PARAMS, ErrorData, Result, Task, TaskMetadata, TaskStatus
+
+from mcp_hangar._sdk_compat import (
+    INVALID_PARAMS,
+    ErrorData,
+    McpError,
+    Result,
+    Task,
+    TaskMetadata,
+    TaskStatus,
+)
 
 from mcp_hangar.application.read_models.tool_projection import get_tool_projection_registry
 from mcp_hangar.application.tasks.tool_pin_context import get_current_tool_pin

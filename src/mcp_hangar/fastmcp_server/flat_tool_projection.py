@@ -46,11 +46,11 @@ import uuid
 from typing import TYPE_CHECKING, Any
 
 from mcp.server.fastmcp import FastMCP
-from mcp.shared.exceptions import McpError
-from mcp.types import (
+from mcp_hangar._sdk_compat import (
     METHOD_NOT_FOUND,
     ErrorData,
     ListToolsResult,
+    McpError,
     Tool as MCPTool,
 )
 
@@ -318,7 +318,7 @@ def register_flat_tool_handlers(mcp: FastMCP) -> None:
           which surfaces as a CallToolResult(isError=True).  The backend is
           never invoked.
         """
-        from mcp.types import CallToolResult, TextContent
+        from mcp_hangar._sdk_compat import CallToolResult, TextContent
 
         identity = get_identity_context()
         tenant_id: str | None = identity.caller.tenant_id if identity is not None else None
