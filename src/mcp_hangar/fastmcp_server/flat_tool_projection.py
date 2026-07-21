@@ -243,10 +243,15 @@ def _build_mcp_tool_list(
         description = schema.get("description", "")
 
         tools.append(
-            MCPTool(
-                name=flat_name,
-                description=description,
-                inputSchema=input_schema,
+            # Built via model_validate with the wire alias ``inputSchema`` so the
+            # same call works on SDK v1 (field ``inputSchema``) and v2 (renamed to
+            # ``input_schema``, alias-populated).
+            MCPTool.model_validate(
+                {
+                    "name": flat_name,
+                    "description": description,
+                    "inputSchema": input_schema,
+                }
             )
         )
 

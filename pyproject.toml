@@ -20,7 +20,8 @@ classifiers = [
     "Topic :: System :: Systems Administration",
 ]
 dependencies = [
-    "mcp>=1.28.1,<2",  # v1 SDK surface; the #547 migration moves this to mcp==2.0.0bN
+    "mcp==2.0.0b2",  # v2 SDK (#547); beta pinned hard — b2->b3 may break, bump deliberately
+    "mcp-types==2.0.0b2",  # v2 split protocol-types dist (imported directly as mcp_types); paired with mcp
     "structlog>=24.0.0",
     "pydantic>=2.0.0",
     "httpx>=0.25.0",
@@ -138,6 +139,15 @@ module = [
     "structlog.*",
 ]
 ignore_missing_imports = true
+
+# Dormant on SDK v2: the governed task store is built on mcp.shared.experimental.tasks,
+# which v2 removed. It is lazy-quarantined at runtime (HAS_EXPERIMENTAL_TASKS) and its
+# tests importorskip. Under the pinned v2 SDK the wrapped store types resolve to Any, so
+# its pass-through methods trip warn_return_any. Relax only that here until the store is
+# rebuilt on v2's native Tasks extension (#322 / ADR-014).
+[[tool.mypy.overrides]]
+module = ["mcp_hangar.application.tasks.governed_task_store"]
+warn_return_any = false
 
 [tool.pytest.ini_options]
 testpaths = ["tests"]

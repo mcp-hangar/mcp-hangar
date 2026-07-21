@@ -19,12 +19,14 @@ from __future__ import annotations
 try:  # SDK v2: protocol types live in the split ``mcp_types`` package.
     import mcp_types as _t
 except ImportError:  # SDK v1: protocol types live under ``mcp.types``.
-    from mcp import types as _t
+    # Static analysis runs against the pinned SDK (v2); the v1 fallback below is
+    # dead there, so mypy flags the missing v1 module — silence it deliberately.
+    from mcp import types as _t  # type: ignore[attr-defined,no-redef]
 
 try:  # SDK v2 renamed McpError -> MCPError (mcp.shared.exceptions still exists).
-    from mcp.shared.exceptions import MCPError as McpError  # type: ignore[attr-defined]
+    from mcp.shared.exceptions import MCPError as McpError
 except ImportError:  # SDK v1
-    from mcp.shared.exceptions import McpError
+    from mcp.shared.exceptions import McpError  # type: ignore[attr-defined,no-redef]
 
 from typing import TYPE_CHECKING
 
@@ -90,7 +92,8 @@ def make_mcp_error(code: int, message: str, data=None):
     import inspect
 
     if "error" in inspect.signature(McpError.__init__).parameters:  # SDK v1
-        return McpError(ErrorData(code=code, message=message, data=data))
+        # v1-only branch; under the pinned v2 SDK McpError is MCPError(int, ...).
+        return McpError(ErrorData(code=code, message=message, data=data))  # type: ignore[call-arg,arg-type]
     return McpError(code, message, data)  # SDK v2
 
 
@@ -106,7 +109,7 @@ def current_request_context():
     v2 ``Context`` through to those sites is a follow-up under #547.
     """
     try:  # SDK v1: ambient request ContextVar.
-        from mcp.server.lowlevel.server import request_ctx
+        from mcp.server.lowlevel.server import request_ctx  # type: ignore[attr-defined]
     except ImportError:  # SDK v2: no ambient request_ctx (Context is passed explicitly).
         return None
     return request_ctx.get(None)
@@ -132,7 +135,7 @@ TaskMetadata = _t.TaskMetadata
 TaskStatus = _t.TaskStatus
 RequestParams = _t.RequestParams
 # v1 nested it as RequestParams.Meta; v2 promotes it to mcp_types.RequestParamsMeta.
-RequestParamsMeta = getattr(_t, "RequestParamsMeta", None) or RequestParams.Meta
+RequestParamsMeta = getattr(_t, "RequestParamsMeta", None) or RequestParams.Meta  # type: ignore[attr-defined]
 
 __all__ = [
     "FastMCP",

@@ -24,7 +24,11 @@ class TestBaggageRoundTrip:
 
     def test_inbound_baggage_extracted_and_available(self) -> None:
         """Baggage present on an inbound carrier round-trips through extract/inject."""
-        pytest.importorskip("opentelemetry.baggage")
+        # extract_trace_context is a no-op unless the full OTEL SDK is installed
+        # (OTEL_AVAILABLE). Gate on the SDK, not just opentelemetry.baggage: mcp v2
+        # pulls opentelemetry-api transitively, so an api-only (SDK-less) dev env
+        # imports opentelemetry.baggage yet extract_trace_context still returns None.
+        pytest.importorskip("opentelemetry.sdk.trace")
 
         from opentelemetry import baggage
         from opentelemetry import context as otel_context

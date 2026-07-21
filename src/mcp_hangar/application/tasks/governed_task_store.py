@@ -54,12 +54,11 @@ from mcp.shared.experimental.tasks.store import TaskStore
 
 from mcp_hangar._sdk_compat import (
     INVALID_PARAMS,
-    ErrorData,
-    McpError,
     Result,
     Task,
     TaskMetadata,
     TaskStatus,
+    make_mcp_error,
 )
 
 from mcp_hangar.application.read_models.tool_projection import get_tool_projection_registry
@@ -203,12 +202,7 @@ class GovernedTaskStore(TaskStore):
                 tool=tool_name,
                 verifiable=observed is not None,
             )
-            raise McpError(
-                ErrorData(
-                    code=INVALID_PARAMS,
-                    message="tool digest drifted since task creation",
-                )
-            )
+            raise make_mcp_error(INVALID_PARAMS, "tool digest drifted since task creation")
 
     async def update_task(
         self,
@@ -281,12 +275,7 @@ class GovernedTaskStore(TaskStore):
 
     def _require_authorized(self, task_id: str) -> None:
         if not self._authorized(task_id):
-            raise McpError(
-                ErrorData(
-                    code=INVALID_PARAMS,
-                    message=f"Task not found: {task_id}",
-                )
-            )
+            raise make_mcp_error(INVALID_PARAMS, f"Task not found: {task_id}")
 
 
 __all__ = ["GovernedTaskStore"]
