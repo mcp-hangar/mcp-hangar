@@ -24,7 +24,7 @@ from __future__ import annotations
 from typing import Any
 
 from mcp.server.fastmcp import FastMCP
-from mcp.types import DEFAULT_NEGOTIATED_VERSION, LATEST_PROTOCOL_VERSION
+from mcp_hangar._sdk_compat import DEFAULT_NEGOTIATED_VERSION, LATEST_PROTOCOL_VERSION
 from starlette.requests import Request
 from starlette.responses import JSONResponse
 
