@@ -53,6 +53,16 @@ except ImportError:
     HAS_EXPERIMENTAL_TASKS = False
 
 
+def lowlevel_server(mcp):
+    """Return the wrapped low-level MCP ``Server``.
+
+    FastMCP (v1) exposes it as ``._mcp_server``; MCPServer (v2) as
+    ``._lowlevel_server``. Both carry ``add_request_handler`` / ``middleware`` /
+    ``create_initialization_options`` / ``get_capabilities``.
+    """
+    return getattr(mcp, "_lowlevel_server", None) or mcp._mcp_server
+
+
 def new_mcp_server(name: str, **extra) -> FastMCP:
     """Construct the FastMCP/MCPServer, passing only kwargs its ``__init__`` accepts.
 
@@ -123,6 +133,7 @@ __all__ = [
     "Context",
     "McpError",
     "HAS_EXPERIMENTAL_TASKS",
+    "lowlevel_server",
     "new_mcp_server",
     "make_mcp_error",
     "current_request_context",
