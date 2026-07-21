@@ -10,6 +10,12 @@ import pytest
 from mcp_hangar.fastmcp_server import HangarFunctions, MCPServerFactory, MCPServerFactoryBuilder, ServerConfig
 
 
+def _binds_host_port(server) -> bool:
+    """FastMCP (SDK v1) stores host/port on ``.settings``; MCPServer (v2) does not
+    (host/port bind via the host uvicorn), so guard those assertions on v1."""
+    return hasattr(getattr(server, "settings", None), "host")
+
+
 @pytest.fixture
 def mock_registry():
     """Create mock registry functions."""
@@ -149,8 +155,9 @@ class TestMCPServerFactory:
         factory = MCPServerFactory(mock_registry, config)
         server = factory.create_server()
 
-        assert server.settings.host == "127.0.0.1"
-        assert server.settings.port == 9999
+        if _binds_host_port(server):
+            assert server.settings.host == "127.0.0.1"
+            assert server.settings.port == 9999
 
     def test_default_config_used_when_none(self, mock_registry):
         """Default ServerConfig used when not provided."""
@@ -404,8 +411,9 @@ class TestMCPServerFactoryBuilder:
         )
 
         server = factory.create_server()
-        assert server.settings.port == 3000
-        assert server.settings.host == "localhost"
+        if _binds_host_port(server):
+            assert server.settings.port == 3000
+            assert server.settings.host == "localhost"
 
     def test_builder_with_all_config_options(self, mock_registry):
         """Builder accepts all config options."""
@@ -468,8 +476,9 @@ class TestMultipleInstances:
         server1 = factory1.create_server()
         server2 = factory2.create_server()
 
-        assert server1.settings.port == 8000
-        assert server2.settings.port == 9000
+        if _binds_host_port(server1):
+            assert server1.settings.port == 8000
+            assert server2.settings.port == 9000
 
     def test_factories_dont_share_mcp_instance(self, mock_registry):
         """Each factory caches its own MCP instance."""
