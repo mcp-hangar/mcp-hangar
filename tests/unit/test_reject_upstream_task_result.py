@@ -49,6 +49,10 @@ def mock_context():
         state=Mock(value="ready"), has_tools=False, health=Mock(should_degrade=Mock(return_value=False))
     )
     ctx.mcp_server_exists.return_value = True
+    # Kill-switch OFF (default): the factory wires governed_task_store only when
+    # relay_tasks_enabled is on, so its absence == the relay-only stance. A bare
+    # Mock would auto-create a truthy attribute, so pin it to None explicitly.
+    ctx.governed_task_store = None
     with (
         patch("mcp_hangar.server.tools.batch.executor.get_context", return_value=ctx),
         patch("mcp_hangar.server.tools.batch.executor.GROUPS") as exec_groups,

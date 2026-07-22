@@ -7,6 +7,9 @@ plus configuration constants.
 from dataclasses import dataclass, field
 from typing import Any
 
+from ....application.tasks.tool_pin_context import CurrentToolPin
+from ....domain.value_objects.identity import IdentityContext
+
 # =============================================================================
 # Configuration Constants
 # =============================================================================
@@ -69,6 +72,42 @@ class RetryMetadata:
 
 
 @dataclass
+class RelayCapture:
+    """Context captured in a batch WORKER when an upstream ``tools/call`` returns
+    a task handle, to be governed on the MAIN LOOP (ADR-014 D4).
+
+    The ThreadPoolExecutor worker only DETECTS the upstream task result and
+    snapshots the request-scoped context needed to govern it; the actual
+    ``store.relay_and_govern(...)`` (register + ``TaskCreated`` emit) runs on the
+    main loop at the P3.3 seam, BEFORE the handle reaches the client. Governance
+    therefore binds on the request path, never in a worker thread.
+
+    Attributes:
+        identity: The worker's :class:`IdentityContext` snapshot (or ``None`` when
+            unattributed). Re-bound at the seam so the store's owner cross-check
+            sees the same tenant the worker authorized.
+        pin: The worker's :class:`CurrentToolPin` snapshot (or ``None`` when the
+            call was not digest-pinned). Re-bound at the seam so the governed
+            entry is pinned to the digest authorized at invoke time (#320).
+        target_server_id: Resolved backend (standalone server or selected group
+            member) the task lives on; first half of the composite ledger key.
+        correlation_id: Request correlation id (the call's ``call_id``).
+        upstream: The raw upstream task-handle dict (``result.result``); handed
+            back to the client verbatim once governed.
+        logical_mcp_server: Logical mcp_server (or group) id the call targeted.
+        tool: Tool name invoked on the call.
+    """
+
+    identity: IdentityContext | None
+    pin: CurrentToolPin | None
+    target_server_id: str
+    correlation_id: str
+    upstream: dict[str, Any]
+    logical_mcp_server: str
+    tool: str
+
+
+@dataclass
 class CallResult:
     """Result of a single call within a batch."""
 
@@ -84,6 +123,10 @@ class CallResult:
     original_size_bytes: int | None = None
     retry_metadata: RetryMetadata | None = None
     continuation_id: str | None = None  # For fetching full response when truncated
+    # ADR-014 P3: set by a batch worker when the upstream returned a task handle
+    # and the relay kill-switch is on. Carries the captured request context so the
+    # MAIN-LOOP seam (hangar_call) can govern the relay; None on every other path.
+    relay_capture: "RelayCapture | None" = None
 
 
 @dataclass
