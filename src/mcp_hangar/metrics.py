@@ -965,6 +965,51 @@ OTLP_EXPORT_FAILURES_TOTAL = Counter(
     description="Total number of failed OTLP span-export batches (collector unreachable or export error)",
 )
 
+# -----------------------------------------------------------------------------
+# Task Relay Metrics (ADR-014 Phase 3)
+# -----------------------------------------------------------------------------
+# The relay seam emits Task* lifecycle events; these counters make the async
+# task lifecycle observable per tenant. The fail-closed paths (TaskFailed,
+# DigestMismatchInTask) are the ones most in need of alerting, so each is a
+# distinct series. tenant_id is normalized to "unknown" when absent so the
+# label never carries a None (which would break exposition).
+
+TASK_RELAYED_TOTAL = Counter(
+    name="mcp_hangar_task_relayed",
+    description="Total async tasks relayed/created through the task relay seam",
+    labels=["tenant_id"],
+)
+
+TASK_COMPLETED_TOTAL = Counter(
+    name="mcp_hangar_task_completed",
+    description="Total relayed tasks that finished successfully",
+    labels=["tenant_id"],
+)
+
+TASK_FAILED_TOTAL = Counter(
+    name="mcp_hangar_task_failed",
+    description="Total relayed tasks that terminated with an error, by failure reason",
+    labels=["tenant_id", "reason"],
+)
+
+TASK_CANCELLED_TOTAL = Counter(
+    name="mcp_hangar_task_cancelled",
+    description="Total relayed tasks cancelled before completion",
+    labels=["tenant_id"],
+)
+
+TASK_INPUT_REQUIRED_TOTAL = Counter(
+    name="mcp_hangar_task_input_required",
+    description="Total relayed tasks that paused awaiting caller input",
+    labels=["tenant_id"],
+)
+
+TASK_DIGEST_DRIFT_TOTAL = Counter(
+    name="mcp_hangar_task_digest_drift",
+    description="Total relayed tasks failed fail-closed on pinned-tool digest drift at result time",
+    labels=["tenant_id"],
+)
+
 
 # =============================================================================
 # Register All Metrics
@@ -1075,6 +1120,18 @@ def _register_all_metrics():
     # Semantic analysis metrics
     metrics.append(DETECTION_RULE_MATCHES_TOTAL)
     metrics.append(ENFORCEMENT_ACTIONS_TOTAL)
+
+    # Task relay metrics (ADR-014 Phase 3)
+    metrics.extend(
+        [
+            TASK_RELAYED_TOTAL,
+            TASK_COMPLETED_TOTAL,
+            TASK_FAILED_TOTAL,
+            TASK_CANCELLED_TOTAL,
+            TASK_INPUT_REQUIRED_TOTAL,
+            TASK_DIGEST_DRIFT_TOTAL,
+        ]
+    )
 
     for metric in metrics:
         REGISTRY.register(metric)
@@ -1357,6 +1414,46 @@ def record_enforcement_action(action: str, rule_id: str) -> None:
         rule_id: Identifier of the detection rule that triggered the action.
     """
     ENFORCEMENT_ACTIONS_TOTAL.inc(action=action, rule_id=rule_id)
+
+
+# =============================================================================
+# Task Relay Metrics Functions (ADR-014 Phase 3)
+# =============================================================================
+
+
+def record_task_relayed(tenant_id: str | None) -> None:
+    """Record an async task relayed/created (TaskCreated)."""
+    TASK_RELAYED_TOTAL.inc(tenant_id=tenant_id or "unknown")
+
+
+def record_task_completed(tenant_id: str | None) -> None:
+    """Record a relayed task that finished successfully (TaskCompleted)."""
+    TASK_COMPLETED_TOTAL.inc(tenant_id=tenant_id or "unknown")
+
+
+def record_task_failed(tenant_id: str | None, reason: str) -> None:
+    """Record a relayed task that terminated with an error (TaskFailed).
+
+    Args:
+        tenant_id: Owning tenant, normalized to "unknown" when absent.
+        reason: The failure reason (the event's ``error_type``).
+    """
+    TASK_FAILED_TOTAL.inc(tenant_id=tenant_id or "unknown", reason=reason or "unknown")
+
+
+def record_task_cancelled(tenant_id: str | None) -> None:
+    """Record a relayed task cancelled before completion (TaskCancelled)."""
+    TASK_CANCELLED_TOTAL.inc(tenant_id=tenant_id or "unknown")
+
+
+def record_task_input_required(tenant_id: str | None) -> None:
+    """Record a relayed task that paused awaiting caller input (TaskInputRequired)."""
+    TASK_INPUT_REQUIRED_TOTAL.inc(tenant_id=tenant_id or "unknown")
+
+
+def record_task_digest_drift(tenant_id: str | None) -> None:
+    """Record a relayed task failed fail-closed on digest drift (DigestMismatchInTask)."""
+    TASK_DIGEST_DRIFT_TOTAL.inc(tenant_id=tenant_id or "unknown")
 
 
 # =============================================================================
