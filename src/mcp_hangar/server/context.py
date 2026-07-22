@@ -137,6 +137,13 @@ class ApplicationContext:
     discovery_registry: Optional["DiscoveryRegistry"] = None
     auth_components: Any | None = None
     approval_gate: Any | None = None
+    # ADR-014 task-relay serving surface (Phase 2). Populated by the server
+    # factory ONLY when the relay_tasks_enabled kill-switch is on; the Phase-3
+    # executor seam resolves the SAME instances the tasks/* handlers hold. All
+    # remain None in the default dark configuration.
+    governed_task_store: Any | None = None
+    task_consent_gate: Any | None = None
+    task_upstream_router: Any | None = None
 
     @property
     def repository(self) -> "IMcpServerRepository":

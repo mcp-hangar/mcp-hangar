@@ -7,7 +7,11 @@ from unittest.mock import AsyncMock, Mock
 
 import pytest
 
+from mcp_hangar._sdk_compat import HAS_NATIVE_TASKS, lowlevel_server
 from mcp_hangar.fastmcp_server import HangarFunctions, MCPServerFactory, MCPServerFactoryBuilder, ServerConfig
+from mcp_hangar.server.context import get_context, reset_context
+
+_TASK_METHODS = ("tasks/get", "tasks/result", "tasks/cancel", "tasks/list")
 
 
 def _binds_host_port(server) -> bool:
@@ -528,3 +532,119 @@ class TestNoSideEffectsOnImport:
         mock_registry.list.assert_not_called()
         mock_registry.start.assert_not_called()
         mock_registry.health.assert_not_called()
+
+
+@pytest.fixture
+def _reset_ctx():
+    """Isolate the singleton ApplicationContext around task-relay wiring tests."""
+    reset_context()
+    yield
+    reset_context()
+
+
+@pytest.mark.skipif(not HAS_NATIVE_TASKS, reason="v2-native Tasks SDK required")
+class TestGovernedTaskRelayKillSwitch:
+    """ADR-014 Phase 2: the task-relay serving surface ships dark behind the flag.
+
+    Default OFF must be byte-identical to the relay-only stance (no tasks/*
+    handlers, capabilities.tasks None); only relay_tasks_enabled=True goes live.
+    """
+
+    def _server_low(self, mock_registry, *, enabled: bool):
+        factory = MCPServerFactory(mock_registry, config=ServerConfig(relay_tasks_enabled=enabled))
+        return lowlevel_server(factory.create_server())
+
+    # -- dark parity (default OFF) ------------------------------------------
+
+    def test_default_off_registers_no_tasks_handlers(self, mock_registry, _reset_ctx):
+        low = self._server_low(mock_registry, enabled=False)
+        for method in _TASK_METHODS:
+            assert low.get_request_handler(method) is None, method
+
+    def test_default_off_capabilities_tasks_is_none(self, mock_registry, _reset_ctx):
+        low = self._server_low(mock_registry, enabled=False)
+        assert low.get_capabilities().tasks is None
+
+    def test_default_off_context_task_wiring_absent(self, mock_registry, _reset_ctx):
+        self._server_low(mock_registry, enabled=False)
+        ctx = get_context()
+        assert ctx.governed_task_store is None
+        assert ctx.task_consent_gate is None
+        assert ctx.task_upstream_router is None
+
+    def test_default_off_capabilities_byte_identical_except_tasks(self, mock_registry, _reset_ctx):
+        """The ONLY advertised-capabilities difference vs the enabled server is tasks."""
+        off = self._server_low(mock_registry, enabled=False).get_capabilities().model_dump()
+        reset_context()
+        on = self._server_low(mock_registry, enabled=True).get_capabilities().model_dump()
+        assert off["tasks"] is None
+        on_without_tasks = dict(on)
+        on_without_tasks["tasks"] = None
+        assert off == on_without_tasks
+
+    def test_no_tasks_update_handler_when_off(self, mock_registry, _reset_ctx):
+        low = self._server_low(mock_registry, enabled=False)
+        assert low.get_request_handler("tasks/update") is None
+
+    # -- enabled (flag True) -------------------------------------------------
+
+    def test_enabled_registers_four_tasks_handlers(self, mock_registry, _reset_ctx):
+        low = self._server_low(mock_registry, enabled=True)
+        for method in _TASK_METHODS:
+            assert low.get_request_handler(method) is not None, method
+
+    def test_enabled_advertises_tasks_capability_at_initialize(self, mock_registry, _reset_ctx):
+        """capabilities.tasks is a pure function of the static flag (no task relayed)."""
+        low = self._server_low(mock_registry, enabled=True)
+        tasks = low.get_capabilities().tasks
+        assert tasks is not None
+        assert tasks.list is not None
+        assert tasks.cancel is not None
+        assert tasks.requests is not None
+        assert tasks.requests.tools is not None
+        assert tasks.requests.tools.call is not None
+        # Also reflected in the full INITIALIZE init-options.
+        init_caps = low.create_initialization_options().capabilities
+        assert init_caps.tasks is not None
+
+    def test_enabled_exposes_store_gate_router_on_context(self, mock_registry, _reset_ctx):
+        from mcp_hangar.application.tasks import GovernedTaskStore
+        from mcp_hangar.domain.services.task_consent import TaskConsentGate
+
+        self._server_low(mock_registry, enabled=True)
+        ctx = get_context()
+        assert isinstance(ctx.governed_task_store, GovernedTaskStore)
+        assert isinstance(ctx.task_consent_gate, TaskConsentGate)
+        assert callable(ctx.task_upstream_router)
+
+    def test_enabled_context_store_is_same_instance_handlers_hold(self, mock_registry, _reset_ctx, monkeypatch):
+        """The store/router exposed on ctx are the SAME instances passed to the handlers."""
+        import mcp_hangar.fastmcp_server.task_relay_handlers as trh
+
+        captured: dict = {}
+        real = trh.register_task_relay_handlers
+
+        def _spy(mcp, store, upstream_router):
+            captured["store"] = store
+            captured["router"] = upstream_router
+            return real(mcp, store, upstream_router)
+
+        monkeypatch.setattr(trh, "register_task_relay_handlers", _spy)
+        self._server_low(mock_registry, enabled=True)
+        ctx = get_context()
+        assert captured["store"] is ctx.governed_task_store
+        assert captured["router"] is ctx.task_upstream_router
+
+    def test_no_tasks_update_handler_when_enabled(self, mock_registry, _reset_ctx):
+        low = self._server_low(mock_registry, enabled=True)
+        assert low.get_request_handler("tasks/update") is None
+
+
+class TestServerConfigRelayTasksFlag:
+    """The kill-switch lives on ServerConfig and defaults OFF."""
+
+    def test_relay_tasks_disabled_by_default(self):
+        assert ServerConfig().relay_tasks_enabled is False
+
+    def test_relay_tasks_can_be_enabled(self):
+        assert ServerConfig(relay_tasks_enabled=True).relay_tasks_enabled is True
