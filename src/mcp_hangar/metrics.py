@@ -1010,6 +1010,12 @@ TASK_DIGEST_DRIFT_TOTAL = Counter(
     labels=["tenant_id"],
 )
 
+TASK_CONSENT_DECIDED_TOTAL = Counter(
+    name="mcp_hangar_task_consent_decided",
+    description="Total mid-flight task input-required consent decisions (labeled by grant outcome)",
+    labels=["tenant_id", "granted"],
+)
+
 
 # =============================================================================
 # Register All Metrics
@@ -1130,6 +1136,7 @@ def _register_all_metrics():
             TASK_CANCELLED_TOTAL,
             TASK_INPUT_REQUIRED_TOTAL,
             TASK_DIGEST_DRIFT_TOTAL,
+            TASK_CONSENT_DECIDED_TOTAL,
         ]
     )
 
@@ -1454,6 +1461,11 @@ def record_task_input_required(tenant_id: str | None) -> None:
 def record_task_digest_drift(tenant_id: str | None) -> None:
     """Record a relayed task failed fail-closed on digest drift (DigestMismatchInTask)."""
     TASK_DIGEST_DRIFT_TOTAL.inc(tenant_id=tenant_id or "unknown")
+
+
+def record_task_consent_decided(tenant_id: str | None, granted: bool) -> None:
+    """Record a mid-flight task input-required consent decision (TaskConsentDecided)."""
+    TASK_CONSENT_DECIDED_TOTAL.inc(tenant_id=tenant_id or "unknown", granted="true" if granted else "false")
 
 
 # =============================================================================

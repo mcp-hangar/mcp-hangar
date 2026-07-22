@@ -27,9 +27,14 @@ its payload (``tasks/result``), cancel it (``tasks/cancel``) and list its own
   confirms cancellation -- otherwise the entry is kept and its TRUE current
   status is returned.
 
-This module is DARK in Phase 2: it is not wired into the server factory yet
-(that is the next sub-task) and carries NO consent logic (Phase 4). For an
-``input_required`` task ``tasks/get`` simply returns its status as-is.
+Phase 4 (ADR-014, #322) adds SYNCHRONOUS mid-flight consent, behind the same
+kill-switch (dark by default). On the 2025-11-25 protocol there is no inbound
+``tasks/update``: when a relayed task's upstream status is ``input_required``,
+``tasks/get`` resolves it in-handler -- eliciting the downstream client for
+consent via ``ctx.session`` and relaying the answer upstream. Consent is
+obtained BEFORE the gate opens (open-only-on-accept, no race); every non-accept
+outcome (decline/cancel/no-back-channel/error/missing capability) terminally
+FAILS the task fail-closed, so a paused task is never left hanging.
 
 The upstream transport is injected as ``upstream_router`` so this module depends
 only on the router + the ledger (never on the ambient application context); real
@@ -40,6 +45,8 @@ and tests inject a fake.
 from __future__ import annotations
 
 import asyncio
+import hashlib
+import json
 from typing import Any
 
 # The constructed result classes are sourced directly from ``mcp_types`` (a hard
@@ -51,6 +58,7 @@ from typing import Any
 from mcp_types import CancelTaskResult, GetTaskResult, ListTasksResult
 
 from mcp_hangar._sdk_compat import (
+    DEFAULT_NEGOTIATED_VERSION,
     INVALID_PARAMS,
     CallToolResult,
     CancelTaskRequestParams,
@@ -62,6 +70,7 @@ from mcp_hangar._sdk_compat import (
 )
 from mcp_hangar.application.tasks.governed_task_store import GovernedTaskStore
 from mcp_hangar.context import get_identity_context, identity_context_var
+from mcp_hangar.domain.services.task_consent import TaskConsentGate
 from mcp_hangar.fastmcp_server.asgi import _principal_to_identity_context
 from mcp_hangar.logging_config import get_logger
 
@@ -74,10 +83,85 @@ _RELAY_TIMEOUT = 30.0
 # JSON-RPC response dict (the ``{"result": ...}`` / ``{"error": ...}`` shape).
 UpstreamRouter = Any
 
+# The 2026-07-28 protocol resolves task input via ``InputRequiredResult.input_requests``
+# + an inbound ``tasks/update`` handler. THIS serving surface targets the 2025-11-25
+# session, where input is resolved SYNCHRONOUSLY (elicit the downstream client, then
+# relay the answer upstream). The modern path is guarded on this version and stays
+# unreachable here (finding #8); ISO-date strings compare correctly lexicographically.
+_MODERN_TASKS_VERSION = "2026-07-28"
+
+# Form-mode consent prompt + schema for the synchronous 2025-11-25 resolution. The
+# empty-object schema requests a bare accept/decline/cancel confirmation (no fields).
+_CONSENT_PROMPT = (
+    "Task {task_id} on an upstream server is requesting additional input to continue. Do you consent to providing it?"
+)
+_CONSENT_SCHEMA: dict[str, Any] = {"type": "object", "properties": {}}
+
+
+def _current_principal_id() -> str:
+    """The current caller's principal id (user_id, else agent_id), else ``""``."""
+    identity = get_identity_context()
+    if identity is None or identity.caller is None:
+        return ""
+    caller = identity.caller
+    return caller.user_id or caller.agent_id or ""
+
+
+def _is_modern_tasks_session(ctx: Any) -> bool:
+    """Does this session speak the 2026-07-28+ modern tasks-input protocol?
+
+    Fail-safe to the SYNCHRONOUS 2025-11-25 path: any missing/garbled version is
+    treated as pre-modern. Returns ``False`` on a 2025-11-25 session, keeping the
+    modern branch unreachable on this serving surface (finding #8).
+    """
+    version = getattr(getattr(ctx, "session", None), "protocol_version", DEFAULT_NEGOTIATED_VERSION)
+    try:
+        return str(version) >= _MODERN_TASKS_VERSION
+    except Exception:  # noqa: BLE001 -- a non-comparable version is treated as pre-modern
+        return False
+
+
+def _client_supports_elicitation(ctx: Any) -> bool:
+    """Fail-closed: did the downstream client negotiate the elicitation capability?
+
+    Consent is obtained via ``elicit_form``, so an absent elicitation capability
+    means there is NO back-channel to consent the caller -- fail-closed (finding
+    #9). Reads the negotiated capabilities off ``ctx.session.client_params``; any
+    missing/None link in the chain -> ``False``.
+    """
+    try:
+        caps = getattr(getattr(getattr(ctx, "session", None), "client_params", None), "capabilities", None)
+        return getattr(caps, "elicitation", None) is not None
+    except Exception:  # noqa: BLE001 -- capability probing must never break the serving path
+        return False
+
+
+def _derive_input_key(result: dict[str, Any]) -> str:
+    """Derive a DETERMINISTIC consent key for a task's pending input request(s).
+
+    Stable across repeated polls of the same ``input_required`` state so a
+    concurrent second ``tasks/get`` maps to the SAME gate key (enabling the
+    reprompt guard, finding #6). When the upstream result carries a structured
+    ``inputRequests`` map (the extension shape the gate documents), the key
+    digests its server-assigned request ids in sorted order; otherwise it digests
+    the verbatim upstream ``statusMessage``. Always non-empty (the gate rejects
+    empty keys).
+    """
+    reqs = result.get("inputRequests")
+    if not isinstance(reqs, dict):
+        reqs = result.get("input_requests")
+    if isinstance(reqs, dict) and reqs:
+        basis = "ids:" + json.dumps(sorted(reqs.keys()), separators=(",", ":"))
+    else:
+        message = result.get("statusMessage") or result.get("status_message") or ""
+        basis = "msg:" + str(message)
+    return hashlib.sha256(basis.encode("utf-8")).hexdigest()[:32]
+
 
 def register_task_relay_handlers(
     mcp: Any,
     store: GovernedTaskStore,
+    consent_gate: TaskConsentGate,
     upstream_router: UpstreamRouter,
 ) -> None:
     """Register the four ``tasks/*`` serving handlers on the low-level MCP server.
@@ -86,6 +170,8 @@ def register_task_relay_handlers(
         mcp: The FastMCP/MCPServer instance whose low-level server receives the
             handlers.
         store: The governance ledger authorizing + snapshotting relayed tasks.
+        consent_gate: The fail-closed presence gate for mid-flight ``input_required``
+            consent (ADR-014 Phase 4). Opened ONLY after a downstream accept.
         upstream_router: Callable ``(target_server_id, method, params, timeout)``
             returning the raw upstream JSON-RPC response dict. Injected so this
             module never reaches into the ambient application context.
@@ -136,13 +222,120 @@ def register_task_relay_handlers(
             if token is not None:
                 identity_context_var.reset(token)
 
+    async def _sync_snapshot_from_result(key: tuple[str, str], result: dict[str, Any]) -> None:
+        """Sync the local snapshot from a raw upstream ``tasks/get`` result dict."""
+        status = result.get("status")
+        status_message = result.get("statusMessage", result.get("status_message"))
+        if status == "completed":
+            # Owner-emitted, deduped working->completed transition.
+            await asyncio.to_thread(store.mark_completed, key, status_message)
+        elif status is not None:
+            await asyncio.to_thread(store.update_snapshot, key, status, status_message)
+
+    async def _flat_snapshot(key: tuple[str, str], task_id: str) -> Any:
+        """Return the authorized snapshot as a flat ``GetTaskResult``, else deny."""
+        snapshot = await asyncio.to_thread(store.get_task, key)
+        if snapshot is None:
+            raise make_mcp_error(INVALID_PARAMS, f"Task not found: {task_id}")
+        return GetTaskResult(**snapshot.model_dump(by_alias=False))
+
+    async def _deny_consent(key: tuple[str, str], task_id: str, input_key: str, principal_id: str) -> Any:
+        """Terminal fail-closed denial (findings #1/#9, D6 never-hang).
+
+        Fails the task closed, best-effort relays ``tasks/cancel`` upstream,
+        discards any gate presence, records the negative decision, and returns
+        the (now ``failed``) snapshot -- NEVER leaving the task ``input_required``.
+        """
+        await asyncio.to_thread(store.fail_task, key, "consent_denied")
+        try:  # best-effort upstream cancel; never blocks the terminal resolution
+            await asyncio.to_thread(upstream_router, key[0], "tasks/cancel", {"task_id": task_id}, _RELAY_TIMEOUT)
+        except Exception:  # noqa: BLE001 -- upstream cancel is strictly best-effort
+            logger.debug("consent_denied_upstream_cancel_failed", target_server_id=key[0], task_id=task_id)
+        consent_gate.discard(key)
+        await asyncio.to_thread(store.record_consent_decision, key, input_key, False, principal_id)
+        return await _flat_snapshot(key, task_id)
+
+    async def _grant_consent(key: tuple[str, str], task_id: str, input_key: str, principal_id: str) -> Any:
+        """Accepted-consent path: open the gate NOW, relay the answer, re-sync.
+
+        The gate opens ONLY here, after a confirmed accept (finding #1 -- no
+        pre-decision race). The answer is relayed upstream idempotently; the
+        consent is CONSUMED only after a confirmed successful relay. A transient
+        relay failure discards the gate WITHOUT consuming so a retry re-elicits
+        and completes (finding #3 -- recoverable), and does NOT fail the task.
+        """
+        consent_gate.open(key, input_key)
+        # Relay the consented answer upstream. The upstream answer method mirrors
+        # the gate's ``tasks/update`` answer vocabulary; on 2025-11-25 this is the
+        # server->upstream forward, distinct from the (never-registered) inbound
+        # downstream ``tasks/update`` handler.
+        answer_resp = await asyncio.to_thread(
+            upstream_router, key[0], "tasks/update", {"task_id": task_id, "input_key": input_key}, _RELAY_TIMEOUT
+        )
+        if isinstance(answer_resp, dict) and "error" in answer_resp:
+            # Transient upstream refusal: leave recoverable. Discard the gate (do
+            # NOT consume via answer()) so a retry re-elicits + re-relays; the task
+            # stays live (not failed) and the caller can poll again.
+            consent_gate.discard(key)
+            raise make_mcp_error(INVALID_PARAMS, "consent answer relay failed; retry")
+        # Confirmed relay -> consume the single-use consent + record provenance.
+        consent_gate.answer(key, input_key)
+        await asyncio.to_thread(store.record_consent_decision, key, input_key, True, principal_id)
+        # Re-relay tasks/get to reflect the post-input upstream status.
+        resp = await asyncio.to_thread(upstream_router, key[0], "tasks/get", {"task_id": task_id}, _RELAY_TIMEOUT)
+        if not (isinstance(resp, dict) and "error" in resp):
+            result = resp.get("result") if isinstance(resp, dict) else None
+            if isinstance(result, dict):
+                await _sync_snapshot_from_result(key, result)
+        return await _flat_snapshot(key, task_id)
+
+    async def _consent_for_input_required(ctx: Any, key: tuple[str, str], task_id: str, result: dict[str, Any]) -> Any:
+        """Synchronously obtain downstream consent for a task's mid-flight input.
+
+        2025-11-25 has no inbound ``tasks/update``: the pending input is resolved
+        in-handler by eliciting the downstream client for consent (tenant was
+        already authorized above -- structurally above the gate), then relaying
+        the answer upstream. Consent is obtained BEFORE the gate opens (finding
+        #1); every non-accept outcome terminally fails the task (D6 never-hang).
+        """
+        if _is_modern_tasks_session(ctx):
+            # TODO(#322 modern path / 2026-07-28): consume InputRequiredResult.input_requests
+            # and answer via inbound tasks/update. Unreachable on a 2025-11-25 session.
+            logger.debug("modern_tasks_input_path_todo", task_id=task_id)
+
+        input_key = _derive_input_key(result)
+        principal_id = _current_principal_id()
+
+        # Concurrent-reprompt guard (finding #6): a consent already pending for
+        # this exact (key, input_key) means another _get is mid-flight -- do NOT
+        # re-prompt or double-relay; return the current (still input_required) snapshot.
+        if consent_gate.is_consent_pending(key, input_key):
+            return await _flat_snapshot(key, task_id)
+
+        # (1) No downstream elicitation channel -> immediate fail-closed (finding #9).
+        if not _client_supports_elicitation(ctx):
+            return await _deny_consent(key, task_id, input_key, principal_id)
+
+        # (2) Obtain the decision BEFORE opening the gate. Catch ANY elicitation
+        #     failure (not just NoBackChannelError) -> fail-closed (finding #9).
+        try:
+            decision = await ctx.session.elicit_form(_CONSENT_PROMPT.format(task_id=task_id), _CONSENT_SCHEMA)
+        except Exception:  # noqa: BLE001 -- any elicitation failure is a fail-closed denial
+            return await _deny_consent(key, task_id, input_key, principal_id)
+
+        # (3) accept -> open gate + relay; (4) decline/cancel/other -> fail-closed.
+        if getattr(decision, "action", None) == "accept":
+            return await _grant_consent(key, task_id, input_key, principal_id)
+        return await _deny_consent(key, task_id, input_key, principal_id)
+
     async def _get(ctx: Any, params: Any) -> Any:
         """``tasks/get``: relay to the owning upstream, sync the snapshot, return it flat.
 
         An upstream error returns the local snapshot unchanged (no fabrication).
         A ``working -> completed`` transition emits ``TaskCompleted`` exactly once
-        (dedup is atomic inside the store). No consent/``input_required`` handling
-        here -- Phase 4 wires that; an ``input_required`` status is returned as-is.
+        (dedup is atomic inside the store). An ``input_required`` status triggers
+        the synchronous Phase-4 consent flow (elicit downstream, relay upstream);
+        every denial terminally fails the task (never left ``input_required``).
         """
         token = _bridge_identity(ctx)
         try:
@@ -158,18 +351,11 @@ def register_task_relay_handlers(
             if not (isinstance(resp, dict) and "error" in resp):
                 result = resp.get("result") if isinstance(resp, dict) else None
                 if isinstance(result, dict):
-                    status = result.get("status")
-                    status_message = result.get("statusMessage", result.get("status_message"))
-                    if status == "completed":
-                        # Owner-emitted, deduped working->completed transition.
-                        await asyncio.to_thread(store.mark_completed, key, status_message)
-                    elif status is not None:
-                        await asyncio.to_thread(store.update_snapshot, key, status, status_message)
+                    await _sync_snapshot_from_result(key, result)
+                    if result.get("status") == "input_required":
+                        return await _consent_for_input_required(ctx, key, task_id, result)
 
-            snapshot = await asyncio.to_thread(store.get_task, key)
-            if snapshot is None:
-                raise make_mcp_error(INVALID_PARAMS, f"Task not found: {task_id}")
-            return GetTaskResult(**snapshot.model_dump(by_alias=False))
+            return await _flat_snapshot(key, task_id)
         finally:
             if token is not None:
                 identity_context_var.reset(token)

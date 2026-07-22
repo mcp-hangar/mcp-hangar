@@ -298,6 +298,31 @@ class TaskCancelled(DomainEvent):
 
 
 @dataclass
+class TaskConsentDecided(DomainEvent):
+    """Published when a mid-flight ``input_required`` consent is decided (ADR-014 Phase 4).
+
+    On the 2025-11-25 protocol a relayed task that pauses at ``input_required`` is
+    resolved synchronously: Hangar elicits the downstream client for consent and
+    records the outcome here (``granted=True`` on accept, ``False`` on a
+    decline/cancel/failure/fail-closed denial), keyed by the task plus its
+    ``target_server_id`` (task_ids are unique only per-upstream) and the
+    deterministic ``input_key`` of the pending input. This joins the task's
+    append-only provenance chain via its ``correlation_id`` + owner ``tenant_id``.
+    """
+
+    task_id: str
+    target_server_id: str = ""
+    input_key: str = ""
+    granted: bool = False
+    tenant_id: str | None = None
+    correlation_id: str = ""
+    principal_id: str = ""
+
+    def __post_init__(self):
+        super().__init__()
+
+
+@dataclass
 class DigestMismatchInTask(DomainEvent):
     """Published when a relayed task's pinned tool digest drifts at result time.
 

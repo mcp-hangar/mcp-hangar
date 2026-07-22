@@ -36,6 +36,7 @@ from mcp_hangar._sdk_compat import (
 from mcp_hangar.application.tasks.governed_task_store import GovernedTaskStore
 from mcp_hangar.context import identity_context_var
 from mcp_hangar.domain.events import TaskCancelled, TaskCompleted
+from mcp_hangar.domain.services.task_consent import TaskConsentGate
 from mcp_hangar.domain.services.task_ownership import TaskOwner
 from mcp_hangar.domain.value_objects.security import PrincipalType
 from mcp_hangar.domain.value_objects.identity import CallerIdentity, IdentityContext
@@ -127,10 +128,12 @@ def _register(store: GovernedTaskStore, server: str, task_id: str, tenant: str, 
         store.register_relayed_task(target_server_id=server, task=task, expected_owner=TaskOwner(tenant, principal))
 
 
-def _handlers(store: GovernedTaskStore, router: _FakeRouter) -> dict[str, tuple[Any, Any]]:
+def _handlers(
+    store: GovernedTaskStore, router: _FakeRouter, gate: TaskConsentGate | None = None
+) -> dict[str, tuple[Any, Any]]:
     low = _FakeLow()
     mcp = SimpleNamespace(_mcp_server=low)
-    register_task_relay_handlers(mcp, store, router)
+    register_task_relay_handlers(mcp, store, gate or TaskConsentGate(), router)
     return low.handlers
 
 
@@ -254,13 +257,14 @@ def test_get_emits_task_completed_once_on_working_to_completed(store: GovernedTa
     assert completed[0].tenant_id == "tenant-a"
 
 
-def test_get_input_required_returned_as_is_no_consent(store: GovernedTaskStore) -> None:
+def test_get_input_required_without_elicitation_channel_fails_closed(store: GovernedTaskStore) -> None:
+    """No downstream elicitation channel (ctx has no session) -> fail-closed, never left input_required."""
     _register(store, "S1", "T1", "tenant-a", "alice")
     router = _FakeRouter({"tasks/get": {"result": _upstream_task("T1", status="input_required")}})
     handlers = _handlers(store, router)
 
     result = asyncio.run(handlers["tasks/get"][1](_ctx("alice", "tenant-a"), SimpleNamespace(task_id="T1")))
-    assert result.model_dump(by_alias=True)["status"] == "input_required"
+    assert result.model_dump(by_alias=True)["status"] == "failed"
 
 
 # ---------------------------------------------------------------------------

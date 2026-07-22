@@ -383,12 +383,18 @@ class MCPServerFactory:
 
         registry = TaskOwnershipRegistry()
         digest_guard = TaskDigestGuard()
-        consent_gate = TaskConsentGate()
         store = GovernedTaskStore(
             registry=registry,
             digest_guard=digest_guard,
             # Same domain event bus the audit/metrics handlers subscribe to.
             event_publisher=lambda event: get_context().event_bus.publish(event),
+        )
+        # Fail-close a still-live consent evicted by the gate's TTL/LRU cap: a
+        # vanished pending consent must terminally fail the task, never silently
+        # hang (finding #16). The gate hands ``on_evict`` the full consent key
+        # ``(target_server_id, task_id, input_key)``; the ledger keys on the task.
+        consent_gate = TaskConsentGate(
+            on_evict=lambda ck: store.fail_task((ck[0], ck[1]), "consent_unavailable"),
         )
         self._task_ownership_registry = registry
         self._task_digest_guard = digest_guard
@@ -416,7 +422,7 @@ class MCPServerFactory:
         ctx.task_consent_gate = consent_gate
         ctx.task_upstream_router = _task_upstream_router
 
-        register_task_relay_handlers(mcp, store, _task_upstream_router)
+        register_task_relay_handlers(mcp, store, consent_gate, _task_upstream_router)
         logger.info("governed_tasks_enabled")
 
     def _advertise_tasks_capability(self, mcp: FastMCP) -> None:
