@@ -101,8 +101,8 @@ jobs:
     runs-on: ubuntu-latest
 
     steps:
-      - name: No-op (former enterprise merged into src/mcp_hangar/)
-        run: echo "Import boundary check removed — all code in src/mcp_hangar/ now"
+      - name: No-op (import boundary retired)
+        run: echo "Import boundary check retired — all code lives in src/mcp_hangar/"
 
   secrets-scan:
     name: Secrets Scan

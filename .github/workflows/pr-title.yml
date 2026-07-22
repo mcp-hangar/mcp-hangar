@@ -16,7 +16,6 @@ jobs:
     with:
       scopes: |
         core
-        enterprise
         cli
         ci
         operator
