@@ -17,7 +17,7 @@ import pytest
 from mcp_hangar._sdk_compat import McpError
 from mcp_hangar.application.tasks.governed_task_store import GovernedTaskStore
 from mcp_hangar.context import identity_context_var
-from mcp_hangar.domain.events import TaskFailed
+from mcp_hangar.domain.events import TaskCreated, TaskFailed
 from mcp_hangar.domain.services.task_ownership import (
     TaskOwner,
     TaskOwnerConflictError,
@@ -313,3 +313,139 @@ def test_eviction_fails_live_entry_closed_and_publishes(events: list[object]) ->
     with _as("tenant-a", "alice"):
         assert store.get_task(("S", "T1")) is None
         assert store.get_task(("S", "T3")) is not None
+
+
+# -- relay_and_govern: atomic register + provenance head -----------------------
+
+
+def test_relay_and_govern_registers_and_emits_one_task_created(
+    store: GovernedTaskStore,
+    events: list[object],
+) -> None:
+    key = ("S1", "T1")
+    with _as("tenant-a", "alice"):
+        task = store.mint_from_upstream(_upstream("T1"))
+        store.relay_and_govern(
+            target_server_id="S1",
+            task=task,
+            expected_owner=TaskOwner("tenant-a", "alice"),
+            correlation_id="corr-123",
+            mcp_server_id="srv-logical",
+            tool_name="do_thing",
+            original_result_type="CallToolResult",
+        )
+        # Exactly one TaskCreated with the right provenance.
+        created = [e for e in events if isinstance(e, TaskCreated)]
+        assert len(created) == 1
+        head = created[0]
+        assert head.task_id == "T1"
+        assert head.tenant_id == "tenant-a"
+        assert head.correlation_id == "corr-123"
+        assert head.mcp_server_id == "srv-logical"
+        assert head.tool_name == "do_thing"
+
+        # The stored entry now carries the provenance fields register left empty.
+        entry = store._tasks[key]
+        assert entry.correlation_id == "corr-123"
+        assert entry.original_result_type == "CallToolResult"
+
+        # The task is governed + readable by its owner.
+        assert store.get_task(key) is not None
+
+
+def test_relay_and_govern_rolls_back_completely_when_publish_raises(
+    events: list[object],
+) -> None:
+    def _boom(_event: object) -> None:
+        raise RuntimeError("publish failed")
+
+    store = GovernedTaskStore(event_publisher=_boom)
+    key = ("S1", "T1")
+    with _as("tenant-a", "alice"):
+        task = store.mint_from_upstream(_upstream("T1"))
+        with pytest.raises(RuntimeError, match="publish failed"):
+            store.relay_and_govern(
+                target_server_id="S1",
+                task=task,
+                expected_owner=TaskOwner("tenant-a", "alice"),
+                correlation_id="corr-123",
+            )
+        # Rollback is complete: zero governed state survives.
+        assert store.registry.authorize(key, TaskOwner("tenant-a", "alice")) is False
+        assert store.get_task(key) is None
+        assert key not in store._tasks
+        assert key not in store._task_tools
+        assert store.digest_guard.verify(key, "anything") is False
+
+
+def test_relay_and_govern_publishes_under_lock_while_entry_is_live(
+    events: list[object],
+) -> None:
+    key = ("S1", "T1")
+    observed: dict[str, Any] = {}
+
+    def _publisher(event: object) -> None:
+        # At publish time the entry is already registered (under the same atomic
+        # section) -- proving the head is emitted before relay_and_govern returns.
+        observed["live_at_publish"] = key in store._tasks
+        observed["authorized_at_publish"] = store.registry.authorize(key, TaskOwner("tenant-a", "alice"))
+        events.append(event)
+
+    store = GovernedTaskStore(event_publisher=_publisher)
+    with _as("tenant-a", "alice"):
+        task = store.mint_from_upstream(_upstream("T1"))
+        store.relay_and_govern(
+            target_server_id="S1",
+            task=task,
+            expected_owner=TaskOwner("tenant-a", "alice"),
+            correlation_id="corr-123",
+        )
+    assert observed["live_at_publish"] is True
+    assert observed["authorized_at_publish"] is True
+    assert len([e for e in events if isinstance(e, TaskCreated)]) == 1
+
+
+def test_relay_and_govern_rollback_removes_a_registered_entry(
+    events: list[object],
+) -> None:
+    seen: dict[str, Any] = {}
+
+    def _publisher(_event: object) -> None:
+        # Prove the entry WAS registered at publish time, then force rollback.
+        seen["registered_at_publish"] = key in store._tasks
+        raise RuntimeError("publish failed")
+
+    store = GovernedTaskStore(event_publisher=_publisher)
+    key = ("S1", "T1")
+    with _as("tenant-a", "alice"):
+        task = store.mint_from_upstream(_upstream("T1"))
+        with pytest.raises(RuntimeError):
+            store.relay_and_govern(
+                target_server_id="S1",
+                task=task,
+                expected_owner=TaskOwner("tenant-a", "alice"),
+                correlation_id="corr-123",
+            )
+    # The publish observed a live registration; the raise then removed it.
+    assert seen["registered_at_publish"] is True
+    assert key not in store._tasks
+
+
+def test_relay_and_govern_owner_divergence_fails_closed_with_no_entry(
+    store: GovernedTaskStore,
+    events: list[object],
+) -> None:
+    key = ("S1", "T1")
+    with _as("tenant-a", "alice"):
+        task = store.mint_from_upstream(_upstream("T1"))
+        with pytest.raises(ValueError, match="relay identity diverged"):
+            store.relay_and_govern(
+                target_server_id="S1",
+                task=task,
+                expected_owner=TaskOwner("tenant-b", "bob"),
+                correlation_id="corr-123",
+            )
+        # Fail closed before register: no entry, no provenance head.
+        assert key not in store._tasks
+        assert store.get_task(key) is None
+        assert [e for e in events if isinstance(e, TaskCreated)] == []

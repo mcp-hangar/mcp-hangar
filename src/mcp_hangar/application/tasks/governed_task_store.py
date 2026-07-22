@@ -60,7 +60,13 @@ from mcp_hangar._sdk_compat import (
 from mcp_hangar.application.read_models.tool_projection import get_tool_projection_registry
 from mcp_hangar.application.tasks.tool_pin_context import get_current_tool_pin
 from mcp_hangar.context import get_identity_context
-from mcp_hangar.domain.events import DigestMismatchInTask, TaskCancelled, TaskCompleted, TaskFailed
+from mcp_hangar.domain.events import (
+    DigestMismatchInTask,
+    TaskCancelled,
+    TaskCompleted,
+    TaskCreated,
+    TaskFailed,
+)
 from mcp_hangar.domain.services.digest_computation import compute_tool_digest
 from mcp_hangar.domain.services.task_digest_guard import TaskDigestGuard
 from mcp_hangar.domain.services.task_ownership import TaskKey, TaskOwner, TaskOwnershipRegistry
@@ -225,6 +231,75 @@ class GovernedTaskStore:
             digest_pinned=get_current_tool_pin() is not None,
         )
         return owner
+
+    def relay_and_govern(
+        self,
+        *,
+        target_server_id: str,
+        task: Task,
+        expected_owner: TaskOwner,
+        correlation_id: str,
+        mcp_server_id: str | None = None,
+        tool_name: str = "",
+        original_result_type: str = "CallToolResult",
+    ) -> None:
+        """Atomically bind governance to a relayed task and emit its provenance head.
+
+        The P3 relay seam (ADR-014) calls this ONE method so that registration and
+        the ``TaskCreated`` provenance head are a single lock-held critical section:
+        the register is the last fallible governance op, the publish the last op
+        overall, and both happen under ``_tasks_lock`` so no concurrent reader can
+        observe a registered-but-headless governed task (review finding #5). If the
+        publish raises, the whole registration is rolled back, leaving ZERO governed
+        state -- no orphan binding, no live provenance head (review finding #15).
+
+        Args:
+            target_server_id: Upstream server id the task lives on (first half of key).
+            task: Upstream-truth :class:`Task` snapshot to record.
+            expected_owner: Owner the caller authorized; cross-checked (on tenant)
+                against the bound request identity by :meth:`register_relayed_task`.
+            correlation_id: Request correlation id threaded into the ledger entry and
+                the ``TaskCreated`` head so downstream lifecycle events + ``tasks/result``
+                reconstruction share the provenance chain.
+            mcp_server_id: Logical MCP server id for the ``TaskCreated`` head (optional).
+            tool_name: Tool name for the ``TaskCreated`` head (optional).
+            original_result_type: Marker recorded on the entry for future
+                ``tasks/result`` reconstruction.
+        """
+        key: TaskKey = (target_server_id, task.task_id)
+        with self._tasks_lock:
+            # 1. Register (owner cross-check + ownership/digest pin + store entry).
+            #    Re-entrant on _tasks_lock; raises on divergence/rebind before any
+            #    publish, so a failed register leaves nothing to roll back.
+            owner = self.register_relayed_task(
+                target_server_id=target_server_id,
+                task=task,
+                expected_owner=expected_owner,
+            )
+            # 2. Populate the provenance fields register_relayed_task left empty.
+            entry = self._tasks[key]
+            entry.correlation_id = correlation_id
+            entry.original_result_type = original_result_type
+            # 3. Publish the provenance head UNDER THE LOCK. On failure, roll the
+            #    whole registration back so zero governed state survives, then re-raise.
+            if self._event_publisher is not None:
+                try:
+                    self._event_publisher(
+                        TaskCreated(
+                            task_id=task.task_id,
+                            tenant_id=owner.tenant_id,
+                            correlation_id=correlation_id,
+                            mcp_server_id=mcp_server_id,
+                            tool_name=tool_name,
+                        )
+                    )
+                except BaseException:
+                    self._registry.discard(key)
+                    self._digest_guard.discard(key)
+                    self._tasks.pop(key, None)
+                    with self._task_tools_lock:
+                        self._task_tools.pop(key, None)
+                    raise
 
     def mint_from_upstream(self, upstream: dict[str, Any]) -> Task:
         """Build a v2 :class:`Task` from an upstream task dict, verbatim + fail-closed.
