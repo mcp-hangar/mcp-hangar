@@ -544,10 +544,11 @@ def _reset_ctx():
 
 @pytest.mark.skipif(not HAS_NATIVE_TASKS, reason="v2-native Tasks SDK required")
 class TestGovernedTaskRelayKillSwitch:
-    """ADR-014 Phase 2: the task-relay serving surface ships dark behind the flag.
+    """ADR-014: the task-relay serving surface is gated by the flag (both states asserted).
 
-    Default OFF must be byte-identical to the relay-only stance (no tasks/*
-    handlers, capabilities.tasks None); only relay_tasks_enabled=True goes live.
+    Activated 2026-07-22 (flag defaults True). With the flag False the server is
+    byte-identical to the relay-only stance (no tasks/* handlers, capabilities.tasks
+    None) — the retained rollback path; with it True the governed relay is live.
     """
 
     def _server_low(self, mock_registry, *, enabled: bool):
@@ -643,10 +644,12 @@ class TestGovernedTaskRelayKillSwitch:
 
 
 class TestServerConfigRelayTasksFlag:
-    """The kill-switch lives on ServerConfig and defaults OFF."""
+    """The kill-switch lives on ServerConfig and defaults ON (activated 2026-07-22)."""
 
-    def test_relay_tasks_disabled_by_default(self):
-        assert ServerConfig().relay_tasks_enabled is False
+    def test_relay_tasks_enabled_by_default(self):
+        # Activated per ADR-014 D5/D6 (2026-07-22); the flag is retained as a
+        # per-deployment rollback, not an opt-in.
+        assert ServerConfig().relay_tasks_enabled is True
 
-    def test_relay_tasks_can_be_enabled(self):
-        assert ServerConfig(relay_tasks_enabled=True).relay_tasks_enabled is True
+    def test_relay_tasks_can_be_disabled(self):
+        assert ServerConfig(relay_tasks_enabled=False).relay_tasks_enabled is False
