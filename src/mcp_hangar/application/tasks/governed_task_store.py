@@ -64,6 +64,7 @@ from mcp_hangar.domain.events import (
     DigestMismatchInTask,
     TaskCancelled,
     TaskCompleted,
+    TaskConsentDecided,
     TaskCreated,
     TaskFailed,
 )
@@ -488,6 +489,37 @@ class GovernedTaskStore:
                     error_message=error_message,
                 )
             )
+
+    def record_consent_decision(self, key: TaskKey, input_key: str, granted: bool, principal_id: str) -> None:
+        """Emit ``TaskConsentDecided`` provenance for a mid-flight consent outcome.
+
+        Fail-closed: if the ledger entry is absent (never registered / already
+        retired) nothing is emitted -- a consent decision can only be recorded
+        against a known governed task. The event carries the entry's
+        ``correlation_id`` + owner ``tenant_id`` so the decision joins the task's
+        provenance chain; ``principal_id`` attributes who was prompted.
+
+        This is provenance-only: the presence primitive (:class:`TaskConsentGate`)
+        stays a minimal event-free gate; the ledger owns the event bus and emits
+        the decision here.
+        """
+        with self._tasks_lock:
+            entry = self._tasks.get(key)
+            if entry is None:
+                return
+            owner = entry.owner
+            correlation_id = entry.correlation_id
+        self._publish(
+            TaskConsentDecided(
+                task_id=key[1],
+                target_server_id=key[0],
+                input_key=input_key,
+                granted=granted,
+                tenant_id=owner.tenant_id,
+                correlation_id=correlation_id,
+                principal_id=principal_id,
+            )
+        )
 
     def _on_evict(self, key: TaskKey) -> None:
         """Primitive-eviction callback: fail a still-live entry closed, then purge.

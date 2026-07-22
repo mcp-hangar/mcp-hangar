@@ -22,6 +22,7 @@ from mcp_hangar.domain.events import (
     McpServerStopped,
     TaskCancelled,
     TaskCompleted,
+    TaskConsentDecided,
     TaskCreated,
     TaskFailed,
     TaskInputRequired,
@@ -125,6 +126,8 @@ class MetricsEventHandler:
             self._handle_task_input_required(event)
         elif isinstance(event, DigestMismatchInTask):
             self._handle_task_digest_drift(event)
+        elif isinstance(event, TaskConsentDecided):
+            self._handle_task_consent_decided(event)
 
     def _handle_mcp_server_started(self, event: McpServerStarted) -> None:
         """Handle mcp_server started event."""
@@ -258,6 +261,10 @@ class MetricsEventHandler:
     def _handle_task_digest_drift(self, event: DigestMismatchInTask) -> None:
         """Handle relayed-task digest-drift event (fail-closed path)."""
         prometheus_metrics.record_task_digest_drift(event.tenant_id)
+
+    def _handle_task_consent_decided(self, event: TaskConsentDecided) -> None:
+        """Handle a mid-flight input-required consent decision event."""
+        prometheus_metrics.record_task_consent_decided(event.tenant_id, event.granted)
 
     def get_metrics(self, mcp_server_id: str) -> McpServerMetrics | None:
         """

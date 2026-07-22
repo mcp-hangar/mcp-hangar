@@ -29,6 +29,7 @@ from mcp_hangar.domain.events import (
     DomainEvent,
     TaskCancelled,
     TaskCompleted,
+    TaskConsentDecided,
     TaskCreated,
     TaskFailed,
     TaskInputRequired,
@@ -70,6 +71,11 @@ EVENT_COUNTER_MAP: dict[type[DomainEvent], tuple[DomainEvent, object, dict[str, 
         DigestMismatchInTask(task_id="t6", tenant_id=_TENANT),
         prometheus_metrics.TASK_DIGEST_DRIFT_TOTAL,
         {"tenant_id": _TENANT},
+    ),
+    TaskConsentDecided: (
+        TaskConsentDecided(task_id="t7", tenant_id=_TENANT, granted=True),
+        prometheus_metrics.TASK_CONSENT_DECIDED_TOTAL,
+        {"tenant_id": _TENANT, "granted": "true"},
     ),
 }
 

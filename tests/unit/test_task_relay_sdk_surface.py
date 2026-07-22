@@ -51,7 +51,11 @@ class _FakeLow:
 def _registered_methods() -> set[str]:
     low = _FakeLow()
     mcp = SimpleNamespace(_mcp_server=low)
-    register_task_relay_handlers(mcp, GovernedTaskStore(event_publisher=lambda _e: None), lambda *a, **k: None)
+    from mcp_hangar.domain.services.task_consent import TaskConsentGate
+
+    register_task_relay_handlers(
+        mcp, GovernedTaskStore(event_publisher=lambda _e: None), TaskConsentGate(), lambda *a, **k: None
+    )
     return set(low.handlers)
 
 

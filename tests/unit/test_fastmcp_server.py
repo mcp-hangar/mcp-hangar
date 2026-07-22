@@ -624,15 +624,17 @@ class TestGovernedTaskRelayKillSwitch:
         captured: dict = {}
         real = trh.register_task_relay_handlers
 
-        def _spy(mcp, store, upstream_router):
+        def _spy(mcp, store, consent_gate, upstream_router):
             captured["store"] = store
+            captured["consent_gate"] = consent_gate
             captured["router"] = upstream_router
-            return real(mcp, store, upstream_router)
+            return real(mcp, store, consent_gate, upstream_router)
 
         monkeypatch.setattr(trh, "register_task_relay_handlers", _spy)
         self._server_low(mock_registry, enabled=True)
         ctx = get_context()
         assert captured["store"] is ctx.governed_task_store
+        assert captured["consent_gate"] is ctx.task_consent_gate
         assert captured["router"] is ctx.task_upstream_router
 
     def test_no_tasks_update_handler_when_enabled(self, mock_registry, _reset_ctx):
