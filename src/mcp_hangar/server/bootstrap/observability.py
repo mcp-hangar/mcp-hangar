@@ -37,7 +37,7 @@ from typing import Any
 
 from ...application.ports.observability import NullObservabilityAdapter, ObservabilityPort
 from ...logging_config import get_logger
-from .enterprise import create_enterprise_observability_adapter
+from .components import create_observability_adapter
 
 logger = get_logger(__name__)
 
@@ -197,7 +197,7 @@ def init_langfuse(config: LangfuseBootstrapConfig) -> ObservabilityPort:
         return NullObservabilityAdapter()
 
     try:
-        adapter = create_enterprise_observability_adapter(config)
+        adapter = create_observability_adapter(config)
         if adapter is None:
             raise ImportError
         logger.info(

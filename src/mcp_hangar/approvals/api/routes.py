@@ -1,11 +1,11 @@
 """REST API routes for the approval gate.
 
 Endpoints:
-  GET  /enterprise/approvals           - List approvals (filtered by state)
-  GET  /enterprise/approvals/{id}      - Get single approval
-  POST /enterprise/approvals/{id}/resolve - Approve or deny
+  GET  /approvals           - List approvals (filtered by state)
+  GET  /approvals/{id}      - Get single approval
+  POST /approvals/{id}/resolve - Approve or deny
 
-Mounted by enterprise bootstrap. Auth via JWT (approval:read/resolve
+Mounted by the server component loader. Auth via JWT (approval:read/resolve
 permissions) or Slack HMAC callback signature on resolve.
 """
 
@@ -241,10 +241,10 @@ def _get_slack_signing_secret(request: Request) -> str | None:
 
 
 approval_routes = [
-    Route("/enterprise/approvals", list_approvals, methods=["GET"]),
-    Route("/enterprise/approvals/{approval_id:str}", get_approval, methods=["GET"]),
+    Route("/approvals", list_approvals, methods=["GET"]),
+    Route("/approvals/{approval_id:str}", get_approval, methods=["GET"]),
     Route(
-        "/enterprise/approvals/{approval_id:str}/resolve",
+        "/approvals/{approval_id:str}/resolve",
         resolve_approval,
         methods=["POST"],
     ),

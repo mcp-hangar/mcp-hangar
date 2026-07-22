@@ -26,7 +26,7 @@ from mcp_hangar.application.mcp.tooling import (
 
 @dataclass
 class FakeApprovalResult:
-    """Minimal stand-in for enterprise ApprovalResult -- avoids enterprise import."""
+    """Minimal stand-in for ApprovalResult -- avoids an approvals import."""
 
     approved: bool
     error_code: str = ""

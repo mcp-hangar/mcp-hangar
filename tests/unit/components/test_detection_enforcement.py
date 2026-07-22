@@ -1,8 +1,8 @@
-"""Detection enforcement: Free vs Enterprise behavior scenarios.
+"""Detection enforcement scenarios: handler unwired vs wired.
 
-Tests demonstrating that Free-tier (DetectionEnforcementHandler not wired)
-lets DetectionRuleMatched events pass without enforcement, while Enterprise-tier
-(handler wired to the event bus) executes the recommended action and emits
+Tests demonstrating that with the DetectionEnforcementHandler not wired,
+DetectionRuleMatched events pass without enforcement, while with the handler
+wired to the event bus it executes the recommended action and emits
 EnforcementActionTaken.
 """
 
@@ -48,14 +48,14 @@ def handler(event_bus):
     return DetectionEnforcementHandler(event_bus=event_bus)
 
 
-class TestDetectionFreePassesEnterpriseCatches:
+class TestDetectionUnwiredPassesWiredCatches:
     def test_free_no_handler_wired_rule_match_has_no_enforcement(self):
         unregistered_bus = MagicMock()
         unregistered_bus.published = []
 
         unregistered_bus.publish.assert_not_called()
 
-    def test_enterprise_suspend_action_adds_session_to_suspended_set(self, handler, event_bus):
+    def test_suspend_action_adds_session_to_suspended_set(self, handler, event_bus):
         from mcp_hangar.server.api.sessions import _suspended_sessions
 
         session_id = "sess-suspend-001"
@@ -68,7 +68,7 @@ class TestDetectionFreePassesEnterpriseCatches:
 
         _suspended_sessions.discard(session_id)
 
-    def test_enterprise_suspend_action_emits_enforcement_event(self, handler, event_bus):
+    def test_suspend_action_emits_enforcement_event(self, handler, event_bus):
         from mcp_hangar.server.api.sessions import _suspended_sessions
 
         session_id = "sess-suspend-002"
@@ -85,14 +85,14 @@ class TestDetectionFreePassesEnterpriseCatches:
 
         _suspended_sessions.discard(session_id)
 
-    def test_enterprise_alert_action_emits_no_enforcement_event(self, handler, event_bus):
+    def test_alert_action_emits_no_enforcement_event(self, handler, event_bus):
         event = _make_rule_matched(recommended_action="alert")
         handler.handle(event)
 
         enforcement_events = [e for e in event_bus.published if isinstance(e, EnforcementActionTaken)]
         assert len(enforcement_events) == 0
 
-    def test_enterprise_block_action_requires_command_bus(self, event_bus):
+    def test_block_action_requires_command_bus(self, event_bus):
         handler_no_cmd = DetectionEnforcementHandler(event_bus=event_bus, command_bus=None)
 
         event = _make_rule_matched(recommended_action="block")
@@ -101,7 +101,7 @@ class TestDetectionFreePassesEnterpriseCatches:
         enforcement_events = [e for e in event_bus.published if isinstance(e, EnforcementActionTaken)]
         assert len(enforcement_events) == 0
 
-    def test_enterprise_block_action_with_command_bus_dispatches_stop_command(self, event_bus):
+    def test_block_action_with_command_bus_dispatches_stop_command(self, event_bus):
         from mcp_hangar.application.commands.commands import StopMcpServerCommand
 
         command_bus = MagicMock()
@@ -119,7 +119,7 @@ class TestDetectionFreePassesEnterpriseCatches:
         assert len(enforcement_events) == 1
         assert enforcement_events[0].action == "block_mcp_server"
 
-    def test_enterprise_non_detection_event_is_ignored(self, handler, event_bus):
+    def test_non_detection_event_is_ignored(self, handler, event_bus):
         from mcp_hangar.domain.events import McpServerStarted
 
         other_event = McpServerStarted(

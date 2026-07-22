@@ -109,7 +109,7 @@ class TestListApprovals:
         loop.run_until_complete(repo.save(_make_pending_request("a-001", state=ApprovalState.APPROVED)))
         loop.close()
 
-        response = client.get("/enterprise/approvals")
+        response = client.get("/approvals")
         assert response.status_code == 200
         data = response.json()
         assert len(data) == 1
@@ -125,14 +125,14 @@ class TestListApprovals:
         loop.run_until_complete(repo.save(_make_pending_request("a-001", state=ApprovalState.APPROVED)))
         loop.close()
 
-        response = client.get("/enterprise/approvals?state=approved")
+        response = client.get("/approvals?state=approved")
         assert response.status_code == 200
         data = response.json()
         assert len(data) == 1
         assert data[0]["state"] == "approved"
 
     def test_invalid_state_returns_400(self, client):
-        response = client.get("/enterprise/approvals?state=invalid")
+        response = client.get("/approvals?state=invalid")
         assert response.status_code == 400
 
 
@@ -147,14 +147,14 @@ class TestGetApproval:
         loop.run_until_complete(repo.save(_make_pending_request("test-001")))
         loop.close()
 
-        response = client.get("/enterprise/approvals/test-001")
+        response = client.get("/approvals/test-001")
         assert response.status_code == 200
         data = response.json()
         assert data["approval_id"] == "test-001"
         assert data["tool_name"] == "update_page"
 
     def test_get_nonexistent_returns_404(self, client):
-        response = client.get("/enterprise/approvals/nonexistent")
+        response = client.get("/approvals/nonexistent")
         assert response.status_code == 404
 
 
@@ -172,7 +172,7 @@ class TestResolveApproval:
         loop.close()
 
         response = client.post(
-            "/enterprise/approvals/r-001/resolve",
+            "/approvals/r-001/resolve",
             json={"decision": "approve"},
         )
         assert response.status_code == 200
@@ -192,14 +192,14 @@ class TestResolveApproval:
         loop.close()
 
         response = client.post(
-            "/enterprise/approvals/r-002/resolve",
+            "/approvals/r-002/resolve",
             json={"decision": "deny", "reason": "Too risky"},
         )
         assert response.status_code == 200
 
     def test_resolve_nonexistent_returns_404(self, client):
         response = client.post(
-            "/enterprise/approvals/nonexistent/resolve",
+            "/approvals/nonexistent/resolve",
             json={"decision": "approve"},
         )
         assert response.status_code == 404
@@ -215,7 +215,7 @@ class TestResolveApproval:
         loop.close()
 
         response = client.post(
-            "/enterprise/approvals/done-001/resolve",
+            "/approvals/done-001/resolve",
             json={"decision": "approve"},
         )
         assert response.status_code == 409
@@ -231,7 +231,7 @@ class TestResolveApproval:
         loop.close()
 
         response = client.post(
-            "/enterprise/approvals/r-003/resolve",
+            "/approvals/r-003/resolve",
             json={"decision": "maybe"},
         )
         assert response.status_code == 400
@@ -270,7 +270,7 @@ class TestSlackCallback:
         headers = self._make_slack_request(body, "test-secret", stale_ts)
 
         response = client.post(
-            "/enterprise/approvals/s-001/resolve",
+            "/approvals/s-001/resolve",
             content=body,
             headers=headers,
         )
@@ -292,7 +292,7 @@ class TestSlackCallback:
         }
 
         response = client.post(
-            "/enterprise/approvals/s-002/resolve",
+            "/approvals/s-002/resolve",
             content="payload={}",
             headers=headers,
         )

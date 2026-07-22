@@ -199,7 +199,7 @@ class IDurableEventStore(IEventStore):
     that are specific to SQLite/Postgres backends. In-memory stores
     do not implement this -- they implement IEventStore directly.
 
-    Enterprise persistence (SQLite/Postgres event stores) implements this.
+    Durable persistence (SQLite/Postgres event stores) implements this.
     Core retains InMemoryEventStore (IEventStore) and NullEventStore.
     """
 

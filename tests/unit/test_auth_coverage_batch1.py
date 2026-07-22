@@ -1194,13 +1194,13 @@ class TestRolesStub:
     """Tests for the roles.py fallback stub."""
 
     def test_fallback_imports(self):
-        """When enterprise is not available, fallback values are used."""
+        """When the auth module is not available, fallback values are used."""
         from mcp_hangar.domain.security.roles import (
             BUILTIN_ROLES,
             PERMISSIONS,
         )
 
-        # When enterprise IS available, these return real values
+        # When the auth module IS available, these return real values
         # Either way the symbols must be importable
         assert isinstance(BUILTIN_ROLES, dict)
         assert isinstance(PERMISSIONS, dict)
@@ -1208,14 +1208,14 @@ class TestRolesStub:
     def test_role_constants_importable(self):
         pass
         # These should be importable (either None or Role objects)
-        # No assertion on value -- depends on whether enterprise is installed
+        # No assertion on value -- depends on whether the auth module is installed
 
     def test_get_builtin_role(self):
         from mcp_hangar.domain.security.roles import get_builtin_role
 
         # Should return a Role or None
         result = get_builtin_role("nonexistent_role")
-        # If enterprise roles exist it returns None for unknown; if fallback, always None
+        # If auth roles exist it returns None for unknown; if fallback, always None
         assert result is None or hasattr(result, "name")
 
     def test_list_functions(self):

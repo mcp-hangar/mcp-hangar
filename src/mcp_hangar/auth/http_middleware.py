@@ -1,6 +1,6 @@
-"""Enterprise HTTP authentication adapter.
+"""HTTP authentication adapter.
 
-This middleware is the HTTP-facing auth enforcement path for enterprise API
+This middleware is the HTTP-facing auth enforcement path for API
 requests. It reuses the core ``mcp_hangar.infrastructure.identity`` request
 normalization helpers to extract headers/source IP consistently with
 ``IdentityMiddleware``, then performs authentication and stores the resulting
@@ -28,11 +28,11 @@ logger = get_logger(__name__)
 
 
 class AuthMiddlewareHTTP(BaseHTTPMiddleware):
-    """Starlette middleware for enterprise HTTP authentication.
+    """Starlette middleware for HTTP authentication.
 
     This middleware shares request metadata extraction with
     ``mcp_hangar.infrastructure.identity.middleware.IdentityMiddleware`` so
-    there is a single normalization path. It then adds enterprise-specific
+    there is a single normalization path. It then adds authentication-specific
     authentication enforcement and attaches ``request.state.auth`` for
     downstream authorization.
 

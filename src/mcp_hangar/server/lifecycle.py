@@ -306,7 +306,7 @@ class ServerLifecycle:
 
         api_app = create_api_router(auth_components=getattr(self._context, "auth_components", None))
 
-        # Wire enterprise approval service into Starlette app state.
+        # Wire approval service into Starlette app state.
         approval_svc = getattr(self._context, "approval_service", None)
         if approval_svc is not None:
             api_app.state.approval_gate_service = approval_svc

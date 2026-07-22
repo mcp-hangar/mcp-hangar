@@ -1,4 +1,4 @@
-"""Unit tests for enterprise compliance export formats."""
+"""Unit tests for compliance export formats."""
 
 from collections.abc import Callable
 import json

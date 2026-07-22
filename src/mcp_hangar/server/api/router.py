@@ -2,7 +2,7 @@
 
 Creates a Starlette application with:
 - CORSMiddleware configured from environment
-- Optional AuthMiddlewareHTTP for enterprise authentication
+- Optional AuthMiddlewareHTTP for authentication
 - CSRFMiddleware for mutating browser-style requests
 - TrustedHostMiddleware for host header validation
 - Exception handlers mapping domain errors to JSON error envelopes
@@ -24,7 +24,7 @@ from starlette.routing import BaseRoute, Mount
 
 from ...domain.exceptions import MCPError
 from .middleware import AuthMiddlewareHTTP, CSRFMiddleware, error_handler, get_cors_config
-from ..bootstrap.enterprise import get_enterprise_api_routes
+from ..bootstrap.components import get_component_api_routes
 
 
 def create_api_router(auth_components: Any = None) -> Starlette:
@@ -33,11 +33,11 @@ def create_api_router(auth_components: Any = None) -> Starlette:
     Returns a fully configured Starlette app with CORS middleware,
     error handlers, and all API endpoint routes mounted.
 
-    When auth_components is provided and enabled, the enterprise
+    When auth_components is provided and enabled, the
     AuthMiddlewareHTTP is mounted to protect all API routes.
 
     Args:
-        auth_components: Optional enterprise auth components. When present
+        auth_components: Optional auth components. When present
             and auth_components.enabled is True, authentication middleware
             is added to the application.
 
@@ -66,7 +66,7 @@ def create_api_router(auth_components: Any = None) -> Starlette:
         Mount("/admin/tools", routes=admin_tools_routes),
     ]
 
-    routes.extend(get_enterprise_api_routes())
+    routes.extend(get_component_api_routes())
 
     exception_handlers = {
         MCPError: error_handler,

@@ -1,7 +1,7 @@
-"""Batch 2: Enterprise auth infrastructure tests.
+"""Batch 2: Auth infrastructure tests.
 
-Covers enterprise/auth/cli.py, enterprise/auth/infrastructure/jwt_authenticator.py,
-enterprise/auth/infrastructure/opa_authorizer.py, and enterprise/auth/bootstrap.py.
+Covers auth/cli.py, auth/infrastructure/jwt_authenticator.py,
+auth/infrastructure/opa_authorizer.py, and auth/bootstrap.py.
 
 Target: ~321 missed statements.
 """
