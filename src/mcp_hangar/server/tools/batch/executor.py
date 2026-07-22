@@ -21,7 +21,7 @@ from typing import Any, cast, Literal
 
 from ....application.commands import InvokeToolCommand, StartMcpServerCommand
 from ....application.services.mutator_pipeline import MutatorPipeline
-from ....application.tasks.tool_pin_context import CurrentToolPin, set_current_tool_pin
+from ....application.tasks.tool_pin_context import CurrentToolPin, get_current_tool_pin, set_current_tool_pin
 from ....application.services.validator_pipeline import ValidatorPipeline
 from ....domain.contracts.mutator import MutationContext
 from ....domain.contracts.validator import ValidationContext
@@ -54,7 +54,7 @@ from ....retry import retry_sync, RetryPolicy, RetryResult
 from ...context import get_context
 from ...state import GROUPS
 from .concurrency import ConcurrencyManager, get_concurrency_manager
-from .models import BatchResult, CallResult, CallSpec, MAX_RESPONSE_SIZE_BYTES, RetryMetadata
+from .models import BatchResult, CallResult, CallSpec, MAX_RESPONSE_SIZE_BYTES, RelayCapture, RetryMetadata
 
 logger = get_logger(__name__)
 
@@ -1023,13 +1023,49 @@ class BatchExecutor:
                     call, cancel_event, effective_timeout, call_start, ctx, target_server_id
                 )
 
-        # Reject upstream MCP task handles (relay-only, ADR-008). Hangar does not
-        # yet relay or govern task results, so a passed-through CreateTaskResult
-        # would be an untracked, unusable handle: the client's follow-up
-        # tasks/get would hit GovernedTaskStore and get "Task not found". Turn
-        # that accidental fail-closed into a deliberate, clean rejection here --
-        # before the outcome is treated as a success (group health, return).
+        # Upstream MCP task handle (ADR-014 P3). Two mutually exclusive outcomes,
+        # both an EARLY return BEFORE the group-health block (a task creation is
+        # NOT a healthy-member outcome, so report_success must not fire here):
+        #
+        #  - Relay kill-switch ON (the governed task store is wired on the app
+        #    ctx, which happens ONLY when config.relay_tasks_enabled is True):
+        #    CAPTURE the request context into the CallResult and return it as a
+        #    success. This worker performs NO store write -- per ADR-014 D4 the
+        #    actual register + TaskCreated emit runs on the MAIN LOOP at the
+        #    hangar_call seam, before the handle reaches the client.
+        #  - Kill-switch OFF (store absent): byte-identical to the ADR-008
+        #    relay-only stance -- a clean TaskRelayNotSupported rejection, so the
+        #    client never gets an untracked, unusable handle.
+        #
+        # The store's mere presence on ctx is the kill-switch: the factory wires
+        # governed_task_store ONLY under `HAS_NATIVE_TASKS and relay_tasks_enabled`
+        # (see fastmcp_server/factory._enable_governed_tasks), and the real
+        # ApplicationContext field defaults to None. Reading it here needs no
+        # config plumbing into the worker.
         if result.success and isinstance(result.result, dict) and _is_task_result(result.result):
+            if getattr(ctx, "governed_task_store", None) is not None:
+                logger.debug(
+                    "upstream_task_result_captured_for_relay",
+                    mcp_server=call.mcp_server,
+                    tool=call.tool,
+                    call_id=call.call_id,
+                )
+                return CallResult(
+                    index=call.index,
+                    call_id=call.call_id,
+                    success=True,
+                    result=result.result,
+                    elapsed_ms=result.elapsed_ms,
+                    relay_capture=RelayCapture(
+                        identity=get_identity_context(),
+                        pin=get_current_tool_pin(),
+                        target_server_id=target_server_id,
+                        correlation_id=call.call_id,
+                        upstream=result.result,
+                        logical_mcp_server=call.mcp_server,
+                        tool=call.tool,
+                    ),
+                )
             logger.warning(
                 "upstream_task_result_rejected",
                 mcp_server=call.mcp_server,
