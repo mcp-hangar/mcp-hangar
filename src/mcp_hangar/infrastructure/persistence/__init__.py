@@ -59,5 +59,7 @@ def __getattr__(name: str):  # noqa: ANN001
         try:
             return getattr(importlib.import_module("mcp_hangar.infrastructure.persistence.sqlite_event_store"), name)
         except ImportError as err:
-            raise AttributeError(f"module {__name__!r} has no attribute {name!r} (enterprise not installed)") from err
+            raise AttributeError(
+                f"module {__name__!r} has no attribute {name!r} (persistence backend not installed)"
+            ) from err
     raise AttributeError(f"module {__name__!r} has no attribute {name!r}")

@@ -1,6 +1,6 @@
 """Bootstrap wiring for the approval gate module.
 
-Called from src/mcp_hangar/server/bootstrap/enterprise.py
+Called from src/mcp_hangar/server/bootstrap/components.py
 to initialize the approval gate service and wire it into
 the application context.
 """
@@ -57,7 +57,7 @@ def _build_delivery(config: dict | None) -> Any:
     if config is None:
         return NoOpApprovalDelivery()
 
-    approvals_config = config.get("enterprise", {}).get("approvals", {})
+    approvals_config = config.get("approvals", {})
     channel = approvals_config.get("channel", "dashboard")
 
     if channel == "slack":

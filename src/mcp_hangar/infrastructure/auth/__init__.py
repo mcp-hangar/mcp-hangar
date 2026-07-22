@@ -5,7 +5,7 @@ Provides lazy re-exports of auth implementations via importlib.
 
 import importlib
 
-_ENTERPRISE_AUTH_SYMBOLS: dict[str, str] = {
+_AUTH_SYMBOLS: dict[str, str] = {
     "ApiKeyAuthenticator": "mcp_hangar.auth.infrastructure.api_key_authenticator",
     "InMemoryApiKeyStore": "mcp_hangar.auth.infrastructure.api_key_authenticator",
     "JWTAuthenticator": "mcp_hangar.auth.infrastructure.jwt_authenticator",
@@ -21,11 +21,11 @@ _ENTERPRISE_AUTH_SYMBOLS: dict[str, str] = {
     "OPAAuthorizer": "mcp_hangar.auth.infrastructure.opa_authorizer",
 }
 
-__all__: list[str] = list(_ENTERPRISE_AUTH_SYMBOLS)
+__all__: list[str] = list(_AUTH_SYMBOLS)
 
 
 def __getattr__(name: str):  # noqa: ANN001
-    module_name = _ENTERPRISE_AUTH_SYMBOLS.get(name)
+    module_name = _AUTH_SYMBOLS.get(name)
     if module_name is not None:
         try:
             return getattr(importlib.import_module(module_name), name)

@@ -1,10 +1,10 @@
-"""Batch 3: HTTP middleware, API routes, identity middleware, enterprise auth middleware.
+"""Batch 3: HTTP middleware, API routes, identity middleware, auth middleware.
 
 Covers:
-- enterprise/auth/http_middleware.py (AuthMiddlewareHTTP, get_principal_from_request, require_auth)
-- enterprise/auth/api/routes.py (17 async route handlers, auth_routes list)
+- auth/http_middleware.py (AuthMiddlewareHTTP, get_principal_from_request, require_auth)
+- auth/api/routes.py (17 async route handlers, auth_routes list)
 - src/mcp_hangar/infrastructure/identity/middleware.py (IdentityMiddleware)
-- enterprise/auth/infrastructure/middleware.py (AuthenticationMiddleware, AuthorizationMiddleware,
+- auth/infrastructure/middleware.py (AuthenticationMiddleware, AuthorizationMiddleware,
   AuthContext, create_auth_request_from_headers)
 """
 
@@ -52,7 +52,7 @@ def _run(coro):
 
 
 # ===========================================================================
-# enterprise/auth/infrastructure/middleware.py -- AuthContext
+# auth/infrastructure/middleware.py -- AuthContext
 # ===========================================================================
 
 
@@ -81,7 +81,7 @@ class TestAuthContext:
 
 
 # ===========================================================================
-# enterprise/auth/infrastructure/middleware.py -- AuthenticationMiddleware
+# auth/infrastructure/middleware.py -- AuthenticationMiddleware
 # ===========================================================================
 
 
@@ -253,7 +253,7 @@ class TestAuthenticationMiddleware:
 
 
 # ===========================================================================
-# enterprise/auth/infrastructure/middleware.py -- AuthorizationMiddleware
+# auth/infrastructure/middleware.py -- AuthorizationMiddleware
 # ===========================================================================
 
 
@@ -349,7 +349,7 @@ class TestAuthorizationMiddleware:
 
 
 # ===========================================================================
-# enterprise/auth/infrastructure/middleware.py -- create_auth_request_from_headers
+# auth/infrastructure/middleware.py -- create_auth_request_from_headers
 # ===========================================================================
 
 
@@ -383,7 +383,7 @@ class TestCreateAuthRequestFromHeaders:
 
 
 # ===========================================================================
-# enterprise/auth/http_middleware.py -- AuthMiddlewareHTTP
+# auth/http_middleware.py -- AuthMiddlewareHTTP
 # ===========================================================================
 
 
@@ -624,7 +624,7 @@ class TestAuthMiddlewareHTTP:
 
 
 # ===========================================================================
-# enterprise/auth/http_middleware.py -- get_principal_from_request / require_auth
+# auth/http_middleware.py -- get_principal_from_request / require_auth
 # ===========================================================================
 
 
@@ -870,7 +870,7 @@ class TestIdentityMiddleware:
 
 
 # ===========================================================================
-# enterprise/auth/api/routes.py -- Route handlers
+# auth/api/routes.py -- Route handlers
 # ===========================================================================
 
 

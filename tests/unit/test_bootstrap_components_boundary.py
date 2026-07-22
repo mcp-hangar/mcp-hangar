@@ -22,7 +22,7 @@ _OPTIONAL_MODULE_PREFIXES = (
 )
 
 
-def _block_enterprise_modules(monkeypatch: pytest.MonkeyPatch) -> None:
+def _block_optional_modules(monkeypatch: pytest.MonkeyPatch) -> None:
     """Block optional module imports by setting them to None in sys.modules.
 
     Setting a module to ``None`` in ``sys.modules`` causes ``import``
@@ -40,17 +40,17 @@ def _block_enterprise_modules(monkeypatch: pytest.MonkeyPatch) -> None:
 
 
 # ---------------------------------------------------------------------------
-# Tests: Bootstrap without enterprise
+# Tests: Bootstrap without optional components
 # ---------------------------------------------------------------------------
 
 
-class TestBootstrapWithoutEnterprise:
+class TestBootstrapWithoutComponents:
     """Prove that bootstrap components fall back to null implementations
-    when enterprise modules are not available."""
+    when the optional modules are not available."""
 
-    def test_bootstrap_auth_fallback_without_enterprise(self, monkeypatch, tmp_path):
-        """When enterprise is blocked, the fallback bootstrap_auth() returns
-        an object with enabled=False.
+    def test_bootstrap_auth_fallback_without_components(self, monkeypatch, tmp_path):
+        """When the optional modules are blocked, the fallback bootstrap_auth()
+        returns an object with enabled=False.
 
         Instead of reloading the complex bootstrap __init__ module (which
         has many sub-imports), we directly test the fallback code path by
@@ -70,9 +70,9 @@ class TestBootstrapWithoutEnterprise:
             "        return AuthComponents()\n"
         )
 
-        _block_enterprise_modules(monkeypatch)
+        _block_optional_modules(monkeypatch)
 
-        # Use importlib to load the module fresh (enterprise is blocked)
+        # Use importlib to load the module fresh (optional modules are blocked)
         import importlib.util
 
         spec = importlib.util.spec_from_file_location("test_auth_fallback", str(test_mod))
@@ -81,11 +81,11 @@ class TestBootstrapWithoutEnterprise:
 
         assert mod._available is False
         result = mod.bootstrap_auth()
-        assert result.enabled is False, "bootstrap_auth() must return disabled auth when enterprise is absent"
+        assert result.enabled is False, "bootstrap_auth() must return disabled auth when the auth module is absent"
 
     def test_bootstrap_module_exports_auth_names(self):
         """The bootstrap __init__ module exports the auth-related names
-        required by the rest of the application: _enterprise_auth_available,
+        required by the rest of the application: _auth_available,
         bootstrap_auth, parse_auth_config, AuthComponents, NullAuthComponents.
         """
         # Force the package __init__ to be loaded first
@@ -94,7 +94,7 @@ class TestBootstrapWithoutEnterprise:
         # Access the module object (not the bootstrap() function) via sys.modules
         bootstrap_mod = sys.modules["mcp_hangar.server.bootstrap"]
 
-        assert hasattr(bootstrap_mod, "_enterprise_auth_available")
+        assert hasattr(bootstrap_mod, "_auth_available")
         assert hasattr(bootstrap_mod, "bootstrap_auth")
         assert hasattr(bootstrap_mod, "parse_auth_config")
         assert hasattr(bootstrap_mod, "AuthComponents")
@@ -102,20 +102,20 @@ class TestBootstrapWithoutEnterprise:
 
     def test_parse_auth_config_none_returns_default_disabled_config(self):
         """parse_auth_config(None) should return a config with enabled=False
-        when enterprise IS available (returns a default AuthConfig),
-        and None when enterprise is NOT available (fallback stub)."""
+        when the auth module IS available (returns a default AuthConfig),
+        and None when the auth module is NOT available (fallback stub)."""
         from mcp_hangar.server.bootstrap import parse_auth_config
 
         result = parse_auth_config(None)
-        # With enterprise: returns AuthConfig(enabled=False, ...)
-        # Without enterprise: returns None
+        # With the auth module: returns AuthConfig(enabled=False, ...)
+        # Without it: returns None
         # In both cases, auth is effectively disabled.
         if result is not None:
             assert result.enabled is False, "parse_auth_config(None) must return a config with enabled=False"
         # If None, that's the stub behavior -- also fine
 
     def test_init_event_store_sqlite_works(self):
-        """SQLiteEventStore is always available after enterprise absorption."""
+        """SQLiteEventStore is always available after component absorption."""
         from mcp_hangar.infrastructure.persistence.sqlite_event_store import SQLiteEventStore
         from mcp_hangar.server.bootstrap.event_store import init_event_store
 
@@ -141,7 +141,7 @@ class TestBootstrapWithoutEnterprise:
 
     def test_init_event_store_memory_always_works(self):
         """When driver='memory', init_event_store() creates InMemoryEventStore
-        regardless of enterprise availability."""
+        regardless of optional-module availability."""
         from mcp_hangar.infrastructure.persistence import InMemoryEventStore
         from mcp_hangar.server.bootstrap.event_store import init_event_store
 
@@ -195,7 +195,7 @@ class TestBootstrapWithoutEnterprise:
         mock_runtime = MagicMock()
         config = {"event_store": {"enabled": True, "driver": "sqlite", "path": "data/events.db"}}
 
-        monkeypatch.setattr(event_store_module, "create_enterprise_event_store", lambda *_: None)
+        monkeypatch.setattr(event_store_module, "create_persistent_event_store", lambda *_: None)
 
         with pytest.raises(ConfigurationError, match="SQLite event store is unavailable"):
             event_store_module.init_event_store(mock_runtime, config)
@@ -227,10 +227,10 @@ class TestBootstrapWithoutEnterprise:
         # Should not raise
         init_auth_cqrs(mock_runtime, None)
 
-    def test_init_auth_cqrs_skips_without_enterprise(self, monkeypatch):
-        """When enterprise is blocked, init_auth_cqrs() logs skip and returns
+    def test_init_auth_cqrs_skips_without_components(self, monkeypatch):
+        """When the auth module is blocked, init_auth_cqrs() logs skip and returns
         without error even with enabled=True auth_components."""
-        _block_enterprise_modules(monkeypatch)
+        _block_optional_modules(monkeypatch)
 
         from mcp_hangar.server.bootstrap.cqrs import init_auth_cqrs
 
@@ -242,11 +242,11 @@ class TestBootstrapWithoutEnterprise:
         # will fail and the function will log and return.
         init_auth_cqrs(mock_runtime, mock_auth)
 
-    def test_roles_fallback_without_enterprise(self, monkeypatch, tmp_path):
-        """When enterprise is blocked, BUILTIN_ROLES is empty dict and
+    def test_roles_fallback_without_components(self, monkeypatch, tmp_path):
+        """When the auth module is blocked, BUILTIN_ROLES is empty dict and
         list_builtin_roles() returns empty list.
 
-        The roles module caches enterprise availability at import time.
+        The roles module caches auth-module availability at import time.
         We exercise the same pattern via a fresh module load.
         """
         test_mod = tmp_path / "test_roles_fallback.py"
@@ -259,7 +259,7 @@ class TestBootstrapWithoutEnterprise:
             "        return []\n"
         )
 
-        _block_enterprise_modules(monkeypatch)
+        _block_optional_modules(monkeypatch)
 
         import importlib.util
 
@@ -267,13 +267,15 @@ class TestBootstrapWithoutEnterprise:
         mod = importlib.util.module_from_spec(spec)
         spec.loader.exec_module(mod)
 
-        assert mod.BUILTIN_ROLES == {}, f"BUILTIN_ROLES must be empty dict without enterprise, got {mod.BUILTIN_ROLES}"
-        assert mod.list_builtin_roles() == [], "list_builtin_roles() must return empty list without enterprise"
+        assert mod.BUILTIN_ROLES == {}, (
+            f"BUILTIN_ROLES must be empty dict without the auth module, got {mod.BUILTIN_ROLES}"
+        )
+        assert mod.list_builtin_roles() == [], "list_builtin_roles() must return empty list without the auth module"
 
-    def test_langfuse_fallback_without_enterprise(self, monkeypatch):
-        """When enterprise is blocked, init_langfuse() returns
+    def test_langfuse_fallback_without_components(self, monkeypatch):
+        """When the integrations module is blocked, init_langfuse() returns
         NullObservabilityAdapter even when Langfuse is configured."""
-        _block_enterprise_modules(monkeypatch)
+        _block_optional_modules(monkeypatch)
 
         from mcp_hangar.application.ports.observability import NullObservabilityAdapter
         from mcp_hangar.server.bootstrap.observability import (
@@ -294,48 +296,48 @@ class TestBootstrapWithoutEnterprise:
 
 
 # ---------------------------------------------------------------------------
-# Tests: API Router enterprise boundary
+# Tests: API Router component boundary
 # ---------------------------------------------------------------------------
 
 
-class TestApiRouterEnterpriseBoundary:
-    """Verify conditional /auth route mounting based on enterprise availability."""
+class TestApiRouterComponentBoundary:
+    """Verify conditional /auth route mounting based on optional-module availability."""
 
-    def test_api_router_excludes_auth_routes_without_enterprise(self, monkeypatch):
-        """When enterprise is blocked, create_api_router() does NOT
+    def test_api_router_excludes_auth_routes_without_components(self, monkeypatch):
+        """When the auth module is blocked, create_api_router() does NOT
         include /auth mount."""
-        _block_enterprise_modules(monkeypatch)
+        _block_optional_modules(monkeypatch)
 
         from mcp_hangar.server.api.router import create_api_router
 
         app = create_api_router()
 
         route_paths = [getattr(r, "path", "") for r in app.routes]
-        assert "/auth" not in route_paths, f"/auth should not be in routes without enterprise, got {route_paths}"
+        assert "/auth" not in route_paths, f"/auth should not be in routes without the auth module, got {route_paths}"
 
-    def test_api_router_includes_auth_routes_with_enterprise(self):
-        """When enterprise IS available, create_api_router() includes
+    def test_api_router_includes_auth_routes_with_components(self):
+        """When the auth module IS available, create_api_router() includes
         /auth mount."""
         from mcp_hangar.server.api.router import create_api_router
 
         app = create_api_router()
 
         route_paths = [getattr(r, "path", "") for r in app.routes]
-        assert "/auth" in route_paths, f"/auth should be in routes with enterprise, got {route_paths}"
+        assert "/auth" in route_paths, f"/auth should be in routes with the auth module, got {route_paths}"
 
 
 # ---------------------------------------------------------------------------
-# Tests: Bootstrap with enterprise present
+# Tests: Bootstrap with optional components present
 # ---------------------------------------------------------------------------
 
 
-class TestBootstrapWithEnterprise:
-    """Prove that bootstrap components load real enterprise implementations
-    when enterprise modules are available."""
+class TestBootstrapWithComponents:
+    """Prove that bootstrap components load real implementations
+    when the optional modules are available."""
 
-    def test_enterprise_auth_available_flag_is_true(self):
-        """When enterprise is available, the bootstrap module sets
-        _enterprise_auth_available to True at import time."""
+    def test_auth_available_flag_is_true(self):
+        """When the auth module is available, the bootstrap module sets
+        _auth_available to True at import time."""
         # Ensure we get a fresh view of the module
         fqn = "mcp_hangar.server.bootstrap"
         mod = sys.modules.get(fqn)
@@ -343,33 +345,29 @@ class TestBootstrapWithEnterprise:
             import mcp_hangar.server.bootstrap  # noqa: F401
 
             mod = sys.modules[fqn]
-        assert mod._enterprise_auth_available is True, (
-            "_enterprise_auth_available must be True when enterprise is installed"
-        )
+        assert mod._auth_available is True, "_auth_available must be True when the auth module is installed"
 
-    def test_roles_populated_with_enterprise(self):
-        """When enterprise is available, BUILTIN_ROLES is populated."""
-        # Import directly from enterprise to ensure we test the real module,
+    def test_roles_populated_with_components(self):
+        """When the auth module is available, BUILTIN_ROLES is populated."""
+        # Import directly from the auth module to ensure we test the real module,
         # regardless of any reload effects from previous tests.
         from mcp_hangar.auth.roles import BUILTIN_ROLES, list_builtin_roles
 
-        assert len(BUILTIN_ROLES) > 0, "BUILTIN_ROLES must be populated when enterprise is installed"
+        assert len(BUILTIN_ROLES) > 0, "BUILTIN_ROLES must be populated when the auth module is installed"
         role_names = list_builtin_roles()
-        assert len(role_names) > 0, "list_builtin_roles() must return roles when enterprise is installed"
+        assert len(role_names) > 0, "list_builtin_roles() must return roles when the auth module is installed"
         assert "admin" in BUILTIN_ROLES, "admin role must be present in BUILTIN_ROLES"
 
-    def test_enterprise_auth_bootstrap_importable(self):
-        """Enterprise auth bootstrap module must be importable
-        when enterprise is installed."""
+    def test_auth_bootstrap_importable(self):
+        """Auth bootstrap module must be importable when the auth module is installed."""
         from mcp_hangar.auth.bootstrap import AuthComponents, NullAuthComponents, bootstrap_auth
 
         assert AuthComponents is not None
         assert NullAuthComponents is not None
         assert callable(bootstrap_auth)
 
-    def test_enterprise_langfuse_importable(self):
-        """Enterprise Langfuse integration must be importable
-        when enterprise is installed."""
+    def test_langfuse_importable(self):
+        """Langfuse integration must be importable when the integrations module is installed."""
         from mcp_hangar.integrations.langfuse import LangfuseConfig, LangfuseObservabilityAdapter
 
         assert LangfuseConfig is not None

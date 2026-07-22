@@ -1,8 +1,8 @@
-"""Free vs Enterprise behavior scenarios.
+"""Approval enforcement scenarios: gate unconfigured vs configured.
 
-Tests demonstrating that Free-tier (no enterprise features bootstrapped)
-allows tool invocations to pass through immediately, while Enterprise-tier
-(with approval gate configured) holds execution until a human decision.
+Tests demonstrating that when no approval gate is configured, tool invocations
+pass through immediately, while when an approval gate is configured it
+holds execution until a human decision.
 """
 
 import asyncio
@@ -87,7 +87,7 @@ def service(repo, hold_registry, event_bus, delivery):
     )
 
 
-class TestFreePassesEnterpriseCatches:
+class TestUnconfiguredPassesConfiguredCatches:
     @pytest.mark.asyncio
     async def test_free_no_approval_list_passes_immediately(self, service):
         policy = ToolAccessPolicy(allow_list=("update_page",))
@@ -104,7 +104,7 @@ class TestFreePassesEnterpriseCatches:
         assert result.approval_id is None
 
     @pytest.mark.asyncio
-    async def test_enterprise_approval_list_holds_execution(self, service, hold_registry, event_bus, delivery):
+    async def test_approval_list_holds_execution(self, service, hold_registry, event_bus, delivery):
         policy = ToolAccessPolicy(
             approval_list=("update_page",),
             approval_timeout_seconds=5,
@@ -132,7 +132,7 @@ class TestFreePassesEnterpriseCatches:
             tool_name="update_page",
             arguments={"page_id": "abc"},
             policy=policy,
-            correlation_id="enterprise-corr-1",
+            correlation_id="corr-1",
         )
 
         assert result.approved is True
@@ -147,7 +147,7 @@ class TestFreePassesEnterpriseCatches:
         assert "ToolApprovalGranted" in event_types
 
     @pytest.mark.asyncio
-    async def test_enterprise_approval_denied_blocks_execution(self, service, hold_registry, event_bus, delivery):
+    async def test_approval_denied_blocks_execution(self, service, hold_registry, event_bus, delivery):
         policy = ToolAccessPolicy(
             approval_list=("update_page",),
             approval_timeout_seconds=5,
@@ -175,7 +175,7 @@ class TestFreePassesEnterpriseCatches:
             tool_name="update_page",
             arguments={"page_id": "abc"},
             policy=policy,
-            correlation_id="enterprise-corr-2",
+            correlation_id="corr-2",
         )
 
         assert result.approved is False
@@ -187,7 +187,7 @@ class TestFreePassesEnterpriseCatches:
         assert "ToolApprovalDenied" in event_types
 
     @pytest.mark.asyncio
-    async def test_enterprise_timeout_blocks_execution(self, service, event_bus, delivery):
+    async def test_timeout_blocks_execution(self, service, event_bus, delivery):
         policy = ToolAccessPolicy(
             approval_list=("update_page",),
             approval_timeout_seconds=0,
@@ -198,7 +198,7 @@ class TestFreePassesEnterpriseCatches:
             tool_name="update_page",
             arguments={"page_id": "abc"},
             policy=policy,
-            correlation_id="enterprise-corr-3",
+            correlation_id="corr-3",
         )
 
         assert result.approved is False
@@ -226,7 +226,7 @@ class TestFreePassesEnterpriseCatches:
         assert result.approval_id is None
 
     @pytest.mark.asyncio
-    async def test_enterprise_sensitive_args_redacted_before_hold(self, service, repo):
+    async def test_sensitive_args_redacted_before_hold(self, service, repo):
         policy = ToolAccessPolicy(
             approval_list=("update_page",),
             approval_timeout_seconds=0,
@@ -237,7 +237,7 @@ class TestFreePassesEnterpriseCatches:
             tool_name="update_page",
             arguments={"page_id": "abc", "api_token": "secret-value"},
             policy=policy,
-            correlation_id="enterprise-corr-4",
+            correlation_id="corr-4",
         )
 
         requests = list(repo._store.values())

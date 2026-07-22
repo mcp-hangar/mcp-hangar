@@ -13,7 +13,7 @@ from ...infrastructure.persistence.saga_state_store import NullSagaStateStore, S
 from ...infrastructure.saga_manager import get_saga_manager
 from ...logging_config import get_logger
 from ..config import ServerConfigLoader
-from .enterprise import register_auth_cqrs
+from .components import register_auth_cqrs
 from ..context import get_context
 from ..state import get_runtime, GROUPS, RUNTIME_PROVIDERS, set_group_rebalance_saga
 

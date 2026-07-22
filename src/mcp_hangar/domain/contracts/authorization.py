@@ -378,7 +378,7 @@ class IToolAccessPolicyEnforcer(Protocol):
     considering all applicable policies (mcp_server-level, group-level, member-level).
 
     This is the enforcement contract -- distinct from IToolAccessPolicyStore which
-    handles policy storage/retrieval. Enterprise RBAC implements this with
+    handles policy storage/retrieval. The RBAC module implements this with
     identity-aware policy resolution. Core provides a config-driven implementation
     using ToolAccessPolicy value objects.
     """
@@ -408,7 +408,7 @@ class IToolAccessPolicyEnforcer(Protocol):
 class NullAuthorizer:
     """No-op authorizer. Allows all requests.
 
-    Used when enterprise RBAC is not installed or during testing.
+    Used when the RBAC module is not installed or during testing.
     """
 
     def authorize(self, request: AuthorizationRequest) -> AuthorizationResult:
@@ -419,11 +419,11 @@ class NullAuthorizer:
 class NullRoleStore:
     """No-op role store. Returns empty results for all queries.
 
-    Used when enterprise RBAC is not installed or during testing.
+    Used when the RBAC module is not installed or during testing.
     """
 
     def add_role(self, role: Role) -> None:
-        """No-op: role creation requires enterprise RBAC."""
+        """No-op: role creation requires the RBAC module."""
 
     def get_role(self, role_name: str) -> Role | None:
         """No roles defined."""
@@ -444,7 +444,7 @@ class NullRoleStore:
         scope: str = "global",
         assigned_by: str | None = None,
     ) -> None:
-        """No-op: role assignment requires enterprise RBAC."""
+        """No-op: role assignment requires the RBAC module."""
 
     def revoke_role(
         self,
@@ -453,14 +453,14 @@ class NullRoleStore:
         scope: str = "global",
         revoked_by: str | None = None,
     ) -> None:
-        """No-op: role revocation requires enterprise RBAC."""
+        """No-op: role revocation requires the RBAC module."""
 
     def list_all_roles(self) -> list[Role]:
         """No custom roles defined."""
         return []
 
     def delete_role(self, role_name: str) -> None:
-        """No-op: role deletion requires enterprise RBAC."""
+        """No-op: role deletion requires the RBAC module."""
 
     def update_role(
         self,
@@ -468,14 +468,14 @@ class NullRoleStore:
         permissions: list[Permission],
         description: str | None = None,
     ) -> Role:
-        """No-op: raise NotImplementedError (no role management without enterprise)."""
-        raise NotImplementedError("Role management requires enterprise RBAC module")
+        """No-op: raise NotImplementedError (no role management without the RBAC module)."""
+        raise NotImplementedError("Role management requires the RBAC module")
 
 
 class NullToolAccessPolicyStore:
     """No-op tool access policy store. Returns None for all lookups.
 
-    Used when enterprise policy storage is not installed or during testing.
+    Used when the policy storage module is not installed or during testing.
     """
 
     def set_policy(
@@ -485,7 +485,7 @@ class NullToolAccessPolicyStore:
         allow_list: list[str],
         deny_list: list[str],
     ) -> None:
-        """No-op: policy storage requires enterprise module."""
+        """No-op: policy storage requires the auth module."""
 
     def get_policy(self, scope: str, target_id: str) -> ToolAccessPolicy | None:
         """No policies stored."""
@@ -502,7 +502,7 @@ class NullToolAccessPolicyStore:
 class NullToolAccessPolicyEnforcer:
     """No-op policy enforcer. Allows all tool invocations.
 
-    Used when enterprise policy enforcement is not installed or during testing.
+    Used when the policy enforcement module is not installed or during testing.
     """
 
     def evaluate(

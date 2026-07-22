@@ -1,4 +1,4 @@
-"""Enterprise approval gate module.
+"""Approval gate module.
 
 Provides human-in-the-loop approval for tool invocations matching
 configured approval_list patterns. Tools are held pending a human

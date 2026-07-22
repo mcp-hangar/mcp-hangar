@@ -2,10 +2,10 @@
 
 Bootstraps the in-core auth and approval modules when they are configured and
 available. Historically this was a plugin boundary that discovered a *separate*
-enterprise package via ``mcp_hangar.extensions`` entry points; that package/tier
+optional package via ``mcp_hangar.extensions`` entry points; that package
 was retired, so the indirection (provider registry + entry-point discovery) is
 gone and the built-in modules are loaded directly. The public functions and the
-``EnterpriseComponents`` container are unchanged so callers stay stable.
+``ServerComponents`` container are unchanged so callers stay stable.
 """
 
 # pyright: reportExplicitAny=false, reportAny=false, reportMissingTypeArgument=false, reportUnknownParameterType=false, reportUnknownVariableType=false
@@ -58,11 +58,11 @@ class AuthCompatibilityExports:
     NullAuthComponents: type[Any]
     bootstrap_auth: Callable[..., Any]
     parse_auth_config: Callable[[dict[str, Any] | None], Any]
-    enterprise_auth_available: bool
+    auth_available: bool
 
 
 @dataclass
-class EnterpriseComponents:
+class ServerComponents:
     """Container for the optional auth / approval component instances."""
 
     auth_components: Any = None
@@ -87,7 +87,7 @@ def get_auth_compat_exports() -> AuthCompatibilityExports:
             NullAuthComponents=_FallbackNullAuthComponents,
             bootstrap_auth=_fallback_bootstrap_auth,
             parse_auth_config=_fallback_parse_auth_config,
-            enterprise_auth_available=False,
+            auth_available=False,
         )
 
     return AuthCompatibilityExports(
@@ -95,15 +95,15 @@ def get_auth_compat_exports() -> AuthCompatibilityExports:
         NullAuthComponents=cast(type[Any], null_auth_components),
         bootstrap_auth=cast(Callable[..., Any], bootstrap_auth),
         parse_auth_config=cast(Callable[[dict[str, Any] | None], Any], parse_auth_config),
-        enterprise_auth_available=True,
+        auth_available=True,
     )
 
 
-def load_enterprise_modules(
+def load_components(
     config: dict[str, Any],
     event_bus: Any = None,
     event_publisher: Any = None,
-) -> EnterpriseComponents:
+) -> ServerComponents:
     """Load the optional auth components when auth is configured and available.
 
     Args:
@@ -112,16 +112,16 @@ def load_enterprise_modules(
         event_publisher: Optional callable for publishing domain events.
 
     Returns:
-        EnterpriseComponents populated when auth is enabled, otherwise empty.
+        ServerComponents populated when auth is enabled, otherwise empty.
     """
     exports = get_auth_compat_exports()
-    if not exports.enterprise_auth_available:
+    if not exports.auth_available:
         logger.info("optional_components_unavailable", reason="auth_module_not_installed")
-        return EnterpriseComponents()
+        return ServerComponents()
 
     auth_config = exports.parse_auth_config(config.get("auth"))
     if auth_config is None or not getattr(auth_config, "enabled", False):
-        return EnterpriseComponents()
+        return ServerComponents()
 
     auth_components = exports.bootstrap_auth(
         auth_config,
@@ -129,7 +129,7 @@ def load_enterprise_modules(
         event_store=get_event_store(),
         event_bus=event_bus,
     )
-    components = EnterpriseComponents(auth_components=auth_components)
+    components = ServerComponents(auth_components=auth_components)
     logger.info(
         "optional_components_loaded",
         auth=components.auth_components is not None,
@@ -170,7 +170,7 @@ def register_auth_cqrs(runtime: Any, auth_components: Any) -> bool:
     return True
 
 
-def get_enterprise_api_routes() -> list[Any]:
+def get_component_api_routes() -> list[Any]:
     """Return Starlette routes contributed by the optional auth / approval modules."""
     from starlette.routing import Mount
 
@@ -190,7 +190,7 @@ def get_enterprise_api_routes() -> list[Any]:
     return routes
 
 
-def create_enterprise_event_store(driver: str, config: dict[str, Any]) -> Any | None:
+def create_persistent_event_store(driver: str, config: dict[str, Any]) -> Any | None:
     """Build a persistent event store for the given driver, if supported."""
     if driver != "sqlite":
         return None
@@ -204,7 +204,7 @@ def create_enterprise_event_store(driver: str, config: dict[str, Any]) -> Any | 
     return sqlite_event_store(db_path)
 
 
-def create_enterprise_observability_adapter(config: Any) -> ObservabilityPort | None:
+def create_observability_adapter(config: Any) -> ObservabilityPort | None:
     """Build the Langfuse observability adapter from config."""
     langfuse_config = _import_attribute("mcp_hangar.integrations.langfuse", "LangfuseConfig")
     adapter_type = _import_attribute("mcp_hangar.integrations.langfuse", "LangfuseObservabilityAdapter")

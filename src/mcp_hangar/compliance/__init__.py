@@ -1,4 +1,4 @@
-"""Enterprise compliance export.
+"""Compliance export.
 
 SIEM export functionality for audit records. Supports CEF (Common Event
 Format), LEEF 2.0 (IBM QRadar), JSON-lines, and RFC 5424 syslog.

@@ -1,10 +1,10 @@
-"""Tests for enterprise contract Null implementations.
+"""Tests for optional-module contract Null implementations.
 
-Verifies that every enterprise contract (Protocol/ABC) in
+Verifies that every optional-module contract (Protocol/ABC) in
 domain.contracts and application.ports has a working Null implementation
 that satisfies its interface and returns the expected no-op values.
 
-Contract inventory (6 enterprise contracts + 4 pre-existing):
+Contract inventory (6 optional-module contracts + 4 pre-existing):
     1. IAuthenticator -> NullAuthenticator
     2. IApiKeyStore -> NullApiKeyStore
     3. IAuthorizer -> NullAuthorizer
@@ -126,12 +126,12 @@ class TestNullApiKeyStore:
 
     def test_create_key_raises_not_implemented_error(self) -> None:
         store = NullApiKeyStore()
-        with pytest.raises(NotImplementedError, match="enterprise"):
+        with pytest.raises(NotImplementedError, match="requires the"):
             store.create_key("principal", "key-name")
 
     def test_rotate_key_raises_not_implemented_error(self) -> None:
         store = NullApiKeyStore()
-        with pytest.raises(NotImplementedError, match="enterprise"):
+        with pytest.raises(NotImplementedError, match="requires the"):
             store.rotate_key("key-id")
 
     def test_revoke_key_returns_false(self) -> None:
@@ -181,7 +181,7 @@ class TestNullRoleStore:
 
     def test_update_role_raises_not_implemented_error(self) -> None:
         store = NullRoleStore()
-        with pytest.raises(NotImplementedError, match="enterprise"):
+        with pytest.raises(NotImplementedError, match="requires the"):
             store.update_role("admin", [], None)
 
     def test_assign_role_is_silent_noop(self) -> None:
@@ -347,10 +347,10 @@ class TestNullAuditExporter:
 # -- Complete inventory check --
 
 
-class TestEnterpriseContractInventory:
-    def test_all_six_enterprise_contracts_have_null_implementations(self) -> None:
-        """Verify the complete set of 6 enterprise contracts each have Null implementations."""
-        enterprise_contract_pairs = [
+class TestOptionalContractInventory:
+    def test_all_six_optional_contracts_have_null_implementations(self) -> None:
+        """Verify the complete set of 6 optional-module contracts each have Null implementations."""
+        optional_contract_pairs = [
             (IAuthenticator, NullAuthenticator, "authentication"),
             (IApiKeyStore, NullApiKeyStore, "authentication"),
             (IAuthorizer, NullAuthorizer, "authorization"),
@@ -359,13 +359,13 @@ class TestEnterpriseContractInventory:
             (IToolAccessPolicyEnforcer, NullToolAccessPolicyEnforcer, "authorization"),
         ]
 
-        for contract, null_impl, module_name in enterprise_contract_pairs:
+        for contract, null_impl, module_name in optional_contract_pairs:
             instance = null_impl()
             assert isinstance(instance, contract), (
                 f"Null implementation {null_impl.__name__} does not satisfy {contract.__name__} from {module_name}"
             )
 
-        assert len(enterprise_contract_pairs) == 6, "Expected exactly 6 enterprise contract pairs"
+        assert len(optional_contract_pairs) == 6, "Expected exactly 6 optional-module contract pairs"
 
     def test_pre_existing_contracts_have_null_implementations(self) -> None:
         """Verify pre-existing contracts also have working Null implementations."""

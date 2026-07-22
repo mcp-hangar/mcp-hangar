@@ -4,7 +4,7 @@ This is the core identity middleware path in ``src/``. It only normalizes
 request metadata, extracts an ``IdentityContext`` via an ``IIdentityExtractor``,
 and binds that context to ``identity_context_var`` for downstream consumers.
 
-It does not authenticate, authorize, or reject requests. Enterprise HTTP auth
+It does not authenticate, authorize, or reject requests. The HTTP auth
 middleware composes with the same request-normalization helpers, then adds
 authentication/error handling on top.
 """
