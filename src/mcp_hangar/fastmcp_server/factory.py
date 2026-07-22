@@ -125,6 +125,7 @@ class MCPServerFactory:
         self._maybe_register_flat_tool_handlers(mcp)
         self._enable_governed_tasks(mcp)
         self._advertise_governance_extensions(mcp)
+        self._advertise_tasks_capability(mcp)
 
         self._mcp = mcp
         logger.info(
@@ -346,38 +347,133 @@ class MCPServerFactory:
             return hgr.metrics(format=format)
 
     def _enable_governed_tasks(self, mcp: FastMCP) -> None:
-        """Enable the experimental MCP task API behind an ownership-governed store.
+        """Wire the ADR-014 governed task-relay serving surface (Phase 2); dark by default.
 
-        Binds each MCP task to its owning tenant/principal and authorizes every
-        ``tasks/*`` access fail-closed via a shared ``TaskOwnershipRegistry``.
+        Ships behind a static kill-switch: the four ``tasks/*`` serving handlers
+        are registered ONLY when the v2-native Tasks SDK is present AND
+        ``config.relay_tasks_enabled`` is True. With the default (flag False)
+        nothing is registered -- the server is byte-identical to the relay-only
+        stance (ADR-008): no ``tasks/*`` handlers, upstream task handles rejected.
 
-        WARNING: built on the EXPERIMENTAL mcp task API
-        (``mcp.server.experimental``, mcp 1.26.0); enabling this advertises the
-        server ``tasks`` capability and the wire format may churn.
+        When enabled it constructs ONE shared governance ledger
+        (``GovernedTaskStore`` over a shared ``TaskOwnershipRegistry`` +
+        ``TaskDigestGuard``), a Phase-4-ready ``TaskConsentGate``, and an upstream
+        router that forwards each follow-up ``tasks/*`` verbatim to the SAME
+        upstream that minted the task via ``relay_request``. Store, consent gate,
+        and router are exposed on the ApplicationContext so the Phase-3 executor
+        seam can resolve the SAME instances the handlers hold.
         """
-        from .._sdk_compat import HAS_EXPERIMENTAL_TASKS
+        from .._sdk_compat import HAS_NATIVE_TASKS
 
-        if not HAS_EXPERIMENTAL_TASKS:
-            # SDK v2 removed mcp.shared.experimental.tasks (the store API this
-            # governs). Task governance stays dormant on v2 — the same net effect
-            # as the relay-only stance (ADR-008); its rebuild on the native v2
-            # Tasks extension is tracked in #322 / ADR-014.
-            logger.info("governed_tasks_skipped_no_experimental_api")
+        if not (HAS_NATIVE_TASKS and self._config.relay_tasks_enabled):
+            # Dark: relay-only stance preserved (ADR-008). Nothing registered.
+            logger.info(
+                "governed_tasks_disabled",
+                relay_tasks_enabled=self._config.relay_tasks_enabled,
+                native_tasks=HAS_NATIVE_TASKS,
+            )
             return
 
         from ..application.tasks import GovernedTaskStore
+        from ..domain.services.task_consent import TaskConsentGate
         from ..domain.services.task_digest_guard import TaskDigestGuard
         from ..domain.services.task_ownership import TaskOwnershipRegistry
+        from ..server.context import get_context
+        from .task_relay_handlers import register_task_relay_handlers
 
         registry = TaskOwnershipRegistry()
         digest_guard = TaskDigestGuard()
-        store = GovernedTaskStore(registry=registry, digest_guard=digest_guard)
+        store = GovernedTaskStore(
+            registry=registry,
+            digest_guard=digest_guard,
+            # Same domain event bus the audit/metrics handlers subscribe to.
+            event_publisher=lambda event: get_context().event_bus.publish(event),
+        )
+        # Fail-close a still-live consent evicted by the gate's TTL/LRU cap: a
+        # vanished pending consent must terminally fail the task, never silently
+        # hang (finding #16). The gate hands ``on_evict`` the full consent key
+        # ``(target_server_id, task_id, input_key)``; the ledger keys on the task.
+        consent_gate = TaskConsentGate(
+            on_evict=lambda ck: store.fail_task((ck[0], ck[1]), "consent_unavailable"),
+        )
         self._task_ownership_registry = registry
         self._task_digest_guard = digest_guard
-        # FastMCP wraps a low-level Server exposed as ``_mcp_server``; its
-        # ``experimental`` API is where task support is enabled.
-        lowlevel_server(mcp).experimental.enable_tasks(store=store)
+
+        def _task_upstream_router(
+            target_server_id: str,
+            method: str,
+            params: dict[str, Any],
+            timeout: float,
+        ) -> dict[str, Any]:
+            """Forward a follow-up ``tasks/*`` verbatim to the task's owning upstream.
+
+            Never cold-starts; a missing/unknown server fails closed with a clear
+            error (the serving handler surfaces it as a task-relay failure).
+            """
+            server = get_context().get_mcp_server(target_server_id)
+            if server is None:
+                raise ValueError(f"unknown target server for relayed task: {target_server_id}")
+            return server.relay_request(method, params, timeout)
+
+        # Expose the shared instances on the ApplicationContext so the Phase-3
+        # executor seam resolves the SAME store/gate/router the handlers hold.
+        ctx = get_context()
+        ctx.governed_task_store = store
+        ctx.task_consent_gate = consent_gate
+        ctx.task_upstream_router = _task_upstream_router
+
+        register_task_relay_handlers(mcp, store, consent_gate, _task_upstream_router)
         logger.info("governed_tasks_enabled")
+
+    def _advertise_tasks_capability(self, mcp: FastMCP) -> None:
+        """Advertise the first-class ``tasks`` server capability at INITIALIZE (ADR-014).
+
+        Gated on the SAME static kill-switch as handler registration
+        (``HAS_NATIVE_TASKS and config.relay_tasks_enabled``) -- NOT on any
+        runtime flag -- so the advertisement is a pure function of configuration:
+        it is populated the moment the server is built with the flag on,
+        independent of whether any task has been relayed. Off by default the
+        ``tasks`` field stays None (``get_capabilities`` never sets it), so the
+        advertised capabilities are byte-identical to a plain server.
+
+        Wraps ``get_capabilities`` (which ``create_initialization_options``
+        delegates to) to inject the first-class ``ServerCapabilities.tasks``
+        field -- mirroring the init-options-wrapping pattern in
+        ``_advertise_governance_extensions``. Uses the first-class ``tasks``
+        field, NOT ``capabilities.extensions[...]``.
+        """
+        from .._sdk_compat import HAS_NATIVE_TASKS
+
+        if not (HAS_NATIVE_TASKS and self._config.relay_tasks_enabled):
+            return
+
+        # Concrete constructors sourced from ``mcp_types`` (native-tasks-only past
+        # the gate above): ``_sdk_compat`` re-exports them as ``X | None`` via
+        # ``getattr`` to import on either SDK, which trips a "None not callable"
+        # at each constructor. Mirrors ``task_relay_handlers`` / the v2 branch of
+        # ``flat_tool_projection``; unreachable on v1 (guarded by HAS_NATIVE_TASKS).
+        from mcp_types import (
+            ServerTasksCapability,
+            ServerTasksRequestsCapability,
+            TasksCallCapability,
+            TasksCancelCapability,
+            TasksListCapability,
+            TasksToolsCapability,
+        )
+
+        tasks_capability = ServerTasksCapability(
+            list=TasksListCapability(),
+            cancel=TasksCancelCapability(),
+            requests=ServerTasksRequestsCapability(tools=TasksToolsCapability(call=TasksCallCapability())),
+        )
+        server = lowlevel_server(mcp)
+        original = server.get_capabilities
+
+        def _with_tasks(*args: Any, **kwargs: Any) -> Any:
+            capabilities = original(*args, **kwargs)
+            return capabilities.model_copy(update={"tasks": tasks_capability})
+
+        server.get_capabilities = _with_tasks
 
     @staticmethod
     def _advertise_governance_extensions(mcp: FastMCP) -> None:

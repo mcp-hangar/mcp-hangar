@@ -60,7 +60,14 @@ from mcp_hangar._sdk_compat import (
 from mcp_hangar.application.read_models.tool_projection import get_tool_projection_registry
 from mcp_hangar.application.tasks.tool_pin_context import get_current_tool_pin
 from mcp_hangar.context import get_identity_context
-from mcp_hangar.domain.events import DigestMismatchInTask, TaskFailed
+from mcp_hangar.domain.events import (
+    DigestMismatchInTask,
+    TaskCancelled,
+    TaskCompleted,
+    TaskConsentDecided,
+    TaskCreated,
+    TaskFailed,
+)
 from mcp_hangar.domain.services.digest_computation import compute_tool_digest
 from mcp_hangar.domain.services.task_digest_guard import TaskDigestGuard
 from mcp_hangar.domain.services.task_ownership import TaskKey, TaskOwner, TaskOwnershipRegistry
@@ -226,6 +233,75 @@ class GovernedTaskStore:
         )
         return owner
 
+    def relay_and_govern(
+        self,
+        *,
+        target_server_id: str,
+        task: Task,
+        expected_owner: TaskOwner,
+        correlation_id: str,
+        mcp_server_id: str | None = None,
+        tool_name: str = "",
+        original_result_type: str = "CallToolResult",
+    ) -> None:
+        """Atomically bind governance to a relayed task and emit its provenance head.
+
+        The P3 relay seam (ADR-014) calls this ONE method so that registration and
+        the ``TaskCreated`` provenance head are a single lock-held critical section:
+        the register is the last fallible governance op, the publish the last op
+        overall, and both happen under ``_tasks_lock`` so no concurrent reader can
+        observe a registered-but-headless governed task (review finding #5). If the
+        publish raises, the whole registration is rolled back, leaving ZERO governed
+        state -- no orphan binding, no live provenance head (review finding #15).
+
+        Args:
+            target_server_id: Upstream server id the task lives on (first half of key).
+            task: Upstream-truth :class:`Task` snapshot to record.
+            expected_owner: Owner the caller authorized; cross-checked (on tenant)
+                against the bound request identity by :meth:`register_relayed_task`.
+            correlation_id: Request correlation id threaded into the ledger entry and
+                the ``TaskCreated`` head so downstream lifecycle events + ``tasks/result``
+                reconstruction share the provenance chain.
+            mcp_server_id: Logical MCP server id for the ``TaskCreated`` head (optional).
+            tool_name: Tool name for the ``TaskCreated`` head (optional).
+            original_result_type: Marker recorded on the entry for future
+                ``tasks/result`` reconstruction.
+        """
+        key: TaskKey = (target_server_id, task.task_id)
+        with self._tasks_lock:
+            # 1. Register (owner cross-check + ownership/digest pin + store entry).
+            #    Re-entrant on _tasks_lock; raises on divergence/rebind before any
+            #    publish, so a failed register leaves nothing to roll back.
+            owner = self.register_relayed_task(
+                target_server_id=target_server_id,
+                task=task,
+                expected_owner=expected_owner,
+            )
+            # 2. Populate the provenance fields register_relayed_task left empty.
+            entry = self._tasks[key]
+            entry.correlation_id = correlation_id
+            entry.original_result_type = original_result_type
+            # 3. Publish the provenance head UNDER THE LOCK. On failure, roll the
+            #    whole registration back so zero governed state survives, then re-raise.
+            if self._event_publisher is not None:
+                try:
+                    self._event_publisher(
+                        TaskCreated(
+                            task_id=task.task_id,
+                            tenant_id=owner.tenant_id,
+                            correlation_id=correlation_id,
+                            mcp_server_id=mcp_server_id,
+                            tool_name=tool_name,
+                        )
+                    )
+                except BaseException:
+                    self._registry.discard(key)
+                    self._digest_guard.discard(key)
+                    self._tasks.pop(key, None)
+                    with self._task_tools_lock:
+                        self._task_tools.pop(key, None)
+                    raise
+
     def mint_from_upstream(self, upstream: dict[str, Any]) -> Task:
         """Build a v2 :class:`Task` from an upstream task dict, verbatim + fail-closed.
 
@@ -272,6 +348,30 @@ class GovernedTaskStore:
         own = [entry.snapshot for key, entry in items if self._registry.authorize(key, caller)]
         return own, None
 
+    def find_owned_key(self, task_id: str, caller: TaskOwner | None = None) -> TaskKey | None:
+        """Resolve the composite :data:`TaskKey` for a ``task_id`` the caller owns.
+
+        The serving surface (``tasks/get`` etc.) only receives a bare ``task_id``;
+        the composite key needs the ``target_server_id`` the task lives on, which
+        is never surfaced in a :class:`Task` snapshot. This scans owned entries and
+        returns the key of the first one whose ``task_id`` matches, fail-closed:
+
+        * A ``task_id`` the caller does NOT own -- or that does not exist -- both
+          return ``None`` (no existence leak; a foreign task is indistinguishable
+          from a nonexistent one).
+        * ``task_id`` is unique only per upstream, so in the pathological case of
+          one owner holding the same ``task_id`` on two upstreams the first match
+          wins; ownership is still enforced.
+        """
+        if caller is None:
+            caller = self._current_caller()
+        with self._tasks_lock:
+            items = list(self._tasks.items())
+        for key, _entry in items:
+            if key[1] == task_id and self._registry.authorize(key, caller):
+                return key
+        return None
+
     # -- authorized mutations ------------------------------------------------
 
     def update_snapshot(
@@ -300,6 +400,69 @@ class GovernedTaskStore:
         with self._task_tools_lock:
             self._task_tools.pop(key, None)
 
+    # -- terminal lifecycle transitions (owner-emitted events) --------------
+
+    def mark_completed(self, key: TaskKey, status_message: str | None = None) -> None:
+        """Transition the entry to ``completed`` and emit ``TaskCompleted`` ONCE.
+
+        Fail-closed on ownership like every mutation. The ``working -> completed``
+        transition and its event are deduplicated atomically under the ledger
+        lock: if the entry is ALREADY ``completed`` this is an idempotent no-op and
+        emits nothing, so repeated upstream polls that observe completion publish
+        at most one :class:`TaskCompleted`. The store owns the event publisher, so
+        this transition is emitted here rather than by the (publisher-less) caller.
+        """
+        if not self.authorize(key):
+            raise make_mcp_error(INVALID_PARAMS, f"Task not found: {key[1]}")
+        with self._tasks_lock:
+            entry = self._tasks.get(key)
+            if entry is None:
+                raise make_mcp_error(INVALID_PARAMS, f"Task not found: {key[1]}")
+            already_completed = entry.snapshot.status == "completed"
+            entry.snapshot = self._with_status(entry.snapshot, "completed", status_message)
+            owner = entry.owner
+            correlation_id = entry.correlation_id
+        if already_completed:
+            return
+        self._publish(TaskCompleted(task_id=key[1], tenant_id=owner.tenant_id, correlation_id=correlation_id))
+
+    def mark_cancelled(
+        self,
+        key: TaskKey,
+        reason: str = "",
+        cancelled_by: str = "",
+    ) -> Task | None:
+        """Transition the entry to ``cancelled``, emit ``TaskCancelled`` ONCE, return the snapshot.
+
+        Fail-closed on ownership. Deduplicated atomically: an entry already in
+        ``cancelled`` re-emits nothing. Returns the updated snapshot so the caller
+        can build its terminal result BEFORE retiring the entry (the serving
+        surface calls :meth:`delete_task` next). The store owns the publisher, so
+        the event is emitted here rather than by the caller.
+        """
+        if not self.authorize(key):
+            raise make_mcp_error(INVALID_PARAMS, f"Task not found: {key[1]}")
+        with self._tasks_lock:
+            entry = self._tasks.get(key)
+            if entry is None:
+                raise make_mcp_error(INVALID_PARAMS, f"Task not found: {key[1]}")
+            already_cancelled = entry.snapshot.status == "cancelled"
+            entry.snapshot = self._with_status(entry.snapshot, "cancelled", None)
+            snapshot = entry.snapshot
+            owner = entry.owner
+            correlation_id = entry.correlation_id
+        if not already_cancelled:
+            self._publish(
+                TaskCancelled(
+                    task_id=key[1],
+                    tenant_id=owner.tenant_id,
+                    correlation_id=correlation_id,
+                    reason=reason,
+                    cancelled_by=cancelled_by,
+                )
+            )
+        return snapshot
+
     # -- fail-closed lifecycle ----------------------------------------------
 
     def fail_task(self, key: TaskKey, error_type: str, error_message: str = "") -> None:
@@ -326,6 +489,37 @@ class GovernedTaskStore:
                     error_message=error_message,
                 )
             )
+
+    def record_consent_decision(self, key: TaskKey, input_key: str, granted: bool, principal_id: str) -> None:
+        """Emit ``TaskConsentDecided`` provenance for a mid-flight consent outcome.
+
+        Fail-closed: if the ledger entry is absent (never registered / already
+        retired) nothing is emitted -- a consent decision can only be recorded
+        against a known governed task. The event carries the entry's
+        ``correlation_id`` + owner ``tenant_id`` so the decision joins the task's
+        provenance chain; ``principal_id`` attributes who was prompted.
+
+        This is provenance-only: the presence primitive (:class:`TaskConsentGate`)
+        stays a minimal event-free gate; the ledger owns the event bus and emits
+        the decision here.
+        """
+        with self._tasks_lock:
+            entry = self._tasks.get(key)
+            if entry is None:
+                return
+            owner = entry.owner
+            correlation_id = entry.correlation_id
+        self._publish(
+            TaskConsentDecided(
+                task_id=key[1],
+                target_server_id=key[0],
+                input_key=input_key,
+                granted=granted,
+                tenant_id=owner.tenant_id,
+                correlation_id=correlation_id,
+                principal_id=principal_id,
+            )
+        )
 
     def _on_evict(self, key: TaskKey) -> None:
         """Primitive-eviction callback: fail a still-live entry closed, then purge.

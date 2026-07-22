@@ -1267,6 +1267,62 @@ class McpServer(AggregateRoot):
 
             return cast(dict[str, Any], result)
 
+    def relay_request(self, method: str, params: dict[str, Any], timeout: float = 30.0) -> dict[str, Any]:
+        """Relay a raw JSON-RPC request to the live upstream client.
+
+        This is the follow-up path for an already-minted governed task (ADR-014
+        task relay): a client later sends ``tasks/get`` / ``tasks/result`` /
+        ``tasks/cancel`` and Hangar must forward that request verbatim to the
+        SAME upstream MCP server that minted the task.
+
+        Unlike ``invoke_tool``, this NEVER cold-starts the server. If the server
+        is not already live we fail -- we do not launch it (the task's upstream
+        is gone, so there is nothing to relay to). It applies no L7/egress/consent
+        logic; it is a thin transport relay. Trace/_meta injection is handled
+        inside ``client.call``.
+
+        The client reference is copied under the same lock ``invoke_tool`` uses
+        (see the invocation-phase pattern around mcp_server.py:1095), and the
+        network ``.call`` is issued OUTSIDE the lock.
+
+        Args:
+            method: JSON-RPC method to forward verbatim (e.g. "tasks/get").
+            params: JSON-RPC params to forward verbatim.
+            timeout: Timeout in seconds.
+
+        Returns:
+            The raw JSON-RPC response dict as-is (the ``{"result": ...}`` /
+            ``{"error": ...}`` shape). Not unwrapped or interpreted -- the caller
+            validates the payload into a typed result.
+
+        Raises:
+            ToolInvocationError: If the upstream client is absent or not alive
+                (relay-unavailable), or if the transport call fails.
+        """
+        # Copy the live client under the lock; do NOT cold-start. Mirrors the
+        # invoke_tool invocation-phase copy-under-lock-then-call-outside-lock.
+        with self._lock:
+            client = self._client
+            if client is None or not client.is_alive():
+                raise ToolInvocationError(
+                    self.mcp_server_id,
+                    "relay unavailable: mcp_server client is not live",
+                    {"method": method},
+                )
+
+        # Transport phase (outside lock): forward method + params verbatim.
+        try:
+            response = client.call(method, params, timeout=timeout)
+        except (OSError, TimeoutError) as e:
+            raise ToolInvocationError(
+                self.mcp_server_id,
+                str(e),
+                {"method": method},
+            ) from e
+
+        # Return the raw response dict as-is; the caller validates the payload.
+        return cast(dict[str, Any], response)
+
     def _refresh_tools(self) -> None:
         """Refresh tool catalog from mcp_server.
 

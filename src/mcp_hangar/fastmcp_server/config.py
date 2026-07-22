@@ -77,6 +77,11 @@ class ServerConfig:
         auth_enabled: Whether authentication is enabled (opt-in, default False).
         auth_skip_paths: Paths to skip authentication (health, metrics, etc.).
         trusted_proxies: Set of trusted proxy IPs for X-Forwarded-For.
+        relay_tasks_enabled: Kill-switch for the ADR-014 task-relay serving
+            surface (default False). When False the server is byte-identical to
+            the relay-only stance: no ``tasks/*`` handlers are registered and the
+            ``tasks`` capability is not advertised at INITIALIZE. Only when True
+            (native-tasks SDK required) does the governed task relay go live.
     """
 
     host: str = "0.0.0.0"
@@ -88,6 +93,8 @@ class ServerConfig:
     auth_enabled: bool = False
     auth_skip_paths: tuple[str, ...] = ("/health", "/ready", "/_ready", "/metrics")
     trusted_proxies: frozenset[str] = frozenset(["127.0.0.1", "::1"])
+    # ADR-014 task-relay serving surface kill-switch (opt-in, default OFF / dark).
+    relay_tasks_enabled: bool = False
 
 
 __all__ = [
