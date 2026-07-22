@@ -60,6 +60,17 @@ except ImportError:
 # HAS_EXPERIMENTAL_TASKS above is now only a legacy no-op marker.
 HAS_NATIVE_TASKS = hasattr(_t, "CreateTaskResult")
 
+# Fine-grained 2026-07-28 (SEP-2663) Tasks-extension deltas WITHIN the v2 line.
+# ``mcp==2.0.0b2`` is the 2026-07-28 RC beta: it still ships ``ListTasksResult``
+# (``tasks/list`` not yet removed) and lacks ``UpdateTaskRequest`` (``tasks/update``
+# not yet added). These flags let the relay track the surface as later betas land
+# the final shape WITHOUT a version bump touching call sites: the ``tasks/list``
+# advertise + serving drop themselves when the SDK removes the type, and the
+# ``tasks/update`` handler + answer path light up when the SDK adds it. See the
+# ADR-014 activation follow-up (Tier A forward-compat).
+HAS_LIST_TASKS = getattr(_t, "ListTasksResult", None) is not None
+HAS_TASKS_UPDATE = getattr(_t, "UpdateTaskRequest", None) is not None
+
 
 def lowlevel_server(mcp):
     """Return the wrapped low-level MCP ``Server``.
@@ -153,6 +164,12 @@ GetTaskPayloadResult = getattr(_t, "GetTaskPayloadResult", None)
 CancelTaskRequestParams = getattr(_t, "CancelTaskRequestParams", None)
 CancelTaskResult = getattr(_t, "CancelTaskResult", None)
 ListTasksResult = getattr(_t, "ListTasksResult", None)
+# 2026-07-28 (SEP-2663) inbound client-input method; absent on the b2 RC beta ->
+# None (the handler is registration-guarded on HAS_TASKS_UPDATE, so None is never
+# called on b2). Lights up when a later beta adds the type.
+UpdateTaskRequest = getattr(_t, "UpdateTaskRequest", None)
+UpdateTaskRequestParams = getattr(_t, "UpdateTaskRequestParams", None)
+UpdateTaskResult = getattr(_t, "UpdateTaskResult", None)
 PaginatedRequestParams = getattr(_t, "PaginatedRequestParams", None)
 TaskStatusNotification = getattr(_t, "TaskStatusNotification", None)
 ServerCapabilities = getattr(_t, "ServerCapabilities", None)
@@ -169,6 +186,8 @@ __all__ = [
     "McpError",
     "HAS_EXPERIMENTAL_TASKS",
     "HAS_NATIVE_TASKS",
+    "HAS_LIST_TASKS",
+    "HAS_TASKS_UPDATE",
     "lowlevel_server",
     "new_mcp_server",
     "make_mcp_error",
@@ -196,6 +215,9 @@ __all__ = [
     "CancelTaskRequestParams",
     "CancelTaskResult",
     "ListTasksResult",
+    "UpdateTaskRequest",
+    "UpdateTaskRequestParams",
+    "UpdateTaskResult",
     "PaginatedRequestParams",
     "TaskStatusNotification",
     "ServerCapabilities",

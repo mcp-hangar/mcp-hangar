@@ -442,7 +442,7 @@ class MCPServerFactory:
         ``_advertise_governance_extensions``. Uses the first-class ``tasks``
         field, NOT ``capabilities.extensions[...]``.
         """
-        from .._sdk_compat import HAS_NATIVE_TASKS
+        from .._sdk_compat import HAS_LIST_TASKS, HAS_NATIVE_TASKS
 
         if not (HAS_NATIVE_TASKS and self._config.relay_tasks_enabled):
             return
@@ -457,15 +457,23 @@ class MCPServerFactory:
             ServerTasksRequestsCapability,
             TasksCallCapability,
             TasksCancelCapability,
-            TasksListCapability,
             TasksToolsCapability,
         )
 
-        tasks_capability = ServerTasksCapability(
-            list=TasksListCapability(),
-            cancel=TasksCancelCapability(),
-            requests=ServerTasksRequestsCapability(tools=TasksToolsCapability(call=TasksCallCapability())),
-        )
+        # ``tasks/list`` is removed in 2026-07-28 (SEP-2663): advertise ``list`` only
+        # while the SDK still defines it, so a later beta's removal auto-drops it from
+        # the capability WITHOUT ever advertising a method the server can no longer
+        # serve ("do not advertise what does not run"). ``TasksListCapability`` is
+        # imported conditionally so its removal cannot break this import.
+        cap_kwargs: dict[str, Any] = {
+            "cancel": TasksCancelCapability(),
+            "requests": ServerTasksRequestsCapability(tools=TasksToolsCapability(call=TasksCallCapability())),
+        }
+        if HAS_LIST_TASKS:
+            from mcp_types import TasksListCapability
+
+            cap_kwargs["list"] = TasksListCapability()
+        tasks_capability = ServerTasksCapability(**cap_kwargs)
         server = lowlevel_server(mcp)
         original = server.get_capabilities
 

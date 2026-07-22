@@ -55,16 +55,25 @@ from typing import Any
 # generation; that Optional trips a "None not callable" at each constructor. The
 # concrete import keeps mypy honest without per-call ignores, mirroring the v2
 # branch of ``flat_tool_projection``.
-from mcp_types import CancelTaskResult, GetTaskResult, ListTasksResult
+from mcp_types import CancelTaskResult, GetTaskResult
+
+try:  # ``ListTasksResult`` is removed in 2026-07-28 (SEP-2663); guard the import.
+    from mcp_types import ListTasksResult
+except ImportError:  # pragma: no cover -- b3+ where tasks/list is gone
+    ListTasksResult = None  # type: ignore[assignment,misc]
 
 from mcp_hangar._sdk_compat import (
     DEFAULT_NEGOTIATED_VERSION,
+    HAS_LIST_TASKS,
+    HAS_TASKS_UPDATE,
     INVALID_PARAMS,
     CallToolResult,
     CancelTaskRequestParams,
     GetTaskPayloadRequestParams,
     GetTaskRequestParams,
     PaginatedRequestParams,
+    UpdateTaskRequestParams,
+    UpdateTaskResult,
     lowlevel_server,
     make_mcp_error,
 )
@@ -299,9 +308,13 @@ def register_task_relay_handlers(
         #1); every non-accept outcome terminally fails the task (D6 never-hang).
         """
         if _is_modern_tasks_session(ctx):
-            # TODO(#322 modern path / 2026-07-28): consume InputRequiredResult.input_requests
-            # and answer via inbound tasks/update. Unreachable on a 2025-11-25 session.
-            logger.debug("modern_tasks_input_path_todo", task_id=task_id)
+            # 2026-07-28 (SEP-2663): the client resolves ``input_required`` by driving
+            # an inbound ``tasks/update`` (governed in ``_update`` below), NOT by a
+            # synchronous elicit here. Pass the ``input_required`` snapshot through
+            # untouched -- upstream-truthful -- and let the client come back through
+            # the governed update path. Unreachable on a 2025-11-25 session (the flag
+            # is fail-safe to pre-modern), so b2 behavior is byte-identical.
+            return await _flat_snapshot(key, task_id)
 
         input_key = _derive_input_key(result)
         principal_id = _current_principal_id()
@@ -427,12 +440,72 @@ def register_task_relay_handlers(
             if token is not None:
                 identity_context_var.reset(token)
 
+    async def _update(ctx: Any, params: Any) -> Any:
+        """``tasks/update`` (2026-07-28 / SEP-2663): the GOVERNED modern input path.
+
+        On the modern protocol the downstream client resolves a task's mid-flight
+        ``input_required`` by driving an inbound ``tasks/update`` carrying its input
+        -- so THIS handler, not ``tasks/get``, is where consent is governed on a
+        modern session (the 2025-11-25 surface governs synchronously in ``_get``).
+        An inbound update IS the client's consent to provide input: authorize the
+        tenant, gate the decision on the composite key, relay the client's payload
+        upstream verbatim (upstream-truthful), record the decision, and re-sync.
+
+        A transient upstream refusal discards the gate WITHOUT consuming (finding
+        #3 -- recoverable) and raises; it does not fail the task. Registered ONLY
+        when the SDK defines ``UpdateTaskRequest`` (HAS_TASKS_UPDATE), so it is
+        never built on the b2 RC beta -- b2 behavior is byte-identical.
+        """
+        token = _bridge_identity(ctx)
+        try:
+            task_id = params.task_id
+            key = await _resolve_owned_key(task_id)
+            if not await asyncio.to_thread(store.authorize, key):
+                raise make_mcp_error(INVALID_PARAMS, f"Task not found: {task_id}")
+            principal_id = _current_principal_id()
+
+            # Key the decision off the current upstream input_required state.
+            probe = await asyncio.to_thread(upstream_router, key[0], "tasks/get", {"task_id": task_id}, _RELAY_TIMEOUT)
+            probed = probe.get("result") if isinstance(probe, dict) else None
+            input_key = _derive_input_key(probed if isinstance(probed, dict) else {})
+
+            # Consent BEFORE the answer reaches upstream (finding #1). Relay the
+            # client's payload verbatim; consume only on a confirmed relay.
+            consent_gate.open(key, input_key)
+            payload = params.model_dump(by_alias=True) if hasattr(params, "model_dump") else {"task_id": task_id}
+            resp = await asyncio.to_thread(upstream_router, key[0], "tasks/update", payload, _RELAY_TIMEOUT)
+            if isinstance(resp, dict) and "error" in resp:
+                consent_gate.discard(key)  # recoverable: retry re-drives the update
+                raise make_mcp_error(INVALID_PARAMS, "task update relay failed; retry")
+            consent_gate.answer(key, input_key)
+            await asyncio.to_thread(store.record_consent_decision, key, input_key, True, principal_id)
+
+            updated = resp.get("result") if isinstance(resp, dict) else None
+            if isinstance(updated, dict):
+                await _sync_snapshot_from_result(key, updated)
+            snapshot = await asyncio.to_thread(store.get_task, key)
+            if snapshot is None:
+                raise make_mcp_error(INVALID_PARAMS, f"Task not found: {task_id}")
+            # ``UpdateTaskResult`` shape is finalized with the b3 SDK (Tier C); fall
+            # back to the flat ``GetTaskResult`` projection until it lands.
+            result_cls = UpdateTaskResult or GetTaskResult
+            return result_cls(**snapshot.model_dump(by_alias=False))
+        finally:
+            if token is not None:
+                identity_context_var.reset(token)
+
     # Byte-exact wire method strings. ``tasks/result`` fetches the payload
-    # (GetTaskPayloadRequestParams). NO ``tasks/update`` handler (out of scope).
+    # (GetTaskPayloadRequestParams). ``tasks/list`` (removed in 2026-07-28) and the
+    # inbound ``tasks/update`` (added in 2026-07-28) are each registered only while
+    # the SDK defines their type -- so the served surface tracks the negotiated
+    # protocol without a version bump (advertise/serve exactly what runs).
     low.add_request_handler("tasks/get", GetTaskRequestParams, _get)
     low.add_request_handler("tasks/result", GetTaskPayloadRequestParams, _result)
     low.add_request_handler("tasks/cancel", CancelTaskRequestParams, _cancel)
-    low.add_request_handler("tasks/list", PaginatedRequestParams, _list)
+    if HAS_LIST_TASKS:
+        low.add_request_handler("tasks/list", PaginatedRequestParams, _list)
+    if HAS_TASKS_UPDATE:
+        low.add_request_handler("tasks/update", UpdateTaskRequestParams, _update)
 
 
 def _cancel_confirmed(resp: Any) -> bool:
