@@ -6,7 +6,7 @@ Tests:
 1. deserialize() returns DomainEvent (or raises EventSerializationError) for valid type names
 2. deserialize() never leaks raw exceptions on arbitrary byte input
 3. UpcasterChain.upcast() passthrough contract for unregistered types
-4. Round-trip serialize -> deserialize for all 17 EVENT_TYPE_MAP types
+4. Round-trip serialize -> deserialize for all 18 EVENT_TYPE_MAP types
 """
 
 import json
@@ -21,6 +21,7 @@ from mcp_hangar.domain.events import (
     DiscoveryCycleCompleted,
     DiscoverySourceHealthChanged,
     EgressBlocked,
+    EgressPolicyViolationObserved,
     HealthCheckFailed,
     HealthCheckPassed,
     PolicyPushRejected,
@@ -129,6 +130,12 @@ _MINIMAL_EVENTS: dict[str, DomainEvent] = {
         destination_host="evil.example.com",
         destination_port=443,
         protocol="https",
+    ),
+    "EgressPolicyViolationObserved": EgressPolicyViolationObserved(
+        mcp_server_id="p1",
+        tool_name="t",
+        would_be_action="deny",
+        reasons=["denied by egress policy"],
     ),
     "ProviderCapabilityQuarantined": ProviderCapabilityQuarantined(
         mcp_server_id="p1",
