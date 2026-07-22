@@ -78,10 +78,14 @@ class ServerConfig:
         auth_skip_paths: Paths to skip authentication (health, metrics, etc.).
         trusted_proxies: Set of trusted proxy IPs for X-Forwarded-For.
         relay_tasks_enabled: Kill-switch for the ADR-014 task-relay serving
-            surface (default False). When False the server is byte-identical to
-            the relay-only stance: no ``tasks/*`` handlers are registered and the
-            ``tasks`` capability is not advertised at INITIALIZE. Only when True
-            (native-tasks SDK required) does the governed task relay go live.
+            surface (**default True — activated 2026-07-22** by maintainer
+            decision, ADR-014 D5/D6). When True (native-tasks SDK required) the
+            governed task relay is live: the ``tasks/*`` handlers are registered
+            and the ``tasks`` capability is advertised at INITIALIZE; per D5 the
+            relay itself only engages once an upstream actually emits a task, so
+            no synchronous flow changes until then. Set False to fully disable
+            the surface (byte-identical to the relay-only stance) — the kill
+            switch is retained for a fast, per-deployment rollback.
     """
 
     host: str = "0.0.0.0"
@@ -93,8 +97,9 @@ class ServerConfig:
     auth_enabled: bool = False
     auth_skip_paths: tuple[str, ...] = ("/health", "/ready", "/_ready", "/metrics")
     trusted_proxies: frozenset[str] = frozenset(["127.0.0.1", "::1"])
-    # ADR-014 task-relay serving surface kill-switch (opt-in, default OFF / dark).
-    relay_tasks_enabled: bool = False
+    # ADR-014 task-relay serving surface kill-switch. Activated 2026-07-22
+    # (default True, ADR-014 D5/D6); retained as a per-deployment rollback.
+    relay_tasks_enabled: bool = True
 
 
 __all__ = [
