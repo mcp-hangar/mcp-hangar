@@ -11,6 +11,7 @@ import time
 from mcp_hangar.domain.events import (
     CapabilityViolationDetected,
     CircuitBreakerStateChanged,
+    DigestMismatchInTask,
     DomainEvent,
     EgressBlocked,
     HealthCheckFailed,
@@ -19,6 +20,11 @@ from mcp_hangar.domain.events import (
     McpServerStarted,
     McpServerStateChanged,
     McpServerStopped,
+    TaskCancelled,
+    TaskCompleted,
+    TaskCreated,
+    TaskFailed,
+    TaskInputRequired,
     ToolInvocationCompleted,
     ToolInvocationFailed,
 )
@@ -107,6 +113,18 @@ class MetricsEventHandler:
             self._handle_capability_violation(event)
         elif isinstance(event, EgressBlocked):
             self._handle_egress_blocked(event)
+        elif isinstance(event, TaskCreated):
+            self._handle_task_created(event)
+        elif isinstance(event, TaskCompleted):
+            self._handle_task_completed(event)
+        elif isinstance(event, TaskFailed):
+            self._handle_task_failed(event)
+        elif isinstance(event, TaskCancelled):
+            self._handle_task_cancelled(event)
+        elif isinstance(event, TaskInputRequired):
+            self._handle_task_input_required(event)
+        elif isinstance(event, DigestMismatchInTask):
+            self._handle_task_digest_drift(event)
 
     def _handle_mcp_server_started(self, event: McpServerStarted) -> None:
         """Handle mcp_server started event."""
@@ -216,6 +234,30 @@ class MetricsEventHandler:
             mcp_server=event.mcp_server_id,
             violation_type="egress_denied",
         )
+
+    def _handle_task_created(self, event: TaskCreated) -> None:
+        """Handle relayed-task created event."""
+        prometheus_metrics.record_task_relayed(event.tenant_id)
+
+    def _handle_task_completed(self, event: TaskCompleted) -> None:
+        """Handle relayed-task completed event."""
+        prometheus_metrics.record_task_completed(event.tenant_id)
+
+    def _handle_task_failed(self, event: TaskFailed) -> None:
+        """Handle relayed-task failed event (fail-closed path)."""
+        prometheus_metrics.record_task_failed(event.tenant_id, reason=event.error_type)
+
+    def _handle_task_cancelled(self, event: TaskCancelled) -> None:
+        """Handle relayed-task cancelled event."""
+        prometheus_metrics.record_task_cancelled(event.tenant_id)
+
+    def _handle_task_input_required(self, event: TaskInputRequired) -> None:
+        """Handle relayed-task input-required event."""
+        prometheus_metrics.record_task_input_required(event.tenant_id)
+
+    def _handle_task_digest_drift(self, event: DigestMismatchInTask) -> None:
+        """Handle relayed-task digest-drift event (fail-closed path)."""
+        prometheus_metrics.record_task_digest_drift(event.tenant_id)
 
     def get_metrics(self, mcp_server_id: str) -> McpServerMetrics | None:
         """
