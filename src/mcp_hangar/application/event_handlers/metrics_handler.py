@@ -13,6 +13,7 @@ from mcp_hangar.domain.events import (
     CircuitBreakerStateChanged,
     DomainEvent,
     EgressBlocked,
+    EgressPolicyViolationObserved,
     HealthCheckFailed,
     HealthCheckPassed,
     McpServerDegraded,
@@ -107,6 +108,8 @@ class MetricsEventHandler:
             self._handle_capability_violation(event)
         elif isinstance(event, EgressBlocked):
             self._handle_egress_blocked(event)
+        elif isinstance(event, EgressPolicyViolationObserved):
+            self._handle_egress_policy_violation_observed(event)
 
     def _handle_mcp_server_started(self, event: McpServerStarted) -> None:
         """Handle mcp_server started event."""
@@ -215,6 +218,13 @@ class MetricsEventHandler:
         prometheus_metrics.record_capability_violation(
             mcp_server=event.mcp_server_id,
             violation_type="egress_denied",
+        )
+
+    def _handle_egress_policy_violation_observed(self, event: EgressPolicyViolationObserved) -> None:
+        """Handle an Audit-mode L7 egress-policy violation (observed, not blocked)."""
+        prometheus_metrics.record_egress_policy_violation_observed(
+            mcp_server=event.mcp_server_id,
+            would_be_action=event.would_be_action,
         )
 
     def get_metrics(self, mcp_server_id: str) -> McpServerMetrics | None:

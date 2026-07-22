@@ -15,6 +15,7 @@ from ..contracts.metrics_publisher import IMetricsPublisher, NullMetricsPublishe
 from ..value_objects.capabilities import McpServerCapabilities, ViolationSeverity, ViolationType
 from ..events import (
     CapabilityViolationDetected,
+    EgressPolicyViolationObserved,
     HealthCheckFailed,
     HealthCheckPassed,
     McpServerDegraded,
@@ -1026,16 +1027,44 @@ class McpServer(AggregateRoot):
         identity_context_dict = idt_ctx.to_dict() if idt_ctx else None
 
         # L7 egress policy (MCPEgressPolicy): evaluate the tool call before we
-        # wake the server or touch the upstream, so a denied or approval-gated
-        # call never reaches the wire (and never cold-starts a server).
+        # wake the server or touch the upstream. The verdict (deny / require-
+        # approval) is applied per the policy's mode (ADR-013):
+        #   - Enforce (default): block -- raise, so a denied or approval-gated
+        #     call never reaches the wire (and never cold-starts a server).
+        #   - Audit: observe -- record the would-be verdict as a domain event and
+        #     let the call proceed. This is the safe adoption path: an operator
+        #     sees a policy's impact before switching it on.
+        # A policy with no mode (programmatic or a mode-less older-operator
+        # payload) resolves to Enforce -- it keeps blocking (fail-closed).
         if self._l7_policy is not None:
-            from ..policies.egress_l7 import ToolAction, evaluate
+            from ..policies.egress_l7 import PolicyMode, ToolAction, evaluate
 
             decision = evaluate(tool_name, arguments, self._l7_policy)
-            if decision.action is ToolAction.DENY:
-                raise EgressPolicyDeniedError(self.mcp_server_id, tool_name, "; ".join(decision.reasons))
-            if decision.action is ToolAction.REQUIRE_APPROVAL:
-                raise EgressPolicyApprovalRequiredError(self.mcp_server_id, tool_name)
+            would_block = decision.action in (ToolAction.DENY, ToolAction.REQUIRE_APPROVAL)
+            if would_block:
+                if self._l7_policy.mode is PolicyMode.AUDIT:
+                    self._record_event(
+                        EgressPolicyViolationObserved(
+                            mcp_server_id=self.mcp_server_id,
+                            tool_name=tool_name,
+                            would_be_action=decision.action.value,
+                            reasons=list(decision.reasons),
+                            correlation_id=correlation_id,
+                            identity_context=identity_context_dict,
+                        )
+                    )
+                    logger.warning(
+                        "egress_policy_violation_observed",
+                        mcp_server_id=self.mcp_server_id,
+                        tool_name=tool_name,
+                        would_be_action=decision.action.value,
+                        reasons=list(decision.reasons),
+                    )
+                    # Audit mode: fall through and proceed with the call.
+                elif decision.action is ToolAction.DENY:
+                    raise EgressPolicyDeniedError(self.mcp_server_id, tool_name, "; ".join(decision.reasons))
+                else:  # ToolAction.REQUIRE_APPROVAL
+                    raise EgressPolicyApprovalRequiredError(self.mcp_server_id, tool_name)
 
         # Wait outside the invocation lock so a concurrent starter can finalize
         # state and signal every cold-start waiter.
