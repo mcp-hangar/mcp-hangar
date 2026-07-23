@@ -9,6 +9,7 @@ from mcp_hangar.domain.policies.egress_l7 import (
     evaluate,
     evaluate_tool,
     L7Policy,
+    PolicyMode,
     scan_arguments,
     ToolAction,
     ToolRules,
@@ -182,6 +183,44 @@ def test_from_dict_roundtrips_through_evaluate() -> None:
     p = L7Policy.from_dict({"tools": {"deny": ["delete_*"]}, "defaultAction": "Allow"})
     assert evaluate("delete_repo", {}, p).action is ToolAction.DENY
     assert evaluate("get_user", {}, p).action is ToolAction.ALLOW
+
+
+# --- mode (Audit | Enforce) ------------------------------------------------
+
+
+def test_policy_default_mode_is_enforce() -> None:
+    # A programmatically-built policy with no mode blocks (fail-closed / safe).
+    assert L7Policy().mode is PolicyMode.ENFORCE
+
+
+def test_from_dict_parses_audit_mode() -> None:
+    p = L7Policy.from_dict({"tools": {"deny": ["delete_*"]}, "mode": "Audit"})
+    assert p.mode is PolicyMode.AUDIT
+
+
+def test_from_dict_parses_enforce_mode() -> None:
+    p = L7Policy.from_dict({"tools": {"deny": ["delete_*"]}, "mode": "Enforce"})
+    assert p.mode is PolicyMode.ENFORCE
+
+
+def test_from_dict_mode_absent_defaults_enforce() -> None:
+    # Backward-compat: a mode-less payload from an older operator keeps blocking.
+    assert L7Policy.from_dict({}).mode is PolicyMode.ENFORCE
+
+
+@pytest.mark.parametrize("bad_mode", ["audit", "ENFORCE", "observe", "", None, 1, True])
+def test_from_dict_unrecognized_mode_defaults_enforce(bad_mode: object) -> None:
+    # Anything that is not exactly "Audit" fails closed to Enforce.
+    assert L7Policy.from_dict({"mode": bad_mode}).mode is PolicyMode.ENFORCE
+
+
+def test_mode_does_not_affect_evaluate_verdict() -> None:
+    # evaluate() stays pure: the verdict is identical regardless of mode.
+    deny_rule = ToolRules(deny=("delete_*",))
+    audit = L7Policy(tools=deny_rule, mode=PolicyMode.AUDIT)
+    enforce = L7Policy(tools=deny_rule, mode=PolicyMode.ENFORCE)
+    assert evaluate("delete_repo", {}, audit).action is ToolAction.DENY
+    assert evaluate("delete_repo", {}, enforce).action is ToolAction.DENY
 
 
 @pytest.mark.parametrize(

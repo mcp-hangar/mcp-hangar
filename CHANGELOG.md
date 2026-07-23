@@ -5,6 +5,18 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [1.6.1](https://github.com/mcp-hangar/mcp-hangar/compare/v1.6.0...v1.6.1) (2026-07-23)
+
+
+### Added
+
+* **core:** wire MCPEgressPolicy mode (Audit observes, Enforce blocks) ([#588](https://github.com/mcp-hangar/mcp-hangar/issues/588)) ([969b996](https://github.com/mcp-hangar/mcp-hangar/commit/969b99668c95d23c975f7f3affd02117230fa0bb))
+
+
+### Changed
+
+* **release:** force patch release 1.6.1 ([#593](https://github.com/mcp-hangar/mcp-hangar/issues/593)) ([44912b0](https://github.com/mcp-hangar/mcp-hangar/commit/44912b0a2eb4b30c4ca8a91b79fbd5efc3aae5ab))
+
 ## [1.6.0](https://github.com/mcp-hangar/mcp-hangar/compare/v1.5.1...v1.6.0) (2026-07-19)
 
 

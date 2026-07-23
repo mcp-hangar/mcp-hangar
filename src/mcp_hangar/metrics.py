@@ -907,6 +907,12 @@ CAPABILITY_VIOLATIONS_TOTAL = Counter(
     labels=["mcp_server", "violation_type"],
 )
 
+EGRESS_POLICY_VIOLATIONS_OBSERVED_TOTAL = Counter(
+    name="mcp_hangar_egress_policy_violations_observed",
+    description="Total L7 egress-policy violations observed in Audit mode (recorded, not blocked)",
+    labels=["mcp_server", "would_be_action"],  # would_be_action: deny | require_approval
+)
+
 BEHAVIORAL_DEVIATIONS_TOTAL = Counter(
     name="mcp_hangar_behavioral_deviations",
     description="Total number of behavioral deviations detected",
@@ -1370,6 +1376,17 @@ def record_capability_violation(mcp_server: str, violation_type: str) -> None:
         violation_type: Type of violation (egress_denied, capability_drift, etc.).
     """
     CAPABILITY_VIOLATIONS_TOTAL.inc(mcp_server=mcp_server, violation_type=violation_type)
+
+
+def record_egress_policy_violation_observed(mcp_server: str, would_be_action: str) -> None:
+    """Record an Audit-mode L7 egress-policy violation (observed, not blocked).
+
+    Args:
+        mcp_server: McpServer ID whose tool call tripped the policy.
+        would_be_action: Verdict Enforce mode would have applied
+            (``deny`` or ``require_approval``).
+    """
+    EGRESS_POLICY_VIOLATIONS_OBSERVED_TOTAL.inc(mcp_server=mcp_server, would_be_action=would_be_action)
 
 
 def record_behavioral_deviation(mcp_server: str, deviation_type: str) -> None:

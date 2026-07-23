@@ -1451,6 +1451,60 @@ class CapabilityViolationDetected(DomainEvent):
 
 
 @dataclass(init=False)
+class EgressPolicyViolationObserved(DomainEvent):
+    """Published when an Audit-mode MCPEgressPolicy would have blocked a call.
+
+    In Audit mode (ADR-013) the L7 policy verdict is recorded but NOT enforced:
+    the call proceeds. This event captures what Enforce mode *would* have done,
+    so an operator can see the impact of a policy before switching it on.
+
+    Attributes:
+        mcp_server_id: McpServer whose tool call tripped the policy.
+        tool_name: The MCP tool that was invoked.
+        would_be_action: The verdict Enforce mode would have applied:
+            "deny" or "require_approval".
+        reasons: Human-readable reasons for the verdict (audit-friendly).
+        correlation_id: Correlation id of the observed invocation, if any.
+        identity_context: Caller identity context (tenant/subject), if any.
+        schema_version: Event schema version.
+    """
+
+    mcp_server_id: str
+    tool_name: str
+    would_be_action: str
+    reasons: list[str]
+    correlation_id: str | None = None
+    identity_context: dict[str, Any] | None = None
+    schema_version: int = 1
+
+    def __init__(
+        self,
+        mcp_server_id: str | None = None,
+        tool_name: str = "",
+        would_be_action: str = "",
+        reasons: list[str] | None = None,
+        correlation_id: str | None = None,
+        identity_context: dict[str, Any] | None = None,
+        schema_version: int = 1,
+        **kwargs: object,
+    ):
+        self.mcp_server_id = _resolve_legacy_mcp_server_id(mcp_server_id, kwargs)
+        self.tool_name = tool_name
+        self.would_be_action = would_be_action
+        self.reasons = reasons if reasons is not None else []
+        self.correlation_id = correlation_id
+        self.identity_context = identity_context
+        self.schema_version = schema_version
+        if kwargs:
+            unexpected = ", ".join(sorted(kwargs))
+            raise TypeError(f"Unexpected keyword argument(s): {unexpected}")
+        super().__init__()
+
+    def __post_init__(self):
+        super().__init__()
+
+
+@dataclass(init=False)
 class EgressBlocked(DomainEvent):
     """Published when an outbound connection from a mcp_server is blocked.
 

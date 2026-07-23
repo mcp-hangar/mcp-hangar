@@ -41,6 +41,21 @@ class ToolAction(str, Enum):
     REQUIRE_APPROVAL = "require_approval"
 
 
+class PolicyMode(str, Enum):
+    """How a policy's verdict is applied (ADR-013).
+
+    - ``ENFORCE`` blocks: a DENY/REQUIRE_APPROVAL verdict stops the call.
+    - ``AUDIT`` observes: the same verdict is recorded but the call proceeds.
+
+    ``ENFORCE`` is the safe default. A programmatically-built policy with no
+    mode, or a mode-less/unrecognized wire payload from an older operator,
+    resolves to ``ENFORCE`` -- it keeps blocking (fail-closed).
+    """
+
+    AUDIT = "Audit"
+    ENFORCE = "Enforce"
+
+
 # --- Secret-pattern groups -------------------------------------------------
 #
 # The policy names *groups* (e.g. "aws-keys"); each maps to one or more compiled
@@ -113,6 +128,7 @@ class L7Policy:
     tools: ToolRules = field(default_factory=ToolRules)
     arguments: ArgumentRules = field(default_factory=ArgumentRules)
     default_action: ToolAction = ToolAction.DENY
+    mode: PolicyMode = PolicyMode.ENFORCE
 
     @classmethod
     def from_dict(cls, data: dict[str, Any]) -> L7Policy:
@@ -123,10 +139,14 @@ class L7Policy:
             {
               "tools": {"allow": [...], "deny": [...], "requireApproval": [...]},
               "arguments": {"secretPatterns": [...], "maxPayloadBytes": 262144},
-              "defaultAction": "Deny"
+              "defaultAction": "Deny",
+              "mode": "Audit"
             }
 
         Missing sections default to empty; ``defaultAction`` defaults to Deny.
+        ``mode`` accepts ``"Audit"``/``"Enforce"`` (case-sensitive, as sent);
+        when absent or unrecognized it defaults to ``Enforce`` -- a mode-less
+        payload from an older operator keeps blocking (fail-closed).
         Raises ValueError on a malformed payload.
         """
         if not isinstance(data, dict):
@@ -155,10 +175,15 @@ class L7Policy:
         if max_bytes is not None and (not isinstance(max_bytes, int) or isinstance(max_bytes, bool) or max_bytes < 0):
             raise ValueError("arguments.maxPayloadBytes must be a non-negative integer")
 
+        # Mode is parsed exactly as sent ("Audit"/"Enforce"); anything absent or
+        # unrecognized fails closed to Enforce (keeps blocking).
+        mode = PolicyMode.AUDIT if data.get("mode") == "Audit" else PolicyMode.ENFORCE
+
         return cls(
             tools=ToolRules(allow=_globs("allow"), deny=_globs("deny"), require_approval=_globs("requireApproval")),
             arguments=ArgumentRules(secret_patterns=tuple(secret_patterns), max_payload_bytes=max_bytes),
             default_action=ToolAction(default_raw),
+            mode=mode,
         )
 
 
