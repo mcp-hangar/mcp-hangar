@@ -122,7 +122,12 @@ def _authorize_calls(
     except Exception:  # noqa: BLE001 -- no app context (stdio/local) -> auth off, allow
         auth_components = None
     authz = getattr(auth_components, "authz_middleware", None)
-    if authz is None:
+    # Auth off -> allow (backward compatible). "Off" means either no authz
+    # middleware at all (stdio/local) OR an auth_components that is present but
+    # explicitly disabled (NullAuthComponents ships a real AuthorizationMiddleware
+    # with enabled=False; without the enabled check every invoke on an auth-off
+    # HTTP server is denied as anonymous, so --unsafe-no-auth cannot invoke tools).
+    if authz is None or not getattr(auth_components, "enabled", False):
         return {}
 
     # Auth IS configured: resolve the authenticated principal bridged onto the

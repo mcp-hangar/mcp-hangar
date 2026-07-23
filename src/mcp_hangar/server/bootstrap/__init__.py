@@ -288,6 +288,21 @@ def bootstrap(
     mcp_server = FastMCP("mcp-registry")
     register_all_tools(mcp_server)
 
+    # Wire the ADR-014 governed task-relay serving surface. This HTTP-serve path
+    # builds FastMCP directly (not via MCPServerFactory), so without this call
+    # ctx.governed_task_store stays None and every upstream task handle is
+    # rejected TaskRelayNotSupported regardless of the kill-switch. Kill-switch
+    # defaults True (activated per ADR-014 D5/D6); set relay_tasks_enabled: false
+    # in config to restore the dark relay-only stance.
+    from ...fastmcp_server.task_relay_wiring import (
+        advertise_tasks_capability,
+        enable_governed_task_relay,
+    )
+
+    relay_tasks_enabled = bool(full_config.get("relay_tasks_enabled", True))
+    enable_governed_task_relay(mcp_server, relay_tasks_enabled=relay_tasks_enabled)
+    advertise_tasks_capability(mcp_server, relay_tasks_enabled=relay_tasks_enabled)
+
     # Wire log buffers to mcp_servers after configuration populates the shared repository.
     init_log_buffers(runtime.repository.get_all())
 
