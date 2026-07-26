@@ -136,6 +136,39 @@ def current_request_context():
 DEFAULT_NEGOTIATED_VERSION = _t.DEFAULT_NEGOTIATED_VERSION
 LATEST_PROTOCOL_VERSION = _t.LATEST_PROTOCOL_VERSION
 
+
+def _handshake_protocol_versions() -> tuple[str, ...]:
+    """Return the revisions that still negotiate through the ``initialize`` handshake.
+
+    The v2 SDK session manager era-routes on exactly this set: an
+    ``MCP-Protocol-Version`` OUTSIDE it is a modern (stateless) request handled by
+    the 2026-07-28 entry. Read from the SDK so our own front door makes the same
+    legacy/modern call instead of guessing, with a fallback to the known list for
+    v1, which has no such constant (and no modern entry to route to).
+
+    Resolved inside a function because the SDK declares its constant ``Final``:
+    a module-level try/except rebinding the imported name is a Final
+    reassignment, which the type checker rejects.
+    """
+    try:
+        from mcp.server.streamable_http_manager import HANDSHAKE_PROTOCOL_VERSIONS as _SDK_VERSIONS
+    except ImportError:  # SDK v1
+        return ("2024-11-05", "2025-03-26", "2025-06-18", "2025-11-25")
+    return tuple(_SDK_VERSIONS)
+
+
+HANDSHAKE_PROTOCOL_VERSIONS: tuple[str, ...] = _handshake_protocol_versions()
+
+
+def is_modern_protocol_version(version: str | None) -> bool:
+    """Return whether *version* names a post-handshake (stateless-era) revision.
+
+    ``None`` -- the header is absent -- is NOT modern: the spec's default for a
+    request without the header is a handshake-era revision.
+    """
+    return version is not None and version not in HANDSHAKE_PROTOCOL_VERSIONS
+
+
 # Error codes.
 INVALID_PARAMS = _t.INVALID_PARAMS
 METHOD_NOT_FOUND = _t.METHOD_NOT_FOUND
@@ -188,6 +221,8 @@ __all__ = [
     "HAS_NATIVE_TASKS",
     "HAS_LIST_TASKS",
     "HAS_TASKS_UPDATE",
+    "HANDSHAKE_PROTOCOL_VERSIONS",
+    "is_modern_protocol_version",
     "lowlevel_server",
     "new_mcp_server",
     "make_mcp_error",

@@ -190,6 +190,16 @@ class ServerLifecycle:
         # Get the MCP app from FastMCP
         mcp_app = mcp_server.streamable_http_app()
 
+        # SEP-2243: wrap the stateless front door so a legacy-era POST carrying
+        # Mcp-Method / Mcp-Name is checked against its body instead of trusted
+        # blindly. The 2026-07-28 era needs nothing here — the SDK era-routes on
+        # MCP-Protocol-Version and enforces header/body agreement itself — but
+        # the legacy era does, and this path served neither before (#560). Shared
+        # with the factory path via ``modern_surface``.
+        from ..fastmcp_server.modern_surface import wrap_front_door_routing
+
+        mcp_app = wrap_front_door_routing(mcp_app)
+
         # Create auxiliary routes for /metrics, /health, /ready
         import time
 

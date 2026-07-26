@@ -32,6 +32,7 @@ from mcp_hangar import __version__
 from mcp_hangar.context import get_identity_context
 from mcp_hangar.logging_config import get_logger
 
+from .config import HANGAR_SERVER_NAME
 from .flat_tool_projection import _build_flat_map, _build_mcp_tool_list
 
 logger = get_logger(__name__)
@@ -78,7 +79,7 @@ def server_discover_result(tenant_id: str | None) -> dict[str, Any]:
     return {
         "supportedVersions": list(_SUPPORTED_VERSIONS),
         "capabilities": {"tools": {"listChanged": True}},
-        "serverInfo": {"name": "mcp-hangar", "version": __version__},
+        "serverInfo": {"name": HANGAR_SERVER_NAME, "version": __version__},
         "instructions": (
             "mcp-hangar governs per-tenant access to backend MCP tools. The "
             "`tools` field lists exactly the tools this tenant may call; it "

@@ -26,11 +26,14 @@ from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Any, cast, TYPE_CHECKING
 
-from mcp_hangar._sdk_compat import FastMCP
+from mcp_hangar import __version__
+from mcp_hangar._sdk_compat import FastMCP, new_mcp_server
 
 from ...application.commands.load_handlers import LoadMcpServerHandler, UnloadMcpServerHandler
 from ...application.discovery import DiscoveryOrchestrator
 from ...application.ports.observability import ObservabilityPort
+from ...fastmcp_server.config import HANGAR_SERVER_NAME
+from ...fastmcp_server.modern_surface import register_modern_surface
 from ...infrastructure.persistence.saga_state_store import NullSagaStateStore, SagaStateStore
 from ...gc import BackgroundWorker
 from ...logging_config import get_logger
@@ -167,6 +170,35 @@ def _ensure_data_dir() -> None:
             logger.warning("data_directory_creation_failed", error=str(e))
 
 
+def build_serving_mcp_server() -> FastMCP:
+    """Build the MCP server the CLI serves: control-plane tools + modern surface.
+
+    Extracted from :func:`bootstrap` so the protocol surface the shipped
+    ``mcp-hangar serve`` exposes can be constructed — and probed — without
+    standing up the whole application (bootstrap registers process-global command
+    handlers, so tests cannot call it). The absence of that seam is why #560 went
+    unnoticed: the modern surface was unit-tested through ``MCPServerFactory``,
+    which has no production call site, while the served server quietly lacked it.
+
+    ``name``/``version`` are the INBOUND ``serverInfo`` reported to our own
+    clients, and are shared with the factory path so ``initialize`` and
+    ``server/discover`` agree on one identity (#560). ``version`` must be passed
+    explicitly: left unset the SDK reports ITS OWN version as the server's, so
+    ``initialize`` advertised the mcp SDK's version while ``server/discover``
+    reported Hangar's.
+
+    Does NOT wire the ADR-014 task relay: that publishes onto the
+    ApplicationContext and so belongs to :func:`bootstrap`, after the context
+    exists.
+    """
+    mcp_server = new_mcp_server(HANGAR_SERVER_NAME, version=__version__)
+    register_all_tools(mcp_server)
+    # SEP-2575 `server/discover`. Without this the shipped `serve --http` surface
+    # 404s the modern/stateless discovery entrypoint the 2.x line depends on.
+    register_modern_surface(mcp_server)
+    return mcp_server
+
+
 def bootstrap(
     config_path: str | None = None,
     config_dict: dict[str, Any] | None = None,
@@ -284,9 +316,8 @@ def bootstrap(
     # Initialize hot-loading components
     load_handler, unload_handler = init_hot_loading(runtime, full_config)
 
-    # Create MCP server and register tools
-    mcp_server = FastMCP("mcp-registry")
-    register_all_tools(mcp_server)
+    # Create the MCP server the CLI serves (tools + modern protocol surface).
+    mcp_server = build_serving_mcp_server()
 
     # Wire the ADR-014 governed task-relay serving surface. This HTTP-serve path
     # builds FastMCP directly (not via MCPServerFactory), so without this call
@@ -408,6 +439,7 @@ __all__ = [
     "ApplicationContext",
     "ServerComponents",
     "bootstrap",
+    "build_serving_mcp_server",
     "load_components",
     "GC_WORKER_INTERVAL_SECONDS",
     "HEALTH_CHECK_INTERVAL_SECONDS",

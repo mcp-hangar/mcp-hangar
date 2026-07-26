@@ -317,6 +317,7 @@ class TestBootstrap:
         mock_init_retry = MagicMock()
         mock_fastmcp = MagicMock()
         mock_reg_tools = MagicMock()
+        mock_reg_modern = MagicMock()
         mock_create_workers = MagicMock(return_value=[])
         mock_runtime.repository.keys.return_value = []
         mock_init_event_store = MagicMock()
@@ -338,8 +339,9 @@ class TestBootstrap:
             patch("mcp_hangar.server.bootstrap.init_retry_config", mock_init_retry),
             patch("mcp_hangar.server.bootstrap.init_event_store", mock_init_event_store),
             patch("mcp_hangar.server.bootstrap.init_hot_loading", mock_init_hot_loading),
-            patch("mcp_hangar.server.bootstrap.FastMCP", mock_fastmcp),
+            patch("mcp_hangar.server.bootstrap.new_mcp_server", mock_fastmcp),
             patch("mcp_hangar.server.bootstrap.register_all_tools", mock_reg_tools),
+            patch("mcp_hangar.server.bootstrap.register_modern_surface", mock_reg_modern),
             patch("mcp_hangar.server.bootstrap.create_background_workers", mock_create_workers),
             patch("mcp_hangar.server.bootstrap.GROUPS", {}),
             patch("mcp_hangar.server.bootstrap.parse_auth_config", mock_parse_auth),
@@ -362,6 +364,7 @@ class TestBootstrap:
             "init_retry": mock_init_retry,
             "fastmcp": mock_fastmcp,
             "reg_tools": mock_reg_tools,
+            "register_modern_surface": mock_reg_modern,
             "create_workers": mock_create_workers,
             "get_context": mock_get_context,
         }
@@ -410,10 +413,28 @@ class TestBootstrap:
         assert mock_dependencies["get_context"].return_value.discovery_orchestrator is orchestrator
 
     def test_bootstrap_creates_mcp_server(self, mock_dependencies):
-        """Bootstrap should create FastMCP server."""
+        """Bootstrap should create the MCP server under the shared inbound identity."""
+        from mcp_hangar import __version__
+        from mcp_hangar.fastmcp_server.config import HANGAR_SERVER_NAME
+
         bootstrap()
 
-        mock_dependencies["fastmcp"].assert_called_once_with("mcp-registry")
+        # One identity across surfaces: the factory path and this path must report
+        # the same serverInfo (#560), so assert the constants, not literals. The
+        # version is explicit because the SDK otherwise reports its own.
+        mock_dependencies["fastmcp"].assert_called_once_with(HANGAR_SERVER_NAME, version=__version__)
+
+    def test_bootstrap_registers_the_modern_surface(self, mock_dependencies):
+        """Bootstrap must register SEP-2575 ``server/discover`` on the served server.
+
+        The shipped ``serve --http`` surface 404'd this route for the whole 2.x
+        pre-release because the wiring lived only in the never-called
+        MCPServerFactory (#560). Pinned on the served server instance, so dropping
+        the call fails here rather than in a live compat run.
+        """
+        bootstrap()
+
+        mock_dependencies["register_modern_surface"].assert_called_once_with(mock_dependencies["fastmcp"].return_value)
 
     def test_bootstrap_registers_tools(self, mock_dependencies):
         """Bootstrap should register all MCP tools."""
