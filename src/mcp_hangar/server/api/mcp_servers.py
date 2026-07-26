@@ -34,11 +34,31 @@ from .serializers import HangarJSONResponse
 
 
 def _check_permission(request: Request, resource_type: str, action: str) -> None:
+    """Authorize a REST call, or allow it outright when auth is disabled.
+
+    Auth off must mean off. ``NullAuthComponents`` reports ``enabled=False`` but
+    still ships a real ``authz_middleware``, so testing only ``is None`` left the
+    guard armed with nobody able to satisfy it: the API router deliberately does
+    not mount authentication when auth is disabled, so no principal is ever
+    attached and every REST call -- read and write -- answered 401
+    ``MissingCredentialsError``. There is no credential a caller could present to
+    get past it; auth is off, so there is no issuer and no key store to mint one.
+
+    That silently disarmed the enforcement plane: the operator delivers compiled
+    L7 egress policies over this API, so on an auth-off gateway the CRD would
+    reconcile, report ``Compiled``, and enforce nothing. Failing closed on the API
+    meant failing OPEN on enforcement (#600).
+
+    Same fix shape as #590, which corrected the identical mistake on the
+    tool-invoke path. Auth-off exposure stays bounded by the server refusing to
+    bind a non-loopback interface without auth unless ``--unsafe-no-auth`` is
+    passed explicitly.
+    """
     context = get_context()
     auth_components = getattr(context, "auth_components", None)
     authz_middleware = getattr(auth_components, "authz_middleware", None)
 
-    if authz_middleware is None:
+    if authz_middleware is None or not getattr(auth_components, "enabled", False):
         return
 
     auth_context = getattr(request.state, "auth", None)

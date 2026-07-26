@@ -339,15 +339,28 @@ def api_client_with_auth():
 
     authz = Mock()
     authz.authorize.side_effect = _authorize
+
+    # Two stubs on purpose, because `enabled` answers two different questions
+    # here. The ROUTER stub says enabled=False so `create_api_router` does not
+    # mount a Mock authn middleware -- this harness injects the auth context by
+    # hand instead. The CONTEXT stub, which is what `_check_permission` reads,
+    # says enabled=True because these tests model a deployment WITH auth on.
+    # Conflating the two used to be harmless only because the guard ignored
+    # `enabled` entirely and enforced whenever an authz middleware existed --
+    # which is exactly the bug that locked auth-off deployments out of their own
+    # REST API (#600).
+    router_auth_components = Mock()
+    router_auth_components.enabled = False
+
     auth_components = Mock()
-    auth_components.enabled = False  # authn middleware off (we inject auth context manually)
+    auth_components.enabled = True
     auth_components.authz_middleware = authz
     ctx.auth_components = auth_components
 
     with patch("mcp_hangar.server.api.middleware.get_context", return_value=ctx):
         with patch("mcp_hangar.server.api.admin_tools.get_context", return_value=ctx):
             with patch("mcp_hangar.server.api.mcp_servers.get_context", return_value=ctx):
-                app = create_api_router(auth_components=auth_components)
+                app = create_api_router(auth_components=router_auth_components)
                 client = TestClient(app, raise_server_exceptions=False)
                 yield client, event_bus
 
