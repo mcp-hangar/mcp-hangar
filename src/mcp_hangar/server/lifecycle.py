@@ -31,6 +31,54 @@ from .state import get_discovery_orchestrator, get_runtime_mcp_servers
 logger = get_logger(__name__)
 
 
+def build_readiness_report(repository: Any) -> tuple[dict[str, Any], int]:
+    """Return the ``/health/ready`` body and HTTP status.
+
+    Readiness answers one question: **can this gateway accept and route a call?**
+    It deliberately does NOT require a warm backend. Hangar starts backends
+    lazily and shuts them down on ``idle_ttl_s``, so "every backend cold" is the
+    normal steady state of an idle gateway -- and a cold backend starts on the
+    next call. Gating readiness on a warm backend deadlocked Kubernetes
+    deployments: the last backend goes idle -> 503 -> the pod leaves the Service
+    endpoints -> no call can arrive -> nothing ever warms a backend again. The
+    chart wires ``readinessProbe`` to this endpoint, so a pod could sit NotReady
+    indefinitely while the process was perfectly healthy (#599).
+
+    Backend state is still reported in the body for observability, and the
+    always-on health framework already treats backend availability as
+    *degraded*, not unhealthy (``create_mcp_server_health_check`` is
+    ``critical=False``) -- alerting, not the traffic gate, is where it belongs.
+
+    What DOES fail readiness: the event store silently degrading to a
+    non-durable in-memory store while a durable driver was configured. That one
+    is a real "do not send me writes I cannot audit" condition.
+
+    Extracted from the endpoint closure so the decision is unit-testable; the
+    bug lived in a closure nothing could reach.
+    """
+    from ..observability.health import get_event_store_durability_status
+
+    ready_count = sum(1 for p in repository.get_all().values() if p.state.value == "ready")
+    total_count = repository.count()
+
+    durability = get_event_store_durability_status()
+    event_store_ok = durability is None or not durability.degraded
+
+    body: dict[str, Any] = {
+        "status": "healthy" if event_store_ok else "unhealthy",
+        "ready_mcp_servers": ready_count,
+        "total_mcp_servers": total_count,
+    }
+    if not event_store_ok and durability is not None:
+        body["event_store"] = {
+            "status": "unhealthy",
+            "configured_driver": durability.configured_driver,
+            "durable": durability.durable,
+            "detail": durability.detail,
+        }
+    return body, (200 if event_store_ok else 503)
+
+
 def _is_loopback_host(host: str) -> bool:
     """Return whether a bind host resolves to loopback-only."""
     normalized_host = host.strip().lower()
@@ -217,36 +265,10 @@ class ServerLifecycle:
             """Liveness check - is the process alive?"""
             return JSONResponse({"status": "healthy"})
 
-        from ..observability.health import get_event_store_durability_status
-
         def readiness_endpoint(request):
             """Readiness check - can we handle traffic?"""
-            repository = get_runtime().repository
-            ready_count = sum(1 for p in repository.get_all().values() if p.state.value == "ready")
-            total_count = repository.count()
-            is_ready = ready_count > 0 or total_count == 0
-
-            # Fail readiness when the event store silently degraded to a
-            # non-durable in-memory store while a durable driver was configured.
-            durability = get_event_store_durability_status()
-            event_store_ok = durability is None or not durability.degraded
-
-            body: dict[str, Any] = {
-                "status": "healthy" if (is_ready and event_store_ok) else "unhealthy",
-                "ready_mcp_servers": ready_count,
-                "total_mcp_servers": total_count,
-            }
-            if not event_store_ok and durability is not None:
-                body["event_store"] = {
-                    "status": "unhealthy",
-                    "configured_driver": durability.configured_driver,
-                    "durable": durability.durable,
-                    "detail": durability.detail,
-                }
-            return JSONResponse(
-                body,
-                status_code=200 if (is_ready and event_store_ok) else 503,
-            )
+            body, status_code = build_readiness_report(get_runtime().repository)
+            return JSONResponse(body, status_code=status_code)
 
         def startup_endpoint(request):
             """Startup check - has initialization completed?"""
@@ -618,5 +640,6 @@ def run_server(cli_config: CLIConfig) -> None:
 
 __all__ = [
     "ServerLifecycle",
+    "build_readiness_report",
     "run_server",
 ]
