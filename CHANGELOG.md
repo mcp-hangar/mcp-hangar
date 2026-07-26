@@ -12,6 +12,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 * **core:** serve the SEP-2575 `server/discover` entry point over `serve --http` — it 404'd on the shipped CLI because the wiring lived only in the never-called `MCPServerFactory` ([#560](https://github.com/mcp-hangar/mcp-hangar/issues/560))
 * **core:** report one `serverInfo` identity to clients — `initialize` announced `mcp-registry` at the mcp SDK's version while `server/discover` announced `mcp-hangar` at Hangar's ([#560](https://github.com/mcp-hangar/mcp-hangar/issues/560))
 * **core:** keep the SEP-2243 front-door wrap off 2026-07-28 requests — buffering and replaying a modern-era body makes the SDK read a disconnect and cancel, answering 500 ([#560](https://github.com/mcp-hangar/mcp-hangar/issues/560))
+* **core:** let a task owner reach their own task when auth is enabled — the identity bridge read only the SDK v1 `ctx.request_context.request`, so on v2 every `tasks/*` call over `serve --http` was unattributed and the governed relay was dead in the deployment mode that matters
 
 ## [1.6.1](https://github.com/mcp-hangar/mcp-hangar/compare/v1.6.0...v1.6.1) (2026-07-23)
 
