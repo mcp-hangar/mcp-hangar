@@ -100,14 +100,25 @@ def _principal(user_id: str, tenant_id: str) -> Any:
     )
 
 
+def _request_with(principal: Any) -> Any:
+    return SimpleNamespace(state=SimpleNamespace(auth=SimpleNamespace(principal=principal)))
+
+
 def _ctx(user_id: str | None = None, tenant_id: str | None = None) -> Any:
-    """A fake FastMCP ctx exposing ``request_context.request.state.auth.principal``."""
+    """A fake ctx in the SDK **v2** shape: the request hangs off ``ctx.request``.
+
+    This is what ``ServerRequestContext`` actually looks like on ``mcp>=2``; there
+    is no ``request_context`` attribute. Pinning the v1 shape here is what let the
+    bridge silently no-op under auth in production while these tests stayed green.
+    """
     principal = _principal(user_id, tenant_id) if user_id else None
-    return SimpleNamespace(
-        request_context=SimpleNamespace(
-            request=SimpleNamespace(state=SimpleNamespace(auth=SimpleNamespace(principal=principal)))
-        )
-    )
+    return SimpleNamespace(request=_request_with(principal))
+
+
+def _ctx_v1(user_id: str | None = None, tenant_id: str | None = None) -> Any:
+    """The SDK **v1** shape: ``ctx.request_context.request``. Still supported."""
+    principal = _principal(user_id, tenant_id) if user_id else None
+    return SimpleNamespace(request_context=SimpleNamespace(request=_request_with(principal)))
 
 
 def _upstream_task(task_id: str, *, status: str = "working", **extra: Any) -> dict[str, Any]:
@@ -430,4 +441,46 @@ def test_absent_principal_is_unattributed_and_cannot_reach_attributed_task(
 
     with pytest.raises(McpError):
         asyncio.run(handlers["tasks/get"][1](_ctx(), SimpleNamespace(task_id="T1")))
+    assert router.calls == []
+
+
+def test_owner_reaches_their_own_task_via_the_v2_request_shape(store: GovernedTaskStore) -> None:
+    """The owner must reach their own task when the ctx is SDK-v2 shaped.
+
+    Regression: the bridge read only ``ctx.request_context.request`` (v1). On v2
+    that attribute does not exist, so every ``tasks/*`` call on the shipped
+    ``serve --http`` path was unattributed -- the serve path binds the principal
+    on ``request.state.auth`` and not on ``identity_context_var`` -- and an owner
+    got "Task not found" for their own task. Fail-closed, but the relay was dead
+    under auth.
+    """
+    _register(store, "S1", "T1", "tenant-a", "alice")
+    router = _FakeRouter({"tasks/get": {"result": _upstream_task("T1", status="completed")}})
+    handlers = _handlers(store, router)
+
+    result = asyncio.run(handlers["tasks/get"][1](_ctx("alice", "tenant-a"), SimpleNamespace(task_id="T1")))
+
+    assert result.task_id == "T1"
+    assert router.calls, "the relay never reached the upstream"
+
+
+def test_owner_reaches_their_own_task_via_the_v1_request_shape(store: GovernedTaskStore) -> None:
+    """The v1 ``ctx.request_context.request`` spelling keeps working."""
+    _register(store, "S1", "T1", "tenant-a", "alice")
+    router = _FakeRouter({"tasks/get": {"result": _upstream_task("T1", status="completed")}})
+    handlers = _handlers(store, router)
+
+    result = asyncio.run(handlers["tasks/get"][1](_ctx_v1("alice", "tenant-a"), SimpleNamespace(task_id="T1")))
+
+    assert result.task_id == "T1"
+
+
+def test_a_foreign_tenant_still_cannot_reach_the_task_through_the_v2_shape(store: GovernedTaskStore) -> None:
+    """Bridging identity must not widen access: another tenant is still denied."""
+    _register(store, "S1", "T1", "tenant-a", "alice")
+    router = _FakeRouter({"tasks/get": {"result": _upstream_task("T1")}})
+    handlers = _handlers(store, router)
+
+    with pytest.raises(McpError):
+        asyncio.run(handlers["tasks/get"][1](_ctx("bob", "tenant-b"), SimpleNamespace(task_id="T1")))
     assert router.calls == []

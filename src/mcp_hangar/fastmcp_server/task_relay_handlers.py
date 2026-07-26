@@ -195,11 +195,21 @@ def register_task_relay_handlers(
         identity the ASGI wrapper legitimately propagated (stdio/local). Fully
         fault-barriered: any failure leaves identity untouched (unattributed →
         fail-closed downstream).
+
+        The request lives at ``ctx.request`` on SDK v2 and at
+        ``ctx.request_context.request`` on v1. Reading only the v1 spelling made
+        this a silent no-op on v2: the shipped ``serve --http`` path binds the
+        principal on ``request.state.auth`` and NOT on ``identity_context_var``
+        (unlike the factory's ASGI wrapper), so with auth enabled every
+        ``tasks/*`` call was unattributed and an owner could not reach their own
+        task -- fail-closed, but the relay was dead in the deployment mode that
+        matters.
         """
         if get_identity_context() is not None:
             return None
         try:
-            state = getattr(getattr(getattr(ctx, "request_context", None), "request", None), "state", None)
+            request = getattr(ctx, "request", None) or getattr(getattr(ctx, "request_context", None), "request", None)
+            state = getattr(request, "state", None)
             principal = getattr(getattr(state, "auth", None), "principal", None)
             if principal is not None:
                 return identity_context_var.set(_principal_to_identity_context(principal))
