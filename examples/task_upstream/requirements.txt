@@ -1,0 +1,6 @@
+# SDK v2 pre-release, pinned EXACTLY. The Tasks surface is still moving inside
+# the v2 line (SEP-2663 removes tasks/list and adds tasks/update), and this
+# server hand-rolls against b2 internals -- a floating pin would break it
+# silently. Bump deliberately, then re-run smoke_upstream.py.
+# Pulls mcp-types==2.0.0b2, starlette and uvicorn transitively.
+mcp==2.0.0b2

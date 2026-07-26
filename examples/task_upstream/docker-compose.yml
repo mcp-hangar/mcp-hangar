@@ -1,0 +1,46 @@
+# Hangar 2.x + a task-emitting upstream, wired for the governed task relay.
+#
+#   docker compose -f examples/task_upstream/docker-compose.yml up --build
+#   python examples/task_upstream/drive_relay.py
+#
+# HANGAR_IMAGE selects what is under test -- default is the current 2.x
+# pre-release; point it at an rc/GA tag to smoke a release candidate:
+#   HANGAR_IMAGE=ghcr.io/mcp-hangar/mcp-hangar:2.0.0-rc.1 docker compose ... up
+services:
+  task-upstream:
+    build:
+      context: .
+    container_name: task-upstream
+    ports:
+      # Exposed so smoke_upstream.py can hit the upstream directly, bypassing
+      # Hangar, to tell an upstream regression from a relay regression.
+      - "8081:8080"
+    environment:
+      - MCP_HOST=0.0.0.0
+      - MCP_PORT=8080
+      - MCP_HTTP_PATH=/mcp
+      # Seconds a task stays "working" before resolving. Raise it to watch polling.
+      - MCP_TASK_WORK_SECONDS=2.0
+    restart: unless-stopped
+
+  mcp-hangar:
+    image: ${HANGAR_IMAGE:-ghcr.io/mcp-hangar/mcp-hangar:2.0.0a2}
+    container_name: mcp-hangar-task-relay
+    depends_on:
+      - task-upstream
+    ports:
+      - "8080:8080"
+    environment:
+      - MCP_MODE=http
+      - MCP_HTTP_PORT=8080
+      - MCP_LOG_LEVEL=INFO
+      - MCP_JSON_LOGS=true
+    volumes:
+      - ./config.yaml:/etc/mcp-hangar/config.yaml:ro
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:8080/health/live"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+      start_period: 10s
+    restart: unless-stopped
