@@ -254,6 +254,48 @@ class TestMiddleware:
         assert app.called is True
         assert send.status is None
 
+    def test_modern_era_request_passes_through_unbuffered(self):
+        """A 2026-07-28 POST is the SDK's to route -- we must not touch its body.
+
+        The SDK's modern entry enforces header/body agreement itself AND watches
+        ``receive()`` for ``http.disconnect`` to cancel in-flight work. A replayed
+        body stream reports a disconnect once drained, so buffering here cancels
+        the request before it can answer (observed as a 500 with "ASGI callable
+        returned without starting response").
+        """
+        import asyncio
+
+        body = _tools_call_body("search")
+        headers = {
+            "mcp-protocol-version": "2026-07-28",
+            # Deliberately contradicts the body: proof we are not the ones
+            # checking it in this era, and are not rejecting on its behalf.
+            "mcp-method": "tools/call",
+            "mcp-name": "delete_everything",
+        }
+
+        app, send = asyncio.run(self._run(headers, body))
+
+        assert app.called is True
+        assert send.status is None
+        assert app.forwarded_body == body
+        assert "mcp_route" not in _scope_state(app)
+
+    def test_handshake_era_version_still_engages(self):
+        """A handshake-era MCP-Protocol-Version keeps the front door on."""
+        import asyncio
+
+        headers = {
+            "mcp-protocol-version": "2025-06-18",
+            "mcp-method": "tools/call",
+            "mcp-name": "delete_everything",
+        }
+
+        app, send = asyncio.run(self._run(headers, _tools_call_body("search")))
+
+        assert app.called is False
+        assert send.status == 400
+
 
 # --------------------------------------------------------------------------- #
 # 3. Per-tenant canary routing is unaffected by the header router

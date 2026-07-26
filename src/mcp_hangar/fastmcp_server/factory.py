@@ -8,13 +8,14 @@ from __future__ import annotations
 
 from typing import Any, TYPE_CHECKING
 
+from mcp_hangar import __version__
 from mcp_hangar._sdk_compat import FastMCP, lowlevel_server, new_mcp_server
 from starlette.applications import Starlette
 
 from ..logging_config import get_logger
 from .asgi import create_auth_combined_app, create_combined_asgi_app, create_health_routes
-from .config import HangarFunctions, ServerConfig
-from .front_door_routing import FrontDoorRoutingMiddleware
+from .config import HANGAR_SERVER_NAME, HangarFunctions, ServerConfig
+from .modern_surface import register_modern_surface, wrap_front_door_routing
 
 if TYPE_CHECKING:
     from ..domain.services.task_digest_guard import TaskDigestGuard
@@ -110,7 +111,10 @@ class MCPServerFactory:
             return self._mcp
 
         mcp = new_mcp_server(
-            "mcp-hangar",
+            HANGAR_SERVER_NAME,
+            # Explicit: unset, the SDK reports its own version as the server's,
+            # disagreeing with the version server/discover reports (#560).
+            version=__version__,
             host=self._config.host,
             port=self._config.port,
             streamable_http_path=self._config.streamable_http_path,
@@ -163,7 +167,8 @@ class MCPServerFactory:
         # affinity. Pre-SEP-2243 requests without these headers pass through
         # unchanged (content-based routing). Identity, tenant, per-tenant canary
         # routing, and the audit session_id are untouched by this wrapper.
-        mcp_app = FrontDoorRoutingMiddleware(mcp_app, mcp_path=self._config.streamable_http_path)
+        # Shared with the HTTP-serve path (see ``modern_surface``).
+        mcp_app = wrap_front_door_routing(mcp_app, mcp_path=self._config.streamable_http_path)
 
         # Log if auth is configured
         if self._config.auth_enabled and self._auth_components:
@@ -410,10 +415,11 @@ class MCPServerFactory:
         result, in addition to ``tools/list``. Tenant scoping and isolation
         are inherited from the projection read-model — this is a no-op in
         terms of enforcement, purely an alternate read entry point.
-        """
-        from .server_discover import register_server_discover
 
-        register_server_discover(mcp)
+        Delegates to the shared wiring so this path and the HTTP-serve
+        bootstrap path expose the same surface (see ``modern_surface``).
+        """
+        register_modern_surface(mcp)
 
     @staticmethod
     def _maybe_register_flat_tool_handlers(mcp: FastMCP) -> None:

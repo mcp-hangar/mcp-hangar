@@ -200,6 +200,29 @@ class TestServerLifecycle:
         finally:
             del sys.modules["uvicorn"]
 
+    def test_run_http_wraps_the_front_door(self, mock_context):
+        """run_http() must wrap the MCP app in SEP-2243 front-door routing (#560).
+
+        The wrap used to exist only in MCPServerFactory, which nothing calls, so
+        the shipped serve path enforced no header/body agreement for legacy-era
+        POSTs carrying Mcp-Method / Mcp-Name.
+        """
+        mock_uvicorn = MagicMock()
+        sys.modules["uvicorn"] = mock_uvicorn
+
+        try:
+            with (
+                patch("asyncio.run") as mock_asyncio_run,
+                patch("mcp_hangar.fastmcp_server.modern_surface.wrap_front_door_routing") as mock_wrap,
+            ):
+                mock_asyncio_run.side_effect = _close_run_coro
+
+                ServerLifecycle(mock_context).run_http("127.0.0.1", 9000)
+
+            mock_wrap.assert_called_once_with(mock_context.mcp_server.streamable_http_app.return_value)
+        finally:
+            del sys.modules["uvicorn"]
+
     def test_run_http_handles_keyboard_interrupt(self, mock_context):
         """run_http() should handle KeyboardInterrupt gracefully."""
         mock_uvicorn = MagicMock()

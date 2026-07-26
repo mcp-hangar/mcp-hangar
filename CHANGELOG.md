@@ -5,6 +5,14 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [Unreleased]
+
+### Fixed
+
+* **core:** serve the SEP-2575 `server/discover` entry point over `serve --http` — it 404'd on the shipped CLI because the wiring lived only in the never-called `MCPServerFactory` ([#560](https://github.com/mcp-hangar/mcp-hangar/issues/560))
+* **core:** report one `serverInfo` identity to clients — `initialize` announced `mcp-registry` at the mcp SDK's version while `server/discover` announced `mcp-hangar` at Hangar's ([#560](https://github.com/mcp-hangar/mcp-hangar/issues/560))
+* **core:** keep the SEP-2243 front-door wrap off 2026-07-28 requests — buffering and replaying a modern-era body makes the SDK read a disconnect and cancel, answering 500 ([#560](https://github.com/mcp-hangar/mcp-hangar/issues/560))
+
 ## [1.6.1](https://github.com/mcp-hangar/mcp-hangar/compare/v1.6.0...v1.6.1) (2026-07-23)
 
 

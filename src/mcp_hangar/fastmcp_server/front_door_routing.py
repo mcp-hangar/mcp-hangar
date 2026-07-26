@@ -17,6 +17,14 @@ To keep the front door honest, when both a header and the request body carry the
 method/name we require them to agree; a mismatch is rejected. When the headers
 are absent we fall back to content-based routing (no error), preserving
 backward-compatible behavior for pre-SEP-2243 clients.
+
+Era scope: this middleware covers HANDSHAKE-era requests only. A 2026-07-28
+request is routed by the SDK's own modern entry, which enforces header/body
+agreement itself (``HEADER_MISMATCH``) and watches ``receive()`` for
+``http.disconnect`` to cancel in-flight work -- so buffering and replaying its
+body here would both duplicate the check and, because a replayed stream reports a
+disconnect once drained, cancel the request before it can answer. Modern-era
+requests therefore pass through untouched.
 """
 
 from __future__ import annotations
@@ -29,9 +37,12 @@ from typing import Any, Literal
 from starlette.responses import JSONResponse
 from starlette.types import Message, Receive, Scope, Send
 
+from .._sdk_compat import is_modern_protocol_version
+
 #: Lower-cased ASGI header names (ASGI delivers header names lower-cased).
 MCP_METHOD_HEADER = b"mcp-method"
 MCP_NAME_HEADER = b"mcp-name"
+MCP_PROTOCOL_VERSION_HEADER = b"mcp-protocol-version"
 
 #: JSON-RPC params keys that carry the routable target name, in priority order.
 _NAME_PARAM_KEYS = ("name", "uri")
@@ -178,8 +189,19 @@ class FrontDoorRoutingMiddleware:
     def _should_engage(self, scope: Scope) -> bool:
         if scope.get("type") != "http" or scope.get("method", "").upper() != "POST":
             return False
+        if is_modern_protocol_version(_protocol_version(scope.get("headers", []))):
+            # 2026-07-28 era: the SDK owns the check and cancels on disconnect.
+            return False
         path = scope.get("path", "")
         return bool(path == self._mcp_path or path.startswith(self._mcp_path.rstrip("/") + "/"))
+
+
+def _protocol_version(raw_headers: Iterable[tuple[bytes, bytes]]) -> str | None:
+    """Return the ``MCP-Protocol-Version`` header value, or ``None`` if absent."""
+    for key, value in raw_headers:
+        if key.lower() == MCP_PROTOCOL_VERSION_HEADER:
+            return value.decode("latin-1").strip() or None
+    return None
 
 
 def _stash_route(scope: Scope, decision: RouteDecision) -> None:
@@ -242,6 +264,7 @@ async def _reject(scope: Scope, send: Send, message: str, payload: Any) -> None:
 __all__ = [
     "MCP_METHOD_HEADER",
     "MCP_NAME_HEADER",
+    "MCP_PROTOCOL_VERSION_HEADER",
     "RouteDecision",
     "HeaderBodyMismatchError",
     "extract_route_headers",
