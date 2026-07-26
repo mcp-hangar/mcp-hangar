@@ -1,0 +1,62 @@
+# The same upstream on Kubernetes, registered through the operator's MCPServer CRD.
+#
+#   docker build -t localhost/mcp-task-upstream:test examples/task_upstream
+#   kind load docker-image localhost/mcp-task-upstream:test   # or push to your registry
+#   kubectl apply -f examples/task_upstream/k8s.yaml
+#
+# Heads up: if Hangar's namespace carries a default-deny egress NetworkPolicy
+# (the operator generates one), core cannot reach this namespace until you allow
+# it -- the relay will look broken when it is only being firewalled.
+apiVersion: v1
+kind: Namespace
+metadata:
+  name: task-test
+---
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: task-upstream
+  namespace: task-test
+  labels: { app: task-upstream }
+spec:
+  replicas: 1
+  selector:
+    matchLabels: { app: task-upstream }
+  template:
+    metadata:
+      labels: { app: task-upstream }
+    spec:
+      containers:
+        - name: server
+          image: localhost/mcp-task-upstream:test
+          imagePullPolicy: IfNotPresent
+          ports:
+            - containerPort: 8080
+          env:
+            - { name: MCP_HOST, value: "0.0.0.0" }
+            - { name: MCP_PORT, value: "8080" }
+            - { name: MCP_HTTP_PATH, value: "/mcp" }
+          securityContext:
+            allowPrivilegeEscalation: false
+            runAsNonRoot: true
+            capabilities: { drop: ["ALL"] }
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: task-upstream
+  namespace: task-test
+spec:
+  selector: { app: task-upstream }
+  ports:
+    - port: 8080
+      targetPort: 8080
+---
+apiVersion: mcp-hangar.io/v1alpha2
+kind: MCPServer
+metadata:
+  name: task-upstream
+  namespace: task-test
+spec:
+  mode: remote
+  endpoint: "http://task-upstream.task-test.svc.cluster.local:8080/mcp"
