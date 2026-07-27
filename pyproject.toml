@@ -31,7 +31,13 @@ dependencies = [
     "mcp>=1.28.1,<2",
     "structlog>=24.0.0",
     "pydantic>=2.0.0",
-    "httpx>=0.25.0",
+    # Capped below 1.0: httpx 1.0 drops `httpx.AsyncClient`, which this code
+    # uses throughout the proxy path. Same class as the `mcp` cap above (#561)
+    # -- a dependency allowed to walk into a major this code cannot run on.
+    # Not yet breaking on this line (httpx 1.0 is still a dev release and a
+    # plain install will not take it), unlike the v2 line where the documented
+    # `pip install --pre` resolved it and the gateway died at startup.
+    "httpx>=0.25.0,<1",
     "prometheus-client>=0.19.0",
     "pyjwt>=2.8.0",
     "cryptography>=41.0.0",
