@@ -176,3 +176,51 @@ class TestCheckPermissionEnforcement:
 
         # No authz middleware -> guard returns without enforcing (no raise).
         api._check_permission(MagicMock(), resource_type="mcp_servers", action="write")
+
+    def test_check_permission_allows_when_auth_is_disabled(self, monkeypatch):
+        """Auth off must mean off, even though NullAuthComponents ships an authz middleware.
+
+        Regression (#600): the guard tested only ``authz_middleware is None``, so
+        with auth disabled it stayed armed while the API router deliberately
+        mounts no authentication -- no principal is ever attached and every REST
+        call answered 401, with no credential a caller could possibly present.
+        That also disarmed the enforcement plane, since the operator delivers
+        compiled L7 policy over this API.
+        """
+        from unittest.mock import MagicMock
+
+        from mcp_hangar.server.api import mcp_servers as api
+
+        authz = MagicMock()
+        ctx = MagicMock()
+        ctx.auth_components.enabled = False  # NullAuthComponents reports False...
+        ctx.auth_components.authz_middleware = authz  # ...but still ships this.
+        monkeypatch.setattr(api, "get_context", lambda: ctx)
+
+        request = MagicMock()
+        request.state.auth = None  # nothing authenticated the caller, by design
+
+        api._check_permission(request, resource_type="mcp_servers", action="write")
+
+        authz.authorize.assert_not_called()
+
+    def test_check_permission_still_denies_anonymous_when_auth_is_enabled(self, monkeypatch):
+        """The other half of #600: enabling auth must not fail open."""
+        import pytest
+        from unittest.mock import MagicMock
+
+        from mcp_hangar.domain.exceptions import MissingCredentialsError
+        from mcp_hangar.server.api import mcp_servers as api
+
+        authz = MagicMock()
+        ctx = MagicMock()
+        ctx.auth_components.enabled = True
+        ctx.auth_components.authz_middleware = authz
+        monkeypatch.setattr(api, "get_context", lambda: ctx)
+
+        request = MagicMock()
+        request.state.auth = None
+
+        with pytest.raises(MissingCredentialsError):
+            api._check_permission(request, resource_type="mcp_servers", action="write")
+        authz.authorize.assert_not_called()

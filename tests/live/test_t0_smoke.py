@@ -42,3 +42,17 @@ def test_readiness_is_green_with_a_configured_but_cold_backend(live_http_hangar)
     assert body["status"] == "healthy"
     assert body["ready_mcp_servers"] == 0, "the fixture backend should still be cold"
     assert body["total_mcp_servers"] >= 1, "a backend must be configured for this to mean anything"
+
+
+def test_rest_api_is_reachable_when_auth_is_disabled(live_http_hangar):
+    """Claim: with auth off, the REST API answers instead of 401-ing (#600).
+
+    The fixture runs the shipped CLI with no `auth` block. The API router
+    deliberately mounts no authentication in that mode, so a guard that still
+    demands a principal locks the API out with no credential able to open it --
+    and takes the enforcement plane with it, since the operator delivers compiled
+    L7 egress policy over exactly this surface.
+    """
+    resp = httpx.get(f"{live_http_hangar}/api/mcp_servers", follow_redirects=True, timeout=5.0)
+
+    assert resp.status_code == 200, resp.text
