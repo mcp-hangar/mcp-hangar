@@ -16,6 +16,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 * **core:** stop requiring a warm backend for `/health/ready` — lazy start plus `idle_ttl_s` makes "every backend cold" the normal idle state, so readiness flipped to 503, Kubernetes removed the pod from its Service, and no call could arrive to warm a backend again ([#599](https://github.com/mcp-hangar/mcp-hangar/issues/599))
 * **core:** allow the REST API when auth is disabled — the permission guard tested only for an authz middleware, which `NullAuthComponents` still ships, so every REST call answered 401 with no credential able to open it and the operator could not deliver L7 egress policy to an auth-off gateway ([#600](https://github.com/mcp-hangar/mcp-hangar/issues/600))
 * **core:** enforce a tenant's digest pin on the first call after gateway boot — the tool catalogue is published by the backend's start, which happens after the pin gate ran, so the first call to a pinned tool skipped the check entirely ([#601](https://github.com/mcp-hangar/mcp-hangar/issues/601))
+* **core:** report the server's real capabilities from `server/discover` — it returned a hardcoded set, so a stateless client (which has no `initialize` to learn from) was told Tasks, prompts and resources did not exist ([#605](https://github.com/mcp-hangar/mcp-hangar/issues/605))
+* **core:** advertise the caller's actual tool surface from `server/discover` — on an egress gateway it returned the flat backend projection, which is empty until some backend happens to start, instead of the `hangar_*` meta-API the caller would get from `tools/list` ([#606](https://github.com/mcp-hangar/mcp-hangar/issues/606))
 
 ## [1.6.1](https://github.com/mcp-hangar/mcp-hangar/compare/v1.6.0...v1.6.1) (2026-07-23)
 
