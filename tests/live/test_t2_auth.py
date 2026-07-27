@@ -239,6 +239,27 @@ def hangar_rbac(keycloak_base_url: str, tmp_path_factory: pytest.TempPathFactory
     yield from _serve_hangar(workdir, config_text)
 
 
+@pytest.fixture(scope="session")
+def hangar_rbac_admin_group(keycloak_base_url: str, tmp_path_factory: pytest.TempPathFactory) -> Iterator[str]:
+    """Same RBAC gateway, plus a role assignment for ``group:platform-engineering``.
+
+    The pair (this and ``hangar_rbac``) is what makes the group-claim mapping
+    falsifiable: the ONLY difference between the two gateways is one
+    ``role_assignments`` entry keyed on a group, so a user whose outcome flips
+    between them can only have flipped because of their ``groups`` claim.
+    """
+    admin_assignment = (
+        '  role_assignments:\n    - principal: "group:platform-engineering"\n      role: admin\n      scope: global\n'
+    )
+    config_text = _RBAC_CONFIG.format(
+        issuer_a=f"{keycloak_base_url}/realms/mcp-hangar",
+        python=sys.executable,
+        server=str(_MATH_SERVER),
+    ).replace("  role_assignments:\n", admin_assignment, 1)
+    workdir = tmp_path_factory.mktemp("hangar_rbac_admin_group")
+    yield from _serve_hangar(workdir, config_text)
+
+
 def test_rbac_denies_unprivileged_and_allows_privileged(hangar_rbac: str, keycloak_token) -> None:
     """Claim: RBAC denies an unprivileged principal a privileged op and allows a privileged one.
 
@@ -411,3 +432,75 @@ def test_hangar_call_enforces_tool_invoke_viewer_denied_developer_allowed(hangar
         # Reached the backend invoke path (e.g. cold-start), proving the authz
         # gate let the developer through -- not an authorization rejection.
         assert dev_call["result"] == {"result": 3.0} or dev_call["error_type"] not in (None, ""), dev_batch
+
+
+def _attempt_privileged_write(base_url: str, token: str, probe_id: str) -> int:
+    """POST the guarded create as *token*; return the HTTP status."""
+    return httpx.post(
+        f"{base_url}{_PRIVILEGED_CREATE_PATH}",
+        json={"mcp_server_id": probe_id, "mode": "subprocess", "command": [sys.executable, "-c", "pass"]},
+        headers={"Authorization": f"Bearer {token}"},
+        timeout=15.0,
+    ).status_code
+
+
+def test_group_claim_drives_the_mapped_role(hangar_rbac: str, keycloak_token) -> None:
+    """Claim: the role that gates a privileged op comes from the token's `groups` claim.
+
+    Ported from main's single-realm T2 harness onto this multi-issuer one (#546),
+    reusing `keycloak_token(realm, ...)` / `hangar_rbac` rather than
+    reintroducing main's clashing fixture names.
+
+    Three real realm-A users, identical in every respect the gateway can see
+    except group membership, against ONE gateway whose config assigns roles to
+    two of the three groups:
+
+    * `developer` -> `/developers` -> role `developer` (has `mcp_servers:write`) -> allowed
+    * `viewer`    -> `/viewers`    -> role `viewer` (read-only)              -> denied
+    * `admin`     -> `/platform-engineering` -> **no assignment here**       -> denied
+
+    The admin arm is the point: a human admin is denied purely because their
+    group carries no role in this config. That is only explicable by the mapping
+    being group-driven, and it is what makes the companion test below meaningful.
+    """
+    outcomes = {
+        user: _attempt_privileged_write(
+            hangar_rbac,
+            keycloak_token(realm="mcp-hangar", username=user, password=password),
+            f"group-claim-{user}",
+        )
+        for user, password in (("developer", "dev123"), ("viewer", "view123"), ("admin", "admin123"))
+    }
+
+    if outcomes["viewer"] not in (401, 403):
+        pytest.skip(f"authorization not enforced on this build: viewer got {outcomes['viewer']}")
+
+    assert outcomes["developer"] in (200, 201), outcomes
+    assert outcomes["viewer"] in (401, 403), outcomes
+    assert outcomes["admin"] in (401, 403), f"an unassigned group must not inherit a role from the username: {outcomes}"
+
+
+def test_assigning_a_group_a_role_changes_that_group_only(
+    hangar_rbac: str, hangar_rbac_admin_group: str, keycloak_token
+) -> None:
+    """Claim: adding one group->role assignment flips exactly that group's outcome.
+
+    Two gateways differing by a single `role_assignments` entry keyed on
+    `group:platform-engineering`. The `admin` user is denied on the first and
+    allowed on the second, while `viewer` stays denied on both — so the decision
+    tracks the group claim, not the identity, the issuer, or the tenant.
+    """
+    admin = keycloak_token(realm="mcp-hangar", username="admin", password="admin123")
+    viewer = keycloak_token(realm="mcp-hangar", username="viewer", password="view123")
+
+    admin_unassigned = _attempt_privileged_write(hangar_rbac, admin, "grp-admin-unassigned")
+    admin_assigned = _attempt_privileged_write(hangar_rbac_admin_group, admin, "grp-admin-assigned")
+    viewer_assigned = _attempt_privileged_write(hangar_rbac_admin_group, viewer, "grp-viewer-assigned")
+
+    if admin_unassigned not in (401, 403):
+        pytest.skip(f"authorization not enforced on this build: unassigned admin got {admin_unassigned}")
+
+    assert admin_assigned in (200, 201), (
+        f"assigning group:platform-engineering the admin role did not grant it: {admin_assigned}"
+    )
+    assert viewer_assigned in (401, 403), f"assigning another group a role must not widen viewer: {viewer_assigned}"

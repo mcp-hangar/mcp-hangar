@@ -3,14 +3,32 @@
 Validates our response against a JSON Schema derived from the SEP-1763
 Interceptor interface definition at:
 
-    modelcontextprotocol/experimental-ext-interceptors @ 99bc7c9
+    modelcontextprotocol/experimental-ext-interceptors @ 7cf90c9
 
 Re-pinned 5bd7ab4 -> 99bc7c9 for issue #401 (6 commits ahead). The notable
-drift is upstream #25 ("Align capability key to SEP-2133 extensions format"),
-which moved the interceptor capability to the reverse-DNS key
+drift then was upstream #25 ("Align capability key to SEP-2133 extensions
+format"), which moved the interceptor capability to the reverse-DNS key
 ``io.modelcontextprotocol/interceptors``; the SEP prose ``Interceptor``
-interface at 99bc7c9 also carries optional ``failOpen`` / ``priorityHint`` /
-``compat`` / ``configSchema`` fields, reflected in INTERCEPTOR_SCHEMA_V2 below.
+interface also carries optional ``failOpen`` / ``priorityHint`` / ``compat`` /
+``configSchema`` fields, reflected in INTERCEPTOR_SCHEMA_V2 below.
+
+Re-pinned 99bc7c9 -> 7cf90c9 for issue #548, after reviewing both intervening
+commits. **The schema below is unchanged, deliberately** -- the pin moves to
+record what was reviewed, not because anything drifted:
+
+* ``eebd2ac`` "Introduce InterceptorOverrides in the chain execution model"
+  touches ``docs/sep.md`` only, and describes an INVOKER-side concept: the
+  invoker supplies ``overrides`` per chain entry (``failOpen`` / ``priorityHint``
+  / ``mode`` / ``timeoutMs`` / hook narrowing) on top of the server's declared
+  defaults. The server-declared shape that ``interceptors/list`` advertises --
+  what this schema mirrors -- is untouched. Its one enum change,
+  ``mode?: "audit"`` widening to ``"active" | "audit"``, was already allowed
+  here; Hangar emits ``"active"``.
+* ``7cf90c9`` is C# SDK sources only.
+
+Hangar does not implement invoker-side ``InterceptorOverrides``. That is a
+feature gap against current upstream, not a schema drift, and is out of scope
+for a pin review.
 
 The upstream repo does not publish a machine-readable JSON Schema, so we
 maintain a local schema that mirrors the spec. When bumping the pinned
@@ -191,8 +209,8 @@ class TestInterceptorsListSchemaV2:
         with pytest.raises(jsonschema.ValidationError):
             jsonschema.validate(bad, INTERCEPTOR_SCHEMA_V2)
 
-    def test_v2_schema_accepts_99bc7c9_optional_fields(self):
-        # Optional fields added to the SEP Interceptor interface at 99bc7c9.
+    def test_v2_schema_accepts_the_optional_interface_fields(self):
+        # Optional fields on the SEP Interceptor interface as of the pinned SHA.
         entry = {
             "interceptors": [
                 {
@@ -208,3 +226,32 @@ class TestInterceptorsListSchemaV2:
             "nextCursor": "opaque",
         }
         jsonschema.validate(entry, INTERCEPTOR_SCHEMA_V2)
+
+
+class TestPinnedInterfaceConclusions:
+    """Pins what the #548 pin review concluded, so it need not be redone by hand."""
+
+    def test_mode_accepts_both_values_the_sep_defines(self):
+        """`eebd2ac` widened `mode?: "audit"` to `"active" | "audit"`.
+
+        Already allowed here before the bump, and Hangar emits "active" -- this
+        asserts the conclusion rather than leaving it in a commit message.
+        """
+        for mode in ("active", "audit"):
+            entry = {
+                "interceptors": [
+                    {
+                        "name": "content-filter",
+                        "type": "mutation",
+                        "hooks": [{"events": ["tools/call"], "phase": "request"}],
+                        "mode": mode,
+                    }
+                ]
+            }
+            jsonschema.validate(entry, INTERCEPTOR_SCHEMA_V2)
+
+    def test_the_emitted_mode_is_one_the_sep_defines(self):
+        """Guards the pair above against drifting apart from what we actually send."""
+        for interceptor in interceptors_list_response_v2()["interceptors"]:
+            if "mode" in interceptor:
+                assert interceptor["mode"] in ("active", "audit"), interceptor
