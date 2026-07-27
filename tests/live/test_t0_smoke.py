@@ -56,3 +56,63 @@ def test_rest_api_is_reachable_when_auth_is_disabled(live_http_hangar):
     resp = httpx.get(f"{live_http_hangar}/api/mcp_servers", follow_redirects=True, timeout=5.0)
 
     assert resp.status_code == 200, resp.text
+
+
+def test_stdio_stdout_carries_only_jsonrpc(tmp_path):
+    """Claim: on stdio, stdout carries JSON-RPC and nothing else (#563).
+
+    Black-box against the shipped CLI, because that is the only place the bug
+    lived: a log emitted while modules were still importing — before
+    `setup_logging()` redirects to stderr — landed on stdout, and structlog's
+    default factory writes there. One such line is enough for a strict client to
+    fail parsing and drop the session, which is the Claude Desktop / Cursor path.
+    """
+    import json
+    import shutil
+    import subprocess
+    import time
+
+    binary = shutil.which("mcp-hangar")
+    if binary is None:
+        pytest.skip("`mcp-hangar` not on PATH (run under `uv run`)")
+
+    config = tmp_path / "stdio.yaml"
+    config.write_text("logging:\n  level: DEBUG\nmcp_servers: {}\n")
+
+    proc = subprocess.Popen(
+        [binary, "serve", "--config", str(config)],
+        stdin=subprocess.PIPE,
+        stdout=subprocess.PIPE,
+        stderr=subprocess.PIPE,
+        text=True,
+    )
+    try:
+        request = {
+            "jsonrpc": "2.0",
+            "id": 1,
+            "method": "initialize",
+            "params": {
+                "protocolVersion": "2025-11-25",
+                "capabilities": {},
+                "clientInfo": {"name": "stdio-probe", "version": "0"},
+            },
+        }
+        proc.stdin.write(json.dumps(request) + "\n")
+        proc.stdin.flush()
+        time.sleep(5)
+    finally:
+        proc.terminate()
+        stdout, stderr = proc.communicate(timeout=15)
+
+    lines = [line for line in stdout.splitlines() if line.strip()]
+    polluted = []
+    for line in lines:
+        try:
+            json.loads(line)
+        except ValueError:
+            polluted.append(line)
+
+    assert not polluted, f"non-JSON-RPC lines on stdout: {polluted[:3]}"
+    assert lines, "the server answered nothing on stdout"
+    # DEBUG level on purpose: the logs must still be produced, just elsewhere.
+    assert stderr.strip(), "logging vanished entirely instead of moving to stderr"
