@@ -5,6 +5,13 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [1.6.2](https://github.com/mcp-hangar/mcp-hangar/compare/v1.6.1...v1.6.2) (2026-07-27)
+
+
+### Fixed
+
+* **core:** cap the mcp SDK pin at the v1 line ([#610](https://github.com/mcp-hangar/mcp-hangar/issues/610)) ([b862297](https://github.com/mcp-hangar/mcp-hangar/commit/b8622972e8c695b80535fa463bac0fa2fb3bd2a6)), closes [#561](https://github.com/mcp-hangar/mcp-hangar/issues/561)
+
 ## [Unreleased]
 
 ### Fixed
