@@ -18,6 +18,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 * **core:** enforce a tenant's digest pin on the first call after gateway boot — the tool catalogue is published by the backend's start, which happens after the pin gate ran, so the first call to a pinned tool skipped the check entirely ([#601](https://github.com/mcp-hangar/mcp-hangar/issues/601))
 * **core:** report the server's real capabilities from `server/discover` — it returned a hardcoded set, so a stateless client (which has no `initialize` to learn from) was told Tasks, prompts and resources did not exist ([#605](https://github.com/mcp-hangar/mcp-hangar/issues/605))
 * **core:** advertise the caller's actual tool surface from `server/discover` — on an egress gateway it returned the flat backend projection, which is empty until some backend happens to start, instead of the `hangar_*` meta-API the caller would get from `tools/list` ([#606](https://github.com/mcp-hangar/mcp-hangar/issues/606))
+* **core:** keep stdout clean on the stdio transport — structlog's default factory prints to stdout, so a log emitted before `setup_logging()` (a module-import-time one, for instance) corrupted the JSON-RPC stream and dropped the client's session ([#563](https://github.com/mcp-hangar/mcp-hangar/issues/563))
 
 ## [1.6.1](https://github.com/mcp-hangar/mcp-hangar/compare/v1.6.0...v1.6.1) (2026-07-23)
 
