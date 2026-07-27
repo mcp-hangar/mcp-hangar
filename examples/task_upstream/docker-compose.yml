@@ -24,7 +24,7 @@ services:
     restart: unless-stopped
 
   mcp-hangar:
-    image: ${HANGAR_IMAGE:-ghcr.io/mcp-hangar/mcp-hangar:2.0.0a2}
+    image: ${HANGAR_IMAGE:-ghcr.io/mcp-hangar/mcp-hangar:2.0.0rc1}
     container_name: mcp-hangar-task-relay
     depends_on:
       - task-upstream
