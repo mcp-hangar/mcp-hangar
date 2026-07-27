@@ -146,3 +146,90 @@ class TestDigestPinExecutor:
         result = _execute(_TENANT_A)
         assert result.results[0].success is False  # still blocked on server_a
         assert result.results[0].error_type == "ToolDigestMismatchError"
+
+
+class TestDigestPinAtColdStart:
+    """The catalogue only appears when the backend starts (#601).
+
+    `McpServerStarted` populates the projection registry, and the executor's cold
+    start happens AFTER the pin gate's original position. So on a freshly booted
+    gateway the first call to a pinned tool found no projection and skipped the
+    check entirely -- one unvalidated call per boot, per server, and gateway
+    restarts are routine in Kubernetes.
+    """
+
+    @staticmethod
+    def _cold_server_populating_catalogue_on_start(mock_context, registry, tool: ToolSchema):
+        """Wire a cold backend whose start publishes the catalogue, as in production."""
+        from mcp_hangar.application.commands import StartMcpServerCommand
+
+        cold = Mock(
+            state=Mock(value="cold"),
+            has_tools=False,
+            health=Mock(should_degrade=Mock(return_value=False)),
+        )
+        mock_context.get_mcp_server.return_value = cold
+
+        def _send(command):
+            if isinstance(command, StartMcpServerCommand):
+                registry.build_from_tools(_SERVER, [tool])
+                cold.state = Mock(value="ready")
+            return {"ok": True}
+
+        mock_context.command_bus.send.side_effect = _send
+        return cold
+
+    def test_stale_pin_blocks_on_the_first_call_after_boot(self, mock_context):
+        """The regression: the first call must not slip past the pin."""
+        from mcp_hangar.application.commands import InvokeToolCommand
+
+        registry = get_tool_projection_registry()
+        # Pin configured, catalogue NOT built -- exactly a just-booted gateway.
+        registry.set_config_pin(_SERVER, _TOOL, _TENANT_A, ToolDigest(tool_name=_TOOL, sha256=_STALE))
+        self._cold_server_populating_catalogue_on_start(mock_context, registry, _make_tool())
+
+        result = _execute(_TENANT_A)
+
+        assert result.results[0].success is False
+        assert result.results[0].error_type == "ToolDigestMismatchError"
+        invokes = [c for c in mock_context.command_bus.send.call_args_list if isinstance(c.args[0], InvokeToolCommand)]
+        assert invokes == [], "the backend was invoked despite a stale pin"
+
+    def test_matching_pin_still_passes_on_the_first_call_after_boot(self, mock_context):
+        """The other half: closing the hole must not deny honest first calls."""
+        from mcp_hangar.domain.services.digest_computation import compute_tool_digest
+
+        tool = _make_tool()
+        honest = compute_tool_digest(tool.to_dict()).sha256
+
+        registry = get_tool_projection_registry()
+        registry.set_config_pin(_SERVER, _TOOL, _TENANT_A, ToolDigest(tool_name=_TOOL, sha256=honest))
+        self._cold_server_populating_catalogue_on_start(mock_context, registry, tool)
+
+        result = _execute(_TENANT_A)
+
+        assert result.results[0].success is True, result.results[0].error
+        assert _mismatch_events(mock_context) == []
+
+    def test_a_pinned_tool_that_never_appears_is_refused_under_block(self, mock_context):
+        """Unverifiable is not the same as fine: no catalogue entry -> fail closed.
+
+        Mirrors how the gate already treats a digest it cannot compute.
+        """
+        registry = get_tool_projection_registry()
+        registry.set_config_pin(_SERVER, _TOOL, _TENANT_A, ToolDigest(tool_name=_TOOL, sha256=_STALE))
+        # Start publishes a catalogue that does NOT contain the pinned tool.
+        self._cold_server_populating_catalogue_on_start(mock_context, registry, _make_tool("some_other_tool"))
+
+        result = _execute(_TENANT_A)
+
+        assert result.results[0].success is False
+        assert result.results[0].error_type == "ToolDigestMismatchError"
+
+    def test_an_unpinned_tool_is_unaffected_by_the_deferred_check(self, mock_context):
+        registry = get_tool_projection_registry()
+        self._cold_server_populating_catalogue_on_start(mock_context, registry, _make_tool())
+
+        result = _execute(_TENANT_A)
+
+        assert result.results[0].success is True, result.results[0].error
