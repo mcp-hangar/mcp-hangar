@@ -24,7 +24,11 @@ services:
     restart: unless-stopped
 
   mcp-hangar:
-    image: ${HANGAR_IMAGE:-ghcr.io/mcp-hangar/mcp-hangar:2.0.0rc1}
+    # NB: the published image tag is the SEMVER form of the release tag
+    # (2.0.0-rc.1), not the PEP 440 project version (2.0.0rc1). The release
+    # workflow tags the image from the git tag, so the two never match on a
+    # prerelease -- pinning the PEP 440 form here silently 404s on pull.
+    image: ${HANGAR_IMAGE:-ghcr.io/mcp-hangar/mcp-hangar:2.0.0-rc.1}
     container_name: mcp-hangar-task-relay
     depends_on:
       - task-upstream
