@@ -15,6 +15,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 * **core:** let a task owner reach their own task when auth is enabled — the identity bridge read only the SDK v1 `ctx.request_context.request`, so on v2 every `tasks/*` call over `serve --http` was unattributed and the governed relay was dead in the deployment mode that matters
 * **core:** stop requiring a warm backend for `/health/ready` — lazy start plus `idle_ttl_s` makes "every backend cold" the normal idle state, so readiness flipped to 503, Kubernetes removed the pod from its Service, and no call could arrive to warm a backend again ([#599](https://github.com/mcp-hangar/mcp-hangar/issues/599))
 * **core:** allow the REST API when auth is disabled — the permission guard tested only for an authz middleware, which `NullAuthComponents` still ships, so every REST call answered 401 with no credential able to open it and the operator could not deliver L7 egress policy to an auth-off gateway ([#600](https://github.com/mcp-hangar/mcp-hangar/issues/600))
+* **core:** enforce a tenant's digest pin on the first call after gateway boot — the tool catalogue is published by the backend's start, which happens after the pin gate ran, so the first call to a pinned tool skipped the check entirely ([#601](https://github.com/mcp-hangar/mcp-hangar/issues/601))
 
 ## [1.6.1](https://github.com/mcp-hangar/mcp-hangar/compare/v1.6.0...v1.6.1) (2026-07-23)
 

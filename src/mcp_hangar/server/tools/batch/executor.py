@@ -879,17 +879,28 @@ class BatchExecutor:
         # NOTE: the withdrawal check above takes precedence -- a withdrawn tool is
         # rejected before reaching here, so no mismatch event fires for a tool that
         # is both withdrawn and pinned.
+        # A pinned tool whose projection is not in the registry yet cannot be
+        # checked here. That is the state of every backend that has not started
+        # in this process: the catalogue is populated by the McpServerStarted
+        # handler, and the cold start happens LATER in this same function. Left
+        # as-is, the first call after a gateway boot skipped the pin entirely --
+        # one unvalidated call per boot per server, and gateway restarts are
+        # routine in Kubernetes (#601). So the gate is a closure, run here when
+        # the catalogue is already available and re-run right after the cold
+        # start when it was not.
         _pin = _proj_registry.resolve_pin(call.mcp_server, call.tool, _caller_tenant_id)
-        if _pin is not None and _proj is not None:
+
+        def _enforce_digest_pin(projection: Any, pin: Any) -> CallResult | None:
+            """Validate *projection* against the tenant's *pin*; a CallResult means reject."""
             _enforcement = _proj_registry.digest_enforcement(call.mcp_server)
             try:
                 _digest_result = DigestValidator(
                     DigestPolicy(
                         enforcement=_enforcement,
                         unknown=DigestUnknownPolicy.BLOCK,
-                        allowlist=frozenset({_pin}),
+                        allowlist=frozenset({pin}),
                     )
-                ).validate_tool(_proj.schema, call.mcp_server, call.call_id, tenant_id=_caller_tenant_id)
+                ).validate_tool(projection.schema, call.mcp_server, call.call_id, tenant_id=_caller_tenant_id)
                 _digest_blocked = _digest_result.blocked
                 _digest_event = _digest_result.event
             except Exception:  # noqa: BLE001 -- a malformed projection schema must not 500 the call path
@@ -929,9 +940,21 @@ class BatchExecutor:
                 CurrentToolPin(
                     mcp_server=call.mcp_server,
                     tool_name=call.tool,
-                    pinned_digest=_pin.sha256,
+                    pinned_digest=pin.sha256,
                 )
             )
+            return None
+
+        #: True when a pin exists but the catalogue was not there to check it
+        #: against; the cold start below populates it and the gate re-runs.
+        _digest_pin_deferred = False
+        if _pin is not None:
+            if _proj is not None:
+                _rejection = _enforce_digest_pin(_proj, _pin)
+                if _rejection is not None:
+                    return _rejection
+            else:
+                _digest_pin_deferred = True
 
         # Check circuit breaker / health degradation of the resolved target
         # (a standalone server, or the selected group member).
@@ -989,6 +1012,33 @@ class BatchExecutor:
                         error_type="McpServerStartError",
                         elapsed_ms=(time.perf_counter() - call_start) * 1000,
                     )
+
+        # The cold start above published McpServerStarted, so the tool catalogue
+        # exists now. Run the pin gate that could not run earlier (#601). Still
+        # missing afterwards means the tool never appeared in the catalogue at
+        # all, which for a PINNED tool is unverifiable -> fail closed under BLOCK,
+        # matching how an uncomputable digest is treated inside the gate.
+        if _digest_pin_deferred:
+            _late_proj = _proj_registry.resolve(call.mcp_server, call.tool, _caller_tenant_id)
+            if _late_proj is not None:
+                _rejection = _enforce_digest_pin(_late_proj, _pin)
+                if _rejection is not None:
+                    return _rejection
+            elif _proj_registry.digest_enforcement(call.mcp_server) == DigestEnforcement.BLOCK:
+                logger.info(
+                    "tool_digest_pin_unresolvable",
+                    mcp_server_id=call.mcp_server,
+                    tool=call.tool,
+                    tenant_id=_caller_tenant_id,
+                )
+                return CallResult(
+                    index=call.index,
+                    call_id=call.call_id,
+                    success=False,
+                    error=f"Tool '{call.tool}' is pinned for this tenant but its schema could not be verified",
+                    error_type="ToolDigestMismatchError",
+                    elapsed_ms=(time.perf_counter() - call_start) * 1000,
+                )
 
         # Check cancellation after cold start
         if cancel_event.is_set():
