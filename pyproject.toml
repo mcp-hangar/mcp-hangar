@@ -20,7 +20,15 @@ classifiers = [
     "Topic :: System :: Systems Administration",
 ]
 dependencies = [
-    "mcp==2.0.0b2",  # v2 SDK (#547); beta pinned hard — b2->b3 may break, bump deliberately
+    # Pinned EXACTLY, not merely bounded. This is the v2 line: the Tasks surface
+    # is still moving inside the beta series (SEP-2663 removes tasks/list, adds
+    # tasks/update) and `_sdk_compat` shims against b2 internals, so a floating
+    # pin breaks silently. b2 -> b3 is a deliberate bump, not a drift.
+    #
+    # The v1 line on `main` solves the same class of problem with `>=1.28.1,<2`
+    # (#561): both branches must be unable to follow the SDK somewhere their
+    # code does not run. Do not widen either to match the other.
+    "mcp==2.0.0b2",
     "mcp-types==2.0.0b2",  # v2 split protocol-types dist (imported directly as mcp_types); paired with mcp
     "structlog>=24.0.0",
     "pydantic>=2.0.0",

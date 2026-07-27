@@ -21,6 +21,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 * **core:** keep stdout clean on the stdio transport — structlog's default factory prints to stdout, so a log emitted before `setup_logging()` (a module-import-time one, for instance) corrupted the JSON-RPC stream and dropped the client's session ([#563](https://github.com/mcp-hangar/mcp-hangar/issues/563))
 * **core:** honour `tool_access.mode: front_door` on `serve --http` — the gate lived only in the never-called `MCPServerFactory`, so a gateway configured front_door kept serving the `hangar_*` meta-API, lifecycle control included, to callers the mode exists to fail closed on ([#596](https://github.com/mcp-hangar/mcp-hangar/issues/596))
 * **core:** advertise the SEP-2133 governance extensions on `serve --http`, via `get_capabilities` so both the handshake and the stateless `server/discover` surface carry them ([#595](https://github.com/mcp-hangar/mcp-hangar/issues/595))
+* **core:** guard the `mcp` SDK pin with a metadata test on this line too — the v2 pin stays exact (`==2.0.0b2`, drift inside the beta series breaks `_sdk_compat` silently), mirroring the `<2` cap `main` needs for the v1 surface ([#561](https://github.com/mcp-hangar/mcp-hangar/issues/561))
 
 ## [1.6.1](https://github.com/mcp-hangar/mcp-hangar/compare/v1.6.0...v1.6.1) (2026-07-23)
 
