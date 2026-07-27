@@ -30,6 +30,7 @@ from mcp_hangar.domain.services.tool_access_resolver import (
 from mcp_hangar.domain.value_objects import ToolAccessPolicy
 from mcp_hangar.domain.value_objects.identity import CallerIdentity, IdentityContext
 from mcp_hangar.fastmcp_server import flat_tool_projection, server_discover
+from mcp_hangar._sdk_compat import lowlevel_server
 from mcp_hangar.fastmcp_server.server_discover import server_discover_result, tenant_scoped_tools
 
 _PROJ_PATH = "mcp_hangar.fastmcp_server.flat_tool_projection.get_tool_projection_registry"
@@ -225,3 +226,102 @@ def _make_awaitable(value):
         return value
 
     return _coro
+
+
+# ---------------------------------------------------------------------------
+# The discovery result must describe the REAL server (#605, #606)
+# ---------------------------------------------------------------------------
+
+
+class TestDiscoverDescribesTheRealServer:
+    """A stateless client has no `initialize`; this endpoint is all it gets.
+
+    While the result was assembled from literals, a modern client was told the
+    gateway had no Tasks, no prompts, no resources (#605), and — on an egress
+    gateway whose backend had not started — no tools at all (#606). Both were
+    contradicted by `initialize` on the same process.
+    """
+
+    def _server_with_tools(self):
+        from mcp_hangar._sdk_compat import new_mcp_server
+
+        mcp = new_mcp_server("test-server", version="9.9.9")
+
+        @mcp.tool(name="hangar_demo")
+        def hangar_demo(x: int) -> int:
+            """A meta-API tool."""
+            return x
+
+        return mcp
+
+    def test_capabilities_come_from_the_server_not_a_literal(self, registry, resolver):
+        mcp = self._server_with_tools()
+
+        result = server_discover_result(None, mcp)
+
+        # Whatever the server reports, discover reports -- byte for byte.
+        expected = lowlevel_server(mcp).get_capabilities().model_dump(mode="json", by_alias=True, exclude_none=True)
+        assert result["capabilities"] == expected
+        # And it is richer than the old literal: the handshake surface has more
+        # than tools on it.
+        assert set(result["capabilities"]) > {"tools"}
+
+    def test_capabilities_track_an_advertised_tasks_capability(self, registry, resolver):
+        """The concrete #605 symptom: Tasks advertised at initialize, absent here."""
+        from mcp_hangar._sdk_compat import HAS_NATIVE_TASKS
+        from mcp_hangar.fastmcp_server.task_relay_wiring import advertise_tasks_capability
+
+        if not HAS_NATIVE_TASKS:
+            pytest.skip("SDK without the native Tasks extension")
+
+        mcp = self._server_with_tools()
+        advertise_tasks_capability(mcp, relay_tasks_enabled=True)
+
+        result = server_discover_result(None, mcp)
+
+        assert result["capabilities"].get("tasks"), (
+            "the relay advertises tasks at initialize; discover must not hide it"
+        )
+
+    def test_egress_advertises_the_meta_api_even_with_no_backend_started(self, registry, resolver):
+        """#606: an empty projection must not mean an empty discovery result."""
+        mcp = self._server_with_tools()
+
+        with _wired(registry, resolver):  # projection registry is empty here
+            result = server_discover_result(None, mcp)
+
+        assert _names(result["tools"]) == {"hangar_demo"}, result["tools"]
+
+    def test_front_door_still_advertises_the_flat_tenant_projection(self, registry, resolver):
+        """Topology decides which surface tools/list serves; discover must agree."""
+        _populate(registry, "server_a", ["read_item"])
+        mcp = self._server_with_tools()
+
+        # Topology in production comes from the process-wide resolver, which is
+        # what `_maybe_register_flat_tool_handlers` consults, so set that rather
+        # than a patched stand-in. `clean_singletons` resets it afterwards.
+        from mcp_hangar.domain.services.tool_access_resolver import get_tool_access_resolver
+
+        get_tool_access_resolver().set_topology_mode("front_door")
+
+        token = identity_context_var.set(_identity("tenant:a"))
+        try:
+            with _wired(registry, resolver):
+                result = server_discover_result("tenant:a", mcp)
+        finally:
+            identity_context_var.reset(token)
+
+        names = _names(result["tools"])
+        assert "read_item" in names, names
+        assert "hangar_demo" not in names, "front_door must not leak the meta-API"
+
+    def test_a_capability_read_failure_degrades_instead_of_failing_discovery(self, registry, resolver):
+        """Discovery answering something honest beats it 500-ing."""
+        broken = Mock()
+        broken._mcp_server.get_capabilities.side_effect = RuntimeError("boom")
+        broken._tool_manager.list_tools.side_effect = RuntimeError("boom")
+
+        result = server_discover_result(None, broken)
+
+        assert result["capabilities"] == {"tools": {"listChanged": True}}
+        assert result["tools"] == []
