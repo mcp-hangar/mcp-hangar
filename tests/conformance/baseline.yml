@@ -29,9 +29,22 @@
 #    answer; this is a scope-of-applicability question for the suite, not a
 #    defect to fix here.
 #
-# 3. Genuinely unimplemented — `logging/setLevel`. A real gap, listed so it is
-#    tracked rather than hidden. Decide deliberately: implement, or declare out
-#    of scope for a gateway.
+# 3. Deliberately not implemented — `logging/setLevel`. This looked like the
+#    one real gap until the specification was read: the method is REMOVED in
+#    2026-07-28, the generation this line targets. SEP-2575: "Remove `ping`,
+#    `logging/setLevel`, and `notifications/roots/list_changed`. Log level is
+#    now set per-request via `io.modelcontextprotocol/logLevel` in `_meta`."
+#    And SEP-2577 deprecates the whole Logging feature, replacement field
+#    included (`@deprecated as of protocol version 2026-07-28` in the draft
+#    schema), telling new implementations not to adopt it and suggesting
+#    exactly Hangar's approach: stderr or OpenTelemetry. `-32601` here is the
+#    correct answer from a 2026-07-28 server; the scenario only runs because
+#    the published suite has no vectors for that generation yet.
+#    `tests/unit/test_no_mcp_logging_dependency.py` enforces the stance.
+#
+#    Free consequence worth stating: SEP-2575 requires servers MUST NOT emit
+#    `notifications/message` for requests that did not carry the log-level
+#    field. Hangar emits none at all, so it satisfies that unconditionally.
 #
 # Re-check before GA: the 2026-07-28 server vectors DO NOT EXIST YET. The
 # published CLI knows only 2025-03-26 / 2025-06-18 / 2025-11-25 / draft /
@@ -42,8 +55,8 @@
 # the surface we built (SEP-2575 discover, Tasks) and belong in this run.
 
 server:
-  # -- 3. unimplemented ------------------------------------------------------
-  - logging-set-level # -32601: logging/setLevel is not implemented
+  # -- 3. deliberately not implemented ---------------------------------------
+  - logging-set-level # removed in 2026-07-28 (SEP-2575), feature deprecated (SEP-2577)
 
   # -- 2. capability not advertised -----------------------------------------
   - completion-complete # `completions` is absent from initialize
