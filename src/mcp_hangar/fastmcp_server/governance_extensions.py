@@ -77,5 +77,43 @@ def governance_experimental_capabilities() -> dict[str, dict[str, Any]]:
 
 __all__ = [
     "DIGEST_PINNING_ID",
+    "advertise_governance_extensions",
     "governance_experimental_capabilities",
 ]
+
+
+def advertise_governance_extensions(mcp: Any) -> None:
+    """Advertise Hangar governance as SEP-2133 experimental extensions on *mcp*.
+
+    A PURE DECLARATION of availability: no behavior changes, every advertised
+    extension is off by default, and only governance that is actually enforced
+    today is listed (see :func:`governance_experimental_capabilities`).
+
+    Wraps ``get_capabilities`` rather than ``create_initialization_options``.
+    Both are read by the handshake, but only the former is read by the stateless
+    ``server/discover`` surface — and a 2026-07-28 client has no handshake, so
+    injecting at the initialize-only seam would have advertised governance to
+    exactly the generation that cannot see it (the shape of #605).
+
+    Shared by both builders: it used to live only in ``MCPServerFactory``, which
+    has no production call site, so the shipped ``serve --http`` advertised an
+    empty ``capabilities.experimental`` (#595).
+    """
+    from mcp_hangar._sdk_compat import lowlevel_server
+
+    server = lowlevel_server(mcp)
+    extensions = governance_experimental_capabilities()
+    if not extensions:
+        return
+
+    original = server.get_capabilities
+
+    def _with_governance(*args: Any, **kwargs: Any) -> Any:
+        capabilities = original(*args, **kwargs)
+        merged: dict[str, Any] = dict(extensions)
+        existing = getattr(capabilities, "experimental", None)
+        if existing:
+            merged.update(existing)
+        return capabilities.model_copy(update={"experimental": merged})
+
+    server.get_capabilities = _with_governance

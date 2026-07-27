@@ -222,3 +222,50 @@ class TestOneServerIdentity:
         # Version too: unset, the SDK reports ITS version here, so the two
         # surfaces disagreed on which software the client was talking to.
         assert handshake_info["version"] == discover_info["version"] == __version__
+
+
+class TestTopologyIsHonouredOnTheServedApp:
+    """`tool_access.mode: front_door` must actually change the served surface (#596).
+
+    It did not: the gate lived only in `MCPServerFactory`, which nothing calls,
+    so a gateway configured front_door kept serving the `hangar_*` meta-API —
+    lifecycle control included — to the callers front_door exists to fail closed
+    on. Driven over the real app rather than by inspecting handlers, because the
+    handler wiring is exactly what was wrong.
+    """
+
+    @staticmethod
+    def _tools_over(client) -> list[str]:
+        response = client.post(
+            "/mcp",
+            headers=_modern_headers("tools/list"),
+            content=_modern_body("tools/list"),
+        )
+        assert response.status_code == 200, response.text
+        return [tool["name"] for tool in _jsonrpc(response.text)["result"]["tools"]]
+
+    def test_egress_serves_the_meta_api(self, client):
+        """The default topology is untouched."""
+        names = self._tools_over(client)
+
+        assert any(name.startswith("hangar_") for name in names), names
+
+    def test_front_door_withholds_the_meta_api_from_an_unidentified_caller(self):
+        from mcp_hangar.domain.services.tool_access_resolver import (
+            get_tool_access_resolver,
+            reset_tool_access_resolver,
+        )
+        from mcp_hangar.fastmcp_server.modern_surface import wrap_front_door_routing
+        from mcp_hangar.server.bootstrap import build_serving_mcp_server
+
+        reset_tool_access_resolver()
+        get_tool_access_resolver().set_topology_mode("front_door")
+        try:
+            app = wrap_front_door_routing(build_serving_mcp_server().streamable_http_app())
+            with TestClient(app, base_url=_BASE_URL) as front_door_client:
+                names = self._tools_over(front_door_client)
+        finally:
+            reset_tool_access_resolver()
+
+        leaked = [name for name in names if name.startswith("hangar_")]
+        assert not leaked, f"front_door still serves the meta-API: {leaked[:6]}"
