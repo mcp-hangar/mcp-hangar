@@ -9,6 +9,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Added
 
+- **core:** run the official MCP conformance suite against a real `serve --http` gateway in CI, with a classified baseline of known failures (gate E of #550). The 2026-07-28 server vectors do not exist upstream yet, so this certifies the back-compat generation; a weekly check watches for the modern scenarios landing ([#550](https://github.com/mcp-hangar/mcp-hangar/issues/550))
+
 - **core:** smoke the *published artifact* rather than the repo tree before and after every release (gate D of #550) — a clean venv installs the wheel the way a user would, then a real `hangar_call` is driven through the gateway to a cold backend; `publish-pypi` now depends on the pre-publish run, so a wheel broken only by its packaging can still be stopped ([#550](https://github.com/mcp-hangar/mcp-hangar/issues/550))
 
 ### Fixed
