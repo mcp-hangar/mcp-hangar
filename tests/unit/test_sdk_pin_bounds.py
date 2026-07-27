@@ -80,3 +80,27 @@ class TestMcpSdkPin:
     def test_other_runtime_pins_are_declared(self, package: str):
         """Guards the lookup above: if these vanish, the mcp assertions are vacuous."""
         assert _requirement(package)
+
+
+class TestHttpxPin:
+    """`httpx` is the second dependency this code cannot follow across a major.
+
+    httpx 1.0 drops `httpx.AsyncClient`, which the proxy path uses throughout.
+    Unbounded, `pip install --pre mcp-hangar` -- the install the v2-preview docs
+    recommend -- resolved httpx to `1.0.dev3` and the gateway died at startup.
+    Found by the published-artifact smoke (gate D, #550), which is the only
+    check that resolves dependencies the way a user's install does.
+    """
+
+    def test_the_pin_is_bounded_below_the_next_major(self):
+        specifier = _requirement("httpx").specifier
+
+        assert Version("1.0.0") not in specifier, (
+            f"httpx 1.0 satisfies `{specifier}`, and it has no `AsyncClient` -- the gateway will not start"
+        )
+
+    def test_a_current_supported_httpx_still_resolves(self):
+        """The cap must exclude the break, not the versions in use."""
+        specifier = _requirement("httpx").specifier
+
+        assert Version("0.28.1") in specifier, f"`{specifier}` excludes httpx 0.28.1, which this code runs on"

@@ -32,7 +32,12 @@ dependencies = [
     "mcp-types==2.0.0b2",  # v2 split protocol-types dist (imported directly as mcp_types); paired with mcp
     "structlog>=24.0.0",
     "pydantic>=2.0.0",
-    "httpx>=0.25.0",
+    # Capped below 1.0: httpx 1.0 drops `httpx.AsyncClient`, which this code
+    # uses everywhere. Unbounded, `pip install --pre mcp-hangar` -- the install
+    # the v2-preview docs recommend -- resolves httpx to 1.0.dev3 and the
+    # gateway dies at startup. Same class as the `mcp` cap (#561): a dependency
+    # allowed to walk into a major this code does not run on.
+    "httpx>=0.25.0,<1",
     "prometheus-client>=0.19.0",
     "pyjwt>=2.8.0",
     "cryptography>=41.0.0",

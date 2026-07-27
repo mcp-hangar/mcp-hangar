@@ -157,11 +157,38 @@ jobs:
         run: |
           python -m pytest tests/integration/ -v --tb=short --color=yes
 
+  # Gate D of the release matrix (#550): smoke the ARTIFACT, not the tree.
+  #
+  # Every other job here tests the working copy, which is exactly the blind spot
+  # that shipped #561 -- the code was fine, the packaging was not, and no test
+  # importing from `src/` can see that. This builds the wheel, installs it into
+  # a clean venv (dependencies resolve from the index, as a user's install
+  # would), and drives a real tool call through the gateway. It runs BEFORE
+  # publish so a bad wheel can still be stopped; a published wheel cannot be
+  # edited.
+  smoke-wheel:
+    name: Published-artifact smoke (pre-publish gate)
+    needs: [validate, test]
+    if: always() && needs.validate.result == 'success' && (needs.test.result == 'success' || needs.test.result == 'skipped')
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@v7
+      - uses: actions/setup-python@v6
+        with:
+          python-version: "3.12"
+      - name: Build the wheel
+        run: |
+          python -m pip install --upgrade pip build
+          python -m build --wheel
+      - name: Smoke the built wheel in a clean venv
+        run: python scripts/smoke_published_artifact.py --wheel "dist/mcp_hangar-*.whl"
+
   # Publish Python package to PyPI
   publish-pypi:
     name: Publish to PyPI
-    needs: [validate, test]
-    if: always() && needs.validate.result == 'success' && (needs.test.result == 'success' || needs.test.result == 'skipped')
+    needs: [validate, test, smoke-wheel]
+    if: always() && needs.validate.result == 'success' && (needs.test.result == 'success' || needs.test.result == 'skipped') && needs.smoke-wheel.result == 'success'
     runs-on: ubuntu-latest
     defaults:
       run:
@@ -356,3 +383,25 @@ jobs:
 
             ${{ steps.changelog.outputs.full_changelog_line }}
           prerelease: ${{ needs.validate.outputs.is_prerelease == 'true' }}
+
+  # The same smoke against what the index actually serves. This one cannot block
+  # anything -- the wheel is already immutable -- but it is the only check that
+  # sees precisely what a user receives, including the `--pre` resolve that the
+  # v2-preview docs recommend (advisory: an upstream alpha breaking that resolve
+  # is not a defect in this artifact, so it warns rather than fails).
+  smoke-published:
+    name: Published-artifact smoke (post-publish check)
+    needs: [validate, publish-pypi]
+    if: always() && needs.publish-pypi.result == 'success'
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    steps:
+      - uses: actions/checkout@v7
+      - uses: actions/setup-python@v6
+        with:
+          python-version: "3.12"
+      - name: Resolve the PEP 440 version
+        id: pep440
+        run: echo "version=$(grep -m1 -E '^version = "' pyproject.toml | sed 's/version = "\(.*\)"/\1/')" >> $GITHUB_OUTPUT
+      - name: Smoke what PyPI serves
+        run: python scripts/smoke_published_artifact.py --version "${{ steps.pep440.outputs.version }}" --also-pre

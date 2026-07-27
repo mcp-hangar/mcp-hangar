@@ -5,6 +5,16 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [Unreleased]
+
+### Added
+
+- **core:** smoke the *published artifact* rather than the repo tree before and after every release (gate D of #550) — a clean venv installs the wheel the way a user would, then a real `hangar_call` is driven through the gateway to a cold backend; `publish-pypi` now depends on the pre-publish run, so a wheel broken only by its packaging can still be stopped ([#550](https://github.com/mcp-hangar/mcp-hangar/issues/550))
+
+### Fixed
+
+- **core:** cap `httpx` below 1.0 — httpx 1.0 drops `httpx.AsyncClient`, which the proxy path uses throughout, so the documented `pip install --pre mcp-hangar` resolved `httpx==1.0.dev3` and the gateway could not start at all. Found by the new published-artifact smoke on its first run against a real release
+
 ## [2.0.0rc1](https://github.com/mcp-hangar/mcp-hangar/compare/v2.0.0-alpha.2...v2.0.0-rc.1) (2026-07-27)
 
 First release candidate for 2.0.0 — the SDK v2 / MCP 2026-07-28 line.
