@@ -20,7 +20,15 @@ classifiers = [
     "Topic :: System :: Systems Administration",
 ]
 dependencies = [
-    "mcp>=1.28.1",
+    # Capped at the v1 SDK line ON PURPOSE. This branch targets the v1 server
+    # surface (`mcp.server.fastmcp`), which SDK v2 removed, so an uncapped
+    # `mcp>=1.28.1` resolves to a 2.x release and the gateway dies at import with
+    # `ModuleNotFoundError: No module named 'mcp.server.fastmcp'`. Under
+    # `--pre`/`--prerelease=allow` that already happens today (it picks
+    # 2.0.0b2), and it starts happening on a PLAIN install the moment mcp 2.0.0
+    # ships — no flag required (#561). The v2 line lives on `mcp2`, pinned
+    # exactly to `mcp==2.0.0bN`; do not widen this one to follow it.
+    "mcp>=1.28.1,<2",
     "structlog>=24.0.0",
     "pydantic>=2.0.0",
     "httpx>=0.25.0",

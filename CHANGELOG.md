@@ -5,6 +5,12 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [Unreleased]
+
+### Fixed
+
+* **core:** cap the `mcp` SDK pin at the v1 line (`>=1.28.1,<2`) — unbounded, resolution follows the SDK into 2.x, whose server surface this line does not use, and the gateway dies at import with `ModuleNotFoundError: No module named 'mcp.server.fastmcp'` ([#561](https://github.com/mcp-hangar/mcp-hangar/issues/561))
+
 ## [1.6.1](https://github.com/mcp-hangar/mcp-hangar/compare/v1.6.0...v1.6.1) (2026-07-23)
 
 

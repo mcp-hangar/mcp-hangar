@@ -947,7 +947,7 @@ wheels = [
 
 [[package]]
 name = "mcp-hangar"
-version = "1.6.0"
+version = "1.6.1"
 source = { editable = "." }
 dependencies = [
     { name = "aiosqlite" },
@@ -1017,7 +1017,7 @@ requires-dist = [
     { name = "jcs", specifier = ">=0.2.1" },
     { name = "jsonschema", marker = "extra == 'dev'", specifier = ">=4.20.0" },
     { name = "langfuse", marker = "extra == 'langfuse'", specifier = ">=2.0.0" },
-    { name = "mcp", specifier = ">=1.28.1" },
+    { name = "mcp", specifier = ">=1.28.1,<2" },
     { name = "mypy", marker = "extra == 'dev'", specifier = ">=1.8.0" },
     { name = "opentelemetry-api", marker = "extra == 'opentelemetry'", specifier = ">=1.22.0" },
     { name = "opentelemetry-exporter-otlp", marker = "extra == 'opentelemetry'", specifier = ">=1.22.0" },
