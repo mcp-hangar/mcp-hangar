@@ -1,0 +1,111 @@
+# Official MCP conformance suite, run against a real `serve --http` gateway.
+#
+# Gate E of the release matrix (#550). Our own live tiers assert what we
+# believe the protocol requires; this asserts what the specification's
+# maintainers say it requires, which is the part we cannot mark our own
+# homework on.
+#
+# Scope, stated plainly: the published suite has NO 2026-07-28 server vectors
+# yet. Its CLI accepts 2025-03-26 / 2025-06-18 / 2025-11-25 / draft / extension,
+# and `--spec-version draft` lists zero server scenarios. So this run certifies
+# the generation we still serve for back-compat, not the modern surface. The
+# upstream repo already carries `server-stateless` (SEP-2575 discover) and
+# `tasks-lifecycle` scenarios that are not in the npm build; when they ship,
+# they cover exactly what we built and belong here. `check-for-new-scenarios`
+# below exists to notice that rather than rely on someone remembering.
+name: MCP Conformance
+
+on:
+  pull_request:
+    paths:
+      - "src/mcp_hangar/fastmcp_server/**"
+      - "src/mcp_hangar/server/**"
+      - "tests/conformance/**"
+      - ".github/workflows/conformance.yml"
+      - "pyproject.toml"
+  push:
+    branches: [mcp2]
+  schedule:
+    - cron: "17 5 * * 2" # weekly; also how the scenario-drift check runs
+  workflow_dispatch: {}
+
+permissions:
+  contents: read
+
+jobs:
+  conformance:
+    name: Server conformance (baselined)
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    steps:
+      - uses: actions/checkout@v7
+      - uses: actions/setup-python@v6
+        with:
+          python-version: "3.12"
+      - uses: actions/setup-node@v6
+        with:
+          node-version: "24"
+
+      - name: Install the gateway
+        run: |
+          python -m pip install --upgrade pip
+          pip install -e .
+
+      - name: Start `serve --http` with a subprocess backend
+        run: |
+          cat > conformance-config.yaml <<'EOF'
+          logging:
+            level: WARNING
+          mcp_servers:
+            math:
+              mode: subprocess
+              command: ["python", "examples/provider_math/server.py"]
+              idle_ttl_s: 300
+          EOF
+          mcp-hangar --config conformance-config.yaml serve --http \
+            --host 127.0.0.1 --port 52444 > gateway.log 2>&1 &
+          for _ in $(seq 1 60); do
+            if curl -sf -o /dev/null http://127.0.0.1:52444/health/live; then
+              echo "gateway healthy"; exit 0
+            fi
+            sleep 1
+          done
+          echo "::error::gateway never became healthy"; tail -50 gateway.log; exit 1
+
+      # Pinned, not @latest: a suite that changes under us turns a red build
+      # into a guessing game about whose change caused it. `check-for-new-
+      # scenarios` is what watches for movement.
+      - name: Run the conformance suite
+        run: |
+          npx -y @modelcontextprotocol/conformance@0.1.16 server \
+            --url http://127.0.0.1:52444/mcp \
+            --suite core \
+            --expected-failures tests/conformance/baseline.yml
+
+      - name: Gateway log on failure
+        if: failure()
+        run: tail -100 gateway.log
+
+  # The suite is moving fast (server-stateless and tasks-lifecycle exist
+  # upstream but are not published yet). This notices when the pinned version
+  # falls behind, so the pin is a deliberate choice rather than a fossil.
+  # Advisory: it must never redden a PR for an upstream release.
+  check-for-new-scenarios:
+    name: New upstream scenarios?
+    if: github.event_name == 'schedule' || github.event_name == 'workflow_dispatch'
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    continue-on-error: true
+    steps:
+      - uses: actions/setup-node@v6
+        with:
+          node-version: "24"
+      - name: Compare the pinned scenario list against @latest
+        run: |
+          npx -y @modelcontextprotocol/conformance@0.1.16 list > pinned.txt 2>&1 || true
+          npx -y @modelcontextprotocol/conformance@latest list > latest.txt 2>&1 || true
+          if diff -u pinned.txt latest.txt; then
+            echo "No scenario changes since the pinned version."
+          else
+            echo "::notice::Upstream conformance scenarios changed — consider bumping the pin (watch for 2026-07-28 server vectors)."
+          fi
