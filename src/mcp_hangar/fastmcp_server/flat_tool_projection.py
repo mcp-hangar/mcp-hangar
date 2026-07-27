@@ -394,3 +394,31 @@ def register_flat_tool_handlers(mcp: FastMCP) -> None:
 
         low.add_request_handler("tools/list", PaginatedRequestParams, _list_v2)
         low.add_request_handler("tools/call", CallToolRequestParams, _call_v2)
+
+
+def maybe_register_flat_tool_handlers(mcp: Any) -> bool:
+    """Install the flat tool surface when topology says ``front_door``.
+
+    In ``front_door`` external agents see flat backend tool names instead of the
+    ``hangar_*`` meta-API; in ``egress`` (the default) this is a no-op and the
+    meta-API is preserved unchanged. Returns whether the handlers were installed.
+
+    Shared by both builders: the gate used to live only in ``MCPServerFactory``,
+    which has no production call site, so ``front_door`` configured on the
+    shipped ``serve --http`` silently kept serving the meta-API — the mode
+    appeared to do nothing (#596).
+    """
+    from ..domain.services.tool_access_resolver import get_tool_access_resolver
+
+    try:
+        front_door = get_tool_access_resolver().topology_mode == "front_door"
+    except Exception:  # noqa: BLE001 -- an unresolvable topology must not break startup
+        logger.warning("flat_tool_topology_unresolved", exc_info=True)
+        return False
+
+    if not front_door:
+        return False
+
+    register_flat_tool_handlers(mcp)
+    logger.info("flat_tool_handlers_registered (topology_mode=front_door)")
+    return True

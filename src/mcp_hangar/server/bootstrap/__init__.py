@@ -33,6 +33,8 @@ from ...application.commands.load_handlers import LoadMcpServerHandler, UnloadMc
 from ...application.discovery import DiscoveryOrchestrator
 from ...application.ports.observability import ObservabilityPort
 from ...fastmcp_server.config import HANGAR_SERVER_NAME
+from ...fastmcp_server.flat_tool_projection import maybe_register_flat_tool_handlers
+from ...fastmcp_server.governance_extensions import advertise_governance_extensions
 from ...fastmcp_server.modern_surface import register_modern_surface
 from ...infrastructure.persistence.saga_state_store import NullSagaStateStore, SagaStateStore
 from ...gc import BackgroundWorker
@@ -193,6 +195,13 @@ def build_serving_mcp_server() -> FastMCP:
     """
     mcp_server = new_mcp_server(HANGAR_SERVER_NAME, version=__version__)
     register_all_tools(mcp_server)
+    # Topology decides the tool surface: front_door swaps the hangar_* meta-API
+    # for flat backend names. Gate must run here, not only in the unused factory,
+    # or the configured mode silently does nothing on the shipped path (#596).
+    maybe_register_flat_tool_handlers(mcp_server)
+    # SEP-2133 governance descriptors, advertised on both the handshake and the
+    # stateless discovery surface (#595).
+    advertise_governance_extensions(mcp_server)
     # SEP-2575 `server/discover`. Without this the shipped `serve --http` surface
     # 404s the modern/stateless discovery entrypoint the 2.x line depends on.
     register_modern_surface(mcp_server)

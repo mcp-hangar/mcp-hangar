@@ -175,11 +175,17 @@ _MATH_SERVER = Path(__file__).resolve().parents[2] / "examples" / "provider_math
 # front_door + auth + OIDC (realm A) + role_assignments seeding the role store.
 # require_tenant stays on (all three realm-A users carry a tenant_id), so the
 # ONLY axis that differs between viewer and developer here is the assigned role.
+# Topology is deliberately left at the default (egress). These two tests
+# exercise the REST API and the `hangar_call` meta-tool, and `hangar_call` only
+# exists in egress -- front_door replaces the hangar_* meta-API with flat backend
+# names. It used to say `mode: front_door` here, which was decorative: the gate
+# lived only in the never-called MCPServerFactory, so the mode did nothing on the
+# serve path (#596). Once it started working, `hangar_call` was correctly no
+# longer served and this file's premise broke. Neither test asserts front_door
+# semantics -- those live on the `hangar_oidc` fixture.
 _RBAC_CONFIG = """\
 logging:
   level: WARNING
-tool_access:
-  mode: front_door
 auth:
   enabled: true
   allow_anonymous: false

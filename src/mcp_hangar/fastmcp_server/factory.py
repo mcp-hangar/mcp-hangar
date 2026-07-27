@@ -9,7 +9,7 @@ from __future__ import annotations
 from typing import Any, TYPE_CHECKING
 
 from mcp_hangar import __version__
-from mcp_hangar._sdk_compat import FastMCP, lowlevel_server, new_mcp_server
+from mcp_hangar._sdk_compat import FastMCP, new_mcp_server
 from starlette.applications import Starlette
 
 from ..logging_config import get_logger
@@ -376,30 +376,12 @@ class MCPServerFactory:
     def _advertise_governance_extensions(mcp: FastMCP) -> None:
         """Advertise Hangar governance as SEP-2133 experimental extensions.
 
-        Injects the governance descriptor map (reverse-DNS keys) into the
-        server's advertised ``capabilities.experimental``. This is a PURE
-        DECLARATION of availability -- no behavior changes; every advertised
-        extension is off by default / opt-in. Only governance that is
-        actually enforced today is advertised (see ``governance_extensions``).
+        Delegates to the shared wiring so this path and the HTTP-serve bootstrap
+        advertise the same set (see ``governance_extensions``).
         """
-        from mcp.server.lowlevel.server import NotificationOptions
+        from .governance_extensions import advertise_governance_extensions
 
-        from .governance_extensions import governance_experimental_capabilities
-
-        server = lowlevel_server(mcp)
-        extensions = governance_experimental_capabilities()
-        original = server.create_initialization_options
-
-        def _with_governance(
-            notification_options: NotificationOptions | None = None,
-            experimental_capabilities: dict[str, dict[str, Any]] | None = None,
-        ) -> Any:
-            merged: dict[str, dict[str, Any]] = dict(extensions)
-            if experimental_capabilities:
-                merged.update(experimental_capabilities)
-            return original(notification_options, merged)
-
-        server.create_initialization_options = _with_governance
+        advertise_governance_extensions(mcp)
 
     @staticmethod
     def _register_interceptors_list(mcp: FastMCP) -> None:
@@ -425,17 +407,12 @@ class MCPServerFactory:
     def _maybe_register_flat_tool_handlers(mcp: FastMCP) -> None:
         """Replace tools/list and tools/call handlers in front_door mode.
 
-        In front_door mode, external agents see flat backend tool names instead
-        of the hangar_* meta-API.  In egress mode this is a no-op — the
-        default hangar_* surface is preserved unchanged.
+        Delegates to the shared, mode-gated entry point so this path and the
+        HTTP-serve bootstrap decide identically (see ``flat_tool_projection``).
         """
-        from ..domain.services.tool_access_resolver import get_tool_access_resolver
-        from .flat_tool_projection import register_flat_tool_handlers
+        from .flat_tool_projection import maybe_register_flat_tool_handlers
 
-        resolver = get_tool_access_resolver()
-        if resolver.topology_mode == "front_door":
-            register_flat_tool_handlers(mcp)
-            logger.info("flat_tool_handlers_registered", topology_mode="front_door")
+        maybe_register_flat_tool_handlers(mcp)
 
     def _run_readiness_checks(self) -> dict[str, Any]:
         """Run readiness checks.
