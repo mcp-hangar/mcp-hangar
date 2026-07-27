@@ -86,12 +86,17 @@ jobs:
         if: failure()
         run: tail -100 gateway.log
 
-  # The suite is moving fast (server-stateless and tasks-lifecycle exist
-  # upstream but are not published yet). This notices when the pinned version
-  # falls behind, so the pin is a deliberate choice rather than a fossil.
-  # Advisory: it must never redden a PR for an upstream release.
+  # Gate E is blocked on the ecosystem, not on us: the 2026-07-28 server vectors
+  # do not exist yet, and no released MCP client speaks that generation either
+  # (the Inspector pins TypeScript SDK v1.x, and npm has no 2.x SDK at all).
+  # Both unblock on someone else's release, so this watches for them instead of
+  # relying on a person remembering to look.
+  #
+  # Condition checks, not diffs: each step asks "has the thing we are waiting
+  # for happened?" so a quiet week is silent rather than nagging.
+  # Advisory throughout -- it must never redden a PR for an upstream release.
   check-for-new-scenarios:
-    name: New upstream scenarios?
+    name: Ecosystem watch (gate E blockers)
     if: github.event_name == 'schedule' || github.event_name == 'workflow_dispatch'
     runs-on: ubuntu-latest
     timeout-minutes: 10
@@ -108,4 +113,35 @@ jobs:
             echo "No scenario changes since the pinned version."
           else
             echo "::notice::Upstream conformance scenarios changed — consider bumping the pin (watch for 2026-07-28 server vectors)."
+          fi
+
+      # The interop half of gate E needs a real client that speaks 2026-07-28.
+      # None exists while the TypeScript SDK has no 2.x on npm.
+      - name: Has the TypeScript SDK published a 2.x?
+        run: |
+          latest=$(npm view @modelcontextprotocol/sdk version)
+          echo "@modelcontextprotocol/sdk latest = ${latest}"
+          # Compare the MAJOR numerically. Globbing on `1.*` looks equivalent and
+          # is not: `^2.1.0` matches `*1.*`, so a real bump would pass silently.
+          major=$(printf '%s' "${latest}" | sed -E 's/^[^0-9]*//; s/[.-].*//')
+          if [ "${major}" = "1" ]; then
+            echo "Still on the v1 line — no modern-surface client is publishable yet."
+          else
+            echo "::notice::@modelcontextprotocol/sdk is at ${latest} (major ${major}) — a client that speaks 2026-07-28 is now possible; revisit gate E interop."
+          fi
+
+      # The Inspector is the interop candidate. It is only useful to us once it
+      # rides an SDK that knows server/discover and the Mcp-Method routing.
+      - name: Has the Inspector moved off SDK v1?
+        run: |
+          pin=$(curl -sf https://raw.githubusercontent.com/modelcontextprotocol/inspector/main/package.json \
+                | node -e 'let d="";process.stdin.on("data",c=>d+=c).on("end",()=>{const p=JSON.parse(d);console.log((p.dependencies||{})["@modelcontextprotocol/sdk"]||"unknown")})')
+          echo "inspector pins @modelcontextprotocol/sdk ${pin}"
+          major=$(printf '%s' "${pin}" | sed -E 's/^[^0-9]*//; s/[.-].*//')
+          if [ "${pin}" = "unknown" ] || [ -z "${major}" ]; then
+            echo "::notice::Could not read the Inspector's SDK pin — this check needs updating."
+          elif [ "${major}" = "1" ]; then
+            echo "Still SDK v1 — the Inspector cannot exercise the modern surface."
+          else
+            echo "::notice::The Inspector now pins ${pin} (major ${major}) — it may finally speak 2026-07-28; revisit gate E interop."
           fi
