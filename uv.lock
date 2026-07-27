@@ -947,7 +947,7 @@ wheels = [
 
 [[package]]
 name = "mcp-hangar"
-version = "1.6.1"
+version = "1.6.2"
 source = { editable = "." }
 dependencies = [
     { name = "aiosqlite" },
@@ -1012,7 +1012,7 @@ requires-dist = [
     { name = "cryptography", specifier = ">=41.0.0" },
     { name = "docker", specifier = ">=7.1.0" },
     { name = "fpdf2", marker = "extra == 'full'", specifier = ">=2.8.0" },
-    { name = "httpx", specifier = ">=0.25.0" },
+    { name = "httpx", specifier = ">=0.25.0,<1" },
     { name = "hypothesis", marker = "extra == 'dev'", specifier = ">=6.90.0" },
     { name = "jcs", specifier = ">=0.2.1" },
     { name = "jsonschema", marker = "extra == 'dev'", specifier = ">=4.20.0" },
