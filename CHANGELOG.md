@@ -23,6 +23,12 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 * **core:** advertise the SEP-2133 governance extensions on `serve --http`, via `get_capabilities` so both the handshake and the stateless `server/discover` surface carry them ([#595](https://github.com/mcp-hangar/mcp-hangar/issues/595))
 * **core:** guard the `mcp` SDK pin with a metadata test on this line too — the v2 pin stays exact (`==2.0.0b2`, drift inside the beta series breaks `_sdk_compat` silently), mirroring the `<2` cap `main` needs for the v1 surface ([#561](https://github.com/mcp-hangar/mcp-hangar/issues/561))
 
+## [1.6.2](https://github.com/mcp-hangar/mcp-hangar/compare/v1.6.1...v1.6.2) (2026-07-27)
+
+### Fixed
+
+* **core:** cap the mcp SDK pin at the v1 line ([#610](https://github.com/mcp-hangar/mcp-hangar/issues/610)) ([b862297](https://github.com/mcp-hangar/mcp-hangar/commit/b8622972e8c695b80535fa463bac0fa2fb3bd2a6)), closes [#561](https://github.com/mcp-hangar/mcp-hangar/issues/561)
+
 ## [1.6.1](https://github.com/mcp-hangar/mcp-hangar/compare/v1.6.0...v1.6.1) (2026-07-23)
 
 
