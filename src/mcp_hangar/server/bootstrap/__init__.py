@@ -280,6 +280,14 @@ def bootstrap(
     mcp_server = FastMCP("mcp-registry")
     register_all_tools(mcp_server)
 
+    # Wire flat-tool projection for front_door mode (issue #596)
+    from ..fastmcp_server.flat_tool_projection import register_flat_tool_handlers
+    from ..domain.services.tool_access_resolver import get_tool_access_resolver
+
+    resolver = get_tool_access_resolver()
+    if resolver.topology_mode == "front_door":
+        register_flat_tool_handlers(mcp_server)
+
     # Wire log buffers to mcp_servers after configuration populates the shared repository.
     init_log_buffers(runtime.repository.get_all())
 
