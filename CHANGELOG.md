@@ -7,6 +7,10 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Fixed
+
+- **core:** stop stamping the 2026-07-28 `_meta` envelope on upstreams that negotiated a legacy protocol. From `mcp==2.0.0` the SDK enforces era separation: a connection whose `initialize` settled on 2025-11-25 rejects every later request carrying the modern envelope with `-32600`. Hangar stamped it unconditionally, so against any SDK-built legacy upstream `tools/list` failed, the cold start never completed, and the caller saw a **hang** rather than an error — the batch sat until its global timeout. The beta tolerated it; the stable release does not. The handshake now records the negotiated era and withholds the protocol keys on legacy connections, while still sending them to stateless SEP-2575 upstreams, which have no handshake and learn the protocol only from `_meta`. Caught by the published-artifact smoke (gate D) before the wheel shipped ([#550](https://github.com/mcp-hangar/mcp-hangar/issues/550))
+
 ## [2.0.0rc3](https://github.com/mcp-hangar/mcp-hangar/compare/v2.0.0-rc.2...v2.0.0-rc.3) (2026-07-28)
 
 The candidate that makes the published artifact match what the docs describe. It carries the whole SEP-2663 realignment — which `rc2` predates — and moves the SDK pin onto the **stable** `mcp==2.0.0`, released the same day.
