@@ -227,6 +227,13 @@ This section covers **everything on the 2.x line since it diverged from 1.x**, a
 - **security:** require `mcp>=1.28.1` to pull in the fix for CVE-2026-59950 (MCP Python SDK WebSocket server transport missing Host/Origin validation, HIGH). The published constraint was `mcp>=1.0.0`, so installs could still resolve a vulnerable SDK even though the dev lock had moved.
 - **core:** validate WebSocket handshake `Origin`/`Host` at the Hangar ASGI edge before forwarding non-`/api/` connections to the SDK app (DNS-rebinding / cross-origin defense-in-depth, the CVE-2026-59950 class at our own trust boundary). Loopback is trusted; non-loopback is fail-closed — a present `Origin` must be allow-listed (`MCP_CORS_ORIGINS`), a missing one is allowed (non-browser client, auth still applies), and the `Host` must be in `MCP_TRUSTED_HOSTS` ([#498](https://github.com/mcp-hangar/mcp-hangar/issues/498))
 
+## [1.6.3](https://github.com/mcp-hangar/mcp-hangar/compare/v1.6.2...v1.6.3) (2026-07-27)
+
+
+### Fixed
+
+* **core:** cap httpx below 1.0 on the v1 line too ([#619](https://github.com/mcp-hangar/mcp-hangar/issues/619)) ([74c1af7](https://github.com/mcp-hangar/mcp-hangar/commit/74c1af77394af5b7820c65e996425640931a0086))
+
 ## [1.6.2](https://github.com/mcp-hangar/mcp-hangar/compare/v1.6.1...v1.6.2) (2026-07-27)
 
 ### Fixed
