@@ -7,6 +7,10 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Added
+
+- **ci:** run the task-relay smoke drivers against a real gateway on every change to the relay or the example (`task-relay-smoke.yml`). `examples/` was covered by no workflow at all — CI built only `examples/provider_math` — which is why two defects shipped through a green unit suite and were found only by running the drivers by hand: the payload bridge (#638) and the capability advertisement (#639). Neither is reachable without a real client on a real connection, because the unit suite fakes the request context. Runs the upstream's own contract first, so a failure tells an upstream regression apart from a relay one ([#322](https://github.com/mcp-hangar/mcp-hangar/issues/322))
+
 ### Changed
 
 - **tests:** rewrite the task-relay smoke harness onto the SEP-2663 wire. The drivers negotiated `2025-11-25` and called `tasks/result` / `tasks/list`, so after the wire realignment every `tasks/*` answered `-32601` and the harness tested nothing — silently, because `examples/task_upstream` is not covered by any workflow. `drive_relay.py` now speaks through the SDK's `Client` with `mode="2026-07-28"` and typed requests carrying `name_param`, which is the only way to satisfy the mandatory per-request `Mcp-Name` header; `consent_hitl.py` is removed because Hangar no longer issues the `elicitation/create` prompt it drove; the example upstream now emits `inputRequests` so the governed `tasks/update` loop has something to key on. Two live defects were found by running it: the payload bridge and the capability advertisement

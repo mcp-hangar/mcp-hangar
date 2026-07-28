@@ -1,0 +1,115 @@
+# The governed task relay, driven end to end against a real gateway.
+#
+# Why this exists as its own job rather than as more unit tests: the unit suite
+# fakes the request context, so it can prove the handler logic and nothing about
+# the wire. Two defects shipped straight through a green suite and were caught
+# only by running these drivers by hand:
+#
+#   * a completed task relayed from an older upstream returned `result: null`
+#     forever -- `tasks/result` was removed downstream AND, by accident, the
+#     upstream fetch went with it (#638);
+#   * the tasks capability was advertised as `capabilities.tasks`, which the
+#     SDK's per-version sieve drops from a 2026-07-28 `server/discover` -- so the
+#     surface was served where it was not advertised and advertised where it is
+#     refused (#639).
+#
+# Neither is reachable without a real client on a real connection. `examples/`
+# was covered by no workflow at all (CI built only `examples/provider_math`),
+# which is why they were invisible.
+#
+# Runs the two processes directly rather than via the example's compose file:
+# same topology, no daemon, and a failure points at the gateway instead of at
+# Docker.
+name: Task relay smoke
+
+on:
+  pull_request:
+    paths:
+      - "src/mcp_hangar/fastmcp_server/task_relay_*.py"
+      - "src/mcp_hangar/tasks_wire.py"
+      - "src/mcp_hangar/application/tasks/**"
+      - "src/mcp_hangar/domain/services/task_*.py"
+      - "examples/task_upstream/**"
+      - ".github/workflows/task-relay-smoke.yml"
+  push:
+    branches: [mcp2]
+  workflow_dispatch: {}
+
+permissions:
+  contents: read
+
+jobs:
+  smoke:
+    name: Relay lifecycle (SEP-2663)
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@v7
+      - uses: actions/setup-python@v6
+        with:
+          python-version: "3.12"
+
+      - name: Install the gateway
+        run: |
+          python -m pip install --upgrade pip
+          pip install -e .
+
+      # The example upstream pins the same `mcp` the project does, so the
+      # editable install above already satisfies it. Installing its
+      # requirements.txt on top would risk resolving a different SDK into the
+      # same environment as the gateway under test.
+      - name: Start the task-emitting upstream
+        run: |
+          MCP_PORT=52455 python examples/task_upstream/server.py > upstream.log 2>&1 &
+          for _ in $(seq 1 60); do
+            if curl -sf -o /dev/null -X POST http://127.0.0.1:52455/mcp \
+                 -H 'Content-Type: application/json' \
+                 -H 'Accept: application/json, text/event-stream' \
+                 -d '{"jsonrpc":"2.0","id":1,"method":"initialize","params":{"protocolVersion":"2025-11-25","capabilities":{},"clientInfo":{"name":"probe","version":"0"}}}'; then
+              echo "upstream healthy"; exit 0
+            fi
+            sleep 1
+          done
+          echo "::error::the upstream never became healthy"; tail -50 upstream.log; exit 1
+
+      # `relay_tasks_enabled` is spelled out because it defaults to FALSE
+      # (ADR-015): the surface is opt-in until it is proven, and proving it is
+      # what this job does.
+      - name: Start `serve --http` in front of it
+        run: |
+          cat > relay-smoke-config.yaml <<'EOF'
+          logging:
+            level: WARNING
+          relay_tasks_enabled: true
+          mcp_servers:
+            task-upstream:
+              mode: remote
+              endpoint: http://127.0.0.1:52455/mcp
+              idle_ttl_s: 600
+          EOF
+          mcp-hangar --config relay-smoke-config.yaml serve --http \
+            --host 127.0.0.1 --port 52456 > gateway.log 2>&1 &
+          for _ in $(seq 1 60); do
+            if curl -sf -o /dev/null http://127.0.0.1:52456/health/live; then
+              echo "gateway healthy"; exit 0
+            fi
+            sleep 1
+          done
+          echo "::error::the gateway never became healthy"; tail -50 gateway.log; exit 1
+
+      # Run the upstream's own contract first. When something breaks, this tells
+      # an upstream regression apart from a relay regression instead of leaving
+      # both suspects.
+      - name: Smoke the upstream directly
+        working-directory: examples/task_upstream
+        run: python smoke_upstream.py --url http://127.0.0.1:52455/mcp
+
+      - name: Drive the relay through the gateway
+        working-directory: examples/task_upstream
+        run: python drive_relay.py --url http://127.0.0.1:52456/mcp --server task-upstream
+
+      - name: Logs on failure
+        if: failure()
+        run: |
+          echo "--- gateway ---"; tail -120 gateway.log || true
+          echo "--- upstream ---"; tail -120 upstream.log || true
