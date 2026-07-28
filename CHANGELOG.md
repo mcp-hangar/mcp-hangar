@@ -11,6 +11,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 - **core:** vendor the SEP-2663 Tasks wire models (`mcp_hangar/tasks_wire.py`) instead of serving `mcp_types`' `Task*` types, which are the SEP-1686 generation 2026-07-28 removed from the core spec — flat `CreateTaskResult` with `resultType`, `ttlMs`/`pollIntervalMs`, `tasks/get` inlining its outcome, `tasks/result` and `tasks/list` gone, `tasks/update` present. Field names track [python-sdk#3005](https://github.com/modelcontextprotocol/python-sdk/pull/3005) so the models retire rather than fork when it merges; the one deliberate divergence is `GetTaskResult.inputRequests`, which #3005 drops on parse and Hangar's consent gate needs. No handler is rewired yet ([#322](https://github.com/mcp-hangar/mcp-hangar/issues/322))
 
+- **tests:** pin what Hangar declares to an upstream at handshake — a hardcoded `"capabilities": {}`. Recorded because it decides whether the ADR-014 relay ever receives a task: SEP-2663 makes augmentation the upstream's decision and gates it on the caller declaring `io.modelcontextprotocol/tasks` (python-sdk#3005 answers a non-declaring client `-32021`), so against a spec-compliant upstream Hangar is a non-declaring client and no task is ever minted for it. Also records why per-downstream-client extension propagation is the wrong model — the upstream connection is one shared, cold-start connection that outlives any client ([#322](https://github.com/mcp-hangar/mcp-hangar/issues/322))
+
 ## [2.0.0rc2](https://github.com/mcp-hangar/mcp-hangar/compare/v2.0.0-rc.1...v2.0.0-rc.2) (2026-07-28)
 
 A single-fix candidate cut directly on top of `2.0.0rc1`, which advertises a task capability it cannot serve to a modern client.
