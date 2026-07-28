@@ -37,13 +37,25 @@ _META_CAPABILITIES_KEY_LEGACY = "io.modelcontextprotocol/capabilities"
 TASKS_EXTENSION_ID = "io.modelcontextprotocol/tasks"
 
 
-def inject_protocol_meta(params: dict[str, Any]) -> dict[str, Any]:
+def inject_protocol_meta(params: dict[str, Any], *, modern_envelope: bool = True) -> dict[str, Any]:
     """Return ``params`` with Hangar's protocol context merged into ``params._meta``.
 
     A stateless upstream (SEP-2575) has no initialize handshake, so the protocol
     version + client info must travel in every request's ``_meta`` instead. This
     returns a new dict and does not mutate the caller's ``params``; existing
     ``_meta`` keys are preserved and caller-set protocol keys win (set-if-absent).
+
+    ``modern_envelope=False`` omits those keys, and that is not an optimisation.
+    From ``mcp==2.0.0`` the SDK enforces era separation: a connection that
+    negotiated a legacy version at ``initialize`` rejects **every** subsequent
+    request carrying the 2026-07-28 envelope with ``-32600`` ("this connection
+    serves the handshake protocol era"). Hangar stamped the envelope
+    unconditionally, so against any SDK-built legacy upstream discovery failed,
+    the cold start never completed, and the batch timed out -- a hang rather than
+    an error. The beta tolerated it; the stable release does not.
+
+    Trace context is separate and always injected by the caller, so an upstream
+    that ignores ``_meta`` is unaffected either way.
 
     Also forwards the **caller's** Tasks declaration, per request, when Hangar can
     honestly stand behind it -- see :func:`forwardable_client_capabilities`. That
@@ -53,6 +65,13 @@ def inject_protocol_meta(params: dict[str, Any]) -> dict[str, Any]:
     client that declared nothing. Hangar is that client on the wire.
     """
     meta = dict(params.get("_meta") or {})
+    if not modern_envelope:
+        # `_meta` still has to EXIST: it is also the trace-context carrier, and
+        # the caller injects into it immediately after this returns. Only the
+        # protocol keys are withheld -- the era gate is about those, not about
+        # `_meta` as such.
+        return {**params, "_meta": meta}
+
     meta.setdefault(_META_PROTOCOL_VERSION_KEY, SUPPORTED_PROTOCOL_VERSION)
     meta.setdefault(_META_CLIENT_INFO_KEY, dict(HANGAR_CLIENT_INFO))
 

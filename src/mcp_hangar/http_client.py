@@ -189,6 +189,12 @@ class HttpClient:
         self._auth_config = auth_config or AuthConfig()
         self._http_config = http_config or HttpClientConfig()
         self._mcp_server_id = mcp_server_id
+        #: Whether this connection accepts the 2026-07-28 `_meta` envelope.
+        #: Starts True so the handshake itself and stateless (SEP-2575) upstreams
+        #: carry it; `_perform_mcp_handshake` clears it the moment a legacy
+        #: `initialize` succeeds, because from mcp 2.0.0 such a connection
+        #: rejects the modern envelope on every later request (-32600).
+        self.modern_envelope = True
 
         # Parse endpoint URL
         self._scheme, self._host, self._port, self._base_path = self._parse_endpoint(endpoint)
@@ -328,7 +334,7 @@ class HttpClient:
         _identity = get_identity_context()
         _tenant_id = _identity.caller.tenant_id if _identity and _identity.caller else None
 
-        params = inject_protocol_meta(params)
+        params = inject_protocol_meta(params, modern_envelope=self.modern_envelope)
         # SEP-414: carry W3C trace context in params._meta (not only HTTP headers),
         # so it survives across MCP hops regardless of transport.
         inject_trace_context(params["_meta"])

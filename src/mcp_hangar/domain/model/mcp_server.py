@@ -52,6 +52,10 @@ logger = get_logger(__name__)
 # module (re-exported above) so the transport clients can share them without a
 # domain -> transport import. Re-export keeps existing import sites working.
 
+#: The generation whose `_meta` envelope a connection must have negotiated before
+#: Hangar may keep stamping it. ISO dates compare correctly as strings.
+_MODERN_PROTOCOL_VERSION = "2026-07-28"
+
 # JSON-RPC "method not found". A stateless MCP server (SEP-2575) removed the
 # `initialize` handler and answers with this code; we treat it as "this upstream
 # is stateless, skip the handshake" rather than a startup failure.
@@ -814,6 +818,8 @@ class McpServer(AggregateRoot):
         init_error = init_resp.get("error")
         if init_error is not None and init_error.get("code") == _JSONRPC_METHOD_NOT_FOUND:
             # Stateless upstream (SEP-2575): no initialize handshake. Expected.
+            # Keep the modern envelope -- it is the only way such an upstream
+            # learns the protocol version and client info at all.
             logger.info("mcp_handshake_stateless_upstream", mcp_server_id=self.mcp_server_id)
         elif init_error is not None:
             error_msg = init_error.get("message", "unknown")
@@ -829,6 +835,22 @@ class McpServer(AggregateRoot):
                 suggestion=diagnostics.get("suggestion")
                 or "Check mcp_server logs and ensure it implements the MCP protocol correctly.",
             )
+
+        if init_error is None:
+            # A handshake happened, so this connection belongs to whichever era
+            # the upstream negotiated -- and from mcp 2.0.0 a legacy connection
+            # REJECTS the 2026-07-28 `_meta` envelope on every later request
+            # (-32600), which reads as a hang: discovery fails, the cold start
+            # never completes, the batch times out. Stop stamping it unless the
+            # upstream actually negotiated the modern generation.
+            negotiated = (init_resp.get("result") or {}).get("protocolVersion")
+            if isinstance(negotiated, str) and negotiated < _MODERN_PROTOCOL_VERSION:
+                client.modern_envelope = False
+                logger.debug(
+                    "upstream_legacy_era",
+                    mcp_server_id=self.mcp_server_id,
+                    negotiated_protocol_version=negotiated,
+                )
 
         # Discover tools
         tools_resp = client.call("tools/list", {})
