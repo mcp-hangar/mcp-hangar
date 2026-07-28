@@ -100,7 +100,7 @@ def advertise_tasks_capability(mcp: FastMCP, *, relay_tasks_enabled: bool) -> No
     server. Wraps ``get_capabilities`` to inject the first-class
     ``ServerCapabilities.tasks`` field.
     """
-    from .._sdk_compat import HAS_LIST_TASKS, HAS_NATIVE_TASKS
+    from .._sdk_compat import HAS_NATIVE_TASKS
 
     if not (HAS_NATIVE_TASKS and relay_tasks_enabled):
         return
@@ -113,19 +113,22 @@ def advertise_tasks_capability(mcp: FastMCP, *, relay_tasks_enabled: bool) -> No
         TasksToolsCapability,
     )
 
-    # ``tasks/list`` is removed in 2026-07-28 (SEP-2663): advertise ``list`` only
-    # while the SDK still defines it, so a later beta's removal auto-drops it from
-    # the capability WITHOUT ever advertising a method the server can no longer
-    # serve ("do not advertise what does not run").
-    cap_kwargs: dict[str, Any] = {
-        "cancel": TasksCancelCapability(),
-        "requests": ServerTasksRequestsCapability(tools=TasksToolsCapability(call=TasksCallCapability())),
-    }
-    if HAS_LIST_TASKS:
-        from mcp_types import TasksListCapability
-
-        cap_kwargs["list"] = TasksListCapability()
-    tasks_capability = ServerTasksCapability(**cap_kwargs)
+    # ``list`` is NOT advertised. SEP-2663 removes ``tasks/list`` and the serving
+    # surface does not register it, so advertising it would be the exact defect
+    # this line used to cause: the previous version gated it on the SDK still
+    # defining ``ListTasksResult``, reasoning that "a later beta's removal
+    # auto-drops it". That type belongs to the frozen SEP-1686 generation and is
+    # never going away, so the guard advertised a method the server could not
+    # serve, permanently (ADR-015).
+    #
+    # These capability CLASSES are still the SDK's. That is fine and not the
+    # thing ADR-015 bars: they are the negotiation envelope, identical across
+    # both generations, not the ``Task*`` payload shapes. Only results and params
+    # come from ``tasks_wire``.
+    tasks_capability = ServerTasksCapability(
+        cancel=TasksCancelCapability(),
+        requests=ServerTasksRequestsCapability(tools=TasksToolsCapability(call=TasksCallCapability())),
+    )
     server = lowlevel_server(mcp)
     original = server.get_capabilities
 

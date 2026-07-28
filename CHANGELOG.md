@@ -9,6 +9,20 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Changed
 
+- **core:** serve the SEP-2663 Tasks wire. `tasks/get` now returns the flat vendored shape with `ttlMs`/`pollIntervalMs`, its outcome **inlined** (SEP-2663 folds the removed `tasks/result` round trip into the poll) and its `inputRequests` carried so the client can answer them; `tasks/cancel` and `tasks/update` return empty acknowledgements, because cancellation is cooperative and claiming a status the upstream never reported is the fabrication the SEP warns about. `tasks/result` and `tasks/list` are no longer registered, which is how they return `-32601`. `tasks/update` is now registered **unconditionally** — it was gated on an SDK probe that could never become true, so the handler was dead code (ADR-015). The advertised capability no longer claims `list` ([#322](https://github.com/mcp-hangar/mcp-hangar/issues/322))
+
+- **core:** refuse `tasks/*` with the code SEP-2663 specifies: `-32601` on a 2025-11-25 connection (the methods do not exist there), `-32021` with a machine-readable `requiredCapabilities` for a modern client that never declared `io.modelcontextprotocol/tasks`, `-32020` for a missing or contradictory `Mcp-Name` header, `-32602` for an unknown or unowned task. The ladder is ordered version → routing header → capability, and each rung refuses before reaching the upstream ([#322](https://github.com/mcp-hangar/mcp-hangar/issues/322))
+
+- **core:** enforce SEP-2663's mandatory `Mcp-Name: <taskId>` on `tasks/get|update|cancel` over HTTP. Neither the SDK nor Hangar's front-door middleware covers this — the SDK's `NAME_BEARING_METHODS` omits `tasks/*` and checks agreement rather than presence, and the middleware deliberately disengages on 2026-07-28 — so the handler gate is the only rung that runs. Skipped on stdio, where the SEP does not apply. `NAME_BEARING_TASK_METHODS` is exported for the operator's L7 selector (operator#53)
+
+### Removed
+
+- **core:** the synchronous 2025-11-25 mid-flight consent flow, which resolved an `input_required` task by eliciting the downstream client inside `tasks/get`. It existed only for a wire Hangar no longer serves; on the SEP-2663 wire the client resolves its own input by driving `tasks/update`, which is governed and still fail-closed. What went with it: the decline / cancel / no-back-channel / elicit-error denial matrix and the concurrent-reprompt guard, all of which guarded an interactive prompt Hangar no longer issues. The digest re-verification that guarded `tasks/result` did **not** go with it — it moved to `tasks/get`, now the only path by which a payload reaches a caller
+
+- **core:** `HAS_LIST_TASKS` / `HAS_TASKS_UPDATE` from `_sdk_compat`. Both probed `mcp_types`, which carries the frozen SEP-1686 generation, so neither could ever flip (ADR-015)
+
+### Changed
+
 - **core:** correct two claims in the `tasks_wire` module docstring that a reader could disprove in seconds — `resultType` is not "absent entirely" from `mcp_types` (twelve result classes declare it, and `ResultType` accepts any string; the true and sufficient claim is that no `Task*` class does), and b2/rc1 are not "byte-identical" (the module was edited in that window — `SERVER_INFO_META_KEY` arrived, `DiscoverResult` lost `server_info`). The accurate version is the stronger argument: the Tasks surface is unchanged across both releases while the file around it is under active edit, so those types are a deliberately frozen region rather than a neglected one
 
 ### Added

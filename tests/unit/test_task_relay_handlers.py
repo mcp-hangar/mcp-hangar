@@ -1,16 +1,17 @@
-"""Unit tests for the relayed-task serving surface (ADR-014, Phase 2).
+"""Unit tests for the SEP-2663 relayed-task serving surface (ADR-014 / ADR-015).
 
-Exercises the four ``tasks/*`` request handlers registered by
+Exercises the three ``tasks/*`` handlers registered by
 :func:`register_task_relay_handlers` against a REAL :class:`GovernedTaskStore`, a
-fake injected upstream router, and a fake FastMCP request context that carries an
-authenticated principal (the streamable-HTTP identity bridge). Handlers are
-invoked directly.
+fake injected upstream router, and a fake request context carrying an
+authenticated principal, a negotiated protocol version, a client capability
+declaration and the ``Mcp-Name`` routing header. Handlers are invoked directly.
 
-Invariants under test: flat (non-nested) result construction, upstream-truthful
-snapshot sync, once-only ``TaskCompleted``/``TaskCancelled`` emission, cancel
-truthfulness, cross-tenant denial with no existence leak, ``tasks/result``
-reconstruction + digest-drift propagation, and that NO ``tasks/update`` handler
-is registered.
+Invariants under test: the SEP-2663 wire shapes (flat, ``ttlMs``, outcome
+inlined), the refusal ladder (``-32601`` legacy / ``-32020`` routing header /
+``-32021`` undeclared extension / ``-32602`` unknown task), upstream-truthful
+snapshot sync, once-only ``TaskCompleted``/``TaskCancelled`` emission, empty
+cancel/update acknowledgements, cross-tenant denial with no existence leak, and
+digest re-verification before an outcome is handed over.
 """
 
 from __future__ import annotations
@@ -23,15 +24,13 @@ from typing import Any
 
 import pytest
 
-from mcp_hangar._sdk_compat import (
-    CallToolResult,
-    CancelTaskRequestParams,
-    CancelTaskResult,
-    GetTaskPayloadRequestParams,
-    GetTaskRequestParams,
+from mcp_hangar._sdk_compat import McpError
+from mcp_hangar.tasks_wire import (
+    EXTENSION_ID,
+    HEADER_MISMATCH,
+    MISSING_REQUIRED_CLIENT_CAPABILITY,
+    EmptyResult,
     GetTaskResult,
-    McpError,
-    PaginatedRequestParams,
 )
 from mcp_hangar.application.tasks.governed_task_store import GovernedTaskStore
 from mcp_hangar.context import identity_context_var
@@ -100,25 +99,56 @@ def _principal(user_id: str, tenant_id: str) -> Any:
     )
 
 
-def _request_with(principal: Any) -> Any:
-    return SimpleNamespace(state=SimpleNamespace(auth=SimpleNamespace(principal=principal)))
+def _request_with(principal: Any, headers: dict[str, str] | None) -> Any:
+    return SimpleNamespace(
+        state=SimpleNamespace(auth=SimpleNamespace(principal=principal)),
+        headers=headers,
+    )
 
 
-def _ctx(user_id: str | None = None, tenant_id: str | None = None) -> Any:
+def _session(*, version: str | None, declares: bool) -> Any:
+    """A fake session carrying the negotiated version and client capabilities."""
+    extensions = {EXTENSION_ID: {}} if declares else {}
+    return SimpleNamespace(
+        protocol_version=version,
+        client_params=SimpleNamespace(capabilities=SimpleNamespace(extensions=extensions)),
+    )
+
+
+def _ctx(
+    user_id: str | None = None,
+    tenant_id: str | None = None,
+    *,
+    task_id: str | None = "T1",
+    version: str | None = "2026-07-28",
+    declares: bool = True,
+) -> Any:
     """A fake ctx in the SDK **v2** shape: the request hangs off ``ctx.request``.
 
     This is what ``ServerRequestContext`` actually looks like on ``mcp>=2``; there
     is no ``request_context`` attribute. Pinning the v1 shape here is what let the
     bridge silently no-op under auth in production while these tests stayed green.
+
+    Defaults to a caller the SEP-2663 ladder accepts -- modern version, extension
+    declared, ``Mcp-Name`` matching ``task_id`` -- so that a test about anything
+    else is not silently testing the gate. Each knob is turned off individually
+    by the refusal-ladder tests.
     """
     principal = _principal(user_id, tenant_id) if user_id else None
-    return SimpleNamespace(request=_request_with(principal))
+    headers = {"mcp-name": task_id} if task_id is not None else {}
+    return SimpleNamespace(
+        request=_request_with(principal, headers),
+        session=_session(version=version, declares=declares),
+    )
 
 
-def _ctx_v1(user_id: str | None = None, tenant_id: str | None = None) -> Any:
+def _ctx_v1(user_id: str | None = None, tenant_id: str | None = None, *, task_id: str = "T1") -> Any:
     """The SDK **v1** shape: ``ctx.request_context.request``. Still supported."""
     principal = _principal(user_id, tenant_id) if user_id else None
-    return SimpleNamespace(request_context=SimpleNamespace(request=_request_with(principal)))
+    return SimpleNamespace(
+        request_context=SimpleNamespace(request=_request_with(principal, {"mcp-name": task_id})),
+        session=_session(version="2026-07-28", declares=True),
+    )
 
 
 def _upstream_task(task_id: str, *, status: str = "working", **extra: Any) -> dict[str, Any]:
@@ -179,19 +209,6 @@ def test_flat_get_result_spread_dumps_camelcase_wire_json() -> None:
     assert wire["lastUpdatedAt"] == "2020-01-02T00:00:00Z"
 
 
-def test_flat_cancel_result_spread_dumps_camelcase_wire_json() -> None:
-    result = CancelTaskResult(
-        task_id="T1",
-        status="cancelled",
-        created_at="2020-01-01T00:00:00Z",
-        last_updated_at="2020-01-02T00:00:00Z",
-        ttl=None,
-    )
-    wire = result.model_dump(by_alias=True)
-    assert wire["taskId"] == "T1"
-    assert wire["status"] == "cancelled"
-
-
 def test_nested_task_form_is_locked_out() -> None:
     """The anti-pattern ``GetTaskResult(task=...)`` must raise (results are FLAT)."""
     from pydantic import ValidationError
@@ -205,18 +222,47 @@ def test_nested_task_form_is_locked_out() -> None:
 # ---------------------------------------------------------------------------
 
 
-def test_registers_four_handlers_with_exact_methods_and_param_types(store: GovernedTaskStore) -> None:
+def test_registers_exactly_the_sep_2663_method_set(store: GovernedTaskStore) -> None:
+    """Three methods, and the absence of the other two is the point.
+
+    SEP-2663 removes `tasks/result` and `tasks/list`. An unregistered method
+    already yields -32601 from the SDK runner, so not registering them IS the
+    implementation of "removed" -- there is no separate rejection to write.
+    """
     handlers = _handlers(store, _FakeRouter())
-    assert set(handlers) == {"tasks/get", "tasks/result", "tasks/cancel", "tasks/list"}
-    assert handlers["tasks/get"][0] is GetTaskRequestParams
-    assert handlers["tasks/result"][0] is GetTaskPayloadRequestParams
-    assert handlers["tasks/cancel"][0] is CancelTaskRequestParams
-    assert handlers["tasks/list"][0] is PaginatedRequestParams
+
+    assert set(handlers) == {"tasks/get", "tasks/cancel", "tasks/update"}
 
 
-def test_no_tasks_update_handler_registered(store: GovernedTaskStore) -> None:
+def test_update_is_registered_unconditionally(store: GovernedTaskStore) -> None:
+    """It used to be gated on the SDK defining ``UpdateTaskRequest``.
+
+    That probe watched `mcp_types`, which carries the frozen SEP-1686
+    generation, so it could never become true and the handler was dead code on
+    every SDK version (ADR-015).
+    """
     handlers = _handlers(store, _FakeRouter())
-    assert "tasks/update" not in handlers
+
+    assert "tasks/update" in handlers
+
+
+def test_param_models_match_the_vendored_wire_definitions(store: GovernedTaskStore) -> None:
+    """The registered params subclass the SDK base but must not drift from the wire.
+
+    They deliberately subclass `RequestParams` rather than the `tasks_wire`
+    models so `_meta` is parsed and forwarded; this pins that the two field sets
+    stay identical anyway.
+    """
+    from mcp_hangar import tasks_wire
+
+    handlers = _handlers(store, _FakeRouter())
+
+    def fields(model: Any) -> set[str]:
+        return set(model.model_fields) - {"meta"}
+
+    assert fields(handlers["tasks/get"][0]) == fields(tasks_wire.GetTaskRequestParams)
+    assert fields(handlers["tasks/cancel"][0]) == fields(tasks_wire.CancelTaskRequestParams)
+    assert fields(handlers["tasks/update"][0]) == fields(tasks_wire.UpdateTaskRequestParams)
 
 
 # ---------------------------------------------------------------------------
@@ -268,38 +314,6 @@ def test_get_emits_task_completed_once_on_working_to_completed(store: GovernedTa
     assert completed[0].tenant_id == "tenant-a"
 
 
-def test_get_input_required_without_elicitation_channel_fails_closed(store: GovernedTaskStore) -> None:
-    """No downstream elicitation channel (ctx has no session) -> fail-closed, never left input_required."""
-    _register(store, "S1", "T1", "tenant-a", "alice")
-    router = _FakeRouter({"tasks/get": {"result": _upstream_task("T1", status="input_required")}})
-    handlers = _handlers(store, router)
-
-    result = asyncio.run(handlers["tasks/get"][1](_ctx("alice", "tenant-a"), SimpleNamespace(task_id="T1")))
-    assert result.model_dump(by_alias=True)["status"] == "failed"
-
-
-# ---------------------------------------------------------------------------
-# tasks/list
-# ---------------------------------------------------------------------------
-
-
-def test_list_returns_only_callers_tasks_no_cursor(store: GovernedTaskStore) -> None:
-    _register(store, "S1", "T1", "tenant-a", "alice")
-    _register(store, "S2", "T2", "tenant-a", "alice")
-    _register(store, "S3", "T3", "tenant-b", "bob")
-    handlers = _handlers(store, _FakeRouter())
-
-    result = asyncio.run(handlers["tasks/list"][1](_ctx("alice", "tenant-a"), SimpleNamespace()))
-    ids = {t.task_id for t in result.tasks}
-    assert ids == {"T1", "T2"}
-    assert result.model_dump(by_alias=True).get("nextCursor") is None
-
-
-# ---------------------------------------------------------------------------
-# Cross-tenant / ownership (no existence leak)
-# ---------------------------------------------------------------------------
-
-
 def test_get_cross_tenant_denied_no_leak_and_no_upstream_call(store: GovernedTaskStore) -> None:
     _register(store, "S1", "T1", "tenant-a", "alice")
     router = _FakeRouter({"tasks/get": {"result": _upstream_task("T1")}})
@@ -315,7 +329,9 @@ def test_get_unknown_task_id_denied(store: GovernedTaskStore) -> None:
     _register(store, "S1", "T1", "tenant-a", "alice")
     handlers = _handlers(store, _FakeRouter())
     with pytest.raises(McpError) as exc:
-        asyncio.run(handlers["tasks/get"][1](_ctx("alice", "tenant-a"), SimpleNamespace(task_id="NOPE")))
+        asyncio.run(
+            handlers["tasks/get"][1](_ctx("alice", "tenant-a", task_id="NOPE"), SimpleNamespace(task_id="NOPE"))
+        )
     assert "Task not found: NOPE" in str(exc.value)
 
 
@@ -324,15 +340,14 @@ def test_get_unknown_task_id_denied(store: GovernedTaskStore) -> None:
 # ---------------------------------------------------------------------------
 
 
-def test_cancel_confirmed_retires_and_emits_once(store: GovernedTaskStore, events: list[object]) -> None:
+def test_cancel_confirmed_retires_the_entry_and_emits_once(store: GovernedTaskStore, events: list[object]) -> None:
     _register(store, "S1", "T1", "tenant-a", "alice")
     router = _FakeRouter({"tasks/cancel": {"result": _upstream_task("T1", status="cancelled")}})
     handlers = _handlers(store, router)
 
     result = asyncio.run(handlers["tasks/cancel"][1](_ctx("alice", "tenant-a"), SimpleNamespace(task_id="T1")))
 
-    assert isinstance(result, CancelTaskResult)
-    assert result.model_dump(by_alias=True)["status"] == "cancelled"
+    assert isinstance(result, EmptyResult)
     cancelled = [e for e in events if isinstance(e, TaskCancelled)]
     assert len(cancelled) == 1
     assert cancelled[0].task_id == "T1"
@@ -342,33 +357,64 @@ def test_cancel_confirmed_retires_and_emits_once(store: GovernedTaskStore, event
     assert len([e for e in events if isinstance(e, TaskCancelled)]) == 1
 
 
-def test_cancel_upstream_error_keeps_entry_returns_true_status_no_event(
+def test_the_cancel_ack_carries_no_status_at_all(store: GovernedTaskStore) -> None:
+    """SEP-2663: cancellation is cooperative, so the ack must not claim an outcome.
+
+    The SEP-1686 shape this replaced returned a status -- and on the confirmed
+    path OVERWROTE it with ``cancelled`` before returning, which is exactly the
+    fabrication the SEP warns about. The client polls ``tasks/get`` instead.
+    """
+    _register(store, "S1", "T1", "tenant-a", "alice")
+    router = _FakeRouter({"tasks/cancel": {"result": _upstream_task("T1", status="cancelled")}})
+    handlers = _handlers(store, router)
+
+    result = asyncio.run(handlers["tasks/cancel"][1](_ctx("alice", "tenant-a"), SimpleNamespace(task_id="T1")))
+    wire = result.model_dump(by_alias=True, exclude_none=True)
+
+    assert wire == {"resultType": "complete"}
+
+
+def test_cancel_upstream_error_keeps_the_entry_and_emits_nothing(
     store: GovernedTaskStore, events: list[object]
 ) -> None:
+    """An unconfirmed cancel must not retire the ledger entry or claim success."""
     _register(store, "S1", "T1", "tenant-a", "alice")
-    router = _FakeRouter({"tasks/cancel": {"error": {"code": -32000, "message": "refused"}}})
+    router = _FakeRouter(
+        {
+            "tasks/cancel": {"error": {"code": -32000, "message": "refused"}},
+            "tasks/get": {"result": _upstream_task("T1", status="working")},
+        }
+    )
     handlers = _handlers(store, router)
 
     result = asyncio.run(handlers["tasks/cancel"][1](_ctx("alice", "tenant-a"), SimpleNamespace(task_id="T1")))
 
-    # True current status returned (working), NOT a fabricated 'cancelled'.
-    assert result.model_dump(by_alias=True)["status"] == "working"
+    assert isinstance(result, EmptyResult)
     assert [e for e in events if isinstance(e, TaskCancelled)] == []
-    # Entry KEPT: still resolvable via list.
-    listed = asyncio.run(handlers["tasks/list"][1](_ctx("alice", "tenant-a"), SimpleNamespace()))
-    assert {t.task_id for t in listed.tasks} == {"T1"}
+    # Entry KEPT: the task is still pollable and still reports its TRUE status.
+    polled = asyncio.run(handlers["tasks/get"][1](_ctx("alice", "tenant-a"), SimpleNamespace(task_id="T1")))
+    assert polled.status == "working"
 
 
 def test_cancel_upstream_reports_non_cancelled_status_keeps_entry(
     store: GovernedTaskStore, events: list[object]
 ) -> None:
+    """The upstream answered cleanly but is still working -- not a confirmation."""
     _register(store, "S1", "T1", "tenant-a", "alice")
-    router = _FakeRouter({"tasks/cancel": {"result": _upstream_task("T1", status="working")}})
+    router = _FakeRouter(
+        {
+            "tasks/cancel": {"result": _upstream_task("T1", status="working")},
+            "tasks/get": {"result": _upstream_task("T1", status="working")},
+        }
+    )
     handlers = _handlers(store, router)
 
     result = asyncio.run(handlers["tasks/cancel"][1](_ctx("alice", "tenant-a"), SimpleNamespace(task_id="T1")))
-    assert result.model_dump(by_alias=True)["status"] == "working"
+
+    assert isinstance(result, EmptyResult)
     assert [e for e in events if isinstance(e, TaskCancelled)] == []
+    polled = asyncio.run(handlers["tasks/get"][1](_ctx("alice", "tenant-a"), SimpleNamespace(task_id="T1")))
+    assert polled.status == "working"
 
 
 def test_cancel_confirmed_predicate() -> None:
@@ -378,52 +424,6 @@ def test_cancel_confirmed_predicate() -> None:
     assert _cancel_confirmed({"error": {"code": -1}}) is False
     assert _cancel_confirmed({"result": {"status": "working"}}) is False
     assert _cancel_confirmed("nonsense") is False
-
-
-# ---------------------------------------------------------------------------
-# tasks/result
-# ---------------------------------------------------------------------------
-
-
-def test_result_reconstructs_call_tool_result(store: GovernedTaskStore) -> None:
-    _register(store, "S1", "T1", "tenant-a", "alice")
-    payload = {"content": [{"type": "text", "text": "done"}], "isError": False}
-    router = _FakeRouter({"tasks/result": {"result": payload}})
-    handlers = _handlers(store, router)
-
-    result = asyncio.run(handlers["tasks/result"][1](_ctx("alice", "tenant-a"), SimpleNamespace(task_id="T1")))
-    assert isinstance(result, CallToolResult)
-    assert router.calls == [("S1", "tasks/result", {"task_id": "T1"}, 30.0)]
-    assert result.content[0].text == "done"
-
-
-def test_result_upstream_error_raises(store: GovernedTaskStore) -> None:
-    _register(store, "S1", "T1", "tenant-a", "alice")
-    router = _FakeRouter({"tasks/result": {"error": {"code": -32000, "message": "boom"}}})
-    handlers = _handlers(store, router)
-    with pytest.raises(McpError) as exc:
-        asyncio.run(handlers["tasks/result"][1](_ctx("alice", "tenant-a"), SimpleNamespace(task_id="T1")))
-    assert "task result unavailable" in str(exc.value)
-
-
-def test_result_digest_drift_propagates_and_skips_upstream(
-    store: GovernedTaskStore, monkeypatch: pytest.MonkeyPatch
-) -> None:
-    from mcp_hangar._sdk_compat import INVALID_PARAMS, make_mcp_error
-
-    _register(store, "S1", "T1", "tenant-a", "alice")
-    router = _FakeRouter({"tasks/result": {"result": {"content": []}}})
-
-    def _drift(key: Any) -> None:
-        raise make_mcp_error(INVALID_PARAMS, "tool digest drifted since task creation")
-
-    monkeypatch.setattr(store, "_verify_pinned_digest", _drift)
-    handlers = _handlers(store, router)
-
-    with pytest.raises(McpError) as exc:
-        asyncio.run(handlers["tasks/result"][1](_ctx("alice", "tenant-a"), SimpleNamespace(task_id="T1")))
-    assert "digest drifted" in str(exc.value)
-    assert router.calls == []  # drift fails before the relay
 
 
 # ---------------------------------------------------------------------------
@@ -484,3 +484,321 @@ def test_a_foreign_tenant_still_cannot_reach_the_task_through_the_v2_shape(store
     with pytest.raises(McpError):
         asyncio.run(handlers["tasks/get"][1](_ctx("bob", "tenant-b"), SimpleNamespace(task_id="T1")))
     assert router.calls == []
+
+
+# ---------------------------------------------------------------------------
+# The SEP-2663 refusal ladder
+# ---------------------------------------------------------------------------
+
+
+@pytest.mark.parametrize("method", ["tasks/get", "tasks/cancel", "tasks/update"])
+def test_legacy_connection_is_told_the_method_does_not_exist(store: GovernedTaskStore, method: str) -> None:
+    """A 2025-11-25 client gets -32601, not -32021.
+
+    It could not act on -32021 if it wanted to: the extension it would be told
+    to declare cannot be negotiated on its protocol generation. For it these
+    methods genuinely do not exist.
+    """
+    _register(store, "S1", "T1", "tenant-a", "alice")
+    router = _FakeRouter()
+    handlers = _handlers(store, router)
+    params = SimpleNamespace(task_id="T1", input_responses={"k": {}})
+
+    with pytest.raises(McpError) as exc:
+        asyncio.run(handlers[method][1](_ctx("alice", "tenant-a", version="2025-11-25"), params))
+
+    assert exc.value.error.code == -32601
+    assert router.calls == [], "a refused request must never reach the upstream"
+
+
+def test_an_unreadable_protocol_version_fails_closed_to_legacy(store: GovernedTaskStore) -> None:
+    """No negotiated version -> treated as legacy, not as modern."""
+    _register(store, "S1", "T1", "tenant-a", "alice")
+    handlers = _handlers(store, _FakeRouter())
+
+    with pytest.raises(McpError) as exc:
+        asyncio.run(handlers["tasks/get"][1](_ctx("alice", "tenant-a", version=None), SimpleNamespace(task_id="T1")))
+
+    assert exc.value.error.code == -32601
+
+
+@pytest.mark.parametrize("method", ["tasks/get", "tasks/cancel", "tasks/update"])
+def test_modern_client_without_the_extension_is_told_what_to_declare(store: GovernedTaskStore, method: str) -> None:
+    """-32021 carries a machine-readable `requiredCapabilities`.
+
+    Unlike a legacy client, this one can fix its declaration and retry, so it is
+    told exactly what to add rather than simply refused.
+    """
+    _register(store, "S1", "T1", "tenant-a", "alice")
+    router = _FakeRouter()
+    handlers = _handlers(store, router)
+    params = SimpleNamespace(task_id="T1", input_responses={"k": {}})
+
+    with pytest.raises(McpError) as exc:
+        asyncio.run(handlers[method][1](_ctx("alice", "tenant-a", declares=False), params))
+
+    assert exc.value.error.code == MISSING_REQUIRED_CLIENT_CAPABILITY == -32021
+    assert exc.value.error.data == {"requiredCapabilities": {"extensions": {EXTENSION_ID: {}}}}
+    assert router.calls == []
+
+
+@pytest.mark.parametrize("method", ["tasks/get", "tasks/cancel", "tasks/update"])
+def test_a_missing_mcp_name_header_is_refused(store: GovernedTaskStore, method: str) -> None:
+    """SEP-2663 mandates `Mcp-Name: <taskId>` on every `tasks/*` over HTTP.
+
+    The header only earns its keep if it is reliably present -- an intermediary
+    routing on it cannot fall back to parsing the body. Neither the SDK nor the
+    front-door middleware enforces this (the SDK's `NAME_BEARING_METHODS` omits
+    `tasks/*`; the middleware disengages on 2026-07-28), so this gate is the
+    only rung that runs.
+    """
+    _register(store, "S1", "T1", "tenant-a", "alice")
+    router = _FakeRouter()
+    handlers = _handlers(store, router)
+    params = SimpleNamespace(task_id="T1", input_responses={"k": {}})
+
+    with pytest.raises(McpError) as exc:
+        asyncio.run(handlers[method][1](_ctx("alice", "tenant-a", task_id=None), params))
+
+    assert exc.value.error.code == HEADER_MISMATCH == -32020
+    assert router.calls == []
+
+
+def test_an_mcp_name_header_disagreeing_with_the_body_is_refused(store: GovernedTaskStore) -> None:
+    """Worse than absent: an intermediary already routed on a value the body denies."""
+    _register(store, "S1", "T1", "tenant-a", "alice")
+    router = _FakeRouter()
+    handlers = _handlers(store, router)
+
+    with pytest.raises(McpError) as exc:
+        asyncio.run(
+            handlers["tasks/get"][1](_ctx("alice", "tenant-a", task_id="SOMEONE-ELSE"), SimpleNamespace(task_id="T1"))
+        )
+
+    assert exc.value.error.code == HEADER_MISMATCH
+    assert router.calls == []
+
+
+def test_the_ladder_is_ordered_header_before_capability(store: GovernedTaskStore) -> None:
+    """A misrouted request is refused as misrouted whatever the client declared.
+
+    Both defects are present here. The answer must be the routing one: it is a
+    property of the request, not of the client's declaration, so it cannot be
+    allowed to depend on how far down the ladder the request happens to get.
+    """
+    _register(store, "S1", "T1", "tenant-a", "alice")
+    handlers = _handlers(store, _FakeRouter())
+
+    with pytest.raises(McpError) as exc:
+        asyncio.run(
+            handlers["tasks/get"][1](
+                _ctx("alice", "tenant-a", task_id=None, declares=False), SimpleNamespace(task_id="T1")
+            )
+        )
+
+    assert exc.value.error.code == HEADER_MISMATCH
+
+
+def test_the_ladder_is_ordered_version_before_header(store: GovernedTaskStore) -> None:
+    """Never demand a routing header for a method that does not exist for you."""
+    _register(store, "S1", "T1", "tenant-a", "alice")
+    handlers = _handlers(store, _FakeRouter())
+
+    with pytest.raises(McpError) as exc:
+        asyncio.run(
+            handlers["tasks/get"][1](
+                _ctx("alice", "tenant-a", version="2025-11-25", task_id=None), SimpleNamespace(task_id="T1")
+            )
+        )
+
+    assert exc.value.error.code == -32601
+
+
+def test_stdio_has_no_headers_so_the_requirement_does_not_apply(store: GovernedTaskStore) -> None:
+    """SEP-2663 scopes `Mcp-Name` to Streamable HTTP.
+
+    On stdio there is no request object to carry it, so its absence means "not
+    applicable" rather than "missing" -- refusing there would make the relay
+    unusable on a transport the SEP never addressed.
+    """
+    _register(store, "S1", "T1", "tenant-a", "alice")
+    router = _FakeRouter({"tasks/get": {"result": _upstream_task("T1")}})
+    handlers = _handlers(store, router)
+    ctx = SimpleNamespace(request=None, session=_session(version="2026-07-28", declares=True))
+
+    with _as("tenant-a", "alice"):
+        result = asyncio.run(handlers["tasks/get"][1](ctx, SimpleNamespace(task_id="T1")))
+
+    assert result.task_id == "T1"
+
+
+# ---------------------------------------------------------------------------
+# SEP-2663 wire shape on tasks/get
+# ---------------------------------------------------------------------------
+
+
+def test_get_projects_the_ledger_snapshot_onto_the_sep_2663_field_names(store: GovernedTaskStore) -> None:
+    """The ledger still stores the SEP-1686 `Task`; the wire must not show it.
+
+    `ttl` -> `ttlMs` and `poll_interval` -> `pollIntervalMs` are pure renames --
+    the fossil documents both as milliseconds -- but the fossil spellings must
+    never reach a client.
+    """
+    _register(store, "S1", "T1", "tenant-a", "alice")
+    router = _FakeRouter({"tasks/get": {"result": _upstream_task("T1")}})
+    handlers = _handlers(store, router)
+
+    result = asyncio.run(handlers["tasks/get"][1](_ctx("alice", "tenant-a"), SimpleNamespace(task_id="T1")))
+    wire = result.model_dump(by_alias=True)
+
+    assert wire["ttlMs"] == 60_000
+    assert "ttl" not in wire
+    assert "pollInterval" not in wire
+    assert wire["resultType"] == "complete"
+    assert "task" not in wire, "results are flat; the nested fossil form must not reappear"
+
+
+def test_a_completed_task_inlines_its_result_on_the_poll(store: GovernedTaskStore) -> None:
+    """SEP-2663 folds the removed `tasks/result` round trip into `tasks/get`."""
+    _register(store, "S1", "T1", "tenant-a", "alice")
+    payload = {"content": [{"type": "text", "text": "done"}], "isError": False}
+    router = _FakeRouter({"tasks/get": {"result": _upstream_task("T1", status="completed", result=payload)}})
+    handlers = _handlers(store, router)
+
+    result = asyncio.run(handlers["tasks/get"][1](_ctx("alice", "tenant-a"), SimpleNamespace(task_id="T1")))
+
+    assert result.status == "completed"
+    assert result.result == payload
+
+
+def test_input_requests_reach_the_client_so_it_can_answer_them(store: GovernedTaskStore) -> None:
+    """Without this map the client cannot key its `tasks/update` answers.
+
+    python-sdk#3005's own `GetTaskResult` drops it (no field + `extra="ignore"`),
+    which is the one place the vendored models deliberately diverge.
+    """
+    _register(store, "S1", "T1", "tenant-a", "alice")
+    requests = {"user_name": {"message": "Who are you?"}}
+    router = _FakeRouter(
+        {"tasks/get": {"result": _upstream_task("T1", status="input_required", inputRequests=requests)}}
+    )
+    handlers = _handlers(store, router)
+
+    result = asyncio.run(handlers["tasks/get"][1](_ctx("alice", "tenant-a"), SimpleNamespace(task_id="T1")))
+
+    assert result.input_requests == requests
+    assert result.model_dump(by_alias=True)["inputRequests"] == requests
+
+
+def test_an_upstream_error_yields_no_outcome_fields(store: GovernedTaskStore) -> None:
+    """State is never fabricated: no upstream answer means no inlined outcome."""
+    _register(store, "S1", "T1", "tenant-a", "alice")
+    router = _FakeRouter({"tasks/get": {"error": {"code": -32000, "message": "boom"}}})
+    handlers = _handlers(store, router)
+
+    result = asyncio.run(handlers["tasks/get"][1](_ctx("alice", "tenant-a"), SimpleNamespace(task_id="T1")))
+
+    assert result.result is None
+    assert result.error is None
+    assert result.status == "working"
+
+
+def test_digest_drift_is_caught_before_an_outcome_is_handed_over(
+    store: GovernedTaskStore, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """The check that used to guard `tasks/result` must survive its removal.
+
+    With that method gone, `tasks/get` is the ONLY path by which a task's
+    payload reaches a caller. Dropping the re-verification along with the method
+    would have quietly retired a supply-chain control (ADR-014) while looking
+    like a pure wire change.
+    """
+    from mcp_hangar._sdk_compat import INVALID_PARAMS, make_mcp_error
+
+    _register(store, "S1", "T1", "tenant-a", "alice")
+    payload = {"content": [], "isError": False}
+    router = _FakeRouter({"tasks/get": {"result": _upstream_task("T1", status="completed", result=payload)}})
+
+    def _drift(key: Any) -> None:
+        raise make_mcp_error(INVALID_PARAMS, "tool digest drifted since task creation")
+
+    monkeypatch.setattr(store, "_verify_pinned_digest", _drift)
+    handlers = _handlers(store, router)
+
+    with pytest.raises(McpError) as exc:
+        asyncio.run(handlers["tasks/get"][1](_ctx("alice", "tenant-a"), SimpleNamespace(task_id="T1")))
+
+    assert "digest drifted" in str(exc.value)
+
+
+def test_a_still_running_task_is_not_digest_checked(store: GovernedTaskStore, monkeypatch: pytest.MonkeyPatch) -> None:
+    """The check guards handing over an outcome, matching its old placement.
+
+    A poll that returns no payload has nothing to verify, and failing one would
+    kill live tasks on an unrelated deployment.
+    """
+    from mcp_hangar._sdk_compat import INVALID_PARAMS, make_mcp_error
+
+    _register(store, "S1", "T1", "tenant-a", "alice")
+    router = _FakeRouter({"tasks/get": {"result": _upstream_task("T1", status="working")}})
+
+    def _drift(key: Any) -> None:
+        raise make_mcp_error(INVALID_PARAMS, "tool digest drifted since task creation")
+
+    monkeypatch.setattr(store, "_verify_pinned_digest", _drift)
+    handlers = _handlers(store, router)
+
+    result = asyncio.run(handlers["tasks/get"][1](_ctx("alice", "tenant-a"), SimpleNamespace(task_id="T1")))
+
+    assert result.status == "working"
+
+
+# ---------------------------------------------------------------------------
+# tasks/update
+# ---------------------------------------------------------------------------
+
+
+def test_update_relays_the_clients_answers_and_acknowledges_empty(store: GovernedTaskStore) -> None:
+    _register(store, "S1", "T1", "tenant-a", "alice")
+    answers = {"user_name": {"content": {"name": "ada"}}}
+    router = _FakeRouter(
+        {
+            "tasks/get": {"result": _upstream_task("T1", status="input_required")},
+            "tasks/update": {"result": _upstream_task("T1", status="working")},
+        }
+    )
+    handlers = _handlers(store, router)
+
+    result = asyncio.run(
+        handlers["tasks/update"][1](_ctx("alice", "tenant-a"), SimpleNamespace(task_id="T1", input_responses=answers))
+    )
+
+    assert isinstance(result, EmptyResult)
+    relayed = [c for c in router.calls if c[1] == "tasks/update"]
+    assert len(relayed) == 1
+
+
+def test_update_from_a_foreign_tenant_is_denied_before_the_gate_or_upstream(
+    store: GovernedTaskStore,
+) -> None:
+    """Tenant authorization sits ABOVE consent, structurally.
+
+    Re-homed from the deleted synchronous-consent suite, where it guarded the
+    elicit path. The property is the same and still load-bearing: a foreign
+    tenant must be refused before anything is opened or relayed, and must not be
+    able to tell "not yours" from "does not exist".
+    """
+    _register(store, "S1", "T1", "tenant-a", "alice")
+    router = _FakeRouter()
+    gate = TaskConsentGate()
+    handlers = _handlers(store, router, gate)
+
+    with pytest.raises(McpError) as exc:
+        asyncio.run(
+            handlers["tasks/update"][1](
+                _ctx("bob", "tenant-b"), SimpleNamespace(task_id="T1", input_responses={"k": {}})
+            )
+        )
+
+    assert "Task not found: T1" in str(exc.value)
+    assert router.calls == [], "a denied caller must never reach the upstream"

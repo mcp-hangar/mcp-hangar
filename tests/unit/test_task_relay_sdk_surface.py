@@ -1,9 +1,8 @@
 """SDK-surface guard for the custom ``tasks/*`` relay methods (ADR-014).
 
-The relay seam registers four custom request methods -- ``tasks/get``,
-``tasks/result``, ``tasks/cancel``, ``tasks/list`` -- that are DELIBERATELY
-absent from the SDK's spec-method registry in mcp==2.0.0b2. That absence is
-load-bearing:
+The relay seam registers three custom request methods -- ``tasks/get``,
+``tasks/update``, ``tasks/cancel`` -- that are DELIBERATELY absent from the
+SDK's spec-method registry. That absence is load-bearing:
 
 ``mcp/server/runner.py`` serializes a handler result via
 ``mcp_types.methods.serialize_server_result(method, version, dumped)`` ONLY when
@@ -26,6 +25,8 @@ resolved: the constant exists in b2.
 from __future__ import annotations
 
 from types import SimpleNamespace
+
+from mcp_hangar import tasks_wire
 from typing import Any
 
 import mcp_types.methods as sdk_methods
@@ -35,7 +36,10 @@ from mcp_hangar.fastmcp_server.task_relay_handlers import register_task_relay_ha
 
 # The byte-exact wire method strings the seam registers. Kept as a literal here
 # so a rename in the handler registration is caught too.
-TASK_RELAY_METHODS = ("tasks/get", "tasks/result", "tasks/cancel", "tasks/list")
+# Sourced from the vendored wire module so the served set and the guarded set
+# cannot drift apart -- a method added there without being checked here would
+# silently escape the SPEC_CLIENT_METHODS guard below.
+TASK_RELAY_METHODS = tuple(sorted(tasks_wire.TASKS_METHODS))
 
 
 class _FakeLow:
@@ -59,8 +63,8 @@ def _registered_methods() -> set[str]:
     return set(low.handlers)
 
 
-def test_seam_registers_exactly_the_four_task_methods() -> None:
-    """The seam registers precisely our four tasks/* methods -- no more, no less."""
+def test_seam_registers_exactly_the_sep_2663_task_methods() -> None:
+    """The seam registers precisely the SEP-2663 method set -- no more, no less."""
     assert _registered_methods() == set(TASK_RELAY_METHODS)
 
 
