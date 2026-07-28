@@ -3,6 +3,11 @@ on:
   pull_request:
   push:
     branches: [main]
+# Read-only by default: without this the workflow inherits the repository
+# default, which is write on nearly everything. Nothing here writes.
+permissions:
+  contents: read
+
 jobs:
   domain:
     uses: mcp-hangar/.github/.github/workflows/domain-lint.yml@main

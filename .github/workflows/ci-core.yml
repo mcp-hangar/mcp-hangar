@@ -26,6 +26,11 @@ concurrency:
 env:
   RUFF_VERSION: "0.14.13"
 
+# Read-only by default: without this the workflow inherits the repository
+# default, which is write on nearly everything. Nothing here writes.
+permissions:
+  contents: read
+
 jobs:
   lint:
     runs-on: ubuntu-latest
