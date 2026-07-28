@@ -9,6 +9,11 @@ concurrency:
   group: ${{ github.workflow }}-${{ github.ref }}
   cancel-in-progress: false
 
+# Read-only by default: without this the workflow inherits the repository
+# default, which is write on nearly everything. Nothing here writes.
+permissions:
+  contents: read
+
 jobs:
   branch-name:
     uses: mcp-hangar/.github/.github/workflows/branch-name.yml@main

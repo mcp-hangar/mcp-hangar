@@ -27,6 +27,21 @@ on:
 env:
   PYTHON_VERSION: "3.11"
 
+# Default the whole workflow to read-only. Without this every job inherits the
+# repository default, which is write on nearly everything -- Contents, Packages,
+# Actions, Deployments, SecurityEvents. That is broadest exactly where it should
+# be narrowest: `smoke-wheel` and `smoke-published` DOWNLOAD AND EXECUTE the
+# freshly built artifact (they start a gateway, spawn subprocess backends and
+# drive a real MCP server), and `test` runs the suite. Those four jobs only ever
+# need to read the repo.
+#
+# The three jobs that genuinely write already declare their own `permissions:`,
+# and a job-level block REPLACES this default rather than merging with it, so
+# they are unaffected: publish-pypi (id-token + attestations), publish-docker
+# (packages) and create-release (contents: write).
+permissions:
+  contents: read
+
 jobs:
   # Validate release tag matches pyproject.toml version
   validate:

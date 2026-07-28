@@ -7,6 +7,10 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Security
+
+- **ci:** scope every workflow's `GITHUB_TOKEN` to read-only by default. Nine workflows declared no top-level `permissions:`, so each inherited the repository default — write on Contents, Packages, Actions, Deployments, SecurityEvents and more. That was broadest exactly where it should be narrowest: in `release.yml` the `smoke-wheel` and `smoke-published` jobs **download and execute the freshly built artifact** (starting a gateway, spawning subprocess backends, driving a real MCP server) and `test` runs the suite — all with a near-omnipotent token, while the three jobs that genuinely publish had already scoped themselves down. Job-level blocks replace rather than merge with the default, so `publish-pypi`, `publish-docker`, `create-release`, `codeql` and `semgrep` keep exactly the scopes they declare
+
 ### Fixed
 
 - **core:** stop stamping the 2026-07-28 `_meta` envelope on upstreams that negotiated a legacy protocol. From `mcp==2.0.0` the SDK enforces era separation: a connection whose `initialize` settled on 2025-11-25 rejects every later request carrying the modern envelope with `-32600`. Hangar stamped it unconditionally, so against any SDK-built legacy upstream `tools/list` failed, the cold start never completed, and the caller saw a **hang** rather than an error — the batch sat until its global timeout. The beta tolerated it; the stable release does not. The handshake now records the negotiated era and withholds the protocol keys on legacy connections, while still sending them to stateless SEP-2575 upstreams, which have no handshake and learn the protocol only from `_meta`. Caught by the published-artifact smoke (gate D) before the wheel shipped ([#550](https://github.com/mcp-hangar/mcp-hangar/issues/550))

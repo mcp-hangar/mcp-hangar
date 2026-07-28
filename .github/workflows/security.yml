@@ -17,6 +17,11 @@ concurrency:
   group: ${{ github.workflow }}-${{ github.ref }}
   cancel-in-progress: true
 
+# Read by default; the CodeQL job needs `security-events: write` to upload its
+# SARIF and declares that itself, which REPLACES this default for that job.
+permissions:
+  contents: read
+
 jobs:
   dependency-audit:
     name: Dependency Audit
