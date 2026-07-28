@@ -7,6 +7,10 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Changed
+
+- **tests:** rewrite the task-relay smoke harness onto the SEP-2663 wire. The drivers negotiated `2025-11-25` and called `tasks/result` / `tasks/list`, so after the wire realignment every `tasks/*` answered `-32601` and the harness tested nothing — silently, because `examples/task_upstream` is not covered by any workflow. `drive_relay.py` now speaks through the SDK's `Client` with `mode="2026-07-28"` and typed requests carrying `name_param`, which is the only way to satisfy the mandatory per-request `Mcp-Name` header; `consent_hitl.py` is removed because Hangar no longer issues the `elicitation/create` prompt it drove; the example upstream now emits `inputRequests` so the governed `tasks/update` loop has something to key on. Two live defects were found by running it: the payload bridge and the capability advertisement
+
 ### Fixed
 
 - **core:** fetch a completed task's payload from an upstream that keeps it behind `tasks/result`. SEP-2663 inlines the result on `tasks/get`, so a modern upstream needs nothing extra — but an upstream on the older design answers `tasks/get` with a status only. Serving `tasks/result` downstream was correctly removed; no longer *calling* it upstream went with it by accident, which made the payload of every task relayed from such a server unreachable: the client polled to `completed` and got `result: null` forever. The fetch is best-effort (a modern upstream answers `-32601` there, which is not a reason to fail a good poll) and runs only after the pinned-digest re-verification, so a drifted tool is never asked for output ([#322](https://github.com/mcp-hangar/mcp-hangar/issues/322))
