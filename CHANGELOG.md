@@ -7,6 +7,17 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [2.0.0rc3](https://github.com/mcp-hangar/mcp-hangar/compare/v2.0.0-rc.2...v2.0.0-rc.3) (2026-07-28)
+
+The candidate that makes the published artifact match what the docs describe. It carries the whole SEP-2663 realignment — which `rc2` predates — and moves the SDK pin onto the **stable** `mcp==2.0.0`, released the same day.
+
+### Changed
+
+- **deps:** pin the SDK to the stable `mcp==2.0.0` / `mcp-types==2.0.0` (from `2.0.0b2`). Verified rather than assumed: the full suite, the relay smoke harness against a live gateway, and the upstream contract all pass unchanged on the stable release. Note what did **not** arrive with it — SEP-2663 Tasks are still absent ([python-sdk#3005](https://github.com/modelcontextprotocol/python-sdk/pull/3005) remains open), and the `Task*` types are field-for-field identical across `b2`, `rc1` and `2.0.0`. A frozen region inside a moving beta could have been a snapshot mid-migration; one that ships unchanged in a major is a decision, so the vendored wire (ADR-015) stays. `pydantic-settings` leaves the dependency tree, which the SDK dropped at `rc1`
+
+- **core:** drop a stale `type: ignore[attr-defined]` in `_sdk_compat`. `mcp.types` does not exist in the betas but the stable release carries it again, so mypy now resolves the import and the suppression became dead weight
+
+
 ### Changed
 
 - **core:** reactivate the governed task relay — `relay_tasks_enabled` defaults to **true** again on all three construction paths. It was turned off on 2026-07-28 because the surface advertised a wire it did not serve; ADR-015 Decision 5 set the condition for turning it back on as *the SEP-2663 shapes actually being served*, and they now are. Verified against a live gateway on a config that never mentions the flag: the extension is advertised on `server/discover` with the served method set, and the full relay lifecycle passes 22/22 — including the payload bridge, the refusal ladder, the `Mcp-Name` requirement and the governed `tasks/update` consent. The rollback path is unchanged and equally verified: `relay_tasks_enabled: false` advertises nothing and registers nothing ([#322](https://github.com/mcp-hangar/mcp-hangar/issues/322))

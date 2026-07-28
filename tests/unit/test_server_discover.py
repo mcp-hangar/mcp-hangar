@@ -270,7 +270,7 @@ class TestDiscoverDescribesTheRealServer:
         """The concrete #605 symptom: Tasks advertised on the server, absent here.
 
         Asserts the EXTENSION entry, not `capabilities.tasks`. The latter has no
-        field in `v2026_07_28.ServerCapabilities`, so the SDK's per-version sieve
+        field in the 2026-07-28 `ServerCapabilities`, so the SDK's per-version sieve
         drops it from a modern discover -- a server advertising it there would
         serve `tasks/*` that no spec-following client could discover.
         """

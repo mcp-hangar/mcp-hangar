@@ -19,9 +19,15 @@ from __future__ import annotations
 try:  # SDK v2: protocol types live in the split ``mcp_types`` package.
     import mcp_types as _t
 except ImportError:  # SDK v1: protocol types live under ``mcp.types``.
-    # Static analysis runs against the pinned SDK (v2); the v1 fallback below is
-    # dead there, so mypy flags the missing v1 module — silence it deliberately.
-    from mcp import types as _t  # type: ignore[attr-defined,no-redef]
+    # Unreachable on the pinned SDK -- ``mcp_types`` imports fine there, so this
+    # branch never runs. It is kept because the module is the one place that
+    # spans both generations.
+    #
+    # The ignore lost its ``attr-defined`` half at the 2.0.0 bump: ``mcp.types``
+    # does not exist in the betas, but the stable release carries it again, so
+    # mypy resolves the import and the suppression became dead weight. Only the
+    # redefinition needs silencing now.
+    from mcp import types as _t  # type: ignore[no-redef]
 
 try:  # SDK v2 renamed McpError -> MCPError (mcp.shared.exceptions still exists).
     from mcp.shared.exceptions import MCPError as McpError

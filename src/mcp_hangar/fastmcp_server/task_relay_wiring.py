@@ -103,7 +103,7 @@ def advertise_tasks_capability(mcp: FastMCP, *, relay_tasks_enabled: bool) -> No
     discoverable at all.
 
     SEP-2663 moved Tasks out of the core capability set into a negotiated
-    extension. ``mcp_types.v2026_07_28.ServerCapabilities`` has no ``tasks``
+    extension. the 2026-07-28 ``ServerCapabilities`` has no ``tasks``
     field, so the SDK's per-version serialization sieve silently DROPS it from a
     2026-07-28 ``server/discover``. Advertising it there produced the exact
     inverse of what was intended:
