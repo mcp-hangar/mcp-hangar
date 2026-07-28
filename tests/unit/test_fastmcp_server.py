@@ -577,14 +577,19 @@ class TestGovernedTaskRelayKillSwitch:
         assert ctx.task_consent_gate is None
         assert ctx.task_upstream_router is None
 
-    def test_default_off_capabilities_byte_identical_except_tasks(self, mock_registry, _reset_ctx):
-        """The ONLY advertised-capabilities difference vs the enabled server is tasks."""
+    def test_default_off_capabilities_byte_identical_except_the_tasks_extension(self, mock_registry, _reset_ctx):
+        """The ONLY advertised-capabilities difference is the tasks extension entry."""
+        from mcp_hangar.tasks_wire import EXTENSION_ID
+
         off = self._server_low(mock_registry, enabled=False).get_capabilities().model_dump()
         reset_context()
         on = self._server_low(mock_registry, enabled=True).get_capabilities().model_dump()
-        assert off["tasks"] is None
+
+        assert EXTENSION_ID not in (off.get("extensions") or {})
         on_without_tasks = dict(on)
-        on_without_tasks["tasks"] = None
+        on_without_tasks["extensions"] = {
+            key: value for key, value in (on.get("extensions") or {}).items() if key != EXTENSION_ID
+        } or None
         assert off == on_without_tasks
 
     def test_no_tasks_update_handler_when_off(self, mock_registry, _reset_ctx):
@@ -604,23 +609,42 @@ class TestGovernedTaskRelayKillSwitch:
         for method in ("tasks/result", "tasks/list"):
             assert low.get_request_handler(method) is None, method
 
-    def test_enabled_advertises_tasks_capability_at_initialize(self, mock_registry, _reset_ctx):
-        """capabilities.tasks is a pure function of the static flag (no task relayed)."""
+    def test_enabled_advertises_the_tasks_extension(self, mock_registry, _reset_ctx):
+        """Advertised under `extensions`, which is where SEP-2663 puts it.
+
+        Not under `capabilities.tasks`: that field does not exist in
+        `v2026_07_28.ServerCapabilities`, so the SDK's per-version serialization
+        sieve drops it from a modern `server/discover` -- leaving the surface
+        served but undiscoverable.
+        """
+        from mcp_hangar.tasks_wire import EXTENSION_ID
+
         low = self._server_low(mock_registry, enabled=True)
-        tasks = low.get_capabilities().tasks
-        assert tasks is not None
-        # `list` is NOT advertised: SEP-2663 removes `tasks/list` and the serving
-        # surface does not register it. Advertising it was the previous defect --
-        # gated on an SDK type that is never going away, so it was advertised
-        # permanently and served never.
-        assert tasks.list is None
-        assert tasks.cancel is not None
-        assert tasks.requests is not None
-        assert tasks.requests.tools is not None
-        assert tasks.requests.tools.call is not None
-        # Also reflected in the full INITIALIZE init-options.
-        init_caps = low.create_initialization_options().capabilities
-        assert init_caps.tasks is not None
+        extensions = low.get_capabilities().extensions or {}
+
+        assert EXTENSION_ID in extensions
+
+    def test_the_advertised_extension_names_only_served_methods(self, mock_registry, _reset_ctx):
+        """The ad and the registration read the same set, so they cannot drift.
+
+        `tasks/list` is absent from it, so it cannot be advertised by mistake --
+        which is the defect 2.0.0rc2 was cut to undo.
+        """
+        from mcp_hangar.tasks_wire import EXTENSION_ID, TASKS_METHODS
+
+        low = self._server_low(mock_registry, enabled=True)
+        settings = (low.get_capabilities().extensions or {})[EXTENSION_ID]
+
+        assert set(settings["methods"]) == set(TASKS_METHODS)
+        assert "tasks/list" not in settings["methods"]
+        for method in settings["methods"]:
+            assert low.get_request_handler(method) is not None, method
+
+    def test_the_legacy_tasks_capability_field_is_not_used(self, mock_registry, _reset_ctx):
+        """It survives only on the wire where Hangar refuses to serve tasks."""
+        low = self._server_low(mock_registry, enabled=True)
+
+        assert low.get_capabilities().tasks is None
 
     def test_enabled_exposes_store_gate_router_on_context(self, mock_registry, _reset_ctx):
         from mcp_hangar.application.tasks import GovernedTaskStore
