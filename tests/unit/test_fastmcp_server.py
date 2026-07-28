@@ -8,10 +8,14 @@ from unittest.mock import AsyncMock, Mock
 import pytest
 
 from mcp_hangar._sdk_compat import HAS_NATIVE_TASKS, lowlevel_server
+from mcp_hangar import tasks_wire
 from mcp_hangar.fastmcp_server import HangarFunctions, MCPServerFactory, MCPServerFactoryBuilder, ServerConfig
 from mcp_hangar.server.context import get_context, reset_context
 
-_TASK_METHODS = ("tasks/get", "tasks/result", "tasks/cancel", "tasks/list")
+# The SEP-2663 method set, sourced from the wire module so this file cannot claim
+# a surface the server does not serve. `tasks/result` and `tasks/list` are absent:
+# the SEP removes both (ADR-015).
+_TASK_METHODS = tuple(sorted(tasks_wire.TASKS_METHODS))
 
 
 def _binds_host_port(server) -> bool:
@@ -589,17 +593,27 @@ class TestGovernedTaskRelayKillSwitch:
 
     # -- enabled (flag True) -------------------------------------------------
 
-    def test_enabled_registers_four_tasks_handlers(self, mock_registry, _reset_ctx):
+    def test_enabled_registers_the_sep_2663_tasks_handlers(self, mock_registry, _reset_ctx):
         low = self._server_low(mock_registry, enabled=True)
         for method in _TASK_METHODS:
             assert low.get_request_handler(method) is not None, method
+
+    def test_enabled_does_not_register_the_methods_sep_2663_removed(self, mock_registry, _reset_ctx):
+        """Not registering them is how they return -32601; nothing else implements that."""
+        low = self._server_low(mock_registry, enabled=True)
+        for method in ("tasks/result", "tasks/list"):
+            assert low.get_request_handler(method) is None, method
 
     def test_enabled_advertises_tasks_capability_at_initialize(self, mock_registry, _reset_ctx):
         """capabilities.tasks is a pure function of the static flag (no task relayed)."""
         low = self._server_low(mock_registry, enabled=True)
         tasks = low.get_capabilities().tasks
         assert tasks is not None
-        assert tasks.list is not None
+        # `list` is NOT advertised: SEP-2663 removes `tasks/list` and the serving
+        # surface does not register it. Advertising it was the previous defect --
+        # gated on an SDK type that is never going away, so it was advertised
+        # permanently and served never.
+        assert tasks.list is None
         assert tasks.cancel is not None
         assert tasks.requests is not None
         assert tasks.requests.tools is not None
@@ -638,9 +652,10 @@ class TestGovernedTaskRelayKillSwitch:
         assert captured["consent_gate"] is ctx.task_consent_gate
         assert captured["router"] is ctx.task_upstream_router
 
-    def test_no_tasks_update_handler_when_enabled(self, mock_registry, _reset_ctx):
+    def test_tasks_update_is_registered_when_enabled(self, mock_registry, _reset_ctx):
+        """It was previously gated on an SDK probe that could never become true."""
         low = self._server_low(mock_registry, enabled=True)
-        assert low.get_request_handler("tasks/update") is None
+        assert low.get_request_handler("tasks/update") is not None
 
 
 class TestServerConfigRelayTasksFlag:

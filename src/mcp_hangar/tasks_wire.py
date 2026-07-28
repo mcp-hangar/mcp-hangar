@@ -84,6 +84,15 @@ EXTENSION_ID = "io.modelcontextprotocol/tasks"
 #: neighbourhood, and because the numeric code is the wire contract.
 MISSING_REQUIRED_CLIENT_CAPABILITY = -32021
 
+#: JSON-RPC code for "a routing header contradicts, or is missing from, the
+#: request it routes" (``mcp_types.jsonrpc.HEADER_MISMATCH``). Reused rather than
+#: invented: the SDK already answers a bad ``Mcp-Method`` / ``Mcp-Name`` with it,
+#: so a client's existing handling applies unchanged.
+HEADER_MISMATCH = -32020
+
+#: Wire name of the SEP-2243 routing header SEP-2663 mandates on ``tasks/*``.
+MCP_NAME_HEADER = "mcp-name"
+
 #: Methods this extension serves on the modern wire. `tasks/result` and
 #: `tasks/list` are absent BY DESIGN -- SEP-2663 removes both -- and that absence
 #: is asserted in tests, so re-adding one here is a deliberate act.
@@ -236,6 +245,8 @@ def missing_capability_error_data() -> dict[str, Any]:
 
 __all__ = [
     "CancelTaskRequestParams",
+    "HEADER_MISMATCH",
+    "MCP_NAME_HEADER",
     "CreateTaskResult",
     "EXTENSION_ID",
     "EmptyResult",
