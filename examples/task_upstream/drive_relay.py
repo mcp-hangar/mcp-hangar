@@ -14,8 +14,8 @@ serves SEP-2663 downstream and bridges the difference, so a green run here prove
 the BRIDGE works, not that the upstream is modern. That bridge is exactly what
 broke once without anyone noticing, because these drivers are not in CI.
 
-Requires ``relay_tasks_enabled: true``; the kill-switch defaults to **off**
-(ADR-015). ``config.yaml`` sets it.
+The relay is live by default (``relay_tasks_enabled``); ``config.yaml`` spells
+it out anyway so the example still runs against a deployment that turned it off.
 
 Exits non-zero if any assertion fails.
 """
@@ -61,7 +61,7 @@ async def _check_advertisement(session: Any, checks: Checks) -> None:
 
     A 2026-07-28 connection has no ``initialize`` to learn them from -- that is
     the point of SEP-2575 -- and the entry must sit under ``extensions``, since
-    ``v2026_07_28.ServerCapabilities`` has no ``tasks`` field and a server
+    the 2026-07-28 ``ServerCapabilities`` has no ``tasks`` field and a server
     advertising it there has it sieved out of this very response.
     """
     advertised = (await discover(session)).get("capabilities") or {}

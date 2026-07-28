@@ -32,8 +32,8 @@ python examples/task_upstream/smoke_upstream.py --url http://127.0.0.1:8081/mcp 
 python examples/task_upstream/drive_relay.py                                     # through Hangar
 ```
 
-`drive_relay.py` needs `relay_tasks_enabled: true`. The kill-switch defaults to
-**off** (ADR-015); `config.yaml` here turns it on.
+The relay is live by default; `config.yaml` spells `relay_tasks_enabled` out
+anyway so the example still runs against a deployment that turned it off.
 
 Each script exits non-zero on the first failed assertion, so they drop straight
 into CI or a release checklist.
@@ -60,7 +60,7 @@ regression.
 **`drive_relay.py`** — the same lifecycle *through* Hangar, plus what only the
 relay can be asked. It drives the SEP-2663 surface: the tasks extension
 advertised on `server/discover` (under `capabilities.extensions`, since
-`v2026_07_28.ServerCapabilities` has no `tasks` field and a server advertising it
+the 2026-07-28 `ServerCapabilities` has no `tasks` field and a server advertising it
 there has the entry sieved out) and naming only the methods actually served; a
 handle that survives relaying; `tasks/get` polling to `completed` with the
 outcome carried **inline**; SEP-2663 field names on the wire (`ttlMs`,
