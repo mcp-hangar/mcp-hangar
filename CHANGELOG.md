@@ -5,6 +5,13 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [1.6.3](https://github.com/mcp-hangar/mcp-hangar/compare/v1.6.2...v1.6.3) (2026-07-27)
+
+
+### Fixed
+
+* **core:** cap httpx below 1.0 on the v1 line too ([#619](https://github.com/mcp-hangar/mcp-hangar/issues/619)) ([74c1af7](https://github.com/mcp-hangar/mcp-hangar/commit/74c1af77394af5b7820c65e996425640931a0086))
+
 ## [1.6.2](https://github.com/mcp-hangar/mcp-hangar/compare/v1.6.1...v1.6.2) (2026-07-27)
 
 
