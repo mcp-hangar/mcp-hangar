@@ -105,43 +105,80 @@ jobs:
       - uses: actions/setup-node@v6
         with:
           node-version: "24"
-      - name: Compare the pinned scenario list against @latest
+      # Compared against BOTH dist-tags. `latest` alone is a blind spot: the
+      # 2026-07-28 server vectors and the whole `tasks-*` extension family
+      # landed on `alpha` (0.2.0-alpha.x) while `latest` sat unchanged at
+      # 0.1.16 -- so a check watching only `latest` reported "no changes" for
+      # the exact release gate E was waiting for.
+      - name: Compare the pinned scenario list against the published tags
         run: |
           npx -y @modelcontextprotocol/conformance@0.1.16 list > pinned.txt 2>&1 || true
-          npx -y @modelcontextprotocol/conformance@latest list > latest.txt 2>&1 || true
-          if diff -u pinned.txt latest.txt; then
-            echo "No scenario changes since the pinned version."
-          else
-            echo "::notice::Upstream conformance scenarios changed — consider bumping the pin (watch for 2026-07-28 server vectors)."
-          fi
+          for tag in latest alpha next beta; do
+            npx -y "@modelcontextprotocol/conformance@${tag}" list > "${tag}.txt" 2>&1 || continue
+            if ! diff -q pinned.txt "${tag}.txt" >/dev/null; then
+              echo "::notice::conformance@${tag} has scenarios the pin does not -- consider bumping."
+              diff -u pinned.txt "${tag}.txt" || true
+            fi
+            if grep -q "2026-07-28" "${tag}.txt"; then
+              echo "::notice::conformance@${tag} carries 2026-07-28 server vectors -- gate E's modern half is unblocked."
+            fi
+            if grep -q "tasks-" "${tag}.txt"; then
+              echo "::notice::conformance@${tag} carries tasks-* extension scenarios -- the SEP-2663 relay can be certified against them."
+            fi
+          done
 
       # The interop half of gate E needs a real client that speaks 2026-07-28.
-      # None exists while the TypeScript SDK has no 2.x on npm.
-      - name: Has the TypeScript SDK published a 2.x?
+      #
+      # This used to ask whether `@modelcontextprotocol/sdk` had published a
+      # 2.x. It never will: the TypeScript SDK v2 shipped under NEW package
+      # names -- `@modelcontextprotocol/core` / `client` / `server`, all at
+      # 2.0.0 -- while `sdk` continues on the v1 line and is still being
+      # released. The check therefore answered "still on the v1 line" about a
+      # package that had already been superseded: a false all-clear rather than
+      # a stale one, silent about the very event it existed to catch.
+      #
+      # Watching the successor packages instead. Their EXISTENCE at a 2.x is
+      # the signal, so there is no version comparison to get wrong.
+      - name: Has the TypeScript SDK v2 shipped?
         run: |
-          latest=$(npm view @modelcontextprotocol/sdk version)
-          echo "@modelcontextprotocol/sdk latest = ${latest}"
-          # Compare the MAJOR numerically. Globbing on `1.*` looks equivalent and
-          # is not: `^2.1.0` matches `*1.*`, so a real bump would pass silently.
-          major=$(printf '%s' "${latest}" | sed -E 's/^[^0-9]*//; s/[.-].*//')
-          if [ "${major}" = "1" ]; then
-            echo "Still on the v1 line — no modern-surface client is publishable yet."
+          unblocked=0
+          for pkg in core client server; do
+            version=$(npm view "@modelcontextprotocol/${pkg}" version 2>/dev/null || echo "")
+            if [ -z "${version}" ]; then
+              echo "@modelcontextprotocol/${pkg}: not published"
+              continue
+            fi
+            echo "@modelcontextprotocol/${pkg} = ${version}"
+            major=$(printf '%s' "${version}" | sed -E 's/^[^0-9]*//; s/[.-].*//')
+            case "${major}" in
+              ''|*[!0-9]*) echo "::notice::Could not read a major from ${version} -- this check needs updating." ;;
+              *) [ "${major}" -ge 2 ] && unblocked=1 ;;
+            esac
+          done
+          if [ "${unblocked}" = "1" ]; then
+            echo "::notice::The TypeScript SDK v2 packages are published -- a client that speaks 2026-07-28 is now possible; revisit gate E interop."
           else
-            echo "::notice::@modelcontextprotocol/sdk is at ${latest} (major ${major}) — a client that speaks 2026-07-28 is now possible; revisit gate E interop."
+            echo "No 2.x among the successor packages yet."
           fi
 
-      # The Inspector is the interop candidate. It is only useful to us once it
-      # rides an SDK that knows server/discover and the Mcp-Method routing.
-      - name: Has the Inspector moved off SDK v1?
+      # The Inspector is the interop candidate, useful to us once it rides an
+      # SDK that knows server/discover and the Mcp-Method routing.
+      #
+      # Retargeted for the same rename: it no longer depends on
+      # `@modelcontextprotocol/sdk` at all, so reading that key returned
+      # "unknown" forever. That failure was at least loud -- it reported a
+      # broken check rather than an all-clear -- but it still could not answer
+      # the question.
+      - name: Has the Inspector moved to the v2 packages?
         run: |
-          pin=$(curl -sf https://raw.githubusercontent.com/modelcontextprotocol/inspector/main/package.json \
-                | node -e 'let d="";process.stdin.on("data",c=>d+=c).on("end",()=>{const p=JSON.parse(d);console.log((p.dependencies||{})["@modelcontextprotocol/sdk"]||"unknown")})')
-          echo "inspector pins @modelcontextprotocol/sdk ${pin}"
-          major=$(printf '%s' "${pin}" | sed -E 's/^[^0-9]*//; s/[.-].*//')
-          if [ "${pin}" = "unknown" ] || [ -z "${major}" ]; then
-            echo "::notice::Could not read the Inspector's SDK pin — this check needs updating."
-          elif [ "${major}" = "1" ]; then
-            echo "Still SDK v1 — the Inspector cannot exercise the modern surface."
+          manifest=$(curl -sf https://raw.githubusercontent.com/modelcontextprotocol/inspector/main/package.json || echo "")
+          if [ -z "${manifest}" ]; then
+            echo "::notice::Could not read the Inspector manifest -- this check needs updating."
+            exit 0
+          fi
+          pin=$(printf '%s' "${manifest}" | node -e 'let d="";process.stdin.on("data",c=>d+=c).on("end",()=>{const p=JSON.parse(d);const deps=p.dependencies||{};console.log(deps["@modelcontextprotocol/client"]||deps["@modelcontextprotocol/core"]||"absent")})')
+          if [ "${pin}" = "absent" ]; then
+            echo "The Inspector is not on the v2 packages yet."
           else
-            echo "::notice::The Inspector now pins ${pin} (major ${major}) — it may finally speak 2026-07-28; revisit gate E interop."
+            echo "::notice::The Inspector now depends on the v2 packages (${pin}) -- it may speak 2026-07-28; revisit gate E interop."
           fi
