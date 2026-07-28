@@ -7,6 +7,10 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [2.0.0rc2](https://github.com/mcp-hangar/mcp-hangar/compare/v2.0.0-rc.1...v2.0.0-rc.2) (2026-07-28)
+
+A single-fix candidate cut directly on top of `2.0.0rc1`, which advertises a task capability it cannot serve to a modern client.
+
 ### Added
 
 - **core:** run the official MCP conformance suite against a real `serve --http` gateway in CI, with a classified baseline of known failures (gate E of #550). The 2026-07-28 server vectors do not exist upstream yet, so this certifies the back-compat generation; a weekly advisory job watches all three things gate E is blocked on: the modern scenarios, an SDK 2.x on npm, and the Inspector moving off SDK v1 ([#550](https://github.com/mcp-hangar/mcp-hangar/issues/550))
