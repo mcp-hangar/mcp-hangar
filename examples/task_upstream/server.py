@@ -296,8 +296,34 @@ class _ListParams(t.RequestParams):
     cursor: str | None = Field(default=None)
 
 
-async def handle_tasks_get(ctx: ServerRequestContext[Any, Any], params: _TaskIdParams) -> t.GetTaskResult:
-    return STORE.get(params.task_id).to_get_result()
+#: What a paused task says it needs, keyed the way SEP-2663 keys it. A client
+#: answers these keys back through ``tasks/update``.
+INPUT_REQUESTS = {
+    "consent": {
+        "message": "Additional input is required to continue. Do you consent?",
+        "requestedSchema": {"type": "object", "properties": {}},
+    }
+}
+
+
+async def handle_tasks_get(ctx: ServerRequestContext[Any, Any], params: _TaskIdParams) -> dict[str, Any]:
+    """``tasks/get``, with ``inputRequests`` attached while the task is paused.
+
+    Returned as a dict rather than a typed ``GetTaskResult`` because the SDK's
+    model has no field for the map -- it is the SEP-1686 shape, and SEP-2663's
+    ``inputRequests`` has nowhere to live on it. Without the map a client knows
+    only that some input is wanted, not WHICH, so a relay in front of this server
+    has nothing meaningful to forward.
+
+    Everything else stays on the older design deliberately: the payload lives
+    behind ``tasks/result`` rather than inlined here, so what the relay driver
+    exercises is Hangar bridging the two generations.
+    """
+    record = STORE.get(params.task_id)
+    result = record.to_get_result().model_dump(by_alias=True, exclude_none=True)
+    if record.status == "input_required":
+        result["inputRequests"] = INPUT_REQUESTS
+    return result
 
 
 async def handle_tasks_result(ctx: ServerRequestContext[Any, Any], params: _TaskIdParams) -> t.CallToolResult:

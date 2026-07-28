@@ -2,8 +2,13 @@
 
 A small MCP server that answers a tool call with a **task handle** instead of a
 result, and serves the native `tasks/*` lifecycle. It exists to exercise
-mcp-hangar's governed task relay (ADR-014) end to end — including the
-human-in-the-loop consent gate — against a real upstream rather than a mock.
+mcp-hangar's governed task relay (ADR-014) end to end against a real upstream
+rather than a mock.
+
+The upstream stays deliberately on the **older** Tasks design — it answers
+`tasks/get` with a status and keeps the payload behind `tasks/result`. Hangar
+serves the SEP-2663 wire downstream and bridges the difference, so this example
+exercises the bridge, which is the part most likely to rot silently.
 
 It is the only example here pinned to the **v2 pre-release SDK** (`mcp==2.0.0b2`).
 Every other example resolves the stable 1.x line, which has no Tasks extension.
@@ -17,7 +22,6 @@ Every other example resolves the stable 1.x line, which has no Tasks extension.
 | `k8s.yaml` | the same upstream on Kubernetes via the `MCPServer` CRD |
 | `smoke_upstream.py` | drives the upstream **directly** — the upstream's own contract |
 | `drive_relay.py` | drives the full relay lifecycle **through Hangar** |
-| `consent_hitl.py` | answers Hangar's mid-flight consent prompt (accept / decline) |
 
 ## Run it
 
@@ -26,9 +30,10 @@ docker compose -f examples/task_upstream/docker-compose.yml up --build
 
 python examples/task_upstream/smoke_upstream.py --url http://127.0.0.1:8081/mcp  # upstream alone
 python examples/task_upstream/drive_relay.py                                     # through Hangar
-python examples/task_upstream/consent_hitl.py --decision accept
-python examples/task_upstream/consent_hitl.py --decision decline
 ```
+
+`drive_relay.py` needs `relay_tasks_enabled: true`. The kill-switch defaults to
+**off** (ADR-015); `config.yaml` here turns it on.
 
 Each script exits non-zero on the first failed assertion, so they drop straight
 into CI or a release checklist.
@@ -53,18 +58,41 @@ first when something breaks: it tells an upstream regression apart from a relay
 regression.
 
 **`drive_relay.py`** — the same lifecycle *through* Hangar, plus what only the
-relay can be asked: the `tasks` capability advertised at `initialize`, a handle
-that survives relaying (rather than `TaskRelayNotSupported`), the tool digest
-re-verified when the result is retrieved, `tasks/list` scoped to its owner, and
-an unknown id yielding no enumeration side channel.
+relay can be asked. It drives the SEP-2663 surface: the tasks extension
+advertised on `server/discover` (under `capabilities.extensions`, since
+`v2026_07_28.ServerCapabilities` has no `tasks` field and a server advertising it
+there has the entry sieved out) and naming only the methods actually served; a
+handle that survives relaying; `tasks/get` polling to `completed` with the
+outcome carried **inline**; SEP-2663 field names on the wire (`ttlMs`,
+`pollIntervalMs`, `resultType`, flat — not `ttl` / `pollInterval` / nested
+`task`); `tasks/result` and `tasks/list` actually answering `-32601`; an unknown
+id yielding no enumeration side channel; `tasks/cancel` acknowledging *empty*,
+because cancellation is cooperative and the ack must not claim an outcome the
+upstream never reported; a paused task exposing its `inputRequests` and resolving
+through the governed `tasks/update`; and a client that never declared
+`io.modelcontextprotocol/tasks` being refused `-32021` with a payload naming what
+to declare.
 
-**`consent_hitl.py`** — the interactive gate. The upstream parks the task; Hangar
-sends `elicitation/create` to the client *in-handler* during the `tasks/get` that
-observes the pause; the gate opens only on `action == "accept"`. Both decisions
-are passing runs — `accept` must complete the task, `decline` must fail it
-**closed**. A client that never negotiates the `elicitation` capability is the
-third case: Hangar has nobody to ask, so it fails closed. (This is not the
-synchronous L7 `requireApproval` mechanism, which is non-interactive by design.)
+It speaks through the SDK's `Client` with an explicit `mode="2026-07-28"`, and
+both parts are forced rather than stylistic. SEP-2663 requires `Mcp-Name:
+<taskId>` on every `tasks/*`; that header varies per request and the transport
+only takes connection-level headers, so `_session.py` declares typed requests
+carrying `name_param` and lets the SDK stamp it. And the `initialize` handshake
+cannot negotiate 2026-07-28 at all — `HANDSHAKE_PROTOCOL_VERSIONS` tops out at
+`2025-11-25` — so a plain `ClientSession` lands on a legacy connection where
+these methods correctly do not exist.
+
+Results are read as raw dicts on purpose. Validating them against Hangar's own
+`tasks_wire` models would make the smoke test circular: it would prove our models
+parse our own output. Asserting on literal wire keys is the only version that can
+catch us serving the wrong shape.
+
+There is no interactive-consent driver any more. Hangar used to prompt the client
+with `elicitation/create` in-handler during the `tasks/get` that observed a pause;
+that belonged to the 2025-11-25 wire, which Hangar no longer serves. On the
+SEP-2663 wire the client resolves its own input by driving `tasks/update`, which
+`drive_relay.py` covers. Consent is still governed and still fail-closed — gated
+on the update rather than on a prompt.
 
 In egress topology a client never calls the upstream tool directly — it calls
 Hangar's `hangar_call` meta-tool, so the task handle arrives nested in a batch
