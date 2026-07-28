@@ -802,3 +802,91 @@ def test_update_from_a_foreign_tenant_is_denied_before_the_gate_or_upstream(
 
     assert "Task not found: T1" in str(exc.value)
     assert router.calls == [], "a denied caller must never reach the upstream"
+
+
+# ---------------------------------------------------------------------------
+# Bridging an upstream that keeps the payload behind tasks/result
+# ---------------------------------------------------------------------------
+
+
+def test_a_completed_task_on_an_older_upstream_still_yields_its_payload(store: GovernedTaskStore) -> None:
+    """The regression this guards against made every such payload unreachable.
+
+    SEP-2663 inlines a completed task's result on `tasks/get`, so a modern
+    upstream needs nothing extra. An upstream on the older design answers
+    `tasks/get` with a status only and keeps the payload behind `tasks/result`.
+    Hangar stopped serving that method downstream -- correctly -- but for a while
+    also stopped CALLING it upstream, so a client polled to `completed` and got
+    `result: null` forever. Bridging the generations is the relay's job.
+    """
+    _register(store, "S1", "T1", "tenant-a", "alice")
+    payload = {"content": [{"type": "text", "text": "done"}], "isError": False}
+    router = _FakeRouter(
+        {
+            # No inlined `result` -- the older shape.
+            "tasks/get": {"result": _upstream_task("T1", status="completed")},
+            "tasks/result": {"result": payload},
+        }
+    )
+    handlers = _handlers(store, router)
+
+    result = asyncio.run(handlers["tasks/get"][1](_ctx("alice", "tenant-a"), SimpleNamespace(task_id="T1")))
+
+    assert result.result == payload
+    assert any(call[1] == "tasks/result" for call in router.calls)
+
+
+def test_a_modern_upstream_is_never_asked_for_the_payload_twice(store: GovernedTaskStore) -> None:
+    """An inlined result is authoritative; asking again would be a wasted round trip."""
+    _register(store, "S1", "T1", "tenant-a", "alice")
+    payload = {"content": [], "isError": False}
+    router = _FakeRouter({"tasks/get": {"result": _upstream_task("T1", status="completed", result=payload)}})
+    handlers = _handlers(store, router)
+
+    result = asyncio.run(handlers["tasks/get"][1](_ctx("alice", "tenant-a"), SimpleNamespace(task_id="T1")))
+
+    assert result.result == payload
+    assert not any(call[1] == "tasks/result" for call in router.calls)
+
+
+def test_an_upstream_that_refuses_tasks_result_does_not_fail_the_poll(store: GovernedTaskStore) -> None:
+    """A modern upstream answers -32601 there. That is not a reason to fail a good poll."""
+    _register(store, "S1", "T1", "tenant-a", "alice")
+    router = _FakeRouter(
+        {
+            "tasks/get": {"result": _upstream_task("T1", status="completed")},
+            "tasks/result": {"error": {"code": -32601, "message": "Method not found"}},
+        }
+    )
+    handlers = _handlers(store, router)
+
+    result = asyncio.run(handlers["tasks/get"][1](_ctx("alice", "tenant-a"), SimpleNamespace(task_id="T1")))
+
+    assert result.status == "completed"
+    assert result.result is None
+
+
+def test_a_drifted_digest_is_caught_before_the_payload_is_even_requested(
+    store: GovernedTaskStore, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """Ordering matters: never ask a tool that failed verification for output."""
+    from mcp_hangar._sdk_compat import INVALID_PARAMS, make_mcp_error
+
+    _register(store, "S1", "T1", "tenant-a", "alice")
+    router = _FakeRouter(
+        {
+            "tasks/get": {"result": _upstream_task("T1", status="completed")},
+            "tasks/result": {"result": {"content": []}},
+        }
+    )
+
+    def _drift(key: Any) -> None:
+        raise make_mcp_error(INVALID_PARAMS, "tool digest drifted since task creation")
+
+    monkeypatch.setattr(store, "_verify_pinned_digest", _drift)
+    handlers = _handlers(store, router)
+
+    with pytest.raises(McpError):
+        asyncio.run(handlers["tasks/get"][1](_ctx("alice", "tenant-a"), SimpleNamespace(task_id="T1")))
+
+    assert not any(call[1] == "tasks/result" for call in router.calls)
