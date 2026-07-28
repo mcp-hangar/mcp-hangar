@@ -266,8 +266,14 @@ class TestDiscoverDescribesTheRealServer:
         # than tools on it.
         assert set(result["capabilities"]) > {"tools"}
 
-    def test_capabilities_track_an_advertised_tasks_capability(self, registry, resolver):
-        """The concrete #605 symptom: Tasks advertised at initialize, absent here."""
+    def test_capabilities_track_the_advertised_tasks_extension(self, registry, resolver):
+        """The concrete #605 symptom: Tasks advertised on the server, absent here.
+
+        Asserts the EXTENSION entry, not `capabilities.tasks`. The latter has no
+        field in `v2026_07_28.ServerCapabilities`, so the SDK's per-version sieve
+        drops it from a modern discover -- a server advertising it there would
+        serve `tasks/*` that no spec-following client could discover.
+        """
         from mcp_hangar._sdk_compat import HAS_NATIVE_TASKS
         from mcp_hangar.fastmcp_server.task_relay_wiring import advertise_tasks_capability
 
@@ -279,8 +285,10 @@ class TestDiscoverDescribesTheRealServer:
 
         result = server_discover_result(None, mcp)
 
-        assert result["capabilities"].get("tasks"), (
-            "the relay advertises tasks at initialize; discover must not hide it"
+        from mcp_hangar.tasks_wire import EXTENSION_ID
+
+        assert EXTENSION_ID in (result["capabilities"].get("extensions") or {}), (
+            "the relay advertises the tasks extension; discover must not hide it"
         )
 
     def test_egress_advertises_the_meta_api_even_with_no_backend_started(self, registry, resolver):

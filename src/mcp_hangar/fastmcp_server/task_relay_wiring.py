@@ -92,49 +92,51 @@ def enable_governed_task_relay(mcp: FastMCP, *, relay_tasks_enabled: bool) -> No
 
 
 def advertise_tasks_capability(mcp: FastMCP, *, relay_tasks_enabled: bool) -> None:
-    """Advertise the first-class ``tasks`` server capability at INITIALIZE (ADR-014).
+    """Advertise the SEP-2663 Tasks extension so a modern client can discover it.
 
     Gated on the SAME static kill-switch as handler registration
-    (``HAS_NATIVE_TASKS and relay_tasks_enabled``). Off by default the ``tasks``
-    field stays None, so advertised capabilities are byte-identical to a plain
-    server. Wraps ``get_capabilities`` to inject the first-class
-    ``ServerCapabilities.tasks`` field.
+    (``HAS_NATIVE_TASKS and relay_tasks_enabled``); off, advertised capabilities
+    are byte-identical to a plain server.
+
+    Advertised under ``capabilities.extensions``, NOT ``capabilities.tasks``, and
+    the difference is not cosmetic -- it decides whether the surface is
+    discoverable at all.
+
+    SEP-2663 moved Tasks out of the core capability set into a negotiated
+    extension. ``mcp_types.v2026_07_28.ServerCapabilities`` has no ``tasks``
+    field, so the SDK's per-version serialization sieve silently DROPS it from a
+    2026-07-28 ``server/discover``. Advertising it there produced the exact
+    inverse of what was intended:
+
+    * on the legacy handshake, where the field survives, Hangar refuses
+      ``tasks/*`` outright (``-32601``) -- advertising what does not run;
+    * on the modern wire, where Hangar does serve them, the field was sieved out
+      -- running what is not advertised.
+
+    A spec-following 2026-07-28 client therefore could never learn the surface
+    existed. Found by the release smoke harness, which reads capabilities from
+    ``server/discover`` the way such a client actually would.
     """
     from .._sdk_compat import HAS_NATIVE_TASKS
 
     if not (HAS_NATIVE_TASKS and relay_tasks_enabled):
         return
 
-    from mcp_types import (
-        ServerTasksCapability,
-        ServerTasksRequestsCapability,
-        TasksCallCapability,
-        TasksCancelCapability,
-        TasksToolsCapability,
-    )
+    from ..tasks_wire import EXTENSION_ID, TASKS_METHODS
 
-    # ``list`` is NOT advertised. SEP-2663 removes ``tasks/list`` and the serving
-    # surface does not register it, so advertising it would be the exact defect
-    # this line used to cause: the previous version gated it on the SDK still
-    # defining ``ListTasksResult``, reasoning that "a later beta's removal
-    # auto-drops it". That type belongs to the frozen SEP-1686 generation and is
-    # never going away, so the guard advertised a method the server could not
-    # serve, permanently (ADR-015).
-    #
-    # These capability CLASSES are still the SDK's. That is fine and not the
-    # thing ADR-015 bars: they are the negotiation envelope, identical across
-    # both generations, not the ``Task*`` payload shapes. Only results and params
-    # come from ``tasks_wire``.
-    tasks_capability = ServerTasksCapability(
-        cancel=TasksCancelCapability(),
-        requests=ServerTasksRequestsCapability(tools=TasksToolsCapability(call=TasksCallCapability())),
-    )
+    # The settings name what this server actually serves, so the advertisement
+    # and the registration cannot drift: both read TASKS_METHODS. `tasks/list` is
+    # absent from that set, so it cannot be advertised by mistake.
+    extension_settings: dict[str, Any] = {"methods": sorted(TASKS_METHODS)}
+
     server = lowlevel_server(mcp)
     original = server.get_capabilities
 
     def _with_tasks(*args: Any, **kwargs: Any) -> Any:
         capabilities = original(*args, **kwargs)
-        return capabilities.model_copy(update={"tasks": tasks_capability})
+        extensions = dict(getattr(capabilities, "extensions", None) or {})
+        extensions[EXTENSION_ID] = extension_settings
+        return capabilities.model_copy(update={"extensions": extensions})
 
     server.get_capabilities = _with_tasks
 
