@@ -7,6 +7,10 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Changed
+
+- **core:** correct two claims in the `tasks_wire` module docstring that a reader could disprove in seconds — `resultType` is not "absent entirely" from `mcp_types` (twelve result classes declare it, and `ResultType` accepts any string; the true and sufficient claim is that no `Task*` class does), and b2/rc1 are not "byte-identical" (the module was edited in that window — `SERVER_INFO_META_KEY` arrived, `DiscoverResult` lost `server_info`). The accurate version is the stronger argument: the Tasks surface is unchanged across both releases while the file around it is under active edit, so those types are a deliberately frozen region rather than a neglected one
+
 ### Added
 
 - **core:** vendor the SEP-2663 Tasks wire models (`mcp_hangar/tasks_wire.py`) instead of serving `mcp_types`' `Task*` types, which are the SEP-1686 generation 2026-07-28 removed from the core spec — flat `CreateTaskResult` with `resultType`, `ttlMs`/`pollIntervalMs`, `tasks/get` inlining its outcome, `tasks/result` and `tasks/list` gone, `tasks/update` present. Field names track [python-sdk#3005](https://github.com/modelcontextprotocol/python-sdk/pull/3005) so the models retire rather than fork when it merges; the one deliberate divergence is `GetTaskResult.inputRequests`, which #3005 drops on parse and Hangar's consent gate needs. No handler is rewired yet ([#322](https://github.com/mcp-hangar/mcp-hangar/issues/322))
