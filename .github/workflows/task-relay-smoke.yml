@@ -72,9 +72,11 @@ jobs:
           done
           echo "::error::the upstream never became healthy"; tail -50 upstream.log; exit 1
 
-      # `relay_tasks_enabled` is spelled out because it defaults to FALSE
-      # (ADR-015): the surface is opt-in until it is proven, and proving it is
-      # what this job does.
+      # `relay_tasks_enabled` is spelled out so this job pins the surface it
+      # tests rather than inheriting whatever the default happens to be. The
+      # default is TRUE (bootstrap reactivated it on 2026-07-28, once the
+      # SEP-2663 wire was actually served); it was false only for the window
+      # between rc.2 and that change.
       - name: Start `serve --http` in front of it
         run: |
           cat > relay-smoke-config.yaml <<'EOF'
