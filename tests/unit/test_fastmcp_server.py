@@ -613,7 +613,7 @@ class TestGovernedTaskRelayKillSwitch:
         """Advertised under `extensions`, which is where SEP-2663 puts it.
 
         Not under `capabilities.tasks`: that field does not exist in
-        `v2026_07_28.ServerCapabilities`, so the SDK's per-version serialization
+        the 2026-07-28 `ServerCapabilities`, so the SDK's per-version serialization
         sieve drops it from a modern `server/discover` -- leaving the surface
         served but undiscoverable.
         """

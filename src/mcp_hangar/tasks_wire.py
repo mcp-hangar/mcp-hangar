@@ -30,12 +30,19 @@ and the one that survives being checked.)
 
 The obvious assumption -- that those types are mid-migration and will grow into
 the SEP-2663 shape -- is false, and acting on it cost us a released artifact.
-Measured across ``mcp==2.0.0b2`` (14 Jul) and ``2.0.0rc1`` (27 Jul): the Tasks
-surface is **unchanged** -- all 29 ``Task*`` classes field-for-field identical,
-``ListTasksResult`` still present, ``UpdateTaskRequest`` still absent -- while the
-module around them **was** edited in that window (``__init__.py``, ``_types.py``
-and ``v2026_07_28/__init__.py`` all changed, ``SERVER_INFO_META_KEY`` arrived,
-``DiscoverResult`` lost ``server_info``).
+Measured across ``mcp==2.0.0b2`` (14 Jul), ``2.0.0rc1`` (27 Jul) and the stable
+``2.0.0`` (28 Jul): the Tasks surface is **unchanged** -- all 29 ``Task*``
+classes field-for-field identical, ``ListTasksResult`` still present,
+``UpdateTaskRequest`` still absent -- while the module around them **was** edited
+throughout (``__init__.py``, ``_types.py`` and the per-version modules all
+changed, ``SERVER_INFO_META_KEY`` arrived, ``DiscoverResult`` lost
+``server_info``, and the per-version modules were renamed private).
+
+The stable release is the part that settles it. A frozen region inside a moving
+beta could be a snapshot mid-migration; a frozen region that ships **unchanged in
+a major** is a decision. SEP-2663 landed nowhere in 2.0.0 -- python-sdk#3005 is
+still open -- so these types are what the SDK intends to keep carrying for the
+2025-11-25 generation.
 
 That is the point, and it is stronger than "nobody maintains this file". These
 types are not stale by neglect; they are a **deliberately frozen region of a file

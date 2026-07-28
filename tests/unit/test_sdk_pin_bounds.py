@@ -5,10 +5,13 @@ Both release lines solve the same class of problem and must keep solving it:
 * `main` (v1) serves `mcp.server.fastmcp`, which SDK v2 removed, so it caps at
   `>=1.28.1,<2`. Uncapped, a plain install follows the SDK into 2.x and the
   gateway dies at import (#561).
-* this branch (v2) is pinned **exactly** to a beta. The Tasks surface is still
-  moving inside the series — SEP-2663 removes `tasks/list` and adds
-  `tasks/update` — and `_sdk_compat` shims against b2 internals, so drifting
-  within the betas breaks silently. b2 -> b3 is a deliberate bump.
+* this branch (v2) is pinned **exactly**, now on the stable `2.0.0`. The
+  exactness is no longer about beta drift: `_sdk_compat` shims specific SDK
+  internals and the relay registers custom `tasks/*` methods the SDK
+  deliberately keeps out of `SPEC_CLIENT_METHODS`. A floating pin lets either
+  move under us, and the failure mode is a wrong wire rather than an
+  ImportError — which is far harder to notice. Bump deliberately, with the relay
+  smoke harness run against the candidate.
 
 A published wheel cannot be edited, so a bad pin is one of the few defects a
 release makes permanent for everyone who installed it. Hence a test on the
@@ -37,7 +40,7 @@ def _requirement(name: str) -> Requirement:
 
     Uses `packaging` rather than string surgery. A hand-rolled parser split the
     whole line on "," and inspected prefixes, which silently mis-read
-    `mcp==2.0.0b2` -- the first part starts with the package name, not the
+    `mcp==2.0.0` -- the first part starts with the package name, not the
     operator -- and only appeared to work on `main`'s two-part `>=1.28.1,<2`.
     """
     data = tomllib.loads(_PYPROJECT.read_text())

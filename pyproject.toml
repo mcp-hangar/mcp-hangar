@@ -1,6 +1,6 @@
 [project]
 name = "mcp-hangar"
-version = "2.0.0rc2"
+version = "2.0.0rc3"
 description = "Production-grade infrastructure for Model Context Protocol"
 readme = "README.md"
 license = {text = "MIT"}
@@ -20,16 +20,21 @@ classifiers = [
     "Topic :: System :: Systems Administration",
 ]
 dependencies = [
-    # Pinned EXACTLY, not merely bounded. This is the v2 line: the Tasks surface
-    # is still moving inside the beta series (SEP-2663 removes tasks/list, adds
-    # tasks/update) and `_sdk_compat` shims against b2 internals, so a floating
-    # pin breaks silently. b2 -> b3 is a deliberate bump, not a drift.
+    # Pinned EXACTLY, not merely bounded, and now on the stable 2.0.0.
+    #
+    # The exactness is no longer about beta drift -- it is that `_sdk_compat`
+    # shims specific SDK internals (`_lowlevel_server`, `add_request_handler`,
+    # `MCPError`, `HANDSHAKE_PROTOCOL_VERSIONS`) and the relay registers custom
+    # `tasks/*` methods that the SDK deliberately does not carry in
+    # `SPEC_CLIENT_METHODS`. A floating pin lets any of that move under us
+    # silently, and the failure mode is a wrong wire rather than an ImportError.
+    # Bump deliberately, with the relay smoke harness run against the candidate.
     #
     # The v1 line on `main` solves the same class of problem with `>=1.28.1,<2`
     # (#561): both branches must be unable to follow the SDK somewhere their
     # code does not run. Do not widen either to match the other.
-    "mcp==2.0.0b2",
-    "mcp-types==2.0.0b2",  # v2 split protocol-types dist (imported directly as mcp_types); paired with mcp
+    "mcp==2.0.0",
+    "mcp-types==2.0.0",  # v2 split protocol-types dist (imported directly as mcp_types); paired with mcp
     "structlog>=24.0.0",
     "pydantic>=2.0.0",
     # Capped below 1.0: httpx 1.0 drops `httpx.AsyncClient`, which this code
