@@ -127,6 +127,35 @@ jobs:
             fi
           done
 
+      # The tasks half of gate E is blocked on the suite, not on us.
+      #
+      # `@modelcontextprotocol/conformance@alpha` now ships seven `tasks-*`
+      # extension scenarios -- an external audit of exactly the SEP-2663 relay
+      # this repo serves. They cannot be run against Hangar today, and the
+      # reason is structural rather than a missing fixture name:
+      #
+      #   * the scenarios require `greet` / `slow_compute` in `tools/list`;
+      #   * Hangar exposes backend tool names only in `front_door` topology,
+      #     which projects per tenant and therefore needs an identity -- with
+      #     auth off it advertises ZERO tools, by design and verified;
+      #   * `conformance server` has no `--header` / auth option, so it cannot
+      #     present one.
+      #
+      # Those two are mutually exclusive, so this unblocks when the suite grows
+      # a way to authenticate. Watching for that instead of re-discovering it.
+      - name: Can the conformance suite authenticate yet?
+        run: |
+          help=$(npx -y @modelcontextprotocol/conformance@alpha server --help 2>&1 || echo "")
+          if [ -z "${help}" ]; then
+            echo "::notice::Could not read the conformance CLI help -- this check needs updating."
+            exit 0
+          fi
+          if printf '%s' "${help}" | grep -qiE '\-\-header|\-\-auth|\-\-bearer|\-\-token'; then
+            echo "::notice::conformance server now accepts auth/header options -- the tasks-* scenarios can finally be run against a front_door gateway; revisit gate E."
+          else
+            echo "Still no auth option on `conformance server` -- tasks-* remain unrunnable against Hangar."
+          fi
+
       # The interop half of gate E needs a real client that speaks 2026-07-28.
       #
       # This used to ask whether `@modelcontextprotocol/sdk` had published a

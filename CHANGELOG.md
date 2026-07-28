@@ -17,6 +17,10 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Added
 
+- **ci:** watch for the conformance suite gaining auth support, which is what now blocks certifying the relay against the spec's own vectors. `@modelcontextprotocol/conformance@alpha` ships seven `tasks-*` extension scenarios — an external audit of exactly the SEP-2663 surface this repo serves — but they require `greet` / `slow_compute` in `tools/list`, and Hangar exposes backend tool names only in `front_door` topology, which projects per tenant and advertises **zero** tools without an identity (verified against a running gateway). `conformance server` has no `--header` / auth option, so it cannot present one. The two requirements are mutually exclusive, so this unblocks on the suite rather than on us ([#550](https://github.com/mcp-hangar/mcp-hangar/issues/550))
+
+### Added
+
 - **ci:** run the task-relay smoke drivers against a real gateway on every change to the relay or the example (`task-relay-smoke.yml`). `examples/` was covered by no workflow at all — CI built only `examples/provider_math` — which is why two defects shipped through a green unit suite and were found only by running the drivers by hand: the payload bridge (#638) and the capability advertisement (#639). Neither is reachable without a real client on a real connection, because the unit suite fakes the request context. Runs the upstream's own contract first, so a failure tells an upstream regression apart from a relay one ([#322](https://github.com/mcp-hangar/mcp-hangar/issues/322))
 
 ### Changed
