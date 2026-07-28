@@ -7,6 +7,10 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Changed
+
+- **core:** reactivate the governed task relay — `relay_tasks_enabled` defaults to **true** again on all three construction paths. It was turned off on 2026-07-28 because the surface advertised a wire it did not serve; ADR-015 Decision 5 set the condition for turning it back on as *the SEP-2663 shapes actually being served*, and they now are. Verified against a live gateway on a config that never mentions the flag: the extension is advertised on `server/discover` with the served method set, and the full relay lifecycle passes 22/22 — including the payload bridge, the refusal ladder, the `Mcp-Name` requirement and the governed `tasks/update` consent. The rollback path is unchanged and equally verified: `relay_tasks_enabled: false` advertises nothing and registers nothing ([#322](https://github.com/mcp-hangar/mcp-hangar/issues/322))
+
 ### Fixed
 
 - **core:** read the client's capabilities from the key the spec actually uses. `read_protocol_negotiation` looked for `io.modelcontextprotocol/capabilities`; the spec key is `io.modelcontextprotocol/clientCapabilities` — the SDK's inbound ladder requires it on every modern request, and the short spelling appears nowhere in `mcp_types`. So capabilities came back **empty for every well-formed request**, and nothing noticed because nothing consumed them (#291). The legacy spelling is still accepted; the spec key wins
