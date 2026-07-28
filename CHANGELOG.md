@@ -7,6 +7,10 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Fixed
+
+- **core:** fetch a completed task's payload from an upstream that keeps it behind `tasks/result`. SEP-2663 inlines the result on `tasks/get`, so a modern upstream needs nothing extra — but an upstream on the older design answers `tasks/get` with a status only. Serving `tasks/result` downstream was correctly removed; no longer *calling* it upstream went with it by accident, which made the payload of every task relayed from such a server unreachable: the client polled to `completed` and got `result: null` forever. The fetch is best-effort (a modern upstream answers `-32601` there, which is not a reason to fail a good poll) and runs only after the pinned-digest re-verification, so a drifted tool is never asked for output ([#322](https://github.com/mcp-hangar/mcp-hangar/issues/322))
+
 ### Changed
 
 - **core:** serve the SEP-2663 Tasks wire. `tasks/get` now returns the flat vendored shape with `ttlMs`/`pollIntervalMs`, its outcome **inlined** (SEP-2663 folds the removed `tasks/result` round trip into the poll) and its `inputRequests` carried so the client can answer them; `tasks/cancel` and `tasks/update` return empty acknowledgements, because cancellation is cooperative and claiming a status the upstream never reported is the fabrication the SEP warns about. `tasks/result` and `tasks/list` are no longer registered, which is how they return `-32601`. `tasks/update` is now registered **unconditionally** — it was gated on an SDK probe that could never become true, so the handler was dead code (ADR-015). The advertised capability no longer claims `list` ([#322](https://github.com/mcp-hangar/mcp-hangar/issues/322))

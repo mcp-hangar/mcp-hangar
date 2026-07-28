@@ -445,13 +445,55 @@ def register_task_relay_handlers(
                     await _sync_snapshot_from_result(key, result)
                     if result.get("result") is not None or result.get("status") == "completed":
                         # Fail-closed supply-chain re-verification; its McpError propagates.
+                        # Runs BEFORE the payload is fetched, not just before it is
+                        # returned, so a drifted tool is never even asked for output.
                         await asyncio.to_thread(store._verify_pinned_digest, key)
+                        result = await _with_upstream_payload(key, task_id, result)
                     return await _flat_snapshot(key, task_id, upstream=result)
 
             return await _flat_snapshot(key, task_id)
         finally:
             if token is not None:
                 identity_context_var.reset(token)
+
+    async def _with_upstream_payload(key: tuple[str, str], task_id: str, upstream: dict[str, Any]) -> dict[str, Any]:
+        """Ensure a completed task's payload is present, fetching it if it is not.
+
+        SEP-2663 inlines a completed task's ``result`` on ``tasks/get``, so a
+        modern upstream already put it there and this is a no-op.
+
+        An upstream on the older design does not: it answers ``tasks/get`` with a
+        status only and keeps the payload behind ``tasks/result``. Hangar no
+        longer serves that method downstream -- correctly, SEP-2663 removes it --
+        but it must still CALL it upstream, or the payload of every task relayed
+        from such a server becomes unreachable: the client polls to
+        ``completed`` and gets ``result: null`` forever. Bridging the two
+        generations is the relay's job; dropping the downstream method and the
+        upstream fetch together is what made this a regression rather than a
+        rename.
+
+        Best-effort by design. A modern upstream answers ``-32601`` here, and an
+        upstream that simply has nothing to give is not an error either -- in both
+        cases the snapshot passes through with no outcome rather than failing a
+        poll that otherwise succeeded.
+        """
+        if upstream.get("result") is not None:
+            return upstream
+
+        try:
+            payload = await asyncio.to_thread(
+                upstream_router, key[0], "tasks/result", {"task_id": task_id}, _RELAY_TIMEOUT
+            )
+        except Exception:  # noqa: BLE001 -- a missing payload must not fail the poll
+            logger.debug("task_payload_fetch_failed", target_server_id=key[0], task_id=task_id)
+            return upstream
+
+        if not isinstance(payload, dict) or "error" in payload:
+            return upstream
+        fetched = payload.get("result")
+        if not isinstance(fetched, dict):
+            return upstream
+        return {**upstream, "result": fetched}
 
     async def _cancel(ctx: Any, params: Any) -> Any:
         """``tasks/cancel``: best-effort relay, then an EMPTY acknowledgement.
