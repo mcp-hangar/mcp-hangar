@@ -7,6 +7,14 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Fixed
+
+- **core:** read the client's capabilities from the key the spec actually uses. `read_protocol_negotiation` looked for `io.modelcontextprotocol/capabilities`; the spec key is `io.modelcontextprotocol/clientCapabilities` — the SDK's inbound ladder requires it on every modern request, and the short spelling appears nowhere in `mcp_types`. So capabilities came back **empty for every well-formed request**, and nothing noticed because nothing consumed them (#291). The legacy spelling is still accepted; the spec key wins
+
+### Added
+
+- **core:** forward the caller's Tasks declaration upstream, per request. SEP-2663 leaves task augmentation to the upstream and gates it on the **caller** having declared `io.modelcontextprotocol/tasks` — and on the wire to an upstream, Hangar is that caller. Declaring nothing meant a spec-following upstream would never mint a task and the governed relay would sit idle having never been offered one. Forwarded only when the downstream caller declared it **and** the relay is actually wired: a connection-level claim would mint tasks for clients that never asked, and those same clients are then answered `-32021` on `tasks/get`, holding a handle they cannot use ([#322](https://github.com/mcp-hangar/mcp-hangar/issues/322))
+
 ### Added
 
 - **ci:** run the task-relay smoke drivers against a real gateway on every change to the relay or the example (`task-relay-smoke.yml`). `examples/` was covered by no workflow at all — CI built only `examples/provider_math` — which is why two defects shipped through a green unit suite and were found only by running the drivers by hand: the payload bridge (#638) and the capability advertisement (#639). Neither is reachable without a real client on a real connection, because the unit suite fakes the request context. Runs the upstream's own contract first, so a failure tells an upstream regression apart from a relay one ([#322](https://github.com/mcp-hangar/mcp-hangar/issues/322))

@@ -1,8 +1,13 @@
 """Tests for inbound stateless protocol negotiation (SEP-2575, issue #291).
 
-Hangar reads the client's ``protocolVersion``/``capabilities`` from
+Hangar reads the client's ``protocolVersion``/``clientCapabilities`` from
 ``params._meta`` per request (no ``initialize`` handshake) and exposes them via a
 request-scoped contextvar. These tests pin the parse and fail-safe behaviour.
+
+They used to assert against ``io.modelcontextprotocol/capabilities``, which is
+not a spec key -- so they passed while the reader saw nothing on any real
+request. The constant they use now is the one the SDK's inbound ladder requires.
+See ``test_client_capability_forwarding`` for the consumer that surfaced it.
 """
 
 from __future__ import annotations
@@ -16,7 +21,7 @@ from mcp_hangar.negotiation import (
     set_current_protocol_negotiation,
 )
 from mcp_hangar.protocol import (
-    _META_CAPABILITIES_KEY,
+    _META_CLIENT_CAPABILITIES_KEY,
     _META_PROTOCOL_VERSION_KEY,
     SUPPORTED_PROTOCOL_VERSION,
 )
@@ -25,7 +30,7 @@ from mcp_hangar.protocol import (
 def test_reads_version_and_capabilities_when_present() -> None:
     meta = {
         _META_PROTOCOL_VERSION_KEY: "2026-07-28",
-        _META_CAPABILITIES_KEY: {"sampling": {}, "roots": {"listChanged": True}},
+        _META_CLIENT_CAPABILITIES_KEY: {"sampling": {}, "roots": {"listChanged": True}},
     }
 
     negotiation = read_protocol_negotiation(meta)
@@ -59,7 +64,7 @@ def test_garbage_meta_does_not_raise_and_defaults() -> None:
     # Wrong types for both keys, plus an unrelated key -- must not raise.
     meta = {
         _META_PROTOCOL_VERSION_KEY: 12345,  # not a str
-        _META_CAPABILITIES_KEY: ["not", "a", "mapping"],
+        _META_CLIENT_CAPABILITIES_KEY: ["not", "a", "mapping"],
         "unrelated": object(),
     }
 
@@ -90,7 +95,7 @@ def test_contextvar_round_trips() -> None:
         negotiation = read_protocol_negotiation(
             {
                 _META_PROTOCOL_VERSION_KEY: "2026-07-28",
-                _META_CAPABILITIES_KEY: {"sampling": {}},
+                _META_CLIENT_CAPABILITIES_KEY: {"sampling": {}},
             }
         )
         set_current_protocol_negotiation(negotiation)

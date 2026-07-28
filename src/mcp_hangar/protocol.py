@@ -7,6 +7,7 @@ import cycle.
 
 from __future__ import annotations
 
+from collections.abc import Mapping
 from typing import Any
 
 # MCP protocol version Hangar advertises to upstream MCP servers. Targets the
@@ -19,9 +20,21 @@ HANGAR_CLIENT_INFO = {"name": "mcp-registry", "version": "1.0.0"}
 # Reverse-DNS _meta keys per the MCP spec namespace (SEP-2575 stateless model).
 _META_PROTOCOL_VERSION_KEY = "io.modelcontextprotocol/protocolVersion"
 _META_CLIENT_INFO_KEY = "io.modelcontextprotocol/clientInfo"
-# Client capabilities travel under the same reverse-DNS namespace on the inbound
-# path (read by mcp_hangar.negotiation); Hangar does not inject this outbound.
-_META_CAPABILITIES_KEY = "io.modelcontextprotocol/capabilities"
+# The spec key for client capabilities. It is `clientCapabilities`, NOT
+# `capabilities`: the SDK's inbound ladder requires
+# `_meta["io.modelcontextprotocol/clientCapabilities"]` on every modern request,
+# and `io.modelcontextprotocol/capabilities` appears nowhere in `mcp_types`.
+# Hangar read the latter, so `read_protocol_negotiation` returned empty
+# capabilities for every well-formed request -- silently, because nothing
+# consumed them until now.
+_META_CLIENT_CAPABILITIES_KEY = "io.modelcontextprotocol/clientCapabilities"
+
+# The key Hangar used to read. Kept only so a caller that copied the old
+# (non-spec) spelling is still understood; the spec key wins.
+_META_CAPABILITIES_KEY_LEGACY = "io.modelcontextprotocol/capabilities"
+
+#: The Tasks extension identifier, as declared under `clientCapabilities.extensions`.
+TASKS_EXTENSION_ID = "io.modelcontextprotocol/tasks"
 
 
 def inject_protocol_meta(params: dict[str, Any]) -> dict[str, Any]:
@@ -31,8 +44,58 @@ def inject_protocol_meta(params: dict[str, Any]) -> dict[str, Any]:
     version + client info must travel in every request's ``_meta`` instead. This
     returns a new dict and does not mutate the caller's ``params``; existing
     ``_meta`` keys are preserved and caller-set protocol keys win (set-if-absent).
+
+    Also forwards the **caller's** Tasks declaration, per request, when Hangar can
+    honestly stand behind it -- see :func:`forwardable_client_capabilities`. That
+    is what makes the governed relay reachable at all: SEP-2663 leaves
+    augmentation to the upstream and gates it on the *caller* having declared the
+    extension, so an upstream that follows the spec never mints a task for a
+    client that declared nothing. Hangar is that client on the wire.
     """
     meta = dict(params.get("_meta") or {})
     meta.setdefault(_META_PROTOCOL_VERSION_KEY, SUPPORTED_PROTOCOL_VERSION)
     meta.setdefault(_META_CLIENT_INFO_KEY, dict(HANGAR_CLIENT_INFO))
+
+    capabilities = forwardable_client_capabilities()
+    if capabilities is not None:
+        meta.setdefault(_META_CLIENT_CAPABILITIES_KEY, capabilities)
     return {**params, "_meta": meta}
+
+
+def forwardable_client_capabilities() -> dict[str, Any] | None:
+    """The caller's declared capabilities Hangar may relay upstream, or ``None``.
+
+    Deliberately **not** a passthrough of whatever the caller declared, and not a
+    blanket claim either. Two conditions must both hold, and each excludes a
+    concrete way of lying:
+
+    * **The caller declared the Tasks extension.** A connection-level claim would
+      let an upstream mint a task for a client that never asked for one -- and
+      that client is then answered ``-32021`` on ``tasks/get``, holding a handle
+      it cannot use. Per-request tracking keeps the two ends consistent; SEP-2663
+      provides exactly this opt-in for the purpose.
+    * **Hangar's relay is actually wired.** With the kill-switch off there is no
+      governed store and no ``tasks/*`` surface, so claiming the capability would
+      promise governance that is not running.
+
+    Fault-barriered: any failure yields ``None``, which degrades to the previous
+    behaviour (declare nothing) rather than breaking an invoke.
+    """
+    try:
+        from .negotiation import get_current_protocol_negotiation
+
+        negotiation = get_current_protocol_negotiation()
+        if negotiation is None:
+            return None
+        extensions = negotiation.capabilities.get("extensions")
+        if not isinstance(extensions, Mapping) or TASKS_EXTENSION_ID not in extensions:
+            return None
+
+        from .server.context import get_context
+
+        if getattr(get_context(), "governed_task_store", None) is None:
+            return None
+    except Exception:  # noqa: BLE001 -- never break an invoke over a capability read
+        return None
+
+    return {"extensions": {TASKS_EXTENSION_ID: {}}}

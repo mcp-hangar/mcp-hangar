@@ -22,7 +22,8 @@ from types import MappingProxyType
 from typing import Any
 
 from .protocol import (
-    _META_CAPABILITIES_KEY,
+    _META_CAPABILITIES_KEY_LEGACY,
+    _META_CLIENT_CAPABILITIES_KEY,
     _META_PROTOCOL_VERSION_KEY,
     SUPPORTED_PROTOCOL_VERSION,
 )
@@ -51,7 +52,7 @@ def read_protocol_negotiation(meta: Mapping[str, Any] | None) -> ProtocolNegotia
     """Extract the negotiated protocol version + capabilities from ``_meta``.
 
     Reads the reverse-DNS keys ``io.modelcontextprotocol/protocolVersion`` and
-    ``io.modelcontextprotocol/capabilities`` from the inbound request's
+    ``io.modelcontextprotocol/clientCapabilities`` from the inbound request's
     ``params._meta`` mapping. Fully fail-safe: a ``None``, empty, or garbage
     ``meta`` (or any read error) yields the default version and empty
     capabilities, and this function never raises.
@@ -63,7 +64,13 @@ def read_protocol_negotiation(meta: Mapping[str, Any] | None) -> ProtocolNegotia
         raw_version = meta.get(_META_PROTOCOL_VERSION_KEY)
         version = raw_version if isinstance(raw_version, str) and raw_version else SUPPORTED_PROTOCOL_VERSION
 
-        raw_caps = meta.get(_META_CAPABILITIES_KEY)
+        # Spec key first. Hangar read only the legacy spelling, which appears
+        # nowhere in `mcp_types`, so capabilities came back empty for every
+        # well-formed request. The legacy key is still accepted so a caller that
+        # copied the old spelling keeps working.
+        raw_caps = meta.get(_META_CLIENT_CAPABILITIES_KEY)
+        if raw_caps is None:
+            raw_caps = meta.get(_META_CAPABILITIES_KEY_LEGACY)
         capabilities: Mapping[str, Any]
         if isinstance(raw_caps, Mapping):
             capabilities = MappingProxyType(dict(raw_caps))
