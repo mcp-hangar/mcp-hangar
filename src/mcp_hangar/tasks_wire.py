@@ -18,17 +18,31 @@ poll hint            ``pollInterval``                ``pollIntervalMs``
 ``tasks/result``     present                         removed (``-32601``)
 ``tasks/list``       present                         removed
 ``tasks/update``     absent                          required
-``resultType``       absent entirely                 required on every result
+``resultType``       on 12 result classes,           required on every result
+                     none of them ``Task*``
 ===================  ==============================  ==============================
+
+(``mcp_types`` does declare ``result_type`` -- on ``DiscoverResult``,
+``CallToolResult``, ``ListToolsResult`` and nine others -- and ``ResultType`` is
+``Literal["complete", "input_required"] | str``, so it would accept ``"task"``.
+No ``Task*`` class declares it. That narrower claim is the one that matters here
+and the one that survives being checked.)
 
 The obvious assumption -- that those types are mid-migration and will grow into
 the SEP-2663 shape -- is false, and acting on it cost us a released artifact.
-``mcp==2.0.0b2`` (14 Jul) and ``2.0.0rc1`` (27 Jul) are **byte-identical** on this
-surface: ``ListTasksResult`` still present, ``UpdateTaskRequest`` still absent.
-python-sdk#3005 says why in its own design: the extension defines its **own**
-SEP-2663 models precisely *because* they are wire-incompatible with what stayed
-behind. The types in ``mcp_types`` are a fossil of the removed core feature, kept
-for the 2025-11-25 generation. They never evolve in place.
+Measured across ``mcp==2.0.0b2`` (14 Jul) and ``2.0.0rc1`` (27 Jul): the Tasks
+surface is **unchanged** -- all 29 ``Task*`` classes field-for-field identical,
+``ListTasksResult`` still present, ``UpdateTaskRequest`` still absent -- while the
+module around them **was** edited in that window (``__init__.py``, ``_types.py``
+and ``v2026_07_28/__init__.py`` all changed, ``SERVER_INFO_META_KEY`` arrived,
+``DiscoverResult`` lost ``server_info``).
+
+That is the point, and it is stronger than "nobody maintains this file". These
+types are not stale by neglect; they are a **deliberately frozen region of a file
+under active edit**. python-sdk#3005 says why in its own design: the extension
+defines its **own** SEP-2663 models precisely *because* they are wire-incompatible
+with what stayed behind. The types in ``mcp_types`` are a fossil of the removed
+core feature, kept for the 2025-11-25 generation. They never evolve in place.
 
 So capability-probing them (``hasattr(_t, "UpdateTaskRequest")``) can never flip,
 and serving them on a 2026-07-28 connection hands the client a reply it cannot
