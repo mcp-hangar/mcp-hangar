@@ -26,11 +26,16 @@ Every other example resolves the stable 1.x line, which has no Tasks extension.
 ## Run it
 
 ```bash
-docker compose -f examples/task_upstream/docker-compose.yml up --build
+HANGAR_IMAGE=ghcr.io/mcp-hangar/mcp-hangar:2.0.0-rc.3 \
+  docker compose -f examples/task_upstream/docker-compose.yml up --build
 
 python examples/task_upstream/smoke_upstream.py --url http://127.0.0.1:8081/mcp  # upstream alone
 python examples/task_upstream/drive_relay.py                                     # through Hangar
 ```
+
+If 8080 or 8081 is already taken — an identity provider and a second gateway are
+the usual culprits — set `HANGAR_PORT` / `UPSTREAM_PORT` and pass the same ports
+to the drivers via `--url`.
 
 The relay is live by default; `config.yaml` spells `relay_tasks_enabled` out
 anyway so the example still runs against a deployment that turned it off.
@@ -38,12 +43,18 @@ anyway so the example still runs against a deployment that turned it off.
 Each script exits non-zero on the first failed assertion, so they drop straight
 into CI or a release checklist.
 
-To smoke a release candidate, point the compose file at the image under test:
+To smoke a release candidate, name the image under test. `HANGAR_IMAGE` has no
+default — compose errors out rather than guess, because a stale guess passes and
+tells you nothing:
 
 ```bash
-HANGAR_IMAGE=ghcr.io/mcp-hangar/mcp-hangar:2.0.0-rc.1 \
+HANGAR_IMAGE=ghcr.io/mcp-hangar/mcp-hangar:2.0.0-rc.3 \
   docker compose -f examples/task_upstream/docker-compose.yml up --build
 ```
+
+Use the **semver** form of the release tag (`2.0.0-rc.3`), not the PEP 440
+project version (`2.0.0rc3`): the image is tagged from the git tag, so the two
+never coincide on a prerelease and the PEP 440 spelling 404s on pull.
 
 Without Docker, run the two processes yourself: `python examples/task_upstream/server.py`
 (listens on `:8080`) and a Hangar configured with this `config.yaml`.

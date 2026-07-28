@@ -3,9 +3,16 @@
 #   docker compose -f examples/task_upstream/docker-compose.yml up --build
 #   python examples/task_upstream/drive_relay.py
 #
-# HANGAR_IMAGE selects what is under test -- default is the current 2.x
-# pre-release; point it at an rc/GA tag to smoke a release candidate:
-#   HANGAR_IMAGE=ghcr.io/mcp-hangar/mcp-hangar:2.0.0-rc.1 docker compose ... up
+# HANGAR_IMAGE selects what is under test and is REQUIRED -- there is no
+# default, deliberately. This file's whole purpose is smoking a specific
+# candidate, and a pinned default is wrong the moment the next one is cut: it
+# had rotted to 2.0.0-rc.1 while rc.3 was the candidate, so anyone following the
+# release checklist would have smoked a two-releases-old artifact and seen it
+# pass. Compose cannot track the project version, and there is no floating `2` /
+# `2.0` tag to point at -- docker/metadata-action does not emit them for a
+# prerelease (1.x has them; 2.0.0-rc.* does not). So: name the tag, or get an
+# error. Failing loudly beats testing the wrong image quietly.
+#   HANGAR_IMAGE=ghcr.io/mcp-hangar/mcp-hangar:2.0.0-rc.3 docker compose ... up
 services:
   task-upstream:
     build:
@@ -14,7 +21,10 @@ services:
     ports:
       # Exposed so smoke_upstream.py can hit the upstream directly, bypassing
       # Hangar, to tell an upstream regression from a relay regression.
-      - "8081:8080"
+      # Host ports are overridable: 8080/8081 are popular, and an identity
+      # provider or another gateway squatting on one should not stop you
+      # smoking a release candidate.
+      - "${UPSTREAM_PORT:-8081}:8080"
     environment:
       - MCP_HOST=0.0.0.0
       - MCP_PORT=8080
@@ -25,16 +35,47 @@ services:
 
   mcp-hangar:
     # NB: the published image tag is the SEMVER form of the release tag
-    # (2.0.0-rc.1), not the PEP 440 project version (2.0.0rc1). The release
+    # (2.0.0-rc.3), not the PEP 440 project version (2.0.0rc3). The release
     # workflow tags the image from the git tag, so the two never match on a
     # prerelease -- pinning the PEP 440 form here silently 404s on pull.
-    image: ${HANGAR_IMAGE:-ghcr.io/mcp-hangar/mcp-hangar:2.0.0-rc.1}
+    image: ${HANGAR_IMAGE:?name the image under test, e.g. HANGAR_IMAGE=ghcr.io/mcp-hangar/mcp-hangar:2.0.0-rc.3}
     container_name: mcp-hangar-task-relay
     depends_on:
       - task-upstream
     ports:
-      - "8080:8080"
+      - "${HANGAR_PORT:-8080}:8080"
+    # The image's default CMD is `serve --http --host 0.0.0.0 --port 8080`, and
+    # this example configures no authentication -- so the gateway refuses to
+    # start and the container exits 1:
+    #
+    #   Refusing to start HTTP on non-loopback without authentication.
+    #   Use --unsafe-no-auth to override.
+    #
+    # That refusal is correct and must stay: binding a wildcard address with no
+    # authentication is exactly the mistake worth failing closed on. It is also
+    # why this compose file had never once started the gateway -- the flag was
+    # simply missing. CI never caught it because the smoke workflow runs the
+    # processes directly on 127.0.0.1, where the refusal does not trigger.
+    #
+    # Overridden here deliberately: this stack is a disposable smoke harness for
+    # one image, its only upstream is the stub next to it, and the port is
+    # published to the loopback interface. Do NOT copy this line into anything
+    # that fronts a real upstream.
+    command:
+      - serve
+      - --http
+      - --host
+      - 0.0.0.0
+      - --port
+      - "8080"
+      - --unsafe-no-auth
     environment:
+      # Mounting the config is not enough to load it: nothing points the gateway
+      # at the mount, so it started with `config_path: null` and registered its
+      # built-in `math_subprocess` instead of `task-upstream`. The relay driver
+      # then failed on an unknown tool, which reads like a relay bug and is not
+      # one. The mount and the path that reads it have to be changed together.
+      - MCP_CONFIG=/etc/mcp-hangar/config.yaml
       - MCP_MODE=http
       - MCP_HTTP_PORT=8080
       - MCP_LOG_LEVEL=INFO
