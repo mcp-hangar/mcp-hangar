@@ -134,7 +134,7 @@ class MCPServerFactoryBuilder:
         auth_enabled: bool = False,
         auth_skip_paths: tuple[str, ...] = ("/health", "/ready", "/_ready", "/metrics"),
         trusted_proxies: frozenset[str] = frozenset(["127.0.0.1", "::1"]),
-        relay_tasks_enabled: bool = False,
+        relay_tasks_enabled: bool = True,
     ) -> "MCPServerFactoryBuilder":
         """Set server configuration.
 
@@ -148,7 +148,7 @@ class MCPServerFactoryBuilder:
             auth_skip_paths: Paths to skip authentication.
             trusted_proxies: Trusted proxy IPs for X-Forwarded-For.
             relay_tasks_enabled: Kill-switch for the ADR-014 task-relay serving
-                surface (default: False / dark).
+                surface (default: True; see ``ServerConfig``).
 
         Returns:
             Self for chaining.

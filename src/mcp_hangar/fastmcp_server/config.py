@@ -87,25 +87,25 @@ class ServerConfig:
         auth_skip_paths: Paths to skip authentication (health, metrics, etc.).
         trusted_proxies: Set of trusted proxy IPs for X-Forwarded-For.
         relay_tasks_enabled: Kill-switch for the ADR-014 task-relay serving
-            surface (**default False — deactivated 2026-07-28**, see below).
-            When True (native-tasks SDK required) the governed task relay is
-            live: the ``tasks/*`` handlers are registered and the ``tasks``
-            capability is advertised at INITIALIZE; per D5 the relay itself only
-            engages once an upstream actually emits a task, so no synchronous
-            flow changes until then.
+            surface (**default True — reactivated 2026-07-28**). When True (the
+            native-tasks SDK is required) the governed relay is live: the
+            ``tasks/*`` handlers are registered and the Tasks extension is
+            advertised on ``server/discover``; per ADR-014 D5 the relay itself
+            only engages once an upstream actually emits a task, so no
+            synchronous flow changes until then.
 
-            It was activated (default True) on 2026-07-22 and turned back off on
-            2026-07-28 because the surface advertises a wire it does not serve.
-            ``mcp_types`` still carries the SEP-1686 task shapes -- nested
-            ``CreateTaskResult{task}``, ``ttl``, ``pollInterval``,
-            ``tasks/result``, no ``resultType`` -- while a client negotiating
-            2026-07-28 expects the SEP-2663 shapes (flat ``CreateTaskResult``
-            with ``resultType: "task"``, ``ttlMs``, ``pollIntervalMs``, no
-            ``tasks/result``). Advertising ``tasks`` hands that client a reply it
-            cannot parse, and it has no way to detect the mismatch first. Those
-            types never evolve in place -- SEP-2663 lands as a separate extension
-            defining its own models (python-sdk#3005) -- so the surface stays off
-            by default until Hangar serves the SEP-2663 wire.
+            It has been on, off, and on again, and the reason matters more than
+            the dates. Activated 2026-07-22 (ADR-014 D5/D6). Turned off
+            2026-07-28 because the surface advertised a wire it did not serve --
+            ``mcp_types`` carries the SEP-1686 shapes, not SEP-2663, so a client
+            negotiating 2026-07-28 was handed a reply it could not parse
+            (ADR-015). Turned back on the same day once the SEP-2663 wire was
+            actually served and verified end to end against a live gateway,
+            which is the condition ADR-015 Decision 5 set for reactivating it.
+
+            Set False to disable the surface entirely -- byte-identical to the
+            relay-only stance (ADR-008): no ``tasks/*`` handlers registered, no
+            extension advertised, upstream task handles rejected.
     """
 
     host: str = "0.0.0.0"
@@ -117,11 +117,10 @@ class ServerConfig:
     auth_enabled: bool = False
     auth_skip_paths: tuple[str, ...] = ("/health", "/ready", "/_ready", "/metrics")
     trusted_proxies: frozenset[str] = frozenset(["127.0.0.1", "::1"])
-    # ADR-014 task-relay serving surface kill-switch. Activated 2026-07-22,
-    # deactivated 2026-07-28: the advertised `tasks` capability serves the
-    # SEP-1686 shapes still carried by `mcp_types`, not the SEP-2663 shapes a
-    # 2026-07-28 client expects. Opt-in until the wire is realigned.
-    relay_tasks_enabled: bool = False
+    # ADR-014 task-relay serving surface kill-switch. Reactivated 2026-07-28
+    # once the SEP-2663 wire was actually served -- the condition ADR-015
+    # Decision 5 set for turning it back on.
+    relay_tasks_enabled: bool = True
 
 
 __all__ = [

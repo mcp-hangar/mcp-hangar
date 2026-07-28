@@ -332,16 +332,15 @@ def bootstrap(
     # builds FastMCP directly (not via MCPServerFactory), so without this call
     # ctx.governed_task_store stays None and every upstream task handle is
     # rejected TaskRelayNotSupported regardless of the kill-switch. Kill-switch
-    # defaults False (deactivated 2026-07-28: the surface advertises the
-    # SEP-1686 wire `mcp_types` still carries, not the SEP-2663 wire a
-    # 2026-07-28 client expects -- see ServerConfig.relay_tasks_enabled). Set
-    # relay_tasks_enabled: true in config to opt back in.
+    # defaults True (reactivated 2026-07-28 once the SEP-2663 wire was actually
+    # served -- see ServerConfig.relay_tasks_enabled). Set
+    # relay_tasks_enabled: false in config to restore the relay-only stance.
     from ...fastmcp_server.task_relay_wiring import (
         advertise_tasks_capability,
         enable_governed_task_relay,
     )
 
-    relay_tasks_enabled = bool(full_config.get("relay_tasks_enabled", False))
+    relay_tasks_enabled = bool(full_config.get("relay_tasks_enabled", True))
     enable_governed_task_relay(mcp_server, relay_tasks_enabled=relay_tasks_enabled)
     advertise_tasks_capability(mcp_server, relay_tasks_enabled=relay_tasks_enabled)
 

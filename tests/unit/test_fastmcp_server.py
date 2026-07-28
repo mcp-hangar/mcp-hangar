@@ -683,21 +683,24 @@ class TestGovernedTaskRelayKillSwitch:
 
 
 class TestServerConfigRelayTasksFlag:
-    """The kill-switch lives on ServerConfig and defaults OFF (2026-07-28).
+    """The kill-switch lives on ServerConfig and defaults ON (2026-07-28).
 
-    It was activated (default True) on 2026-07-22 and turned back off once the
-    wire mismatch surfaced: advertising ``tasks`` while serving the SEP-1686
-    shapes ``mcp_types`` still carries hands a 2026-07-28 client a reply it
-    cannot parse. Off by default until Hangar serves the SEP-2663 wire.
+    On, then off, then on again -- and the reason matters more than the dates.
+    Activated 2026-07-22. Turned off the same week because the surface
+    advertised a wire it did not serve (ADR-015). Turned back on once the
+    SEP-2663 wire was actually served and verified end to end, which is the
+    condition ADR-015 Decision 5 set for reactivating it.
+
+    So the thing to check before flipping this again is not the flag: it is
+    whether the served wire matches what is advertised.
     """
 
-    def test_relay_tasks_disabled_by_default(self):
-        # A default-on advertisement of an unservable wire is the failure this
-        # pins. Do not flip back to True without the SEP-2663 serving shapes.
-        assert ServerConfig().relay_tasks_enabled is False
+    def test_relay_tasks_enabled_by_default(self):
+        assert ServerConfig().relay_tasks_enabled is True
 
-    def test_relay_tasks_can_be_enabled(self):
-        assert ServerConfig(relay_tasks_enabled=True).relay_tasks_enabled is True
+    def test_relay_tasks_can_be_disabled(self):
+        """The rollback path stays a single flag."""
+        assert ServerConfig(relay_tasks_enabled=False).relay_tasks_enabled is False
 
     def test_every_default_agrees(self):
         """One flag, three construction paths -- they must not drift apart.
@@ -723,8 +726,8 @@ class TestServerConfigRelayTasksFlag:
             Path(inspect.getfile(MCPServerFactoryBuilder)).parents[1] / "server" / "bootstrap" / "__init__.py"
         ).read_text()
 
-        assert ServerConfig().relay_tasks_enabled is False
-        assert builder_default is False
-        assert 'full_config.get("relay_tasks_enabled", False)' in bootstrap_src, (
+        assert ServerConfig().relay_tasks_enabled is True
+        assert builder_default is True
+        assert 'full_config.get("relay_tasks_enabled", True)' in bootstrap_src, (
             "the HTTP-serve bootstrap carries its own default and has drifted from ServerConfig"
         )
