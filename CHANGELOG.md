@@ -15,6 +15,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Fixed
 
+- **core:** stop advertising the `tasks` capability by default — `relay_tasks_enabled` now defaults to **False** on all three construction paths (`ServerConfig`, the builder, the HTTP-serve bootstrap), which previously disagreed with each other (True / False / True). `2.0.0rc1` shipped the relay on by default, so a client negotiating 2026-07-28 was told the server speaks `tasks` and then served the SEP-1686 shapes `mcp_types` still carries — nested `CreateTaskResult{task}`, `ttl`, `pollInterval`, a `tasks/result` method that SEP-2663 removes, and no `resultType`. The client cannot detect the mismatch before it gets a reply it cannot parse. Those types are a fossil and never evolve in place — SEP-2663 lands as a separate extension with its own models (python-sdk#3005) — so the surface is opt-in until Hangar serves that wire ([#322](https://github.com/mcp-hangar/mcp-hangar/issues/322))
+
 - **core:** cap `httpx` below 1.0 — httpx 1.0 drops `httpx.AsyncClient`, which the proxy path uses throughout, so the documented `pip install --pre mcp-hangar` resolved `httpx==1.0.dev3` and the gateway could not start at all. Found by the new published-artifact smoke on its first run against a real release
 
 ## [2.0.0rc1](https://github.com/mcp-hangar/mcp-hangar/compare/v2.0.0-alpha.2...v2.0.0-rc.1) (2026-07-27)

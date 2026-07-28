@@ -644,12 +644,48 @@ class TestGovernedTaskRelayKillSwitch:
 
 
 class TestServerConfigRelayTasksFlag:
-    """The kill-switch lives on ServerConfig and defaults ON (activated 2026-07-22)."""
+    """The kill-switch lives on ServerConfig and defaults OFF (2026-07-28).
 
-    def test_relay_tasks_enabled_by_default(self):
-        # Activated per ADR-014 D5/D6 (2026-07-22); the flag is retained as a
-        # per-deployment rollback, not an opt-in.
-        assert ServerConfig().relay_tasks_enabled is True
+    It was activated (default True) on 2026-07-22 and turned back off once the
+    wire mismatch surfaced: advertising ``tasks`` while serving the SEP-1686
+    shapes ``mcp_types`` still carries hands a 2026-07-28 client a reply it
+    cannot parse. Off by default until Hangar serves the SEP-2663 wire.
+    """
 
-    def test_relay_tasks_can_be_disabled(self):
-        assert ServerConfig(relay_tasks_enabled=False).relay_tasks_enabled is False
+    def test_relay_tasks_disabled_by_default(self):
+        # A default-on advertisement of an unservable wire is the failure this
+        # pins. Do not flip back to True without the SEP-2663 serving shapes.
+        assert ServerConfig().relay_tasks_enabled is False
+
+    def test_relay_tasks_can_be_enabled(self):
+        assert ServerConfig(relay_tasks_enabled=True).relay_tasks_enabled is True
+
+    def test_every_default_agrees(self):
+        """One flag, three construction paths -- they must not drift apart.
+
+        `ServerConfig`, the builder's `with_config()` and the HTTP-serve
+        bootstrap each carry their own default. They disagreed before (True /
+        False / True), so a deployment's posture depended on how it was built.
+
+        The bootstrap default is a literal inside a `dict.get()` on the serve
+        path, not an importable symbol, so it is asserted against the source --
+        the same guard style as `test_no_mcp_logging_dependency`.
+        """
+        import inspect
+        from pathlib import Path
+
+        from mcp_hangar.fastmcp_server.builder import MCPServerFactoryBuilder
+
+        builder_default = (
+            inspect.signature(MCPServerFactoryBuilder.with_config).parameters["relay_tasks_enabled"].default
+        )
+
+        bootstrap_src = (
+            Path(inspect.getfile(MCPServerFactoryBuilder)).parents[1] / "server" / "bootstrap" / "__init__.py"
+        ).read_text()
+
+        assert ServerConfig().relay_tasks_enabled is False
+        assert builder_default is False
+        assert 'full_config.get("relay_tasks_enabled", False)' in bootstrap_src, (
+            "the HTTP-serve bootstrap carries its own default and has drifted from ServerConfig"
+        )
