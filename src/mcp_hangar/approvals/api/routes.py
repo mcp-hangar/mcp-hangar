@@ -5,17 +5,15 @@ Endpoints:
   GET  /approvals/{id}      - Get single approval
   POST /approvals/{id}/resolve - Approve or deny
 
-Mounted by the server component loader. Auth via JWT (approval:read/resolve
-permissions) or Slack HMAC callback signature on resolve.
+Mounted by the server component loader. One authentication path: the platform's
+own, with `approval:read` / `approval:resolve` enforced in the command handler.
+Vendor callbacks terminate in an adapter outside core and arrive here as ordinary
+authenticated requests.
 """
 
-import hashlib
-import hmac
-import json
-import time
 from dataclasses import asdict, dataclass
 from datetime import datetime, UTC
-from typing import Any, cast
+from typing import Any
 
 from starlette.requests import Request
 from starlette.routing import Route
@@ -111,26 +109,23 @@ async def get_approval(request: Request) -> HangarJSONResponse:
 async def resolve_approval(request: Request) -> HangarJSONResponse:
     """Resolve (approve or deny) a pending approval.
 
-    Accepts either:
-      - JWT auth with approval:resolve permission
-      - Slack HMAC callback (X-Slack-Signature header)
+    One authentication path: the platform's own, requiring `approval:resolve`.
 
-    Body (JSON path):
+    This route used to branch on the presence of an `X-Slack-Signature` header
+    and hand control to a vendor-specific verifier. Both branches were
+    individually sound, but the shape was not: an unauthenticated caller chose
+    which authentication mechanism ran. Vendor callbacks now terminate in an
+    adapter outside core, which verifies the vendor's signature, maps the vendor
+    identity onto a Hangar principal, and calls this endpoint with an ordinary
+    token. Core does not know Slack exists.
+
+    Body:
         decision: "approve" | "deny"
         reason: Optional string
-
-    Body (Slack callback path):
-        payload: URL-encoded JSON with actions[0].action_id
     """
     service = _get_approval_service(request)
     approval_id = request.path_params["approval_id"]
 
-    # Check if this is a Slack callback
-    slack_signature = request.headers.get("x-slack-signature")
-    if slack_signature:
-        return await _handle_slack_callback(request, service, approval_id)
-
-    # Standard JSON resolution
     body = await request.json()
     decision = body.get("decision")
     reason = body.get("reason")
@@ -166,71 +161,6 @@ async def resolve_approval(request: Request) -> HangarJSONResponse:
             "state": result.state if result.state is not None else decision,
         }
     )
-
-
-async def _handle_slack_callback(request: Request, service: Any, approval_id: str) -> HangarJSONResponse:
-    """Handle Slack interactive message callback."""
-    # Verify timestamp freshness (replay protection)
-    timestamp_str = request.headers.get("x-slack-request-timestamp", "")
-    try:
-        timestamp = int(timestamp_str)
-    except (ValueError, TypeError):
-        return HangarJSONResponse({"error": "Invalid timestamp"}, status_code=401)
-
-    if abs(time.time() - timestamp) > 300:
-        return HangarJSONResponse({"error": "Stale request"}, status_code=401)
-
-    # Verify HMAC signature
-    raw_body = await request.body()
-    signing_secret = _get_slack_signing_secret(request)
-    if not signing_secret:
-        return HangarJSONResponse({"error": "Slack signing not configured"}, status_code=500)
-
-    sig_basestring = f"v0:{timestamp}:{raw_body.decode('utf-8')}"
-    expected_sig = (
-        "v0="
-        + hmac.new(
-            signing_secret.encode("utf-8"),
-            sig_basestring.encode("utf-8"),
-            hashlib.sha256,
-        ).hexdigest()
-    )
-
-    slack_signature = request.headers.get("x-slack-signature", "")
-    if not hmac.compare_digest(expected_sig, slack_signature):
-        return HangarJSONResponse({"error": "Invalid signature"}, status_code=401)
-
-    # Parse Slack payload
-    try:
-        from urllib.parse import parse_qs
-
-        body_str = raw_body.decode("utf-8")
-        parsed = parse_qs(body_str)
-        payload = json.loads(parsed.get("payload", ["{}"])[0])
-        actions = payload.get("actions", [])
-        if not actions:
-            return HangarJSONResponse({"error": "No actions"}, status_code=400)
-
-        action_id = actions[0].get("action_id", "")
-        user_id = payload.get("user", {}).get("id", "unknown")
-    except (json.JSONDecodeError, KeyError, IndexError):
-        return HangarJSONResponse({"error": "Invalid payload"}, status_code=400)
-
-    # Parse action: approve_{id} or deny_{id}
-    if action_id.startswith("approve_"):
-        approved = True
-    elif action_id.startswith("deny_"):
-        approved = False
-    else:
-        return HangarJSONResponse({"error": "Unknown action"}, status_code=400)
-
-    decided_by = f"slack:{user_id}"
-    success = await service.resolve(approval_id, approved, decided_by)
-
-    if not success:
-        return HangarJSONResponse({"error": "Already resolved"}, status_code=409)
-
-    return HangarJSONResponse({"approval_id": approval_id, "state": "resolved"})
 
 
 def _require_principal(request: Request, auth_components: Any | None) -> Principal:
@@ -282,13 +212,6 @@ def _resolve_handler(service: Any, auth_components: Any | None) -> ResolveApprov
     ``app.state.approval_gate_service`` working unchanged.
     """
     return ResolveApprovalHandler(service, auth_components=auth_components)
-
-
-def _get_slack_signing_secret(request: Request) -> str | None:
-    """Get Slack signing secret from app config."""
-    if hasattr(request.app.state, "slack_signing_secret"):
-        return cast(str | None, request.app.state.slack_signing_secret)
-    return None
 
 
 approval_routes = [
