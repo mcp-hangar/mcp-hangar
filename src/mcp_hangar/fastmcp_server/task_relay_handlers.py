@@ -284,6 +284,16 @@ def _derive_input_key(result: dict[str, Any]) -> str:
     digests its server-assigned request ids in sorted order; otherwise it digests
     the verbatim upstream ``statusMessage``. Always non-empty (the gate rejects
     empty keys).
+
+    **The request values -- including any ``method`` on them -- are deliberately
+    not read.** It looks like an oversight and is not. The key must be identical
+    across repeated polls of one paused state; the request *ids* are what the
+    upstream holds stable, while the values are free to be reworded between
+    polls. Digesting a ``method`` would also couple the gate key to a field
+    SEP-2663 is still reshaping (see ``approvals/pending.py`` and
+    modelcontextprotocol#2919), so re-expressing the same pause under a different
+    method identifier would silently mint a new key and defeat the reprompt
+    guard. Identity of the pending request, not its description.
     """
     reqs = result.get("inputRequests")
     if not isinstance(reqs, dict):
