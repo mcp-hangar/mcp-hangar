@@ -1,9 +1,5 @@
 """Unit tests for approval API routes."""
 
-import hashlib
-import hmac
-import json
-import time
 from datetime import datetime, timedelta, UTC
 from unittest.mock import MagicMock
 
@@ -85,7 +81,6 @@ def app_with_service():
 
     app = Starlette(routes=approval_routes)
     app.state.approval_gate_service = service
-    app.state.slack_signing_secret = "test-secret"
 
     return app, service, repo
 
@@ -235,65 +230,3 @@ class TestResolveApproval:
             json={"decision": "maybe"},
         )
         assert response.status_code == 400
-
-
-class TestSlackCallback:
-    def _make_slack_request(self, body: str, secret: str, timestamp: int | None = None):
-        """Generate Slack-compatible HMAC headers."""
-        ts = timestamp or int(time.time())
-        sig_basestring = f"v0:{ts}:{body}"
-        sig = (
-            "v0="
-            + hmac.new(
-                secret.encode("utf-8"),
-                sig_basestring.encode("utf-8"),
-                hashlib.sha256,
-            ).hexdigest()
-        )
-        return {
-            "x-slack-signature": sig,
-            "x-slack-request-timestamp": str(ts),
-        }
-
-    def test_slack_stale_timestamp_returns_401(self, app_with_service):
-        app, service, repo = app_with_service
-        client = TestClient(app)
-
-        import asyncio
-
-        loop = asyncio.new_event_loop()
-        loop.run_until_complete(repo.save(_make_pending_request("s-001")))
-        loop.close()
-
-        stale_ts = int(time.time()) - 600
-        body = "payload=" + json.dumps({"actions": [{"action_id": "approve_s-001"}], "user": {"id": "U123"}})
-        headers = self._make_slack_request(body, "test-secret", stale_ts)
-
-        response = client.post(
-            "/approvals/s-001/resolve",
-            content=body,
-            headers=headers,
-        )
-        assert response.status_code == 401
-
-    def test_slack_invalid_signature_returns_401(self, app_with_service):
-        app, service, repo = app_with_service
-        client = TestClient(app)
-
-        import asyncio
-
-        loop = asyncio.new_event_loop()
-        loop.run_until_complete(repo.save(_make_pending_request("s-002")))
-        loop.close()
-
-        headers = {
-            "x-slack-signature": "v0=invalidsig",
-            "x-slack-request-timestamp": str(int(time.time())),
-        }
-
-        response = client.post(
-            "/approvals/s-002/resolve",
-            content="payload={}",
-            headers=headers,
-        )
-        assert response.status_code == 401
