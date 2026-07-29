@@ -32,7 +32,7 @@ from .observability.tracing import (
     scrub_baggage_for_tenant,
     upstream_call_span,
 )
-from .protocol import inject_protocol_meta
+from .protocol import SESSION_TERMINATED_CODE, SESSION_TERMINATED_REASON, inject_protocol_meta
 
 logger = get_logger(__name__)
 
@@ -420,6 +420,41 @@ class HttpClient:
                 status=response.status_code,
                 duration_ms=duration_ms,
             )
+
+            if response.status_code == 404 and self._mcp_session_id is not None:
+                # The session this client holds no longer exists upstream --
+                # typically because the upstream process restarted. Streamable
+                # HTTP answers a request carrying an unknown Mcp-Session-Id with
+                # 404, and the resolution is to establish a new session rather
+                # than keep presenting the dead one.
+                #
+                # Nothing did that. The id was captured once and never cleared,
+                # 404 is not in `retry_status_codes`, and the caller saw an
+                # opaque "HTTP error: 404". So every call after an upstream
+                # restart failed, forever, while /health/ready still reported the
+                # gateway healthy -- it recovered only when the gateway itself
+                # was restarted (#651).
+                #
+                # Dropping the id here is half the fix; the other half is the
+                # re-handshake, which lives in the domain layer because only it
+                # knows how to `initialize`.
+                dead_session = self._mcp_session_id
+                self._mcp_session_id = None
+                logger.warning(
+                    "http_client_session_terminated",
+                    request_id=request_id,
+                    mcp_server=mcp_server_label,
+                    method=method,
+                    session_id=dead_session,
+                )
+                prometheus_metrics.HTTP_ERRORS_TOTAL.inc(mcp_server=mcp_server_label, error_type="session_terminated")
+                return {
+                    "error": {
+                        "code": SESSION_TERMINATED_CODE,
+                        "message": "Session terminated",
+                        "data": {"reason": SESSION_TERMINATED_REASON},
+                    }
+                }
 
             if response.status_code >= 400:
                 prometheus_metrics.HTTP_ERRORS_TOTAL.inc(mcp_server=mcp_server_label, error_type=f"http_{status_code}")

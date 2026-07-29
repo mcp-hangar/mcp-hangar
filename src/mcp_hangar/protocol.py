@@ -118,3 +118,16 @@ def forwardable_client_capabilities() -> dict[str, Any] | None:
         return None
 
     return {"extensions": {TASKS_EXTENSION_ID: {}}}
+
+
+#: JSON-RPC code for "the upstream rejected our transport session". Matches what
+#: the SDK client reports for the same condition (`INVALID_REQUEST` +
+#: "Session terminated"), so a caller already handling the SDK's shape handles
+#: ours.
+SESSION_TERMINATED_CODE = -32600
+
+#: Machine-readable discriminator carried in that error's ``data``. Callers must
+#: key on this rather than the message, which is prose. Lives here, in the leaf
+#: protocol module, so the domain layer can recognise the condition without
+#: importing a transport client.
+SESSION_TERMINATED_REASON = "mcp_session_terminated"
