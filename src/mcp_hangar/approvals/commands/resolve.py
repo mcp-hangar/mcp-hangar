@@ -131,9 +131,7 @@ class ResolveApprovalHandler(CommandHandler):
             return ResolveApprovalResult(ResolveOutcome.ALREADY_TERMINAL, state=existing.state.value)
 
         decided_by = str(command.principal.id)
-        success = await self._service.resolve(
-            command.approval_id, command.approved, decided_by, command.reason
-        )
+        success = await self._service.resolve(command.approval_id, command.approved, decided_by, command.reason)
         if not success:
             # The decision is already durable at this point: the service writes
             # state before releasing the hold, so a failed release does not undo
