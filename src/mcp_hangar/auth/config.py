@@ -68,6 +68,12 @@ class OIDCIssuerConfig:
     # Lifetime enforcement
     max_token_lifetime_seconds: int = 3600
 
+    # Tolerance for clock drift against the issuer, applied to exp/iat/nbf.
+    # PyJWT defaults to 0, which demands second-level agreement between this host
+    # and the IdP; ordinary drift then rejects every token at once. 0 restores the
+    # exact-agreement behaviour.
+    clock_skew_leeway_seconds: int = 60
+
     # Multi-tenant fail-closed gate
     require_tenant: bool = False
 
@@ -129,6 +135,12 @@ class OIDCAuthConfig:
     # Lifetime enforcement
     max_token_lifetime_seconds: int = 3600
 
+    # Tolerance for clock drift against the issuer, applied to exp/iat/nbf.
+    # PyJWT defaults to 0, which demands second-level agreement between this host
+    # and the IdP; ordinary drift then rejects every token at once. 0 restores the
+    # exact-agreement behaviour.
+    clock_skew_leeway_seconds: int = 60
+
     # Multi-tenant fail-closed gate (inherited by per-issuer entries)
     require_tenant: bool = False
 
@@ -160,6 +172,7 @@ class OIDCAuthConfig:
                     tenant_claim=self.tenant_claim,
                     email_claim=self.email_claim,
                     max_token_lifetime_seconds=self.max_token_lifetime_seconds,
+                    clock_skew_leeway_seconds=self.clock_skew_leeway_seconds,
                     require_tenant=self.require_tenant,
                     strict_tenant_audience=self.strict_tenant_audience,
                     tenant_audiences=dict(self.tenant_audiences),
