@@ -47,6 +47,7 @@ jobs:
   validate:
     name: Validate Release
     runs-on: ubuntu-latest
+    timeout-minutes: 10
     outputs:
       version: ${{ steps.extract.outputs.version }}
       is_prerelease: ${{ steps.extract.outputs.is_prerelease }}
@@ -205,6 +206,7 @@ jobs:
     needs: [validate, test, smoke-wheel]
     if: always() && needs.validate.result == 'success' && (needs.test.result == 'success' || needs.test.result == 'skipped') && needs.smoke-wheel.result == 'success'
     runs-on: ubuntu-latest
+    timeout-minutes: 20
     defaults:
       run:
         working-directory: .
@@ -260,6 +262,7 @@ jobs:
     needs: [validate, test]
     if: always() && needs.validate.result == 'success' && (needs.test.result == 'success' || needs.test.result == 'skipped')
     runs-on: ubuntu-latest
+    timeout-minutes: 30
     permissions:
       contents: read
       packages: write
@@ -326,6 +329,7 @@ jobs:
     needs: [validate, publish-pypi, publish-docker]
     if: always() && needs.validate.result == 'success' && needs.publish-pypi.result == 'success'
     runs-on: ubuntu-latest
+    timeout-minutes: 10
     permissions:
       contents: write
 
