@@ -120,7 +120,7 @@ class ResolveApprovalHandler(CommandHandler):
             resource_id=approval_id,
         )
 
-    async def handle(self, command: ResolveApprovalCommand) -> ResolveApprovalResult:  # type: ignore[override]
+    async def handle(self, command: ResolveApprovalCommand) -> ResolveApprovalResult:
         self._authorize(command.principal, command.approval_id)
 
         repository = self._service._repository
