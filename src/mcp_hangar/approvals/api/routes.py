@@ -20,8 +20,14 @@ from typing import Any, cast
 from starlette.requests import Request
 from starlette.routing import Route
 
+from mcp_hangar.auth.http_middleware import get_principal_from_request
+from mcp_hangar.domain.exceptions import MissingCredentialsError
+from mcp_hangar.domain.value_objects.security import Principal
 from mcp_hangar.logging_config import get_logger
 from mcp_hangar.server.api.serializers import HangarJSONResponse
+from mcp_hangar.server.context import get_context
+
+from ..commands.resolve import ResolveApprovalCommand, ResolveApprovalHandler, ResolveOutcome
 
 logger = get_logger(__name__)
 
@@ -132,30 +138,32 @@ async def resolve_approval(request: Request) -> HangarJSONResponse:
     if decision not in ("approve", "deny"):
         return HangarJSONResponse({"error": "decision must be 'approve' or 'deny'"}, status_code=400)
 
-    # Check if already resolved
-    existing = await service._repository.get(approval_id)
-    if existing is None:
+    auth_components = _auth_components()
+    principal = _require_principal(request, auth_components)
+
+    result = await _resolve_handler(service, auth_components).handle(
+        ResolveApprovalCommand(
+            approval_id=approval_id,
+            approved=decision == "approve",
+            principal=principal,
+            reason=reason,
+        )
+    )
+
+    if result.outcome is ResolveOutcome.NOT_FOUND:
         return HangarJSONResponse({"error": "Approval not found"}, status_code=404)
-    if existing.is_terminal():
+    if result.outcome is ResolveOutcome.ALREADY_TERMINAL:
         return HangarJSONResponse(
-            {"error": "Approval already resolved", "state": existing.state.value},
+            {"error": "Approval already resolved", "state": result.state},
             status_code=409,
         )
-
-    decided_by = _extract_principal(request)
-    approved = decision == "approve"
-
-    success = await service.resolve(approval_id, approved, decided_by, reason)
-    if not success:
+    if result.outcome is ResolveOutcome.HOLD_RELEASE_FAILED:
         return HangarJSONResponse({"error": "Failed to resolve approval"}, status_code=409)
-
-    updated = await service._repository.get(approval_id)
-    state = updated.state.value if updated else decision
 
     return HangarJSONResponse(
         {
             "approval_id": approval_id,
-            "state": state,
+            "state": result.state if result.state is not None else decision,
         }
     )
 
@@ -225,12 +233,55 @@ async def _handle_slack_callback(request: Request, service: Any, approval_id: st
     return HangarJSONResponse({"approval_id": approval_id, "state": "resolved"})
 
 
-def _extract_principal(request: Request) -> str:
-    """Extract principal identity from request auth context."""
-    # Check for auth middleware populated identity
-    if hasattr(request, "state") and hasattr(request.state, "principal_id"):
-        return cast(str, request.state.principal_id)
-    return request.headers.get("x-principal-id", "unknown")
+def _require_principal(request: Request, auth_components: Any | None) -> Principal:
+    """Return the caller's identity, or refuse -- never invent one.
+
+    Replaces ``_extract_principal``, which read ``request.state.principal_id`` and
+    fell back to the ``x-principal-id`` header, defaulting to the literal
+    ``"unknown"``. That was not a fallback for unauthenticated callers -- it was
+    the only path: the authentication middleware attaches ``request.state.auth``
+    and **nothing in the tree ever set** ``principal_id``, so the first branch
+    could never be taken. Every recorded ``decided_by`` was therefore either
+    client-attested or ``"unknown"``, in the provenance chain.
+
+    The auth-disabled case is deliberately NOT a 401. When auth is off the API
+    router does not mount authentication at all, so no principal is ever attached
+    -- refusing here would mean no caller could ever resolve an approval, with no
+    credential that could fix it. That is #600's exact shape: failing closed on
+    the API is failing OPEN on enforcement, because the decision simply never gets
+    made. Instead the identity is recorded as the system principal: explicit,
+    server-side, and impossible to confuse with a real approver.
+
+    Auth on and no principal is still a refusal.
+    """
+    principal = get_principal_from_request(request)
+    if principal is not None:
+        return principal
+    if getattr(auth_components, "enabled", False):
+        raise MissingCredentialsError("Authentication required")
+    return Principal.system()
+
+
+def _auth_components() -> Any | None:
+    """The application's auth components, or None when there is no app context.
+
+    No context means no auth (tests mounting the routes directly, stdio); the
+    callers below treat that as auth-disabled rather than as a failure.
+    """
+    try:
+        return getattr(get_context(), "auth_components", None)
+    except Exception:  # noqa: BLE001 -- absence of a context is not an error here
+        return None
+
+
+def _resolve_handler(service: Any, auth_components: Any | None) -> ResolveApprovalHandler:
+    """Build the resolution handler for this request.
+
+    Constructed per request rather than wired at bootstrap: the handler holds no
+    state, and this keeps every existing caller that mounts the routes with only
+    ``app.state.approval_gate_service`` working unchanged.
+    """
+    return ResolveApprovalHandler(service, auth_components=auth_components)
 
 
 def _get_slack_signing_secret(request: Request) -> str | None:
