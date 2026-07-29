@@ -341,6 +341,7 @@ def bootstrap_auth(
                     tenant_claim=entry.tenant_claim,
                     email_claim=entry.email_claim,
                     max_token_lifetime=entry.max_token_lifetime_seconds,
+                    clock_skew_leeway=entry.clock_skew_leeway_seconds,
                     require_tenant=entry.require_tenant,
                     strict_tenant_audience=entry.strict_tenant_audience,
                     tenant_audiences=dict(entry.tenant_audiences),

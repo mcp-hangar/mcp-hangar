@@ -66,6 +66,24 @@ class OIDCConfig:
     # Lifetime enforcement
     max_token_lifetime: int = 3600
 
+    # Tolerance for clock drift between this host and the token issuer, applied to
+    # the time-based claims (exp / iat / nbf).
+    #
+    # PyJWT defaults this to 0, which demands the two clocks agree to the second.
+    # They routinely do not: a VM resuming from a snapshot, a container host whose
+    # NTP has drifted, an IdP a few seconds ahead -- any of these makes every
+    # freshly issued token fail `iat`/`nbf` and every nearly-expired one fail
+    # `exp`. The failure is total rather than partial: skew is a property of the
+    # pair of hosts, so it rejects *every* token at once, and it presents as
+    # "authentication suddenly broke everywhere" with valid credentials and a
+    # healthy IdP.
+    #
+    # 60s is the usual bound for this: large enough to absorb ordinary drift,
+    # small enough that it does not meaningfully extend the life of an expired
+    # token. RFC 7519 permits "some small leeway, usually no more than a few
+    # minutes". Set to 0 to require exact agreement.
+    clock_skew_leeway: int = 60
+
     # Multi-tenant fail-closed gate
     require_tenant: bool = False
 
@@ -406,6 +424,7 @@ class JWKSTokenValidator(ITokenValidator):
                 algorithms=["RS256", "ES256"],
                 audience=audience,
                 issuer=self._config.issuer,
+                leeway=self._config.clock_skew_leeway,
                 options={
                     "verify_exp": True,
                     "verify_iat": True,
@@ -582,17 +601,28 @@ class StaticSecretTokenValidator(ITokenValidator):
     WARNING: Only for development/testing. Use JWKS in production.
     """
 
-    def __init__(self, secret: str, issuer: str | None = None, audience: str | None = None):
+    def __init__(
+        self,
+        secret: str,
+        issuer: str | None = None,
+        audience: str | None = None,
+        clock_skew_leeway: int = 60,
+    ):
         """Initialize with a static secret.
 
         Args:
             secret: The HMAC secret for HS256 validation.
             issuer: Optional expected issuer.
             audience: Optional expected audience.
+            clock_skew_leeway: Tolerance in seconds for drift between this host and
+                the issuer, applied to exp/iat/nbf. Defaults to 60 for the reasons
+                given on ``OIDCConfig.clock_skew_leeway``; 0 requires exact
+                agreement.
         """
         self._secret = secret
         self._issuer = issuer
         self._audience = audience
+        self._clock_skew_leeway = clock_skew_leeway
 
     def validate(self, token: str) -> dict:
         """Validate JWT using static secret.
@@ -629,6 +659,7 @@ class StaticSecretTokenValidator(ITokenValidator):
                 algorithms=["HS256"],
                 audience=self._audience,
                 issuer=self._issuer,
+                leeway=self._clock_skew_leeway,
                 options=options,
             )
             return claims
