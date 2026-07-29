@@ -5,7 +5,7 @@ import time
 from typing import Any, TYPE_CHECKING, cast
 
 from ...logging_config import get_logger
-from ...protocol import HANGAR_CLIENT_INFO, SUPPORTED_PROTOCOL_VERSION
+from ...protocol import HANGAR_CLIENT_INFO, SESSION_TERMINATED_REASON, SUPPORTED_PROTOCOL_VERSION
 
 if TYPE_CHECKING:
     from ...infrastructure.lock_hierarchy import TrackedLock
@@ -797,6 +797,64 @@ class McpServer(AggregateRoot):
             )
         return self._image
 
+    def _is_session_terminated(self, response: Any) -> bool:
+        """Did the upstream reject our transport session?
+
+        Keyed on the machine-readable discriminator rather than the message,
+        which is prose.
+        """
+        if not isinstance(response, dict):
+            return False
+        error = response.get("error")
+        if not isinstance(error, dict):
+            return False
+        data = error.get("data")
+        return isinstance(data, dict) and data.get("reason") == SESSION_TERMINATED_REASON
+
+    def _call_with_session_recovery(
+        self, client: Any, method: str, params: dict[str, Any], timeout: float | None = None
+    ) -> Any:
+        """Call *method*, re-handshaking once if the upstream lost our session.
+
+        An upstream that restarts forgets every session it issued. Before this,
+        the client kept presenting the dead id and every later call answered 404
+        forever -- while readiness still reported the gateway healthy, so nothing
+        restarted it and nothing alerted. Recovery required restarting the
+        gateway itself (#651).
+
+        The retry is deliberately once. A second failure is not a stale session,
+        it is an upstream that will not hold one, and looping would turn a
+        recoverable blip into an unbounded retry against a sick backend.
+
+        Failing to renegotiate records a health failure; succeeding does not.
+        That ordering is the decision: a session lost to an ordinary restart is
+        not evidence of an unhealthy upstream, and marking it so would pull the
+        pod out of its Service for something that just healed itself.
+        """
+        response = client.call(method, params, timeout=timeout)
+        if not self._is_session_terminated(response):
+            return response
+
+        logger.warning(
+            "mcp_session_terminated_renegotiating",
+            mcp_server_id=self.mcp_server_id,
+            method=method,
+        )
+        try:
+            self._perform_mcp_handshake(client)
+        except Exception as exc:  # noqa: BLE001 -- any handshake failure is the same verdict here
+            self._health.record_failure()
+            logger.error(
+                "mcp_session_renegotiation_failed",
+                mcp_server_id=self.mcp_server_id,
+                method=method,
+                error=str(exc),
+            )
+            return response
+
+        logger.info("mcp_session_renegotiated", mcp_server_id=self.mcp_server_id, method=method)
+        return client.call(method, params, timeout=timeout)
+
     def _perform_mcp_handshake(self, client: Any) -> None:
         """Perform the MCP startup handshake and tools/list discovery.
 
@@ -1191,7 +1249,8 @@ class McpServer(AggregateRoot):
             raise ToolInvocationError(self.mcp_server_id, "mcp_server client is None")
 
         try:
-            response = client.call(
+            response = self._call_with_session_recovery(
+                client,
                 "tools/call",
                 {"name": tool_name, "arguments": arguments},
                 timeout=timeout,
