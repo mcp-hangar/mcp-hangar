@@ -85,9 +85,7 @@ class TestVendorAdaptersLoadFromEntryPoints:
         import mcp_hangar.approvals as approvals_pkg
 
         root = pathlib.Path(approvals_pkg.__file__).parent
-        offenders = sorted(
-            str(path.relative_to(root)) for path in root.rglob("*.py") if "slack" in path.name.lower()
-        )
+        offenders = sorted(str(path.relative_to(root)) for path in root.rglob("*.py") if "slack" in path.name.lower())
 
         assert offenders == [], f"vendor module back in core: {offenders}"
 
@@ -115,9 +113,7 @@ class TestDegradation:
             def __init__(self, config):
                 raise RuntimeError("missing credentials")
 
-        entry_point = SimpleNamespace(
-            name="grumpy", value="grumpy:factory", load=lambda: _Unconstructable
-        )
+        entry_point = SimpleNamespace(name="grumpy", value="grumpy:factory", load=lambda: _Unconstructable)
 
         with patch("importlib.metadata.entry_points", return_value=[entry_point]):
             delivery = _build_delivery(_config("grumpy"))
