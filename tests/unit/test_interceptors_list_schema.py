@@ -3,7 +3,7 @@
 Validates our response against a JSON Schema derived from the SEP-1763
 Interceptor interface definition at:
 
-    modelcontextprotocol/experimental-ext-interceptors @ 99bc7c9
+    modelcontextprotocol/experimental-ext-interceptors @ 7cf90c9
 
 Re-pinned 5bd7ab4 -> 99bc7c9 for issue #401 (6 commits ahead). The notable
 drift is upstream #25 ("Align capability key to SEP-2133 extensions format"),
@@ -11,6 +11,24 @@ which moved the interceptor capability to the reverse-DNS key
 ``io.modelcontextprotocol/interceptors``; the SEP prose ``Interceptor``
 interface at 99bc7c9 also carries optional ``failOpen`` / ``priorityHint`` /
 ``compat`` / ``configSchema`` fields, reflected in INTERCEPTOR_SCHEMA_V2 below.
+
+Re-pinned 99bc7c9 -> 7cf90c9 for issue #548, after reviewing both intervening
+commits. **The schema below is unchanged, deliberately** -- the pin moves to
+record what was reviewed, not because anything drifted:
+
+* ``eebd2ac`` "Introduce InterceptorOverrides in the chain execution model"
+  touches ``docs/sep.md`` only, and describes an INVOKER-side concept: the
+  invoker supplies ``overrides`` per chain entry (``failOpen`` / ``priorityHint``
+  / ``mode`` / ``timeoutMs`` / hook narrowing) on top of the server's declared
+  defaults. The server-declared shape that ``interceptors/list`` advertises --
+  what this schema mirrors -- is untouched. Its one enum change,
+  ``mode?: "audit"`` widening to ``"active" | "audit"``, was already allowed
+  here; Hangar emits ``"active"``.
+* ``7cf90c9`` is C# SDK sources only.
+
+Hangar does not implement invoker-side ``InterceptorOverrides``. That is a
+feature gap against current upstream, not a schema drift, and is out of scope
+for this pin.
 
 The upstream repo does not publish a machine-readable JSON Schema, so we
 maintain a local schema that mirrors the spec. When bumping the pinned
