@@ -7,6 +7,10 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Added
+
+- **core:** publish the REST surface as `api-routes.json`, generated from the routing table by `scripts/dump_api_routes.py`. Consumers build URLs against this API by hand across repositories, and there was no authoritative list to check them against: the operator called `/api/v1/*` for months after core moved to `/api/*`, leaving every remote `MCPServer` `Degraded` while working, with its own tests green throughout (they assert against a mock, and a mock answers whatever it is asked — operator#91). A unit test fails when the file drifts from the served routes, so a route change either updates it or breaks the build. Method and path only — response shapes are **not** covered, and a renamed field still breaks a consumer silently (ADR-011)
+
 ## [2.0.0rc4](https://github.com/mcp-hangar/mcp-hangar/compare/v2.0.0-rc.3...v2.0.0-rc.4) (2026-07-29)
 
 ### Security
