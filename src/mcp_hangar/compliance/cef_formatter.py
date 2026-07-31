@@ -7,7 +7,7 @@ CEF format:
 
 Reference: ArcSight Common Event Format (CEF) Rev 25.
 
-This module is part of the enterprise compliance layer.
+This module is part of the compliance layer.
 """
 
 from datetime import datetime, UTC

@@ -40,12 +40,18 @@ surface is fully intact.
 
 from __future__ import annotations
 
+import hashlib
 import logging
+import uuid
 from typing import TYPE_CHECKING, Any
 
-from mcp.server.fastmcp import FastMCP
-from mcp.shared.exceptions import McpError
-from mcp.types import METHOD_NOT_FOUND, ErrorData, Tool as MCPTool
+from mcp_hangar._sdk_compat import FastMCP, lowlevel_server
+from mcp_hangar._sdk_compat import (
+    METHOD_NOT_FOUND,
+    ListToolsResult,
+    Tool as MCPTool,
+    make_mcp_error,
+)
 
 from ..application.read_models.tool_projection import get_tool_projection_registry
 from ..context import get_identity_context
@@ -56,6 +62,89 @@ if TYPE_CHECKING:
     pass
 
 logger = logging.getLogger(__name__)
+
+# --- SEP-2549 cache-scope advertisement for projected lists (issue #292) ------
+#
+# SEP-2549 defines ``cacheScope`` / ``ttlMs`` as caching hints on list results so
+# downstream caches know whether — and for how long — a list response may be
+# reused.  ``mcp.types.ListToolsResult`` predates the SEP and has no typed
+# top-level ``cacheScope`` / ``ttlMs`` fields (only ``_meta``/``nextCursor``/
+# ``tools``), so we advertise the hints under the result's ``_meta`` using the
+# SEP-2549 field names.
+#
+# Cross-tenant isolation is the whole point here.  The hangar fronts MANY tenants
+# behind a SINGLE endpoint, and each tenant's ``tools/list`` is a distinct,
+# per-request projection.  SEP-2549's bare ``"private"`` enum relies on the
+# downstream cache correctly keying by authorization context; if it does not, it
+# could serve tenant A's list to tenant B.  To make cross-tenant reuse
+# STRUCTURALLY impossible even for a naive cache that keys only on the advertised
+# scope, we emit a DISTINCT, stable, opaque scope TOKEN per tenant instead of a
+# shared constant.
+#
+# Fail-closed: when the tenant is unknown (``None``/empty) we emit a unique,
+# non-shareable per-request ``no-store`` token so a cache can never get a second
+# hit on it — never a shared or global scope.
+CACHE_SCOPE_META_KEY = "cacheScope"
+CACHE_TTL_META_KEY = "ttlMs"
+
+# Conservative freshness hint (SEP-2549 ``ttlMs`` is in milliseconds).  Small on
+# purpose: the projection is cheap to rebuild and changes to a tenant's tool
+# surface (withdrawals, policy edits) must propagate quickly.
+PROJECTED_LIST_CACHE_TTL_MS = 5_000
+
+# Prefix for real, per-tenant shareable-within-tenant scope tokens.
+_TENANT_SCOPE_PREFIX = "tenant"
+# Prefix for the fail-closed, non-shareable per-request scope tokens.
+_NO_STORE_SCOPE_PREFIX = "no-store"
+
+
+def derive_tenant_cache_scope(tenant_id: str | None) -> str:
+    """Derive a per-tenant SEP-2549 ``cacheScope`` token (pure, unit-testable).
+
+    Properties (relied on by the cross-tenant isolation tests):
+
+    * Two DIFFERENT tenants get DIFFERENT tokens.
+    * The SAME tenant gets the SAME token every time (stable).
+    * It is NEVER a shared/global constant across tenants.
+    * FAIL CLOSED: an unknown tenant (``None`` or empty) yields a unique,
+      non-shareable per-request ``no-store`` token that a cache can never reuse,
+      and which can never equal a real tenant's token.
+
+    The tenant id is hashed so the raw tenant identifier does not leak into the
+    advertised scope; the hash is stable, so the token is stable per tenant.
+
+    Args:
+        tenant_id: The calling tenant's id, or ``None``/empty if unknown.
+
+    Returns:
+        An opaque, per-tenant (or per-request, when unknown) scope token.
+    """
+    if not tenant_id:
+        # Unknown tenant -> narrowest possible scope.  A fresh uuid guarantees
+        # the token is unique to this single response, so any downstream cache
+        # keyed on it can never produce a cross-request (or cross-tenant) hit.
+        return f"{_NO_STORE_SCOPE_PREFIX}:{uuid.uuid4().hex}"
+
+    digest = hashlib.sha256(tenant_id.encode("utf-8")).hexdigest()[:32]
+    return f"{_TENANT_SCOPE_PREFIX}:{digest}"
+
+
+def build_projected_list_cache_meta(tenant_id: str | None) -> dict[str, Any]:
+    """Build the ``_meta`` cache-scope block for a projected list response.
+
+    Attaches the SEP-2549 ``cacheScope`` (per-tenant, fail-closed) and a
+    conservative ``ttlMs`` freshness hint.
+
+    Args:
+        tenant_id: The calling tenant's id, or ``None`` if unknown.
+
+    Returns:
+        A ``_meta`` dict carrying ``cacheScope`` and ``ttlMs``.
+    """
+    return {
+        CACHE_SCOPE_META_KEY: derive_tenant_cache_scope(tenant_id),
+        CACHE_TTL_META_KEY: PROJECTED_LIST_CACHE_TTL_MS,
+    }
 
 
 def _build_flat_map(
@@ -154,10 +243,15 @@ def _build_mcp_tool_list(
         description = schema.get("description", "")
 
         tools.append(
-            MCPTool(
-                name=flat_name,
-                description=description,
-                inputSchema=input_schema,
+            # Built via model_validate with the wire alias ``inputSchema`` so the
+            # same call works on SDK v1 (field ``inputSchema``) and v2 (renamed to
+            # ``input_schema``, alias-populated).
+            MCPTool.model_validate(
+                {
+                    "name": flat_name,
+                    "description": description,
+                    "inputSchema": input_schema,
+                }
             )
         )
 
@@ -181,10 +275,9 @@ def register_flat_tool_handlers(mcp: FastMCP) -> None:
     Args:
         mcp: The FastMCP server instance to modify.
     """
-    low = mcp._mcp_server  # The MCPServer (lowlevel)
+    low = lowlevel_server(mcp)
 
-    @low.list_tools()
-    async def _flat_list_tools() -> list[MCPTool]:
+    async def _flat_list_tools() -> ListToolsResult:
         """Per-request filtered tools/list for front_door mode.
 
         Reads tenant_id from the identity context (bound at request time by
@@ -193,14 +286,22 @@ def register_flat_tool_handlers(mcp: FastMCP) -> None:
         both member-scope policy (resolver.filter_tools) and withdrawal status.
         hangar_* meta-tools are intentionally absent — external agents must not
         see the control plane surface.
+
+        The response advertises a per-tenant SEP-2549 ``cacheScope`` under
+        ``_meta`` (fail-closed to a non-shareable ``no-store`` token when the
+        tenant is unknown) so a downstream cache can never serve one tenant's
+        list to another (issue #292).
         """
         identity = get_identity_context()
         tenant_id: str | None = identity.caller.tenant_id if identity is not None else None
 
         flat_map = _build_flat_map(tenant_id)
-        return _build_mcp_tool_list(flat_map)
+        tools = _build_mcp_tool_list(flat_map)
+        return ListToolsResult(
+            tools=tools,
+            _meta=build_projected_list_cache_meta(tenant_id),
+        )
 
-    @low.call_tool(validate_input=False)
     async def _flat_call_tool(name: str, arguments: dict[str, Any]) -> Any:
         """Flat tool call dispatch for front_door mode.
 
@@ -219,9 +320,7 @@ def register_flat_tool_handlers(mcp: FastMCP) -> None:
           which surfaces as a CallToolResult(isError=True).  The backend is
           never invoked.
         """
-        import uuid
-
-        from mcp.types import CallToolResult, TextContent
+        from mcp_hangar._sdk_compat import CallToolResult
 
         identity = get_identity_context()
         tenant_id: str | None = identity.caller.tenant_id if identity is not None else None
@@ -232,12 +331,7 @@ def register_flat_tool_handlers(mcp: FastMCP) -> None:
 
         if name not in flat_map:
             # Unknown flat name → -32601 (method/tool not found).
-            raise McpError(
-                ErrorData(
-                    code=METHOD_NOT_FOUND,
-                    message=f"Tool '{name}' not found",
-                )
-            )
+            raise make_mcp_error(METHOD_NOT_FOUND, f"Tool '{name}' not found")
 
         mcp_server_id, tool_name = flat_map[name]
 
@@ -266,10 +360,65 @@ def register_flat_tool_handlers(mcp: FastMCP) -> None:
         if not result.success:
             # Surface enforcement failures as tool errors (isError=True),
             # not as unhandled exceptions, so the MCP envelope stays valid.
-            return CallToolResult(
-                content=[TextContent(type="text", text=result.error or "tool call failed")],
-                isError=True,
+            return CallToolResult.model_validate(
+                {
+                    "content": [{"type": "text", "text": result.error or "tool call failed"}],
+                    "isError": True,
+                }
             )
 
         # Success — return the raw result dict; the lowlevel handler wraps it.
         return result.result if result.result is not None else {}
+
+    # Register the handlers, replacing the defaults. SDK v1's lowlevel Server
+    # exposes list_tools()/call_tool() registration decorators; SDK v2 dropped
+    # them for add_request_handler(method, params_type, handler) with a
+    # (ctx, params) -> HandlerResult signature.
+    if hasattr(low, "list_tools"):  # SDK v1
+        low.list_tools()(_flat_list_tools)
+        low.call_tool(validate_input=False)(_flat_call_tool)
+    else:  # SDK v2
+        from mcp_types import CallToolRequestParams, PaginatedRequestParams
+
+        from mcp_hangar._sdk_compat import CallToolResult
+
+        async def _list_v2(ctx: Any, params: Any) -> ListToolsResult:
+            return await _flat_list_tools()
+
+        async def _call_v2(ctx: Any, params: Any) -> Any:
+            out = await _flat_call_tool(params.name, params.arguments or {})
+            if isinstance(out, CallToolResult):  # error path already built one
+                return out
+            # success path returned the raw backend result dict; wrap it.
+            return CallToolResult.model_validate(out) if out else CallToolResult(content=[])
+
+        low.add_request_handler("tools/list", PaginatedRequestParams, _list_v2)
+        low.add_request_handler("tools/call", CallToolRequestParams, _call_v2)
+
+
+def maybe_register_flat_tool_handlers(mcp: Any) -> bool:
+    """Install the flat tool surface when topology says ``front_door``.
+
+    In ``front_door`` external agents see flat backend tool names instead of the
+    ``hangar_*`` meta-API; in ``egress`` (the default) this is a no-op and the
+    meta-API is preserved unchanged. Returns whether the handlers were installed.
+
+    Shared by both builders: the gate used to live only in ``MCPServerFactory``,
+    which has no production call site, so ``front_door`` configured on the
+    shipped ``serve --http`` silently kept serving the meta-API — the mode
+    appeared to do nothing (#596).
+    """
+    from ..domain.services.tool_access_resolver import get_tool_access_resolver
+
+    try:
+        front_door = get_tool_access_resolver().topology_mode == "front_door"
+    except Exception:  # noqa: BLE001 -- an unresolvable topology must not break startup
+        logger.warning("flat_tool_topology_unresolved", exc_info=True)
+        return False
+
+    if not front_door:
+        return False
+
+    register_flat_tool_handlers(mcp)
+    logger.info("flat_tool_handlers_registered (topology_mode=front_door)")
+    return True

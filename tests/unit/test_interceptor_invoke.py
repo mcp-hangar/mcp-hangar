@@ -11,7 +11,7 @@ from starlette.applications import Starlette
 from starlette.routing import Route
 from starlette.testclient import TestClient
 
-from mcp.server.fastmcp import FastMCP
+from mcp_hangar._sdk_compat import FastMCP
 
 from mcp_hangar.domain.events import InterceptorInvoked
 from mcp_hangar.domain.value_objects.hook import Hook, HookPhase

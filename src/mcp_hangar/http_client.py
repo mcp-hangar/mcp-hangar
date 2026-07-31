@@ -26,7 +26,13 @@ import httpx
 from . import metrics as prometheus_metrics
 from .domain.exceptions import ClientError
 from .logging_config import get_logger
-from .observability.tracing import inject_trace_context, upstream_call_span
+from .context import get_identity_context
+from .observability.tracing import (
+    inject_trace_context,
+    scrub_baggage_for_tenant,
+    upstream_call_span,
+)
+from .protocol import SESSION_TERMINATED_CODE, SESSION_TERMINATED_REASON, inject_protocol_meta
 
 logger = get_logger(__name__)
 
@@ -119,6 +125,13 @@ class HttpClientConfig:
         pool_connections: Number of connection pool connections.
         pool_maxsize: Maximum pool size.
         extra_headers: Additional headers to include in all requests.
+        stateless_upstream: Declare the upstream as stateless (SEP-2567). When
+            True, the deprecated transport ``Mcp-Session-Id`` handling is fully
+            disabled: Hangar neither captures nor echoes the header. Leave False
+            (the default) only for backward-compat with legacy, session-based
+            upstreams (pre-2026-07-28); in that mode the header is still echoed,
+            but ONLY after such an upstream established a session by returning
+            one -- stateless upstreams remain session-free either way.
     """
 
     connect_timeout: float = 10.0
@@ -133,6 +146,10 @@ class HttpClientConfig:
     pool_connections: int = 10
     pool_maxsize: int = 10
     extra_headers: dict[str, str] = field(default_factory=dict)
+    # SEP-2567: sessions are removed from the transport. This guard lets an
+    # upstream be declared stateless so the deprecated Mcp-Session-Id handling
+    # below is never exercised. Default False preserves legacy connectivity.
+    stateless_upstream: bool = False
 
 
 @dataclass
@@ -172,6 +189,12 @@ class HttpClient:
         self._auth_config = auth_config or AuthConfig()
         self._http_config = http_config or HttpClientConfig()
         self._mcp_server_id = mcp_server_id
+        #: Whether this connection accepts the 2026-07-28 `_meta` envelope.
+        #: Starts True so the handshake itself and stateless (SEP-2575) upstreams
+        #: carry it; `_perform_mcp_handshake` clears it the moment a legacy
+        #: `initialize` succeeds, because from mcp 2.0.0 such a connection
+        #: rejects the modern envelope on every later request (-32600).
+        self.modern_envelope = True
 
         # Parse endpoint URL
         self._scheme, self._host, self._port, self._base_path = self._parse_endpoint(endpoint)
@@ -187,10 +210,15 @@ class HttpClient:
         self._sse_thread: threading.Thread | None = None
         self._sse_running = False
 
-        # MCP Streamable HTTP session tracking.
-        # The server returns Mcp-Session-Id on initialize; all subsequent
-        # requests must include it so the server correlates them to the
-        # same session.
+        # DEPRECATED (SEP-2567): MCP Streamable HTTP transport session tracking.
+        # Sessions are removed from the transport for stateless upstreams
+        # (2026-07-28+). This state is retained ONLY for backward-compat with
+        # legacy session-based upstreams: such a server returns Mcp-Session-Id on
+        # initialize, and older deployments require it echoed on subsequent
+        # requests. It stays None (and is never sent) for stateless upstreams or
+        # when ``stateless_upstream`` is set. NOTE: this transport session id is
+        # unrelated to the audit/correlation ``CallerIdentity.session_id`` used
+        # by compliance exporters, which is untouched by SEP-2567.
         self._mcp_session_id: str | None = None
 
         # Client state
@@ -301,6 +329,17 @@ class HttpClient:
 
         request_id = str(uuid.uuid4())
 
+        # Resolve the tenant this outbound request is attributed to, so we can
+        # strip any cross-tenant / untrusted W3C baggage before it leaves.
+        _identity = get_identity_context()
+        _tenant_id = _identity.caller.tenant_id if _identity and _identity.caller else None
+
+        params = inject_protocol_meta(params, modern_envelope=self.modern_envelope)
+        # SEP-414: carry W3C trace context in params._meta (not only HTTP headers),
+        # so it survives across MCP hops regardless of transport.
+        inject_trace_context(params["_meta"])
+        # Fail-safe cross-tenant scrub: drop untrusted/cross-tenant baggage on outbound.
+        scrub_baggage_for_tenant(params["_meta"], _tenant_id)
         request_body = {
             "jsonrpc": "2.0",
             "id": request_id,
@@ -328,10 +367,15 @@ class HttpClient:
             # opened before injection so the traceparent written into the
             # request headers parents the upstream's span to this one.
             with upstream_call_span(method, params):
-                # Build per-request headers: W3C TraceContext + MCP session ID.
+                # Build per-request headers: W3C TraceContext (+ deprecated session id).
                 extra_headers: dict[str, str] = {}
                 inject_trace_context(extra_headers)
-                if self._mcp_session_id:
+                # Fail-safe cross-tenant scrub: drop untrusted/cross-tenant baggage on outbound.
+                scrub_baggage_for_tenant(extra_headers, _tenant_id)
+                # DEPRECATED (SEP-2567): only echo the transport Mcp-Session-Id for a
+                # legacy session-based upstream that established one. Declaring the
+                # upstream stateless keeps _mcp_session_id None, so this is skipped.
+                if not self._http_config.stateless_upstream and self._mcp_session_id:
                     extra_headers["Mcp-Session-Id"] = self._mcp_session_id
 
                 prometheus_metrics.record_message_sent(mcp_server_label, method, len(json.dumps(request_body).encode()))
@@ -346,12 +390,14 @@ class HttpClient:
             duration_ms = duration_s * 1000
             status_code = str(response.status_code)
 
-            # Capture MCP session ID from response headers.
-            # The server sets this on initialize; we must echo it back on
-            # all subsequent requests per the Streamable HTTP spec.
-            session_id = response.headers.get("Mcp-Session-Id")
-            if session_id:
-                self._mcp_session_id = session_id
+            # DEPRECATED (SEP-2567): capture the transport session id ONLY for
+            # backward-compat with legacy session-based upstreams. Stateless
+            # upstreams do not return this header, and declaring the upstream
+            # stateless suppresses capture entirely so no session is ever tracked.
+            if not self._http_config.stateless_upstream:
+                session_id = response.headers.get("Mcp-Session-Id")
+                if session_id:
+                    self._mcp_session_id = session_id
 
             # Record HTTP request metrics
             prometheus_metrics.HTTP_REQUESTS_TOTAL.inc(
@@ -374,6 +420,41 @@ class HttpClient:
                 status=response.status_code,
                 duration_ms=duration_ms,
             )
+
+            if response.status_code == 404 and self._mcp_session_id is not None:
+                # The session this client holds no longer exists upstream --
+                # typically because the upstream process restarted. Streamable
+                # HTTP answers a request carrying an unknown Mcp-Session-Id with
+                # 404, and the resolution is to establish a new session rather
+                # than keep presenting the dead one.
+                #
+                # Nothing did that. The id was captured once and never cleared,
+                # 404 is not in `retry_status_codes`, and the caller saw an
+                # opaque "HTTP error: 404". So every call after an upstream
+                # restart failed, forever, while /health/ready still reported the
+                # gateway healthy -- it recovered only when the gateway itself
+                # was restarted (#651).
+                #
+                # Dropping the id here is half the fix; the other half is the
+                # re-handshake, which lives in the domain layer because only it
+                # knows how to `initialize`.
+                dead_session = self._mcp_session_id
+                self._mcp_session_id = None
+                logger.warning(
+                    "http_client_session_terminated",
+                    request_id=request_id,
+                    mcp_server=mcp_server_label,
+                    method=method,
+                    session_id=dead_session,
+                )
+                prometheus_metrics.HTTP_ERRORS_TOTAL.inc(mcp_server=mcp_server_label, error_type="session_terminated")
+                return {
+                    "error": {
+                        "code": SESSION_TERMINATED_CODE,
+                        "message": "Session terminated",
+                        "data": {"reason": SESSION_TERMINATED_REASON},
+                    }
+                }
 
             if response.status_code >= 400:
                 prometheus_metrics.HTTP_ERRORS_TOTAL.inc(mcp_server=mcp_server_label, error_type=f"http_{status_code}")

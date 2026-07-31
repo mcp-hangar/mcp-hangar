@@ -1,4 +1,4 @@
-"""Enterprise auth infrastructure implementations."""
+"""Auth infrastructure implementations."""
 
 from mcp_hangar.auth.infrastructure.api_key_authenticator import ApiKeyAuthenticator, InMemoryApiKeyStore
 from mcp_hangar.auth.infrastructure.jwt_authenticator import JWKSTokenValidator, JWTAuthenticator, OIDCConfig

@@ -4,7 +4,7 @@ Provides authenticator and token validator for JWT-based authentication
 with OIDC support (JWKS validation, standard claims).
 """
 
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from typing import Any, TYPE_CHECKING
 
 import structlog
@@ -35,6 +35,21 @@ class OIDCConfig:
         email_claim: JWT claim for email (default: email).
         max_token_lifetime: Maximum allowed token lifetime (exp - iat) in seconds.
             Value of 0 means disabled (no lifetime check). Default: 3600.
+        require_tenant: Fail-closed multi-tenant gate. When True, a validated token
+            whose ``tenant_claim`` is absent or empty is REJECTED instead of being
+            silently treated as a global/no-tenant principal. Enable this on
+            multi-tenant deployments so a token that does not name a tenant cannot
+            act across tenant boundaries. Default False (single-tenant / no-OIDC
+            deployments are unaffected).
+        strict_tenant_audience: Opt-in strict per-tenant audience binding (RFC 8707).
+            When True, after the tenant claim is extracted the token's ``aud`` must
+            equal the resource mapped to that tenant in ``tenant_audiences``; a
+            mismatch (or a tenant with no mapping) is rejected fail-closed. This
+            makes cross-tenant token replay structurally impossible at the token
+            layer, independent of the tenant claim. Default False.
+        tenant_audiences: Explicit ``{tenant_id: expected_audience}`` map consulted
+            only when ``strict_tenant_audience`` is True. The global ``audience`` is
+            never used as a fallback for an unmapped tenant.
     """
 
     issuer: str
@@ -50,6 +65,31 @@ class OIDCConfig:
 
     # Lifetime enforcement
     max_token_lifetime: int = 3600
+
+    # Tolerance for clock drift between this host and the token issuer, applied to
+    # the time-based claims (exp / iat / nbf).
+    #
+    # PyJWT defaults this to 0, which demands the two clocks agree to the second.
+    # They routinely do not: a VM resuming from a snapshot, a container host whose
+    # NTP has drifted, an IdP a few seconds ahead -- any of these makes every
+    # freshly issued token fail `iat`/`nbf` and every nearly-expired one fail
+    # `exp`. The failure is total rather than partial: skew is a property of the
+    # pair of hosts, so it rejects *every* token at once, and it presents as
+    # "authentication suddenly broke everywhere" with valid credentials and a
+    # healthy IdP.
+    #
+    # 60s is the usual bound for this: large enough to absorb ordinary drift,
+    # small enough that it does not meaningfully extend the life of an expired
+    # token. RFC 7519 permits "some small leeway, usually no more than a few
+    # minutes". Set to 0 to require exact agreement.
+    clock_skew_leeway: int = 60
+
+    # Multi-tenant fail-closed gate
+    require_tenant: bool = False
+
+    # Strict per-tenant audience binding (RFC 8707), opt-in
+    strict_tenant_audience: bool = False
+    tenant_audiences: dict[str, str] = field(default_factory=dict)
 
 
 class JWTAuthenticator(IAuthenticator):
@@ -219,6 +259,37 @@ class JWTAuthenticator(IAuthenticator):
             groups = [groups]
 
         tenant_id = claims.get(config.tenant_claim)
+
+        # Fail-closed multi-tenant enforcement (#312): in multi-tenant mode the
+        # effective tenant derives SOLELY from this validated claim, so a token
+        # that names no tenant must not be admitted as a global/any-tenant
+        # principal -- that would let it act across tenant boundaries. Reject an
+        # absent or empty tenant claim. Single-tenant / no-OIDC deployments leave
+        # ``require_tenant`` False and are unaffected.
+        if config.require_tenant and (tenant_id is None or (isinstance(tenant_id, str) and not tenant_id.strip())):
+            logger.warning(
+                "jwt_missing_tenant_claim",
+                tenant_claim=config.tenant_claim,
+                issuer=claims.get("iss"),
+                subject=subject,
+                reason="cross_tenant_rejected",
+            )
+            raise InvalidCredentialsError(
+                message="Missing required tenant claim",
+                auth_method="jwt",
+            )
+
+        # Strict per-tenant audience binding (#373, RFC 8707): when enabled, the
+        # token's `aud` must equal the resource EXPLICITLY mapped to the claimed
+        # tenant. This binds each token to one tenant's resource at the token
+        # layer, so a token minted for tenant A's resource is rejected when its
+        # claim maps to a different resource (or to nothing) -- cross-tenant
+        # replay is structurally impossible, independent of the tenant claim.
+        # Fail-closed: an unmapped tenant is rejected; the global audience is
+        # never a fallback here.
+        if config.strict_tenant_audience:
+            self._enforce_tenant_audience(claims, tenant_id, subject, config)
+
         email = claims.get(config.email_claim)
 
         return Principal(
@@ -233,6 +304,60 @@ class JWTAuthenticator(IAuthenticator):
                 "expires_at": claims.get("exp"),
             },
         )
+
+    def _enforce_tenant_audience(
+        self,
+        claims: dict[str, Any],
+        tenant_id: Any,
+        subject: Any,
+        config: OIDCConfig,
+    ) -> None:
+        """Reject a token whose ``aud`` is not bound to its claimed tenant (#373).
+
+        Emits a ``jwt_cross_tenant_audience`` audit event and raises
+        :class:`InvalidCredentialsError` (fail-closed) when the claimed tenant has
+        no configured audience mapping, or when the token's ``aud`` does not
+        include that tenant's mapped resource.
+
+        Args:
+            claims: Validated JWT claims (source of the ``aud`` value).
+            tenant_id: The tenant extracted from the validated tenant claim.
+            subject: The token subject (for audit context only).
+            config: The issuer config carrying the tenant -> audience map.
+
+        Raises:
+            InvalidCredentialsError: If the tenant is unmapped or the ``aud`` does
+                not match the tenant's mapped resource.
+        """
+        expected = config.tenant_audiences.get(tenant_id) if isinstance(tenant_id, str) and tenant_id else None
+        if not expected:
+            # Unmapped tenant (or no tenant claim at all) -> reject fail-closed.
+            logger.warning(
+                "jwt_cross_tenant_audience",
+                reason="tenant_audience_unmapped",
+                tenant_id=tenant_id,
+                issuer=claims.get("iss"),
+                subject=subject,
+            )
+            raise InvalidCredentialsError(
+                message="No audience mapping for tenant",
+                auth_method="jwt",
+            )
+
+        token_aud = claims.get("aud")
+        auds = [token_aud] if isinstance(token_aud, str) else list(token_aud or [])
+        if expected not in auds:
+            logger.warning(
+                "jwt_cross_tenant_audience",
+                reason="cross_tenant_audience",
+                tenant_id=tenant_id,
+                issuer=claims.get("iss"),
+                subject=subject,
+            )
+            raise InvalidCredentialsError(
+                message="Token audience does not match tenant resource",
+                auth_method="jwt",
+            )
 
 
 class JWKSTokenValidator(ITokenValidator):
@@ -283,12 +408,23 @@ class JWKSTokenValidator(ITokenValidator):
             assert self._jwks_client is not None
             signing_key = self._jwks_client.get_signing_key_from_jwt(token)
 
+            # In strict per-tenant mode (#373) the token's `aud` names ONE tenant's
+            # resource, so signature-time verification must accept any configured
+            # tenant resource (PyJWT treats a list as "match at least one"). The
+            # precise tenant<->aud binding is then enforced per claim in
+            # JWTAuthenticator._enforce_tenant_audience. Otherwise verify against
+            # the single global audience exactly as before.
+            audience: str | list[str] = self._config.audience
+            if self._config.strict_tenant_audience and self._config.tenant_audiences:
+                audience = list(dict.fromkeys(self._config.tenant_audiences.values()))
+
             claims = jwt.decode(
                 token,
                 signing_key.key,
                 algorithms=["RS256", "ES256"],
-                audience=self._config.audience,
+                audience=audience,
                 issuer=self._config.issuer,
+                leeway=self._config.clock_skew_leeway,
                 options={
                     "verify_exp": True,
                     "verify_iat": True,
@@ -465,17 +601,28 @@ class StaticSecretTokenValidator(ITokenValidator):
     WARNING: Only for development/testing. Use JWKS in production.
     """
 
-    def __init__(self, secret: str, issuer: str | None = None, audience: str | None = None):
+    def __init__(
+        self,
+        secret: str,
+        issuer: str | None = None,
+        audience: str | None = None,
+        clock_skew_leeway: int = 60,
+    ):
         """Initialize with a static secret.
 
         Args:
             secret: The HMAC secret for HS256 validation.
             issuer: Optional expected issuer.
             audience: Optional expected audience.
+            clock_skew_leeway: Tolerance in seconds for drift between this host and
+                the issuer, applied to exp/iat/nbf. Defaults to 60 for the reasons
+                given on ``OIDCConfig.clock_skew_leeway``; 0 requires exact
+                agreement.
         """
         self._secret = secret
         self._issuer = issuer
         self._audience = audience
+        self._clock_skew_leeway = clock_skew_leeway
 
     def validate(self, token: str) -> dict:
         """Validate JWT using static secret.
@@ -512,6 +659,7 @@ class StaticSecretTokenValidator(ITokenValidator):
                 algorithms=["HS256"],
                 audience=self._audience,
                 issuer=self._issuer,
+                leeway=self._clock_skew_leeway,
                 options=options,
             )
             return claims

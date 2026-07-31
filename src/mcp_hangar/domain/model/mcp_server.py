@@ -5,6 +5,7 @@ import time
 from typing import Any, TYPE_CHECKING, cast
 
 from ...logging_config import get_logger
+from ...protocol import HANGAR_CLIENT_INFO, SESSION_TERMINATED_REASON, SUPPORTED_PROTOCOL_VERSION
 
 if TYPE_CHECKING:
     from ...infrastructure.lock_hierarchy import TrackedLock
@@ -45,6 +46,20 @@ from .mcp_server_config import McpServerConfig
 from .tool_catalog import ToolCatalog, ToolSchema
 
 logger = get_logger(__name__)
+
+
+# SUPPORTED_PROTOCOL_VERSION / HANGAR_CLIENT_INFO live in the leaf `protocol`
+# module (re-exported above) so the transport clients can share them without a
+# domain -> transport import. Re-export keeps existing import sites working.
+
+#: The generation whose `_meta` envelope a connection must have negotiated before
+#: Hangar may keep stamping it. ISO dates compare correctly as strings.
+_MODERN_PROTOCOL_VERSION = "2026-07-28"
+
+# JSON-RPC "method not found". A stateless MCP server (SEP-2575) removed the
+# `initialize` handler and answers with this code; we treat it as "this upstream
+# is stateless, skip the handshake" rather than a startup failure.
+_JSONRPC_METHOD_NOT_FOUND = -32601
 
 
 # Valid state transitions
@@ -782,22 +797,90 @@ class McpServer(AggregateRoot):
             )
         return self._image
 
+    def _is_session_terminated(self, response: Any) -> bool:
+        """Did the upstream reject our transport session?
+
+        Keyed on the machine-readable discriminator rather than the message,
+        which is prose.
+        """
+        if not isinstance(response, dict):
+            return False
+        error = response.get("error")
+        if not isinstance(error, dict):
+            return False
+        data = error.get("data")
+        return isinstance(data, dict) and data.get("reason") == SESSION_TERMINATED_REASON
+
+    def _call_with_session_recovery(
+        self, client: Any, method: str, params: dict[str, Any], timeout: float | None = None
+    ) -> Any:
+        """Call *method*, re-handshaking once if the upstream lost our session.
+
+        An upstream that restarts forgets every session it issued. Before this,
+        the client kept presenting the dead id and every later call answered 404
+        forever -- while readiness still reported the gateway healthy, so nothing
+        restarted it and nothing alerted. Recovery required restarting the
+        gateway itself (#651).
+
+        The retry is deliberately once. A second failure is not a stale session,
+        it is an upstream that will not hold one, and looping would turn a
+        recoverable blip into an unbounded retry against a sick backend.
+
+        Failing to renegotiate records a health failure; succeeding does not.
+        That ordering is the decision: a session lost to an ordinary restart is
+        not evidence of an unhealthy upstream, and marking it so would pull the
+        pod out of its Service for something that just healed itself.
+        """
+        response = client.call(method, params, timeout=timeout)
+        if not self._is_session_terminated(response):
+            return response
+
+        logger.warning(
+            "mcp_session_terminated_renegotiating",
+            mcp_server_id=self.mcp_server_id,
+            method=method,
+        )
+        try:
+            self._perform_mcp_handshake(client)
+        except Exception as exc:  # noqa: BLE001 -- any handshake failure is the same verdict here
+            self._health.record_failure()
+            logger.error(
+                "mcp_session_renegotiation_failed",
+                mcp_server_id=self.mcp_server_id,
+                method=method,
+                error=str(exc),
+            )
+            return response
+
+        logger.info("mcp_session_renegotiated", mcp_server_id=self.mcp_server_id, method=method)
+        return client.call(method, params, timeout=timeout)
+
     def _perform_mcp_handshake(self, client: Any) -> None:
-        """Perform MCP initialize and tools/list handshake."""
-        # Initialize
+        """Perform the MCP startup handshake and tools/list discovery.
+
+        Legacy upstreams answer ``initialize``; stateless upstreams (SEP-2575)
+        removed it and reply method-not-found, which is tolerated rather than
+        treated as a startup failure. Either way we then discover tools.
+        """
         # Note: timeout is handled by the client's configuration
         # (StdioClient: 15s default, HttpClient: configured read_timeout)
         init_resp = client.call(
             "initialize",
             {
-                "protocolVersion": "2024-11-05",
+                "protocolVersion": SUPPORTED_PROTOCOL_VERSION,
                 "capabilities": {},
-                "clientInfo": {"name": "mcp-registry", "version": "1.0.0"},
+                "clientInfo": dict(HANGAR_CLIENT_INFO),
             },
         )
 
-        if "error" in init_resp:
-            error_msg = init_resp["error"].get("message", "unknown")
+        init_error = init_resp.get("error")
+        if init_error is not None and init_error.get("code") == _JSONRPC_METHOD_NOT_FOUND:
+            # Stateless upstream (SEP-2575): no initialize handshake. Expected.
+            # Keep the modern envelope -- it is the only way such an upstream
+            # learns the protocol version and client info at all.
+            logger.info("mcp_handshake_stateless_upstream", mcp_server_id=self.mcp_server_id)
+        elif init_error is not None:
+            error_msg = init_error.get("message", "unknown")
             self._log_client_error(client, error_msg)
 
             # Collect full diagnostics for user-friendly error
@@ -810,6 +893,22 @@ class McpServer(AggregateRoot):
                 suggestion=diagnostics.get("suggestion")
                 or "Check mcp_server logs and ensure it implements the MCP protocol correctly.",
             )
+
+        if init_error is None:
+            # A handshake happened, so this connection belongs to whichever era
+            # the upstream negotiated -- and from mcp 2.0.0 a legacy connection
+            # REJECTS the 2026-07-28 `_meta` envelope on every later request
+            # (-32600), which reads as a hang: discovery fails, the cold start
+            # never completes, the batch times out. Stop stamping it unless the
+            # upstream actually negotiated the modern generation.
+            negotiated = (init_resp.get("result") or {}).get("protocolVersion")
+            if isinstance(negotiated, str) and negotiated < _MODERN_PROTOCOL_VERSION:
+                client.modern_envelope = False
+                logger.debug(
+                    "upstream_legacy_era",
+                    mcp_server_id=self.mcp_server_id,
+                    negotiated_protocol_version=negotiated,
+                )
 
         # Discover tools
         tools_resp = client.call("tools/list", {})
@@ -1150,7 +1249,8 @@ class McpServer(AggregateRoot):
             raise ToolInvocationError(self.mcp_server_id, "mcp_server client is None")
 
         try:
-            response = client.call(
+            response = self._call_with_session_recovery(
+                client,
                 "tools/call",
                 {"name": tool_name, "arguments": arguments},
                 timeout=timeout,
@@ -1276,6 +1376,62 @@ class McpServer(AggregateRoot):
             logger.debug(f"tool_invoked: {correlation_id}, mcp_server={self.mcp_server_id}, tool={tool_name}")
 
             return cast(dict[str, Any], result)
+
+    def relay_request(self, method: str, params: dict[str, Any], timeout: float = 30.0) -> dict[str, Any]:
+        """Relay a raw JSON-RPC request to the live upstream client.
+
+        This is the follow-up path for an already-minted governed task (ADR-014
+        task relay): a client later sends ``tasks/get`` / ``tasks/result`` /
+        ``tasks/cancel`` and Hangar must forward that request verbatim to the
+        SAME upstream MCP server that minted the task.
+
+        Unlike ``invoke_tool``, this NEVER cold-starts the server. If the server
+        is not already live we fail -- we do not launch it (the task's upstream
+        is gone, so there is nothing to relay to). It applies no L7/egress/consent
+        logic; it is a thin transport relay. Trace/_meta injection is handled
+        inside ``client.call``.
+
+        The client reference is copied under the same lock ``invoke_tool`` uses
+        (see the invocation-phase pattern around mcp_server.py:1095), and the
+        network ``.call`` is issued OUTSIDE the lock.
+
+        Args:
+            method: JSON-RPC method to forward verbatim (e.g. "tasks/get").
+            params: JSON-RPC params to forward verbatim.
+            timeout: Timeout in seconds.
+
+        Returns:
+            The raw JSON-RPC response dict as-is (the ``{"result": ...}`` /
+            ``{"error": ...}`` shape). Not unwrapped or interpreted -- the caller
+            validates the payload into a typed result.
+
+        Raises:
+            ToolInvocationError: If the upstream client is absent or not alive
+                (relay-unavailable), or if the transport call fails.
+        """
+        # Copy the live client under the lock; do NOT cold-start. Mirrors the
+        # invoke_tool invocation-phase copy-under-lock-then-call-outside-lock.
+        with self._lock:
+            client = self._client
+            if client is None or not client.is_alive():
+                raise ToolInvocationError(
+                    self.mcp_server_id,
+                    "relay unavailable: mcp_server client is not live",
+                    {"method": method},
+                )
+
+        # Transport phase (outside lock): forward method + params verbatim.
+        try:
+            response = client.call(method, params, timeout=timeout)
+        except (OSError, TimeoutError) as e:
+            raise ToolInvocationError(
+                self.mcp_server_id,
+                str(e),
+                {"method": method},
+            ) from e
+
+        # Return the raw response dict as-is; the caller validates the payload.
+        return cast(dict[str, Any], response)
 
     def _refresh_tools(self) -> None:
         """Refresh tool catalog from mcp_server.

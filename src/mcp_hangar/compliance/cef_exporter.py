@@ -4,7 +4,7 @@ Exports security-relevant events (tool invocations, provider state changes)
 as CEF (Common Event Format) log lines. Output is written to a configurable
 destination: file, stderr, or a callback function.
 
-This module is part of the enterprise compliance layer.
+This module is part of the compliance layer.
 """
 
 import logging

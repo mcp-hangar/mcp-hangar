@@ -101,12 +101,12 @@ def client(service_stack):
 
 class TestApprovalAPIListEmpty:
     def test_list_pending_empty(self, client):
-        resp = client.get("/enterprise/approvals?state=pending")
+        resp = client.get("/approvals?state=pending")
         assert resp.status_code == 200
         assert resp.json() == []
 
     def test_list_invalid_state(self, client):
-        resp = client.get("/enterprise/approvals?state=invalid")
+        resp = client.get("/approvals?state=invalid")
         assert resp.status_code == 400
 
 
@@ -132,7 +132,7 @@ class TestApprovalAPIResolveFlow:
         await asyncio.sleep(0.1)
 
         # List pending via API
-        resp = client.get("/enterprise/approvals?state=pending")
+        resp = client.get("/approvals?state=pending")
         assert resp.status_code == 200
         data = resp.json()
         assert len(data) == 1
@@ -142,13 +142,13 @@ class TestApprovalAPIResolveFlow:
         assert data[0]["expires_in_seconds"] > 0
 
         # Get single approval via API
-        resp = client.get(f"/enterprise/approvals/{approval_id}")
+        resp = client.get(f"/approvals/{approval_id}")
         assert resp.status_code == 200
         assert resp.json()["approval_id"] == approval_id
 
         # Resolve via API
         resp = client.post(
-            f"/enterprise/approvals/{approval_id}/resolve",
+            f"/approvals/{approval_id}/resolve",
             json={"decision": "approve"},
             headers={"x-principal-id": "api-user"},
         )
@@ -160,7 +160,7 @@ class TestApprovalAPIResolveFlow:
 
     async def test_resolve_unknown_returns_404(self, client):
         resp = client.post(
-            "/enterprise/approvals/nonexistent/resolve",
+            "/approvals/nonexistent/resolve",
             json={"decision": "approve"},
         )
         assert resp.status_code == 404
@@ -182,18 +182,18 @@ class TestApprovalAPIResolveFlow:
         check_task = loop.create_task(do_check())
         await asyncio.sleep(0.1)
 
-        pending = client.get("/enterprise/approvals?state=pending").json()
+        pending = client.get("/approvals?state=pending").json()
         approval_id = pending[0]["approval_id"]
 
         resp = client.post(
-            f"/enterprise/approvals/{approval_id}/resolve",
+            f"/approvals/{approval_id}/resolve",
             json={"decision": "maybe"},
         )
         assert resp.status_code == 400
 
         # Clean up: resolve properly to unblock
         client.post(
-            f"/enterprise/approvals/{approval_id}/resolve",
+            f"/approvals/{approval_id}/resolve",
             json={"decision": "deny"},
         )
         await check_task
@@ -215,12 +215,12 @@ class TestApprovalAPIResolveFlow:
         check_task = loop.create_task(do_check())
         await asyncio.sleep(0.1)
 
-        pending = client.get("/enterprise/approvals?state=pending").json()
+        pending = client.get("/approvals?state=pending").json()
         approval_id = pending[0]["approval_id"]
 
         # First resolve
         resp1 = client.post(
-            f"/enterprise/approvals/{approval_id}/resolve",
+            f"/approvals/{approval_id}/resolve",
             json={"decision": "approve"},
         )
         assert resp1.status_code == 200
@@ -229,7 +229,7 @@ class TestApprovalAPIResolveFlow:
 
         # Second resolve should be 409
         resp2 = client.post(
-            f"/enterprise/approvals/{approval_id}/resolve",
+            f"/approvals/{approval_id}/resolve",
             json={"decision": "deny"},
         )
         assert resp2.status_code == 409

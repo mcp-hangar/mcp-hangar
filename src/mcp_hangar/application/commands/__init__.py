@@ -60,7 +60,7 @@ globals().update(
 )
 sys.modules[f"{__name__}.crud_{''.join(('com', 'mands'))}"] = import_module(f"{__name__}.crud_commands")
 
-_ENTERPRISE_AUTH_COMMANDS = {
+_AUTH_COMMANDS = {
     "AssignRoleCommand",
     "CreateApiKeyCommand",
     "CreateCustomRoleCommand",
@@ -78,7 +78,7 @@ _ENTERPRISE_AUTH_COMMANDS = {
 
 
 def __getattr__(name: str):  # noqa: ANN001
-    if name in _ENTERPRISE_AUTH_COMMANDS:
+    if name in _AUTH_COMMANDS:
         try:
             if "Handler" in name or name.startswith("register"):
                 mod_name = "mcp_hangar.auth.commands.handlers"
@@ -86,5 +86,5 @@ def __getattr__(name: str):  # noqa: ANN001
                 mod_name = "mcp_hangar.auth.commands.commands"
             return getattr(import_module(mod_name), name)
         except ImportError as err:
-            raise AttributeError(f"module {__name__!r} has no attribute {name!r} (enterprise not installed)") from err
+            raise AttributeError(f"module {__name__!r} has no attribute {name!r} (auth module not installed)") from err
     raise AttributeError(f"module {__name__!r} has no attribute {name!r}")

@@ -4,6 +4,13 @@ Policies encapsulate domain rules and classification logic that can be
 applied across different contexts without coupling to specific aggregates.
 """
 
+from .dsl import (
+    ALLOWED_ACTIONS,
+    ALLOWED_HOOKS,
+    HookRule,
+    parse_policy,
+    PolicyDSL,
+)
 from .egress_l7 import (
     ArgumentRules,
     Decision,
@@ -23,17 +30,22 @@ from .mcp_server_health import (
 )
 
 __all__ = [
+    "ALLOWED_ACTIONS",
+    "ALLOWED_HOOKS",
     "ArgumentRules",
     "Decision",
+    "HookRule",
     "KNOWN_SECRET_PATTERN_GROUPS",
     "L7Policy",
     "McpServerHealthClassification",
+    "PolicyDSL",
     "ToolAction",
     "ToolRules",
     "classify_mcp_server_health",
     "classify_mcp_server_health_from_mcp_server",
     "evaluate",
     "evaluate_tool",
+    "parse_policy",
     "scan_arguments",
     "to_health_status_string",
 ]

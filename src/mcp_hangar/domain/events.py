@@ -297,6 +297,55 @@ class TaskCancelled(DomainEvent):
         super().__init__()
 
 
+@dataclass
+class TaskConsentDecided(DomainEvent):
+    """Published when a mid-flight ``input_required`` consent is decided (ADR-014 Phase 4).
+
+    On the 2025-11-25 protocol a relayed task that pauses at ``input_required`` is
+    resolved synchronously: Hangar elicits the downstream client for consent and
+    records the outcome here (``granted=True`` on accept, ``False`` on a
+    decline/cancel/failure/fail-closed denial), keyed by the task plus its
+    ``target_server_id`` (task_ids are unique only per-upstream) and the
+    deterministic ``input_key`` of the pending input. This joins the task's
+    append-only provenance chain via its ``correlation_id`` + owner ``tenant_id``.
+    """
+
+    task_id: str
+    target_server_id: str = ""
+    input_key: str = ""
+    granted: bool = False
+    tenant_id: str | None = None
+    correlation_id: str = ""
+    principal_id: str = ""
+
+    def __post_init__(self):
+        super().__init__()
+
+
+@dataclass
+class DigestMismatchInTask(DomainEvent):
+    """Published when a relayed task's pinned tool digest drifts at result time.
+
+    The task-keyed counterpart of :class:`DigestMismatchEvent` (ADR-014 relay-with-
+    governance / #320): when ``get_result`` re-verifies a task's pinned tool digest
+    and finds drift (or an unverifiable schema), the task is failed fail-closed and
+    this event is emitted onto the append-only provenance chain, keyed by the task
+    plus its ``target_server_id`` (task_ids are unique only per-upstream).
+    """
+
+    task_id: str
+    target_server_id: str = ""
+    tenant_id: str | None = None
+    correlation_id: str = ""
+    mcp_server_id: str | None = None
+    tool_name: str = ""
+    expected_digest: str = ""
+    observed_digest: str | None = None
+
+    def __post_init__(self):
+        super().__init__()
+
+
 # Health Check Events
 
 
@@ -1357,6 +1406,12 @@ class CapabilityViolationDetected(DomainEvent):
     destination: str | None = None
     severity: str = "high"
     schema_version: int = 2
+    # Process attribution (populated by the Tetragon backend / hangar-agent; #331/#333).
+    process_pid: int | None = None
+    container_id: str | None = None
+    pod_name: str | None = None
+    pod_namespace: str | None = None
+    node_name: str | None = None
 
     def __init__(
         self,
@@ -1367,6 +1422,11 @@ class CapabilityViolationDetected(DomainEvent):
         destination: str | None = None,
         severity: str = "high",
         schema_version: int = 2,
+        process_pid: int | None = None,
+        container_id: str | None = None,
+        pod_name: str | None = None,
+        pod_namespace: str | None = None,
+        node_name: str | None = None,
         **kwargs: object,
     ):
         self.mcp_server_id = _resolve_legacy_mcp_server_id(mcp_server_id, kwargs)
@@ -1376,6 +1436,11 @@ class CapabilityViolationDetected(DomainEvent):
         self.destination = destination
         self.severity = severity
         self.schema_version = schema_version
+        self.process_pid = process_pid
+        self.container_id = container_id
+        self.pod_name = pod_name
+        self.pod_namespace = pod_namespace
+        self.node_name = node_name
         if kwargs:
             unexpected = ", ".join(sorted(kwargs))
             raise TypeError(f"Unexpected keyword argument(s): {unexpected}")
@@ -1461,6 +1526,12 @@ class EgressBlocked(DomainEvent):
     protocol: str
     enforcement_source: str = "networkpolicy"
     schema_version: int = 1
+    # Process attribution (populated by the Tetragon backend / hangar-agent; #331/#333).
+    process_pid: int | None = None
+    container_id: str | None = None
+    pod_name: str | None = None
+    pod_namespace: str | None = None
+    node_name: str | None = None
 
     def __init__(
         self,
@@ -1470,6 +1541,11 @@ class EgressBlocked(DomainEvent):
         protocol: str = "",
         enforcement_source: str = "networkpolicy",
         schema_version: int = 1,
+        process_pid: int | None = None,
+        container_id: str | None = None,
+        pod_name: str | None = None,
+        pod_namespace: str | None = None,
+        node_name: str | None = None,
         **kwargs: object,
     ):
         self.mcp_server_id = _resolve_legacy_mcp_server_id(mcp_server_id, kwargs)
@@ -1478,6 +1554,11 @@ class EgressBlocked(DomainEvent):
         self.protocol = protocol
         self.enforcement_source = enforcement_source
         self.schema_version = schema_version
+        self.process_pid = process_pid
+        self.container_id = container_id
+        self.pod_name = pod_name
+        self.pod_namespace = pod_namespace
+        self.node_name = node_name
         if kwargs:
             unexpected = ", ".join(sorted(kwargs))
             raise TypeError(f"Unexpected keyword argument(s): {unexpected}")

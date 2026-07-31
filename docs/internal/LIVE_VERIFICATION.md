@@ -41,9 +41,9 @@ live) · 🔴 no coverage at all · ⬜ live test not yet written.
 | `hangar_call` runs a batch in parallel and returns each result | MCP `hangar_call` | result payloads, wall-clock < sum | internal only (`test_trace_propagation_e2e`, `test_batch_invoke`) | 🟡 |
 | Management tools return correct shapes (`hangar_list`/`details`/`health`/`start`/`stop`/`load`/`warm`/`status`/`tools`/`metrics`/`reload_config`/`quarantine`/`sources`) | MCP tools | tool result JSON | unit only | 🟡 |
 | Lifecycle COLD→READY→DEGRADED→DEAD + single-flight cold start | MCP `hangar_load`/`hangar_call` | state via `hangar_status` | internal (`test_e2e_mcp_flow`) | 🟡 |
-| Tool-access policy (glob allow/deny, 3-level merge) blocks a denied tool on a real call **and** hides it from `hangar_tools` | MCP `hangar_call`/`hangar_tools` | rejection + filtered listing | internal resolver (`test_tool_filtering`) | 🟡 |
-| Per-tenant withdrawal rejects a withdrawn tool on the call path; config-reload restores it | MCP `hangar_call` + reload | `CallResult(success=False)` then success | unit only | 🔴 |
-| Digest pinning blocks a drifted tool and emits `DigestMismatchEvent` (#276/#280) | MCP `hangar_call` | rejection + event | validator internal only | 🔴 |
+| Tool-access policy (glob allow/deny, 3-level merge) blocks a denied tool on a real call **and** hides it from `hangar_tools` | MCP `hangar_call`/`hangar_tools` | rejection + filtered listing | `tests/live/test_t0_tool_access.py` (per-tenant deny over `/mcp` with an `X-API-Key` tenant: denied tool `success=False` on `hangar_call` AND absent from `hangar_tools`, allowed tool callable + listed). Fixed a fail-OPEN on the listing half — see note below. | ✅ |
+| Per-tenant withdrawal rejects a withdrawn tool on the call path; config-reload restores it | MCP `hangar_call` + reload | `CallResult(success=False)` then success | `tests/live/test_t0_withdrawal.py` (live: a tool withdrawn for tenant A is rejected on A's `hangar_call` with `ToolWithdrawnError`, while tenant B and A's other tools succeed -- proving the executor's per-tenant withdrawal check AND that the caller identity bridged over streamable-HTTP by #387 reaches it). Config-reload *restore* remains unit-only (`test_config_withdrawal::test_reload_clears_then_reapplies_withdrawals`). | ✅ |
+| Digest pinning blocks a drifted tool and emits `DigestMismatchEvent` (#276/#280) | MCP `hangar_call` | rejection + event | `tests/live/test_t0_digest.py` (real API-key tenant + `provider_identity` stub: a tool pinned to a stale digest is rejected `CallResult(success=False, error_type="ToolDigestMismatchError")` and never dispatched; a matching pin is allowed). Enforcement confirmed **already fail-closed** over HTTP -- per-tenant identity (via `X-API-Key`) reaches the executor and the pin fires. `DigestMismatchEvent` emission on that same branch is unit-covered (`tests/unit/test_digest_pinning_executor.py`); it is internal, not observable over HTTP. | ✅ |
 | Flat per-tenant re-export surfaces tools under flat names | MCP `tools/list` | re-exported names | unit only | 🔴 |
 | Truncation + continuation (`hangar_fetch_continuation`/`delete_continuation`) | MCP tools | truncated payload then paged fetch | unit-ish only | 🔴 |
 | Approval gate via `hangar_approve` / approval REST | MCP tool + REST | pending→resolve→granted | REST fakes (`test_approval_api_e2e`) | 🟡 |
@@ -51,12 +51,28 @@ live) · 🔴 no coverage at all · ⬜ live test not yet written.
 | OTEL trace context (W3C) propagates Agent→hangar→backend | MCP `hangar_call` + collector | correlated spans | mocked ctx | 🟡 |
 | Audit log / CEF emitted on a real invocation | MCP `hangar_call` | CEF line in sink | exporter unit-ish | 🟡 |
 
+> **Tool-access live finding (fail-OPEN on listing → FIXED).** Driving a per-tenant
+> `deny_list` over the real `/mcp` surface surfaced a split-brain: the invoke path
+> (`hangar_call` → `BatchExecutor`) correctly rejected the denied tool
+> (`ToolAccessDeniedError`) because it keys the resolver on the caller
+> `member_id=<tenant>`, but `hangar_tools` still LISTED it. Root cause: the listing
+> helpers (`_get_tools_for_mcp_server`, `hangar_details`) called
+> `resolver.filter_tools(...)` with NO `member_id`, so only the server-level policy
+> applied and the per-tenant deny was ignored — a fail-OPEN on the visibility half
+> of the claim (denied on call, yet advertised). The tenant was unavailable to the
+> listing thread for the same reason as the group canary gap: over streamable-HTTP
+> the ASGI auth layer's `identity_context_var` is not propagated into FastMCP's
+> per-session tool task. Fixed by reading the caller tenant in the listing path
+> (`server/tools/mcp_server.py::_caller_tenant_id`, bridging the request's
+> authenticated principal exactly as `hangar_call` does) and passing `member_id` to
+> the resolver, so listing and invocation now agree.
+
 ### T1 — multi-backend / groups
 
 | Claim | Driven via | Observable proof | Existing coverage | Status |
 |-------|-----------|------------------|-------------------|--------|
-| `hangar_call` to a group routes to a selected member (#282) | MCP `hangar_call` | call reaches a member backend | unit only (`test_group_invoke_routing`) | 🔴 |
-| Canary: a pinned tenant deterministically hits its member; a split routes ~split_pct (#283) | MCP `hangar_call` per tenant | which member served | unit only (`test_canary_routing`) | 🔴 |
+| `hangar_call` to a group routes to a selected member (#282) | MCP `hangar_call` | call reaches a member backend | `tests/live/test_t1_groups.py::test_group_invocation_routes_to_a_member` (2 subprocess `provider_identity` members; `whoami` echoes the server) | ✅ |
+| Canary: a pinned tenant deterministically hits its member; a split routes ~split_pct (#283) | MCP `hangar_call` per tenant | which member served | `tests/live/test_t1_groups.py::test_canary_pins_a_tenant_to_a_version` (real per-tenant routing over `/mcp`: each pinned tenant is sticky to its pinned member, and every SHA-256-bucketed in-split tenant deterministically lands on the canary member). Proven live post-#389: the harness grants its callers `tool:invoke` via the built-in `service-account` role -- the seeded per-tenant keys share a group carrying the role, and the tenant-less warm/round-robin caller holds it too (the invoke path hard-denies an anonymous principal since #389, so a credential is required). The caller `tenant_id` reaching the executor over streamable-HTTP is the same #387 bridge proven by `tests/live/test_t0_withdrawal.py`; #283 bucketing also unit-covered by `test_canary_routing`. | ✅ |
 | Failover: a failed member leaves rotation; `report_failure` feeds the group breaker | MCP `hangar_call` under fault | next call avoids the dead member | internal `select_member` only | 🟡 |
 | Load-balancing strategies distribute across members | MCP `hangar_call` ×N | member distribution | internal only | 🟡 |
 | Discovery (filesystem/container) surfaces backends via `hangar_discover`/`discovered`/`sources` | MCP tools | discovered set | internal + **non-gating** script | 🟡 |
@@ -65,21 +81,39 @@ live) · 🔴 no coverage at all · ⬜ live test not yet written.
 
 | Claim | Driven via | Observable proof | Existing coverage | Status |
 |-------|-----------|------------------|-------------------|--------|
-| `front_door` mode DENIES an unauthenticated request (fail-closed) | HTTP/MCP no token | 401/deny, not silent allow | 🔴 none | 🔴 |
-| A signed OIDC token authenticates; `tenant_id` extracted from the claim | HTTP + Keycloak token | authenticated principal | unit only | 🔴 |
-| Multi-issuer: tokens from ≥2 trusted issuers both validate; untrusted issuer rejected (#273) | HTTP + 2 issuers | accept/reject | unit only | 🔴 |
-| RFC 8707 audience binding: token without matching `aud` rejected (#274) | HTTP token | rejection | unit only | 🔴 |
-| PRM advertises all trusted issuers; 401 carries `WWW-Authenticate: resource_metadata` (RFC 9728) | `GET /.well-known/oauth-protected-resource` | `authorization_servers` list, header | unit only | 🔴 |
-| API-key rotation + grace; old key honored then rejected | REST/MCP with keys | accept→grace→reject | unit only | 🔴 |
-| RBAC: a role lacking a permission is denied on a real call | MCP `hangar_call` | denial | unit only | 🔴 |
+| `front_door` mode DENIES an unauthenticated request (fail-closed) | HTTP/MCP no token | 401/deny, not silent allow | `tests/live/test_t2_auth.py::test_unauthenticated_front_door_call_is_denied` | ✅ |
+| A signed OIDC token authenticates; `tenant_id` extracted from the claim | HTTP + Keycloak token | authenticated principal (tenant proven fail-closed via `require_tenant`) | `tests/live/test_t2_auth.py::test_valid_oidc_token_authenticates_and_carries_tenant` | ✅ |
+| Multi-issuer: tokens from ≥2 trusted issuers both validate; untrusted issuer rejected (#273) | HTTP + 2 issuers | accept/reject | `tests/live/test_t2_auth.py::test_realm_b_token_is_accepted`, `::test_token_from_untrusted_issuer_is_rejected` | ✅ |
+| RFC 8707 audience binding: token without matching `aud` rejected (#274) | HTTP token | rejection | `tests/live/test_t2_auth.py::test_aud_mismatch_is_rejected` | ✅ |
+| PRM advertises all trusted issuers; 401 carries `WWW-Authenticate: resource_metadata` (RFC 9728) | `GET /.well-known/oauth-protected-resource` | `authorization_servers` list, header | `tests/live/test_t2_auth.py::test_prm_advertises_trusted_issuers` (+ `WWW-Authenticate` asserted in deny/untrusted tests) | ✅ |
+| API-key rotation + grace; old key honored then rejected | REST/MCP with keys | accept→grace→reject | `tests/live/test_t2_apikey.py` (valid→200; rotated old key honored in grace + new key works; post-grace old key→401; revoked→401; all fail-closed) | ✅ |
+| RBAC: a role lacking a permission is denied on a real call | HTTP `POST /api/mcp_servers/` (write) / MCP `hangar_call` | 403 for `viewer`, 2xx for `developer` | `tests/live/test_t2_auth.py::test_rbac_denies_unprivileged_and_allows_privileged` (live probe; passes with the #386 wiring fix) | ✅ |
+
+> **RBAC live finding (fail-OPEN → FIXED in #386).** This probe originally surfaced a
+> fail-OPEN gap: on the shipped `serve` HTTP surface a read-only `viewer`
+> OIDC token performed a write-privileged `POST /api/mcp_servers/` and received `201`
+> (identical to `developer`), i.e. authorization was not enforced. Root cause below;
+> fixed by wiring `auth_components` onto the context in #386, after which the probe
+> passes live (`viewer` → 403 `AccessDeniedError`, `developer` → 201). RBAC is
+> role-store-driven (roles seeded from config `role_assignments`, keyed by
+> `group:<name>` and joined on the token's `groups` claim; NOT taken from the token's
+> `roles` claim), and the role store is populated correctly — but the per-endpoint
+> guard `_check_permission` (`server/api/mcp_servers.py`) reads `auth_components` from
+> the global `ApplicationContext` via `get_context()`, which `bootstrap` installs with
+> `init_context(runtime)` (`server/bootstrap/__init__.py`) and never sets
+> `ctx.auth_components` on, so `authz_middleware` is `None` and the check returns early.
+> The MCP `hangar_call` path likewise never consults `tool:invoke`. Authentication is
+> wired; authorization is not. The live test asserts the intended invariant and
+> auto-passes (flipping this row to ✅) once the wiring is fixed; until then it skips
+> with this finding rather than faking a pass.
 
 ## Priority gaps (proven nowhere live)
 
 Ranked by risk × recency — these are unit/internal only and should get live tests first:
 
 1. **The entire real MCP tool surface** — nothing drives `hangar_call`/`hangar_*` over MCP. Standing up T0 against the stub backend unlocks most of the T0 rows at once.
-2. **Auth / front_door (T2)** — multi-issuer (#273), audience binding (#274), `front_door` fail-closed DENY, OIDC, RBAC: the security boundary is unit-only.
-3. **Group invocation + canary (T1, #282/#283)** — routing is proven with mocks; never with a real call routed to a member.
+2. **Auth / front_door (T2)** — multi-issuer (#273), audience binding (#274), `front_door` fail-closed DENY, OIDC tenant extraction, and PRM are now proven live against a real Keycloak (`tests/live/test_t2_auth.py`). API-key rotation/grace is now proven live on the real `serve --http` surface (`tests/live/test_t2_apikey.py`): a rotated key is honored during its grace window then rejected fail-closed once grace elapses, and a revoked key is rejected immediately. RBAC permission denial now has a live probe (`test_rbac_denies_unprivileged_and_allows_privileged`) that surfaced a fail-OPEN gap — authorization is not enforced on the `serve` surface (see the RBAC note above); it stays 🔴 and skips until the wiring is fixed.
+3. **Group invocation + canary (T1, #282/#283)** — now proven live: `test_group_invocation_routes_to_a_member` (member selection) and `test_canary_pins_a_tenant_to_a_version` (per-tenant pins + split) both route real `hangar_call`s to real subprocess members. Remaining T1 gaps: failover, load-balancing strategy distribution, and discovery are still mock/internal only.
 4. **Per-tenant projection on the call path (T0)** — withdrawal enforcement, reload restore, digest pinning (#276/#280): the executor path is unverified live.
 5. **Continuation** (`hangar_fetch_continuation`/`delete_continuation`) — untested beyond the truncator unit.
 6. **Persisted event sourcing** — only in-memory is proven; the Postgres container test uses ad-hoc SQL, not hangar's store.

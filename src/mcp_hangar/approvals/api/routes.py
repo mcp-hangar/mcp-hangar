@@ -1,27 +1,31 @@
 """REST API routes for the approval gate.
 
 Endpoints:
-  GET  /enterprise/approvals           - List approvals (filtered by state)
-  GET  /enterprise/approvals/{id}      - Get single approval
-  POST /enterprise/approvals/{id}/resolve - Approve or deny
+  GET  /approvals           - List approvals (filtered by state)
+  GET  /approvals/{id}      - Get single approval
+  POST /approvals/{id}/resolve - Approve or deny
 
-Mounted by enterprise bootstrap. Auth via JWT (approval:read/resolve
-permissions) or Slack HMAC callback signature on resolve.
+Mounted by the server component loader. One authentication path: the platform's
+own, with `approval:read` / `approval:resolve` enforced in the command handler.
+Vendor callbacks terminate in an adapter outside core and arrive here as ordinary
+authenticated requests.
 """
 
-import hashlib
-import hmac
-import json
-import time
 from dataclasses import asdict, dataclass
 from datetime import datetime, UTC
-from typing import Any, cast
+from typing import Any
 
 from starlette.requests import Request
 from starlette.routing import Route
 
+from mcp_hangar.auth.http_middleware import get_principal_from_request
+from mcp_hangar.domain.exceptions import MissingCredentialsError
+from mcp_hangar.domain.value_objects.security import Principal
 from mcp_hangar.logging_config import get_logger
 from mcp_hangar.server.api.serializers import HangarJSONResponse
+from mcp_hangar.server.context import get_context
+
+from ..commands.resolve import ResolveApprovalCommand, ResolveApprovalHandler, ResolveOutcome
 
 logger = get_logger(__name__)
 
@@ -105,26 +109,23 @@ async def get_approval(request: Request) -> HangarJSONResponse:
 async def resolve_approval(request: Request) -> HangarJSONResponse:
     """Resolve (approve or deny) a pending approval.
 
-    Accepts either:
-      - JWT auth with approval:resolve permission
-      - Slack HMAC callback (X-Slack-Signature header)
+    One authentication path: the platform's own, requiring `approval:resolve`.
 
-    Body (JSON path):
+    This route used to branch on the presence of an `X-Slack-Signature` header
+    and hand control to a vendor-specific verifier. Both branches were
+    individually sound, but the shape was not: an unauthenticated caller chose
+    which authentication mechanism ran. Vendor callbacks now terminate in an
+    adapter outside core, which verifies the vendor's signature, maps the vendor
+    identity onto a Hangar principal, and calls this endpoint with an ordinary
+    token. Core does not know Slack exists.
+
+    Body:
         decision: "approve" | "deny"
         reason: Optional string
-
-    Body (Slack callback path):
-        payload: URL-encoded JSON with actions[0].action_id
     """
     service = _get_approval_service(request)
     approval_id = request.path_params["approval_id"]
 
-    # Check if this is a Slack callback
-    slack_signature = request.headers.get("x-slack-signature")
-    if slack_signature:
-        return await _handle_slack_callback(request, service, approval_id)
-
-    # Standard JSON resolution
     body = await request.json()
     decision = body.get("decision")
     reason = body.get("reason")
@@ -132,119 +133,92 @@ async def resolve_approval(request: Request) -> HangarJSONResponse:
     if decision not in ("approve", "deny"):
         return HangarJSONResponse({"error": "decision must be 'approve' or 'deny'"}, status_code=400)
 
-    # Check if already resolved
-    existing = await service._repository.get(approval_id)
-    if existing is None:
+    auth_components = _auth_components()
+    principal = _require_principal(request, auth_components)
+
+    result = await _resolve_handler(service, auth_components).handle(
+        ResolveApprovalCommand(
+            approval_id=approval_id,
+            approved=decision == "approve",
+            principal=principal,
+            reason=reason,
+        )
+    )
+
+    if result.outcome is ResolveOutcome.NOT_FOUND:
         return HangarJSONResponse({"error": "Approval not found"}, status_code=404)
-    if existing.is_terminal():
+    if result.outcome is ResolveOutcome.ALREADY_TERMINAL:
         return HangarJSONResponse(
-            {"error": "Approval already resolved", "state": existing.state.value},
+            {"error": "Approval already resolved", "state": result.state},
             status_code=409,
         )
-
-    decided_by = _extract_principal(request)
-    approved = decision == "approve"
-
-    success = await service.resolve(approval_id, approved, decided_by, reason)
-    if not success:
+    if result.outcome is ResolveOutcome.HOLD_RELEASE_FAILED:
         return HangarJSONResponse({"error": "Failed to resolve approval"}, status_code=409)
-
-    updated = await service._repository.get(approval_id)
-    state = updated.state.value if updated else decision
 
     return HangarJSONResponse(
         {
             "approval_id": approval_id,
-            "state": state,
+            "state": result.state if result.state is not None else decision,
         }
     )
 
 
-async def _handle_slack_callback(request: Request, service: Any, approval_id: str) -> HangarJSONResponse:
-    """Handle Slack interactive message callback."""
-    # Verify timestamp freshness (replay protection)
-    timestamp_str = request.headers.get("x-slack-request-timestamp", "")
+def _require_principal(request: Request, auth_components: Any | None) -> Principal:
+    """Return the caller's identity, or refuse -- never invent one.
+
+    Replaces ``_extract_principal``, which read ``request.state.principal_id`` and
+    fell back to the ``x-principal-id`` header, defaulting to the literal
+    ``"unknown"``. That was not a fallback for unauthenticated callers -- it was
+    the only path: the authentication middleware attaches ``request.state.auth``
+    and **nothing in the tree ever set** ``principal_id``, so the first branch
+    could never be taken. Every recorded ``decided_by`` was therefore either
+    client-attested or ``"unknown"``, in the provenance chain.
+
+    The auth-disabled case is deliberately NOT a 401. When auth is off the API
+    router does not mount authentication at all, so no principal is ever attached
+    -- refusing here would mean no caller could ever resolve an approval, with no
+    credential that could fix it. That is #600's exact shape: failing closed on
+    the API is failing OPEN on enforcement, because the decision simply never gets
+    made. Instead the identity is recorded as the system principal: explicit,
+    server-side, and impossible to confuse with a real approver.
+
+    Auth on and no principal is still a refusal.
+    """
+    principal = get_principal_from_request(request)
+    if principal is not None:
+        return principal
+    if getattr(auth_components, "enabled", False):
+        raise MissingCredentialsError("Authentication required")
+    return Principal.system()
+
+
+def _auth_components() -> Any | None:
+    """The application's auth components, or None when there is no app context.
+
+    No context means no auth (tests mounting the routes directly, stdio); the
+    callers below treat that as auth-disabled rather than as a failure.
+    """
     try:
-        timestamp = int(timestamp_str)
-    except (ValueError, TypeError):
-        return HangarJSONResponse({"error": "Invalid timestamp"}, status_code=401)
-
-    if abs(time.time() - timestamp) > 300:
-        return HangarJSONResponse({"error": "Stale request"}, status_code=401)
-
-    # Verify HMAC signature
-    raw_body = await request.body()
-    signing_secret = _get_slack_signing_secret(request)
-    if not signing_secret:
-        return HangarJSONResponse({"error": "Slack signing not configured"}, status_code=500)
-
-    sig_basestring = f"v0:{timestamp}:{raw_body.decode('utf-8')}"
-    expected_sig = (
-        "v0="
-        + hmac.new(
-            signing_secret.encode("utf-8"),
-            sig_basestring.encode("utf-8"),
-            hashlib.sha256,
-        ).hexdigest()
-    )
-
-    slack_signature = request.headers.get("x-slack-signature", "")
-    if not hmac.compare_digest(expected_sig, slack_signature):
-        return HangarJSONResponse({"error": "Invalid signature"}, status_code=401)
-
-    # Parse Slack payload
-    try:
-        from urllib.parse import parse_qs
-
-        body_str = raw_body.decode("utf-8")
-        parsed = parse_qs(body_str)
-        payload = json.loads(parsed.get("payload", ["{}"])[0])
-        actions = payload.get("actions", [])
-        if not actions:
-            return HangarJSONResponse({"error": "No actions"}, status_code=400)
-
-        action_id = actions[0].get("action_id", "")
-        user_id = payload.get("user", {}).get("id", "unknown")
-    except (json.JSONDecodeError, KeyError, IndexError):
-        return HangarJSONResponse({"error": "Invalid payload"}, status_code=400)
-
-    # Parse action: approve_{id} or deny_{id}
-    if action_id.startswith("approve_"):
-        approved = True
-    elif action_id.startswith("deny_"):
-        approved = False
-    else:
-        return HangarJSONResponse({"error": "Unknown action"}, status_code=400)
-
-    decided_by = f"slack:{user_id}"
-    success = await service.resolve(approval_id, approved, decided_by)
-
-    if not success:
-        return HangarJSONResponse({"error": "Already resolved"}, status_code=409)
-
-    return HangarJSONResponse({"approval_id": approval_id, "state": "resolved"})
+        return getattr(get_context(), "auth_components", None)
+    except Exception:  # noqa: BLE001 -- absence of a context is not an error here
+        return None
 
 
-def _extract_principal(request: Request) -> str:
-    """Extract principal identity from request auth context."""
-    # Check for auth middleware populated identity
-    if hasattr(request, "state") and hasattr(request.state, "principal_id"):
-        return cast(str, request.state.principal_id)
-    return request.headers.get("x-principal-id", "unknown")
+def _resolve_handler(service: Any, auth_components: Any | None) -> ResolveApprovalHandler:
+    """Build the resolution handler for this request.
 
-
-def _get_slack_signing_secret(request: Request) -> str | None:
-    """Get Slack signing secret from app config."""
-    if hasattr(request.app.state, "slack_signing_secret"):
-        return cast(str | None, request.app.state.slack_signing_secret)
-    return None
+    Constructed per request rather than wired at bootstrap: the handler holds no
+    state, and this keeps every existing caller that mounts the routes with only
+    ``app.state.approval_gate_service`` working unchanged.
+    """
+    return ResolveApprovalHandler(service, auth_components=auth_components)
 
 
 approval_routes = [
-    Route("/enterprise/approvals", list_approvals, methods=["GET"]),
-    Route("/enterprise/approvals/{approval_id:str}", get_approval, methods=["GET"]),
+    Route("/approvals", list_approvals, methods=["GET"]),
+    Route("/approvals/{approval_id:str}", get_approval, methods=["GET"]),
     Route(
-        "/enterprise/approvals/{approval_id:str}/resolve",
+        "/approvals/{approval_id:str}/resolve",
         resolve_approval,
         methods=["POST"],
     ),

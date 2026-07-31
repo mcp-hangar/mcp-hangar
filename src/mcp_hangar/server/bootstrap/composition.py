@@ -7,7 +7,7 @@ server startup and runtime wiring.
 from __future__ import annotations
 
 from threading import Lock
-from typing import TYPE_CHECKING, cast
+from typing import Any, TYPE_CHECKING, cast
 import warnings
 
 from ...application.discovery import DiscoveryOrchestrator
@@ -57,13 +57,19 @@ _group_rebalance_saga: GroupRebalanceSaga | None = None
 _discovery_orchestrator: DiscoveryOrchestrator | None = None
 
 
-def get_runtime() -> Runtime:
-    """Get the lazily initialized runtime singleton."""
+def get_runtime(rate_limit: dict[str, Any] | None = None) -> Runtime:
+    """Get the lazily initialized runtime singleton.
+
+    Args:
+        rate_limit: Optional ``rate_limit`` config section forwarded to
+            :func:`create_runtime` on first construction. Only applied when the
+            singleton is created; subsequent calls return the existing runtime.
+    """
     global _runtime
     if _runtime is None:
         with _runtime_lock:
             if _runtime is None:
-                _runtime = create_runtime()
+                _runtime = create_runtime(rate_limit=rate_limit)
     return _runtime
 
 

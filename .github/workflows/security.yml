@@ -17,6 +17,11 @@ concurrency:
   group: ${{ github.workflow }}-${{ github.ref }}
   cancel-in-progress: true
 
+# Read by default; the CodeQL job needs `security-events: write` to upload its
+# SARIF and declares that itself, which REPLACES this default for that job.
+permissions:
+  contents: read
+
 jobs:
   dependency-audit:
     name: Dependency Audit
@@ -101,8 +106,8 @@ jobs:
     runs-on: ubuntu-latest
 
     steps:
-      - name: No-op (former enterprise merged into src/mcp_hangar/)
-        run: echo "Import boundary check removed — all code in src/mcp_hangar/ now"
+      - name: No-op (import boundary retired)
+        run: echo "Import boundary check retired — all code lives in src/mcp_hangar/"
 
   secrets-scan:
     name: Secrets Scan

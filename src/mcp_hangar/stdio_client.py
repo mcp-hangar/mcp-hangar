@@ -13,6 +13,7 @@ from . import metrics as prometheus_metrics
 from .domain.exceptions import ClientError
 from .logging_config import get_logger
 from .observability.tracing import inject_trace_context, upstream_call_span
+from .protocol import inject_protocol_meta
 
 if TYPE_CHECKING:
     from .infrastructure.lock_hierarchy import TrackedLock
@@ -46,6 +47,12 @@ class StdioClient:
         """
         self.process = popen
         self.mcp_server_id = mcp_server_id
+        #: Whether this connection accepts the 2026-07-28 `_meta` envelope.
+        #: Starts True so the handshake itself and stateless (SEP-2575) upstreams
+        #: carry it; `_perform_mcp_handshake` clears it the moment a legacy
+        #: `initialize` succeeds, because from mcp 2.0.0 such a connection
+        #: rejects the modern envelope on every later request (-32600).
+        self.modern_envelope = True
         self.pending: dict[str, PendingRequest] = {}
         # Lock hierarchy level: STDIO_CLIENT (50)
         # Safe to acquire after: PROVIDER, EVENT_BUS, EVENT_STORE
@@ -213,17 +220,14 @@ class StdioClient:
         # before injection so the trace context written into `_meta` parents the
         # upstream's span to this one.
         with upstream_call_span(method, params):
-            # Propagate the active trace context to the upstream server over
-            # stdio. W3C traceparent/tracestate go in the MCP `_meta` field
-            # (mirrors the HTTP transport, which injects into request headers).
-            # Servers that don't understand _meta ignore it. Copy params so the
-            # caller's dict is never mutated.
-            carrier: dict[str, str] = {}
-            inject_trace_context(carrier)
-            if carrier:
-                meta = dict(params.get("_meta") or {})
-                meta.update(carrier)
-                params = {**params, "_meta": meta}
+            # Inject Hangar protocol metadata, then propagate the active trace
+            # context to the upstream over stdio: W3C traceparent/tracestate go
+            # in the MCP `_meta` field (mirrors the HTTP transport, which injects
+            # into request headers). Servers that don't understand `_meta` ignore
+            # it. inject_protocol_meta returns a fresh dict, so the caller's is
+            # never mutated.
+            params = inject_protocol_meta(params, modern_envelope=self.modern_envelope)
+            inject_trace_context(params["_meta"])
 
             request = {
                 "jsonrpc": "2.0",

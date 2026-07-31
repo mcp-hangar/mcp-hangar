@@ -276,7 +276,7 @@ class IInitialAdminBootstrapStore(Protocol):
 class NullAuthenticator:
     """No-op authenticator. Returns anonymous system principal for all requests.
 
-    Used when enterprise auth is not installed or during testing.
+    Used when the auth module is not installed or during testing.
     """
 
     _ANONYMOUS: Principal | None = None
@@ -305,7 +305,7 @@ class NullAuthenticator:
 class NullApiKeyStore:
     """No-op API key store. All operations are no-ops or return empty results.
 
-    Used when enterprise auth is not installed or during testing.
+    Used when the auth module is not installed or during testing.
     """
 
     def get_principal_for_key(self, key_hash: str) -> Principal | None:
@@ -321,8 +321,8 @@ class NullApiKeyStore:
         tenant_id: str | None = None,
         created_by: str | None = None,
     ) -> str:
-        """No-op: raise NotImplementedError (no key storage without enterprise)."""
-        raise NotImplementedError("API key creation requires enterprise auth module")
+        """No-op: raise NotImplementedError (no key storage without the auth module)."""
+        raise NotImplementedError("API key creation requires the auth module")
 
     def revoke_key(
         self,
@@ -347,5 +347,5 @@ class NullApiKeyStore:
         grace_period_seconds: float = 86400,
         rotated_by: str = "system",
     ) -> str:
-        """No-op: raise NotImplementedError (no key storage without enterprise)."""
-        raise NotImplementedError("API key rotation requires enterprise auth module")
+        """No-op: raise NotImplementedError (no key storage without the auth module)."""
+        raise NotImplementedError("API key rotation requires the auth module")

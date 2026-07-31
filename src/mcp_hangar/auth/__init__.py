@@ -1,4 +1,4 @@
-"""Enterprise authentication and authorization module.
+"""Authentication and authorization module.
 
 Provides:
 - RBAC (role-based access control)

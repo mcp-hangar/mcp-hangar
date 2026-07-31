@@ -1,6 +1,6 @@
 [project]
 name = "mcp-hangar"
-version = "1.6.3"
+version = "2.0.0"
 description = "Production-grade infrastructure for Model Context Protocol"
 readme = "README.md"
 license = {text = "MIT"}
@@ -20,23 +20,28 @@ classifiers = [
     "Topic :: System :: Systems Administration",
 ]
 dependencies = [
-    # Capped at the v1 SDK line ON PURPOSE. This branch targets the v1 server
-    # surface (`mcp.server.fastmcp`), which SDK v2 removed, so an uncapped
-    # `mcp>=1.28.1` resolves to a 2.x release and the gateway dies at import with
-    # `ModuleNotFoundError: No module named 'mcp.server.fastmcp'`. Under
-    # `--pre`/`--prerelease=allow` that already happens today (it picks
-    # 2.0.0b2), and it starts happening on a PLAIN install the moment mcp 2.0.0
-    # ships — no flag required (#561). The v2 line lives on `mcp2`, pinned
-    # exactly to `mcp==2.0.0bN`; do not widen this one to follow it.
-    "mcp>=1.28.1,<2",
+    # Pinned EXACTLY, not merely bounded, and now on the stable 2.0.0.
+    #
+    # The exactness is no longer about beta drift -- it is that `_sdk_compat`
+    # shims specific SDK internals (`_lowlevel_server`, `add_request_handler`,
+    # `MCPError`, `HANDSHAKE_PROTOCOL_VERSIONS`) and the relay registers custom
+    # `tasks/*` methods that the SDK deliberately does not carry in
+    # `SPEC_CLIENT_METHODS`. A floating pin lets any of that move under us
+    # silently, and the failure mode is a wrong wire rather than an ImportError.
+    # Bump deliberately, with the relay smoke harness run against the candidate.
+    #
+    # The v1 line on `main` solves the same class of problem with `>=1.28.1,<2`
+    # (#561): both branches must be unable to follow the SDK somewhere their
+    # code does not run. Do not widen either to match the other.
+    "mcp==2.0.0",
+    "mcp-types==2.0.0",  # v2 split protocol-types dist (imported directly as mcp_types); paired with mcp
     "structlog>=24.0.0",
     "pydantic>=2.0.0",
     # Capped below 1.0: httpx 1.0 drops `httpx.AsyncClient`, which this code
-    # uses throughout the proxy path. Same class as the `mcp` cap above (#561)
-    # -- a dependency allowed to walk into a major this code cannot run on.
-    # Not yet breaking on this line (httpx 1.0 is still a dev release and a
-    # plain install will not take it), unlike the v2 line where the documented
-    # `pip install --pre` resolved it and the gateway died at startup.
+    # uses everywhere. Unbounded, `pip install --pre mcp-hangar` -- the install
+    # the v2-preview docs recommend -- resolves httpx to 1.0.dev3 and the
+    # gateway dies at startup. Same class as the `mcp` cap (#561): a dependency
+    # allowed to walk into a major this code does not run on.
     "httpx>=0.25.0,<1",
     "prometheus-client>=0.19.0",
     "pyjwt>=2.8.0",
@@ -50,6 +55,7 @@ dependencies = [
     "python-multipart>=0.0.22",
     "protobuf>=6.33.5",
     "jcs>=0.2.1",
+    "click>=8.3.3",  # security floor: PYSEC-2026-2132 (click.edit() command injection); transitive via typer
 ]
 [project.optional-dependencies]
 dev = [
@@ -157,6 +163,10 @@ ignore_missing_imports = true
 testpaths = ["tests"]
 asyncio_mode = "auto"
 addopts = "-v --cov=mcp_hangar --cov-report=term-missing"
+# Per-test hang guard: fail (with a stack dump) instead of hanging so one wedged
+# test can't burn a CI job to the 6h ceiling (which cancelled a release). 300s is
+# far above any real test; the whole unit suite runs in well under a minute.
+timeout = 300
 pythonpath = ["src", "."]
 markers = [
     "benchmark: performance benchmarks (deselect with '-m not benchmark')",

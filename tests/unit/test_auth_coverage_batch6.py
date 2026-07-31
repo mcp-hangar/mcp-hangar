@@ -1,4 +1,4 @@
-"""Tests for enterprise auth infrastructure: api_key_authenticator, rbac_authorizer,
+"""Tests for auth infrastructure: api_key_authenticator, rbac_authorizer,
 rate_limiter, and constant_time modules.
 
 Targets all uncovered lines listed in the batch6 coverage plan.

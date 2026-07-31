@@ -79,6 +79,15 @@ from .discovery import DiscoverySourceSpec
 # Tool Digest (SEP-1766)
 from .tool_digest import DigestEnforcement, DigestPolicy, DigestUnknownPolicy, ToolDigest
 
+# UI resources (MCP Apps / SEP-1865)
+from .ui_resource import (
+    DEFAULT_UI_CSP,
+    UI_SCHEME,
+    UiResourcePolicy,
+    is_ui_scheme,
+    matches_ui_allowlist,
+)
+
 __all__ = [
     # Security
     "PrincipalType",
@@ -140,6 +149,12 @@ __all__ = [
     "ViolationType",
     # Tool Digest
     "ToolDigest",
+    # UI resources (MCP Apps / SEP-1865)
+    "UI_SCHEME",
+    "DEFAULT_UI_CSP",
+    "UiResourcePolicy",
+    "is_ui_scheme",
+    "matches_ui_allowlist",
     "DigestEnforcement",
     "DigestUnknownPolicy",
     "DigestPolicy",

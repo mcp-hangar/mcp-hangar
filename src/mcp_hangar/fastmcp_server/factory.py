@@ -4,16 +4,22 @@ The factory encapsulates all dependencies needed to create an MCP server,
 enabling proper dependency injection and testability.
 """
 
+from __future__ import annotations
+
 from typing import Any, TYPE_CHECKING
 
-from mcp.server.fastmcp import FastMCP
+from mcp_hangar import __version__
+from mcp_hangar._sdk_compat import FastMCP, new_mcp_server
 from starlette.applications import Starlette
 
 from ..logging_config import get_logger
 from .asgi import create_auth_combined_app, create_combined_asgi_app, create_health_routes
-from .config import HangarFunctions, ServerConfig
+from .config import HANGAR_SERVER_NAME, HangarFunctions, ServerConfig
+from .modern_surface import register_modern_surface, wrap_front_door_routing
 
 if TYPE_CHECKING:
+    from ..domain.services.task_digest_guard import TaskDigestGuard
+    from ..domain.services.task_ownership import TaskOwnershipRegistry
     from .builder import MCPServerFactoryBuilder
 
 logger = get_logger(__name__)
@@ -52,7 +58,7 @@ class MCPServerFactory:
         self,
         hangar: HangarFunctions,
         config: ServerConfig | None = None,
-        auth_components: "Any" = None,
+        auth_components: Any = None,
     ):
         """Initialize factory with dependencies.
 
@@ -65,9 +71,15 @@ class MCPServerFactory:
         self._config = config or ServerConfig()
         self._auth_components = auth_components
         self._mcp: FastMCP | None = None
+        # Shared registry binding MCP task handles to their owning
+        # tenant/principal; populated when governed tasks are enabled.
+        self._task_ownership_registry: TaskOwnershipRegistry | None = None
+        # Shared guard binding MCP task handles to the tool digest pinned on the
+        # invoke path; re-verified fail-closed on result retrieval (#320).
+        self._task_digest_guard: TaskDigestGuard | None = None
 
     @classmethod
-    def builder(cls) -> "MCPServerFactoryBuilder":
+    def builder(cls) -> MCPServerFactoryBuilder:
         """Create a builder for fluent configuration.
 
         Returns:
@@ -98,8 +110,11 @@ class MCPServerFactory:
         if self._mcp is not None:
             return self._mcp
 
-        mcp = FastMCP(
-            name="mcp-hangar",
+        mcp = new_mcp_server(
+            HANGAR_SERVER_NAME,
+            # Explicit: unset, the SDK reports its own version as the server's,
+            # disagreeing with the version server/discover reports (#560).
+            version=__version__,
             host=self._config.host,
             port=self._config.port,
             streamable_http_path=self._config.streamable_http_path,
@@ -112,6 +127,9 @@ class MCPServerFactory:
         self._register_interceptors_list(mcp)
         self._register_server_discover(mcp)
         self._maybe_register_flat_tool_handlers(mcp)
+        self._enable_governed_tasks(mcp)
+        self._advertise_governance_extensions(mcp)
+        self._advertise_tasks_capability(mcp)
 
         self._mcp = mcp
         logger.info(
@@ -142,7 +160,15 @@ class MCPServerFactory:
         from ..server.api import create_api_router
 
         mcp = self.create_server()
-        mcp_app = mcp.streamable_http_app()
+        mcp_app: Any = mcp.streamable_http_app()
+
+        # SEP-2243: route the stateless front door on Mcp-Method / Mcp-Name
+        # headers (with header<->body consistency enforced) instead of session
+        # affinity. Pre-SEP-2243 requests without these headers pass through
+        # unchanged (content-based routing). Identity, tenant, per-tenant canary
+        # routing, and the audit session_id are untouched by this wrapper.
+        # Shared with the HTTP-serve path (see ``modern_surface``).
+        mcp_app = wrap_front_door_routing(mcp_app, mcp_path=self._config.streamable_http_path)
 
         # Log if auth is configured
         if self._config.auth_enabled and self._auth_components:
@@ -325,6 +351,38 @@ class MCPServerFactory:
                 return {"error": "Metrics not available"}
             return hgr.metrics(format=format)
 
+    def _enable_governed_tasks(self, mcp: FastMCP) -> None:
+        """Wire the ADR-014 governed task-relay serving surface (Phase 2); dark by default.
+
+        Delegates to the shared wiring so the factory path and the HTTP-serve
+        bootstrap path activate the relay identically (see ``task_relay_wiring``).
+        Gated on ``HAS_NATIVE_TASKS and config.relay_tasks_enabled``.
+        """
+        from .task_relay_wiring import enable_governed_task_relay
+
+        enable_governed_task_relay(mcp, relay_tasks_enabled=self._config.relay_tasks_enabled)
+
+    def _advertise_tasks_capability(self, mcp: FastMCP) -> None:
+        """Advertise the first-class ``tasks`` server capability at INITIALIZE (ADR-014).
+
+        Delegates to the shared wiring (see ``task_relay_wiring``); gated on the
+        same static kill-switch as handler registration.
+        """
+        from .task_relay_wiring import advertise_tasks_capability
+
+        advertise_tasks_capability(mcp, relay_tasks_enabled=self._config.relay_tasks_enabled)
+
+    @staticmethod
+    def _advertise_governance_extensions(mcp: FastMCP) -> None:
+        """Advertise Hangar governance as SEP-2133 experimental extensions.
+
+        Delegates to the shared wiring so this path and the HTTP-serve bootstrap
+        advertise the same set (see ``governance_extensions``).
+        """
+        from .governance_extensions import advertise_governance_extensions
+
+        advertise_governance_extensions(mcp)
+
     @staticmethod
     def _register_interceptors_list(mcp: FastMCP) -> None:
         from .interceptors_list import register_interceptors_list
@@ -339,26 +397,22 @@ class MCPServerFactory:
         result, in addition to ``tools/list``. Tenant scoping and isolation
         are inherited from the projection read-model — this is a no-op in
         terms of enforcement, purely an alternate read entry point.
-        """
-        from .server_discover import register_server_discover
 
-        register_server_discover(mcp)
+        Delegates to the shared wiring so this path and the HTTP-serve
+        bootstrap path expose the same surface (see ``modern_surface``).
+        """
+        register_modern_surface(mcp)
 
     @staticmethod
     def _maybe_register_flat_tool_handlers(mcp: FastMCP) -> None:
         """Replace tools/list and tools/call handlers in front_door mode.
 
-        In front_door mode, external agents see flat backend tool names instead
-        of the hangar_* meta-API.  In egress mode this is a no-op — the
-        default hangar_* surface is preserved unchanged.
+        Delegates to the shared, mode-gated entry point so this path and the
+        HTTP-serve bootstrap decide identically (see ``flat_tool_projection``).
         """
-        from ..domain.services.tool_access_resolver import get_tool_access_resolver
-        from .flat_tool_projection import register_flat_tool_handlers
+        from .flat_tool_projection import maybe_register_flat_tool_handlers
 
-        resolver = get_tool_access_resolver()
-        if resolver.topology_mode == "front_door":
-            register_flat_tool_handlers(mcp)
-            logger.info("flat_tool_handlers_registered", topology_mode="front_door")
+        maybe_register_flat_tool_handlers(mcp)
 
     def _run_readiness_checks(self) -> dict[str, Any]:
         """Run readiness checks.

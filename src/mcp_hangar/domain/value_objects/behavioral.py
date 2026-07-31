@@ -5,7 +5,7 @@ Defines the core data types for the behavioral profiling subsystem:
 - DeviationType: Classification of behavioral deviations detected
 - NetworkObservation: Immutable record of an observed network connection
 
-These are MIT-licensed domain primitives used by both core and enterprise code.
+These are MIT-licensed domain primitives used across the core and optional modules.
 """
 
 from dataclasses import dataclass

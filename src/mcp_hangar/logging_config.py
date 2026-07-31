@@ -25,6 +25,23 @@ import structlog
 from structlog.types import Processor
 
 
+# Make the pre-`setup_logging` window safe. structlog's out-of-the-box factory
+# is `PrintLoggerFactory()`, which writes to **stdout** -- and on the stdio
+# transport stdout is the JSON-RPC stream, so a single line emitted before
+# `setup_logging()` runs corrupts the session and the client dies on a parse
+# error. That is not hypothetical: `gc.py` logs "watchdog package not installed"
+# at import time, i.e. while bootstrap is still importing modules (#563).
+#
+# Configuring this at import of *this* module closes the window for every logger
+# in the package, since `get_logger` lives here and cannot be reached without
+# importing it first. `setup_logging()` reconfigures on top later; caching stays
+# off so a logger bound during the early window is not frozen to this factory.
+structlog.configure(
+    logger_factory=structlog.PrintLoggerFactory(file=sys.stderr),
+    cache_logger_on_first_use=False,
+)
+
+
 def _add_service_context(_logger: Any, _method_name: str, event_dict: MutableMapping[str, Any]) -> Mapping[str, Any]:
     """Add service-level context to all log entries."""
     event_dict.setdefault("service", "mcp-hangar")

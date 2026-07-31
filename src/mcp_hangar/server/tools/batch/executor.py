@@ -16,10 +16,15 @@ import contextvars
 import json
 import threading
 import time
-from typing import Any, cast
+from typing import Any, cast, Literal
 
 
 from ....application.commands import InvokeToolCommand, StartMcpServerCommand
+from ....application.services.mutator_pipeline import MutatorPipeline
+from ....application.tasks.tool_pin_context import CurrentToolPin, get_current_tool_pin, set_current_tool_pin
+from ....application.services.validator_pipeline import ValidatorPipeline
+from ....domain.contracts.mutator import MutationContext
+from ....domain.contracts.validator import ValidationContext
 from ....domain.events import (
     BatchCallCompleted,
     BatchInvocationCompleted,
@@ -44,13 +49,70 @@ from ....metrics import (
     BATCH_TRUNCATIONS_TOTAL,
     TOOL_ACCESS_DENIED_TOTAL,
 )
+from ....negotiation import read_protocol_negotiation, set_current_protocol_negotiation
 from ....retry import retry_sync, RetryPolicy, RetryResult
 from ...context import get_context
 from ...state import GROUPS
 from .concurrency import ConcurrencyManager, get_concurrency_manager
-from .models import BatchResult, CallResult, CallSpec, MAX_RESPONSE_SIZE_BYTES, RetryMetadata
+from .models import BatchResult, CallResult, CallSpec, MAX_RESPONSE_SIZE_BYTES, RelayCapture, RetryMetadata
 
 logger = get_logger(__name__)
+
+
+def _inbound_trace_meta(ctx: Any) -> dict[str, str]:
+    """Read SEP-414 trace keys from the inbound request's ``params._meta``.
+
+    Returns only ``traceparent``/``tracestate`` (``baggage`` is deliberately
+    excluded pending cross-tenant scrubbing). Best-effort fault barrier: trace
+    context is a convention (SEP-414 MAY), so any failure to read it returns
+    ``{}`` and never breaks the call.
+    """
+    try:
+        req_meta = ctx.request_context.meta
+        if req_meta is None:
+            return {}
+        dumped = req_meta.model_dump(exclude_none=True) if hasattr(req_meta, "model_dump") else dict(req_meta)
+        return {k: str(v) for k, v in dumped.items() if k in ("traceparent", "tracestate") and isinstance(v, str)}
+    except Exception:  # noqa: BLE001 -- fault barrier: trace reading must not break invocation
+        return {}
+
+
+def _inbound_meta_dict(ctx: Any) -> dict[str, Any] | None:
+    """Return the inbound request's ``params._meta`` as a plain dict, or ``None``.
+
+    Best-effort fault barrier mirroring ``_inbound_trace_meta``: pydantic ``Meta``
+    models are dumped, plain mappings are copied, and any failure yields ``None``
+    so a missing/malformed ``_meta`` never breaks the call.
+    """
+    try:
+        req_meta = ctx.request_context.meta
+        if req_meta is None:
+            return None
+        if hasattr(req_meta, "model_dump"):
+            return dict(req_meta.model_dump(exclude_none=True))
+        return dict(req_meta)
+    except Exception:  # noqa: BLE001 -- fault barrier: meta reading must not break invocation
+        return None
+
+
+def _is_task_result(result: dict[str, Any]) -> bool:
+    """Return True if an upstream ``tools/call`` result is an MCP task handle.
+
+    An ``mcp.types.CreateTaskResult`` carries a ``task`` object (a ``Task`` with
+    ``taskId``/``status``) and NO ``content`` -- distinct from a normal
+    ``CallToolResult`` which carries ``content``. So the upstream result is a
+    task result iff it contains a ``task`` object bearing a task id or status.
+
+    Defensive: accepts an arbitrary dict, tolerates a non-dict ``task`` value or
+    a malformed shape, and only returns True for the task-handle shape.
+    """
+    if not isinstance(result, dict):
+        return False
+    task = result.get("task")
+    if not isinstance(task, dict):
+        return False
+    return any(key in task for key in ("taskId", "task_id", "id", "status"))
+
 
 _approval_loop_local = threading.local()
 _all_approval_loops: set[asyncio.AbstractEventLoop] = set()
@@ -104,11 +166,24 @@ class BatchExecutor:
     entire batch wave to complete.
     """
 
-    def __init__(self, concurrency_manager: ConcurrencyManager | None = None):
+    def __init__(
+        self,
+        concurrency_manager: ConcurrencyManager | None = None,
+        validator_pipeline: ValidatorPipeline | None = None,
+        mutator_pipeline: MutatorPipeline | None = None,
+    ):
         self._single_flight = SingleFlight(cache_results=False)
         self._active_batches = 0
         self._active_lock = threading.Lock()
         self._concurrency_manager = concurrency_manager
+        # Interceptor validator pipeline. Defaults to a fresh EMPTY pipeline
+        # (no validators registered), so it always allows -- preserving current
+        # behavior. Fail-closed only takes effect once validators are registered.
+        self._validator_pipeline = validator_pipeline if validator_pipeline is not None else ValidatorPipeline()
+        # Interceptor mutator pipeline. Defaults to a fresh EMPTY pipeline (no
+        # mutators registered), so payloads pass through unchanged -- preserving
+        # current behavior. Transforms only take effect once mutators are registered.
+        self._mutator_pipeline = mutator_pipeline if mutator_pipeline is not None else MutatorPipeline()
 
     @property
     def concurrency_manager(self) -> ConcurrencyManager:
@@ -213,6 +288,58 @@ class BatchExecutor:
         # Approved -- continue execution
         return None
 
+    def _check_validators(self, call: CallSpec) -> CallResult | None:
+        """Run the interceptor ValidatorPipeline against this tool call.
+
+        Fail-closed but behavior-preserving: with the default empty pipeline no
+        validators run, so this always returns None (proceed). Once validators
+        are registered, an enforced denial short-circuits the call BEFORE the
+        approval gate and invoke.
+
+        Returns None if the call is allowed (continue execution). Returns a
+        CallResult if a validator denied the call.
+        """
+        ctx = ValidationContext(
+            method="tools/call",
+            direction="request",
+            payload={"name": call.tool, "arguments": call.arguments or {}},
+            correlation_id=call.call_id,
+        )
+        result = self._validator_pipeline.execute(ctx)
+        if not result.allowed:
+            return CallResult(
+                index=call.index,
+                call_id=call.call_id,
+                success=False,
+                error=result.reason or "Denied by validator",
+                error_type="ValidatorDenied",
+                elapsed_ms=0,
+            )
+        return None
+
+    def _mutate(
+        self,
+        method: str,
+        direction: Literal["request", "response"],
+        payload: dict[str, Any],
+        correlation_id: str,
+    ) -> dict[str, Any]:
+        """Run the interceptor MutatorPipeline over a tool-call payload.
+
+        Behavior-preserving: with the default empty pipeline no mutators run, so
+        the payload is returned unchanged. Once mutators are registered, the
+        applicable ones transform the payload in priority order and the
+        (possibly changed) payload is returned.
+        """
+        ctx = MutationContext(
+            method=method,
+            direction=direction,
+            payload=payload,
+            correlation_id=correlation_id,
+        )
+        result = self._mutator_pipeline.execute(ctx)
+        return result.payload
+
     def execute(
         self,
         batch_id: str,
@@ -220,6 +347,7 @@ class BatchExecutor:
         max_concurrency: int,
         global_timeout: float,
         fail_fast: bool,
+        request_ctx: Any | None = None,
     ) -> BatchResult:
         """Execute batch of calls in parallel.
 
@@ -238,11 +366,29 @@ class BatchExecutor:
             max_concurrency: Maximum parallel workers for this batch.
             global_timeout: Global timeout for entire batch.
             fail_fast: Abort on first error if True.
+            request_ctx: The real FastMCP request ``Context`` (when invoked over an
+                MCP transport), used solely to read the inbound ``params._meta``
+                for trace context and protocol negotiation. ``None`` on the
+                stdio / no-request path, in which case both default (empty trace /
+                supported protocol version) exactly as before. Distinct from the
+                ApplicationContext returned by ``get_context()``, which has no
+                ``request_context`` and is still used for the event/command buses.
 
         Returns:
             BatchResult with all call results.
         """
         ctx = get_context()
+
+        # Stateless negotiation (SEP-2575): the client conveys its protocolVersion
+        # and capabilities per request in params._meta (no initialize handshake).
+        # Read them once at ingress and publish to a request-scoped contextvar that
+        # batch worker threads inherit via copy_context(). Additive: no gating here.
+        # Over streamable-HTTP the inbound _meta lives on the FastMCP request_ctx
+        # (the ApplicationContext has no request_context), so read from request_ctx;
+        # when it is None (stdio / no request) the helper yields None and negotiation
+        # falls back to the default supported version -- unchanged behavior.
+        set_current_protocol_negotiation(read_protocol_negotiation(_inbound_meta_dict(request_ctx)))
+
         start_time = time.perf_counter()
         cancel_event = threading.Event()
         results: list[CallResult | None] = [None] * len(calls)
@@ -317,6 +463,7 @@ class BatchExecutor:
                             cancel_event,
                             global_timeout,
                             start_time,
+                            request_ctx,
                         ): call.index
                         for call in calls
                     }
@@ -495,6 +642,7 @@ class BatchExecutor:
         cancel_event: threading.Event,
         global_timeout: float,
         batch_start_time: float,
+        request_ctx: Any | None = None,
     ) -> CallResult:
         """Execute a single call within the batch.
 
@@ -516,6 +664,10 @@ class BatchExecutor:
             cancel_event: Event to check for cancellation.
             global_timeout: Global batch timeout.
             batch_start_time: When batch started (for remaining time calculation).
+            request_ctx: The real FastMCP request ``Context`` (or ``None`` on the
+                stdio / no-request path), used to read the inbound ``params._meta``
+                for W3C trace context. Distinct from the ApplicationContext returned
+                by ``get_context()``.
 
         Returns:
             CallResult for this call.
@@ -523,11 +675,14 @@ class BatchExecutor:
         ctx = get_context()
         call_start = time.perf_counter()
 
-        # Extract W3C TraceContext from call metadata for distributed tracing.
-        # If the agent passed traceparent, spans created for this call become
-        # children of the agent's trace rather than new root spans.
+        # Extract W3C TraceContext for distributed tracing. Per SEP-414 it travels
+        # in the inbound request's params._meta (un-prefixed traceparent/tracestate);
+        # fall back to the legacy call.metadata field. _meta wins when both present.
+        # The inbound _meta lives on the FastMCP request_ctx (the ApplicationContext
+        # has no request_context); when request_ctx is None the helper yields {} and
+        # only call.metadata is used -- the pre-bridge default, unchanged.
         metadata = call.metadata or {}
-        parent_context = extract_trace_context(metadata)
+        parent_context = extract_trace_context({**metadata, **_inbound_trace_meta(request_ctx)})
 
         # Create a span for this batch call, parented to the agent's trace
         # context when traceparent was provided. This links the Hangar span
@@ -724,17 +879,28 @@ class BatchExecutor:
         # NOTE: the withdrawal check above takes precedence -- a withdrawn tool is
         # rejected before reaching here, so no mismatch event fires for a tool that
         # is both withdrawn and pinned.
+        # A pinned tool whose projection is not in the registry yet cannot be
+        # checked here. That is the state of every backend that has not started
+        # in this process: the catalogue is populated by the McpServerStarted
+        # handler, and the cold start happens LATER in this same function. Left
+        # as-is, the first call after a gateway boot skipped the pin entirely --
+        # one unvalidated call per boot per server, and gateway restarts are
+        # routine in Kubernetes (#601). So the gate is a closure, run here when
+        # the catalogue is already available and re-run right after the cold
+        # start when it was not.
         _pin = _proj_registry.resolve_pin(call.mcp_server, call.tool, _caller_tenant_id)
-        if _pin is not None and _proj is not None:
+
+        def _enforce_digest_pin(projection: Any, pin: Any) -> CallResult | None:
+            """Validate *projection* against the tenant's *pin*; a CallResult means reject."""
             _enforcement = _proj_registry.digest_enforcement(call.mcp_server)
             try:
                 _digest_result = DigestValidator(
                     DigestPolicy(
                         enforcement=_enforcement,
                         unknown=DigestUnknownPolicy.BLOCK,
-                        allowlist=frozenset({_pin}),
+                        allowlist=frozenset({pin}),
                     )
-                ).validate_tool(_proj.schema, call.mcp_server, call.call_id, tenant_id=_caller_tenant_id)
+                ).validate_tool(projection.schema, call.mcp_server, call.call_id, tenant_id=_caller_tenant_id)
                 _digest_blocked = _digest_result.blocked
                 _digest_event = _digest_result.event
             except Exception:  # noqa: BLE001 -- a malformed projection schema must not 500 the call path
@@ -764,6 +930,31 @@ class BatchExecutor:
                     error_type="ToolDigestMismatchError",
                     elapsed_ms=(time.perf_counter() - call_start) * 1000,
                 )
+            # Pin verified: bind the tool's approved digest to the request
+            # context so that if this call is task-augmented and returns a task
+            # handle, GovernedTaskStore.create_task pins the task to this digest
+            # and re-verifies it fail-closed on result retrieval (#320). Each
+            # batch call runs in its own contextvars.copy_context() (see
+            # execute()), so this set is confined to the current call.
+            set_current_tool_pin(
+                CurrentToolPin(
+                    mcp_server=call.mcp_server,
+                    tool_name=call.tool,
+                    pinned_digest=pin.sha256,
+                )
+            )
+            return None
+
+        #: True when a pin exists but the catalogue was not there to check it
+        #: against; the cold start below populates it and the gate re-runs.
+        _digest_pin_deferred = False
+        if _pin is not None:
+            if _proj is not None:
+                _rejection = _enforce_digest_pin(_proj, _pin)
+                if _rejection is not None:
+                    return _rejection
+            else:
+                _digest_pin_deferred = True
 
         # Check circuit breaker / health degradation of the resolved target
         # (a standalone server, or the selected group member).
@@ -778,6 +969,13 @@ class BatchExecutor:
                     error_type="CircuitBreakerOpen",
                     elapsed_ms=(time.perf_counter() - call_start) * 1000,
                 )
+
+        # Interceptor validators: gate the request payload fail-closed BEFORE
+        # prompting for approval, so a validator denial short-circuits without
+        # blocking on a human decision. Empty pipeline (default) always allows.
+        if (denied := self._check_validators(call)) is not None:
+            denied.elapsed_ms = (time.perf_counter() - call_start) * 1000
+            return denied
 
         # Approval gate: check if the tool requires human approval before execution.
         # The policy is configured via the server config and applied to the ToolAccessResolver.
@@ -815,6 +1013,33 @@ class BatchExecutor:
                         elapsed_ms=(time.perf_counter() - call_start) * 1000,
                     )
 
+        # The cold start above published McpServerStarted, so the tool catalogue
+        # exists now. Run the pin gate that could not run earlier (#601). Still
+        # missing afterwards means the tool never appeared in the catalogue at
+        # all, which for a PINNED tool is unverifiable -> fail closed under BLOCK,
+        # matching how an uncomputable digest is treated inside the gate.
+        if _digest_pin_deferred:
+            _late_proj = _proj_registry.resolve(call.mcp_server, call.tool, _caller_tenant_id)
+            if _late_proj is not None:
+                _rejection = _enforce_digest_pin(_late_proj, _pin)
+                if _rejection is not None:
+                    return _rejection
+            elif _proj_registry.digest_enforcement(call.mcp_server) == DigestEnforcement.BLOCK:
+                logger.info(
+                    "tool_digest_pin_unresolvable",
+                    mcp_server_id=call.mcp_server,
+                    tool=call.tool,
+                    tenant_id=_caller_tenant_id,
+                )
+                return CallResult(
+                    index=call.index,
+                    call_id=call.call_id,
+                    success=False,
+                    error=f"Tool '{call.tool}' is pinned for this tenant but its schema could not be verified",
+                    error_type="ToolDigestMismatchError",
+                    elapsed_ms=(time.perf_counter() - call_start) * 1000,
+                )
+
         # Check cancellation after cold start
         if cancel_event.is_set():
             return CallResult(
@@ -847,6 +1072,68 @@ class BatchExecutor:
                 result = self._invoke_with_retry(
                     call, cancel_event, effective_timeout, call_start, ctx, target_server_id
                 )
+
+        # Upstream MCP task handle (ADR-014 P3). Two mutually exclusive outcomes,
+        # both an EARLY return BEFORE the group-health block (a task creation is
+        # NOT a healthy-member outcome, so report_success must not fire here):
+        #
+        #  - Relay kill-switch ON (the governed task store is wired on the app
+        #    ctx, which happens ONLY when config.relay_tasks_enabled is True):
+        #    CAPTURE the request context into the CallResult and return it as a
+        #    success. This worker performs NO store write -- per ADR-014 D4 the
+        #    actual register + TaskCreated emit runs on the MAIN LOOP at the
+        #    hangar_call seam, before the handle reaches the client.
+        #  - Kill-switch OFF (store absent): byte-identical to the ADR-008
+        #    relay-only stance -- a clean TaskRelayNotSupported rejection, so the
+        #    client never gets an untracked, unusable handle.
+        #
+        # The store's mere presence on ctx is the kill-switch: the factory wires
+        # governed_task_store ONLY under `HAS_NATIVE_TASKS and relay_tasks_enabled`
+        # (see fastmcp_server/factory._enable_governed_tasks), and the real
+        # ApplicationContext field defaults to None. Reading it here needs no
+        # config plumbing into the worker.
+        if result.success and isinstance(result.result, dict) and _is_task_result(result.result):
+            if getattr(ctx, "governed_task_store", None) is not None:
+                logger.debug(
+                    "upstream_task_result_captured_for_relay",
+                    mcp_server=call.mcp_server,
+                    tool=call.tool,
+                    call_id=call.call_id,
+                )
+                return CallResult(
+                    index=call.index,
+                    call_id=call.call_id,
+                    success=True,
+                    result=result.result,
+                    elapsed_ms=result.elapsed_ms,
+                    relay_capture=RelayCapture(
+                        identity=get_identity_context(),
+                        pin=get_current_tool_pin(),
+                        target_server_id=target_server_id,
+                        correlation_id=call.call_id,
+                        upstream=result.result,
+                        logical_mcp_server=call.mcp_server,
+                        tool=call.tool,
+                    ),
+                )
+            logger.warning(
+                "upstream_task_result_rejected",
+                mcp_server=call.mcp_server,
+                tool=call.tool,
+                call_id=call.call_id,
+            )
+            return CallResult(
+                index=call.index,
+                call_id=call.call_id,
+                success=False,
+                error=(
+                    "Upstream returned an MCP task handle; Hangar does not yet relay "
+                    "or govern task results (relay-only, ADR-008). The task is not "
+                    "tracked, so the handle is unusable."
+                ),
+                error_type="TaskRelayNotSupported",
+                elapsed_ms=result.elapsed_ms,
+            )
 
         # Feed the group health tracker so its circuit-breaker and member rotation
         # react to actual invoke outcomes (enables failover on the call path, #275).
@@ -890,6 +1177,11 @@ class BatchExecutor:
         # call.mcp_server is a group, otherwise the server itself.
         dispatch_server_id = target_server_id or call.mcp_server
 
+        # Interceptor mutators (request): transform the outgoing arguments payload
+        # once, before dispatch (and before any retry). Empty pipeline (default)
+        # returns the arguments unchanged, preserving current behavior.
+        mutated_arguments = self._mutate("tools/call", "request", call.arguments or {}, call.call_id)
+
         def do_invoke() -> dict[str, Any]:
             with tracer.start_as_current_span("command.send.InvokeToolCommand") as cmd_span:
                 cmd_span.set_attribute("mcp.server.id", dispatch_server_id)
@@ -898,7 +1190,7 @@ class BatchExecutor:
                 command = InvokeToolCommand(
                     mcp_server_id=dispatch_server_id,
                     tool_name=call.tool,
-                    arguments=call.arguments,
+                    arguments=mutated_arguments,
                     timeout=effective_timeout,
                 )
                 result = ctx.command_bus.send(command)
@@ -979,6 +1271,11 @@ class BatchExecutor:
                     error_type=error_type,
                     elapsed_ms=elapsed_ms,
                 )
+
+        # Interceptor mutators (response): transform the returned result payload
+        # after a successful invoke, before the size check and building the
+        # success CallResult. Empty pipeline (default) returns it unchanged.
+        result = self._mutate("tools/call", "response", cast(dict[str, Any], result), call.call_id)
 
         elapsed_ms = (time.perf_counter() - call_start) * 1000
 

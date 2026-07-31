@@ -161,6 +161,6 @@ def _create_compliance_exporter(format_name: str, output_path: str | None) -> IA
         logger.warning(
             "compliance_exporter_unavailable",
             format=format_name,
-            reason="enterprise module not installed",
+            reason="compliance module not installed",
         )
         return None

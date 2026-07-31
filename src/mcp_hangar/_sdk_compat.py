@@ -1,0 +1,273 @@
+"""SDK-version-agnostic re-exports for the mcp SDK v1 -> v2 migration (#547).
+
+In SDK v2 the protocol **types** moved out of ``mcp.types`` into the split
+``mcp-types`` distribution (import root ``mcp_types``), and the exception
+``McpError`` was renamed ``MCPError``. Importing those names from this module
+(instead of ``mcp.types`` / ``mcp.shared.exceptions`` directly) makes the same
+source work on **both** SDK generations:
+
+- SDK v1 (``mcp>=1.28,<2``): resolves from ``mcp.types`` / ``McpError``.
+- SDK v2 (``mcp>=2.0.0b``): resolves from ``mcp_types`` / ``MCPError``.
+
+Phase 1 of the migration routes the type + exception surface through here, so
+flipping the pin to SDK v2 does not have to touch every call site. The FastMCP
+server surface (a much larger change) is handled in a later phase.
+"""
+
+from __future__ import annotations
+
+try:  # SDK v2: protocol types live in the split ``mcp_types`` package.
+    import mcp_types as _t
+except ImportError:  # SDK v1: protocol types live under ``mcp.types``.
+    # Unreachable on the pinned SDK -- ``mcp_types`` imports fine there, so this
+    # branch never runs. It is kept because the module is the one place that
+    # spans both generations.
+    #
+    # The ignore lost its ``attr-defined`` half at the 2.0.0 bump: ``mcp.types``
+    # does not exist in the betas, but the stable release carries it again, so
+    # mypy resolves the import and the suppression became dead weight. Only the
+    # redefinition needs silencing now.
+    from mcp import types as _t  # type: ignore[no-redef]
+
+try:  # SDK v2 renamed McpError -> MCPError (mcp.shared.exceptions still exists).
+    from mcp.shared.exceptions import MCPError as McpError
+except ImportError:  # SDK v1
+    from mcp.shared.exceptions import McpError  # type: ignore[attr-defined,no-redef]
+
+from typing import TYPE_CHECKING
+
+if TYPE_CHECKING:
+    # Static typing follows the SDK v1 FastMCP surface until the pin flips to v2,
+    # so mypy keeps checking the server surface (the runtime resolution below
+    # would otherwise degrade FastMCP to Any under ignore_missing_imports).
+    from mcp.server.fastmcp import Context, FastMCP
+else:
+    try:  # SDK v2: FastMCP -> MCPServer; Context moved to mcp.server.mcpserver.
+        from mcp.server.mcpserver import Context, MCPServer as FastMCP
+    except ImportError:  # SDK v1
+        from mcp.server.fastmcp import Context, FastMCP
+
+
+# SDK v1 shipped a pluggable task store under ``mcp.shared.experimental.tasks``
+# that GovernedTaskStore builds on; SDK v2 removed that namespace entirely (the
+# native v2 Tasks extension is a different mechanism). Callers use this flag to
+# keep the dormant task-governance wiring off on v2 — its rebuild on the v2
+# Tasks extension is tracked in #322 / ADR-014.
+try:
+    import mcp.shared.experimental.tasks.store as _tasks_store  # noqa: F401
+
+    HAS_EXPERIMENTAL_TASKS = True
+except ImportError:
+    HAS_EXPERIMENTAL_TASKS = False
+
+# SDK v2 promotes Tasks out of ``experimental`` into a first-class negotiated
+# protocol extension (``mcp_types.CreateTaskResult`` et al.). This flag gates the
+# v2-native task-relay governance (ADR-014 relay-with-governance / #322); the v1
+# HAS_EXPERIMENTAL_TASKS above is now only a legacy no-op marker.
+HAS_NATIVE_TASKS = hasattr(_t, "CreateTaskResult")
+
+# NOTE: the SEP-2663 Tasks surface is NOT probed here, deliberately.
+#
+# This block used to define ``HAS_LIST_TASKS`` / ``HAS_TASKS_UPDATE`` so the relay
+# could "track the surface as later betas land the final shape WITHOUT a version
+# bump touching call sites". Both were latches that could never trip: they probed
+# ``mcp_types``, which carries the frozen SEP-1686 generation, while SEP-2663
+# lands as a separate extension defining its own models (python-sdk#3005). The
+# net effect was that ``tasks/list`` was always served and ``tasks/update`` never
+# was -- permanently, and in both cases wrongly.
+#
+# The served wire is now vendored in ``mcp_hangar.tasks_wire``; see ADR-015. A
+# capability probe is a hedge only when the probed module can still change.
+
+
+def lowlevel_server(mcp):
+    """Return the wrapped low-level MCP ``Server``.
+
+    FastMCP (v1) exposes it as ``._mcp_server``; MCPServer (v2) as
+    ``._lowlevel_server``. Both carry ``add_request_handler`` / ``middleware`` /
+    ``create_initialization_options`` / ``get_capabilities``.
+
+    Prefers ``_mcp_server`` (the v1 name — absent on real v2 servers, so it falls
+    through there) so that test doubles which set up ``_mcp_server`` still work
+    (a Mock auto-creates both attributes).
+    """
+    return getattr(mcp, "_mcp_server", None) or mcp._lowlevel_server
+
+
+def new_mcp_server(name: str, **extra) -> FastMCP:
+    """Construct the FastMCP/MCPServer, passing only kwargs its ``__init__`` accepts.
+
+    FastMCP (v1) takes ``host`` / ``port`` / ``streamable_http_path`` / ``sse_path``
+    / ``message_path``; MCPServer (v2) does not (host/port bind via the host
+    uvicorn instead). Filtering by the constructor signature keeps one call site
+    working on both generations.
+    """
+    import inspect
+
+    accepted = set(inspect.signature(FastMCP.__init__).parameters)
+    return FastMCP(name=name, **{k: v for k, v in extra.items() if k in accepted})
+
+
+def make_mcp_error(code: int, message: str, data=None):
+    """Build an ``McpError`` / ``MCPError`` across SDK versions.
+
+    v1 wraps an ``ErrorData`` (``McpError(ErrorData(code, message))``); v2 takes
+    ``MCPError(code, message, data)`` positionally.
+    """
+    import inspect
+
+    if "error" in inspect.signature(McpError.__init__).parameters:  # SDK v1
+        # v1-only branch; under the pinned v2 SDK McpError is MCPError(int, ...).
+        return McpError(ErrorData(code=code, message=message, data=data))  # type: ignore[call-arg,arg-type]
+    return McpError(code, message, data)  # SDK v2
+
+
+def current_request_context():
+    """Best-effort access to the ambient MCP request context, or ``None``.
+
+    SDK v1 exposes the in-flight request on the module-level ``request_ctx``
+    ContextVar (``mcp.server.lowlevel.server``). SDK v2 removed that ambient var:
+    the request context is passed explicitly to a tool via its ``Context``
+    (``Context.request_context``), so there is no ambient equivalent. Callers
+    that only have this fallback therefore get ``None`` on v2 and must degrade
+    gracefully (they are fault-barriered to server-level policy). Threading the
+    v2 ``Context`` through to those sites is a follow-up under #547.
+    """
+    try:  # SDK v1: ambient request ContextVar.
+        from mcp.server.lowlevel.server import request_ctx  # type: ignore[attr-defined]
+    except ImportError:  # SDK v2: no ambient request_ctx (Context is passed explicitly).
+        return None
+    return request_ctx.get(None)
+
+
+# Protocol version constants.
+DEFAULT_NEGOTIATED_VERSION = _t.DEFAULT_NEGOTIATED_VERSION
+LATEST_PROTOCOL_VERSION = _t.LATEST_PROTOCOL_VERSION
+
+
+def _handshake_protocol_versions() -> tuple[str, ...]:
+    """Return the revisions that still negotiate through the ``initialize`` handshake.
+
+    The v2 SDK session manager era-routes on exactly this set: an
+    ``MCP-Protocol-Version`` OUTSIDE it is a modern (stateless) request handled by
+    the 2026-07-28 entry. Read from the SDK so our own front door makes the same
+    legacy/modern call instead of guessing, with a fallback to the known list for
+    v1, which has no such constant (and no modern entry to route to).
+
+    Resolved inside a function because the SDK declares its constant ``Final``:
+    a module-level try/except rebinding the imported name is a Final
+    reassignment, which the type checker rejects.
+    """
+    try:
+        from mcp.server.streamable_http_manager import HANDSHAKE_PROTOCOL_VERSIONS as _SDK_VERSIONS
+    except ImportError:  # SDK v1
+        return ("2024-11-05", "2025-03-26", "2025-06-18", "2025-11-25")
+    return tuple(_SDK_VERSIONS)
+
+
+HANDSHAKE_PROTOCOL_VERSIONS: tuple[str, ...] = _handshake_protocol_versions()
+
+
+def is_modern_protocol_version(version: str | None) -> bool:
+    """Return whether *version* names a post-handshake (stateless-era) revision.
+
+    ``None`` -- the header is absent -- is NOT modern: the spec's default for a
+    request without the header is a handshake-era revision.
+    """
+    return version is not None and version not in HANDSHAKE_PROTOCOL_VERSIONS
+
+
+# Error codes.
+INVALID_PARAMS = _t.INVALID_PARAMS
+METHOD_NOT_FOUND = _t.METHOD_NOT_FOUND
+
+# Result / content / tool / task types.
+CallToolResult = _t.CallToolResult
+TextContent = _t.TextContent
+ErrorData = _t.ErrorData
+Result = _t.Result
+ListToolsResult = _t.ListToolsResult
+Tool = _t.Tool
+Task = _t.Task
+TaskMetadata = _t.TaskMetadata
+TaskStatus = _t.TaskStatus
+RequestParams = _t.RequestParams
+# v1 nested it as RequestParams.Meta; v2 promotes it to mcp_types.RequestParamsMeta.
+RequestParamsMeta = getattr(_t, "RequestParamsMeta", None) or RequestParams.Meta  # type: ignore[attr-defined]
+
+# v2-native Tasks extension surface (ADR-014). Absent on v1 -> None (this module
+# still imports on either generation); callers gate on HAS_NATIVE_TASKS before use.
+CreateTaskResult = getattr(_t, "CreateTaskResult", None)
+GetTaskRequestParams = getattr(_t, "GetTaskRequestParams", None)
+GetTaskResult = getattr(_t, "GetTaskResult", None)
+GetTaskPayloadRequestParams = getattr(_t, "GetTaskPayloadRequestParams", None)
+GetTaskPayloadResult = getattr(_t, "GetTaskPayloadResult", None)
+CancelTaskRequestParams = getattr(_t, "CancelTaskRequestParams", None)
+CancelTaskResult = getattr(_t, "CancelTaskResult", None)
+ListTasksResult = getattr(_t, "ListTasksResult", None)
+# SEP-1686 leftovers. These stay re-exported for the ledger and for tests that
+# assert what the SDK does and does not carry; NONE of them may reach a serving
+# path (ADR-015) -- the served shapes live in ``mcp_hangar.tasks_wire``.
+# ``UpdateTaskRequest*`` in particular is permanently None: it belongs to the
+# SEP-2663 extension, not to the frozen generation `mcp_types` kept.
+UpdateTaskRequest = getattr(_t, "UpdateTaskRequest", None)
+UpdateTaskRequestParams = getattr(_t, "UpdateTaskRequestParams", None)
+UpdateTaskResult = getattr(_t, "UpdateTaskResult", None)
+PaginatedRequestParams = getattr(_t, "PaginatedRequestParams", None)
+TaskStatusNotification = getattr(_t, "TaskStatusNotification", None)
+ServerCapabilities = getattr(_t, "ServerCapabilities", None)
+ServerTasksCapability = getattr(_t, "ServerTasksCapability", None)
+ServerTasksRequestsCapability = getattr(_t, "ServerTasksRequestsCapability", None)
+TasksToolsCapability = getattr(_t, "TasksToolsCapability", None)
+TasksCallCapability = getattr(_t, "TasksCallCapability", None)
+TasksListCapability = getattr(_t, "TasksListCapability", None)
+TasksCancelCapability = getattr(_t, "TasksCancelCapability", None)
+
+__all__ = [
+    "FastMCP",
+    "Context",
+    "McpError",
+    "HAS_EXPERIMENTAL_TASKS",
+    "HAS_NATIVE_TASKS",
+    "HANDSHAKE_PROTOCOL_VERSIONS",
+    "is_modern_protocol_version",
+    "lowlevel_server",
+    "new_mcp_server",
+    "make_mcp_error",
+    "current_request_context",
+    "DEFAULT_NEGOTIATED_VERSION",
+    "LATEST_PROTOCOL_VERSION",
+    "INVALID_PARAMS",
+    "METHOD_NOT_FOUND",
+    "CallToolResult",
+    "TextContent",
+    "ErrorData",
+    "Result",
+    "ListToolsResult",
+    "Tool",
+    "Task",
+    "TaskMetadata",
+    "TaskStatus",
+    "RequestParams",
+    "RequestParamsMeta",
+    "CreateTaskResult",
+    "GetTaskRequestParams",
+    "GetTaskResult",
+    "GetTaskPayloadRequestParams",
+    "GetTaskPayloadResult",
+    "CancelTaskRequestParams",
+    "CancelTaskResult",
+    "ListTasksResult",
+    "UpdateTaskRequest",
+    "UpdateTaskRequestParams",
+    "UpdateTaskResult",
+    "PaginatedRequestParams",
+    "TaskStatusNotification",
+    "ServerCapabilities",
+    "ServerTasksCapability",
+    "ServerTasksRequestsCapability",
+    "TasksToolsCapability",
+    "TasksCallCapability",
+    "TasksListCapability",
+    "TasksCancelCapability",
+]

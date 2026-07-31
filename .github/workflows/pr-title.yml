@@ -10,13 +10,24 @@ concurrency:
   group: ${{ github.workflow }}-${{ github.ref }}
   cancel-in-progress: false
 
+# Read-only by default: without this the workflow inherits the repository
+# default, which is write on nearly everything. Nothing here writes.
+#
+# `pull-requests: read` is not optional padding: the reusable workflow this
+# calls declares it, and a called workflow cannot be granted more than its
+# caller. Granting only `contents: read` makes the request exceed the cap and
+# the run fails to start at all -- no job, no log, just `startup_failure` and a
+# required check that never reports.
+permissions:
+  contents: read
+  pull-requests: read
+
 jobs:
   pr-title:
     uses: mcp-hangar/.github/.github/workflows/pr-title.yml@main
     with:
       scopes: |
         core
-        enterprise
         cli
         ci
         operator

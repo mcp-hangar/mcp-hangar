@@ -26,11 +26,16 @@ from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Any, cast, TYPE_CHECKING
 
-from mcp.server.fastmcp import FastMCP
+from mcp_hangar import __version__
+from mcp_hangar._sdk_compat import FastMCP, new_mcp_server
 
 from ...application.commands.load_handlers import LoadMcpServerHandler, UnloadMcpServerHandler
 from ...application.discovery import DiscoveryOrchestrator
 from ...application.ports.observability import ObservabilityPort
+from ...fastmcp_server.config import HANGAR_SERVER_NAME
+from ...fastmcp_server.flat_tool_projection import maybe_register_flat_tool_handlers
+from ...fastmcp_server.governance_extensions import advertise_governance_extensions
+from ...fastmcp_server.modern_surface import register_modern_surface
 from ...infrastructure.persistence.saga_state_store import NullSagaStateStore, SagaStateStore
 from ...gc import BackgroundWorker
 from ...logging_config import get_logger
@@ -38,7 +43,7 @@ from ..config import load_config, load_configuration
 from ..context import get_context, init_context
 from ..state import get_runtime, GROUPS
 
-from .enterprise import EnterpriseComponents, get_auth_compat_exports, load_enterprise_modules
+from .components import ServerComponents, get_auth_compat_exports, load_components
 
 from .cqrs import init_cqrs, init_auth_cqrs, init_saga, save_group_circuit_breakers
 from .discovery import _auto_add_volumes, _create_discovery_source, create_discovery_orchestrator
@@ -107,7 +112,7 @@ class ApplicationContext:
     """Discovery source registry (wraps DiscoveryOrchestrator)."""
 
     approval_service: Any = None
-    """Enterprise approval gate service (when ENTERPRISE tier)."""
+    """Approval gate service (when approvals are configured)."""
 
     @property
     def mcp_servers(self):
@@ -167,6 +172,42 @@ def _ensure_data_dir() -> None:
             logger.warning("data_directory_creation_failed", error=str(e))
 
 
+def build_serving_mcp_server() -> FastMCP:
+    """Build the MCP server the CLI serves: control-plane tools + modern surface.
+
+    Extracted from :func:`bootstrap` so the protocol surface the shipped
+    ``mcp-hangar serve`` exposes can be constructed — and probed — without
+    standing up the whole application (bootstrap registers process-global command
+    handlers, so tests cannot call it). The absence of that seam is why #560 went
+    unnoticed: the modern surface was unit-tested through ``MCPServerFactory``,
+    which has no production call site, while the served server quietly lacked it.
+
+    ``name``/``version`` are the INBOUND ``serverInfo`` reported to our own
+    clients, and are shared with the factory path so ``initialize`` and
+    ``server/discover`` agree on one identity (#560). ``version`` must be passed
+    explicitly: left unset the SDK reports ITS OWN version as the server's, so
+    ``initialize`` advertised the mcp SDK's version while ``server/discover``
+    reported Hangar's.
+
+    Does NOT wire the ADR-014 task relay: that publishes onto the
+    ApplicationContext and so belongs to :func:`bootstrap`, after the context
+    exists.
+    """
+    mcp_server = new_mcp_server(HANGAR_SERVER_NAME, version=__version__)
+    register_all_tools(mcp_server)
+    # Topology decides the tool surface: front_door swaps the hangar_* meta-API
+    # for flat backend names. Gate must run here, not only in the unused factory,
+    # or the configured mode silently does nothing on the shipped path (#596).
+    maybe_register_flat_tool_handlers(mcp_server)
+    # SEP-2133 governance descriptors, advertised on both the handshake and the
+    # stateless discovery surface (#595).
+    advertise_governance_extensions(mcp_server)
+    # SEP-2575 `server/discover`. Without this the shipped `serve --http` surface
+    # 404s the modern/stateless discovery entrypoint the 2.x line depends on.
+    register_modern_surface(mcp_server)
+    return mcp_server
+
+
 def bootstrap(
     config_path: str | None = None,
     config_dict: dict[str, Any] | None = None,
@@ -199,11 +240,7 @@ def bootstrap(
     # Ensure data directory exists
     _ensure_data_dir()
 
-    # Initialize runtime and context
-    runtime = get_runtime()
-    init_context(runtime)
-
-    # Load configuration early (needed for event store config)
+    # Load configuration early (needed for runtime rate-limit and event store config)
     if config_dict is not None:
         # Use provided config dict, merge with defaults
         full_config = load_configuration(None)
@@ -214,6 +251,11 @@ def bootstrap(
             load_config(mcp_servers_config)
     else:
         full_config = load_configuration(config_path)
+
+    # Initialize runtime and context. The rate_limit section (config > env > default)
+    # is applied when the runtime singleton is first constructed.
+    runtime = get_runtime(rate_limit=full_config.get("rate_limit"))
+    init_context(runtime)
 
     # Initialize observability (tracing, Langfuse) early
     _, observability_adapter = init_observability(full_config)
@@ -249,23 +291,30 @@ def bootstrap(
     # Deprecation warning for legacy license key env var
     if os.environ.get("HANGAR_LICENSE_KEY"):
         warnings.warn(
-            "HANGAR_LICENSE_KEY is deprecated and has no effect. "
-            "All enterprise features are now available under the MIT license.",
+            "HANGAR_LICENSE_KEY is deprecated and has no effect. All features are now available under the MIT license.",
             DeprecationWarning,
             stacklevel=1,
         )
 
-    # Load enterprise modules unconditionally
-    enterprise = load_enterprise_modules(
+    # Load optional auth / approval components unconditionally
+    components = load_components(
         config=full_config,
         event_bus=runtime.event_bus,
         event_publisher=lambda event: runtime.event_bus.publish(event),
     )
 
-    # Wire enterprise components with null fallbacks
-    auth_components = enterprise.auth_components if enterprise.auth_components is not None else NullAuthComponents()
+    # Wire optional components with null fallbacks
+    auth_components = components.auth_components if components.auth_components is not None else NullAuthComponents()
 
     init_auth_cqrs(runtime, auth_components)
+
+    # Wire auth components onto the global application context so the API
+    # permission guard (`_check_permission`, server/api/mcp_servers.py) can reach
+    # the authz middleware. `init_context()` ran earlier with no auth_components,
+    # so without this the guard reads `auth_components=None`, finds
+    # `authz_middleware is None`, and fail-OPENs (returns early) -- disabling RBAC
+    # enforcement entirely (any authenticated principal passes every check). (SECURITY)
+    get_context().auth_components = auth_components
 
     # Initialize retry configuration
     init_retry_config(full_config)
@@ -276,9 +325,24 @@ def bootstrap(
     # Initialize hot-loading components
     load_handler, unload_handler = init_hot_loading(runtime, full_config)
 
-    # Create MCP server and register tools
-    mcp_server = FastMCP("mcp-registry")
-    register_all_tools(mcp_server)
+    # Create the MCP server the CLI serves (tools + modern protocol surface).
+    mcp_server = build_serving_mcp_server()
+
+    # Wire the ADR-014 governed task-relay serving surface. This HTTP-serve path
+    # builds FastMCP directly (not via MCPServerFactory), so without this call
+    # ctx.governed_task_store stays None and every upstream task handle is
+    # rejected TaskRelayNotSupported regardless of the kill-switch. Kill-switch
+    # defaults True (reactivated 2026-07-28 once the SEP-2663 wire was actually
+    # served -- see ServerConfig.relay_tasks_enabled). Set
+    # relay_tasks_enabled: false in config to restore the relay-only stance.
+    from ...fastmcp_server.task_relay_wiring import (
+        advertise_tasks_capability,
+        enable_governed_task_relay,
+    )
+
+    relay_tasks_enabled = bool(full_config.get("relay_tasks_enabled", True))
+    enable_governed_task_relay(mcp_server, relay_tasks_enabled=relay_tasks_enabled)
+    advertise_tasks_capability(mcp_server, relay_tasks_enabled=relay_tasks_enabled)
 
     # Wire log buffers to mcp_servers after configuration populates the shared repository.
     init_log_buffers(runtime.repository.get_all())
@@ -340,7 +404,7 @@ def bootstrap(
         observability_adapter=observability_adapter,
         saga_state_store=saga_state_store,
         discovery_registry=discovery_registry,
-        approval_service=enterprise.approval_service,
+        approval_service=components.approval_service,
     )
 
     # Update application context for tools to access
@@ -351,8 +415,8 @@ def bootstrap(
     ctx.discovery_orchestrator = discovery_orchestrator
     ctx.discovery_registry = discovery_registry
     ctx.full_config = full_config  # Store for config round-trip serialization
-    if enterprise.approval_service is not None:
-        ctx.approval_gate = enterprise.approval_service
+    if components.approval_service is not None:
+        ctx.approval_gate = components.approval_service
 
     return context
 
@@ -370,22 +434,23 @@ _register_all_tools = register_all_tools
 _create_background_workers = create_background_workers
 _create_discovery_orchestrator = create_discovery_orchestrator
 
-# Backward compatibility: enterprise auth shims for existing code and tests that
+# Backward compatibility: auth shims for existing code and tests that
 # import these names from bootstrap.__init__.
 _auth_compat_exports = get_auth_compat_exports()
 AuthComponents = _auth_compat_exports.AuthComponents
 NullAuthComponents = _auth_compat_exports.NullAuthComponents
 bootstrap_auth = _auth_compat_exports.bootstrap_auth
 parse_auth_config = _auth_compat_exports.parse_auth_config
-_enterprise_auth_available = _auth_compat_exports.enterprise_auth_available
+_auth_available = _auth_compat_exports.auth_available
 
 
 # Re-export for backward compatibility
 __all__ = [
     "ApplicationContext",
-    "EnterpriseComponents",
+    "ServerComponents",
     "bootstrap",
-    "load_enterprise_modules",
+    "build_serving_mcp_server",
+    "load_components",
     "GC_WORKER_INTERVAL_SECONDS",
     "HEALTH_CHECK_INTERVAL_SECONDS",
     # Initialization functions (with and without underscore prefix)
@@ -417,10 +482,10 @@ __all__ = [
     "_register_all_tools",
     "_auto_add_volumes",
     "_create_discovery_source",
-    # Backward compatibility: enterprise auth shims
+    # Backward compatibility: auth shims
     "AuthComponents",
     "NullAuthComponents",
     "bootstrap_auth",
     "parse_auth_config",
-    "_enterprise_auth_available",
+    "_auth_available",
 ]

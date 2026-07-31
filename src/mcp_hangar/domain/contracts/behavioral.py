@@ -1,7 +1,7 @@
 """Behavioral profiling contracts (ports) for the domain layer.
 
 These protocols define the interfaces for behavioral profiling components.
-Enterprise layer provides concrete implementations; MIT core ships with
+The profiling module provides concrete implementations; MIT core ships with
 NullBehavioralProfiler (always DISABLED).
 
 Contracts:
@@ -30,7 +30,7 @@ class IBehavioralProfiler(Protocol):
     subsystem (baseline store in LEARNING, deviation detector in ENFORCING).
 
     In MIT core, only NullBehavioralProfiler is available (always DISABLED).
-    Enterprise module provides a real implementation.
+    The profiling module provides a real implementation.
     """
 
     @abstractmethod
@@ -157,7 +157,7 @@ class IDeviationDetector(Protocol):
 class NullBehavioralProfiler:
     """No-op behavioral profiler. Always returns DISABLED mode.
 
-    Used when enterprise behavioral profiling is not installed.
+    Used when behavioral profiling is not installed.
     Satisfies the IBehavioralProfiler protocol at runtime.
     """
 
@@ -168,14 +168,14 @@ class NullBehavioralProfiler:
         return BehavioralMode.DISABLED
 
     def set_mode(self, mcp_server_id: str, mode: BehavioralMode) -> None:
-        """No-op -- profiling mode cannot be changed without enterprise module."""
+        """No-op -- profiling mode cannot be changed without the profiling module."""
         pass
 
     def record_observation(self, observation: NetworkObservation) -> list[dict[str, Any]]:
-        """No-op -- observations are discarded without enterprise module.
+        """No-op -- observations are discarded without the profiling module.
 
         Returns:
-            Empty list (no deviations possible without enterprise module).
+            Empty list (no deviations possible without the profiling module).
         """
         return []
 
@@ -186,7 +186,7 @@ class IResourceStore(Protocol):
 
     Stores CPU, memory, and network I/O samples during both LEARNING and
     ENFORCING phases. Computes statistical baselines (mean + stddev) from
-    accumulated samples. Enterprise layer provides a SQLite-backed implementation.
+    accumulated samples. The profiling module provides a SQLite-backed implementation.
     """
 
     @abstractmethod
@@ -256,7 +256,7 @@ class IResourceMonitor(Protocol):
     """Background monitor collecting resource usage from mcp_server containers.
 
     Polls Docker containers or K8s pods for CPU, memory, and network I/O
-    metrics. Enterprise layer provides a real implementation; MIT core
+    metrics. The profiling module provides a real implementation; MIT core
     ships with NullResourceMonitor.
     """
 
@@ -280,17 +280,17 @@ class IResourceMonitor(Protocol):
 class NullResourceMonitor:
     """No-op resource monitor. Always reports not running.
 
-    Used when enterprise resource monitoring is not installed.
+    Used when resource monitoring is not installed.
     Satisfies the IResourceMonitor protocol at runtime.
     """
 
     def start(self) -> None:
-        """No-op -- resource monitoring not available without enterprise module."""
+        """No-op -- resource monitoring not available without the profiling module."""
 
     def stop(self) -> None:
         """No-op -- nothing to stop."""
 
     @property
     def running(self) -> bool:
-        """Always False -- monitor is never active without enterprise module."""
+        """Always False -- monitor is never active without the profiling module."""
         return False

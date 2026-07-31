@@ -45,16 +45,6 @@ repos:
       - id: debug-statements
       - id: mixed-line-ending
 
-  # Import boundary enforcement
-  - repo: local
-    hooks:
-      - id: enterprise-import-boundary
-        name: enforce core -> enterprise boundary
-        entry: python3 tools/check_enterprise_imports.py
-        language: system
-        pass_filenames: false
-        files: ^src/mcp_hangar/.*\.py$
-
   # Pytest check (optional - runs fast tests)
   # Uncomment if you want tests to run on commit
   # - repo: local

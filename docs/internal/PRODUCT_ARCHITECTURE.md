@@ -3,7 +3,7 @@
 > **Classification:** Internal — do not publish
 > **Author:** Marcin
 > **Date:** 2026-03-24
-> **Purpose:** Define product tiers, hardening priorities, cut list, and deployment focus
+> **Purpose:** Capture product identity, hardening priorities, cut list, and deployment focus. The historical commercial tier/pricing model (§3, §7) is retained for context only — Hangar is now pure MIT with no tiers, pricing, or license keys.
 
 ---
 
@@ -97,6 +97,12 @@ The import boundary is now CI-enforced.
 
 ## 3. Product Tiers
 
+> **Historical (pre-2026 commercial model).** Hangar is now pure MIT: no tiers, no pricing, no
+> license keys; all features are freely available and inbound=outbound. The tier, pricing, and
+> consulting content below is retained for history and does **not** describe the current product.
+> The Tier-0 capability list remains an accurate description of the (now universally available)
+> feature set; the "Pro"/"Enterprise"/"Advisory" pricing and gating are superseded.
+
 ### Tier 0: Hangar Core (Open Source, MIT)
 
 **Buyer:** Individual developer, small team, OSS community
@@ -126,7 +132,7 @@ The import boundary is now CI-enforced.
 
 **Buyer:** Platform engineering team, 10-100 MCP servers
 **Entry:** Self-hosted
-**Price target:** $49-99/mo per cluster (or $499-999/yr)
+**Price target:** ~~$49-99/mo per cluster (or $499-999/yr)~~ — historical; free under MIT
 **Value:** "Govern and secure your MCP servers with full visibility."
 
 **Adds on top of Core:**
@@ -144,7 +150,7 @@ The import boundary is now CI-enforced.
 
 **Buyer:** Organization with 100+ MCP servers, compliance requirements
 **Entry:** Sales-led, consulting engagement
-**Price target:** €2,000-5,000/mo or annual contract
+**Price target:** ~~€2,000-5,000/mo or annual contract~~ — historical; free under MIT
 **Value:** "Runtime security and compliance for MCP at scale."
 
 **Adds on top of Pro:**
@@ -163,7 +169,7 @@ The import boundary is now CI-enforced.
 
 **Buyer:** Any organization deploying MCP servers
 **Entry:** Direct outreach, inbound from content/newsletter
-**Price:** €800-1,200/day
+**Price:** ~~€800-1,200/day~~ — historical; consulting model never operated
 
 **Offerings:**
 
@@ -253,9 +259,9 @@ Phases 1-2 are complete.
 
 | Area                              | Gap                                                                        | Action                                                                                                      | Target version | Status |
 |-----------------------------------|----------------------------------------------------------------------------|-------------------------------------------------------------------------------------------------------------|----------------|--------|
-| **Container network isolation**   | Docker MCP servers can talk to anything                                      | Default-deny egress, explicit allowlist                                                                     | v0.13.0        | |
-| **Capability declaration schema** | No formal way to declare what a server needs                               | New `capabilities` config block                                                                             | v0.13.0        | |
-| **K8s NetworkPolicy generation**  | Operator doesn't create NetworkPolicies                                    | Auto-generate from CRD capabilities field                                                                   | v0.13.0        | |
+| **Container network isolation**   | Docker MCP servers can talk to anything                                      | Default-deny egress, explicit allowlist                                                                     | v0.13.0        | **Done / shipped v1.0** (operator NetworkPolicy backend) |
+| **Capability declaration schema** | No formal way to declare what a server needs                               | New `capabilities` config block                                                                             | v0.13.0        | **Done / shipped v1.0** (operator CRD `spec.capabilities.network.egress`) |
+| **K8s NetworkPolicy generation**  | Operator doesn't create NetworkPolicies                                    | Auto-generate from CRD capabilities field                                                                   | v0.13.0        | **Done / shipped v1.0** (operator `pkg/networkpolicy`, reconciled per MCPServer) |
 | **Licensing boundary**            | All code in MIT, no commercial protection                                  | Migrate Pro/Enterprise features into `src/mcp_hangar/`                                                     | v0.13.0        | Completed |
 | **Behavioral baseline storage**   | No behavioral profiling exists                                             | Network connection logging per container                                                                    | v0.14.0        | |
 | **Test coverage on auth**         | Auth stack is comprehensive but test density unclear                       | Audit test coverage, target 90%+ on auth paths                                                              | v0.13.0        | |
@@ -277,7 +283,7 @@ Phases 1-2 are complete.
 | **Error handling audit**       | Exception hygiene improved in v0.11.0                                              | Full audit of error surfaces exposed to users                                                | v0.14.0        | |
 | **OTLP completeness**          | Traces exist, but partner story needs explicit completeness across telemetry types | Ensure security-relevant traces, metrics, and logs/audit signals are exportable through OTLP | v0.14.0        | **DONE** (v6.0 Phase 33) |
 | **Integration recipes**        | OTEL partner story is implied, not operationalized                                 | Publish reference deployments for OpenLIT, OTEL Collector, Langfuse, and Grafana             | v0.14.0        | **DONE** (v6.0 Phase 34) |
-| **License key infrastructure** | No mechanism to activate Pro/Enterprise                                            | Implement license key validation in bootstrap; enterprise modules load conditionally         | v0.14.0        | |
+| **License key infrastructure** | No mechanism to activate Pro/Enterprise                                            | ~~Implement license key validation in bootstrap; enterprise modules load conditionally~~     | v0.14.0        | Dropped (pure MIT — no license keys; all modules load freely) |
 
 ### Nice-to-have (H2 2026)
 
@@ -287,6 +293,30 @@ Phases 1-2 are complete.
 | Seccomp profiles                   | Not shipped     | Create and ship default MCP server seccomp profile |
 | Multi-cluster federation           | Not implemented | Design doc first, implement when demand validated  |
 | SCIM provisioning                  | Not implemented | Enterprise tier only                               |
+
+### Enforcement state (reconciled 2026-07-01)
+
+Per the #295 enforcement audit (operator + helm-charts, read-only), the §6
+"Not implemented" cells above were a stale 2026-03-24 snapshot that ADR-006
+already overtook. The reconciled state:
+
+- **NetworkPolicy L3/L4 egress enforcement shipped in v1.0**, implemented in the
+  operator repo (`pkg/networkpolicy/builder.go`, reconciled with owner references
+  in `internal/controller/mcpserver_controller.go`), driven by the CRD
+  `spec.capabilities.network.egress` field plus an always-on CEL wildcard-egress
+  gate and an off-by-default validating admission webhook. This is the shipping
+  v1.0 enforcement backend, exactly as ADR-006 states.
+- **Tetragon (ADR-006 v1.5) is not yet built** — zero references in either repo.
+  It is cleanly buildable on the existing backend-agnostic capability schema and
+  reconcile seams; tracked as WS-9.
+- **Forensic / provenance chain (v2.0) is not buildable on what exists** — it
+  needs process attribution that NetworkPolicy structurally cannot provide, and
+  is gated on Tetragon landing first; tracked as WS-10 (sequence strictly after
+  WS-9).
+- **Known gap:** host/FQDN-only egress rules are not enforced at L3/L4 — they
+  emit a port-only NetworkPolicy, so the SSRF vector ADR-006 claims to close is
+  closed only for CIDR-based rules. This is the biggest remaining gap in the v1.0
+  backend and should be filed against the operator repo.
 
 ---
 
@@ -360,7 +390,44 @@ Enforced by `tools/check_enterprise_imports.py` (CI job `import-boundary` in `se
 
 ---
 
-## 9. Competitive Intelligence — Key Gaps They Have
+## 9. MCP Surface Coverage — Deliberate Non-Interception
+
+Hangar governs the MCP surfaces where runtime security and governance add value: `tools/*` (invocation, capability enforcement, behavioral profiling, RBAC, approval gates), plus lifecycle, health, and telemetry concerns.
+
+Hangar deliberately does **not** intercept or govern the following MCP methods. This traffic passes through to upstream MCP servers unchanged, and upstream responses pass back unchanged:
+
+- **Sampling** (`sampling/*`, e.g. `sampling/createMessage`) — server-initiated LLM completions handled by the client.
+- **Roots** (`roots/*`, e.g. `roots/list`, `notifications/roots/list_changed`) — client-exposed filesystem/workspace roots.
+- **MCP Logging** (`logging/setLevel`, `notifications/message`) — protocol-level log messages emitted by servers.
+
+### Why this is by design
+
+1. **These surfaces are deprecated upstream.** Under MCP spec 2026-07-28 (SEP-2577), Roots, Sampling, and MCP Logging are deprecated and annotation-only, with a 12-month migration window. Implementations MUST still handle them during that window, and new work SHOULD NOT adopt them. Building governance on top of a deprecated surface would be wasted effort with a known removal horizon; transparent pass-through keeps Hangar compatible without coupling to a sunsetting feature.
+2. **Hangar's audit is OTEL and event-sourced, not MCP-`logging`-based.** The audit pipeline (`src/mcp_hangar/observability/`, `src/mcp_hangar/compliance/`) is built on OpenTelemetry traces and an event-sourced audit log, independent of the MCP protocol `logging` methods. Hangar does not need to intercept `logging/setLevel` or `notifications/message` to produce its own audit trail, and it does not repurpose that channel.
+
+### Evidence
+
+There is no interception handling for these methods in the codebase. Confirm with:
+
+```bash
+grep -rniE "sampling/|roots/|logging/setLevel|notifications/message" src/mcp_hangar
+# (no matches)
+```
+
+### Multi-tenant isolation model
+
+Two independent mechanisms are easy to conflate; they answer different questions.
+
+- **Audience (`aud`)** validates that an inbound token was issued *for the Hangar resource server*, per RFC 8707. Hangar binds `aud` to a single, global Hangar resource URI (see `src/mcp_hangar/auth/bootstrap.py`). This is a resource-binding control — it proves "this token is for Hangar" — not a tenant-scoping control.
+- **`tenant_id` + per-tenant projection** enforce cross-tenant separation. The `tenant_id` JWT claim identifies the calling tenant, and the per-tenant tool projection plus the member-scope access policy (#237 / #241) decide which backend tools that tenant may see and invoke.
+
+There is deliberately no per-tenant audience. A caller carrying `tenant_id="A"` can never see or invoke another tenant's tools, because the projection read-model and the member-scope resolver filter every `tools/list` and every call by the caller's `tenant_id` — independently of the (shared) audience. This boundary is exercised by `tests/unit/test_cross_tenant_isolation.py`.
+
+A per-tenant-resource-URI model (interpretation B), where each tenant would receive its own distinct `aud` value, was considered and deliberately deferred: it would push tenancy into the token-issuance and audience-validation path without strengthening the boundary that the `tenant_id` claim and per-tenant projection already enforce.
+
+---
+
+## 10. Competitive Intelligence — Key Gaps They Have
 
 | Competitor               | What they lack (our opportunity)                                                                                                                                                                                                                                            |
 |--------------------------|-----------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------|
@@ -373,7 +440,7 @@ Enforced by `tools/check_enterprise_imports.py` (CI job `import-boundary` in `se
 
 ---
 
-## 10. Decision Log
+## 11. Decision Log
 
 | Date       | Decision                                                                                                         | Rationale                                                                                                                                                                                                                                   |
 |------------|------------------------------------------------------------------------------------------------------------------|---------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------|
@@ -388,3 +455,5 @@ Enforced by `tools/check_enterprise_imports.py` (CI job `import-boundary` in `se
 | 2026-03-23 | Three-tier product model (Core/Pro/Enterprise).                                                                  | Need open source adoption funnel AND revenue path.                                                                                                                                                                                          |
 | 2026-03-23 | v1.0.0 target: September 2026.                                                                                   | 6-month window before major vendors enter MCP observability.                                                                                                                                                                                |
 | 2026-03-23 | Position as "runtime security," not "control plane."                                                             | "Control plane" is generic. "Runtime security and governance" is specific and defensible.                                                                                                                                                   |
+| 2026-06-30 | Do not intercept or govern MCP `sampling/*`, `roots/*`, or `logging` methods; pass through unchanged.            | These surfaces are deprecated upstream (SEP-2577, spec 2026-07-28). Hangar's audit is OTEL/event-sourced, not MCP-`logging`-based. See section 9.                                                                                            |
+| 2026-07-01 | Audience (`aud`) binds tokens to the shared Hangar RS (RFC 8707); cross-tenant isolation is enforced by the `tenant_id` claim plus per-tenant projection (#237 / #241), not by a per-tenant audience. Per-tenant-resource-URI (interpretation B) deferred. | A per-tenant `aud` would not strengthen a boundary already enforced by the projection read-model and member-scope policy; it would only complicate token issuance and audience validation. See section 9 and issue #312.                       |

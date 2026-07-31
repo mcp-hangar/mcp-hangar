@@ -24,6 +24,8 @@ import time
 import httpx
 import pytest
 
+from tests.live import _group_support as gs
+
 # Opt-in gate: live verification only runs when explicitly requested, so a normal
 # `pytest tests/` (incl. the release test run) never starts servers. The
 # `live-verify` workflow sets this env var.
@@ -74,20 +76,19 @@ def _hangar_bin() -> str:
     return binary
 
 
-@pytest.fixture(scope="session")
-def live_http_hangar(tmp_path_factory: pytest.TempPathFactory) -> Iterator[str]:
-    """Start `mcp-hangar serve --http` on loopback and yield its base URL.
+def _serve_hangar(workdir: Path, config_text: str) -> Iterator[str]:
+    """Start `mcp-hangar serve --http` with ``config_text`` and yield its base URL.
 
-    Skips cleanly if the binary is missing or the server does not become healthy
-    within the startup budget. Loopback binding needs no auth.
+    Shared engine for every "run a real hangar over HTTP" fixture. Writes the
+    config into ``workdir``, binds a free loopback port, polls ``/health/live``
+    until healthy, then yields the base URL and tears the process down on exit.
+    Skips cleanly (never fails) if the binary is missing or the server does not
+    become healthy within the startup budget.
     """
     binary = _hangar_bin()
-    if not _MATH_SERVER.exists():
-        pytest.skip(f"stub backend not found at {_MATH_SERVER}")
 
-    workdir = tmp_path_factory.mktemp("live_hangar")
     config_path = workdir / "config.yaml"
-    config_path.write_text(_MINIMAL_CONFIG.format(python=sys.executable, server=str(_MATH_SERVER)))
+    config_path.write_text(config_text)
 
     port = _free_port()
     base_url = f"http://127.0.0.1:{port}"
@@ -134,50 +135,138 @@ def live_http_hangar(tmp_path_factory: pytest.TempPathFactory) -> Iterator[str]:
                 proc.kill()
 
 
-# ---------------------------------------------------------------------------
-# Tier 2 (auth / IdP) harness: a real Keycloak from examples/auth-keycloak/,
-# fronted by `mcp-hangar serve --http` with OIDC auth enabled. Every fixture
-# skips cleanly when its prerequisite (Docker, a reachable Keycloak, the hangar
-# binary, a healthy startup) is absent, so this stays safe to run anywhere.
-# ---------------------------------------------------------------------------
+@pytest.fixture(scope="session")
+def live_http_hangar(tmp_path_factory: pytest.TempPathFactory) -> Iterator[str]:
+    """Start `mcp-hangar serve --http` on loopback and yield its base URL.
 
-_KEYCLOAK_DIR = Path(__file__).resolve().parents[2] / "examples" / "auth-keycloak"
-_KEYCLOAK_COMPOSE = _KEYCLOAK_DIR / "docker-compose.yml"
-_KEYCLOAK_URL = "http://localhost:8080"
-_REALM = "mcp-hangar"
-_ISSUER = f"{_KEYCLOAK_URL}/realms/{_REALM}"
-_TOKEN_URL = f"{_ISSUER}/protocol/openid-connect/token"
-_KEYCLOAK_READY_TIMEOUT_S = 180.0
+    Skips cleanly if the binary is missing or the server does not become healthy
+    within the startup budget. Loopback binding needs no auth.
+    """
+    if not _MATH_SERVER.exists():
+        pytest.skip(f"stub backend not found at {_MATH_SERVER}")
 
-# Users seeded by keycloak/realm-export.json (username, password, group -> role).
-KEYCLOAK_USERS = {
-    "admin": "admin123",  # group platform-engineering -> admin
-    "developer": "dev123",  # group developers          -> developer
-    "viewer": "view123",  # group viewers             -> viewer
-}
+    workdir = tmp_path_factory.mktemp("live_hangar")
+    yield from _serve_hangar(workdir, _MINIMAL_CONFIG.format(python=sys.executable, server=str(_MATH_SERVER)))
 
-# Hangar auth config that matches the exported realm (front-door: anonymous
-# denied, OIDC issuer trusted, groups claim mapped to roles).
-_AUTH_CONFIG = """\
+
+# --- T2: live OIDC / Keycloak (real IdP) --------------------------------------
+#
+# These fixtures drive a REAL Keycloak (issuer A = realm `mcp-hangar`, issuer B =
+# realm `mcp-hangar-b`) and a REAL hangar with OIDC auth enabled. Everything is
+# skip-safe: if Keycloak or Docker is unavailable, tests SKIP (never fail). We
+# reuse an already-running Keycloak and never tear down an IdP we did not start.
+
+# Keycloak base URL: reuse an already-running instance; override for elsewhere.
+_KEYCLOAK_BASE_URL = os.environ.get("MCP_HANGAR_KEYCLOAK_URL", "http://localhost:8080")
+_REALM_A = "mcp-hangar"
+_REALM_B = "mcp-hangar-b"
+_COMPOSE_FILE = Path(__file__).resolve().parents[2] / "examples" / "auth-keycloak" / "docker-compose.yml"
+_KEYCLOAK_START_TIMEOUT_S = 120.0
+
+
+def _realm_discovery_ok(base_url: str, realm: str) -> bool:
+    """Return True if the realm's OIDC discovery endpoint answers 200."""
+    try:
+        resp = httpx.get(f"{base_url}/realms/{realm}/.well-known/openid-configuration", timeout=2.0)
+        return resp.status_code == 200
+    except httpx.HTTPError:
+        return False
+
+
+def _realms_ready(base_url: str) -> bool:
+    return _realm_discovery_ok(base_url, _REALM_A) and _realm_discovery_ok(base_url, _REALM_B)
+
+
+@pytest.fixture(scope="session")
+def keycloak_base_url() -> str:
+    """Return a reachable Keycloak base URL exposing realms A and B, else skip.
+
+    Reuses an already-running Keycloak (never torn down here). If none answers,
+    tries ``docker compose up -d keycloak`` from the auth-keycloak example and
+    waits for both realms to import. Skips (never fails) when Docker or Keycloak
+    are unavailable or the required realms never appear.
+    """
+    base_url = _KEYCLOAK_BASE_URL
+    if _realms_ready(base_url):
+        return base_url
+
+    # Not reachable: attempt to start it from the shipped compose file. We only
+    # ever start it here; teardown of a Keycloak we started is left to the
+    # operator (compose keeps it running for reuse across the suite).
+    if shutil.which("docker") is None or not _COMPOSE_FILE.exists():
+        pytest.skip(f"Keycloak not reachable at {base_url}; Docker/compose unavailable to start it")
+    try:
+        subprocess.run(
+            ["docker", "compose", "-f", str(_COMPOSE_FILE), "up", "-d", "keycloak"],
+            check=True,
+            capture_output=True,
+            timeout=180,
+        )
+    except (subprocess.CalledProcessError, subprocess.TimeoutExpired, OSError) as exc:
+        pytest.skip(f"could not start Keycloak via docker compose: {exc}")
+
+    deadline = time.monotonic() + _KEYCLOAK_START_TIMEOUT_S
+    while time.monotonic() < deadline:
+        if _realms_ready(base_url):
+            return base_url
+        time.sleep(2.0)
+    pytest.skip(f"Keycloak at {base_url} did not import realms {_REALM_A!r} + {_REALM_B!r} in time")
+
+
+@pytest.fixture(scope="session")
+def keycloak_token(keycloak_base_url: str):
+    """Return a helper that mints real access tokens via the OIDC password grant.
+
+    Usage: ``keycloak_token(realm, username, password, client_id="mcp-cli")``.
+    Skips (never fails) if the grant does not succeed.
+    """
+
+    def _mint(realm: str, username: str, password: str, client_id: str = "mcp-cli") -> str:
+        resp = httpx.post(
+            f"{keycloak_base_url}/realms/{realm}/protocol/openid-connect/token",
+            data={
+                "grant_type": "password",
+                "client_id": client_id,
+                "username": username,
+                "password": password,
+            },
+            timeout=10.0,
+        )
+        if resp.status_code != 200:
+            pytest.skip(f"password grant failed for {realm}/{username}: {resp.status_code} {resp.text[:200]}")
+        token = resp.json().get("access_token")
+        if not token:
+            pytest.skip(f"no access_token in token response for {realm}/{username}")
+        return str(token)
+
+    return _mint
+
+
+# Hangar config trusting both Keycloak realms. front_door topology + auth on,
+# OIDC multi-issuer registry, audience/resource bound to `mcp-hangar` (RFC 8707),
+# require_tenant on (so a token with no tenant claim is rejected fail-closed).
+_OIDC_CONFIG = """\
 logging:
   level: WARNING
+tool_access:
+  mode: front_door
 auth:
   enabled: true
   allow_anonymous: false
+  storage:
+    driver: memory
+  api_key:
+    enabled: false
   oidc:
     enabled: true
-    issuer: {issuer}
-    audience: mcp-hangar
-    groups_claim: groups
+    resource_uri: "{resource}"
+    require_tenant: true
+    issuers:
+      - issuer: {issuer_a}
+      - issuer: {issuer_b}
   role_assignments:
-    - principal: "group:platform-engineering"
-      role: admin
-      scope: global
     - principal: "group:developers"
       role: developer
-      scope: global
-    - principal: "group:viewers"
-      role: viewer
       scope: global
 mcp_servers:
   math:
@@ -187,90 +276,85 @@ mcp_servers:
 """
 
 
-def _compose_cmd() -> list[str]:
-    """Return a working `docker compose` (v2) or `docker-compose` invocation, or skip."""
-    if shutil.which("docker") and subprocess.run(["docker", "compose", "version"], capture_output=True).returncode == 0:
-        return ["docker", "compose"]
-    if shutil.which("docker-compose"):
-        return ["docker-compose"]
-    pytest.skip("Docker Compose not available; T2 Keycloak harness unavailable")
+def _oidc_config_text(keycloak_base_url: str, resource: str) -> str:
+    return _OIDC_CONFIG.format(
+        resource=resource,
+        issuer_a=f"{keycloak_base_url}/realms/{_REALM_A}",
+        issuer_b=f"{keycloak_base_url}/realms/{_REALM_B}",
+        python=sys.executable,
+        server=str(_MATH_SERVER),
+    )
 
 
 @pytest.fixture(scope="session")
-def keycloak() -> Iterator[str]:
-    """Bring up the example Keycloak and yield its issuer URL.
+def hangar_oidc(keycloak_base_url: str, tmp_path_factory: pytest.TempPathFactory) -> Iterator[str]:
+    """Run a real hangar (front_door + auth) trusting Keycloak realms A and B.
 
-    Skips (never fails) if Docker/Compose is missing or Keycloak does not become
-    ready within the budget. Reuses examples/auth-keycloak/ verbatim.
+    Resource/audience bound to ``mcp-hangar`` (matches the tokens' aud), OIDC
+    multi-issuer registry (A + B), ``require_tenant`` on. Yields the base URL;
+    skip-safe.
     """
-    if not _KEYCLOAK_COMPOSE.exists():
-        pytest.skip(f"Keycloak compose not found at {_KEYCLOAK_COMPOSE}")
-    compose = _compose_cmd()
-    base = [*compose, "-f", str(_KEYCLOAK_COMPOSE)]
-
-    # Only the keycloak service (not the compose's hangar service, which would
-    # build an image); hangar runs on the host via the CLI.
-    up = subprocess.run([*base, "up", "-d", "keycloak"], capture_output=True, text=True)
-    if up.returncode != 0:
-        pytest.skip(f"could not start Keycloak:\n{up.stderr[-2000:]}")
-
-    try:
-        discovery = f"{_ISSUER}/.well-known/openid-configuration"
-        deadline = time.monotonic() + _KEYCLOAK_READY_TIMEOUT_S
-        ready = False
-        while time.monotonic() < deadline:
-            try:
-                if httpx.get(discovery, timeout=2.0).status_code == 200:
-                    ready = True
-                    break
-            except httpx.HTTPError:
-                pass
-            time.sleep(1.0)
-        if not ready:
-            logs = subprocess.run([*base, "logs", "keycloak"], capture_output=True, text=True)
-            pytest.skip(f"Keycloak not ready in {_KEYCLOAK_READY_TIMEOUT_S}s:\n{logs.stdout[-2000:]}")
-        yield _ISSUER
-    finally:
-        subprocess.run([*base, "down", "-v"], capture_output=True)
-
-
-@pytest.fixture(scope="session")
-def keycloak_token(keycloak: str):
-    """Return a helper that fetches an access token via the password grant."""
-
-    def _token(username: str, password: str | None = None) -> str:
-        password = password or KEYCLOAK_USERS[username]
-        resp = httpx.post(
-            _TOKEN_URL,
-            data={
-                "grant_type": "password",
-                "client_id": "mcp-hangar",
-                "client_secret": "mcp-hangar-secret",
-                "username": username,
-                "password": password,
-            },
-            timeout=10.0,
-        )
-        if resp.status_code != 200:
-            pytest.skip(f"token request for {username} failed ({resp.status_code}): {resp.text[:500]}")
-        return str(resp.json()["access_token"])
-
-    return _token
-
-
-@pytest.fixture(scope="session")
-def auth_http_hangar(keycloak: str, tmp_path_factory: pytest.TempPathFactory) -> Iterator[str]:
-    """Start `mcp-hangar serve --http` with OIDC auth trusting the example realm."""
-    binary = _hangar_bin()
     if not _MATH_SERVER.exists():
         pytest.skip(f"stub backend not found at {_MATH_SERVER}")
+    workdir = tmp_path_factory.mktemp("hangar_oidc")
+    yield from _serve_hangar(workdir, _oidc_config_text(keycloak_base_url, resource="mcp-hangar"))
 
-    workdir = tmp_path_factory.mktemp("live_auth_hangar")
+
+@pytest.fixture(scope="session")
+def hangar_oidc_wrong_audience(keycloak_base_url: str, tmp_path_factory: pytest.TempPathFactory) -> Iterator[str]:
+    """Same as ``hangar_oidc`` but expecting a DIFFERENT resource/audience.
+
+    A real realm-A token (aud=``mcp-hangar``) must fail audience validation here,
+    exercising RFC 8707 resource binding. Yields the base URL; skip-safe.
+    """
+    if not _MATH_SERVER.exists():
+        pytest.skip(f"stub backend not found at {_MATH_SERVER}")
+    workdir = tmp_path_factory.mktemp("hangar_oidc_wrong_aud")
+    yield from _serve_hangar(workdir, _oidc_config_text(keycloak_base_url, resource="urn:mcp-hangar:other-resource"))
+
+
+# --------------------------------------------------------------------------- #
+# T1: multi-backend group + per-tenant canary harness
+# --------------------------------------------------------------------------- #
+#
+# Unlike the T0 stub (``examples/provider_math``, whose results are anonymous),
+# the group members here run ``examples/provider_identity`` -- a stdio backend
+# whose ``whoami`` tool echoes *which* instance served the call. Two members
+# (``member-a`` / ``member-b``) run as ``mode: subprocess`` group members, so a
+# live ``hangar_call`` to the group can be observed landing on a real backend and
+# the serving member asserted.
+#
+# For canary/version routing the caller's tenant must reach hangar. The shipped,
+# no-IdP way to carry an arbitrary per-request tenant over the HTTP surface is an
+# API key (``X-API-Key``) whose stored principal carries a ``tenant_id``; keys are
+# seeded with the shipped ``SQLiteApiKeyStore`` and the server points its
+# ``auth.storage`` at the same DB. Reusable pieces live in ``_group_support``.
+
+
+@pytest.fixture(scope="session")
+def live_group_hangar(tmp_path_factory: pytest.TempPathFactory) -> Iterator[gs.GroupHarness]:
+    """Start hangar with a 2-member group + canary policy; yield a GroupHarness.
+
+    Skips cleanly if the binary or identity stub is missing, the server does not
+    become healthy, or the group never warms a member within the startup budget.
+    """
+    binary = _hangar_bin()
+    if not gs.IDENTITY_SERVER.exists():
+        pytest.skip(f"identity stub backend not found at {gs.IDENTITY_SERVER}")
+
+    workdir = tmp_path_factory.mktemp("live_group")
+    auth_db = workdir / "auth.db"
+
+    try:
+        tenant_keys = gs.seed_tenant_keys(auth_db, [*gs.PINNED, *gs.SPLIT_TENANTS])
+    except Exception as exc:  # noqa: BLE001 -- fixture prerequisite: skip, never fail
+        pytest.skip(f"could not seed tenant API keys: {exc}")
+
     config_path = workdir / "config.yaml"
-    config_path.write_text(_AUTH_CONFIG.format(issuer=keycloak, python=sys.executable, server=str(_MATH_SERVER)))
+    config_path.write_text(gs.render_config(auth_db))
 
     port = _free_port()
-    base_url = f"http://127.0.0.1:{port}"
+    harness = gs.GroupHarness(base_url=f"http://127.0.0.1:{port}", tenant_keys=tenant_keys)
     proc = subprocess.Popen(
         [binary, "--config", str(config_path), "serve", "--http", "--host", "127.0.0.1", "--port", str(port)],
         stdout=subprocess.PIPE,
@@ -285,12 +369,13 @@ def auth_http_hangar(keycloak: str, tmp_path_factory: pytest.TempPathFactory) ->
             if proc.poll() is not None:
                 break
             try:
-                if httpx.get(f"{base_url}/health/live", timeout=1.0).status_code == 200:
+                if httpx.get(f"{harness.base_url}/health/live", timeout=1.0).status_code == 200:
                     healthy = True
                     break
             except httpx.HTTPError:
                 pass
             time.sleep(_POLL_INTERVAL_S)
+
         if not healthy:
             proc.terminate()
             out = b""
@@ -299,9 +384,25 @@ def auth_http_hangar(keycloak: str, tmp_path_factory: pytest.TempPathFactory) ->
             except subprocess.TimeoutExpired:
                 proc.kill()
             pytest.skip(
-                f"auth hangar did not become healthy in {_STARTUP_TIMEOUT_S}s:\n{out.decode(errors='replace')[-2000:]}"
+                f"group hangar did not become healthy in {_STARTUP_TIMEOUT_S}s:\n{out.decode(errors='replace')[-2000:]}"
             )
-        yield base_url
+
+        # Warm the group: members cold-start on first use, so poll until one serves.
+        warm_deadline = time.monotonic() + _STARTUP_TIMEOUT_S
+        warmed = False
+        while time.monotonic() < warm_deadline:
+            try:
+                if gs.serving_member(harness) in harness.members:
+                    warmed = True
+                    break
+            except Exception:  # noqa: BLE001 -- transient during member cold-start
+                pass
+            time.sleep(_POLL_INTERVAL_S)
+
+        if not warmed:
+            pytest.skip(f"group '{gs.GROUP_ID}' never warmed a member in {_STARTUP_TIMEOUT_S}s")
+
+        yield harness
     finally:
         if proc.poll() is None:
             proc.terminate()

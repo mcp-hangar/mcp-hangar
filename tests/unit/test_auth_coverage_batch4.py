@@ -2,11 +2,11 @@
 sqlite_tap_store, query handlers, and command handlers.
 
 Covers:
-- enterprise/auth/infrastructure/postgres_store.py (214 missed stmts, 0% -> target ~80%)
-- enterprise/auth/infrastructure/event_sourced_store.py (47 miss, 83% -> target ~95%)
-- enterprise/auth/infrastructure/sqlite_tap_store.py (20 miss -> target 100%)
-- enterprise/auth/queries/handlers.py (26 miss -> target ~95%)
-- enterprise/auth/commands/handlers.py (20 miss -> target ~95%)
+- auth/infrastructure/postgres_store.py (214 missed stmts, 0% -> target ~80%)
+- auth/infrastructure/event_sourced_store.py (47 miss, 83% -> target ~95%)
+- auth/infrastructure/sqlite_tap_store.py (20 miss -> target 100%)
+- auth/queries/handlers.py (26 miss -> target ~95%)
+- auth/commands/handlers.py (20 miss -> target ~95%)
 """
 
 import json

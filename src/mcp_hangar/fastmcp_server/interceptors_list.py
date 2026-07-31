@@ -47,7 +47,7 @@ import time
 import uuid
 from typing import Any
 
-from mcp.server.fastmcp import FastMCP
+from mcp_hangar._sdk_compat import FastMCP
 from starlette.requests import Request
 from starlette.responses import JSONResponse
 
@@ -99,6 +99,11 @@ def interceptor_ext_negotiated(request: Request) -> bool:
 
 # --- interceptors/list ---------------------------------------------------------
 
+#: Reverse-DNS extension identifiers (SEP-2133). The vendor prefix is the
+#: reversed ``mcp-hangar.io`` domain, giving a globally unambiguous namespace.
+VALIDATOR_ID = "io.mcp-hangar.validator"
+MUTATOR_ID = "io.mcp-hangar.mutator"
+
 
 def interceptors_list_response() -> dict[str, Any]:
     """Build the legacy (v1.2) ``interceptors/list`` payload.
@@ -110,7 +115,7 @@ def interceptors_list_response() -> dict[str, Any]:
     return {
         "interceptors": [
             {
-                "name": _VALIDATOR,
+                "name": VALIDATOR_ID,
                 "version": __version__,
                 "type": "validator",
                 "supportedEvents": list(_VALIDATOR_EVENTS),
@@ -118,7 +123,7 @@ def interceptors_list_response() -> dict[str, Any]:
                 "trustBoundary": "host",
             },
             {
-                "name": _MUTATOR,
+                "name": MUTATOR_ID,
                 "version": __version__,
                 "type": "mutator",
                 "supportedEvents": list(_MUTATOR_EVENTS),

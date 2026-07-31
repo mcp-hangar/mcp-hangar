@@ -11,7 +11,7 @@ from ...observability.health import (
     register_event_store_durability_check,
     set_event_store_durability_status,
 )
-from .enterprise import create_enterprise_event_store
+from .components import create_persistent_event_store
 
 if TYPE_CHECKING:
     from ...bootstrap.runtime import Runtime
@@ -102,7 +102,7 @@ def init_event_store(runtime: "Runtime", config: dict[str, Any]) -> None:
         db_path = event_store_config.get("path", "data/events.db")
         try:
             Path(db_path).parent.mkdir(parents=True, exist_ok=True)
-            _result = create_enterprise_event_store(driver, event_store_config)
+            _result = create_persistent_event_store(driver, event_store_config)
             if _result is None:
                 raise EventStoreConfigurationError("SQLite event store is unavailable")
             event_store = _result

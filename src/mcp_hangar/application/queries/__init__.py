@@ -12,7 +12,7 @@ from .queries import (
     QueryHandler,
 )
 
-_ENTERPRISE_AUTH_QUERIES = {
+_AUTH_QUERIES = {
     "CheckPermissionQuery",
     "GetApiKeyCountQuery",
     "GetApiKeysByPrincipalQuery",
@@ -21,7 +21,7 @@ _ENTERPRISE_AUTH_QUERIES = {
     "ListBuiltinRolesQuery",
 }
 
-_ENTERPRISE_AUTH_QUERY_HANDLERS = {
+_AUTH_QUERY_HANDLERS = {
     "CheckPermissionHandler",
     "GetApiKeyCountHandler",
     "GetApiKeysByPrincipalHandler",
@@ -45,17 +45,17 @@ def __getattr__(name: str):  # noqa: ANN001
 
         return getattr(handlers, name)
 
-    if name in _ENTERPRISE_AUTH_QUERIES:
+    if name in _AUTH_QUERIES:
         try:
             return getattr(importlib.import_module("mcp_hangar.auth.queries.queries"), name)
         except ImportError as err:
-            raise AttributeError(f"module {__name__!r} has no attribute {name!r} (enterprise not installed)") from err
+            raise AttributeError(f"module {__name__!r} has no attribute {name!r} (auth module not installed)") from err
 
-    if name in _ENTERPRISE_AUTH_QUERY_HANDLERS:
+    if name in _AUTH_QUERY_HANDLERS:
         try:
             return getattr(importlib.import_module("mcp_hangar.auth.queries.handlers"), name)
         except ImportError as err:
-            raise AttributeError(f"module {__name__!r} has no attribute {name!r} (enterprise not installed)") from err
+            raise AttributeError(f"module {__name__!r} has no attribute {name!r} (auth module not installed)") from err
 
     raise AttributeError(f"module {__name__!r} has no attribute {name!r}")
 

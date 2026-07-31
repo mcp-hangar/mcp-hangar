@@ -165,7 +165,7 @@ class Audit:
 
 
 class Behavioral:
-    """Attributes for behavioral profiling signals (enterprise)."""
+    """Attributes for behavioral profiling signals."""
 
     #: Whether this tool call matches a baseline pattern ("true"/"false").
     MATCHES_BASELINE = "mcp.behavioral.matches_baseline"

@@ -27,11 +27,27 @@ on:
 env:
   PYTHON_VERSION: "3.11"
 
+# Default the whole workflow to read-only. Without this every job inherits the
+# repository default, which is write on nearly everything -- Contents, Packages,
+# Actions, Deployments, SecurityEvents. That is broadest exactly where it should
+# be narrowest: `smoke-wheel` and `smoke-published` DOWNLOAD AND EXECUTE the
+# freshly built artifact (they start a gateway, spawn subprocess backends and
+# drive a real MCP server), and `test` runs the suite. Those four jobs only ever
+# need to read the repo.
+#
+# The three jobs that genuinely write already declare their own `permissions:`,
+# and a job-level block REPLACES this default rather than merging with it, so
+# they are unaffected: publish-pypi (id-token + attestations), publish-docker
+# (packages) and create-release (contents: write).
+permissions:
+  contents: read
+
 jobs:
   # Validate release tag matches pyproject.toml version
   validate:
     name: Validate Release
     runs-on: ubuntu-latest
+    timeout-minutes: 10
     outputs:
       version: ${{ steps.extract.outputs.version }}
       is_prerelease: ${{ steps.extract.outputs.is_prerelease }}
@@ -69,7 +85,12 @@ jobs:
           # For prereleases, strip suffix for comparison (e.g., 1.0.0-rc.1 -> 1.0.0)
           BASE_TAG_VERSION=$(echo "$TAG_VERSION" | sed 's/-.*//')
 
-          if [ "$PYPROJECT_VERSION" != "$BASE_TAG_VERSION" ] && [ "$PYPROJECT_VERSION" != "$TAG_VERSION" ]; then
+          # Normalize a semver-style prerelease tag suffix to its PEP 440 form so a
+          # PEP 440 pyproject version (e.g. 2.0.0a1) validates against its release
+          # tag (v2.0.0-alpha.1): -alpha.N -> aN, -beta.N -> bN, -rc.N -> rcN.
+          NORM_TAG_VERSION=$(echo "$TAG_VERSION" | sed -E 's/-alpha\.?([0-9]+)/a\1/; s/-beta\.?([0-9]+)/b\1/; s/-rc\.?([0-9]+)/rc\1/')
+
+          if [ "$PYPROJECT_VERSION" != "$BASE_TAG_VERSION" ] && [ "$PYPROJECT_VERSION" != "$TAG_VERSION" ] && [ "$PYPROJECT_VERSION" != "$NORM_TAG_VERSION" ]; then
             echo "❌ Version mismatch!"
             echo "   pyproject.toml: ${PYPROJECT_VERSION}"
             echo "   Git tag: ${TAG_VERSION}"
@@ -86,6 +107,10 @@ jobs:
     needs: validate
     if: ${{ github.event.inputs.skip_tests != 'true' }}
     runs-on: ubuntu-latest
+    # Backstop for a hung test/step: the whole suite runs in a few minutes, so a
+    # job running long means something wedged -- fail fast instead of burning to
+    # the 6h GitHub ceiling (which cancelled a prior release on 3.12).
+    timeout-minutes: 30
     defaults:
       run:
         working-directory: .
@@ -148,18 +173,46 @@ jobs:
         run: |
           python -m pytest tests/integration/ -v --tb=short --color=yes
 
-  # Publish Python package to PyPI
-  publish-pypi:
-    name: Publish to PyPI
+  # Gate D of the release matrix (#550): smoke the ARTIFACT, not the tree.
+  #
+  # Every other job here tests the working copy, which is exactly the blind spot
+  # that shipped #561 -- the code was fine, the packaging was not, and no test
+  # importing from `src/` can see that. This builds the wheel, installs it into
+  # a clean venv (dependencies resolve from the index, as a user's install
+  # would), and drives a real tool call through the gateway. It runs BEFORE
+  # publish so a bad wheel can still be stopped; a published wheel cannot be
+  # edited.
+  smoke-wheel:
+    name: Published-artifact smoke (pre-publish gate)
     needs: [validate, test]
     if: always() && needs.validate.result == 'success' && (needs.test.result == 'success' || needs.test.result == 'skipped')
     runs-on: ubuntu-latest
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@v7
+      - uses: actions/setup-python@v6
+        with:
+          python-version: "3.12"
+      - name: Build the wheel
+        run: |
+          python -m pip install --upgrade pip build
+          python -m build --wheel
+      - name: Smoke the built wheel in a clean venv
+        run: python scripts/smoke_published_artifact.py --wheel "dist/mcp_hangar-*.whl"
+
+  # Publish Python package to PyPI
+  publish-pypi:
+    name: Publish to PyPI
+    needs: [validate, test, smoke-wheel]
+    if: always() && needs.validate.result == 'success' && (needs.test.result == 'success' || needs.test.result == 'skipped') && needs.smoke-wheel.result == 'success'
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
     defaults:
       run:
         working-directory: .
     environment:
-      name: ${{ needs.validate.outputs.is_prerelease == 'true' && 'testpypi' || 'pypi' }}
-      url: ${{ needs.validate.outputs.is_prerelease == 'true' && 'https://test.pypi.org/p/mcp-hangar' || 'https://pypi.org/p/mcp-hangar' }}
+      name: pypi
+      url: https://pypi.org/p/mcp-hangar
     permissions:
       id-token: write  # Required for trusted publishing and OIDC signing
       attestations: write  # Required for build provenance attestations
@@ -190,18 +243,18 @@ jobs:
           pip install twine
           twine check dist/*
 
-      - name: Publish to TestPyPI (prereleases)
-        if: needs.validate.outputs.is_prerelease == 'true'
-        uses: pypa/gh-action-pypi-publish@release/v1
-        with:
-          repository-url: https://test.pypi.org/legacy/
-          packages-dir: dist/
-
-      - name: Publish to PyPI (stable releases)
-        if: needs.validate.outputs.is_prerelease == 'false'
+      # Prereleases (alpha/beta/rc) and stable releases both publish to prod PyPI.
+      # pip ignores prereleases unless --pre or an explicit prerelease pin is used,
+      # so an alpha on prod PyPI never affects a plain `pip install mcp-hangar`.
+      # (TestPyPI was dropped: its trusted-publisher was never configured, and prod
+      # PyPI already hosts the `pypi` environment's trusted publisher.)
+      - name: Publish to PyPI
         uses: pypa/gh-action-pypi-publish@release/v1
         with:
           packages-dir: dist/
+          # Idempotent: a re-run/recovery of an already-published version is a
+          # no-op instead of a hard failure (PyPI rejects duplicate uploads).
+          skip-existing: true
 
   # Build and publish Docker images
   publish-docker:
@@ -209,6 +262,7 @@ jobs:
     needs: [validate, test]
     if: always() && needs.validate.result == 'success' && (needs.test.result == 'success' || needs.test.result == 'skipped')
     runs-on: ubuntu-latest
+    timeout-minutes: 30
     permissions:
       contents: read
       packages: write
@@ -237,6 +291,10 @@ jobs:
             type=semver,pattern={{major}}.{{minor}}
             type=semver,pattern={{major}},enable=${{ !startsWith(github.ref, 'refs/tags/v0.') }}
             type=raw,value=latest,enable=${{ needs.validate.outputs.is_prerelease == 'false' }}
+            # Explicit version tag from the validated release version, so a
+            # workflow_dispatch run (github.ref is a branch, not a tag) still
+            # gets an image tag — the semver patterns above only fire on a tag ref.
+            type=raw,value=${{ needs.validate.outputs.version }}
 
       - name: Build and push Docker image
         id: docker-build
@@ -271,6 +329,7 @@ jobs:
     needs: [validate, publish-pypi, publish-docker]
     if: always() && needs.validate.result == 'success' && needs.publish-pypi.result == 'success'
     runs-on: ubuntu-latest
+    timeout-minutes: 10
     permissions:
       contents: write
 
@@ -316,6 +375,9 @@ jobs:
         uses: softprops/action-gh-release@v3
         with:
           name: "v${{ needs.validate.outputs.version }}"
+          # Explicit tag so a workflow_dispatch run (github.ref is a branch)
+          # attaches the release to the version tag instead of failing.
+          tag_name: "v${{ needs.validate.outputs.version }}"
           body: |
             ## What's Changed
 
@@ -340,3 +402,25 @@ jobs:
 
             ${{ steps.changelog.outputs.full_changelog_line }}
           prerelease: ${{ needs.validate.outputs.is_prerelease == 'true' }}
+
+  # The same smoke against what the index actually serves. This one cannot block
+  # anything -- the wheel is already immutable -- but it is the only check that
+  # sees precisely what a user receives, including the `--pre` resolve that the
+  # v2-preview docs recommend (advisory: an upstream alpha breaking that resolve
+  # is not a defect in this artifact, so it warns rather than fails).
+  smoke-published:
+    name: Published-artifact smoke (post-publish check)
+    needs: [validate, publish-pypi]
+    if: always() && needs.publish-pypi.result == 'success'
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    steps:
+      - uses: actions/checkout@v7
+      - uses: actions/setup-python@v6
+        with:
+          python-version: "3.12"
+      - name: Resolve the PEP 440 version
+        id: pep440
+        run: echo "version=$(grep -m1 -E '^version = "' pyproject.toml | sed 's/version = "\(.*\)"/\1/')" >> $GITHUB_OUTPUT
+      - name: Smoke what PyPI serves
+        run: python scripts/smoke_published_artifact.py --version "${{ steps.pep440.outputs.version }}" --also-pre

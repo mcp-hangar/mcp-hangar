@@ -62,7 +62,10 @@
         }
       ],
       "realmRoles": ["admin"],
-      "groups": ["/platform-engineering"]
+      "groups": ["/platform-engineering"],
+      "attributes": {
+        "tenant_id": ["acme"]
+      }
     },
     {
       "username": "developer",
@@ -79,7 +82,10 @@
         }
       ],
       "realmRoles": ["developer"],
-      "groups": ["/developers"]
+      "groups": ["/developers"],
+      "attributes": {
+        "tenant_id": ["acme"]
+      }
     },
     {
       "username": "viewer",
@@ -96,7 +102,10 @@
         }
       ],
       "realmRoles": ["viewer"],
-      "groups": ["/viewers"]
+      "groups": ["/viewers"],
+      "attributes": {
+        "tenant_id": ["globex"]
+      }
     }
   ],
   "clients": [
@@ -176,6 +185,20 @@
             "claim.name": "email",
             "jsonType.label": "String"
           }
+        },
+        {
+          "name": "tenant_id",
+          "protocol": "openid-connect",
+          "protocolMapper": "oidc-usermodel-attribute-mapper",
+          "consentRequired": false,
+          "config": {
+            "user.attribute": "tenant_id",
+            "claim.name": "tenant_id",
+            "jsonType.label": "String",
+            "id.token.claim": "true",
+            "access.token.claim": "true",
+            "userinfo.token.claim": "true"
+          }
         }
       ]
     },
@@ -247,6 +270,20 @@
             "access.token.claim": "true",
             "claim.name": "email",
             "jsonType.label": "String"
+          }
+        },
+        {
+          "name": "tenant_id",
+          "protocol": "openid-connect",
+          "protocolMapper": "oidc-usermodel-attribute-mapper",
+          "consentRequired": false,
+          "config": {
+            "user.attribute": "tenant_id",
+            "claim.name": "tenant_id",
+            "jsonType.label": "String",
+            "id.token.claim": "true",
+            "access.token.claim": "true",
+            "userinfo.token.claim": "true"
           }
         }
       ]
