@@ -19,6 +19,14 @@ pip install mcp-hangar
 # or: uv pip install mcp-hangar
 ```
 
+This resolves to **2.0.0**. Coming from 1.6.x, read the
+[upgrade guide](https://mcp-hangar.io/docs/upgrade) first — two of the changes
+need a decision before you upgrade, not after: Slack approval delivery now needs
+an adapter you run yourself, and approval resolution is authorized. Your upstream
+MCP servers do **not** have to move; a connection that negotiates the 2025-11-25
+protocol keeps working. To stay on the old line while you plan, pin
+`"mcp-hangar>=1.6,<2"` — note that it is closed and receives no fixes.
+
 ## Quickstart
 
 Point Hangar at an MCP server in `config.yaml`:
@@ -39,7 +47,7 @@ mcp-hangar serve --config config.yaml                     # stdio (Claude Deskto
 mcp-hangar serve --config config.yaml --http --port 8000  # HTTP + REST API at /api/
 ```
 
-> The 1.5 server refuses to bind a non-loopback interface without auth. For a
+> Hangar refuses to bind a non-loopback interface without auth. For a
 > quick/insecure demo, pass `--unsafe-no-auth`; for anything real, configure
 > the `auth` block.
 
@@ -51,45 +59,48 @@ curl -sSL https://mcp-hangar.io/install.sh | bash && mcp-hangar init -y && mcp-h
 
 ## What you get
 
+The enforcement plane — what the call path actually decides:
+
+- **L7 egress policy** -- allow/deny in MCP semantics: which upstream, which tool, which arguments. Deterministic, with no anomaly scores and no learned baselines, so every verdict is reproducible from the policy that produced it.
+- **Tool-schema digest pinning** -- an upstream that changes a pinned tool's schema fails closed instead of quietly serving a different tool.
+- **Auth & RBAC** -- API-key and OIDC/JWT identity with role-based access and RFC 8707 audience binding; bootstrap the first administrator with `mcp-hangar auth bootstrap-admin`, and every call carries a verified principal into the audit trail.
+- **Per-tenant tool projection** -- front-door mode presents a different executable surface per caller, fail-closed on unknown identity.
+- **Human-in-the-loop approvals** -- gate a call on an explicit decision, authorized and attributed to a real principal. Delivery channels are pluggable; core ships no vendor integration.
+- **Governed task relay** -- Hangar interposes on the SEP-2663 task lifecycle and never becomes an executor: no scheduler, no job runner, no result store.
+- **Attributable audit** -- an event-sourced trail exported to SIEM as CEF, LEEF 2.0, RFC 5424 syslog or JSON-lines, and to OTLP.
+
+Everything else it takes to run a fleet:
+
 - **Parallel tool calls** -- one `hangar_call` fans out to many MCP servers concurrently; all results returned together.
 - **Lifecycle management** -- lazy start, health checks, single-flight cold starts, idle shutdown, and per-server circuit breaking.
 - **Hot config reload** -- add or withdraw servers and tools via file watch, no restart.
-- **Per-tenant tool projection** -- front-door mode presents a different executable surface per caller, fail-closed on unknown identity.
 - **OAuth ingress** -- advertise as an RFC 9728 protected resource and challenge external agents for verified tokens.
-- **Auth & RBAC** -- API-key and OIDC/JWT identity with role-based access; bootstrap the first administrator with `mcp-hangar auth bootstrap-admin`, and every call carries a verified principal into the audit trail.
-- **Observability built in** -- OpenTelemetry traces, Prometheus metrics, structured logs, and an event-sourced audit trail.
+- **Observability built in** -- OpenTelemetry traces, Prometheus metrics, and structured logs.
 
-## Configuring `tools:`
+## One config gotcha: `tools:` is overloaded
 
-The per-server `tools:` key is overloaded and accepts two distinct forms:
-
-- A **list of tool schemas** is a **pre-start visibility projection**. It lets a
-  tool be listed before its provider has started, so callers can see it up
-  front. It is not an access policy. On start, the provider's dynamic
-  `tools/list` is **authoritative and replaces this projection entirely** — a
-  statically-listed tool that the provider does not return becomes uncallable
-  and fails with `Tool not found: <name>` at invocation (a warning naming the
-  unconfirmed tool is logged at start).
-
-- A **dict with `allow:` / `deny:`** is an **access policy** (glob-pattern,
-  three-level merge) that filters which discovered tools are exposed.
+The per-server `tools:` key accepts two forms that look similar and mean
+opposite things:
 
 ```yaml
-mcp_servers:
-  math:
-    mode: subprocess
-    command: [python, -m, examples.provider_math.server]
-    tools:                     # list form: pre-start schema projection
-      - name: add
-        description: "Add two numbers"
-        inputSchema: { type: object, properties: { a: { type: number } } }
-  github:
-    mode: subprocess
-    command: [uvx, mcp-server-github]
-    tools:                     # dict form: allow/deny access policy
-      allow: [create_issue, list_issues]
-      deny: [delete_repository]
+tools:                        # LIST -- pre-start visibility projection
+  - name: add
+    inputSchema: { type: object, properties: { a: { type: number } } }
+
+tools:                        # DICT -- access policy
+  allow: [create_issue, list_issues]
+  deny: [delete_repository]
 ```
+
+The **list** form only lets a tool be listed before its provider has started.
+It is **not** an access policy, and it does not survive startup: the provider's
+dynamic `tools/list` is authoritative and replaces it entirely, so a
+statically-listed tool the provider does not return becomes uncallable and
+fails with `Tool not found: <name>` at invocation.
+
+The **dict** form is the access policy — glob patterns, three-level merge.
+Reach for it when you mean to restrict something. Full semantics in the
+[configuration reference](https://mcp-hangar.io/docs/reference/configuration).
 
 ## Documentation
 
