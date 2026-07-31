@@ -7,6 +7,32 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [2.0.0](https://github.com/mcp-hangar/mcp-hangar/compare/v2.0.0-rc.4...v2.0.0) (2026-07-31)
+
+The 2.x line goes stable. Four changes decide whether this upgrade needs
+planning; everything else is drop-in. The full detail is in the `2.0.0rc1`
+through `2.0.0rc4` sections below — this is the short version, and
+[the upgrade guide](https://mcp-hangar.io/docs/upgrade) is the operational one.
+
+1. **Slack approval delivery moved out of core.** A config with
+   `approvals.channel: slack` degrades to `noop` on 2.0.0 — approvals still
+   queue and stay resolvable over REST, but nobody is notified until you run an
+   adapter. Deliberate: refusing to boot over a *notification* channel turns a
+   degraded path into an outage.
+2. **Approval resolution is authorized.** `approval:resolve` was defined,
+   granted to a role, and checked nowhere. A caller without it now gets `403`
+   where it got `200`, and the client-supplied `x-principal-id` header no
+   longer decides who a decision is attributed to.
+3. **The gateway speaks MCP 2026-07-28** on the stable `mcp==2.0.0` SDK. Your
+   upstreams do not have to: a connection that negotiates 2025-11-25 keeps
+   working, and the modern `_meta` envelope is withheld on it.
+4. **Tasks are served on the SEP-2663 wire.** `tasks/get` inlines the outcome;
+   `tasks/result` and `tasks/list` answer `-32601`; the synchronous mid-flight
+   consent prompt is gone, replaced by the governed `tasks/update` loop.
+
+Security fixes land on 2.0.x only. The 1.6.x line is closed, and the approval
+authorization fix is **not** backported.
+
 ### Added
 
 - **core:** publish the REST surface as `api-routes.json`, generated from the routing table by `scripts/dump_api_routes.py`. Consumers build URLs against this API by hand across repositories, and there was no authoritative list to check them against: the operator called `/api/v1/*` for months after core moved to `/api/*`, leaving every remote `MCPServer` `Degraded` while working, with its own tests green throughout (they assert against a mock, and a mock answers whatever it is asked — operator#91). A unit test fails when the file drifts from the served routes, so a route change either updates it or breaks the build. Method and path only — response shapes are **not** covered, and a renamed field still breaks a consumer silently (ADR-011)
