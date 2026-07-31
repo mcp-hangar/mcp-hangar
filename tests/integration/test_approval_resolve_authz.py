@@ -78,9 +78,7 @@ class _InMemoryRepository:
     async def list_by_state(self, state: Any, mcp_server_id: str | None = None) -> list[Any]:
         return [r for r in self._store.values() if r.state == state]
 
-    async def update_state(
-        self, approval_id: str, state: Any, decided_by: str, decided_at: Any, reason: Any
-    ) -> None:
+    async def update_state(self, approval_id: str, state: Any, decided_by: str, decided_at: Any, reason: Any) -> None:
         r = self._store.get(approval_id)
         if r:
             r.state = state
@@ -108,9 +106,7 @@ class _DenyingAuthorizer:
 
     calls: list[tuple[str, str]]
 
-    def authorize(
-        self, *, principal: Principal, action: str, resource_type: str, resource_id: str
-    ) -> None:
+    def authorize(self, *, principal: Principal, action: str, resource_type: str, resource_id: str) -> None:
         self.calls.append((resource_type, action))
         raise AccessDeniedError(
             principal_id=str(principal.id),
@@ -256,8 +252,7 @@ class TestResolveRequiresApprovalResolvePermission:
             resp = client.post(f"/approvals/{approval_id}/resolve", json={"decision": "approve"})
 
         assert resp.status_code == 403, (
-            f"resolve returned {resp.status_code}; authorizer consulted: "
-            f"{authorizer.calls or 'never'}"
+            f"resolve returned {resp.status_code}; authorizer consulted: {authorizer.calls or 'never'}"
         )
 
     async def test_the_authorizer_is_consulted_at_all(self, stack) -> None:
@@ -274,8 +269,7 @@ class TestResolveRequiresApprovalResolvePermission:
             client.post(f"/approvals/{approval_id}/resolve", json={"decision": "approve"})
 
         assert (DENIED_RESOURCE, DENIED_ACTION) in authorizer.calls, (
-            "resolve_approval never called authorize(); "
-            f"observed calls: {authorizer.calls}"
+            f"resolve_approval never called authorize(); observed calls: {authorizer.calls}"
         )
 
 
@@ -333,8 +327,7 @@ class TestDecidedByComesFromAuthenticatedContext:
 
         stored = await repo.get(approval_id)
         assert stored.decided_by != "attacker-supplied", (
-            "decided_by was taken from a client-supplied header and written into "
-            "the provenance chain"
+            "decided_by was taken from a client-supplied header and written into the provenance chain"
         )
 
     async def test_decided_by_is_never_the_unknown_sentinel(self, stack) -> None:

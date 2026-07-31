@@ -37,6 +37,10 @@ class ApprovalRequest:
     decided_at: datetime | None = None
     reason: str | None = None
     correlation_id: str = ""
+    #: Principal the gated call was made *by*. The record has always named who
+    #: decided; without this it never named who asked, which is half of an
+    #: attribution chain.
+    requested_by: str | None = None
 
     def __init__(
         self,
@@ -54,6 +58,7 @@ class ApprovalRequest:
         decided_at: datetime | None = None,
         reason: str | None = None,
         correlation_id: str = "",
+        requested_by: str | None = None,
     ) -> None:
         resolved_provider_id = mcp_server_id or provider_id
         if resolved_provider_id is None:
@@ -72,6 +77,7 @@ class ApprovalRequest:
         self.decided_at = decided_at
         self.reason = reason
         self.correlation_id = correlation_id
+        self.requested_by = requested_by
 
     @property
     def mcp_server_id(self) -> str:
@@ -100,6 +106,15 @@ class ApprovalRequest:
         self.decided_by = decided_by
         self.decided_at = datetime.now(UTC)
         self.reason = reason
+
+    def is_expired(self, now: datetime | None = None) -> bool:
+        """Whether the approval window has closed.
+
+        ``expires_at`` was persisted, serialised and delivered to the approver
+        from the beginning, and read by nothing: the only expiry that ever ran
+        was the in-process ``wait()`` timeout, which dies with the waiter.
+        """
+        return (now or datetime.now(UTC)) >= self.expires_at
 
     def expire(self) -> None:
         """Transition PENDING -> EXPIRED. Idempotent on already-terminal."""

@@ -62,6 +62,32 @@ def _hash_arguments(arguments: dict[str, Any]) -> str:
 class ApprovalGateService:
     """Orchestrates the full approval gate flow."""
 
+    async def revalidate(self, approval_id: str, arguments: dict[str, Any]) -> str | None:
+        """Re-establish an approval's validity at dispatch time.
+
+        The gate decides once, then blocks -- by default for up to five minutes,
+        and longer if configured. Everything the decision rested on was checked
+        *before* that pause and nothing was checked after it, so the call could
+        be dispatched against a world the approver never saw.
+
+        Returns a refusal reason, or ``None`` when the approval still holds.
+        """
+        request = await self._repository.get(approval_id)
+        if request is None:
+            return "approval record is gone"
+        if request.state is not ApprovalState.APPROVED:
+            return f"approval is {request.state.value}, not approved"
+        if request.is_expired():
+            return "approval expired during the hold"
+        if _hash_arguments(_sanitize_arguments(arguments)) != request.arguments_hash:
+            # `arguments_hash` was computed, persisted, emitted and shown to the
+            # approver, and compared against nothing -- its own docstring says
+            # "for integrity checking". The request mutator pipeline runs after
+            # the gate, so the dispatched payload can legitimately differ from
+            # the approved one with nothing to notice.
+            return "arguments changed after approval"
+        return None
+
     def __init__(
         self,
         repository: ApprovalRepository,

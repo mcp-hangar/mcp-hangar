@@ -7,6 +7,10 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Security
+
+- **core:** re-establish an approval's validity at dispatch, not only at decision. The gate decided once and then blocked — 300 seconds by default, longer if configured — and every condition the decision rested on was evaluated *before* that pause and none of it after: effective policy, tool withdrawal, and the pinned tool digest were all checked at request time. Live config reload is a supported operation, so withdrawing a tool or tightening a policy while a decision was pending left the held call to dispatch on the superseded decision. Two fields made it worse by looking like they already handled it. `arguments_hash` was computed, persisted, emitted in events and shown to the approver, and compared against nothing — its own docstring says "for integrity checking" — while the request **mutator pipeline runs after the gate**, so a registered mutator could rewrite arguments a human had just agreed to with nothing to notice. `expires_at` was persisted and delivered and read by nothing: the only expiry that ran was the in-process `wait()` timeout, which dies with its waiter, so after a restart the row stayed `PENDING` past its window and `resolve()` still accepted it, minting an `APPROVED` record with a real `decided_by` for a call that never ran. `ApprovalGateService.revalidate()` now re-checks state, expiry and the argument hash; the executor calls it after the hold and additionally re-resolves the effective policy and re-runs the digest pin; `resolve()` refuses an expired approval with a new `EXPIRED` outcome mapped to **409**. Failing to re-verify refuses the call. `ApprovalRequest` also gains `requested_by` — the record named who decided and never who asked ([#674](https://github.com/mcp-hangar/mcp-hangar/issues/674))
+
 ## [2.0.0](https://github.com/mcp-hangar/mcp-hangar/compare/v2.0.0-rc.4...v2.0.0) (2026-07-31)
 
 The 2.x line goes stable. Four changes decide whether this upgrade needs
