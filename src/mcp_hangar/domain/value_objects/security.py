@@ -204,7 +204,8 @@ class Role:
     """Named collection of permissions.
 
     Roles group related permissions for easier assignment and management.
-    Built-in roles include: admin, mcp_server-admin, developer, viewer, auditor.
+    Built-in roles: admin, provider-admin, developer, viewer, auditor,
+    service-account. Defined in mcp_hangar.auth.roles.
 
     Attributes:
         name: Unique role identifier.
