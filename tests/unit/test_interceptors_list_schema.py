@@ -30,6 +30,24 @@ Hangar does not implement invoker-side ``InterceptorOverrides``. That is a
 feature gap against current upstream, not a schema drift, and is out of scope
 for a pin review.
 
+Re-pinned 99bc7c9 -> 7cf90c9 for issue #548, after reviewing both intervening
+commits. **The schema below is unchanged, deliberately** -- the pin moves to
+record what was reviewed, not because anything drifted:
+
+* ``eebd2ac`` "Introduce InterceptorOverrides in the chain execution model"
+  touches ``docs/sep.md`` only, and describes an INVOKER-side concept: the
+  invoker supplies ``overrides`` per chain entry (``failOpen`` / ``priorityHint``
+  / ``mode`` / ``timeoutMs`` / hook narrowing) on top of the server's declared
+  defaults. The server-declared shape that ``interceptors/list`` advertises --
+  what this schema mirrors -- is untouched. Its one enum change,
+  ``mode?: "audit"`` widening to ``"active" | "audit"``, was already allowed
+  here; Hangar emits ``"active"``.
+* ``7cf90c9`` is C# SDK sources only.
+
+Hangar does not implement invoker-side ``InterceptorOverrides``. That is a
+feature gap against current upstream, not a schema drift, and is out of scope
+for this pin.
+
 The upstream repo does not publish a machine-readable JSON Schema, so we
 maintain a local schema that mirrors the spec. When bumping the pinned
 SHA, review the upstream diff and update INTERCEPTOR_SCHEMA accordingly.
