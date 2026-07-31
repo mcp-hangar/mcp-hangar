@@ -221,6 +221,11 @@ class BatchExecutor:
         Returns None if no approval is needed (continue execution).
         Returns a CallResult if the tool was denied or timed out.
         """
+        # Cleared per call: worker threads are reused across calls, so a stale
+        # id from the previous call in this thread must never be revalidated
+        # against the current one.
+        _approval_loop_local.approval_id = None
+
         # Get effective policy for this mcp_server (or fallback to _global)
         policy = resolver.resolve_effective_policy(call.mcp_server)
         if policy.is_unrestricted():
@@ -273,6 +278,7 @@ class BatchExecutor:
 
         if result.approved and result.approval_id is None:
             # not_required -- no approval was needed after detailed check
+            _approval_loop_local.approval_id = None
             return None
 
         if not result.approved:
@@ -285,7 +291,80 @@ class BatchExecutor:
                 elapsed_ms=0,
             )
 
-        # Approved -- continue execution
+        # Approved -- continue execution. The caller revalidates before dispatch;
+        # see _revalidate_approval.
+        _approval_loop_local.approval_id = result.approval_id
+        return None
+
+    def _revalidate_after_hold(
+        self,
+        call: CallSpec,
+        resolver: Any,
+        ctx: Any,
+        approval_id: str,
+        pin: Any,
+        proj_registry: Any,
+        caller_tenant_id: Any,
+        enforce_digest_pin: Any,
+    ) -> CallResult | None:
+        """Re-check, after an approval hold, everything decided before it.
+
+        Returns a refusal ``CallResult`` when the approved call may no longer
+        run, or ``None`` to proceed.
+        """
+
+        def _refuse(reason: str, code: str) -> CallResult:
+            logger.warning(
+                "approval_revalidation_failed",
+                approval_id=approval_id,
+                mcp_server=call.mcp_server,
+                tool=call.tool,
+                reason=reason,
+            )
+            return CallResult(
+                index=call.index,
+                call_id=call.call_id,
+                success=False,
+                error=f"Approval no longer valid at dispatch: {reason}",
+                error_type=code,
+                elapsed_ms=0,
+            )
+
+        # The record itself: still approved, still inside its window, and still
+        # describing these arguments.
+        gate_service = getattr(ctx, "approval_gate", None)
+        if gate_service is not None and hasattr(gate_service, "revalidate"):
+            try:
+                reason = _get_approval_loop().run_until_complete(
+                    gate_service.revalidate(approval_id, call.arguments or {})
+                )
+            except (RuntimeError, OSError, ValueError, TimeoutError) as exc:
+                # Fail closed: an approval we cannot re-verify is not an
+                # approval we can act on.
+                return _refuse(f"revalidation error: {exc}", "ApprovalRevalidationError")
+            if reason is not None:
+                return _refuse(reason, "ApprovalNoLongerValid")
+
+        # Effective policy, re-resolved. A tool moved to deny during the hold
+        # must not execute on the pre-change decision.
+        try:
+            policy = resolver.resolve_effective_policy(call.mcp_server)
+            if policy.is_unrestricted():
+                policy = resolver.resolve_effective_policy("_global")
+            if not policy.is_unrestricted() and not policy.is_tool_allowed(call.tool):
+                return _refuse("tool is no longer allowed by policy", "ToolAccessDenied")
+        except Exception as exc:  # noqa: BLE001 -- fail closed on an unreadable policy
+            return _refuse(f"policy could not be re-resolved: {exc}", "ApprovalRevalidationError")
+
+        # The pinned tool digest, re-verified against the catalogue as it is
+        # now. The pre-gate check spoke for a schema that may since have moved.
+        if pin is not None:
+            projection = proj_registry.resolve(call.mcp_server, call.tool, caller_tenant_id)
+            if projection is not None:
+                rejection: CallResult | None = enforce_digest_pin(projection, pin)
+                if rejection is not None:
+                    return rejection
+
         return None
 
     def _check_validators(self, call: CallSpec) -> CallResult | None:
@@ -988,6 +1067,30 @@ class BatchExecutor:
                 approval_span.set_attribute("approval.result", approval_result.error_type or "denied")
                 approval_result.elapsed_ms = (time.perf_counter() - call_start) * 1000
                 return approval_result
+
+            # Re-establish validity after the hold. The gate blocks for up to
+            # `approval_timeout_seconds` (300 by default), and every check that
+            # preceded it -- effective policy, tool withdrawal, the pinned tool
+            # digest -- was evaluated against the world as it was *before* that
+            # pause. Config reload is a supported live operation, so withdrawing
+            # a tool or tightening a policy while a decision is pending left the
+            # held call to dispatch on the superseded decision.
+            _granted_id = getattr(_approval_loop_local, "approval_id", None)
+            if _granted_id is not None:
+                _refusal = self._revalidate_after_hold(
+                    call,
+                    resolver,
+                    ctx,
+                    _granted_id,
+                    _pin,
+                    _proj_registry,
+                    _caller_tenant_id,
+                    _enforce_digest_pin,
+                )
+                if _refusal is not None:
+                    approval_span.set_attribute("approval.result", "revalidation_failed")
+                    _refusal.elapsed_ms = (time.perf_counter() - call_start) * 1000
+                    return _refusal
             approval_span.set_attribute("approval.result", "not_required")
 
         # Single-flight cold start of the resolved target (standalone server or

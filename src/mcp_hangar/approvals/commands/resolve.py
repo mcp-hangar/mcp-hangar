@@ -54,6 +54,7 @@ class ResolveOutcome(Enum):
     """Non-exceptional results the transport renders."""
 
     RESOLVED = "resolved"
+    EXPIRED = "expired"
     NOT_FOUND = "not_found"
     ALREADY_TERMINAL = "already_terminal"
     HOLD_RELEASE_FAILED = "hold_release_failed"
@@ -129,6 +130,19 @@ class ResolveApprovalHandler(CommandHandler):
             return ResolveApprovalResult(ResolveOutcome.NOT_FOUND)
         if existing.is_terminal():
             return ResolveApprovalResult(ResolveOutcome.ALREADY_TERMINAL, state=existing.state.value)
+        if existing.is_expired():
+            # `expires_at` was persisted and delivered to the approver from the
+            # start, and consulted by nothing. The only expiry that ran was the
+            # in-process `wait()` timeout, so an approval whose waiter died --
+            # a restart, a crash, a redeploy -- stayed PENDING past its window
+            # and was still resolvable. Deciding it releases no held call (the
+            # hold registry is in-memory and did not survive either), but it
+            # minted an APPROVED record with a real `decided_by` for a call
+            # that never ran, which is an audit trail asserting something
+            # false. Mark it expired and refuse the decision.
+            existing.expire()
+            await repository.update_state(command.approval_id, existing.state, None, existing.decided_at, None)
+            return ResolveApprovalResult(ResolveOutcome.EXPIRED, state=existing.state.value)
 
         decided_by = str(command.principal.id)
         success = await self._service.resolve(command.approval_id, command.approved, decided_by, command.reason)
