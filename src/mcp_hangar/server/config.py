@@ -604,12 +604,22 @@ def _init_topology_mode_from_config(full_config: dict[str, Any]) -> None:
     """Apply tool_access.mode from the top-level config to the resolver.
 
     Valid values: "egress" (default, backward-compatible) | "front_door".
-    Absent or unrecognised mode → "egress" (not "front_door"), ensuring that
-    deployments that never set the key are not silently broken.  Only an
-    explicit "front_door" value activates the fail-closed default.
+
+    An ABSENT key still means "egress": a deployment that never opted in must
+    not be silently switched to the fail-closed topology by an upgrade.
+
+    An UNRECOGNISED value is a different situation and is now a hard error. An
+    operator who wrote ``mode: front-door`` (hyphen) or ``mode: frontdoor``
+    was configuring this deliberately, and quietly resolving their typo to
+    ``egress`` hands them the permissive topology while their config file says
+    otherwise -- a warning in the log is not a fair trade for that. Refusing to
+    start puts the failure where the operator is already looking.
 
     Args:
         full_config: Full configuration dictionary.
+
+    Raises:
+        ConfigurationError: If tool_access.mode is present but not a valid mode.
     """
     from ..domain.services import get_tool_access_resolver
     from ..domain.services.tool_access_resolver import TopologyMode
@@ -617,19 +627,16 @@ def _init_topology_mode_from_config(full_config: dict[str, Any]) -> None:
     tool_access_config = full_config.get("tool_access", {})
     raw_mode = tool_access_config.get("mode") if isinstance(tool_access_config, dict) else None
 
-    if raw_mode == "front_door":
-        mode: TopologyMode = "front_door"
-    else:
-        # Default to egress for backward compatibility.  Unknown values are
-        # treated as egress and a warning is logged so operators notice typos
-        # without causing a service interruption.
-        if raw_mode is not None and raw_mode != "egress":
-            logger.warning(
-                "unknown_tool_access_mode_defaulting_to_egress",
-                mode=raw_mode,
-                hint="Valid values are 'egress' and 'front_door'",
-            )
+    mode: TopologyMode
+    if raw_mode is None:
         mode = "egress"
+    elif raw_mode in ("egress", "front_door"):
+        mode = raw_mode
+    else:
+        raise ConfigurationError(
+            f"Invalid tool_access.mode {raw_mode!r}. Valid values are 'egress' and 'front_door'; "
+            "omit the key entirely to keep the default 'egress' topology."
+        )
 
     resolver = get_tool_access_resolver()
     resolver.set_topology_mode(mode)
