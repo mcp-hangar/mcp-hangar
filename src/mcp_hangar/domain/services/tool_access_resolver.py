@@ -90,6 +90,33 @@ class ToolAccessResolver:
         """Legacy alias for set_mcp_server_policy."""
         self.set_mcp_server_policy(provider_id, policy)
 
+    def get_configured_policy(self, scope: str, target_id: str) -> ToolAccessPolicy | None:
+        """Return the policy currently configured for a scope/target, if any.
+
+        Read access exists so callers performing a partial update can preserve
+        the fields they are not restating -- notably ``approval_list``, which a
+        REST update that carries only allow/deny lists would otherwise drop,
+        silently removing the human-consent gate from a tool.
+
+        Args:
+            scope: One of "provider"/"mcp_server", "group", or "member".
+                Member targets are addressed as "group_id:member_id".
+            target_id: Identifier within the scope.
+
+        Returns:
+            The configured policy, or None when the target has none.
+        """
+        with self._lock:
+            if scope in ("provider", "mcp_server"):
+                return self._mcp_server_policies.get(target_id)
+            if scope == "group":
+                return self._group_policies.get(target_id)
+            if scope == "member":
+                group_id, _, member_id = target_id.partition(":")
+                key = (group_id, member_id or target_id)
+                return self._member_policies.get(key)
+            return None
+
     def set_group_policy(self, group_id: str, policy: ToolAccessPolicy) -> None:
         """Set the tool access policy for a group.
 

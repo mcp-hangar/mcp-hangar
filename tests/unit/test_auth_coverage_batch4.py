@@ -1894,6 +1894,9 @@ class TestSetToolAccessPolicyHandler:
         handler = SetToolAccessPolicyHandler(mock_tap_store, event_bus=mock_event_bus)
 
         mock_resolver = Mock()
+        # No pre-existing policy: the handler reads the current one so a partial
+        # update cannot drop approval_list (see SetToolAccessPolicyHandler).
+        mock_resolver.get_configured_policy.return_value = None
         with patch(
             "mcp_hangar.domain.services.tool_access_resolver.get_tool_access_resolver",
             return_value=mock_resolver,
@@ -1922,6 +1925,9 @@ class TestSetToolAccessPolicyHandler:
         handler = SetToolAccessPolicyHandler(mock_tap_store, event_bus=mock_event_bus)
 
         mock_resolver = Mock()
+        # No pre-existing policy: the handler reads the current one so a partial
+        # update cannot drop approval_list (see SetToolAccessPolicyHandler).
+        mock_resolver.get_configured_policy.return_value = None
         with patch(
             "mcp_hangar.domain.services.tool_access_resolver.get_tool_access_resolver",
             return_value=mock_resolver,
@@ -1947,6 +1953,9 @@ class TestSetToolAccessPolicyHandler:
         handler = SetToolAccessPolicyHandler(mock_tap_store, event_bus=mock_event_bus)
 
         mock_resolver = Mock()
+        # No pre-existing policy: the handler reads the current one so a partial
+        # update cannot drop approval_list (see SetToolAccessPolicyHandler).
+        mock_resolver.get_configured_policy.return_value = None
         with patch(
             "mcp_hangar.domain.services.tool_access_resolver.get_tool_access_resolver",
             return_value=mock_resolver,
@@ -1976,6 +1985,9 @@ class TestSetToolAccessPolicyHandler:
         handler = SetToolAccessPolicyHandler(mock_tap_store, event_bus=mock_event_bus)
 
         mock_resolver = Mock()
+        # No pre-existing policy: the handler reads the current one so a partial
+        # update cannot drop approval_list (see SetToolAccessPolicyHandler).
+        mock_resolver.get_configured_policy.return_value = None
         with patch(
             "mcp_hangar.domain.services.tool_access_resolver.get_tool_access_resolver",
             return_value=mock_resolver,

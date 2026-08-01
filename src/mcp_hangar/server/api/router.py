@@ -23,7 +23,13 @@ from starlette.middleware.trustedhost import TrustedHostMiddleware
 from starlette.routing import BaseRoute, Mount
 
 from ...domain.exceptions import MCPError
-from .middleware import AuthMiddlewareHTTP, CSRFMiddleware, error_handler, get_cors_config
+from .middleware import (
+    AuthMiddlewareHTTP,
+    AuthorizationEnforcementMiddleware,
+    CSRFMiddleware,
+    error_handler,
+    get_cors_config,
+)
 from ..bootstrap.components import attach_component_app_state, get_component_api_routes
 
 
@@ -79,6 +85,15 @@ def create_api_router(auth_components: Any = None) -> Starlette:
     # Done here so every REST surface -- HTTP serve, MCPServerFactory, tests --
     # is wired identically rather than at one call site (#678).
     attach_component_app_state(app)
+
+    # Authorization runs INNERMOST: added first, so every other middleware wraps
+    # it and the authenticated principal is already on the scope by the time it
+    # resolves the route's required permission. It is bound to the same
+    # auth_components as the authentication middleware below, which keeps
+    # "authorization armed" and "authentication mounted" a single decision --
+    # the two drifting apart is what made the REST API answer 401 with no
+    # satisfiable credential in #600.
+    app.add_middleware(AuthorizationEnforcementMiddleware, auth_components=auth_components)
 
     # TrustedHostMiddleware blocks unexpected Host headers (DNS rebinding protection).
     _trusted_hosts_env = os.environ.get("MCP_TRUSTED_HOSTS", "localhost,127.0.0.1,::1,testserver")

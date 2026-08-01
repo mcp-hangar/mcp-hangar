@@ -34,6 +34,7 @@ from ...domain.exceptions import (
     McpServerDegradedError,
     McpServerNotFoundError,
     McpServerNotReadyError,
+    MissingCredentialsError,
     RateLimitExceeded,
     RateLimitExceededError,
     ToolNotFoundError,
@@ -42,6 +43,7 @@ from ...domain.exceptions import (
 )
 from ...infrastructure.identity.trusted_proxy import TrustedProxyResolver, headers_from_asgi_scope, resolve_source_ip
 from ..context import get_context
+from .route_permissions import resolve_rule
 from .serializers import HangarJSONResponse
 
 logger = logging.getLogger(__name__)
@@ -273,6 +275,133 @@ class AuthEnforcementMiddleware:
             else:
                 www_auth = "Bearer, ApiKey"
             await _send_auth_failure(scope, receive, send, exc, source_ip, www_authenticate=www_auth)
+
+
+class AuthorizationEnforcementMiddleware:
+    """Route-driven authorization for the REST/WebSocket API.
+
+    Runs innermost -- after authentication has attached the principal to the
+    scope -- and resolves the required permission from
+    :mod:`.route_permissions` rather than from the handler. A route absent from
+    that table is DENIED: adding an endpoint without deciding who may call it
+    now fails closed instead of shipping it public.
+
+    Auth off must mean off. ``NullAuthComponents`` reports ``enabled=False``
+    while still exposing an ``authz_middleware``, so testing only ``is None``
+    would arm the guard with nobody able to satisfy it -- the failure #590/#600
+    fixed on the invoke and REST paths respectively. Both conditions are checked
+    here for the same reason.
+
+    Critically, the components are taken from the SAME object the router was
+    built with rather than re-read from the application context. Those two can
+    disagree -- a router built without auth mounts no authentication middleware,
+    so no principal is ever attached -- and an authorizer armed against an
+    unauthenticated app answers 401 to every caller with no credential that
+    could ever satisfy it. Binding both to one object makes the invariant
+    structural: authorization is armed if and only if authentication is mounted.
+    """
+
+    app: ASGIApp
+    _authz: Any
+    _skip_paths: frozenset[str]
+
+    def __init__(
+        self,
+        app: ASGIApp,
+        auth_components: Any = None,
+        skip_paths: frozenset[str] | None = None,
+    ) -> None:
+        self.app = app
+        self._skip_paths = skip_paths or _DEFAULT_AUTH_SKIP_PATHS
+        enabled = auth_components is not None and bool(getattr(auth_components, "enabled", False))
+        self._authz = getattr(auth_components, "authz_middleware", None) if enabled else None
+
+    async def __call__(self, scope: Scope, receive: Receive, send: Send) -> None:
+        if scope["type"] not in ("http", "websocket"):
+            await self.app(scope, receive, send)
+            return
+
+        path = scope.get("path", "")
+        if _should_skip_auth_path(path, self._skip_paths):
+            await self.app(scope, receive, send)
+            return
+
+        # CORS preflight carries no credentials by design; CORSMiddleware sits
+        # outside this and answers it, but a direct OPTIONS must not 403 here.
+        method = scope.get("method", "GET" if scope["type"] == "websocket" else "")
+        if method.upper() == "OPTIONS":
+            await self.app(scope, receive, send)
+            return
+
+        authz = self._authz
+        if authz is None:
+            await self.app(scope, receive, send)
+            return
+
+        principal = self._principal(scope)
+        if principal is None or principal.is_anonymous():
+            await _send_auth_failure(
+                scope, receive, send, MissingCredentialsError("Authentication required"), "unknown"
+            )
+            return
+
+        rule = resolve_rule(method, path)
+        if rule is None:
+            _AuthLoggerAdapter.warning(
+                "authz_route_not_in_permission_table",
+                path=path,
+                method=method,
+                principal_id=str(getattr(principal, "id", "unknown")),
+            )
+            await _send_auth_failure(
+                scope,
+                receive,
+                send,
+                AccessDeniedError(
+                    principal_id=str(getattr(principal, "id", "unknown")),
+                    action=method.lower(),
+                    resource=path,
+                    reason="route has no permission mapping",
+                ),
+                "unknown",
+            )
+            return
+
+        if rule.permission is None:
+            await self.app(scope, receive, send)
+            return
+
+        resource_type, action = rule.permission
+        try:
+            authz.authorize(
+                principal=principal,
+                action=action,
+                resource_type=resource_type,
+                resource_id="*",
+            )
+        except AccessDeniedError as exc:
+            await _send_auth_failure(scope, receive, send, exc, "unknown")
+            return
+
+        await self.app(scope, receive, send)
+
+    @staticmethod
+    def _principal(scope: Scope) -> Any:
+        """Read the authenticated principal off the scope.
+
+        The scope carries auth context in one of two shapes, because the two
+        authentication middlewares write it differently:
+        ``AuthEnforcementMiddleware`` installs a ``State`` object via
+        ``_store_auth_context``, while ``AuthMiddlewareHTTP`` assigns
+        ``request.state.auth``, and Starlette's ``Request.state`` wraps a plain
+        ``dict`` it leaves in ``scope["state"]``. Reading only one shape makes
+        every request look unauthenticated -- a 401 that no credential can fix.
+        """
+        state = scope.get("state")
+        if state is None:
+            return None
+        auth_context = state.get("auth") if isinstance(state, dict) else getattr(state, "auth", None)
+        return getattr(auth_context, "principal", None)
 
 
 class AuthMiddlewareHTTP(BaseHTTPMiddleware):

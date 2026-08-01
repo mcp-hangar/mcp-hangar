@@ -411,9 +411,21 @@ class SetToolAccessPolicyHandler(CommandHandler):
         from mcp_hangar.domain.services.tool_access_resolver import get_tool_access_resolver
 
         resolver = get_tool_access_resolver()
+        # Preserve the approval gate across a partial update. The command
+        # carries only allow_list/deny_list, so rebuilding the policy from it
+        # alone dropped approval_list, approval_timeout_seconds and
+        # approval_channel -- a plain "update the deny list" call silently
+        # removed human-consent gating from every tool that had it, and the
+        # enforcement path (BatchExecutor._check_approval_gate) reads this same
+        # resolver, so the gate was gone immediately and invisibly. An update
+        # may narrow access; it must never remove a consent requirement.
+        existing = resolver.get_configured_policy(command.scope, command.target_id)
         policy = ToolAccessPolicy(
             allow_list=tuple(command.allow_list),
             deny_list=tuple(command.deny_list),
+            approval_list=existing.approval_list if existing else (),
+            approval_timeout_seconds=existing.approval_timeout_seconds if existing else 300,
+            approval_channel=existing.approval_channel if existing else "dashboard",
         )
         if command.scope == "provider":
             resolver.set_mcp_server_policy(command.target_id, policy)
