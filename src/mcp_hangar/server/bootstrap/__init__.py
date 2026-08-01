@@ -52,6 +52,12 @@ from .event_store import init_event_store
 from .hot_loading import init_hot_loading
 from .logs import init_log_buffers
 from .observability import init_observability, shutdown_observability
+from .reachability import (
+    check_subsystem_reachability,
+    collect_subsystem_requirements,
+    enforce_subsystem_reachability,
+    SubsystemRequirement,
+)
 from .retry_config import init_retry_config
 from .tools import register_all_tools
 from .truncation import init_truncation
@@ -418,6 +424,14 @@ def bootstrap(
     if components.approval_service is not None:
         ctx.approval_gate = components.approval_service
 
+    # Last gate before the process serves: every subsystem this configuration
+    # asks for must be reachable on the path this process actually took. Placed
+    # here because `bootstrap()` is the funnel every entry point goes through --
+    # `serve`, `serve --http` and the facade all land in it -- so a subsystem
+    # wired on one path and not another cannot start quietly (#678). Checks the
+    # singleton context, the same object the executor and the REST routes read.
+    enforce_subsystem_reachability(full_config, ctx)
+
     return context
 
 
@@ -448,8 +462,12 @@ _auth_available = _auth_compat_exports.auth_available
 __all__ = [
     "ApplicationContext",
     "ServerComponents",
+    "SubsystemRequirement",
     "bootstrap",
     "build_serving_mcp_server",
+    "check_subsystem_reachability",
+    "collect_subsystem_requirements",
+    "enforce_subsystem_reachability",
     "load_components",
     "GC_WORKER_INTERVAL_SECONDS",
     "HEALTH_CHECK_INTERVAL_SECONDS",

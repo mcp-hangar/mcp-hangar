@@ -67,6 +67,8 @@ class ToolsConfig:
     - If allow_list is defined, ONLY matching tools are visible (deny_list ignored)
     - If only deny_list is defined, all tools EXCEPT matching are visible
     - If both are empty, all tools are visible (no filtering)
+    - approval_list marks tools as visible but held for a human decision before
+      execution; deny_list still wins over it
     - Supports fnmatch glob patterns (e.g., 'delete_*', '*_alert_*')
 
     Example:
@@ -74,10 +76,22 @@ class ToolsConfig:
           deny_list:
             - create_alert_rule
             - delete_*
+          approval_list:
+            - deploy_*
+          approval_timeout_seconds: 600
+          approval_channel: dashboard
+
+    ``approval_list`` used to exist only on :class:`ToolAccessPolicy`, with no
+    config key anywhere that could populate it -- so the approval gate that
+    ``ToolAccessPolicy.requires_approval()`` guards was unreachable from YAML
+    (#678).
     """
 
     allow_list: list[str] = field(default_factory=list)
     deny_list: list[str] = field(default_factory=list)
+    approval_list: list[str] = field(default_factory=list)
+    approval_timeout_seconds: int = 300
+    approval_channel: str = "dashboard"
 
     def __post_init__(self) -> None:
         """Validate and warn if both lists are defined."""
@@ -96,16 +110,67 @@ class ToolsConfig:
             if not isinstance(pattern, str) or not pattern.strip():
                 raise ValueError(f"Invalid deny_list pattern: {pattern!r}")
 
+        for pattern in self.approval_list:
+            if not isinstance(pattern, str) or not pattern.strip():
+                raise ValueError(f"Invalid approval_list pattern: {pattern!r}")
+
+        if not isinstance(self.approval_timeout_seconds, int) or isinstance(self.approval_timeout_seconds, bool):
+            raise ValueError(f"Invalid approval_timeout_seconds: {self.approval_timeout_seconds!r}")
+        if self.approval_timeout_seconds <= 0:
+            raise ValueError(f"Invalid approval_timeout_seconds: {self.approval_timeout_seconds!r}")
+
+        if not isinstance(self.approval_channel, str) or not self.approval_channel.strip():
+            raise ValueError(f"Invalid approval_channel: {self.approval_channel!r}")
+
     def to_policy(self) -> ToolAccessPolicy:
         """Convert to immutable ToolAccessPolicy value object."""
         return ToolAccessPolicy(
             allow_list=tuple(self.allow_list),
             deny_list=tuple(self.deny_list),
+            approval_list=tuple(self.approval_list),
+            approval_timeout_seconds=self.approval_timeout_seconds,
+            approval_channel=self.approval_channel,
         )
 
     def is_empty(self) -> bool:
         """Check if no filtering is configured."""
-        return not self.allow_list and not self.deny_list
+        return not self.allow_list and not self.deny_list and not self.approval_list
+
+
+def parse_tools_access_config(data: dict[str, Any]) -> "ToolsConfig | None":
+    """Build a :class:`ToolsConfig` from a ``tools:``-style mapping.
+
+    Every config site that turns YAML into a tool access policy goes through
+    here -- mcp_server level, group level, group member, and the per-tenant
+    ``tool_access.member`` block -- so a key cannot be honoured at one scope and
+    silently dropped at another. That divergence is exactly how ``approval_list``
+    stayed unparseable while ``allow_list``/``deny_list`` worked (#678): the
+    parsing was copy-pasted five times.
+
+    Returns ``None`` when the mapping declares no access policy at all, so
+    callers keep their "only register a policy when one is configured" shape.
+
+    Raises:
+        ValueError: When a declared pattern or approval setting is invalid.
+    """
+    allow_list = data.get("allow_list", [])
+    deny_list = data.get("deny_list", [])
+    approval_list = data.get("approval_list", [])
+
+    if not (allow_list or deny_list or approval_list):
+        return None
+
+    kwargs: dict[str, Any] = {
+        "allow_list": allow_list,
+        "deny_list": deny_list,
+        "approval_list": approval_list,
+    }
+    if "approval_timeout_seconds" in data:
+        kwargs["approval_timeout_seconds"] = data["approval_timeout_seconds"]
+    if "approval_channel" in data:
+        kwargs["approval_channel"] = data["approval_channel"]
+
+    return ToolsConfig(**kwargs)
 
 
 @dataclass
@@ -222,7 +287,7 @@ class McpServerConfig:
 
         # Parse tools config - can be either:
         # 1. A list of predefined tool schemas
-        # 2. A dict with allow_list/deny_list for access policy
+        # 2. A dict with allow_list/deny_list/approval_list for access policy
         tools_data = data.get("tools")
         predefined_tools: list[dict[str, Any]] = []
         tools_access_config: ToolsConfig | None = None
@@ -232,14 +297,8 @@ class McpServerConfig:
                 # List format: predefined tool schemas
                 predefined_tools = tools_data
             elif isinstance(tools_data, dict):
-                # Dict format: access policy with allow_list/deny_list
-                allow_list = tools_data.get("allow_list", [])
-                deny_list = tools_data.get("deny_list", [])
-                if allow_list or deny_list:
-                    tools_access_config = ToolsConfig(
-                        allow_list=allow_list,
-                        deny_list=deny_list,
-                    )
+                # Dict format: access policy (allow/deny/approval)
+                tools_access_config = parse_tools_access_config(tools_data)
 
         # Parse capabilities declaration
         capabilities_data = data.get("capabilities")
