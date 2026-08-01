@@ -281,6 +281,40 @@ class TestAuthenticationStillRequired:
         assert response.status_code == 401
 
 
+class TestMountPrefixStripping:
+    """Starlette leaves the mount prefix in scope["path"]; the guard must strip it.
+
+    The served application mounts this router at ``/api``. Starlette >=0.35
+    records the consumed prefix in ``root_path`` instead of rewriting ``path``,
+    so a guard reading ``path`` raw would look up ``/api/groups`` in a table
+    written as ``/groups``, find nothing, and -- because the default is deny --
+    reject every REST call. Pinned here as well as in the served-app integration
+    test, because this helper is the single point where that goes wrong.
+    """
+
+    @staticmethod
+    def _relative(path: str, root_path: str) -> str:
+        from mcp_hangar.server.api.middleware import AuthorizationEnforcementMiddleware
+
+        return AuthorizationEnforcementMiddleware._router_relative_path(
+            {"type": "http", "path": path, "root_path": root_path}
+        )
+
+    def test_mount_prefix_is_stripped(self):
+        assert self._relative("/api/groups", "/api") == "/groups"
+        assert self._relative("/api/mcp_servers/srv1/l7_policy", "/api") == "/mcp_servers/srv1/l7_policy"
+
+    def test_no_root_path_is_a_no_op(self):
+        assert self._relative("/groups", "") == "/groups"
+
+    def test_path_equal_to_root_path_becomes_root(self):
+        assert self._relative("/api", "/api") == "/"
+
+    def test_non_prefix_root_path_is_left_alone(self):
+        """Defensive: never mangle a path that does not start with root_path."""
+        assert self._relative("/groups", "/api") == "/groups"
+
+
 class TestAuthDisabledStaysOpen:
     """#600: arming authorization on an app without authentication bricks it."""
 

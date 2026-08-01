@@ -321,7 +321,7 @@ class AuthorizationEnforcementMiddleware:
             await self.app(scope, receive, send)
             return
 
-        path = scope.get("path", "")
+        path = self._router_relative_path(scope)
         if _should_skip_auth_path(path, self._skip_paths):
             await self.app(scope, receive, send)
             return
@@ -384,6 +384,29 @@ class AuthorizationEnforcementMiddleware:
             return
 
         await self.app(scope, receive, send)
+
+    @staticmethod
+    def _router_relative_path(scope: Scope) -> str:
+        """Return the path relative to this router, stripping any mount prefix.
+
+        Starlette (>=0.35, and 1.x) does NOT rewrite ``scope["path"]`` when it
+        dispatches into a mounted sub-application: it leaves the full path in
+        place and records the consumed prefix in ``scope["root_path"]``. The
+        served application mounts this router at ``/api`` (lifecycle.run_http),
+        so a table keyed on the raw path would match ``/api/groups`` against a
+        rule written as ``/groups`` -- match nothing, and therefore deny
+        everything, because the table's default is deny.
+
+        Unit tests that build the router directly never see this: root_path is
+        empty there, so the raw path already is the relative one. Only the
+        served-app assembly exposes it, which is why
+        tests/integration/test_rest_authz_on_served_app.py exists.
+        """
+        path: str = scope.get("path", "")
+        root_path: str = scope.get("root_path", "")
+        if root_path and path.startswith(root_path):
+            return path[len(root_path) :] or "/"
+        return path
 
     @staticmethod
     def _principal(scope: Scope) -> Any:
