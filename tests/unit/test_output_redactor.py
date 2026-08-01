@@ -53,6 +53,32 @@ class TestOutputRedactor:
         result = redactor.redact(text)
         assert "eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.abc123" not in result
 
+    def test_redact_jwt_with_short_header(self):
+        """A standard HS256 JWT has a ~33-char header; the old pattern required
+        50+ there, so every short-header token (all HS256, anything without a
+        kid) evaded the `jwt_token` detector. Regression for that gap."""
+        redactor = OutputRedactor()
+        # header {"alg":"HS256","typ":"JWT"} == eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9
+        token = (
+            "eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9"
+            ".eyJzdWIiOiIxMjM0NTY3ODkwIiwibmFtZSI6IkpvaG4ifQ"
+            ".SflKxwRJSMeKKF2QT4fwpMeJf36POk6yJV_adQssw5c"
+        )
+        result = redactor.redact("token=" + token)
+        assert token not in result
+        assert "[REDACTED:jwt_token]" in result
+
+    def test_jwt_pattern_no_false_positives(self):
+        """The three-segment `eyJ`-anchored shape must not fire on arbitrary
+        base64 or ordinary prose."""
+        redactor = OutputRedactor()
+        for benign in (
+            "the quick brown fox jumps over the lazy dog",
+            "eyJhbGc.only-two-segments-here",
+            "AIzaSyD-1234567890abcdefghijklmnopqrstuv",
+        ):
+            assert "jwt_token" not in redactor.redact(benign)
+
     def test_redact_aws_access_key(self):
         """Test redacting AWS access key."""
         redactor = OutputRedactor()

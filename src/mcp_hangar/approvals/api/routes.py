@@ -44,6 +44,8 @@ class ApprovalRequestDTO:
     decided_by: str | None
     decided_at: str | None
     reason: str | None
+    requested_by: str | None = None
+    tenant_id: str | None = None
 
 
 def _to_dto(request: Any) -> dict[str, Any]:
@@ -63,8 +65,24 @@ def _to_dto(request: Any) -> dict[str, Any]:
         decided_by=request.decided_by,
         decided_at=request.decided_at.isoformat() if request.decided_at else None,
         reason=request.reason,
+        requested_by=getattr(request, "requested_by", None),
+        tenant_id=getattr(request, "tenant_id", None),
     )
     return asdict(dto)
+
+
+def _tenant_visible(approval: Any, principal: Principal) -> bool:
+    """Whether *principal* may see *approval*, scoped by tenant.
+
+    An approval with no tenant (single-tenant / auth-off) is visible to any
+    authorized caller. Once it carries a tenant, only a caller in that tenant
+    sees it -- so an approver in one tenant cannot list or read another
+    tenant's approvals, which authorization by permission alone allowed.
+    """
+    approval_tenant = getattr(approval, "tenant_id", None)
+    if approval_tenant is None:
+        return True
+    return bool(getattr(principal, "tenant_id", None) == approval_tenant)
 
 
 def _unavailable() -> HangarJSONResponse:
@@ -119,7 +137,9 @@ async def list_approvals(request: Request) -> HangarJSONResponse:
         return HangarJSONResponse({"error": f"Invalid state: {state_filter}"}, status_code=400)
 
     requests = await service._repository.list_by_state(state, provider_id)
-    return HangarJSONResponse([_to_dto(r) for r in requests])
+    principal = _require_principal(request, _auth_components())
+    visible = [r for r in requests if _tenant_visible(r, principal)]
+    return HangarJSONResponse([_to_dto(r) for r in visible])
 
 
 async def get_approval(request: Request) -> HangarJSONResponse:
@@ -131,6 +151,12 @@ async def get_approval(request: Request) -> HangarJSONResponse:
 
     approval = await service._repository.get(approval_id)
     if approval is None:
+        return HangarJSONResponse({"error": "Approval not found"}, status_code=404)
+
+    principal = _require_principal(request, _auth_components())
+    if not _tenant_visible(approval, principal):
+        # 404, not 403: a caller in another tenant should not be able to
+        # distinguish "exists elsewhere" from "does not exist" (matches resolve).
         return HangarJSONResponse({"error": "Approval not found"}, status_code=404)
 
     return HangarJSONResponse(_to_dto(approval))

@@ -255,6 +255,15 @@ class BatchExecutor:
             # event loop reused across calls in this worker thread. We cannot
             # use the main FastMCP loop because hangar_call() blocks it. See
             # _get_approval_loop() for the cross-loop signaling rationale.
+            # Bind the caller's tenant and identity onto the approval so the
+            # resolve/list surfaces can be scoped to them. Without this, an
+            # approver in one tenant can see and resolve another tenant's
+            # approvals, because authorization is by permission alone.
+            _ident = get_identity_context()
+            _caller = _ident.caller if _ident is not None else None
+            _tenant_id = _caller.tenant_id if _caller is not None else None
+            _requested_by = (_caller.user_id or _caller.agent_id) if _caller is not None else None
+
             thread_loop = _get_approval_loop()
             result = thread_loop.run_until_complete(
                 gate_service.check(
@@ -263,6 +272,8 @@ class BatchExecutor:
                     arguments=call.arguments,
                     policy=policy,
                     correlation_id=call.call_id,
+                    tenant_id=_tenant_id,
+                    requested_by=_requested_by,
                 )
             )
         except (RuntimeError, OSError, ValueError, TimeoutError) as exc:
