@@ -55,10 +55,23 @@ import urllib.request
 STARTUP_TIMEOUT_S = 60.0
 POLL_INTERVAL_S = 0.5
 
-# A freshly published version is not visible to every PyPI CDN node at once.
-# Without a retry the post-publish run would fail on timing rather than truth.
-INSTALL_ATTEMPTS = 6
-INSTALL_BACKOFF_S = 10.0
+# A freshly published version is not visible to every PyPI CDN node at once, and
+# the *simple index* pip reads lags the JSON API the release notes link to. A
+# retry has always been here, but the budget was six flat 10s waits -- 53 seconds
+# end to end -- and the 2.0.1 release fell outside it: all six attempts expired,
+# the job went red, and a re-run minutes later passed with nothing changed
+# (#680). `--no-cache-dir` is not the fix; the staleness is upstream, not local.
+# This budget spans ~3.5 minutes (5+10+20+40+45+45+45).
+INSTALL_ATTEMPTS = 8
+INSTALL_BACKOFF_S = 5.0
+INSTALL_BACKOFF_MAX_S = 45.0
+
+# Independent evidence that a version exists, used to tell propagation lag apart
+# from a version that was never published. The JSON API is served from different
+# infrastructure than the simple index and was already returning 200 for 2.0.1
+# while pip still could not see it.
+PYPI_RELEASE_JSON = "https://pypi.org/pypi/{project}/{version}/json"
+PROJECT = "mcp-hangar"
 
 # A stdio MCP upstream for the gateway to proxy. It is written here, at smoke
 # time, rather than shipped in the wheel: `examples/` is not packaged, so a
@@ -186,7 +199,7 @@ def run(cmd: list[str], **kwargs) -> subprocess.CompletedProcess:
 
 def http_get(url: str, timeout: float = 5.0) -> tuple[int, str]:
     try:
-        with urllib.request.urlopen(url, timeout=timeout) as response:  # noqa: S310 -- loopback only
+        with urllib.request.urlopen(url, timeout=timeout) as response:  # noqa: S310 -- loopback, or pypi.org over TLS
             return response.status, response.read().decode("utf-8", "replace")
     except urllib.error.HTTPError as exc:
         return exc.code, exc.read().decode("utf-8", "replace")
@@ -202,6 +215,32 @@ def make_venv(root: Path) -> tuple[Path, Path]:
     python = bin_dir / ("python.exe" if sys.platform == "win32" else "python")
     run([str(python), "-m", "pip", "install", "--quiet", "--upgrade", "pip"])
     return python, bin_dir / ("mcp-hangar.exe" if sys.platform == "win32" else "mcp-hangar")
+
+
+class IndexLag(Exception):
+    """The version is provably published, but the simple index has not served it yet.
+
+    Raised only with positive evidence from PyPI's JSON API. Kept separate from
+    every other install failure because the two mean opposite things: this one
+    says nothing at all about the artifact and resolves itself in minutes, while
+    a wheel that will not install is a defect that shipped.
+    """
+
+
+def version_is_published(version: str, index_url: str | None) -> bool | None:
+    """Ask PyPI's JSON API whether this version exists. None when unanswerable."""
+    if index_url:
+        return None  # a custom index has no JSON API we can assume the shape of
+    status, _ = http_get(PYPI_RELEASE_JSON.format(project=PROJECT, version=version), timeout=10.0)
+    if status == 200:
+        return True
+    if status == 404:
+        return False
+    return None  # network trouble or a 5xx: no evidence either way
+
+
+def backoff_for(attempt: int) -> float:
+    return min(INSTALL_BACKOFF_S * 2 ** (attempt - 1), INSTALL_BACKOFF_MAX_S)
 
 
 def install(python: Path, *, wheel: str | None, version: str | None, index_url: str | None) -> None:
@@ -227,17 +266,52 @@ def install(python: Path, *, wheel: str | None, version: str | None, index_url: 
     cmd = [str(python), "-m", "pip", "install", spec]
     if index_url:
         cmd[4:4] = ["--index-url", index_url]
+    last = None
     for attempt in range(1, INSTALL_ATTEMPTS + 1):
         log(f"installing {spec} from the index (attempt {attempt}/{INSTALL_ATTEMPTS})")
-        result = run(cmd)
+        last = result = run(cmd)
         if result.returncode == 0:
             return
         # Distinguish "not visible yet" from "genuinely broken": only the former
         # is worth waiting on, and pretending otherwise hides real failures.
-        transient = "No matching distribution" in result.stderr or "could not find a version" in result.stderr.lower()
-        if not transient or attempt == INSTALL_ATTEMPTS:
-            raise SystemExit(f"FAIL: install failed\n{result.stdout}\n{result.stderr}")
-        time.sleep(INSTALL_BACKOFF_S)
+        absent = "No matching distribution" in result.stderr or "could not find a version" in result.stderr.lower()
+        if not absent:
+            # pip found the version and the install still failed -- a bad
+            # dependency pin, an unbuildable sdist, a broken wheel. Waiting
+            # cannot change this, and it is exactly what the gate exists for.
+            raise SystemExit(
+                f"FAIL: the wheel will not install.\n"
+                f"  pip located {spec} on the index; the install itself failed. This is a defect in the\n"
+                f"  published artifact, not a timing problem, and re-running will not change it.\n"
+                f"{result.stdout}\n{result.stderr}"
+            )
+        if attempt < INSTALL_ATTEMPTS:
+            delay = backoff_for(attempt)
+            log(f"{spec} is not on the simple index yet; retrying in {delay:.0f}s")
+            time.sleep(delay)
+
+    # The budget is spent and pip still cannot see the version. Whether that is a
+    # release that failed to publish or an index that has not caught up is not a
+    # guess -- the JSON API answers it.
+    stdout = last.stdout if last else ""
+    stderr = last.stderr if last else ""
+    spent = sum(backoff_for(i) for i in range(1, INSTALL_ATTEMPTS))
+    published = version_is_published(str(version), index_url)
+    if published:
+        raise IndexLag(
+            f"{spec} is published -- PyPI's JSON API serves it -- but the simple index pip reads has\n"
+            f"  not caught up after {INSTALL_ATTEMPTS} attempts over {spent:.0f}s. Nothing is known to be wrong\n"
+            f"  with the artifact; this is index propagation and clears on its own within minutes."
+        )
+    detail = (
+        "PyPI's JSON API does not serve it either (404): the version was never published."
+        if published is False
+        else "PyPI's JSON API could not be reached, so propagation cannot be ruled in or out."
+    )
+    raise SystemExit(
+        f"FAIL: {spec} is not installable from the index after {INSTALL_ATTEMPTS} attempts over {spent:.0f}s.\n"
+        f"  {detail}\n{stdout}\n{stderr}"
+    )
 
 
 def assert_isolated(python: Path, workdir: Path, expected_version: str | None) -> str:
@@ -420,6 +494,14 @@ def main() -> int:
         action="store_true",
         help="additionally resolve with `pip install --pre` and report the outcome (advisory, never fails the run)",
     )
+    parser.add_argument(
+        "--tolerate-index-lag",
+        action="store_true",
+        help=(
+            "warn instead of failing when the version is provably published but the simple index has not "
+            "served it within the retry budget (post-publish placement only)"
+        ),
+    )
     args = parser.parse_args()
 
     root = Path(tempfile.mkdtemp(prefix="hangar-smoke-"))
@@ -429,7 +511,20 @@ def main() -> int:
     try:
         print(f"Smoking {'wheel ' + args.wheel if args.wheel else 'published ' + args.version} in {root}", flush=True)
         python, binary = make_venv(root)
-        install(python, wheel=args.wheel, version=args.version, index_url=args.index_url)
+        try:
+            install(python, wheel=args.wheel, version=args.version, index_url=args.index_url)
+        except IndexLag as lag:
+            # A red here is not free. This job cannot stop the release -- the
+            # wheel is immutable by the time it runs -- so its only effect is on
+            # the reader, and a failure that fires for reasons unrelated to the
+            # artifact teaches them to re-run it without looking. That is how a
+            # real packaging failure gets waved through (#680). So: loud, but not
+            # red, and only ever on positive proof the version is published.
+            if not args.tolerate_index_lag:
+                raise SystemExit(f"FAIL: {lag}") from lag
+            print(f"::warning title=PyPI index lag::{lag}", flush=True)
+            print(f"\nSKIPPED — {lag}", flush=True)
+            return 0
         assert_isolated(python, workdir, args.version)
         proc, base_url = serve(binary, python, workdir)
         drive_a_real_call(python, workdir, base_url)

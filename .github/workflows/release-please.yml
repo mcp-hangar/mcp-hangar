@@ -19,6 +19,48 @@ jobs:
     env:
       RELEASE_BOT_APP_ID: ${{ secrets.RELEASE_BOT_APP_ID }}
     steps:
+      # Both guards read .release-please-manifest.json and the pushed commit, so
+      # this job needs the tree it never used to check out.
+      - uses: actions/checkout@v7
+
+      - uses: actions/setup-python@v6
+        with:
+          python-version: "3.12"
+
+      # These versions are PEP 440, not semver: `2.0.1` sorts below `1.6.1` as a
+      # string, and `2.0.0rc4` sorts above `2.0.0`. The guard compares them
+      # properly, which needs exactly this one dependency.
+      - name: Install the version comparator's dependency
+        run: python -m pip install --quiet packaging
+
+      # Guard 1 of #681 -- skip a hand-cut release that has just landed.
+      #
+      # A hand-cut release merges its release commit and pushes the tag second.
+      # In that window release-please finds no tag for the version the manifest
+      # now carries, falls back to an older baseline and proposes moving the
+      # manifest BACKWARDS (#670: 2.0.0 -> 1.6.1, #677: 2.0.1 -> 1.6.1).
+      #
+      # A bot release looks identical at HEAD -- same `chore(release): release X`
+      # subject, same missing tag -- and that run is the one that creates the
+      # tag, so skipping it would break bot releases (v1.6.0..v1.6.3 were all cut
+      # that way). The only thing that differs is where the commit came from, so
+      # that is what is checked. A lookup failure never skips.
+      - name: Should release-please run at all?
+        id: guard
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          set -euo pipefail
+          if ! pr=$(gh api "repos/${GITHUB_REPOSITORY}/commits/${GITHUB_SHA}/pulls" --jq '.[0] // {}'); then
+            echo "::warning::could not resolve the pull request for ${GITHUB_SHA}; running release-please as usual"
+            pr='{}'
+          fi
+          PR_TITLE=$(jq -r '.title // ""' <<<"$pr")
+          PR_BRANCH=$(jq -r '.head.ref // ""' <<<"$pr")
+          HEAD_SUBJECT=$(git log -1 --format=%s)
+          export PR_TITLE PR_BRANCH HEAD_SUBJECT
+          python scripts/release_please_guard.py should-run
+
       # Mint a GitHub App token so the release PR triggers downstream CI.
       # Only runs when the app credentials are configured; otherwise the step
       # is skipped and release-please falls back to the built-in GITHUB_TOKEN
@@ -26,12 +68,27 @@ jobs:
       # missing/rotated app secret.
       - uses: actions/create-github-app-token@v1
         id: app-token
-        if: ${{ env.RELEASE_BOT_APP_ID != '' }}
+        if: ${{ env.RELEASE_BOT_APP_ID != '' && steps.guard.outputs.skip != 'true' }}
         with:
           app-id: ${{ secrets.RELEASE_BOT_APP_ID }}
           private-key: ${{ secrets.RELEASE_BOT_PRIVATE_KEY }}
+
       - uses: googleapis/release-please-action@v5
+        id: release-please
+        if: ${{ steps.guard.outputs.skip != 'true' }}
         with:
           config-file: release-please-config.json
           manifest-file: .release-please-manifest.json
           token: ${{ steps.app-token.outputs.token || secrets.GITHUB_TOKEN }}
+
+      # Guard 2 of #681 -- refuse a backwards version bump.
+      #
+      # This is the one that catches the class rather than the instance: it does
+      # not care why the baseline was wrong, only that a release never moves
+      # backwards. A silently wrong PR becomes a red run. It runs even when
+      # release-please failed, so a partial run cannot slip past it.
+      - name: Refuse a backwards version bump
+        if: ${{ always() && steps.guard.outputs.skip != 'true' }}
+        env:
+          RELEASE_PLEASE_OUTPUTS: ${{ toJSON(steps.release-please.outputs) }}
+        run: python scripts/release_please_guard.py check-bump
