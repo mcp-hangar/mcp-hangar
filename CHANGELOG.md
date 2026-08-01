@@ -5,6 +5,13 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [2.1.1](https://github.com/mcp-hangar/mcp-hangar/compare/v2.1.0...v2.1.1) (2026-08-01)
+
+
+### Fixed
+
+* **security:** tenant-scope approvals and catch short-header JWTs ([#687](https://github.com/mcp-hangar/mcp-hangar/issues/687), [#688](https://github.com/mcp-hangar/mcp-hangar/issues/688)) ([#689](https://github.com/mcp-hangar/mcp-hangar/issues/689)) ([2ffa4f7](https://github.com/mcp-hangar/mcp-hangar/commit/2ffa4f7ac849eeceba91d3ec9f37b5b8003124bf))
+
 ## [Unreleased]
 
 ### Security
