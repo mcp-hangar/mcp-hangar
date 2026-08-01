@@ -171,6 +171,21 @@ class L7Policy:
         if not isinstance(secret_patterns, list) or not all(isinstance(p, str) for p in secret_patterns):
             raise ValueError("arguments.secretPatterns must be a list of strings")
 
+        # A group name this build does not know detects nothing. Rejecting the
+        # policy at parse time is the only point where that is visible: at scan
+        # time the unknown group is just absent, so the policy reports enforcing
+        # while a detector the author asked for is silently off.
+        #
+        # The CRD does not catch this. spec...secretPatterns is declared as
+        # `items: {type: string}` with maxItems, and carries no enum, so
+        # `github-token` (singular) is accepted by the API server and lands here
+        # intact. Validating here also covers the REST channel, which the CRD
+        # never sees at all.
+        unknown = sorted(set(secret_patterns) - KNOWN_SECRET_PATTERN_GROUPS)
+        if unknown:
+            known = ", ".join(sorted(KNOWN_SECRET_PATTERN_GROUPS))
+            raise ValueError(f"unknown arguments.secretPatterns group(s): {', '.join(unknown)} (known groups: {known})")
+
         max_bytes = args_d.get("maxPayloadBytes")
         if max_bytes is not None and (not isinstance(max_bytes, int) or isinstance(max_bytes, bool) or max_bytes < 0):
             raise ValueError("arguments.maxPayloadBytes must be a non-negative integer")
@@ -228,9 +243,15 @@ def _serialize_arguments(arguments: Any) -> str | None:
 def scan_arguments(arguments: Any, rules: ArgumentRules) -> list[str]:
     """Return a list of violation reasons for a tool call's arguments.
 
-    Empty list means the arguments are clean. Unknown secret-pattern group names
-    are ignored (they should be caught by CRD validation, not fail closed here).
-    Arguments that cannot be serialized for inspection fail closed (a violation).
+    Empty list means the arguments are clean. Arguments that cannot be
+    serialized for inspection fail closed (a violation).
+
+    Unknown secret-pattern group names are skipped here, but that is a residual
+    safety net rather than the contract: ``L7Policy.from_dict`` rejects a policy
+    naming a group this build does not know, so an unknown group should be
+    unreachable at scan time. It used to be reachable, and the old docstring
+    deferred to "CRD validation" that does not exist -- the CRD declares
+    secretPatterns as a plain string array with no enum.
     """
     # Nothing to check -- avoid serializing (and any cost/crash) when unconstrained.
     if not rules.secret_patterns and rules.max_payload_bytes is None:
