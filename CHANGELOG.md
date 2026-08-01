@@ -5,6 +5,14 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [2.0.2](https://github.com/mcp-hangar/mcp-hangar/compare/v2.0.1...v2.0.2) (2026-08-01)
+
+
+### Fixed
+
+* **ci:** stop two release checks lying about the release ([#682](https://github.com/mcp-hangar/mcp-hangar/issues/682)) ([1f04920](https://github.com/mcp-hangar/mcp-hangar/commit/1f04920f341690cab46beb2553d6c28429447c53)), closes [#680](https://github.com/mcp-hangar/mcp-hangar/issues/680) [#681](https://github.com/mcp-hangar/mcp-hangar/issues/681)
+* **security:** make the approval gate reachable on every entry point ([#684](https://github.com/mcp-hangar/mcp-hangar/issues/684)) ([8f0aa37](https://github.com/mcp-hangar/mcp-hangar/commit/8f0aa370af4eb1509b4afa5ae5daffab5594b41c)), closes [#678](https://github.com/mcp-hangar/mcp-hangar/issues/678)
+
 ## [Unreleased]
 
 ### Added
