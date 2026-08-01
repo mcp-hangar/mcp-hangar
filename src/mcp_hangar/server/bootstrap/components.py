@@ -99,29 +99,85 @@ def get_auth_compat_exports() -> AuthCompatibilityExports:
     )
 
 
+def approvals_enabled(config: dict[str, Any]) -> bool:
+    """Whether the approval gate service should be constructed.
+
+    On by default. The service is inert until a policy actually gates a tool --
+    :meth:`ToolAccessPolicy.requires_approval` decides that, and the executor
+    returns before touching the gate when nothing does -- so constructing it
+    always is what makes the gate *reachable* rather than conditional on a second
+    switch nobody sets. Set ``approvals.enabled: false`` to opt out; the startup
+    reachability check then refuses a config that gates a tool anyway.
+    """
+    approvals_config = config.get("approvals")
+    if not isinstance(approvals_config, dict):
+        return True
+    return bool(approvals_config.get("enabled", True))
+
+
+def build_approval_service(config: dict[str, Any], event_bus: Any = None) -> Any:
+    """Construct the approval gate service, or return None when disabled.
+
+    ``bootstrap_approvals()`` existed with **no call site anywhere in src/** --
+    so ``ServerComponents.approval_service`` was never populated, the context's
+    ``approval_gate`` was never set, and a tool on an ``approval_list`` executed
+    immediately with a ``approval_gate_not_configured`` debug line (#678). It is
+    called from here, the single loader both ``bootstrap()`` and every other
+    entry point go through.
+    """
+    if not approvals_enabled(config):
+        logger.info("approval_gate_disabled", reason="approvals.enabled=false")
+        return None
+
+    try:
+        bootstrap_approvals = _import_attribute("mcp_hangar.approvals.bootstrap", "bootstrap_approvals")
+        get_database = _import_attribute("mcp_hangar.infrastructure.persistence.database", "get_database")
+    except ImportError:
+        logger.warning("approval_gate_unavailable", reason="approvals_module_not_installed")
+        return None
+
+    try:
+        return bootstrap_approvals(
+            database=get_database(),
+            event_bus=event_bus,
+            config=config,
+        )
+    except Exception:  # noqa: BLE001 -- surfaced by the startup reachability check
+        logger.error("approval_gate_bootstrap_failed", exc_info=True)
+        return None
+
+
 def load_components(
     config: dict[str, Any],
     event_bus: Any = None,
     event_publisher: Any = None,
 ) -> ServerComponents:
-    """Load the optional auth components when auth is configured and available.
+    """Load the optional auth and approval components.
+
+    Approvals are loaded independently of auth. They used to be loaded by
+    nothing at all, and this function returned early -- before any approval
+    wiring could run -- whenever auth was absent or disabled, which is the
+    default (#678).
 
     Args:
         config: Full application configuration dictionary.
-        event_bus: Optional event bus for auth module wiring.
+        event_bus: Optional event bus for auth / approval module wiring.
         event_publisher: Optional callable for publishing domain events.
 
     Returns:
-        ServerComponents populated when auth is enabled, otherwise empty.
+        ServerComponents with the approval service and, when auth is enabled,
+        the auth components.
     """
+    approval_service = build_approval_service(config, event_bus=event_bus)
+
     exports = get_auth_compat_exports()
     if not exports.auth_available:
         logger.info("optional_components_unavailable", reason="auth_module_not_installed")
-        return ServerComponents()
+        return ServerComponents(approval_service=approval_service)
 
     auth_config = exports.parse_auth_config(config.get("auth"))
     if auth_config is None or not getattr(auth_config, "enabled", False):
-        return ServerComponents()
+        return ServerComponents(approval_service=approval_service)
 
     auth_components = exports.bootstrap_auth(
         auth_config,
@@ -129,7 +185,7 @@ def load_components(
         event_store=get_event_store(),
         event_bus=event_bus,
     )
-    components = ServerComponents(auth_components=auth_components)
+    components = ServerComponents(auth_components=auth_components, approval_service=approval_service)
     logger.info(
         "optional_components_loaded",
         auth=components.auth_components is not None,
@@ -188,6 +244,29 @@ def get_component_api_routes() -> list[Any]:
         pass
 
     return routes
+
+
+def attach_component_app_state(app: Any) -> None:
+    """Publish the component services the REST routes read onto ``app.state``.
+
+    Called from ``create_api_router`` so **every** REST surface gets the same
+    wiring: the HTTP-serve path in ``server/lifecycle.py``, ``MCPServerFactory``,
+    and any test client that builds the router directly. Setting it at one of
+    those call sites only is how ``app.state.approval_gate_service`` came to be
+    read by ``/api/approvals`` and set by nothing, answering 500 with an
+    ``AttributeError`` (#678).
+
+    The routes also fall back to the application context, so a router built
+    before bootstrap populated it still resolves the service at request time.
+    """
+    from ..context import get_context
+
+    try:
+        approval_gate = getattr(get_context(), "approval_gate", None)
+    except Exception:  # noqa: BLE001 -- no context (unit tests mounting routes directly) is not an error
+        approval_gate = None
+
+    app.state.approval_gate_service = approval_gate
 
 
 def create_persistent_event_store(driver: str, config: dict[str, Any]) -> Any | None:

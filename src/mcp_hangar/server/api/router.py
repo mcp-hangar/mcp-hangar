@@ -24,7 +24,7 @@ from starlette.routing import BaseRoute, Mount
 
 from ...domain.exceptions import MCPError
 from .middleware import AuthMiddlewareHTTP, CSRFMiddleware, error_handler, get_cors_config
-from ..bootstrap.components import get_component_api_routes
+from ..bootstrap.components import attach_component_app_state, get_component_api_routes
 
 
 def create_api_router(auth_components: Any = None) -> Starlette:
@@ -74,6 +74,11 @@ def create_api_router(auth_components: Any = None) -> Starlette:
     }
 
     app = Starlette(routes=routes, exception_handlers=exception_handlers)
+
+    # Component services the mounted routes read off app.state (approval gate).
+    # Done here so every REST surface -- HTTP serve, MCPServerFactory, tests --
+    # is wired identically rather than at one call site (#678).
+    attach_component_app_state(app)
 
     # TrustedHostMiddleware blocks unexpected Host headers (DNS rebinding protection).
     _trusted_hosts_env = os.environ.get("MCP_TRUSTED_HOSTS", "localhost,127.0.0.1,::1,testserver")

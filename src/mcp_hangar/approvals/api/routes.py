@@ -67,9 +67,35 @@ def _to_dto(request: Any) -> dict[str, Any]:
     return asdict(dto)
 
 
+def _unavailable() -> HangarJSONResponse:
+    """503 for a gateway with no approval gate service wired."""
+    return HangarJSONResponse(
+        {"error": "approval gate is not configured on this gateway"},
+        status_code=503,
+    )
+
+
 def _get_approval_service(request: Request) -> Any:
-    """Extract ApprovalGateService from app state."""
-    return request.app.state.approval_gate_service
+    """Resolve the ApprovalGateService for this request, or None.
+
+    Two sources, in order: ``app.state`` (set by ``create_api_router`` for every
+    REST surface) and the application context, which is the same object the
+    batch executor reads its ``approval_gate`` from. Reading the context as a
+    fallback keeps the API and the enforcement path on one service even when the
+    router was built before bootstrap populated it.
+
+    This used to be a bare ``request.app.state.approval_gate_service``, which
+    nothing ever set: ``GET /api/approvals`` answered **500** with
+    ``AttributeError: 'State' object has no attribute 'approval_gate_service'``
+    (#678). Absence is now an explicit 503, not a stack trace.
+    """
+    service = getattr(request.app.state, "approval_gate_service", None)
+    if service is not None:
+        return service
+    try:
+        return getattr(get_context(), "approval_gate", None)
+    except Exception:  # noqa: BLE001 -- absence of a context is not an error here
+        return None
 
 
 async def list_approvals(request: Request) -> HangarJSONResponse:
@@ -80,6 +106,8 @@ async def list_approvals(request: Request) -> HangarJSONResponse:
         provider_id: Optional provider filter.
     """
     service = _get_approval_service(request)
+    if service is None:
+        return _unavailable()
     state_filter = request.query_params.get("state", "pending")
     provider_id = request.query_params.get("provider_id")
 
@@ -97,6 +125,8 @@ async def list_approvals(request: Request) -> HangarJSONResponse:
 async def get_approval(request: Request) -> HangarJSONResponse:
     """Get a single approval request by ID."""
     service = _get_approval_service(request)
+    if service is None:
+        return _unavailable()
     approval_id = request.path_params["approval_id"]
 
     approval = await service._repository.get(approval_id)
@@ -124,6 +154,8 @@ async def resolve_approval(request: Request) -> HangarJSONResponse:
         reason: Optional string
     """
     service = _get_approval_service(request)
+    if service is None:
+        return _unavailable()
     approval_id = request.path_params["approval_id"]
 
     body = await request.json()

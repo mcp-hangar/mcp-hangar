@@ -164,7 +164,7 @@ def _load_group_members(
     members: list[dict[str, Any]],
 ) -> None:
     """Load group members from configuration."""
-    from ..domain.model.mcp_server_config import ToolsConfig
+    from ..domain.model.mcp_server_config import parse_tools_access_config
     from ..domain.services import get_tool_access_resolver
 
     saga = get_group_rebalance_saga()
@@ -206,14 +206,9 @@ def _load_group_members(
         # Parse member-level tool access policy
         member_tools_config = member_spec.get("tools")
         if isinstance(member_tools_config, dict):
-            allow_list = member_tools_config.get("allow_list", [])
-            deny_list = member_tools_config.get("deny_list", [])
-            if allow_list or deny_list:
-                try:
-                    tools_access_config = ToolsConfig(
-                        allow_list=allow_list,
-                        deny_list=deny_list,
-                    )
+            try:
+                tools_access_config = parse_tools_access_config(member_tools_config)
+                if tools_access_config is not None:
                     member_tools_policy = tools_access_config.to_policy()
                     resolver.set_member_policy(
                         group_id=group_id,
@@ -227,14 +222,15 @@ def _load_group_members(
                         member_id=member_id,
                         has_allow_list=bool(member_tools_policy.allow_list),
                         has_deny_list=bool(member_tools_policy.deny_list),
+                        has_approval_list=bool(member_tools_policy.approval_list),
                     )
-                except ValueError as e:
-                    logger.warning(
-                        "invalid_member_tools_access_config",
-                        group_id=group_id,
-                        member_id=member_id,
-                        error=str(e),
-                    )
+            except ValueError as e:
+                logger.warning(
+                    "invalid_member_tools_access_config",
+                    group_id=group_id,
+                    member_id=member_id,
+                    error=str(e),
+                )
 
         if saga:
             saga.register_member(member_id, group_id)
@@ -242,7 +238,7 @@ def _load_group_members(
 
 def _load_mcp_server_config(mcp_server_id: str, spec_dict: dict[str, Any]) -> McpServer:
     """Load a single mcp_server configuration."""
-    from ..domain.model.mcp_server_config import ToolsConfig
+    from ..domain.model.mcp_server_config import parse_tools_access_config
     from ..domain.services import get_tool_access_resolver
 
     user = spec_dict.get("user")
@@ -251,7 +247,7 @@ def _load_mcp_server_config(mcp_server_id: str, spec_dict: dict[str, Any]) -> Mc
 
     # Parse tools config - can be either:
     # 1. A list of predefined tool schemas
-    # 2. A dict with allow_list/deny_list for access policy
+    # 2. A dict with allow_list/deny_list/approval_list for access policy
     tools_config = spec_dict.get("tools")
     tools = None
     tools_access_policy = None
@@ -270,22 +266,17 @@ def _load_mcp_server_config(mcp_server_id: str, spec_dict: dict[str, Any]) -> Mc
                     }
                 )
         elif isinstance(tools_config, dict):
-            # Dict format: access policy with allow_list/deny_list
-            allow_list = tools_config.get("allow_list", [])
-            deny_list = tools_config.get("deny_list", [])
-            if allow_list or deny_list:
-                try:
-                    tools_access_config = ToolsConfig(
-                        allow_list=allow_list,
-                        deny_list=deny_list,
-                    )
+            # Dict format: access policy (allow_list / deny_list / approval_list)
+            try:
+                tools_access_config = parse_tools_access_config(tools_config)
+                if tools_access_config is not None:
                     tools_access_policy = tools_access_config.to_policy()
-                except ValueError as e:
-                    logger.warning(
-                        "invalid_tools_access_config",
-                        mcp_server_id=mcp_server_id,
-                        error=str(e),
-                    )
+            except ValueError as e:
+                logger.warning(
+                    "invalid_tools_access_config",
+                    mcp_server_id=mcp_server_id,
+                    error=str(e),
+                )
 
     # Process auth configuration for remote mcp_servers
     auth_config = spec_dict.get("auth")
@@ -354,6 +345,7 @@ def _load_mcp_server_config(mcp_server_id: str, spec_dict: dict[str, Any]) -> Mc
             mcp_server_id=mcp_server_id,
             has_allow_list=bool(tools_access_policy.allow_list),
             has_deny_list=bool(tools_access_policy.deny_list),
+            has_approval_list=bool(tools_access_policy.approval_list),
         )
 
     # Parse per-tenant (member-scope) tool access policies:
@@ -363,19 +355,15 @@ def _load_mcp_server_config(mcp_server_id: str, spec_dict: dict[str, Any]) -> Mc
     #       deny_list: [dangerous_tool]
     tool_access_config = spec_dict.get("tool_access")
     if isinstance(tool_access_config, dict):
-        from ..domain.model.mcp_server_config import ToolsConfig
-
         member_policies_config = tool_access_config.get("member", {})
         if isinstance(member_policies_config, dict):
             resolver = get_tool_access_resolver()
             for tenant_id, member_policy_spec in member_policies_config.items():
                 if not isinstance(member_policy_spec, dict):
                     continue
-                allow_list = member_policy_spec.get("allow_list", [])
-                deny_list = member_policy_spec.get("deny_list", [])
-                if allow_list or deny_list:
-                    try:
-                        member_tools_cfg = ToolsConfig(allow_list=allow_list, deny_list=deny_list)
+                try:
+                    member_tools_cfg = parse_tools_access_config(member_policy_spec)
+                    if member_tools_cfg is not None:
                         member_policy = member_tools_cfg.to_policy()
                         resolver.set_standalone_member_policy(mcp_server_id, tenant_id, member_policy)
                         logger.debug(
@@ -384,14 +372,15 @@ def _load_mcp_server_config(mcp_server_id: str, spec_dict: dict[str, Any]) -> Mc
                             tenant_id=tenant_id,
                             has_allow_list=bool(member_policy.allow_list),
                             has_deny_list=bool(member_policy.deny_list),
+                            has_approval_list=bool(member_policy.approval_list),
                         )
-                    except ValueError as e:
-                        logger.warning(
-                            "invalid_standalone_member_tools_access_config",
-                            mcp_server_id=mcp_server_id,
-                            tenant_id=tenant_id,
-                            error=str(e),
-                        )
+                except ValueError as e:
+                    logger.warning(
+                        "invalid_standalone_member_tools_access_config",
+                        mcp_server_id=mcp_server_id,
+                        tenant_id=tenant_id,
+                        error=str(e),
+                    )
 
     # Parse per-server config-declared tool withdrawals.
     # Schema (under each mcp_server entry):
@@ -514,7 +503,7 @@ def _load_mcp_server_config(mcp_server_id: str, spec_dict: dict[str, Any]) -> Mc
 
 def _load_group_config(group_id: str, spec_dict: dict[str, Any]) -> None:
     """Load a mcp_server group configuration."""
-    from ..domain.model.mcp_server_config import ToolsConfig
+    from ..domain.model.mcp_server_config import parse_tools_access_config
     from ..domain.services import get_tool_access_resolver
 
     strategy = _parse_strategy(spec_dict.get("strategy", "round_robin"), group_id)
@@ -537,21 +526,16 @@ def _load_group_config(group_id: str, spec_dict: dict[str, Any]) -> None:
     group_tools_config = spec_dict.get("tools")
     group_tools_policy = None
     if isinstance(group_tools_config, dict):
-        allow_list = group_tools_config.get("allow_list", [])
-        deny_list = group_tools_config.get("deny_list", [])
-        if allow_list or deny_list:
-            try:
-                tools_access_config = ToolsConfig(
-                    allow_list=allow_list,
-                    deny_list=deny_list,
-                )
+        try:
+            tools_access_config = parse_tools_access_config(group_tools_config)
+            if tools_access_config is not None:
                 group_tools_policy = tools_access_config.to_policy()
-            except ValueError as e:
-                logger.warning(
-                    "invalid_group_tools_access_config",
-                    group_id=group_id,
-                    error=str(e),
-                )
+        except ValueError as e:
+            logger.warning(
+                "invalid_group_tools_access_config",
+                group_id=group_id,
+                error=str(e),
+            )
 
     # Register group-level policy
     if group_tools_policy is not None:
@@ -568,6 +552,7 @@ def _load_group_config(group_id: str, spec_dict: dict[str, Any]) -> None:
             group_id=group_id,
             has_allow_list=bool(group_tools_policy.allow_list),
             has_deny_list=bool(group_tools_policy.deny_list),
+            has_approval_list=bool(group_tools_policy.approval_list),
         )
 
     _load_group_members(group, group_id, spec_dict.get("members", []))

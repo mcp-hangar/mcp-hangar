@@ -39,12 +39,25 @@ class TestServerComponents:
 class TestLoadComponents:
     """The loader wires the in-core auth module directly (no plugin discovery)."""
 
-    def test_no_auth_config_returns_empty(self):
-        """With auth absent/disabled, returns ServerComponents with all fields None."""
+    def test_no_auth_config_still_loads_the_approval_gate(self):
+        """Approvals do not ride on auth.
+
+        This function used to return early -- before any approval wiring could
+        run -- whenever auth was absent or disabled, which is the default. That
+        early return was one of the three reasons the gate was unreachable on a
+        stock `serve --http` (#678).
+        """
         from mcp_hangar.server.bootstrap.components import load_components
 
         ec = load_components({})
         assert ec.auth_components is None
+        assert ec.approval_service is not None
+
+    def test_approvals_can_be_turned_off_explicitly(self):
+        """`approvals.enabled: false` is the only way to get no gate."""
+        from mcp_hangar.server.bootstrap.components import load_components
+
+        ec = load_components({"approvals": {"enabled": False}})
         assert ec.approval_service is None
 
     def test_unavailable_auth_module_returns_empty(self, monkeypatch):
@@ -95,7 +108,7 @@ class TestLoadComponents:
             event_publisher="publisher",
         )
         assert ec.auth_components is sentinel
-        assert ec.approval_service is None
+        assert ec.approval_service is not None
         assert captured["kwargs"]["event_bus"] == "bus"
         assert captured["kwargs"]["event_publisher"] == "publisher"
         assert captured["kwargs"]["event_store"] == "event-store"

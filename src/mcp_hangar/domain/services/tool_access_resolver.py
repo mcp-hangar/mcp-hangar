@@ -159,6 +159,25 @@ class ToolAccessResolver:
             cache_key = f"mcp_server:{mcp_server_id}:member:{member_id}"
             self._policy_cache.pop(cache_key, None)
 
+    def iter_registered_policies(self) -> list[tuple[str, ToolAccessPolicy]]:
+        """Return every registered policy as ``(scope_description, policy)``.
+
+        Used by the startup reachability check to answer "does this
+        configuration actually ask for the approval gate?" without reaching into
+        the resolver's private dicts. Reads a snapshot under the lock.
+        """
+        with self._lock:
+            registered: list[tuple[str, ToolAccessPolicy]] = []
+            for mcp_server_id, policy in self._mcp_server_policies.items():
+                registered.append((f"mcp_server:{mcp_server_id}", policy))
+            for group_id, policy in self._group_policies.items():
+                registered.append((f"group:{group_id}", policy))
+            for (group_id, member_id), policy in self._member_policies.items():
+                registered.append((f"group:{group_id}:member:{member_id}", policy))
+            for (mcp_server_id, member_id), policy in self._standalone_member_policies.items():
+                registered.append((f"mcp_server:{mcp_server_id}:member:{member_id}", policy))
+            return registered
+
     @property
     def topology_mode(self) -> TopologyMode:
         """Return the current topology mode."""

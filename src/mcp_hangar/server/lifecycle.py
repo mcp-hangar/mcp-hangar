@@ -338,7 +338,11 @@ class ServerLifecycle:
 
         api_app = create_api_router(auth_components=getattr(self._context, "auth_components", None))
 
-        # Wire approval service into Starlette app state.
+        # create_api_router already wired the component services from the
+        # application context. Overlay this lifecycle's own ApplicationContext
+        # when it carries one, so the two objects cannot disagree: this used to
+        # be the ONLY place app.state.approval_gate_service was set, and it read
+        # a field that was never populated, so /api/approvals 500'd (#678).
         approval_svc = getattr(self._context, "approval_service", None)
         if approval_svc is not None:
             api_app.state.approval_gate_service = approval_svc
