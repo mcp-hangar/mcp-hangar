@@ -23,6 +23,7 @@ from mcp_hangar.domain.events import (
     ToolApprovalGranted,
     ToolApprovalRequested,
 )
+from mcp_hangar.domain.security.redactor import get_default_redactor
 from mcp_hangar.domain.value_objects.tool_access_policy import ToolAccessPolicy
 from mcp_hangar.logging_config import get_logger
 from mcp_hangar.observability.tracing import get_tracer
@@ -42,19 +43,65 @@ _publish_executor = concurrent.futures.ThreadPoolExecutor(max_workers=4, thread_
 
 
 def _sanitize_arguments(arguments: dict[str, Any]) -> dict[str, Any]:
-    """Redact sensitive keys from arguments before persist/delivery."""
+    """Redact secrets from arguments before they are persisted or delivered.
+
+    Two passes, because either alone leaks:
+
+    1. by key name -- ``password``, ``token``, ``secret``, ``key``, ``auth``,
+       ``credential`` as substrings;
+    2. by value shape, using the shared builtin-pattern redactor (JWTs, Bearer
+       headers, ``ghp_``/``AKIA``/``xox``-style keys, connection strings).
+
+    Pass 1 alone was the whole of this function, so a secret under a
+    non-matching key -- ``{"body": "Authorization: Bearer eyJ..."}`` or
+    ``{"dsn": "postgres://user:pw@host"}`` -- was written verbatim into the
+    SQLite approval record and served to every ``approval:read`` holder through
+    the REST DTO. The value redactor already existed and is used by the log
+    pipeline and the stderr capture; approvals just were not using it.
+
+    Nested dicts and lists are walked, since MCP tool arguments are arbitrary
+    JSON, with the same depth cap the log pipeline uses.
+    """
     sensitive_patterns = {"password", "token", "secret", "key", "auth", "credential"}
-    sanitized = {}
-    for k, v in arguments.items():
-        if any(pattern in k.lower() for pattern in sensitive_patterns):
-            sanitized[k] = "[REDACTED]"
+    redactor = get_default_redactor()
+
+    def scrub(value: Any, depth: int = 0) -> Any:
+        if depth > 5:
+            return value
+        if isinstance(value, str):
+            return redactor.redact(value)
+        if isinstance(value, dict):
+            return {k: scrub(v, depth + 1) for k, v in value.items()}
+        if isinstance(value, list):
+            return [scrub(item, depth + 1) for item in value]
+        return value
+
+    sanitized: dict[str, Any] = {}
+    for key, value in arguments.items():
+        if any(pattern in key.lower() for pattern in sensitive_patterns):
+            sanitized[key] = "[REDACTED]"
         else:
-            sanitized[k] = v
+            sanitized[key] = scrub(value)
     return sanitized
 
 
 def _hash_arguments(arguments: dict[str, Any]) -> str:
-    """SHA-256 hash of sanitized arguments for integrity checking."""
+    """SHA-256 over the RAW arguments, for the dispatch-time integrity check.
+
+    Confidentiality and integrity are different jobs and this hash is the
+    integrity one: it answers "is the payload about to be dispatched the payload
+    the approver saw approved". Hashing the *redacted* copy instead -- which is
+    what this did while redaction was key-name-only, and which would become
+    actively unsafe now that values are redacted too -- makes the check blind to
+    exactly the substitutions worth catching: two different tokens both redact
+    to the same marker, hash identically, and swap freely between approval and
+    dispatch.
+
+    Upgrade note: approvals already pending when this ships were hashed over the
+    old (sanitized) projection, so they will fail revalidation and be refused.
+    That is the fail-closed direction -- a refused approval can be re-requested;
+    a silently accepted substitution cannot be undone.
+    """
     serialized = json.dumps(arguments, sort_keys=True, default=str)
     return hashlib.sha256(serialized.encode()).hexdigest()
 
@@ -79,7 +126,7 @@ class ApprovalGateService:
             return f"approval is {request.state.value}, not approved"
         if request.is_expired():
             return "approval expired during the hold"
-        if _hash_arguments(_sanitize_arguments(arguments)) != request.arguments_hash:
+        if _hash_arguments(arguments) != request.arguments_hash:
             # `arguments_hash` was computed, persisted, emitted and shown to the
             # approver, and compared against nothing -- its own docstring says
             # "for integrity checking". The request mutator pipeline runs after
@@ -138,7 +185,7 @@ class ApprovalGateService:
             gate_span.set_attribute("approval.id", approval_id)
             now = datetime.now(UTC)
             sanitized_args = _sanitize_arguments(arguments)
-            args_hash = _hash_arguments(sanitized_args)
+            args_hash = _hash_arguments(arguments)
             expires_at = now + timedelta(seconds=policy.approval_timeout_seconds)
 
             request = ApprovalRequest(
