@@ -661,6 +661,12 @@ class TestOPAAuthorizerEvaluate:
         assert result.reason == "opa_denied"
 
     def test_missing_result_key_defaults_to_deny(self):
+        """OPA omits `result` when the queried rule is undefined.
+
+        Still a denial, but reported as a configuration error rather than as
+        `opa_denied`: an operator staring at a wrong policy_path needs to be
+        able to tell "the policy said no" from "there is no policy here".
+        """
         from mcp_hangar.auth.infrastructure.opa_authorizer import OPAAuthorizer
         import httpx
 
@@ -675,7 +681,7 @@ class TestOPAAuthorizerEvaluate:
 
         result = opa.evaluate({"principal": {"id": "u1"}})
         assert not result.allowed
-        assert result.reason == "opa_denied"
+        assert result.reason == "opa_error:undefined_result"
 
     def test_connect_error_denies(self):
         from mcp_hangar.auth.infrastructure.opa_authorizer import OPAAuthorizer

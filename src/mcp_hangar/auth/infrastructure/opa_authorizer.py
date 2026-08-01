@@ -89,7 +89,32 @@ class OPAAuthorizer(IPolicyEngine):
             response.raise_for_status()
 
             result = response.json()
-            allowed = result.get("result", False)
+
+            # OPA's verdict must be a BOOLEAN, not merely truthy. Rego rules are
+            # commonly authored to return an object or a string --
+            # `{"result": {"allow": true, "reason": "..."}}` or
+            # `{"result": "deny"}` -- and a truthiness test grants access for
+            # both, including for the one that literally says deny. A document
+            # this code cannot interpret is a misconfiguration, and the safe
+            # reading of an uninterpretable verdict on an authorization path is
+            # "no", not "yes".
+            if "result" not in result:
+                # OPA omits the key entirely when the queried rule is undefined
+                # (wrong policy_path, policy not loaded). Distinguished from a
+                # real denial so the operator can tell misconfiguration from
+                # policy.
+                logger.error("opa_result_undefined", url=url, policy_path=self._policy_path)
+                return AuthorizationResult.deny(reason="opa_error:undefined_result")
+
+            allowed = result["result"]
+            if not isinstance(allowed, bool):
+                logger.error(
+                    "opa_result_not_boolean",
+                    url=url,
+                    policy_path=self._policy_path,
+                    result_type=type(allowed).__name__,
+                )
+                return AuthorizationResult.deny(reason="opa_error:non_boolean_result")
 
             logger.debug(
                 "opa_evaluation_complete",
