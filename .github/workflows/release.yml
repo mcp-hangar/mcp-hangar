@@ -422,5 +422,15 @@ jobs:
       - name: Resolve the PEP 440 version
         id: pep440
         run: echo "version=$(grep -m1 -E '^version = "' pyproject.toml | sed 's/version = "\(.*\)"/\1/')" >> $GITHUB_OUTPUT
+      # `--tolerate-index-lag`: the simple index pip reads lags a publish by
+      # minutes, and on 2.0.1 this job ran inside that window and went red on a
+      # healthy release (#680). The script now retries for ~3.5 minutes and, if
+      # the version is still invisible, asks PyPI's JSON API whether it exists at
+      # all. Published-but-unindexed becomes a warning here and only here: this
+      # placement cannot stop a release anyway, so a red would buy nothing and
+      # cost the reader's attention. Every other failure -- a wheel that will not
+      # install, a version PyPI never received -- still fails the job.
       - name: Smoke what PyPI serves
-        run: python scripts/smoke_published_artifact.py --version "${{ steps.pep440.outputs.version }}" --also-pre
+        run: |
+          python scripts/smoke_published_artifact.py \
+            --version "${{ steps.pep440.outputs.version }}" --also-pre --tolerate-index-lag
