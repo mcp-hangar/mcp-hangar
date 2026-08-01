@@ -7,6 +7,11 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Security
+
+- **core:** the L7 egress `jwt` secret pattern now catches short-header JWTs. It required 50+ base64url chars in the header segment, but a standard header -- `{"alg":"HS256","typ":"JWT"}` -- is ~33, so every HS256 token and anything without a `kid` evaded the detector while only long-header RS256 tokens matched. A JWT exfiltrated through a tool-call argument slipped past. The pattern now matches the two/three-segment JWT structure with realistic per-segment minimums, verified on a live gateway (the token that was allowed through is now blocked) ([#687](https://github.com/mcp-hangar/mcp-hangar/issues/687))
+- **core:** scope the approval surface by tenant. Resolution and listing authorized on the `approval:resolve` permission alone, ignoring the caller's tenant, so an approver in one tenant could list and resolve high-risk approvals raised in another -- and read their arguments. An approval now binds the tenant that raised it; resolve and list/get are scoped to the caller's tenant, and a foreign-tenant approval is reported as not-found rather than forbidden so its existence is not disclosed. An approval with no tenant (single-tenant / auth-off) is unscoped, so the change is inert outside multi-tenancy. `tenant_id` and `requested_by` are now persisted (SQLite migration included). Verified live: a `tenant:b` approver that previously saw and resolved a `tenant:a` approval now sees zero and gets 404 ([#688](https://github.com/mcp-hangar/mcp-hangar/issues/688))
+
 ## [2.1.0](https://github.com/mcp-hangar/mcp-hangar/compare/v2.0.1...v2.1.0) (2026-08-01)
 
 The human-in-the-loop approval gate becomes reachable for the first time. Until now no configuration could put a tool behind it, the gate service was never constructed, and the REST surface answered 500 — a governance control that was documented, tested in isolation, and unreachable in every shipped build. A minor rather than a patch because it adds config keys; nothing that worked before behaves differently.

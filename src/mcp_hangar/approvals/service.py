@@ -108,6 +108,8 @@ class ApprovalGateService:
         correlation_id: str,
         mcp_server_id: str | None = None,
         provider_id: str | None = None,
+        tenant_id: str | None = None,
+        requested_by: str | None = None,
     ) -> ApprovalResult:
         """Called from mcp_tool_wrapper check_approval hook.
 
@@ -150,6 +152,8 @@ class ApprovalGateService:
                 state=ApprovalState.PENDING,
                 channel=policy.approval_channel,
                 correlation_id=correlation_id,
+                tenant_id=tenant_id,
+                requested_by=requested_by,
             )
 
             await self._repository.save(request)

@@ -47,9 +47,20 @@ class SqliteApprovalRepository:
         decided_by TEXT,
         decided_at TEXT,
         reason TEXT,
-        correlation_id TEXT DEFAULT ''
+        correlation_id TEXT DEFAULT '',
+        requested_by TEXT,
+        tenant_id TEXT
     )
     """
+
+    # Idempotent migration for tables created before requested_by / tenant_id
+    # existed. `CREATE TABLE IF NOT EXISTS` never adds columns to an existing
+    # table, so a durable store from an earlier version would silently drop the
+    # tenant binding the resolve/list scoping depends on.
+    MIGRATIONS_SQL = (
+        "ALTER TABLE approval_requests ADD COLUMN requested_by TEXT",
+        "ALTER TABLE approval_requests ADD COLUMN tenant_id TEXT",
+    )
 
     CREATE_INDEX_STATE_SQL = """
     CREATE INDEX IF NOT EXISTS idx_approval_state ON approval_requests (state)
@@ -71,6 +82,11 @@ class SqliteApprovalRepository:
             await conn.execute(self.CREATE_TABLE_SQL)
             await conn.execute(self.CREATE_INDEX_STATE_SQL)
             await conn.execute(self.CREATE_INDEX_EXPIRES_SQL)
+            for migration in self.MIGRATIONS_SQL:
+                try:
+                    await conn.execute(migration)
+                except Exception:  # noqa: BLE001 -- column already present
+                    pass
         self._initialized = True
 
     async def save(self, request: ApprovalRequest) -> None:
@@ -83,8 +99,9 @@ class SqliteApprovalRepository:
                 INSERT INTO approval_requests
                 (approval_id, provider_id, tool_name, arguments_json,
                  arguments_hash, requested_at, expires_at, state, channel,
-                 decided_by, decided_at, reason, correlation_id)
-                VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                 decided_by, decided_at, reason, correlation_id,
+                 requested_by, tenant_id)
+                VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
                 """,
                 (
                     request.approval_id,
@@ -100,6 +117,8 @@ class SqliteApprovalRepository:
                     request.decided_at.isoformat() if request.decided_at else None,
                     request.reason,
                     request.correlation_id,
+                    request.requested_by,
+                    request.tenant_id,
                 ),
             )
 
@@ -178,4 +197,9 @@ class SqliteApprovalRepository:
             decided_at=datetime.fromisoformat(row[10]) if row[10] else None,
             reason=row[11],
             correlation_id=row[12] or "",
+            # Columns 13/14 are absent on rows written before the migration; a
+            # short row from a legacy DB reads them as None (unscoped), which is
+            # the safe single-tenant default rather than a crash.
+            requested_by=row[13] if len(row) > 13 else None,
+            tenant_id=row[14] if len(row) > 14 else None,
         )

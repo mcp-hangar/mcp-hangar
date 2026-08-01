@@ -41,6 +41,12 @@ class ApprovalRequest:
     #: decided; without this it never named who asked, which is half of an
     #: attribution chain.
     requested_by: str | None = None
+    #: Tenant the gated call originated in. Bound at creation so the resolve and
+    #: list surfaces can be scoped to it: without this an approver in one tenant
+    #: could see and resolve another tenant's approvals, since authorization is
+    #: by permission alone. ``None`` means single-tenant / no tenant context, in
+    #: which case scoping is not applied.
+    tenant_id: str | None = None
 
     def __init__(
         self,
@@ -59,6 +65,7 @@ class ApprovalRequest:
         reason: str | None = None,
         correlation_id: str = "",
         requested_by: str | None = None,
+        tenant_id: str | None = None,
     ) -> None:
         resolved_provider_id = mcp_server_id or provider_id
         if resolved_provider_id is None:
@@ -78,6 +85,7 @@ class ApprovalRequest:
         self.reason = reason
         self.correlation_id = correlation_id
         self.requested_by = requested_by
+        self.tenant_id = tenant_id
 
     @property
     def mcp_server_id(self) -> str:

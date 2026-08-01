@@ -121,12 +121,33 @@ class ResolveApprovalHandler(CommandHandler):
             resource_id=approval_id,
         )
 
+    @staticmethod
+    def _tenant_matches(principal: Principal, approval: Any) -> bool:
+        """Whether *principal* is in the tenant that raised *approval*.
+
+        An approval with no tenant (single-tenant, or auth-off where the caller
+        is the system principal) is not scoped -- ``True`` for anyone with the
+        permission. Once an approval carries a tenant, only a caller in that same
+        tenant matches; a tenantless or foreign-tenant caller does not.
+        """
+        approval_tenant = getattr(approval, "tenant_id", None)
+        if approval_tenant is None:
+            return True
+        return bool(getattr(principal, "tenant_id", None) == approval_tenant)
+
     async def handle(self, command: ResolveApprovalCommand) -> ResolveApprovalResult:
         self._authorize(command.principal, command.approval_id)
 
         repository = self._service._repository
         existing = await repository.get(command.approval_id)
         if existing is None:
+            return ResolveApprovalResult(ResolveOutcome.NOT_FOUND)
+        if not self._tenant_matches(command.principal, existing):
+            # The approval belongs to a different tenant. Reported as NOT_FOUND,
+            # not a distinct "forbidden", so a caller in tenant B cannot even
+            # confirm that an approval exists in tenant A -- existence itself is
+            # scoped. An approval with no tenant (single-tenant / auth-off) is
+            # not restricted, so this only engages under multi-tenancy.
             return ResolveApprovalResult(ResolveOutcome.NOT_FOUND)
         if existing.is_terminal():
             return ResolveApprovalResult(ResolveOutcome.ALREADY_TERMINAL, state=existing.state.value)

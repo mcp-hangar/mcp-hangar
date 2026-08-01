@@ -105,7 +105,15 @@ class OutputRedactor:
             name="google_api_key",
         ),
         RedactionPattern(
-            pattern=re.compile(r"eyJ[a-zA-Z0-9_-]{50,}\.[a-zA-Z0-9_-]{50,}"),
+            # Match the three-segment JWT structure, not a length floor on the
+            # header. The old pattern required >=50 base64url chars in the
+            # HEADER segment, but real headers are short -- {"alg":"HS256",
+            # "typ":"JWT"} is ~33 after `eyJ` -- so every standard HS256 token
+            # (and any token without a `kid`) slipped through while only
+            # long-header RS256 tokens matched. `eyJ` is the base64url of `{"`,
+            # so anchoring on it plus two more base64url segments is
+            # JWT-specific enough to avoid matching arbitrary base64.
+            pattern=re.compile(r"eyJ[a-zA-Z0-9_-]{10,}\.[a-zA-Z0-9_-]{8,}(?:\.[a-zA-Z0-9_-]{8,})?"),
             name="jwt_token",
         ),
         RedactionPattern(
