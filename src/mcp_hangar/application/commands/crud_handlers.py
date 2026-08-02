@@ -10,7 +10,12 @@ All handlers:
 import threading
 from typing import Any, cast
 
-from ...domain.events import McpServerDeregistered, McpServerRegistered
+from ...domain.events import (
+    EgressPolicyCleared,
+    EgressPolicySet,
+    McpServerDeregistered,
+    McpServerRegistered,
+)
 from ...domain.exceptions import McpServerNotFoundError, ValidationError
 from ...domain.model.mcp_server import McpServer
 from ...domain.model.mcp_server_group import GroupDeleted, McpServerGroup
@@ -197,6 +202,28 @@ class SetL7PolicyHandler(CommandHandler):
             raise McpServerNotFoundError(command.mcp_server_id)
 
         cast(McpServer, mcp_server).set_l7_policy(command.policy)
+
+        # Changing this policy changes what the enforcement plane blocks, so
+        # the change belongs in the audit trail and not only in a log line.
+        # Every sibling handler in this module publishes; this one took an
+        # event_bus and never used it.
+        if command.policy is None:
+            self._event_bus.publish(EgressPolicyCleared(mcp_server_id=command.mcp_server_id, source=command.source))
+        else:
+            policy = command.policy
+            self._event_bus.publish(
+                EgressPolicySet(
+                    mcp_server_id=command.mcp_server_id,
+                    source=command.source,
+                    mode=policy.mode.value,
+                    default_action=policy.default_action.value,
+                    allow_rules=len(policy.tools.allow),
+                    deny_rules=len(policy.tools.deny),
+                    require_approval_rules=len(policy.tools.require_approval),
+                    secret_pattern_groups=list(policy.arguments.secret_patterns),
+                    max_payload_bytes=policy.arguments.max_payload_bytes,
+                )
+            )
 
         logger.info(
             "mcp_server_l7_policy_set",

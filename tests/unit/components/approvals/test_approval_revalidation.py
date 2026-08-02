@@ -27,6 +27,10 @@ def _service(repo):
 
 
 def _approved(arguments, *, expires_in=300, state=ApprovalState.APPROVED):
+    # Mirrors ApprovalGateService.check: the STORED copy is sanitized (it is
+    # shown to approval:read holders), the HASH is over the raw arguments (it
+    # answers whether the dispatched payload is the approved one). Building the
+    # fixture any other way tests a scheme production does not use.
     sanitized = _sanitize_arguments(arguments)
     now = datetime.now(UTC)
     return ApprovalRequest(
@@ -34,7 +38,7 @@ def _approved(arguments, *, expires_in=300, state=ApprovalState.APPROVED):
         provider_id="srv",
         tool_name="transfer",
         arguments=sanitized,
-        arguments_hash=_hash_arguments(sanitized),
+        arguments_hash=_hash_arguments(arguments),
         requested_at=now,
         expires_at=now + timedelta(seconds=expires_in),
         state=state,
@@ -70,11 +74,13 @@ class TestRevalidateAtDispatch:
 
     @pytest.mark.asyncio
     async def test_redacted_keys_do_not_cause_false_refusals(self):
-        """The stored hash is over *sanitized* arguments.
+        """Redaction must not make healthy traffic look tampered with.
 
-        Comparing a raw payload against it would refuse every call carrying a
-        secret-shaped key -- a fix that fails closed on healthy traffic is not
-        a fix.
+        Both sides of the comparison hash the raw arguments, so a payload
+        carrying a secret-shaped key round-trips. What must never happen is the
+        two sides disagreeing about which projection they hash -- that would
+        refuse every call carrying such a key, and a fix that fails closed on
+        healthy traffic is not a fix.
         """
         repo = FakeRepository()
         args = {"amount": 10, "api_key": "sk-live-1234"}

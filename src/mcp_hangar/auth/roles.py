@@ -140,9 +140,24 @@ ROLE_ADMIN = Role(
 
 ROLE_PROVIDER_ADMIN = Role(
     name="provider-admin",
-    description="Manage providers and invoke tools",
+    description="Manage providers, deliver egress policy, and invoke tools",
     permissions=frozenset(
         [
+            # The REST API authorizes against the mcp_servers:* vocabulary; the
+            # provider:* entries below are the pre-rename names and are checked
+            # by nothing (see UNENFORCED_BY_DESIGN in
+            # tests/unit/test_permissions_defined_are_enforced.py). Without
+            # these two, this role cannot read a server or deliver a policy
+            # through the API at all, which is why the operator's API key has
+            # had to be `developer` or `admin`.
+            #
+            # policy:write is deliberately paired with mcp_servers:READ and not
+            # with mcp_servers:write: the operator only GETs servers and
+            # POST/DELETEs /l7_policy, so this is the whole set it needs.
+            # Granting write/lifecycle here would widen the role towards admin
+            # for a capability nothing asked for.
+            PERMISSION_PROVIDERS_READ,
+            PERMISSION_POLICY_WRITE,
             PERMISSION_PROVIDER_CREATE,
             PERMISSION_PROVIDER_READ,
             PERMISSION_PROVIDER_UPDATE,

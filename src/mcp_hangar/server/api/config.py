@@ -18,12 +18,28 @@ from starlette.requests import Request
 from starlette.routing import Route
 
 from ...application.commands.commands import ReloadConfigurationCommand
+from ...domain.exceptions import ValidationError
 from ..config_serializer import serialize_full_config, write_config_backup
 from .middleware import dispatch_command, get_context
 from .serializers import HangarJSONResponse
 
 # Field name fragments that indicate a sensitive value.
 _SENSITIVE_FRAGMENTS = frozenset({"secret", "key", "token", "password"})
+
+
+def _requested_by(request: Request) -> str:
+    """Attribute a mutation to the calling principal, not to the transport.
+
+    Reload was recorded as ``requested_by="api"`` regardless of who triggered
+    it, which makes the audit trail useless for the one operation that
+    re-applies every governance input. Falls back to ``"api"`` only when auth
+    is disabled and there is genuinely no principal to name.
+    """
+    state = request.scope.get("state")
+    auth_context = state.get("auth") if isinstance(state, dict) else getattr(state, "auth", None)
+    principal = getattr(auth_context, "principal", None)
+    principal_id = getattr(principal, "id", None)
+    return str(principal_id) if principal_id is not None else "api"
 
 
 def _sanitize(config: dict) -> dict:
@@ -67,26 +83,43 @@ async def reload_config(request: Request) -> HangarJSONResponse:
     """Trigger a hot-reload of server configuration.
 
     Optional JSON body:
-        config_path: Path to the config file (default: None, uses server default).
         graceful: Whether to perform a graceful reload (default: True).
+
+    ``config_path`` is deliberately NOT accepted. This handler used to pass a
+    caller-supplied path straight into ``ReloadConfigurationCommand``, and
+    ``ReloadConfigurationHandler`` loads whatever it names. Because an
+    ``mcp_servers`` entry carries ``command`` and ``args``, that turned "reload
+    my config" into "load an arbitrary file from the server's filesystem and
+    start the processes it describes". The reload now always targets the path
+    the server was started with.
+
+    A request that still sends ``config_path`` is rejected rather than silently
+    ignored: a caller depending on the old behaviour fails loudly instead of
+    getting a reload of a different file than it asked for, and an attempt to
+    exploit it is visible in the response and the audit log.
 
     Returns:
         JSON with {"status": "reloaded", "result": ...} on success.
     """
-    config_path = None
     graceful = True
     try:
         body = await request.json()
-        config_path = body.get("config_path", None)
-        graceful = body.get("graceful", True)
     except (json.JSONDecodeError, ValueError):  # empty body or non-JSON content
-        pass
+        body = {}
+
+    if isinstance(body, dict):
+        if "config_path" in body:
+            raise ValidationError(
+                "config_path is not accepted; reload always targets the server's own configuration file",
+                field="config_path",
+            )
+        graceful = body.get("graceful", True)
 
     result = await dispatch_command(
         ReloadConfigurationCommand(
-            config_path=config_path,
+            config_path=None,
             graceful=graceful,
-            requested_by="api",
+            requested_by=_requested_by(request),
         )
     )
     return HangarJSONResponse({"status": "reloaded", "result": result})

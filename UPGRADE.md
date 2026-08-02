@@ -1,4 +1,37 @@
-# Upgrading to MCP Hangar v1.0
+# Upgrading MCP Hangar
+
+## 2.2.0 — action required before you roll out
+
+2.2.0 is a security release. It is a minor rather than a patch because it
+changes behaviour that working deployments rely on. Three things can
+break a working deployment, and two of them fail silently:
+
+1. **Operator API key.** `POST`/`DELETE /api/mcp_servers/{id}/l7_policy` now
+   requires `policy:write` instead of `mcp_servers:write`. A `developer` token
+   stops delivering compiled egress policy — the CRD still reports `Compiled`
+   and nothing reaches the enforcement point. Move operator keys to
+   `provider-admin`, which gained `mcp_servers:read` + `policy:write` for
+   exactly this.
+2. **OPA policies.** A non-boolean verdict was treated as *allow* (including a
+   policy returning the string `"deny"`). It is now a denial. A policy that
+   returns an object or a string flips from allowing everything to denying
+   everything.
+3. **`tool_access.mode`.** A misspelled value used to fall back to `egress`
+   with a warning; the server now refuses to start. An absent key still means
+   `egress`.
+
+Also changed: REST authorization is enforced on every route (`/config`,
+`/discovery`, `/groups`, `/sessions`, `/tools`, `/approvals` reads and the whole
+`/auth` subtree previously made no authorization decision at all);
+`POST /api/config/reload` no longer accepts a caller-supplied `config_path`;
+approvals pending across the upgrade are refused and must be re-requested.
+
+The full guide, with the role-compatibility table and the per-item rationale,
+is the canonical one: <https://mcp-hangar.io/upgrade/#upgrade-to-220>.
+
+---
+
+## Upgrading to MCP Hangar v1.0
 
 This guide covers upgrading from v0.12.x (or earlier) to v1.0.0. If you are
 upgrading from a version older than v0.4.0, read every section. If you are

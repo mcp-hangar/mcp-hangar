@@ -1504,6 +1504,74 @@ class EgressPolicyViolationObserved(DomainEvent):
         super().__init__()
 
 
+@dataclass
+class EgressPolicySet(DomainEvent):
+    """Published when an L7 egress policy is attached to or replaced on a server.
+
+    Changing this policy changes what the enforcement plane will block, so the
+    change itself belongs in the audit trail -- otherwise the only record that
+    enforcement was narrowed or widened is a log line. The policy body is
+    summarised rather than embedded: an auditor needs to see that enforcement
+    moved and in which direction, and the full rule set can be large and is
+    already retrievable from the server.
+
+    Attributes:
+        mcp_server_id: McpServer whose policy changed.
+        source: Who set it -- "operator" (compiled from an MCPEgressPolicy) or
+            "api" (the REST channel, which requires policy:write).
+        mode: Policy mode as applied, "Enforce" or "Audit".
+        default_action: Verdict for a tool no rule matches, "allow" or "deny".
+
+    Note the casing difference between ``mode`` and ``default_action``: both
+    carry their enum value verbatim, and ``PolicyMode`` is spelled in the CRD's
+    capitalised form while ``ToolAction`` is lower-case. The values are passed
+    through rather than normalised, so an audit record matches what the policy
+    document says; normalising here would invent a third vocabulary.
+        allow_rules: Number of allow globs in the policy.
+        deny_rules: Number of deny globs.
+        require_approval_rules: Number of globs gated on human approval.
+        secret_pattern_groups: Secret-detection groups the policy activates.
+        max_payload_bytes: Argument payload ceiling, if any.
+        schema_version: Event schema version.
+    """
+
+    mcp_server_id: str
+    source: str
+    mode: str
+    default_action: str
+    allow_rules: int = 0
+    deny_rules: int = 0
+    require_approval_rules: int = 0
+    secret_pattern_groups: list[str] = field(default_factory=list)
+    max_payload_bytes: int | None = None
+    schema_version: int = 1
+
+    def __post_init__(self):
+        super().__init__()
+
+
+@dataclass
+class EgressPolicyCleared(DomainEvent):
+    """Published when an L7 egress policy is removed from a server.
+
+    Separated from :class:`EgressPolicySet` because clearing is the direction
+    that widens what the server may do, and an audit trail should not require
+    reading a boolean field to notice that.
+
+    Attributes:
+        mcp_server_id: McpServer whose policy was removed.
+        source: Who cleared it -- "operator" or "api".
+        schema_version: Event schema version.
+    """
+
+    mcp_server_id: str
+    source: str
+    schema_version: int = 1
+
+    def __post_init__(self):
+        super().__init__()
+
+
 @dataclass(init=False)
 class EgressBlocked(DomainEvent):
     """Published when an outbound connection from a mcp_server is blocked.

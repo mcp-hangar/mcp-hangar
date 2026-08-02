@@ -137,8 +137,27 @@ class TestReloadConfig:
             cmd = mock_dispatch.call_args[0][0]
             assert isinstance(cmd, ReloadConfigurationCommand)
 
-    def test_accepts_config_path_in_body(self, api_client):
-        """POST /config/reload accepts config_path JSON body param."""
+    def test_rejects_config_path_in_body(self, api_client):
+        """POST /config/reload refuses a caller-supplied config_path.
+
+        Reload loads whatever path it is given, and an mcp_servers entry carries
+        command/args -- so honouring a body-supplied path made this endpoint a
+        remote "load an arbitrary file and start what it describes" primitive.
+        Rejection is explicit rather than silent so a caller relying on the old
+        behaviour fails loudly instead of reloading a different file than it
+        asked for.
+        """
+        with patch(
+            "mcp_hangar.server.api.config.dispatch_command",
+            new_callable=AsyncMock,
+            return_value=None,
+        ) as mock_dispatch:
+            response = api_client.post("/config/reload", json={"config_path": "/etc/mcp/evil.yaml"})
+            assert response.status_code == 422
+            mock_dispatch.assert_not_called()
+
+    def test_reload_always_targets_the_servers_own_config(self, api_client):
+        """A well-formed reload never carries a path to the command."""
         from mcp_hangar.application.commands.commands import ReloadConfigurationCommand
 
         with patch(
@@ -146,10 +165,11 @@ class TestReloadConfig:
             new_callable=AsyncMock,
             return_value=None,
         ) as mock_dispatch:
-            api_client.post("/config/reload", json={"config_path": "/etc/mcp/config.yaml"})
+            api_client.post("/config/reload", json={"graceful": False})
             cmd = mock_dispatch.call_args[0][0]
             assert isinstance(cmd, ReloadConfigurationCommand)
-            assert cmd.config_path == "/etc/mcp/config.yaml"
+            assert cmd.config_path is None
+            assert cmd.graceful is False
 
     def test_accepts_graceful_in_body(self, api_client):
         """POST /config/reload accepts graceful JSON body param."""
