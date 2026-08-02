@@ -12,6 +12,8 @@ Tests:
 import json
 from datetime import UTC, datetime
 
+import pytest
+
 from hypothesis import HealthCheck, given, settings, strategies as st
 
 from mcp_hangar.domain.events import (
@@ -21,6 +23,8 @@ from mcp_hangar.domain.events import (
     DiscoveryCycleCompleted,
     DiscoverySourceHealthChanged,
     EgressBlocked,
+    EgressPolicyCleared,
+    EgressPolicySet,
     EgressPolicyViolationObserved,
     HealthCheckFailed,
     HealthCheckPassed,
@@ -137,6 +141,21 @@ _MINIMAL_EVENTS: dict[str, DomainEvent] = {
         would_be_action="deny",
         reasons=["denied by egress policy"],
     ),
+    "EgressPolicySet": EgressPolicySet(
+        mcp_server_id="p1",
+        source="operator",
+        mode="Enforce",
+        default_action="deny",
+        allow_rules=1,
+        deny_rules=1,
+        require_approval_rules=0,
+        secret_pattern_groups=["jwt"],
+        max_payload_bytes=262144,
+    ),
+    "EgressPolicyCleared": EgressPolicyCleared(
+        mcp_server_id="p1",
+        source="api",
+    ),
     "ProviderCapabilityQuarantined": ProviderCapabilityQuarantined(
         mcp_server_id="p1",
         reason="3 violations in 60s",
@@ -229,19 +248,31 @@ class TestEventSerializerFuzz:
         # If no exception: deserialize succeeded, which is fine
         # All other exceptions (json.JSONDecodeError, KeyError, etc.) will cause the test to fail
 
-    @given(
-        event_type=st.sampled_from(list(EVENT_TYPE_MAP.keys())),
-    )
-    @settings(max_examples=17)
+    @pytest.mark.parametrize("event_type", sorted(EVENT_TYPE_MAP))
     def test_round_trip_all_event_types(self, event_type: str) -> None:
         """serialize -> deserialize must produce an object of the same type with a valid
-        event_id for every type registered in EVENT_TYPE_MAP."""
+        event_id for every type registered in EVENT_TYPE_MAP.
+
+        Parametrized rather than hypothesis-sampled, because "every type" has to
+        mean every type. This was ``@given(sampled_from(EVENT_TYPE_MAP))`` with
+        ``max_examples=17`` against a map that now holds 42 entries: a single run
+        could cover at most 17 of them, and which 17 depended on the seed. A type
+        registered without a sample here therefore failed on some runs and passed
+        on others -- it passed locally and failed in CI for exactly that reason.
+        Parametrizing makes the claim in this docstring true and the result
+        reproducible.
+        """
         serializer = EventSerializer()
         event = _make_minimal_event(event_type)
         type_name, json_data = serializer.serialize(event)
         restored = serializer.deserialize(type_name, json_data)
         assert type(restored) is type(event)
         assert restored.event_id is not None
+
+    def test_every_registered_type_has_a_minimal_sample(self) -> None:
+        """A registered type with no sample is a gap in the round-trip coverage."""
+        missing = sorted(set(EVENT_TYPE_MAP) - set(_MINIMAL_EVENTS))
+        assert missing == [], f"EVENT_TYPE_MAP entries with no _MINIMAL_EVENTS sample: {missing}"
 
 
 class TestUpcasterChainFuzz:
