@@ -5,6 +5,14 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [2.2.0](https://github.com/mcp-hangar/mcp-hangar/compare/v2.1.1...v2.2.0) (2026-08-02)
+
+
+### Fixed
+
+* **core:** register the egress-policy audit events with the serializer ([#694](https://github.com/mcp-hangar/mcp-hangar/issues/694)) ([491e29a](https://github.com/mcp-hangar/mcp-hangar/commit/491e29a93b80ebe1b10f61dab61265df0219a79e))
+* **security:** authorize the REST surface from one route-driven chokepoint ([#692](https://github.com/mcp-hangar/mcp-hangar/issues/692)) ([ae19765](https://github.com/mcp-hangar/mcp-hangar/commit/ae19765cd4e3532577653180e095b26e56f259fc))
+
 ## [Unreleased]
 
 ### Fixed
