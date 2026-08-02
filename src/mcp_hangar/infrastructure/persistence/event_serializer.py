@@ -17,6 +17,8 @@ from mcp_hangar.domain.events import (
     DiscoverySourceHealthChanged,
     DomainEvent,
     EgressBlocked,
+    EgressPolicyCleared,
+    EgressPolicySet,
     EgressPolicyViolationObserved,
     HealthCheckFailed,
     HealthCheckPassed,
@@ -86,6 +88,8 @@ EVENT_TYPE_MAP: dict[str, type[DomainEvent]] = {
     # Capability enforcement
     "CapabilityViolationDetected": CapabilityViolationDetected,
     "EgressBlocked": EgressBlocked,
+    "EgressPolicyCleared": EgressPolicyCleared,
+    "EgressPolicySet": EgressPolicySet,
     "EgressPolicyViolationObserved": EgressPolicyViolationObserved,
     "ProviderCapabilityQuarantined": ProviderCapabilityQuarantined,
     "ProviderCapabilityQuarantineReleased": ProviderCapabilityQuarantineReleased,
@@ -141,6 +145,8 @@ EVENT_VERSION_MAP: dict[str, int] = {
     # Capability enforcement
     "CapabilityViolationDetected": 2,
     "EgressBlocked": 1,
+    "EgressPolicyCleared": 1,
+    "EgressPolicySet": 1,
     "EgressPolicyViolationObserved": 1,
     "McpServerCapabilityQuarantined": 1,
     "McpServerCapabilityQuarantineReleased": 1,

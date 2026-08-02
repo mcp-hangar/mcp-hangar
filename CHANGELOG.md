@@ -7,6 +7,11 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Fixed
+
+- **core:** the event-serializer round-trip test now covers every registered type. It was `@given(sampled_from(EVENT_TYPE_MAP))` with `max_examples=17` against a 42-entry map, so a single run exercised at most 17 types and which ones depended on the seed -- a type registered without a sample passed on some runs and failed on others. It is now parametrized over all types, plus a check that every registered type has one
+- **core:** register `EgressPolicySet` and `EgressPolicyCleared` with the event serializer. Both were added as audit events for egress-policy changes but omitted from `_EVENT_CLASS_BY_TYPE`, so `deserialize` raised `EventSerializationError` on them -- the record was written and then unreadable, which is not an audit trail. Their siblings `EgressBlocked` and `EgressPolicyViolationObserved` were already registered
+
 ### Security
 
 - **core:** authorize the REST/WebSocket surface from one route-driven chokepoint. Only `mcp_servers.py` and `admin_tools.py` ever called the per-handler guard, so `/config`, `/discovery`, `/groups`, `/sessions`, `/tools`, the `/approvals` reads and the whole `/auth` subtree -- API-key minting, role assignment, tool-access policy -- were authenticated but made no authorization decision. Any principal holding any valid credential, including the operator's `X-API-Key`, could `POST /api/auth/roles/assign` and grant itself `admin`; the shipped Helm charts render no Ingress, so nothing fronted the API. Authorization is now resolved from the route via a declarative table, and a route absent from it is denied, so a new endpoint is unreachable until someone decides who may call it
