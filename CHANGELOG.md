@@ -7,6 +7,25 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Security
+
+- **core:** authorize the REST/WebSocket surface from one route-driven chokepoint. Only `mcp_servers.py` and `admin_tools.py` ever called the per-handler guard, so `/config`, `/discovery`, `/groups`, `/sessions`, `/tools`, the `/approvals` reads and the whole `/auth` subtree -- API-key minting, role assignment, tool-access policy -- were authenticated but made no authorization decision. Any principal holding any valid credential, including the operator's `X-API-Key`, could `POST /api/auth/roles/assign` and grant itself `admin`; the shipped Helm charts render no Ingress, so nothing fronted the API. Authorization is now resolved from the route via a declarative table, and a route absent from it is denied, so a new endpoint is unreachable until someone decides who may call it
+- **core:** `/mcp_servers/{id}/l7_policy` now requires `policy:write`, not `mcp_servers:write`. It is the operator's channel for compiled `MCPEgressPolicy` objects (ADR-013), and `mcp_servers:write` is held by `developer`, so a developer token could clear a compiled egress policy. `policy:write` was defined, granted to admin only, and enforced nowhere. **Breaking:** `provider-admin` gained `mcp_servers:read` + `policy:write` and is the least-privilege home for an operator key; an operator running a `developer` key stops delivering policy, silently -- the CRD still reports `Compiled`
+- **core:** `POST /api/config/reload` requires `config:reload` and no longer accepts a caller-supplied `config_path`. Reload loads whatever path it is given and an `mcp_servers` entry carries `command`/`args`, so the old behaviour was a remote "load an arbitrary file and start what it describes" primitive. A request still sending the field now gets `422` rather than being silently ignored
+- **core:** OPA's verdict is required to be a boolean rather than merely truthy. Rego rules commonly return an object or a string, and every such shape was read as allow -- including `{"result": "deny"}`, which granted access while saying the opposite. A non-boolean verdict is now a denial, and a missing `result` key (an undefined rule, e.g. a wrong `policy_path`) is reported distinctly. **Breaking:** a policy returning anything but a bare boolean flips from allowing everything to denying everything
+- **core:** a partial tool-access-policy update no longer drops the consent gate. `SetToolAccessPolicyCommand` carries only allow/deny lists, so rebuilding the policy from it discarded `approval_list`, `approval_timeout_seconds` and `approval_channel` -- and the enforcement path reads the same resolver, so a plain "add one deny pattern" call silently un-gated every tool requiring human approval
+- **core:** approval arguments are redacted by value, not only by key name, so a secret under an innocuous key no longer reaches the SQLite record or the REST DTO. The dispatch-time integrity hash moved to the raw arguments, because two different secrets redact to the same marker and would otherwise hash identically. **Breaking:** approvals pending across the upgrade fail revalidation and must be re-requested
+- **core:** a misspelled `tool_access.mode` stops the server instead of resolving to `egress` with a warning, which handed a deployment that intended `front_door` the permissive topology. An absent key still means `egress`. **Breaking** for a config with a typo in that key
+- **core:** an unknown `arguments.secretPatterns` group is rejected when the L7 policy is parsed. It used to be skipped at scan time, and the docstring deferred to CRD validation that does not exist -- the CRD declares the field as a plain string array with no enum -- so a misspelled group left the policy reporting as enforcing with that detector off
+
+### Added
+
+- **core:** `EgressPolicySet` and `EgressPolicyCleared` domain events. `SetL7PolicyHandler` took an event bus and never published to it, so changing what the enforcement plane blocks left no audit trail
+
+### Fixed
+
+- **core:** the authorization chokepoint resolves the route against `root_path`. Starlette does not rewrite `scope["path"]` under a `Mount`, and the served application mounts the REST router at `/api`, so a table keyed on the raw path matched nothing and -- the default being deny -- would have rejected every REST call on the app `serve --http` serves
+
 ## [2.1.1](https://github.com/mcp-hangar/mcp-hangar/compare/v2.1.0...v2.1.1) (2026-08-01)
 
 Two security fixes from red-teaming the 2.1.0 release on a live cluster. Both are fail-closed and confined: the JWT change only widens detection, and the tenant scoping is inert outside multi-tenancy.

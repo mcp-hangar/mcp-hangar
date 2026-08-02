@@ -30,7 +30,7 @@ is the canonical one: <https://mcp-hangar.io/upgrade/#upgrade-to-212>.
 
 ---
 
-# Upgrading to MCP Hangar v1.0
+## Upgrading to MCP Hangar v1.0
 
 This guide covers upgrading from v0.12.x (or earlier) to v1.0.0. If you are
 upgrading from a version older than v0.4.0, read every section. If you are
