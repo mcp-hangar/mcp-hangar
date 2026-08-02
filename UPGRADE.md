@@ -1,8 +1,9 @@
 # Upgrading MCP Hangar
 
-## 2.1.2 — action required before you roll out
+## 2.2.0 — action required before you roll out
 
-2.1.2 is a security release and is **not** a drop-in patch. Three things can
+2.2.0 is a security release. It is a minor rather than a patch because it
+changes behaviour that working deployments rely on. Three things can
 break a working deployment, and two of them fail silently:
 
 1. **Operator API key.** `POST`/`DELETE /api/mcp_servers/{id}/l7_policy` now
@@ -26,7 +27,7 @@ Also changed: REST authorization is enforced on every route (`/config`,
 approvals pending across the upgrade are refused and must be re-requested.
 
 The full guide, with the role-compatibility table and the per-item rationale,
-is the canonical one: <https://mcp-hangar.io/upgrade/#upgrade-to-212>.
+is the canonical one: <https://mcp-hangar.io/upgrade/#upgrade-to-220>.
 
 ---
 
