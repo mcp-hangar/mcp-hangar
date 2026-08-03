@@ -158,7 +158,48 @@ from .aliases import (
     ProviderLoadFailed,
 )
 
+
+def _legacy_event_type_names() -> dict[str, str]:
+    """Map each deprecated event-type name to the name that supersedes it.
+
+    The `provider` -> `mcp_server` rename (2026-04-22) landed after v1.0.1, so
+    event stores written by any earlier release hold rows typed `ProviderStarted`,
+    `ProviderDiscovered` and so on. Replaying such a row has to produce the
+    modern class, and its schema version has to be looked up under the modern
+    name, or the row silently misses both its handlers and its upcasters.
+
+    Derived rather than hand-listed: the aliases come in two shapes -- subclasses
+    (`ProviderStarted(McpServerStarted)`) and plain assignments
+    (`ProviderHotLoaded = McpServerHotLoaded`) -- and a hand-written table would
+    drift the moment one is added or retired. `test_legacy_event_names` pins the
+    result against the full alias inventory.
+    """
+    names: dict[str, str] = {}
+    for exported_name, obj in list(globals().items()):
+        if not (isinstance(obj, type) and issubclass(obj, DomainEvent) and obj is not DomainEvent):
+            continue
+        if obj.__name__ != exported_name:
+            # An assignment alias: the name it is bound to is not its own.
+            names[exported_name] = obj.__name__
+        else:
+            base = obj.__mro__[1]
+            if base is not DomainEvent and issubclass(base, DomainEvent):
+                names[exported_name] = base.__name__
+    return names
+
+
+LEGACY_EVENT_TYPE_NAMES: dict[str, str] = _legacy_event_type_names()
+"""Deprecated event-type name -> the name that supersedes it. See above."""
+
+
+def canonical_event_type(event_type: str) -> str:
+    """Resolve a possibly-deprecated event-type name to the current one."""
+    return LEGACY_EVENT_TYPE_NAMES.get(event_type, event_type)
+
+
 __all__ = [
+    "LEGACY_EVENT_TYPE_NAMES",
+    "canonical_event_type",
     "ProviderLoadFailed",
     "ProviderLoadAttempted",
     "ProviderHotUnloaded",

@@ -22,6 +22,10 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Fixed
+
+- **core:** events written before the `provider` -> `mcp_server` rename now reach their handlers again. The rename landed after v1.0.1, so event stores from any of the eight earlier releases hold rows typed `ProviderStarted`, `ProviderDiscovered` and so on -- and replaying one was a silent no-op for every consumer. Two layers dropped them independently: the serializer resolved those type names to the deprecated alias *classes* and looked their schema version up under a key no upcaster is registered against, and the event bus dispatched on the exact class, so a `ProviderStarted` -- a subclass of `McpServerStarted` -- matched none of the handlers registered against the modern class. No error and no warning, just a `handlers_count=0` debug line. Legacy type names now resolve to the current class and version key, new writes use the current name, and bus dispatch walks the class hierarchy so a subclass event reaches base-class handlers exactly once
+
 ### Changed
 
 - **core:** `domain/events.py` is now a package. The single 2197-line module held 108 event classes spanning every bounded context at once, so any change to it touched a file 141 other modules import. It is split into thirteen context modules -- lifecycle, invocation, tasks, health, discovery, auth, operations, administration, enforcement, analysis, approvals, interceptors -- plus the legacy aliases, all re-exported from `__init__` so no import path changes. A guard test asserts the re-export surface covers every class defined under the package, because a forgotten re-export otherwise surfaces as an `ImportError` in production and as a silently missing type in the event serializer's class map

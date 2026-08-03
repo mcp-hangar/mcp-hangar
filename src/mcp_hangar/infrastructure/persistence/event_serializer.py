@@ -22,10 +22,9 @@ from mcp_hangar.domain.events import (
     EgressPolicyViolationObserved,
     HealthCheckFailed,
     HealthCheckPassed,
-    PolicyPushRejected,
     McpServerApproved,
-    McpServerCapabilityQuarantined,
     McpServerCapabilityQuarantineReleased,
+    McpServerCapabilityQuarantined,
     McpServerDegraded,
     McpServerDiscovered,
     McpServerDiscoveryConfigChanged,
@@ -35,18 +34,7 @@ from mcp_hangar.domain.events import (
     McpServerStarted,
     McpServerStateChanged,
     McpServerStopped,
-    ProviderApproved,
-    ProviderCapabilityQuarantined,
-    ProviderCapabilityQuarantineReleased,
-    ProviderDegraded,
-    ProviderDiscovered,
-    ProviderDiscoveryConfigChanged,
-    ProviderDiscoveryLost,
-    ProviderIdleDetected,
-    ProviderQuarantined,
-    ProviderStarted,
-    ProviderStateChanged,
-    ProviderStopped,
+    PolicyPushRejected,
     ToolApprovalDenied,
     ToolApprovalExpired,
     ToolApprovalGranted,
@@ -54,6 +42,7 @@ from mcp_hangar.domain.events import (
     ToolInvocationCompleted,
     ToolInvocationFailed,
     ToolInvocationRequested,
+    canonical_event_type,
 )
 from mcp_hangar.logging_config import get_logger
 
@@ -67,7 +56,7 @@ EVENT_TYPE_MAP: dict[str, type[DomainEvent]] = {
     "McpServerStopped": McpServerStopped,
     "McpServerDegraded": McpServerDegraded,
     "McpServerStateChanged": McpServerStateChanged,
-    "ProviderIdleDetected": ProviderIdleDetected,
+    "McpServerIdleDetected": McpServerIdleDetected,
     # Circuit Breaker
     "CircuitBreakerStateChanged": CircuitBreakerStateChanged,
     # Tool Invocation
@@ -78,11 +67,11 @@ EVENT_TYPE_MAP: dict[str, type[DomainEvent]] = {
     "HealthCheckPassed": HealthCheckPassed,
     "HealthCheckFailed": HealthCheckFailed,
     # Discovery
-    "ProviderDiscovered": ProviderDiscovered,
-    "ProviderDiscoveryLost": ProviderDiscoveryLost,
-    "ProviderDiscoveryConfigChanged": ProviderDiscoveryConfigChanged,
-    "ProviderQuarantined": ProviderQuarantined,
-    "ProviderApproved": ProviderApproved,
+    "McpServerDiscovered": McpServerDiscovered,
+    "McpServerDiscoveryLost": McpServerDiscoveryLost,
+    "McpServerDiscoveryConfigChanged": McpServerDiscoveryConfigChanged,
+    "McpServerQuarantined": McpServerQuarantined,
+    "McpServerApproved": McpServerApproved,
     "DiscoveryCycleCompleted": DiscoveryCycleCompleted,
     "DiscoverySourceHealthChanged": DiscoverySourceHealthChanged,
     # Capability enforcement
@@ -91,8 +80,8 @@ EVENT_TYPE_MAP: dict[str, type[DomainEvent]] = {
     "EgressPolicyCleared": EgressPolicyCleared,
     "EgressPolicySet": EgressPolicySet,
     "EgressPolicyViolationObserved": EgressPolicyViolationObserved,
-    "ProviderCapabilityQuarantined": ProviderCapabilityQuarantined,
-    "ProviderCapabilityQuarantineReleased": ProviderCapabilityQuarantineReleased,
+    "McpServerCapabilityQuarantined": McpServerCapabilityQuarantined,
+    "McpServerCapabilityQuarantineReleased": McpServerCapabilityQuarantineReleased,
     # Policy push
     "PolicyPushRejected": PolicyPushRejected,
     # Approval Gate
@@ -102,21 +91,9 @@ EVENT_TYPE_MAP: dict[str, type[DomainEvent]] = {
     "ToolApprovalExpired": ToolApprovalExpired,
 }
 
-_EVENT_CLASS_BY_TYPE: dict[str, type[DomainEvent]] = {
-    **EVENT_TYPE_MAP,
-    "ProviderStarted": ProviderStarted,
-    "ProviderStopped": ProviderStopped,
-    "ProviderDegraded": ProviderDegraded,
-    "ProviderStateChanged": ProviderStateChanged,
-    "McpServerIdleDetected": McpServerIdleDetected,
-    "McpServerDiscovered": McpServerDiscovered,
-    "McpServerDiscoveryLost": McpServerDiscoveryLost,
-    "McpServerDiscoveryConfigChanged": McpServerDiscoveryConfigChanged,
-    "McpServerQuarantined": McpServerQuarantined,
-    "McpServerApproved": McpServerApproved,
-    "McpServerCapabilityQuarantined": McpServerCapabilityQuarantined,
-    "McpServerCapabilityQuarantineReleased": McpServerCapabilityQuarantineReleased,
-}
+# Kept as a distinct name because `register_event_type` and the fuzz suite both
+# reference it; every deserialisable class now lives in EVENT_TYPE_MAP itself.
+_EVENT_CLASS_BY_TYPE: dict[str, type[DomainEvent]] = EVENT_TYPE_MAP
 
 EVENT_VERSION_MAP: dict[str, int] = {
     # McpServer Lifecycle
@@ -209,7 +186,10 @@ class EventSerializer:
         Raises:
             EventSerializationError: If serialization fails.
         """
-        event_type = type(event).__name__
+        # Written under the current name even when the caller published one of the
+        # deprecated `Provider*` aliases, so the store does not keep accumulating
+        # rows that need translating on the way back out.
+        event_type = canonical_event_type(type(event).__name__)
 
         try:
             version = get_current_version(event_type)
@@ -237,7 +217,15 @@ class EventSerializer:
         Raises:
             EventSerializationError: If deserialization fails.
         """
-        event_class = _EVENT_CLASS_BY_TYPE.get(event_type)
+        # Stores written before the provider -> mcp_server rename (v1.0.1 and
+        # earlier) hold rows typed `ProviderStarted`, `ProviderDiscovered` and so
+        # on. Resolving to the current name here means such a row reconstructs
+        # into the class handlers actually subscribe to, and looks its schema
+        # version up under the key the upcasters are registered against --
+        # neither of which happened while the alias classes were mapped
+        # separately.
+        canonical_type = canonical_event_type(event_type)
+        event_class = _EVENT_CLASS_BY_TYPE.get(canonical_type)
         if not event_class:
             raise EventSerializationError(
                 event_type,
@@ -248,11 +236,11 @@ class EventSerializer:
             payload = json.loads(data)
 
             version = payload.pop("_version", 1)
-            current_version = get_current_version(event_type)
+            current_version = get_current_version(canonical_type)
 
             if version < current_version:
                 version, payload = self._upcaster_chain.upcast(
-                    event_type,
+                    canonical_type,
                     version,
                     payload,
                     current_version=current_version,
