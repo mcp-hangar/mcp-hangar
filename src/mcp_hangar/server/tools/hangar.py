@@ -85,7 +85,7 @@ def hangar_list(state_filter: str | None = None) -> dict:
     }
 
 
-def register_hangar_tools(mcp: FastMCP) -> None:
+def register_hangar_tools(mcp: FastMCP) -> None:  # noqa: C901 -- baseline CC=18; split before extending
     """Register control plane management tools with MCP server."""
 
     @mcp.tool(name="hangar_list")

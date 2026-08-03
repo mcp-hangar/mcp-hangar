@@ -279,7 +279,7 @@ class ContainerLauncher(McpServerLauncher):
                     value=volume,
                 )
 
-    def _build_command(self, config: ContainerConfig) -> list[str]:
+    def _build_command(self, config: ContainerConfig) -> list[str]:  # noqa: C901 -- baseline CC=21; split before extending
         """
         Build container run command with security options.
 

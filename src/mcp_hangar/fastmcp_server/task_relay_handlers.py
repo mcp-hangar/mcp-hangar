@@ -306,7 +306,7 @@ def _derive_input_key(result: dict[str, Any]) -> str:
     return hashlib.sha256(basis.encode("utf-8")).hexdigest()[:32]
 
 
-def register_task_relay_handlers(
+def register_task_relay_handlers(  # noqa: C901 -- baseline CC=33; split before extending
     mcp: Any,
     store: GovernedTaskStore,
     consent_gate: TaskConsentGate,

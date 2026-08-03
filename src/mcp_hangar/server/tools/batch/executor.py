@@ -430,7 +430,7 @@ class BatchExecutor:
         result = self._mutator_pipeline.execute(ctx)
         return result.payload
 
-    def execute(
+    def execute(  # noqa: C901 -- baseline CC=17; split before extending
         self,
         batch_id: str,
         calls: list[CallSpec],
@@ -803,7 +803,7 @@ class BatchExecutor:
                 mark_span_error(span, result.error)
             return result
 
-    def _execute_call_inner(
+    def _execute_call_inner(  # noqa: C901 -- baseline CC=36; split before extending
         self,
         call: CallSpec,
         cancel_event: threading.Event,

@@ -10,7 +10,7 @@ from ...state import GROUPS
 from .models import MAX_CALLS_PER_BATCH, MAX_CONCURRENCY_LIMIT, MAX_TIMEOUT, ValidationError
 
 
-def validate_batch(
+def validate_batch(  # noqa: C901 -- baseline CC=16; split before extending
     calls: list[dict[str, Any]],
     max_concurrency: int,
     timeout: float,

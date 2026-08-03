@@ -490,7 +490,7 @@ class RichToolInvocationError(HangarError):
 
         return hints
 
-    def __str__(self) -> str:
+    def __str__(self) -> str:  # noqa: C901 -- baseline CC=16; split before extending
         """Formatuj blad z pelnym kontekstem."""
         lines = [f"\n{self.__class__.__name__}: {self.message}"]
 
