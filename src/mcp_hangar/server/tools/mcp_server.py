@@ -170,7 +170,7 @@ def _get_tools_for_mcp_server(mcp_server: str) -> dict[str, Any]:
 # =============================================================================
 
 
-def register_mcp_server_tools(mcp: FastMCP) -> None:
+def register_mcp_server_tools(mcp: FastMCP) -> None:  # noqa: C901 -- baseline CC=16; split before extending
     """Register mcp_server interaction tools with MCP server.
 
     Registers:

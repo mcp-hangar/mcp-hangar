@@ -32,7 +32,7 @@ def _origin_allowed(websocket: WebSocket) -> bool:
     return origin in allowed_origins
 
 
-async def ws_events_endpoint(websocket: WebSocket) -> None:
+async def ws_events_endpoint(websocket: WebSocket) -> None:  # noqa: C901 -- baseline CC=23; split before extending
     """Stream domain events to a connected client.
 
     Protocol:

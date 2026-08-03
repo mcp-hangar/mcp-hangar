@@ -236,7 +236,7 @@ def _load_group_members(
             saga.register_member(member_id, group_id)
 
 
-def _load_mcp_server_config(mcp_server_id: str, spec_dict: dict[str, Any]) -> McpServer:
+def _load_mcp_server_config(mcp_server_id: str, spec_dict: dict[str, Any]) -> McpServer:  # noqa: C901 -- baseline CC=37; split before extending
     """Load a single mcp_server configuration."""
     from ..domain.model.mcp_server_config import parse_tools_access_config
     from ..domain.services import get_tool_access_resolver

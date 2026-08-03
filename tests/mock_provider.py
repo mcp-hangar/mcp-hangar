@@ -4,7 +4,7 @@ import json
 import sys
 
 
-def main():
+def main():  # noqa: C901 -- baseline CC=16; test fixture, split before extending
     """Run a simple JSON-RPC server for testing."""
     while True:
         try:

@@ -285,7 +285,7 @@ def _show_completion_summary(
 
 
 @app.callback(invoke_without_command=True)
-def init_command(
+def init_command(  # noqa: C901 -- baseline CC=49; split before extending
     ctx: typer.Context,
     non_interactive: Annotated[
         bool,

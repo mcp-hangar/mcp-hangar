@@ -84,7 +84,7 @@ class MetricsEventHandler:
         self._metrics: dict[str, McpServerMetrics] = defaultdict(lambda: McpServerMetrics(""))
         self._started_at = time.time()
 
-    def handle(self, event: DomainEvent) -> None:
+    def handle(self, event: DomainEvent) -> None:  # noqa: C901 -- baseline CC=20; split before extending
         """
         Handle a domain event by updating metrics.
 

@@ -302,7 +302,7 @@ class Metrics:
 # ---------------------------------------------------------------------------
 
 
-def set_governance_attributes(
+def set_governance_attributes(  # noqa: C901 -- baseline CC=19; split before extending
     span: Any,
     *,
     mcp_server_id: str,
