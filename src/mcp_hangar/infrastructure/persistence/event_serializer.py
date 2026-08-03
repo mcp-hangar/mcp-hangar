@@ -279,26 +279,18 @@ class EventSerializer:
     def _from_dict(self, cls: type[DomainEvent], data: dict[str, Any]) -> DomainEvent:
         """Reconstruct event from dictionary.
 
-        Handles the special case of DomainEvent base class initialization
-        by pre-setting event_id and occurred_at if present in data.
+        Identity restoration goes through DomainEvent.rehydrate so the "patch
+        event_id after construction" wart lives in one place rather than here
+        and in the event-sourced repository.
         """
-        # Extract base class fields
         event_id = data.pop("event_id", None)
         occurred_at = data.pop("occurred_at", None)
 
+        # Event dataclasses have different constructor signatures; we instantiate
+        # dynamically from the payload. DomainEvent.rehydrate restores the stored
+        # identity -- replay must not mint a new event_id or re-date the event.
         ctor_kwargs = self._filter_constructor_kwargs(cls, data)
-
-        # Create instance with remaining data.
-        # Event dataclasses have different constructor signatures; we instantiate dynamically from payload.
-        instance = cls(**ctor_kwargs)
-
-        # Restore original values if present
-        if event_id is not None:
-            instance.event_id = event_id
-        if occurred_at is not None:
-            instance.occurred_at = occurred_at
-
-        return instance
+        return cls.rehydrate(event_id, occurred_at, **ctor_kwargs)
 
     def _filter_constructor_kwargs(self, cls: type[DomainEvent], data: dict[str, Any]) -> dict[str, Any]:
         """Filter payload keys to those accepted by the event constructor.
