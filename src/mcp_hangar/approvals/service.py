@@ -207,7 +207,7 @@ class ApprovalGateService:
 
             requested_event = ToolApprovalRequested(
                 approval_id=approval_id,
-                provider_id=resolved_provider_id,
+                mcp_server_id=resolved_provider_id,
                 tool_name=tool_name,
                 arguments_hash=args_hash,
                 channel=policy.approval_channel,
@@ -247,7 +247,7 @@ class ApprovalGateService:
                 await self._publish(
                     ToolApprovalGranted(
                         approval_id=approval_id,
-                        provider_id=resolved_provider_id,
+                        mcp_server_id=resolved_provider_id,
                         tool_name=tool_name,
                         decided_by=decided_by,
                         decided_at=decided_at.isoformat(),
@@ -266,7 +266,7 @@ class ApprovalGateService:
                 await self._publish(
                     ToolApprovalDenied(
                         approval_id=approval_id,
-                        provider_id=resolved_provider_id,
+                        mcp_server_id=resolved_provider_id,
                         tool_name=tool_name,
                         decided_by=decided_by,
                         decided_at=decided_at.isoformat(),
@@ -283,7 +283,7 @@ class ApprovalGateService:
             await self._publish(
                 ToolApprovalExpired(
                     approval_id=approval_id,
-                    provider_id=resolved_provider_id,
+                    mcp_server_id=resolved_provider_id,
                     tool_name=tool_name,
                     expired_at=expired_at.isoformat(),
                 )
