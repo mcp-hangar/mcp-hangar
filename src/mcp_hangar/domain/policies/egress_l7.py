@@ -24,7 +24,7 @@ this module is the engine and its contract.
 from __future__ import annotations
 
 from dataclasses import dataclass, field
-from enum import Enum
+from enum import StrEnum
 from fnmatch import fnmatchcase
 import json
 import re
@@ -33,7 +33,7 @@ from typing import Any
 from ..security.redactor import OutputRedactor
 
 
-class ToolAction(str, Enum):
+class ToolAction(StrEnum):
     """Outcome of evaluating a tool call against a policy."""
 
     ALLOW = "allow"
@@ -41,7 +41,7 @@ class ToolAction(str, Enum):
     REQUIRE_APPROVAL = "require_approval"
 
 
-class PolicyMode(str, Enum):
+class PolicyMode(StrEnum):
     """How a policy's verdict is applied (ADR-013).
 
     - ``ENFORCE`` blocks: a DENY/REQUIRE_APPROVAL verdict stops the call.

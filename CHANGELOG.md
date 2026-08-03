@@ -7,6 +7,11 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Changed
+
+- **core:** CI and developers now lint with the same ruff. The version was pinned twice -- `RUFF_VERSION` in `ci-core.yml` at 0.14.13, and `ruff>=0.3.0` in the dev dependencies, an open floor that resolved to whatever was newest locally. Rules that fired on a developer's machine were therefore invisible in CI; two `UP042` findings sat unseen for exactly that reason. The dev dependency is now pinned and is the single source, CI installs from it, and dependabot bumps it
+- **core:** `ToolAction` and `PolicyMode` become `StrEnum`. Wire values are unchanged (`allow`/`deny`/`require_approval`, `Audit`/`Enforce`) and are pinned by a test, since the operator compiles `MCPEgressPolicy` objects against exactly those strings. `str()` on a member now yields the value rather than `ToolAction.DENY`; nothing relied on the old form
+
 ### Fixed
 
 - **core:** the decision-path coverage floor for `server/tools/batch/executor.py` was measured on CPython 3.13 but enforced on 3.11, where branch-arc counts differ (85.38 vs 85.06) -- so the gate failed on its first CI run. Floors now come from the Python the gate runs on, and the config says so

@@ -23,9 +23,6 @@ concurrency:
   group: ${{ github.workflow }}-${{ github.ref }}
   cancel-in-progress: true
 
-env:
-  RUFF_VERSION: "0.14.13"
-
 # Read-only by default: without this the workflow inherits the repository
 # default, which is write on nearly everything. Nothing here writes.
 permissions:
@@ -43,9 +40,11 @@ jobs:
           python-version: "3.11"
 
       - name: Install dependencies
-        run: |
-          pip install ruff==${{ env.RUFF_VERSION }}
-          pip install -e ".[dev]"
+        # ruff comes from the pinned dev dependency, not a version pinned here.
+        # Two pins meant CI and developers ran different ruffs, so rules that
+        # fired locally were invisible in CI -- two UP042 findings sat unseen
+        # for exactly that reason.
+        run: pip install -e ".[dev]"
 
       - name: Ruff check (lint + isort)
         run: ruff check src/mcp_hangar
