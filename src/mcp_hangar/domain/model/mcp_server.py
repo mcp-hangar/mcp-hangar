@@ -8,10 +8,10 @@ from ...logging_config import get_logger
 from ...protocol import HANGAR_CLIENT_INFO, SESSION_TERMINATED_REASON, SUPPORTED_PROTOCOL_VERSION
 
 if TYPE_CHECKING:
-    from ...infrastructure.lock_hierarchy import TrackedLock
     from ..policies.egress_l7 import L7Policy
 
 from ..contracts.log_buffer import IMcpServerLogBuffer
+from ...lock_hierarchy import LockLevel, TrackedLock
 from ..contracts.launcher import TransportClient
 from ..contracts.metrics_publisher import IMetricsPublisher, get_default_metrics_publisher
 from ..value_objects.capabilities import McpServerCapabilities, ViolationSeverity, ViolationType
@@ -322,19 +322,17 @@ class McpServer(AggregateRoot):
         )
 
     @staticmethod
-    def _create_lock(mcp_server_id: str) -> "TrackedLock | threading.RLock":
-        """Create lock with hierarchy tracking.
+    def _create_lock(mcp_server_id: str) -> TrackedLock:
+        """Create the aggregate's lock, registered in the global ordering.
 
-        Uses runtime import to avoid circular dependency between
-        domain and infrastructure layers.
+        The tracking is not optional: a bare RLock here would take this
+        aggregate out of the hierarchy and let a deadlock through undetected.
+        This used to sit in a `try/except ImportError` that fell back to exactly
+        that -- an except branch that could never run, since the module ships in
+        the package, quietly guarding against a failure mode that would have
+        been silent if it ever did.
         """
-        try:
-            from ...infrastructure.lock_hierarchy import LockLevel, TrackedLock
-
-            return TrackedLock(LockLevel.PROVIDER, f"McpServer:{mcp_server_id}")
-        except ImportError:
-            # Fallback for testing or isolated domain usage
-            return threading.RLock()
+        return TrackedLock(LockLevel.PROVIDER, f"McpServer:{mcp_server_id}")
 
     # --- Properties ---
 

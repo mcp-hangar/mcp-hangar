@@ -33,7 +33,7 @@ from .launchers import (
     McpServerLauncher,
     SubprocessLauncher,
 )
-from .lock_hierarchy import (
+from ..lock_hierarchy import (
     clear_thread_locks,
     get_current_thread_locks,
     LockLevel,

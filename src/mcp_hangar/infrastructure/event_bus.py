@@ -12,7 +12,7 @@ from mcp_hangar.domain.contracts.event_store import IEventStore, NullEventStore
 from mcp_hangar.domain.contracts.hook_subscriber import IHookSubscriber
 from mcp_hangar.domain.events import DomainEvent
 from mcp_hangar.domain.value_objects.hook import Hook, HookPhase
-from mcp_hangar.infrastructure.lock_hierarchy import LockLevel, TrackedLock
+from mcp_hangar.lock_hierarchy import LockLevel, TrackedLock
 from mcp_hangar.logging_config import get_logger
 from mcp_hangar.observability.tracing import get_tracer
 

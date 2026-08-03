@@ -1304,7 +1304,7 @@ class TestLockHierarchyEnforcement:
     """TrackedLock detects out-of-order acquisition."""
 
     def test_correct_order_succeeds(self):
-        from mcp_hangar.infrastructure.lock_hierarchy import LockLevel, TrackedLock, clear_thread_locks
+        from mcp_hangar.lock_hierarchy import LockLevel, TrackedLock, clear_thread_locks
 
         clear_thread_locks()
         lock_a = TrackedLock(LockLevel.PROVIDER, "test-provider", reentrant=False)
@@ -1319,7 +1319,7 @@ class TestLockHierarchyEnforcement:
         clear_thread_locks()
 
     def test_wrong_order_raises(self):
-        from mcp_hangar.infrastructure.lock_hierarchy import (
+        from mcp_hangar.lock_hierarchy import (
             LockLevel,
             LockOrderViolation,
             TrackedLock,
@@ -1339,7 +1339,7 @@ class TestLockHierarchyEnforcement:
         clear_thread_locks()
 
     def test_reentrant_lock_allows_same_level(self):
-        from mcp_hangar.infrastructure.lock_hierarchy import LockLevel, TrackedLock, clear_thread_locks
+        from mcp_hangar.lock_hierarchy import LockLevel, TrackedLock, clear_thread_locks
 
         clear_thread_locks()
         lock = TrackedLock(LockLevel.PROVIDER, "test-reentrant", reentrant=True)
@@ -1353,7 +1353,7 @@ class TestLockHierarchyEnforcement:
         clear_thread_locks()
 
     def test_context_manager_protocol(self):
-        from mcp_hangar.infrastructure.lock_hierarchy import LockLevel, TrackedLock, clear_thread_locks
+        from mcp_hangar.lock_hierarchy import LockLevel, TrackedLock, clear_thread_locks
 
         clear_thread_locks()
         lock = TrackedLock(LockLevel.PROVIDER, "test-ctx", reentrant=True)
@@ -1363,7 +1363,7 @@ class TestLockHierarchyEnforcement:
         clear_thread_locks()
 
     def test_violation_contains_diagnostic_info(self):
-        from mcp_hangar.infrastructure.lock_hierarchy import (
+        from mcp_hangar.lock_hierarchy import (
             LockLevel,
             LockOrderViolation,
             TrackedLock,

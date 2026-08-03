@@ -1,7 +1,6 @@
 """Event Sourced McpServer aggregate - mcp_server that rebuilds state from events."""
 
 from dataclasses import dataclass
-import threading
 from typing import Any
 
 from ...logging_config import get_logger
@@ -156,8 +155,11 @@ class EventSourcedMcpServer(McpServer):
         self._meta: dict[str, Any] = {}
         self._last_used: float = 0.0
 
-        # Thread safety
-        self._lock = threading.RLock()
+        # Thread safety. The tracked lock, like the parent aggregate: this used
+        # to be a bare RLock, which put every event-sourced McpServer outside
+        # the global lock ordering and made a deadlock involving one invisible
+        # to the hierarchy check. Surfaced by typing McpServer._create_lock.
+        self._lock = self._create_lock(mcp_server_id)
 
         # Event sourcing specific
         self._events_applied: int = 0
