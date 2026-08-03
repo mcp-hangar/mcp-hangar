@@ -69,6 +69,7 @@ dev = [
     # locally stays invisible in CI. Dependabot bumps it (uv ecosystem), and CI
     # follows automatically because it installs from here.
     "ruff==0.15.22",
+    "import-linter==2.13",
     "mypy>=1.8.0",
     "hypothesis>=6.90.0",
     "jsonschema>=4.20.0",

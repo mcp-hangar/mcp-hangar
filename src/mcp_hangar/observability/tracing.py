@@ -659,10 +659,15 @@ def get_current_span_id() -> str | None:
 
 
 def _get_version() -> str:
-    """Get MCP Hangar version."""
-    try:
-        from mcp_hangar import __version__
+    """Get MCP Hangar version.
 
-        return __version__
-    except (ImportError, AttributeError):
+    Reads the installed distribution directly instead of importing
+    ``__version__`` off the package root, which would drag the whole public API
+    -- facade included -- into the tracing bootstrap just to label a resource.
+    """
+    try:
+        from importlib.metadata import PackageNotFoundError, version
+
+        return version("mcp-hangar")
+    except (ImportError, PackageNotFoundError):
         return "unknown"

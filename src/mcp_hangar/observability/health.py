@@ -356,12 +356,17 @@ class HealthEndpoint:
             return HealthStatus.HEALTHY
 
     def _get_version(self) -> str:
-        """Get MCP Hangar version."""
-        try:
-            from mcp_hangar import __version__
+        """Get MCP Hangar version.
 
-            return __version__
-        except (ImportError, AttributeError):
+        Reads the installed distribution directly rather than importing
+        ``__version__`` off the package root, which would pull the whole public
+        API into a health probe just to report a version string.
+        """
+        try:
+            from importlib.metadata import PackageNotFoundError, version
+
+            return version("mcp-hangar")
+        except (ImportError, PackageNotFoundError):
             return "unknown"
 
     def get_last_result(self, name: str) -> HealthCheckResult | None:
