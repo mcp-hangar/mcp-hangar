@@ -111,7 +111,7 @@ class TestChokepointIsArmedOnTheServedApp:
             json={"principal_id": "user:alice", "role_name": "admin"},
         )
         assert response.status_code == 403
-        assert response.json()["error"] == "access_denied"
+        assert response.json()["error"]["code"] == "AccessDeniedError"
 
     def test_config_reload_is_denied_to_non_admin(self, client_factory):
         client = client_factory("developer")
