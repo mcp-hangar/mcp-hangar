@@ -7,16 +7,8 @@ a single intent to mutate state. Handlers receive these via the command bus.
 from dataclasses import dataclass, field
 
 from ...domain.policies.egress_l7 import L7Policy
+from ...domain.value_objects.compat import resolve_legacy_mcp_server_id as _resolve_legacy_mcp_server_id
 from .commands import Command
-
-
-def _resolve_legacy_mcp_server_id(mcp_server_id: str | None, kwargs: dict[str, object]) -> str:
-    if mcp_server_id is not None:
-        return mcp_server_id
-    legacy_id = kwargs.pop("provider_id", None)
-    if isinstance(legacy_id, str):
-        return legacy_id
-    raise TypeError("Missing required argument: mcp_server_id")
 
 
 # =============================================================================

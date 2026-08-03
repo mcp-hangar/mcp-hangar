@@ -4,56 +4,33 @@
 
 from dataclasses import dataclass
 
-from ..value_objects.compat import (
-    resolve_legacy_mcp_server_id as _resolve_legacy_mcp_server_id,
-)
+from ..value_objects.compat import accepts_legacy_provider_id
 from .base import DomainEvent
 
 
 # Health Check Events
 
 
-@dataclass(init=False)
+@accepts_legacy_provider_id
+@dataclass
 class HealthCheckPassed(DomainEvent):
     """Published when a health check succeeds."""
 
     mcp_server_id: str
-    duration_ms: float
-
-    def __init__(self, mcp_server_id: str | None = None, duration_ms: float = 0.0, **kwargs: object):
-        self.mcp_server_id = _resolve_legacy_mcp_server_id(mcp_server_id, kwargs)
-        self.duration_ms = duration_ms
-        if kwargs:
-            unexpected = ", ".join(sorted(kwargs))
-            raise TypeError(f"Unexpected keyword argument(s): {unexpected}")
-        super().__init__()
+    duration_ms: float = 0.0
 
     def __post_init__(self):
         super().__init__()
 
 
-@dataclass(init=False)
+@accepts_legacy_provider_id
+@dataclass
 class HealthCheckFailed(DomainEvent):
     """Published when a health check fails."""
 
     mcp_server_id: str
-    consecutive_failures: int
-    error_message: str
-
-    def __init__(
-        self,
-        mcp_server_id: str | None = None,
-        consecutive_failures: int = 0,
-        error_message: str = "",
-        **kwargs: object,
-    ):
-        self.mcp_server_id = _resolve_legacy_mcp_server_id(mcp_server_id, kwargs)
-        self.consecutive_failures = consecutive_failures
-        self.error_message = error_message
-        if kwargs:
-            unexpected = ", ".join(sorted(kwargs))
-            raise TypeError(f"Unexpected keyword argument(s): {unexpected}")
-        super().__init__()
+    consecutive_failures: int = 0
+    error_message: str = ""
 
     def __post_init__(self):
         super().__init__()
