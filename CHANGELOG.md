@@ -24,6 +24,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Changed
 
+- **core:** `domain/events.py` is now a package. The single 2197-line module held 108 event classes spanning every bounded context at once, so any change to it touched a file 141 other modules import. It is split into thirteen context modules -- lifecycle, invocation, tasks, health, discovery, auth, operations, administration, enforcement, analysis, approvals, interceptors -- plus the legacy aliases, all re-exported from `__init__` so no import path changes. A guard test asserts the re-export surface covers every class defined under the package, because a forgotten re-export otherwise surfaces as an `ImportError` in production and as a silently missing type in the event serializer's class map
 - **core:** the ten `Provider*` alias events keep the legacy `provider_id` keyword through one decorator instead of ten hand-written constructors. The field assignment, required-argument check and unknown-keyword `TypeError` come back from the dataclass machinery, so they can no longer drift between classes -- which they had: three aliases had stopped accepting the modern `mcp_server_id` spelling entirely. `domain/events.py` loses 170 lines
 
 ### Fixed
