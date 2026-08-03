@@ -29,15 +29,15 @@ from mcp_hangar.domain.events import (
     HealthCheckFailed,
     HealthCheckPassed,
     PolicyPushRejected,
-    ProviderApproved,
-    ProviderCapabilityQuarantined,
-    ProviderCapabilityQuarantineReleased,
+    McpServerApproved,
+    McpServerCapabilityQuarantined,
+    McpServerCapabilityQuarantineReleased,
     McpServerDegraded,
-    ProviderDiscovered,
-    ProviderDiscoveryConfigChanged,
-    ProviderDiscoveryLost,
-    ProviderIdleDetected,
-    ProviderQuarantined,
+    McpServerDiscovered,
+    McpServerDiscoveryConfigChanged,
+    McpServerDiscoveryLost,
+    McpServerIdleDetected,
+    McpServerQuarantined,
     McpServerStarted,
     McpServerStateChanged,
     McpServerStopped,
@@ -72,7 +72,7 @@ _MINIMAL_EVENTS: dict[str, DomainEvent] = {
         reason="health",
     ),
     "McpServerStateChanged": McpServerStateChanged(mcp_server_id="p1", old_state="COLD", new_state="INITIALIZING"),
-    "ProviderIdleDetected": ProviderIdleDetected(mcp_server_id="p1", idle_duration_s=0.0, last_used_at=0.0),
+    "McpServerIdleDetected": McpServerIdleDetected(mcp_server_id="p1", idle_duration_s=0.0, last_used_at=0.0),
     "ToolInvocationRequested": ToolInvocationRequested(mcp_server_id="p1", tool_name="t", correlation_id="c1"),
     "ToolInvocationCompleted": ToolInvocationCompleted(
         mcp_server_id="p1",
@@ -91,27 +91,27 @@ _MINIMAL_EVENTS: dict[str, DomainEvent] = {
     ),
     "HealthCheckPassed": HealthCheckPassed(mcp_server_id="p1", duration_ms=0.0),
     "HealthCheckFailed": HealthCheckFailed(mcp_server_id="p1", consecutive_failures=1, error_message="e"),
-    "ProviderDiscovered": ProviderDiscovered(
+    "McpServerDiscovered": McpServerDiscovered(
         mcp_server_name="p1", source_type="filesystem", mode="subprocess", fingerprint="abc"
     ),
-    "ProviderDiscoveryLost": ProviderDiscoveryLost(
+    "McpServerDiscoveryLost": McpServerDiscoveryLost(
         mcp_server_name="p1",
         source_type="filesystem",
         reason="ttl_expired",
     ),
-    "ProviderDiscoveryConfigChanged": ProviderDiscoveryConfigChanged(
+    "McpServerDiscoveryConfigChanged": McpServerDiscoveryConfigChanged(
         mcp_server_name="p1",
         source_type="filesystem",
         old_fingerprint="a",
         new_fingerprint="b",
     ),
-    "ProviderQuarantined": ProviderQuarantined(
+    "McpServerQuarantined": McpServerQuarantined(
         mcp_server_name="p1",
         source_type="filesystem",
         reason="unknown_mode",
         validation_result="invalid",
     ),
-    "ProviderApproved": ProviderApproved(mcp_server_name="p1", source_type="filesystem", approved_by="auto"),
+    "McpServerApproved": McpServerApproved(mcp_server_name="p1", source_type="filesystem", approved_by="auto"),
     "DiscoveryCycleCompleted": DiscoveryCycleCompleted(
         discovered_count=0,
         registered_count=0,
@@ -156,12 +156,12 @@ _MINIMAL_EVENTS: dict[str, DomainEvent] = {
         mcp_server_id="p1",
         source="api",
     ),
-    "ProviderCapabilityQuarantined": ProviderCapabilityQuarantined(
+    "McpServerCapabilityQuarantined": McpServerCapabilityQuarantined(
         mcp_server_id="p1",
         reason="3 violations in 60s",
         violation_count=3,
     ),
-    "ProviderCapabilityQuarantineReleased": ProviderCapabilityQuarantineReleased(
+    "McpServerCapabilityQuarantineReleased": McpServerCapabilityQuarantineReleased(
         mcp_server_id="p1",
         released_by="ops@example.com",
     ),

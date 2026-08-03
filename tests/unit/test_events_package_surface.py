@@ -47,16 +47,17 @@ class TestEveryEventIsReachableFromThePackage:
             f"fails and the serializer cannot resolve them: {missing}"
         )
 
-    def test_all_matches_what_is_exported(self):
-        declared = set(events_pkg.__all__)
-        actual = _exported_event_classes()
-        # __all__ also carries the four legacy assignment aliases, which are not
-        # classes of their own -- they are names bound to existing classes.
-        alias_names = {"ProviderHotLoaded", "ProviderHotUnloaded", "ProviderLoadAttempted", "ProviderLoadFailed"}
-        assert actual - declared == set(), f"exported but absent from __all__: {sorted(actual - declared)}"
-        assert declared - actual - alias_names == set(), (
-            f"declared in __all__ but not exported: {sorted(declared - actual - alias_names)}"
-        )
+    def test_every_event_class_is_declared_in_all(self):
+        missing = sorted(_exported_event_classes() - set(events_pkg.__all__))
+        assert missing == [], f"exported but absent from __all__: {missing}"
+
+    def test_everything_in_all_actually_exists(self):
+        """`__all__` carries more than classes -- the assignment aliases, and the
+        legacy-name mapping and its lookup. Rather than exempting those by name,
+        which goes stale, check that every declared name resolves to something.
+        """
+        unresolved = [name for name in events_pkg.__all__ if not hasattr(events_pkg, name)]
+        assert unresolved == [], f"declared in __all__ but not defined: {unresolved}"
 
     def test_the_legacy_assignment_aliases_still_resolve(self):
         """Four renames kept as plain assignments; they must still point somewhere."""
