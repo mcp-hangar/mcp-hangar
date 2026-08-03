@@ -7,6 +7,10 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Fixed
+
+- **docs:** point `UPGRADE.md` at the upgrade guide's real URL. It linked `mcp-hangar.io/upgrade/`, which 404s -- the docs are served under `/docs/`. The fragment is dropped too: headings on that page carry no `id` attributes, so `#upgrade-to-220` resolved to nothing. The v2.2.0 release notes carried the same link and have been corrected in place
+
 ## [2.2.0](https://github.com/mcp-hangar/mcp-hangar/compare/v2.1.1...v2.2.0) (2026-08-02)
 
 Closes the REST authorization holes found by an audit against the project's technical-quality requirements, plus four fail-open defects found alongside them.

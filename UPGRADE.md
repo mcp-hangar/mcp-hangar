@@ -27,7 +27,7 @@ Also changed: REST authorization is enforced on every route (`/config`,
 approvals pending across the upgrade are refused and must be re-requested.
 
 The full guide, with the role-compatibility table and the per-item rationale,
-is the canonical one: <https://mcp-hangar.io/upgrade/#upgrade-to-220>.
+is the canonical one: <https://mcp-hangar.io/docs/upgrade/>.
 
 ---
 
