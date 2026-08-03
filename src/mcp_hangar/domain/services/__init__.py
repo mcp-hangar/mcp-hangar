@@ -6,7 +6,7 @@ from typing import TYPE_CHECKING
 
 # Re-export exception from canonical location for convenience
 from ..exceptions import McpServerStartError
-from ..contracts.launcher import IMcpServerLauncher, LaunchResult
+from ..contracts.launcher import IMcpServerLauncher, LaunchResult, TransportClient
 from .audit_service import AuditService
 from .error_diagnostics import collect_startup_diagnostics, get_suggestion_for_error
 from .image_builder import BuildConfig, get_image_builder, ImageBuilder
@@ -69,6 +69,7 @@ __all__ = [
     "AuditService",
     "IMcpServerLauncher",
     "LaunchResult",
+    "TransportClient",
     "McpServerLauncher",
     "SubprocessLauncher",
     "DockerLauncher",

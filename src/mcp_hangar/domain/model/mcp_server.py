@@ -12,6 +12,7 @@ if TYPE_CHECKING:
     from ..policies.egress_l7 import L7Policy
 
 from ..contracts.log_buffer import IMcpServerLogBuffer
+from ..contracts.launcher import TransportClient
 from ..contracts.metrics_publisher import IMetricsPublisher, get_default_metrics_publisher
 from ..value_objects.capabilities import McpServerCapabilities, ViolationSeverity, ViolationType
 from ..events import (
@@ -186,7 +187,10 @@ class McpServer(AggregateRoot):
         self._state = McpServerState.COLD
         self._health = HealthTracker(max_consecutive_failures=max_consecutive_failures)
         self._tools = ToolCatalog()
-        self._client: Any | None = None  # StdioClient or HttpClient
+        # Typed by the port rather than Any: the domain's whole use of a launched
+        # connection is is_alive/close/call, and until TransportClient existed the
+        # real type lived in a comment where nothing could check it.
+        self._client: TransportClient | None = None
         self._meta: dict[str, Any] = {}
         self._last_used: float = 0.0
 
@@ -1427,7 +1431,9 @@ class McpServer(AggregateRoot):
             ) from e
 
         # Return the raw response dict as-is; the caller validates the payload.
-        return cast(dict[str, Any], response)
+        # No cast needed since the client is typed by TransportClient -- it was
+        # only ever there because the attribute was Any.
+        return response
 
     def _refresh_tools(self) -> None:
         """Refresh tool catalog from mcp_server.

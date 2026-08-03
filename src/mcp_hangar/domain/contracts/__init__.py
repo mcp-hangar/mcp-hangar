@@ -38,7 +38,7 @@ from .authorization import (
 )
 from .event_store import ConcurrencyError, IDurableEventStore, IEventStore, NullEventStore, StreamNotFoundError
 from .installer import InstalledPackage, IPackageInstaller
-from .launcher import IMcpServerLauncher, LaunchResult
+from .launcher import IMcpServerLauncher, LaunchResult, TransportClient
 from mcp_hangar.domain.contracts.lock import ILock
 from .log_buffer import IMcpServerLogBuffer
 from .metrics_publisher import IMetricsPublisher
@@ -99,6 +99,7 @@ __all__ = [
     "ILock",
     "IMcpServerLauncher",
     "LaunchResult",
+    "TransportClient",
     # Metrics
     "IMetricsPublisher",
     # Persistence
