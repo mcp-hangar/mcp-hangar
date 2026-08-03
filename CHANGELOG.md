@@ -5,6 +5,21 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [2.2.1](https://github.com/mcp-hangar/mcp-hangar/compare/v2.2.0...v2.2.1) (2026-08-03)
+
+
+### Fixed
+
+* **core:** accept the modern keyword on all Provider* aliases ([#705](https://github.com/mcp-hangar/mcp-hangar/issues/705)) ([625f93b](https://github.com/mcp-hangar/mcp-hangar/commit/625f93bfb03ae68e10e9c2b74b44ef48dd77b326))
+* **core:** restore the API error envelope on authorization denials ([#707](https://github.com/mcp-hangar/mcp-hangar/issues/707)) ([17c9bbf](https://github.com/mcp-hangar/mcp-hangar/commit/17c9bbf7f52f9928a3337e0d6dac8174cd8008c2))
+* **core:** set the executor coverage floor below CI's jitter, not local's ([#706](https://github.com/mcp-hangar/mcp-hangar/issues/706)) ([1408b2d](https://github.com/mcp-hangar/mcp-hangar/commit/1408b2d5d3fed5e8c546bc0b8e44a042ab5693e3))
+* **core:** take coverage floors from the Python the gate runs on ([#699](https://github.com/mcp-hangar/mcp-hangar/issues/699)) ([1465c6f](https://github.com/mcp-hangar/mcp-hangar/commit/1465c6f4478e49d590042f21eed583b018780614))
+
+
+### Changed
+
+* **core:** restore replayed event identity through one seam ([#704](https://github.com/mcp-hangar/mcp-hangar/issues/704)) ([4a45a70](https://github.com/mcp-hangar/mcp-hangar/commit/4a45a708e2e766e9b6ff5a6f5fc9d81026503eaf))
+
 ## [Unreleased]
 
 ### Fixed
