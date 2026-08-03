@@ -22,6 +22,10 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Changed
+
+- **core:** the ten `Provider*` alias events keep the legacy `provider_id` keyword through one decorator instead of ten hand-written constructors. The field assignment, required-argument check and unknown-keyword `TypeError` come back from the dataclass machinery, so they can no longer drift between classes -- which they had: three aliases had stopped accepting the modern `mcp_server_id` spelling entirely. `domain/events.py` loses 170 lines
+
 ### Fixed
 
 - **core:** the decision-path coverage floor for `server/tools/batch/executor.py` drops to 84.5. The module dispatches work on a thread pool with timeouts and single-flight de-duplication, so a few branches fire or not depending on scheduling: measured 85.38 three times on CPython 3.13, 85.06 twice on 3.11, and 85.06 then 84.75 on two CI runs of the same tree. The floor now sits under the lowest observed CI value rather than under a reproducible local one, so the gate reports a real regression instead of the runner's mood. The job also uploads `coverage.json` on failure, so the next divergence is diagnosable rather than guessed at
