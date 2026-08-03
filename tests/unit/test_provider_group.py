@@ -438,7 +438,7 @@ class TestProviderGroupLockHierarchy:
 
     def test_add_member_does_not_hold_group_lock_during_ensure_ready(self):
         """add_member() with auto_start must release group lock before ensure_ready()."""
-        from mcp_hangar.infrastructure.lock_hierarchy import LockLevel, get_current_thread_locks
+        from mcp_hangar.lock_hierarchy import LockLevel, get_current_thread_locks
 
         group = McpServerGroup(group_id="lock-test", auto_start=True)
         lock_held_during_ensure_ready = []
@@ -464,7 +464,7 @@ class TestProviderGroupLockHierarchy:
 
     def test_start_all_does_not_hold_group_lock_during_ensure_ready(self):
         """start_all() must release group lock before ensure_ready()."""
-        from mcp_hangar.infrastructure.lock_hierarchy import LockLevel, get_current_thread_locks
+        from mcp_hangar.lock_hierarchy import LockLevel, get_current_thread_locks
 
         group = McpServerGroup(group_id="lock-test", auto_start=False)
         lock_held_during_ensure_ready = []
@@ -488,7 +488,7 @@ class TestProviderGroupLockHierarchy:
 
     def test_stop_all_does_not_hold_group_lock_during_shutdown(self):
         """stop_all() must release group lock before shutdown()."""
-        from mcp_hangar.infrastructure.lock_hierarchy import LockLevel, get_current_thread_locks
+        from mcp_hangar.lock_hierarchy import LockLevel, get_current_thread_locks
 
         group = McpServerGroup(group_id="lock-test", auto_start=False)
         lock_held_during_shutdown = []

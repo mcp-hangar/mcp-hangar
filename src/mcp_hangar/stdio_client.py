@@ -16,7 +16,7 @@ from .observability.tracing import inject_trace_context, upstream_call_span
 from .protocol import inject_protocol_meta
 
 if TYPE_CHECKING:
-    from .infrastructure.lock_hierarchy import TrackedLock
+    from .lock_hierarchy import TrackedLock
 
 logger = get_logger(__name__)
 
@@ -68,7 +68,7 @@ class StdioClient:
     def _create_lock(pid: int) -> "TrackedLock | threading.Lock":
         """Create lock with hierarchy tracking."""
         try:
-            from .infrastructure.lock_hierarchy import LockLevel, TrackedLock
+            from .lock_hierarchy import LockLevel, TrackedLock
 
             return TrackedLock(LockLevel.STDIO_CLIENT, f"StdioClient:{pid}", reentrant=False)
         except ImportError:
