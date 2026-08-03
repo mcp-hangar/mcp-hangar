@@ -10,6 +10,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 ### Fixed
 
 - **core:** the decision-path coverage floor for `server/tools/batch/executor.py` drops to 84.5. The module dispatches work on a thread pool with timeouts and single-flight de-duplication, so a few branches fire or not depending on scheduling: measured 85.38 three times on CPython 3.13, 85.06 twice on 3.11, and 85.06 then 84.75 on two CI runs of the same tree. The floor now sits under the lowest observed CI value rather than under a reproducible local one, so the gate reports a real regression instead of the runner's mood. The job also uploads `coverage.json` on failure, so the next divergence is diagnosable rather than guessed at
+- **core:** `ProviderRegistered`, `ProviderUpdated` and `ProviderDeregistered` rejected the modern `mcp_server_id` keyword -- they accepted only the pre-rename `provider_id`, unlike the other seven `Provider*` aliases which take both. Passing `mcp_server_id` raised `TypeError: Missing required argument: mcp_server_id` while the caller had supplied exactly that. The legacy alias contract is now pinned across every event that carries it
 
 ### Changed
 
