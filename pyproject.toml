@@ -159,6 +159,81 @@ module = [
 ]
 ignore_missing_imports = true
 
+[tool.coverage.run]
+# branch = true lives HERE, not only on the command line, for two reasons.
+# 1. The decision-path floors are BRANCH numbers. A floor compared against
+#    statement-only data silently passes a lower bar than it claims.
+# 2. Modes do not mix: combining a statement-mode .coverage with a branch-mode
+#    run raises `coverage.exceptions.DataError: Can't combine branch coverage
+#    data with statement data` as a pytest INTERNALERROR. Making every run
+#    branch-mode removes the mixed state entirely.
+branch = true
+relative_files = true
+
+[tool.coverage.report]
+# Deliberately NO fail_under. coverage.py's threshold is GLOBAL -- there is no
+# per-file setting -- so a single number would have to be low enough for the
+# weakest module in the tree, which is exactly the modules that need the
+# strongest guarantee. Per-module floors live below and are checked by
+# scripts/check_decision_coverage.py.
+
+# ---------------------------------------------------------------------------
+# Decision-path coverage floors
+# ---------------------------------------------------------------------------
+# A module is a DECISION PATH when a wrong branch produces a wrong allow/deny:
+# authorization, human consent, egress and tool-access policy, supply-chain
+# digest pinning. An untested branch there is a security defect, not a style
+# complaint, so these modules get a floor and the rest of the tree does not.
+#
+# Values are combined line+branch coverage as MEASURED on this branch, rounded
+# down -- not an aspirational 90. A gate that is red the day it lands teaches
+# people to skip it; this one is green on arrival and catches regressions from
+# the first commit. Raising a floor is the unit of progress
+# (`check_decision_coverage.py coverage.json --bump` locks in what was gained).
+#
+# Two entries are visible debt rather than a target:
+#   approvals/persistence/sqlite_approval_repository.py at 31.2 -- the store
+#     holding approval state, tenant scoping and the arguments hash. Unit tests
+#     use a fake repository, so the real SQL paths are barely exercised.
+#   domain/value_objects/tool_access_policy.py at 84.2 -- _CompositePolicy's
+#     merge and approval-list handling, i.e. the consent-preservation logic.
+#   server/tools/batch/executor.py at 85.3 -- the invoke path, including the
+#     455-line _execute_call_inner.
+[tool.decision_coverage]
+# How far a floor may sit below reality before it stops being a ratchet.
+drift_allowance = 3.0
+
+[tool.decision_coverage.floors]
+  "application/tasks/governed_task_store.py" = 89.8
+  "application/tasks/tool_pin_context.py" = 94.4
+  "approvals/api/routes.py" = 90.0
+  "approvals/bootstrap.py" = 96.4
+  "approvals/commands/resolve.py" = 92.5
+  "approvals/delivery/dashboard.py" = 83.3
+  "approvals/delivery/noop.py" = 100.0
+  "approvals/hold_registry.py" = 100.0
+  "approvals/models.py" = 97.9
+  "approvals/pending.py" = 100.0
+  "approvals/persistence/sqlite_approval_repository.py" = 31.2
+  "approvals/service.py" = 95.0
+  "auth/commands/handlers.py" = 99.2
+  "auth/infrastructure/middleware.py" = 96.9
+  "auth/infrastructure/opa_authorizer.py" = 100.0
+  "auth/infrastructure/rbac_authorizer.py" = 98.8
+  "auth/roles.py" = 100.0
+  "domain/policies/egress_l7.py" = 98.6
+  "domain/services/digest_computation.py" = 100.0
+  "domain/services/digest_validator.py" = 100.0
+  "domain/services/task_consent.py" = 92.7
+  "domain/services/task_digest_guard.py" = 97.7
+  "domain/services/task_ownership.py" = 97.9
+  "domain/services/tool_access_resolver.py" = 86.4
+  "domain/services/ui_resource_guard.py" = 100.0
+  "domain/value_objects/tool_access_policy.py" = 84.2
+  "server/api/middleware.py" = 88.7
+  "server/api/route_permissions.py" = 100.0
+  "server/tools/batch/executor.py" = 85.3
+
 [tool.pytest.ini_options]
 testpaths = ["tests"]
 asyncio_mode = "auto"

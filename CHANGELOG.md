@@ -7,6 +7,10 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Changed
+
+- **core:** branch coverage is now gated per module on the decision paths. `coverage.py`'s `fail_under` is global-only, so a single threshold would have to be low enough for the weakest module in the tree -- exactly the modules needing the strongest guarantee. 29 modules (authz, consent/approvals, egress + tool-access policy, digest) carry floors set to their MEASURED value, checked in CI by `scripts/check_decision_coverage.py`. `branch = true` moves into `[tool.coverage.run]`, since a floor compared against statement-only data silently passes a lower bar, and mixing modes raises `DataError`
+
 ### Fixed
 
 - **docs:** point `UPGRADE.md` at the upgrade guide's real URL. It linked `mcp-hangar.io/upgrade/`, which 404s -- the docs are served under `/docs/`. The fragment is dropped too: headings on that page carry no `id` attributes, so `#upgrade-to-220` resolved to nothing. The v2.2.0 release notes carried the same link and have been corrected in place
