@@ -1273,8 +1273,15 @@ class McpServerDeregistered(DomainEvent):
 
 @dataclass(init=False)
 class ProviderRegistered(McpServerRegistered):
-    def __init__(self, provider_id: str | None = None, source: str = "", mode: str = "", **kwargs: object):
-        resolved_id = provider_id or _resolve_legacy_mcp_server_id(None, kwargs)
+    def __init__(
+        self,
+        provider_id: str | None = None,
+        mcp_server_id: str | None = None,
+        source: str = "",
+        mode: str = "",
+        **kwargs: object,
+    ):
+        resolved_id = provider_id or mcp_server_id or _resolve_legacy_mcp_server_id(None, kwargs)
         if kwargs:
             unexpected = ", ".join(sorted(kwargs))
             raise TypeError(f"Unexpected keyword argument(s): {unexpected}")
@@ -1283,8 +1290,14 @@ class ProviderRegistered(McpServerRegistered):
 
 @dataclass(init=False)
 class ProviderUpdated(McpServerUpdated):
-    def __init__(self, provider_id: str | None = None, source: str = "", **kwargs: object):
-        resolved_id = provider_id or _resolve_legacy_mcp_server_id(None, kwargs)
+    def __init__(
+        self,
+        provider_id: str | None = None,
+        mcp_server_id: str | None = None,
+        source: str = "",
+        **kwargs: object,
+    ):
+        resolved_id = provider_id or mcp_server_id or _resolve_legacy_mcp_server_id(None, kwargs)
         if kwargs:
             unexpected = ", ".join(sorted(kwargs))
             raise TypeError(f"Unexpected keyword argument(s): {unexpected}")
@@ -1293,8 +1306,14 @@ class ProviderUpdated(McpServerUpdated):
 
 @dataclass(init=False)
 class ProviderDeregistered(McpServerDeregistered):
-    def __init__(self, provider_id: str | None = None, source: str = "", **kwargs: object):
-        resolved_id = provider_id or _resolve_legacy_mcp_server_id(None, kwargs)
+    def __init__(
+        self,
+        provider_id: str | None = None,
+        mcp_server_id: str | None = None,
+        source: str = "",
+        **kwargs: object,
+    ):
+        resolved_id = provider_id or mcp_server_id or _resolve_legacy_mcp_server_id(None, kwargs)
         if kwargs:
             unexpected = ", ".join(sorted(kwargs))
             raise TypeError(f"Unexpected keyword argument(s): {unexpected}")
