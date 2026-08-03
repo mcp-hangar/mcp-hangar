@@ -12,7 +12,7 @@ if TYPE_CHECKING:
     from ..policies.egress_l7 import L7Policy
 
 from ..contracts.log_buffer import IMcpServerLogBuffer
-from ..contracts.metrics_publisher import IMetricsPublisher, NullMetricsPublisher
+from ..contracts.metrics_publisher import IMetricsPublisher, get_default_metrics_publisher
 from ..value_objects.capabilities import McpServerCapabilities, ViolationSeverity, ViolationType
 from ..events import (
     CapabilityViolationDetected,
@@ -172,7 +172,7 @@ class McpServer(AggregateRoot):
         self._http_config = http
 
         # Dependencies (Dependency Inversion Principle)
-        self._metrics_publisher = metrics_publisher or NullMetricsPublisher()
+        self._metrics_publisher = metrics_publisher or get_default_metrics_publisher()
         self._log_buffer = log_buffer
 
         # Capability declarations (Phase 38)
@@ -676,9 +676,7 @@ class McpServer(AggregateRoot):
         if self._log_buffer is not None:
             self._start_stderr_reader(client)
 
-        from ...metrics import set_connection_active
-
-        set_connection_active(self.mcp_server_id, True)
+        self._metrics_publisher.set_connection_active(self.mcp_server_id, True)
 
         return client
 
@@ -1063,9 +1061,7 @@ class McpServer(AggregateRoot):
             except Exception:  # noqa: BLE001 -- fault-barrier: cleanup must not mask original startup error
                 pass
             self._client = None
-            from ...metrics import set_connection_active
-
-            set_connection_active(self.mcp_server_id, False)
+            self._metrics_publisher.set_connection_active(self.mcp_server_id, False)
 
         self._health.record_failure()
 
@@ -1572,9 +1568,7 @@ class McpServer(AggregateRoot):
             except Exception as e:  # noqa: BLE001 -- fault-barrier: shutdown cleanup must not propagate
                 logger.warning(f"shutdown_error: {self.mcp_server_id}, error={e}")
             self._client = None
-            from ...metrics import set_connection_active
-
-            set_connection_active(self.mcp_server_id, False)
+            self._metrics_publisher.set_connection_active(self.mcp_server_id, False)
 
         self._state = McpServerState.COLD
         self._increment_version()

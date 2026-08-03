@@ -71,7 +71,6 @@ ignore_imports =
     mcp_hangar.domain.contracts.launcher -> mcp_hangar.stdio_client
     mcp_hangar.domain.model.mcp_server -> mcp_hangar.infrastructure.launchers
     mcp_hangar.domain.model.mcp_server -> mcp_hangar.infrastructure.lock_hierarchy
-    mcp_hangar.domain.model.mcp_server -> mcp_hangar.metrics
     mcp_hangar.domain.model.mcp_server_group -> mcp_hangar.infrastructure.lock_hierarchy
     mcp_hangar.domain.repository -> mcp_hangar.infrastructure.lock_hierarchy
     mcp_hangar.domain.services -> mcp_hangar.application.read_models.tool_projection
