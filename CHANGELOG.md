@@ -9,6 +9,10 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Changed
 
+- **core:** replaying a persisted stream restores the event's stored identity through one seam, `DomainEvent.rehydrate`, instead of two modules patching `event_id` and `occurred_at` in place after construction. Nothing asserted that identity survived replay: a fresh `event_id` silently reprocesses everything for any consumer de-duplicating on it, and a fresh `occurred_at` re-dates history to whenever the stream was read
+
+### Changed
+
 - **core:** the hexagon layering is enforced by `import-linter` instead of by review. Five layers, bottom-up: shared kernel < domain < application < infrastructure < delivery, with the 14 root-level modules split between the kernel and the infrastructure tier rather than lumped together -- folding them all into the kernel would have legalised `domain -> metrics` and `domain.contracts.launcher -> http_client`, a port importing its own adapter. 33 existing edges are baselined in a capped ledger; `tests/unit/test_import_contracts.py` guards the contract file itself, because `lint-imports` exits 0 on an empty one
 
 ### Fixed

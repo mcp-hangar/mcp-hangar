@@ -304,7 +304,7 @@ class EventSourcedMcpServerRepository(IMcpServerRepository):
             ToolInvocationRequested,
         )
 
-        event_classes = {
+        event_classes: dict[str, type[DomainEvent]] = {
             "McpServerStarted": McpServerStarted,
             "McpServerStopped": McpServerStopped,
             "McpServerDegraded": McpServerDegraded,
@@ -328,11 +328,10 @@ class EventSourcedMcpServerRepository(IMcpServerRepository):
                 }
 
                 try:
-                    event = event_class(**event_data)
-                    # Restore original event_id and occurred_at
-                    event.event_id = stored.event_id
-                    event.occurred_at = stored.occurred_at
-                    domain_events.append(event)
+                    # rehydrate restores the stored identity: a replay that minted
+                    # a new event_id would break every consumer keyed on it, and a
+                    # fresh occurred_at would re-date history to read time.
+                    domain_events.append(event_class.rehydrate(stored.event_id, stored.occurred_at, **event_data))
                 except Exception as e:  # noqa: BLE001 -- infra-boundary: skip malformed event during replay
                     logger.warning(f"Failed to hydrate event {stored.event_type}: {e}")
 
