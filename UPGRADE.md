@@ -1,5 +1,35 @@
 # Upgrading MCP Hangar
 
+## 2.2.2 — plan for it only if you run `auth.storage.driver: event_sourcing`
+
+Drop-in for everyone else.
+
+On that driver, API keys and role assignments were written to the event store
+correctly and could not be read back: the writer accepts any domain event, the
+reader looked the class up in a hand-maintained table that listed 30 of the 116
+event types, and all five the auth aggregates emit were missing. Every API key
+stopped authenticating across a restart, and role assignments were invisible
+after one. Affected from **1.2.2** (when the driver landed) through **2.2.1**;
+`memory` is the default and `sqlite`/`postgresql` were never affected.
+
+**Nothing was lost** — only the read path failed — which is exactly why this
+needs planning rather than celebration:
+
+> Credentials and role assignments you believed were gone start working again
+> the moment you upgrade, including any `admin` assignment made in that window.
+
+Revocations are events too and replay in order, so anything you revoked stays
+revoked. Look at what is dormant before you roll out, and revoke what you do not
+want live. The canonical guide has the two `sqlite3` commands for that:
+<https://mcp-hangar.io/docs/upgrade/>.
+
+Also in this release, and needing no configuration change: events written before
+the `provider` -> `mcp_server` rename (stores from 1.0.1 or earlier) reach their
+handlers again instead of replaying into nothing, and a `datetime` field on a
+persisted event comes back as a `datetime` rather than a string.
+
+---
+
 ## 2.2.0 — action required before you roll out
 
 2.2.0 is a security release. It is a minor rather than a patch because it
