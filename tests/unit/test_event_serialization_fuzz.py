@@ -16,6 +16,8 @@ import pytest
 
 from hypothesis import HealthCheck, given, settings, strategies as st
 
+import dataclasses
+
 from mcp_hangar.domain.events import (
     CapabilityViolationDetected,
     CircuitBreakerStateChanged,
@@ -204,8 +206,42 @@ _MINIMAL_EVENTS: dict[str, DomainEvent] = {
 }
 
 
+def _sample_value(name: str, annotation: object) -> object:
+    """A plausible value for a field, chosen from its annotation."""
+    text = str(annotation)
+    if "bool" in text:
+        return True
+    if "int" in text and "float" not in text:
+        return 7
+    if "float" in text:
+        return 7.5
+    if "datetime" in text:
+        return datetime(2026, 1, 2, 3, 4, 5, tzinfo=UTC)
+    if "list" in text:
+        return ["a"]
+    if "dict" in text:
+        return {"k": "v"}
+    return f"sample-{name}"
+
+
+def _build_event(event_type: str) -> DomainEvent:
+    """Construct an event of the given type with every field populated.
+
+    The hand-written samples in `_MINIMAL_EVENTS` are more realistic and are
+    preferred where they exist. This fallback exists so that "every registered
+    type round-trips" can actually mean every type: the registry holds 100+
+    entries now that it is derived from the class hierarchy rather than curated,
+    and hand-writing a sample per type is the kind of list that goes stale --
+    which is the very failure this suite is here to catch.
+    """
+    cls = EVENT_TYPE_MAP[event_type]
+    kwargs = {field.name: _sample_value(field.name, field.type) for field in dataclasses.fields(cls)}
+    return cls(**kwargs)
+
+
 def _make_minimal_event(event_type: str) -> DomainEvent:
-    return _MINIMAL_EVENTS[event_type]
+    sample = _MINIMAL_EVENTS.get(event_type)
+    return sample if sample is not None else _build_event(event_type)
 
 
 # ---------------------------------------------------------------------------
@@ -269,10 +305,32 @@ class TestEventSerializerFuzz:
         assert type(restored) is type(event)
         assert restored.event_id is not None
 
-    def test_every_registered_type_has_a_minimal_sample(self) -> None:
-        """A registered type with no sample is a gap in the round-trip coverage."""
-        missing = sorted(set(EVENT_TYPE_MAP) - set(_MINIMAL_EVENTS))
-        assert missing == [], f"EVENT_TYPE_MAP entries with no _MINIMAL_EVENTS sample: {missing}"
+    @pytest.mark.parametrize("event_type", sorted(EVENT_TYPE_MAP))
+    def test_round_trip_preserves_every_field(self, event_type: str) -> None:
+        """Same type is not enough -- the values have to come back too.
+
+        `PolicyPushRejected.timestamp` did not: JSON has no datetime, the encoder
+        wrote an ISO string, and nothing parsed it back, so a `datetime` went
+        into the store and a `str` came out. Silently, and only on replay.
+        """
+        serializer = EventSerializer()
+        event = _make_minimal_event(event_type)
+        restored = serializer.deserialize(*serializer.serialize(event))
+
+        for field in dataclasses.fields(type(event)):
+            original, roundtripped = getattr(event, field.name), getattr(restored, field.name)
+            assert type(roundtripped) is type(original), (
+                f"{event_type}.{field.name} came back as {type(roundtripped).__name__}, not {type(original).__name__}"
+            )
+            assert roundtripped == original, f"{event_type}.{field.name} changed value across a round trip"
+
+    def test_the_identity_survives_a_round_trip(self) -> None:
+        """Replay must not mint a new id or re-date the event."""
+        serializer = EventSerializer()
+        event = _make_minimal_event("McpServerStarted")
+        restored = serializer.deserialize(*serializer.serialize(event))
+        assert restored.event_id == event.event_id
+        assert restored.occurred_at == event.occurred_at
 
 
 class TestUpcasterChainFuzz:
