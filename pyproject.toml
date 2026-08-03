@@ -216,6 +216,16 @@ relative_files = true
 # 3.11, so a floor taken from 3.13 failed CI on arrival. When a floor moves, take
 # the number from the CI job -- or the lower of the two if you have both.
 #
+#   server/tools/batch/executor.py at 84.5 -- deliberately below what anyone
+#     measures locally. The module runs work on a thread pool with timeouts and
+#     single-flight de-duplication, so a handful of branches fire or not
+#     depending on scheduling. Measured: 85.38 three times on CPython 3.13,
+#     85.06 twice on 3.11, and 85.06 then 84.75 on two CI runs of the same
+#     tree. Local is reproducible; a loaded shared runner is not. The floor sits
+#     under the lowest observed CI value rather than under the local one, so the
+#     gate reports a real regression instead of the runner's mood.
+#     Pinning those branches with deterministic tests would let this rise again.
+#
 # Two entries are visible debt rather than a target:
 #   approvals/persistence/sqlite_approval_repository.py at 31.2 -- the store
 #     holding approval state, tenant scoping and the arguments hash. Unit tests
@@ -257,7 +267,7 @@ drift_allowance = 3.0
   "domain/value_objects/tool_access_policy.py" = 84.2
   "server/api/middleware.py" = 88.7
   "server/api/route_permissions.py" = 100.0
-  "server/tools/batch/executor.py" = 85.0
+  "server/tools/batch/executor.py" = 84.5
 
 [tool.pytest.ini_options]
 testpaths = ["tests"]
