@@ -49,7 +49,7 @@ class ReloadConfigurationHandler(CommandHandler):
         self._config_loader = config_loader
         self._groups = groups if groups is not None else {}
 
-    def handle(self, command: ReloadConfigurationCommand) -> dict[str, Any]:
+    def handle(self, command: ReloadConfigurationCommand) -> dict[str, Any]:  # noqa: C901 -- baseline CC=16; split before extending
         """Handle the reload configuration command.
 
         Args:

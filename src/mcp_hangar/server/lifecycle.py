@@ -193,7 +193,7 @@ class ServerLifecycle:
             )
             sys.exit(1)
 
-    def run_http(self, host: str, port: int, unsafe_no_auth: bool = False) -> None:
+    def run_http(self, host: str, port: int, unsafe_no_auth: bool = False) -> None:  # noqa: C901 -- baseline CC=19; split before extending
         """Run MCP server in HTTP mode. Blocks until exit.
 
         This mode is compatible with LM Studio and other MCP HTTP clients.

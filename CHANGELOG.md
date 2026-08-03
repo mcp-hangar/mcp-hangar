@@ -7,6 +7,10 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Changed
+
+- **core:** cyclomatic complexity is now a gate. `C901` caps new code at 15; the 16 functions already above it carry an explicit `# noqa: C901 -- baseline CC=N`, and `tests/unit/test_complexity_baseline.py` caps that list so it can only shrink. Complexity had never been measured -- the ruff config omitted `C90` entirely, and the worst function in the tree scores 49
+
 ### Fixed
 
 - **docs:** point `UPGRADE.md` at the upgrade guide's real URL. It linked `mcp-hangar.io/upgrade/`, which 404s -- the docs are served under `/docs/`. The fragment is dropped too: headings on that page carry no `id` attributes, so `#upgrade-to-220` resolved to nothing. The v2.2.0 release notes carried the same link and have been corrected in place

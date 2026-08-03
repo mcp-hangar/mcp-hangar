@@ -1093,7 +1093,7 @@ class McpServer(AggregateRoot):
 
         logger.error(f"mcp_server_start_failed: {self.mcp_server_id}, error={error_str}")
 
-    def invoke_tool(self, tool_name: str, arguments: dict[str, Any], timeout: float = 30.0) -> dict[str, Any]:
+    def invoke_tool(self, tool_name: str, arguments: dict[str, Any], timeout: float = 30.0) -> dict[str, Any]:  # noqa: C901 -- baseline CC=22; split before extending
         """
         Invoke a tool on this mcp_server.
 

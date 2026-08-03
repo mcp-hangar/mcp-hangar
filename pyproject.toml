@@ -102,7 +102,7 @@ line-length = 120
 target-version = "py311"
 extend-exclude = ["packages/operator", "site", "dist"]
 [tool.ruff.lint]
-select = ["E", "F", "N", "W", "UP", "B", "BLE001", "C4", "SIM"]
+select = ["E", "F", "N", "W", "UP", "B", "BLE001", "C4", "C90", "SIM"]
 ignore = [
     "B007",
     "B011",
@@ -122,6 +122,20 @@ ignore = [
     "SIM117",
     "SIM118",
 ]
+[tool.ruff.lint.mccabe]
+# Cyclomatic complexity ceiling for NEW code. Everything above it today carries an
+# explicit `# noqa: C901` naming its current score -- 16 functions, listed by
+# `ruff check src --select C901`. That list is a debt ledger, not wallpaper: it is
+# short enough to read, and each entry is visible to whoever next opens the
+# function.
+#
+# 15 rather than mccabe's default 10 because 10 would have baselined 54 functions,
+# and a 54-entry noqa list stops being read. Anything above 15 is indefensible in
+# review, so the gate bites real monsters while leaving ordinary code alone.
+#
+# The rule: never add a noqa here. Lower the ceiling, or split the function.
+max-complexity = 15
+
 # Mypy strictness migration in progress (TASK-P1-5).
 # Phase 1: baseline strictness with per-module debt overrides (DONE).
 # Phase 2: clean union-attr + attr-defined site by site.
