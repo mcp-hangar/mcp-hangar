@@ -378,3 +378,40 @@ class TestRejectionsUseTheApiErrorEnvelope:
         """Dropping WWW-Authenticate would break RFC 9728 clients."""
         client = _client(role=None)
         assert "WWW-Authenticate" in client.get("/mcp_servers").headers
+
+
+class TestTheGuardStepsAsideWhereItMust:
+    """Three bypasses that would each be an outage if the guard forgot them."""
+
+    def test_options_preflight_is_not_denied(self):
+        """CORS preflight carries no credentials by design.
+
+        A 403 here breaks every browser client before the real request is ever
+        sent, and the failure looks like a CORS misconfiguration rather than an
+        authorization one.
+        """
+        client = _client(role=None)
+        response = client.options(
+            "/mcp_servers",
+            headers={"Origin": "https://example.com", "Access-Control-Request-Method": "GET"},
+        )
+        assert response.status_code != 403
+
+    def test_health_endpoints_stay_public(self):
+        """Liveness must answer before any credential exists, or the pod never
+        passes its probe and the deployment rolls back."""
+        client = _client(role=None)
+        assert client.get("/health/live").status_code != 401
+
+    def test_metrics_stays_public(self):
+        """Prometheus scrapes unauthenticated; 401 here silently ends metrics."""
+        client = _client(role=None)
+        assert client.get("/metrics").status_code != 401
+
+    def test_authenticated_only_routes_need_no_permission(self):
+        """`/system/me` describes the caller, so the principal IS the resource.
+
+        A role with no permissions at all must still be able to ask who it is.
+        """
+        client = _client(role="service-account")
+        assert client.get("/system/me").status_code not in (401, 403)
