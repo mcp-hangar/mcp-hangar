@@ -4,9 +4,7 @@
 
 from dataclasses import dataclass
 
-from ..value_objects.compat import (
-    resolve_legacy_mcp_server_id as _resolve_legacy_mcp_server_id,
-)
+from ..value_objects.compat import accepts_legacy_provider_id
 from .base import DomainEvent
 
 
@@ -65,22 +63,14 @@ class McpServerStateChanged(DomainEvent):
 # Circuit Breaker Events
 
 
-@dataclass(init=False)
+@accepts_legacy_provider_id
+@dataclass
 class CircuitBreakerStateChanged(DomainEvent):
     """Published when a circuit breaker transitions between states."""
 
     mcp_server_id: str
-    old_state: str  # closed, open, half_open
-    new_state: str  # closed, open, half_open
-
-    def __init__(self, mcp_server_id: str | None = None, old_state: str = "", new_state: str = "", **kwargs: object):
-        self.mcp_server_id = _resolve_legacy_mcp_server_id(mcp_server_id, kwargs)
-        self.old_state = old_state
-        self.new_state = new_state
-        if kwargs:
-            unexpected = ", ".join(sorted(kwargs))
-            raise TypeError(f"Unexpected keyword argument(s): {unexpected}")
-        super().__init__()
+    old_state: str = ""  # closed, open, half_open
+    new_state: str = ""  # closed, open, half_open
 
     def __post_init__(self):
         super().__init__()

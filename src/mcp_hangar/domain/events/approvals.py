@@ -4,9 +4,7 @@
 
 from dataclasses import dataclass
 
-from ..value_objects.compat import (
-    resolve_legacy_mcp_server_id as _resolve_legacy_mcp_server_id,
-)
+from ..value_objects.compat import accepts_legacy_provider_id
 from .base import DomainEvent
 
 
@@ -14,139 +12,63 @@ from .base import DomainEvent
 # =============================================================================
 
 
-@dataclass(init=False)
+@accepts_legacy_provider_id
+@dataclass
 class ToolApprovalRequested(DomainEvent):
     """Published when a tool invocation is held pending human approval."""
 
     approval_id: str
     mcp_server_id: str
-    tool_name: str
-    arguments_hash: str
-    channel: str
-    expires_at: str
-    correlation_id: str
-
-    def __init__(
-        self,
-        approval_id: str,
-        mcp_server_id: str | None = None,
-        tool_name: str = "",
-        arguments_hash: str = "",
-        channel: str = "",
-        expires_at: str = "",
-        correlation_id: str = "",
-        **kwargs: object,
-    ):
-        self.approval_id = approval_id
-        self.mcp_server_id = _resolve_legacy_mcp_server_id(mcp_server_id, kwargs)
-        self.tool_name = tool_name
-        self.arguments_hash = arguments_hash
-        self.channel = channel
-        self.expires_at = expires_at
-        self.correlation_id = correlation_id
-        if kwargs:
-            unexpected = ", ".join(sorted(kwargs))
-            raise TypeError(f"Unexpected keyword argument(s): {unexpected}")
-        super().__init__()
+    tool_name: str = ""
+    arguments_hash: str = ""
+    channel: str = ""
+    expires_at: str = ""
+    correlation_id: str = ""
 
     def __post_init__(self):
         super().__init__()
 
 
-@dataclass(init=False)
+@accepts_legacy_provider_id
+@dataclass
 class ToolApprovalGranted(DomainEvent):
     """Published when a held tool invocation is approved by a human."""
 
     approval_id: str
     mcp_server_id: str
-    tool_name: str
-    decided_by: str
-    decided_at: str
-
-    def __init__(
-        self,
-        approval_id: str,
-        mcp_server_id: str | None = None,
-        tool_name: str = "",
-        decided_by: str = "",
-        decided_at: str = "",
-        **kwargs: object,
-    ):
-        self.approval_id = approval_id
-        self.mcp_server_id = _resolve_legacy_mcp_server_id(mcp_server_id, kwargs)
-        self.tool_name = tool_name
-        self.decided_by = decided_by
-        self.decided_at = decided_at
-        if kwargs:
-            unexpected = ", ".join(sorted(kwargs))
-            raise TypeError(f"Unexpected keyword argument(s): {unexpected}")
-        super().__init__()
+    tool_name: str = ""
+    decided_by: str = ""
+    decided_at: str = ""
 
     def __post_init__(self):
         super().__init__()
 
 
-@dataclass(init=False)
+@accepts_legacy_provider_id
+@dataclass
 class ToolApprovalDenied(DomainEvent):
     """Published when a held tool invocation is denied by a human."""
 
     approval_id: str
     mcp_server_id: str
-    tool_name: str
-    decided_by: str
-    decided_at: str
+    tool_name: str = ""
+    decided_by: str = ""
+    decided_at: str = ""
     reason: str | None = None
-
-    def __init__(
-        self,
-        approval_id: str,
-        mcp_server_id: str | None = None,
-        tool_name: str = "",
-        decided_by: str = "",
-        decided_at: str = "",
-        reason: str | None = None,
-        **kwargs: object,
-    ):
-        self.approval_id = approval_id
-        self.mcp_server_id = _resolve_legacy_mcp_server_id(mcp_server_id, kwargs)
-        self.tool_name = tool_name
-        self.decided_by = decided_by
-        self.decided_at = decided_at
-        self.reason = reason
-        if kwargs:
-            unexpected = ", ".join(sorted(kwargs))
-            raise TypeError(f"Unexpected keyword argument(s): {unexpected}")
-        super().__init__()
 
     def __post_init__(self):
         super().__init__()
 
 
-@dataclass(init=False)
+@accepts_legacy_provider_id
+@dataclass
 class ToolApprovalExpired(DomainEvent):
     """Published when a held tool invocation expires without a decision."""
 
     approval_id: str
     mcp_server_id: str
-    tool_name: str
-    expired_at: str
-
-    def __init__(
-        self,
-        approval_id: str,
-        mcp_server_id: str | None = None,
-        tool_name: str = "",
-        expired_at: str = "",
-        **kwargs: object,
-    ):
-        self.approval_id = approval_id
-        self.mcp_server_id = _resolve_legacy_mcp_server_id(mcp_server_id, kwargs)
-        self.tool_name = tool_name
-        self.expired_at = expired_at
-        if kwargs:
-            unexpected = ", ".join(sorted(kwargs))
-            raise TypeError(f"Unexpected keyword argument(s): {unexpected}")
-        super().__init__()
+    tool_name: str = ""
+    expired_at: str = ""
 
     def __post_init__(self):
         super().__init__()
