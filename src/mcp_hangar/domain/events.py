@@ -12,7 +12,10 @@ import time
 from typing import Any
 import uuid
 
-from .value_objects.compat import resolve_legacy_mcp_server_id as _resolve_legacy_mcp_server_id
+from .value_objects.compat import (
+    accepts_legacy_provider_id,
+    resolve_legacy_mcp_server_id as _resolve_legacy_mcp_server_id,
+)
 
 
 class DomainEvent(ABC):
@@ -516,93 +519,29 @@ class McpServerApproved(DomainEvent):
         super().__init__()
 
 
-@dataclass(init=False)
+@accepts_legacy_provider_id
 class ProviderStarted(McpServerStarted):
-    def __init__(
-        self,
-        provider_id: str | None = None,
-        mcp_server_id: str | None = None,
-        mode: str = "",
-        tools_count: int = 0,
-        startup_duration_ms: float = 0.0,
-        **kwargs: object,
-    ):
-        provider_id = provider_id or mcp_server_id or _resolve_legacy_mcp_server_id(None, kwargs)
-        if kwargs:
-            unexpected = ", ".join(sorted(kwargs))
-            raise TypeError(f"Unexpected keyword argument(s): {unexpected}")
-        super().__init__(
-            mcp_server_id=provider_id, mode=mode, tools_count=tools_count, startup_duration_ms=startup_duration_ms
-        )
+    """Deprecated alias for :class:`McpServerStarted`, kept for pre-rename callers."""
 
 
-@dataclass(init=False)
+@accepts_legacy_provider_id
 class ProviderStopped(McpServerStopped):
-    def __init__(
-        self, provider_id: str | None = None, mcp_server_id: str | None = None, reason: str = "", **kwargs: object
-    ):
-        provider_id = provider_id or mcp_server_id or _resolve_legacy_mcp_server_id(None, kwargs)
-        if kwargs:
-            unexpected = ", ".join(sorted(kwargs))
-            raise TypeError(f"Unexpected keyword argument(s): {unexpected}")
-        super().__init__(mcp_server_id=provider_id, reason=reason)
+    """Deprecated alias for :class:`McpServerStopped`, kept for pre-rename callers."""
 
 
-@dataclass(init=False)
+@accepts_legacy_provider_id
 class ProviderDegraded(McpServerDegraded):
-    def __init__(
-        self,
-        provider_id: str | None = None,
-        mcp_server_id: str | None = None,
-        consecutive_failures: int = 0,
-        total_failures: int = 0,
-        reason: str = "",
-        **kwargs: object,
-    ):
-        provider_id = provider_id or mcp_server_id or _resolve_legacy_mcp_server_id(None, kwargs)
-        if kwargs:
-            unexpected = ", ".join(sorted(kwargs))
-            raise TypeError(f"Unexpected keyword argument(s): {unexpected}")
-        super().__init__(
-            mcp_server_id=provider_id,
-            consecutive_failures=consecutive_failures,
-            total_failures=total_failures,
-            reason=reason,
-        )
+    """Deprecated alias for :class:`McpServerDegraded`, kept for pre-rename callers."""
 
 
-@dataclass(init=False)
+@accepts_legacy_provider_id
 class ProviderStateChanged(McpServerStateChanged):
-    def __init__(
-        self,
-        provider_id: str | None = None,
-        mcp_server_id: str | None = None,
-        old_state: str = "",
-        new_state: str = "",
-        **kwargs: object,
-    ):
-        provider_id = provider_id or mcp_server_id or _resolve_legacy_mcp_server_id(None, kwargs)
-        if kwargs:
-            unexpected = ", ".join(sorted(kwargs))
-            raise TypeError(f"Unexpected keyword argument(s): {unexpected}")
-        super().__init__(mcp_server_id=provider_id, old_state=old_state, new_state=new_state)
+    """Deprecated alias for :class:`McpServerStateChanged`, kept for pre-rename callers."""
 
 
-@dataclass(init=False)
+@accepts_legacy_provider_id
 class ProviderIdleDetected(McpServerIdleDetected):
-    def __init__(
-        self,
-        provider_id: str | None = None,
-        mcp_server_id: str | None = None,
-        idle_duration_s: float = 0.0,
-        last_used_at: float = 0.0,
-        **kwargs: object,
-    ):
-        provider_id = provider_id or mcp_server_id or _resolve_legacy_mcp_server_id(None, kwargs)
-        if kwargs:
-            unexpected = ", ".join(sorted(kwargs))
-            raise TypeError(f"Unexpected keyword argument(s): {unexpected}")
-        super().__init__(mcp_server_id=provider_id, idle_duration_s=idle_duration_s, last_used_at=last_used_at)
+    """Deprecated alias for :class:`McpServerIdleDetected`, kept for pre-rename callers."""
 
 
 @dataclass(init=False)
@@ -1306,53 +1245,19 @@ class McpServerDeregistered(DomainEvent):
         super().__init__()
 
 
-@dataclass(init=False)
+@accepts_legacy_provider_id
 class ProviderRegistered(McpServerRegistered):
-    def __init__(
-        self,
-        provider_id: str | None = None,
-        mcp_server_id: str | None = None,
-        source: str = "",
-        mode: str = "",
-        **kwargs: object,
-    ):
-        resolved_id = provider_id or mcp_server_id or _resolve_legacy_mcp_server_id(None, kwargs)
-        if kwargs:
-            unexpected = ", ".join(sorted(kwargs))
-            raise TypeError(f"Unexpected keyword argument(s): {unexpected}")
-        super().__init__(mcp_server_id=resolved_id, source=source, mode=mode)
+    """Deprecated alias for :class:`McpServerRegistered`, kept for pre-rename callers."""
 
 
-@dataclass(init=False)
+@accepts_legacy_provider_id
 class ProviderUpdated(McpServerUpdated):
-    def __init__(
-        self,
-        provider_id: str | None = None,
-        mcp_server_id: str | None = None,
-        source: str = "",
-        **kwargs: object,
-    ):
-        resolved_id = provider_id or mcp_server_id or _resolve_legacy_mcp_server_id(None, kwargs)
-        if kwargs:
-            unexpected = ", ".join(sorted(kwargs))
-            raise TypeError(f"Unexpected keyword argument(s): {unexpected}")
-        super().__init__(mcp_server_id=resolved_id, source=source)
+    """Deprecated alias for :class:`McpServerUpdated`, kept for pre-rename callers."""
 
 
-@dataclass(init=False)
+@accepts_legacy_provider_id
 class ProviderDeregistered(McpServerDeregistered):
-    def __init__(
-        self,
-        provider_id: str | None = None,
-        mcp_server_id: str | None = None,
-        source: str = "",
-        **kwargs: object,
-    ):
-        resolved_id = provider_id or mcp_server_id or _resolve_legacy_mcp_server_id(None, kwargs)
-        if kwargs:
-            unexpected = ", ".join(sorted(kwargs))
-            raise TypeError(f"Unexpected keyword argument(s): {unexpected}")
-        super().__init__(mcp_server_id=resolved_id, source=source)
+    """Deprecated alias for :class:`McpServerDeregistered`, kept for pre-rename callers."""
 
 
 # =============================================================================
@@ -1731,41 +1636,14 @@ class McpServerCapabilityQuarantineReleased(DomainEvent):
         super().__init__()
 
 
-@dataclass(init=False)
+@accepts_legacy_provider_id
 class ProviderCapabilityQuarantined(McpServerCapabilityQuarantined):
-    def __init__(
-        self,
-        provider_id: str | None = None,
-        mcp_server_id: str | None = None,
-        reason: str = "",
-        violation_count: int = 1,
-        schema_version: int = 1,
-        **kwargs: object,
-    ):
-        provider_id = provider_id or mcp_server_id or _resolve_legacy_mcp_server_id(None, kwargs)
-        if kwargs:
-            unexpected = ", ".join(sorted(kwargs))
-            raise TypeError(f"Unexpected keyword argument(s): {unexpected}")
-        super().__init__(
-            mcp_server_id=provider_id, reason=reason, violation_count=violation_count, schema_version=schema_version
-        )
+    """Deprecated alias for :class:`McpServerCapabilityQuarantined`, kept for pre-rename callers."""
 
 
-@dataclass(init=False)
+@accepts_legacy_provider_id
 class ProviderCapabilityQuarantineReleased(McpServerCapabilityQuarantineReleased):
-    def __init__(
-        self,
-        provider_id: str | None = None,
-        mcp_server_id: str | None = None,
-        released_by: str = "",
-        schema_version: int = 1,
-        **kwargs: object,
-    ):
-        provider_id = provider_id or mcp_server_id or _resolve_legacy_mcp_server_id(None, kwargs)
-        if kwargs:
-            unexpected = ", ".join(sorted(kwargs))
-            raise TypeError(f"Unexpected keyword argument(s): {unexpected}")
-        super().__init__(mcp_server_id=provider_id, released_by=released_by, schema_version=schema_version)
+    """Deprecated alias for :class:`McpServerCapabilityQuarantineReleased`, kept for pre-rename callers."""
 
 
 @dataclass

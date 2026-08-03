@@ -37,7 +37,15 @@ def _alias_classes() -> list[type[DomainEvent]]:
         except (ValueError, TypeError):  # pragma: no cover - defensive
             continue
         takes_kwargs = any(p.kind is inspect.Parameter.VAR_KEYWORD for p in params.values())
-        if "provider_id" in params or (takes_kwargs and "mcp_server_id" in params):
+        # Two shapes carry the alias: a hand-written __init__ that names
+        # provider_id, and the decorator, whose wrapper is not introspectable --
+        # functools.wraps makes inspect.signature report the dataclass
+        # constructor instead. The decorator sets a marker for exactly this.
+        if (
+            getattr(obj, "__accepts_legacy_provider_id__", False)
+            or "provider_id" in params
+            or (takes_kwargs and "mcp_server_id" in params)
+        ):
             found.append(obj)
     return sorted(found, key=lambda c: c.__name__)
 
