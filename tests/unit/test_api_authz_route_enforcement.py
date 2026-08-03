@@ -159,7 +159,7 @@ class TestAuthSurfaceIsAdminOnly:
         kwargs = {"json": {}} if method == "post" else {}
         response = getattr(client, method)(path, **kwargs)
         assert response.status_code == 403, f"{method.upper()} {path} was not denied"
-        assert response.json()["error"] == "access_denied"
+        assert response.json()["error"]["code"] == "AccessDeniedError"
 
     def test_provider_admin_cannot_assign_roles(self):
         """The most privileged non-admin role must not reach role assignment."""
@@ -269,7 +269,7 @@ class TestFailClosedDefault:
         client = _client(role="admin")
         response = client.get("/definitely-not-mounted")
         assert response.status_code == 403
-        assert response.json()["error"] == "access_denied"
+        assert response.json()["error"]["code"] == "AccessDeniedError"
 
 
 class TestAuthenticationStillRequired:
@@ -328,3 +328,90 @@ class TestAuthDisabledStaysOpen:
         client = TestClient(create_api_router(auth_components=disabled), raise_server_exceptions=False)
         response = client.get("/system/me")
         assert response.status_code == 200
+
+
+class TestRejectionsUseTheApiErrorEnvelope:
+    """A denial from the chokepoint must look like every other domain error.
+
+    The REST API's error shape is the one `error_handler` produces:
+
+        {"error": {"code": "AccessDeniedError", "message": ..., "details": ...}}
+
+    Before the chokepoint existed, an authorization failure was an
+    `AccessDeniedError` raised inside a handler, so it reached that handler and
+    got that shape. Denying in middleware means the exception never reaches it,
+    and the first version of this middleware reused the authentication layer's
+    flatter body -- silently changing the 403 contract for every REST client.
+
+    A nightly live test caught it (`tests/live/test_t2_auth.py`), asserting
+    `error["code"] == "AccessDeniedError"` and receiving the string
+    `"access_denied"`. Pinned here so the next regression fails in seconds
+    rather than overnight.
+    """
+
+    def test_denial_body_is_the_structured_envelope(self):
+        client = _client(role="viewer")
+        response = client.delete("/mcp_servers/srv1")
+
+        assert response.status_code == 403
+        error = response.json()["error"]
+        assert isinstance(error, dict), f"error must be an object, got {type(error).__name__}"
+        assert error["code"] == "AccessDeniedError"
+        assert "message" in error
+
+    def test_unmapped_route_uses_the_same_envelope(self):
+        client = _client(role="admin")
+        error = client.get("/definitely-not-mounted").json()["error"]
+        assert isinstance(error, dict)
+        assert error["code"] == "AccessDeniedError"
+
+    def test_missing_credentials_body_is_also_structured(self):
+        client = _client(role=None)
+        response = client.get("/mcp_servers")
+
+        assert response.status_code == 401
+        error = response.json()["error"]
+        assert isinstance(error, dict)
+        assert error["code"] == "MissingCredentialsError"
+
+    def test_authentication_failure_still_advertises_the_scheme(self):
+        """Dropping WWW-Authenticate would break RFC 9728 clients."""
+        client = _client(role=None)
+        assert "WWW-Authenticate" in client.get("/mcp_servers").headers
+
+
+class TestTheGuardStepsAsideWhereItMust:
+    """Three bypasses that would each be an outage if the guard forgot them."""
+
+    def test_options_preflight_is_not_denied(self):
+        """CORS preflight carries no credentials by design.
+
+        A 403 here breaks every browser client before the real request is ever
+        sent, and the failure looks like a CORS misconfiguration rather than an
+        authorization one.
+        """
+        client = _client(role=None)
+        response = client.options(
+            "/mcp_servers",
+            headers={"Origin": "https://example.com", "Access-Control-Request-Method": "GET"},
+        )
+        assert response.status_code != 403
+
+    def test_health_endpoints_stay_public(self):
+        """Liveness must answer before any credential exists, or the pod never
+        passes its probe and the deployment rolls back."""
+        client = _client(role=None)
+        assert client.get("/health/live").status_code != 401
+
+    def test_metrics_stays_public(self):
+        """Prometheus scrapes unauthenticated; 401 here silently ends metrics."""
+        client = _client(role=None)
+        assert client.get("/metrics").status_code != 401
+
+    def test_authenticated_only_routes_need_no_permission(self):
+        """`/system/me` describes the caller, so the principal IS the resource.
+
+        A role with no permissions at all must still be able to ask who it is.
+        """
+        client = _client(role="service-account")
+        assert client.get("/system/me").status_code not in (401, 403)

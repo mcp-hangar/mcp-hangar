@@ -7,6 +7,12 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Fixed
+
+- **core:** the decision-path coverage floor for `server/tools/batch/executor.py` drops to 84.5. The module dispatches work on a thread pool with timeouts and single-flight de-duplication, so a few branches fire or not depending on scheduling: measured 85.38 three times on CPython 3.13, 85.06 twice on 3.11, and 85.06 then 84.75 on two CI runs of the same tree. The floor now sits under the lowest observed CI value rather than under a reproducible local one, so the gate reports a real regression instead of the runner's mood. The job also uploads `coverage.json` on failure, so the next divergence is diagnosable rather than guessed at
+- **core:** `ProviderRegistered`, `ProviderUpdated` and `ProviderDeregistered` rejected the modern `mcp_server_id` keyword -- they accepted only the pre-rename `provider_id`, unlike the other seven `Provider*` aliases which take both. Passing `mcp_server_id` raised `TypeError: Missing required argument: mcp_server_id` while the caller had supplied exactly that. The legacy alias contract is now pinned across every event that carries it
+- **core:** authorization denials return the API's standard error envelope again. 2.2.0 moved authorization into middleware, where the `AccessDeniedError` no longer reaches `error_handler`, and the middleware reused the authentication layer's flatter body -- so a `403` changed from `{"error": {"code": "AccessDeniedError", ...}}` to `{"error": "access_denied", ...}`. Any client reading `error.code` broke. Caught by the nightly live-verify suite; now pinned by unit tests so the next regression fails in seconds rather than overnight
+
 ### Changed
 
 - **core:** replaying a persisted stream restores the event's stored identity through one seam, `DomainEvent.rehydrate`, instead of two modules patching `event_id` and `occurred_at` in place after construction. Nothing asserted that identity survived replay: a fresh `event_id` silently reprocesses everything for any consumer de-duplicating on it, and a fresh `occurred_at` re-dates history to whenever the stream was read
