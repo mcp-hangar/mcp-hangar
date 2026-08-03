@@ -5,10 +5,7 @@
 from dataclasses import dataclass, field
 from typing import Any
 
-from ..value_objects.compat import (
-    accepts_legacy_provider_id,
-    resolve_legacy_mcp_server_id as _resolve_legacy_mcp_server_id,
-)
+from ..value_objects.compat import accepts_legacy_provider_id
 from .base import DomainEvent
 
 
@@ -16,7 +13,8 @@ from .base import DomainEvent
 # ---------------------------------------------------------------------------
 
 
-@dataclass(init=False)
+@accepts_legacy_provider_id
+@dataclass
 class CapabilityViolationDetected(DomainEvent):
     """Published when a mcp_server exceeds its declared capabilities.
 
@@ -42,9 +40,9 @@ class CapabilityViolationDetected(DomainEvent):
     """
 
     mcp_server_id: str
-    violation_type: str
-    violation_detail: str
-    enforcement_action: str
+    violation_type: str = ""
+    violation_detail: str = ""
+    enforcement_action: str = ""
     destination: str | None = None
     severity: str = "high"
     schema_version: int = 2
@@ -55,44 +53,12 @@ class CapabilityViolationDetected(DomainEvent):
     pod_namespace: str | None = None
     node_name: str | None = None
 
-    def __init__(
-        self,
-        mcp_server_id: str | None = None,
-        violation_type: str = "",
-        violation_detail: str = "",
-        enforcement_action: str = "",
-        destination: str | None = None,
-        severity: str = "high",
-        schema_version: int = 2,
-        process_pid: int | None = None,
-        container_id: str | None = None,
-        pod_name: str | None = None,
-        pod_namespace: str | None = None,
-        node_name: str | None = None,
-        **kwargs: object,
-    ):
-        self.mcp_server_id = _resolve_legacy_mcp_server_id(mcp_server_id, kwargs)
-        self.violation_type = violation_type
-        self.violation_detail = violation_detail
-        self.enforcement_action = enforcement_action
-        self.destination = destination
-        self.severity = severity
-        self.schema_version = schema_version
-        self.process_pid = process_pid
-        self.container_id = container_id
-        self.pod_name = pod_name
-        self.pod_namespace = pod_namespace
-        self.node_name = node_name
-        if kwargs:
-            unexpected = ", ".join(sorted(kwargs))
-            raise TypeError(f"Unexpected keyword argument(s): {unexpected}")
-        super().__init__()
-
     def __post_init__(self):
         super().__init__()
 
 
-@dataclass(init=False)
+@accepts_legacy_provider_id
+@dataclass
 class EgressPolicyViolationObserved(DomainEvent):
     """Published when an Audit-mode MCPEgressPolicy would have blocked a call.
 
@@ -112,37 +78,18 @@ class EgressPolicyViolationObserved(DomainEvent):
     """
 
     mcp_server_id: str
-    tool_name: str
-    would_be_action: str
-    reasons: list[str]
+    tool_name: str = ""
+    would_be_action: str = ""
+    reasons: list[str] = field(default_factory=list)
     correlation_id: str | None = None
     identity_context: dict[str, Any] | None = None
     schema_version: int = 1
 
-    def __init__(
-        self,
-        mcp_server_id: str | None = None,
-        tool_name: str = "",
-        would_be_action: str = "",
-        reasons: list[str] | None = None,
-        correlation_id: str | None = None,
-        identity_context: dict[str, Any] | None = None,
-        schema_version: int = 1,
-        **kwargs: object,
-    ):
-        self.mcp_server_id = _resolve_legacy_mcp_server_id(mcp_server_id, kwargs)
-        self.tool_name = tool_name
-        self.would_be_action = would_be_action
-        self.reasons = reasons if reasons is not None else []
-        self.correlation_id = correlation_id
-        self.identity_context = identity_context
-        self.schema_version = schema_version
-        if kwargs:
-            unexpected = ", ".join(sorted(kwargs))
-            raise TypeError(f"Unexpected keyword argument(s): {unexpected}")
-        super().__init__()
-
     def __post_init__(self):
+        # The hand-written constructor this replaces coerced None to [], and every
+        # consumer iterates `reasons` without a None check.
+        if self.reasons is None:
+            self.reasons = []
         super().__init__()
 
 
@@ -214,7 +161,8 @@ class EgressPolicyCleared(DomainEvent):
         super().__init__()
 
 
-@dataclass(init=False)
+@accepts_legacy_provider_id
+@dataclass
 class EgressBlocked(DomainEvent):
     """Published when an outbound connection from a mcp_server is blocked.
 
@@ -231,9 +179,9 @@ class EgressBlocked(DomainEvent):
     """
 
     mcp_server_id: str
-    destination_host: str
-    destination_port: int
-    protocol: str
+    destination_host: str = ""
+    destination_port: int = 0
+    protocol: str = ""
     enforcement_source: str = "networkpolicy"
     schema_version: int = 1
     # Process attribution (populated by the Tetragon backend / hangar-agent; #331/#333).
@@ -242,37 +190,6 @@ class EgressBlocked(DomainEvent):
     pod_name: str | None = None
     pod_namespace: str | None = None
     node_name: str | None = None
-
-    def __init__(
-        self,
-        mcp_server_id: str | None = None,
-        destination_host: str = "",
-        destination_port: int = 0,
-        protocol: str = "",
-        enforcement_source: str = "networkpolicy",
-        schema_version: int = 1,
-        process_pid: int | None = None,
-        container_id: str | None = None,
-        pod_name: str | None = None,
-        pod_namespace: str | None = None,
-        node_name: str | None = None,
-        **kwargs: object,
-    ):
-        self.mcp_server_id = _resolve_legacy_mcp_server_id(mcp_server_id, kwargs)
-        self.destination_host = destination_host
-        self.destination_port = destination_port
-        self.protocol = protocol
-        self.enforcement_source = enforcement_source
-        self.schema_version = schema_version
-        self.process_pid = process_pid
-        self.container_id = container_id
-        self.pod_name = pod_name
-        self.pod_namespace = pod_namespace
-        self.node_name = node_name
-        if kwargs:
-            unexpected = ", ".join(sorted(kwargs))
-            raise TypeError(f"Unexpected keyword argument(s): {unexpected}")
-        super().__init__()
 
     def __post_init__(self):
         super().__init__()

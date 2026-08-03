@@ -4,9 +4,7 @@
 
 from dataclasses import dataclass
 
-from ..value_objects.compat import (
-    accepts_legacy_provider_id,
-)
+from ..value_objects.compat import accepts_legacy_provider_id, accepts_legacy_provider_name
 from .base import DomainEvent
 from .health import McpServerIdleDetected
 from .lifecycle import McpServerDegraded, McpServerStarted, McpServerStateChanged, McpServerStopped
@@ -103,69 +101,29 @@ class ProviderIdleDetected(McpServerIdleDetected):
     """Deprecated alias for :class:`McpServerIdleDetected`, kept for pre-rename callers."""
 
 
-@dataclass(init=False)
+@accepts_legacy_provider_name
 class ProviderDiscovered(McpServerDiscovered):
-    def __init__(
-        self,
-        provider_name: str = "",
-        mcp_server_name: str = "",
-        source_type: str = "",
-        mode: str = "",
-        fingerprint: str = "",
-    ):
-        provider_name = provider_name or mcp_server_name
-        super().__init__(mcp_server_name=provider_name, source_type=source_type, mode=mode, fingerprint=fingerprint)
+    """Deprecated alias for :class:`McpServerDiscovered`, kept for pre-rename callers."""
 
 
-@dataclass(init=False)
+@accepts_legacy_provider_name
 class ProviderDiscoveryLost(McpServerDiscoveryLost):
-    def __init__(self, provider_name: str = "", mcp_server_name: str = "", source_type: str = "", reason: str = ""):
-        provider_name = provider_name or mcp_server_name
-        super().__init__(mcp_server_name=provider_name, source_type=source_type, reason=reason)
+    """Deprecated alias for :class:`McpServerDiscoveryLost`, kept for pre-rename callers."""
 
 
-@dataclass(init=False)
+@accepts_legacy_provider_name
 class ProviderDiscoveryConfigChanged(McpServerDiscoveryConfigChanged):
-    def __init__(
-        self,
-        provider_name: str = "",
-        mcp_server_name: str = "",
-        source_type: str = "",
-        old_fingerprint: str = "",
-        new_fingerprint: str = "",
-    ):
-        provider_name = provider_name or mcp_server_name
-        super().__init__(
-            mcp_server_name=provider_name,
-            source_type=source_type,
-            old_fingerprint=old_fingerprint,
-            new_fingerprint=new_fingerprint,
-        )
+    """Deprecated alias for :class:`McpServerDiscoveryConfigChanged`, kept for pre-rename callers."""
 
 
-@dataclass(init=False)
+@accepts_legacy_provider_name
 class ProviderQuarantined(McpServerQuarantined):
-    def __init__(
-        self,
-        provider_name: str = "",
-        mcp_server_name: str = "",
-        source_type: str = "",
-        reason: str = "",
-        validation_result: str = "",
-    ):
-        provider_name = provider_name or mcp_server_name
-        super().__init__(
-            mcp_server_name=provider_name, source_type=source_type, reason=reason, validation_result=validation_result
-        )
+    """Deprecated alias for :class:`McpServerQuarantined`, kept for pre-rename callers."""
 
 
-@dataclass(init=False)
+@accepts_legacy_provider_name
 class ProviderApproved(McpServerApproved):
-    def __init__(
-        self, provider_name: str = "", mcp_server_name: str = "", source_type: str = "", approved_by: str = ""
-    ):
-        provider_name = provider_name or mcp_server_name
-        super().__init__(mcp_server_name=provider_name, source_type=source_type, approved_by=approved_by)
+    """Deprecated alias for :class:`McpServerApproved`, kept for pre-rename callers."""
 
 
 @dataclass
