@@ -13,6 +13,7 @@ from concurrent.futures import as_completed, ThreadPoolExecutor
 import asyncio
 import atexit
 import contextvars
+from dataclasses import dataclass
 import json
 import threading
 import time
@@ -148,6 +149,79 @@ def _close_approval_loops() -> None:
                 loop.close()
         except Exception:  # noqa: BLE001 -- best-effort shutdown
             pass
+
+
+#: Sentinel: "not looked up yet", distinct from a genuine "no such projection".
+_UNRESOLVED = object()
+
+
+@dataclass
+class _CallPipeline:
+    """Mutable state threaded through the gates of a single batch call.
+
+    A shared object rather than a widening parameter list: the later gates need
+    what the earlier ones resolved -- the selected group member, the tool
+    projection, the tenant's digest pin -- and passing eleven values down a
+    chain of eleven methods is how the 454-line function this replaced came to
+    be one function.
+    """
+
+    call: CallSpec
+    ctx: Any
+    call_start: float
+    cancel_event: threading.Event
+    global_timeout: float
+    batch_start_time: float
+    caller_tenant_id: str | None
+    resolver: Any
+    proj_registry: Any
+    tracer: Any
+
+    #: Set by _gate_global_timeout: what is left of the batch budget.
+    effective_timeout: float = 0.0
+    #: Set by _gate_resolve_target.
+    mcp_server_obj: Any = None
+    is_group: bool = False
+    group_obj: Any = None
+    target_server_id: str = ""
+    #: Set by _gate_digest_pin.
+    pin: Any = None
+    _projection: Any = _UNRESOLVED
+    #: True when a pin exists but the catalogue was not there to check it
+    #: against; the cold start populates it and the gate re-runs (#601).
+    digest_pin_deferred: bool = False
+
+    @property
+    def projection(self) -> Any:
+        """The tool's projection, resolved once and cached.
+
+        A cached lookup rather than a field set by whichever gate happens to run
+        first: both the withdrawal gate and the digest-pin gate need it, and
+        making one of them responsible for populating it for the other is an
+        ordering dependency that fails silently -- reorder the two and the pin
+        check quietly defers instead of running.
+        """
+        if self._projection is _UNRESOLVED:
+            self._projection = self.proj_registry.resolve(self.call.mcp_server, self.call.tool, self.caller_tenant_id)
+        return self._projection
+
+    def elapsed_ms(self) -> float:
+        return (time.perf_counter() - self.call_start) * 1000
+
+    def refuse(self, error: str, error_type: str) -> CallResult:
+        """A refusal for this call, timed from its start.
+
+        Every gate built this by hand, eight lines apiece, and the elapsed_ms
+        argument is the one an edit forgets.
+        """
+        return CallResult(
+            index=self.call.index,
+            call_id=self.call.call_id,
+            success=False,
+            error=error,
+            error_type=error_type,
+            elapsed_ms=self.elapsed_ms(),
+        )
 
 
 class BatchExecutor:
@@ -803,7 +877,7 @@ class BatchExecutor:
                 mark_span_error(span, result.error)
             return result
 
-    def _execute_call_inner(  # noqa: C901 -- baseline CC=36; split before extending
+    def _execute_call_inner(
         self,
         call: CallSpec,
         cancel_event: threading.Event,
@@ -815,355 +889,40 @@ class BatchExecutor:
         """Inner execution logic for a single batch call (runs inside trace span).
 
         Separated from _execute_call so the span wraps the full call lifecycle.
+
+        The body is a chain of gates. Each returns a ``CallResult`` to refuse the
+        call or ``None`` to hand it to the next, and they share the mutable
+        ``_CallPipeline`` below because the later ones need what the earlier ones
+        resolved -- the selected group member, the tool projection, the tenant's
+        digest pin.
+
+        Their ORDER is load-bearing rather than incidental: the refusal a caller
+        receives decides what it does next, so swapping two gates silently
+        changes the answer. ``_GATES`` is that order, and
+        tests/unit/test_batch_gate_precedence.py arranges pairs of them to fail
+        at once and asserts which one wins.
         """
-        # Check cancellation before starting
-        if cancel_event.is_set():
-            return CallResult(
-                index=call.index,
-                call_id=call.call_id,
-                success=False,
-                error="Cancelled before execution",
-                error_type="CancellationError",
-                elapsed_ms=0.0,
-            )
+        pipeline = _CallPipeline(
+            call=call,
+            ctx=ctx,
+            call_start=call_start,
+            cancel_event=cancel_event,
+            global_timeout=global_timeout,
+            batch_start_time=batch_start_time,
+            # Read the caller's tenant first: a group's member selection may be
+            # tenant-aware (per-tenant canary / version routing, #275). The
+            # identity is set by IdentityMiddleware and carried into this worker
+            # thread via copy_context() (PR #239).
+            caller_tenant_id=(identity.caller.tenant_id if (identity := get_identity_context()) is not None else None),
+            resolver=get_tool_access_resolver(),
+            proj_registry=get_tool_projection_registry(),
+            tracer=get_tracer(__name__),
+        )
 
-        # Calculate effective timeout
-        elapsed = time.perf_counter() - batch_start_time
-        remaining_global = global_timeout - elapsed
-        if remaining_global <= 0:
-            return CallResult(
-                index=call.index,
-                call_id=call.call_id,
-                success=False,
-                error="Global timeout exceeded",
-                error_type="TimeoutError",
-                elapsed_ms=0.0,
-            )
-
-        effective_timeout = remaining_global
-        if call.timeout is not None:
-            effective_timeout = min(call.timeout, remaining_global)
-
-        # Read caller tenant_id first: a group's member selection may be
-        # tenant-aware (per-tenant canary / version routing, #275). The identity
-        # is set by IdentityMiddleware and carried into this worker thread via
-        # copy_context() (PR #239).
-        _identity_ctx = get_identity_context()
-        _caller_tenant_id: str | None = _identity_ctx.caller.tenant_id if _identity_ctx is not None else None
-
-        # Get mcp_server (or group). For a group, select a member NOW (tenant-aware
-        # when a canary policy is set) so the rest of the pipeline -- cold-start,
-        # circuit breaker, dispatch -- targets a real backend. Policy, withdrawal,
-        # and digest-pin checks below still key on the logical group id.
-        mcp_server_obj = ctx.get_mcp_server(call.mcp_server)
-        is_group = False
-        group_obj = None
-        target_server_id = call.mcp_server
-        if not mcp_server_obj:
-            group_obj = GROUPS.get(call.mcp_server)
-            if group_obj:
-                is_group = True
-                selected_member = group_obj.select_member_for(_caller_tenant_id)
-                if selected_member is None:
-                    return CallResult(
-                        index=call.index,
-                        call_id=call.call_id,
-                        success=False,
-                        error=f"No available member in group '{call.mcp_server}'",
-                        error_type="NoAvailableMemberError",
-                        elapsed_ms=(time.perf_counter() - call_start) * 1000,
-                    )
-                mcp_server_obj = selected_member
-                target_server_id = selected_member.id.value
-            elif not ctx.mcp_server_exists(call.mcp_server):
-                return CallResult(
-                    index=call.index,
-                    call_id=call.call_id,
-                    success=False,
-                    error=f"McpServer '{call.mcp_server}' not found",
-                    error_type="McpServerNotFoundError",
-                    elapsed_ms=(time.perf_counter() - call_start) * 1000,
-                )
-
-        # Check tool access policy BEFORE starting mcp_server or executing.
-        resolver = get_tool_access_resolver()
-        tracer = get_tracer(__name__)
-        with tracer.start_as_current_span("policy.check_access") as policy_span:
-            policy_span.set_attribute("mcp.server.id", call.mcp_server)
-            policy_span.set_attribute("gen_ai.tool.name", call.tool)
-            policy_span.set_attribute("policy.is_group", is_group)
-            if is_group:
-                group_obj = GROUPS.get(call.mcp_server)
-                # For groups, we check against group policy
-                # Member-specific policy will be checked when member is selected
-                allowed = resolver.is_tool_allowed(
-                    mcp_server_id=call.mcp_server,
-                    tool_name=call.tool,
-                    group_id=call.mcp_server,
-                    member_id=_caller_tenant_id,
-                )
-            else:
-                # For standalone mcp_servers: server→member merge when tenant is known
-                allowed = resolver.is_tool_allowed(
-                    mcp_server_id=call.mcp_server,
-                    tool_name=call.tool,
-                    member_id=_caller_tenant_id,
-                )
-            policy_span.set_attribute("policy.allowed", allowed)
-
-        if not allowed:
-            logger.info(
-                "tool_access_denied",
-                mcp_server_id=call.mcp_server,
-                tool=call.tool,
-                reason="tool_not_in_access_policy",
-            )
-            TOOL_ACCESS_DENIED_TOTAL.inc(
-                mcp_server=call.mcp_server,
-                tool=call.tool,
-                reason="tool_not_in_access_policy",
-            )
-            return CallResult(
-                index=call.index,
-                call_id=call.call_id,
-                success=False,
-                error="Tool not available for this mcp_server",
-                error_type="ToolAccessDeniedError",
-                elapsed_ms=(time.perf_counter() - call_start) * 1000,
-            )
-
-        # Check tool withdrawal status BEFORE backend invoke (#231).
-        # Guarantee: per-process-after-reload (registry is config-reload-driven; runtime
-        # mutation is #235). Rejection is envelope-level; protocol-clean -32601 is #232.
-        # Semantics: proj is None → registry unpopulated → do NOT block (safe default).
-        # Only an explicit is_withdrawn_for() == True causes rejection.
-        _proj_registry = get_tool_projection_registry()
-        _proj = _proj_registry.resolve(call.mcp_server, call.tool, _caller_tenant_id)
-        if _proj is not None and _proj.is_withdrawn_for(_caller_tenant_id):
-            logger.info(
-                "tool_withdrawn_rejected",
-                mcp_server_id=call.mcp_server,
-                tool=call.tool,
-                tenant_id=_caller_tenant_id,
-            )
-            ctx.event_bus.publish(
-                ToolWithdrawnRejected(
-                    tenant_id=_caller_tenant_id,
-                    mcp_server=call.mcp_server,
-                    tool=call.tool,
-                )
-            )
-            return CallResult(
-                index=call.index,
-                call_id=call.call_id,
-                success=False,
-                error=f"Tool '{call.tool}' is withdrawn for this tenant",
-                error_type="ToolWithdrawnError",
-                elapsed_ms=(time.perf_counter() - call_start) * 1000,
-            )
-
-        # Per-tenant digest pin enforcement (#233): if the caller's tenant pinned
-        # this tool to an approved digest, validate the backend's current schema
-        # against it and enforce per the server's configured mode. This is the
-        # first call site for DigestValidator. No pin -> unchanged behavior.
-        # NOTE: the withdrawal check above takes precedence -- a withdrawn tool is
-        # rejected before reaching here, so no mismatch event fires for a tool that
-        # is both withdrawn and pinned.
-        # A pinned tool whose projection is not in the registry yet cannot be
-        # checked here. That is the state of every backend that has not started
-        # in this process: the catalogue is populated by the McpServerStarted
-        # handler, and the cold start happens LATER in this same function. Left
-        # as-is, the first call after a gateway boot skipped the pin entirely --
-        # one unvalidated call per boot per server, and gateway restarts are
-        # routine in Kubernetes (#601). So the gate is a closure, run here when
-        # the catalogue is already available and re-run right after the cold
-        # start when it was not.
-        _pin = _proj_registry.resolve_pin(call.mcp_server, call.tool, _caller_tenant_id)
-
-        def _enforce_digest_pin(projection: Any, pin: Any) -> CallResult | None:
-            """Validate *projection* against the tenant's *pin*; a CallResult means reject."""
-            _enforcement = _proj_registry.digest_enforcement(call.mcp_server)
-            try:
-                _digest_result = DigestValidator(
-                    DigestPolicy(
-                        enforcement=_enforcement,
-                        unknown=DigestUnknownPolicy.BLOCK,
-                        allowlist=frozenset({pin}),
-                    )
-                ).validate_tool(projection.schema, call.mcp_server, call.call_id, tenant_id=_caller_tenant_id)
-                _digest_blocked = _digest_result.blocked
-                _digest_event = _digest_result.event
-            except Exception:  # noqa: BLE001 -- a malformed projection schema must not 500 the call path
-                # Cannot compute/verify the digest: fail closed under block, else allow.
-                logger.warning(
-                    "tool_digest_pin_unverifiable",
-                    mcp_server_id=call.mcp_server,
-                    tool=call.tool,
-                    tenant_id=_caller_tenant_id,
-                )
-                _digest_blocked = _enforcement == DigestEnforcement.BLOCK
-                _digest_event = None
-            if _digest_event is not None:
-                ctx.event_bus.publish(_digest_event)
-            if _digest_blocked:
-                logger.info(
-                    "tool_digest_pin_rejected",
-                    mcp_server_id=call.mcp_server,
-                    tool=call.tool,
-                    tenant_id=_caller_tenant_id,
-                )
-                return CallResult(
-                    index=call.index,
-                    call_id=call.call_id,
-                    success=False,
-                    error=f"Tool '{call.tool}' schema does not match the digest pinned for this tenant",
-                    error_type="ToolDigestMismatchError",
-                    elapsed_ms=(time.perf_counter() - call_start) * 1000,
-                )
-            # Pin verified: bind the tool's approved digest to the request
-            # context so that if this call is task-augmented and returns a task
-            # handle, GovernedTaskStore.create_task pins the task to this digest
-            # and re-verifies it fail-closed on result retrieval (#320). Each
-            # batch call runs in its own contextvars.copy_context() (see
-            # execute()), so this set is confined to the current call.
-            set_current_tool_pin(
-                CurrentToolPin(
-                    mcp_server=call.mcp_server,
-                    tool_name=call.tool,
-                    pinned_digest=pin.sha256,
-                )
-            )
-            return None
-
-        #: True when a pin exists but the catalogue was not there to check it
-        #: against; the cold start below populates it and the gate re-runs.
-        _digest_pin_deferred = False
-        if _pin is not None:
-            if _proj is not None:
-                _rejection = _enforce_digest_pin(_proj, _pin)
-                if _rejection is not None:
-                    return _rejection
-            else:
-                _digest_pin_deferred = True
-
-        # Check circuit breaker / health degradation of the resolved target
-        # (a standalone server, or the selected group member).
-        if mcp_server_obj:
-            if hasattr(mcp_server_obj, "health") and mcp_server_obj.health.should_degrade():
-                BATCH_CIRCUIT_BREAKER_REJECTIONS_TOTAL.inc(mcp_server=target_server_id)
-                return CallResult(
-                    index=call.index,
-                    call_id=call.call_id,
-                    success=False,
-                    error="Circuit breaker open (too many consecutive failures)",
-                    error_type="CircuitBreakerOpen",
-                    elapsed_ms=(time.perf_counter() - call_start) * 1000,
-                )
-
-        # Interceptor validators: gate the request payload fail-closed BEFORE
-        # prompting for approval, so a validator denial short-circuits without
-        # blocking on a human decision. Empty pipeline (default) always allows.
-        if (denied := self._check_validators(call)) is not None:
-            denied.elapsed_ms = (time.perf_counter() - call_start) * 1000
-            return denied
-
-        # Approval gate: check if the tool requires human approval before execution.
-        # The policy is configured via the server config and applied to the ToolAccessResolver.
-        # Uses the resolver's effective policy (mcp_server-specific or _global fallback).
-        with tracer.start_as_current_span("approval_gate.check") as approval_span:
-            approval_span.set_attribute("mcp.server.id", call.mcp_server)
-            approval_span.set_attribute("gen_ai.tool.name", call.tool)
-            approval_result = self._check_approval_gate(call, resolver, ctx)
-            if approval_result is not None:
-                approval_span.set_attribute("approval.result", approval_result.error_type or "denied")
-                approval_result.elapsed_ms = (time.perf_counter() - call_start) * 1000
-                return approval_result
-
-            # Re-establish validity after the hold. The gate blocks for up to
-            # `approval_timeout_seconds` (300 by default), and every check that
-            # preceded it -- effective policy, tool withdrawal, the pinned tool
-            # digest -- was evaluated against the world as it was *before* that
-            # pause. Config reload is a supported live operation, so withdrawing
-            # a tool or tightening a policy while a decision is pending left the
-            # held call to dispatch on the superseded decision.
-            _granted_id = getattr(_approval_loop_local, "approval_id", None)
-            if _granted_id is not None:
-                _refusal = self._revalidate_after_hold(
-                    call,
-                    resolver,
-                    ctx,
-                    _granted_id,
-                    _pin,
-                    _proj_registry,
-                    _caller_tenant_id,
-                    _enforce_digest_pin,
-                )
-                if _refusal is not None:
-                    approval_span.set_attribute("approval.result", "revalidation_failed")
-                    _refusal.elapsed_ms = (time.perf_counter() - call_start) * 1000
-                    return _refusal
-            approval_span.set_attribute("approval.result", "not_required")
-
-        # Single-flight cold start of the resolved target (standalone server or
-        # the selected group member).
-        if mcp_server_obj and mcp_server_obj.state.value == "cold":
-            with tracer.start_as_current_span("mcp_server.cold_start") as cs_span:
-                cs_span.set_attribute("mcp.server.id", target_server_id)
-                try:
-                    self._single_flight.do(
-                        target_server_id,
-                        lambda: ctx.command_bus.send(StartMcpServerCommand(mcp_server_id=target_server_id)),
-                    )
-                    cs_span.set_attribute("cold_start.result", "success")
-                except Exception as e:  # noqa: BLE001 -- fault-barrier: mcp_server start failure must return error result, not crash batch
-                    cs_span.set_attribute("cold_start.result", "error")
-                    cs_span.record_exception(e)
-                    return CallResult(
-                        index=call.index,
-                        call_id=call.call_id,
-                        success=False,
-                        error=f"Failed to start mcp_server: {e}",
-                        error_type="McpServerStartError",
-                        elapsed_ms=(time.perf_counter() - call_start) * 1000,
-                    )
-
-        # The cold start above published McpServerStarted, so the tool catalogue
-        # exists now. Run the pin gate that could not run earlier (#601). Still
-        # missing afterwards means the tool never appeared in the catalogue at
-        # all, which for a PINNED tool is unverifiable -> fail closed under BLOCK,
-        # matching how an uncomputable digest is treated inside the gate.
-        if _digest_pin_deferred:
-            _late_proj = _proj_registry.resolve(call.mcp_server, call.tool, _caller_tenant_id)
-            if _late_proj is not None:
-                _rejection = _enforce_digest_pin(_late_proj, _pin)
-                if _rejection is not None:
-                    return _rejection
-            elif _proj_registry.digest_enforcement(call.mcp_server) == DigestEnforcement.BLOCK:
-                logger.info(
-                    "tool_digest_pin_unresolvable",
-                    mcp_server_id=call.mcp_server,
-                    tool=call.tool,
-                    tenant_id=_caller_tenant_id,
-                )
-                return CallResult(
-                    index=call.index,
-                    call_id=call.call_id,
-                    success=False,
-                    error=f"Tool '{call.tool}' is pinned for this tenant but its schema could not be verified",
-                    error_type="ToolDigestMismatchError",
-                    elapsed_ms=(time.perf_counter() - call_start) * 1000,
-                )
-
-        # Check cancellation after cold start
-        if cancel_event.is_set():
-            return CallResult(
-                index=call.index,
-                call_id=call.call_id,
-                success=False,
-                error="Cancelled after cold start",
-                error_type="CancellationError",
-                elapsed_ms=(time.perf_counter() - call_start) * 1000,
-            )
+        for gate in _GATES:
+            refusal = gate(self, pipeline)
+            if refusal is not None:
+                return refusal
 
         # Acquire concurrency slots (global + per-mcp_server) before invocation.
         # This is where backpressure happens: if the global or mcp_server semaphore
@@ -1171,7 +930,7 @@ class BatchExecutor:
         # starts as soon as ANY slot is freed -- it does not wait for an entire
         # batch wave to complete (unlike sequential chunking).
         cm = self.concurrency_manager
-        with tracer.start_as_current_span("concurrency.acquire") as conc_span:
+        with pipeline.tracer.start_as_current_span("concurrency.acquire") as conc_span:
             conc_span.set_attribute("mcp.server.id", call.mcp_server)
             with cm.acquire(call.mcp_server) as wait_s:
                 conc_span.set_attribute("concurrency.wait_ms", round(wait_s * 1000, 2))
@@ -1184,79 +943,400 @@ class BatchExecutor:
                     )
 
                 result = self._invoke_with_retry(
-                    call, cancel_event, effective_timeout, call_start, ctx, target_server_id
+                    call,
+                    cancel_event,
+                    pipeline.effective_timeout,
+                    call_start,
+                    ctx,
+                    pipeline.target_server_id,
                 )
 
-        # Upstream MCP task handle (ADR-014 P3). Two mutually exclusive outcomes,
-        # both an EARLY return BEFORE the group-health block (a task creation is
-        # NOT a healthy-member outcome, so report_success must not fire here):
-        #
-        #  - Relay kill-switch ON (the governed task store is wired on the app
-        #    ctx, which happens ONLY when config.relay_tasks_enabled is True):
-        #    CAPTURE the request context into the CallResult and return it as a
-        #    success. This worker performs NO store write -- per ADR-014 D4 the
-        #    actual register + TaskCreated emit runs on the MAIN LOOP at the
-        #    hangar_call seam, before the handle reaches the client.
-        #  - Kill-switch OFF (store absent): byte-identical to the ADR-008
-        #    relay-only stance -- a clean TaskRelayNotSupported rejection, so the
-        #    client never gets an untracked, unusable handle.
-        #
-        # The store's mere presence on ctx is the kill-switch: the factory wires
-        # governed_task_store ONLY under `HAS_NATIVE_TASKS and relay_tasks_enabled`
-        # (see fastmcp_server/factory._enable_governed_tasks), and the real
-        # ApplicationContext field defaults to None. Reading it here needs no
-        # config plumbing into the worker.
-        if result.success and isinstance(result.result, dict) and _is_task_result(result.result):
-            if getattr(ctx, "governed_task_store", None) is not None:
-                logger.debug(
-                    "upstream_task_result_captured_for_relay",
-                    mcp_server=call.mcp_server,
-                    tool=call.tool,
-                    call_id=call.call_id,
-                )
-                return CallResult(
-                    index=call.index,
-                    call_id=call.call_id,
-                    success=True,
-                    result=result.result,
-                    elapsed_ms=result.elapsed_ms,
-                    relay_capture=RelayCapture(
-                        identity=get_identity_context(),
-                        pin=get_current_tool_pin(),
-                        target_server_id=target_server_id,
-                        correlation_id=call.call_id,
-                        upstream=result.result,
-                        logical_mcp_server=call.mcp_server,
-                        tool=call.tool,
-                    ),
-                )
-            logger.warning(
-                "upstream_task_result_rejected",
-                mcp_server=call.mcp_server,
-                tool=call.tool,
-                call_id=call.call_id,
-            )
-            return CallResult(
-                index=call.index,
-                call_id=call.call_id,
-                success=False,
-                error=(
-                    "Upstream returned an MCP task handle; Hangar does not yet relay "
-                    "or govern task results (relay-only, ADR-008). The task is not "
-                    "tracked, so the handle is unusable."
-                ),
-                error_type="TaskRelayNotSupported",
-                elapsed_ms=result.elapsed_ms,
-            )
+        relayed = self._relay_upstream_task(pipeline, result)
+        if relayed is not None:
+            return relayed
 
         # Feed the group health tracker so its circuit-breaker and member rotation
         # react to actual invoke outcomes (enables failover on the call path, #275).
-        if is_group and group_obj is not None:
+        if pipeline.is_group and pipeline.group_obj is not None:
             if result.success:
-                group_obj.report_success(target_server_id)
+                pipeline.group_obj.report_success(pipeline.target_server_id)
             else:
-                group_obj.report_failure(target_server_id)
+                pipeline.group_obj.report_failure(pipeline.target_server_id)
         return result
+
+    # -- gates ---------------------------------------------------------------
+    #
+    # Each returns None to let the call through, or a CallResult to refuse it.
+    # Registered in _GATES at the bottom of this module, which is the order they
+    # run in.
+
+    def _gate_cancelled_before_execution(self, p: "_CallPipeline") -> CallResult | None:
+        if p.cancel_event.is_set():
+            # elapsed_ms is 0.0 rather than measured: nothing ran.
+            return CallResult(
+                index=p.call.index,
+                call_id=p.call.call_id,
+                success=False,
+                error="Cancelled before execution",
+                error_type="CancellationError",
+                elapsed_ms=0.0,
+            )
+        return None
+
+    def _gate_global_timeout(self, p: "_CallPipeline") -> CallResult | None:
+        """Refuse if the batch's budget is already spent, and set what is left."""
+        remaining_global = p.global_timeout - (time.perf_counter() - p.batch_start_time)
+        if remaining_global <= 0:
+            return CallResult(
+                index=p.call.index,
+                call_id=p.call.call_id,
+                success=False,
+                error="Global timeout exceeded",
+                error_type="TimeoutError",
+                elapsed_ms=0.0,
+            )
+        p.effective_timeout = min(p.call.timeout, remaining_global) if p.call.timeout is not None else remaining_global
+        return None
+
+    def _gate_resolve_target(self, p: "_CallPipeline") -> CallResult | None:
+        """Resolve the call to a concrete backend, selecting a group member if needed.
+
+        For a group the member is selected NOW (tenant-aware when a canary policy
+        is set) so the rest of the pipeline -- cold-start, circuit breaker,
+        dispatch -- targets a real backend. Policy, withdrawal and digest-pin
+        checks below still key on the logical group id.
+        """
+        p.mcp_server_obj = p.ctx.get_mcp_server(p.call.mcp_server)
+        p.target_server_id = p.call.mcp_server
+        if p.mcp_server_obj:
+            return None
+
+        p.group_obj = GROUPS.get(p.call.mcp_server)
+        if p.group_obj:
+            p.is_group = True
+            selected_member = p.group_obj.select_member_for(p.caller_tenant_id)
+            if selected_member is None:
+                return p.refuse(f"No available member in group '{p.call.mcp_server}'", "NoAvailableMemberError")
+            p.mcp_server_obj = selected_member
+            p.target_server_id = selected_member.id.value
+        elif not p.ctx.mcp_server_exists(p.call.mcp_server):
+            return p.refuse(f"McpServer '{p.call.mcp_server}' not found", "McpServerNotFoundError")
+        return None
+
+    def _gate_tool_access(self, p: "_CallPipeline") -> CallResult | None:
+        """Tool access policy, checked BEFORE starting the server or executing."""
+        with p.tracer.start_as_current_span("policy.check_access") as policy_span:
+            policy_span.set_attribute("mcp.server.id", p.call.mcp_server)
+            policy_span.set_attribute("gen_ai.tool.name", p.call.tool)
+            policy_span.set_attribute("policy.is_group", p.is_group)
+            if p.is_group:
+                p.group_obj = GROUPS.get(p.call.mcp_server)
+                # For groups, we check against group policy. Member-specific
+                # policy will be checked when the member is selected.
+                allowed = p.resolver.is_tool_allowed(
+                    mcp_server_id=p.call.mcp_server,
+                    tool_name=p.call.tool,
+                    group_id=p.call.mcp_server,
+                    member_id=p.caller_tenant_id,
+                )
+            else:
+                # For standalone mcp_servers: server->member merge when tenant is known
+                allowed = p.resolver.is_tool_allowed(
+                    mcp_server_id=p.call.mcp_server,
+                    tool_name=p.call.tool,
+                    member_id=p.caller_tenant_id,
+                )
+            policy_span.set_attribute("policy.allowed", allowed)
+
+        if allowed:
+            return None
+        logger.info(
+            "tool_access_denied",
+            mcp_server_id=p.call.mcp_server,
+            tool=p.call.tool,
+            reason="tool_not_in_access_policy",
+        )
+        TOOL_ACCESS_DENIED_TOTAL.inc(mcp_server=p.call.mcp_server, tool=p.call.tool, reason="tool_not_in_access_policy")
+        return p.refuse("Tool not available for this mcp_server", "ToolAccessDeniedError")
+
+    def _gate_withdrawal(self, p: "_CallPipeline") -> CallResult | None:
+        """Tool withdrawal status, checked BEFORE backend invoke (#231).
+
+        Guarantee: per-process-after-reload (registry is config-reload-driven;
+        runtime mutation is #235). Rejection is envelope-level; protocol-clean
+        -32601 is #232. Semantics: projection is None -> registry unpopulated ->
+        do NOT block (safe default). Only an explicit is_withdrawn_for() == True
+        causes rejection.
+        """
+        projection = p.projection
+        if projection is None or not projection.is_withdrawn_for(p.caller_tenant_id):
+            return None
+        logger.info(
+            "tool_withdrawn_rejected",
+            mcp_server_id=p.call.mcp_server,
+            tool=p.call.tool,
+            tenant_id=p.caller_tenant_id,
+        )
+        p.ctx.event_bus.publish(
+            ToolWithdrawnRejected(tenant_id=p.caller_tenant_id, mcp_server=p.call.mcp_server, tool=p.call.tool)
+        )
+        return p.refuse(f"Tool '{p.call.tool}' is withdrawn for this tenant", "ToolWithdrawnError")
+
+    def _enforce_digest_pin(self, p: "_CallPipeline", projection: Any, pin: Any) -> CallResult | None:
+        """Validate *projection* against the tenant's *pin*; a CallResult means reject."""
+        enforcement = p.proj_registry.digest_enforcement(p.call.mcp_server)
+        try:
+            digest_result = DigestValidator(
+                DigestPolicy(
+                    enforcement=enforcement,
+                    unknown=DigestUnknownPolicy.BLOCK,
+                    allowlist=frozenset({pin}),
+                )
+            ).validate_tool(projection.schema, p.call.mcp_server, p.call.call_id, tenant_id=p.caller_tenant_id)
+            blocked = digest_result.blocked
+            event = digest_result.event
+        except Exception:  # noqa: BLE001 -- a malformed projection schema must not 500 the call path
+            # Cannot compute/verify the digest: fail closed under block, else allow.
+            logger.warning(
+                "tool_digest_pin_unverifiable",
+                mcp_server_id=p.call.mcp_server,
+                tool=p.call.tool,
+                tenant_id=p.caller_tenant_id,
+            )
+            blocked = enforcement == DigestEnforcement.BLOCK
+            event = None
+        if event is not None:
+            p.ctx.event_bus.publish(event)
+        if blocked:
+            logger.info(
+                "tool_digest_pin_rejected",
+                mcp_server_id=p.call.mcp_server,
+                tool=p.call.tool,
+                tenant_id=p.caller_tenant_id,
+            )
+            return p.refuse(
+                f"Tool '{p.call.tool}' schema does not match the digest pinned for this tenant",
+                "ToolDigestMismatchError",
+            )
+        # Pin verified: bind the tool's approved digest to the request context so
+        # that if this call is task-augmented and returns a task handle,
+        # GovernedTaskStore.create_task pins the task to this digest and
+        # re-verifies it fail-closed on result retrieval (#320). Each batch call
+        # runs in its own contextvars.copy_context() (see execute()), so this set
+        # is confined to the current call.
+        set_current_tool_pin(
+            CurrentToolPin(mcp_server=p.call.mcp_server, tool_name=p.call.tool, pinned_digest=pin.sha256)
+        )
+        return None
+
+    def _gate_digest_pin(self, p: "_CallPipeline") -> CallResult | None:
+        """Per-tenant digest pin enforcement (#233).
+
+        If the caller's tenant pinned this tool to an approved digest, validate
+        the backend's current schema against it and enforce per the server's
+        configured mode. No pin -> unchanged behavior.
+
+        NOTE: the withdrawal check above takes precedence -- a withdrawn tool is
+        rejected before reaching here, so no mismatch event fires for a tool that
+        is both withdrawn and pinned.
+
+        A pinned tool whose projection is not in the registry yet cannot be
+        checked here. That is the state of every backend that has not started in
+        this process: the catalogue is populated by the McpServerStarted handler,
+        and the cold start happens LATER in this pipeline. Left as-is, the first
+        call after a gateway boot skipped the pin entirely -- one unvalidated
+        call per boot per server, and gateway restarts are routine in Kubernetes
+        (#601). So the check is deferred and re-run by
+        _gate_deferred_digest_pin once the cold start has populated the
+        catalogue.
+        """
+        p.pin = p.proj_registry.resolve_pin(p.call.mcp_server, p.call.tool, p.caller_tenant_id)
+        if p.pin is None:
+            return None
+        if p.projection is None:
+            p.digest_pin_deferred = True
+            return None
+        return self._enforce_digest_pin(p, p.projection, p.pin)
+
+    def _gate_circuit_breaker(self, p: "_CallPipeline") -> CallResult | None:
+        """Circuit breaker / health degradation of the resolved target."""
+        if not p.mcp_server_obj:
+            return None
+        if not (hasattr(p.mcp_server_obj, "health") and p.mcp_server_obj.health.should_degrade()):
+            return None
+        BATCH_CIRCUIT_BREAKER_REJECTIONS_TOTAL.inc(mcp_server=p.target_server_id)
+        return p.refuse("Circuit breaker open (too many consecutive failures)", "CircuitBreakerOpen")
+
+    def _gate_validators(self, p: "_CallPipeline") -> CallResult | None:
+        """Interceptor validators, fail-closed BEFORE prompting for approval.
+
+        Ordered ahead of the approval gate so a validator denial short-circuits
+        without blocking on a human decision. Empty pipeline (default) allows.
+        """
+        denied = self._check_validators(p.call)
+        if denied is None:
+            return None
+        denied.elapsed_ms = p.elapsed_ms()
+        return denied
+
+    def _gate_approval(self, p: "_CallPipeline") -> CallResult | None:
+        """Human approval gate, plus the re-check of everything it paused.
+
+        The policy is configured via the server config and applied to the
+        ToolAccessResolver; this uses the resolver's effective policy
+        (mcp_server-specific or _global fallback).
+        """
+        with p.tracer.start_as_current_span("approval_gate.check") as approval_span:
+            approval_span.set_attribute("mcp.server.id", p.call.mcp_server)
+            approval_span.set_attribute("gen_ai.tool.name", p.call.tool)
+            approval_result = self._check_approval_gate(p.call, p.resolver, p.ctx)
+            if approval_result is not None:
+                approval_span.set_attribute("approval.result", approval_result.error_type or "denied")
+                approval_result.elapsed_ms = p.elapsed_ms()
+                return approval_result
+
+            # Re-establish validity after the hold. The gate blocks for up to
+            # `approval_timeout_seconds` (300 by default), and every check that
+            # preceded it -- effective policy, tool withdrawal, the pinned tool
+            # digest -- was evaluated against the world as it was *before* that
+            # pause. Config reload is a supported live operation, so withdrawing
+            # a tool or tightening a policy while a decision is pending left the
+            # held call to dispatch on the superseded decision.
+            granted_id = getattr(_approval_loop_local, "approval_id", None)
+            if granted_id is not None:
+                refusal = self._revalidate_after_hold(
+                    p.call,
+                    p.resolver,
+                    p.ctx,
+                    granted_id,
+                    p.pin,
+                    p.proj_registry,
+                    p.caller_tenant_id,
+                    lambda projection, pin: self._enforce_digest_pin(p, projection, pin),
+                )
+                if refusal is not None:
+                    approval_span.set_attribute("approval.result", "revalidation_failed")
+                    refusal.elapsed_ms = p.elapsed_ms()
+                    return refusal
+            approval_span.set_attribute("approval.result", "not_required")
+        return None
+
+    def _gate_cold_start(self, p: "_CallPipeline") -> CallResult | None:
+        """Single-flight cold start of the resolved target."""
+        if not (p.mcp_server_obj and p.mcp_server_obj.state.value == "cold"):
+            return None
+        with p.tracer.start_as_current_span("mcp_server.cold_start") as cs_span:
+            cs_span.set_attribute("mcp.server.id", p.target_server_id)
+            try:
+                self._single_flight.do(
+                    p.target_server_id,
+                    lambda: p.ctx.command_bus.send(StartMcpServerCommand(mcp_server_id=p.target_server_id)),
+                )
+                cs_span.set_attribute("cold_start.result", "success")
+            except Exception as e:  # noqa: BLE001 -- fault-barrier: mcp_server start failure must return error result, not crash batch
+                cs_span.set_attribute("cold_start.result", "error")
+                cs_span.record_exception(e)
+                return p.refuse(f"Failed to start mcp_server: {e}", "McpServerStartError")
+        return None
+
+    def _gate_deferred_digest_pin(self, p: "_CallPipeline") -> CallResult | None:
+        """Run the pin check the cold start made possible (#601).
+
+        The cold start published McpServerStarted, so the tool catalogue exists
+        now. Still missing afterwards means the tool never appeared in the
+        catalogue at all, which for a PINNED tool is unverifiable -> fail closed
+        under BLOCK, matching how an uncomputable digest is treated inside the
+        gate.
+        """
+        if not p.digest_pin_deferred:
+            return None
+        late_projection = p.proj_registry.resolve(p.call.mcp_server, p.call.tool, p.caller_tenant_id)
+        if late_projection is not None:
+            return self._enforce_digest_pin(p, late_projection, p.pin)
+        if p.proj_registry.digest_enforcement(p.call.mcp_server) != DigestEnforcement.BLOCK:
+            return None
+        logger.info(
+            "tool_digest_pin_unresolvable",
+            mcp_server_id=p.call.mcp_server,
+            tool=p.call.tool,
+            tenant_id=p.caller_tenant_id,
+        )
+        return p.refuse(
+            f"Tool '{p.call.tool}' is pinned for this tenant but its schema could not be verified",
+            "ToolDigestMismatchError",
+        )
+
+    def _gate_cancelled_after_cold_start(self, p: "_CallPipeline") -> CallResult | None:
+        if not p.cancel_event.is_set():
+            return None
+        return p.refuse("Cancelled after cold start", "CancellationError")
+
+    def _relay_upstream_task(self, p: "_CallPipeline", result: CallResult) -> CallResult | None:
+        """Upstream MCP task handle (ADR-014 P3).
+
+        Two mutually exclusive outcomes, both an EARLY return BEFORE the
+        group-health block (a task creation is NOT a healthy-member outcome, so
+        report_success must not fire for it):
+
+         - Relay kill-switch ON (the governed task store is wired on the app ctx,
+           which happens ONLY when config.relay_tasks_enabled is True): CAPTURE
+           the request context into the CallResult and return it as a success.
+           This worker performs NO store write -- per ADR-014 D4 the actual
+           register + TaskCreated emit runs on the MAIN LOOP at the hangar_call
+           seam, before the handle reaches the client.
+         - Kill-switch OFF (store absent): byte-identical to the ADR-008
+           relay-only stance -- a clean TaskRelayNotSupported rejection, so the
+           client never gets an untracked, unusable handle.
+
+        The store's mere presence on ctx is the kill-switch: the factory wires
+        governed_task_store ONLY under `HAS_NATIVE_TASKS and relay_tasks_enabled`
+        (see fastmcp_server/factory._enable_governed_tasks), and the real
+        ApplicationContext field defaults to None. Reading it here needs no
+        config plumbing into the worker.
+        """
+        if not (result.success and isinstance(result.result, dict) and _is_task_result(result.result)):
+            return None
+        if getattr(p.ctx, "governed_task_store", None) is not None:
+            logger.debug(
+                "upstream_task_result_captured_for_relay",
+                mcp_server=p.call.mcp_server,
+                tool=p.call.tool,
+                call_id=p.call.call_id,
+            )
+            return CallResult(
+                index=p.call.index,
+                call_id=p.call.call_id,
+                success=True,
+                result=result.result,
+                elapsed_ms=result.elapsed_ms,
+                relay_capture=RelayCapture(
+                    identity=get_identity_context(),
+                    pin=get_current_tool_pin(),
+                    target_server_id=p.target_server_id,
+                    correlation_id=p.call.call_id,
+                    upstream=result.result,
+                    logical_mcp_server=p.call.mcp_server,
+                    tool=p.call.tool,
+                ),
+            )
+        logger.warning(
+            "upstream_task_result_rejected",
+            mcp_server=p.call.mcp_server,
+            tool=p.call.tool,
+            call_id=p.call.call_id,
+        )
+        return CallResult(
+            index=p.call.index,
+            call_id=p.call.call_id,
+            success=False,
+            error=(
+                "Upstream returned an MCP task handle; Hangar does not yet relay "
+                "or govern task results (relay-only, ADR-008). The task is not "
+                "tracked, so the handle is unusable."
+            ),
+            error_type="TaskRelayNotSupported",
+            elapsed_ms=result.elapsed_ms,
+        )
 
     def _invoke_with_retry(
         self,
@@ -1479,3 +1559,23 @@ def format_result_dict(result: CallResult) -> dict[str, Any]:
         d["retry_metadata"] = result.retry_metadata.to_dict()
 
     return d
+
+
+#: The order the gates run in. This IS the precedence contract -- which gate
+#: answers decides what the caller does next, so reordering two lines here
+#: changes behaviour. tests/unit/test_batch_gate_precedence.py pins it by
+#: arranging pairs to fail at once and asserting which one wins.
+_GATES = (
+    BatchExecutor._gate_cancelled_before_execution,
+    BatchExecutor._gate_global_timeout,
+    BatchExecutor._gate_resolve_target,
+    BatchExecutor._gate_tool_access,
+    BatchExecutor._gate_withdrawal,
+    BatchExecutor._gate_digest_pin,
+    BatchExecutor._gate_circuit_breaker,
+    BatchExecutor._gate_validators,
+    BatchExecutor._gate_approval,
+    BatchExecutor._gate_cold_start,
+    BatchExecutor._gate_deferred_digest_pin,
+    BatchExecutor._gate_cancelled_after_cold_start,
+)
