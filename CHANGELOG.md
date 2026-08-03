@@ -9,7 +9,9 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Changed
 
+- **core:** branch coverage is now gated per module on the decision paths. `coverage.py`'s `fail_under` is global-only, so a single threshold would have to be low enough for the weakest module in the tree -- exactly the modules needing the strongest guarantee. 29 modules (authz, consent/approvals, egress + tool-access policy, digest) carry floors set to their MEASURED value, checked by `scripts/check_decision_coverage.py`. `branch = true` moves into `[tool.coverage.run]`, since a floor compared against statement-only data silently passes a lower bar, and mixing modes raises `DataError`
 - **core:** cyclomatic complexity is now a gate. `C901` caps new code at 15; the 16 functions already above it carry an explicit `# noqa: C901 -- baseline CC=N`, and `tests/unit/test_complexity_baseline.py` caps that list so it can only shrink. Complexity had never been measured -- the ruff config omitted `C90` entirely, and the worst function in the tree scores 49
+
 
 ### Fixed
 
