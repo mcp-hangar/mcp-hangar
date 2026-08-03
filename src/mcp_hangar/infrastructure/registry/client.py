@@ -77,12 +77,19 @@ class RegistryClient(IRegistryClient):
             self._client = None
 
     def _get_default_user_agent(self) -> str:
-        """Get the default User-Agent string."""
-        try:
-            from ... import __version__
+        """Get the default User-Agent string.
 
-            return f"mcp-hangar/{__version__}"
-        except ImportError:
+        Reads the installed distribution's version directly rather than
+        importing ``__version__`` off the package root. That import pulled the
+        whole public API -- facade, SyncHangar and everything they reach -- into
+        an adapter, purely to format a header, and it is what made this module
+        appear to depend on the delivery layer in the import contract.
+        """
+        try:
+            from importlib.metadata import PackageNotFoundError, version
+
+            return f"mcp-hangar/{version('mcp-hangar')}"
+        except (ImportError, PackageNotFoundError):
             return "mcp-hangar/unknown"
 
     async def search(self, query: str, limit: int = 10) -> list[ServerSummary]:

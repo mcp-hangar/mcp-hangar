@@ -55,6 +55,12 @@ jobs:
       - name: Type check
         run: mypy src/mcp_hangar
 
+      - name: Import contracts
+        # Layering is checked here rather than by a grep in review. Note the
+        # companion test: `lint-imports` exits 0 on an empty contract file, so
+        # tests/unit/test_import_contracts.py guards the contract itself.
+        run: lint-imports --config .importlinter
+
   test:
     runs-on: ubuntu-latest
     strategy:

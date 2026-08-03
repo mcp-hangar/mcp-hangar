@@ -9,6 +9,15 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Changed
 
+- **core:** the hexagon layering is enforced by `import-linter` instead of by review. Five layers, bottom-up: shared kernel < domain < application < infrastructure < delivery, with the 14 root-level modules split between the kernel and the infrastructure tier rather than lumped together -- folding them all into the kernel would have legalised `domain -> metrics` and `domain.contracts.launcher -> http_client`, a port importing its own adapter. 33 existing edges are baselined in a capped ledger; `tests/unit/test_import_contracts.py` guards the contract file itself, because `lint-imports` exits 0 on an empty one
+
+### Fixed
+
+- **core:** `application/mcp` and `bootstrap` shipped without an `__init__.py`. The modules were tracked, the marker was not, so the 2.2.0 wheel carries them inside implicit namespace packages. Imports resolve either way, which is why nothing broke -- but static import analysis walks the package tree and skips a directory with no marker, so those modules were invisible to it
+- **core:** three modules read `__version__` off the package root, pulling the entire public API -- facade included -- into an adapter, a health probe and the tracing bootstrap just to format a version string. They now read the installed distribution directly
+
+### Changed
+
 - **core:** CI and developers now lint with the same ruff. The version was pinned twice -- `RUFF_VERSION` in `ci-core.yml` at 0.14.13, and `ruff>=0.3.0` in the dev dependencies, an open floor that resolved to whatever was newest locally. Rules that fired on a developer's machine were therefore invisible in CI; two `UP042` findings sat unseen for exactly that reason. The dev dependency is now pinned and is the single source, CI installs from it, and dependabot bumps it
 - **core:** `ToolAction` and `PolicyMode` become `StrEnum`. Wire values are unchanged (`allow`/`deny`/`require_approval`, `Audit`/`Enforce`) and are pinned by a test, since the operator compiles `MCPEgressPolicy` objects against exactly those strings. `str()` on a member now yields the value rather than `ToolAction.DENY`; nothing relied on the old form
 
