@@ -546,7 +546,7 @@ class TestEventBusPipeline:
         assert any(isinstance(e, ToolInvocationCompleted) for e in received)
 
     def test_events_flow_through_metrics_handler(self, started_mcp_server):
-        from mcp_hangar.application.event_handlers.metrics_handler import MetricsEventHandler
+        from mcp_hangar.infrastructure.observability.metrics_event_handler import MetricsEventHandler
         from mcp_hangar.infrastructure.event_bus import EventBus
 
         bus = EventBus()
@@ -582,7 +582,7 @@ class TestEventBusPipeline:
         assert len(received_after) > 0
 
     def test_multiple_handlers_all_receive_events(self, started_mcp_server):
-        from mcp_hangar.application.event_handlers.metrics_handler import MetricsEventHandler
+        from mcp_hangar.infrastructure.observability.metrics_event_handler import MetricsEventHandler
         from mcp_hangar.infrastructure.event_bus import EventBus
 
         bus = EventBus()
@@ -717,7 +717,7 @@ class TestMetricsHandlerIntegration:
     """MetricsEventHandler accumulates stats from real tool invocations."""
 
     def test_success_and_failure_counts(self, started_mcp_server):
-        from mcp_hangar.application.event_handlers.metrics_handler import MetricsEventHandler
+        from mcp_hangar.infrastructure.observability.metrics_event_handler import MetricsEventHandler
         from mcp_hangar.infrastructure.event_bus import EventBus
 
         bus = EventBus()
@@ -739,7 +739,7 @@ class TestMetricsHandlerIntegration:
         assert m.total_invocations == 3
 
     def test_success_rate_calculation(self, started_mcp_server):
-        from mcp_hangar.application.event_handlers.metrics_handler import MetricsEventHandler
+        from mcp_hangar.infrastructure.observability.metrics_event_handler import MetricsEventHandler
         from mcp_hangar.infrastructure.event_bus import EventBus
 
         bus = EventBus()
@@ -759,7 +759,7 @@ class TestMetricsHandlerIntegration:
         assert m.success_rate == pytest.approx(80.0)
 
     def test_latency_tracking(self, started_mcp_server):
-        from mcp_hangar.application.event_handlers.metrics_handler import MetricsEventHandler
+        from mcp_hangar.infrastructure.observability.metrics_event_handler import MetricsEventHandler
         from mcp_hangar.infrastructure.event_bus import EventBus
 
         bus = EventBus()
@@ -779,7 +779,7 @@ class TestMetricsHandlerIntegration:
         assert m.p95_latency_ms >= m.average_latency_ms
 
     def test_health_check_metrics(self, started_mcp_server):
-        from mcp_hangar.application.event_handlers.metrics_handler import MetricsEventHandler
+        from mcp_hangar.infrastructure.observability.metrics_event_handler import MetricsEventHandler
         from mcp_hangar.infrastructure.event_bus import EventBus
 
         bus = EventBus()
@@ -797,7 +797,7 @@ class TestMetricsHandlerIntegration:
         assert m.health_checks_passed == 2
 
     def test_per_server_metrics_isolation(self):
-        from mcp_hangar.application.event_handlers.metrics_handler import MetricsEventHandler
+        from mcp_hangar.infrastructure.observability.metrics_event_handler import MetricsEventHandler
         from mcp_hangar.infrastructure.event_bus import EventBus
 
         bus = EventBus()

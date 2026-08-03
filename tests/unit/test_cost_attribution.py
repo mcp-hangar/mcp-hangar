@@ -142,7 +142,7 @@ class TestDefaultCostAttributor:
 class TestCostAttributionEventHandler:
     def test_computes_and_publishes_cost_event(self) -> None:
         from mcp_hangar.application.event_handlers.cost_handler import CostAttributionEventHandler
-        from mcp_hangar.domain.events import ToolInvocationCompleted
+        from mcp_hangar.domain.events import CostReportGenerated, ToolInvocationCompleted
 
         rules = [PricingRule(fixed_cost_cents=42, model=CostModel.FIXED)]
         attributor = DefaultCostAttributor(rules=rules)
@@ -160,9 +160,14 @@ class TestCostAttributionEventHandler:
         handler.handle(event)
 
         event_bus.publish.assert_called_once()
-        published_events = event_bus.publish.call_args[0][0]
-        assert len(published_events) == 1
-        assert published_events[0].total_cost == str(42 / 100.0)
+        published = event_bus.publish.call_args[0][0]
+        # A single event, not a list. This used to assert `len(published) == 1`
+        # against `publish([event])`, which the bus delivered to every
+        # subscribe-to-all handler as a `list` object while anything subscribed
+        # to CostReportGenerated received nothing -- the test agreed with the
+        # bug because a MagicMock bus never had to route it.
+        assert isinstance(published, CostReportGenerated)
+        assert published.total_cost == str(42 / 100.0)
 
     def test_skips_zero_cost(self) -> None:
         from mcp_hangar.application.event_handlers.cost_handler import CostAttributionEventHandler
