@@ -67,8 +67,6 @@ ignore_imports =
     mcp_hangar.application.sagas.mcp_server_failover_saga -> mcp_hangar.infrastructure.saga_manager
     mcp_hangar.application.sagas.mcp_server_recovery_saga -> mcp_hangar.infrastructure.saga_manager
     mcp_hangar.context -> mcp_hangar.domain.value_objects.identity
-    mcp_hangar.domain.contracts.launcher -> mcp_hangar.http_client
-    mcp_hangar.domain.contracts.launcher -> mcp_hangar.stdio_client
     mcp_hangar.domain.model.mcp_server -> mcp_hangar.infrastructure.launchers
     mcp_hangar.domain.model.mcp_server -> mcp_hangar.infrastructure.lock_hierarchy
     mcp_hangar.domain.model.mcp_server_group -> mcp_hangar.infrastructure.lock_hierarchy
