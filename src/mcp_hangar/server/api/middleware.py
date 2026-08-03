@@ -277,6 +277,46 @@ class AuthEnforcementMiddleware:
             await _send_auth_failure(scope, receive, send, exc, source_ip, www_authenticate=www_auth)
 
 
+async def _send_authz_failure(
+    scope: Scope,
+    receive: Receive,
+    send: Send,
+    exc: AuthenticationError | AccessDeniedError,
+) -> None:
+    """Reject a request from the authorization chokepoint, in the API's envelope.
+
+    The REST API's error shape is the one ``error_handler`` produces for every
+    other domain exception::
+
+        {"error": {"code": "AccessDeniedError", "message": ..., "details": ...}}
+
+    Before the route-driven chokepoint existed, an authorization failure was an
+    ``AccessDeniedError`` raised inside a handler, so it reached that handler and
+    got that shape. Denying in middleware means the exception never reaches it,
+    and reusing ``_send_auth_failure`` -- written for the authentication layer,
+    which has always emitted a flatter body -- silently changed the 403 contract
+    for every REST client. A nightly live test caught it: it asserts
+    ``error["code"] == "AccessDeniedError"`` and got the string ``"access_denied"``.
+
+    WebSocket rejections still go through ``_send_auth_failure``: there is no
+    body to shape, only a close frame.
+    """
+    if scope["type"] == "websocket":
+        await _send_auth_failure(scope, receive, send, exc, "unknown")
+        return
+
+    status_code = _get_status_code(exc)
+    body: dict[str, Any] = {
+        "error": {
+            "code": type(exc).__name__,
+            "message": exc.message if isinstance(exc, MCPError) else str(exc),
+            "details": (exc.details or None) if isinstance(exc, MCPError) else None,
+        }
+    }
+    headers = {"WWW-Authenticate": "Bearer, ApiKey"} if isinstance(exc, AuthenticationError) else None
+    await JSONResponse(status_code=status_code, content=body, headers=headers)(scope, receive, send)
+
+
 class AuthorizationEnforcementMiddleware:
     """Route-driven authorization for the REST/WebSocket API.
 
@@ -340,9 +380,7 @@ class AuthorizationEnforcementMiddleware:
 
         principal = self._principal(scope)
         if principal is None or principal.is_anonymous():
-            await _send_auth_failure(
-                scope, receive, send, MissingCredentialsError("Authentication required"), "unknown"
-            )
+            await _send_authz_failure(scope, receive, send, MissingCredentialsError("Authentication required"))
             return
 
         rule = resolve_rule(method, path)
@@ -353,7 +391,7 @@ class AuthorizationEnforcementMiddleware:
                 method=method,
                 principal_id=str(getattr(principal, "id", "unknown")),
             )
-            await _send_auth_failure(
+            await _send_authz_failure(
                 scope,
                 receive,
                 send,
@@ -363,7 +401,6 @@ class AuthorizationEnforcementMiddleware:
                     resource=path,
                     reason="route has no permission mapping",
                 ),
-                "unknown",
             )
             return
 
@@ -380,7 +417,7 @@ class AuthorizationEnforcementMiddleware:
                 resource_id="*",
             )
         except AccessDeniedError as exc:
-            await _send_auth_failure(scope, receive, send, exc, "unknown")
+            await _send_authz_failure(scope, receive, send, exc)
             return
 
         await self.app(scope, receive, send)
