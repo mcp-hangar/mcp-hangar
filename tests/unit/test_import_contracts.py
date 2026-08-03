@@ -143,3 +143,33 @@ class TestLedgerCannotGrow:
         """
         shims = [e for e in self._entries(hexagon) if "domain.services.mcp_server_launcher" in e]
         assert len(shims) == 7, f"expected 7 launcher shim entries, found {len(shims)}"
+
+
+class TestEveryPackageHasAMarker:
+    """A directory of modules with no `__init__.py` is invisible to import analysis.
+
+    `application/mcp` and `bootstrap` shipped exactly that way: the modules were
+    tracked, the marker was not, so the wheel carried them inside implicit
+    namespace packages. Imports resolve either way -- which is why nothing broke
+    and nobody noticed -- but grimp walks the package tree and skips a directory
+    with no marker, so those modules were outside the contract entirely.
+
+    This caught it: `lint-imports` in CI rejected an `ignore_imports` entry that
+    matched nothing, because the edge it named lived in a module CI could not
+    see.
+    """
+
+    def test_no_module_directory_lacks_an_init(self):
+        src = ROOT / "src" / "mcp_hangar"
+        missing = [
+            str(d.relative_to(src))
+            for d in sorted(src.rglob("*"))
+            if d.is_dir()
+            and d.name != "__pycache__"
+            and any(f.suffix == ".py" and f.name != "__init__.py" for f in d.iterdir())
+            and not (d / "__init__.py").exists()
+        ]
+        assert missing == [], (
+            "these directories hold modules but no __init__.py, so import analysis "
+            f"skips them and the wheel ships a namespace package: {missing}"
+        )

@@ -13,6 +13,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Fixed
 
+- **core:** `application/mcp` and `bootstrap` shipped without an `__init__.py`. The modules were tracked, the marker was not, so the 2.2.0 wheel carries them inside implicit namespace packages. Imports resolve either way, which is why nothing broke -- but static import analysis walks the package tree and skips a directory with no marker, so those modules were invisible to it
 - **core:** three modules read `__version__` off the package root, pulling the entire public API -- facade included -- into an adapter, a health probe and the tracing bootstrap just to format a version string. They now read the installed distribution directly
 
 ### Changed
