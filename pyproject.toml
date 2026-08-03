@@ -205,6 +205,12 @@ relative_files = true
 # the first commit. Raising a floor is the unit of progress
 # (`check_decision_coverage.py coverage.json --bump` locks in what was gained).
 #
+# Floors are measured on the Python the GATE runs (3.11 in the decision-coverage
+# job), not on a developer's interpreter. Branch-arc counts differ between CPython
+# versions: server/tools/batch/executor.py measures 85.38 on 3.13 and 85.06 on
+# 3.11, so a floor taken from 3.13 failed CI on arrival. When a floor moves, take
+# the number from the CI job -- or the lower of the two if you have both.
+#
 # Two entries are visible debt rather than a target:
 #   approvals/persistence/sqlite_approval_repository.py at 31.2 -- the store
 #     holding approval state, tenant scoping and the arguments hash. Unit tests
@@ -246,7 +252,7 @@ drift_allowance = 3.0
   "domain/value_objects/tool_access_policy.py" = 84.2
   "server/api/middleware.py" = 88.7
   "server/api/route_permissions.py" = 100.0
-  "server/tools/batch/executor.py" = 85.3
+  "server/tools/batch/executor.py" = 85.0
 
 [tool.pytest.ini_options]
 testpaths = ["tests"]

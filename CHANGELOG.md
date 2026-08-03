@@ -7,6 +7,10 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Fixed
+
+- **core:** the decision-path coverage floor for `server/tools/batch/executor.py` was measured on CPython 3.13 but enforced on 3.11, where branch-arc counts differ (85.38 vs 85.06) -- so the gate failed on its first CI run. Floors now come from the Python the gate runs on, and the config says so
+
 ### Changed
 
 - **core:** branch coverage is now gated per module on the decision paths. `coverage.py`'s `fail_under` is global-only, so a single threshold would have to be low enough for the weakest module in the tree -- exactly the modules needing the strongest guarantee. 29 modules (authz, consent/approvals, egress + tool-access policy, digest) carry floors set to their MEASURED value, checked by `scripts/check_decision_coverage.py`. `branch = true` moves into `[tool.coverage.run]`, since a floor compared against statement-only data silently passes a lower bar, and mixing modes raises `DataError`
