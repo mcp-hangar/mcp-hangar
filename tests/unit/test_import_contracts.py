@@ -30,7 +30,7 @@ ROOT = pathlib.Path(__file__).resolve().parents[2]
 CONTRACT = ROOT / ".importlinter"
 
 # Lower as edges are removed. Never raise without a reason in review.
-MAX_IGNORED_IMPORTS = 33
+MAX_IGNORED_IMPORTS = 32
 
 # Bottom-up. Each entry is a layer line; `:` separates independent siblings.
 EXPECTED_LAYER_ORDER = [

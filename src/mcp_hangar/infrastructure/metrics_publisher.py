@@ -34,3 +34,7 @@ class PrometheusMetricsPublisher(IMetricsPublisher):
     def end_cold_start(self, mcp_server_id: str) -> None:
         """Mark the end of a cold start."""
         self._ensure_metrics().cold_start_end(mcp_server_id)
+
+    def set_connection_active(self, mcp_server_id: str, active: bool) -> None:
+        """Record whether a backend connection is currently established."""
+        self._ensure_metrics().set_connection_active(mcp_server_id, active)

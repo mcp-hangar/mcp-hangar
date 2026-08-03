@@ -51,7 +51,7 @@ from .event_handlers import init_event_handlers
 from .event_store import init_event_store
 from .hot_loading import init_hot_loading
 from .logs import init_log_buffers
-from .observability import init_observability, shutdown_observability
+from .observability import init_metrics_publisher, init_observability, shutdown_observability
 from .reachability import (
     check_subsystem_reachability,
     collect_subsystem_requirements,
@@ -242,6 +242,10 @@ def bootstrap(
         Fully initialized ApplicationContext (components not started)
     """
     logger.info("bootstrap_start", config_path=config_path, has_config_dict=config_dict is not None)
+
+    # Before `load_config` below, which is where McpServer instances are
+    # constructed and where they read the default publisher.
+    init_metrics_publisher()
 
     # Ensure data directory exists
     _ensure_data_dir()
