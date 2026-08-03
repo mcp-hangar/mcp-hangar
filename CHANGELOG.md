@@ -7,6 +7,10 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Fixed
+
+- **core:** the decision-path coverage floor for `server/tools/batch/executor.py` drops to 84.5. The module dispatches work on a thread pool with timeouts and single-flight de-duplication, so a few branches fire or not depending on scheduling: measured 85.38 three times on CPython 3.13, 85.06 twice on 3.11, and 85.06 then 84.75 on two CI runs of the same tree. The floor now sits under the lowest observed CI value rather than under a reproducible local one, so the gate reports a real regression instead of the runner's mood. The job also uploads `coverage.json` on failure, so the next divergence is diagnosable rather than guessed at
+
 ### Changed
 
 - **core:** the hexagon layering is enforced by `import-linter` instead of by review. Five layers, bottom-up: shared kernel < domain < application < infrastructure < delivery, with the 14 root-level modules split between the kernel and the infrastructure tier rather than lumped together -- folding them all into the kernel would have legalised `domain -> metrics` and `domain.contracts.launcher -> http_client`, a port importing its own adapter. 33 existing edges are baselined in a capped ledger; `tests/unit/test_import_contracts.py` guards the contract file itself, because `lint-imports` exits 0 on an empty one
