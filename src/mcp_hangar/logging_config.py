@@ -103,7 +103,7 @@ def _redact_secret_values(_logger: Any, _method_name: str, event_dict: MutableMa
     key, using the shared builtin-pattern redactor. Long-string redaction is off,
     so it only rewrites recognizable token shapes.
     """
-    from .domain.security.redactor import get_default_redactor
+    from .redactor import get_default_redactor
 
     redactor = get_default_redactor()
 

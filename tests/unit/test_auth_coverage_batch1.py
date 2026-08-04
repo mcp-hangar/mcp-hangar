@@ -1108,7 +1108,7 @@ class TestSanitizerConvenienceFunctions:
 
 # --- redactor.py ---
 
-from mcp_hangar.domain.security.redactor import OutputRedactor  # noqa: E402
+from mcp_hangar.redactor import OutputRedactor  # noqa: E402
 
 
 class TestOutputRedactorExtended:
