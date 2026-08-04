@@ -61,6 +61,14 @@ jobs:
         # tests/unit/test_import_contracts.py guards the contract itself.
         run: lint-imports --config .importlinter
 
+      - name: Dead symbols
+        # Which public symbols does nothing reference? Five defects this month
+        # were code that could not run -- an adapter never constructed, a port
+        # never injected, a module with no callers -- and each was found by
+        # accident. The baseline in pyproject.toml can only shrink; its
+        # companion test guards the baseline itself.
+        run: python scripts/check_dead_symbols.py
+
   test:
     runs-on: ubuntu-latest
     strategy:

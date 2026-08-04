@@ -73,6 +73,10 @@ before/after and a one-liner that lists affected call sites:
 
 ## [Unreleased]
 
+### Added
+
+- **core:** a dead-symbol gate. Five defects this release turned out to be code that could not run -- an adapter never constructed, a port never injected, a module with no callers, a fallback beside an injected dependency -- and every one was found by accident while chasing something else. `scripts/check_dead_symbols.py` asks the question on purpose: which public symbols does nothing reference? The answer is baselined in `pyproject.toml` and can only shrink, the same ratchet the complexity baseline and import-contract ledger use. Symbols exported through an `__all__` are counted separately, because deleting those is a release decision rather than a cleanup. Current: 45 unreferenced, 4 exported-unreferenced
+
 ## [2.2.0](https://github.com/mcp-hangar/mcp-hangar/compare/v2.1.1...v2.2.0) (2026-08-02)
 
 Closes the REST authorization holes found by an audit against the project's technical-quality requirements, plus four fail-open defects found alongside them.
