@@ -44,9 +44,6 @@ exhaustive = False
 # It may shrink; tests/unit/test_import_contracts.py caps it so it cannot grow.
 #
 # Three groups worth recognising:
-#   * domain.services.mcp_server_launcher.* -- seven deprecation shims that
-#     re-export from infrastructure.launchers. Deleting them at 3.0 clears
-#     seven lines at once.
 #   * domain -> metrics / http_client / stdio_client / lock_hierarchy -- the
 #     aggregate and one port reaching for adapters. IMetricsPublisher is
 #     already injected into the aggregate, so part of this is a half-finished
@@ -65,14 +62,6 @@ ignore_imports =
     mcp_hangar.context -> mcp_hangar.domain.value_objects.identity
     mcp_hangar.domain.model.mcp_server -> mcp_hangar.infrastructure.launchers
     mcp_hangar.domain.services -> mcp_hangar.application.read_models.tool_projection
-    mcp_hangar.domain.services -> mcp_hangar.infrastructure.launchers
-    mcp_hangar.domain.services.mcp_server_launcher -> mcp_hangar.infrastructure.launchers
-    mcp_hangar.domain.services.mcp_server_launcher.base -> mcp_hangar.infrastructure.launchers.base
-    mcp_hangar.domain.services.mcp_server_launcher.container -> mcp_hangar.infrastructure.launchers.container
-    mcp_hangar.domain.services.mcp_server_launcher.docker -> mcp_hangar.infrastructure.launchers.docker
-    mcp_hangar.domain.services.mcp_server_launcher.factory -> mcp_hangar.infrastructure.launchers.factory
-    mcp_hangar.domain.services.mcp_server_launcher.http -> mcp_hangar.infrastructure.launchers.http
-    mcp_hangar.domain.services.mcp_server_launcher.subprocess -> mcp_hangar.infrastructure.launchers.subprocess
     mcp_hangar.infrastructure.truncation.manager -> mcp_hangar.server.tools.batch.models
     mcp_hangar.logging_config -> mcp_hangar.domain.security.redactor
     mcp_hangar.protocol -> mcp_hangar.server.context

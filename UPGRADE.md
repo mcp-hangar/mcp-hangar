@@ -1,5 +1,42 @@
 # Upgrading MCP Hangar
 
+## Next major — the deprecated launcher import paths are gone
+
+Only affects code that imports the concrete launcher classes from the domain
+layer. If you import them from `mcp_hangar.infrastructure.launchers`, which is
+where they live and what the deprecation warning has been telling you since
+**v1.0.2**, nothing changes.
+
+Two import paths were removed:
+
+```python
+# Both of these now raise.
+from mcp_hangar.domain.services.mcp_server_launcher import DockerLauncher
+from mcp_hangar.domain.services import DockerLauncher
+
+# This is the one to use, and always was:
+from mcp_hangar.infrastructure.launchers import DockerLauncher
+```
+
+The same applies to `SubprocessLauncher`, `ContainerLauncher`, `HttpLauncher`,
+`ContainerConfig`, `McpServerLauncher` and `get_launcher`.
+
+`mcp_hangar.domain.services` still exports the launcher **port**,
+`IMcpServerLauncher`, along with `LaunchResult` and `TransportClient`. It is the
+concrete implementations that moved out — a domain package re-exporting
+infrastructure classes is what the deprecation was about.
+
+The shim emitted a `DeprecationWarning` on import from v1.0.2 onward, so a run
+of your test suite with warnings visible will list every call site:
+
+```bash
+python -W error::DeprecationWarning -m pytest
+```
+
+Removing it also broke a real import cycle: the domain reaching for the
+concrete launchers is what forced two sagas to import their saga manager inside
+a function body rather than at module level.
+
 ## 2.2.2 — plan for it only if you run `auth.storage.driver: event_sourcing`
 
 Drop-in for everyone else.
