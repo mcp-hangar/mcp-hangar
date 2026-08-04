@@ -1,6 +1,6 @@
 # Upgrading MCP Hangar
 
-## Next major — the deprecated launcher import paths are gone
+## 2.3.0 — the deprecated launcher import paths are gone
 
 Only affects code that imports the concrete launcher classes from the domain
 layer. If you import them from `mcp_hangar.infrastructure.launchers`, which is
