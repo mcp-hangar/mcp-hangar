@@ -700,7 +700,7 @@ class McpServer(AggregateRoot):
         if stderr_pipe is None:
             return
 
-        from ..security.redactor import get_default_redactor
+        from ...redactor import get_default_redactor
         from ..value_objects.log import LogLine
 
         mcp_server_id = self.mcp_server_id

@@ -30,7 +30,7 @@ import json
 import re
 from typing import Any
 
-from ..security.redactor import OutputRedactor
+from ...redactor import OutputRedactor
 
 
 class ToolAction(StrEnum):

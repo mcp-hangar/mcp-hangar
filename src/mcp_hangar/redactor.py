@@ -1,7 +1,21 @@
 """Output redactor for sensitive information.
 
-This module provides functionality to redact sensitive information from
-output text, logs, and error messages to prevent secret leakage.
+Redacts secrets from output text, logs and error messages.
+
+Lives in the shared kernel rather than under ``domain/security/`` because four
+layers speak it -- the log processor, the domain aggregate and its egress
+policy, an application command handler, and the approval service -- and it has
+nothing on the other side of it: a pure ``str -> str`` transformation over
+known token shapes, with no I/O and no configuration.
+
+A port would have been the other option, and is the wrong one here. Redaction
+of secrets in logs must not depend on a composition root having run: an
+uninjected port means logging quietly stops redacting, which is the worst
+possible failure for this particular function. Importing it directly means it
+always works.
+
+``OutputRedactor`` and ``RedactionPattern`` are still re-exported from
+``mcp_hangar.domain.security`` for callers that used that surface.
 """
 
 from dataclasses import dataclass
