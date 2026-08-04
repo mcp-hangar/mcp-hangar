@@ -10,6 +10,7 @@ import structlog
 from mcp_hangar.domain.contracts.authorization import AuthorizationRequest, AuthorizationResult, IAuthorizer, IRoleStore
 from mcp_hangar.auth.roles import BUILTIN_ROLES
 from mcp_hangar.domain.value_objects import Permission, Principal, Role
+from mcp_hangar.domain.contracts.authorization import validate_role_scope
 
 logger = structlog.get_logger(__name__)
 
@@ -249,6 +250,7 @@ class InMemoryRoleStore(IRoleStore):
         Raises:
             ValueError: If role_name doesn't exist.
         """
+        validate_role_scope(scope)
         with self._lock:
             if role_name not in self._roles:
                 raise ValueError(f"Unknown role: {role_name}")

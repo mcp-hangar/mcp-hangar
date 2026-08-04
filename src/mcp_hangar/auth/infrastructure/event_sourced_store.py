@@ -25,6 +25,7 @@ from mcp_hangar.domain.model.event_sourced_role_assignment import EventSourcedRo
 from mcp_hangar.auth.roles import BUILTIN_ROLES
 from mcp_hangar.domain.value_objects import Principal, Role
 from mcp_hangar.logging_config import get_logger
+from mcp_hangar.domain.contracts.authorization import validate_role_scope
 
 logger = get_logger(__name__)
 
@@ -639,6 +640,7 @@ class EventSourcedRoleStore(IRoleStore):
         assigned_by: str | None = None,
     ) -> None:
         """Assign a role to a principal."""
+        validate_role_scope(scope)
         # Verify role exists
         if self.get_role(role_name) is None:
             raise ValueError(f"Unknown role: {role_name}")
