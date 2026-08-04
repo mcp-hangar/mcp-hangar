@@ -43,15 +43,45 @@ exhaustive = False
 # The debt ledger. Every line is an edge that exists today and should not.
 # It may shrink; tests/unit/test_import_contracts.py caps it so it cannot grow.
 #
-# Three groups worth recognising:
-#   * domain -> metrics / http_client / stdio_client / lock_hierarchy -- the
-#     aggregate and one port reaching for adapters. IMetricsPublisher is
-#     already injected into the aggregate, so part of this is a half-finished
-#     migration rather than a design choice.
-#   * application -> infrastructure / server -- what remains after measuring
-#     which of these avoid a real cycle. Three did not; grimp showed the
-#     infrastructure module reaching nothing back. The saga pair genuinely did,
-#     through domain.services -> infrastructure.launchers.
+# It went 33 -> 11. What cleared did so because the edge turned out to be held
+# up by code that could not run: a port that was never wired, a fallback beside
+# an injected dependency, a deprecation shim with no callers. Measuring first
+# was what found those -- three of the "cycle avoidance" imports avoided no
+# cycle at all, and grimp said so in a second.
+#
+# The eleven that remain are NOT of that kind, and the difference is worth
+# stating so the next pass does not mistake churn for progress:
+#
+#   * application -> metrics (3) + observability.tracing -> metrics.
+#     Services instrumenting themselves. A port per counter would turn
+#     IMetricsPublisher into a god interface; `metrics` is an adapter (it has a
+#     scrape endpoint behind it), so moving it into the shared kernel is
+#     relabelling, not repair. cost_handler additionally cannot move its call
+#     until CostReportGenerated carries the mcp_server / tool / cost_model
+#     dimensions -- widening a persisted event, so a schema version and an
+#     upcaster. The tracing one is a third case again: tracing.py is dual, half
+#     ambient-span accessors that logging_config legitimately needs and half
+#     OTLP exporter setup. Splitting those two apart is the honest fix and is a
+#     673-line module's worth of work.
+#
+#   * context -> domain.value_objects.identity. The kernel's contextvar carrier
+#     needing a domain type. Moving IdentityContext down would put a validated
+#     domain concept (CallerIdentity enforces an invariant) in the kernel;
+#     moving the contextvar up into domain puts a runtime mechanism in a
+#     value-objects module and rewrites 41 import sites. Accepted for now
+#     BECAUSE both available moves are worse than the edge, not because nobody
+#     looked.
+#
+#   * domain.model.mcp_server -> infrastructure.launchers, and
+#     domain.services -> application.read_models.tool_projection. The aggregate
+#     constructing its own launchers despite IMcpServerLauncher existing, and a
+#     domain service reaching into an application read model. These two look
+#     like the ones that cleared -- worth measuring next.
+#
+#   * infrastructure.truncation.manager -> server.tools.batch.models. A shared
+#     DTO living in the delivery layer; likely wants to move down rather than
+#     be inverted.
+#
 ignore_imports =
     mcp_hangar.application.commands.handlers -> mcp_hangar.metrics
     mcp_hangar.application.commands.load_handlers -> mcp_hangar.infrastructure.runtime_store
