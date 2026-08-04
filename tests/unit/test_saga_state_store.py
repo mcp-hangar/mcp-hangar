@@ -31,6 +31,7 @@ from mcp_hangar.application.sagas.mcp_server_failover_saga import (
     McpServerFailoverEventSaga,
 )
 from mcp_hangar.application.sagas.mcp_server_recovery_saga import McpServerRecoverySaga
+from mcp_hangar.infrastructure.saga_manager import get_saga_manager
 
 
 @pytest.fixture
@@ -138,7 +139,7 @@ class TestMcpServerRecoverySagaSerialization:
 
     def test_to_dict_serializes_retry_state(self):
         """Test that to_dict() returns retry state dict."""
-        saga = McpServerRecoverySaga()
+        saga = McpServerRecoverySaga(saga_manager=get_saga_manager())
         saga._retry_state = {
             "p1": {"retries": 2, "last_attempt": 1000.0, "next_retry": 1010.0},
             "p2": {"retries": 0, "last_attempt": 0, "next_retry": 0},
@@ -151,7 +152,7 @@ class TestMcpServerRecoverySagaSerialization:
 
     def test_from_dict_restores_retry_state(self):
         """Test that from_dict() restores retry state from serialized data."""
-        saga = McpServerRecoverySaga()
+        saga = McpServerRecoverySaga(saga_manager=get_saga_manager())
         data = {
             "retry_state": {
                 "p1": {"retries": 3, "last_attempt": 500.0, "next_retry": 510.0},
@@ -165,14 +166,14 @@ class TestMcpServerRecoverySagaSerialization:
 
     def test_round_trip_serialization(self):
         """Test full round-trip: to_dict -> from_dict preserves state."""
-        saga = McpServerRecoverySaga()
+        saga = McpServerRecoverySaga(saga_manager=get_saga_manager())
         saga._retry_state = {
             "p1": {"retries": 1, "last_attempt": 100.0, "next_retry": 105.0},
         }
 
         serialized = saga.to_dict()
 
-        restored_saga = McpServerRecoverySaga()
+        restored_saga = McpServerRecoverySaga(saga_manager=get_saga_manager())
         restored_saga.from_dict(serialized)
 
         assert restored_saga._retry_state == saga._retry_state
@@ -183,7 +184,7 @@ class TestMcpServerFailoverSagaSerialization:
 
     def test_to_dict_serializes_failover_state(self):
         """Test that to_dict() serializes failover_configs and active_failovers."""
-        saga = McpServerFailoverEventSaga()
+        saga = McpServerFailoverEventSaga(saga_manager=get_saga_manager())
         saga._failover_configs["p1"] = FailoverConfig(
             primary_id="p1", backup_id="p1-backup", auto_failback=True, failback_delay_s=30.0
         )
@@ -205,7 +206,7 @@ class TestMcpServerFailoverSagaSerialization:
 
     def test_from_dict_restores_failover_state(self):
         """Test that from_dict() restores all failover state."""
-        saga = McpServerFailoverEventSaga()
+        saga = McpServerFailoverEventSaga(saga_manager=get_saga_manager())
         data = {
             "failover_configs": {
                 "p1": {
@@ -240,7 +241,7 @@ class TestMcpServerFailoverSagaSerialization:
 
     def test_round_trip_serialization(self):
         """Test full round-trip: to_dict -> json -> from_dict preserves state."""
-        saga = McpServerFailoverEventSaga()
+        saga = McpServerFailoverEventSaga(saga_manager=get_saga_manager())
         saga._failover_configs["p1"] = FailoverConfig(
             primary_id="p1", backup_id="p1-backup", auto_failback=True, failback_delay_s=30.0
         )
@@ -255,7 +256,7 @@ class TestMcpServerFailoverSagaSerialization:
         json_str = json.dumps(serialized)
         deserialized = json.loads(json_str)
 
-        restored = McpServerFailoverEventSaga()
+        restored = McpServerFailoverEventSaga(saga_manager=get_saga_manager())
         restored.from_dict(deserialized)
 
         assert restored._failover_configs["p1"].primary_id == "p1"
@@ -355,7 +356,7 @@ class TestBootstrapSagaWiring:
         state_data = {"retry_state": {"p1": {"retries": 3, "last_attempt": 100.0, "next_retry": 110.0}}}
         store.checkpoint("mcp_server_recovery", "saga-id", state_data, 42)
 
-        saga = McpServerRecoverySaga()
+        saga = McpServerRecoverySaga(saga_manager=get_saga_manager())
         _restore_saga_state(store, saga)
 
         assert saga._retry_state["p1"]["retries"] == 3
@@ -377,7 +378,7 @@ class TestBootstrapSagaWiring:
         }
         store.checkpoint("mcp_server_failover_event", "saga-id", state_data, 10)
 
-        saga = McpServerFailoverEventSaga()
+        saga = McpServerFailoverEventSaga(saga_manager=get_saga_manager())
         _restore_saga_state(store, saga)
 
         assert saga._failover_configs["p1"].primary_id == "p1"
@@ -388,7 +389,7 @@ class TestBootstrapSagaWiring:
 
         store = SagaStateStore(factory)
 
-        saga = McpServerRecoverySaga()
+        saga = McpServerRecoverySaga(saga_manager=get_saga_manager())
         # Should not raise
         _restore_saga_state(store, saga)
 

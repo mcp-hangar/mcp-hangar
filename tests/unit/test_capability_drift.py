@@ -14,6 +14,7 @@ from mcp_hangar.domain.value_objects.capabilities import (
     ViolationType,
 )
 from mcp_hangar.application.sagas.mcp_server_recovery_saga import McpServerRecoverySaga
+from mcp_hangar.infrastructure.saga_manager import get_saga_manager
 
 
 def _make_provider(
@@ -193,7 +194,7 @@ class TestRecoverySagaCapabilityFilter:
 
     def test_saga_skips_capability_violation_reason(self) -> None:
         """Saga should return empty and NOT schedule for capability_violation: reason."""
-        saga = McpServerRecoverySaga()
+        saga = McpServerRecoverySaga(saga_manager=get_saga_manager())
 
         event = McpServerDegraded(
             mcp_server_id="blocked-provider",
@@ -214,7 +215,7 @@ class TestRecoverySagaCapabilityFilter:
         via saga_manager.schedule_command() for non-capability-violation events.
         We verify retry state is initialized (proving it entered the scheduling path).
         """
-        saga = McpServerRecoverySaga()
+        saga = McpServerRecoverySaga(saga_manager=get_saga_manager())
 
         event = McpServerDegraded(
             mcp_server_id="normal-provider",
