@@ -196,7 +196,20 @@ class EventBus(IEventBus):
 
         Args:
             event: The domain event to publish
+
+        Raises:
+            TypeError: If given something that is not a DomainEvent.
         """
+        if not isinstance(event, DomainEvent):
+            # Fail loudly. `publish([event])` used to be accepted: the list
+            # reached every subscribe-to-all handler as a `list` object -- where
+            # each one's isinstance checks quietly matched nothing -- while
+            # anything subscribed to the event's own type got nothing at all.
+            # A publish that silently delivers to no one is worse than a crash.
+            raise TypeError(
+                f"publish() takes a single DomainEvent, got {type(event).__name__}. "
+                "To publish several, call publish() for each."
+            )
         event_type_name = event.__class__.__name__
         with self._lock:
             handlers = self._resolve_handlers(type(event))

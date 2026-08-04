@@ -22,7 +22,7 @@ import inspect
 import pytest
 
 from mcp_hangar import metrics as prometheus_metrics
-from mcp_hangar.application.event_handlers import MetricsEventHandler
+from mcp_hangar.infrastructure.observability.metrics_event_handler import MetricsEventHandler
 from mcp_hangar.domain import events as domain_events
 from mcp_hangar.domain.events import (
     DigestMismatchInTask,
