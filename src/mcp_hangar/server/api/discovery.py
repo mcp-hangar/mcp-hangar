@@ -18,6 +18,7 @@ from ...domain.exceptions import McpServerNotFoundError
 from ..context import get_context
 from .middleware import dispatch_command
 from .serializers import HangarJSONResponse
+from .request_body import missing_fields
 
 
 class DiscoveryNotConfigured(McpServerNotFoundError):
@@ -155,6 +156,8 @@ async def register_source(request: Request) -> HangarJSONResponse:
     """
     _require_orchestrator()  # Guard: discovery must be configured
     body = await request.json()
+    if (invalid := missing_fields(body, "source_type", "mode")) is not None:
+        return invalid
     result = await dispatch_command(
         RegisterDiscoverySourceCommand(
             source_type=body["source_type"],
@@ -247,6 +250,8 @@ async def toggle_source(request: Request) -> HangarJSONResponse:
     """
     source_id = request.path_params["source_id"]
     body = await request.json()
+    if (invalid := missing_fields(body, "enabled")) is not None:
+        return invalid
     result = await dispatch_command(
         ToggleDiscoverySourceCommand(
             source_id=source_id,

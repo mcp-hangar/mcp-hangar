@@ -19,6 +19,7 @@ from mcp_hangar.domain.contracts.command import CommandHandler  # noqa: F401 -- 
 from mcp_hangar.application.ports.bus import ICommandBus
 from mcp_hangar.logging_config import get_logger
 from mcp_hangar.observability.tracing import get_tracer
+from mcp_hangar.application.ports.bus import HandlerNotRegisteredError
 
 if TYPE_CHECKING:
     from ..application.commands import Command
@@ -118,7 +119,7 @@ class CommandBus(ICommandBus):
         handler = self._handlers.get(command_type)
 
         if handler is None:
-            raise ValueError(f"No handler registered for {command_type.__name__}")
+            raise HandlerNotRegisteredError(f"No handler registered for {command_type.__name__}")
 
         logger.debug("command_dispatching", command_type=command_type.__name__)
 

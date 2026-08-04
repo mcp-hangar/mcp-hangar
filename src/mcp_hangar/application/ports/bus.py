@@ -55,3 +55,17 @@ class IQueryBus(ABC):
             query_type: The type of query to handle.
             handler: The handler instance (must implement handle()).
         """
+
+
+class HandlerNotRegisteredError(ValueError):
+    """No handler is registered for a command or query type.
+
+    Distinct from a malformed request: the caller asked for something this
+    process does not serve. `GET /api/auth/keys` with auth disabled hit exactly
+    this -- the route is mounted whenever the auth module imports, while its
+    handlers are registered only when auth is enabled -- and answered 500,
+    telling the caller the server had broken when in fact the feature was off.
+
+    Subclasses ValueError so the `except ValueError` blocks that predate it keep
+    behaving as they did.
+    """

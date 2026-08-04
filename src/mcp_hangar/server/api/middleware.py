@@ -26,6 +26,7 @@ from starlette.responses import JSONResponse, Response
 from starlette.types import ASGIApp, Receive, Scope, Send
 
 from ...domain.contracts.authentication import AuthRequest
+from ...application.ports.bus import HandlerNotRegisteredError
 from ...domain.exceptions import (
     AccessDeniedError,
     AuthenticationError,
@@ -83,6 +84,13 @@ class _AuthLoggerAdapter:
 # Mapping of exception types to HTTP status codes.
 # More specific types must come before their base classes.
 _EXCEPTION_STATUS_MAP: list[tuple[type, int]] = [
+    # Ahead of the domain errors: the caller asked for something this process
+    # does not serve, which is a statement about the deployment rather than
+    # about the request. `GET /api/auth/keys` with auth disabled reached a
+    # mounted route whose handlers are registered only when auth is enabled,
+    # and answered 500 -- telling the caller the server had broken when the
+    # feature was simply off.
+    (HandlerNotRegisteredError, 503),
     (McpServerNotFoundError, 404),
     (ToolNotFoundError, 404),
     (McpServerNotReadyError, 409),

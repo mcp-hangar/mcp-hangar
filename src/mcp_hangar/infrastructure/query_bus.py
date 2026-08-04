@@ -7,7 +7,7 @@ Each query has exactly one handler that returns data.
 
 from typing import Any
 
-from mcp_hangar.application.ports.bus import IQueryBus
+from mcp_hangar.application.ports.bus import HandlerNotRegisteredError, IQueryBus
 from mcp_hangar.logging_config import get_logger
 
 # Re-export query classes from canonical location for backward compatibility
@@ -81,7 +81,7 @@ class QueryBus(IQueryBus):
         handler = self._handlers.get(query_type)
 
         if handler is None:
-            raise ValueError(f"No handler registered for {query_type.__name__}")
+            raise HandlerNotRegisteredError(f"No handler registered for {query_type.__name__}")
 
         logger.debug("query_executing", query_type=query_type.__name__)
         return handler.handle(query)
