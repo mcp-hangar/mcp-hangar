@@ -59,6 +59,13 @@ release: ## Create a release (use VERSION=x.y.z)
 	git tag -a v$(VERSION) -m "Release v$(VERSION)"
 	git push origin v$(VERSION)
 
+changelog-check: ## Validate pending changelog fragments in changelog.d/
+	python scripts/build_changelog.py check
+
+changelog-preview: ## Render the next release section (use VERSION=x.y.z)
+	@if [ -z "$(VERSION)" ]; then echo "VERSION required"; exit 1; fi
+	python scripts/build_changelog.py preview --version $(VERSION)
+
 ##@ CI
 
 check-boundary: ## Check enterprise import boundary

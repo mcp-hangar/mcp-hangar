@@ -38,4 +38,3 @@ jobs:
           globs: |
             docs/internal/**/*.md
             *.md
-            !CHANGELOG.md

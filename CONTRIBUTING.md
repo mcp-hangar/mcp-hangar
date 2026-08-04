@@ -29,6 +29,23 @@ make setup
 make test
 ```
 
+## Changelog
+
+Do not edit `CHANGELOG.md` -- it is generated. Every non-trivial PR adds one
+new file instead:
+
+```bash
+printf '**core:** what changed, and what a reader has to do about it\n' \
+  > changelog.d/<issue-or-pr>-<slug>.fixed.md
+```
+
+The suffix is one of `added`, `changed`, `deprecated`, `removed`, `fixed`,
+`security`, and becomes the section heading; the bullet and the PR link are
+added at release time. One file per PR is what keeps concurrent PRs from
+conflicting on the same lines. Details in
+[changelog.d/README.md](changelog.d/README.md); `make changelog-check`
+validates what you wrote.
+
 ## Licensing
 
 MCP Hangar is licensed under the [MIT License](LICENSE).

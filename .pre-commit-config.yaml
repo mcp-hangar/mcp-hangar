@@ -45,6 +45,18 @@ repos:
       - id: debug-statements
       - id: mixed-line-ending
 
+  # Changelog fragments. Cheap here, and the alternative is finding a malformed
+  # fragment during release assembly -- on the release branch, with the release
+  # waiting on it.
+  - repo: local
+    hooks:
+      - id: changelog-fragments
+        name: validate changelog fragments
+        entry: python scripts/build_changelog.py check
+        language: system
+        pass_filenames: false
+        files: ^changelog\.d/
+
   # Pytest check (optional - runs fast tests)
   # Uncomment if you want tests to run on commit
   # - repo: local

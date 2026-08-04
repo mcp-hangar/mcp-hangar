@@ -15,9 +15,12 @@ The PR body MUST contain these five `##` sections, in this exact wording
 3. `## How tested` -- commands run, scenarios verified. Manual smoke is
    acceptable when phrased explicitly.
 4. `## Risk and rollback` -- what could break and how to revert.
-5. `## CHANGELOG note` -- paste the `[Unreleased]` entry the PR adds, or write
+5. `## CHANGELOG note` -- name the fragment the PR adds and paste its text
+   (`changelog.d/<id>-<slug>.<kind>.md`, kind one of `added`, `changed`,
+   `deprecated`, `removed`, `fixed`, `security`), or write
    `skip-changelog: <reason>` when the change does not touch a triggering
-    path (`src/`, `pyproject.toml`, `packages/ui/`).
+    path (`src/`, `pyproject.toml`, `packages/ui/`). Never edit `CHANGELOG.md`
+    itself -- it is assembled from the fragments at release time.
 
 Optionally append `## Agent metadata` for agent-authored PRs (single CC scope
 declaration, single-goal confirmation, LOC declared, files-in-scope match).
