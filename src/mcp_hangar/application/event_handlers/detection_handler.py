@@ -4,13 +4,12 @@ Executes local response actions (suspend_session, block_mcp_server) in
 reaction to DetectionRuleMatched events and emits EnforcementActionTaken.
 """
 
-# pyright: reportPrivateUsage=false
-
 from __future__ import annotations
 
 from ...application.commands.commands import StopMcpServerCommand
 from ...application.ports import ICommandBus
 from ...domain.contracts.event_bus import IEventBus
+from ...domain.contracts.session_suspension import ISessionSuspensionRegistry
 from ...domain.events import DetectionRuleMatched, DomainEvent, EnforcementActionTaken
 from ...logging_config import get_logger
 
@@ -20,9 +19,23 @@ logger = get_logger(__name__)
 class DetectionEnforcementHandler:
     """Execute local enforcement actions for detection rule matches."""
 
-    def __init__(self, event_bus: IEventBus, command_bus: ICommandBus | None = None) -> None:
+    def __init__(
+        self,
+        event_bus: IEventBus,
+        command_bus: ICommandBus | None = None,
+        *,
+        session_registry: ISessionSuspensionRegistry,
+    ) -> None:
+        """`session_registry` is required, deliberately.
+
+        The obvious alternative -- default it to None and raise at suspend time
+        -- makes forgotten wiring a runtime failure inside this handler's fault
+        barrier, i.e. one log line and enforcement that silently does nothing.
+        Required means a deployment that forgot it cannot start.
+        """
         self._event_bus: IEventBus = event_bus
         self._command_bus: ICommandBus | None = command_bus
+        self._session_registry: ISessionSuspensionRegistry = session_registry
 
     def handle(self, event: DomainEvent) -> None:
         """Handle a detection match without letting failures escape."""
@@ -60,9 +73,7 @@ class DetectionEnforcementHandler:
             logger.exception("detection_enforcement_handler_error", error=str(exc))
 
     def _suspend_session(self, session_id: str, rule_id: str) -> None:
-        from ...server.api.sessions import _suspended_sessions
-
-        _suspended_sessions.add(session_id)
+        self._session_registry.suspend(session_id)
 
         logger.info("enforcement_session_suspended", session_id=session_id, rule_id=rule_id)
 

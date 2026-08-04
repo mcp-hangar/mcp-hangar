@@ -4,6 +4,7 @@ import importlib
 import os
 from typing import TYPE_CHECKING
 
+from ..api.sessions import get_session_suspension_registry
 from ...application.event_handlers import (
     DetectionEnforcementHandler,
     LoggingEventHandler,
@@ -98,6 +99,10 @@ def init_event_handlers(runtime: "Runtime") -> None:
     detection_enforcement_handler = DetectionEnforcementHandler(
         event_bus=runtime.event_bus,
         command_bus=runtime.command_bus,
+        # The SAME instance the HTTP suspend/unsuspend routes use. Two instances
+        # would silently disagree: a session suspended by a detection rule would
+        # stay servable, and one suspended over HTTP would be invisible here.
+        session_registry=get_session_suspension_registry(),
     )
     runtime.event_bus.subscribe(DetectionRuleMatched, detection_enforcement_handler.handle)
 

@@ -12,6 +12,7 @@ import pytest
 
 from mcp_hangar.application.event_handlers.detection_handler import DetectionEnforcementHandler
 from mcp_hangar.domain.events import DetectionRuleMatched, EnforcementActionTaken
+from mcp_hangar.server.api.sessions import get_session_suspension_registry
 
 
 def _make_rule_matched(
@@ -45,7 +46,7 @@ def event_bus():
 
 @pytest.fixture
 def handler(event_bus):
-    return DetectionEnforcementHandler(event_bus=event_bus)
+    return DetectionEnforcementHandler(event_bus=event_bus, session_registry=get_session_suspension_registry())
 
 
 class TestDetectionUnwiredPassesWiredCatches:
@@ -93,7 +94,11 @@ class TestDetectionUnwiredPassesWiredCatches:
         assert len(enforcement_events) == 0
 
     def test_block_action_requires_command_bus(self, event_bus):
-        handler_no_cmd = DetectionEnforcementHandler(event_bus=event_bus, command_bus=None)
+        handler_no_cmd = DetectionEnforcementHandler(
+            event_bus=event_bus,
+            command_bus=None,
+            session_registry=get_session_suspension_registry(),
+        )
 
         event = _make_rule_matched(recommended_action="block")
         handler_no_cmd.handle(event)
@@ -105,7 +110,11 @@ class TestDetectionUnwiredPassesWiredCatches:
         from mcp_hangar.application.commands.commands import StopMcpServerCommand
 
         command_bus = MagicMock()
-        handler_with_cmd = DetectionEnforcementHandler(event_bus=event_bus, command_bus=command_bus)
+        handler_with_cmd = DetectionEnforcementHandler(
+            event_bus=event_bus,
+            command_bus=command_bus,
+            session_registry=get_session_suspension_registry(),
+        )
 
         event = _make_rule_matched(recommended_action="block", mcp_server_id="filesystem")
         handler_with_cmd.handle(event)

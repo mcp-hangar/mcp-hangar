@@ -73,6 +73,10 @@ before/after and a one-liner that lists affected call sites:
 
 ## [Unreleased]
 
+### Changed
+
+- **core:** session suspension has a port. `DetectionEnforcementHandler` reached the suspended-session store through a function-local `from ...server.api.sessions import _suspended_sessions` -- an application handler depending on the delivery layer, past the underscore into another module's private state, behind an import that hid the edge from a reader. It was the only application → delivery entry in the import-contract ledger, which drops from 11 to 10. The store was never route code: it is a bounded, TTL-expiring, thread-safe cache, so it moved to `infrastructure/session_suspension.py` behind `ISessionSuspensionRegistry`, and the handler is handed the same instance the HTTP routes use. The registry is a **required** constructor argument rather than an optional one defaulting to `None`: a forgotten wiring now fails at construction instead of silently inside the handler's fault barrier, where enforcement would have logged one line and done nothing
+
 ### Fixed
 
 - **core:** mutating REST endpoints answer 400 instead of 500 on an incomplete body, and an inactive module answers 503 instead of 500. Five endpoints indexed the parsed JSON directly (`body["mcp_server_id"]`, `body["group_id"]`, `body["source_type"]` and two more); `KeyError` is not `ValueError`, so it escaped each route's handler into a generic "internal server error" -- telling the caller the server had broken when their request was merely incomplete, and filling the log with unhandled exceptions in exactly the channel that is supposed to stay quiet. The validation is one shared helper rather than five copies. Separately, `GET /api/auth/keys` with auth disabled reached a mounted route whose CQRS handlers are registered only when auth is enabled; the bus now raises a typed `HandlerNotRegisteredError` that maps to 503, which answers correctly for any module that is present but inactive. A security audit found one of the five endpoints (SEC-04) and the auth route (SEC-05)
