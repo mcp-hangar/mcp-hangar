@@ -31,6 +31,7 @@ from ...infrastructure.persistence.log_buffer import get_log_buffer
 from ..context import get_context
 from .middleware import dispatch_command, dispatch_query
 from .serializers import HangarJSONResponse
+from .request_body import missing_fields
 
 
 def _check_permission(request: Request, resource_type: str, action: str) -> None:
@@ -280,6 +281,8 @@ async def create_mcp_server(request: Request) -> HangarJSONResponse:
     """
     _check_permission(request, resource_type="mcp_servers", action="write")
     body = await request.json()
+    if (invalid := missing_fields(body, "mcp_server_id", "mode")) is not None:
+        return invalid
     try:
         result = await dispatch_command(
             CreateMcpServerCommand(

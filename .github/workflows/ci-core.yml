@@ -35,7 +35,7 @@ jobs:
       - uses: actions/checkout@v7
 
       - name: Set up Python
-        uses: actions/setup-python@v5
+        uses: actions/setup-python@v7
         with:
           python-version: "3.11"
 
@@ -61,6 +61,14 @@ jobs:
         # tests/unit/test_import_contracts.py guards the contract itself.
         run: lint-imports --config .importlinter
 
+      - name: Dead symbols
+        # Which public symbols does nothing reference? Five defects this month
+        # were code that could not run -- an adapter never constructed, a port
+        # never injected, a module with no callers -- and each was found by
+        # accident. The baseline in pyproject.toml can only shrink; its
+        # companion test guards the baseline itself.
+        run: python scripts/check_dead_symbols.py
+
   test:
     runs-on: ubuntu-latest
     strategy:
@@ -71,7 +79,7 @@ jobs:
       - uses: actions/checkout@v7
 
       - name: Set up Python ${{ matrix.python-version }}
-        uses: actions/setup-python@v5
+        uses: actions/setup-python@v7
         with:
           python-version: ${{ matrix.python-version }}
 
@@ -102,7 +110,7 @@ jobs:
       - uses: actions/checkout@v7
 
       - name: Set up Python
-        uses: actions/setup-python@v5
+        uses: actions/setup-python@v7
         with:
           python-version: "3.11"
 
@@ -139,7 +147,7 @@ jobs:
       - uses: actions/checkout@v7
 
       - name: Set up Python
-        uses: actions/setup-python@v5
+        uses: actions/setup-python@v7
         with:
           python-version: "3.11"
 
@@ -156,7 +164,7 @@ jobs:
       - uses: actions/checkout@v7
 
       - name: Set up Python
-        uses: actions/setup-python@v5
+        uses: actions/setup-python@v7
         with:
           python-version: "3.11"
 

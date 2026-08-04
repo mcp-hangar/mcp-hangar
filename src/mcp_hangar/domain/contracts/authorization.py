@@ -515,3 +515,32 @@ class NullToolAccessPolicyEnforcer:
     ) -> PolicyEvaluationResult:
         """Allow all tool invocations when no policy enforcement is configured."""
         return PolicyEvaluationResult.allow(reason="No policy enforcement configured (null enforcer)")
+
+
+#: The scopes `RBACAuthorizer._collect_roles` actually queries. Anything else is
+#: stored and then never read, so the grant silently does nothing.
+SUPPORTED_SCOPE_PREFIXES = ("tenant:",)
+GLOBAL_SCOPE = "global"
+
+
+def validate_role_scope(scope: str) -> None:
+    """Reject a scope no authorizer will ever look up.
+
+    Role collection asks the store for exactly two things: `global`, and
+    `tenant:{id}` when the principal carries a tenant. A grant written with any
+    other scope -- `*` being the tempting one -- is accepted, persisted, and
+    then never matched. That fails closed, so it is not an escalation; it is
+    worse in a quieter way. An administrator who grants `*` believes a
+    permission exists, sees it in the audit trail, and has in fact granted
+    nothing. The next step is usually to reach for something less auditable.
+
+    Raises:
+        ValueError: If the scope would never be collected.
+    """
+    if scope == GLOBAL_SCOPE or scope.startswith(SUPPORTED_SCOPE_PREFIXES):
+        return
+    raise ValueError(
+        f"unsupported role scope {scope!r}: use {GLOBAL_SCOPE!r} or 'tenant:<id>'. "
+        "Other scopes are never collected during authorization, so the grant "
+        "would be stored and never take effect."
+    )
