@@ -231,12 +231,16 @@ class GetSystemMetricsHandler(BaseQueryHandler):
 class GetToolInvocationHistoryHandler(QueryHandler):
     """Handler for GetToolInvocationHistoryQuery."""
 
-    def __init__(self, event_store: Any = None):
+    def __init__(self, event_store: Any):
         """Initialize the handler.
 
         Args:
-            event_store: Optional event store instance for reading invocation history.
-                Injected from bootstrap; falls back to global singleton if None.
+            event_store: Event store instance for reading invocation history.
+                Required: bootstrap injects it. It used to be optional with a
+                `get_event_store()` fallback, which was the application layer
+                reaching for infrastructure to obtain the very thing it was
+                already being handed -- a branch that could not run in a
+                bootstrapped process, and hid a missing wiring if it ever could.
         """
         self._event_store = event_store
 
@@ -249,12 +253,7 @@ class GetToolInvocationHistoryHandler(QueryHandler):
         Returns:
             Dict with mcp_server_id, history list, and total count.
         """
-        if self._event_store is not None:
-            event_store = self._event_store
-        else:
-            from ...infrastructure.event_store import get_event_store
-
-            event_store = get_event_store()
+        event_store = self._event_store
         target_stream_id = f"mcp_server-{query.mcp_server_id}"
         tool_event_types = {"ToolInvocationCompleted", "ToolInvocationFailed"}
         limit = min(max(1, query.limit), 500)
@@ -282,7 +281,8 @@ def register_all_handlers(
     query_bus: IQueryBus,
     repository: IMcpServerRepository,
     runtime_store: IRuntimeMcpServerStore | None = None,
-    event_store: Any = None,
+    *,
+    event_store: Any,
 ) -> None:
     """
     Register all query handlers with the query bus.
@@ -291,7 +291,8 @@ def register_all_handlers(
         query_bus: The query bus to register handlers with
         repository: McpServer repository
         runtime_store: Optional runtime mcp_server store for hot-loaded mcp_server lookup
-        event_store: Optional event store for tool invocation history
+        event_store: Event store for tool invocation history. Required, so a
+            missing wiring fails at registration rather than at the first query.
     """
     query_bus.register(ListMcpServersQuery, ListMcpServersHandler(repository, runtime_store))
     query_bus.register(GetMcpServerQuery, GetMcpServerHandler(repository, runtime_store))
