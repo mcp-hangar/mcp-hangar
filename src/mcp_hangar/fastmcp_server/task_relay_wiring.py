@@ -16,6 +16,7 @@ from typing import Any
 
 from .._sdk_compat import FastMCP, lowlevel_server
 from ..logging_config import get_logger
+from ..protocol import set_task_relay_wired
 
 logger = get_logger(__name__)
 
@@ -34,6 +35,7 @@ def enable_governed_task_relay(mcp: FastMCP, *, relay_tasks_enabled: bool) -> No
 
     if not (HAS_NATIVE_TASKS and relay_tasks_enabled):
         # Dark: relay-only stance preserved (ADR-008). Nothing registered.
+        set_task_relay_wired(False)
         logger.info(
             "governed_tasks_disabled",
             relay_tasks_enabled=relay_tasks_enabled,
@@ -84,6 +86,9 @@ def enable_governed_task_relay(mcp: FastMCP, *, relay_tasks_enabled: bool) -> No
     # resolves the SAME store/gate/router the handlers hold.
     ctx = get_context()
     ctx.governed_task_store = store
+    # Same statement group as the store itself, so the protocol layer's view of
+    # "is the relay serving?" cannot drift from whether it actually is.
+    set_task_relay_wired(True)
     ctx.task_consent_gate = consent_gate
     ctx.task_upstream_router = _task_upstream_router
 

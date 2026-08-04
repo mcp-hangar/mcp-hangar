@@ -64,5 +64,4 @@ ignore_imports =
     mcp_hangar.domain.services -> mcp_hangar.application.read_models.tool_projection
     mcp_hangar.infrastructure.truncation.manager -> mcp_hangar.server.tools.batch.models
     mcp_hangar.logging_config -> mcp_hangar.domain.security.redactor
-    mcp_hangar.protocol -> mcp_hangar.server.context
     mcp_hangar.observability.tracing -> mcp_hangar.metrics

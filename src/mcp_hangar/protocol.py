@@ -81,6 +81,27 @@ def inject_protocol_meta(params: dict[str, Any], *, modern_envelope: bool = True
     return {**params, "_meta": meta}
 
 
+#: Whether the ADR-014 governed task relay is actually serving in this process.
+#:
+#: A boot-time fact, written once by the single seam that activates the relay
+#: (``fastmcp_server.task_relay_wiring.enable_governed_task_relay``), so the two
+#: cannot disagree. This module used to answer the question by importing
+#: ``server.context`` and reading ``ctx.governed_task_store`` -- a leaf protocol
+#: module reaching three layers up into delivery for application state.
+_task_relay_wired = False
+
+
+def set_task_relay_wired(wired: bool) -> None:
+    """Record whether the governed task relay is serving. Called by the wiring seam."""
+    global _task_relay_wired
+    _task_relay_wired = wired
+
+
+def is_task_relay_wired() -> bool:
+    """Whether Hangar can honestly stand behind a forwarded Tasks declaration."""
+    return _task_relay_wired
+
+
 def forwardable_client_capabilities() -> dict[str, Any] | None:
     """The caller's declared capabilities Hangar may relay upstream, or ``None``.
 
@@ -110,9 +131,7 @@ def forwardable_client_capabilities() -> dict[str, Any] | None:
         if not isinstance(extensions, Mapping) or TASKS_EXTENSION_ID not in extensions:
             return None
 
-        from .server.context import get_context
-
-        if getattr(get_context(), "governed_task_store", None) is None:
+        if not is_task_relay_wired():
             return None
     except Exception:  # noqa: BLE001 -- never break an invoke over a capability read
         return None
