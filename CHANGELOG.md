@@ -73,6 +73,10 @@ before/after and a one-liner that lists affected call sites:
 
 ## [Unreleased]
 
+### Removed
+
+- **core:** `EventSourcedMcpServerRepository` and `EventSourcedMcpServer` (1741 lines including tests). Both arrived with the enterprise migration in April 2026, in the same commit as `EventSourcedApiKey` and `EventSourcedRoleAssignment` -- and unlike those two, neither was ever wired. In four months the repository was never constructed anywhere in `src/`; the aggregate's only consumer was that repository, so the pair formed a closed island nothing reached. **They were not broken and not untested** -- ~800 lines of tests covered them, including a snapshot-load-equals-full-replay equivalence check -- which is exactly why this is recorded plainly: the code worked, it simply had no caller and no one asked for one. Event sourcing for `mcp_server` remains available in history if it is ever wanted as a deliberate decision rather than an inherited artifact
+
 ### Changed
 
 - **core:** `DomainEvent` is a `kw_only` dataclass, removing ~290 lines of identical boilerplate. The base was deliberately not a dataclass -- inherited fields with defaults would have forced every subclass field to have one too -- and the price was 99 event classes each carrying the same three-line `__post_init__` whose entire body was `super().__init__()`. Keyword-only fields sit outside that ordering constraint, so the base can now own its identity fields while every subclass keeps its positional signature unchanged. `DomainEvent.rehydrate` passes the stored identity through the constructor instead of assigning after it; the `None`-keeps-the-fresh-one convention stays, so its two call sites do not reimplement it. Equality is unchanged: `event_id` and `occurred_at` are `compare=False`, preserving the payload-only comparison that fell out of the base not being a dataclass -- widening it is a defensible change, but a separate one from deleting boilerplate
