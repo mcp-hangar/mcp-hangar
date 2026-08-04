@@ -7,6 +7,7 @@ on low-level modules, both depend on abstractions.
 
 from dataclasses import dataclass, field
 from typing import Any, Optional, Protocol, cast, runtime_checkable, TYPE_CHECKING
+from ..protocol import set_task_relay_wired
 
 if TYPE_CHECKING:
     from ..application.commands.load_handlers import LoadMcpServerHandler, UnloadMcpServerHandler
@@ -269,6 +270,13 @@ def init_context(runtime: "Runtime") -> ApplicationContext:
 
 
 def reset_context() -> None:
-    """Reset context (for testing)."""
+    """Reset context (for testing).
+
+    Also clears the protocol layer's relay flag. The two are set together by the
+    single wiring seam, so they have to be cleared together too -- otherwise a
+    test that enables the relay leaves the flag on for every test after it, and
+    the capability gets claimed with no store behind it.
+    """
     global _context
     _context = None
+    set_task_relay_wired(False)
