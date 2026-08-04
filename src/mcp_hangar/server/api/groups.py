@@ -19,6 +19,7 @@ from ...domain.exceptions import McpServerNotFoundError
 from ..context import get_context
 from .middleware import dispatch_command
 from .serializers import HangarJSONResponse
+from .request_body import missing_fields
 
 
 async def list_groups(request: Request) -> HangarJSONResponse:
@@ -86,6 +87,8 @@ async def create_group(request: Request) -> HangarJSONResponse:
         JSON with {"group_id": ..., "created": true} and HTTP 201.
     """
     body = await request.json()
+    if (invalid := missing_fields(body, "group_id")) is not None:
+        return invalid
     result = await dispatch_command(
         CreateGroupCommand(
             group_id=body["group_id"],
@@ -154,6 +157,8 @@ async def add_group_member(request: Request) -> HangarJSONResponse:
     """
     group_id = request.path_params["group_id"]
     body = await request.json()
+    if (invalid := missing_fields(body, "member_id")) is not None:
+        return invalid
     result = await dispatch_command(
         AddGroupMemberCommand(
             group_id=group_id,

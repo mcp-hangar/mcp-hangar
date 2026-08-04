@@ -73,6 +73,10 @@ before/after and a one-liner that lists affected call sites:
 
 ## [Unreleased]
 
+### Fixed
+
+- **core:** mutating REST endpoints answer 400 instead of 500 on an incomplete body, and an inactive module answers 503 instead of 500. Five endpoints indexed the parsed JSON directly (`body["mcp_server_id"]`, `body["group_id"]`, `body["source_type"]` and two more); `KeyError` is not `ValueError`, so it escaped each route's handler into a generic "internal server error" -- telling the caller the server had broken when their request was merely incomplete, and filling the log with unhandled exceptions in exactly the channel that is supposed to stay quiet. The validation is one shared helper rather than five copies. Separately, `GET /api/auth/keys` with auth disabled reached a mounted route whose CQRS handlers are registered only when auth is enabled; the bus now raises a typed `HandlerNotRegisteredError` that maps to 503, which answers correctly for any module that is present but inactive. A security audit found one of the five endpoints (SEC-04) and the auth route (SEC-05)
+
 ### Security
 
 - **core:** a subprocess backend no longer opens a network port. The built-in default configuration -- what runs with no `config.yaml` -- launched the math example as a subprocess with no environment, and that example defaulted to `streamable-http` on `MCP_HOST`, which defaults to `0.0.0.0`. So a fresh install served MCP on `0.0.0.0:8080` with **no authentication, no rate limit, no audit trail and no L7 egress policy**: anyone who could reach the host could call the backend's tools around the gateway rather than through it. The same mismatch also meant the gateway itself could not talk to it -- the launcher speaks stdio, so every call failed with `startup_timeout` after 30 s and a fresh install could not invoke a single tool. Fixed in the launcher (a subprocess child now defaults to `MCP_TRANSPORT=stdio`, overridable), in the default config, and in the example. Reported by a security audit against 2.3.0
