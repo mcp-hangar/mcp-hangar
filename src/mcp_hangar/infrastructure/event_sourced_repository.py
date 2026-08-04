@@ -497,22 +497,4 @@ class EventSourcedMcpServerRepository(IMcpServerRepository):
         )
 
 
-# Singleton instance
-_event_sourced_repository: EventSourcedMcpServerRepository | None = None
-
-
-def get_event_sourced_repository() -> EventSourcedMcpServerRepository:
-    """Get the global event sourced repository instance."""
-    global _event_sourced_repository
-    if _event_sourced_repository is None:
-        _event_sourced_repository = EventSourcedMcpServerRepository()
-    return _event_sourced_repository
-
-
-def set_event_sourced_repository(repository: EventSourcedMcpServerRepository) -> None:
-    """Set the global event sourced repository instance."""
-    global _event_sourced_repository
-    _event_sourced_repository = repository
-
-
 EventSourcedProviderRepository = EventSourcedMcpServerRepository
