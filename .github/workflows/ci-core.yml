@@ -126,7 +126,7 @@ jobs:
         # diagnosing it means guessing which branches moved. The report names
         # the missing arcs per module.
         if: failure()
-        uses: actions/upload-artifact@v4
+        uses: actions/upload-artifact@v7
         with:
           name: decision-coverage-report
           path: coverage.json
