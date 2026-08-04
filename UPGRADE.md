@@ -1,6 +1,16 @@
 # Upgrading MCP Hangar
 
-## 2.3.0 — the deprecated launcher import paths are gone
+## 2.3.0 — two things to check before you roll out
+
+Neither affects a default deployment. The first matters only if you import the
+concrete launchers from the domain layer; the second only if you set
+`auth.storage.driver: event_sourcing`.
+
+> The work below was written against a planned 2.2.2. That release was never
+> cut -- it became 2.3.0 when the launcher removal landed, so everything here
+> ships in 2.3.0.
+
+### The deprecated launcher import paths are gone
 
 Only affects code that imports the concrete launcher classes from the domain
 layer. If you import them from `mcp_hangar.infrastructure.launchers`, which is
@@ -37,9 +47,7 @@ Removing it also broke a real import cycle: the domain reaching for the
 concrete launchers is what forced two sagas to import their saga manager inside
 a function body rather than at module level.
 
-## 2.2.2 — plan for it only if you run `auth.storage.driver: event_sourcing`
-
-Drop-in for everyone else.
+### If you run `auth.storage.driver: event_sourcing`, read this before upgrading
 
 On that driver, API keys and role assignments were written to the event store
 correctly and could not be read back: the writer accepts any domain event, the
