@@ -25,9 +25,6 @@ class ToolApprovalRequested(DomainEvent):
     expires_at: str = ""
     correlation_id: str = ""
 
-    def __post_init__(self):
-        super().__init__()
-
 
 @accepts_legacy_provider_id
 @dataclass
@@ -39,9 +36,6 @@ class ToolApprovalGranted(DomainEvent):
     tool_name: str = ""
     decided_by: str = ""
     decided_at: str = ""
-
-    def __post_init__(self):
-        super().__init__()
 
 
 @accepts_legacy_provider_id
@@ -56,9 +50,6 @@ class ToolApprovalDenied(DomainEvent):
     decided_at: str = ""
     reason: str | None = None
 
-    def __post_init__(self):
-        super().__init__()
-
 
 @accepts_legacy_provider_id
 @dataclass
@@ -69,9 +60,6 @@ class ToolApprovalExpired(DomainEvent):
     mcp_server_id: str
     tool_name: str = ""
     expired_at: str = ""
-
-    def __post_init__(self):
-        super().__init__()
 
 
 # =============================================================================
@@ -98,9 +86,6 @@ class ToolWithdrawn(DomainEvent):
     tool: str
     schema_version: int = 1
 
-    def __post_init__(self):
-        super().__init__()
-
 
 @dataclass
 class ToolRestored(DomainEvent):
@@ -121,9 +106,6 @@ class ToolRestored(DomainEvent):
     mcp_server: str
     tool: str
     schema_version: int = 1
-
-    def __post_init__(self):
-        super().__init__()
 
 
 @dataclass
@@ -147,9 +129,6 @@ class ToolWithdrawnRejected(DomainEvent):
     mcp_server: str
     tool: str
     schema_version: int = 1
-
-    def __post_init__(self):
-        super().__init__()
 
 
 # =============================================================================

@@ -22,9 +22,6 @@ class McpServerDiscovered(DomainEvent):
     mode: str
     fingerprint: str
 
-    def __post_init__(self):
-        super().__init__()
-
 
 @dataclass
 class McpServerDiscoveryLost(DomainEvent):
@@ -33,9 +30,6 @@ class McpServerDiscoveryLost(DomainEvent):
     mcp_server_name: str
     source_type: str
     reason: str  # "ttl_expired", "source_removed", etc.
-
-    def __post_init__(self):
-        super().__init__()
 
 
 @dataclass
@@ -47,9 +41,6 @@ class McpServerDiscoveryConfigChanged(DomainEvent):
     old_fingerprint: str
     new_fingerprint: str
 
-    def __post_init__(self):
-        super().__init__()
-
 
 @dataclass
 class McpServerQuarantined(DomainEvent):
@@ -60,9 +51,6 @@ class McpServerQuarantined(DomainEvent):
     reason: str
     validation_result: str
 
-    def __post_init__(self):
-        super().__init__()
-
 
 @dataclass
 class McpServerApproved(DomainEvent):
@@ -71,9 +59,6 @@ class McpServerApproved(DomainEvent):
     mcp_server_name: str
     source_type: str
     approved_by: str  # "manual" or "auto"
-
-    def __post_init__(self):
-        super().__init__()
 
 
 @accepts_legacy_provider_id
@@ -137,9 +122,6 @@ class DiscoveryCycleCompleted(DomainEvent):
     error_count: int
     duration_ms: float
 
-    def __post_init__(self):
-        super().__init__()
-
 
 @dataclass
 class DiscoverySourceHealthChanged(DomainEvent):
@@ -148,6 +130,3 @@ class DiscoverySourceHealthChanged(DomainEvent):
     source_type: str
     is_healthy: bool
     error_message: str | None = None
-
-    def __post_init__(self):
-        super().__init__()

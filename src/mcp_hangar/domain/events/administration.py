@@ -22,9 +22,6 @@ class McpServerRegistered(DomainEvent):
     source: str  # "api" | "config" | "discovery"
     mode: str
 
-    def __post_init__(self):
-        super().__init__()
-
 
 @dataclass
 class McpServerUpdated(DomainEvent):
@@ -33,9 +30,6 @@ class McpServerUpdated(DomainEvent):
     mcp_server_id: str
     source: str
 
-    def __post_init__(self):
-        super().__init__()
-
 
 @dataclass
 class McpServerDeregistered(DomainEvent):
@@ -43,9 +37,6 @@ class McpServerDeregistered(DomainEvent):
 
     mcp_server_id: str
     source: str
-
-    def __post_init__(self):
-        super().__init__()
 
 
 @accepts_legacy_provider_id
@@ -77,9 +68,6 @@ class CustomRoleCreated(DomainEvent):
     description: str | None = None
     schema_version: int = 1
 
-    def __post_init__(self):
-        super().__init__()
-
 
 @dataclass
 class CustomRoleDeleted(DomainEvent):
@@ -87,9 +75,6 @@ class CustomRoleDeleted(DomainEvent):
 
     role_name: str
     schema_version: int = 1
-
-    def __post_init__(self):
-        super().__init__()
 
 
 @dataclass
@@ -100,9 +85,6 @@ class CustomRoleUpdated(DomainEvent):
     permissions: list[str]
     description: str | None = None
     schema_version: int = 1
-
-    def __post_init__(self):
-        super().__init__()
 
 
 @dataclass
@@ -115,9 +97,6 @@ class ToolAccessPolicySet(DomainEvent):
     deny_list: list[str]
     schema_version: int = 1
 
-    def __post_init__(self):
-        super().__init__()
-
 
 @dataclass
 class ToolAccessPolicyCleared(DomainEvent):
@@ -126,9 +105,6 @@ class ToolAccessPolicyCleared(DomainEvent):
     scope: str
     target_id: str
     schema_version: int = 1
-
-    def __post_init__(self):
-        super().__init__()
 
 
 # ---------------------------------------------------------------------------

@@ -30,7 +30,6 @@ class ToolInvocationRequested(DomainEvent):
         # indexes it without a None check.
         if self.arguments is None:
             self.arguments = {}
-        super().__init__()
 
 
 @accepts_legacy_provider_id
@@ -45,9 +44,6 @@ class ToolInvocationCompleted(DomainEvent):
     result_size_bytes: int = 0
     identity_context: dict[str, Any] | None = None
 
-    def __post_init__(self):
-        super().__init__()
-
 
 @accepts_legacy_provider_id
 @dataclass
@@ -61,6 +57,3 @@ class ToolInvocationFailed(DomainEvent):
     error_message: str = ""
     error_type: str = ""
     identity_context: dict[str, Any] | None = None
-
-    def __post_init__(self):
-        super().__init__()

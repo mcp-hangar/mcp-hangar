@@ -45,9 +45,6 @@ class DetectionRuleMatched(DomainEvent):
     metadata: dict[str, Any] = field(default_factory=dict)
     schema_version: int = 1
 
-    def __post_init__(self):
-        super().__init__()
-
     @property
     def provider_id(self) -> str:
         import warnings
@@ -92,9 +89,6 @@ class EnforcementActionTaken(DomainEvent):
     detail: str = ""
     metadata: dict[str, Any] = field(default_factory=dict)
     schema_version: int = 1
-
-    def __post_init__(self):
-        super().__init__()
 
 
 # =============================================================================
