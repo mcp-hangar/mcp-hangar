@@ -141,6 +141,17 @@ class SubprocessLauncher(McpServerLauncher):
 
                 result_env[key] = value
 
+        # A subprocess backend talks to Hangar over the pipe it was started
+        # with, so default it to stdio. Without this an SDK server that defaults
+        # to streamable-http binds a network port instead: it never answers on
+        # the pipe (the launcher times out) AND it serves MCP on that port with
+        # no auth, no rate limit, no audit and no L7 policy -- a way around the
+        # gateway rather than through it.
+        #
+        # A default, not a rule: an explicit env entry below overrides it, so a
+        # provider using a different variable name is unaffected.
+        result_env.setdefault("MCP_TRANSPORT", "stdio")
+
         # Add mcp_server-specific env vars (overrides inherited)
         if mcp_server_env:
             # Sanitize values
