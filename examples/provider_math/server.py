@@ -105,11 +105,13 @@ def power(base: float, exponent: float) -> dict:
 def main():
     """Run the math provider server.
 
-    Defaults to streamable HTTP transport on 0.0.0.0:8080.
-    Override with MCP_TRANSPORT=stdio for subprocess mode.
+    Defaults to stdio (subprocess mode), matching provider_identity. Override
+    with MCP_TRANSPORT=streamable-http to run it as a standalone HTTP backend,
+    which binds MCP_HOST (0.0.0.0 by default) and serves without authentication
+    -- fine on a private network, not on a public interface.
     """
-    transport = os.environ.get("MCP_TRANSPORT", "streamable-http")
-    if transport == "stdio":
+    transport = os.environ.get("MCP_TRANSPORT", "stdio")
+    if transport != "streamable-http":
         mcp.run(transport="stdio")
     elif _MCP_V2:
         mcp.run(transport="streamable-http", host=_HOST, port=_PORT)

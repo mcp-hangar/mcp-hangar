@@ -73,6 +73,10 @@ before/after and a one-liner that lists affected call sites:
 
 ## [Unreleased]
 
+### Security
+
+- **core:** a subprocess backend no longer opens a network port. The built-in default configuration -- what runs with no `config.yaml` -- launched the math example as a subprocess with no environment, and that example defaulted to `streamable-http` on `MCP_HOST`, which defaults to `0.0.0.0`. So a fresh install served MCP on `0.0.0.0:8080` with **no authentication, no rate limit, no audit trail and no L7 egress policy**: anyone who could reach the host could call the backend's tools around the gateway rather than through it. The same mismatch also meant the gateway itself could not talk to it -- the launcher speaks stdio, so every call failed with `startup_timeout` after 30 s and a fresh install could not invoke a single tool. Fixed in the launcher (a subprocess child now defaults to `MCP_TRANSPORT=stdio`, overridable), in the default config, and in the example. Reported by a security audit against 2.3.0
+
 ### Added
 
 - **core:** a dead-symbol gate. Five defects this release turned out to be code that could not run -- an adapter never constructed, a port never injected, a module with no callers, a fallback beside an injected dependency -- and every one was found by accident while chasing something else. `scripts/check_dead_symbols.py` asks the question on purpose: which public symbols does nothing reference? The answer is baselined in `pyproject.toml` and can only shrink, the same ratchet the complexity baseline and import-contract ledger use. Symbols exported through an `__all__` are counted separately, because deleting those is a release decision rather than a cleanup. Current: 45 unreferenced, 4 exported-unreferenced

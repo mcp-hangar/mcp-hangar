@@ -765,6 +765,9 @@ def load_configuration(config_path: str | None = None) -> dict[str, Any]:
             "math_subprocess": {
                 "mode": "subprocess",
                 "command": ["python", "-m", "examples.provider_math.server"],
+                # Explicit even though the subprocess launcher now defaults to
+                # it: this config is what a reader copies as a starting point.
+                "env": {"MCP_TRANSPORT": "stdio"},
                 "idle_ttl_s": 180,
             },
         }
