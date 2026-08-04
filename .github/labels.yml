@@ -84,7 +84,7 @@
 
 - name: skip-changelog
   color: ededed
-  description: PR is exempt from CHANGELOG entry requirement (chore/deps, ci, style, test, pure docs)
+  description: PR is exempt from the changelog.d/ fragment requirement (chore/deps, ci, style, test, pure docs)
 
 - name: trivial
   color: cfd3d7

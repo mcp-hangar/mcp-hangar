@@ -7,8 +7,9 @@
 
 <!-- ─────────────────────────────────────────────────────────────────────────
      Optional sections below — add the ones that carry signal, delete the rest.
-     The CHANGELOG is enforced separately (add a `## [Unreleased]` entry in
-     CHANGELOG.md, or apply the `skip-changelog` label) — no note needed here.
+     The changelog is enforced separately: add ONE file
+     `changelog.d/<id>-<slug>.<kind>.md` (see changelog.d/README.md), or apply
+     the `skip-changelog` label. Do not edit CHANGELOG.md — no note needed here.
      ───────────────────────────────────────────────────────────────────────── -->
 
 ## What
