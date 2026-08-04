@@ -7,6 +7,7 @@ from mcp_hangar.application.commands import StartMcpServerCommand, StopMcpServer
 from mcp_hangar.application.sagas.mcp_server_failover_saga import McpServerFailoverEventSaga, McpServerFailoverSaga
 from mcp_hangar.application.sagas.mcp_server_recovery_saga import McpServerRecoverySaga
 from mcp_hangar.domain.events import HealthCheckFailed, McpServerDegraded, McpServerStarted, McpServerStopped
+from mcp_hangar.infrastructure.saga_manager import get_saga_manager
 
 
 class TestMcpServerRecoverySaga:
@@ -14,13 +15,13 @@ class TestMcpServerRecoverySaga:
 
     def test_saga_type(self):
         """Test saga type identifier."""
-        saga = McpServerRecoverySaga()
+        saga = McpServerRecoverySaga(saga_manager=get_saga_manager())
 
         assert saga.saga_type == "mcp_server_recovery"
 
     def test_handled_events(self):
         """Test that saga handles correct events."""
-        saga = McpServerRecoverySaga()
+        saga = McpServerRecoverySaga(saga_manager=get_saga_manager())
 
         assert McpServerDegraded in saga.handled_events
         assert McpServerStarted in saga.handled_events
@@ -48,7 +49,7 @@ class TestMcpServerRecoverySaga:
 
     def test_handle_degraded_multiple_times(self):
         """Test handling multiple degradations."""
-        saga = McpServerRecoverySaga(max_retries=3)
+        saga = McpServerRecoverySaga(max_retries=3, saga_manager=get_saga_manager())
 
         # First degradation
         saga.handle(McpServerDegraded("p1", 1, 1, "error"))
@@ -64,7 +65,7 @@ class TestMcpServerRecoverySaga:
 
     def test_handle_degraded_max_retries_exceeded(self):
         """Test that max retries triggers stop command."""
-        saga = McpServerRecoverySaga(max_retries=2)
+        saga = McpServerRecoverySaga(max_retries=2, saga_manager=get_saga_manager())
 
         # First two retries
         saga.handle(McpServerDegraded("p1", 1, 1, "error"))
@@ -79,7 +80,7 @@ class TestMcpServerRecoverySaga:
 
     def test_handle_started_resets_retry_count(self):
         """Test that successful start resets retry count."""
-        saga = McpServerRecoverySaga(max_retries=3)
+        saga = McpServerRecoverySaga(max_retries=3, saga_manager=get_saga_manager())
 
         # Build up retries
         saga.handle(McpServerDegraded("p1", 1, 1, "error"))
@@ -93,7 +94,7 @@ class TestMcpServerRecoverySaga:
 
     def test_handle_stopped_clears_state_for_normal_stop(self):
         """Test that normal stops clear retry state."""
-        saga = McpServerRecoverySaga()
+        saga = McpServerRecoverySaga(saga_manager=get_saga_manager())
 
         # Build up state
         saga.handle(McpServerDegraded("p1", 1, 1, "error"))
@@ -105,7 +106,7 @@ class TestMcpServerRecoverySaga:
 
     def test_handle_stopped_keeps_state_for_error_stop(self):
         """Test that error stops keep retry state."""
-        saga = McpServerRecoverySaga()
+        saga = McpServerRecoverySaga(saga_manager=get_saga_manager())
 
         saga.handle(McpServerDegraded("p1", 1, 1, "error"))
 
@@ -117,7 +118,9 @@ class TestMcpServerRecoverySaga:
 
     def test_backoff_calculation(self):
         """Test exponential backoff calculation."""
-        saga = McpServerRecoverySaga(initial_backoff_s=5.0, max_backoff_s=60.0, backoff_multiplier=2.0)
+        saga = McpServerRecoverySaga(
+            initial_backoff_s=5.0, max_backoff_s=60.0, backoff_multiplier=2.0, saga_manager=get_saga_manager()
+        )
 
         assert saga._calculate_backoff(1) == 5.0
         assert saga._calculate_backoff(2) == 10.0
@@ -128,7 +131,7 @@ class TestMcpServerRecoverySaga:
 
     def test_get_all_retry_states(self):
         """Test getting all retry states."""
-        saga = McpServerRecoverySaga()
+        saga = McpServerRecoverySaga(saga_manager=get_saga_manager())
 
         saga.handle(McpServerDegraded("p1", 1, 1, "error"))
         saga.handle(McpServerDegraded("p2", 2, 2, "error"))
@@ -140,7 +143,7 @@ class TestMcpServerRecoverySaga:
 
     def test_reset_retry_state(self):
         """Test manually resetting retry state."""
-        saga = McpServerRecoverySaga()
+        saga = McpServerRecoverySaga(saga_manager=get_saga_manager())
 
         saga.handle(McpServerDegraded("p1", 1, 1, "error"))
         saga.reset_retry_state("p1")
@@ -149,7 +152,7 @@ class TestMcpServerRecoverySaga:
 
     def test_reset_all_retry_states(self):
         """Test resetting all retry states."""
-        saga = McpServerRecoverySaga()
+        saga = McpServerRecoverySaga(saga_manager=get_saga_manager())
 
         saga.handle(McpServerDegraded("p1", 1, 1, "error"))
         saga.handle(McpServerDegraded("p2", 1, 1, "error"))
@@ -191,13 +194,13 @@ class TestMcpServerFailoverSaga:
 
     def test_failover_event_saga_type(self):
         """Test event saga type identifier."""
-        saga = McpServerFailoverEventSaga()
+        saga = McpServerFailoverEventSaga(saga_manager=get_saga_manager())
 
         assert saga.saga_type == "mcp_server_failover_event"
 
     def test_event_saga_handled_events(self):
         """Test that event saga handles correct events."""
-        saga = McpServerFailoverEventSaga()
+        saga = McpServerFailoverEventSaga(saga_manager=get_saga_manager())
 
         assert McpServerDegraded in saga.handled_events
         assert McpServerStarted in saga.handled_events
@@ -205,7 +208,7 @@ class TestMcpServerFailoverSaga:
 
     def test_configure_failover(self):
         """Test configuring a failover pair."""
-        saga = McpServerFailoverEventSaga()
+        saga = McpServerFailoverEventSaga(saga_manager=get_saga_manager())
 
         saga.configure_failover("primary", "backup")
 
@@ -216,7 +219,7 @@ class TestMcpServerFailoverSaga:
 
     def test_configure_failover_custom_options(self):
         """Test configuring failover with custom options."""
-        saga = McpServerFailoverEventSaga()
+        saga = McpServerFailoverEventSaga(saga_manager=get_saga_manager())
 
         saga.configure_failover("primary", "backup", auto_failback=False, failback_delay_s=60.0)
 
@@ -226,7 +229,7 @@ class TestMcpServerFailoverSaga:
 
     def test_remove_failover(self):
         """Test removing a failover configuration."""
-        saga = McpServerFailoverEventSaga()
+        saga = McpServerFailoverEventSaga(saga_manager=get_saga_manager())
 
         saga.configure_failover("primary", "backup")
         result = saga.remove_failover("primary")
@@ -257,7 +260,7 @@ class TestMcpServerFailoverSaga:
 
     def test_handle_degraded_no_failover_configured(self):
         """Test that degradation without config does nothing."""
-        saga = McpServerFailoverEventSaga()
+        saga = McpServerFailoverEventSaga(saga_manager=get_saga_manager())
 
         commands = saga.handle(McpServerDegraded("primary", 3, 5, "error"))
 
@@ -407,7 +410,7 @@ class TestMcpServerFailoverSaga:
 
     def test_get_all_configs(self):
         """Test getting all failover configurations."""
-        saga = McpServerFailoverEventSaga()
+        saga = McpServerFailoverEventSaga(saga_manager=get_saga_manager())
 
         saga.configure_failover("p1", "b1")
         saga.configure_failover("p2", "b2")

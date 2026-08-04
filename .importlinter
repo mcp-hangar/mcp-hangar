@@ -48,8 +48,10 @@ exhaustive = False
 #     aggregate and one port reaching for adapters. IMetricsPublisher is
 #     already injected into the aggregate, so part of this is a half-finished
 #     migration rather than a design choice.
-#   * application -> infrastructure / server -- five and four edges, all
-#     function-scoped imports that read as cycle avoidance.
+#   * application -> infrastructure / server -- what remains after measuring
+#     which of these avoid a real cycle. Three did not; grimp showed the
+#     infrastructure module reaching nothing back. The saga pair genuinely did,
+#     through domain.services -> infrastructure.launchers.
 ignore_imports =
     mcp_hangar.application.commands.handlers -> mcp_hangar.metrics
     mcp_hangar.application.commands.load_handlers -> mcp_hangar.infrastructure.runtime_store
@@ -57,8 +59,6 @@ ignore_imports =
     mcp_hangar.application.event_handlers.cost_handler -> mcp_hangar.metrics
     mcp_hangar.application.event_handlers.detection_handler -> mcp_hangar.server.api.sessions
     mcp_hangar.application.mcp.tooling -> mcp_hangar.fastmcp_server.asgi
-    mcp_hangar.application.sagas.mcp_server_failover_saga -> mcp_hangar.infrastructure.saga_manager
-    mcp_hangar.application.sagas.mcp_server_recovery_saga -> mcp_hangar.infrastructure.saga_manager
     mcp_hangar.context -> mcp_hangar.domain.value_objects.identity
     mcp_hangar.domain.model.mcp_server -> mcp_hangar.infrastructure.launchers
     mcp_hangar.domain.services -> mcp_hangar.application.read_models.tool_projection

@@ -35,6 +35,7 @@ from mcp_hangar.domain.events import (
 from mcp_hangar.domain.exceptions import McpServerNotFoundError, ToolInvocationError, ToolNotFoundError
 from mcp_hangar.domain.model import McpServer
 from mcp_hangar.domain.value_objects import McpServerMode, McpServerState
+from mcp_hangar.infrastructure.saga_manager import get_saga_manager
 
 MOCK_PROVIDER = str(Path(__file__).resolve().parent.parent / "mock_provider.py")
 
@@ -1127,7 +1128,7 @@ class TestRecoverySaga:
     def test_saga_resets_on_successful_start(self):
         from mcp_hangar.application.sagas.mcp_server_recovery_saga import McpServerRecoverySaga
 
-        saga = McpServerRecoverySaga(max_retries=3, initial_backoff_s=0.1)
+        saga = McpServerRecoverySaga(max_retries=3, initial_backoff_s=0.1, saga_manager=get_saga_manager())
         saga._retry_state["saga-reset"] = {"retries": 2, "last_attempt": time.time(), "next_retry": 0}
 
         started_event = McpServerStarted(
@@ -1146,7 +1147,7 @@ class TestRecoverySaga:
         from mcp_hangar.application.commands import StopMcpServerCommand
         from mcp_hangar.application.sagas.mcp_server_recovery_saga import McpServerRecoverySaga
 
-        saga = McpServerRecoverySaga(max_retries=2, initial_backoff_s=0.1)
+        saga = McpServerRecoverySaga(max_retries=2, initial_backoff_s=0.1, saga_manager=get_saga_manager())
         saga._retry_state["saga-max"] = {"retries": 2, "last_attempt": time.time(), "next_retry": 0}
 
         degraded_event = McpServerDegraded(
@@ -1170,6 +1171,7 @@ class TestRecoverySaga:
             initial_backoff_s=1.0,
             max_backoff_s=16.0,
             backoff_multiplier=2.0,
+            saga_manager=get_saga_manager(),
         )
 
         assert saga._calculate_backoff(1) == pytest.approx(1.0)
@@ -1182,7 +1184,7 @@ class TestRecoverySaga:
     def test_saga_clears_state_on_intentional_stop(self):
         from mcp_hangar.application.sagas.mcp_server_recovery_saga import McpServerRecoverySaga
 
-        saga = McpServerRecoverySaga()
+        saga = McpServerRecoverySaga(saga_manager=get_saga_manager())
         saga._retry_state["saga-stop"] = {"retries": 1, "last_attempt": time.time(), "next_retry": 0}
 
         stopped_event = McpServerStopped(mcp_server_id="saga-stop", reason="shutdown")
@@ -1193,7 +1195,7 @@ class TestRecoverySaga:
     def test_saga_with_real_server_degradation_events(self):
         from mcp_hangar.application.sagas.mcp_server_recovery_saga import McpServerRecoverySaga
 
-        saga = McpServerRecoverySaga(max_retries=3, initial_backoff_s=0.1)
+        saga = McpServerRecoverySaga(max_retries=3, initial_backoff_s=0.1, saga_manager=get_saga_manager())
 
         server = _make_server("saga-real")
         server.ensure_ready()
