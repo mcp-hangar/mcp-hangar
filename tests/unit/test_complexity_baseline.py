@@ -1,14 +1,19 @@
 """The complexity baseline may shrink. It may not grow.
 
-`C901` caps new code at cyclomatic complexity 15. Sixteen functions already
+`C901` caps new code at cyclomatic complexity 15. Fourteen functions still
 exceed that, and each carries an explicit `# noqa: C901 -- baseline CC=N`. Ruff
 alone cannot tell a legitimate baseline entry from a new one someone added to
 silence the gate, so this test does: the count is capped, and lowering the cap is
 the unit of progress.
 
 Why 15 and not mccabe's default 10: a threshold of 10 would have baselined 54
-functions, and a 54-entry list of suppressions stops being read as debt. Sixteen
-is short enough to stay a to-do list.
+functions, and a 54-entry list of suppressions stops being read as debt. A list
+this short stays a to-do list.
+
+The cap came down from 16 as functions were split. `MetricsEventHandler.handle`
+was the most recent: a 19-branch isinstance chain at CC=20, replaced by a
+dispatch table when adding a twentieth branch became necessary. Its own noqa
+said "split before extending", and the gate is what made that stick.
 
 The named worst offenders below are pinned separately, because they are the ones
 a reader should recognise: `init_command` at 49 and `_load_mcp_server_config` at
@@ -24,7 +29,7 @@ SRC = pathlib.Path(__file__).resolve().parents[2] / "src" / "mcp_hangar"
 _NOQA = re.compile(r"#\s*noqa:\s*C901\b[^\n]*?baseline CC=(\d+)")
 
 # Lower these as functions are split. Never raise them.
-MAX_BASELINED_FUNCTIONS = 15
+MAX_BASELINED_FUNCTIONS = 14
 MAX_BASELINED_COMPLEXITY = 49
 
 
