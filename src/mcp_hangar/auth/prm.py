@@ -11,26 +11,47 @@ any token-validation logic. Hangar remains a pure Resource Server.
 from __future__ import annotations
 
 from collections.abc import MutableMapping
+
+from mcp_hangar.logging_config import get_logger
+from mcp_hangar.trusted_hosts import fallback_host, host_is_trusted
 from typing import Any
 
 _PRM_PATH = "/.well-known/oauth-protected-resource"
 
 
+logger = get_logger(__name__)
+
+
 def build_resource_base_url(scope: MutableMapping[str, Any]) -> str:
     """Derive the base URL (scheme + host) from an ASGI scope.
 
-    Used as a fallback when no configured resource_uri is available.
-    Note: proxies can make the Host header unreliable; prefer a configured
-    resource_uri (auth.oidc.resource_uri) over this derived value.
+    Used as a fallback when no configured resource_uri is available. Prefer
+    setting `auth.oidc.resource_uri`, which skips this entirely.
+
+    The Host header is attacker-controlled, and the two places that call this
+    are reached BEFORE any host check: `AuthMiddlewareHTTP` builds the RFC 9728
+    `WWW-Authenticate` challenge from outside `TrustedHostMiddleware`, and the
+    `.well-known` PRM endpoint on the serving app has no such middleware at all.
+    A forged Host would therefore be echoed back as this resource's identity, in
+    the document clients use to decide where to send tokens.
+
+    So an untrusted Host is ignored rather than reflected: the advertised
+    identity falls back to the first configured trusted host. That degrades to a
+    value the operator chose, which is the safe direction -- a client that
+    cannot reach it fails to authenticate, rather than authenticating against
+    somewhere an attacker named.
     """
     headers: dict[str, str] = {}
     for key, value in scope.get("headers", []):
         headers[key.decode("latin-1").lower()] = value.decode("latin-1")
 
     host = headers.get("host", "localhost")
+    if not host_is_trusted(host):
+        logger.warning("prm_untrusted_host_ignored", host=host)
+        host = fallback_host()
     # Determine scheme from forwarded headers or ASGI scope hint.
     scheme = headers.get("x-forwarded-proto", "")
-    if not scheme:
+    if scheme not in ("http", "https"):
         scheme = scope.get("scheme", "http")
     return f"{scheme}://{host}"
 

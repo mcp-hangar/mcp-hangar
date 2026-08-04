@@ -15,6 +15,7 @@ from ..context import identity_context_var
 from ..domain.value_objects.identity import CallerIdentity, IdentityContext
 from ..domain.value_objects.security import PrincipalType
 from ..logging_config import get_logger
+from ..trusted_hosts import WILDCARD, trusted_hosts
 
 if TYPE_CHECKING:
     from typing import Any as AuthComponents
@@ -198,7 +199,6 @@ def _ws_handshake_allowed(scope: dict) -> tuple[bool, str]:
 
     Returns ``(allowed, reason)``; ``reason`` is a short tag for logging.
     """
-    import os
 
     from ..server.api.middleware import get_cors_config
     from ..server.lifecycle import _is_loopback_host
@@ -216,9 +216,8 @@ def _ws_handshake_allowed(scope: dict) -> tuple[bool, str]:
         if "*" not in allowed_origins and origin not in allowed_origins:
             return False, f"origin_not_allowed:{origin}"
 
-    trusted_env = os.environ.get("MCP_TRUSTED_HOSTS", "localhost,127.0.0.1,::1,testserver")
-    trusted_hosts = [h.strip() for h in trusted_env.split(",") if h.strip()]
-    if "*" not in trusted_hosts and _strip_host_port(host) not in trusted_hosts:
+    allowed = trusted_hosts()
+    if WILDCARD not in allowed and _strip_host_port(host) not in allowed:
         return False, f"host_not_allowed:{host or '<missing>'}"
 
     return True, ""
