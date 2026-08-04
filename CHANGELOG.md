@@ -22,6 +22,10 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Removed
+
+- **core:** removed the deprecated launcher import paths. `mcp_hangar.domain.services.mcp_server_launcher` and the launcher re-exports on `mcp_hangar.domain.services` (`DockerLauncher`, `SubprocessLauncher`, `ContainerLauncher`, `HttpLauncher`, `ContainerConfig`, `McpServerLauncher`, `get_launcher`) both raise now. Import them from `mcp_hangar.infrastructure.launchers`, which is where they live and what the `DeprecationWarning` has said since v1.0.2 -- a warning that survived the 2.0 major. The port, `IMcpServerLauncher`, is still exported from `domain.services`; it is the concrete classes that left. This also broke a real import cycle: the domain reaching for the concrete launchers is what forced two sagas to import their saga manager inside a function body. Eight lines leave the import-contract debt ledger
+
 ### Fixed
 
 - **core:** cost-attribution events reached no handler. `CostAttributionEventHandler` called `event_bus.publish([cost_event])` -- a list, not an event. Dispatch keys on the event's type, so the list matched no specific handler and every `subscribe_to_all` handler (audit, logging, metrics) received the **list object itself**, where each one's `isinstance` chain quietly matched nothing; anything subscribed to `CostReportGenerated` was never called at all. Nothing failed, the event simply never arrived. The unit test covering it asserted `len(published_events) == 1`, agreeing with the bug because a mock bus never has to route anything. `publish()` now raises `TypeError` on a non-event rather than delivering to no one

@@ -15,9 +15,7 @@ So these tests guard the file rather than the code:
 * `exhaustive = False` is a deliberate choice about component packages, not a
   silent escape hatch, so it is asserted with its reason recorded here
 
-Shrinking `MAX_IGNORED_IMPORTS` is the unit of progress. Seven of the entries
-go at once when the `domain/services/mcp_server_launcher` deprecation shims are
-deleted at 3.0.
+Shrinking `MAX_IGNORED_IMPORTS` is the unit of progress.
 """
 
 import configparser
@@ -30,7 +28,7 @@ ROOT = pathlib.Path(__file__).resolve().parents[2]
 CONTRACT = ROOT / ".importlinter"
 
 # Lower as edges are removed. Never raise without a reason in review.
-MAX_IGNORED_IMPORTS = 23
+MAX_IGNORED_IMPORTS = 15
 
 # Bottom-up. Each entry is a layer line; `:` separates independent siblings.
 EXPECTED_LAYER_ORDER = [
@@ -135,14 +133,24 @@ class TestLedgerCannotGrow:
         malformed = [e for e in self._entries(hexagon) if not pattern.match(e)]
         assert malformed == [], f"malformed ignore_imports entries: {malformed}"
 
-    def test_the_deprecation_shims_are_still_the_biggest_group(self, hexagon):
-        """Seven entries clear at once when the 3.0 shim removal lands.
+    def test_the_launcher_shims_do_not_come_back(self, hexagon):
+        """Eight entries cleared when the deprecated launcher surface was deleted.
 
-        If this drops without MAX_IGNORED_IMPORTS dropping too, the shims were
-        deleted and the ledger was not tightened.
+        It had warned since v1.0.2 and survived the 2.0 major, which is how a
+        shim becomes permanent. Re-adding a re-export of the concrete launchers
+        to `domain.services` would put the domain back on the infrastructure
+        launchers -- and put back the import cycle those entries sustained.
+
+        Scoped to `domain.services`: the aggregate's own
+        `domain.model.mcp_server -> infrastructure.launchers` is a separate
+        leak, still on the ledger, and not what this guards.
         """
-        shims = [e for e in self._entries(hexagon) if "domain.services.mcp_server_launcher" in e]
-        assert len(shims) == 7, f"expected 7 launcher shim entries, found {len(shims)}"
+        offenders = [
+            e
+            for e in self._entries(hexagon)
+            if e.startswith("mcp_hangar.domain.services") and "infrastructure.launchers" in e
+        ]
+        assert offenders == [], f"domain.services reaches for the concrete launchers again: {offenders}"
 
 
 class TestEveryPackageHasAMarker:
