@@ -56,7 +56,6 @@ exhaustive = False
 ignore_imports =
     mcp_hangar.application.commands.handlers -> mcp_hangar.metrics
     mcp_hangar.application.commands.load_handlers -> mcp_hangar.infrastructure.runtime_store
-    mcp_hangar.application.commands.reload_handler -> mcp_hangar.server.config
     mcp_hangar.application.discovery.discovery_orchestrator -> mcp_hangar.metrics
     mcp_hangar.application.event_handlers.cost_handler -> mcp_hangar.metrics
     mcp_hangar.application.event_handlers.detection_handler -> mcp_hangar.server.api.sessions

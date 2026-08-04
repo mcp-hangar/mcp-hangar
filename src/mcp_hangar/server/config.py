@@ -18,6 +18,7 @@ from ..domain.model import LoadBalancerStrategy, McpServer, McpServerGroup
 from ..domain.security.input_validator import validate_mcp_server_id
 from ..domain.value_objects.capabilities import McpServerCapabilities
 from ..domain.value_objects.tool_digest import DigestEnforcement, ToolDigest
+from ..application.ports.config_loader import IConfigLoader
 from ..logging_config import get_logger
 
 from .state import get_group_rebalance_saga, get_runtime, GROUPS
@@ -709,11 +710,16 @@ def _init_interceptors_from_config(full_config: dict[str, Any]) -> None:
     configure_interceptors(validator_specs)
 
 
-class ServerConfigLoader:
+class ServerConfigLoader(IConfigLoader):
     """IConfigLoader implementation backed by server-layer config functions.
 
     Used by ReloadConfigurationHandler to load and apply configuration without
     importing server-layer symbols from the application layer.
+
+    Declares the base class rather than matching it by shape: IConfigLoader is
+    an ABC, so nothing checked the two agreed while this only duck-typed it, and
+    a rename on either side would have surfaced as an AttributeError at reload
+    time.
     """
 
     def load_from_file(self, path: str) -> dict[str, Any]:

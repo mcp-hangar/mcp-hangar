@@ -8,6 +8,7 @@ import pytest
 import yaml
 
 from mcp_hangar.application.commands.reload_handler import ReloadConfigurationHandler
+from mcp_hangar.server.config import ServerConfigLoader
 from mcp_hangar.application.commands import ReloadConfigurationCommand
 from mcp_hangar.domain.events import ConfigurationReloaded, ConfigurationReloadFailed, ConfigurationReloadRequested
 from mcp_hangar.domain.exceptions import ConfigurationError
@@ -36,8 +37,15 @@ class TestReloadConfigurationHandler:
 
     @pytest.fixture
     def handler(self, mock_repository, mock_event_bus):
-        """Create handler instance."""
-        return ReloadConfigurationHandler(mock_repository, mock_event_bus)
+        """Create handler instance.
+
+        The real ServerConfigLoader, which is what bootstrap injects. These
+        tests used to construct the handler without one and so exercised a
+        "legacy path" fallback that production never took -- the tested path and
+        the shipped path were different ones. The fallback is gone; this keeps
+        the same assertions pointed at the path that ships.
+        """
+        return ReloadConfigurationHandler(mock_repository, mock_event_bus, config_loader=ServerConfigLoader())
 
     @pytest.fixture
     def temp_config_file(self):
