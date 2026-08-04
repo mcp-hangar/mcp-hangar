@@ -21,8 +21,6 @@ from .audit_handler import (
 from .detection_handler import DetectionEnforcementHandler
 from .logging_handler import LoggingEventHandler
 from .security_handler import (
-    CallbackSecuritySink,
-    CompositeSecuritySink,
     get_security_handler,
     InMemorySecuritySink,
     LogSecuritySink,
@@ -64,8 +62,6 @@ __all__ = [
     "SecurityEventSink",
     "LogSecuritySink",
     "InMemorySecuritySink",
-    "CallbackSecuritySink",
-    "CompositeSecuritySink",
     "get_security_handler",
     "reset_security_handler",
 ]
