@@ -16,7 +16,7 @@ from ...domain.exceptions import (
     RegistryServerNotFoundError,
     UnverifiedMcpServerError,
 )
-from ...domain.security.redactor import OutputRedactor
+from ...redactor import OutputRedactor
 from ...domain.services import get_tool_access_resolver
 from ...domain.value_objects import ToolAccessPolicy
 from ...domain.contracts.command import CommandHandler

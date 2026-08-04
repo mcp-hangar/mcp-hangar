@@ -12,7 +12,7 @@ from mcp_hangar.domain.contracts.event_store import IEventStore, NullEventStore
 from mcp_hangar.domain.contracts.hook_subscriber import IHookSubscriber
 from mcp_hangar.domain.events import DomainEvent
 from mcp_hangar.domain.value_objects.hook import Hook, HookPhase
-from mcp_hangar.infrastructure.lock_hierarchy import LockLevel, TrackedLock
+from mcp_hangar.lock_hierarchy import LockLevel, TrackedLock
 from mcp_hangar.logging_config import get_logger
 from mcp_hangar.observability.tracing import get_tracer
 
@@ -150,6 +150,39 @@ class EventBus(IEventBus):
             except ValueError:
                 pass
 
+    def _resolve_handlers(self, event_class: type[DomainEvent]) -> list[Callable[[DomainEvent], None]]:
+        """Handlers for an event class and every event class it inherits from.
+
+        Dispatch used to key on the exact class, which quietly dropped an entire
+        family of events: the fifteen deprecated `Provider*` aliases each
+        subclass their `McpServer*` counterpart, and every handler in the system
+        is registered against the modern class. Publishing a `ProviderStarted`
+        therefore reached *zero* handlers -- no error, no warning, just a
+        `handlers_count=0` debug line. Replaying an event store written before
+        the rename (v1.0.1 and earlier) hit exactly that path.
+
+        Walking the MRO also subsumes the separate `DomainEvent` lookup that
+        `subscribe_to_all` relies on, since `DomainEvent` is in every event's
+        MRO. It stays last in the returned order, as before, so subscribe-to-all
+        handlers keep running after the specific ones.
+
+        A handler registered against two classes in the same MRO is delivered
+        once. Registering the same handler twice against one class still
+        delivers twice, which is what it did before.
+
+        Caller holds `self._lock`.
+        """
+        handlers: list[Callable[[DomainEvent], None]] = []
+        seen: set[int] = set()
+        for cls in event_class.__mro__:
+            if cls is DomainEvent or not issubclass(cls, DomainEvent):
+                continue
+            bucket = self._handlers.get(cls, [])
+            handlers.extend(handler for handler in bucket if id(handler) not in seen)
+            seen.update(id(handler) for handler in bucket)
+        handlers.extend(handler for handler in self._handlers.get(DomainEvent, []) if id(handler) not in seen)
+        return handlers
+
     def publish(self, event: DomainEvent) -> None:
         """
         Publish an event to all subscribed handlers.
@@ -163,14 +196,23 @@ class EventBus(IEventBus):
 
         Args:
             event: The domain event to publish
+
+        Raises:
+            TypeError: If given something that is not a DomainEvent.
         """
+        if not isinstance(event, DomainEvent):
+            # Fail loudly. `publish([event])` used to be accepted: the list
+            # reached every subscribe-to-all handler as a `list` object -- where
+            # each one's isinstance checks quietly matched nothing -- while
+            # anything subscribed to the event's own type got nothing at all.
+            # A publish that silently delivers to no one is worse than a crash.
+            raise TypeError(
+                f"publish() takes a single DomainEvent, got {type(event).__name__}. "
+                "To publish several, call publish() for each."
+            )
         event_type_name = event.__class__.__name__
         with self._lock:
-            # Get handlers for this specific event type
-            specific_handlers = self._handlers.get(type(event), [])
-            # Get handlers subscribed to all events
-            all_handlers = self._handlers.get(DomainEvent, [])
-            handlers = specific_handlers + all_handlers
+            handlers = self._resolve_handlers(type(event))
 
         tracer = get_tracer(__name__)
         with tracer.start_as_current_span(f"event.publish.{event_type_name}") as evt_span:

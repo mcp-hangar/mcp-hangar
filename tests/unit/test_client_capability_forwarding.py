@@ -21,7 +21,6 @@ way of lying to an upstream.
 
 from __future__ import annotations
 
-from types import SimpleNamespace
 from typing import Any
 
 import pytest
@@ -54,12 +53,15 @@ def declaring_caller():
 
 @pytest.fixture
 def relay_wired(monkeypatch: pytest.MonkeyPatch):
-    """Pretend the governed relay is wired, without booting a server."""
-    import mcp_hangar.server.context as context_module
+    """Pretend the governed relay is wired, without booting a server.
 
-    monkeypatch.setattr(
-        context_module, "get_context", lambda: SimpleNamespace(governed_task_store=object()), raising=False
-    )
+    Sets the protocol layer's own flag. This used to patch `server.context` --
+    the protocol module read `ctx.governed_task_store` directly, which is the
+    three-layer reach the flag replaced.
+    """
+    import mcp_hangar.protocol as protocol_module
+
+    monkeypatch.setattr(protocol_module, "_task_relay_wired", True)
     yield
 
 
@@ -116,11 +118,9 @@ class TestForwardingTheDeclaration:
 
     def test_nothing_is_claimed_while_the_relay_is_off(self, declaring_caller, monkeypatch):
         """Claiming it with no governed store promises governance that is not running."""
-        import mcp_hangar.server.context as context_module
+        import mcp_hangar.protocol as protocol_module
 
-        monkeypatch.setattr(
-            context_module, "get_context", lambda: SimpleNamespace(governed_task_store=None), raising=False
-        )
+        monkeypatch.setattr(protocol_module, "_task_relay_wired", False)
 
         assert forwardable_client_capabilities() is None
 
@@ -145,18 +145,26 @@ class TestForwardingTheDeclaration:
 
         assert params["_meta"][_SPEC_KEY] == {"extensions": {}}
 
-    def test_a_broken_context_degrades_to_declaring_nothing(self, declaring_caller, monkeypatch):
+    def test_a_broken_negotiation_read_degrades_to_declaring_nothing(self, relay_wired, monkeypatch):
         """Fault barrier: a capability read must never fail an invoke.
 
         Degrading to "declare nothing" is the safe direction -- it loses task
         augmentation, it does not break the call.
+
+        Aimed at the negotiation read, which is what can still raise. It used to
+        point at `get_context`, back when this function reached into the server
+        layer to ask whether the relay was wired.
+
+        Patched on `negotiation`, not on `protocol`: that import is inside the
+        function because `negotiation` imports `protocol` back, so the name is
+        resolved fresh from the source module on every call.
         """
-        import mcp_hangar.server.context as context_module
+        import mcp_hangar.negotiation as negotiation_module
 
         def _boom():
-            raise RuntimeError("no application context")
+            raise RuntimeError("no protocol negotiation")
 
-        monkeypatch.setattr(context_module, "get_context", _boom, raising=False)
+        monkeypatch.setattr(negotiation_module, "get_current_protocol_negotiation", _boom, raising=False)
 
         assert forwardable_client_capabilities() is None
         assert inject_protocol_meta({})["_meta"][_VERSION_KEY]  # the rest still works

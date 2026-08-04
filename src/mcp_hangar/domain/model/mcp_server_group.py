@@ -7,10 +7,10 @@ as a single logical unit with automatic load balancing and failover.
 from collections.abc import Mapping
 from dataclasses import dataclass, field
 import hashlib
-import threading
 import time
-from typing import Any, TYPE_CHECKING
+from typing import Any
 
+from ...lock_hierarchy import LockLevel, TrackedLock
 from ...logging_config import get_logger
 from ..events import CircuitBreakerStateChanged, DomainEvent
 from ..exceptions import McpServerStartError, CannotStartMcpServerError
@@ -20,8 +20,6 @@ from .circuit_breaker import CircuitBreaker, CircuitBreakerConfig
 from .load_balancer import LoadBalancer
 from .mcp_server import McpServer
 
-if TYPE_CHECKING:
-    from ...infrastructure.lock_hierarchy import TrackedLock
 
 logger = get_logger(__name__)
 
@@ -269,14 +267,13 @@ class McpServerGroup(AggregateRoot):
         )
 
     @staticmethod
-    def _create_lock(group_id: str) -> "TrackedLock | threading.RLock":
-        """Create lock with hierarchy tracking."""
-        try:
-            from ...infrastructure.lock_hierarchy import LockLevel, TrackedLock
+    def _create_lock(group_id: str) -> TrackedLock:
+        """Create the group's lock, registered in the global ordering.
 
-            return TrackedLock(LockLevel.PROVIDER_GROUP, f"McpServerGroup:{group_id}")
-        except ImportError:
-            return threading.RLock()
+        See McpServer._create_lock: the tracking is not optional, and the
+        `except ImportError` this replaces could never fire.
+        """
+        return TrackedLock(LockLevel.PROVIDER_GROUP, f"McpServerGroup:{group_id}")
 
     def _on_circuit_breaker_state_change(self, old_state: Any, new_state: Any) -> None:
         """Emit a domain event when the circuit breaker transitions between states.

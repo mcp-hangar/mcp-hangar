@@ -7,10 +7,10 @@ from typing import TYPE_CHECKING
 from ...application.event_handlers import (
     DetectionEnforcementHandler,
     LoggingEventHandler,
-    MetricsEventHandler,
     get_alert_handler,
     get_audit_handler,
 )
+from ...infrastructure.observability.metrics_event_handler import MetricsEventHandler
 from ...application.event_handlers.audit_event_handler import OTLPAuditEventHandler
 from ...application.event_handlers.cost_handler import CostAttributionEventHandler
 from ...application.event_handlers.risk_scoring_handler import RiskScoringEventHandler

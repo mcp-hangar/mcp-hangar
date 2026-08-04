@@ -8,11 +8,12 @@ from ...logging_config import get_logger
 from ...protocol import HANGAR_CLIENT_INFO, SESSION_TERMINATED_REASON, SUPPORTED_PROTOCOL_VERSION
 
 if TYPE_CHECKING:
-    from ...infrastructure.lock_hierarchy import TrackedLock
     from ..policies.egress_l7 import L7Policy
 
 from ..contracts.log_buffer import IMcpServerLogBuffer
-from ..contracts.metrics_publisher import IMetricsPublisher, NullMetricsPublisher
+from ...lock_hierarchy import LockLevel, TrackedLock
+from ..contracts.launcher import TransportClient
+from ..contracts.metrics_publisher import IMetricsPublisher, get_default_metrics_publisher
 from ..value_objects.capabilities import McpServerCapabilities, ViolationSeverity, ViolationType
 from ..events import (
     CapabilityViolationDetected,
@@ -172,7 +173,7 @@ class McpServer(AggregateRoot):
         self._http_config = http
 
         # Dependencies (Dependency Inversion Principle)
-        self._metrics_publisher = metrics_publisher or NullMetricsPublisher()
+        self._metrics_publisher = metrics_publisher or get_default_metrics_publisher()
         self._log_buffer = log_buffer
 
         # Capability declarations (Phase 38)
@@ -186,7 +187,10 @@ class McpServer(AggregateRoot):
         self._state = McpServerState.COLD
         self._health = HealthTracker(max_consecutive_failures=max_consecutive_failures)
         self._tools = ToolCatalog()
-        self._client: Any | None = None  # StdioClient or HttpClient
+        # Typed by the port rather than Any: the domain's whole use of a launched
+        # connection is is_alive/close/call, and until TransportClient existed the
+        # real type lived in a comment where nothing could check it.
+        self._client: TransportClient | None = None
         self._meta: dict[str, Any] = {}
         self._last_used: float = 0.0
 
@@ -318,19 +322,17 @@ class McpServer(AggregateRoot):
         )
 
     @staticmethod
-    def _create_lock(mcp_server_id: str) -> "TrackedLock | threading.RLock":
-        """Create lock with hierarchy tracking.
+    def _create_lock(mcp_server_id: str) -> TrackedLock:
+        """Create the aggregate's lock, registered in the global ordering.
 
-        Uses runtime import to avoid circular dependency between
-        domain and infrastructure layers.
+        The tracking is not optional: a bare RLock here would take this
+        aggregate out of the hierarchy and let a deadlock through undetected.
+        This used to sit in a `try/except ImportError` that fell back to exactly
+        that -- an except branch that could never run, since the module ships in
+        the package, quietly guarding against a failure mode that would have
+        been silent if it ever did.
         """
-        try:
-            from ...infrastructure.lock_hierarchy import LockLevel, TrackedLock
-
-            return TrackedLock(LockLevel.PROVIDER, f"McpServer:{mcp_server_id}")
-        except ImportError:
-            # Fallback for testing or isolated domain usage
-            return threading.RLock()
+        return TrackedLock(LockLevel.PROVIDER, f"McpServer:{mcp_server_id}")
 
     # --- Properties ---
 
@@ -676,9 +678,7 @@ class McpServer(AggregateRoot):
         if self._log_buffer is not None:
             self._start_stderr_reader(client)
 
-        from ...metrics import set_connection_active
-
-        set_connection_active(self.mcp_server_id, True)
+        self._metrics_publisher.set_connection_active(self.mcp_server_id, True)
 
         return client
 
@@ -700,7 +700,7 @@ class McpServer(AggregateRoot):
         if stderr_pipe is None:
             return
 
-        from ..security.redactor import get_default_redactor
+        from ...redactor import get_default_redactor
         from ..value_objects.log import LogLine
 
         mcp_server_id = self.mcp_server_id
@@ -1063,9 +1063,7 @@ class McpServer(AggregateRoot):
             except Exception:  # noqa: BLE001 -- fault-barrier: cleanup must not mask original startup error
                 pass
             self._client = None
-            from ...metrics import set_connection_active
-
-            set_connection_active(self.mcp_server_id, False)
+            self._metrics_publisher.set_connection_active(self.mcp_server_id, False)
 
         self._health.record_failure()
 
@@ -1431,7 +1429,9 @@ class McpServer(AggregateRoot):
             ) from e
 
         # Return the raw response dict as-is; the caller validates the payload.
-        return cast(dict[str, Any], response)
+        # No cast needed since the client is typed by TransportClient -- it was
+        # only ever there because the attribute was Any.
+        return response
 
     def _refresh_tools(self) -> None:
         """Refresh tool catalog from mcp_server.
@@ -1572,9 +1572,7 @@ class McpServer(AggregateRoot):
             except Exception as e:  # noqa: BLE001 -- fault-barrier: shutdown cleanup must not propagate
                 logger.warning(f"shutdown_error: {self.mcp_server_id}, error={e}")
             self._client = None
-            from ...metrics import set_connection_active
-
-            set_connection_active(self.mcp_server_id, False)
+            self._metrics_publisher.set_connection_active(self.mcp_server_id, False)
 
         self._state = McpServerState.COLD
         self._increment_version()

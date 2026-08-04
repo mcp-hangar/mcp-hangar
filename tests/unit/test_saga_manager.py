@@ -402,7 +402,7 @@ class TestSagaManagerCheckpoint:
         def checkpoint_spy(**kwargs):
             # Check the thread-local lock tracking used by TrackedLock
             # to verify SagaManager lock is NOT held during checkpoint I/O.
-            from mcp_hangar.infrastructure.lock_hierarchy import _get_held_locks
+            from mcp_hangar.lock_hierarchy import _get_held_locks
 
             held = _get_held_locks()
             saga_mgr_held = any(name == "SagaManager" for _, name in held)

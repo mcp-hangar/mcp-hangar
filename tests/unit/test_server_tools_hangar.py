@@ -3,6 +3,7 @@
 import pytest
 
 from mcp_hangar.application.queries import register_all_handlers as register_query_handlers
+from mcp_hangar.infrastructure.persistence import InMemoryEventStore
 from mcp_hangar.bootstrap.runtime import create_runtime
 from mcp_hangar.domain.repository import InMemoryMcpServerRepository
 from mcp_hangar.infrastructure.query_bus import QueryBus
@@ -32,7 +33,7 @@ class TestHangarList:
         init_context(runtime)
 
         # Register handlers on fresh query bus
-        register_query_handlers(fresh_query_bus, fresh_repo)
+        register_query_handlers(fresh_query_bus, fresh_repo, event_store=InMemoryEventStore())
 
         yield
         reset_context()

@@ -13,7 +13,7 @@ from typing import Any
 
 from ..domain.events import DomainEvent
 from ..logging_config import get_logger
-from .lock_hierarchy import LockLevel, TrackedLock
+from ..lock_hierarchy import LockLevel, TrackedLock
 
 logger = get_logger(__name__)
 
