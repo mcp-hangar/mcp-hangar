@@ -31,7 +31,8 @@ class ReloadConfigurationHandler(CommandHandler):
         mcp_server_repository: IMcpServerRepository,
         event_bus: IEventBus,
         current_config_path: str | None = None,
-        config_loader: IConfigLoader | None = None,
+        *,
+        config_loader: IConfigLoader,
         groups: dict | None = None,
     ):
         """Initialize the handler.
@@ -41,6 +42,12 @@ class ReloadConfigurationHandler(CommandHandler):
             event_bus: Event bus for publishing events.
             current_config_path: Current configuration file path.
             config_loader: Config loader for loading/applying configuration.
+                Required. It used to be optional, with a "legacy path" that
+                imported `server.config` directly -- the exact import
+                `IConfigLoader` and `ServerConfigLoader` were introduced to
+                remove. Bootstrap has always injected the adapter, so the
+                fallback only ran in tests, which meant the tested path and the
+                production path were different ones.
             groups: Groups dict reference for clearing during reload.
         """
         self._repository = mcp_server_repository
@@ -79,13 +86,7 @@ class ReloadConfigurationHandler(CommandHandler):
 
         try:
             # Load and validate new configuration
-            if self._config_loader is not None:
-                new_full_config = self._config_loader.load_from_file(config_path)
-            else:
-                # Fallback: import server-layer function directly (legacy path)
-                from ...server.config import load_config_from_file as _load_from_file
-
-                new_full_config = _load_from_file(config_path)
+            new_full_config = self._config_loader.load_from_file(config_path)
             new_mcp_servers_config = new_full_config.get("mcp_servers", {})
 
             # Capture current state
@@ -173,13 +174,7 @@ class ReloadConfigurationHandler(CommandHandler):
             logger.debug("config_pins_cleared_for_reload")
 
             # 5. Load new configuration (adds new and updates existing)
-            if self._config_loader is not None:
-                self._config_loader.apply_mcp_servers(new_mcp_servers_config)
-            else:
-                # Fallback: import server-layer function directly (legacy path)
-                from ...server.config import load_config as _load_config
-
-                _load_config(new_mcp_servers_config)
+            self._config_loader.apply_mcp_servers(new_mcp_servers_config)
 
             # 6. Auto-start mcp_servers if they were running before
             # (This depends on auto_start config and mcp_server state)
