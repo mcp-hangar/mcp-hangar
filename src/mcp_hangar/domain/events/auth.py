@@ -342,13 +342,34 @@ class CatalogItemDeprecated(DomainEvent):
 
 @dataclass
 class CostReportGenerated(DomainEvent):
-    """Published when a cost report is generated."""
+    """Published when a cost report is generated.
+
+    Schema v2 added the mcp_server / tool / cost_model dimensions and
+    `cost_cents`. Without them
+    the metrics adapter could not reconstruct what `record_cost` needs, which is
+    why the counter had to be written from the application layer instead --
+    the one such call in the tree, and an entry in the import-contract ledger.
+
+    `cost_cents` is carried rather than derived from `total_cost`: that field is
+    a string of whole currency units, so reconstructing hundredths from it means
+    a float round-trip that can drift. The metric wants cents, so the event
+    states cents.
+
+    The four are additive with defaults, so a stored v1 payload replays through
+    the upcaster chain's passthrough and constructs with them empty. No upcaster
+    is registered because none could help: v1 rows genuinely do not carry these
+    dimensions, and inventing values would be worse than reporting none.
+    """
 
     tenant_id: str
     period_start: str
     period_end: str
     total_cost: str
     currency: str
+    mcp_server_id: str = ""
+    tool_name: str = ""
+    cost_model: str = ""
+    cost_cents: int = 0
 
 
 # =============================================================================

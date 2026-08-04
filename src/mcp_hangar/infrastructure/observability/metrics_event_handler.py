@@ -9,6 +9,7 @@ from dataclasses import dataclass, field
 import time
 
 from mcp_hangar.domain.events import (
+    CostReportGenerated,
     CapabilityViolationDetected,
     CircuitBreakerStateChanged,
     DigestMismatchInTask,
@@ -84,53 +85,71 @@ class MetricsEventHandler:
         self._metrics: dict[str, McpServerMetrics] = defaultdict(lambda: McpServerMetrics(""))
         self._started_at = time.time()
 
-    def handle(self, event: DomainEvent) -> None:  # noqa: C901 -- baseline CC=20; split before extending
-        """
-        Handle a domain event by updating metrics.
+    # Which handler each event type feeds. Replaces a 19-branch isinstance
+    # chain that sat at the complexity ceiling carrying an explicit "split
+    # before extending" note -- adding a branch for CostReportGenerated would
+    # have required raising the baseline, which the gate forbids.
+    #
+    # Values are method NAMES, not functions, so the table can be a class
+    # attribute declared before the methods it points at exist.
+    _DISPATCH: dict[type[DomainEvent], str] = {
+        McpServerStarted: "_handle_mcp_server_started",
+        McpServerStopped: "_handle_mcp_server_stopped",
+        McpServerStateChanged: "_handle_state_changed",
+        ToolInvocationCompleted: "_handle_tool_completed",
+        ToolInvocationFailed: "_handle_tool_failed",
+        HealthCheckPassed: "_handle_health_passed",
+        HealthCheckFailed: "_handle_health_failed",
+        McpServerDegraded: "_handle_mcp_server_degraded",
+        CircuitBreakerStateChanged: "_handle_circuit_breaker_state_changed",
+        CapabilityViolationDetected: "_handle_capability_violation",
+        EgressBlocked: "_handle_egress_blocked",
+        EgressPolicyViolationObserved: "_handle_egress_policy_violation_observed",
+        TaskCreated: "_handle_task_created",
+        TaskCompleted: "_handle_task_completed",
+        TaskFailed: "_handle_task_failed",
+        TaskCancelled: "_handle_task_cancelled",
+        TaskInputRequired: "_handle_task_input_required",
+        DigestMismatchInTask: "_handle_task_digest_drift",
+        TaskConsentDecided: "_handle_task_consent_decided",
+        CostReportGenerated: "_handle_cost_report",
+    }
+
+    def handle(self, event: DomainEvent) -> None:
+        """Handle a domain event by updating metrics.
 
         Updates both in-memory metrics and Prometheus metrics for observability.
+
+        Dispatch walks the MRO rather than looking `type(event)` up directly, so
+        a subclass still reaches its base's handler. That is not hypothetical:
+        the `Provider*` aliases subclass their `McpServer*` counterparts, and the
+        isinstance chain this replaces matched them that way.
 
         Args:
             event: The domain event to process
         """
-        if isinstance(event, McpServerStarted):
-            self._handle_mcp_server_started(event)
-        elif isinstance(event, McpServerStopped):
-            self._handle_mcp_server_stopped(event)
-        elif isinstance(event, McpServerStateChanged):
-            self._handle_state_changed(event)
-        elif isinstance(event, ToolInvocationCompleted):
-            self._handle_tool_completed(event)
-        elif isinstance(event, ToolInvocationFailed):
-            self._handle_tool_failed(event)
-        elif isinstance(event, HealthCheckPassed):
-            self._handle_health_passed(event)
-        elif isinstance(event, HealthCheckFailed):
-            self._handle_health_failed(event)
-        elif isinstance(event, McpServerDegraded):
-            self._handle_mcp_server_degraded(event)
-        elif isinstance(event, CircuitBreakerStateChanged):
-            self._handle_circuit_breaker_state_changed(event)
-        elif isinstance(event, CapabilityViolationDetected):
-            self._handle_capability_violation(event)
-        elif isinstance(event, EgressBlocked):
-            self._handle_egress_blocked(event)
-        elif isinstance(event, EgressPolicyViolationObserved):
-            self._handle_egress_policy_violation_observed(event)
-        elif isinstance(event, TaskCreated):
-            self._handle_task_created(event)
-        elif isinstance(event, TaskCompleted):
-            self._handle_task_completed(event)
-        elif isinstance(event, TaskFailed):
-            self._handle_task_failed(event)
-        elif isinstance(event, TaskCancelled):
-            self._handle_task_cancelled(event)
-        elif isinstance(event, TaskInputRequired):
-            self._handle_task_input_required(event)
-        elif isinstance(event, DigestMismatchInTask):
-            self._handle_task_digest_drift(event)
-        elif isinstance(event, TaskConsentDecided):
-            self._handle_task_consent_decided(event)
+        for klass in type(event).__mro__:
+            method = self._DISPATCH.get(klass)
+            if method is not None:
+                getattr(self, method)(event)
+                return
+
+    def _handle_cost_report(self, event: CostReportGenerated) -> None:
+        """Record an attributed cost.
+
+        Skips rows with no mcp_server dimension: a `CostReportGenerated` stored
+        under schema v1 replays without one, and labelling those as an empty
+        mcp_server would put a bogus series in the scrape output.
+        """
+        if not event.mcp_server_id:
+            return
+
+        prometheus_metrics.record_cost(
+            mcp_server=event.mcp_server_id,
+            tool=event.tool_name,
+            cost_cents=event.cost_cents,
+            cost_model=event.cost_model,
+        )
 
     def _handle_mcp_server_started(self, event: McpServerStarted) -> None:
         """Handle mcp_server started event."""

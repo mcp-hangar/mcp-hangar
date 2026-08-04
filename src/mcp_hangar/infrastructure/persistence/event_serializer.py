@@ -102,6 +102,8 @@ EVENT_VERSION_MAP: dict[str, int] = {
     "McpServerApproved": 1,
     "DiscoveryCycleCompleted": 1,
     "DiscoverySourceHealthChanged": 1,
+    # Cost
+    "CostReportGenerated": 2,
     # Capability enforcement
     "CapabilityViolationDetected": 2,
     "EgressBlocked": 1,
