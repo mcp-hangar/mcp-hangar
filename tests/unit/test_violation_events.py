@@ -220,7 +220,7 @@ class TestCapabilityViolationsCounter:
 
 class TestMetricsEventHandlerViolationRouting:
     def test_handles_capability_violation_detected(self) -> None:
-        from mcp_hangar.application.event_handlers.metrics_handler import MetricsEventHandler
+        from mcp_hangar.infrastructure.observability.metrics_event_handler import MetricsEventHandler
         from mcp_hangar.metrics import CAPABILITY_VIOLATIONS_TOTAL
 
         # Clear any prior state
@@ -242,7 +242,7 @@ class TestMetricsEventHandlerViolationRouting:
         assert samples[0].value == 1.0
 
     def test_handles_egress_blocked(self) -> None:
-        from mcp_hangar.application.event_handlers.metrics_handler import MetricsEventHandler
+        from mcp_hangar.infrastructure.observability.metrics_event_handler import MetricsEventHandler
         from mcp_hangar.metrics import CAPABILITY_VIOLATIONS_TOTAL
 
         # Clear any prior state
@@ -265,7 +265,7 @@ class TestMetricsEventHandlerViolationRouting:
 
     def test_existing_events_still_handled(self) -> None:
         """Ensure adding violation handling does not break existing event routing."""
-        from mcp_hangar.application.event_handlers.metrics_handler import MetricsEventHandler
+        from mcp_hangar.infrastructure.observability.metrics_event_handler import MetricsEventHandler
         from mcp_hangar.domain.events import McpServerStarted
 
         handler = MetricsEventHandler()

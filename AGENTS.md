@@ -233,6 +233,7 @@ Read `https://github.com/mcp-hangar/docs/blob/main/development/GIT_FLOW.md` for 
   - `.github/workflows/release.yml`, `pyproject.toml` version field
 - **CHANGELOG:** every non-trivial PR adds a line under `## [Unreleased]` in the appropriate section (`### Added`, `### Fixed`, `### Changed`, `### Security`). Trivial = `chore(deps)`, `ci`, `style`, `test`, pure `docs`.
 - **No emoji** anywhere in code, comments, commit messages, or docs.
+- **Never `!` or `BREAKING CHANGE:` in a commit.** `3.x` is reserved for a business milestone, so release-please must never compute a major. A change that breaks callers ships as a **minor** with a section in `UPGRADE.md` naming the old and new form -- which is what 2.2.0 and 2.3.0 did. If a major is genuinely wanted, that is a human decision, not a commit footer.
 - **Squash-merge default.** Do not request merge commits.
 - **Required status checks** (must pass before merge): `pr-validation / required-check`, `pr-title / validate`, `changelog / check`, `branch-name / validate`, `pr-body / validate`.
 

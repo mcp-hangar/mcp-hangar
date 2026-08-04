@@ -20,7 +20,6 @@ from .audit_handler import (
 )
 from .detection_handler import DetectionEnforcementHandler
 from .logging_handler import LoggingEventHandler
-from .metrics_handler import MetricsEventHandler
 from .security_handler import (
     CallbackSecuritySink,
     CompositeSecuritySink,
@@ -39,7 +38,6 @@ __all__ = [
     # Logging
     "LoggingEventHandler",
     # Metrics
-    "MetricsEventHandler",
     # Alerts
     "AlertEventHandler",
     "Alert",

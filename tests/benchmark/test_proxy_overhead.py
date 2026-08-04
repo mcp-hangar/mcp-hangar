@@ -26,7 +26,7 @@ from mcp_hangar.application.event_handlers.audit_handler import (
     AuditEventHandler,
     InMemoryAuditStore,
 )
-from mcp_hangar.application.event_handlers.metrics_handler import MetricsEventHandler
+from mcp_hangar.infrastructure.observability.metrics_event_handler import MetricsEventHandler
 from mcp_hangar.context import get_identity_context, identity_context_var
 from mcp_hangar.domain.events import (
     ToolInvocationCompleted,

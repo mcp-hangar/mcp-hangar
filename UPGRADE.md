@@ -1,5 +1,72 @@
 # Upgrading MCP Hangar
 
+## 2.3.0 — the deprecated launcher import paths are gone
+
+Only affects code that imports the concrete launcher classes from the domain
+layer. If you import them from `mcp_hangar.infrastructure.launchers`, which is
+where they live and what the deprecation warning has been telling you since
+**v1.0.2**, nothing changes.
+
+Two import paths were removed:
+
+```python
+# Both of these now raise.
+from mcp_hangar.domain.services.mcp_server_launcher import DockerLauncher
+from mcp_hangar.domain.services import DockerLauncher
+
+# This is the one to use, and always was:
+from mcp_hangar.infrastructure.launchers import DockerLauncher
+```
+
+The same applies to `SubprocessLauncher`, `ContainerLauncher`, `HttpLauncher`,
+`ContainerConfig`, `McpServerLauncher` and `get_launcher`.
+
+`mcp_hangar.domain.services` still exports the launcher **port**,
+`IMcpServerLauncher`, along with `LaunchResult` and `TransportClient`. It is the
+concrete implementations that moved out — a domain package re-exporting
+infrastructure classes is what the deprecation was about.
+
+The shim emitted a `DeprecationWarning` on import from v1.0.2 onward, so a run
+of your test suite with warnings visible will list every call site:
+
+```bash
+python -W error::DeprecationWarning -m pytest
+```
+
+Removing it also broke a real import cycle: the domain reaching for the
+concrete launchers is what forced two sagas to import their saga manager inside
+a function body rather than at module level.
+
+## 2.2.2 — plan for it only if you run `auth.storage.driver: event_sourcing`
+
+Drop-in for everyone else.
+
+On that driver, API keys and role assignments were written to the event store
+correctly and could not be read back: the writer accepts any domain event, the
+reader looked the class up in a hand-maintained table that listed 30 of the 116
+event types, and all five the auth aggregates emit were missing. Every API key
+stopped authenticating across a restart, and role assignments were invisible
+after one. Affected from **1.2.2** (when the driver landed) through **2.2.1**;
+`memory` is the default and `sqlite`/`postgresql` were never affected.
+
+**Nothing was lost** — only the read path failed — which is exactly why this
+needs planning rather than celebration:
+
+> Credentials and role assignments you believed were gone start working again
+> the moment you upgrade, including any `admin` assignment made in that window.
+
+Revocations are events too and replay in order, so anything you revoked stays
+revoked. Look at what is dormant before you roll out, and revoke what you do not
+want live. The canonical guide has the two `sqlite3` commands for that:
+<https://mcp-hangar.io/docs/upgrade/>.
+
+Also in this release, and needing no configuration change: events written before
+the `provider` -> `mcp_server` rename (stores from 1.0.1 or earlier) reach their
+handlers again instead of replaying into nothing, and a `datetime` field on a
+persisted event comes back as a `datetime` rather than a string.
+
+---
+
 ## 2.2.0 — action required before you roll out
 
 2.2.0 is a security release. It is a minor rather than a patch because it

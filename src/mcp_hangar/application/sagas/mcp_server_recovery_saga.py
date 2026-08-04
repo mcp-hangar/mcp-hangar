@@ -37,7 +37,8 @@ class McpServerRecoverySaga(EventTriggeredSaga):
         initial_backoff_s: float = 5.0,
         max_backoff_s: float = 60.0,
         backoff_multiplier: float = 2.0,
-        saga_manager: ISagaManager | None = None,
+        *,
+        saga_manager: ISagaManager,
     ):
         super().__init__()
 
@@ -124,12 +125,7 @@ class McpServerRecoverySaga(EventTriggeredSaga):
         )
 
         # Schedule the restart command to fire after the computed backoff delay.
-        sm = self._saga_manager
-        if sm is None:
-            from ...infrastructure.saga_manager import get_saga_manager
-
-            sm = get_saga_manager()
-        sm.schedule_command(
+        self._saga_manager.schedule_command(
             StartMcpServerCommand(mcp_server_id=mcp_server_id),
             delay_s=backoff,
         )

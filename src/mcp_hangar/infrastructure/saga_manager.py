@@ -20,7 +20,7 @@ from ..domain.events import DomainEvent
 from ..logging_config import get_logger
 from .command_bus import CommandBus, get_command_bus
 from .event_bus import EventBus, get_event_bus
-from .lock_hierarchy import LockLevel, TrackedLock
+from ..lock_hierarchy import LockLevel, TrackedLock
 
 if TYPE_CHECKING:
     from ..application.commands import Command

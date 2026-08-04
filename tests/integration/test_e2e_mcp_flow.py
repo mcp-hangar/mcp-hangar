@@ -35,6 +35,7 @@ from mcp_hangar.domain.events import (
 from mcp_hangar.domain.exceptions import McpServerNotFoundError, ToolInvocationError, ToolNotFoundError
 from mcp_hangar.domain.model import McpServer
 from mcp_hangar.domain.value_objects import McpServerMode, McpServerState
+from mcp_hangar.infrastructure.saga_manager import get_saga_manager
 
 MOCK_PROVIDER = str(Path(__file__).resolve().parent.parent / "mock_provider.py")
 
@@ -546,7 +547,7 @@ class TestEventBusPipeline:
         assert any(isinstance(e, ToolInvocationCompleted) for e in received)
 
     def test_events_flow_through_metrics_handler(self, started_mcp_server):
-        from mcp_hangar.application.event_handlers.metrics_handler import MetricsEventHandler
+        from mcp_hangar.infrastructure.observability.metrics_event_handler import MetricsEventHandler
         from mcp_hangar.infrastructure.event_bus import EventBus
 
         bus = EventBus()
@@ -582,7 +583,7 @@ class TestEventBusPipeline:
         assert len(received_after) > 0
 
     def test_multiple_handlers_all_receive_events(self, started_mcp_server):
-        from mcp_hangar.application.event_handlers.metrics_handler import MetricsEventHandler
+        from mcp_hangar.infrastructure.observability.metrics_event_handler import MetricsEventHandler
         from mcp_hangar.infrastructure.event_bus import EventBus
 
         bus = EventBus()
@@ -717,7 +718,7 @@ class TestMetricsHandlerIntegration:
     """MetricsEventHandler accumulates stats from real tool invocations."""
 
     def test_success_and_failure_counts(self, started_mcp_server):
-        from mcp_hangar.application.event_handlers.metrics_handler import MetricsEventHandler
+        from mcp_hangar.infrastructure.observability.metrics_event_handler import MetricsEventHandler
         from mcp_hangar.infrastructure.event_bus import EventBus
 
         bus = EventBus()
@@ -739,7 +740,7 @@ class TestMetricsHandlerIntegration:
         assert m.total_invocations == 3
 
     def test_success_rate_calculation(self, started_mcp_server):
-        from mcp_hangar.application.event_handlers.metrics_handler import MetricsEventHandler
+        from mcp_hangar.infrastructure.observability.metrics_event_handler import MetricsEventHandler
         from mcp_hangar.infrastructure.event_bus import EventBus
 
         bus = EventBus()
@@ -759,7 +760,7 @@ class TestMetricsHandlerIntegration:
         assert m.success_rate == pytest.approx(80.0)
 
     def test_latency_tracking(self, started_mcp_server):
-        from mcp_hangar.application.event_handlers.metrics_handler import MetricsEventHandler
+        from mcp_hangar.infrastructure.observability.metrics_event_handler import MetricsEventHandler
         from mcp_hangar.infrastructure.event_bus import EventBus
 
         bus = EventBus()
@@ -779,7 +780,7 @@ class TestMetricsHandlerIntegration:
         assert m.p95_latency_ms >= m.average_latency_ms
 
     def test_health_check_metrics(self, started_mcp_server):
-        from mcp_hangar.application.event_handlers.metrics_handler import MetricsEventHandler
+        from mcp_hangar.infrastructure.observability.metrics_event_handler import MetricsEventHandler
         from mcp_hangar.infrastructure.event_bus import EventBus
 
         bus = EventBus()
@@ -797,7 +798,7 @@ class TestMetricsHandlerIntegration:
         assert m.health_checks_passed == 2
 
     def test_per_server_metrics_isolation(self):
-        from mcp_hangar.application.event_handlers.metrics_handler import MetricsEventHandler
+        from mcp_hangar.infrastructure.observability.metrics_event_handler import MetricsEventHandler
         from mcp_hangar.infrastructure.event_bus import EventBus
 
         bus = EventBus()
@@ -1127,7 +1128,7 @@ class TestRecoverySaga:
     def test_saga_resets_on_successful_start(self):
         from mcp_hangar.application.sagas.mcp_server_recovery_saga import McpServerRecoverySaga
 
-        saga = McpServerRecoverySaga(max_retries=3, initial_backoff_s=0.1)
+        saga = McpServerRecoverySaga(max_retries=3, initial_backoff_s=0.1, saga_manager=get_saga_manager())
         saga._retry_state["saga-reset"] = {"retries": 2, "last_attempt": time.time(), "next_retry": 0}
 
         started_event = McpServerStarted(
@@ -1146,7 +1147,7 @@ class TestRecoverySaga:
         from mcp_hangar.application.commands import StopMcpServerCommand
         from mcp_hangar.application.sagas.mcp_server_recovery_saga import McpServerRecoverySaga
 
-        saga = McpServerRecoverySaga(max_retries=2, initial_backoff_s=0.1)
+        saga = McpServerRecoverySaga(max_retries=2, initial_backoff_s=0.1, saga_manager=get_saga_manager())
         saga._retry_state["saga-max"] = {"retries": 2, "last_attempt": time.time(), "next_retry": 0}
 
         degraded_event = McpServerDegraded(
@@ -1170,6 +1171,7 @@ class TestRecoverySaga:
             initial_backoff_s=1.0,
             max_backoff_s=16.0,
             backoff_multiplier=2.0,
+            saga_manager=get_saga_manager(),
         )
 
         assert saga._calculate_backoff(1) == pytest.approx(1.0)
@@ -1182,7 +1184,7 @@ class TestRecoverySaga:
     def test_saga_clears_state_on_intentional_stop(self):
         from mcp_hangar.application.sagas.mcp_server_recovery_saga import McpServerRecoverySaga
 
-        saga = McpServerRecoverySaga()
+        saga = McpServerRecoverySaga(saga_manager=get_saga_manager())
         saga._retry_state["saga-stop"] = {"retries": 1, "last_attempt": time.time(), "next_retry": 0}
 
         stopped_event = McpServerStopped(mcp_server_id="saga-stop", reason="shutdown")
@@ -1193,7 +1195,7 @@ class TestRecoverySaga:
     def test_saga_with_real_server_degradation_events(self):
         from mcp_hangar.application.sagas.mcp_server_recovery_saga import McpServerRecoverySaga
 
-        saga = McpServerRecoverySaga(max_retries=3, initial_backoff_s=0.1)
+        saga = McpServerRecoverySaga(max_retries=3, initial_backoff_s=0.1, saga_manager=get_saga_manager())
 
         server = _make_server("saga-real")
         server.ensure_ready()
@@ -1304,7 +1306,7 @@ class TestLockHierarchyEnforcement:
     """TrackedLock detects out-of-order acquisition."""
 
     def test_correct_order_succeeds(self):
-        from mcp_hangar.infrastructure.lock_hierarchy import LockLevel, TrackedLock, clear_thread_locks
+        from mcp_hangar.lock_hierarchy import LockLevel, TrackedLock, clear_thread_locks
 
         clear_thread_locks()
         lock_a = TrackedLock(LockLevel.PROVIDER, "test-provider", reentrant=False)
@@ -1319,7 +1321,7 @@ class TestLockHierarchyEnforcement:
         clear_thread_locks()
 
     def test_wrong_order_raises(self):
-        from mcp_hangar.infrastructure.lock_hierarchy import (
+        from mcp_hangar.lock_hierarchy import (
             LockLevel,
             LockOrderViolation,
             TrackedLock,
@@ -1339,7 +1341,7 @@ class TestLockHierarchyEnforcement:
         clear_thread_locks()
 
     def test_reentrant_lock_allows_same_level(self):
-        from mcp_hangar.infrastructure.lock_hierarchy import LockLevel, TrackedLock, clear_thread_locks
+        from mcp_hangar.lock_hierarchy import LockLevel, TrackedLock, clear_thread_locks
 
         clear_thread_locks()
         lock = TrackedLock(LockLevel.PROVIDER, "test-reentrant", reentrant=True)
@@ -1353,7 +1355,7 @@ class TestLockHierarchyEnforcement:
         clear_thread_locks()
 
     def test_context_manager_protocol(self):
-        from mcp_hangar.infrastructure.lock_hierarchy import LockLevel, TrackedLock, clear_thread_locks
+        from mcp_hangar.lock_hierarchy import LockLevel, TrackedLock, clear_thread_locks
 
         clear_thread_locks()
         lock = TrackedLock(LockLevel.PROVIDER, "test-ctx", reentrant=True)
@@ -1363,7 +1365,7 @@ class TestLockHierarchyEnforcement:
         clear_thread_locks()
 
     def test_violation_contains_diagnostic_info(self):
-        from mcp_hangar.infrastructure.lock_hierarchy import (
+        from mcp_hangar.lock_hierarchy import (
             LockLevel,
             LockOrderViolation,
             TrackedLock,

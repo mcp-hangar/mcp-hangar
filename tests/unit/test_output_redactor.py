@@ -1,6 +1,6 @@
 """Tests for the output redactor."""
 
-from mcp_hangar.domain.security.redactor import OutputRedactor
+from mcp_hangar.redactor import OutputRedactor
 
 
 class TestOutputRedactor:

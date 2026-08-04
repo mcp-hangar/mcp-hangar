@@ -37,6 +37,13 @@ class CostAttributionEventHandler:
         if cost_record.cost_cents == 0:
             return
 
+        # This counter belongs in MetricsEventHandler with every other one, but
+        # cannot move yet: CostReportGenerated carries tenant/period/total and
+        # none of the mcp_server / tool / cost_model dimensions record_cost
+        # needs, so the adapter could not reconstruct them from the event. Moving
+        # it means widening a persisted event, which needs a schema version and
+        # an upcaster. Until then this is the one application module that writes
+        # a metric directly, and the import-contract ledger records it.
         from ...metrics import record_cost
 
         record_cost(
@@ -62,4 +69,7 @@ class CostAttributionEventHandler:
                 total_cost=str(cost_record.cost_cents / 100.0),
                 currency=cost_record.currency,
             )
-            self._event_bus.publish([cost_event])
+            # NOT publish([cost_event]): the bus takes one event, and a list reached
+            # every subscribe-to-all handler as a `list` object while anything
+            # subscribed to CostReportGenerated got nothing at all.
+            self._event_bus.publish(cost_event)

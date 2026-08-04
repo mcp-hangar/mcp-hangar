@@ -12,6 +12,7 @@ from ...domain.repository import IMcpServerRepository
 from ...logging_config import get_logger
 from ...metrics import observe_tool_call, record_error, record_mcp_server_start, record_mcp_server_stop
 from ..ports.bus import ICommandBus
+from ..ports.config_loader import IConfigLoader
 from .commands import (
     HealthCheckCommand,
     InvokeToolCommand,
@@ -192,7 +193,8 @@ def register_all_handlers(
     repository: IMcpServerRepository,
     event_bus: IEventBus,
     current_config_path: str | None = None,
-    config_loader=None,
+    *,
+    config_loader: IConfigLoader,
     groups: dict | None = None,
     runtime_store: IRuntimeMcpServerStore | None = None,
 ) -> None:

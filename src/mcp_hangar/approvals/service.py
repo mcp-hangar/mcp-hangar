@@ -23,7 +23,7 @@ from mcp_hangar.domain.events import (
     ToolApprovalGranted,
     ToolApprovalRequested,
 )
-from mcp_hangar.domain.security.redactor import get_default_redactor
+from mcp_hangar.redactor import get_default_redactor
 from mcp_hangar.domain.value_objects.tool_access_policy import ToolAccessPolicy
 from mcp_hangar.logging_config import get_logger
 from mcp_hangar.observability.tracing import get_tracer

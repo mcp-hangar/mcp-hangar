@@ -11,6 +11,7 @@ import threading
 from typing import Any
 
 from mcp_hangar.domain.contracts.lock import ILock
+from mcp_hangar.lock_hierarchy import LockLevel, TrackedLock
 
 # Type alias for mcp_server-like objects (McpServer aggregate)
 McpServerLike = Any
@@ -139,12 +140,10 @@ class InMemoryMcpServerRepository(IMcpServerRepository):
         if lock_factory is not threading.Lock:
             return lock_factory()
 
-        try:
-            from ..infrastructure.lock_hierarchy import LockLevel, TrackedLock
-
-            return TrackedLock(LockLevel.REPOSITORY, "InMemoryMcpServerRepository")  # type: ignore[return-value]  # TrackedLock satisfies ILock protocol at runtime
-        except ImportError:
-            return lock_factory()
+        # Not optional, and the `except ImportError` this replaces could never
+        # fire: an untracked lock here takes the repository out of the global
+        # ordering and lets a deadlock through undetected.
+        return TrackedLock(LockLevel.REPOSITORY, "InMemoryMcpServerRepository")  # type: ignore[return-value]  # TrackedLock satisfies ILock protocol at runtime
 
     def add(self, mcp_server_id: str, mcp_server: McpServerLike) -> None:
         """Add or update a mcp_server in the repository.

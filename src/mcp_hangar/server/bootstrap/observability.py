@@ -36,6 +36,8 @@ import os
 from typing import Any
 
 from ...application.ports.observability import NullObservabilityAdapter, ObservabilityPort
+from ...domain.contracts.metrics_publisher import set_default_metrics_publisher
+from ...infrastructure.metrics_publisher import PrometheusMetricsPublisher
 from ...logging_config import get_logger
 from .components import create_observability_adapter
 
@@ -219,6 +221,24 @@ def init_langfuse(config: LangfuseBootstrapConfig) -> ObservabilityPort:
     except Exception as e:  # noqa: BLE001 -- fault-barrier: langfuse init failure must not crash application
         logger.warning("langfuse_initialization_failed", error=str(e))
         return NullObservabilityAdapter()
+
+
+def init_metrics_publisher() -> None:
+    """Connect the domain's metrics port to its Prometheus adapter.
+
+    A named function rather than two lines inline in `bootstrap`, because this
+    wiring is the whole defect it fixes and a test needs to be able to assert it
+    without standing up the application. `PrometheusMetricsPublisher` appeared
+    exactly once in the codebase -- at its own class statement -- so every
+    McpServer used the Null object and the cold-start histogram
+    (`mcp_hangar_mcp_server_cold_start_seconds`, which metrics.py calls the
+    critical UX metric) was never observed.
+
+    Must run before McpServer instances are constructed: they read the default
+    at construction time.
+    """
+    set_default_metrics_publisher(PrometheusMetricsPublisher())
+    logger.debug("metrics_publisher_wired", adapter="PrometheusMetricsPublisher")
 
 
 def init_observability(config: dict[str, Any]) -> tuple[ObservabilityConfig, ObservabilityPort]:
