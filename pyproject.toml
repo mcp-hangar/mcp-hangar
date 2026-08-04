@@ -318,8 +318,6 @@ unreferenced = [
   "domain/value_objects/behavioral.py::DeviationType",
   "domain/value_objects/behavioral.py::SchemaChangeType",
   "domain/value_objects/semantic.py::PatternMatchResult",
-  "infrastructure/event_sourced_repository.py::get_event_sourced_repository",
-  "infrastructure/event_sourced_repository.py::set_event_sourced_repository",
   "infrastructure/persistence/database.py::initialize_database",
   "infrastructure/persistence/database.py::set_database",
   "infrastructure/persistence/database_common.py::create_connection_factory",
