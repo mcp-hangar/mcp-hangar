@@ -28,6 +28,7 @@ from mcp_hangar.domain.events import ApiKeyCreated, ApiKeyRevoked, KeyRotated, R
 from mcp_hangar.domain.exceptions import ExpiredCredentialsError, RevokedCredentialsError
 from mcp_hangar.auth.roles import BUILTIN_ROLES
 from mcp_hangar.domain.value_objects import Permission, Principal, PrincipalId, PrincipalType, Role
+from mcp_hangar.domain.contracts.authorization import validate_role_scope
 
 logger = structlog.get_logger(__name__)
 
@@ -796,6 +797,7 @@ class SQLiteRoleStore(IRoleStore):
 
         Emits: RoleAssigned event
         """
+        validate_role_scope(scope)
         conn = self._get_connection()
 
         # Verify role exists
