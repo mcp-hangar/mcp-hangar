@@ -5,6 +5,41 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [2.3.0](https://github.com/mcp-hangar/mcp-hangar/compare/v2.2.1...v2.3.0) (2026-08-04)
+
+
+### ⚠ BREAKING CHANGES
+
+* **core:** `mcp_hangar.domain.services.mcp_server_launcher` and the launcher re-exports on `mcp_hangar.domain.services` are removed. Import DockerLauncher, SubprocessLauncher, ContainerLauncher, HttpLauncher, ContainerConfig, McpServerLauncher and get_launcher from `mcp_hangar.infrastructure.launchers` instead. Run your suite with `python -W error::DeprecationWarning` to list affected call sites.
+
+### Added
+
+* **core:** remove the deprecated launcher import paths ([#730](https://github.com/mcp-hangar/mcp-hangar/issues/730)) ([46aa9de](https://github.com/mcp-hangar/mcp-hangar/commit/46aa9de9fe3395fb33eac9017b128c9920a0bf9f))
+
+
+### Fixed
+
+* **core:** cost events reached no handler; move the metrics adapter out of application ([#727](https://github.com/mcp-hangar/mcp-hangar/issues/727)) ([0d77e69](https://github.com/mcp-hangar/mcp-hangar/commit/0d77e6908e5ce346ee09e45fdbdde04f55a32076))
+* **core:** make pre-rename events reach their handlers again ([#713](https://github.com/mcp-hangar/mcp-hangar/issues/713)) ([d6e21d8](https://github.com/mcp-hangar/mcp-hangar/commit/d6e21d862609aa6d89725705a4d635c0c3dcb10c))
+* **core:** publish cold-start metrics, and route connection state through the port ([#724](https://github.com/mcp-hangar/mcp-hangar/issues/724)) ([d827648](https://github.com/mcp-hangar/mcp-hangar/commit/d827648b4dc0d5a67f9b3bc124ab81a02a60a018))
+* **core:** the event store could write events it could not read back ([#721](https://github.com/mcp-hangar/mcp-hangar/issues/721)) ([8cf3170](https://github.com/mcp-hangar/mcp-hangar/commit/8cf3170eff3af527e8e193769cdc754469a9d8a0))
+
+
+### Changed
+
+* **core:** delete the unused audit store and a dead event-store fallback ([#728](https://github.com/mcp-hangar/mcp-hangar/issues/728)) ([a349fd6](https://github.com/mcp-hangar/mcp-hangar/commit/a349fd6c1d27345f10fa2152a7c0e1c7e47fa75c))
+* **core:** fold the last 18 alias constructors into the decorator ([#712](https://github.com/mcp-hangar/mcp-hangar/issues/712)) ([7ef2fbe](https://github.com/mcp-hangar/mcp-hangar/commit/7ef2fbe4a7f77ef775bbaa466ed74f1f4275ad7d))
+* **core:** fold the Provider* alias constructors into one decorator ([#708](https://github.com/mcp-hangar/mcp-hangar/issues/708)) ([98afe13](https://github.com/mcp-hangar/mcp-hangar/commit/98afe13b1ea9a691d391eb6adbce580ca3f0cbba))
+* **core:** give the launcher port its own type ([#725](https://github.com/mcp-hangar/mcp-hangar/issues/725)) ([cfca05f](https://github.com/mcp-hangar/mcp-hangar/commit/cfca05f6368bcd223da324e9251ae09f82c917b2))
+* **core:** make the reload handler go through its config port ([#729](https://github.com/mcp-hangar/mcp-hangar/issues/729)) ([a833d6e](https://github.com/mcp-hangar/mcp-hangar/commit/a833d6e9689e4e868cff23238bd52b386d955c91))
+* **core:** make the sagas require their saga manager ([#731](https://github.com/mcp-hangar/mcp-hangar/issues/731)) ([f2fff17](https://github.com/mcp-hangar/mcp-hangar/commit/f2fff1744334371eef27575b46072f446c567be8))
+* **core:** move lock_hierarchy to the shared kernel ([#726](https://github.com/mcp-hangar/mcp-hangar/issues/726)) ([13b93e8](https://github.com/mcp-hangar/mcp-hangar/commit/13b93e88b2988180fd3e10be2df93f6953da1eda))
+* **core:** move the secret redactor to the shared kernel ([#733](https://github.com/mcp-hangar/mcp-hangar/issues/733)) ([2b1703c](https://github.com/mcp-hangar/mcp-hangar/commit/2b1703c8e6c0a7e49949db5f0a15603e0209410c))
+* **core:** split the 2197-line events module into a package ([#710](https://github.com/mcp-hangar/mcp-hangar/issues/710)) ([569692f](https://github.com/mcp-hangar/mcp-hangar/commit/569692f578aad3d3f6321bd34b25558b7048d785))
+* **core:** split the batch call path into named gates ([#723](https://github.com/mcp-hangar/mcp-hangar/issues/723)) ([7a838eb](https://github.com/mcp-hangar/mcp-hangar/commit/7a838eb6c40b6a3f19b4e8b2174e353edbfbac01))
+* **core:** stop protocol.py reaching into the server layer ([#732](https://github.com/mcp-hangar/mcp-hangar/issues/732)) ([34f87d2](https://github.com/mcp-hangar/mcp-hangar/commit/34f87d279315247b4bfb579b9c945105d8511fcd))
+* **release:** cut the launcher removal as 2.3.0, not 3.0.0 ([#735](https://github.com/mcp-hangar/mcp-hangar/issues/735)) ([089b597](https://github.com/mcp-hangar/mcp-hangar/commit/089b5973d25e1b3f610d2cc1ea98953788073b74))
+
 ## [2.2.1](https://github.com/mcp-hangar/mcp-hangar/compare/v2.2.0...v2.2.1) (2026-08-03)
 
 
