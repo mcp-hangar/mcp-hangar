@@ -53,9 +53,6 @@ class CapabilityViolationDetected(DomainEvent):
     pod_namespace: str | None = None
     node_name: str | None = None
 
-    def __post_init__(self):
-        super().__init__()
-
 
 @accepts_legacy_provider_id
 @dataclass
@@ -90,7 +87,6 @@ class EgressPolicyViolationObserved(DomainEvent):
         # consumer iterates `reasons` without a None check.
         if self.reasons is None:
             self.reasons = []
-        super().__init__()
 
 
 @dataclass
@@ -135,9 +131,6 @@ class EgressPolicySet(DomainEvent):
     max_payload_bytes: int | None = None
     schema_version: int = 1
 
-    def __post_init__(self):
-        super().__init__()
-
 
 @dataclass
 class EgressPolicyCleared(DomainEvent):
@@ -156,9 +149,6 @@ class EgressPolicyCleared(DomainEvent):
     mcp_server_id: str
     source: str
     schema_version: int = 1
-
-    def __post_init__(self):
-        super().__init__()
 
 
 @accepts_legacy_provider_id
@@ -191,9 +181,6 @@ class EgressBlocked(DomainEvent):
     pod_namespace: str | None = None
     node_name: str | None = None
 
-    def __post_init__(self):
-        super().__init__()
-
 
 @dataclass
 class McpServerCapabilityQuarantined(DomainEvent):
@@ -214,9 +201,6 @@ class McpServerCapabilityQuarantined(DomainEvent):
     violation_count: int = 1
     schema_version: int = 1
 
-    def __post_init__(self):
-        super().__init__()
-
 
 @dataclass
 class McpServerCapabilityQuarantineReleased(DomainEvent):
@@ -231,9 +215,6 @@ class McpServerCapabilityQuarantineReleased(DomainEvent):
     mcp_server_id: str
     released_by: str
     schema_version: int = 1
-
-    def __post_init__(self):
-        super().__init__()
 
 
 @accepts_legacy_provider_id
@@ -267,9 +248,6 @@ class ToolSchemaDriftDetected(DomainEvent):
     tools_changed: list[str]
     schema_version: int = 1
 
-    def __post_init__(self):
-        super().__init__()
-
 
 @dataclass
 class CapabilityDeclarationMissing(DomainEvent):
@@ -287,9 +265,6 @@ class CapabilityDeclarationMissing(DomainEvent):
     mcp_server_id: str
     enforcement_mode: str = "alert"
     schema_version: int = 1
-
-    def __post_init__(self):
-        super().__init__()
 
 
 @dataclass
@@ -320,9 +295,6 @@ class DigestMismatchEvent(DomainEvent):
     tenant_id: str | None = None
     schema_version: int = 1
 
-    def __post_init__(self):
-        super().__init__()
-
 
 # ---------------------------------------------------------------------------
 # Mutator Events (SEP-1763)
@@ -349,9 +321,6 @@ class ResponseTruncated(DomainEvent):
     max_size: int
     schema_version: int = 1
 
-    def __post_init__(self):
-        super().__init__()
-
 
 # ---------------------------------------------------------------------------
 # Behavioral Profiling Events
@@ -373,9 +342,6 @@ class BehavioralModeChanged(DomainEvent):
     old_mode: str
     new_mode: str
     schema_version: int = 1
-
-    def __post_init__(self):
-        super().__init__()
 
     @property
     def provider_id(self) -> str:
@@ -415,9 +381,6 @@ class BehavioralDeviationDetected(DomainEvent):
     severity: str = "high"
     schema_version: int = 1
 
-    def __post_init__(self):
-        super().__init__()
-
 
 @dataclass
 class ToolSchemaChanged(DomainEvent):
@@ -442,9 +405,6 @@ class ToolSchemaChanged(DomainEvent):
     old_hash: str | None = None
     new_hash: str | None = None
     schema_version: int = 1
-
-    def __post_init__(self):
-        super().__init__()
 
 
 # ---------------------------------------------------------------------------

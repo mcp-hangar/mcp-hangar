@@ -22,9 +22,6 @@ class BatchInvocationRequested(DomainEvent):
     timeout: float
     fail_fast: bool
 
-    def __post_init__(self):
-        super().__init__()
-
 
 @dataclass
 class BatchInvocationCompleted(DomainEvent):
@@ -36,9 +33,6 @@ class BatchInvocationCompleted(DomainEvent):
     failed: int
     elapsed_ms: float
     cancelled: int = 0
-
-    def __post_init__(self):
-        super().__init__()
 
 
 @dataclass
@@ -54,9 +48,6 @@ class BatchCallCompleted(DomainEvent):
     elapsed_ms: float
     error_type: str | None = None
 
-    def __post_init__(self):
-        super().__init__()
-
 
 # =============================================================================
 # Hot Load Events
@@ -69,9 +60,6 @@ class McpServerLoadAttempted(DomainEvent):
 
     mcp_server_name: str
     user_id: str | None
-
-    def __post_init__(self):
-        super().__init__()
 
 
 @dataclass
@@ -86,9 +74,6 @@ class McpServerHotLoaded(DomainEvent):
     tools_count: int
     load_duration_ms: float
 
-    def __post_init__(self):
-        super().__init__()
-
 
 @dataclass
 class McpServerLoadFailed(DomainEvent):
@@ -99,9 +84,6 @@ class McpServerLoadFailed(DomainEvent):
     user_id: str | None
     error_type: str | None = None
 
-    def __post_init__(self):
-        super().__init__()
-
 
 @dataclass
 class McpServerHotUnloaded(DomainEvent):
@@ -110,9 +92,6 @@ class McpServerHotUnloaded(DomainEvent):
     mcp_server_id: str
     user_id: str | None
     lifetime_seconds: float
-
-    def __post_init__(self):
-        super().__init__()
 
 
 # Configuration Reload Events
@@ -125,9 +104,6 @@ class ConfigurationReloadRequested(DomainEvent):
     config_path: str
     requested_by: str  # "sighup", "tool", "file_watcher"
     force: bool = False
-
-    def __post_init__(self):
-        super().__init__()
 
 
 @dataclass
@@ -142,9 +118,6 @@ class ConfigurationReloaded(DomainEvent):
     reload_duration_ms: float
     requested_by: str
 
-    def __post_init__(self):
-        super().__init__()
-
 
 @dataclass
 class ConfigurationReloadFailed(DomainEvent):
@@ -154,9 +127,6 @@ class ConfigurationReloadFailed(DomainEvent):
     reason: str
     error_type: str
     requested_by: str
-
-    def __post_init__(self):
-        super().__init__()
 
 
 # =============================================================================

@@ -30,9 +30,6 @@ class AuthenticationSucceeded(DomainEvent):
     source_ip: str
     tenant_id: str | None = None
 
-    def __post_init__(self):
-        super().__init__()
-
 
 @dataclass
 class AuthenticationFailed(DomainEvent):
@@ -49,9 +46,6 @@ class AuthenticationFailed(DomainEvent):
     source_ip: str
     reason: str
     attempted_principal_id: str | None = None
-
-    def __post_init__(self):
-        super().__init__()
 
 
 @dataclass
@@ -72,9 +66,6 @@ class AuthorizationDenied(DomainEvent):
     resource_id: str
     reason: str
 
-    def __post_init__(self):
-        super().__init__()
-
 
 @dataclass
 class AuthorizationGranted(DomainEvent):
@@ -94,9 +85,6 @@ class AuthorizationGranted(DomainEvent):
     resource_id: str
     granted_by_role: str
 
-    def __post_init__(self):
-        super().__init__()
-
 
 @dataclass
 class PolicyPushRejected(DomainEvent):
@@ -105,9 +93,6 @@ class PolicyPushRejected(DomainEvent):
     principal_id: str
     reason: str
     timestamp: datetime
-
-    def __post_init__(self):
-        super().__init__()
 
 
 @dataclass
@@ -126,9 +111,6 @@ class RoleAssigned(DomainEvent):
     scope: str
     assigned_by: str
 
-    def __post_init__(self):
-        super().__init__()
-
 
 @dataclass
 class RoleRevoked(DomainEvent):
@@ -145,9 +127,6 @@ class RoleRevoked(DomainEvent):
     role_name: str
     scope: str
     revoked_by: str
-
-    def __post_init__(self):
-        super().__init__()
 
 
 @dataclass
@@ -168,9 +147,6 @@ class ApiKeyCreated(DomainEvent):
     expires_at: float | None
     created_by: str
 
-    def __post_init__(self):
-        super().__init__()
-
 
 @dataclass
 class ApiKeyRevoked(DomainEvent):
@@ -187,9 +163,6 @@ class ApiKeyRevoked(DomainEvent):
     principal_id: str
     revoked_by: str
     reason: str = ""
-
-    def __post_init__(self):
-        super().__init__()
 
 
 @dataclass
@@ -208,9 +181,6 @@ class RateLimitLockout(DomainEvent):
     lockout_count: int
     failed_attempts: int
 
-    def __post_init__(self):
-        super().__init__()
-
 
 @dataclass
 class RateLimitUnlock(DomainEvent):
@@ -225,9 +195,6 @@ class RateLimitUnlock(DomainEvent):
     source_ip: str
     lockout_count: int
     unlock_reason: str
-
-    def __post_init__(self):
-        super().__init__()
 
 
 @dataclass
@@ -250,9 +217,6 @@ class KeyRotated(DomainEvent):
     grace_until: float
     rotated_by: str
 
-    def __post_init__(self):
-        super().__init__()
-
 
 # --- Multi-Tenancy Events ---
 
@@ -265,9 +229,6 @@ class TenantCreated(DomainEvent):
     name: str
     owner_principal_id: str
 
-    def __post_init__(self):
-        super().__init__()
-
 
 @dataclass
 class TenantSuspended(DomainEvent):
@@ -277,9 +238,6 @@ class TenantSuspended(DomainEvent):
     reason: str
     suspended_by: str
 
-    def __post_init__(self):
-        super().__init__()
-
 
 @dataclass
 class TenantReactivated(DomainEvent):
@@ -287,9 +245,6 @@ class TenantReactivated(DomainEvent):
 
     tenant_id: str
     reactivated_by: str
-
-    def __post_init__(self):
-        super().__init__()
 
 
 @dataclass
@@ -300,9 +255,6 @@ class QuotaUpdated(DomainEvent):
     old_quotas: dict[str, Any]
     new_quotas: dict[str, Any]
     updated_by: str
-
-    def __post_init__(self):
-        super().__init__()
 
 
 @dataclass
@@ -315,9 +267,6 @@ class QuotaExceeded(DomainEvent):
     current_usage: int
     limit: int
 
-    def __post_init__(self):
-        super().__init__()
-
 
 @dataclass
 class QuotaWarningThresholdReached(DomainEvent):
@@ -329,9 +278,6 @@ class QuotaWarningThresholdReached(DomainEvent):
     limit: int
     percentage: int
 
-    def __post_init__(self):
-        super().__init__()
-
 
 @dataclass
 class NamespaceCreated(DomainEvent):
@@ -342,9 +288,6 @@ class NamespaceCreated(DomainEvent):
     name: str
     created_by: str
 
-    def __post_init__(self):
-        super().__init__()
-
 
 @dataclass
 class NamespaceDeleted(DomainEvent):
@@ -353,9 +296,6 @@ class NamespaceDeleted(DomainEvent):
     namespace_id: str
     tenant_id: str
     deleted_by: str
-
-    def __post_init__(self):
-        super().__init__()
 
 
 @dataclass
@@ -366,9 +306,6 @@ class CatalogItemPublished(DomainEvent):
     name: str
     version: str
     published_by: str
-
-    def __post_init__(self):
-        super().__init__()
 
 
 @dataclass
@@ -381,9 +318,6 @@ class CatalogItemApproved(DomainEvent):
     approved_by: str
     notes: str
 
-    def __post_init__(self):
-        super().__init__()
-
 
 @dataclass
 class CatalogItemRejected(DomainEvent):
@@ -393,9 +327,6 @@ class CatalogItemRejected(DomainEvent):
     name: str
     rejected_by: str
     reason: str
-
-    def __post_init__(self):
-        super().__init__()
 
 
 @dataclass
@@ -408,9 +339,6 @@ class CatalogItemDeprecated(DomainEvent):
     reason: str
     sunset_date: str | None
 
-    def __post_init__(self):
-        super().__init__()
-
 
 @dataclass
 class CostReportGenerated(DomainEvent):
@@ -421,9 +349,6 @@ class CostReportGenerated(DomainEvent):
     period_end: str
     total_cost: str
     currency: str
-
-    def __post_init__(self):
-        super().__init__()
 
 
 # =============================================================================
