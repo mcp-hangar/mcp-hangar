@@ -13,7 +13,8 @@ import pytest
 
 sys.path.insert(0, str(Path(__file__).parent))
 
-from mcp_hangar.application.queries import register_all_handlers as register_query_handlers  # noqa: E402
+from mcp_hangar.application.queries import register_all_handlers as register_query_handlers
+from mcp_hangar.infrastructure.persistence import InMemoryEventStore  # noqa: E402
 from mcp_hangar.server import (  # noqa: E402
     hangar_list,
     load_config,
@@ -31,7 +32,7 @@ def test_descriptions() -> None:
     # Register query handlers
     print("\n🔧 Registering query handlers...")
     runtime = get_runtime()
-    register_query_handlers(runtime.query_bus, runtime.repository)
+    register_query_handlers(runtime.query_bus, runtime.repository, event_store=InMemoryEventStore())
     print("   ✅ Query handlers registered")
 
     # Load config

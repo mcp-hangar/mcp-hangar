@@ -60,9 +60,7 @@ ignore_imports =
     mcp_hangar.application.discovery.discovery_orchestrator -> mcp_hangar.metrics
     mcp_hangar.application.event_handlers.cost_handler -> mcp_hangar.metrics
     mcp_hangar.application.event_handlers.detection_handler -> mcp_hangar.server.api.sessions
-    mcp_hangar.application.event_handlers.persistent_audit_store -> mcp_hangar.infrastructure.async_executor
     mcp_hangar.application.mcp.tooling -> mcp_hangar.fastmcp_server.asgi
-    mcp_hangar.application.queries.handlers -> mcp_hangar.infrastructure.event_store
     mcp_hangar.application.sagas.mcp_server_failover_saga -> mcp_hangar.infrastructure.saga_manager
     mcp_hangar.application.sagas.mcp_server_recovery_saga -> mcp_hangar.infrastructure.saga_manager
     mcp_hangar.context -> mcp_hangar.domain.value_objects.identity
