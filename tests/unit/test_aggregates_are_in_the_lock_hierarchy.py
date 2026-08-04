@@ -18,11 +18,17 @@ Two ways that had happened:
 
 So this asserts the lock each aggregate actually ends up holding, rather than
 the code path that creates it.
+
+The `EventSourcedMcpServer` case is gone from the list below because the class
+itself is gone: it was an unwired artifact of the enterprise migration, never
+constructed in `src/` in four months, and was deleted along with its repository.
+The bug it recorded is kept here in prose because the LESSON outlives the class
+-- the next aggregate that assigns `threading.RLock()` directly will be outside
+the hierarchy in exactly the same way.
 """
 
 from __future__ import annotations
 
-from mcp_hangar.domain.model.event_sourced_mcp_server import EventSourcedMcpServer
 from mcp_hangar.domain.model.mcp_server import McpServer
 from mcp_hangar.domain.model.mcp_server_group import McpServerGroup
 from mcp_hangar.domain.repository import InMemoryMcpServerRepository
@@ -32,12 +38,6 @@ from mcp_hangar.lock_hierarchy import LockLevel, TrackedLock
 class TestAggregateLocksAreTracked:
     def test_mcp_server(self):
         server = McpServer(mcp_server_id="demo", mode="subprocess", command=["true"])
-        assert isinstance(server._lock, TrackedLock)
-        assert server._lock.level == LockLevel.PROVIDER
-
-    def test_event_sourced_mcp_server(self):
-        """The one that was genuinely outside the hierarchy, unconditionally."""
-        server = EventSourcedMcpServer(mcp_server_id="demo", mode="subprocess", command=["true"])
         assert isinstance(server._lock, TrackedLock)
         assert server._lock.level == LockLevel.PROVIDER
 

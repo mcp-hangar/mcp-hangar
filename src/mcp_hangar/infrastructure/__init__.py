@@ -15,7 +15,6 @@ application.commands to maintain proper layer separation.
 
 from .command_bus import CommandBus, CommandHandler, get_command_bus, reset_command_bus
 from .event_bus import EventBus, EventHandler, get_event_bus, reset_event_bus
-from .event_sourced_repository import EventSourcedMcpServerRepository, McpServerConfigStore
 from .event_store import (
     ConcurrencyError,
     EventStore,
@@ -93,8 +92,6 @@ __all__ = [
     "HttpLauncher",
     "get_launcher",
     # Event Sourced Repository
-    "EventSourcedMcpServerRepository",
-    "McpServerConfigStore",
     # Lock Hierarchy
     "LockLevel",
     "LockOrderViolation",
