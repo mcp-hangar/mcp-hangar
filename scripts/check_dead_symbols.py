@@ -74,8 +74,20 @@ def _referenced_names(trees: dict[pathlib.Path, ast.Module]) -> set[str]:
                 used.add(node.attr)
             elif isinstance(node, ast.alias):
                 # `from x import y as z` uses y; the alias is a local rebinding.
-                used.add(node.name.split(".")[-1])
-                if node.asname:
+                #
+                # UNLESS the importing file also exports that name: then the
+                # import is a re-export, not a use, and counting it hid every
+                # unused symbol behind a package facade. `__all__` is exactly
+                # the marker here -- ruff uses the same one to decide an
+                # `__init__.py` import is a deliberate re-export rather than
+                # F401 -- so the two agree on what a facade is.
+                #
+                # A file that re-exports AND uses the symbol is still covered:
+                # the use is an `ast.Name`, caught above.
+                name = node.name.split(".")[-1]
+                if name not in exported:
+                    used.add(name)
+                if node.asname and node.asname not in exported:
                     used.add(node.asname)
             elif isinstance(node, ast.Constant) and isinstance(node.value, str):
                 if node.value not in exported:

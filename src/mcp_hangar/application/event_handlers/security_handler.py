@@ -255,44 +255,6 @@ class InMemorySecuritySink(SecurityEventSink):
             return len(self._events)
 
 
-class CallbackSecuritySink(SecurityEventSink):
-    """Security sink that calls a callback function."""
-
-    def __init__(self, callback):
-        self._callback = callback
-
-    def emit(self, event: SecurityEvent) -> None:
-        """Call the callback with the event."""
-        try:
-            self._callback(event)
-        except Exception as e:  # noqa: BLE001 -- fault-barrier: callback failure must not crash security handler
-            logger.error(f"Security callback failed: {e}")
-
-
-class CompositeSecuritySink(SecurityEventSink):
-    """Security sink that emits to multiple sinks."""
-
-    def __init__(self, sinks: list[SecurityEventSink]):
-        self._sinks = sinks
-
-    def emit(self, event: SecurityEvent) -> None:
-        """Emit to all configured sinks."""
-        for sink in self._sinks:
-            try:
-                sink.emit(event)
-            except Exception as e:  # noqa: BLE001 -- fault-barrier: single sink failure must not prevent other sinks
-                logger.error(f"Security sink {type(sink).__name__} failed: {e}")
-
-    def add_sink(self, sink: SecurityEventSink) -> None:
-        """Add a sink."""
-        self._sinks.append(sink)
-
-    def remove_sink(self, sink: SecurityEventSink) -> None:
-        """Remove a sink."""
-        if sink in self._sinks:
-            self._sinks.remove(sink)
-
-
 class SecurityEventHandler:
     """
     Handler for domain events that detects and logs security-relevant activity.
