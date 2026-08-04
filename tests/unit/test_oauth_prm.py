@@ -87,7 +87,13 @@ class TestPrmHelpers:
         assert _PRM_PATH in header
         assert header.endswith('", ApiKey')
 
-    def test_build_resource_base_url_from_scope(self):
+    def test_build_resource_base_url_from_scope(self, monkeypatch):
+        # mcp.example.com is this deployment's own hostname, so it has to be in
+        # the allowlist -- it always did, or TrustedHostMiddleware would have
+        # rejected the request outright. Made explicit here because the derived
+        # identity now depends on it: an unlisted Host is ignored rather than
+        # advertised. See test_prm_ignores_a_forged_host.py.
+        monkeypatch.setenv("MCP_TRUSTED_HOSTS", "mcp.example.com,localhost,127.0.0.1,testserver")
         scope = {
             "type": "http",
             "scheme": "https",
@@ -105,7 +111,13 @@ class TestPrmHelpers:
         base = build_resource_base_url(scope)
         assert base == "http://localhost:8000"
 
-    def test_build_resource_base_url_x_forwarded_proto(self):
+    def test_build_resource_base_url_x_forwarded_proto(self, monkeypatch):
+        # mcp.example.com is this deployment's own hostname, so it has to be in
+        # the allowlist -- it always did, or TrustedHostMiddleware would have
+        # rejected the request outright. Made explicit here because the derived
+        # identity now depends on it: an unlisted Host is ignored rather than
+        # advertised. See test_prm_ignores_a_forged_host.py.
+        monkeypatch.setenv("MCP_TRUSTED_HOSTS", "mcp.example.com,localhost,127.0.0.1,testserver")
         scope = {
             "type": "http",
             "scheme": "http",
@@ -148,7 +160,13 @@ class TestPrmEndpoint:
         response = client.get(_PRM_PATH)
         assert response.status_code == 404
 
-    def test_derives_resource_from_host_when_no_config(self):
+    def test_derives_resource_from_host_when_no_config(self, monkeypatch):
+        # mcp.example.com is this deployment's own hostname, so it has to be in
+        # the allowlist -- it always did, or TrustedHostMiddleware would have
+        # rejected the request outright. Made explicit here because the derived
+        # identity now depends on it: an unlisted Host is ignored rather than
+        # advertised. See test_prm_ignores_a_forged_host.py.
+        monkeypatch.setenv("MCP_TRUSTED_HOSTS", "mcp.example.com,localhost,127.0.0.1,testserver")
         """When resource_uri_cfg is empty, resource is derived from Host header."""
         app = _make_prm_app(oidc_issuer=_ISSUER, resource_uri_cfg="")
         client = TestClient(app, base_url="http://mcp.example.com")

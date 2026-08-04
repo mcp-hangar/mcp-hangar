@@ -37,7 +37,7 @@ layers =
     mcp_hangar.infrastructure : mcp_hangar.metrics : mcp_hangar.http_client : mcp_hangar.stdio_client : mcp_hangar.retry : mcp_hangar.progress : mcp_hangar.gc
     mcp_hangar.application
     mcp_hangar.domain
-    mcp_hangar.logging_config : mcp_hangar.lock_hierarchy : mcp_hangar.redactor : mcp_hangar.errors : mcp_hangar.protocol : mcp_hangar.context : mcp_hangar._sdk_compat : mcp_hangar.tasks_wire : mcp_hangar.negotiation : mcp_hangar.observability
+    mcp_hangar.logging_config : mcp_hangar.lock_hierarchy : mcp_hangar.redactor : mcp_hangar.errors : mcp_hangar.protocol : mcp_hangar.context : mcp_hangar._sdk_compat : mcp_hangar.tasks_wire : mcp_hangar.negotiation : mcp_hangar.observability : mcp_hangar.trusted_hosts
 exhaustive = False
 
 # The debt ledger. Every line is an edge that exists today and should not.

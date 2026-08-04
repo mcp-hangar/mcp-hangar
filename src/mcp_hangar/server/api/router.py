@@ -14,7 +14,6 @@ auth runs inside CORS, CSRF runs outside auth, and TrustedHostMiddleware is inne
 
 # pyright: reportAny=false, reportExplicitAny=false
 
-import os
 from typing import Any
 
 from starlette.applications import Starlette
@@ -23,6 +22,7 @@ from starlette.middleware.trustedhost import TrustedHostMiddleware
 from starlette.routing import BaseRoute, Mount
 
 from ...domain.exceptions import MCPError
+from ...trusted_hosts import trusted_hosts
 from .middleware import (
     AuthMiddlewareHTTP,
     AuthorizationEnforcementMiddleware,
@@ -96,9 +96,7 @@ def create_api_router(auth_components: Any = None) -> Starlette:
     app.add_middleware(AuthorizationEnforcementMiddleware, auth_components=auth_components)
 
     # TrustedHostMiddleware blocks unexpected Host headers (DNS rebinding protection).
-    _trusted_hosts_env = os.environ.get("MCP_TRUSTED_HOSTS", "localhost,127.0.0.1,::1,testserver")
-    trusted_hosts = [h.strip() for h in _trusted_hosts_env.split(",") if h.strip()]
-    app.add_middleware(TrustedHostMiddleware, allowed_hosts=trusted_hosts)
+    app.add_middleware(TrustedHostMiddleware, allowed_hosts=trusted_hosts())
 
     # CSRF middleware sits outside auth but inside CORS.
     # It enforces X-Requested-With for mutating browser requests while letting

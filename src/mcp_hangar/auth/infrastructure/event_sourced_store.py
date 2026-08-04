@@ -260,6 +260,21 @@ class EventSourcedApiKeyStore(IApiKeyStore):
         if key is None:
             return None
 
+        # These three checks return at different points, which a security audit
+        # flagged as a timing side-channel disclosing the key's state
+        # (LLM-01). Measured before acting on it: the difference is three
+        # attribute reads, ~5 ns, against a request path that has already done
+        # a store load and HTTP parsing -- not observable over a network.
+        #
+        # More to the point, the state is disclosed OUTRIGHT: the 401 body
+        # carries `e.message`, which is literally "API key has been revoked" or
+        # "API key has expired". A uniform exit path would close a channel that
+        # leaks nothing the response does not already say.
+        #
+        # If the disclosure itself is unwanted, the change to make is the
+        # message, not the timing -- and that trades away a caller's ability to
+        # tell "my key expired" from "my key was revoked", which is a product
+        # decision rather than a hardening one.
         if key.is_revoked:
             raise RevokedCredentialsError("API key has been revoked")
 
