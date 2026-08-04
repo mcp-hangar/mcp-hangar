@@ -43,23 +43,26 @@ exhaustive = False
 # The debt ledger. Every line is an edge that exists today and should not.
 # It may shrink; tests/unit/test_import_contracts.py caps it so it cannot grow.
 #
-# It went 33 -> 10. What cleared did so because the edge turned out to be held
+# It went 33 -> 9. What cleared did so because the edge turned out to be held
 # up by code that could not run: a port that was never wired, a fallback beside
 # an injected dependency, a deprecation shim with no callers. Measuring first
 # was what found those -- three of the "cycle avoidance" imports avoided no
 # cycle at all, and grimp said so in a second.
 #
-# The ten that remain are NOT of that kind, and the difference is worth
+# The nine that remain are NOT of that kind, and the difference is worth
 # stating so the next pass does not mistake churn for progress:
 #
-#   * application -> metrics (3) + observability.tracing -> metrics.
+#   * application -> metrics (2) + observability.tracing -> metrics.
 #     Services instrumenting themselves. A port per counter would turn
 #     IMetricsPublisher into a god interface; `metrics` is an adapter (it has a
 #     scrape endpoint behind it), so moving it into the shared kernel is
-#     relabelling, not repair. cost_handler additionally cannot move its call
-#     until CostReportGenerated carries the mcp_server / tool / cost_model
-#     dimensions -- widening a persisted event, so a schema version and an
-#     upcaster. The tracing one is a third case again: tracing.py is dual, half
+#     relabelling, not repair. cost_handler CLEARED: CostReportGenerated now
+#     carries the mcp_server / tool / cost_model dimensions (schema v2), so the
+#     metrics adapter can reconstruct the counter from the event and the
+#     application layer no longer writes one directly. No upcaster was needed --
+#     the change is additive and v1 rows genuinely lack the dimensions, so
+#     passthrough plus empty defaults is the honest reading of old data.
+#     The tracing one is a third case again: tracing.py is dual, half
 #     ambient-span accessors that logging_config legitimately needs and half
 #     OTLP exporter setup. Splitting those two apart is the honest fix and is a
 #     673-line module's worth of work.
@@ -95,7 +98,6 @@ ignore_imports =
     mcp_hangar.application.commands.handlers -> mcp_hangar.metrics
     mcp_hangar.application.commands.load_handlers -> mcp_hangar.infrastructure.runtime_store
     mcp_hangar.application.discovery.discovery_orchestrator -> mcp_hangar.metrics
-    mcp_hangar.application.event_handlers.cost_handler -> mcp_hangar.metrics
     mcp_hangar.application.mcp.tooling -> mcp_hangar.fastmcp_server.asgi
     mcp_hangar.context -> mcp_hangar.domain.value_objects.identity
     mcp_hangar.domain.model.mcp_server -> mcp_hangar.infrastructure.launchers

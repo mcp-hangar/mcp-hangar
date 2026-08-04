@@ -8,6 +8,40 @@ Provides dedicated security audit logging for:
 - Suspicious activity detection
 - Input validation failures
 - Command injection attempts
+
+A DELIBERATE SECOND EVENT SYSTEM
+--------------------------------
+This module carries its own `SecurityEvent` (not a `DomainEvent`), its own
+severity enum, and its own delivery mechanism (`SecurityEventSink`, with a
+composite) beside the real `EventBus`. That reads like duplication, and it was
+investigated as such. It is not, on three grounds -- recorded here so the next
+reader does not spend the afternoon re-deriving them:
+
+1. **Severity.** `DomainEvent` has no severity, and adding one would put a
+   security concept on every event in the system.
+
+2. **An intake the bus never sees.** Validation failures, injection attempts and
+   suspicious commands have NO `DomainEvent` counterpart at all. They are raised
+   imperatively from the request path through the `log_*` methods below, by
+   `server/validation.py`. Folding this into the bus would mean inventing domain
+   events for them first, which is a larger design question than deduplication.
+
+3. **Aggregation.** `FAILURE_THRESHOLD` / `TIME_WINDOW_S` detect anomalies ACROSS
+   events. A stateless bus subscriber cannot express that.
+
+The one apparent collision is rate limiting, and it is not one:
+`RateLimitLockout` is an auth-lockout domain event (per source IP, published by
+`auth/infrastructure/rate_limiter.py`), while `log_rate_limit_exceeded` reports
+request-rate rejection from `check_rate_limit()` -- a function that is itself
+deprecated in favour of command-bus middleware. Different occurrences, so the
+two cannot disagree about the same one.
+
+What the investigation DID find: of the four sinks, only `LogSecuritySink` is
+ever wired -- `get_security_handler()` is always called with no argument.
+`InMemorySecuritySink` appears in two test files; `CallbackSecuritySink` and
+`CompositeSecuritySink` have zero references anywhere, tests included. They are
+exported through this package's `__all__`, so removing them is a release
+decision rather than a cleanup, which is why they are still here.
 """
 
 from abc import ABC, abstractmethod
@@ -219,44 +253,6 @@ class InMemorySecuritySink(SecurityEventSink):
         """Get total event count."""
         with self._lock:
             return len(self._events)
-
-
-class CallbackSecuritySink(SecurityEventSink):
-    """Security sink that calls a callback function."""
-
-    def __init__(self, callback):
-        self._callback = callback
-
-    def emit(self, event: SecurityEvent) -> None:
-        """Call the callback with the event."""
-        try:
-            self._callback(event)
-        except Exception as e:  # noqa: BLE001 -- fault-barrier: callback failure must not crash security handler
-            logger.error(f"Security callback failed: {e}")
-
-
-class CompositeSecuritySink(SecurityEventSink):
-    """Security sink that emits to multiple sinks."""
-
-    def __init__(self, sinks: list[SecurityEventSink]):
-        self._sinks = sinks
-
-    def emit(self, event: SecurityEvent) -> None:
-        """Emit to all configured sinks."""
-        for sink in self._sinks:
-            try:
-                sink.emit(event)
-            except Exception as e:  # noqa: BLE001 -- fault-barrier: single sink failure must not prevent other sinks
-                logger.error(f"Security sink {type(sink).__name__} failed: {e}")
-
-    def add_sink(self, sink: SecurityEventSink) -> None:
-        """Add a sink."""
-        self._sinks.append(sink)
-
-    def remove_sink(self, sink: SecurityEventSink) -> None:
-        """Remove a sink."""
-        if sink in self._sinks:
-            self._sinks.remove(sink)
 
 
 class SecurityEventHandler:

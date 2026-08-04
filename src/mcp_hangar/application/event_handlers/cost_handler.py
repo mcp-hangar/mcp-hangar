@@ -12,7 +12,7 @@ logger = get_logger(__name__)
 
 
 class CostAttributionEventHandler:
-    """Computes cost on every successful tool invocation and publishes metrics."""
+    """Computes cost on every successful tool invocation and publishes the result."""
 
     def __init__(
         self,
@@ -37,22 +37,9 @@ class CostAttributionEventHandler:
         if cost_record.cost_cents == 0:
             return
 
-        # This counter belongs in MetricsEventHandler with every other one, but
-        # cannot move yet: CostReportGenerated carries tenant/period/total and
-        # none of the mcp_server / tool / cost_model dimensions record_cost
-        # needs, so the adapter could not reconstruct them from the event. Moving
-        # it means widening a persisted event, which needs a schema version and
-        # an upcaster. Until then this is the one application module that writes
-        # a metric directly, and the import-contract ledger records it.
-        from ...metrics import record_cost
-
-        record_cost(
-            mcp_server=cost_record.mcp_server_id,
-            tool=cost_record.tool_name,
-            cost_cents=cost_record.cost_cents,
-            cost_model=str(cost_record.cost_model),
-        )
-
+        # The counter itself lives in MetricsEventHandler with every other one.
+        # This handler computes the cost and publishes it; recording it is the
+        # metrics adapter's job, reached over the bus like everything else.
         logger.debug(
             "cost_attributed",
             mcp_server_id=cost_record.mcp_server_id,
@@ -68,6 +55,10 @@ class CostAttributionEventHandler:
                 period_end="",
                 total_cost=str(cost_record.cost_cents / 100.0),
                 currency=cost_record.currency,
+                mcp_server_id=cost_record.mcp_server_id,
+                tool_name=cost_record.tool_name,
+                cost_model=str(cost_record.cost_model),
+                cost_cents=cost_record.cost_cents,
             )
             # NOT publish([cost_event]): the bus takes one event, and a list reached
             # every subscribe-to-all handler as a `list` object while anything
