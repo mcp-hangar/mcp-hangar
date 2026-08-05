@@ -270,6 +270,14 @@ def bootstrap(
     # Initialize observability (tracing, Langfuse) early
     _, observability_adapter = init_observability(full_config)
 
+    # The one storage decision, before anything asks for storage. Returns None
+    # when `persistence.backend` is absent, in which case every subsystem below
+    # keeps configuring its own as it did before -- 2.4.0 is released, and this
+    # must not change what an existing configuration does.
+    from .persistence import select_backend
+
+    runtime.persistence_backend = select_backend(full_config)
+
     # Initialize event store for event sourcing
     init_event_store(runtime, full_config)
 
