@@ -24,7 +24,6 @@ from mcp_hangar._sdk_compat import FastMCP
 from .bootstrap import (
     _auto_add_volumes,
     _create_background_workers,
-    _create_discovery_source,
     _ensure_data_dir,
     _init_cqrs,
     _init_event_handlers,
@@ -141,7 +140,6 @@ __all__ = [
     "_init_saga",
     "_init_retry_config",
     "_auto_add_volumes",
-    "_create_discovery_source",
     "_create_background_workers",
     "_register_all_tools",
 ]

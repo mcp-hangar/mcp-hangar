@@ -7,9 +7,12 @@ These tests verify backward compatibility after the refactoring.
 import os
 from unittest.mock import MagicMock, patch
 
+import pytest
+
+from mcp_hangar.infrastructure.discovery.registry import UnknownDiscoverySourceError, create_source
+
 from mcp_hangar.server import (
     _auto_add_volumes,
-    _create_discovery_source,
     _ensure_data_dir,
     parse_args,
     GC_WORKER_INTERVAL_SECONDS,
@@ -132,13 +135,18 @@ class TestEnsureDataDir:
 
 
 class TestCreateDiscoverySource:
-    """Tests for _create_discovery_source function."""
+    """Tests for discovery source construction (registry.create_source)."""
 
-    def test_unknown_source_type_returns_none(self):
-        """Should return None for unknown source type."""
-        result = _create_discovery_source("unknown_type", {})
+    def test_unknown_source_type_raises(self):
+        """A configured source that cannot exist must not be skipped silently.
 
-        assert result is None
+        This used to return None, and bootstrap logged a warning and carried on
+        -- so a typo in `type:` produced a gateway running with no discovery and
+        one line in the log. `init_event_store` already refuses an unknown
+        driver; this now matches.
+        """
+        with pytest.raises(UnknownDiscoverySourceError):
+            create_source("unknown_type", {})
 
     def test_kubernetes_source_creation(self):
         """Should create Kubernetes source with correct config."""
@@ -151,7 +159,7 @@ class TestCreateDiscoverySource:
 
         # May raise ImportError if kubernetes package not installed
         try:
-            result = _create_discovery_source("kubernetes", config)
+            result = create_source("kubernetes", config)
             # If we get here, kubernetes is installed
             assert result is None or hasattr(result, "discover")
         except ImportError:
@@ -165,7 +173,7 @@ class TestCreateDiscoverySource:
             "socket_path": "/var/run/docker.sock",
         }
 
-        result = _create_discovery_source("docker", config)
+        result = create_source("docker", config)
 
         # Should return a source or None (depending on docker availability)
         assert result is None or hasattr(result, "discover")
@@ -179,7 +187,7 @@ class TestCreateDiscoverySource:
             "watch": True,
         }
 
-        result = _create_discovery_source("filesystem", config)
+        result = create_source("filesystem", config)
 
         assert result is None or hasattr(result, "discover")
 
@@ -190,13 +198,13 @@ class TestCreateDiscoverySource:
             "group": "mcp.mcp_servers",
         }
 
-        result = _create_discovery_source("entrypoint", config)
+        result = create_source("entrypoint", config)
 
         assert result is None or hasattr(result, "discover")
 
     def test_mode_defaults_to_additive(self):
         """Should default to additive mode when not specified."""
-        result = _create_discovery_source("filesystem", {"path": "/tmp"})
+        result = create_source("filesystem", {"path": "/tmp"})
 
         assert result is None or hasattr(result, "discover")
 

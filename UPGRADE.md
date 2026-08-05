@@ -1,5 +1,26 @@
 # Upgrading MCP Hangar
 
+## Discovery: an unknown `source_type` now refuses to start
+
+A discovery source configured with a type nothing provides used to be skipped
+with a warning, and the gateway carried on with that source absent. A typo in
+`type:` therefore produced a running gateway with no discovery and one line in
+the log. It now raises at startup, the way an unknown `event_store.driver`
+already did.
+
+**Who is affected:** deployments whose configuration names a source type that
+is not installed. They were already not getting that source; now they are told.
+
+**What to do:** fix the type, or install the package that provides it. The
+error lists the types that are registered.
+
+A missing *optional dependency* is unchanged -- `ImportError` still degrades
+with a warning, because that is a deployment shape rather than a mistake in the
+configuration.
+
+Third-party sources now register under the `mcp_hangar.discovery_sources` entry
+point group, so adding one no longer means patching the core.
+
 ## Removed: `EventBus.on_error`
 
 The hook that registered a callback for exceptions raised inside event handlers

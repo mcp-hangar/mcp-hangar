@@ -46,7 +46,7 @@ from ..state import get_runtime, GROUPS
 from .components import ServerComponents, get_auth_compat_exports, load_components
 
 from .cqrs import init_cqrs, init_auth_cqrs, init_saga, save_group_circuit_breakers
-from .discovery import _auto_add_volumes, _create_discovery_source, create_discovery_orchestrator
+from .discovery import _auto_add_volumes, create_discovery_orchestrator
 from .event_handlers import init_event_handlers
 from .event_store import init_event_store, recover_undelivered_events
 from .hot_loading import init_hot_loading
@@ -511,7 +511,6 @@ __all__ = [
     "_create_discovery_orchestrator",
     "_register_all_tools",
     "_auto_add_volumes",
-    "_create_discovery_source",
     # Backward compatibility: auth shims
     "AuthComponents",
     "NullAuthComponents",

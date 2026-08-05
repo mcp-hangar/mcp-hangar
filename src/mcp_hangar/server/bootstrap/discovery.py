@@ -6,9 +6,9 @@ from pathlib import Path
 from typing import Any, cast
 
 from ...application.discovery import DiscoveryConfig, DiscoveryOrchestrator
-from ...domain.discovery import DiscoveryMode
 from ...domain.model import McpServer
 from ...domain.security.input_validator import InputValidator
+from ...infrastructure.discovery.registry import UnknownDiscoverySourceError, create_source
 from ...logging_config import get_logger
 from ..state import get_runtime, set_discovery_orchestrator
 
@@ -44,10 +44,17 @@ def create_discovery_orchestrator(config: dict[str, Any]) -> DiscoveryOrchestrat
     for source_config in sources_config:
         source_type = source_config.get("type")
         try:
-            source = _create_discovery_source(source_type, source_config)
-            if source:
-                orchestrator.add_source(source)
+            orchestrator.add_source(create_source(source_type, source_config))
+        except UnknownDiscoverySourceError:
+            # Deliberately NOT caught. A configured source that silently does
+            # nothing is the failure this codebase keeps finding: the operator
+            # believes the fleet is watched and one startup warning is the only
+            # thing that ever says otherwise. `init_event_store` already refuses
+            # an unknown driver the same way.
+            raise
         except ImportError as e:
+            # An optional dependency is missing -- a deployment shape, not a
+            # mistake in the configuration. Degrade, as before.
             logger.warning(
                 "discovery_source_unavailable",
                 source_type=source_type,
@@ -66,60 +73,6 @@ def create_discovery_orchestrator(config: dict[str, Any]) -> DiscoveryOrchestrat
 
     set_discovery_orchestrator(orchestrator)
     return orchestrator
-
-
-def _create_discovery_source(source_type: str, config: dict[str, Any]):
-    """Create a discovery source based on type and config.
-
-    Args:
-        source_type: Type of discovery source (kubernetes, docker, filesystem, entrypoint).
-        config: Source configuration dictionary.
-
-    Returns:
-        Discovery source instance or None.
-    """
-    mode_str = config.get("mode", "additive")
-    mode = DiscoveryMode.AUTHORITATIVE if mode_str == "authoritative" else DiscoveryMode.ADDITIVE
-
-    if source_type == "kubernetes":
-        from ...infrastructure.discovery import KubernetesDiscoverySource
-
-        return KubernetesDiscoverySource(
-            mode=mode,
-            namespaces=config.get("namespaces"),
-            label_selector=config.get("label_selector"),
-            in_cluster=config.get("in_cluster", True),
-        )
-    elif source_type == "docker":
-        from ...infrastructure.discovery import DockerDiscoverySource
-
-        return DockerDiscoverySource(
-            mode=mode,
-            socket_path=config.get("socket_path"),
-        )
-    elif source_type == "filesystem":
-        from ...infrastructure.discovery import FilesystemDiscoverySource
-
-        path = config.get("path", "/etc/mcp-hangar/mcp_servers.d/")
-        resolved_path = Path(path)
-        if not resolved_path.is_absolute():
-            resolved_path = Path.cwd() / resolved_path
-        return FilesystemDiscoverySource(
-            mode=mode,
-            path=str(resolved_path),
-            pattern=config.get("pattern", "*.yaml"),
-            watch=config.get("watch", True),
-        )
-    elif source_type == "entrypoint":
-        from ...infrastructure.discovery import EntrypointDiscoverySource
-
-        return EntrypointDiscoverySource(
-            mode=mode,
-            group=config.get("group", "mcp.mcp_servers"),
-        )
-    else:
-        logger.warning("discovery_unknown_source_type", source_type=source_type)
-        return None
 
 
 async def _on_mcp_server_register(mcp_server) -> bool:
