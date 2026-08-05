@@ -229,7 +229,10 @@ def recover_undelivered_events(runtime: Any) -> int:
         How many events were recovered.
     """
     try:
-        recovered = runtime.event_bus.dispatch_pending()
+        # `runtime` is untyped here, so the count arrives as `Any`; narrow it at
+        # the boundary rather than letting it leak out of a function that
+        # promises an int.
+        recovered = int(runtime.event_bus.dispatch_pending())
     except Exception as e:  # noqa: BLE001 -- fault-barrier: recovery must not block startup
         logger.warning("dispatch_recovery_failed", error=str(e))
         return 0
