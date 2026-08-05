@@ -67,7 +67,7 @@ The enforcement plane — what the call path actually decides:
 - **Per-tenant tool projection** -- front-door mode presents a different executable surface per caller, fail-closed on unknown identity.
 - **Human-in-the-loop approvals** -- gate a call on an explicit decision, authorized and attributed to a real principal. Delivery channels are pluggable; core ships no vendor integration.
 - **Governed task relay** -- Hangar interposes on the SEP-2663 task lifecycle and never becomes an executor: no scheduler, no job runner, no result store.
-- **Attributable audit** -- an event-sourced trail exported to SIEM as CEF, LEEF 2.0, RFC 5424 syslog or JSON-lines, and to OTLP.
+- **Attributable audit** -- an identity-attributed audit record exported to SIEM as CEF, LEEF 2.0, RFC 5424 syslog or JSON-lines, and to OTLP.
 
 Everything else it takes to run a fleet:
 
