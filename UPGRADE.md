@@ -1,5 +1,24 @@
 # Upgrading MCP Hangar
 
+## Removed: `EventBus.on_error`
+
+The hook that registered a callback for exceptions raised inside event handlers
+is gone, along with the list it appended to.
+
+**Who is affected:** only code that calls `EventBus.on_error(...)`. Nothing in
+Hangar ever did, so the loop that invoked those callbacks ran zero times on
+every handler failure -- dead code in the one path that only executes when
+something is already wrong. `IEventBus`, the port the application layer depends
+on, never declared it.
+
+**What to do:** nothing, unless you registered a callback. If you did, the
+information it carried is now a metric: a handler that raises increments
+`mcp_hangar_errors{component="event_handler"}`, labelled with the exception
+type, and the `event_handler_error` log line now names the failing handler.
+
+The fault barrier itself is unchanged -- one failing handler still does not stop
+the others, and `publish()` still does not raise.
+
 ## 2.3.0 — two things to check before you roll out
 
 Neither affects a default deployment. The first matters only if you import the
