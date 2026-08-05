@@ -14,9 +14,12 @@ could observe the other. The mismatch was invisible because no writer ever ran;
 it would have surfaced as an endpoint that stayed empty after the store started
 filling up, which is the worst moment to discover a naming convention.
 
-There is deliberately no parsing function. A stream id is written and matched by
-prefix, never taken apart, so an id that round-trips through split() is a
-capability nothing needs and a constraint on the format nobody asked for.
+There is deliberately no parsing function, and no prefix helper either. A
+stream id is written and matched, never taken apart; the first version of this
+module shipped a `stream_prefix_for()` with no caller, on the theory that
+listing streams would want one, and the dead-symbol gate rejected it before
+review did. Speculative API is the same disease as the 22 event classes nothing
+emits. Both come back when a caller does.
 """
 
 from __future__ import annotations
@@ -25,9 +28,6 @@ from typing import Final
 
 #: Aggregate type for `McpServer` streams.
 MCP_SERVER: Final = "mcp_server"
-
-#: Aggregate type for `McpServerGroup` streams.
-MCP_SERVER_GROUP: Final = "mcp_server_group"
 
 SEPARATOR: Final = ":"
 
@@ -43,18 +43,3 @@ def stream_id_for(aggregate_type: str, aggregate_id: str) -> str:
         The stream identifier, e.g. `mcp_server:math`.
     """
     return f"{aggregate_type}{SEPARATOR}{aggregate_id}"
-
-
-def stream_prefix_for(aggregate_type: str) -> str:
-    """The prefix matching every stream of one aggregate type.
-
-    Kept beside `stream_id_for` so a caller listing streams uses the same
-    separator as the caller writing them.
-
-    Args:
-        aggregate_type: Aggregate type, e.g. `MCP_SERVER`.
-
-    Returns:
-        The prefix, e.g. `mcp_server:`.
-    """
-    return f"{aggregate_type}{SEPARATOR}"
