@@ -17,6 +17,7 @@ from mcp_hangar.domain.value_objects.hook import Hook, HookPhase
 from mcp_hangar.lock_hierarchy import LockLevel, TrackedLock
 from mcp_hangar.stream_ids import stream_id_for
 from mcp_hangar.logging_config import get_logger
+from mcp_hangar.metrics import record_error
 from mcp_hangar.observability.tracing import get_tracer
 
 logger = get_logger(__name__)
@@ -67,7 +68,6 @@ class EventBus(IEventBus):
         # Safe to acquire before: EVENT_STORE, REPOSITORY, STDIO_CLIENT
         # Note: Handlers are called OUTSIDE this lock to avoid blocking
         self._lock = TrackedLock(LockLevel.EVENT_BUS, "EventBus", reentrant=False)
-        self._error_handlers: list[Callable[[Exception, DomainEvent], None]] = []
         self._event_store = event_store or NullEventStore()
         self._dispatch_checkpoint = dispatch_checkpoint
         self._hook_subscribers: list[IHookSubscriber] = []
@@ -258,22 +258,20 @@ class EventBus(IEventBus):
                 try:
                     handler(event)
                 except Exception as e:  # noqa: BLE001 -- fault-barrier: handler errors must not break other handlers
+                    # Counted, not only logged. The barrier is right -- one bad
+                    # handler must not stop the others -- but until now the only
+                    # trace of a swallowed failure was a log line, so an audit
+                    # handler that threw on every event looked exactly like one
+                    # that was working. A counter puts it on the dashboard the
+                    # team already watches.
+                    record_error("event_handler", type(e).__name__)
                     logger.exception(
                         "event_handler_error",
                         event_type=event_type_name,
+                        handler=getattr(handler, "__qualname__", repr(handler)),
                         error=str(e),
                     )
                     evt_span.record_exception(e)
-                    # Call error handlers
-                    for error_handler in self._error_handlers:
-                        try:
-                            error_handler(e, event)
-                        except Exception as eh:  # noqa: BLE001 -- fault-barrier: error_handler failure must not break event publishing
-                            logger.exception(
-                                "event_error_handler_failed",
-                                event_type=event_type_name,
-                                error=str(eh),
-                            )
 
             # Hook fan-out: deliver phase-wrapped event to hook subscribers.
             # Default phase is OBSERVE for events published via the flat API;
@@ -511,20 +509,10 @@ class EventBus(IEventBus):
                 if hasattr(span, "record_exception"):
                     span.record_exception(e)
 
-    def on_error(self, handler: Callable[[Exception, DomainEvent], None]) -> None:
-        """
-        Register a handler for errors that occur during event handling.
-
-        Args:
-            handler: Callable that takes (exception, event)
-        """
-        self._error_handlers.append(handler)
-
     def clear(self) -> None:
         """Clear all subscriptions (mainly for testing)."""
         with self._lock:
             self._handlers.clear()
-            self._error_handlers.clear()
             self._hook_subscribers.clear()
             self._hook_sequence = 0
 
