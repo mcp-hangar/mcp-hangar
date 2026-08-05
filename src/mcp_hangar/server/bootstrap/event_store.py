@@ -193,16 +193,14 @@ def init_event_store(runtime: "Runtime", config: dict[str, Any]) -> None:
 def _selected_backend(config: dict[str, Any]) -> Any:
     """The storage backend, if this deployment selected one.
 
-    Held on the runtime rather than rebuilt here: the backend owns connection
-    pools, and building a second one would give the event store a different
-    database handle than everything else -- the very split this replaces.
+    Read from the bootstrap holder rather than rebuilt here: the backend owns
+    connection pools, and building a second one would give the event store a
+    different database handle than everything else -- the very split this
+    replaces. `config` is accepted for symmetry with the caller and is not read.
     """
-    from ..state import get_runtime
+    from .composition import get_persistence_backend
 
-    try:
-        return getattr(get_runtime(), "persistence_backend", None)
-    except Exception:  # noqa: BLE001 -- boundary: no runtime yet means no backend yet
-        return None
+    return get_persistence_backend()
 
 
 def _install_from_backend(runtime: Any, backend: Any, name: str) -> None:
