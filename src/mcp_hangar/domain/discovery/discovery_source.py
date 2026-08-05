@@ -95,8 +95,13 @@ class DiscoverySource(ABC):
     def source_type(self) -> str:
         """Return source identifier.
 
+        This is the value operators write as `type` in a source's config entry,
+        and the one a factory is registered under. Built-ins use `kubernetes`,
+        `docker`, `filesystem` and `entrypoint`; a third-party source picks its
+        own -- the set is open, and core holds no list of it.
+
         Returns:
-            One of: kubernetes, docker, filesystem, entrypoint
+            This source's type, e.g. `kubernetes`.
         """
         ...
 

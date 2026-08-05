@@ -20,7 +20,9 @@ class DiscoveredMcpServer:
 
     Attributes:
         name: Unique identifier for the mcp_server
-        source_type: Origin of discovery (kubernetes, docker, filesystem, entrypoint)
+        source_type: Origin of discovery -- the `source_type` of the source that
+            found it. Built-ins are kubernetes, docker, filesystem and
+            entrypoint; a third-party source contributes its own
         mode: Connection mode (stdio, sse, http, subprocess)
         connection_info: Mode-specific connection details
         metadata: Labels, annotations, and custom data
