@@ -98,9 +98,12 @@ def _create_storage_backends(
 
     elif driver == "postgresql" or driver == "postgres":
         from mcp_hangar.auth.infrastructure.postgres_store import (
-            create_postgres_connection_factory,
             PostgresApiKeyStore,
             PostgresRoleStore,
+        )
+        from mcp_hangar.infrastructure.persistence.database_common import (
+            PostgresConfig,
+            PostgresConnectionFactory,
         )
 
         logger.info(
@@ -110,14 +113,22 @@ def _create_storage_backends(
             database=config.storage.database,
         )
 
-        connection_factory = create_postgres_connection_factory(
-            host=config.storage.host,
-            port=config.storage.port,
-            database=config.storage.database,
-            user=config.storage.user,
-            password=config.storage.password,
-            min_connections=config.storage.min_connections,
-            max_connections=config.storage.max_connections,
+        # The shared factory, not a second one owned by auth. There were two
+        # implementations of "pool psycopg2 connections" -- this one and an
+        # identical private copy in `postgres_store` -- which is how a backend
+        # ends up configured differently depending on which door you came
+        # through (#779). One place knows psycopg2; every store depends on the
+        # `IConnectionFactory` port.
+        connection_factory = PostgresConnectionFactory(
+            PostgresConfig(
+                host=config.storage.host,
+                port=config.storage.port,
+                database=config.storage.database,
+                user=config.storage.user,
+                password=config.storage.password,
+                min_connections=config.storage.min_connections,
+                max_connections=config.storage.max_connections,
+            )
         )
 
         pg_api_key_store = PostgresApiKeyStore(connection_factory, event_publisher=event_publisher)

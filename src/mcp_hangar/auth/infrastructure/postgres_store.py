@@ -7,11 +7,10 @@ Provides production-ready storage backends with:
 - Proper transaction handling
 - Domain event emission (CQRS compatible)
 
-Requires: asyncpg or psycopg2
+Requires: psycopg2 (installed by the `postgres` extra)
 """
 
 from collections.abc import Callable
-from contextlib import contextmanager
 from datetime import datetime, timedelta, UTC
 import hmac
 import json
@@ -118,12 +117,15 @@ class PostgresApiKeyStore(IApiKeyStore, IInitialAdminBootstrapStore):
         """Initialize the PostgreSQL store.
 
         Args:
-            connection_factory: Callable that returns a DB connection.
-                               Should support context manager protocol.
+            connection_factory: An `IConnectionFactory` -- the shared port from
+                `infrastructure.persistence.database_common`. This store knows
+                SQL; it deliberately does not know psycopg2, pooling, or how a
+                connection is obtained. One place holds that knowledge, and it
+                is the factory (#779).
             table_prefix: Optional prefix for table names.
             event_publisher: Optional callback for publishing domain events.
         """
-        self._get_connection = connection_factory
+        self._connections = connection_factory
         self._prefix = table_prefix
         self._table = f"{table_prefix}api_keys" if table_prefix else "api_keys"
         self._roles_table = f"{table_prefix}roles" if table_prefix else "roles"
@@ -138,7 +140,7 @@ class PostgresApiKeyStore(IApiKeyStore, IInitialAdminBootstrapStore):
             schema = schema.replace("api_keys", self._table)
             schema = schema.replace("initial_admin_bootstrap", self._bootstrap_table)
 
-        with self._get_connection() as conn:
+        with self._connections.get_connection() as conn:
             with conn.cursor() as cur:
                 cur.execute(schema)
             conn.commit()
@@ -146,7 +148,7 @@ class PostgresApiKeyStore(IApiKeyStore, IInitialAdminBootstrapStore):
 
     def get_principal_for_key(self, key_hash: str) -> Principal | None:
         """Look up principal for an API key hash."""
-        with self._get_connection() as conn, conn.cursor() as cur:
+        with self._connections.get_connection() as conn, conn.cursor() as cur:
             cur.execute(
                 f"""
                     SELECT principal_id, tenant_id, groups, name, key_id,
@@ -251,7 +253,7 @@ class PostgresApiKeyStore(IApiKeyStore, IInitialAdminBootstrapStore):
         """
         from .api_key_authenticator import ApiKeyAuthenticator
 
-        with self._get_connection() as conn, conn.cursor() as cur:
+        with self._connections.get_connection() as conn, conn.cursor() as cur:
             # Check key count for principal
             cur.execute(
                 f"""
@@ -324,7 +326,7 @@ class PostgresApiKeyStore(IApiKeyStore, IInitialAdminBootstrapStore):
         """Atomically create the first API-key administrator, if unclaimed."""
         from .api_key_authenticator import ApiKeyAuthenticator
 
-        with self._get_connection() as conn, conn.cursor() as cur:
+        with self._connections.get_connection() as conn, conn.cursor() as cur:
             try:
                 cur.execute(
                     f"""
@@ -387,7 +389,7 @@ class PostgresApiKeyStore(IApiKeyStore, IInitialAdminBootstrapStore):
 
         Emits: ApiKeyRevoked event
         """
-        with self._get_connection() as conn, conn.cursor() as cur:
+        with self._connections.get_connection() as conn, conn.cursor() as cur:
             # Get principal_id before revoking
             cur.execute(
                 f"""
@@ -430,7 +432,7 @@ class PostgresApiKeyStore(IApiKeyStore, IInitialAdminBootstrapStore):
 
     def list_keys(self, principal_id: str) -> list[ApiKeyMetadata]:
         """List API keys for a principal."""
-        with self._get_connection() as conn, conn.cursor() as cur:
+        with self._connections.get_connection() as conn, conn.cursor() as cur:
             cur.execute(
                 f"""
                     SELECT key_id, name, principal_id, created_at,
@@ -457,7 +459,7 @@ class PostgresApiKeyStore(IApiKeyStore, IInitialAdminBootstrapStore):
 
     def count_keys(self, principal_id: str) -> int:
         """Count active keys for a principal."""
-        with self._get_connection() as conn, conn.cursor() as cur:
+        with self._connections.get_connection() as conn, conn.cursor() as cur:
             cur.execute(
                 f"""
                     SELECT COUNT(*) FROM {self._table}
@@ -489,7 +491,7 @@ class PostgresApiKeyStore(IApiKeyStore, IInitialAdminBootstrapStore):
         """
         from .api_key_authenticator import ApiKeyAuthenticator
 
-        with self._get_connection() as conn, conn.cursor() as cur:
+        with self._connections.get_connection() as conn, conn.cursor() as cur:
             # Look up existing key
             cur.execute(
                 f"""
@@ -639,11 +641,15 @@ class PostgresRoleStore(IRoleStore):
         """Initialize the PostgreSQL store.
 
         Args:
-            connection_factory: Callable that returns a DB connection.
+            connection_factory: An `IConnectionFactory` -- the shared port from
+                `infrastructure.persistence.database_common`. This store knows
+                SQL; it deliberately does not know psycopg2, pooling, or how a
+                connection is obtained. One place holds that knowledge, and it
+                is the factory (#779).
             table_prefix: Optional prefix for table names.
             event_publisher: Optional callback for publishing domain events.
         """
-        self._get_connection = connection_factory
+        self._connections = connection_factory
         self._prefix = table_prefix
         self._roles_table = f"{table_prefix}roles" if table_prefix else "roles"
         self._assignments_table = f"{table_prefix}role_assignments" if table_prefix else "role_assignments"
@@ -656,7 +662,7 @@ class PostgresRoleStore(IRoleStore):
             schema = schema.replace("roles", self._roles_table)
             schema = schema.replace("role_assignments", self._assignments_table)
 
-        with self._get_connection() as conn:
+        with self._connections.get_connection() as conn:
             with conn.cursor() as cur:
                 cur.execute(schema)
 
@@ -686,7 +692,7 @@ class PostgresRoleStore(IRoleStore):
 
     def get_role(self, role_name: str) -> Role | None:
         """Get role by name."""
-        with self._get_connection() as conn, conn.cursor() as cur:
+        with self._connections.get_connection() as conn, conn.cursor() as cur:
             cur.execute(
                 f"""
                     SELECT name, description, permissions
@@ -718,7 +724,7 @@ class PostgresRoleStore(IRoleStore):
 
     def add_role(self, role: Role) -> None:
         """Add a custom role."""
-        with self._get_connection() as conn:
+        with self._connections.get_connection() as conn:
             with conn.cursor() as cur:
                 permissions_json = json.dumps(
                     [
@@ -748,7 +754,7 @@ class PostgresRoleStore(IRoleStore):
         scope: str = "*",
     ) -> list[Role]:
         """Get all roles assigned to a principal."""
-        with self._get_connection() as conn, conn.cursor() as cur:
+        with self._connections.get_connection() as conn, conn.cursor() as cur:
             if scope == "*":
                 cur.execute(
                     f"""
@@ -799,7 +805,7 @@ class PostgresRoleStore(IRoleStore):
         Emits: RoleAssigned event
         """
         validate_role_scope(scope)
-        with self._get_connection() as conn:
+        with self._connections.get_connection() as conn:
             with conn.cursor() as cur:
                 # Verify role exists
                 cur.execute(f"SELECT 1 FROM {self._roles_table} WHERE name = %s", (role_name,))
@@ -844,7 +850,7 @@ class PostgresRoleStore(IRoleStore):
 
         Emits: RoleRevoked event
         """
-        with self._get_connection() as conn:
+        with self._connections.get_connection() as conn:
             with conn.cursor() as cur:
                 cur.execute(
                     f"""
@@ -870,57 +876,3 @@ class PostgresRoleStore(IRoleStore):
                             revoked_by=revoked_by or "system",
                         )
                     )
-
-
-def create_postgres_connection_factory(
-    host: str = "localhost",
-    port: int = 5432,
-    database: str = "mcp_hangar",
-    user: str = "mcp_hangar",
-    password: str = "",
-    min_connections: int = 2,
-    max_connections: int = 10,
-):
-    """Create a connection factory for PostgreSQL.
-
-    Uses psycopg2 with connection pooling.
-
-    Args:
-        host: Database host.
-        port: Database port.
-        database: Database name.
-        user: Database user.
-        password: Database password.
-        min_connections: Minimum pool size.
-        max_connections: Maximum pool size.
-
-    Returns:
-        Connection factory callable.
-    """
-    try:
-        import psycopg2  # noqa: F401 - imported for availability check
-        from psycopg2 import pool
-    except ImportError as e:
-        raise ImportError(
-            "psycopg2 is required for PostgreSQL storage. Install with: pip install psycopg2-binary"
-        ) from e
-
-    connection_pool = pool.ThreadedConnectionPool(
-        minconn=min_connections,
-        maxconn=max_connections,
-        host=host,
-        port=port,
-        database=database,
-        user=user,
-        password=password,
-    )
-
-    @contextmanager
-    def get_connection():
-        conn = connection_pool.getconn()
-        try:
-            yield conn
-        finally:
-            connection_pool.putconn(conn)
-
-    return get_connection

@@ -25,6 +25,14 @@ import pytest
 # ============================================================================
 
 
+class _NullFactory:
+    """A factory that yields nothing, for tests that never touch a connection."""
+
+    @contextmanager
+    def get_connection(self):
+        yield None
+
+
 class TestPostgresApiKeyStore:
     """Tests for PostgresApiKeyStore with mock psycopg2 connection factory."""
 
@@ -38,9 +46,15 @@ class TestPostgresApiKeyStore:
         mock_conn.__enter__ = Mock(return_value=mock_conn)
         mock_conn.__exit__ = Mock(return_value=False)
 
-        @contextmanager
-        def connection_factory():
-            yield mock_conn
+        # The port, not a bare callable: the store depends on
+        # `IConnectionFactory`, so the double has to be one too -- otherwise the
+        # test passes against a shape production does not use.
+        class _Factory:
+            @contextmanager
+            def get_connection(self):
+                yield mock_conn
+
+        connection_factory = _Factory()
 
         store = PostgresApiKeyStore(
             connection_factory=connection_factory,
@@ -52,13 +66,13 @@ class TestPostgresApiKeyStore:
     def test_init_default_table_name(self):
         from mcp_hangar.auth.infrastructure.postgres_store import PostgresApiKeyStore
 
-        store = PostgresApiKeyStore(connection_factory=lambda: None)
+        store = PostgresApiKeyStore(connection_factory=_NullFactory())
         assert store._table == "api_keys"
 
     def test_init_with_prefix(self):
         from mcp_hangar.auth.infrastructure.postgres_store import PostgresApiKeyStore
 
-        store = PostgresApiKeyStore(connection_factory=lambda: None, table_prefix="auth_")
+        store = PostgresApiKeyStore(connection_factory=_NullFactory(), table_prefix="auth_")
         assert store._table == "auth_api_keys"
 
     def test_initialize_creates_schema(self):
@@ -581,9 +595,15 @@ class TestPostgresRoleStore:
         mock_conn.__enter__ = Mock(return_value=mock_conn)
         mock_conn.__exit__ = Mock(return_value=False)
 
-        @contextmanager
-        def connection_factory():
-            yield mock_conn
+        # The port, not a bare callable: the store depends on
+        # `IConnectionFactory`, so the double has to be one too -- otherwise the
+        # test passes against a shape production does not use.
+        class _Factory:
+            @contextmanager
+            def get_connection(self):
+                yield mock_conn
+
+        connection_factory = _Factory()
 
         # PostgresRoleStore inherits from IRoleStore (Protocol) which declares
         # delete_role, list_all_roles, update_role as abstract. PostgresRoleStore
@@ -756,40 +776,59 @@ class TestPostgresRoleStore:
 # ============================================================================
 
 
-class TestCreatePostgresConnectionFactory:
-    """Tests for create_postgres_connection_factory."""
+class TestPostgresConnectionFactory:
+    """The single factory. There used to be two identical ones (#779)."""
 
-    def test_missing_psycopg2_raises_import_error(self):
-        from mcp_hangar.auth.infrastructure.postgres_store import create_postgres_connection_factory
+    def test_missing_psycopg2_names_what_to_install(self):
+        """The message is the whole value here.
+
+        The `postgres` extra used to install asyncpg while this code imports
+        psycopg2, so an operator following the documented install hit this error
+        and needed it to name the right package (#779).
+        """
+        from mcp_hangar.infrastructure.persistence.database_common import (
+            PostgresConfig,
+            PostgresConnectionFactory,
+        )
+
+        factory = PostgresConnectionFactory(PostgresConfig())
 
         with patch.dict("sys.modules", {"psycopg2": None, "psycopg2.pool": None}):
-            with pytest.raises(ImportError, match="psycopg2"):
-                create_postgres_connection_factory()
+            with pytest.raises(ImportError, match="psycopg2-binary"):
+                with factory.get_connection():
+                    pass
 
-    def test_factory_creates_pool_and_returns_callable(self):
+    def test_the_pool_is_built_from_the_config(self):
+        from mcp_hangar.infrastructure.persistence.database_common import (
+            PostgresConfig,
+            PostgresConnectionFactory,
+        )
+
         mock_pool_module = MagicMock()
-        mock_pool = MagicMock()
-        mock_pool_module.ThreadedConnectionPool.return_value = mock_pool
-
         mock_psycopg2 = MagicMock()
         mock_psycopg2.pool = mock_pool_module
 
         import sys
 
         with patch.dict(sys.modules, {"psycopg2": mock_psycopg2, "psycopg2.pool": mock_pool_module}):
-            from mcp_hangar.auth.infrastructure.postgres_store import create_postgres_connection_factory
-
-            factory = create_postgres_connection_factory(
-                host="db.local",
-                port=5433,
-                database="test_db",
-                user="testuser",
-                password="secret",
-                min_connections=1,
-                max_connections=5,
+            factory = PostgresConnectionFactory(
+                PostgresConfig(
+                    host="db.local",
+                    port=5433,
+                    database="test_db",
+                    user="testuser",
+                    password="secret",
+                    min_connections=1,
+                    max_connections=5,
+                )
             )
+            with factory.get_connection():
+                pass
 
-            assert callable(factory)
+        kwargs = mock_pool_module.ThreadedConnectionPool.call_args.kwargs
+        assert kwargs["host"] == "db.local"
+        assert kwargs["port"] == 5433
+        assert (kwargs["minconn"], kwargs["maxconn"]) == (1, 5)
 
 
 # ============================================================================
