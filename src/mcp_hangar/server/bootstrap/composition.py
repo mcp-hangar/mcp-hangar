@@ -55,6 +55,7 @@ RUNTIME_PROVIDERS: RuntimeMcpServerStore = RuntimeMcpServerStore()
 # Saga and discovery instances (initialized in main())
 _group_rebalance_saga: GroupRebalanceSaga | None = None
 _discovery_orchestrator: DiscoveryOrchestrator | None = None
+_persistence_backend: Any = None
 
 
 def get_runtime(rate_limit: dict[str, Any] | None = None) -> Runtime:
@@ -87,6 +88,22 @@ def __getattr__(name: str) -> object:
         stacklevel=2,
     )
     return cast(object, getattr(get_runtime(), runtime_attr))
+
+
+def set_persistence_backend(backend: Any) -> None:
+    """Record the one storage backend this process persists through.
+
+    Held here rather than on `Runtime`, which is a frozen dataclass on purpose:
+    the runtime is assembled once and not mutated afterwards, and the storage
+    decision arrives during bootstrap like the discovery orchestrator does.
+    """
+    global _persistence_backend
+    _persistence_backend = backend
+
+
+def get_persistence_backend() -> Any:
+    """The selected storage backend, or None when none was configured."""
+    return _persistence_backend
 
 
 def set_discovery_orchestrator(orchestrator: DiscoveryOrchestrator | None) -> None:
