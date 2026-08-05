@@ -30,13 +30,47 @@ if [ -z "$branch" ]; then
 fi
 
 echo "Release branch: ${branch}"
+
+# Take the assembler OUT of the tree before switching to the release branch.
+#
+# The checkout below replaces the whole working tree, and the release branch is
+# not guaranteed to contain this mechanism: release-please only rebuilds its
+# branch when the commit set changes the release it proposes, so right after
+# this landed the branch still pointed at the previous main. The step checked
+# it out, deleted `scripts/build_changelog.py` from under itself, and failed
+# trying to run a file that was no longer there (run 30955840864). A snapshot
+# costs one `cp` and makes the step independent of what the branch happens to
+# carry.
+#
+# Checking out only the paths (`git checkout "$branch" -- CHANGELOG.md`) would
+# keep the tooling but leave HEAD on main, and this step has to COMMIT onto the
+# release branch.
+assembler="${RUNNER_TEMP:-/tmp}/build_changelog.py"
+cp scripts/build_changelog.py "$assembler"
+
 git fetch --force origin "${branch}:refs/remotes/origin/${branch}"
+
+# Refuse to write onto a release branch that does not contain the commit this
+# run was triggered by.
+#
+# release-please rebuilds its branch only when the commit set changes the
+# release it proposes, so a push that leaves the version alone leaves a branch
+# behind main -- carrying, among other things, whatever CHANGELOG.md main has
+# since moved on from. That is what produced the conflict on #739: main gained
+# a 2.4.0 section while the branch still held release-please's own generated
+# one. Assembling onto that tree would write notes destined to conflict, so it
+# waits for the rebuild instead and says why.
+if ! git merge-base --is-ancestor "${GITHUB_SHA:-HEAD}" "origin/${branch}"; then
+  echo "::warning::${branch} does not contain ${GITHUB_SHA:-HEAD}; it is behind main. Skipping assembly until release-please rebuilds it."
+  exit 0
+fi
+
 git checkout --force -B "$branch" "origin/${branch}"
 
 version=$(python3 -c 'import json,pathlib;print(json.loads(pathlib.Path(".release-please-manifest.json").read_text())["."])')
 echo "Manifest version: ${version}"
 
-if ! python3 scripts/build_changelog.py assemble --version "$version"; then
+if ! python3 "$assembler" assemble --version "$version"; then
   echo "::error::changelog assembly failed for ${version}"
   exit 1
 fi
