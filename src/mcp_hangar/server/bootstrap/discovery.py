@@ -6,9 +6,9 @@ from pathlib import Path
 from typing import Any, cast
 
 from ...application.discovery import DiscoveryConfig, DiscoveryOrchestrator
-from ...domain.model import McpServer
 from ...domain.security.input_validator import InputValidator
 from ...infrastructure.discovery.registry import UnknownDiscoverySourceError, create_source
+from ...application.commands.crud_commands import CreateMcpServerCommand
 from ...logging_config import get_logger
 from ..state import get_runtime, set_discovery_orchestrator
 
@@ -197,8 +197,18 @@ async def _on_mcp_server_register(mcp_server) -> bool:
 
         mcp_server_kwargs["env"] = conn_info.get("env", {})
 
-        new_mcp_server = McpServer(**cast(Any, mcp_server_kwargs))
-        get_runtime().repository.add(mcp_server.name, new_mcp_server)
+        # Through the command bus, not around it. Building the aggregate here
+        # skipped everything the command handler does: the duplicate guard, the
+        # SSRF check on a remote endpoint, and `McpServerRegistered` -- so a
+        # server could join the fleet automatically, unvalidated, leaving one
+        # log line and no record. `source` carries the provenance the CRUD path
+        # has always carried for hand-registered servers.
+        get_runtime().command_bus.send(
+            CreateMcpServerCommand(
+                **cast(Any, mcp_server_kwargs),
+                source=f"discovery:{mcp_server.source_type}",
+            )
+        )
         logger.info(
             "discovery_registered_mcp_server",
             mcp_server_name=mcp_server.name,
