@@ -87,9 +87,15 @@ class ValidationReport:
 class SecurityConfig:
     """Security configuration for validation.
 
+    Holds the checks that are true of every source. Rules only one kind of
+    infrastructure understands belong to that source's `policy_violation`.
+
     Attributes:
-        allowed_namespaces: Whitelist of K8s namespaces
-        denied_namespaces: Blacklist of K8s namespaces
+        allowed_namespaces: **Read by nothing here.** The kubernetes source owns
+            the namespace policy now; `create_discovery_orchestrator` carries the
+            legacy `discovery.security` location onto that source and warns. The
+            field is kept so an old config still parses, and is due for removal
+        denied_namespaces: **Read by nothing here.** See `allowed_namespaces`
         require_health_check: Whether to require health check pass
         require_mcp_schema: Whether to validate MCP schema
         max_mcp_servers_per_source: Max mcp_servers from single source
