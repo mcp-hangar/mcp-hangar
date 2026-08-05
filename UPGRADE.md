@@ -1,5 +1,25 @@
 # Upgrading MCP Hangar
 
+## Removed: eight domain event classes that nothing emitted
+
+`CatalogItemApproved`, `CatalogItemDeprecated`, `CatalogItemPublished`,
+`CatalogItemRejected`, `ToolSchemaChanged`, `ToolSchemaDriftDetected`,
+`BehavioralModeChanged` and `CapabilityDeclarationMissing` are gone from
+`mcp_hangar.domain.events`.
+
+**Who is affected:** only code that imports one of those names. No deployment
+can have received one of these events, because nothing in Hangar has ever
+constructed one -- they were vocabulary for features that were never built, and
+an audit found them with no producer and no consumer anywhere in the tree.
+
+**What to do:** delete the import and any handler registered against it. Such a
+handler has never been called, so removing it changes no behaviour.
+
+A stream cannot contain one either, so no event store needs migrating. The
+remaining unemitted events -- the five discovery ones, four quarantine ones and
+`PolicyPushRejected` -- are deliberately kept: those features are live or
+planned, and the missing emitter is tracked rather than papered over.
+
 ## 2.3.0 — two things to check before you roll out
 
 Neither affects a default deployment. The first matters only if you import the

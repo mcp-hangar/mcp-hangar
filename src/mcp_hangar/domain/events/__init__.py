@@ -72,10 +72,6 @@ from .auth import (
     AuthenticationSucceeded,
     AuthorizationDenied,
     AuthorizationGranted,
-    CatalogItemApproved,
-    CatalogItemDeprecated,
-    CatalogItemPublished,
-    CatalogItemRejected,
     CostReportGenerated,
     KeyRotated,
     NamespaceCreated,
@@ -119,8 +115,6 @@ from .administration import (
 )
 from .enforcement import (
     BehavioralDeviationDetected,
-    BehavioralModeChanged,
-    CapabilityDeclarationMissing,
     CapabilityViolationDetected,
     DigestMismatchEvent,
     EgressBlocked,
@@ -132,8 +126,6 @@ from .enforcement import (
     ProviderCapabilityQuarantineReleased,
     ProviderCapabilityQuarantined,
     ResponseTruncated,
-    ToolSchemaChanged,
-    ToolSchemaDriftDetected,
 )
 from .analysis import (
     DetectionRuleMatched,
@@ -214,13 +206,7 @@ __all__ = [
     "BatchInvocationCompleted",
     "BatchInvocationRequested",
     "BehavioralDeviationDetected",
-    "BehavioralModeChanged",
-    "CapabilityDeclarationMissing",
     "CapabilityViolationDetected",
-    "CatalogItemApproved",
-    "CatalogItemDeprecated",
-    "CatalogItemPublished",
-    "CatalogItemRejected",
     "CircuitBreakerStateChanged",
     "ConfigurationReloadFailed",
     "ConfigurationReloadRequested",
@@ -308,8 +294,6 @@ __all__ = [
     "ToolInvocationFailed",
     "ToolInvocationRequested",
     "ToolRestored",
-    "ToolSchemaChanged",
-    "ToolSchemaDriftDetected",
     "ToolWithdrawn",
     "ToolWithdrawnRejected",
 ]

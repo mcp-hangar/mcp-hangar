@@ -299,48 +299,6 @@ class NamespaceDeleted(DomainEvent):
 
 
 @dataclass
-class CatalogItemPublished(DomainEvent):
-    """Published when a catalog item is published."""
-
-    item_id: str
-    name: str
-    version: str
-    published_by: str
-
-
-@dataclass
-class CatalogItemApproved(DomainEvent):
-    """Published when a catalog item is approved for deployment."""
-
-    item_id: str
-    name: str
-    version: str
-    approved_by: str
-    notes: str
-
-
-@dataclass
-class CatalogItemRejected(DomainEvent):
-    """Published when a catalog item is rejected."""
-
-    item_id: str
-    name: str
-    rejected_by: str
-    reason: str
-
-
-@dataclass
-class CatalogItemDeprecated(DomainEvent):
-    """Published when a catalog item is deprecated."""
-
-    item_id: str
-    name: str
-    deprecated_by: str
-    reason: str
-    sunset_date: str | None
-
-
-@dataclass
 class CostReportGenerated(DomainEvent):
     """Published when a cost report is generated.
 

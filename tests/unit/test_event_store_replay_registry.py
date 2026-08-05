@@ -155,8 +155,16 @@ class TestEverythingWritableIsAlsoReadable:
         assert mismatched == [], f"registered under a name that is not the class's own: {mismatched}"
 
     def test_the_registry_is_not_trivially_small(self):
-        """Guards against a discovery bug that silently registers nothing."""
-        assert len(EVENT_TYPE_MAP) >= 100
+        """Guards against a discovery bug that silently registers nothing.
+
+        A floor, not a census. Coverage is guaranteed by
+        `test_every_event_class_can_be_deserialised`, which derives the expected
+        set from the class hierarchy and needs no maintenance; this only catches
+        the registry coming up empty or near-empty. The number moved from 100
+        when eight event classes with no producer and no consumer were deleted,
+        which is a legitimate way for it to fall.
+        """
+        assert len(EVENT_TYPE_MAP) >= 50
 
 
 class TestTheAggregateEventsSpecifically:
