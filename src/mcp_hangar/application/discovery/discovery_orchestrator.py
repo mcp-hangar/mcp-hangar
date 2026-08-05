@@ -357,7 +357,10 @@ class DiscoveryOrchestrator:
                     return "rejected"
 
             # Validate mcp_server
-            validation_report = await self._validator.validate(mcp_server)
+            # The source that produced it answers for its own policy; the
+            # validator no longer recognises sources by name.
+            producing_source = self._discovery_service.get_source(mcp_server.source_type)
+            validation_report = await self._validator.validate(mcp_server, source=producing_source)
 
             main_metrics.record_discovery_validation_duration(
                 source_type=mcp_server.source_type,

@@ -156,11 +156,15 @@ def _load_entry_points() -> None:
 def _kubernetes(mode: DiscoveryMode, config: dict[str, Any]) -> DiscoverySource:
     from . import KubernetesDiscoverySource
 
+    allowed = config.get("allowed_namespaces")
+    denied = config.get("denied_namespaces")
     return KubernetesDiscoverySource(
         mode=mode,
         namespaces=config.get("namespaces"),
         label_selector=config.get("label_selector"),
         in_cluster=config.get("in_cluster", True),
+        allowed_namespaces=set(allowed) if allowed is not None else None,
+        denied_namespaces=set(denied) if denied is not None else None,
     )
 
 
