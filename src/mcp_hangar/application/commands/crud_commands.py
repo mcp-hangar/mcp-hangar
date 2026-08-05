@@ -30,6 +30,14 @@ class CreateMcpServerCommand(Command):
         idle_ttl_s: Idle TTL in seconds before auto-shutdown.
         health_check_interval_s: Health check interval in seconds.
         description: Human-readable description / preprompt.
+        volumes: Docker volume mounts. Present because a discovered container
+            can carry them and the aggregate has always accepted them; without
+            it, routing discovery through this command would drop them silently.
+        read_only: Mount the container root read-only. Same reasoning as
+            volumes -- and losing this one would silently relax a container's
+            hardening, which is the worse direction to drop a field in. The
+            default mirrors the aggregate's, which is True: a caller that says
+            nothing gets the hardened container, not the permissive one.
         source: Who is registering this mcp_server ("api", "config", "discovery").
     """
 
@@ -42,6 +50,8 @@ class CreateMcpServerCommand(Command):
     idle_ttl_s: int = 300
     health_check_interval_s: int = 60
     description: str | None = None
+    volumes: list[str] | None = None
+    read_only: bool = True
     source: str = "api"
 
 

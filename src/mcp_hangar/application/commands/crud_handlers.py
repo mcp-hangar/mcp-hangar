@@ -90,6 +90,8 @@ class CreateMcpServerHandler(CommandHandler):
             idle_ttl_s=command.idle_ttl_s,
             health_check_interval_s=command.health_check_interval_s,
             description=command.description,
+            volumes=command.volumes,
+            read_only=command.read_only,
         )
         self._repository.add(command.mcp_server_id, mcp_server)
 
