@@ -71,6 +71,15 @@ def stream_id_for_event(event: object) -> str | None:
     if isinstance(mcp_server_id, str) and mcp_server_id:
         return stream_id_for(MCP_SERVER, mcp_server_id)
 
+    # Discovery names a server before it has an id, and the name it reports is
+    # the id the server is registered under -- so the two are the same subject
+    # at two moments, and belong in one stream. That is what makes the history
+    # readable end to end: discovered, registered, started, and for one that
+    # never got in, discovered and then quarantined.
+    mcp_server_name = getattr(event, "mcp_server_name", None)
+    if isinstance(mcp_server_name, str) and mcp_server_name:
+        return stream_id_for(MCP_SERVER, mcp_server_name)
+
     group_id = getattr(event, "group_id", None)
     if isinstance(group_id, str) and group_id:
         return stream_id_for(MCP_SERVER_GROUP, group_id)

@@ -12,10 +12,17 @@ from dataclasses import dataclass, field
 from datetime import datetime, UTC
 from typing import TYPE_CHECKING, Any
 
+from mcp_hangar.domain.contracts.event_bus import IEventBus
 from mcp_hangar.domain.discovery.conflict_resolver import ConflictResolver
 from mcp_hangar.domain.discovery.discovered_mcp_server import DiscoveredMcpServer
 from mcp_hangar.domain.discovery.discovery_service import DiscoveryCycleResult, DiscoveryService
 from mcp_hangar.domain.discovery.discovery_source import DiscoverySource
+from mcp_hangar.domain.events import (
+    McpServerDiscovered,
+    McpServerDiscoveryConfigChanged,
+    McpServerDiscoveryLost,
+    McpServerQuarantined,
+)
 from mcp_hangar.logging_config import get_logger
 from mcp_hangar.observability.tracing import get_tracer
 
@@ -112,6 +119,7 @@ class DiscoveryOrchestrator:
         config: DiscoveryConfig | None = None,
         static_mcp_servers: set[str] | None = None,
         input_validator: InputValidator | None = None,
+        event_bus: IEventBus | None = None,
     ):
         """Initialize discovery orchestrator.
 
@@ -119,9 +127,13 @@ class DiscoveryOrchestrator:
             config: Discovery configuration
             static_mcp_servers: Set of static mcp_server names (from config)
             input_validator: Optional InputValidator for command validation
+            event_bus: Where discovery's own events go. Optional because the
+                orchestrator runs in tests without one; when it is absent the
+                events are simply not emitted, and nothing else changes.
         """
         self.config = config or DiscoveryConfig()
         self._input_validator = input_validator
+        self._event_bus = event_bus
 
         # Core components
         self._conflict_resolver = ConflictResolver(static_mcp_servers)
@@ -144,6 +156,32 @@ class DiscoveryOrchestrator:
         self._running = False
         self._discovery_task: asyncio.Task[None] | None = None
         self._last_cycle: datetime | None = None
+
+    def _emit(self, event: Any) -> None:
+        """Record something discovery did, if there is a bus to record it on.
+
+        Discovery is the one door into the fleet nobody opens by hand, which is
+        why its history is worth keeping: a server appeared, its definition
+        changed under us, it was refused, it went away. Five event classes for
+        exactly this were declared long ago and never emitted by anything --
+        the vocabulary existed, the feature was live, and the log stayed empty
+        (#762).
+
+        Failures here are swallowed on purpose. The bus already has a fault
+        barrier around handlers and keeps delivering when the store cannot
+        write; this is the last line of defence, so that recording an event can
+        never be the reason a discovery cycle dies.
+        """
+        if self._event_bus is None:
+            return
+        try:
+            self._event_bus.publish(event)
+        except Exception as e:  # noqa: BLE001 -- fault-barrier: bookkeeping must not stop discovery
+            logger.warning(
+                "discovery_event_not_recorded",
+                event_type=type(event).__name__,
+                error=str(e),
+            )
 
     def add_source(self, source: DiscoverySource) -> None:
         """Add a discovery source.
@@ -330,8 +368,18 @@ class DiscoveryOrchestrator:
                 self._lifecycle_manager.update_seen(mcp_server.name)
                 return "skipped"
             else:
-                # Config changed, need to validate again
-                pass
+                # Config changed, need to validate again. Recorded here because
+                # this is the only place both fingerprints exist: a moment later
+                # `existing` has been overwritten with the new definition and the
+                # old one is gone for good.
+                self._emit(
+                    McpServerDiscoveryConfigChanged(
+                        mcp_server_name=mcp_server.name,
+                        source_type=mcp_server.source_type,
+                        old_fingerprint=existing.fingerprint,
+                        new_fingerprint=mcp_server.fingerprint,
+                    )
+                )
 
         tracer = get_tracer(__name__)
         with tracer.start_as_current_span("discovery.process_mcp_server") as prov_span:
@@ -388,13 +436,50 @@ class DiscoveryOrchestrator:
                 )
 
                 if self.config.security.quarantine_on_failure:
+                    # Only the transition is an event. A refused server is
+                    # re-reported by its source on every cycle and refused again
+                    # each time, so recording each refusal writes a row per
+                    # cycle -- 2880 a day at the default refresh, all saying the
+                    # same thing. That is the poll transcript this log declines
+                    # to keep for cycle events, and it would be no better here.
+                    was_quarantined = self._lifecycle_manager.is_quarantined(mcp_server.name)
                     self._lifecycle_manager.quarantine(mcp_server, validation_report.reason)
                     main_metrics.record_discovery_quarantine(reason=validation_report.result.value)
+                    # A refusal is the discovery event most worth keeping: it
+                    # says something asked to join the fleet and was turned away,
+                    # and by which rule.
+                    if not was_quarantined:
+                        self._emit(
+                            McpServerQuarantined(
+                                mcp_server_name=mcp_server.name,
+                                source_type=mcp_server.source_type,
+                                reason=validation_report.reason,
+                                validation_result=validation_report.result.value,
+                            )
+                        )
                     prov_span.set_attribute("discovery.result", "quarantined")
                     return "quarantined"
 
                 prov_span.set_attribute("discovery.result", "skipped")
                 return "skipped"
+
+            # Recorded before registration is attempted, for two reasons. The
+            # log has to read in the order things happened -- discovery saw it,
+            # then the control plane took it -- and putting this after
+            # `on_register` produced a stream whose first row was the
+            # registration and whose second was the discovery that caused it.
+            # And a server the control plane then refuses is still a server this
+            # source reported: the absence of a registration after this row is
+            # exactly what an operator needs to see.
+            if existing is None:
+                self._emit(
+                    McpServerDiscovered(
+                        mcp_server_name=mcp_server.name,
+                        source_type=mcp_server.source_type,
+                        mode=mcp_server.mode,
+                        fingerprint=mcp_server.fingerprint,
+                    )
+                )
 
             # Register with main registry
             if self.on_register:
@@ -434,6 +519,17 @@ class DiscoveryOrchestrator:
         if mcp_server:
             self._validator.record_deregistration(mcp_server)
             main_metrics.record_discovery_deregistration(source_type=mcp_server.source_type, reason=reason)
+            # Emitted before the callback rather than after: the callback is
+            # what removes the server, and if it throws, the barrier below turns
+            # that into a log line. The record of *why* it was dropped --
+            # ttl_expired, source_removed -- would be the first thing lost.
+            self._emit(
+                McpServerDiscoveryLost(
+                    mcp_server_name=name,
+                    source_type=mcp_server.source_type,
+                    reason=reason,
+                )
+            )
 
         if self.on_deregister:
             try:
