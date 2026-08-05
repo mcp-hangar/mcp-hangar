@@ -7,9 +7,10 @@ from unittest.mock import MagicMock, patch
 
 import pytest
 
+from mcp_hangar.infrastructure.discovery.registry import UnknownDiscoverySourceError, create_source
+
 from mcp_hangar.server.bootstrap import (
     _auto_add_volumes,
-    _create_discovery_source,
     _ensure_data_dir,
     ApplicationContext,
     bootstrap,
@@ -247,12 +248,12 @@ class TestAutoAddVolumes:
 
 
 class TestCreateDiscoverySource:
-    """Tests for _create_discovery_source function."""
+    """Tests for discovery source construction (registry.create_source)."""
 
     def test_docker_source(self):
         """Should create Docker discovery source."""
         with patch("mcp_hangar.infrastructure.discovery.DockerDiscoverySource") as MockSource:
-            source = _create_discovery_source("docker", {"mode": "additive"})
+            source = create_source("docker", {"mode": "additive"})
 
         MockSource.assert_called_once()
         assert source == MockSource.return_value
@@ -265,7 +266,7 @@ class TestCreateDiscoverySource:
                 "path": str(tmp_path),
                 "pattern": "*.yaml",
             }
-            source = _create_discovery_source("filesystem", config)
+            source = create_source("filesystem", config)
 
         MockSource.assert_called_once()
         assert source == MockSource.return_value
@@ -273,21 +274,20 @@ class TestCreateDiscoverySource:
     def test_entrypoint_source(self):
         """Should create entrypoint discovery source."""
         with patch("mcp_hangar.infrastructure.discovery.EntrypointDiscoverySource") as MockSource:
-            source = _create_discovery_source("entrypoint", {"mode": "additive"})
+            source = create_source("entrypoint", {"mode": "additive"})
 
         MockSource.assert_called_once()
         assert source == MockSource.return_value
 
-    def test_unknown_source_returns_none(self):
-        """Unknown source type should return None."""
-        source = _create_discovery_source("unknown", {"mode": "additive"})
-
-        assert source is None
+    def test_unknown_source_raises(self):
+        """Unknown source types are a configuration error, not a skip."""
+        with pytest.raises(UnknownDiscoverySourceError):
+            create_source("unknown", {"mode": "additive"})
 
     def test_authoritative_mode(self):
         """Should handle authoritative mode correctly."""
         with patch("mcp_hangar.infrastructure.discovery.DockerDiscoverySource") as MockSource:
-            _create_discovery_source("docker", {"mode": "authoritative"})
+            create_source("docker", {"mode": "authoritative"})
 
         # Check that mode was passed correctly
         call_kwargs = MockSource.call_args.kwargs
