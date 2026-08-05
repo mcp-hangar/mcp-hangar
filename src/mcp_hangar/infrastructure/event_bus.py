@@ -6,10 +6,11 @@ Supports optional event persistence via IEventStore.
 
 from collections.abc import Callable
 import threading
+from typing import Final
 
 from mcp_hangar.domain.contracts.dispatch_checkpoint import IDispatchCheckpoint
 from mcp_hangar.domain.contracts.event_bus import IEventBus
-from mcp_hangar.domain.contracts.event_store import IEventStore, NullEventStore
+from mcp_hangar.domain.contracts.event_store import ConcurrencyError, IEventStore, NullEventStore
 from mcp_hangar.domain.contracts.hook_subscriber import IHookSubscriber
 from mcp_hangar.domain.events import DomainEvent
 from mcp_hangar.domain.value_objects.hook import Hook, HookPhase
@@ -19,6 +20,14 @@ from mcp_hangar.logging_config import get_logger
 from mcp_hangar.observability.tracing import get_tracer
 
 logger = get_logger(__name__)
+
+#: `expected_version` meaning "append after whatever is already there".
+#:
+#: Distinct from -1, which claims the stream does not exist yet and is a real
+#: assertion the store will reject if it is wrong. A caller with no version to
+#: assert needs a way to say so; without one it would have to invent -1 and get
+#: a ConcurrencyError on its second write to the same aggregate.
+APPEND_AT_END: Final = -2
 
 
 class EventHandler:
@@ -300,14 +309,53 @@ class EventBus(IEventBus):
         if not events:
             return expected_version
 
+        if expected_version == APPEND_AT_END:
+            # No optimistic-concurrency claim: the caller is appending to
+            # whatever is there. Aggregates do not carry a stream version yet --
+            # their state comes from the config repository, not from replay --
+            # so a version they could check against does not exist. Real
+            # concurrency control arrives with rehydration, and the callers that
+            # want it pass a version explicitly, as they do today.
+            expected_version = self._event_store.get_stream_version(stream_id)
+
         tracer = get_tracer(__name__)
         with tracer.start_as_current_span("event_store.append") as store_span:
             store_span.set_attribute("event_store.stream_id", stream_id)
             store_span.set_attribute("event_store.events_count", len(events))
             store_span.set_attribute("event_store.expected_version", expected_version)
 
-            # Persist first (fail fast if concurrency error)
-            new_version = self._event_store.append(stream_id, events, expected_version)
+            try:
+                new_version = self._event_store.append(stream_id, events, expected_version)
+            except ConcurrencyError:
+                # A genuine conflict is the caller's business, not something to
+                # paper over: someone else wrote where this caller expected to.
+                raise
+            except Exception as e:  # noqa: BLE001 -- see below; the store is not allowed to take delivery down with it
+                # Persistence failed for an infrastructure reason -- disk full,
+                # database locked, backend gone. Delivering nothing here would
+                # be the worse failure: metrics, audit, security and enforcement
+                # handlers all run off this path, so a store outage would
+                # silently switch off enforcement while the gateway kept serving
+                # traffic. Before this change those handlers ran without any
+                # store at all, and losing them is a regression persistence must
+                # not cause.
+                #
+                # So: deliver, and say loudly that the record is missing. The
+                # events are gone from the log for good -- there is no retry
+                # queue in front of a store that just failed.
+                logger.error(
+                    "event_persistence_failed",
+                    stream_id=stream_id,
+                    events_count=len(events),
+                    error=str(e),
+                    detail="events delivered to handlers but NOT persisted; the audit log has a hole here",
+                    exc_info=True,
+                )
+                store_span.record_exception(e)
+                for event in events:
+                    self.publish(event)
+                return expected_version
+
             store_span.set_attribute("event_store.new_version", new_version)
 
             logger.debug(
@@ -401,7 +449,7 @@ class EventBus(IEventBus):
         aggregate_type: str,
         aggregate_id: str,
         events: list[DomainEvent],
-        expected_version: int = -1,
+        expected_version: int = APPEND_AT_END,
     ) -> int:
         """
         Convenience method for publishing aggregate events.

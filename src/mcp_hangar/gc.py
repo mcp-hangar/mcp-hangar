@@ -8,6 +8,7 @@ from typing import Any, Literal
 from .domain.contracts.mcp_server_runtime import normalize_state_to_str, McpServerMapping, McpServerRuntime
 from .infrastructure.event_bus import get_event_bus
 from .logging_config import get_logger
+from .stream_ids import MCP_SERVER
 from .metrics import observe_health_check, record_error, record_gc_cycle, record_mcp_server_stop
 
 logger = get_logger(__name__)
@@ -79,11 +80,14 @@ class BackgroundWorker:
 
         McpServerRuntime is expected to support event collection.
         """
-        for event in mcp_server.collect_events():
-            try:
-                self._event_bus.publish(event)
-            except Exception:  # noqa: BLE001 -- fault-barrier: event publishing must not crash background worker
-                logger.exception("event_publish_failed")
+        # The runtime port promises `Iterable`, the store wants a list.
+        events = list(mcp_server.collect_events())
+        if not events:
+            return
+        try:
+            self._event_bus.publish_aggregate_events(MCP_SERVER, mcp_server.mcp_server_id, events)
+        except Exception:  # noqa: BLE001 -- fault-barrier: event publishing must not crash background worker
+            logger.exception("event_publish_failed")
 
     def _loop(self):
         """Main worker loop."""

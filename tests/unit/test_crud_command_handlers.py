@@ -62,9 +62,26 @@ def _make_cold_provider(mcp_server_id: str = "p", mode: str = "subprocess") -> M
 
 
 def _make_event_bus() -> MagicMock:
-    """Create a mock EventBus with a publish() method."""
+    """A mock EventBus that mirrors how the real one delivers.
+
+    Handlers drain aggregates through `publish_aggregate_events` now, and the
+    real bus appends that batch to the aggregate's stream and then calls
+    `publish` once per event. The double does the second half, so assertions
+    about *what was delivered* stay true to the production path instead of
+    quietly passing against a mock that delivers nothing.
+
+    `publish_aggregate_events.call_args_list` remains available for assertions
+    about *which stream* a handler named.
+    """
     bus = MagicMock()
     bus.publish = MagicMock()
+
+    def _append_and_publish(_aggregate_type, _aggregate_id, events):
+        for event in events:
+            bus.publish(event)
+        return len(events) - 1
+
+    bus.publish_aggregate_events = MagicMock(side_effect=_append_and_publish)
     return bus
 
 
