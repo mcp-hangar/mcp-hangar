@@ -74,6 +74,14 @@ dev = [
     "hypothesis>=6.90.0",
     "jsonschema>=4.20.0",
 ]
+# The kubernetes discovery source imports this. Until now it was declared
+# nowhere -- not a dependency, not an extra, not in the image -- so the source
+# could not be constructed on any supported install: bootstrap took the
+# ImportError path, logged `discovery_source_unavailable` and discovered
+# nothing, while the guide, the cookbook and the config reference all described
+# a working feature. `docker` is a base dependency, so its source always worked;
+# this is the same standing for kubernetes.
+kubernetes = ["kubernetes>=29.0.0"]
 langfuse = ["langfuse>=2.0.0"]
 opentelemetry = [
     "opentelemetry-api>=1.22.0",
