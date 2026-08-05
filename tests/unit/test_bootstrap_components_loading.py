@@ -100,12 +100,16 @@ class TestLoadComponents:
             auth_available=True,
         )
         monkeypatch.setattr(eb, "get_auth_compat_exports", lambda: fake_exports)
-        monkeypatch.setattr(eb, "get_event_store", lambda: "event-store")
 
+        # The store is INJECTED now. It used to be fetched from a module-level
+        # singleton here -- a different store from the one bootstrap configures,
+        # and one whose class lacks three of the four methods the
+        # `event_sourcing` auth driver calls.
         ec = eb.load_components(
             {"auth": {"enabled": True}},
             event_bus="bus",
             event_publisher="publisher",
+            event_store="event-store",
         )
         assert ec.auth_components is sentinel
         assert ec.approval_service is not None

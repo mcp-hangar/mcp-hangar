@@ -13,6 +13,7 @@ from mcp_hangar.domain.contracts.hook_subscriber import IHookSubscriber
 from mcp_hangar.domain.events import DomainEvent
 from mcp_hangar.domain.value_objects.hook import Hook, HookPhase
 from mcp_hangar.lock_hierarchy import LockLevel, TrackedLock
+from mcp_hangar.stream_ids import stream_id_for
 from mcp_hangar.logging_config import get_logger
 from mcp_hangar.observability.tracing import get_tracer
 
@@ -325,7 +326,7 @@ class EventBus(IEventBus):
         Returns:
             New stream version.
         """
-        stream_id = f"{aggregate_type}:{aggregate_id}"
+        stream_id = stream_id_for(aggregate_type, aggregate_id)
         return self.publish_to_stream(stream_id, events, expected_version)
 
     def publish_hook(self, event: DomainEvent, phase: HookPhase) -> None:

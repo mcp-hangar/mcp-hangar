@@ -8,7 +8,6 @@ from ...application.sagas import GroupRebalanceSaga
 from ...application.sagas.mcp_server_failover_saga import McpServerFailoverEventSaga
 from ...application.sagas.mcp_server_recovery_saga import McpServerRecoverySaga
 from ...domain.model.circuit_breaker import CircuitBreaker
-from ...infrastructure.event_store import get_event_store
 from ...infrastructure.persistence.saga_state_store import NullSagaStateStore, SagaStateStore
 from ...infrastructure.saga_manager import get_saga_manager
 from ...logging_config import get_logger
@@ -53,7 +52,7 @@ def init_cqrs(
         runtime.query_bus,
         repository,
         runtime_store=RUNTIME_PROVIDERS,
-        event_store=get_event_store(),
+        event_store=runtime.event_bus.event_store,
     )
     register_crud_handlers(runtime.command_bus, repository, runtime.event_bus, GROUPS)
 
