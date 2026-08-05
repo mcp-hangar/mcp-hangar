@@ -97,6 +97,38 @@ class HealthTracker:
             return 1.0
         return (self._total_invocations - self._total_failures) / self._total_invocations
 
+    def restore(
+        self,
+        *,
+        consecutive_failures: int | None = None,
+        total_failures: int | None = None,
+        total_invocations: int | None = None,
+        last_success_at: float | None = None,
+        last_failure_at: float | None = None,
+    ) -> None:
+        """Set counters from a replayed event, without re-dating them.
+
+        `record_success` / `record_failure` stamp `time.time()`, which is
+        correct when something just happened and wrong when it is being read
+        back: replaying a week-old failure through them would move it to now,
+        the same defect #704 fixed for event identity. Replay needs a seam that
+        says so, rather than five writes into this object's privates from
+        another class.
+
+        Only the arguments given are applied, so a handler can restore the two
+        counters its event actually carries.
+        """
+        if consecutive_failures is not None:
+            self._consecutive_failures = consecutive_failures
+        if total_failures is not None:
+            self._total_failures = total_failures
+        if total_invocations is not None:
+            self._total_invocations = total_invocations
+        if last_success_at is not None:
+            self._last_success_at = last_success_at
+        if last_failure_at is not None:
+            self._last_failure_at = last_failure_at
+
     def record_success(self) -> None:
         """Record a successful operation.
 

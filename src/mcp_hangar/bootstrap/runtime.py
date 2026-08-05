@@ -319,6 +319,8 @@ def create_runtime(
             mcp_server_repository=repo,
             config_repository=config_repository,
             audit_repository=audit_repository,
+            # The same store the bus appends to; recovery replays what it wrote.
+            event_store=eb.event_store,
         )
     else:
         # Use in-memory repositories for non-persistent mode
