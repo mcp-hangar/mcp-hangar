@@ -19,7 +19,8 @@ stream id is written and matched, never taken apart; the first version of this
 module shipped a `stream_prefix_for()` with no caller, on the theory that
 listing streams would want one, and the dead-symbol gate rejected it before
 review did. Speculative API is the same disease as the 22 event classes nothing
-emits. Both come back when a caller does.
+emits. Both come back when a caller does -- `MCP_SERVER_GROUP` is back here for
+exactly that reason: five drain points now name it.
 """
 
 from __future__ import annotations
@@ -28,6 +29,9 @@ from typing import Final
 
 #: Aggregate type for `McpServer` streams.
 MCP_SERVER: Final = "mcp_server"
+
+#: Aggregate type for `McpServerGroup` streams.
+MCP_SERVER_GROUP: Final = "mcp_server_group"
 
 SEPARATOR: Final = ":"
 

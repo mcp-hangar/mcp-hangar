@@ -26,9 +26,18 @@ class RecordingEventBus(IEventBus):
 
     def __init__(self) -> None:
         self.published: list[object] = []
+        self.streams: list[tuple[str, str, list]] = []
 
     def publish(self, event: object) -> None:
         self.published.append(event)
+
+    def publish_aggregate_events(self, aggregate_type: str, aggregate_id: str, events: list) -> int:
+        # Records the stream it was told to append to as well as the events, so
+        # a caller naming the wrong aggregate is visible to a test rather than
+        # only to whoever reads the store months later.
+        self.streams.append((aggregate_type, aggregate_id, list(events)))
+        self.published.extend(events)
+        return len(events) - 1
 
 
 class RecordingCommandBus(ICommandBus):

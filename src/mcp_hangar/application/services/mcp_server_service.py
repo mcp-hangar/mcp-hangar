@@ -7,6 +7,7 @@ from ...domain.model import McpServer
 from ...domain.repository import IMcpServerRepository
 from ...domain.contracts.event_bus import IEventBus
 from ...logging_config import get_logger
+from ...stream_ids import MCP_SERVER
 from ...observability.tracing import get_tracer
 
 logger = get_logger(__name__)
@@ -34,11 +35,12 @@ class McpServerService:
     def _publish_events(self, mcp_server: McpServer) -> None:
         """Publish all collected events from mcp_server."""
         events = mcp_server.collect_events()
-        for event in events:
-            try:
-                self._event_bus.publish(event)
-            except Exception as e:  # noqa: BLE001 -- fault-barrier: event publishing must not crash mcp_server operations
-                logger.error(f"Failed to publish event {event.__class__.__name__}: {e}")
+        if not events:
+            return
+        try:
+            self._event_bus.publish_aggregate_events(MCP_SERVER, mcp_server.mcp_server_id, events)
+        except Exception as e:  # noqa: BLE001 -- fault-barrier: event publishing must not crash mcp_server operations
+            logger.error(f"Failed to publish events for {mcp_server.mcp_server_id}: {e}")
 
     def _get_mcp_server(self, mcp_server_id: str) -> McpServer:
         """Get mcp_server or raise McpServerNotFoundError."""

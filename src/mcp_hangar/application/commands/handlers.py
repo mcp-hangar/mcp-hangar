@@ -10,6 +10,7 @@ from ...domain.contracts.runtime_store import IRuntimeMcpServerStore
 from ...domain.exceptions import McpServerNotFoundError
 from ...domain.repository import IMcpServerRepository
 from ...logging_config import get_logger
+from ...stream_ids import MCP_SERVER
 from ...metrics import observe_tool_call, record_error, record_mcp_server_start, record_mcp_server_stop
 from ..ports.bus import ICommandBus
 from ..ports.config_loader import IConfigLoader
@@ -57,16 +58,22 @@ class BaseMcpServerHandler(CommandHandler):
 
     def _publish_events(self, mcp_server: McpServerRuntime) -> None:
         """Publish collected events from mcp_server (no duck typing)."""
-        for event in mcp_server.collect_events():
-            try:
-                self._event_bus.publish(event)
-            except (RuntimeError, ValueError, TypeError) as e:
-                logger.error(
-                    "event_publish_failed",
-                    event_type=type(event).__name__,
-                    error=str(e),
-                    exc_info=True,
-                )
+        # The runtime port promises `Iterable`, the store wants a list.
+        events = list(mcp_server.collect_events())
+        if not events:
+            return
+        try:
+            self._event_bus.publish_aggregate_events(MCP_SERVER, mcp_server.mcp_server_id, events)
+        except (RuntimeError, ValueError, TypeError) as e:
+            # The barrier stays where it was and keeps its type list. It now
+            # covers a batch rather than one event, which is what appending to a
+            # stream is: the store writes all of them or none.
+            logger.error(
+                "event_publish_failed",
+                event_types=[type(event).__name__ for event in events],
+                error=str(e),
+                exc_info=True,
+            )
 
 
 class StartMcpServerHandler(BaseMcpServerHandler):

@@ -24,6 +24,7 @@ from ...domain.security.ssrf import validate_no_ssrf
 from ...domain.value_objects import LoadBalancerStrategy, McpServerMode, McpServerState
 from ...domain.contracts.command import CommandHandler
 from ...logging_config import get_logger
+from ...stream_ids import MCP_SERVER, MCP_SERVER_GROUP
 from .crud_commands import (
     AddGroupMemberCommand,
     CreateGroupCommand,
@@ -167,10 +168,9 @@ class UpdateMcpServerHandler(CommandHandler):
             health_check_interval_s=command.health_check_interval_s,
         )
 
-        # Collect the McpServerUpdated event recorded by update_config()
-        # and forward it through the event bus.
-        for event in mcp_server.collect_events():
-            self._event_bus.publish(event)
+        # Collect the McpServerUpdated event recorded by update_config() and
+        # append it to the aggregate's stream, which also delivers it.
+        self._event_bus.publish_aggregate_events(MCP_SERVER, mcp_server.mcp_server_id, mcp_server.collect_events())
 
         logger.info(
             "mcp_server_updated",
@@ -288,9 +288,8 @@ class DeleteMcpServerHandler(CommandHandler):
         # the no-I/O-under-lock rule.
         if mcp_server.state not in (McpServerState.COLD, McpServerState.DEAD):
             mcp_server.shutdown()
-            # Publish any lifecycle events emitted by shutdown()
-            for event in mcp_server.collect_events():
-                self._event_bus.publish(event)
+            # Persist and publish any lifecycle events emitted by shutdown()
+            self._event_bus.publish_aggregate_events(MCP_SERVER, mcp_server.mcp_server_id, mcp_server.collect_events())
 
         self._repository.remove(command.mcp_server_id)
 
@@ -357,8 +356,7 @@ class CreateGroupHandler(CommandHandler):
             self._groups[command.group_id] = group
 
         # Publish events OUTSIDE lock (no I/O under lock)
-        for event in group.collect_events():
-            self._event_bus.publish(event)
+        self._event_bus.publish_aggregate_events(MCP_SERVER_GROUP, group.id, group.collect_events())
 
         logger.info("group_created", group_id=command.group_id, strategy=command.strategy)
         return {"group_id": command.group_id, "created": True}
@@ -411,8 +409,7 @@ class UpdateGroupHandler(CommandHandler):
         )
 
         # Collect the GroupUpdated event and forward through event bus
-        for event in group.collect_events():
-            self._event_bus.publish(event)
+        self._event_bus.publish_aggregate_events(MCP_SERVER_GROUP, group.id, group.collect_events())
 
         logger.info("group_updated", group_id=command.group_id, source=command.source)
         return {"group_id": command.group_id, "updated": True}
@@ -460,8 +457,7 @@ class DeleteGroupHandler(CommandHandler):
         group.stop_all()
 
         # Collect any lifecycle events from stop_all(), then emit GroupDeleted
-        for event in group.collect_events():
-            self._event_bus.publish(event)
+        self._event_bus.publish_aggregate_events(MCP_SERVER_GROUP, group.id, group.collect_events())
         self._event_bus.publish(GroupDeleted(group_id=command.group_id))
 
         logger.info("group_deleted", group_id=command.group_id, source=command.source)
@@ -517,8 +513,7 @@ class AddGroupMemberHandler(CommandHandler):
             group.add_member(mcp_server, weight=command.weight, priority=command.priority)
 
         # Collect GroupMemberAdded event and forward
-        for event in group.collect_events():
-            self._event_bus.publish(event)
+        self._event_bus.publish_aggregate_events(MCP_SERVER_GROUP, group.id, group.collect_events())
 
         logger.info("group_member_added", group_id=command.group_id, mcp_server_id=command.mcp_server_id)
         return {"group_id": command.group_id, "mcp_server_id": command.mcp_server_id, "added": True}
@@ -563,8 +558,7 @@ class RemoveGroupMemberHandler(CommandHandler):
             group.remove_member(command.mcp_server_id)
 
         # Collect GroupMemberRemoved event and forward
-        for event in group.collect_events():
-            self._event_bus.publish(event)
+        self._event_bus.publish_aggregate_events(MCP_SERVER_GROUP, group.id, group.collect_events())
 
         logger.info("group_member_removed", group_id=command.group_id, mcp_server_id=command.mcp_server_id)
         return {"group_id": command.group_id, "mcp_server_id": command.mcp_server_id, "removed": True}
