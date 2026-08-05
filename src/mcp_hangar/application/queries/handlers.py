@@ -8,6 +8,7 @@ from ...domain.exceptions import McpServerNotFoundError
 from ...domain.policies.mcp_server_health import to_health_status_string
 from ...domain.repository import IMcpServerRepository
 from ...logging_config import get_logger
+from ...stream_ids import MCP_SERVER, stream_id_for
 from ..ports.bus import IQueryBus
 from ..read_models import HealthInfo, McpServerDetails, McpServerSummary, SystemMetrics, ToolInfo
 from .queries import (
@@ -254,21 +255,32 @@ class GetToolInvocationHistoryHandler(QueryHandler):
             Dict with mcp_server_id, history list, and total count.
         """
         event_store = self._event_store
-        target_stream_id = f"mcp_server-{query.mcp_server_id}"
+        # The id comes from the shared kernel, not from a format string here.
+        # This handler used to compose `mcp_server-{id}` while the only writer
+        # composes `mcp_server:{id}`; the two could not observe each other and
+        # nothing failed, because no writer ever ran.
+        target_stream_id = stream_id_for(MCP_SERVER, query.mcp_server_id)
         tool_event_types = {"ToolInvocationCompleted", "ToolInvocationFailed"}
         limit = min(max(1, query.limit), 500)
 
+        # `read_stream` is the port's API and answers with domain events, not
+        # store wrappers: no `.event_type`, no `.version`. The type name comes
+        # from the class. A stream that does not exist reads as empty, so there
+        # is no separate existence check to keep in step with it.
+        #
+        # `from_position` is inclusive. The previous form skipped every event
+        # at or below it, so the default -- 0, which both the query and the REST
+        # endpoint use to mean "from the beginning" -- dropped the first event
+        # of every stream. Nothing depended on that: this query could not return
+        # a row at all until the store it reads had a writer.
         history = []
-        if event_store.stream_exists(target_stream_id):
-            events = event_store.load(target_stream_id)
-            for stored_event in events:
-                if stored_event.event_type not in tool_event_types:
-                    continue
-                if stored_event.version <= query.from_position:
-                    continue
-                history.append(stored_event.to_dict())
-                if len(history) >= limit:
-                    break
+        events = event_store.read_stream(target_stream_id, from_version=max(0, query.from_position))
+        for event in events:
+            if type(event).__name__ not in tool_event_types:
+                continue
+            history.append(event.to_dict())
+            if len(history) >= limit:
+                break
 
         return {
             "mcp_server_id": query.mcp_server_id,

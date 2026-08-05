@@ -19,7 +19,6 @@ from typing import Any, cast
 from collections.abc import Callable
 
 from ...application.ports.observability import ObservabilityPort
-from ...infrastructure.event_store import get_event_store
 from ...logging_config import get_logger
 
 logger = get_logger(__name__)
@@ -151,6 +150,7 @@ def load_components(
     config: dict[str, Any],
     event_bus: Any = None,
     event_publisher: Any = None,
+    event_store: Any = None,
 ) -> ServerComponents:
     """Load the optional auth and approval components.
 
@@ -182,7 +182,7 @@ def load_components(
     auth_components = exports.bootstrap_auth(
         auth_config,
         event_publisher=event_publisher,
-        event_store=get_event_store(),
+        event_store=event_store,
         event_bus=event_bus,
     )
     components = ServerComponents(auth_components=auth_components, approval_service=approval_service)

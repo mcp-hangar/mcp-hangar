@@ -311,6 +311,11 @@ def bootstrap(
         config=full_config,
         event_bus=runtime.event_bus,
         event_publisher=lambda event: runtime.event_bus.publish(event),
+        # The store `init_event_store` just configured, not a second one. The
+        # `event_sourcing` auth driver calls `read_stream`, `get_stream_version`
+        # and `list_streams` -- the port's API -- and used to be handed a legacy
+        # in-memory store that has none of the three.
+        event_store=runtime.event_bus.event_store,
     )
 
     # Wire optional components with null fallbacks
