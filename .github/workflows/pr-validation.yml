@@ -31,7 +31,6 @@ jobs:
               - 'src/**'
             docs:
               - 'docs/**'
-              - 'mkdocs.yml'
 
   summary:
     runs-on: ubuntu-latest

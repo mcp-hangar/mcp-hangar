@@ -36,7 +36,7 @@
 
 - name: scope/docs
   color: ededed
-  description: docs/, mkdocs, READMEs
+  description: docs/, READMEs, published documentation
 
 - name: scope/infra
   color: ededed

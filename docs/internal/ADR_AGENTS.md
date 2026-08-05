@@ -336,8 +336,9 @@ After creating or modifying any ADR, confirm:
       point to existing files).
 - [ ] If superseding: bidirectional references in place (old ADR Status
       updated, new ADR references old).
-- [ ] If MkDocs is configured for this ADR:
-      `uv run mkdocs build --strict` produces no new warnings.
+- [ ] Published output is the `mcp-hangar/docs` repo rendered by
+      `mcp-hangar-website` at <https://mcp-hangar.io>. This repo builds no
+      documentation site; there is no local build step to run.
 
 ---
 
