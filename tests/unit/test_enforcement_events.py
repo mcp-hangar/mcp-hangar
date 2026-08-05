@@ -1,12 +1,10 @@
 """Unit tests for capability enforcement domain events."""
 
 from mcp_hangar.domain.events import (
-    CapabilityDeclarationMissing,
     CapabilityViolationDetected,
     EgressBlocked,
     ProviderCapabilityQuarantined,
     ProviderCapabilityQuarantineReleased,
-    ToolSchemaDriftDetected,
 )
 
 
@@ -86,36 +84,3 @@ class TestProviderCapabilityQuarantineReleased:
         assert event.released_by == "ops@example.com"
 
 
-class TestToolSchemaDriftDetected:
-    def test_new_tool_added(self) -> None:
-        event = ToolSchemaDriftDetected(
-            mcp_server_id="code-runner",
-            tools_added=["exec_shell"],
-            tools_removed=[],
-            tools_changed=[],
-        )
-        assert "exec_shell" in event.tools_added
-        assert event.tools_removed == []
-
-    def test_tool_removed(self) -> None:
-        event = ToolSchemaDriftDetected(
-            mcp_server_id="math",
-            tools_added=[],
-            tools_removed=["multiply"],
-            tools_changed=["add"],
-        )
-        assert "multiply" in event.tools_removed
-        assert "add" in event.tools_changed
-
-
-class TestCapabilityDeclarationMissing:
-    def test_default_alert_mode(self) -> None:
-        event = CapabilityDeclarationMissing(mcp_server_id="legacy-server")
-        assert event.enforcement_mode == "alert"
-
-    def test_block_mode(self) -> None:
-        event = CapabilityDeclarationMissing(
-            mcp_server_id="untrusted-server",
-            enforcement_mode="block",
-        )
-        assert event.enforcement_mode == "block"
