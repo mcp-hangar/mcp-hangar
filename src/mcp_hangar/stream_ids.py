@@ -47,3 +47,32 @@ def stream_id_for(aggregate_type: str, aggregate_id: str) -> str:
         The stream identifier, e.g. `mcp_server:math`.
     """
     return f"{aggregate_type}{SEPARATOR}{aggregate_id}"
+
+
+def stream_id_for_event(event: object) -> str | None:
+    """Which stream this event belongs to, read off the event itself.
+
+    An event that names an aggregate is that aggregate's history. Deriving the
+    stream here rather than at the call site is what lets `EventBus.publish`
+    persist by construction: the alternative was two publish methods, one of
+    which silently kept no record, and 34 call sites picked the forgetful one
+    against 10 that did not (#772).
+
+    Args:
+        event: A domain event.
+
+    Returns:
+        The stream id, or None when the event names no aggregate -- a config
+        reload, a batch outcome. Those are delivered and not stored; there is no
+        history for them to be part of, and inventing a bucket to hold them
+        would make the store harder to read, not more complete.
+    """
+    mcp_server_id = getattr(event, "mcp_server_id", None)
+    if isinstance(mcp_server_id, str) and mcp_server_id:
+        return stream_id_for(MCP_SERVER, mcp_server_id)
+
+    group_id = getattr(event, "group_id", None)
+    if isinstance(group_id, str) and group_id:
+        return stream_id_for(MCP_SERVER_GROUP, group_id)
+
+    return None
