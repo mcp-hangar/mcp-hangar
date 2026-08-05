@@ -158,9 +158,7 @@ assert namespace_a.tenant_id != namespace_b.tenant_id
 tenant = Tenant(quotas=TenantQuotas(max_providers=100))
 
 # Namespace restricts to 10
-namespace = Namespace(
-    quota_overrides=NamespaceQuotaOverrides(max_providers=10)
-)
+namespace = Namespace(quota_overrides=NamespaceQuotaOverrides(max_providers=10))
 
 # Effective quota is the lower value
 effective = namespace.get_effective_quota("max_providers", 100)

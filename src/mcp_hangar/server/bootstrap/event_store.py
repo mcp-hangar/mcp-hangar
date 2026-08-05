@@ -61,6 +61,11 @@ def init_event_store(runtime: "Runtime", config: dict[str, Any]) -> None:
             cannot be initialized and no explicit memory fallback was requested,
             or when an unknown driver is configured.
     """
+    backend = _selected_backend(config)
+    if backend is not None:
+        _install_from_backend(runtime, backend, str((config.get("persistence") or {}).get("backend")))
+        return
+
     event_store_config = config.get("event_store", {})
     enabled = event_store_config.get("enabled", True)
 
@@ -182,6 +187,45 @@ def init_event_store(runtime: "Runtime", config: dict[str, Any]) -> None:
 
     runtime.event_bus.set_event_store(event_store)
     _install_dispatch_checkpoint(runtime, event_store, event_store_config)
+    register_event_store_durability_check()
+
+
+def _selected_backend(config: dict[str, Any]) -> Any:
+    """The storage backend, if this deployment selected one.
+
+    Held on the runtime rather than rebuilt here: the backend owns connection
+    pools, and building a second one would give the event store a different
+    database handle than everything else -- the very split this replaces.
+    """
+    from ..state import get_runtime
+
+    try:
+        return getattr(get_runtime(), "persistence_backend", None)
+    except Exception:  # noqa: BLE001 -- boundary: no runtime yet means no backend yet
+        return None
+
+
+def _install_from_backend(runtime: Any, backend: Any, name: str) -> None:
+    """Take the log and its delivery mark from the selected backend.
+
+    No driver branch, no durability negotiation, no memory fallback. A backend
+    was chosen as a whole and it is durable by definition -- the fallback logic
+    below exists for the legacy per-subsystem configuration, where `sqlite`
+    could fail to open a path and the operator had to be told rather than
+    silently given a volatile store.
+    """
+    event_store = backend.event_store()
+    runtime.event_bus.set_event_store(event_store)
+    runtime.event_bus.set_dispatch_checkpoint(backend.dispatch_checkpoint())
+    logger.info("event_store_initialized", driver=name, source="persistence_backend")
+    set_event_store_durability_status(
+        EventStoreDurabilityStatus(
+            configured_driver=name,
+            durable=True,
+            degraded=False,
+            detail=f"{name} backend selected by persistence.backend",
+        )
+    )
     register_event_store_durability_check()
 
 

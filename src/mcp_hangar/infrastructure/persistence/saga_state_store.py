@@ -11,6 +11,7 @@ from typing import Any
 import structlog
 
 from .database_common import IConnectionFactory, MigrationRunner
+from ...domain.contracts.saga_state import ISagaStateStore
 
 logger = structlog.get_logger(__name__)
 
@@ -39,7 +40,7 @@ SAGA_STORE_MIGRATIONS: list[dict[str, Any]] = [
 ]
 
 
-class SagaStateStore:
+class SagaStateStore(ISagaStateStore):
     """Persists saga state to SQLite for crash recovery.
 
     Uses SQLiteConnectionFactory and MigrationRunner from database_common

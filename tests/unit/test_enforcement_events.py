@@ -82,5 +82,3 @@ class TestProviderCapabilityQuarantineReleased:
             released_by="ops@example.com",
         )
         assert event.released_by == "ops@example.com"
-
-

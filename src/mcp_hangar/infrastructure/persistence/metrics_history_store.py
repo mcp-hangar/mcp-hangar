@@ -12,6 +12,7 @@ from dataclasses import dataclass
 
 from .database_common import MigrationRunner, SQLiteConfig, SQLiteConnectionFactory
 from ...logging_config import get_logger
+from ...domain.contracts.metrics_history import IMetricsHistoryStore
 
 logger = get_logger(__name__)
 
@@ -64,7 +65,7 @@ class MetricPoint:
 # ---------------------------------------------------------------------------
 
 
-class MetricsHistoryStore:
+class MetricsHistoryStore(IMetricsHistoryStore):
     """SQLite-backed store for per-mcp_server metric snapshots.
 
     Provides:

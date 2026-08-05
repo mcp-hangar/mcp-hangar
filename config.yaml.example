@@ -219,6 +219,37 @@ mcp_servers:
 #     scrub_inputs: false                 # Redact sensitive input data
 #     scrub_outputs: false                # Redact sensitive output data
 
+# Storage backend (optional) -- ONE decision for everything the gateway persists
+#
+# Omit this block and each subsystem keeps configuring its own storage, exactly
+# as before. Set it, and every persisted concern -- the event log and its
+# delivery mark, server configuration, the audit trail, saga state, approvals,
+# API keys, roles, tool-access policies and metric history -- comes from the one
+# backend named here.
+#
+# It is either one or the other. A per-subsystem driver key that names a
+# different backend (auth.storage.driver, event_store.driver) is refused at
+# startup rather than resolved by precedence, because every precedence rule
+# silently ignores half of what you wrote.
+#
+# sqlite     -- the standalone answer. Files under one directory, nothing to
+#               install, nothing to run. Not shareable between processes.
+# postgresql -- the multi-node answer, and the only one two gateways can share.
+#               Needs the extra: pip install mcp-hangar[postgres]
+#
+# persistence:
+#   backend: sqlite            # sqlite | postgresql
+#   sqlite:
+#     data_dir: data           # where the .db files live
+#   postgresql:
+#     host: db.internal.example
+#     port: 5432
+#     database: mcp_hangar
+#     user: hangar
+#     password: ${PGPASSWORD}
+#     min_connections: 2
+#     max_connections: 10
+
 # Event Store for Event Sourcing (optional)
 # Enables full event history, audit trail, and replay capabilities
 # event_store:
