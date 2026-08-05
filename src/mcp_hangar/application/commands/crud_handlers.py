@@ -289,9 +289,7 @@ class DeleteMcpServerHandler(CommandHandler):
         if mcp_server.state not in (McpServerState.COLD, McpServerState.DEAD):
             mcp_server.shutdown()
             # Persist and publish any lifecycle events emitted by shutdown()
-            self._event_bus.publish_aggregate_events(
-                MCP_SERVER, mcp_server.mcp_server_id, mcp_server.collect_events()
-            )
+            self._event_bus.publish_aggregate_events(MCP_SERVER, mcp_server.mcp_server_id, mcp_server.collect_events())
 
         self._repository.remove(command.mcp_server_id)
 
