@@ -38,11 +38,17 @@ es_module = importlib.import_module("mcp_hangar.server.bootstrap.event_store")
 
 
 class _FakeEventBus:
+    """Mirrors the surface `init_event_store` binds to, and nothing else."""
+
     def __init__(self) -> None:
         self.store = None
+        self.checkpoint = None
 
     def set_event_store(self, store) -> None:
         self.store = store
+
+    def set_dispatch_checkpoint(self, checkpoint) -> None:
+        self.checkpoint = checkpoint
 
 
 @pytest.fixture

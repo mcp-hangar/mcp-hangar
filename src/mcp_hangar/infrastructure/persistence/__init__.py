@@ -9,6 +9,7 @@ import importlib
 from .audit_repository import InMemoryAuditRepository, SQLiteAuditRepository
 from .config_repository import InMemoryMcpServerConfigRepository, SQLiteMcpServerConfigRepository
 from .database import Database, DatabaseConfig
+from .dispatch_checkpoint import InMemoryDispatchCheckpoint, SqliteDispatchCheckpoint
 from .event_serializer import EventSerializationError, EventSerializer, register_event_type
 from .event_upcaster import IEventUpcaster, UpcasterChain
 from .in_memory_event_store import InMemoryEventStore
@@ -26,6 +27,8 @@ from .unit_of_work import SQLiteUnitOfWork
 
 __all__ = [
     "Database",
+    "InMemoryDispatchCheckpoint",
+    "SqliteDispatchCheckpoint",
     "DatabaseConfig",
     "DEFAULT_MAX_LINES",
     "EventSerializationError",

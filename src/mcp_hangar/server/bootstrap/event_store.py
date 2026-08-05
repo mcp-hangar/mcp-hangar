@@ -181,4 +181,58 @@ def init_event_store(runtime: "Runtime", config: dict[str, Any]) -> None:
         raise EventStoreConfigurationError(f"unknown event_store.driver {driver!r}; expected 'sqlite' or 'memory'")
 
     runtime.event_bus.set_event_store(event_store)
+    _install_dispatch_checkpoint(runtime, event_store, event_store_config)
     register_event_store_durability_check()
+
+
+def _install_dispatch_checkpoint(runtime: Any, event_store: Any, event_store_config: dict[str, Any]) -> None:
+    """Give the bus a delivery high-water mark. Does NOT deliver anything.
+
+    Delivery is `recover_undelivered_events`, and it must run after the handlers
+    are registered -- `init_event_handlers` comes later in bootstrap than this
+    does. Sweeping here would deliver a crash's leftovers to an empty handler
+    table and then advance the mark past them, destroying exactly the events the
+    mechanism exists to save.
+
+    A durable checkpoint over a volatile log would be worse than none: it would
+    claim delivery of events that no longer exist. So the checkpoint's
+    durability follows the store's.
+    """
+    from ...domain.contracts.dispatch_checkpoint import IDispatchCheckpoint
+    from ...infrastructure.persistence import InMemoryDispatchCheckpoint, SqliteDispatchCheckpoint
+    from ...infrastructure.persistence.sqlite_event_store import SQLiteEventStore
+
+    # Keyed on the store that was actually built, not on the configured driver.
+    # A configured `sqlite` that degraded to in-memory still reads as "sqlite"
+    # here, and pairing that with a file-backed checkpoint would leave a durable
+    # mark asserting delivery of events the volatile log no longer holds.
+    checkpoint: IDispatchCheckpoint
+    if isinstance(event_store, SQLiteEventStore):
+        checkpoint = SqliteDispatchCheckpoint(event_store_config.get("path", "data/events.db"))
+    else:
+        checkpoint = InMemoryDispatchCheckpoint()
+
+    runtime.event_bus.set_dispatch_checkpoint(checkpoint)
+
+
+def recover_undelivered_events(runtime: Any) -> int:
+    """Deliver events a previous run stored but never handed to handlers.
+
+    MUST be called after the event handlers are registered. Called before them,
+    it delivers to nobody and marks the events delivered anyway.
+
+    Deliberately not fatal: an unreadable checkpoint costs re-delivery, which
+    handlers must tolerate anyway, and refusing to boot over it would turn a
+    recoverable state into an outage.
+
+    Returns:
+        How many events were recovered.
+    """
+    try:
+        recovered = runtime.event_bus.dispatch_pending()
+    except Exception as e:  # noqa: BLE001 -- fault-barrier: recovery must not block startup
+        logger.warning("dispatch_recovery_failed", error=str(e))
+        return 0
+    if recovered:
+        logger.warning("dispatch_recovery_completed", events_delivered=recovered)
+    return recovered
