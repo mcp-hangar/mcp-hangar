@@ -378,3 +378,24 @@ exported_unreferenced = [
   "server/tools/models.py::HangarLoadResult",
   "server/tools/models.py::HangarUnloadResult",
 ]
+
+[tool.event_contracts]
+# Events a handler listens for that nothing emits, with the reason. Kept here
+# rather than as string literals in the test: the dead-symbol scanner counts a
+# name appearing in Python source as a reference, so an inventory of dead
+# vocabulary written in code would hide exactly the symbols it inventories.
+reserved_without_producer = [
+  "DetectionRuleMatched:anomaly detection is deliberately unshipped; the enforcement handler is built and waiting",
+  "BehavioralDeviationDetected:same feature -- risk scoring consumes it, nothing produces it yet",
+  "EgressBlocked:the metrics handler counts it; L7 egress enforcement emits the observed variant instead",
+  "TaskInputRequired:the synchronous mid-flight consent flow that emitted it was removed with SEP-2663",
+]
+# Events with neither a producer nor a consumer. May shrink, never grow.
+unused_events = [
+  "BehavioralModeChanged", "CapabilityDeclarationMissing",
+  "CatalogItemApproved", "CatalogItemDeprecated", "CatalogItemPublished", "CatalogItemRejected",
+  "DiscoveryCycleCompleted", "DiscoverySourceHealthChanged",
+  "McpServerApproved", "McpServerCapabilityQuarantineReleased", "McpServerCapabilityQuarantined",
+  "McpServerDiscovered", "McpServerDiscoveryConfigChanged", "McpServerDiscoveryLost", "McpServerQuarantined",
+  "PolicyPushRejected", "ToolSchemaChanged", "ToolSchemaDriftDetected",
+]
