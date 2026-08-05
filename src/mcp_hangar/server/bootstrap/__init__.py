@@ -48,7 +48,7 @@ from .components import ServerComponents, get_auth_compat_exports, load_componen
 from .cqrs import init_cqrs, init_auth_cqrs, init_saga, save_group_circuit_breakers
 from .discovery import _auto_add_volumes, _create_discovery_source, create_discovery_orchestrator
 from .event_handlers import init_event_handlers
-from .event_store import init_event_store
+from .event_store import init_event_store, recover_undelivered_events
 from .hot_loading import init_hot_loading
 from .logs import init_log_buffers
 from .observability import init_metrics_publisher, init_observability, shutdown_observability
@@ -275,6 +275,9 @@ def bootstrap(
 
     # Initialize event handlers
     init_event_handlers(runtime)
+    # Strictly after the handlers exist. Sweeping before them delivers a crash's
+    # leftovers to an empty handler table and marks them delivered anyway.
+    recover_undelivered_events(runtime)
 
     # Initialize CQRS (base handlers; discovery handlers registered after DiscoveryRegistry is created)
     init_cqrs(runtime, config_path)

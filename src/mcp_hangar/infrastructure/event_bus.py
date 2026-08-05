@@ -7,6 +7,7 @@ Supports optional event persistence via IEventStore.
 from collections.abc import Callable
 import threading
 
+from mcp_hangar.domain.contracts.dispatch_checkpoint import IDispatchCheckpoint
 from mcp_hangar.domain.contracts.event_bus import IEventBus
 from mcp_hangar.domain.contracts.event_store import IEventStore, NullEventStore
 from mcp_hangar.domain.contracts.hook_subscriber import IHookSubscriber
@@ -37,12 +38,19 @@ class EventBus(IEventBus):
     Optionally persists events via IEventStore before publishing.
     """
 
-    def __init__(self, event_store: IEventStore | None = None):
+    def __init__(
+        self,
+        event_store: IEventStore | None = None,
+        dispatch_checkpoint: IDispatchCheckpoint | None = None,
+    ):
         """Initialize event bus.
 
         Args:
             event_store: Optional event store for persistence.
                 If None, events are not persisted.
+            dispatch_checkpoint: Optional delivery high-water mark. Without one
+                the bus behaves exactly as before -- append, deliver, forget --
+                which is at-most-once across a crash.
         """
         self._handlers: dict[type[DomainEvent], list[Callable[[DomainEvent], None]]] = {}
         # Lock hierarchy level: EVENT_BUS (20)
@@ -52,6 +60,7 @@ class EventBus(IEventBus):
         self._lock = TrackedLock(LockLevel.EVENT_BUS, "EventBus", reentrant=False)
         self._error_handlers: list[Callable[[Exception, DomainEvent], None]] = []
         self._event_store = event_store or NullEventStore()
+        self._dispatch_checkpoint = dispatch_checkpoint
         self._hook_subscribers: list[IHookSubscriber] = []
         self._hook_sequence: int = 0
 
@@ -68,6 +77,15 @@ class EventBus(IEventBus):
         """
         self._event_store = event_store
         logger.info("event_store_configured", store_type=type(event_store).__name__)
+
+    def set_dispatch_checkpoint(self, checkpoint: IDispatchCheckpoint) -> None:
+        """Set the delivery high-water mark (late binding during bootstrap).
+
+        Args:
+            checkpoint: Durability-matched checkpoint for this bus's store.
+        """
+        self._dispatch_checkpoint = checkpoint
+        logger.info("dispatch_checkpoint_configured", checkpoint_type=type(checkpoint).__name__)
 
     def subscribe(self, event_type: type[DomainEvent], handler: Callable[[DomainEvent], None]) -> None:
         """
@@ -299,11 +317,84 @@ class EventBus(IEventBus):
                 new_version=new_version,
             )
 
-        # Then publish to handlers
+        # Then publish to handlers, on this thread, before returning -- the
+        # delivery semantics are unchanged, and deliberately so: metrics, audit,
+        # security and enforcement handlers are all called inline today, and
+        # every caller and test that reads a result after publishing depends on
+        # that.
         for event in events:
             self.publish(event)
 
+        # Only now record how far delivery got. The order is the whole point:
+        # append, deliver, then mark. A crash before the mark re-delivers on the
+        # next sweep instead of losing the events, which is why handlers must be
+        # idempotent on `event_id`.
+        self._advance_dispatch_checkpoint(len(events))
+
         return new_version
+
+    def _advance_dispatch_checkpoint(self, appended: int) -> None:
+        """Move the delivery high-water mark past the events just handed over.
+
+        The positions come from re-reading the tail rather than from `append`,
+        which returns a stream version and knows nothing about global order.
+
+        Concurrency, stated rather than discovered: two threads appending at
+        once may each read the other's rows here, so the mark can move past
+        events a *different* thread is still delivering. That thread delivers
+        them itself, so nothing is missed in the normal case; the exposure is
+        narrow and real -- if that other thread dies mid-delivery, its events
+        sit below a mark that says they were handled. Closing it needs delivery
+        serialized under a lock held across handler calls, which is what
+        `publish` deliberately avoids to keep handlers off the bus lock. The
+        sweep is a recovery mechanism, not a distributed-log guarantee.
+        """
+        if self._dispatch_checkpoint is None or not self._event_store.can_replay:
+            return
+        try:
+            start = self._dispatch_checkpoint.read()
+            positions = [pos for pos, _, _ in self._event_store.read_all(from_position=start, limit=appended)]
+            if positions:
+                self._dispatch_checkpoint.advance(max(positions))
+        except Exception as e:  # noqa: BLE001 -- fault-barrier: a checkpoint failure must not undo a delivered publish
+            # Leaving the mark behind costs a re-delivery on the next sweep.
+            # Raising here would fail a publish whose handlers have already run.
+            logger.warning("dispatch_checkpoint_advance_failed", error=str(e))
+
+    def dispatch_pending(self) -> int:
+        """Deliver everything appended but not yet handed to handlers.
+
+        Called once at startup. The window it closes is real and was open
+        forever: `publish_to_stream` commits the append and then calls handlers,
+        so a process that died in between left events durably stored and never
+        delivered, with nothing that would ever look again.
+
+        Events are re-read from the store, so handlers receive deserialized
+        copies rather than the instances an aggregate emitted. That is inherent
+        to recovery -- the originals died with the process -- and is the second
+        reason handlers must key on `event_id` rather than on identity.
+
+        Returns:
+            How many events were delivered.
+        """
+        if self._dispatch_checkpoint is None or not self._event_store.can_replay:
+            return 0
+
+        start = self._dispatch_checkpoint.read()
+        delivered = 0
+        for position, _stream_id, event in self._event_store.read_all(from_position=start, limit=10_000):
+            self.publish(event)
+            self._dispatch_checkpoint.advance(position)
+            delivered += 1
+
+        if delivered:
+            logger.warning(
+                "undelivered_events_recovered",
+                count=delivered,
+                from_position=start,
+                detail="events were persisted but never handed to handlers; a previous run ended between the two",
+            )
+        return delivered
 
     def publish_aggregate_events(
         self,

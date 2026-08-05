@@ -55,6 +55,18 @@ class IEventStore(ABC):
     - 0+ is the actual version (count of events - 1)
     """
 
+    @property
+    def can_replay(self) -> bool:
+        """Whether this store can read back what it was given.
+
+        Delivery recovery reads the log from a checkpoint, which only means
+        something for a store that kept the events. `NullEventStore` accepts
+        appends and keeps nothing, so a sweep over it would read silence -- and
+        silence is indistinguishable from "nothing left to deliver". Callers
+        branch on this rather than on `isinstance`.
+        """
+        return True
+
     @abstractmethod
     def append(
         self,
@@ -232,6 +244,11 @@ class NullEventStore(IEventStore):
 
     Use when event persistence is disabled or for testing.
     """
+
+    @property
+    def can_replay(self) -> bool:
+        """Nothing was kept, so nothing can be read back."""
+        return False
 
     def append(
         self,
