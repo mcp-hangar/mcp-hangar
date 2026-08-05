@@ -16,9 +16,6 @@ Each test here fails on the code as it stood before #753.
 from __future__ import annotations
 
 import pathlib
-import sys
-
-import pytest
 
 from mcp_hangar.application.queries.handlers import GetToolInvocationHistoryHandler
 from mcp_hangar.application.queries.queries import GetToolInvocationHistoryQuery
@@ -106,21 +103,3 @@ class TestTheAuthDriverGetsAStoreItCanUse:
             assert "get_event_store" not in text, (
                 f"{name} imports the legacy event-store singleton again; bootstrap must pass the store it configured"
             )
-
-
-@pytest.mark.parametrize("method", TestTheAuthDriverGetsAStoreItCanUse.REQUIRED)
-def test_legacy_store_is_not_a_drop_in_for_the_port(method: str) -> None:
-    """Why the wiring could not simply be left alone.
-
-    Kept as a record of the incompatibility while the legacy module still
-    exists; it is deleted in the follow-up, and this test goes with it.
-    """
-    sys.path.insert(0, str(ROOT / "src"))
-    from mcp_hangar.infrastructure.event_store import InMemoryEventStore as LegacyStore
-
-    port_only = {"read_stream", "get_stream_version", "list_streams"}
-    if method in port_only:
-        assert not hasattr(LegacyStore(), method), (
-            f"legacy store grew {method}(); if the two APIs converged, "
-            "this test and the follow-up deletion both need revisiting"
-        )
