@@ -14,8 +14,10 @@ Example Pod Annotations:
     mcp-hangar.io/health-path: "/health"
 """
 
+from dataclasses import dataclass
+
 from mcp_hangar.domain.discovery.discovered_mcp_server import DiscoveredMcpServer
-from mcp_hangar.domain.discovery.discovery_source import DiscoveryMode, DiscoverySource
+from mcp_hangar.domain.discovery.discovery_source import DiscoveryMode, DiscoverySource, SourcePolicyViolation
 
 from ...logging_config import get_logger
 
@@ -33,6 +35,38 @@ except ImportError:
     client = None
     config = None
     logger.debug("kubernetes package not installed, KubernetesDiscoverySource unavailable")
+
+
+@dataclass(frozen=True)
+class NamespacePolicy:
+    """Which namespaces this source may take servers from.
+
+    A value object rather than four attributes on the source, for one practical
+    reason: the source itself cannot be constructed without the `kubernetes`
+    package, which is optional and absent from CI. Testing these rules through
+    the source would mean skipping them there -- and "green because it never
+    ran" is the worst possible answer for a security rule that just moved
+    house.
+
+    Denied wins over allowed, as it did when the core owned these checks.
+    """
+
+    allowed: frozenset[str] = frozenset()
+    denied: frozenset[str] = frozenset({"kube-system", "default"})
+
+    def violation(self, namespace: str) -> SourcePolicyViolation | None:
+        """The reason to refuse this namespace, or None to accept it."""
+        if namespace in self.denied:
+            return SourcePolicyViolation(
+                reason=f"Namespace '{namespace}' is in denied list",
+                details={"namespace": namespace, "denied_namespaces": sorted(self.denied)},
+            )
+        if self.allowed and namespace not in self.allowed:
+            return SourcePolicyViolation(
+                reason=f"Namespace '{namespace}' is not in allowed list",
+                details={"namespace": namespace, "allowed_namespaces": sorted(self.allowed)},
+            )
+        return None
 
 
 class KubernetesDiscoverySource(DiscoverySource):
@@ -55,6 +89,8 @@ class KubernetesDiscoverySource(DiscoverySource):
         in_cluster: bool = True,
         kubeconfig_path: str | None = None,
         default_ttl: int = 90,
+        allowed_namespaces: set[str] | None = None,
+        denied_namespaces: set[str] | None = None,
     ):
         """Initialize Kubernetes discovery source.
 
@@ -78,6 +114,15 @@ class KubernetesDiscoverySource(DiscoverySource):
         self.in_cluster = in_cluster
         self.kubeconfig_path = kubeconfig_path
         self.default_ttl = default_ttl
+        # This source's own policy, in this source's own vocabulary. It used to
+        # live in the core's SecurityConfig and run behind an
+        # `if source_type == "kubernetes"` -- so a security component knew the
+        # names of sources, and a new source either escaped these checks
+        # silently or made its author edit security code.
+        self._namespace_policy = NamespacePolicy(
+            allowed=frozenset(allowed_namespaces or ()),
+            denied=frozenset(denied_namespaces) if denied_namespaces is not None else NamespacePolicy.denied,
+        )
 
         self._v1: client.CoreV1Api | None = None
         self._initialized = False
@@ -246,3 +291,7 @@ class KubernetesDiscoverySource(DiscoverySource):
         self._initialized = False
         self._v1 = None
         logger.info("Kubernetes discovery source stopped")
+
+    def policy_violation(self, mcp_server: DiscoveredMcpServer) -> SourcePolicyViolation | None:
+        """Refuse a server from a namespace this source may not take from."""
+        return self._namespace_policy.violation(mcp_server.metadata.get("namespace", ""))

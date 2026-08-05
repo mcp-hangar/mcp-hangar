@@ -43,6 +43,7 @@ def create_discovery_orchestrator(config: dict[str, Any]) -> DiscoveryOrchestrat
     sources_config = discovery_config.get("sources", [])
     for source_config in sources_config:
         source_type = source_config.get("type")
+        source_config = _migrate_namespace_policy(source_type, source_config, discovery_config)
         try:
             orchestrator.add_source(create_source(source_type, source_config))
         except UnknownDiscoverySourceError:
@@ -73,6 +74,49 @@ def create_discovery_orchestrator(config: dict[str, Any]) -> DiscoveryOrchestrat
 
     set_discovery_orchestrator(orchestrator)
     return orchestrator
+
+
+def _migrate_namespace_policy(
+    source_type: str, source_config: dict[str, Any], discovery_config: dict[str, Any]
+) -> dict[str, Any]:
+    """Carry the old namespace policy over to the source that now owns it.
+
+    `allowed_namespaces` / `denied_namespaces` used to live under
+    `discovery.security`, where the core applied them behind a check on the
+    source's name. They belong to the kubernetes source, which is the only thing
+    that knows what a namespace is -- but moving a *security* setting silently
+    is the one migration you must not do quietly: a deployment that denied
+    `kube-system` would start accepting it, and nothing would say so.
+
+    So the old location still works for now, is preferred only when the new one
+    is absent, and warns every time it is used.
+
+    Args:
+        source_type: The configured source type.
+        source_config: That source's own configuration.
+        discovery_config: The whole discovery block, for the legacy location.
+
+    Returns:
+        The source config, with the legacy policy merged in when it applied.
+    """
+    if source_type != "kubernetes":
+        return source_config
+
+    legacy = discovery_config.get("security", {})
+    migrated = dict(source_config)
+    for key in ("allowed_namespaces", "denied_namespaces"):
+        if key in migrated or key not in legacy:
+            continue
+        migrated[key] = legacy[key]
+        logger.warning(
+            "discovery_namespace_policy_deprecated_location",
+            key=key,
+            detail=(
+                f"`discovery.security.{key}` is deprecated; move it to the kubernetes source's "
+                "own configuration. It is being applied from the old location for now."
+            ),
+        )
+    return migrated
 
 
 async def _on_mcp_server_register(mcp_server) -> bool:

@@ -1,5 +1,38 @@
 # Upgrading MCP Hangar
 
+## Discovery: namespace policy moves to the Kubernetes source
+
+`discovery.security.allowed_namespaces` and `discovery.security.denied_namespaces`
+belong to the Kubernetes source now, not to the core's security config. They
+were the only source-specific rules in a component that is otherwise
+source-agnostic, and they were applied behind a check on the source's name --
+so any other source passed that stage with nothing validated and nothing said.
+
+**Who is affected:** deployments that set either key.
+
+**What to do:** move them under the kubernetes source's own entry:
+
+```yaml
+discovery:
+  sources:
+    - type: kubernetes
+      namespaces: [apps]
+      denied_namespaces: [kube-system, default]   # was discovery.security.*
+```
+
+The old location still works and is applied when the new one is absent, with a
+`discovery_namespace_policy_deprecated_location` warning at startup. It will be
+removed in a later release. Moving a security setting silently is the one
+migration that must not happen quietly: a deployment that denied `kube-system`
+must not start accepting it because a key changed address.
+
+Defaults are unchanged -- `kube-system` and `default` are still denied when
+nothing is configured.
+
+A source can now declare its own rules through `DiscoverySource.policy_violation`,
+which is optional: a source that does not implement it raises no objection, so
+existing third-party sources keep working untouched.
+
 ## Discovery: an unknown `source_type` now refuses to start
 
 A discovery source configured with a type nothing provides used to be skipped

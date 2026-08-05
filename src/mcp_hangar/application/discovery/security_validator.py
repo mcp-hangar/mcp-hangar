@@ -16,6 +16,7 @@ import time
 from typing import Any
 
 from mcp_hangar.domain.discovery.discovered_mcp_server import DiscoveredMcpServer
+from mcp_hangar.domain.discovery.discovery_source import DiscoverySource
 
 from ...logging_config import get_logger
 
@@ -153,7 +154,9 @@ class SecurityValidator:
         # McpServer counts per source
         self._mcp_server_counts: dict[str, int] = {}
 
-    async def validate(self, mcp_server: DiscoveredMcpServer) -> ValidationReport:
+    async def validate(
+        self, mcp_server: DiscoveredMcpServer, source: "DiscoverySource | None" = None
+    ) -> ValidationReport:
         """Run full validation pipeline.
 
         Args:
@@ -165,7 +168,7 @@ class SecurityValidator:
         start_time = time.perf_counter()
 
         # Step 1: Source validation
-        source_result = self._validate_source(mcp_server)
+        source_result = self._validate_source(mcp_server, source)
         if source_result:
             source_result.duration_ms = (time.perf_counter() - start_time) * 1000
             return source_result
@@ -205,44 +208,43 @@ class SecurityValidator:
             duration_ms=duration_ms,
         )
 
-    def _validate_source(self, mcp_server: DiscoveredMcpServer) -> ValidationReport | None:
-        """Validate source is trusted.
+    def _validate_source(
+        self, mcp_server: DiscoveredMcpServer, source: "DiscoverySource | None" = None
+    ) -> ValidationReport | None:
+        """Ask the source whether it objects to what it found.
+
+        This used to branch on the source's name and then apply namespace rules
+        read from this module's own config -- a security component that knew
+        which sources exist, and a set of constraints only one of them could
+        ever satisfy. Every new source then had two bad options: pass these
+        checks vacuously, or have its author edit security code.
+
+        The source answers for its own world now. The core keeps what is true of
+        every source -- rate, count, health, schema -- and learns nothing about
+        namespaces, projects or datacenters.
 
         Args:
-            mcp_server: McpServer to validate
+            mcp_server: The discovered server.
+            source: The source that produced it, when the caller knows which.
+                Absent in unit tests of the generic checks, where there is no
+                source-specific policy to apply.
 
         Returns:
-            ValidationReport if failed, None if passed
+            A failed report if the source objects, None otherwise.
         """
-        # Kubernetes namespace checks
-        if mcp_server.source_type == "kubernetes":
-            namespace = mcp_server.metadata.get("namespace", "")
+        if source is None:
+            return None
 
-            # Check denied list first
-            if namespace in self.config.denied_namespaces:
-                return ValidationReport(
-                    result=ValidationResult.FAILED_SOURCE,
-                    mcp_server=mcp_server,
-                    reason=f"Namespace '{namespace}' is in denied list",
-                    details={
-                        "namespace": namespace,
-                        "denied_namespaces": list(self.config.denied_namespaces),
-                    },
-                )
+        violation = source.policy_violation(mcp_server)
+        if violation is None:
+            return None
 
-            # If allowed list is specified, check it
-            if self.config.allowed_namespaces and namespace not in self.config.allowed_namespaces:
-                return ValidationReport(
-                    result=ValidationResult.FAILED_SOURCE,
-                    mcp_server=mcp_server,
-                    reason=f"Namespace '{namespace}' is not in allowed list",
-                    details={
-                        "namespace": namespace,
-                        "allowed_namespaces": list(self.config.allowed_namespaces),
-                    },
-                )
-
-        return None
+        return ValidationReport(
+            result=ValidationResult.FAILED_SOURCE,
+            mcp_server=mcp_server,
+            reason=violation.reason,
+            details=dict(violation.details),
+        )
 
     def _check_rate_limit(self, mcp_server: DiscoveredMcpServer) -> ValidationReport | None:
         """Check registration rate limit.

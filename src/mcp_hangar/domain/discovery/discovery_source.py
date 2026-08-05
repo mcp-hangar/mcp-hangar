@@ -6,6 +6,7 @@ Implementations include Kubernetes, Docker, Filesystem, and Python entrypoints.
 
 from abc import ABC, abstractmethod
 from collections.abc import Callable, Coroutine
+from dataclasses import dataclass, field
 from enum import Enum
 from typing import Any
 
@@ -31,6 +32,25 @@ class DiscoveryMode(Enum):
 
 # Type alias for event handlers
 EventHandler = Callable[..., Coroutine[Any, Any, None]]
+
+
+@dataclass(frozen=True)
+class SourcePolicyViolation:
+    """A source's own reason for refusing something it discovered.
+
+    Exists so a source can express a constraint the core has no vocabulary for.
+    Namespace rules used to live in the core's `SecurityConfig` and were applied
+    behind `if source_type == "kubernetes"` -- so a security component knew the
+    names of sources, and any new source either silently escaped those checks or
+    forced its author to edit security code.
+
+    Deliberately a plain reason and a details dict rather than the application
+    layer's `ValidationReport`: a source lives on the far side of a port and
+    must not have to import upwards to say "no".
+    """
+
+    reason: str
+    details: dict[str, Any] = field(default_factory=dict)
 
 
 class DiscoverySource(ABC):
@@ -185,6 +205,29 @@ class DiscoverySource(ABC):
         stopping file watchers or closing connections.
         """
         pass
+
+    def policy_violation(self, mcp_server: DiscoveredMcpServer) -> "SourcePolicyViolation | None":
+        """This source's own reason to refuse something it discovered.
+
+        Optional on purpose. A source that has no constraints of its own says
+        nothing, and every existing implementation keeps working unchanged --
+        an abstract hook here would break exactly the third-party sources this
+        port exists to make cheap.
+
+        Called before the core's own checks (rate, count, health, schema), which
+        is where the kubernetes namespace rules used to run from inside a
+        `source_type ==` branch. A source now answers for its own world:
+        namespaces, projects, datacenters, tenancy -- whatever its vocabulary
+        is, the core never learns it.
+
+        Args:
+            mcp_server: The discovered server, including its `metadata`, which
+                is where a source puts its own concepts.
+
+        Returns:
+            A violation to refuse registration, or None to raise no objection.
+        """
+        return None
 
     def __str__(self) -> str:
         return f"{self.__class__.__name__}(type={self.source_type}, mode={self.mode})"
