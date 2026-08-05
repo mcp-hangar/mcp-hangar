@@ -605,7 +605,7 @@ class TestEventBusPipeline:
 
     def test_event_bus_publish_to_stream_with_real_events(self, started_mcp_server):
         from mcp_hangar.infrastructure.event_bus import EventBus
-        from mcp_hangar.infrastructure.event_store import InMemoryEventStore
+        from mcp_hangar.infrastructure.persistence import InMemoryEventStore
 
         store = InMemoryEventStore()
         bus = EventBus(event_store=store)
@@ -617,9 +617,10 @@ class TestEventBusPipeline:
         new_version = bus.publish_to_stream(stream_id, events, expected_version=-1)
 
         assert new_version == len(events) - 1
-        stored = store.load(stream_id)
+        stored = store.read_stream(stream_id)
         assert len(stored) == len(events)
-        assert stored[0].event_type == type(events[0]).__name__
+        # `read_stream` answers with domain events, not store wrappers.
+        assert type(stored[0]).__name__ == type(events[0]).__name__
 
 
 class TestSecurityEventHandlerIntegration:
@@ -1496,7 +1497,7 @@ class TestEventSourcingRoundTrip:
 
     def test_persist_and_load_lifecycle_events(self):
         from mcp_hangar.infrastructure.event_bus import EventBus
-        from mcp_hangar.infrastructure.event_store import InMemoryEventStore
+        from mcp_hangar.infrastructure.persistence import InMemoryEventStore
 
         store = InMemoryEventStore()
         bus = EventBus(event_store=store)
@@ -1512,17 +1513,17 @@ class TestEventSourcingRoundTrip:
             stream_id = "mcp_server:es-roundtrip"
             bus.publish_to_stream(stream_id, events, expected_version=-1)
 
-            stored = store.load(stream_id)
+            stored = store.read_stream(stream_id)
             assert len(stored) == len(events)
             for original, persisted in zip(events, stored, strict=True):
-                assert persisted.event_type == type(original).__name__
+                assert type(persisted).__name__ == type(original).__name__
                 assert persisted.event_id == original.event_id
         finally:
             _shutdown_safe(server)
 
     def test_event_store_version_tracking(self):
         from mcp_hangar.infrastructure.event_bus import EventBus
-        from mcp_hangar.infrastructure.event_store import InMemoryEventStore
+        from mcp_hangar.infrastructure.persistence import InMemoryEventStore
 
         store = InMemoryEventStore()
         bus = EventBus(event_store=store)
@@ -1540,15 +1541,16 @@ class TestEventSourcingRoundTrip:
             v2 = bus.publish_to_stream(stream_id, events_batch2, expected_version=v1)
 
             assert v2 > v1
-            assert store.get_version(stream_id) == v2
-            all_stored = store.load(stream_id)
+            assert store.get_stream_version(stream_id) == v2
+            all_stored = store.read_stream(stream_id)
             assert len(all_stored) == len(events_batch1) + len(events_batch2)
         finally:
             _shutdown_safe(server)
 
     def test_concurrency_error_on_version_mismatch(self):
         from mcp_hangar.infrastructure.event_bus import EventBus
-        from mcp_hangar.infrastructure.event_store import ConcurrencyError, InMemoryEventStore
+        from mcp_hangar.domain.contracts.event_store import ConcurrencyError
+        from mcp_hangar.infrastructure.persistence import InMemoryEventStore
 
         store = InMemoryEventStore()
         bus = EventBus(event_store=store)
@@ -1571,7 +1573,7 @@ class TestEventSourcingRoundTrip:
 
     def test_aggregate_events_convenience_method(self):
         from mcp_hangar.infrastructure.event_bus import EventBus
-        from mcp_hangar.infrastructure.event_store import InMemoryEventStore
+        from mcp_hangar.infrastructure.persistence import InMemoryEventStore
 
         store = InMemoryEventStore()
         bus = EventBus(event_store=store)
@@ -1584,7 +1586,7 @@ class TestEventSourcingRoundTrip:
             new_version = bus.publish_aggregate_events("mcp_server", "es-agg", events)
             assert new_version == len(events) - 1
 
-            stored = store.load("mcp_server:es-agg")
+            stored = store.read_stream("mcp_server:es-agg")
             assert len(stored) == len(events)
         finally:
             _shutdown_safe(server)

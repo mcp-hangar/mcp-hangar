@@ -364,7 +364,6 @@ exported_unreferenced = [
   "domain/value_objects/common.py::CatalogItemId",
   "domain/value_objects/common.py::ToolArguments",
   "infrastructure/command_bus.py::reset_command_bus",
-  "infrastructure/event_store.py::StreamNotFoundError",
   "infrastructure/persistence/event_serializer.py::register_event_type",
   "infrastructure/query_bus.py::reset_query_bus",
   "observability/tracing.py::trace_tool_invocation",
