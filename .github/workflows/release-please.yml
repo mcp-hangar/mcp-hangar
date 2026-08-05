@@ -21,7 +21,14 @@ jobs:
     steps:
       # Both guards read .release-please-manifest.json and the pushed commit, so
       # this job needs the tree it never used to check out.
+      #
+      # Full history and tags, not a shallow clone: the changelog assembly step
+      # below reads the squash commit that ADDED each fragment (that is where
+      # the PR number comes from) and the newest tag (the compare link). Both
+      # are invisible at fetch-depth 1.
       - uses: actions/checkout@v7
+        with:
+          fetch-depth: 0
 
       - uses: actions/setup-python@v7
         with:
@@ -88,7 +95,26 @@ jobs:
       # backwards. A silently wrong PR becomes a red run. It runs even when
       # release-please failed, so a partial run cannot slip past it.
       - name: Refuse a backwards version bump
+        id: check-bump
         if: ${{ always() && steps.guard.outputs.skip != 'true' }}
         env:
           RELEASE_PLEASE_OUTPUTS: ${{ toJSON(steps.release-please.outputs) }}
         run: python scripts/release_please_guard.py check-bump
+
+      # The changelog body is no longer release-please's (`skip-changelog: true`
+      # in release-please-config.json). Per-PR fragments in `changelog.d/` are
+      # folded into a version section here, on the release branch, so the
+      # release PR still carries the notes it always did and merging it lands
+      # bump + notes in one squash commit -- what changed is only where the
+      # prose comes from.
+      #
+      # Deliberately last, and only on a healthy run: it checks out the release
+      # branch, so it must not run before the two guards have read the tree as
+      # it stands on main, and there is no point writing notes onto a version
+      # bump that either failed or moved backwards.
+      - name: Assemble the changelog on the release PR
+        if: ${{ steps.guard.outputs.skip != 'true' && steps.release-please.outcome == 'success' && steps.check-bump.outcome == 'success' }}
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          PUSH_TOKEN: ${{ steps.app-token.outputs.token || secrets.GITHUB_TOKEN }}
+        run: bash scripts/assemble_release_changelog.sh

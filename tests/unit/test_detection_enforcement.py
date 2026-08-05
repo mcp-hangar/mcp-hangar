@@ -14,7 +14,11 @@ from mcp_hangar.application.event_handlers import DetectionEnforcementHandler
 from mcp_hangar.application.ports import ICommandBus
 from mcp_hangar.domain.contracts.event_bus import IEventBus
 from mcp_hangar.domain.events import DetectionRuleMatched, EnforcementActionTaken
-from mcp_hangar.server.api.sessions import _suspended_sessions, is_session_suspended
+from mcp_hangar.server.api.sessions import (
+    _suspended_sessions,
+    get_session_suspension_registry,
+    is_session_suspended,
+)
 
 
 class RecordingEventBus(IEventBus):
@@ -75,7 +79,7 @@ class TestDetectionEnforcementHandler:
 
     def test_suspend_action_updates_registry_and_publishes_event(self):
         event_bus = RecordingEventBus()
-        handler = DetectionEnforcementHandler(event_bus=event_bus)
+        handler = DetectionEnforcementHandler(event_bus=event_bus, session_registry=get_session_suspension_registry())
 
         handler.handle(_detection_event("suspend"))
 
@@ -90,7 +94,11 @@ class TestDetectionEnforcementHandler:
     def test_block_action_dispatches_stop_provider_and_publishes_event(self):
         event_bus = RecordingEventBus()
         command_bus = RecordingCommandBus()
-        handler = DetectionEnforcementHandler(event_bus=event_bus, command_bus=command_bus)
+        handler = DetectionEnforcementHandler(
+            event_bus=event_bus,
+            command_bus=command_bus,
+            session_registry=get_session_suspension_registry(),
+        )
 
         handler.handle(_detection_event("block"))
 
@@ -107,7 +115,11 @@ class TestDetectionEnforcementHandler:
     def test_alert_action_does_nothing(self):
         event_bus = RecordingEventBus()
         command_bus = RecordingCommandBus()
-        handler = DetectionEnforcementHandler(event_bus=event_bus, command_bus=command_bus)
+        handler = DetectionEnforcementHandler(
+            event_bus=event_bus,
+            command_bus=command_bus,
+            session_registry=get_session_suspension_registry(),
+        )
 
         handler.handle(_detection_event("alert"))
 
@@ -117,7 +129,11 @@ class TestDetectionEnforcementHandler:
 
     def test_handler_swallow_errors(self):
         event_bus = RecordingEventBus()
-        handler = DetectionEnforcementHandler(event_bus=event_bus, command_bus=None)
+        handler = DetectionEnforcementHandler(
+            event_bus=event_bus,
+            command_bus=None,
+            session_registry=get_session_suspension_registry(),
+        )
 
         with patch("mcp_hangar.application.event_handlers.detection_handler.logger.exception") as log_exception:
             handler.handle(_detection_event("block"))

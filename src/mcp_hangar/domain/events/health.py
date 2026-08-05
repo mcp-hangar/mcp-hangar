@@ -19,9 +19,6 @@ class HealthCheckPassed(DomainEvent):
     mcp_server_id: str
     duration_ms: float = 0.0
 
-    def __post_init__(self):
-        super().__init__()
-
 
 @accepts_legacy_provider_id
 @dataclass
@@ -31,9 +28,6 @@ class HealthCheckFailed(DomainEvent):
     mcp_server_id: str
     consecutive_failures: int = 0
     error_message: str = ""
-
-    def __post_init__(self):
-        super().__init__()
 
 
 # Resource Management Events
@@ -46,9 +40,6 @@ class McpServerIdleDetected(DomainEvent):
     mcp_server_id: str
     idle_duration_s: float
     last_used_at: float
-
-    def __post_init__(self):
-        super().__init__()
 
 
 # McpServer Group Events are defined in mcp_hangar.domain.model.mcp_server_group

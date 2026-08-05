@@ -27,9 +27,6 @@ class TaskCreated(DomainEvent):
     mcp_server_id: str | None = None
     tool_name: str = ""
 
-    def __post_init__(self):
-        super().__init__()
-
 
 @dataclass
 class TaskInputRequired(DomainEvent):
@@ -40,9 +37,6 @@ class TaskInputRequired(DomainEvent):
     correlation_id: str = ""
     message: str = ""
 
-    def __post_init__(self):
-        super().__init__()
-
 
 @dataclass
 class TaskCompleted(DomainEvent):
@@ -52,9 +46,6 @@ class TaskCompleted(DomainEvent):
     tenant_id: str | None = None
     correlation_id: str = ""
     duration_ms: float = 0.0
-
-    def __post_init__(self):
-        super().__init__()
 
 
 @dataclass
@@ -67,9 +58,6 @@ class TaskFailed(DomainEvent):
     error_type: str = ""
     error_message: str = ""
 
-    def __post_init__(self):
-        super().__init__()
-
 
 @dataclass
 class TaskCancelled(DomainEvent):
@@ -80,9 +68,6 @@ class TaskCancelled(DomainEvent):
     correlation_id: str = ""
     reason: str = ""
     cancelled_by: str = ""
-
-    def __post_init__(self):
-        super().__init__()
 
 
 @dataclass
@@ -106,9 +91,6 @@ class TaskConsentDecided(DomainEvent):
     correlation_id: str = ""
     principal_id: str = ""
 
-    def __post_init__(self):
-        super().__init__()
-
 
 @dataclass
 class DigestMismatchInTask(DomainEvent):
@@ -129,6 +111,3 @@ class DigestMismatchInTask(DomainEvent):
     tool_name: str = ""
     expected_digest: str = ""
     observed_digest: str | None = None
-
-    def __post_init__(self):
-        super().__init__()

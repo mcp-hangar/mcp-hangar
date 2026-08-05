@@ -10,7 +10,7 @@ from mcp_hangar.infrastructure.identity.header_extractor import HeaderIdentityEx
 from mcp_hangar.infrastructure.identity.jwt_extractor import JWTIdentityExtractor
 from mcp_hangar.infrastructure.identity.trusted_proxy import TrustedProxyResolver
 from mcp_hangar.server.api.router import create_api_router
-from mcp_hangar.server.api.sessions import _SuspendedSessionCache
+from mcp_hangar.infrastructure.session_suspension import InMemorySessionSuspensionRegistry
 
 
 pytestmark = pytest.mark.security
@@ -41,7 +41,7 @@ def test_w3_ssrf_blocks_localhost() -> None:
 
 
 def test_w4_suspended_sessions_bounded() -> None:
-    cache = _SuspendedSessionCache(maxsize=10, ttl=86400)
+    cache = InMemorySessionSuspensionRegistry(maxsize=10, ttl=86400)
 
     for index in range(10):
         cache.add(f"session-{index}")

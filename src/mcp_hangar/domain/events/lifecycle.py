@@ -20,9 +20,6 @@ class McpServerStarted(DomainEvent):
     tools_count: int
     startup_duration_ms: float
 
-    def __post_init__(self):
-        super().__init__()
-
 
 @dataclass
 class McpServerStopped(DomainEvent):
@@ -30,9 +27,6 @@ class McpServerStopped(DomainEvent):
 
     mcp_server_id: str
     reason: str
-
-    def __post_init__(self):
-        super().__init__()
 
 
 @dataclass
@@ -44,9 +38,6 @@ class McpServerDegraded(DomainEvent):
     total_failures: int
     reason: str
 
-    def __post_init__(self):
-        super().__init__()
-
 
 @dataclass
 class McpServerStateChanged(DomainEvent):
@@ -55,9 +46,6 @@ class McpServerStateChanged(DomainEvent):
     mcp_server_id: str
     old_state: str
     new_state: str
-
-    def __post_init__(self):
-        super().__init__()
 
 
 # Circuit Breaker Events
@@ -71,6 +59,3 @@ class CircuitBreakerStateChanged(DomainEvent):
     mcp_server_id: str
     old_state: str = ""  # closed, open, half_open
     new_state: str = ""  # closed, open, half_open
-
-    def __post_init__(self):
-        super().__init__()

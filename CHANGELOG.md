@@ -5,6 +5,38 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [2.4.0](https://github.com/mcp-hangar/mcp-hangar/compare/v2.3.0...v2.4.0) (2026-08-04)
+
+### Added
+
+- **core:** a dead-symbol gate. Five defects this release turned out to be code that could not run -- an adapter never constructed, a port never injected, a module with no callers, a fallback beside an injected dependency -- and every one was found by accident while chasing something else. `scripts/check_dead_symbols.py` asks the question on purpose: which public symbols does nothing reference? The answer is baselined in `pyproject.toml` and can only shrink, the same ratchet the complexity baseline and import-contract ledger use. Symbols exported through an `__all__` are counted separately, because deleting those is a release decision rather than a cleanup. Current: 45 unreferenced, 4 exported-unreferenced ([#737](https://github.com/mcp-hangar/mcp-hangar/pull/737))
+
+### Changed
+
+- **core:** the cost counter moved out of the application layer, and `CostReportGenerated` gained schema **v2**. The event carried tenant/period/total and none of the mcp_server / tool / cost_model dimensions `record_cost` needs, so the metrics adapter could not reconstruct the counter from it -- which is why `cost_handler` wrote a Prometheus metric directly, the only application module that did, and the last of three such entries in the import-contract ledger (now 11 → 9 across this and the session-suspension change). v2 adds those three plus `cost_cents`, carried rather than re-derived from `total_cost`: that field is a string of whole currency units, and reconstructing hundredths from it is a float round-trip that drifts on a counter. The change is additive with defaults, so a stored v1 row replays through the upcaster chain's passthrough; no upcaster is registered because none could help -- v1 rows genuinely lack the dimensions, and the metrics adapter skips them rather than emitting an empty-labelled series ([#746](https://github.com/mcp-hangar/mcp-hangar/pull/746))
+- **core:** `MetricsEventHandler.handle` dispatches through a table instead of a 19-branch `isinstance` chain. The chain sat at the complexity ceiling carrying an explicit "split before extending" note, and the baseline may only shrink -- so adding the cost branch required the split rather than allowing it to be skipped. Dispatch walks the MRO, because `isinstance` matched subclasses for free and a dict does not: four live event types (`ProviderStarted`, `ProviderStopped`, `ProviderStateChanged`, `ProviderDegraded`) reach their handler that way. The complexity baseline drops from 15 functions to 14 ([#746](https://github.com/mcp-hangar/mcp-hangar/pull/746))
+- **core:** `DomainEvent` is a `kw_only` dataclass, removing ~290 lines of identical boilerplate. The base was deliberately not a dataclass -- inherited fields with defaults would have forced every subclass field to have one too -- and the price was 99 event classes each carrying the same three-line `__post_init__` whose entire body was `super().__init__()`. Keyword-only fields sit outside that ordering constraint, so the base can now own its identity fields while every subclass keeps its positional signature unchanged. `DomainEvent.rehydrate` passes the stored identity through the constructor instead of assigning after it; the `None`-keeps-the-fresh-one convention stays, so its two call sites do not reimplement it. Equality is unchanged: `event_id` and `occurred_at` are `compare=False`, preserving the payload-only comparison that fell out of the base not being a dataclass -- widening it is a defensible change, but a separate one from deleting boilerplate ([#744](https://github.com/mcp-hangar/mcp-hangar/pull/744))
+- **core:** session suspension has a port. `DetectionEnforcementHandler` reached the suspended-session store through a function-local `from ...server.api.sessions import _suspended_sessions` -- an application handler depending on the delivery layer, past the underscore into another module's private state, behind an import that hid the edge from a reader. It was the only application → delivery entry in the import-contract ledger, which drops from 11 to 10. The store was never route code: it is a bounded, TTL-expiring, thread-safe cache, so it moved to `infrastructure/session_suspension.py` behind `ISessionSuspensionRegistry`, and the handler is handed the same instance the HTTP routes use. The registry is a **required** constructor argument rather than an optional one defaulting to `None`: a forgotten wiring now fails at construction instead of silently inside the handler's fault barrier, where enforcement would have logged one line and done nothing ([#745](https://github.com/mcp-hangar/mcp-hangar/pull/745))
+- **core:** the trusted-hosts allowlist has one source. `MCP_TRUSTED_HOSTS` was parsed independently in the REST router, the MCP ASGI endpoint and (with the fix above) the PRM helpers -- three copies of a security allowlist that have to agree and nothing making them. It now lives in `mcp_hangar.trusted_hosts` in the shared kernel, with a guard asserting no call site re-reads the variable. Behaviour and the default (`localhost,127.0.0.1,::1,testserver`) are unchanged ([#742](https://github.com/mcp-hangar/mcp-hangar/pull/742))
+
+### Removed
+
+- **core:** `EventSourcedMcpServerRepository` and `EventSourcedMcpServer` (1741 lines including tests). Both arrived with the enterprise migration in April 2026, in the same commit as `EventSourcedApiKey` and `EventSourcedRoleAssignment` -- and unlike those two, neither was ever wired. In four months the repository was never constructed anywhere in `src/`; the aggregate's only consumer was that repository, so the pair formed a closed island nothing reached. **They were not broken and not untested** -- ~800 lines of tests covered them, including a snapshot-load-equals-full-replay equivalence check -- which is exactly why this is recorded plainly: the code worked, it simply had no caller and no one asked for one. Event sourcing for `mcp_server` remains available in history if it is ever wanted as a deliberate decision rather than an inherited artifact ([#749](https://github.com/mcp-hangar/mcp-hangar/pull/749))
+- **core:** the event-sourced repository's global singleton and its two accessors. `get_event_sourced_repository` / `set_event_sourced_repository` had no callers anywhere in the tree, and the module-global they wrapped was reachable only through them, so all three went together. They were the lazily-constructed-singleton pattern the rest of the codebase does not use -- every other repository is injected -- which is presumably why nothing ever called them. Found by the dead-symbol gate added in 2.3.0; the baseline drops from 45 to 43 ([#743](https://github.com/mcp-hangar/mcp-hangar/pull/743))
+
+### Fixed
+
+- **core:** `CallbackSecuritySink` and `CompositeSecuritySink` are gone. Zero references anywhere in the tree, tests included -- only `LogSecuritySink` is ever wired, since `get_security_handler()` is always called with no sink. They came in with the enterprise migration and were never used ([#748](https://github.com/mcp-hangar/mcp-hangar/pull/748))
+- **core:** the dead-symbol gate could not see through a package facade. `_referenced_names` counted every import alias as a use, so `from .module import Thing` in an `__init__.py` marked `Thing` referenced even when nothing in `src/` or `tests/` imported it -- which is how `CallbackSecuritySink` and `CompositeSecuritySink` sat with zero references anywhere while the gate reported a clean baseline. The scanner already excluded `__all__` *string* entries, so half the problem had been seen; the import that feeds them had not. It now keys on the same marker for both, which is also the marker ruff uses to decide an `__init__.py` import is a deliberate re-export rather than an unused one, so the two tools agree on what a facade is. The **exported-unreferenced** baseline grows from 4 to 38 as a result -- that bucket exists precisely for "deleting this is a release decision", and it was previously reporting almost none of them. The `unreferenced` bucket is unchanged at 43, so nothing private was being hidden ([#748](https://github.com/mcp-hangar/mcp-hangar/pull/748))
+- **core:** nine `Group*` events no longer discard their identity on replay. They live in `domain/model/mcp_server_group.py` rather than the events package, and once the base became a dataclass their inherited `super().__init__()` call ran *after* the generated `__init__` had assigned the fields -- overwriting a restored `event_id` with a fresh uuid and a restored `occurred_at` with the time of the read. That would re-date history to whenever the stream happened to be replayed and break idempotency for any consumer keyed on event id. Caught by the event-serialization fuzz test during the refactor above; a new tree-wide guard now matches on the base class rather than on a directory, so an event defined outside the events package cannot reintroduce it ([#744](https://github.com/mcp-hangar/mcp-hangar/pull/744))
+- **core:** mutating REST endpoints answer 400 instead of 500 on an incomplete body, and an inactive module answers 503 instead of 500. Five endpoints indexed the parsed JSON directly (`body["mcp_server_id"]`, `body["group_id"]`, `body["source_type"]` and two more); `KeyError` is not `ValueError`, so it escaped each route's handler into a generic "internal server error" -- telling the caller the server had broken when their request was merely incomplete, and filling the log with unhandled exceptions in exactly the channel that is supposed to stay quiet. The validation is one shared helper rather than five copies. Separately, `GET /api/auth/keys` with auth disabled reached a mounted route whose CQRS handlers are registered only when auth is enabled; the bus now raises a typed `HandlerNotRegisteredError` that maps to 503, which answers correctly for any module that is present but inactive. A security audit found one of the five endpoints (SEC-04) and the auth route (SEC-05) ([#741](https://github.com/mcp-hangar/mcp-hangar/pull/741))
+
+### Security
+
+- **core:** a subprocess backend no longer opens a network port. The built-in default configuration -- what runs with no `config.yaml` -- launched the math example as a subprocess with no environment, and that example defaulted to `streamable-http` on `MCP_HOST`, which defaults to `0.0.0.0`. So a fresh install served MCP on `0.0.0.0:8080` with **no authentication, no rate limit, no audit trail and no L7 egress policy**: anyone who could reach the host could call the backend's tools around the gateway rather than through it. The same mismatch also meant the gateway itself could not talk to it -- the launcher speaks stdio, so every call failed with `startup_timeout` after 30 s and a fresh install could not invoke a single tool. Fixed in the launcher (a subprocess child now defaults to `MCP_TRANSPORT=stdio`, overridable), in the default config, and in the example. Reported by a security audit against 2.3.0 ([#738](https://github.com/mcp-hangar/mcp-hangar/pull/738))
+- **core:** a role granted with a scope no authorizer collects is now refused instead of silently stored. `RBACAuthorizer._collect_roles` queries exactly `global` and `tenant:{id}`; a grant written with any other scope -- `*` being the tempting one -- was accepted, persisted, shown in the audit trail, and never matched. That fails closed, so it is not an escalation, which is exactly why it was easy to miss: an administrator who grants `*` believes a permission exists and has granted nothing, and the usual next move when a grant "does not work" is something blunter and less auditable. Validated in the domain and called from every store, so a store reached directly by the CLI, a migration or an embedder refuses it too. Reported by an independent model review during a security audit (LLM-02) ([#740](https://github.com/mcp-hangar/mcp-hangar/pull/740))
+- **core:** a forged `Host` header can no longer become this resource's advertised identity. When `auth.oidc.resource_uri` is not configured, the RFC 9728 Protected Resource Metadata document and the `WWW-Authenticate` challenge derived their `resource` value from the request's `Host` -- a header the caller sets. Both paths are reached *before* any host check: Starlette's `add_middleware` prepends, so `AuthMiddlewareHTTP` wraps `TrustedHostMiddleware` and runs outside it, and the `.well-known` PRM endpoint on the serving app has no such middleware at all. An attacker could therefore make the document that tells clients where to send their tokens name a host of their choosing. An untrusted `Host` is now ignored rather than reflected, falling back to the first configured trusted host -- a value the operator chose, so a client that cannot reach it fails to authenticate instead of authenticating somewhere an attacker named. The `X-Forwarded-Proto` scheme is validated for the same reason. **Operational note:** a deployment serving on its own hostname must have it in `MCP_TRUSTED_HOSTS`; this was already required (`TrustedHostMiddleware` would otherwise reject the request outright), but an unlisted host now degrades the advertised identity rather than only the REST surface. Reported by an independent model review during a security audit (LLM-03) ([#742](https://github.com/mcp-hangar/mcp-hangar/pull/742))
+
 ## [2.3.0](https://github.com/mcp-hangar/mcp-hangar/compare/v2.2.1...v2.3.0) (2026-08-04)
 
 Closes the last of the audit findings and pays the import-contract debt ledger
@@ -18,23 +50,6 @@ to nobody, event-sourced aggregates outside the lock hierarchy, and a
 the domain layer. It has warned since v1.0.2. The upgrade guide has the
 before/after and a one-liner that lists affected call sites:
 <https://mcp-hangar.io/docs/upgrade/>.
-
-### ⚠ BREAKING CHANGES
-
-- **core:** `mcp_hangar.domain.services.mcp_server_launcher` and the launcher re-exports on `mcp_hangar.domain.services` are removed. Import DockerLauncher, SubprocessLauncher, ContainerLauncher, HttpLauncher, ContainerConfig, McpServerLauncher and get_launcher from `mcp_hangar.infrastructure.launchers` instead. Run your suite with `python -W error::DeprecationWarning` to list affected call sites.
-
-### Removed
-
-- **core:** removed the deprecated launcher import paths. `mcp_hangar.domain.services.mcp_server_launcher` and the launcher re-exports on `mcp_hangar.domain.services` (`DockerLauncher`, `SubprocessLauncher`, `ContainerLauncher`, `HttpLauncher`, `ContainerConfig`, `McpServerLauncher`, `get_launcher`) both raise now. Import them from `mcp_hangar.infrastructure.launchers`, which is where they live and what the `DeprecationWarning` has said since v1.0.2 -- a warning that survived the 2.0 major. The port, `IMcpServerLauncher`, is still exported from `domain.services`; it is the concrete classes that left. This also broke a real import cycle: the domain reaching for the concrete launchers is what forced two sagas to import their saga manager inside a function body. Eight lines leave the import-contract debt ledger ([#730](https://github.com/mcp-hangar/mcp-hangar/pull/730))
-
-### Fixed
-
-- **core:** cost-attribution events reached no handler. `CostAttributionEventHandler` called `event_bus.publish([cost_event])` -- a list, not an event. Dispatch keys on the event's type, so the list matched no specific handler and every `subscribe_to_all` handler (audit, logging, metrics) received the **list object itself**, where each one's `isinstance` chain quietly matched nothing; anything subscribed to `CostReportGenerated` was never called at all. Nothing failed, the event simply never arrived. The unit test covering it asserted `len(published_events) == 1`, agreeing with the bug because a mock bus never has to route anything. `publish()` now raises `TypeError` on a non-event rather than delivering to no one ([#727](https://github.com/mcp-hangar/mcp-hangar/pull/727))
-- **core:** every event-sourced `McpServer` was outside the global lock ordering. `EventSourcedMcpServer.__init__` assigned a bare `threading.RLock` instead of the tracked lock its parent aggregate uses, unconditionally, so `LockOrderViolation` could never fire for one -- a deadlock involving an event-sourced aggregate would simply hang instead of raising. Surfaced by giving `McpServer._create_lock` a real return type. The two other aggregates and the repository built their locks inside a `try/except ImportError` that fell back to the same untracked lock; that branch could never run, so it guarded against nothing while advertising a silent downgrade ([#726](https://github.com/mcp-hangar/mcp-hangar/pull/726))
-- **core:** cold-start metrics are published again. `mcp_hangar_mcp_server_cold_start_seconds` -- described in `metrics.py` as the critical UX metric, time from a request to a ready backend -- was never observed in production. The domain publishes it through the `IMetricsPublisher` port and the Prometheus adapter behind that port exists, but nothing ever connected the two: `PrometheusMetricsPublisher` appeared exactly once in the codebase, at its own `class` statement, so every `McpServer` fell back to the Null object. The histogram and its in-progress gauge had been empty series since the port was introduced. The composition root now installs the adapter, and `set_connection_active` moved onto the port as well, which removes the `domain.model.mcp_server -> metrics` edge from the import-contract debt ledger ([#724](https://github.com/mcp-hangar/mcp-hangar/pull/724))
-- **core:** the event store could write events it could not read back. `EventSerializer.serialize` accepts any domain event -- it dumps the instance dict -- while `deserialize` looked the class up in a hand-curated table that listed 30 of the 116 event classes in the codebase. Under `auth.storage.driver: event_sourcing`, **every API key and role assignment was durably written and permanently unreadable**: all five events those aggregates emit (`ApiKeyCreated`, `ApiKeyRevoked`, `KeyRotated`, `RoleAssigned`, `RoleRevoked`) were missing from the table, so the next process to open the database raised `EventSerializationError` on its first read -- every credential stopped working across a restart, and revocations did not survive one either. The nine group events were in the same position, which is what the never-called `register_event_type` helper existed to solve. The registry is now derived from the event class hierarchy and refreshed on a lookup miss, so the reader accepts exactly what the writer produces ([#721](https://github.com/mcp-hangar/mcp-hangar/pull/721))
-- **core:** a `datetime` field on a persisted event came back as a `str`. JSON has no datetime, so serialization wrote `isoformat()` and nothing parsed it back -- silently, and only on replay, so a consumer comparing or doing arithmetic on the value broke long after the write. Affected `PolicyPushRejected.timestamp`; the round-trip suite now asserts every field of every registered type comes back with its original type and value, rather than only that the event's class matches ([#721](https://github.com/mcp-hangar/mcp-hangar/pull/721))
-- **core:** events written before the `provider` -> `mcp_server` rename now reach their handlers again. The rename landed after v1.0.1, so event stores from any of the eight earlier releases hold rows typed `ProviderStarted`, `ProviderDiscovered` and so on -- and replaying one was a silent no-op for every consumer. Two layers dropped them independently: the serializer resolved those type names to the deprecated alias *classes* and looked their schema version up under a key no upcaster is registered against, and the event bus dispatched on the exact class, so a `ProviderStarted` -- a subclass of `McpServerStarted` -- matched none of the handlers registered against the modern class. No error and no warning, just a `handlers_count=0` debug line. Legacy type names now resolve to the current class and version key, new writes use the current name, and bus dispatch walks the class hierarchy so a subclass event reaches base-class handlers exactly once ([#713](https://github.com/mcp-hangar/mcp-hangar/pull/713))
 
 ### Changed
 
@@ -51,16 +66,24 @@ before/after and a one-liner that lists affected call sites:
 - **core:** the last eighteen event classes carrying a hand-written `__init__` now use the shared alias decorator, which grew to cover the second rename it did not know about (`provider_name` -> `mcp_server_name`, five discovery aliases) alongside `provider_id` -> `mcp_server_id`. Three deliberate behaviour changes, each verified against a before/after probe of every constructor path on all 111 event classes: **(1)** passing both spellings of one field with *conflicting* values now raises everywhere -- previously the `*_id` family raised and the `*_name` family silently kept the legacy value and discarded the modern one; identical values are still accepted, and no call site passes both. **(2)** the five `Provider*` discovery aliases now take the same positional arguments as the classes they alias; their own `__init__` started with `provider_name`, one slot ahead of the base's parameters, so `ProviderDiscovered(a, b, c, d)` and `McpServerDiscovered(a, b, c, d)` assigned three fields differently -- nothing called them positionally, which is the only reason it never bit. **(3)** `approvals/service.py` now uses the modern keyword in its four event constructions; mypy could not see the deprecated spelling while `**kwargs` swallowed it ([#712](https://github.com/mcp-hangar/mcp-hangar/pull/712))
 - **core:** the ten `Provider*` alias events keep the legacy `provider_id` keyword through one decorator instead of ten hand-written constructors. The field assignment, required-argument check and unknown-keyword `TypeError` come back from the dataclass machinery, so they can no longer drift between classes -- which they had: three aliases had stopped accepting the modern `mcp_server_id` spelling entirely. `domain/events.py` loses 170 lines ([#708](https://github.com/mcp-hangar/mcp-hangar/pull/708))
 
-## [2.2.1](https://github.com/mcp-hangar/mcp-hangar/compare/v2.2.0...v2.2.1) (2026-08-03)
+### Removed
+
+- **core:** removed the deprecated launcher import paths. `mcp_hangar.domain.services.mcp_server_launcher` and the launcher re-exports on `mcp_hangar.domain.services` (`DockerLauncher`, `SubprocessLauncher`, `ContainerLauncher`, `HttpLauncher`, `ContainerConfig`, `McpServerLauncher`, `get_launcher`) both raise now. Import them from `mcp_hangar.infrastructure.launchers`, which is where they live and what the `DeprecationWarning` has said since v1.0.2 -- a warning that survived the 2.0 major. The port, `IMcpServerLauncher`, is still exported from `domain.services`; it is the concrete classes that left. This also broke a real import cycle: the domain reaching for the concrete launchers is what forced two sagas to import their saga manager inside a function body. Eight lines leave the import-contract debt ledger ([#730](https://github.com/mcp-hangar/mcp-hangar/pull/730))
 
 ### Fixed
 
-- **core:** the decision-path coverage floor for `server/tools/batch/executor.py` drops to 84.5. The module dispatches work on a thread pool with timeouts and single-flight de-duplication, so a few branches fire or not depending on scheduling: measured 85.38 three times on CPython 3.13, 85.06 twice on 3.11, and 85.06 then 84.75 on two CI runs of the same tree. The floor now sits under the lowest observed CI value rather than under a reproducible local one, so the gate reports a real regression instead of the runner's mood. The job also uploads `coverage.json` on failure, so the next divergence is diagnosable rather than guessed at ([#699](https://github.com/mcp-hangar/mcp-hangar/pull/699))
-- **core:** `ProviderRegistered`, `ProviderUpdated` and `ProviderDeregistered` rejected the modern `mcp_server_id` keyword -- they accepted only the pre-rename `provider_id`, unlike the other seven `Provider*` aliases which take both. Passing `mcp_server_id` raised `TypeError: Missing required argument: mcp_server_id` while the caller had supplied exactly that. The legacy alias contract is now pinned across every event that carries it ([#705](https://github.com/mcp-hangar/mcp-hangar/pull/705))
-- **core:** authorization denials return the API's standard error envelope again. 2.2.0 moved authorization into middleware, where the `AccessDeniedError` no longer reaches `error_handler`, and the middleware reused the authentication layer's flatter body -- so a `403` changed from `{"error": {"code": "AccessDeniedError", ...}}` to `{"error": "access_denied", ...}`. Any client reading `error.code` broke. Caught by the nightly live-verify suite; now pinned by unit tests so the next regression fails in seconds rather than overnight ([#707](https://github.com/mcp-hangar/mcp-hangar/pull/707))
-- **core:** `application/mcp` and `bootstrap` shipped without an `__init__.py`. The modules were tracked, the marker was not, so the 2.2.0 wheel carries them inside implicit namespace packages. Imports resolve either way, which is why nothing broke -- but static import analysis walks the package tree and skips a directory with no marker, so those modules were invisible to it ([#703](https://github.com/mcp-hangar/mcp-hangar/pull/703))
-- **core:** three modules read `__version__` off the package root, pulling the entire public API -- facade included -- into an adapter, a health probe and the tracing bootstrap just to format a version string. They now read the installed distribution directly ([#703](https://github.com/mcp-hangar/mcp-hangar/pull/703))
-- **core:** the decision-path coverage floor for `server/tools/batch/executor.py` was measured on CPython 3.13 but enforced on 3.11, where branch-arc counts differ (85.38 vs 85.06) -- so the gate failed on its first CI run. Floors now come from the Python the gate runs on, and the config says so ([#699](https://github.com/mcp-hangar/mcp-hangar/pull/699))
+- **core:** cost-attribution events reached no handler. `CostAttributionEventHandler` called `event_bus.publish([cost_event])` -- a list, not an event. Dispatch keys on the event's type, so the list matched no specific handler and every `subscribe_to_all` handler (audit, logging, metrics) received the **list object itself**, where each one's `isinstance` chain quietly matched nothing; anything subscribed to `CostReportGenerated` was never called at all. Nothing failed, the event simply never arrived. The unit test covering it asserted `len(published_events) == 1`, agreeing with the bug because a mock bus never has to route anything. `publish()` now raises `TypeError` on a non-event rather than delivering to no one ([#727](https://github.com/mcp-hangar/mcp-hangar/pull/727))
+- **core:** every event-sourced `McpServer` was outside the global lock ordering. `EventSourcedMcpServer.__init__` assigned a bare `threading.RLock` instead of the tracked lock its parent aggregate uses, unconditionally, so `LockOrderViolation` could never fire for one -- a deadlock involving an event-sourced aggregate would simply hang instead of raising. Surfaced by giving `McpServer._create_lock` a real return type. The two other aggregates and the repository built their locks inside a `try/except ImportError` that fell back to the same untracked lock; that branch could never run, so it guarded against nothing while advertising a silent downgrade ([#726](https://github.com/mcp-hangar/mcp-hangar/pull/726))
+- **core:** cold-start metrics are published again. `mcp_hangar_mcp_server_cold_start_seconds` -- described in `metrics.py` as the critical UX metric, time from a request to a ready backend -- was never observed in production. The domain publishes it through the `IMetricsPublisher` port and the Prometheus adapter behind that port exists, but nothing ever connected the two: `PrometheusMetricsPublisher` appeared exactly once in the codebase, at its own `class` statement, so every `McpServer` fell back to the Null object. The histogram and its in-progress gauge had been empty series since the port was introduced. The composition root now installs the adapter, and `set_connection_active` moved onto the port as well, which removes the `domain.model.mcp_server -> metrics` edge from the import-contract debt ledger ([#724](https://github.com/mcp-hangar/mcp-hangar/pull/724))
+- **core:** the event store could write events it could not read back. `EventSerializer.serialize` accepts any domain event -- it dumps the instance dict -- while `deserialize` looked the class up in a hand-curated table that listed 30 of the 116 event classes in the codebase. Under `auth.storage.driver: event_sourcing`, **every API key and role assignment was durably written and permanently unreadable**: all five events those aggregates emit (`ApiKeyCreated`, `ApiKeyRevoked`, `KeyRotated`, `RoleAssigned`, `RoleRevoked`) were missing from the table, so the next process to open the database raised `EventSerializationError` on its first read -- every credential stopped working across a restart, and revocations did not survive one either. The nine group events were in the same position, which is what the never-called `register_event_type` helper existed to solve. The registry is now derived from the event class hierarchy and refreshed on a lookup miss, so the reader accepts exactly what the writer produces ([#721](https://github.com/mcp-hangar/mcp-hangar/pull/721))
+- **core:** a `datetime` field on a persisted event came back as a `str`. JSON has no datetime, so serialization wrote `isoformat()` and nothing parsed it back -- silently, and only on replay, so a consumer comparing or doing arithmetic on the value broke long after the write. Affected `PolicyPushRejected.timestamp`; the round-trip suite now asserts every field of every registered type comes back with its original type and value, rather than only that the event's class matches ([#721](https://github.com/mcp-hangar/mcp-hangar/pull/721))
+- **core:** events written before the `provider` -> `mcp_server` rename now reach their handlers again. The rename landed after v1.0.1, so event stores from any of the eight earlier releases hold rows typed `ProviderStarted`, `ProviderDiscovered` and so on -- and replaying one was a silent no-op for every consumer. Two layers dropped them independently: the serializer resolved those type names to the deprecated alias *classes* and looked their schema version up under a key no upcaster is registered against, and the event bus dispatched on the exact class, so a `ProviderStarted` -- a subclass of `McpServerStarted` -- matched none of the handlers registered against the modern class. No error and no warning, just a `handlers_count=0` debug line. Legacy type names now resolve to the current class and version key, new writes use the current name, and bus dispatch walks the class hierarchy so a subclass event reaches base-class handlers exactly once ([#713](https://github.com/mcp-hangar/mcp-hangar/pull/713))
+
+### ⚠ BREAKING CHANGES
+
+- **core:** `mcp_hangar.domain.services.mcp_server_launcher` and the launcher re-exports on `mcp_hangar.domain.services` are removed. Import DockerLauncher, SubprocessLauncher, ContainerLauncher, HttpLauncher, ContainerConfig, McpServerLauncher and get_launcher from `mcp_hangar.infrastructure.launchers` instead. Run your suite with `python -W error::DeprecationWarning` to list affected call sites.
+
+## [2.2.1](https://github.com/mcp-hangar/mcp-hangar/compare/v2.2.0...v2.2.1) (2026-08-03)
 
 ### Changed
 
@@ -71,20 +94,14 @@ before/after and a one-liner that lists affected call sites:
 - **core:** branch coverage is now gated per module on the decision paths. `coverage.py`'s `fail_under` is global-only, so a single threshold would have to be low enough for the weakest module in the tree -- exactly the modules needing the strongest guarantee. 29 modules (authz, consent/approvals, egress + tool-access policy, digest) carry floors set to their MEASURED value, checked by `scripts/check_decision_coverage.py`. `branch = true` moves into `[tool.coverage.run]`, since a floor compared against statement-only data silently passes a lower bar, and mixing modes raises `DataError` ([#697](https://github.com/mcp-hangar/mcp-hangar/pull/697))
 - **core:** cyclomatic complexity is now a gate. `C901` caps new code at 15; the 16 functions already above it carry an explicit `# noqa: C901 -- baseline CC=N`, and `tests/unit/test_complexity_baseline.py` caps that list so it can only shrink. Complexity had never been measured -- the ruff config omitted `C90` entirely, and the worst function in the tree scores 49 ([#696](https://github.com/mcp-hangar/mcp-hangar/pull/696))
 
-## [Unreleased]
-
 ### Fixed
 
-- **core:** mutating REST endpoints answer 400 instead of 500 on an incomplete body, and an inactive module answers 503 instead of 500. Five endpoints indexed the parsed JSON directly (`body["mcp_server_id"]`, `body["group_id"]`, `body["source_type"]` and two more); `KeyError` is not `ValueError`, so it escaped each route's handler into a generic "internal server error" -- telling the caller the server had broken when their request was merely incomplete, and filling the log with unhandled exceptions in exactly the channel that is supposed to stay quiet. The validation is one shared helper rather than five copies. Separately, `GET /api/auth/keys` with auth disabled reached a mounted route whose CQRS handlers are registered only when auth is enabled; the bus now raises a typed `HandlerNotRegisteredError` that maps to 503, which answers correctly for any module that is present but inactive. A security audit found one of the five endpoints (SEC-04) and the auth route (SEC-05)
-
-### Security
-
-- **core:** a subprocess backend no longer opens a network port. The built-in default configuration -- what runs with no `config.yaml` -- launched the math example as a subprocess with no environment, and that example defaulted to `streamable-http` on `MCP_HOST`, which defaults to `0.0.0.0`. So a fresh install served MCP on `0.0.0.0:8080` with **no authentication, no rate limit, no audit trail and no L7 egress policy**: anyone who could reach the host could call the backend's tools around the gateway rather than through it. The same mismatch also meant the gateway itself could not talk to it -- the launcher speaks stdio, so every call failed with `startup_timeout` after 30 s and a fresh install could not invoke a single tool. Fixed in the launcher (a subprocess child now defaults to `MCP_TRANSPORT=stdio`, overridable), in the default config, and in the example. Reported by a security audit against 2.3.0
-- **core:** a role granted with a scope no authorizer collects is now refused instead of silently stored. `RBACAuthorizer._collect_roles` queries exactly `global` and `tenant:{id}`; a grant written with any other scope -- `*` being the tempting one -- was accepted, persisted, shown in the audit trail, and never matched. That fails closed, so it is not an escalation, which is exactly why it was easy to miss: an administrator who grants `*` believes a permission exists and has granted nothing, and the usual next move when a grant "does not work" is something blunter and less auditable. Validated in the domain and called from every store, so a store reached directly by the CLI, a migration or an embedder refuses it too. Reported by an independent model review during a security audit (LLM-02)
-
-### Added
-
-- **core:** a dead-symbol gate. Five defects this release turned out to be code that could not run -- an adapter never constructed, a port never injected, a module with no callers, a fallback beside an injected dependency -- and every one was found by accident while chasing something else. `scripts/check_dead_symbols.py` asks the question on purpose: which public symbols does nothing reference? The answer is baselined in `pyproject.toml` and can only shrink, the same ratchet the complexity baseline and import-contract ledger use. Symbols exported through an `__all__` are counted separately, because deleting those is a release decision rather than a cleanup. Current: 45 unreferenced, 4 exported-unreferenced
+- **core:** the decision-path coverage floor for `server/tools/batch/executor.py` drops to 84.5. The module dispatches work on a thread pool with timeouts and single-flight de-duplication, so a few branches fire or not depending on scheduling: measured 85.38 three times on CPython 3.13, 85.06 twice on 3.11, and 85.06 then 84.75 on two CI runs of the same tree. The floor now sits under the lowest observed CI value rather than under a reproducible local one, so the gate reports a real regression instead of the runner's mood. The job also uploads `coverage.json` on failure, so the next divergence is diagnosable rather than guessed at ([#699](https://github.com/mcp-hangar/mcp-hangar/pull/699))
+- **core:** `ProviderRegistered`, `ProviderUpdated` and `ProviderDeregistered` rejected the modern `mcp_server_id` keyword -- they accepted only the pre-rename `provider_id`, unlike the other seven `Provider*` aliases which take both. Passing `mcp_server_id` raised `TypeError: Missing required argument: mcp_server_id` while the caller had supplied exactly that. The legacy alias contract is now pinned across every event that carries it ([#705](https://github.com/mcp-hangar/mcp-hangar/pull/705))
+- **core:** authorization denials return the API's standard error envelope again. 2.2.0 moved authorization into middleware, where the `AccessDeniedError` no longer reaches `error_handler`, and the middleware reused the authentication layer's flatter body -- so a `403` changed from `{"error": {"code": "AccessDeniedError", ...}}` to `{"error": "access_denied", ...}`. Any client reading `error.code` broke. Caught by the nightly live-verify suite; now pinned by unit tests so the next regression fails in seconds rather than overnight ([#707](https://github.com/mcp-hangar/mcp-hangar/pull/707))
+- **core:** `application/mcp` and `bootstrap` shipped without an `__init__.py`. The modules were tracked, the marker was not, so the 2.2.0 wheel carries them inside implicit namespace packages. Imports resolve either way, which is why nothing broke -- but static import analysis walks the package tree and skips a directory with no marker, so those modules were invisible to it ([#703](https://github.com/mcp-hangar/mcp-hangar/pull/703))
+- **core:** three modules read `__version__` off the package root, pulling the entire public API -- facade included -- into an adapter, a health probe and the tracing bootstrap just to format a version string. They now read the installed distribution directly ([#703](https://github.com/mcp-hangar/mcp-hangar/pull/703))
+- **core:** the decision-path coverage floor for `server/tools/batch/executor.py` was measured on CPython 3.13 but enforced on 3.11, where branch-arc counts differ (85.38 vs 85.06) -- so the gate failed on its first CI run. Floors now come from the Python the gate runs on, and the config says so ([#699](https://github.com/mcp-hangar/mcp-hangar/pull/699))
 
 ## [2.2.0](https://github.com/mcp-hangar/mcp-hangar/compare/v2.1.1...v2.2.0) (2026-08-02)
 
@@ -92,26 +109,26 @@ Closes the REST authorization holes found by an audit against the project's tech
 
 **This is a minor, not a patch, on purpose.** Three of the changes below break a working deployment and two break it silently, and a patch would have been pulled in unattended by `~=2.1.1`-style constraints. Read [the upgrade guide](https://mcp-hangar.io/upgrade/#upgrade-to-220) before rolling out: an operator API key on the `developer` role stops delivering egress policy, an OPA policy returning a non-boolean flips from allow-all to deny-all, and a misspelled `tool_access.mode` now refuses to start.
 
-### Security
-
-- **core:** authorize the REST/WebSocket surface from one route-driven chokepoint. Only `mcp_servers.py` and `admin_tools.py` ever called the per-handler guard, so `/config`, `/discovery`, `/groups`, `/sessions`, `/tools`, the `/approvals` reads and the whole `/auth` subtree -- API-key minting, role assignment, tool-access policy -- were authenticated but made no authorization decision. Any principal holding any valid credential, including the operator's `X-API-Key`, could `POST /api/auth/roles/assign` and grant itself `admin`; the shipped Helm charts render no Ingress, so nothing fronted the API. Authorization is now resolved from the route via a declarative table, and a route absent from it is denied, so a new endpoint is unreachable until someone decides who may call it ([#692](https://github.com/mcp-hangar/mcp-hangar/pull/692))
-- **core:** `/mcp_servers/{id}/l7_policy` now requires `policy:write`, not `mcp_servers:write`. It is the operator's channel for compiled `MCPEgressPolicy` objects (ADR-013), and `mcp_servers:write` is held by `developer`, so a developer token could clear a compiled egress policy. `policy:write` was defined, granted to admin only, and enforced nowhere. **Breaking:** `provider-admin` gained `mcp_servers:read` + `policy:write` and is the least-privilege home for an operator key; an operator running a `developer` key stops delivering policy, silently -- the CRD still reports `Compiled`
-- **core:** `POST /api/config/reload` requires `config:reload` and no longer accepts a caller-supplied `config_path`. Reload loads whatever path it is given and an `mcp_servers` entry carries `command`/`args`, so the old behaviour was a remote "load an arbitrary file and start what it describes" primitive. A request still sending the field now gets `422` rather than being silently ignored
-- **core:** OPA's verdict is required to be a boolean rather than merely truthy. Rego rules commonly return an object or a string, and every such shape was read as allow -- including `{"result": "deny"}`, which granted access while saying the opposite. A non-boolean verdict is now a denial, and a missing `result` key (an undefined rule, e.g. a wrong `policy_path`) is reported distinctly. **Breaking:** a policy returning anything but a bare boolean flips from allowing everything to denying everything
-- **core:** a partial tool-access-policy update no longer drops the consent gate. `SetToolAccessPolicyCommand` carries only allow/deny lists, so rebuilding the policy from it discarded `approval_list`, `approval_timeout_seconds` and `approval_channel` -- and the enforcement path reads the same resolver, so a plain "add one deny pattern" call silently un-gated every tool requiring human approval
-- **core:** approval arguments are redacted by value, not only by key name, so a secret under an innocuous key no longer reaches the SQLite record or the REST DTO. The dispatch-time integrity hash moved to the raw arguments, because two different secrets redact to the same marker and would otherwise hash identically. **Breaking:** approvals pending across the upgrade fail revalidation and must be re-requested
-- **core:** a misspelled `tool_access.mode` stops the server instead of resolving to `egress` with a warning, which handed a deployment that intended `front_door` the permissive topology. An absent key still means `egress`. **Breaking** for a config with a typo in that key
-- **core:** an unknown `arguments.secretPatterns` group is rejected when the L7 policy is parsed. It used to be skipped at scan time, and the docstring deferred to CRD validation that does not exist -- the CRD declares the field as a plain string array with no enum -- so a misspelled group left the policy reporting as enforcing with that detector off
-
 ### Added
 
-- **core:** `EgressPolicySet` and `EgressPolicyCleared` domain events. `SetL7PolicyHandler` took an event bus and never published to it, so changing what the enforcement plane blocks left no audit trail
+- **core:** `EgressPolicySet` and `EgressPolicyCleared` domain events. `SetL7PolicyHandler` took an event bus and never published to it, so changing what the enforcement plane blocks left no audit trail ([#692](https://github.com/mcp-hangar/mcp-hangar/pull/692))
 
 ### Fixed
 
-- **core:** the event-serializer round-trip test now covers every registered type. It was `@given(sampled_from(EVENT_TYPE_MAP))` with `max_examples=17` against a 42-entry map, so a single run exercised at most 17 types and which ones depended on the seed -- a type registered without a sample passed on some runs and failed on others. It is now parametrized over all types, plus a check that every registered type has one
+- **core:** the event-serializer round-trip test now covers every registered type. It was `@given(sampled_from(EVENT_TYPE_MAP))` with `max_examples=17` against a 42-entry map, so a single run exercised at most 17 types and which ones depended on the seed -- a type registered without a sample passed on some runs and failed on others. It is now parametrized over all types, plus a check that every registered type has one ([#694](https://github.com/mcp-hangar/mcp-hangar/pull/694))
 - **core:** register `EgressPolicySet` and `EgressPolicyCleared` with the event serializer. Both were added as audit events for egress-policy changes but omitted from `_EVENT_CLASS_BY_TYPE`, so `deserialize` raised `EventSerializationError` on them -- the record was written and then unreadable, which is not an audit trail. Their siblings `EgressBlocked` and `EgressPolicyViolationObserved` were already registered ([#694](https://github.com/mcp-hangar/mcp-hangar/pull/694))
-- **core:** the authorization chokepoint resolves the route against `root_path`. Starlette does not rewrite `scope["path"]` under a `Mount`, and the served application mounts the REST router at `/api`, so a table keyed on the raw path matched nothing and -- the default being deny -- would have rejected every REST call on the app `serve --http` serves
+- **core:** the authorization chokepoint resolves the route against `root_path`. Starlette does not rewrite `scope["path"]` under a `Mount`, and the served application mounts the REST router at `/api`, so a table keyed on the raw path matched nothing and -- the default being deny -- would have rejected every REST call on the app `serve --http` serves ([#692](https://github.com/mcp-hangar/mcp-hangar/pull/692))
+
+### Security
+
+- **core:** authorize the REST/WebSocket surface from one route-driven chokepoint. Only `mcp_servers.py` and `admin_tools.py` ever called the per-handler guard, so `/config`, `/discovery`, `/groups`, `/sessions`, `/tools`, the `/approvals` reads and the whole `/auth` subtree -- API-key minting, role assignment, tool-access policy -- were authenticated but made no authorization decision. Any principal holding any valid credential, including the operator's `X-API-Key`, could `POST /api/auth/roles/assign` and grant itself `admin`; the shipped Helm charts render no Ingress, so nothing fronted the API. Authorization is now resolved from the route via a declarative table, and a route absent from it is denied, so a new endpoint is unreachable until someone decides who may call it ([#692](https://github.com/mcp-hangar/mcp-hangar/pull/692))
+- **core:** `/mcp_servers/{id}/l7_policy` now requires `policy:write`, not `mcp_servers:write`. It is the operator's channel for compiled `MCPEgressPolicy` objects (ADR-013), and `mcp_servers:write` is held by `developer`, so a developer token could clear a compiled egress policy. `policy:write` was defined, granted to admin only, and enforced nowhere. **Breaking:** `provider-admin` gained `mcp_servers:read` + `policy:write` and is the least-privilege home for an operator key; an operator running a `developer` key stops delivering policy, silently -- the CRD still reports `Compiled` ([#692](https://github.com/mcp-hangar/mcp-hangar/pull/692))
+- **core:** `POST /api/config/reload` requires `config:reload` and no longer accepts a caller-supplied `config_path`. Reload loads whatever path it is given and an `mcp_servers` entry carries `command`/`args`, so the old behaviour was a remote "load an arbitrary file and start what it describes" primitive. A request still sending the field now gets `422` rather than being silently ignored ([#692](https://github.com/mcp-hangar/mcp-hangar/pull/692))
+- **core:** OPA's verdict is required to be a boolean rather than merely truthy. Rego rules commonly return an object or a string, and every such shape was read as allow -- including `{"result": "deny"}`, which granted access while saying the opposite. A non-boolean verdict is now a denial, and a missing `result` key (an undefined rule, e.g. a wrong `policy_path`) is reported distinctly. **Breaking:** a policy returning anything but a bare boolean flips from allowing everything to denying everything ([#692](https://github.com/mcp-hangar/mcp-hangar/pull/692))
+- **core:** a partial tool-access-policy update no longer drops the consent gate. `SetToolAccessPolicyCommand` carries only allow/deny lists, so rebuilding the policy from it discarded `approval_list`, `approval_timeout_seconds` and `approval_channel` -- and the enforcement path reads the same resolver, so a plain "add one deny pattern" call silently un-gated every tool requiring human approval ([#692](https://github.com/mcp-hangar/mcp-hangar/pull/692))
+- **core:** approval arguments are redacted by value, not only by key name, so a secret under an innocuous key no longer reaches the SQLite record or the REST DTO. The dispatch-time integrity hash moved to the raw arguments, because two different secrets redact to the same marker and would otherwise hash identically. **Breaking:** approvals pending across the upgrade fail revalidation and must be re-requested ([#692](https://github.com/mcp-hangar/mcp-hangar/pull/692))
+- **core:** a misspelled `tool_access.mode` stops the server instead of resolving to `egress` with a warning, which handed a deployment that intended `front_door` the permissive topology. An absent key still means `egress`. **Breaking** for a config with a typo in that key ([#692](https://github.com/mcp-hangar/mcp-hangar/pull/692))
+- **core:** an unknown `arguments.secretPatterns` group is rejected when the L7 policy is parsed. It used to be skipped at scan time, and the docstring deferred to CRD validation that does not exist -- the CRD declares the field as a plain string array with no enum -- so a misspelled group left the policy reporting as enforcing with that detector off ([#692](https://github.com/mcp-hangar/mcp-hangar/pull/692))
 
 ## [2.1.1](https://github.com/mcp-hangar/mcp-hangar/compare/v2.1.0...v2.1.1) (2026-08-01)
 
@@ -119,8 +136,8 @@ Two security fixes from red-teaming the 2.1.0 release on a live cluster. Both ar
 
 ### Security
 
-- **core:** the L7 egress `jwt` secret pattern now catches short-header JWTs. It required 50+ base64url chars in the header segment, but a standard header -- `{"alg":"HS256","typ":"JWT"}` -- is ~33, so every HS256 token and anything without a `kid` evaded the detector while only long-header RS256 tokens matched. A JWT exfiltrated through a tool-call argument slipped past. The pattern now matches the two/three-segment JWT structure with realistic per-segment minimums, verified on a live gateway (the token that was allowed through is now blocked) ([#687](https://github.com/mcp-hangar/mcp-hangar/issues/687))
-- **core:** scope the approval surface by tenant. Resolution and listing authorized on the `approval:resolve` permission alone, ignoring the caller's tenant, so an approver in one tenant could list and resolve high-risk approvals raised in another -- and read their arguments. An approval now binds the tenant that raised it; resolve and list/get are scoped to the caller's tenant, and a foreign-tenant approval is reported as not-found rather than forbidden so its existence is not disclosed. An approval with no tenant (single-tenant / auth-off) is unscoped, so the change is inert outside multi-tenancy. `tenant_id` and `requested_by` are now persisted (SQLite migration included). Verified live: a `tenant:b` approver that previously saw and resolved a `tenant:a` approval now sees zero and gets 404 ([#688](https://github.com/mcp-hangar/mcp-hangar/issues/688))
+- **core:** the L7 egress `jwt` secret pattern now catches short-header JWTs. It required 50+ base64url chars in the header segment, but a standard header -- `{"alg":"HS256","typ":"JWT"}` -- is ~33, so every HS256 token and anything without a `kid` evaded the detector while only long-header RS256 tokens matched. A JWT exfiltrated through a tool-call argument slipped past. The pattern now matches the two/three-segment JWT structure with realistic per-segment minimums, verified on a live gateway (the token that was allowed through is now blocked) ([#687](https://github.com/mcp-hangar/mcp-hangar/pull/687))
+- **core:** scope the approval surface by tenant. Resolution and listing authorized on the `approval:resolve` permission alone, ignoring the caller's tenant, so an approver in one tenant could list and resolve high-risk approvals raised in another -- and read their arguments. An approval now binds the tenant that raised it; resolve and list/get are scoped to the caller's tenant, and a foreign-tenant approval is reported as not-found rather than forbidden so its existence is not disclosed. An approval with no tenant (single-tenant / auth-off) is unscoped, so the change is inert outside multi-tenancy. `tenant_id` and `requested_by` are now persisted (SQLite migration included). Verified live: a `tenant:b` approver that previously saw and resolved a `tenant:a` approval now sees zero and gets 404 ([#688](https://github.com/mcp-hangar/mcp-hangar/pull/688))
 
 ## [2.1.0](https://github.com/mcp-hangar/mcp-hangar/compare/v2.0.1...v2.1.0) (2026-08-01)
 
@@ -128,13 +145,13 @@ The human-in-the-loop approval gate becomes reachable for the first time. Until 
 
 ### Added
 
-- **core:** the human-in-the-loop approval gate is reachable. It was not — on any shipped path, for as long as it has existed ([#678](https://github.com/mcp-hangar/mcp-hangar/issues/678)). Three independent breaks, each confirmed against a running container. **No config surface:** `approval_list` existed on `ToolAccessPolicy` and in its own unit tests, and in no YAML, REST or CLI input, so nothing could put a tool behind approval in the first place. **No service:** `bootstrap_approvals()` had no call site anywhere in `src/`, and the loader that would have called it returned early whenever auth was absent — the default — so `ServerComponents.approval_service` stayed `None`, the `ctx.approval_gate = ...` assignment guarded by it never fired, and a call the policy said to hold executed immediately with a `approval_gate_not_configured` debug line and a real result. **No route:** `/api/approvals` read `app.state.approval_gate_service`, set at exactly one call site from a field that was never populated, and answered **500** with `AttributeError: 'State' object has no attribute 'approval_gate_service'`. A `tools:` block now accepts `approval_list`, `approval_timeout_seconds` and `approval_channel` everywhere it already accepted `allow_list`/`deny_list` — mcp_server, group, group member, and the per-tenant `tool_access.member` block — through one shared parser, so a key cannot be honoured at one scope and silently dropped at another (it was copy-pasted five times, which is how this diverged). The gate service is built in `load_components` independently of auth, and `create_api_router` publishes it onto `app.state` so the HTTP-serve path, `MCPServerFactory` and any test client are wired identically rather than at one call site; the routes also fall back to the application context — the same object the batch executor reads — so the API and enforcement can never hold different services. An absent gate is an explicit **503**, not a stack trace. Approvals are on by default and inert until a policy gates a tool; `approvals.enabled: false` opts out. The [#673](https://github.com/mcp-hangar/mcp-hangar/issues/673) dispatch-time revalidation shipped in 2.0.1 was the guard that had to be in place first; it now guards a path a deployment can actually enter
-- **core:** a startup check that every subsystem the configuration asks for is reachable on the path this process took. This is the sixth instance of one class — the governed task relay ([#592](https://github.com/mcp-hangar/mcp-hangar/issues/592)), the request mutators ([#594](https://github.com/mcp-hangar/mcp-hangar/issues/594)), the SEP-2133 governance descriptors ([#595](https://github.com/mcp-hangar/mcp-hangar/issues/595)), the flat-tool projection ([#596](https://github.com/mcp-hangar/mcp-hangar/issues/596)), the operator's REST prefix (operator#91), and now the approval gate — where a subsystem was wired on one construction path while the shipped process used another, and in every one of them the process started clean and did less than its configuration said. The check runs at the end of `bootstrap()`, the funnel `serve`, `serve --http` and the facade all pass through, and asks one question per subsystem that a configuration can demand: the config demands it, and is the runtime object that serves it present? A configured-but-unreachable subsystem is never silent again. A tool gated behind approval with no gate service **refuses the boot** — a gateway that cannot hold a call is a gateway executing it unapproved, and starting anyway is failing open — and everything else logs at ERROR naming the subsystem and what asked for it. `startup_checks: {enforce: false}` downgrades the refusals to error logs; there is deliberately no switch that makes them silent
+- **core:** the human-in-the-loop approval gate is reachable. It was not — on any shipped path, for as long as it has existed ([#678](https://github.com/mcp-hangar/mcp-hangar/pull/678)). Three independent breaks, each confirmed against a running container. **No config surface:** `approval_list` existed on `ToolAccessPolicy` and in its own unit tests, and in no YAML, REST or CLI input, so nothing could put a tool behind approval in the first place. **No service:** `bootstrap_approvals()` had no call site anywhere in `src/`, and the loader that would have called it returned early whenever auth was absent — the default — so `ServerComponents.approval_service` stayed `None`, the `ctx.approval_gate = ...` assignment guarded by it never fired, and a call the policy said to hold executed immediately with a `approval_gate_not_configured` debug line and a real result. **No route:** `/api/approvals` read `app.state.approval_gate_service`, set at exactly one call site from a field that was never populated, and answered **500** with `AttributeError: 'State' object has no attribute 'approval_gate_service'`. A `tools:` block now accepts `approval_list`, `approval_timeout_seconds` and `approval_channel` everywhere it already accepted `allow_list`/`deny_list` — mcp_server, group, group member, and the per-tenant `tool_access.member` block — through one shared parser, so a key cannot be honoured at one scope and silently dropped at another (it was copy-pasted five times, which is how this diverged). The gate service is built in `load_components` independently of auth, and `create_api_router` publishes it onto `app.state` so the HTTP-serve path, `MCPServerFactory` and any test client are wired identically rather than at one call site; the routes also fall back to the application context — the same object the batch executor reads — so the API and enforcement can never hold different services. An absent gate is an explicit **503**, not a stack trace. Approvals are on by default and inert until a policy gates a tool; `approvals.enabled: false` opts out. The [#673](https://github.com/mcp-hangar/mcp-hangar/issues/673) dispatch-time revalidation shipped in 2.0.1 was the guard that had to be in place first; it now guards a path a deployment can actually enter
+- **core:** a startup check that every subsystem the configuration asks for is reachable on the path this process took. This is the sixth instance of one class — the governed task relay ([#592](https://github.com/mcp-hangar/mcp-hangar/pull/592)), the request mutators ([#594](https://github.com/mcp-hangar/mcp-hangar/pull/594)), the SEP-2133 governance descriptors ([#595](https://github.com/mcp-hangar/mcp-hangar/pull/595)), the flat-tool projection ([#596](https://github.com/mcp-hangar/mcp-hangar/pull/596)), the operator's REST prefix (operator#91), and now the approval gate — where a subsystem was wired on one construction path while the shipped process used another, and in every one of them the process started clean and did less than its configuration said. The check runs at the end of `bootstrap()`, the funnel `serve`, `serve --http` and the facade all pass through, and asks one question per subsystem that a configuration can demand: the config demands it, and is the runtime object that serves it present? A configured-but-unreachable subsystem is never silent again. A tool gated behind approval with no gate service **refuses the boot** — a gateway that cannot hold a call is a gateway executing it unapproved, and starting anyway is failing open — and everything else logs at ERROR naming the subsystem and what asked for it. `startup_checks: {enforce: false}` downgrades the refusals to error logs; there is deliberately no switch that makes them silent
 
 ### Fixed
 
-- **ci:** stop the post-publish smoke failing on PyPI index propagation. The `Published-artifact smoke (post-publish check)` job went red on the 2.0.1 release with `No matching distribution found for mcp-hangar==2.0.1` while `/pypi/mcp-hangar/2.0.1/json` was already answering 200 — the simple index pip reads lags a publish, and the retry budget (six flat 10-second waits, 53 seconds end to end) expired inside that window. A re-run minutes later passed with nothing changed, which is the actual damage: a gate that fires for reasons unrelated to the artifact teaches its reader to re-run without looking, and that is how a real packaging failure gets waved through. The budget is now ~3.5 minutes with exponential backoff, and when it is spent the script no longer guesses — it asks PyPI's JSON API, served from different infrastructure than the index, whether the version exists at all. The three outcomes now say three different things and only one is tolerated: published-but-unindexed warns (post-publish only, where the wheel is already immutable and a red buys nothing), a version PyPI never received fails, and a wheel that will not install fails immediately without burning the retry budget, because waiting cannot fix it ([#680](https://github.com/mcp-hangar/mcp-hangar/issues/680))
-- **ci:** stop release-please proposing a backwards version bump after a hand-cut release. `release-please.yml` runs on push to `main`, so a hand-cut release — which merges its release commit first and pushes the tag second — leaves a window where no tag matches the version the manifest now carries. release-please falls back to an older baseline and derives a version from the whole commit range: twice in one day it proposed lowering `.release-please-manifest.json` (#670 from `2.0.0` to `1.6.1`, #677 from `2.0.1` to `1.6.1`) while rewriting `CHANGELOG.md` with 1.x history under a `v2.0.0...v1.6.1` compare link. Merging either would have corrupted the version state and the changelog together, and both were caught only by a human reading the diff. Two guards now compose. The run is skipped when the pushed commit is the hand-cut release of a version the manifest already carries — deliberately *not* when that commit came from release-please's own release branch, since that run is what creates the tag and skipping it would break bot-driven releases. And whatever version release-please computes, released or merely proposed in a pull request, the run fails loudly if it is lower than the manifest's; versions are compared as PEP 440, where `2.0.1` sorts below `1.6.1` as a string and `2.0.0rc4` sorts above `2.0.0` ([#681](https://github.com/mcp-hangar/mcp-hangar/issues/681))
+- **ci:** stop the post-publish smoke failing on PyPI index propagation. The `Published-artifact smoke (post-publish check)` job went red on the 2.0.1 release with `No matching distribution found for mcp-hangar==2.0.1` while `/pypi/mcp-hangar/2.0.1/json` was already answering 200 — the simple index pip reads lags a publish, and the retry budget (six flat 10-second waits, 53 seconds end to end) expired inside that window. A re-run minutes later passed with nothing changed, which is the actual damage: a gate that fires for reasons unrelated to the artifact teaches its reader to re-run without looking, and that is how a real packaging failure gets waved through. The budget is now ~3.5 minutes with exponential backoff, and when it is spent the script no longer guesses — it asks PyPI's JSON API, served from different infrastructure than the index, whether the version exists at all. The three outcomes now say three different things and only one is tolerated: published-but-unindexed warns (post-publish only, where the wheel is already immutable and a red buys nothing), a version PyPI never received fails, and a wheel that will not install fails immediately without burning the retry budget, because waiting cannot fix it ([#680](https://github.com/mcp-hangar/mcp-hangar/pull/680))
+- **ci:** stop release-please proposing a backwards version bump after a hand-cut release. `release-please.yml` runs on push to `main`, so a hand-cut release — which merges its release commit first and pushes the tag second — leaves a window where no tag matches the version the manifest now carries. release-please falls back to an older baseline and derives a version from the whole commit range: twice in one day it proposed lowering `.release-please-manifest.json` (#670 from `2.0.0` to `1.6.1`, #677 from `2.0.1` to `1.6.1`) while rewriting `CHANGELOG.md` with 1.x history under a `v2.0.0...v1.6.1` compare link. Merging either would have corrupted the version state and the changelog together, and both were caught only by a human reading the diff. Two guards now compose. The run is skipped when the pushed commit is the hand-cut release of a version the manifest already carries — deliberately *not* when that commit came from release-please's own release branch, since that run is what creates the tag and skipping it would break bot-driven releases. And whatever version release-please computes, released or merely proposed in a pull request, the run fails loudly if it is lower than the manifest's; versions are compared as PEP 440, where `2.0.1` sorts below `1.6.1` as a string and `2.0.0rc4` sorts above `2.0.0` ([#681](https://github.com/mcp-hangar/mcp-hangar/pull/681))
 
 ## [2.0.1](https://github.com/mcp-hangar/mcp-hangar/compare/v2.0.0...v2.0.1) (2026-07-31)
 
@@ -144,7 +161,7 @@ Read the scope honestly: the approval gate is **not reachable on a stock `serve 
 
 ### Security
 
-- **core:** re-establish an approval's validity at dispatch, not only at decision. The gate decided once and then blocked — 300 seconds by default, longer if configured — and every condition the decision rested on was evaluated *before* that pause and none of it after: effective policy, tool withdrawal, and the pinned tool digest were all checked at request time. Live config reload is a supported operation, so withdrawing a tool or tightening a policy while a decision was pending left the held call to dispatch on the superseded decision. Two fields made it worse by looking like they already handled it. `arguments_hash` was computed, persisted, emitted in events and shown to the approver, and compared against nothing — its own docstring says "for integrity checking" — while the request **mutator pipeline runs after the gate**, so a registered mutator could rewrite arguments a human had just agreed to with nothing to notice. `expires_at` was persisted and delivered and read by nothing: the only expiry that ran was the in-process `wait()` timeout, which dies with its waiter, so after a restart the row stayed `PENDING` past its window and `resolve()` still accepted it, minting an `APPROVED` record with a real `decided_by` for a call that never ran. (Measured against a pre-fix build: that resolve already returned 409 via the hold-release-failed branch, so the defect was never the status code — it was the false `APPROVED` record, which this changes along with the body.) `ApprovalGateService.revalidate()` now re-checks state, expiry and the argument hash; the executor calls it after the hold and additionally re-resolves the effective policy and re-runs the digest pin; `resolve()` refuses an expired approval with a new `EXPIRED` outcome mapped to **409**. Failing to re-verify refuses the call. `ApprovalRequest` also gains `requested_by` — the record named who decided and never who asked ([#674](https://github.com/mcp-hangar/mcp-hangar/issues/674))
+- **core:** re-establish an approval's validity at dispatch, not only at decision. The gate decided once and then blocked — 300 seconds by default, longer if configured — and every condition the decision rested on was evaluated *before* that pause and none of it after: effective policy, tool withdrawal, and the pinned tool digest were all checked at request time. Live config reload is a supported operation, so withdrawing a tool or tightening a policy while a decision was pending left the held call to dispatch on the superseded decision. Two fields made it worse by looking like they already handled it. `arguments_hash` was computed, persisted, emitted in events and shown to the approver, and compared against nothing — its own docstring says "for integrity checking" — while the request **mutator pipeline runs after the gate**, so a registered mutator could rewrite arguments a human had just agreed to with nothing to notice. `expires_at` was persisted and delivered and read by nothing: the only expiry that ran was the in-process `wait()` timeout, which dies with its waiter, so after a restart the row stayed `PENDING` past its window and `resolve()` still accepted it, minting an `APPROVED` record with a real `decided_by` for a call that never ran. (Measured against a pre-fix build: that resolve already returned 409 via the hold-release-failed branch, so the defect was never the status code — it was the false `APPROVED` record, which this changes along with the body.) `ApprovalGateService.revalidate()` now re-checks state, expiry and the argument hash; the executor calls it after the hold and additionally re-resolves the effective policy and re-runs the digest pin; `resolve()` refuses an expired approval with a new `EXPIRED` outcome mapped to **409**. Failing to re-verify refuses the call. `ApprovalRequest` also gains `requested_by` — the record named who decided and never who asked ([#674](https://github.com/mcp-hangar/mcp-hangar/pull/674))
 
 ## [2.0.0](https://github.com/mcp-hangar/mcp-hangar/compare/v2.0.0-rc.4...v2.0.0) (2026-07-31)
 
@@ -174,27 +191,40 @@ authorization fix is **not** backported.
 
 ### Added
 
-- **core:** publish the REST surface as `api-routes.json`, generated from the routing table by `scripts/dump_api_routes.py`. Consumers build URLs against this API by hand across repositories, and there was no authoritative list to check them against: the operator called `/api/v1/*` for months after core moved to `/api/*`, leaving every remote `MCPServer` `Degraded` while working, with its own tests green throughout (they assert against a mock, and a mock answers whatever it is asked — operator#91). A unit test fails when the file drifts from the served routes, so a route change either updates it or breaks the build. Method and path only — response shapes are **not** covered, and a renamed field still breaks a consumer silently (ADR-011)
+- **core:** publish the REST surface as `api-routes.json`, generated from the routing table by `scripts/dump_api_routes.py`. Consumers build URLs against this API by hand across repositories, and there was no authoritative list to check them against: the operator called `/api/v1/*` for months after core moved to `/api/*`, leaving every remote `MCPServer` `Degraded` while working, with its own tests green throughout (they assert against a mock, and a mock answers whatever it is asked — operator#91). A unit test fails when the file drifts from the served routes, so a route change either updates it or breaks the build. Method and path only — response shapes are **not** covered, and a renamed field still breaks a consumer silently (ADR-011) ([#664](https://github.com/mcp-hangar/mcp-hangar/pull/664))
 
 ## [2.0.0rc4](https://github.com/mcp-hangar/mcp-hangar/compare/v2.0.0-rc.3...v2.0.0-rc.4) (2026-07-29)
 
-### Security
-
-- **core:** **BREAKING** core no longer knows any approval vendor. The `resolve` route dropped its `X-Slack-Signature` branch, `_handle_slack_callback` and `_get_slack_signing_secret` are gone, and `delivery/slack.py` left the tree. Both authentication branches were individually sound — HMAC-SHA256 over `v0:ts:body`, 300s freshness, `compare_digest` — but the shape was not: an unauthenticated caller chose which authentication mechanism ran. Delivery channels now resolve through the `mcp_hangar.approvals.delivery` entry-point group; core ships `dashboard` and `noop`. **Anyone with `approvals.channel: slack` configured must install an adapter**: it terminates the vendor webhook itself, verifies the signature, maps the vendor identity onto a Hangar principal, and calls `POST /approvals/{id}/resolve` with an ordinary token — which also retires `decided_by = f"slack:{id}"`, so provenance now names a Hangar principal rather than a vendor handle. A reference adapter ships in the docs. An unknown channel degrades to `noop` with a warning rather than failing startup: approvals then queue undelivered but stay resolvable over REST, whereas refusing to boot over a notification channel turns a degraded path into an outage (A-2919 WS-3/WS-4, ADR-016)
-- **core:** tolerate clock drift when validating JWTs. `jwt.decode` was called without `leeway`, so PyJWT's default of 0 demanded that this host and the token issuer agree to the second on `exp`/`iat`/`nbf`. Skew is a property of the pair of hosts, so the failure is total rather than partial — a VM resuming from a snapshot, drifted NTP, or an IdP a few seconds ahead rejects **every** token at once, with valid credentials and a healthy IdP, and nothing in the token explains why. Both verifying paths (JWKS RS256/ES256 and static-secret HS256) now apply a tolerance, configurable per issuer as `clock_skew_leeway_seconds` and defaulting to 60 — the usual bound, and small enough not to meaningfully extend an expired token. Set it to 0 to restore exact agreement ([#630](https://github.com/mcp-hangar/mcp-hangar/issues/630))
-- **core:** authorize approval resolution and attribute it to the authenticated caller. `approval:resolve` was defined in `auth/roles.py`, mapped from its string form and granted to a role — and checked nowhere, so any principal holding a valid token could decide any approval given its id. Resolution now goes through a command handler that authorizes before deciding; the check sits in the handler rather than the route so a second transport inherits it by construction. `decided_by` was worse than it looked: `_extract_principal` read `request.state.principal_id` and fell back to the client-supplied `x-principal-id` header, defaulting to `"unknown"` — but the auth middleware attaches `request.state.auth` and nothing ever set `principal_id`, so the header was the only path, including for authenticated requests, and that value landed in the provenance chain. Identity now comes from the platform's `get_principal_from_request`; with auth disabled the decision is attributed to the system principal, never a header and never a sentinel. Resolution remains possible on an auth-off gateway on purpose — refusing there would decide nothing, which is #600's shape of failing closed on the API and open on enforcement (A-2919 WS-0..WS-2)
-- **ci:** scope every workflow's `GITHUB_TOKEN` to read-only by default. Nine workflows declared no top-level `permissions:`, so each inherited the repository default — write on Contents, Packages, Actions, Deployments, SecurityEvents and more. That was broadest exactly where it should be narrowest: in `release.yml` the `smoke-wheel` and `smoke-published` jobs **download and execute the freshly built artifact** (starting a gateway, spawning subprocess backends, driving a real MCP server) and `test` runs the suite — all with a near-omnipotent token, while the three jobs that genuinely publish had already scoped themselves down. Job-level blocks replace rather than merge with the default, so `publish-pypi`, `publish-docker`, `create-release`, `codeql` and `semgrep` keep exactly the scopes they declare
-
 ### Added
 
-- **core:** typed model for a pending approval, under the `io.mcp-hangar/approval` method namespace. Internal only — nothing is served yet. It serializes to a value that drops into a SEP-2663 `inputRequests` map with no transformation, so if modelcontextprotocol#2919 lands we plug in rather than rebuild. Deliberately carries **no** `requestedSchema`: a value with one looks like an elicitation to a client that does not know the method, and an elicitation is answerable by the caller — which is exactly the party an approval gate exists not to trust. The subject binds the call by `argumentsHash` rather than carrying the arguments, since it travels to whoever is deciding (A-2919 WS-5)
+- **core:** typed model for a pending approval, under the `io.mcp-hangar/approval` method namespace. Internal only — nothing is served yet. It serializes to a value that drops into a SEP-2663 `inputRequests` map with no transformation, so if modelcontextprotocol#2919 lands we plug in rather than rebuild. Deliberately carries **no** `requestedSchema`: a value with one looks like an elicitation to a client that does not know the method, and an elicitation is answerable by the caller — which is exactly the party an approval gate exists not to trust. The subject binds the call by `argumentsHash` rather than carrying the arguments, since it travels to whoever is deciding (A-2919 WS-5) ([#662](https://github.com/mcp-hangar/mcp-hangar/pull/662))
+
 ### Fixed
 
-- **core:** recover from an upstream restart instead of wedging on it. Streamable HTTP answers a request carrying an unknown `Mcp-Session-Id` with 404, and the resolution is to open a new session — but the id was captured once and never cleared, 404 is not in `retry_status_codes`, and the caller saw an opaque `HTTP error: 404`. So after any upstream pod restart **every** call to that server failed, indefinitely, while `/health/ready` still reported the gateway healthy: nothing restarted it, nothing alerted, and recovery required restarting the *gateway* rather than the upstream. The client now drops the dead session and reports the condition distinguishably (`-32600` + `mcp_session_terminated`, matching what the SDK client reports), and the tool-invoke path re-handshakes once and retries. A **successful** renegotiation records no health failure — an ordinary restart is not evidence of an unhealthy upstream, and marking it so would pull a working pod out of its Service; a **failed** one does. Found on kind ([#651](https://github.com/mcp-hangar/mcp-hangar/issues/651))
+- **core:** recover from an upstream restart instead of wedging on it. Streamable HTTP answers a request carrying an unknown `Mcp-Session-Id` with 404, and the resolution is to open a new session — but the id was captured once and never cleared, 404 is not in `retry_status_codes`, and the caller saw an opaque `HTTP error: 404`. So after any upstream pod restart **every** call to that server failed, indefinitely, while `/health/ready` still reported the gateway healthy: nothing restarted it, nothing alerted, and recovery required restarting the *gateway* rather than the upstream. The client now drops the dead session and reports the condition distinguishably (`-32600` + `mcp_session_terminated`, matching what the SDK client reports), and the tool-invoke path re-handshakes once and retries. A **successful** renegotiation records no health failure — an ordinary restart is not evidence of an unhealthy upstream, and marking it so would pull a working pod out of its Service; a **failed** one does. Found on kind ([#651](https://github.com/mcp-hangar/mcp-hangar/pull/651))
+
+### Security
+
+- **core:** **BREAKING** core no longer knows any approval vendor. The `resolve` route dropped its `X-Slack-Signature` branch, `_handle_slack_callback` and `_get_slack_signing_secret` are gone, and `delivery/slack.py` left the tree. Both authentication branches were individually sound — HMAC-SHA256 over `v0:ts:body`, 300s freshness, `compare_digest` — but the shape was not: an unauthenticated caller chose which authentication mechanism ran. Delivery channels now resolve through the `mcp_hangar.approvals.delivery` entry-point group; core ships `dashboard` and `noop`. **Anyone with `approvals.channel: slack` configured must install an adapter**: it terminates the vendor webhook itself, verifies the signature, maps the vendor identity onto a Hangar principal, and calls `POST /approvals/{id}/resolve` with an ordinary token — which also retires `decided_by = f"slack:{id}"`, so provenance now names a Hangar principal rather than a vendor handle. A reference adapter ships in the docs. An unknown channel degrades to `noop` with a warning rather than failing startup: approvals then queue undelivered but stay resolvable over REST, whereas refusing to boot over a notification channel turns a degraded path into an outage (A-2919 WS-3/WS-4, ADR-016) ([#660](https://github.com/mcp-hangar/mcp-hangar/pull/660))
+- **core:** tolerate clock drift when validating JWTs. `jwt.decode` was called without `leeway`, so PyJWT's default of 0 demanded that this host and the token issuer agree to the second on `exp`/`iat`/`nbf`. Skew is a property of the pair of hosts, so the failure is total rather than partial — a VM resuming from a snapshot, drifted NTP, or an IdP a few seconds ahead rejects **every** token at once, with valid credentials and a healthy IdP, and nothing in the token explains why. Both verifying paths (JWKS RS256/ES256 and static-secret HS256) now apply a tolerance, configurable per issuer as `clock_skew_leeway_seconds` and defaulting to 60 — the usual bound, and small enough not to meaningfully extend an expired token. Set it to 0 to restore exact agreement ([#630](https://github.com/mcp-hangar/mcp-hangar/pull/630))
+- **core:** authorize approval resolution and attribute it to the authenticated caller. `approval:resolve` was defined in `auth/roles.py`, mapped from its string form and granted to a role — and checked nowhere, so any principal holding a valid token could decide any approval given its id. Resolution now goes through a command handler that authorizes before deciding; the check sits in the handler rather than the route so a second transport inherits it by construction. `decided_by` was worse than it looked: `_extract_principal` read `request.state.principal_id` and fell back to the client-supplied `x-principal-id` header, defaulting to `"unknown"` — but the auth middleware attaches `request.state.auth` and nothing ever set `principal_id`, so the header was the only path, including for authenticated requests, and that value landed in the provenance chain. Identity now comes from the platform's `get_principal_from_request`; with auth disabled the decision is attributed to the system principal, never a header and never a sentinel. Resolution remains possible on an auth-off gateway on purpose — refusing there would decide nothing, which is #600's shape of failing closed on the API and open on enforcement (A-2919 WS-0..WS-2) ([#656](https://github.com/mcp-hangar/mcp-hangar/pull/656))
+- **ci:** scope every workflow's `GITHUB_TOKEN` to read-only by default. Nine workflows declared no top-level `permissions:`, so each inherited the repository default — write on Contents, Packages, Actions, Deployments, SecurityEvents and more. That was broadest exactly where it should be narrowest: in `release.yml` the `smoke-wheel` and `smoke-published` jobs **download and execute the freshly built artifact** (starting a gateway, spawning subprocess backends, driving a real MCP server) and `test` runs the suite — all with a near-omnipotent token, while the three jobs that genuinely publish had already scoped themselves down. Job-level blocks replace rather than merge with the default, so `publish-pypi`, `publish-docker`, `create-release`, `codeql` and `semgrep` keep exactly the scopes they declare ([#649](https://github.com/mcp-hangar/mcp-hangar/pull/649))
 
 ## [2.0.0rc3](https://github.com/mcp-hangar/mcp-hangar/compare/v2.0.0-rc.2...v2.0.0-rc.3) (2026-07-28)
 
 The candidate that makes the published artifact match what the docs describe. It carries the whole SEP-2663 realignment — which `rc2` predates — and moves the SDK pin onto the **stable** `mcp==2.0.0`, released the same day.
+
+### Added
+
+- **core:** forward the caller's Tasks declaration upstream, per request. SEP-2663 leaves task augmentation to the upstream and gates it on the **caller** having declared `io.modelcontextprotocol/tasks` — and on the wire to an upstream, Hangar is that caller. Declaring nothing meant a spec-following upstream would never mint a task and the governed relay would sit idle having never been offered one. Forwarded only when the downstream caller declared it **and** the relay is actually wired: a connection-level claim would mint tasks for clients that never asked, and those same clients are then answered `-32021` on `tasks/get`, holding a handle they cannot use ([#322](https://github.com/mcp-hangar/mcp-hangar/pull/322))
+
+- **ci:** watch for the conformance suite gaining auth support, which is what now blocks certifying the relay against the spec's own vectors. `@modelcontextprotocol/conformance@alpha` ships seven `tasks-*` extension scenarios — an external audit of exactly the SEP-2663 surface this repo serves — but they require `greet` / `slow_compute` in `tools/list`, and Hangar exposes backend tool names only in `front_door` topology, which projects per tenant and advertises **zero** tools without an identity (verified against a running gateway). `conformance server` has no `--header` / auth option, so it cannot present one. The two requirements are mutually exclusive, so this unblocks on the suite rather than on us ([#550](https://github.com/mcp-hangar/mcp-hangar/pull/550))
+
+- **ci:** run the task-relay smoke drivers against a real gateway on every change to the relay or the example (`task-relay-smoke.yml`). `examples/` was covered by no workflow at all — CI built only `examples/provider_math` — which is why two defects shipped through a green unit suite and were found only by running the drivers by hand: the payload bridge (#638) and the capability advertisement (#639). Neither is reachable without a real client on a real connection, because the unit suite fakes the request context. Runs the upstream's own contract first, so a failure tells an upstream regression apart from a relay one ([#322](https://github.com/mcp-hangar/mcp-hangar/pull/322))
+
+- **core:** vendor the SEP-2663 Tasks wire models (`mcp_hangar/tasks_wire.py`) instead of serving `mcp_types`' `Task*` types, which are the SEP-1686 generation 2026-07-28 removed from the core spec — flat `CreateTaskResult` with `resultType`, `ttlMs`/`pollIntervalMs`, `tasks/get` inlining its outcome, `tasks/result` and `tasks/list` gone, `tasks/update` present. Field names track [python-sdk#3005](https://github.com/modelcontextprotocol/python-sdk/pull/3005) so the models retire rather than fork when it merges; the one deliberate divergence is `GetTaskResult.inputRequests`, which #3005 drops on parse and Hangar's consent gate needs. No handler is rewired yet ([#322](https://github.com/mcp-hangar/mcp-hangar/pull/322))
+
+- **tests:** pin what Hangar declares to an upstream at handshake — a hardcoded `"capabilities": {}`. Recorded because it decides whether the ADR-014 relay ever receives a task: SEP-2663 makes augmentation the upstream's decision and gates it on the caller declaring `io.modelcontextprotocol/tasks` (python-sdk#3005 answers a non-declaring client `-32021`), so against a spec-compliant upstream Hangar is a non-declaring client and no task is ever minted for it. Also records why per-downstream-client extension propagation is the wrong model — the upstream connection is one shared, cold-start connection that outlives any client ([#322](https://github.com/mcp-hangar/mcp-hangar/pull/322))
 
 ### Changed
 
@@ -202,63 +232,34 @@ The candidate that makes the published artifact match what the docs describe. It
 
 - **core:** drop a stale `type: ignore[attr-defined]` in `_sdk_compat`. `mcp.types` does not exist in the betas but the stable release carries it again, so mypy now resolves the import and the suppression became dead weight
 
+- **core:** reactivate the governed task relay — `relay_tasks_enabled` defaults to **true** again on all three construction paths. It was turned off on 2026-07-28 because the surface advertised a wire it did not serve; ADR-015 Decision 5 set the condition for turning it back on as *the SEP-2663 shapes actually being served*, and they now are. Verified against a live gateway on a config that never mentions the flag: the extension is advertised on `server/discover` with the served method set, and the full relay lifecycle passes 22/22 — including the payload bridge, the refusal ladder, the `Mcp-Name` requirement and the governed `tasks/update` consent. The rollback path is unchanged and equally verified: `relay_tasks_enabled: false` advertises nothing and registers nothing ([#322](https://github.com/mcp-hangar/mcp-hangar/pull/322))
 
-### Changed
+- **tests:** rewrite the task-relay smoke harness onto the SEP-2663 wire. The drivers negotiated `2025-11-25` and called `tasks/result` / `tasks/list`, so after the wire realignment every `tasks/*` answered `-32601` and the harness tested nothing — silently, because `examples/task_upstream` is not covered by any workflow. `drive_relay.py` now speaks through the SDK's `Client` with `mode="2026-07-28"` and typed requests carrying `name_param`, which is the only way to satisfy the mandatory per-request `Mcp-Name` header; `consent_hitl.py` is removed because Hangar no longer issues the `elicitation/create` prompt it drove; the example upstream now emits `inputRequests` so the governed `tasks/update` loop has something to key on. Two live defects were found by running it: the payload bridge and the capability advertisement ([#640](https://github.com/mcp-hangar/mcp-hangar/pull/640))
 
-- **core:** reactivate the governed task relay — `relay_tasks_enabled` defaults to **true** again on all three construction paths. It was turned off on 2026-07-28 because the surface advertised a wire it did not serve; ADR-015 Decision 5 set the condition for turning it back on as *the SEP-2663 shapes actually being served*, and they now are. Verified against a live gateway on a config that never mentions the flag: the extension is advertised on `server/discover` with the served method set, and the full relay lifecycle passes 22/22 — including the payload bridge, the refusal ladder, the `Mcp-Name` requirement and the governed `tasks/update` consent. The rollback path is unchanged and equally verified: `relay_tasks_enabled: false` advertises nothing and registers nothing ([#322](https://github.com/mcp-hangar/mcp-hangar/issues/322))
+- **core:** serve the SEP-2663 Tasks wire. `tasks/get` now returns the flat vendored shape with `ttlMs`/`pollIntervalMs`, its outcome **inlined** (SEP-2663 folds the removed `tasks/result` round trip into the poll) and its `inputRequests` carried so the client can answer them; `tasks/cancel` and `tasks/update` return empty acknowledgements, because cancellation is cooperative and claiming a status the upstream never reported is the fabrication the SEP warns about. `tasks/result` and `tasks/list` are no longer registered, which is how they return `-32601`. `tasks/update` is now registered **unconditionally** — it was gated on an SDK probe that could never become true, so the handler was dead code (ADR-015). The advertised capability no longer claims `list` ([#322](https://github.com/mcp-hangar/mcp-hangar/pull/322))
 
-### Fixed
+- **core:** refuse `tasks/*` with the code SEP-2663 specifies: `-32601` on a 2025-11-25 connection (the methods do not exist there), `-32021` with a machine-readable `requiredCapabilities` for a modern client that never declared `io.modelcontextprotocol/tasks`, `-32020` for a missing or contradictory `Mcp-Name` header, `-32602` for an unknown or unowned task. The ladder is ordered version → routing header → capability, and each rung refuses before reaching the upstream ([#322](https://github.com/mcp-hangar/mcp-hangar/pull/322))
 
-- **core:** stop stamping the 2026-07-28 `_meta` envelope on upstreams that negotiated a legacy protocol. From `mcp==2.0.0` the SDK enforces era separation: a connection whose `initialize` settled on 2025-11-25 rejects every later request carrying the modern envelope with `-32600`. Hangar stamped it unconditionally, so against any SDK-built legacy upstream `tools/list` failed, the cold start never completed, and the caller saw a **hang** rather than an error — the batch sat until its global timeout. The beta tolerated it; the stable release does not. The handshake now records the negotiated era and withholds the protocol keys on legacy connections, while still sending them to stateless SEP-2575 upstreams, which have no handshake and learn the protocol only from `_meta`. Caught by the published-artifact smoke (gate D) before the wheel shipped ([#550](https://github.com/mcp-hangar/mcp-hangar/issues/550))
-- **core:** read the client's capabilities from the key the spec actually uses. `read_protocol_negotiation` looked for `io.modelcontextprotocol/capabilities`; the spec key is `io.modelcontextprotocol/clientCapabilities` — the SDK's inbound ladder requires it on every modern request, and the short spelling appears nowhere in `mcp_types`. So capabilities came back **empty for every well-formed request**, and nothing noticed because nothing consumed them (#291). The legacy spelling is still accepted; the spec key wins
+- **core:** enforce SEP-2663's mandatory `Mcp-Name: <taskId>` on `tasks/get|update|cancel` over HTTP. Neither the SDK nor Hangar's front-door middleware covers this — the SDK's `NAME_BEARING_METHODS` omits `tasks/*` and checks agreement rather than presence, and the middleware deliberately disengages on 2026-07-28 — so the handler gate is the only rung that runs. Skipped on stdio, where the SEP does not apply. `NAME_BEARING_TASK_METHODS` is exported for the operator's L7 selector (operator#53) ([#637](https://github.com/mcp-hangar/mcp-hangar/pull/637))
 
-### Added
-
-- **core:** forward the caller's Tasks declaration upstream, per request. SEP-2663 leaves task augmentation to the upstream and gates it on the **caller** having declared `io.modelcontextprotocol/tasks` — and on the wire to an upstream, Hangar is that caller. Declaring nothing meant a spec-following upstream would never mint a task and the governed relay would sit idle having never been offered one. Forwarded only when the downstream caller declared it **and** the relay is actually wired: a connection-level claim would mint tasks for clients that never asked, and those same clients are then answered `-32021` on `tasks/get`, holding a handle they cannot use ([#322](https://github.com/mcp-hangar/mcp-hangar/issues/322))
-
-### Added
-
-- **ci:** watch for the conformance suite gaining auth support, which is what now blocks certifying the relay against the spec's own vectors. `@modelcontextprotocol/conformance@alpha` ships seven `tasks-*` extension scenarios — an external audit of exactly the SEP-2663 surface this repo serves — but they require `greet` / `slow_compute` in `tools/list`, and Hangar exposes backend tool names only in `front_door` topology, which projects per tenant and advertises **zero** tools without an identity (verified against a running gateway). `conformance server` has no `--header` / auth option, so it cannot present one. The two requirements are mutually exclusive, so this unblocks on the suite rather than on us ([#550](https://github.com/mcp-hangar/mcp-hangar/issues/550))
-
-### Added
-
-- **ci:** run the task-relay smoke drivers against a real gateway on every change to the relay or the example (`task-relay-smoke.yml`). `examples/` was covered by no workflow at all — CI built only `examples/provider_math` — which is why two defects shipped through a green unit suite and were found only by running the drivers by hand: the payload bridge (#638) and the capability advertisement (#639). Neither is reachable without a real client on a real connection, because the unit suite fakes the request context. Runs the upstream's own contract first, so a failure tells an upstream regression apart from a relay one ([#322](https://github.com/mcp-hangar/mcp-hangar/issues/322))
-
-### Changed
-
-- **tests:** rewrite the task-relay smoke harness onto the SEP-2663 wire. The drivers negotiated `2025-11-25` and called `tasks/result` / `tasks/list`, so after the wire realignment every `tasks/*` answered `-32601` and the harness tested nothing — silently, because `examples/task_upstream` is not covered by any workflow. `drive_relay.py` now speaks through the SDK's `Client` with `mode="2026-07-28"` and typed requests carrying `name_param`, which is the only way to satisfy the mandatory per-request `Mcp-Name` header; `consent_hitl.py` is removed because Hangar no longer issues the `elicitation/create` prompt it drove; the example upstream now emits `inputRequests` so the governed `tasks/update` loop has something to key on. Two live defects were found by running it: the payload bridge and the capability advertisement
-
-### Fixed
-
-- **core:** fetch a completed task's payload from an upstream that keeps it behind `tasks/result`. SEP-2663 inlines the result on `tasks/get`, so a modern upstream needs nothing extra — but an upstream on the older design answers `tasks/get` with a status only. Serving `tasks/result` downstream was correctly removed; no longer *calling* it upstream went with it by accident, which made the payload of every task relayed from such a server unreachable: the client polled to `completed` and got `result: null` forever. The fetch is best-effort (a modern upstream answers `-32601` there, which is not a reason to fail a good poll) and runs only after the pinned-digest re-verification, so a drifted tool is never asked for output ([#322](https://github.com/mcp-hangar/mcp-hangar/issues/322))
-
-- **core:** advertise the Tasks surface under `capabilities.extensions`, where SEP-2663 puts it, instead of `capabilities.tasks`. `v2026_07_28.ServerCapabilities` has no `tasks` field — SEP-2663 moved Tasks out of the core capability set — so the SDK's per-version serialization sieve silently dropped it from a modern `server/discover`. The result was exactly inverted: the field survived on the legacy handshake, where Hangar refuses `tasks/*` with `-32601`, and vanished on the modern wire, where Hangar actually serves them. A spec-following 2026-07-28 client could never discover the surface. The advertised settings now name the served method set itself, so the advertisement and the registration cannot drift ([#322](https://github.com/mcp-hangar/mcp-hangar/issues/322))
-
-- **ci:** retarget the gate E ecosystem watch, which was reporting a false all-clear. It asked whether `@modelcontextprotocol/sdk` had published a 2.x — but the TypeScript SDK v2 shipped under **new package names** (`@modelcontextprotocol/core` / `client` / `server`, all 2.0.0) while `sdk` continues on the v1 line, so the check answered "still on the v1 line" about a superseded package and stayed silent about the event it existed to catch. The Inspector check had the mirror problem: it read a dependency key the Inspector no longer has. The scenario-drift check only compared against `latest`, missing that the 2026-07-28 server vectors and the whole `tasks-*` extension family landed on the `alpha` tag while `latest` sat at 0.1.16 ([#550](https://github.com/mcp-hangar/mcp-hangar/issues/550))
-
-### Changed
-
-- **core:** serve the SEP-2663 Tasks wire. `tasks/get` now returns the flat vendored shape with `ttlMs`/`pollIntervalMs`, its outcome **inlined** (SEP-2663 folds the removed `tasks/result` round trip into the poll) and its `inputRequests` carried so the client can answer them; `tasks/cancel` and `tasks/update` return empty acknowledgements, because cancellation is cooperative and claiming a status the upstream never reported is the fabrication the SEP warns about. `tasks/result` and `tasks/list` are no longer registered, which is how they return `-32601`. `tasks/update` is now registered **unconditionally** — it was gated on an SDK probe that could never become true, so the handler was dead code (ADR-015). The advertised capability no longer claims `list` ([#322](https://github.com/mcp-hangar/mcp-hangar/issues/322))
-
-- **core:** refuse `tasks/*` with the code SEP-2663 specifies: `-32601` on a 2025-11-25 connection (the methods do not exist there), `-32021` with a machine-readable `requiredCapabilities` for a modern client that never declared `io.modelcontextprotocol/tasks`, `-32020` for a missing or contradictory `Mcp-Name` header, `-32602` for an unknown or unowned task. The ladder is ordered version → routing header → capability, and each rung refuses before reaching the upstream ([#322](https://github.com/mcp-hangar/mcp-hangar/issues/322))
-
-- **core:** enforce SEP-2663's mandatory `Mcp-Name: <taskId>` on `tasks/get|update|cancel` over HTTP. Neither the SDK nor Hangar's front-door middleware covers this — the SDK's `NAME_BEARING_METHODS` omits `tasks/*` and checks agreement rather than presence, and the middleware deliberately disengages on 2026-07-28 — so the handler gate is the only rung that runs. Skipped on stdio, where the SEP does not apply. `NAME_BEARING_TASK_METHODS` is exported for the operator's L7 selector (operator#53)
+- **core:** correct two claims in the `tasks_wire` module docstring that a reader could disprove in seconds — `resultType` is not "absent entirely" from `mcp_types` (twelve result classes declare it, and `ResultType` accepts any string; the true and sufficient claim is that no `Task*` class does), and b2/rc1 are not "byte-identical" (the module was edited in that window — `SERVER_INFO_META_KEY` arrived, `DiscoverResult` lost `server_info`). The accurate version is the stronger argument: the Tasks surface is unchanged across both releases while the file around it is under active edit, so those types are a deliberately frozen region rather than a neglected one ([#636](https://github.com/mcp-hangar/mcp-hangar/pull/636))
 
 ### Removed
 
-- **core:** the synchronous 2025-11-25 mid-flight consent flow, which resolved an `input_required` task by eliciting the downstream client inside `tasks/get`. It existed only for a wire Hangar no longer serves; on the SEP-2663 wire the client resolves its own input by driving `tasks/update`, which is governed and still fail-closed. What went with it: the decline / cancel / no-back-channel / elicit-error denial matrix and the concurrent-reprompt guard, all of which guarded an interactive prompt Hangar no longer issues. The digest re-verification that guarded `tasks/result` did **not** go with it — it moved to `tasks/get`, now the only path by which a payload reaches a caller
+- **core:** the synchronous 2025-11-25 mid-flight consent flow, which resolved an `input_required` task by eliciting the downstream client inside `tasks/get`. It existed only for a wire Hangar no longer serves; on the SEP-2663 wire the client resolves its own input by driving `tasks/update`, which is governed and still fail-closed. What went with it: the decline / cancel / no-back-channel / elicit-error denial matrix and the concurrent-reprompt guard, all of which guarded an interactive prompt Hangar no longer issues. The digest re-verification that guarded `tasks/result` did **not** go with it — it moved to `tasks/get`, now the only path by which a payload reaches a caller ([#637](https://github.com/mcp-hangar/mcp-hangar/pull/637))
 
-- **core:** `HAS_LIST_TASKS` / `HAS_TASKS_UPDATE` from `_sdk_compat`. Both probed `mcp_types`, which carries the frozen SEP-1686 generation, so neither could ever flip (ADR-015)
+- **core:** `HAS_LIST_TASKS` / `HAS_TASKS_UPDATE` from `_sdk_compat`. Both probed `mcp_types`, which carries the frozen SEP-1686 generation, so neither could ever flip (ADR-015) ([#637](https://github.com/mcp-hangar/mcp-hangar/pull/637))
 
-### Changed
+### Fixed
 
-- **core:** correct two claims in the `tasks_wire` module docstring that a reader could disprove in seconds — `resultType` is not "absent entirely" from `mcp_types` (twelve result classes declare it, and `ResultType` accepts any string; the true and sufficient claim is that no `Task*` class does), and b2/rc1 are not "byte-identical" (the module was edited in that window — `SERVER_INFO_META_KEY` arrived, `DiscoverResult` lost `server_info`). The accurate version is the stronger argument: the Tasks surface is unchanged across both releases while the file around it is under active edit, so those types are a deliberately frozen region rather than a neglected one
+- **core:** stop stamping the 2026-07-28 `_meta` envelope on upstreams that negotiated a legacy protocol. From `mcp==2.0.0` the SDK enforces era separation: a connection whose `initialize` settled on 2025-11-25 rejects every later request carrying the modern envelope with `-32600`. Hangar stamped it unconditionally, so against any SDK-built legacy upstream `tools/list` failed, the cold start never completed, and the caller saw a **hang** rather than an error — the batch sat until its global timeout. The beta tolerated it; the stable release does not. The handshake now records the negotiated era and withholds the protocol keys on legacy connections, while still sending them to stateless SEP-2575 upstreams, which have no handshake and learn the protocol only from `_meta`. Caught by the published-artifact smoke (gate D) before the wheel shipped ([#550](https://github.com/mcp-hangar/mcp-hangar/pull/550))
+- **core:** read the client's capabilities from the key the spec actually uses. `read_protocol_negotiation` looked for `io.modelcontextprotocol/capabilities`; the spec key is `io.modelcontextprotocol/clientCapabilities` — the SDK's inbound ladder requires it on every modern request, and the short spelling appears nowhere in `mcp_types`. So capabilities came back **empty for every well-formed request**, and nothing noticed because nothing consumed them (#291). The legacy spelling is still accepted; the spec key wins ([#644](https://github.com/mcp-hangar/mcp-hangar/pull/644))
 
-### Added
+- **core:** fetch a completed task's payload from an upstream that keeps it behind `tasks/result`. SEP-2663 inlines the result on `tasks/get`, so a modern upstream needs nothing extra — but an upstream on the older design answers `tasks/get` with a status only. Serving `tasks/result` downstream was correctly removed; no longer *calling* it upstream went with it by accident, which made the payload of every task relayed from such a server unreachable: the client polled to `completed` and got `result: null` forever. The fetch is best-effort (a modern upstream answers `-32601` there, which is not a reason to fail a good poll) and runs only after the pinned-digest re-verification, so a drifted tool is never asked for output ([#322](https://github.com/mcp-hangar/mcp-hangar/pull/322))
 
-- **core:** vendor the SEP-2663 Tasks wire models (`mcp_hangar/tasks_wire.py`) instead of serving `mcp_types`' `Task*` types, which are the SEP-1686 generation 2026-07-28 removed from the core spec — flat `CreateTaskResult` with `resultType`, `ttlMs`/`pollIntervalMs`, `tasks/get` inlining its outcome, `tasks/result` and `tasks/list` gone, `tasks/update` present. Field names track [python-sdk#3005](https://github.com/modelcontextprotocol/python-sdk/pull/3005) so the models retire rather than fork when it merges; the one deliberate divergence is `GetTaskResult.inputRequests`, which #3005 drops on parse and Hangar's consent gate needs. No handler is rewired yet ([#322](https://github.com/mcp-hangar/mcp-hangar/issues/322))
+- **core:** advertise the Tasks surface under `capabilities.extensions`, where SEP-2663 puts it, instead of `capabilities.tasks`. `v2026_07_28.ServerCapabilities` has no `tasks` field — SEP-2663 moved Tasks out of the core capability set — so the SDK's per-version serialization sieve silently dropped it from a modern `server/discover`. The result was exactly inverted: the field survived on the legacy handshake, where Hangar refuses `tasks/*` with `-32601`, and vanished on the modern wire, where Hangar actually serves them. A spec-following 2026-07-28 client could never discover the surface. The advertised settings now name the served method set itself, so the advertisement and the registration cannot drift ([#322](https://github.com/mcp-hangar/mcp-hangar/pull/322))
 
-- **tests:** pin what Hangar declares to an upstream at handshake — a hardcoded `"capabilities": {}`. Recorded because it decides whether the ADR-014 relay ever receives a task: SEP-2663 makes augmentation the upstream's decision and gates it on the caller declaring `io.modelcontextprotocol/tasks` (python-sdk#3005 answers a non-declaring client `-32021`), so against a spec-compliant upstream Hangar is a non-declaring client and no task is ever minted for it. Also records why per-downstream-client extension propagation is the wrong model — the upstream connection is one shared, cold-start connection that outlives any client ([#322](https://github.com/mcp-hangar/mcp-hangar/issues/322))
+- **ci:** retarget the gate E ecosystem watch, which was reporting a false all-clear. It asked whether `@modelcontextprotocol/sdk` had published a 2.x — but the TypeScript SDK v2 shipped under **new package names** (`@modelcontextprotocol/core` / `client` / `server`, all 2.0.0) while `sdk` continues on the v1 line, so the check answered "still on the v1 line" about a superseded package and stayed silent about the event it existed to catch. The Inspector check had the mirror problem: it read a dependency key the Inspector no longer has. The scenario-drift check only compared against `latest`, missing that the 2026-07-28 server vectors and the whole `tasks-*` extension family landed on the `alpha` tag while `latest` sat at 0.1.16 ([#550](https://github.com/mcp-hangar/mcp-hangar/pull/550))
 
 ## [2.0.0rc2](https://github.com/mcp-hangar/mcp-hangar/compare/v2.0.0-rc.1...v2.0.0-rc.2) (2026-07-28)
 
@@ -266,15 +267,15 @@ A single-fix candidate cut directly on top of `2.0.0rc1`, which advertises a tas
 
 ### Added
 
-- **core:** run the official MCP conformance suite against a real `serve --http` gateway in CI, with a classified baseline of known failures (gate E of #550). The 2026-07-28 server vectors do not exist upstream yet, so this certifies the back-compat generation; a weekly advisory job watches all three things gate E is blocked on: the modern scenarios, an SDK 2.x on npm, and the Inspector moving off SDK v1 ([#550](https://github.com/mcp-hangar/mcp-hangar/issues/550))
+- **core:** run the official MCP conformance suite against a real `serve --http` gateway in CI, with a classified baseline of known failures (gate E of #550). The 2026-07-28 server vectors do not exist upstream yet, so this certifies the back-compat generation; a weekly advisory job watches all three things gate E is blocked on: the modern scenarios, an SDK 2.x on npm, and the Inspector moving off SDK v1 ([#550](https://github.com/mcp-hangar/mcp-hangar/pull/550))
 
-- **core:** smoke the *published artifact* rather than the repo tree before and after every release (gate D of #550) — a clean venv installs the wheel the way a user would, then a real `hangar_call` is driven through the gateway to a cold backend; `publish-pypi` now depends on the pre-publish run, so a wheel broken only by its packaging can still be stopped ([#550](https://github.com/mcp-hangar/mcp-hangar/issues/550))
+- **core:** smoke the *published artifact* rather than the repo tree before and after every release (gate D of #550) — a clean venv installs the wheel the way a user would, then a real `hangar_call` is driven through the gateway to a cold backend; `publish-pypi` now depends on the pre-publish run, so a wheel broken only by its packaging can still be stopped ([#550](https://github.com/mcp-hangar/mcp-hangar/pull/550))
 
 ### Fixed
 
-- **core:** stop advertising the `tasks` capability by default — `relay_tasks_enabled` now defaults to **False** on all three construction paths (`ServerConfig`, the builder, the HTTP-serve bootstrap), which previously disagreed with each other (True / False / True). `2.0.0rc1` shipped the relay on by default, so a client negotiating 2026-07-28 was told the server speaks `tasks` and then served the SEP-1686 shapes `mcp_types` still carries — nested `CreateTaskResult{task}`, `ttl`, `pollInterval`, a `tasks/result` method that SEP-2663 removes, and no `resultType`. The client cannot detect the mismatch before it gets a reply it cannot parse. Those types are a fossil and never evolve in place — SEP-2663 lands as a separate extension with its own models (python-sdk#3005) — so the surface is opt-in until Hangar serves that wire ([#322](https://github.com/mcp-hangar/mcp-hangar/issues/322))
+- **core:** stop advertising the `tasks` capability by default — `relay_tasks_enabled` now defaults to **False** on all three construction paths (`ServerConfig`, the builder, the HTTP-serve bootstrap), which previously disagreed with each other (True / False / True). `2.0.0rc1` shipped the relay on by default, so a client negotiating 2026-07-28 was told the server speaks `tasks` and then served the SEP-1686 shapes `mcp_types` still carries — nested `CreateTaskResult{task}`, `ttl`, `pollInterval`, a `tasks/result` method that SEP-2663 removes, and no `resultType`. The client cannot detect the mismatch before it gets a reply it cannot parse. Those types are a fossil and never evolve in place — SEP-2663 lands as a separate extension with its own models (python-sdk#3005) — so the surface is opt-in until Hangar serves that wire ([#322](https://github.com/mcp-hangar/mcp-hangar/pull/322))
 
-- **core:** cap `httpx` below 1.0 — httpx 1.0 drops `httpx.AsyncClient`, which the proxy path uses throughout, so the documented `pip install --pre mcp-hangar` resolved `httpx==1.0.dev3` and the gateway could not start at all. Found by the new published-artifact smoke on its first run against a real release
+- **core:** cap `httpx` below 1.0 — httpx 1.0 drops `httpx.AsyncClient`, which the proxy path uses throughout, so the documented `pip install --pre mcp-hangar` resolved `httpx==1.0.dev3` and the gateway could not start at all. Found by the new published-artifact smoke on its first run against a real release ([#618](https://github.com/mcp-hangar/mcp-hangar/pull/618))
 
 ## [2.0.0rc1](https://github.com/mcp-hangar/mcp-hangar/compare/v2.0.0-alpha.2...v2.0.0-rc.1) (2026-07-27)
 
@@ -284,56 +285,56 @@ This section covers **everything on the 2.x line since it diverged from 1.x**, a
 
 ### Added
 
-- **cli:** `mcp-hangar auth bootstrap-admin --config PATH --principal PRINCIPAL` grants the one-time initial global admin using the server's own durable auth backend (reuses `bootstrap_auth()`, never an in-memory store). Fails closed when auth is disabled, anonymous access is allowed, or the storage driver is non-durable (`memory`/`event_sourcing`); a second run is refused without mutating storage. No credential is printed -- the grant is a global admin role for an existing external principal ([#451](https://github.com/mcp-hangar/mcp-hangar/issues/451))
-- **core:** read the client `protocolVersion`/capabilities from inbound `params._meta` per request (stateless negotiation, no session handshake), exposed via request context (#291)
-- **security:** projected `tools/list` responses advertise a tenant-scoped `cacheScope` (SEP-2549) so downstream caches cannot serve one tenant's list to another; fail-closed to the narrowest scope when the tenant is unknown (#292)
-- **core:** add the MCP policy DSL parser/validator (v1 grammar; hooks tcp_connect/sk_alloc/execve/openat) per ADR-006, backend-agnostic and compiler-ready (#329)
-- **core:** enforcement events (`CapabilityViolationDetected`, `EgressBlocked`) carry optional process-attribution fields (pid/container/pod/node) for the Tetragon backend and forensic chain (#331)
-- **core:** opt-in interceptor configuration -- register built-in validators (e.g. `payload_size`) via an `interceptors:` config section; off by default, no behavior change (#314)
-- **core:** propagate W3C `baggage` (SEP-414) with a fail-safe cross-tenant scrub that drops untrusted/cross-tenant baggage on outbound (#294)
-- **core:** GovernedTaskStore binds each MCP task to its owning tenant/principal and fail-closed-authorizes tasks/* access, wiring the TaskOwnershipRegistry into the (experimental) task lifecycle (#319)
-- **core:** digest pinning now spans the task lifecycle -- a task inherits its tool's pinned digest and the result is re-verified against the tool's current digest, failing closed on drift (#320)
-- **core:** advertise Hangar governance (interceptors, digest pinning) as SEP-2133 extensions under `capabilities.experimental` (reverse-DNS, opt-in, off by default) (#316)
-- **core:** command-bus rate limit (rps/burst) is configurable via a `rate_limit:` `config.yaml` section (config > env > default); previously env-only (#395)
-- **core:** add a fail-closed `TaskOwnershipRegistry` binding `taskId` to its owning tenant/principal, to authorize `tasks/*` access (#319)
-- **core:** add a fail-closed `TaskDigestGuard` that pins a tool digest per `taskId` and re-verifies it on task completion, extending digest pinning across the task lifecycle (#320)
-- **core:** interceptor Validator framework — `IValidator` contract + fail-closed `ValidatorPipeline` + a reference `PayloadSizeValidator`; validators default to `failOpen=false` per PR #2624 (#314)
-- **core:** add a fail-closed `TaskConsentGate` that gates mid-flight task input (`input_required` / `tasks/update`), rejecting answers with no pending consent (#322)
-- **security:** atomically bootstrap the first API-key administrator in durable SQLite and PostgreSQL auth stores (#450)
-- **core:** reconcile the interceptor surface with MCP PR #2624 — add `interceptor/invoke`, hook objects carrying `events` + `phase` (`request`/`response`), and phase-aware hook delivery on the request/response path. Opt-in and behind capability negotiation (header `MCP-Interceptor-Ext: io.modelcontextprotocol/interceptors` or `?ext=io.modelcontextprotocol/interceptors`); the default `interceptors/list` shape is unchanged. Pinned to PR #2624 head `8029c78` (OPEN — wire format may still move) (#317, #401)
-- **core:** emit task-lifecycle audit events (`TaskCreated`, `TaskInputRequired`, `TaskCompleted`, `TaskFailed`, `TaskCancelled`) carrying `tenant_id` + `task_id` + `correlation_id`; the audit trail records all five and is reconstructable per `task_id` (#321)
-- **core:** configurable command-bus rate limit via `config.yaml` `rate_limit.rps` / `rate_limit.burst`; config values take precedence over the `MCP_RATE_LIMIT_RPS` / `MCP_RATE_LIMIT_BURST` env vars, which remain as a fallback (#395)
-- **tests:** schema validation for `interceptors/list` response against local JSON Schema derived from SEP-1763 (pinned @ `99bc7c9`) (#185, #401)
-- **core:** add a SEP-2575 (Stateless MCP) `server/discover` entry point backed by the existing per-tenant projection read-model (#237). It returns the tenant-scoped tool surface — identical to the tenant's `tools/list` projection — alongside `supportedVersions`, `capabilities`, and `serverInfo`, so a stateless client can discover exactly the tools its tenant may call in one call. Tenant scoping and isolation are inherited from the projection (tenant A never sees tenant B's tools) (#290)
-- **observability:** add `mcp_hangar_otlp_export_failures_total` counter, incremented via a `SpanExporter` decorator when an OTLP span-export batch fails (collector unreachable/export error), so otherwise-silent background export failures and dropped spans are observable on `/metrics`; document the `MCP_TRACING_ENABLED=false` off-switch for running locally without a collector (#402)
-- **observability:** add `mcp_hangar_otlp_export_failures_total` counter, incremented via a `SpanExporter` decorator when an OTLP span-export batch fails (collector unreachable/export error), so otherwise-silent background export failures and dropped spans are observable on `/metrics`; document the `MCP_TRACING_ENABLED=false` off-switch for running locally without a collector (#418)
-- **core:** add the L7 egress policy engine (`domain.policies.egress_l7`): deterministic tool-call matching (glob allow / deny / require-approval with a policy default action) and argument scanning (named secret-pattern groups reusing the output redactor's value-regexes, plus a payload-size limit). Pure and deterministic — no ML. This is the core-side half of `MCPEgressPolicy` ([mcp-hangar-operator#53](https://github.com/mcp-hangar/mcp-hangar-operator/issues/53))
-- **core:** receive the compiled L7 egress policy from the operator over the REST API — `POST/PUT /api/mcp_servers/{id}/l7_policy` (set/replace) and `DELETE` (clear), guarded by the `mcp_servers:write` permission. Adds `L7Policy.from_dict` (parses the operator's camelCase wire form) and a `SetL7PolicyCommand`/handler that calls `McpServer.set_l7_policy`, closing the operator→core transport so an `MCPEgressPolicy` drives L7 enforcement end to end ([mcp-hangar-operator#53](https://github.com/mcp-hangar/mcp-hangar-operator/issues/53))
-- **core:** enforce the L7 egress policy at the tool-invocation chokepoint. `McpServer` carries an optional L7 policy; `invoke_tool` evaluates every call against it before waking the server or touching the upstream — a denied call raises `EgressPolicyDeniedError`, an approval-gated one raises `EgressPolicyApprovalRequiredError`, and neither reaches the wire. No policy attached means no enforcement (unchanged behavior). Populating the policy from the operator's compiled `MCPEgressPolicy` is the remaining transport step ([mcp-hangar-operator#53](https://github.com/mcp-hangar/mcp-hangar-operator/issues/53))
-- **observability:** trace the upstream call boundary. Outgoing MCP RPCs (`tools/call`, `tools/list`, `initialize`) are now `SpanKind.CLIENT` spans named per OTel GenAI/MCP semconv (`execute_tool {tool}`, with `gen_ai.tool.name` / `gen_ai.operation.name` / `mcp.method.name`) so an upstream's server span parents correctly to the gateway. The stdio transport now propagates W3C trace context into the MCP `_meta` field, mirroring the HTTP header injection, so distributed tracing survives stdio upstreams too. `init_tracing` now honors `OTEL_TRACES_SAMPLER` / `OTEL_TRACES_SAMPLER_ARG` (`always_on`/`always_off`/`traceidratio`/`parentbased_*`), which the hand-built `TracerProvider` previously ignored despite the documented contract
-- **observability:** add two telemetry-health Prometheus alerts (`monitoring/prometheus/alerts.yaml`): `MCPHangarTelemetryExportFailing` (fires on `rate(mcp_hangar_otlp_export_failures_total[5m]) > 0` — a silent OTLP export failure means traces are being dropped with no app-level error) and `MCPHangarDiscoveryValidationFailing` (discovered servers being rejected on validation). Closes a coverage gap for two emitted-but-unalerted signals; validated with `promtool check rules`
+- **cli:** `mcp-hangar auth bootstrap-admin --config PATH --principal PRINCIPAL` grants the one-time initial global admin using the server's own durable auth backend (reuses `bootstrap_auth()`, never an in-memory store). Fails closed when auth is disabled, anonymous access is allowed, or the storage driver is non-durable (`memory`/`event_sourcing`); a second run is refused without mutating storage. No credential is printed -- the grant is a global admin role for an existing external principal ([#451](https://github.com/mcp-hangar/mcp-hangar/pull/451))
+- **core:** read the client `protocolVersion`/capabilities from inbound `params._meta` per request (stateless negotiation, no session handshake), exposed via request context (#291) ([#375](https://github.com/mcp-hangar/mcp-hangar/pull/375))
+- **security:** projected `tools/list` responses advertise a tenant-scoped `cacheScope` (SEP-2549) so downstream caches cannot serve one tenant's list to another; fail-closed to the narrowest scope when the tenant is unknown (#292) ([#372](https://github.com/mcp-hangar/mcp-hangar/pull/372))
+- **core:** add the MCP policy DSL parser/validator (v1 grammar; hooks tcp_connect/sk_alloc/execve/openat) per ADR-006, backend-agnostic and compiler-ready (#329) ([#358](https://github.com/mcp-hangar/mcp-hangar/pull/358))
+- **core:** enforcement events (`CapabilityViolationDetected`, `EgressBlocked`) carry optional process-attribution fields (pid/container/pod/node) for the Tetragon backend and forensic chain (#331) ([#363](https://github.com/mcp-hangar/mcp-hangar/pull/363))
+- **core:** opt-in interceptor configuration -- register built-in validators (e.g. `payload_size`) via an `interceptors:` config section; off by default, no behavior change (#314) ([#364](https://github.com/mcp-hangar/mcp-hangar/pull/364))
+- **core:** propagate W3C `baggage` (SEP-414) with a fail-safe cross-tenant scrub that drops untrusted/cross-tenant baggage on outbound (#294) ([#365](https://github.com/mcp-hangar/mcp-hangar/pull/365))
+- **core:** GovernedTaskStore binds each MCP task to its owning tenant/principal and fail-closed-authorizes tasks/* access, wiring the TaskOwnershipRegistry into the (experimental) task lifecycle (#319) ([#366](https://github.com/mcp-hangar/mcp-hangar/pull/366))
+- **core:** digest pinning now spans the task lifecycle -- a task inherits its tool's pinned digest and the result is re-verified against the tool's current digest, failing closed on drift (#320) ([#367](https://github.com/mcp-hangar/mcp-hangar/pull/367))
+- **core:** advertise Hangar governance (interceptors, digest pinning) as SEP-2133 extensions under `capabilities.experimental` (reverse-DNS, opt-in, off by default) (#316) ([#370](https://github.com/mcp-hangar/mcp-hangar/pull/370))
+- **core:** command-bus rate limit (rps/burst) is configurable via a `rate_limit:` `config.yaml` section (config > env > default); previously env-only (#395) ([#396](https://github.com/mcp-hangar/mcp-hangar/pull/396))
+- **core:** add a fail-closed `TaskOwnershipRegistry` binding `taskId` to its owning tenant/principal, to authorize `tasks/*` access (#319) ([#352](https://github.com/mcp-hangar/mcp-hangar/pull/352))
+- **core:** add a fail-closed `TaskDigestGuard` that pins a tool digest per `taskId` and re-verifies it on task completion, extending digest pinning across the task lifecycle (#320) ([#356](https://github.com/mcp-hangar/mcp-hangar/pull/356))
+- **core:** interceptor Validator framework — `IValidator` contract + fail-closed `ValidatorPipeline` + a reference `PayloadSizeValidator`; validators default to `failOpen=false` per PR #2624 (#314) ([#351](https://github.com/mcp-hangar/mcp-hangar/pull/351))
+- **core:** add a fail-closed `TaskConsentGate` that gates mid-flight task input (`input_required` / `tasks/update`), rejecting answers with no pending consent (#322) ([#357](https://github.com/mcp-hangar/mcp-hangar/pull/357))
+- **security:** atomically bootstrap the first API-key administrator in durable SQLite and PostgreSQL auth stores (#450) ([#456](https://github.com/mcp-hangar/mcp-hangar/pull/456))
+- **core:** reconcile the interceptor surface with MCP PR #2624 — add `interceptor/invoke`, hook objects carrying `events` + `phase` (`request`/`response`), and phase-aware hook delivery on the request/response path. Opt-in and behind capability negotiation (header `MCP-Interceptor-Ext: io.modelcontextprotocol/interceptors` or `?ext=io.modelcontextprotocol/interceptors`); the default `interceptors/list` shape is unchanged. Pinned to PR #2624 head `8029c78` (OPEN — wire format may still move) (#317, #401) ([#400](https://github.com/mcp-hangar/mcp-hangar/pull/400))
+- **core:** emit task-lifecycle audit events (`TaskCreated`, `TaskInputRequired`, `TaskCompleted`, `TaskFailed`, `TaskCancelled`) carrying `tenant_id` + `task_id` + `correlation_id`; the audit trail records all five and is reconstructable per `task_id` (#321) ([#399](https://github.com/mcp-hangar/mcp-hangar/pull/399))
+- **core:** configurable command-bus rate limit via `config.yaml` `rate_limit.rps` / `rate_limit.burst`; config values take precedence over the `MCP_RATE_LIMIT_RPS` / `MCP_RATE_LIMIT_BURST` env vars, which remain as a fallback (#395) ([#398](https://github.com/mcp-hangar/mcp-hangar/pull/398))
+- **tests:** schema validation for `interceptors/list` response against local JSON Schema derived from SEP-1763 (pinned @ `99bc7c9`) (#185, #401) ([#191](https://github.com/mcp-hangar/mcp-hangar/pull/191))
+- **core:** add a SEP-2575 (Stateless MCP) `server/discover` entry point backed by the existing per-tenant projection read-model (#237). It returns the tenant-scoped tool surface — identical to the tenant's `tools/list` projection — alongside `supportedVersions`, `capabilities`, and `serverInfo`, so a stateless client can discover exactly the tools its tenant may call in one call. Tenant scoping and isolation are inherited from the projection (tenant A never sees tenant B's tools) (#290) ([#407](https://github.com/mcp-hangar/mcp-hangar/pull/407))
+- **observability:** add `mcp_hangar_otlp_export_failures_total` counter, incremented via a `SpanExporter` decorator when an OTLP span-export batch fails (collector unreachable/export error), so otherwise-silent background export failures and dropped spans are observable on `/metrics`; document the `MCP_TRACING_ENABLED=false` off-switch for running locally without a collector (#402) ([#419](https://github.com/mcp-hangar/mcp-hangar/pull/419))
+- **observability:** add `mcp_hangar_otlp_export_failures_total` counter, incremented via a `SpanExporter` decorator when an OTLP span-export batch fails (collector unreachable/export error), so otherwise-silent background export failures and dropped spans are observable on `/metrics`; document the `MCP_TRACING_ENABLED=false` off-switch for running locally without a collector (#418) ([#419](https://github.com/mcp-hangar/mcp-hangar/pull/419))
+- **core:** add the L7 egress policy engine (`domain.policies.egress_l7`): deterministic tool-call matching (glob allow / deny / require-approval with a policy default action) and argument scanning (named secret-pattern groups reusing the output redactor's value-regexes, plus a payload-size limit). Pure and deterministic — no ML. This is the core-side half of `MCPEgressPolicy` ([mcp-hangar-operator#53](https://github.com/mcp-hangar/mcp-hangar-operator/issues/53)) ([#526](https://github.com/mcp-hangar/mcp-hangar/pull/526))
+- **core:** receive the compiled L7 egress policy from the operator over the REST API — `POST/PUT /api/mcp_servers/{id}/l7_policy` (set/replace) and `DELETE` (clear), guarded by the `mcp_servers:write` permission. Adds `L7Policy.from_dict` (parses the operator's camelCase wire form) and a `SetL7PolicyCommand`/handler that calls `McpServer.set_l7_policy`, closing the operator→core transport so an `MCPEgressPolicy` drives L7 enforcement end to end ([mcp-hangar-operator#53](https://github.com/mcp-hangar/mcp-hangar-operator/issues/53)) ([#528](https://github.com/mcp-hangar/mcp-hangar/pull/528))
+- **core:** enforce the L7 egress policy at the tool-invocation chokepoint. `McpServer` carries an optional L7 policy; `invoke_tool` evaluates every call against it before waking the server or touching the upstream — a denied call raises `EgressPolicyDeniedError`, an approval-gated one raises `EgressPolicyApprovalRequiredError`, and neither reaches the wire. No policy attached means no enforcement (unchanged behavior). Populating the policy from the operator's compiled `MCPEgressPolicy` is the remaining transport step ([mcp-hangar-operator#53](https://github.com/mcp-hangar/mcp-hangar-operator/issues/53)) ([#527](https://github.com/mcp-hangar/mcp-hangar/pull/527))
+- **observability:** trace the upstream call boundary. Outgoing MCP RPCs (`tools/call`, `tools/list`, `initialize`) are now `SpanKind.CLIENT` spans named per OTel GenAI/MCP semconv (`execute_tool {tool}`, with `gen_ai.tool.name` / `gen_ai.operation.name` / `mcp.method.name`) so an upstream's server span parents correctly to the gateway. The stdio transport now propagates W3C trace context into the MCP `_meta` field, mirroring the HTTP header injection, so distributed tracing survives stdio upstreams too. `init_tracing` now honors `OTEL_TRACES_SAMPLER` / `OTEL_TRACES_SAMPLER_ARG` (`always_on`/`always_off`/`traceidratio`/`parentbased_*`), which the hand-built `TracerProvider` previously ignored despite the documented contract ([#537](https://github.com/mcp-hangar/mcp-hangar/pull/537))
+- **observability:** add two telemetry-health Prometheus alerts (`monitoring/prometheus/alerts.yaml`): `MCPHangarTelemetryExportFailing` (fires on `rate(mcp_hangar_otlp_export_failures_total[5m]) > 0` — a silent OTLP export failure means traces are being dropped with no app-level error) and `MCPHangarDiscoveryValidationFailing` (discovered servers being rejected on validation). Closes a coverage gap for two emitted-but-unalerted signals; validated with `promtool check rules` ([#541](https://github.com/mcp-hangar/mcp-hangar/pull/541))
 
 ### Changed
 
-- **core:** the stateless front door routes on `Mcp-Method`/`Mcp-Name` headers instead of session affinity (SEP-2243/SEP-2567); per-tenant canary routing and audit correlation are unchanged (#336)
-- **core:** reject upstream MCP task handles with a clear error instead of passing through an untracked, unusable handle (relay-only; task results are not yet governed) (#302)
-- **core:** the transport `Mcp-Session-Id` handling is deprecated and guarded per SEP-2567 (stateless); it is only echoed for legacy session-based upstreams that established a session, and a `stateless_upstream` flag disables it outright. The audit `session_id` correlation is unchanged (#337)
-- **core:** clarify that `mode: docker`/`container` requires a podman or docker CLI on the host; the no-runtime start error and `config.yaml.example` now state that container mode is unsupported inside the stock Hangar container image and advise running in host mode or using a subprocess provider ([#429](https://github.com/mcp-hangar/mcp-hangar/issues/429))
-- **core:** the interceptor ValidatorPipeline now runs on the tool-call path; registered validators deny fail-closed before invoke (empty/no-op by default) (#314)
-- **core:** the interceptor MutatorPipeline now runs on the tool-call path (request/response payload transform; empty/no-op by default) (#314)
-- **core:** interceptor IDs use reverse-DNS extension identifiers (`io.mcp-hangar.validator`/`io.mcp-hangar.mutator`) per SEP-2133 (#315)
-- **core:** inbound trace context is read from the request's `params._meta` (SEP-414), falling back to the legacy `metadata` field, so agent traces link end-to-end (#294)
-- **core:** outbound HTTP requests carry W3C trace context (`traceparent`/`tracestate`) in `params._meta` per SEP-414, in addition to HTTP headers (#294)
-- **core:** outbound requests to upstream MCP servers carry the protocol version and client info in per-request `_meta`, so stateless upstreams (SEP-2575, no initialize handshake) still receive protocol context (#291)
-- **core:** outbound handshake to upstream MCP servers targets MCP protocol revision `2026-07-28` and tolerates stateless upstreams (servers without an `initialize` handler) instead of failing startup (#341)
-- **core:** document the static `tools:` list as a pre-start visibility projection (the provider's dynamic `tools/list` is authoritative and replaces it at start) and log a warning naming any statically pre-configured tool the provider does not return (#415)
+- **core:** the stateless front door routes on `Mcp-Method`/`Mcp-Name` headers instead of session affinity (SEP-2243/SEP-2567); per-tenant canary routing and audit correlation are unchanged (#336) ([#377](https://github.com/mcp-hangar/mcp-hangar/pull/377))
+- **core:** reject upstream MCP task handles with a clear error instead of passing through an untracked, unusable handle (relay-only; task results are not yet governed) (#302) ([#368](https://github.com/mcp-hangar/mcp-hangar/pull/368))
+- **core:** the transport `Mcp-Session-Id` handling is deprecated and guarded per SEP-2567 (stateless); it is only echoed for legacy session-based upstreams that established a session, and a `stateless_upstream` flag disables it outright. The audit `session_id` correlation is unchanged (#337) ([#379](https://github.com/mcp-hangar/mcp-hangar/pull/379))
+- **core:** clarify that `mode: docker`/`container` requires a podman or docker CLI on the host; the no-runtime start error and `config.yaml.example` now state that container mode is unsupported inside the stock Hangar container image and advise running in host mode or using a subprocess provider ([#429](https://github.com/mcp-hangar/mcp-hangar/pull/429))
+- **core:** the interceptor ValidatorPipeline now runs on the tool-call path; registered validators deny fail-closed before invoke (empty/no-op by default) (#314) ([#359](https://github.com/mcp-hangar/mcp-hangar/pull/359))
+- **core:** the interceptor MutatorPipeline now runs on the tool-call path (request/response payload transform; empty/no-op by default) (#314) ([#361](https://github.com/mcp-hangar/mcp-hangar/pull/361))
+- **core:** interceptor IDs use reverse-DNS extension identifiers (`io.mcp-hangar.validator`/`io.mcp-hangar.mutator`) per SEP-2133 (#315) ([#346](https://github.com/mcp-hangar/mcp-hangar/pull/346))
+- **core:** inbound trace context is read from the request's `params._meta` (SEP-414), falling back to the legacy `metadata` field, so agent traces link end-to-end (#294) ([#344](https://github.com/mcp-hangar/mcp-hangar/pull/344))
+- **core:** outbound HTTP requests carry W3C trace context (`traceparent`/`tracestate`) in `params._meta` per SEP-414, in addition to HTTP headers (#294) ([#343](https://github.com/mcp-hangar/mcp-hangar/pull/343))
+- **core:** outbound requests to upstream MCP servers carry the protocol version and client info in per-request `_meta`, so stateless upstreams (SEP-2575, no initialize handshake) still receive protocol context (#291) ([#342](https://github.com/mcp-hangar/mcp-hangar/pull/342))
+- **core:** outbound handshake to upstream MCP servers targets MCP protocol revision `2026-07-28` and tolerates stateless upstreams (servers without an `initialize` handler) instead of failing startup (#341) ([#342](https://github.com/mcp-hangar/mcp-hangar/pull/342))
+- **core:** document the static `tools:` list as a pre-start visibility projection (the provider's dynamic `tools/list` is authoritative and replaces it at start) and log a warning naming any statically pre-configured tool the provider does not return (#415) ([#421](https://github.com/mcp-hangar/mcp-hangar/pull/421))
 - **core:** **BREAKING** relicense from BSL 1.1 dual-license to MIT; all enterprise features are now freely available (#198)
 - **core:** remove `LicenseTier` enum, `LicenseValidation`, and license-key gating from bootstrap; `load_enterprise_modules` loads unconditionally (#196)
 - **core:** `HANGAR_LICENSE_KEY` env var is deprecated and emits `DeprecationWarning` when set (#196)
 - **core:** `EnterpriseComponents` no longer carries a `license_tier` field; `ApplicationContext.license_tier` removed (#196)
-- **core:** reject tool entries with missing, empty, or non-string `name` field in `compute_tool_digest` (#172)
+- **core:** reject tool entries with missing, empty, or non-string `name` field in `compute_tool_digest` (#172) ([#186](https://github.com/mcp-hangar/mcp-hangar/pull/186))
 - Public documentation migrated to dedicated [docs repository](https://github.com/mcp-hangar/docs). Internal docs remain in `docs/internal/`.
-- **observability:** align tool-invocation spans to OTel GenAI/MCP semantic conventions. The application-layer span is renamed `tool.invoke.{tool}` → `execute_tool {tool}` (matching the transport CLIENT span from the previous change), and the tool-name / token attributes move to semconv: `mcp.tool.name` → `gen_ai.tool.name`, `mcp.cost.input_tokens` / `mcp.cost.output_tokens` → `gen_ai.usage.input_tokens` / `gen_ai.usage.output_tokens`, with `gen_ai.operation.name` and `mcp.method.name` now also set. **Breaking for consumers that query the old span/OTLP-audit attribute names.** The Hangar-specific governance namespaces (`mcp.enforcement.*`, `mcp.risk.*`, `mcp.audit.*`, `mcp.cost.cents`/`model`/`currency`, `mcp.session.id`, …) are unchanged — they have no semconv equivalent. Also restores OTLP audit-log export, which a botched `Provider`→`McpServer` rename had silently disabled (the `LoggerMcpServer` import always failed, pinning `OTEL_LOGS_AVAILABLE` to false). Found continuing the observability audit
+- **observability:** align tool-invocation spans to OTel GenAI/MCP semantic conventions. The application-layer span is renamed `tool.invoke.{tool}` → `execute_tool {tool}` (matching the transport CLIENT span from the previous change), and the tool-name / token attributes move to semconv: `mcp.tool.name` → `gen_ai.tool.name`, `mcp.cost.input_tokens` / `mcp.cost.output_tokens` → `gen_ai.usage.input_tokens` / `gen_ai.usage.output_tokens`, with `gen_ai.operation.name` and `mcp.method.name` now also set. **Breaking for consumers that query the old span/OTLP-audit attribute names.** The Hangar-specific governance namespaces (`mcp.enforcement.*`, `mcp.risk.*`, `mcp.audit.*`, `mcp.cost.cents`/`model`/`currency`, `mcp.session.id`, …) are unchanged — they have no semconv equivalent. Also restores OTLP audit-log export, which a botched `Provider`→`McpServer` rename had silently disabled (the `LoggerMcpServer` import always failed, pinning `OTEL_LOGS_AVAILABLE` to false). Found continuing the observability audit ([#539](https://github.com/mcp-hangar/mcp-hangar/pull/539))
 
 ### Removed
 
@@ -342,200 +343,205 @@ This section covers **everything on the 2.x line since it diverged from 1.x**, a
 - **core:** delete `enterprise/LICENSE.BSL` and `CLA.md` (#194, #197)
 - **core:** remove CLA references from contributing guides (#197)
 - **core:** strip BSL prose from `CONTRIBUTING.md`, `ROADMAP.md`, enterprise docstrings, and `PRODUCT_ARCHITECTURE.md` decision log (#195)
-- **observability:** remove unused `Metrics.COLD_STARTS_TOTAL`, `Metrics.EGRESS_BLOCKED_TOTAL`, and `Metrics.PROVIDERS_QUARANTINED` constants — they had no backing metric in `metrics.py`
-- **core:** retire the Hangar Cloud connector (`src/mcp_hangar/cloud/`), the `POST /agent/policy` endpoint, the `--cloud-key`/`--cloud-url` CLI flags, and the `agent` RBAC role, as the hangar-agent / Hangar Cloud product tier is retired. `PolicyPushRejected` is intentionally kept (deprecated, producer-less) so already-persisted events still replay; `policy:write` remains and is granted via the `admin` role.
+- **observability:** remove unused `Metrics.COLD_STARTS_TOTAL`, `Metrics.EGRESS_BLOCKED_TOTAL`, and `Metrics.PROVIDERS_QUARANTINED` constants — they had no backing metric in `metrics.py` ([#270](https://github.com/mcp-hangar/mcp-hangar/pull/270))
+- **core:** retire the Hangar Cloud connector (`src/mcp_hangar/cloud/`), the `POST /agent/policy` endpoint, the `--cloud-key`/`--cloud-url` CLI flags, and the `agent` RBAC role, as the hangar-agent / Hangar Cloud product tier is retired. `PolicyPushRejected` is intentionally kept (deprecated, producer-less) so already-persisted events still replay; `policy:write` remains and is granted via the `admin` role. ([#490](https://github.com/mcp-hangar/mcp-hangar/pull/490))
 
 ### Fixed
 
-- **security:** `JWTAuthenticator` read the `Authorization` header case-sensitively (`get("Authorization")`), but the HTTP auth middleware lowercases header names (ASGI headers already are), so `supports()` never matched a bearer request -- every valid OIDC/JWT token over `serve --http` was rejected as `auth_method: none` and OIDC bearer auth was non-functional on the HTTP surface. Now reads the header case-insensitively, matching `ApiKeyAuthenticator` ([#471](https://github.com/mcp-hangar/mcp-hangar/issues/471))
-- **security:** the SQLite role store seeded built-in roles with `INSERT OR REPLACE`, which deletes the conflicting row; because `role_assignments.role_name` has `ON DELETE CASCADE`, re-initializing the store (every process start / `bootstrap_auth`) silently cascade-wiped every assignment to a built-in role -- dropping the bootstrapped admin on the next restart. The seed (and `add_role`) now upsert in place via `ON CONFLICT(name) DO UPDATE`, matching the PostgreSQL store, so assignments survive ([#451](https://github.com/mcp-hangar/mcp-hangar/issues/451))
-- **core:** `EventStoreConfigurationError` now subclasses the domain `ConfigurationError` (was `RuntimeError`), so the event-store fail-fast surfaces as a configuration error at the config boundary; realigned the enterprise-boundary tests that asserted the pre-`#428` exception type/message, unbreaking `CI - Core` on `main`
-- **core:** `config.yaml.example` used a `providers:` server section, but the loader requires `mcp_servers:` and raises `Invalid configuration: missing 'mcp_servers' section` -- copying the example verbatim failed to start. Renamed to `mcp_servers:` (and the `mcp_servers.*.max_concurrency` doc path)
-- **auth:** the OIDC/JWT authenticator now matches the `Authorization` header case-insensitively, so a real Bearer token from the HTTP transport (which normalises header keys to lowercase) is authenticated instead of silently falling through to "no authenticator matched" (#311)
-- **core:** `ProtocolNegotiation.capabilities` uses `default_factory` instead of a bare `mappingproxy` default, which Python 3.11's dataclass rejects as a mutable default -- this was breaking test collection on 3.11 across the whole suite (#291)
-- **security:** fail-closed `ui://` (MCP Apps) resource guard -- per-tenant allowlist + restrictive CSP + mandatory consent gate; `ui://` denied by default (#328)
-- **core:** inbound trace context and protocol-version/capability negotiation now reach the executor over streamable-HTTP (`hangar_call` threads the request context in), instead of silently defaulting; identity bridging (#387) unchanged (#294)
-- **core:** fail fast when the SQLite event store cannot be initialized (path not writable / backend unavailable) instead of silently degrading to a non-durable in-memory store and losing the audit/event-sourcing trail; opt into the non-durable fallback with `event_store.driver: memory` or `event_store.allow_memory_fallback: true`. Also adds an `event_store_durability` readiness check so `/health/ready` returns 503 when the store degraded to in-memory while a durable driver was configured ([#428](https://github.com/mcp-hangar/mcp-hangar/issues/428))
-- **core:** treat a backend MCP tool result with `isError: true` as a tool failure instead of a success, so per-call results, batch `succeeded`/`failed` counts, health, and `ToolInvocationFailed` events reflect reality ([#423](https://github.com/mcp-hangar/mcp-hangar/issues/423))
-- **core:** run discovery on a dedicated lifecycle event loop so blocking discovery sources cannot block HTTP serving and shutdown awaits cleanup on the same loop (#436)
-- **core:** expose bootstrapped discovery sources and pending providers through the canonical `/api/discovery` REST endpoint prefix (#434)
-- **core:** reload configured mcp_servers through their supported shutdown lifecycle API and fail the reload when the old runtime cannot be stopped (#433)
-- **core:** allow every concurrent cold-start waiter to invoke after the shared startup succeeds instead of timing out while the provider reaches READY (#435)
-- **core:** fail startup when a configured SQLite event store is unavailable instead of silently falling back to volatile memory storage (#428)
-- **core:** re-pin the interceptor JSON schema (`5bd7ab4` → `99bc7c9`) and reconcile the capability-negotiation key with the SEP-2133 extensions format adopted upstream in experimental-ext-interceptors #25; the `interceptor/invoke` + negotiated `interceptors/list` gate now keys on `io.modelcontextprotocol/interceptors` (was `sep-2624`), so clients negotiating per current upstream reach the gate. Off-by-default posture preserved (#401)
-- **core:** group circuit breaker no longer blocks member selection while a healthy member remains in rotation; the group CB now only vetoes selection when no member is in rotation (the group genuinely down), so an evicted primary failing over to a healthy backup is served instead of returning "No available member" (#425)
-- **cli:** accept `--config`/`-c` on the `serve` subcommand so `mcp-hangar serve --config X` no longer fails with "No such option"; emit the unambiguous global-first arg order (`["--config", path, "serve"]`) in the generated Claude Desktop config so `mcp-hangar init` produces an entry that actually starts (#417)
-- **metrics:** wire `mcp_hangar_connections_active` (set 1 when a server's client connects, 0 on close/shutdown) so the provider-details "Active Connections" panel has data, and **remove** the never-emitted `mcp_hangar_connections_total` / `mcp_hangar_connection_duration_seconds` — no dashboard or alert referenced them and they duplicated the server-lifecycle signals. Found by the observability audit
-- **metrics:** wire the transport message metrics — `mcp_hangar_messages_sent` (by `method`), `mcp_hangar_messages_received` (by `type`: response/notification/error), and the `mcp_hangar_message_size_bytes` payload-size histogram (by `direction`) — at the stdio and HTTP transport boundaries, labeled per upstream server. These were defined but never emitted, so the protocol-level and payload-size panels stayed empty. **Removed** three never-emitted metrics that have nothing to populate them: `mcp_hangar_http_connection_pool_size` (httpx pool internals aren't exposed) and `mcp_hangar_http_sse_streams_active` / `mcp_hangar_http_sse_events` (the streaming-SSE reader path is unused — SSE responses are batch-parsed). Repurposed the dead "Active SSE Streams" dashboard panel to a messages-sent rate. Found by the observability audit
-- **metrics:** emit the cost-attribution metrics (`mcp_hangar_cost_cents_total`, `mcp_hangar_cost_attributions_total`). The cost handler computed per-invocation cost via the `ICostAttributor` port and published a report event, but never fed the Prometheus metrics its docstring promised — so the governance dashboard's cost panels stayed empty even with a real attributor configured. Now wired (a no-op under the default `NullCostAttributor`). Found by the observability audit
-- **metrics:** consolidate discovery metrics onto the single scraped registry. Discovery registrations, errors, validation failures, and validation durations were recorded only to a second `prometheus_client` registry that the `/metrics` endpoint never serialized — so they were silently dropped, and cycle/quarantine/deregistration were double-recorded. Removed the dead secondary system (`application/discovery/discovery_metrics.py`), added the two missing metrics (`mcp_hangar_discovery_validation_failures_total`, `mcp_hangar_discovery_validation_duration_seconds`) to the primary registry, and rewired the orchestrator through it. Found by the observability audit
-- **observability:** stop logging expected stdio-server shutdowns as errors. When Hangar closes a subprocess server (idle-TTL expiry / explicit stop), `close()` sets the client closed before terminating, so the reader thread's `stdio_client_process_exited` (+ any drained stderr) was logged at ERROR on every graceful shutdown — inflating the error stream and any log-based alerting. These are now logged at `info` with `expected=true` when we initiated the exit; an unsolicited process death is still an ERROR. Found reviewing live logs in Loki
-- **observability:** mark a failed tool call's span as ERROR. The batch executor handles failures as data (`CallResult.success=False`), so the `batch.call.{tool}` span never saw an exception and stayed UNSET — a failing tool call looked like a successful trace and couldn't be filtered as an error in Jaeger/Tempo. It now sets ERROR status (with the failure message) when the call fails. Added a NoOp-safe `mark_span_error` helper. Found reviewing the error path on the live stack
-- **observability:** correlate logs with traces — every log record emitted inside an OpenTelemetry span now carries `trace_id`/`span_id`, so you can pivot from a log line to its trace. A no-op when tracing is off or there is no active span, and it never lets a tracing error break a log call. Found by the observability audit
-- **metrics:** the tool-call latency histogram (`mcp_hangar_tool_call_duration_seconds`) no longer records a 0-second observation for every failed call — failures carried no real duration and poisoned the p50/p95/p99 percentiles. Duration is observed only for successful calls; failures are still counted via `mcp_hangar_tool_call_errors_total`. Found by the observability audit
-- **metrics:** drop the unbounded `stream_id` label from `mcp_hangar_events_compacted_total` — stream IDs are per-stream identifiers and were a cardinality bomb. Compaction is now a fleet-wide counter. Found by the observability audit
-- **core:** discovered `http`/`sse` containers now prefer the published host-port binding over the internal bridge-network IP, so they are reachable from the documented host-mode deployment ([#481](https://github.com/mcp-hangar/mcp-hangar/issues/481))
-- **core:** allow a discovery-only `config.yaml` (`discovery.enabled: true`, no top-level `mcp_servers`) to load instead of raising ([#483](https://github.com/mcp-hangar/mcp-hangar/issues/483))
-- **core:** log the transient "container has no IP" discovery skip at debug instead of warning ([#484](https://github.com/mcp-hangar/mcp-hangar/issues/484))
-- **core:** serve the SEP-2575 `server/discover` entry point over `serve --http` — it 404'd on the shipped CLI because the wiring lived only in the never-called `MCPServerFactory` ([#560](https://github.com/mcp-hangar/mcp-hangar/issues/560))
-- **core:** report one `serverInfo` identity to clients — `initialize` announced `mcp-registry` at the mcp SDK's version while `server/discover` announced `mcp-hangar` at Hangar's ([#560](https://github.com/mcp-hangar/mcp-hangar/issues/560))
-- **core:** keep the SEP-2243 front-door wrap off 2026-07-28 requests — buffering and replaying a modern-era body makes the SDK read a disconnect and cancel, answering 500 ([#560](https://github.com/mcp-hangar/mcp-hangar/issues/560))
-- **core:** let a task owner reach their own task when auth is enabled — the identity bridge read only the SDK v1 `ctx.request_context.request`, so on v2 every `tasks/*` call over `serve --http` was unattributed and the governed relay was dead in the deployment mode that matters
-- **core:** stop requiring a warm backend for `/health/ready` — lazy start plus `idle_ttl_s` makes "every backend cold" the normal idle state, so readiness flipped to 503, Kubernetes removed the pod from its Service, and no call could arrive to warm a backend again ([#599](https://github.com/mcp-hangar/mcp-hangar/issues/599))
-- **core:** allow the REST API when auth is disabled — the permission guard tested only for an authz middleware, which `NullAuthComponents` still ships, so every REST call answered 401 with no credential able to open it and the operator could not deliver L7 egress policy to an auth-off gateway ([#600](https://github.com/mcp-hangar/mcp-hangar/issues/600))
-- **core:** enforce a tenant's digest pin on the first call after gateway boot — the tool catalogue is published by the backend's start, which happens after the pin gate ran, so the first call to a pinned tool skipped the check entirely ([#601](https://github.com/mcp-hangar/mcp-hangar/issues/601))
-- **core:** report the server's real capabilities from `server/discover` — it returned a hardcoded set, so a stateless client (which has no `initialize` to learn from) was told Tasks, prompts and resources did not exist ([#605](https://github.com/mcp-hangar/mcp-hangar/issues/605))
-- **core:** advertise the caller's actual tool surface from `server/discover` — on an egress gateway it returned the flat backend projection, which is empty until some backend happens to start, instead of the `hangar_*` meta-API the caller would get from `tools/list` ([#606](https://github.com/mcp-hangar/mcp-hangar/issues/606))
-- **core:** keep stdout clean on the stdio transport — structlog's default factory prints to stdout, so a log emitted before `setup_logging()` (a module-import-time one, for instance) corrupted the JSON-RPC stream and dropped the client's session ([#563](https://github.com/mcp-hangar/mcp-hangar/issues/563))
-- **core:** honour `tool_access.mode: front_door` on `serve --http` — the gate lived only in the never-called `MCPServerFactory`, so a gateway configured front_door kept serving the `hangar_*` meta-API, lifecycle control included, to callers the mode exists to fail closed on ([#596](https://github.com/mcp-hangar/mcp-hangar/issues/596))
-- **core:** advertise the SEP-2133 governance extensions on `serve --http`, via `get_capabilities` so both the handshake and the stateless `server/discover` surface carry them ([#595](https://github.com/mcp-hangar/mcp-hangar/issues/595))
-- **core:** guard the `mcp` SDK pin with a metadata test on this line too — the v2 pin stays exact (`==2.0.0b2`, drift inside the beta series breaks `_sdk_compat` silently), mirroring the `<2` cap `main` needs for the v1 surface ([#561](https://github.com/mcp-hangar/mcp-hangar/issues/561))
+- **security:** `JWTAuthenticator` read the `Authorization` header case-sensitively (`get("Authorization")`), but the HTTP auth middleware lowercases header names (ASGI headers already are), so `supports()` never matched a bearer request -- every valid OIDC/JWT token over `serve --http` was rejected as `auth_method: none` and OIDC bearer auth was non-functional on the HTTP surface. Now reads the header case-insensitively, matching `ApiKeyAuthenticator` ([#471](https://github.com/mcp-hangar/mcp-hangar/pull/471))
+- **security:** the SQLite role store seeded built-in roles with `INSERT OR REPLACE`, which deletes the conflicting row; because `role_assignments.role_name` has `ON DELETE CASCADE`, re-initializing the store (every process start / `bootstrap_auth`) silently cascade-wiped every assignment to a built-in role -- dropping the bootstrapped admin on the next restart. The seed (and `add_role`) now upsert in place via `ON CONFLICT(name) DO UPDATE`, matching the PostgreSQL store, so assignments survive ([#451](https://github.com/mcp-hangar/mcp-hangar/pull/451))
+- **core:** `EventStoreConfigurationError` now subclasses the domain `ConfigurationError` (was `RuntimeError`), so the event-store fail-fast surfaces as a configuration error at the config boundary; realigned the enterprise-boundary tests that asserted the pre-`#428` exception type/message, unbreaking `CI - Core` on `main` ([#459](https://github.com/mcp-hangar/mcp-hangar/pull/459))
+- **core:** `config.yaml.example` used a `providers:` server section, but the loader requires `mcp_servers:` and raises `Invalid configuration: missing 'mcp_servers' section` -- copying the example verbatim failed to start. Renamed to `mcp_servers:` (and the `mcp_servers.*.max_concurrency` doc path) ([#458](https://github.com/mcp-hangar/mcp-hangar/pull/458))
+- **auth:** the OIDC/JWT authenticator now matches the `Authorization` header case-insensitively, so a real Bearer token from the HTTP transport (which normalises header keys to lowercase) is authenticated instead of silently falling through to "no authenticator matched" (#311) ([#383](https://github.com/mcp-hangar/mcp-hangar/pull/383))
+- **core:** `ProtocolNegotiation.capabilities` uses `default_factory` instead of a bare `mappingproxy` default, which Python 3.11's dataclass rejects as a mutable default -- this was breaking test collection on 3.11 across the whole suite (#291) ([#378](https://github.com/mcp-hangar/mcp-hangar/pull/378))
+- **security:** fail-closed `ui://` (MCP Apps) resource guard -- per-tenant allowlist + restrictive CSP + mandatory consent gate; `ui://` denied by default (#328) ([#381](https://github.com/mcp-hangar/mcp-hangar/pull/381))
+- **core:** inbound trace context and protocol-version/capability negotiation now reach the executor over streamable-HTTP (`hangar_call` threads the request context in), instead of silently defaulting; identity bridging (#387) unchanged (#294) ([#397](https://github.com/mcp-hangar/mcp-hangar/pull/397))
+- **core:** fail fast when the SQLite event store cannot be initialized (path not writable / backend unavailable) instead of silently degrading to a non-durable in-memory store and losing the audit/event-sourcing trail; opt into the non-durable fallback with `event_store.driver: memory` or `event_store.allow_memory_fallback: true`. Also adds an `event_store_durability` readiness check so `/health/ready` returns 503 when the store degraded to in-memory while a durable driver was configured ([#428](https://github.com/mcp-hangar/mcp-hangar/pull/428))
+- **core:** treat a backend MCP tool result with `isError: true` as a tool failure instead of a success, so per-call results, batch `succeeded`/`failed` counts, health, and `ToolInvocationFailed` events reflect reality ([#423](https://github.com/mcp-hangar/mcp-hangar/pull/423))
+- **core:** run discovery on a dedicated lifecycle event loop so blocking discovery sources cannot block HTTP serving and shutdown awaits cleanup on the same loop (#436) ([#446](https://github.com/mcp-hangar/mcp-hangar/pull/446))
+- **core:** expose bootstrapped discovery sources and pending providers through the canonical `/api/discovery` REST endpoint prefix (#434) ([#442](https://github.com/mcp-hangar/mcp-hangar/pull/442))
+- **core:** reload configured mcp_servers through their supported shutdown lifecycle API and fail the reload when the old runtime cannot be stopped (#433) ([#441](https://github.com/mcp-hangar/mcp-hangar/pull/441))
+- **core:** allow every concurrent cold-start waiter to invoke after the shared startup succeeds instead of timing out while the provider reaches READY (#435) ([#440](https://github.com/mcp-hangar/mcp-hangar/pull/440))
+- **core:** fail startup when a configured SQLite event store is unavailable instead of silently falling back to volatile memory storage (#428) ([#438](https://github.com/mcp-hangar/mcp-hangar/pull/438))
+- **core:** re-pin the interceptor JSON schema (`5bd7ab4` → `99bc7c9`) and reconcile the capability-negotiation key with the SEP-2133 extensions format adopted upstream in experimental-ext-interceptors #25; the `interceptor/invoke` + negotiated `interceptors/list` gate now keys on `io.modelcontextprotocol/interceptors` (was `sep-2624`), so clients negotiating per current upstream reach the gate. Off-by-default posture preserved (#401) ([#405](https://github.com/mcp-hangar/mcp-hangar/pull/405))
+- **core:** group circuit breaker no longer blocks member selection while a healthy member remains in rotation; the group CB now only vetoes selection when no member is in rotation (the group genuinely down), so an evicted primary failing over to a healthy backup is served instead of returning "No available member" (#425) ([#426](https://github.com/mcp-hangar/mcp-hangar/pull/426))
+- **cli:** accept `--config`/`-c` on the `serve` subcommand so `mcp-hangar serve --config X` no longer fails with "No such option"; emit the unambiguous global-first arg order (`["--config", path, "serve"]`) in the generated Claude Desktop config so `mcp-hangar init` produces an entry that actually starts (#417) ([#420](https://github.com/mcp-hangar/mcp-hangar/pull/420))
+- **metrics:** wire `mcp_hangar_connections_active` (set 1 when a server's client connects, 0 on close/shutdown) so the provider-details "Active Connections" panel has data, and **remove** the never-emitted `mcp_hangar_connections_total` / `mcp_hangar_connection_duration_seconds` — no dashboard or alert referenced them and they duplicated the server-lifecycle signals. Found by the observability audit ([#536](https://github.com/mcp-hangar/mcp-hangar/pull/536))
+- **metrics:** wire the transport message metrics — `mcp_hangar_messages_sent` (by `method`), `mcp_hangar_messages_received` (by `type`: response/notification/error), and the `mcp_hangar_message_size_bytes` payload-size histogram (by `direction`) — at the stdio and HTTP transport boundaries, labeled per upstream server. These were defined but never emitted, so the protocol-level and payload-size panels stayed empty. **Removed** three never-emitted metrics that have nothing to populate them: `mcp_hangar_http_connection_pool_size` (httpx pool internals aren't exposed) and `mcp_hangar_http_sse_streams_active` / `mcp_hangar_http_sse_events` (the streaming-SSE reader path is unused — SSE responses are batch-parsed). Repurposed the dead "Active SSE Streams" dashboard panel to a messages-sent rate. Found by the observability audit ([#540](https://github.com/mcp-hangar/mcp-hangar/pull/540))
+- **metrics:** emit the cost-attribution metrics (`mcp_hangar_cost_cents_total`, `mcp_hangar_cost_attributions_total`). The cost handler computed per-invocation cost via the `ICostAttributor` port and published a report event, but never fed the Prometheus metrics its docstring promised — so the governance dashboard's cost panels stayed empty even with a real attributor configured. Now wired (a no-op under the default `NullCostAttributor`). Found by the observability audit ([#535](https://github.com/mcp-hangar/mcp-hangar/pull/535))
+- **metrics:** consolidate discovery metrics onto the single scraped registry. Discovery registrations, errors, validation failures, and validation durations were recorded only to a second `prometheus_client` registry that the `/metrics` endpoint never serialized — so they were silently dropped, and cycle/quarantine/deregistration were double-recorded. Removed the dead secondary system (`application/discovery/discovery_metrics.py`), added the two missing metrics (`mcp_hangar_discovery_validation_failures_total`, `mcp_hangar_discovery_validation_duration_seconds`) to the primary registry, and rewired the orchestrator through it. Found by the observability audit ([#534](https://github.com/mcp-hangar/mcp-hangar/pull/534))
+- **observability:** stop logging expected stdio-server shutdowns as errors. When Hangar closes a subprocess server (idle-TTL expiry / explicit stop), `close()` sets the client closed before terminating, so the reader thread's `stdio_client_process_exited` (+ any drained stderr) was logged at ERROR on every graceful shutdown — inflating the error stream and any log-based alerting. These are now logged at `info` with `expected=true` when we initiated the exit; an unsolicited process death is still an ERROR. Found reviewing live logs in Loki ([#542](https://github.com/mcp-hangar/mcp-hangar/pull/542))
+- **observability:** mark a failed tool call's span as ERROR. The batch executor handles failures as data (`CallResult.success=False`), so the `batch.call.{tool}` span never saw an exception and stayed UNSET — a failing tool call looked like a successful trace and couldn't be filtered as an error in Jaeger/Tempo. It now sets ERROR status (with the failure message) when the call fails. Added a NoOp-safe `mark_span_error` helper. Found reviewing the error path on the live stack ([#544](https://github.com/mcp-hangar/mcp-hangar/pull/544))
+- **observability:** correlate logs with traces — every log record emitted inside an OpenTelemetry span now carries `trace_id`/`span_id`, so you can pivot from a log line to its trace. A no-op when tracing is off or there is no active span, and it never lets a tracing error break a log call. Found by the observability audit ([#533](https://github.com/mcp-hangar/mcp-hangar/pull/533))
+- **metrics:** the tool-call latency histogram (`mcp_hangar_tool_call_duration_seconds`) no longer records a 0-second observation for every failed call — failures carried no real duration and poisoned the p50/p95/p99 percentiles. Duration is observed only for successful calls; failures are still counted via `mcp_hangar_tool_call_errors_total`. Found by the observability audit ([#532](https://github.com/mcp-hangar/mcp-hangar/pull/532))
+- **metrics:** drop the unbounded `stream_id` label from `mcp_hangar_events_compacted_total` — stream IDs are per-stream identifiers and were a cardinality bomb. Compaction is now a fleet-wide counter. Found by the observability audit ([#532](https://github.com/mcp-hangar/mcp-hangar/pull/532))
+- **core:** discovered `http`/`sse` containers now prefer the published host-port binding over the internal bridge-network IP, so they are reachable from the documented host-mode deployment ([#481](https://github.com/mcp-hangar/mcp-hangar/pull/481))
+- **core:** allow a discovery-only `config.yaml` (`discovery.enabled: true`, no top-level `mcp_servers`) to load instead of raising ([#483](https://github.com/mcp-hangar/mcp-hangar/pull/483))
+- **core:** log the transient "container has no IP" discovery skip at debug instead of warning ([#484](https://github.com/mcp-hangar/mcp-hangar/pull/484))
+- **core:** serve the SEP-2575 `server/discover` entry point over `serve --http` — it 404'd on the shipped CLI because the wiring lived only in the never-called `MCPServerFactory` ([#560](https://github.com/mcp-hangar/mcp-hangar/pull/560))
+- **core:** report one `serverInfo` identity to clients — `initialize` announced `mcp-registry` at the mcp SDK's version while `server/discover` announced `mcp-hangar` at Hangar's ([#560](https://github.com/mcp-hangar/mcp-hangar/pull/560))
+- **core:** keep the SEP-2243 front-door wrap off 2026-07-28 requests — buffering and replaying a modern-era body makes the SDK read a disconnect and cancel, answering 500 ([#560](https://github.com/mcp-hangar/mcp-hangar/pull/560))
+- **core:** let a task owner reach their own task when auth is enabled — the identity bridge read only the SDK v1 `ctx.request_context.request`, so on v2 every `tasks/*` call over `serve --http` was unattributed and the governed relay was dead in the deployment mode that matters ([#598](https://github.com/mcp-hangar/mcp-hangar/pull/598))
+- **core:** stop requiring a warm backend for `/health/ready` — lazy start plus `idle_ttl_s` makes "every backend cold" the normal idle state, so readiness flipped to 503, Kubernetes removed the pod from its Service, and no call could arrive to warm a backend again ([#599](https://github.com/mcp-hangar/mcp-hangar/pull/599))
+- **core:** allow the REST API when auth is disabled — the permission guard tested only for an authz middleware, which `NullAuthComponents` still ships, so every REST call answered 401 with no credential able to open it and the operator could not deliver L7 egress policy to an auth-off gateway ([#600](https://github.com/mcp-hangar/mcp-hangar/pull/600))
+- **core:** enforce a tenant's digest pin on the first call after gateway boot — the tool catalogue is published by the backend's start, which happens after the pin gate ran, so the first call to a pinned tool skipped the check entirely ([#601](https://github.com/mcp-hangar/mcp-hangar/pull/601))
+- **core:** report the server's real capabilities from `server/discover` — it returned a hardcoded set, so a stateless client (which has no `initialize` to learn from) was told Tasks, prompts and resources did not exist ([#605](https://github.com/mcp-hangar/mcp-hangar/pull/605))
+- **core:** advertise the caller's actual tool surface from `server/discover` — on an egress gateway it returned the flat backend projection, which is empty until some backend happens to start, instead of the `hangar_*` meta-API the caller would get from `tools/list` ([#606](https://github.com/mcp-hangar/mcp-hangar/pull/606))
+- **core:** keep stdout clean on the stdio transport — structlog's default factory prints to stdout, so a log emitted before `setup_logging()` (a module-import-time one, for instance) corrupted the JSON-RPC stream and dropped the client's session ([#563](https://github.com/mcp-hangar/mcp-hangar/pull/563))
+- **core:** honour `tool_access.mode: front_door` on `serve --http` — the gate lived only in the never-called `MCPServerFactory`, so a gateway configured front_door kept serving the `hangar_*` meta-API, lifecycle control included, to callers the mode exists to fail closed on ([#596](https://github.com/mcp-hangar/mcp-hangar/pull/596))
+- **core:** advertise the SEP-2133 governance extensions on `serve --http`, via `get_capabilities` so both the handshake and the stateless `server/discover` surface carry them ([#595](https://github.com/mcp-hangar/mcp-hangar/pull/595))
+- **core:** guard the `mcp` SDK pin with a metadata test on this line too — the v2 pin stays exact (`==2.0.0b2`, drift inside the beta series breaks `_sdk_compat` silently), mirroring the `<2` cap `main` needs for the v1 surface ([#561](https://github.com/mcp-hangar/mcp-hangar/pull/561))
 
 ### Security
 
-- **security:** enforce per-tenant isolation -- require the token tenant claim in multi-tenant mode and derive the effective tenant solely from the validated token (never client-supplied), failing closed to prevent cross-tenant token use (#312)
-- **security:** opt-in strict per-tenant audience binding (RFC 8707) -- when enabled, a token's `aud` must match the claimed tenant's resource, rejecting cross-tenant replay at the token layer; off by default (#373)
-- **security:** wire auth components onto the application context at bootstrap so the API permission guard actually enforces RBAC -- previously `auth_components` was never set on the global context, so `_check_permission` read `None`, found no authz middleware, and fail-OPENed (returned early), letting any authenticated principal pass every check regardless of role
-- **security:** bridge the authenticated caller identity into the tool-call path over streamable-HTTP (hangar_call now reads the principal from the request context), so per-tenant enforcement (canary routing, per-tenant tool withdrawal) is no longer silently bypassed with a null tenant over HTTP (#384)
-- **security:** enforce `tool:invoke` authorization on the `hangar_call` tool path -- a principal lacking the permission is denied fail-closed (previously RBAC covered only the REST API, so any caller could invoke tools regardless of role) (#385)
-- **security:** apply the per-tenant tool-access policy to the `hangar_tools`/`hangar_details` listing path -- the listing helpers filtered on the server-level policy only (no `member_id`), so a tool denied for a tenant was rejected on `hangar_call` yet still advertised in the listing (fail-OPEN on visibility); the listing now bridges the caller identity from the request principal and keys the resolver on the caller tenant, so listing and invocation agree
-- **core:** Langfuse tracing now scrubs tool-call inputs and outputs by **default** (`scrub_inputs`/`scrub_outputs` default to true) — the exporter previously shipped full argument and result payloads to Langfuse unless explicitly disabled. Set them false to send full content for debugging. Found by the observability audit
-- **core:** redact secret *values* (AWS/GitHub/Slack/Stripe keys, JWTs, bearer tokens, …) across the logging pipeline and the MCP-server log buffer. The value-level `OutputRedactor` is now a structlog processor (complementing the existing key-name redaction) and is applied to subprocess `stderr` at the source before it enters the buffer — so the `GET /mcp_servers/{id}/logs` API can no longer serve raw secrets that an MCP server printed to stderr. Long-string redaction stays off, so only recognizable token shapes are rewritten. Found by the observability audit
-- **core:** L7 argument scanning now fails closed on un-serializable tool-call arguments (e.g. a circular reference) instead of raising — an unscannable payload is reported as a violation rather than crashing the evaluation — and skips serialization entirely when no argument rules are configured. Found by adversarial testing ([mcp-hangar-operator#53](https://github.com/mcp-hangar/mcp-hangar-operator/issues/53))
-- **security:** require `mcp>=1.28.1` to pull in the fix for CVE-2026-59950 (MCP Python SDK WebSocket server transport missing Host/Origin validation, HIGH). The published constraint was `mcp>=1.0.0`, so installs could still resolve a vulnerable SDK even though the dev lock had moved.
-- **core:** validate WebSocket handshake `Origin`/`Host` at the Hangar ASGI edge before forwarding non-`/api/` connections to the SDK app (DNS-rebinding / cross-origin defense-in-depth, the CVE-2026-59950 class at our own trust boundary). Loopback is trusted; non-loopback is fail-closed — a present `Origin` must be allow-listed (`MCP_CORS_ORIGINS`), a missing one is allowed (non-browser client, auth still applies), and the `Host` must be in `MCP_TRUSTED_HOSTS` ([#498](https://github.com/mcp-hangar/mcp-hangar/issues/498))
+- **security:** enforce per-tenant isolation -- require the token tenant claim in multi-tenant mode and derive the effective tenant solely from the validated token (never client-supplied), failing closed to prevent cross-tenant token use (#312) ([#371](https://github.com/mcp-hangar/mcp-hangar/pull/371))
+- **security:** opt-in strict per-tenant audience binding (RFC 8707) -- when enabled, a token's `aud` must match the claimed tenant's resource, rejecting cross-tenant replay at the token layer; off by default (#373) ([#382](https://github.com/mcp-hangar/mcp-hangar/pull/382))
+- **security:** wire auth components onto the application context at bootstrap so the API permission guard actually enforces RBAC -- previously `auth_components` was never set on the global context, so `_check_permission` read `None`, found no authz middleware, and fail-OPENed (returned early), letting any authenticated principal pass every check regardless of role ([#386](https://github.com/mcp-hangar/mcp-hangar/pull/386))
+- **security:** bridge the authenticated caller identity into the tool-call path over streamable-HTTP (hangar_call now reads the principal from the request context), so per-tenant enforcement (canary routing, per-tenant tool withdrawal) is no longer silently bypassed with a null tenant over HTTP (#384) ([#387](https://github.com/mcp-hangar/mcp-hangar/pull/387))
+- **security:** enforce `tool:invoke` authorization on the `hangar_call` tool path -- a principal lacking the permission is denied fail-closed (previously RBAC covered only the REST API, so any caller could invoke tools regardless of role) (#385) ([#389](https://github.com/mcp-hangar/mcp-hangar/pull/389))
+- **security:** apply the per-tenant tool-access policy to the `hangar_tools`/`hangar_details` listing path -- the listing helpers filtered on the server-level policy only (no `member_id`), so a tool denied for a tenant was rejected on `hangar_call` yet still advertised in the listing (fail-OPEN on visibility); the listing now bridges the caller identity from the request principal and keys the resolver on the caller tenant, so listing and invocation agree ([#393](https://github.com/mcp-hangar/mcp-hangar/pull/393))
+- **core:** Langfuse tracing now scrubs tool-call inputs and outputs by **default** (`scrub_inputs`/`scrub_outputs` default to true) — the exporter previously shipped full argument and result payloads to Langfuse unless explicitly disabled. Set them false to send full content for debugging. Found by the observability audit ([#531](https://github.com/mcp-hangar/mcp-hangar/pull/531))
+- **core:** redact secret *values* (AWS/GitHub/Slack/Stripe keys, JWTs, bearer tokens, …) across the logging pipeline and the MCP-server log buffer. The value-level `OutputRedactor` is now a structlog processor (complementing the existing key-name redaction) and is applied to subprocess `stderr` at the source before it enters the buffer — so the `GET /mcp_servers/{id}/logs` API can no longer serve raw secrets that an MCP server printed to stderr. Long-string redaction stays off, so only recognizable token shapes are rewritten. Found by the observability audit ([#530](https://github.com/mcp-hangar/mcp-hangar/pull/530))
+- **core:** L7 argument scanning now fails closed on un-serializable tool-call arguments (e.g. a circular reference) instead of raising — an unscannable payload is reported as a violation rather than crashing the evaluation — and skips serialization entirely when no argument rules are configured. Found by adversarial testing ([mcp-hangar-operator#53](https://github.com/mcp-hangar/mcp-hangar-operator/issues/53)) ([#529](https://github.com/mcp-hangar/mcp-hangar/pull/529))
+- **security:** require `mcp>=1.28.1` to pull in the fix for CVE-2026-59950 (MCP Python SDK WebSocket server transport missing Host/Origin validation, HIGH). The published constraint was `mcp>=1.0.0`, so installs could still resolve a vulnerable SDK even though the dev lock had moved. ([#497](https://github.com/mcp-hangar/mcp-hangar/pull/497))
+- **core:** validate WebSocket handshake `Origin`/`Host` at the Hangar ASGI edge before forwarding non-`/api/` connections to the SDK app (DNS-rebinding / cross-origin defense-in-depth, the CVE-2026-59950 class at our own trust boundary). Loopback is trusted; non-loopback is fail-closed — a present `Origin` must be allow-listed (`MCP_CORS_ORIGINS`), a missing one is allowed (non-browser client, auth still applies), and the `Host` must be in `MCP_TRUSTED_HOSTS` ([#498](https://github.com/mcp-hangar/mcp-hangar/pull/498))
 
 ## [1.6.3](https://github.com/mcp-hangar/mcp-hangar/compare/v1.6.2...v1.6.3) (2026-07-27)
 
-
 ### Fixed
 
-* **core:** cap httpx below 1.0 on the v1 line too ([#619](https://github.com/mcp-hangar/mcp-hangar/issues/619)) ([74c1af7](https://github.com/mcp-hangar/mcp-hangar/commit/74c1af77394af5b7820c65e996425640931a0086))
+- **core:** cap httpx below 1.0 on the v1 line too ([#619](https://github.com/mcp-hangar/mcp-hangar/pull/619)) ([74c1af7](https://github.com/mcp-hangar/mcp-hangar/commit/74c1af77394af5b7820c65e996425640931a0086))
 
 ## [1.6.2](https://github.com/mcp-hangar/mcp-hangar/compare/v1.6.1...v1.6.2) (2026-07-27)
 
 ### Fixed
 
-* **core:** cap the mcp SDK pin at the v1 line ([#610](https://github.com/mcp-hangar/mcp-hangar/issues/610)) ([b862297](https://github.com/mcp-hangar/mcp-hangar/commit/b8622972e8c695b80535fa463bac0fa2fb3bd2a6)), closes [#561](https://github.com/mcp-hangar/mcp-hangar/issues/561)
+- **core:** cap the mcp SDK pin at the v1 line ([#610](https://github.com/mcp-hangar/mcp-hangar/pull/610)) ([b862297](https://github.com/mcp-hangar/mcp-hangar/commit/b8622972e8c695b80535fa463bac0fa2fb3bd2a6)), closes [#561](https://github.com/mcp-hangar/mcp-hangar/issues/561)
 
 ## [1.6.1](https://github.com/mcp-hangar/mcp-hangar/compare/v1.6.0...v1.6.1) (2026-07-23)
 
-
 ### Added
 
-* **core:** wire MCPEgressPolicy mode (Audit observes, Enforce blocks) ([#588](https://github.com/mcp-hangar/mcp-hangar/issues/588)) ([969b996](https://github.com/mcp-hangar/mcp-hangar/commit/969b99668c95d23c975f7f3affd02117230fa0bb))
-
+- **core:** wire MCPEgressPolicy mode (Audit observes, Enforce blocks) ([#588](https://github.com/mcp-hangar/mcp-hangar/pull/588)) ([969b996](https://github.com/mcp-hangar/mcp-hangar/commit/969b99668c95d23c975f7f3affd02117230fa0bb))
 
 ### Changed
 
-* **release:** force patch release 1.6.1 ([#593](https://github.com/mcp-hangar/mcp-hangar/issues/593)) ([44912b0](https://github.com/mcp-hangar/mcp-hangar/commit/44912b0a2eb4b30c4ca8a91b79fbd5efc3aae5ab))
+- **release:** force patch release 1.6.1 ([#593](https://github.com/mcp-hangar/mcp-hangar/pull/593)) ([44912b0](https://github.com/mcp-hangar/mcp-hangar/commit/44912b0a2eb4b30c4ca8a91b79fbd5efc3aae5ab))
 
 ## [1.6.0](https://github.com/mcp-hangar/mcp-hangar/compare/v1.5.1...v1.6.0) (2026-07-19)
 
-
 ### Added
 
-* **core:** add L7 egress policy engine ([#526](https://github.com/mcp-hangar/mcp-hangar/issues/526)) ([575602d](https://github.com/mcp-hangar/mcp-hangar/commit/575602d1fc28b8f784169157470e2d6e3ddd2ec7))
-* **core:** enforce L7 egress policy at the tool-invocation chokepoint ([#527](https://github.com/mcp-hangar/mcp-hangar/issues/527)) ([2d22ad9](https://github.com/mcp-hangar/mcp-hangar/commit/2d22ad99b1ad5458ae61d9e715941540916abb9d))
-* **core:** receive compiled L7 egress policy over the REST API ([#528](https://github.com/mcp-hangar/mcp-hangar/issues/528)) ([0825a47](https://github.com/mcp-hangar/mcp-hangar/commit/0825a47bbf6888b4f88e126c942a824b060649a8))
-* **observability:** add telemetry-health alerts (OTLP export + discovery validation) ([#541](https://github.com/mcp-hangar/mcp-hangar/issues/541)) ([393f492](https://github.com/mcp-hangar/mcp-hangar/commit/393f492229f0a02762153a0b6b3a1482f2bdc138))
-* **observability:** trace the upstream call boundary (client spans, stdio propagation, sampler) ([#537](https://github.com/mcp-hangar/mcp-hangar/issues/537)) ([63bad07](https://github.com/mcp-hangar/mcp-hangar/commit/63bad0737305de542881974ca8cd4bd4682d177f))
-* **observability:** wire transport message metrics; drop never-emitted pool/SSE gauges ([#540](https://github.com/mcp-hangar/mcp-hangar/issues/540)) ([9d3ed15](https://github.com/mcp-hangar/mcp-hangar/commit/9d3ed15764d0d013b850a59f8e055b426b0b4d0d))
-
-
-### Fixed
-
-* **core:** consolidate discovery metrics onto the scraped registry ([#534](https://github.com/mcp-hangar/mcp-hangar/issues/534)) ([d699ff0](https://github.com/mcp-hangar/mcp-hangar/commit/d699ff027d6259dd3751ecfb9f6434b1b3ffdb53))
-* **core:** emit the cost-attribution metrics ([#535](https://github.com/mcp-hangar/mcp-hangar/issues/535)) ([275de80](https://github.com/mcp-hangar/mcp-hangar/commit/275de802cf6757b61f580d9252420ff479a6c30d))
-* **core:** L7 argument scan fails closed on unserializable arguments ([#529](https://github.com/mcp-hangar/mcp-hangar/issues/529)) ([a14bb2e](https://github.com/mcp-hangar/mcp-hangar/commit/a14bb2ebc6580ab80098ef07fb1bd4242ac42b3a))
-* **core:** redact secret values in logs and the log buffer ([#530](https://github.com/mcp-hangar/mcp-hangar/issues/530)) ([1374da8](https://github.com/mcp-hangar/mcp-hangar/commit/1374da8730e3c5af84bf32e0a9c128d863883170))
-* **core:** scrub Langfuse tool inputs/outputs by default ([#531](https://github.com/mcp-hangar/mcp-hangar/issues/531)) ([98a2cb9](https://github.com/mcp-hangar/mcp-hangar/commit/98a2cb907692f77547c4a2ab639bc2e9dbf190c5))
-* **core:** wire connections_active; delete the redundant connection metrics ([#536](https://github.com/mcp-hangar/mcp-hangar/issues/536)) ([81accc1](https://github.com/mcp-hangar/mcp-hangar/commit/81accc19a0680b2a1d5463b68420f77f5be490c5))
-* **metrics:** stop poisoning the latency histogram; drop stream_id label ([#532](https://github.com/mcp-hangar/mcp-hangar/issues/532)) ([55abc52](https://github.com/mcp-hangar/mcp-hangar/commit/55abc5261627ad6101fddc229c271fea87fc1de0))
-* **observability:** correlate logs with traces (trace_id/span_id) ([#533](https://github.com/mcp-hangar/mcp-hangar/issues/533)) ([29ea16b](https://github.com/mcp-hangar/mcp-hangar/commit/29ea16b09cf3fe751b0b296b1f0e608034e27c42))
-* **observability:** mark a failed tool call's span as ERROR ([#544](https://github.com/mcp-hangar/mcp-hangar/issues/544)) ([43848e9](https://github.com/mcp-hangar/mcp-hangar/commit/43848e9349968219003a6975ea4056dd9098b5f7))
-* **observability:** stop logging expected stdio shutdowns as errors ([#542](https://github.com/mcp-hangar/mcp-hangar/issues/542)) ([11ef2c7](https://github.com/mcp-hangar/mcp-hangar/commit/11ef2c7e5049c4951c68e16ca44db2419eb58a78))
-
+- **core:** add L7 egress policy engine ([#526](https://github.com/mcp-hangar/mcp-hangar/pull/526)) ([575602d](https://github.com/mcp-hangar/mcp-hangar/commit/575602d1fc28b8f784169157470e2d6e3ddd2ec7))
+- **core:** enforce L7 egress policy at the tool-invocation chokepoint ([#527](https://github.com/mcp-hangar/mcp-hangar/pull/527)) ([2d22ad9](https://github.com/mcp-hangar/mcp-hangar/commit/2d22ad99b1ad5458ae61d9e715941540916abb9d))
+- **core:** receive compiled L7 egress policy over the REST API ([#528](https://github.com/mcp-hangar/mcp-hangar/pull/528)) ([0825a47](https://github.com/mcp-hangar/mcp-hangar/commit/0825a47bbf6888b4f88e126c942a824b060649a8))
+- **observability:** add telemetry-health alerts (OTLP export + discovery validation) ([#541](https://github.com/mcp-hangar/mcp-hangar/pull/541)) ([393f492](https://github.com/mcp-hangar/mcp-hangar/commit/393f492229f0a02762153a0b6b3a1482f2bdc138))
+- **observability:** trace the upstream call boundary (client spans, stdio propagation, sampler) ([#537](https://github.com/mcp-hangar/mcp-hangar/pull/537)) ([63bad07](https://github.com/mcp-hangar/mcp-hangar/commit/63bad0737305de542881974ca8cd4bd4682d177f))
+- **observability:** wire transport message metrics; drop never-emitted pool/SSE gauges ([#540](https://github.com/mcp-hangar/mcp-hangar/pull/540)) ([9d3ed15](https://github.com/mcp-hangar/mcp-hangar/commit/9d3ed15764d0d013b850a59f8e055b426b0b4d0d))
 
 ### Changed
 
-* **core:** collapse the vestigial enterprise plugin boundary ([#538](https://github.com/mcp-hangar/mcp-hangar/issues/538)) ([1813dcd](https://github.com/mcp-hangar/mcp-hangar/commit/1813dcdaecf29d4469ee0adb96d5555553a81ecc))
-* **observability:** align tool-invocation spans to OTel GenAI/MCP semconv ([#539](https://github.com/mcp-hangar/mcp-hangar/issues/539)) ([d705c8f](https://github.com/mcp-hangar/mcp-hangar/commit/d705c8f20763137fda61bb7b537330c7d3357592))
+- **core:** collapse the vestigial enterprise plugin boundary ([#538](https://github.com/mcp-hangar/mcp-hangar/pull/538)) ([1813dcd](https://github.com/mcp-hangar/mcp-hangar/commit/1813dcdaecf29d4469ee0adb96d5555553a81ecc))
+- **observability:** align tool-invocation spans to OTel GenAI/MCP semconv ([#539](https://github.com/mcp-hangar/mcp-hangar/pull/539)) ([d705c8f](https://github.com/mcp-hangar/mcp-hangar/commit/d705c8f20763137fda61bb7b537330c7d3357592))
 
+### Fixed
+
+- **core:** consolidate discovery metrics onto the scraped registry ([#534](https://github.com/mcp-hangar/mcp-hangar/pull/534)) ([d699ff0](https://github.com/mcp-hangar/mcp-hangar/commit/d699ff027d6259dd3751ecfb9f6434b1b3ffdb53))
+- **core:** emit the cost-attribution metrics ([#535](https://github.com/mcp-hangar/mcp-hangar/pull/535)) ([275de80](https://github.com/mcp-hangar/mcp-hangar/commit/275de802cf6757b61f580d9252420ff479a6c30d))
+- **core:** L7 argument scan fails closed on unserializable arguments ([#529](https://github.com/mcp-hangar/mcp-hangar/pull/529)) ([a14bb2e](https://github.com/mcp-hangar/mcp-hangar/commit/a14bb2ebc6580ab80098ef07fb1bd4242ac42b3a))
+- **core:** redact secret values in logs and the log buffer ([#530](https://github.com/mcp-hangar/mcp-hangar/pull/530)) ([1374da8](https://github.com/mcp-hangar/mcp-hangar/commit/1374da8730e3c5af84bf32e0a9c128d863883170))
+- **core:** scrub Langfuse tool inputs/outputs by default ([#531](https://github.com/mcp-hangar/mcp-hangar/pull/531)) ([98a2cb9](https://github.com/mcp-hangar/mcp-hangar/commit/98a2cb907692f77547c4a2ab639bc2e9dbf190c5))
+- **core:** wire connections_active; delete the redundant connection metrics ([#536](https://github.com/mcp-hangar/mcp-hangar/pull/536)) ([81accc1](https://github.com/mcp-hangar/mcp-hangar/commit/81accc19a0680b2a1d5463b68420f77f5be490c5))
+- **metrics:** stop poisoning the latency histogram; drop stream_id label ([#532](https://github.com/mcp-hangar/mcp-hangar/pull/532)) ([55abc52](https://github.com/mcp-hangar/mcp-hangar/commit/55abc5261627ad6101fddc229c271fea87fc1de0))
+- **observability:** correlate logs with traces (trace_id/span_id) ([#533](https://github.com/mcp-hangar/mcp-hangar/pull/533)) ([29ea16b](https://github.com/mcp-hangar/mcp-hangar/commit/29ea16b09cf3fe751b0b296b1f0e608034e27c42))
+- **observability:** mark a failed tool call's span as ERROR ([#544](https://github.com/mcp-hangar/mcp-hangar/pull/544)) ([43848e9](https://github.com/mcp-hangar/mcp-hangar/commit/43848e9349968219003a6975ea4056dd9098b5f7))
+- **observability:** stop logging expected stdio shutdowns as errors ([#542](https://github.com/mcp-hangar/mcp-hangar/pull/542)) ([11ef2c7](https://github.com/mcp-hangar/mcp-hangar/commit/11ef2c7e5049c4951c68e16ca44db2419eb58a78))
 
 ### Security
 
-* **core:** validate WebSocket handshake Origin/Host at the edge ([#524](https://github.com/mcp-hangar/mcp-hangar/issues/524)) ([403ec6c](https://github.com/mcp-hangar/mcp-hangar/commit/403ec6c700173faed3cf3da324993b0fc92d267c))
+- **core:** validate WebSocket handshake Origin/Host at the edge ([#524](https://github.com/mcp-hangar/mcp-hangar/pull/524)) ([403ec6c](https://github.com/mcp-hangar/mcp-hangar/commit/403ec6c700173faed3cf3da324993b0fc92d267c))
 
 ## [1.5.1](https://github.com/mcp-hangar/mcp-hangar/compare/v1.5.0...v1.5.1) (2026-07-16)
 
-
 ### Fixed
 
-* **core:** resolve discovery/config review findings ([#481](https://github.com/mcp-hangar/mcp-hangar/issues/481), [#483](https://github.com/mcp-hangar/mcp-hangar/issues/483), [#484](https://github.com/mcp-hangar/mcp-hangar/issues/484)) ([#493](https://github.com/mcp-hangar/mcp-hangar/issues/493)) ([1600c54](https://github.com/mcp-hangar/mcp-hangar/commit/1600c543ecf6e3fa8d8af1b63f842c1339e46740))
-* **repo:** add basic client scope to keycloak example realm so tokens carry sub ([#476](https://github.com/mcp-hangar/mcp-hangar/issues/476)) ([2c1e9f4](https://github.com/mcp-hangar/mcp-hangar/commit/2c1e9f4d3d673fb142cf5d8e217a8d8f89dc2da6))
-* **security:** require mcp&gt;=1.28.1 (CVE-2026-59950) ([#497](https://github.com/mcp-hangar/mcp-hangar/issues/497)) ([5ba85d1](https://github.com/mcp-hangar/mcp-hangar/commit/5ba85d18c5c655d47092906e6577597528afa4dc))
+- **core:** resolve discovery/config review findings ([#481](https://github.com/mcp-hangar/mcp-hangar/issues/481), [#483](https://github.com/mcp-hangar/mcp-hangar/issues/483), [#484](https://github.com/mcp-hangar/mcp-hangar/issues/484)) ([#493](https://github.com/mcp-hangar/mcp-hangar/pull/493)) ([1600c54](https://github.com/mcp-hangar/mcp-hangar/commit/1600c543ecf6e3fa8d8af1b63f842c1339e46740))
+- **repo:** add basic client scope to keycloak example realm so tokens carry sub ([#476](https://github.com/mcp-hangar/mcp-hangar/pull/476)) ([2c1e9f4](https://github.com/mcp-hangar/mcp-hangar/commit/2c1e9f4d3d673fb142cf5d8e217a8d8f89dc2da6))
+- **security:** require mcp&gt;=1.28.1 (CVE-2026-59950) ([#497](https://github.com/mcp-hangar/mcp-hangar/pull/497)) ([5ba85d1](https://github.com/mcp-hangar/mcp-hangar/commit/5ba85d18c5c655d47092906e6577597528afa4dc))
 
 ## [1.5.0](https://github.com/mcp-hangar/mcp-hangar/compare/v1.4.0...v1.5.0) (2026-07-15)
 
-
 ### Added
 
-* **cli:** add `auth bootstrap-admin` command (durable initial admin) ([#463](https://github.com/mcp-hangar/mcp-hangar/issues/463)) ([57b21fc](https://github.com/mcp-hangar/mcp-hangar/commit/57b21fc5816b8daf980c7272f4bae0fc94b3e9be)), closes [#451](https://github.com/mcp-hangar/mcp-hangar/issues/451) [#452](https://github.com/mcp-hangar/mcp-hangar/issues/452)
-* **core:** add interceptor/invoke + phase-aware hooks, pinned to MCP `modelcontextprotocol/modelcontextprotocol#2624` ([#400](https://github.com/mcp-hangar/mcp-hangar/issues/400)) ([3a0e2b5](https://github.com/mcp-hangar/mcp-hangar/commit/3a0e2b5d4df67821aa743fb69ff64ab037b5b28e))
-* **core:** add server/discover entry point backed by the per-tenant projection ([#407](https://github.com/mcp-hangar/mcp-hangar/issues/407)) ([6713cbd](https://github.com/mcp-hangar/mcp-hangar/commit/6713cbdef243977d36e3bfc30f24f4c3dc0c758d))
-* **core:** configurable command-bus rate limit via config.yaml ([#398](https://github.com/mcp-hangar/mcp-hangar/issues/398)) ([a891496](https://github.com/mcp-hangar/mcp-hangar/commit/a89149610ebbf2337bc97253483840875e3339f8))
-* **core:** emit task-lifecycle audit events (created/input_required/completed/failed/cancelled) ([#399](https://github.com/mcp-hangar/mcp-hangar/issues/399)) ([eb399bc](https://github.com/mcp-hangar/mcp-hangar/commit/eb399bcf8d0075721f95ba9a9abb9f3738d914f5))
-* **observability:** meter OTLP export failures and document the tracing off-switch ([#419](https://github.com/mcp-hangar/mcp-hangar/issues/419)) ([515c57c](https://github.com/mcp-hangar/mcp-hangar/commit/515c57c7538e0c5959fd1f8fe566572592448637))
-* **security:** atomically bootstrap the first API-key admin ([#456](https://github.com/mcp-hangar/mcp-hangar/issues/456)) ([9239705](https://github.com/mcp-hangar/mcp-hangar/commit/92397054a3d181c3ffe713a6c4022de6fad32250))
-
+- **cli:** add `auth bootstrap-admin` command (durable initial admin) ([#463](https://github.com/mcp-hangar/mcp-hangar/pull/463)) ([57b21fc](https://github.com/mcp-hangar/mcp-hangar/commit/57b21fc5816b8daf980c7272f4bae0fc94b3e9be)), closes [#451](https://github.com/mcp-hangar/mcp-hangar/issues/451) [#452](https://github.com/mcp-hangar/mcp-hangar/issues/452)
+- **core:** add interceptor/invoke + phase-aware hooks, pinned to MCP `modelcontextprotocol/modelcontextprotocol#2624` ([#400](https://github.com/mcp-hangar/mcp-hangar/pull/400)) ([3a0e2b5](https://github.com/mcp-hangar/mcp-hangar/commit/3a0e2b5d4df67821aa743fb69ff64ab037b5b28e))
+- **core:** add server/discover entry point backed by the per-tenant projection ([#407](https://github.com/mcp-hangar/mcp-hangar/pull/407)) ([6713cbd](https://github.com/mcp-hangar/mcp-hangar/commit/6713cbdef243977d36e3bfc30f24f4c3dc0c758d))
+- **core:** configurable command-bus rate limit via config.yaml ([#398](https://github.com/mcp-hangar/mcp-hangar/pull/398)) ([a891496](https://github.com/mcp-hangar/mcp-hangar/commit/a89149610ebbf2337bc97253483840875e3339f8))
+- **core:** emit task-lifecycle audit events (created/input_required/completed/failed/cancelled) ([#399](https://github.com/mcp-hangar/mcp-hangar/pull/399)) ([eb399bc](https://github.com/mcp-hangar/mcp-hangar/commit/eb399bcf8d0075721f95ba9a9abb9f3738d914f5))
+- **observability:** meter OTLP export failures and document the tracing off-switch ([#419](https://github.com/mcp-hangar/mcp-hangar/pull/419)) ([515c57c](https://github.com/mcp-hangar/mcp-hangar/commit/515c57c7538e0c5959fd1f8fe566572592448637))
+- **security:** atomically bootstrap the first API-key admin ([#456](https://github.com/mcp-hangar/mcp-hangar/pull/456)) ([9239705](https://github.com/mcp-hangar/mcp-hangar/commit/92397054a3d181c3ffe713a6c4022de6fad32250))
 
 ### Fixed
 
-* **ci:** repair actionlint gate (broken action ref) and the YAML it flags ([#287](https://github.com/mcp-hangar/mcp-hangar/issues/287)) ([ee5de14](https://github.com/mcp-hangar/mcp-hangar/commit/ee5de144eea5c0fc3d8cb3dbefcbb7238c67b152))
-* **cli:** accept --config after serve and fix generated Claude Desktop config ([#420](https://github.com/mcp-hangar/mcp-hangar/issues/420)) ([9068161](https://github.com/mcp-hangar/mcp-hangar/commit/9068161b4a6e0c2a72579841550ba081d3f440b5)), closes [#417](https://github.com/mcp-hangar/mcp-hangar/issues/417)
-* **core:** clarify that mode:docker requires a host container CLI ([#430](https://github.com/mcp-hangar/mcp-hangar/issues/430)) ([732de25](https://github.com/mcp-hangar/mcp-hangar/commit/732de255652b8a579cac97392230457cf3acb25b)), closes [#429](https://github.com/mcp-hangar/mcp-hangar/issues/429)
-* **core:** config.yaml.example uses mcp_servers: (loader requires it, not providers:) ([#458](https://github.com/mcp-hangar/mcp-hangar/issues/458)) ([498b312](https://github.com/mcp-hangar/mcp-hangar/commit/498b312fcf993041abfebd462688cf939faa4a0d)), closes [#457](https://github.com/mcp-hangar/mcp-hangar/issues/457)
-* **core:** expose bootstrapped discovery through REST ([#442](https://github.com/mcp-hangar/mcp-hangar/issues/442)) ([1c2280c](https://github.com/mcp-hangar/mcp-hangar/commit/1c2280c2870a1718743b5f80af2090e2468093a4))
-* **core:** fail fast when SQLite event store is unavailable ([#438](https://github.com/mcp-hangar/mcp-hangar/issues/438)) ([a1be5db](https://github.com/mcp-hangar/mcp-hangar/commit/a1be5db4a5f965d06adabf97dde0420c2ad2c59b))
-* **core:** fail-fast on unwritable SQLite event store and add a durability readiness check ([#448](https://github.com/mcp-hangar/mcp-hangar/issues/448)) ([77f84cc](https://github.com/mcp-hangar/mcp-hangar/commit/77f84ccff9560a7d0eaf93a70f0fda9ce49a8d6a))
-* **core:** group circuit breaker no longer blocks a healthy remaining member ([#426](https://github.com/mcp-hangar/mcp-hangar/issues/426)) ([0b9cdc8](https://github.com/mcp-hangar/mcp-hangar/commit/0b9cdc89b9e8b0de8aa1349aecc39ba4e10fa1eb)), closes [#425](https://github.com/mcp-hangar/mcp-hangar/issues/425)
-* **core:** make EventStoreConfigurationError a ConfigurationError subclass ([#459](https://github.com/mcp-hangar/mcp-hangar/issues/459)) ([42cce1a](https://github.com/mcp-hangar/mcp-hangar/commit/42cce1ada6a2a70375a7e338405e7de2508defbb))
-* **core:** re-pin interceptor schema to 99bc7c9 and reconcile SEP-2133 capability key ([#405](https://github.com/mcp-hangar/mcp-hangar/issues/405)) ([c972adf](https://github.com/mcp-hangar/mcp-hangar/commit/c972adf04aea89afe1fba49665e26f69ea5180b6))
-* **core:** run discovery on a dedicated lifecycle loop ([#446](https://github.com/mcp-hangar/mcp-hangar/issues/446)) ([4eee12c](https://github.com/mcp-hangar/mcp-hangar/commit/4eee12c2efe9490e5b41602f07da6301c3df3b95))
-* **core:** treat MCP tool result isError as a failure ([#427](https://github.com/mcp-hangar/mcp-hangar/issues/427)) ([8ed7405](https://github.com/mcp-hangar/mcp-hangar/commit/8ed7405abb7b56e4e5744e2d71b199178f73d60f)), closes [#423](https://github.com/mcp-hangar/mcp-hangar/issues/423)
-* **core:** unblock concurrent cold-start waiters ([#440](https://github.com/mcp-hangar/mcp-hangar/issues/440)) ([9721349](https://github.com/mcp-hangar/mcp-hangar/commit/972134906eca086bea028c0ff5f77e6d631c7958))
-* **core:** use supported lifecycle API during reload ([#441](https://github.com/mcp-hangar/mcp-hangar/issues/441)) ([98f09f1](https://github.com/mcp-hangar/mcp-hangar/commit/98f09f1cc5ec8949ce01cbf8660d809c406e76e1))
-* **security:** read the Authorization header case-insensitively in JWTAuthenticator ([#472](https://github.com/mcp-hangar/mcp-hangar/issues/472)) ([7863848](https://github.com/mcp-hangar/mcp-hangar/commit/78638482741b7ca6e5b341a678453d6820ab3519))
+- **ci:** repair actionlint gate (broken action ref) and the YAML it flags ([#287](https://github.com/mcp-hangar/mcp-hangar/pull/287)) ([ee5de14](https://github.com/mcp-hangar/mcp-hangar/commit/ee5de144eea5c0fc3d8cb3dbefcbb7238c67b152))
+- **cli:** accept --config after serve and fix generated Claude Desktop config ([#420](https://github.com/mcp-hangar/mcp-hangar/pull/420)) ([9068161](https://github.com/mcp-hangar/mcp-hangar/commit/9068161b4a6e0c2a72579841550ba081d3f440b5)), closes [#417](https://github.com/mcp-hangar/mcp-hangar/issues/417)
+- **core:** clarify that mode:docker requires a host container CLI ([#430](https://github.com/mcp-hangar/mcp-hangar/pull/430)) ([732de25](https://github.com/mcp-hangar/mcp-hangar/commit/732de255652b8a579cac97392230457cf3acb25b)), closes [#429](https://github.com/mcp-hangar/mcp-hangar/issues/429)
+- **core:** config.yaml.example uses mcp_servers: (loader requires it, not providers:) ([#458](https://github.com/mcp-hangar/mcp-hangar/pull/458)) ([498b312](https://github.com/mcp-hangar/mcp-hangar/commit/498b312fcf993041abfebd462688cf939faa4a0d)), closes [#457](https://github.com/mcp-hangar/mcp-hangar/issues/457)
+- **core:** expose bootstrapped discovery through REST ([#442](https://github.com/mcp-hangar/mcp-hangar/pull/442)) ([1c2280c](https://github.com/mcp-hangar/mcp-hangar/commit/1c2280c2870a1718743b5f80af2090e2468093a4))
+- **core:** fail fast when SQLite event store is unavailable ([#438](https://github.com/mcp-hangar/mcp-hangar/pull/438)) ([a1be5db](https://github.com/mcp-hangar/mcp-hangar/commit/a1be5db4a5f965d06adabf97dde0420c2ad2c59b))
+- **core:** fail-fast on unwritable SQLite event store and add a durability readiness check ([#448](https://github.com/mcp-hangar/mcp-hangar/pull/448)) ([77f84cc](https://github.com/mcp-hangar/mcp-hangar/commit/77f84ccff9560a7d0eaf93a70f0fda9ce49a8d6a))
+- **core:** group circuit breaker no longer blocks a healthy remaining member ([#426](https://github.com/mcp-hangar/mcp-hangar/pull/426)) ([0b9cdc8](https://github.com/mcp-hangar/mcp-hangar/commit/0b9cdc89b9e8b0de8aa1349aecc39ba4e10fa1eb)), closes [#425](https://github.com/mcp-hangar/mcp-hangar/issues/425)
+- **core:** make EventStoreConfigurationError a ConfigurationError subclass ([#459](https://github.com/mcp-hangar/mcp-hangar/pull/459)) ([42cce1a](https://github.com/mcp-hangar/mcp-hangar/commit/42cce1ada6a2a70375a7e338405e7de2508defbb))
+- **core:** re-pin interceptor schema to 99bc7c9 and reconcile SEP-2133 capability key ([#405](https://github.com/mcp-hangar/mcp-hangar/pull/405)) ([c972adf](https://github.com/mcp-hangar/mcp-hangar/commit/c972adf04aea89afe1fba49665e26f69ea5180b6))
+- **core:** run discovery on a dedicated lifecycle loop ([#446](https://github.com/mcp-hangar/mcp-hangar/pull/446)) ([4eee12c](https://github.com/mcp-hangar/mcp-hangar/commit/4eee12c2efe9490e5b41602f07da6301c3df3b95))
+- **core:** treat MCP tool result isError as a failure ([#427](https://github.com/mcp-hangar/mcp-hangar/pull/427)) ([8ed7405](https://github.com/mcp-hangar/mcp-hangar/commit/8ed7405abb7b56e4e5744e2d71b199178f73d60f)), closes [#423](https://github.com/mcp-hangar/mcp-hangar/issues/423)
+- **core:** unblock concurrent cold-start waiters ([#440](https://github.com/mcp-hangar/mcp-hangar/pull/440)) ([9721349](https://github.com/mcp-hangar/mcp-hangar/commit/972134906eca086bea028c0ff5f77e6d631c7958))
+- **core:** use supported lifecycle API during reload ([#441](https://github.com/mcp-hangar/mcp-hangar/pull/441)) ([98f09f1](https://github.com/mcp-hangar/mcp-hangar/commit/98f09f1cc5ec8949ce01cbf8660d809c406e76e1))
+- **security:** read the Authorization header case-insensitively in JWTAuthenticator ([#472](https://github.com/mcp-hangar/mcp-hangar/pull/472)) ([7863848](https://github.com/mcp-hangar/mcp-hangar/commit/78638482741b7ca6e5b341a678453d6820ab3519))
 
 ## [1.4.0](https://github.com/mcp-hangar/mcp-hangar/compare/v1.3.0...v1.4.0) (2026-06-29)
 
-
 ### Added
 
-* **core:** per-tenant canary and version routing for groups ([#283](https://github.com/mcp-hangar/mcp-hangar/issues/283)) ([3410801](https://github.com/mcp-hangar/mcp-hangar/commit/341080111b2368d95a1c61f097fb3c94159c6c68)), closes [#275](https://github.com/mcp-hangar/mcp-hangar/issues/275) [#226](https://github.com/mcp-hangar/mcp-hangar/issues/226)
-* **core:** per-tenant tool digest pinning on the call path ([#276](https://github.com/mcp-hangar/mcp-hangar/issues/276)) ([0d2b2f2](https://github.com/mcp-hangar/mcp-hangar/commit/0d2b2f26161314bbe40e17d1669010f573e9bff2)), closes [#233](https://github.com/mcp-hangar/mcp-hangar/issues/233) [#226](https://github.com/mcp-hangar/mcp-hangar/issues/226)
-* **observability:** activate availability and transport alerts ([#269](https://github.com/mcp-hangar/mcp-hangar/issues/269)) ([774cb8f](https://github.com/mcp-hangar/mcp-hangar/commit/774cb8f27b4ebce379ccee69dd462f97c3053770)), closes [#268](https://github.com/mcp-hangar/mcp-hangar/issues/268)
-* **observability:** add governance dashboard and alerts for cost, security, and concurrency metrics ([#267](https://github.com/mcp-hangar/mcp-hangar/issues/267)) ([ced19dc](https://github.com/mcp-hangar/mcp-hangar/commit/ced19dc1d0dbe9cdb10636a0417689ee258a83d8)), closes [#261](https://github.com/mcp-hangar/mcp-hangar/issues/261) [#266](https://github.com/mcp-hangar/mcp-hangar/issues/266)
-* **security:** bind token audience to resource URI (RFC 8707) ([#274](https://github.com/mcp-hangar/mcp-hangar/issues/274)) ([783b34b](https://github.com/mcp-hangar/mcp-hangar/commit/783b34b2837c379a66e6ae457e75185615ade1f8)), closes [#255](https://github.com/mcp-hangar/mcp-hangar/issues/255) [#253](https://github.com/mcp-hangar/mcp-hangar/issues/253)
-* **security:** multi-issuer trust registry for OAuth Resource Server ([#273](https://github.com/mcp-hangar/mcp-hangar/issues/273)) ([2a7bd3e](https://github.com/mcp-hangar/mcp-hangar/commit/2a7bd3e6b02faa92fd7441fabe2a35d54e6c27b3)), closes [#254](https://github.com/mcp-hangar/mcp-hangar/issues/254) [#253](https://github.com/mcp-hangar/mcp-hangar/issues/253)
-
-
-### Fixed
-
-* **core:** cost counters emit a doubled _total suffix ([#266](https://github.com/mcp-hangar/mcp-hangar/issues/266)) ([b05cd5c](https://github.com/mcp-hangar/mcp-hangar/commit/b05cd5c7800d5bd3f9dbbb297d6ec5104fd962d9)), closes [#265](https://github.com/mcp-hangar/mcp-hangar/issues/265)
-* **core:** harden per-tenant digest pinning (per-server enforcement, tenant_id, tests) ([#280](https://github.com/mcp-hangar/mcp-hangar/issues/280)) ([066bf97](https://github.com/mcp-hangar/mcp-hangar/commit/066bf97dabdf3fb967d38fe9f8370b485c56e208)), closes [#278](https://github.com/mcp-hangar/mcp-hangar/issues/278) [#226](https://github.com/mcp-hangar/mcp-hangar/issues/226)
-* **core:** select a group member on the invoke path ([#282](https://github.com/mcp-hangar/mcp-hangar/issues/282)) ([532afd8](https://github.com/mcp-hangar/mcp-hangar/commit/532afd86d43d771ef33c671cc28c2725bbb711df)), closes [#281](https://github.com/mcp-hangar/mcp-hangar/issues/281) [#275](https://github.com/mcp-hangar/mcp-hangar/issues/275)
-* **observability:** align monitoring dashboards and alerts with mcp_server rename ([#263](https://github.com/mcp-hangar/mcp-hangar/issues/263)) ([db3f7a6](https://github.com/mcp-hangar/mcp-hangar/commit/db3f7a6e348b595516b57f94d70a1e557e47eb5e)), closes [#260](https://github.com/mcp-hangar/mcp-hangar/issues/260)
-* **security:** reject non-string iss claim instead of raising 500 ([#279](https://github.com/mcp-hangar/mcp-hangar/issues/279)) ([ea1035f](https://github.com/mcp-hangar/mcp-hangar/commit/ea1035f6212e3d35a4f391c962048c7cba8e3bf4)), closes [#277](https://github.com/mcp-hangar/mcp-hangar/issues/277)
-
+- **core:** per-tenant canary and version routing for groups ([#283](https://github.com/mcp-hangar/mcp-hangar/pull/283)) ([3410801](https://github.com/mcp-hangar/mcp-hangar/commit/341080111b2368d95a1c61f097fb3c94159c6c68)), closes [#275](https://github.com/mcp-hangar/mcp-hangar/issues/275) [#226](https://github.com/mcp-hangar/mcp-hangar/issues/226)
+- **core:** per-tenant tool digest pinning on the call path ([#276](https://github.com/mcp-hangar/mcp-hangar/pull/276)) ([0d2b2f2](https://github.com/mcp-hangar/mcp-hangar/commit/0d2b2f26161314bbe40e17d1669010f573e9bff2)), closes [#233](https://github.com/mcp-hangar/mcp-hangar/issues/233) [#226](https://github.com/mcp-hangar/mcp-hangar/issues/226)
+- **observability:** activate availability and transport alerts ([#269](https://github.com/mcp-hangar/mcp-hangar/pull/269)) ([774cb8f](https://github.com/mcp-hangar/mcp-hangar/commit/774cb8f27b4ebce379ccee69dd462f97c3053770)), closes [#268](https://github.com/mcp-hangar/mcp-hangar/issues/268)
+- **observability:** add governance dashboard and alerts for cost, security, and concurrency metrics ([#267](https://github.com/mcp-hangar/mcp-hangar/pull/267)) ([ced19dc](https://github.com/mcp-hangar/mcp-hangar/commit/ced19dc1d0dbe9cdb10636a0417689ee258a83d8)), closes [#261](https://github.com/mcp-hangar/mcp-hangar/issues/261) [#266](https://github.com/mcp-hangar/mcp-hangar/issues/266)
+- **security:** bind token audience to resource URI (RFC 8707) ([#274](https://github.com/mcp-hangar/mcp-hangar/pull/274)) ([783b34b](https://github.com/mcp-hangar/mcp-hangar/commit/783b34b2837c379a66e6ae457e75185615ade1f8)), closes [#255](https://github.com/mcp-hangar/mcp-hangar/issues/255) [#253](https://github.com/mcp-hangar/mcp-hangar/issues/253)
+- **security:** multi-issuer trust registry for OAuth Resource Server ([#273](https://github.com/mcp-hangar/mcp-hangar/pull/273)) ([2a7bd3e](https://github.com/mcp-hangar/mcp-hangar/commit/2a7bd3e6b02faa92fd7441fabe2a35d54e6c27b3)), closes [#254](https://github.com/mcp-hangar/mcp-hangar/issues/254) [#253](https://github.com/mcp-hangar/mcp-hangar/issues/253)
 
 ### Changed
 
-* **observability:** remove dead ObservabilityMetrics registry ([#272](https://github.com/mcp-hangar/mcp-hangar/issues/272)) ([b93382a](https://github.com/mcp-hangar/mcp-hangar/commit/b93382a0ac3835cf102d3ee4595bd0fc974a7372)), closes [#271](https://github.com/mcp-hangar/mcp-hangar/issues/271)
+- **observability:** remove dead ObservabilityMetrics registry ([#272](https://github.com/mcp-hangar/mcp-hangar/pull/272)) ([b93382a](https://github.com/mcp-hangar/mcp-hangar/commit/b93382a0ac3835cf102d3ee4595bd0fc974a7372)), closes [#271](https://github.com/mcp-hangar/mcp-hangar/issues/271)
+
+### Fixed
+
+- **core:** cost counters emit a doubled _total suffix ([#266](https://github.com/mcp-hangar/mcp-hangar/pull/266)) ([b05cd5c](https://github.com/mcp-hangar/mcp-hangar/commit/b05cd5c7800d5bd3f9dbbb297d6ec5104fd962d9)), closes [#265](https://github.com/mcp-hangar/mcp-hangar/issues/265)
+- **core:** harden per-tenant digest pinning (per-server enforcement, tenant_id, tests) ([#280](https://github.com/mcp-hangar/mcp-hangar/pull/280)) ([066bf97](https://github.com/mcp-hangar/mcp-hangar/commit/066bf97dabdf3fb967d38fe9f8370b485c56e208)), closes [#278](https://github.com/mcp-hangar/mcp-hangar/issues/278) [#226](https://github.com/mcp-hangar/mcp-hangar/issues/226)
+- **core:** select a group member on the invoke path ([#282](https://github.com/mcp-hangar/mcp-hangar/pull/282)) ([532afd8](https://github.com/mcp-hangar/mcp-hangar/commit/532afd86d43d771ef33c671cc28c2725bbb711df)), closes [#281](https://github.com/mcp-hangar/mcp-hangar/issues/281) [#275](https://github.com/mcp-hangar/mcp-hangar/issues/275)
+- **observability:** align monitoring dashboards and alerts with mcp_server rename ([#263](https://github.com/mcp-hangar/mcp-hangar/pull/263)) ([db3f7a6](https://github.com/mcp-hangar/mcp-hangar/commit/db3f7a6e348b595516b57f94d70a1e557e47eb5e)), closes [#260](https://github.com/mcp-hangar/mcp-hangar/issues/260)
+- **security:** reject non-string iss claim instead of raising 500 ([#279](https://github.com/mcp-hangar/mcp-hangar/pull/279)) ([ea1035f](https://github.com/mcp-hangar/mcp-hangar/commit/ea1035f6212e3d35a4f391c962048c7cba8e3bf4)), closes [#277](https://github.com/mcp-hangar/mcp-hangar/issues/277)
 
 ## [1.3.0](https://github.com/mcp-hangar/mcp-hangar/compare/v1.2.3...v1.3.0) (2026-06-23)
 
+### Added
+
+- **core:** add front_door fail-closed default for unauthenticated calls ([#242](https://github.com/mcp-hangar/mcp-hangar/pull/242)) ([b4d3200](https://github.com/mcp-hangar/mcp-hangar/commit/b4d32002a12e8fdb82b212dfdb13c5a83910a5bb)), closes [#236](https://github.com/mcp-hangar/mcp-hangar/issues/236)
+- **core:** add runtime tool withdraw/restore mutation API ([#246](https://github.com/mcp-hangar/mcp-hangar/pull/246)) ([b72b43e](https://github.com/mcp-hangar/mcp-hangar/commit/b72b43e8f9ab4554245ad9f501c915c0c1243ac6)), closes [#235](https://github.com/mcp-hangar/mcp-hangar/issues/235)
+- **core:** add tenant_id to CallerIdentity from JWT claim ([#238](https://github.com/mcp-hangar/mcp-hangar/pull/238)) ([0d85e36](https://github.com/mcp-hangar/mcp-hangar/commit/0d85e3669c50fa20e8e16a56c7bc123d9ec6cd4c)), closes [#228](https://github.com/mcp-hangar/mcp-hangar/issues/228)
+- **core:** add ToolProjectionRegistry read-model ([#237](https://github.com/mcp-hangar/mcp-hangar/pull/237)) ([93b00c4](https://github.com/mcp-hangar/mcp-hangar/commit/93b00c4e8a4a45172356dfb7879ceea91cd31930)), closes [#230](https://github.com/mcp-hangar/mcp-hangar/issues/230)
+- **core:** enforce tool withdrawal on the call path ([#243](https://github.com/mcp-hangar/mcp-hangar/pull/243)) ([40dcb77](https://github.com/mcp-hangar/mcp-hangar/commit/40dcb77ee37cb0e8bdb870ce8d9a3840c1618da5)), closes [#231](https://github.com/mcp-hangar/mcp-hangar/issues/231)
+- **core:** flat per-tenant tool re-export in front_door mode ([#252](https://github.com/mcp-hangar/mcp-hangar/pull/252)) ([a8ecd17](https://github.com/mcp-hangar/mcp-hangar/commit/a8ecd178a0f9cc3c4b62fe6bb0b4fcc8c8093d93)), closes [#232](https://github.com/mcp-hangar/mcp-hangar/issues/232)
+- **core:** populate tool withdrawal from config (reload-driven overlay) ([#245](https://github.com/mcp-hangar/mcp-hangar/pull/245)) ([ba1b6af](https://github.com/mcp-hangar/mcp-hangar/commit/ba1b6af4975a017a72c37f23a6bf3891d28599c4)), closes [#244](https://github.com/mcp-hangar/mcp-hangar/issues/244)
+- **core:** populate ToolProjectionRegistry from tool discovery ([#250](https://github.com/mcp-hangar/mcp-hangar/pull/250)) ([02adbc5](https://github.com/mcp-hangar/mcp-hangar/commit/02adbc5c9f97beff8308d07bed72562232ce0e13)), closes [#248](https://github.com/mcp-hangar/mcp-hangar/issues/248)
+- **core:** resolve member-scope tool policy on the live call path ([#241](https://github.com/mcp-hangar/mcp-hangar/pull/241)) ([152ca0e](https://github.com/mcp-hangar/mcp-hangar/commit/152ca0e123eee67493a5a15d41bb1631af27504e)), closes [#229](https://github.com/mcp-hangar/mcp-hangar/issues/229)
+- **security:** advertise OAuth Protected Resource Metadata (RFC 9728) ([#257](https://github.com/mcp-hangar/mcp-hangar/pull/257)) ([d5a6089](https://github.com/mcp-hangar/mcp-hangar/commit/d5a6089f7f9fae1174f772d95f78bbb1e19867a7)), closes [#256](https://github.com/mcp-hangar/mcp-hangar/issues/256)
+
+### Fixed
+
+- **core:** bind caller identity on the MCP request path ([#249](https://github.com/mcp-hangar/mcp-hangar/pull/249)) ([af636cd](https://github.com/mcp-hangar/mcp-hangar/commit/af636cda084eacbcd22666c5f17ffeb3c79be156)), closes [#247](https://github.com/mcp-hangar/mcp-hangar/issues/247)
+- **core:** propagate request context into batch worker threads ([#239](https://github.com/mcp-hangar/mcp-hangar/pull/239)) ([bad09d7](https://github.com/mcp-hangar/mcp-hangar/commit/bad09d78a354750be59c19c2324a4eaebe97c343)), closes [#227](https://github.com/mcp-hangar/mcp-hangar/issues/227)
+- **core:** satisfy mypy and ruff format CI gates ([#258](https://github.com/mcp-hangar/mcp-hangar/pull/258)) ([d7a2a53](https://github.com/mcp-hangar/mcp-hangar/commit/d7a2a53825df6f86803a2402bf70eaba01ab1eda))
 
 ### Highlights
 
@@ -558,134 +564,106 @@ enforced on every call, independent of the client's cached tool list.
   tokens; it does not issue them. Multi-issuer trust and audience binding are
   tracked as follow-ups.
 
-
-### Added
-
-* **core:** add front_door fail-closed default for unauthenticated calls ([#242](https://github.com/mcp-hangar/mcp-hangar/issues/242)) ([b4d3200](https://github.com/mcp-hangar/mcp-hangar/commit/b4d32002a12e8fdb82b212dfdb13c5a83910a5bb)), closes [#236](https://github.com/mcp-hangar/mcp-hangar/issues/236)
-* **core:** add runtime tool withdraw/restore mutation API ([#246](https://github.com/mcp-hangar/mcp-hangar/issues/246)) ([b72b43e](https://github.com/mcp-hangar/mcp-hangar/commit/b72b43e8f9ab4554245ad9f501c915c0c1243ac6)), closes [#235](https://github.com/mcp-hangar/mcp-hangar/issues/235)
-* **core:** add tenant_id to CallerIdentity from JWT claim ([#238](https://github.com/mcp-hangar/mcp-hangar/issues/238)) ([0d85e36](https://github.com/mcp-hangar/mcp-hangar/commit/0d85e3669c50fa20e8e16a56c7bc123d9ec6cd4c)), closes [#228](https://github.com/mcp-hangar/mcp-hangar/issues/228)
-* **core:** add ToolProjectionRegistry read-model ([#237](https://github.com/mcp-hangar/mcp-hangar/issues/237)) ([93b00c4](https://github.com/mcp-hangar/mcp-hangar/commit/93b00c4e8a4a45172356dfb7879ceea91cd31930)), closes [#230](https://github.com/mcp-hangar/mcp-hangar/issues/230)
-* **core:** enforce tool withdrawal on the call path ([#243](https://github.com/mcp-hangar/mcp-hangar/issues/243)) ([40dcb77](https://github.com/mcp-hangar/mcp-hangar/commit/40dcb77ee37cb0e8bdb870ce8d9a3840c1618da5)), closes [#231](https://github.com/mcp-hangar/mcp-hangar/issues/231)
-* **core:** flat per-tenant tool re-export in front_door mode ([#252](https://github.com/mcp-hangar/mcp-hangar/issues/252)) ([a8ecd17](https://github.com/mcp-hangar/mcp-hangar/commit/a8ecd178a0f9cc3c4b62fe6bb0b4fcc8c8093d93)), closes [#232](https://github.com/mcp-hangar/mcp-hangar/issues/232)
-* **core:** populate tool withdrawal from config (reload-driven overlay) ([#245](https://github.com/mcp-hangar/mcp-hangar/issues/245)) ([ba1b6af](https://github.com/mcp-hangar/mcp-hangar/commit/ba1b6af4975a017a72c37f23a6bf3891d28599c4)), closes [#244](https://github.com/mcp-hangar/mcp-hangar/issues/244)
-* **core:** populate ToolProjectionRegistry from tool discovery ([#250](https://github.com/mcp-hangar/mcp-hangar/issues/250)) ([02adbc5](https://github.com/mcp-hangar/mcp-hangar/commit/02adbc5c9f97beff8308d07bed72562232ce0e13)), closes [#248](https://github.com/mcp-hangar/mcp-hangar/issues/248)
-* **core:** resolve member-scope tool policy on the live call path ([#241](https://github.com/mcp-hangar/mcp-hangar/issues/241)) ([152ca0e](https://github.com/mcp-hangar/mcp-hangar/commit/152ca0e123eee67493a5a15d41bb1631af27504e)), closes [#229](https://github.com/mcp-hangar/mcp-hangar/issues/229)
-* **security:** advertise OAuth Protected Resource Metadata (RFC 9728) ([#257](https://github.com/mcp-hangar/mcp-hangar/issues/257)) ([d5a6089](https://github.com/mcp-hangar/mcp-hangar/commit/d5a6089f7f9fae1174f772d95f78bbb1e19867a7)), closes [#256](https://github.com/mcp-hangar/mcp-hangar/issues/256)
-
-
-### Fixed
-
-* **core:** bind caller identity on the MCP request path ([#249](https://github.com/mcp-hangar/mcp-hangar/issues/249)) ([af636cd](https://github.com/mcp-hangar/mcp-hangar/commit/af636cda084eacbcd22666c5f17ffeb3c79be156)), closes [#247](https://github.com/mcp-hangar/mcp-hangar/issues/247)
-* **core:** propagate request context into batch worker threads ([#239](https://github.com/mcp-hangar/mcp-hangar/issues/239)) ([bad09d7](https://github.com/mcp-hangar/mcp-hangar/commit/bad09d78a354750be59c19c2324a4eaebe97c343)), closes [#227](https://github.com/mcp-hangar/mcp-hangar/issues/227)
-* **core:** satisfy mypy and ruff format CI gates ([#258](https://github.com/mcp-hangar/mcp-hangar/issues/258)) ([d7a2a53](https://github.com/mcp-hangar/mcp-hangar/commit/d7a2a53825df6f86803a2402bf70eaba01ab1eda))
-
 ## [1.2.3](https://github.com/mcp-hangar/mcp-hangar/compare/v1.2.2...v1.2.3) (2026-06-23)
 
-
 ### Fixed
 
-* **core:** add auth/tls/http config serialization to to_config_dict() ([#209](https://github.com/mcp-hangar/mcp-hangar/issues/209)) ([0df37d6](https://github.com/mcp-hangar/mcp-hangar/commit/0df37d6a8f6ad3b0287a6cd07c1e2e8895d1e6f2))
-* **security:** make _sanitize() recursive to strip nested secrets ([#210](https://github.com/mcp-hangar/mcp-hangar/issues/210)) ([cfd2a0f](https://github.com/mcp-hangar/mcp-hangar/commit/cfd2a0f863e5d3c812ea6a4d7e79657e287c91b6)), closes [#206](https://github.com/mcp-hangar/mcp-hangar/issues/206)
+- **core:** add auth/tls/http config serialization to to_config_dict() ([#209](https://github.com/mcp-hangar/mcp-hangar/pull/209)) ([0df37d6](https://github.com/mcp-hangar/mcp-hangar/commit/0df37d6a8f6ad3b0287a6cd07c1e2e8895d1e6f2))
+- **security:** make _sanitize() recursive to strip nested secrets ([#210](https://github.com/mcp-hangar/mcp-hangar/pull/210)) ([cfd2a0f](https://github.com/mcp-hangar/mcp-hangar/commit/cfd2a0f863e5d3c812ea6a4d7e79657e287c91b6)), closes [#206](https://github.com/mcp-hangar/mcp-hangar/issues/206)
 
 ## [1.2.2](https://github.com/mcp-hangar/mcp-hangar/compare/v1.2.1...v1.2.2) (2026-05-17)
 
+### Changed
+
+- **core:** absorb enterprise/ into src/mcp_hangar/ ([#201](https://github.com/mcp-hangar/mcp-hangar/pull/201)) ([010f2a0](https://github.com/mcp-hangar/mcp-hangar/commit/010f2a01f55130596a8934f56f5fcf65bff05229))
+- **docs:** move adr/AGENTS.md to docs/internal/ADR_AGENTS.md ([4be7c4f](https://github.com/mcp-hangar/mcp-hangar/commit/4be7c4f2172295e5dff87bd47d3c6ee3d9f42c2e))
 
 ### Fixed
 
-* **core:** remove CLA nav entry and fix ruff formatting in cef_formatter ([753d485](https://github.com/mcp-hangar/mcp-hangar/commit/753d485617781b3bfcf7c06c3540d3e0dfd071e9))
-
-
-### Changed
-
-* **core:** absorb enterprise/ into src/mcp_hangar/ ([#201](https://github.com/mcp-hangar/mcp-hangar/issues/201)) ([010f2a0](https://github.com/mcp-hangar/mcp-hangar/commit/010f2a01f55130596a8934f56f5fcf65bff05229))
-* **docs:** move adr/AGENTS.md to docs/internal/ADR_AGENTS.md ([4be7c4f](https://github.com/mcp-hangar/mcp-hangar/commit/4be7c4f2172295e5dff87bd47d3c6ee3d9f42c2e))
+- **core:** remove CLA nav entry and fix ruff formatting in cef_formatter ([753d485](https://github.com/mcp-hangar/mcp-hangar/commit/753d485617781b3bfcf7c06c3540d3e0dfd071e9))
 
 ## [1.2.1](https://github.com/mcp-hangar/mcp-hangar/compare/v1.2.0...v1.2.1) (2026-05-11)
 
+### Changed
+
+- **core:** rename ALLOW_DEGRADED to ALLOW_UNVERIFIED in DigestUnknownPolicy ([#189](https://github.com/mcp-hangar/mcp-hangar/pull/189)) ([00a44b4](https://github.com/mcp-hangar/mcp-hangar/commit/00a44b4fddae32fec1538c6b0517eed6c1311756)), closes [#175](https://github.com/mcp-hangar/mcp-hangar/issues/175)
 
 ### Fixed
 
-* **core:** disambiguate interceptors/list instance names ([#190](https://github.com/mcp-hangar/mcp-hangar/issues/190)) ([4e4a86c](https://github.com/mcp-hangar/mcp-hangar/commit/4e4a86cc6a89ce3115b91709f6af534f6ccb2403)), closes [#176](https://github.com/mcp-hangar/mcp-hangar/issues/176)
-* **core:** replace json.dumps with RFC 8785 JCS canonicalization in compute_tool_digest ([#186](https://github.com/mcp-hangar/mcp-hangar/issues/186)) ([5626ef8](https://github.com/mcp-hangar/mcp-hangar/commit/5626ef87643714b2fa80af56ebb7f0b2c0270a76))
-* **core:** treat empty values as absent in tool digest computation ([#188](https://github.com/mcp-hangar/mcp-hangar/issues/188)) ([fc93d13](https://github.com/mcp-hangar/mcp-hangar/commit/fc93d136887ba3cc86b4a50f47e843384e57fd9b)), closes [#173](https://github.com/mcp-hangar/mcp-hangar/issues/173)
-
-
-### Changed
-
-* **core:** rename ALLOW_DEGRADED to ALLOW_UNVERIFIED in DigestUnknownPolicy ([#189](https://github.com/mcp-hangar/mcp-hangar/issues/189)) ([00a44b4](https://github.com/mcp-hangar/mcp-hangar/commit/00a44b4fddae32fec1538c6b0517eed6c1311756)), closes [#175](https://github.com/mcp-hangar/mcp-hangar/issues/175)
+- **core:** disambiguate interceptors/list instance names ([#190](https://github.com/mcp-hangar/mcp-hangar/pull/190)) ([4e4a86c](https://github.com/mcp-hangar/mcp-hangar/commit/4e4a86cc6a89ce3115b91709f6af534f6ccb2403)), closes [#176](https://github.com/mcp-hangar/mcp-hangar/issues/176)
+- **core:** replace json.dumps with RFC 8785 JCS canonicalization in compute_tool_digest ([#186](https://github.com/mcp-hangar/mcp-hangar/pull/186)) ([5626ef8](https://github.com/mcp-hangar/mcp-hangar/commit/5626ef87643714b2fa80af56ebb7f0b2c0270a76))
+- **core:** treat empty values as absent in tool digest computation ([#188](https://github.com/mcp-hangar/mcp-hangar/pull/188)) ([fc93d13](https://github.com/mcp-hangar/mcp-hangar/commit/fc93d136887ba3cc86b4a50f47e843384e57fd9b)), closes [#173](https://github.com/mcp-hangar/mcp-hangar/issues/173)
 
 ## [1.2.0](https://github.com/mcp-hangar/mcp-hangar/compare/v1.1.0...v1.2.0) (2026-05-11)
 
-
 ### Added
 
-* **ci:** add actionlint workflow to validate workflow YAML ([#115](https://github.com/mcp-hangar/mcp-hangar/issues/115)) ([1c887d1](https://github.com/mcp-hangar/mcp-hangar/commit/1c887d1a2748b1e22eb56765603e4b0ee5d64454)), closes [#111](https://github.com/mcp-hangar/mcp-hangar/issues/111)
-* **core:** add ADR-004 digest pinning domain types and standalone validator ([#123](https://github.com/mcp-hangar/mcp-hangar/issues/123)) ([ad1b179](https://github.com/mcp-hangar/mcp-hangar/commit/ad1b1799d47d09d2ba7f8498c198a0415d78ee2f))
-* **core:** add hook-based event model and interceptors/list ([#136](https://github.com/mcp-hangar/mcp-hangar/issues/136)) ([aa4f05c](https://github.com/mcp-hangar/mcp-hangar/commit/aa4f05c61cebbf382da79d5779e290837f041964)), closes [#120](https://github.com/mcp-hangar/mcp-hangar/issues/120) [#118](https://github.com/mcp-hangar/mcp-hangar/issues/118)
-* **core:** add IMutator, MutatorPipeline, and ResponseTruncator ([#137](https://github.com/mcp-hangar/mcp-hangar/issues/137)) ([750541b](https://github.com/mcp-hangar/mcp-hangar/commit/750541bba2cc7d1b0b5844dd05317748dadb1d88)), closes [#121](https://github.com/mcp-hangar/mcp-hangar/issues/121) [#118](https://github.com/mcp-hangar/mcp-hangar/issues/118)
-* **core:** add wildcard event subscription patterns (ADR-005 P1) ([#138](https://github.com/mcp-hangar/mcp-hangar/issues/138)) ([a7ae07d](https://github.com/mcp-hangar/mcp-hangar/commit/a7ae07d49dd22c4df4573331f613044a82ce550d)), closes [#122](https://github.com/mcp-hangar/mcp-hangar/issues/122)
-
+- **ci:** add actionlint workflow to validate workflow YAML ([#115](https://github.com/mcp-hangar/mcp-hangar/pull/115)) ([1c887d1](https://github.com/mcp-hangar/mcp-hangar/commit/1c887d1a2748b1e22eb56765603e4b0ee5d64454)), closes [#111](https://github.com/mcp-hangar/mcp-hangar/issues/111)
+- **core:** add ADR-004 digest pinning domain types and standalone validator ([#123](https://github.com/mcp-hangar/mcp-hangar/pull/123)) ([ad1b179](https://github.com/mcp-hangar/mcp-hangar/commit/ad1b1799d47d09d2ba7f8498c198a0415d78ee2f))
+- **core:** add hook-based event model and interceptors/list ([#136](https://github.com/mcp-hangar/mcp-hangar/pull/136)) ([aa4f05c](https://github.com/mcp-hangar/mcp-hangar/commit/aa4f05c61cebbf382da79d5779e290837f041964)), closes [#120](https://github.com/mcp-hangar/mcp-hangar/issues/120) [#118](https://github.com/mcp-hangar/mcp-hangar/issues/118)
+- **core:** add IMutator, MutatorPipeline, and ResponseTruncator ([#137](https://github.com/mcp-hangar/mcp-hangar/pull/137)) ([750541b](https://github.com/mcp-hangar/mcp-hangar/commit/750541bba2cc7d1b0b5844dd05317748dadb1d88)), closes [#121](https://github.com/mcp-hangar/mcp-hangar/issues/121) [#118](https://github.com/mcp-hangar/mcp-hangar/issues/118)
+- **core:** add wildcard event subscription patterns (ADR-005 P1) ([#138](https://github.com/mcp-hangar/mcp-hangar/pull/138)) ([a7ae07d](https://github.com/mcp-hangar/mcp-hangar/commit/a7ae07d49dd22c4df4573331f613044a82ce550d)), closes [#122](https://github.com/mcp-hangar/mcp-hangar/issues/122)
 
 ### Fixed
 
-* **ci:** remove PR-only checks from required status checks on main ([#114](https://github.com/mcp-hangar/mcp-hangar/issues/114)) ([3e6ddd4](https://github.com/mcp-hangar/mcp-hangar/commit/3e6ddd4a520b724c2c9ce42b0c94c67ede497aea)), closes [#110](https://github.com/mcp-hangar/mcp-hangar/issues/110)
-* **core:** register interceptors/list route on bootstrap FastMCP instance ([#154](https://github.com/mcp-hangar/mcp-hangar/issues/154)) ([069329c](https://github.com/mcp-hangar/mcp-hangar/commit/069329cc9325b4edc1cc7562567c431416622a63)), closes [#151](https://github.com/mcp-hangar/mcp-hangar/issues/151)
-* **docs:** add cross-repo operator prerequisites for Kubernetes recipes ([#146](https://github.com/mcp-hangar/mcp-hangar/issues/146)) ([e9b5e69](https://github.com/mcp-hangar/mcp-hangar/commit/e9b5e6926f288b032485524c4196058fae443f18)), closes [#127](https://github.com/mcp-hangar/mcp-hangar/issues/127)
-* **docs:** clean up Provider to McpServer artifacts in guides ([#148](https://github.com/mcp-hangar/mcp-hangar/issues/148)) ([f5d12d2](https://github.com/mcp-hangar/mcp-hangar/commit/f5d12d225f8ef5b6e4005bb2788ea4da4253bdbe)), closes [#133](https://github.com/mcp-hangar/mcp-hangar/issues/133)
-* **docs:** correct hangar_call format, CLI usage, and endpoints in cookbook ([#143](https://github.com/mcp-hangar/mcp-hangar/issues/143)) ([b24f951](https://github.com/mcp-hangar/mcp-hangar/commit/b24f951b944317c79d57bdd3c7a62add64d125b0)), closes [#125](https://github.com/mcp-hangar/mcp-hangar/issues/125)
-* **docs:** correct stale metrics section in OBSERVABILITY.md ([#141](https://github.com/mcp-hangar/mcp-hangar/issues/141)) ([936be63](https://github.com/mcp-hangar/mcp-hangar/commit/936be637ae05c6863ff9b52da63e3ffbc412aba0)), closes [#135](https://github.com/mcp-hangar/mcp-hangar/issues/135)
-* **docs:** drop phantom CLI subcommands and fix stale metric names ([#149](https://github.com/mcp-hangar/mcp-hangar/issues/149)) ([edf28f2](https://github.com/mcp-hangar/mcp-hangar/commit/edf28f260a09fd7eb6c3fd13c1372fdafd6a1ace)), closes [#134](https://github.com/mcp-hangar/mcp-hangar/issues/134)
-* **docs:** drop phantom config blocks from cookbook recipes ([#144](https://github.com/mcp-hangar/mcp-hangar/issues/144)) ([8df8955](https://github.com/mcp-hangar/mcp-hangar/commit/8df89554acf33d763bcfb060daa3b20acd679502)), closes [#126](https://github.com/mcp-hangar/mcp-hangar/issues/126)
-* **docs:** drop phantom endpoints from REST_API, WEBSOCKETS, LOG_STREAMING ([#145](https://github.com/mcp-hangar/mcp-hangar/issues/145)) ([b178ee8](https://github.com/mcp-hangar/mcp-hangar/commit/b178ee87e74284951883d473e7c0408f58e58c12)), closes [#132](https://github.com/mcp-hangar/mcp-hangar/issues/132)
-* **docs:** fix leftover drift in cookbook recipes 02/03/04 ([#155](https://github.com/mcp-hangar/mcp-hangar/issues/155)) ([f1826f3](https://github.com/mcp-hangar/mcp-hangar/commit/f1826f35d9d47336f48b04bf99f856c1e0e5ada6)), closes [#152](https://github.com/mcp-hangar/mcp-hangar/issues/152)
-* **docs:** provider to mcp_server terminology cleanup in cookbook ([#147](https://github.com/mcp-hangar/mcp-hangar/issues/147)) ([e6d0d1b](https://github.com/mcp-hangar/mcp-hangar/commit/e6d0d1b95601560329f099c878c783bbf97084bc)), closes [#129](https://github.com/mcp-hangar/mcp-hangar/issues/129)
-* **docs:** replace broken prerequisites with in-repo provider_math image ([#142](https://github.com/mcp-hangar/mcp-hangar/issues/142)) ([d318671](https://github.com/mcp-hangar/mcp-hangar/commit/d3186714ee3159a8138c2055e2eed57c8da0f15b)), closes [#128](https://github.com/mcp-hangar/mcp-hangar/issues/128)
-* **docs:** REST_API.md auth method, empty sections, discovery prereq ([#156](https://github.com/mcp-hangar/mcp-hangar/issues/156)) ([aa34274](https://github.com/mcp-hangar/mcp-hangar/commit/aa3427452c263cc1b53d2a0c91f8c06bf513083d)), closes [#153](https://github.com/mcp-hangar/mcp-hangar/issues/153)
-* **observability:** restore set_tracer_provider call broken by global rename ([#150](https://github.com/mcp-hangar/mcp-hangar/issues/150)) ([41b5be9](https://github.com/mcp-hangar/mcp-hangar/commit/41b5be97219eb642f9fa40ceeb3c91ed6d2414c9))
-
+- **ci:** remove PR-only checks from required status checks on main ([#114](https://github.com/mcp-hangar/mcp-hangar/pull/114)) ([3e6ddd4](https://github.com/mcp-hangar/mcp-hangar/commit/3e6ddd4a520b724c2c9ce42b0c94c67ede497aea)), closes [#110](https://github.com/mcp-hangar/mcp-hangar/issues/110)
+- **core:** register interceptors/list route on bootstrap FastMCP instance ([#154](https://github.com/mcp-hangar/mcp-hangar/pull/154)) ([069329c](https://github.com/mcp-hangar/mcp-hangar/commit/069329cc9325b4edc1cc7562567c431416622a63)), closes [#151](https://github.com/mcp-hangar/mcp-hangar/issues/151)
+- **docs:** add cross-repo operator prerequisites for Kubernetes recipes ([#146](https://github.com/mcp-hangar/mcp-hangar/pull/146)) ([e9b5e69](https://github.com/mcp-hangar/mcp-hangar/commit/e9b5e6926f288b032485524c4196058fae443f18)), closes [#127](https://github.com/mcp-hangar/mcp-hangar/issues/127)
+- **docs:** clean up Provider to McpServer artifacts in guides ([#148](https://github.com/mcp-hangar/mcp-hangar/pull/148)) ([f5d12d2](https://github.com/mcp-hangar/mcp-hangar/commit/f5d12d225f8ef5b6e4005bb2788ea4da4253bdbe)), closes [#133](https://github.com/mcp-hangar/mcp-hangar/issues/133)
+- **docs:** correct hangar_call format, CLI usage, and endpoints in cookbook ([#143](https://github.com/mcp-hangar/mcp-hangar/pull/143)) ([b24f951](https://github.com/mcp-hangar/mcp-hangar/commit/b24f951b944317c79d57bdd3c7a62add64d125b0)), closes [#125](https://github.com/mcp-hangar/mcp-hangar/issues/125)
+- **docs:** correct stale metrics section in OBSERVABILITY.md ([#141](https://github.com/mcp-hangar/mcp-hangar/pull/141)) ([936be63](https://github.com/mcp-hangar/mcp-hangar/commit/936be637ae05c6863ff9b52da63e3ffbc412aba0)), closes [#135](https://github.com/mcp-hangar/mcp-hangar/issues/135)
+- **docs:** drop phantom CLI subcommands and fix stale metric names ([#149](https://github.com/mcp-hangar/mcp-hangar/pull/149)) ([edf28f2](https://github.com/mcp-hangar/mcp-hangar/commit/edf28f260a09fd7eb6c3fd13c1372fdafd6a1ace)), closes [#134](https://github.com/mcp-hangar/mcp-hangar/issues/134)
+- **docs:** drop phantom config blocks from cookbook recipes ([#144](https://github.com/mcp-hangar/mcp-hangar/pull/144)) ([8df8955](https://github.com/mcp-hangar/mcp-hangar/commit/8df89554acf33d763bcfb060daa3b20acd679502)), closes [#126](https://github.com/mcp-hangar/mcp-hangar/issues/126)
+- **docs:** drop phantom endpoints from REST_API, WEBSOCKETS, LOG_STREAMING ([#145](https://github.com/mcp-hangar/mcp-hangar/pull/145)) ([b178ee8](https://github.com/mcp-hangar/mcp-hangar/commit/b178ee87e74284951883d473e7c0408f58e58c12)), closes [#132](https://github.com/mcp-hangar/mcp-hangar/issues/132)
+- **docs:** fix leftover drift in cookbook recipes 02/03/04 ([#155](https://github.com/mcp-hangar/mcp-hangar/pull/155)) ([f1826f3](https://github.com/mcp-hangar/mcp-hangar/commit/f1826f35d9d47336f48b04bf99f856c1e0e5ada6)), closes [#152](https://github.com/mcp-hangar/mcp-hangar/issues/152)
+- **docs:** provider to mcp_server terminology cleanup in cookbook ([#147](https://github.com/mcp-hangar/mcp-hangar/pull/147)) ([e6d0d1b](https://github.com/mcp-hangar/mcp-hangar/commit/e6d0d1b95601560329f099c878c783bbf97084bc)), closes [#129](https://github.com/mcp-hangar/mcp-hangar/issues/129)
+- **docs:** replace broken prerequisites with in-repo provider_math image ([#142](https://github.com/mcp-hangar/mcp-hangar/pull/142)) ([d318671](https://github.com/mcp-hangar/mcp-hangar/commit/d3186714ee3159a8138c2055e2eed57c8da0f15b)), closes [#128](https://github.com/mcp-hangar/mcp-hangar/issues/128)
+- **docs:** REST_API.md auth method, empty sections, discovery prereq ([#156](https://github.com/mcp-hangar/mcp-hangar/pull/156)) ([aa34274](https://github.com/mcp-hangar/mcp-hangar/commit/aa3427452c263cc1b53d2a0c91f8c06bf513083d)), closes [#153](https://github.com/mcp-hangar/mcp-hangar/issues/153)
+- **observability:** restore set_tracer_provider call broken by global rename ([#150](https://github.com/mcp-hangar/mcp-hangar/pull/150)) ([41b5be9](https://github.com/mcp-hangar/mcp-hangar/commit/41b5be97219eb642f9fa40ceeb3c91ed6d2414c9))
 
 ### Security
 
-* **ci:** scope dependabot-automerge pull_request_target to main ([#116](https://github.com/mcp-hangar/mcp-hangar/issues/116)) ([eb4b53b](https://github.com/mcp-hangar/mcp-hangar/commit/eb4b53b47e62b8cde4cd165aa38c4c85ddcdcbc9)), closes [#112](https://github.com/mcp-hangar/mcp-hangar/issues/112)
+- **ci:** scope dependabot-automerge pull_request_target to main ([#116](https://github.com/mcp-hangar/mcp-hangar/pull/116)) ([eb4b53b](https://github.com/mcp-hangar/mcp-hangar/commit/eb4b53b47e62b8cde4cd165aa38c4c85ddcdcbc9)), closes [#112](https://github.com/mcp-hangar/mcp-hangar/issues/112)
 
 ## [1.1.0](https://github.com/mcp-hangar/mcp-hangar/compare/v1.0.3...v1.1.0) (2026-05-10)
 
-
 ### Added
 
-* **observability:** wire observability and compliance loop end-to-end ([#107](https://github.com/mcp-hangar/mcp-hangar/issues/107)) ([5dbdfc9](https://github.com/mcp-hangar/mcp-hangar/commit/5dbdfc9374283835fffdff05e1d4cd9217a86455)), closes [#106](https://github.com/mcp-hangar/mcp-hangar/issues/106)
-
+- **observability:** wire observability and compliance loop end-to-end ([#107](https://github.com/mcp-hangar/mcp-hangar/pull/107)) ([5dbdfc9](https://github.com/mcp-hangar/mcp-hangar/commit/5dbdfc9374283835fffdff05e1d4cd9217a86455)), closes [#106](https://github.com/mcp-hangar/mcp-hangar/issues/106)
 
 ### Fixed
 
-* **ci:** bump actions/add-to-project from v1 to v2 ([#100](https://github.com/mcp-hangar/mcp-hangar/issues/100)) ([b248fa1](https://github.com/mcp-hangar/mcp-hangar/commit/b248fa152a09a9686141daa41f9d9dd6059ca699))
-* **ci:** fix release notes %0A encoding, duplicate What's Changed, and HTML entities ([#109](https://github.com/mcp-hangar/mcp-hangar/issues/109)) ([7d2e691](https://github.com/mcp-hangar/mcp-hangar/commit/7d2e6915bf6e84265174c852754e01b1be731395))
+- **ci:** bump actions/add-to-project from v1 to v2 ([#100](https://github.com/mcp-hangar/mcp-hangar/pull/100)) ([b248fa1](https://github.com/mcp-hangar/mcp-hangar/commit/b248fa152a09a9686141daa41f9d9dd6059ca699))
+- **ci:** fix release notes %0A encoding, duplicate What's Changed, and HTML entities ([#109](https://github.com/mcp-hangar/mcp-hangar/pull/109)) ([7d2e691](https://github.com/mcp-hangar/mcp-hangar/commit/7d2e6915bf6e84265174c852754e01b1be731395))
 
 ## [1.0.3](https://github.com/mcp-hangar/mcp-hangar/compare/v1.0.2...v1.0.3) (2026-05-10)
 
+### Changed
+
+- clean up Provider -&gt; McpServer legacy shims in events and commands ([e4aa6db](https://github.com/mcp-hangar/mcp-hangar/commit/e4aa6dbbbd179469b7eb095935226c2a57e9a77e))
+- eliminate all static enterprise imports in core (TASK-P0-2, TASK-PRECOMMIT-FIX) ([53c2b73](https://github.com/mcp-hangar/mcp-hangar/commit/53c2b73780dd818263204e8923ef8f518e6be52a))
+- reuse thread-local event loop in approval gate instead of creating per call ([a7a4338](https://github.com/mcp-hangar/mcp-hangar/commit/a7a4338e3314e469195e1f0d62a5c17899531f9e))
 
 ### Fixed
 
-* add TTL for failover saga states to prevent ghost entries ([3757c3f](https://github.com/mcp-hangar/mcp-hangar/commit/3757c3f15f89caf8806a76281be4439375a7a676))
-* **ci:** drop strict flag from pip-audit to allow skip-editable ([#93](https://github.com/mcp-hangar/mcp-hangar/issues/93)) ([2ca2d1c](https://github.com/mcp-hangar/mcp-hangar/commit/2ca2d1c2f67c8f1364cc1379cd1c7cc27d798b97))
-* **ci:** fix crlf parsing and relax commitlint subject-case ([#72](https://github.com/mcp-hangar/mcp-hangar/issues/72)) ([664323f](https://github.com/mcp-hangar/mcp-hangar/commit/664323fd8f28caee705d3d4715daa3c6ba19f9c1))
-* **ci:** skip editable installs in pip-audit to avoid self-lookup ([#85](https://github.com/mcp-hangar/mcp-hangar/issues/85)) ([e707862](https://github.com/mcp-hangar/mcp-hangar/commit/e707862b025d353c8678444d87f124567b0abc1f))
-* **ci:** skip pr-title and commitlint on release-please branches ([#88](https://github.com/mcp-hangar/mcp-hangar/issues/88)) ([9045b50](https://github.com/mcp-hangar/mcp-hangar/commit/9045b50f1704c125e825144eba79da12ef736436))
-* consolidate auth context storage to single canonical write path ([bc1d42b](https://github.com/mcp-hangar/mcp-hangar/commit/bc1d42b3a0431ad802b92b0d163b9e2851a12a20))
-* **docs:** add blank lines before lists in ADR-004 and ADR-005 (MD032) ([d2f046b](https://github.com/mcp-hangar/mcp-hangar/commit/d2f046b3f1668afe78f8fade1c64cd6b1e497a59))
-* **docs:** resolve markdownlint MD032 and mkdocs strict-mode link warnings ([494a4cd](https://github.com/mcp-hangar/mcp-hangar/commit/494a4cd4f8ab261a482b70d10ff81cfb15a7b846))
-* **docs:** use glob exclusion for changelog in markdownlint workflow ([#92](https://github.com/mcp-hangar/mcp-hangar/issues/92)) ([56886a6](https://github.com/mcp-hangar/mcp-hangar/commit/56886a63b9c38f8a76ba0e552d0b20edf2fedb3d))
-* restore TracerProvider import broken by Provider-to-McpServer rename ([fcb204a](https://github.com/mcp-hangar/mcp-hangar/commit/fcb204a4d5861901b55b64fbf3aef41bcc0e2bb9))
-* **tests:** align test assertions with McpServerMode enum and tools.list_names() API ([b67b5c3](https://github.com/mcp-hangar/mcp-hangar/commit/b67b5c3ac0f770497f4e2d45333dcf51fe2c3e3b))
+- add TTL for failover saga states to prevent ghost entries ([3757c3f](https://github.com/mcp-hangar/mcp-hangar/commit/3757c3f15f89caf8806a76281be4439375a7a676))
+- **ci:** drop strict flag from pip-audit to allow skip-editable ([#93](https://github.com/mcp-hangar/mcp-hangar/pull/93)) ([2ca2d1c](https://github.com/mcp-hangar/mcp-hangar/commit/2ca2d1c2f67c8f1364cc1379cd1c7cc27d798b97))
+- **ci:** fix crlf parsing and relax commitlint subject-case ([#72](https://github.com/mcp-hangar/mcp-hangar/pull/72)) ([664323f](https://github.com/mcp-hangar/mcp-hangar/commit/664323fd8f28caee705d3d4715daa3c6ba19f9c1))
+- **ci:** skip editable installs in pip-audit to avoid self-lookup ([#85](https://github.com/mcp-hangar/mcp-hangar/pull/85)) ([e707862](https://github.com/mcp-hangar/mcp-hangar/commit/e707862b025d353c8678444d87f124567b0abc1f))
+- **ci:** skip pr-title and commitlint on release-please branches ([#88](https://github.com/mcp-hangar/mcp-hangar/pull/88)) ([9045b50](https://github.com/mcp-hangar/mcp-hangar/commit/9045b50f1704c125e825144eba79da12ef736436))
+- consolidate auth context storage to single canonical write path ([bc1d42b](https://github.com/mcp-hangar/mcp-hangar/commit/bc1d42b3a0431ad802b92b0d163b9e2851a12a20))
+- **docs:** add blank lines before lists in ADR-004 and ADR-005 (MD032) ([d2f046b](https://github.com/mcp-hangar/mcp-hangar/commit/d2f046b3f1668afe78f8fade1c64cd6b1e497a59))
+- **docs:** resolve markdownlint MD032 and mkdocs strict-mode link warnings ([494a4cd](https://github.com/mcp-hangar/mcp-hangar/commit/494a4cd4f8ab261a482b70d10ff81cfb15a7b846))
+- **docs:** use glob exclusion for changelog in markdownlint workflow ([#92](https://github.com/mcp-hangar/mcp-hangar/pull/92)) ([56886a6](https://github.com/mcp-hangar/mcp-hangar/commit/56886a63b9c38f8a76ba0e552d0b20edf2fedb3d))
+- restore TracerProvider import broken by Provider-to-McpServer rename ([fcb204a](https://github.com/mcp-hangar/mcp-hangar/commit/fcb204a4d5861901b55b64fbf3aef41bcc0e2bb9))
+- **tests:** align test assertions with McpServerMode enum and tools.list_names() API ([b67b5c3](https://github.com/mcp-hangar/mcp-hangar/commit/b67b5c3ac0f770497f4e2d45333dcf51fe2c3e3b))
 
+## [1.0.2](https://github.com/mcp-hangar/mcp-hangar/compare/v1.0.1...v1.0.2) (2026-04-24)
 
-### Changed
+### Added
 
-* clean up Provider -&gt; McpServer legacy shims in events and commands ([e4aa6db](https://github.com/mcp-hangar/mcp-hangar/commit/e4aa6dbbbd179469b7eb095935226c2a57e9a77e))
-* eliminate all static enterprise imports in core (TASK-P0-2, TASK-PRECOMMIT-FIX) ([53c2b73](https://github.com/mcp-hangar/mcp-hangar/commit/53c2b73780dd818263204e8923ef8f518e6be52a))
-* reuse thread-local event loop in approval gate instead of creating per call ([a7a4338](https://github.com/mcp-hangar/mcp-hangar/commit/a7a4338e3314e469195e1f0d62a5c17899531f9e))
-
-## [1.0.2] - 2026-04-24
+- `tests/integration/test_e2e_mcp_flow.py` -- end-to-end integration tests for full MCP server lifecycle.
+- `tests/security/test_identity_network.py` -- security regression tests for identity extraction and network hardening.
 
 ### Changed
 
@@ -698,12 +676,7 @@ enforced on every call, independent of the client's cached tool list.
 - Browser-originated `POST /sessions/{id}/suspend` now requires `X-Requested-With`, while API key / bearer / non-browser clients remain unaffected.
 - Direct server-layer `from enterprise` imports were removed from the bootstrap/router path, shrinking the core-to-enterprise attack surface and making the boundary auditable in one place.
 
-### Added
-
-- `tests/integration/test_e2e_mcp_flow.py` -- end-to-end integration tests for full MCP server lifecycle.
-- `tests/security/test_identity_network.py` -- security regression tests for identity extraction and network hardening.
-
-## [1.0.1] - 2026-04-17
+## [1.0.1](https://github.com/mcp-hangar/mcp-hangar/compare/v1.0.0...v1.0.1) (2026-04-17)
 
 Security hardening release addressing findings from the April 2026 security audit.
 
@@ -737,19 +710,19 @@ Security hardening release addressing findings from the April 2026 security audi
 - JWT algorithm confusion guard for mixed symmetric/asymmetric families
 - WebSocket CSWSH protection via Origin validation
 
-## [1.0.0] - 2026-04-11
+## [1.0.0](https://github.com/mcp-hangar/mcp-hangar/compare/v0.12.0...v1.0.0) (2026-04-11)
 
 First stable release. All public APIs are now covered by semantic versioning guarantees.
 
 ### Added
 
-- **Enterprise Module System** (Phases 47, BSL 1.1):
+- **Enterprise Module System** (Phases 47, BSL 1.1): ([#33](https://github.com/mcp-hangar/mcp-hangar/pull/33))
   - `LicenseTier` enum (COMMUNITY, PRO, ENTERPRISE) with `LicenseValidator` HMAC-SHA256 key validation
   - `EnterpriseComponents` dataclass and `load_enterprise_modules()` bootstrap integration
   - License tier gating: enterprise features activate based on license key; all failure modes fall back to COMMUNITY
   - HMAC signing secret configurable via `HANGAR_LICENSE_HMAC_SECRET` environment variable (no longer hardcoded)
 
-- **Capability Declaration and Enforcement** (Phases 38-41):
+- **Capability Declaration and Enforcement** (Phases 38-41): ([#33](https://github.com/mcp-hangar/mcp-hangar/pull/33))
   - `McpServerCapabilities` value object with network, filesystem, environment, tool, and resource declarations
   - `from_dict()` factory and config.yaml integration for capability blocks
   - Kubernetes CRD types for capabilities with reconciler propagation to status
@@ -760,7 +733,7 @@ First stable release. All public APIs are now covered by semantic versioning gua
   - CEL admission validation and `ExpectedTools` field in MCPServer CRD
   - Wildcard egress override audit warning event
 
-- **Behavioral Profiling** (Phases 42-44):
+- **Behavioral Profiling** (Phases 42-44): ([#33](https://github.com/mcp-hangar/mcp-hangar/pull/33))
   - `IBehavioralProfiler`, `IBaselineStore`, `IDeviationDetector` contracts with null implementations
   - `BehavioralMode` enum, `NetworkObservation` value object, `BehavioralModeChanged` event
   - SQLite-backed `BaselineStore` for behavioral profiling data
@@ -768,13 +741,13 @@ First stable release. All public APIs are now covered by semantic versioning gua
   - `DeviationDetector` with 3 detection rules (new destination, protocol drift, frequency anomaly)
   - ENFORCING mode support with event handler integration
 
-- **Network Connection Monitoring** (Phase 43):
+- **Network Connection Monitoring** (Phase 43): ([#33](https://github.com/mcp-hangar/mcp-hangar/pull/33))
   - `/proc/net/tcp` and `ss` output parsers for connection tracking
   - `DockerNetworkMonitor` with container label injection
   - `K8sNetworkMonitor` with audit events and pod exec fallback
   - `ConnectionLogWorker` with monitor orchestration, bootstrap wiring, and config parsing
 
-- **Tool Schema Drift Detection** (Phase 45):
+- **Tool Schema Drift Detection** (Phase 45): ([#33](https://github.com/mcp-hangar/mcp-hangar/pull/33))
   - MIT domain types for tool schema change tracking
   - `SchemaTracker` BSL class with SQLite storage and bootstrap wiring
   - `ToolSchemaChangeHandler` with event-driven schema diff detection
@@ -785,7 +758,7 @@ First stable release. All public APIs are now covered by semantic versioning gua
   - `BehavioralReportGenerator` with JSON and PDF export (via fpdf2)
   - Behavioral report REST endpoint with enterprise 403 gating
 
-- **OpenTelemetry Governance Telemetry** (Phases 31-34):
+- **OpenTelemetry Governance Telemetry** (Phases 31-34): ([#33](https://github.com/mcp-hangar/mcp-hangar/pull/33))
   - `set_governance_attributes()` helper with MCP semantic convention constants
   - OTEL span integration in `TracedProviderService.invoke_tool`
   - W3C trace context extraction in `BatchExecutor` and injection in `HttpClient`
@@ -798,7 +771,7 @@ First stable release. All public APIs are now covered by semantic versioning gua
   - `NullAuthenticator`, `NullApiKeyStore` implementations for COMMUNITY tier
   - BSL 1.1 docstrings on all enterprise placeholder modules
 
-- **Cloud Connector** (uplink to hangar-cloud SaaS):
+- **Cloud Connector** (uplink to hangar-cloud SaaS): ([#33](https://github.com/mcp-hangar/mcp-hangar/pull/33))
   - Event payload redaction: tool arguments, error messages, and identity context stripped before cloud transmission
   - Bounded retry with dormant mode: registration stops after `max_registration_attempts`, then probes periodically
   - `CloudConfig` extended with `max_registration_attempts` and `dormant_probe_interval_s`
@@ -814,17 +787,17 @@ First stable release. All public APIs are now covered by semantic versioning gua
 
 ### Changed
 
-- **Development Status**: Promoted from Beta to Production/Stable
-- **HMAC secret**: License key signing secret now read from `HANGAR_LICENSE_HMAC_SECRET` environment variable with dev-only fallback
-- **Documentation URLs**: Consolidated to `mcp-hangar.io` (removed stale `github.io` references)
+- **Development Status**: Promoted from Beta to Production/Stable ([#33](https://github.com/mcp-hangar/mcp-hangar/pull/33))
+- **HMAC secret**: License key signing secret now read from `HANGAR_LICENSE_HMAC_SECRET` environment variable with dev-only fallback ([#33](https://github.com/mcp-hangar/mcp-hangar/pull/33))
+- **Documentation URLs**: Consolidated to `mcp-hangar.io` (removed stale `github.io` references) ([#33](https://github.com/mcp-hangar/mcp-hangar/pull/33))
 
 ### Fixed
 
-- Cloud connector: tool arguments no longer leak to cloud telemetry endpoint
-- Cloud connector: infinite retry loop on failed registration replaced with bounded retry + dormant mode
-- Docker Compose quickstart example: removed deprecated `version` key
+- Cloud connector: tool arguments no longer leak to cloud telemetry endpoint ([#33](https://github.com/mcp-hangar/mcp-hangar/pull/33))
+- Cloud connector: infinite retry loop on failed registration replaced with bounded retry + dormant mode ([#33](https://github.com/mcp-hangar/mcp-hangar/pull/33))
+- Docker Compose quickstart example: removed deprecated `version` key ([#33](https://github.com/mcp-hangar/mcp-hangar/pull/33))
 
-## [0.12.0] - 2026-03-23
+## [0.12.0](https://github.com/mcp-hangar/mcp-hangar/compare/v0.11.0...v0.12.0) (2026-03-23)
 
 ### Added
 
@@ -875,6 +848,12 @@ First stable release. All public APIs are now covered by semantic versioning gua
 
 - **Metrics History**: `MetricsHistoryStore`, snapshot worker, `/api/metrics/history` endpoint
 
+### Changed
+
+- Rate limit metrics exported to Prometheus (RESL-04)
+- BLE001 exception hygiene across codebase (EXCP-02)
+- Fuzz tests for input validation (TEST-02)
+
 ### Fixed
 
 - Thread-safety regression in `groups.py` rebalance
@@ -882,13 +861,7 @@ First stable release. All public APIs are now covered by semantic versioning gua
 - Group strategy enum, groups dict wiring, `normalizePath` trailing slash
 - Missing `strategy` field in `UpdateGroupCommand`
 
-### Changed
-
-- Rate limit metrics exported to Prometheus (RESL-04)
-- BLE001 exception hygiene across codebase (EXCP-02)
-- Fuzz tests for input validation (TEST-02)
-
-## [0.11.0] - 2026-03-08
+## [0.11.0](https://github.com/mcp-hangar/mcp-hangar/compare/v0.10...v0.11.0) (2026-03-08)
 
 ### Added
 
@@ -915,6 +888,11 @@ First stable release. All public APIs are now covered by semantic versioning gua
 
 - **PEP 561 Support**: `py.typed` marker for downstream type checking
 
+### Changed
+
+- Discovery pipeline now validates commands before MCP server registration
+- `StdioClient` ordering invariant documented with regression tests
+
 ### Fixed
 
 - **Concurrency Safety**: `McpServerGroup` lock hierarchy violation (CONC-01) resolved
@@ -924,12 +902,7 @@ First stable release. All public APIs are now covered by semantic versioning gua
   narrowed and annotated -- no more bare `except Exception` without justification
 - **Type Safety**: Fixed mypy errors in `rate_limiter`, `gc`, and `docker_source`
 
-### Changed
-
-- Discovery pipeline now validates commands before MCP server registration
-- `StdioClient` ordering invariant documented with regression tests
-
-## [0.10.0] - 2026-03-01
+## [0.10.0](https://github.com/mcp-hangar/mcp-hangar/compare/v0.9.0...v0.10) (2026-03-01)
 
 ### Added
 
@@ -955,7 +928,7 @@ First stable release. All public APIs are now covered by semantic versioning gua
 
 - `docs/security/AUTH_SECURITY_AUDIT.md` (superseded by inline security documentation)
 
-## [0.9.0] - 2026-02-15
+## [0.9.0](https://github.com/mcp-hangar/mcp-hangar/compare/v0.8.0...v0.9.0) (2026-02-15)
 
 ### Added
 
@@ -992,7 +965,7 @@ First stable release. All public APIs are now covered by semantic versioning gua
 - `OIDCConfig` and `OIDCAuthConfig` include `max_token_lifetime` / `max_token_lifetime_seconds` fields
 - `auth_bootstrap.py` passes `max_token_lifetime` to `OIDCConfig` during OIDC setup
 
-## [0.8.0] - 2026-02-15
+## [0.8.0](https://github.com/mcp-hangar/mcp-hangar/compare/v0.7.0...v0.8.0) (2026-02-15)
 
 ### Added
 
@@ -1035,7 +1008,7 @@ First stable release. All public APIs are now covered by semantic versioning gua
 
 - `McpServerState` is now exported from `mcp_hangar.domain.model` module
 
-## [0.7.0] - 2026-02-08
+## [0.7.0](https://github.com/mcp-hangar/mcp-hangar/compare/v0.6.7...v0.7.0) (2026-02-08)
 
 ### Added
 
@@ -1078,7 +1051,7 @@ First stable release. All public APIs are now covered by semantic versioning gua
 - **E402 violations**: Moved mid-file imports to top of file in `examples/auth-keycloak/test_keycloak_integration.py`
 - **B007 violation**: Renamed unused loop variable in `examples/auth-keycloak/test_oidc_local.py`
 
-## [0.6.7] - 2026-02-06
+## [0.6.7](https://github.com/mcp-hangar/mcp-hangar/compare/v0.6.6...v0.6.7) (2026-02-06)
 
 ### Fixed
 
@@ -1089,7 +1062,7 @@ First stable release. All public APIs are now covered by semantic versioning gua
 - **CLI add MCP server test**: Fixed assertion to accept both uvx and npx package names
   - Test now correctly validates `mcp-server-fetch` (uvx) or `@modelcontextprotocol/server-fetch` (npx)
 
-## [0.6.6] - 2026-02-06
+## [0.6.6](https://github.com/mcp-hangar/mcp-hangar/releases/tag/v0.6.6) (2026-02-06)
 
 ### Added
 
@@ -1175,7 +1148,7 @@ config_reload:
 - New cookbook documentation: `docs/cookbook/` with 4 production recipes
 - New reference documentation: `docs/reference/hot-reload.md`
 
-## [0.6.5] - 2026-02-03
+## 0.6.5 (2026-02-03)
 
 ### Added
 
@@ -1193,7 +1166,7 @@ config_reload:
 - Metrics that were defined but never populated now emit data correctly
 - Tool descriptions improved for LLM clarity (previous commit in 0.6.4)
 
-## [0.6.4] - 2026-02-03
+## 0.6.4 (2026-02-03)
 
 ### Added
 
@@ -1224,7 +1197,7 @@ config_reload:
 - New `alerts.json` Grafana dashboard for alert monitoring
 - New `MCP server-details.json` Grafana dashboard for per-MCP server deep dive
 
-## [0.6.3] - 2026-02-01
+## [0.6.3](https://github.com/mcp-hangar/mcp-hangar/compare/v0.6.2...v0.6.3) (2026-02-01)
 
 ### Added
 
@@ -1259,7 +1232,7 @@ truncation:
   truncate_on_line_boundary: true
 ```
 
-## [0.6.2] - 2026-01-31
+## [0.6.2](https://github.com/mcp-hangar/mcp-hangar/compare/v0.6.0...v0.6.2) (2026-01-31)
 
 ### Changed
 
@@ -1322,7 +1295,7 @@ hangar_tools(mcp_server="math")
 hangar_health()
 ```
 
-## [0.6.0] - 2026-01-31
+## [0.6.0](https://github.com/mcp-hangar/mcp-hangar/compare/v0.5.0...v0.6.0) (2026-01-31)
 
 ### Added
 
@@ -1378,7 +1351,7 @@ hangar_health()
 
 - Updated quickstart guide with new CLI commands
 
-## [0.5.0] - 2026-01-29
+## [0.5.0](https://github.com/mcp-hangar/mcp-hangar/compare/v0.4.0...v0.5.0) (2026-01-29)
 
 ### Added
 
@@ -1417,7 +1390,7 @@ hangar_health()
 
 - New guide: `docs/guides/BATCH_INVOCATIONS.md`
 
-## [0.4.0] - 2026-01-29
+## [0.4.0](https://github.com/mcp-hangar/mcp-hangar/compare/v0.3.1...v0.4.0) (2026-01-29)
 
 ### Changed
 
@@ -1506,7 +1479,7 @@ All metrics renamed from `mcp_registry_*` to `mcp_hangar_*`:
 - Updated Grafana dashboards with new metric names
 - Updated copilot-instructions.md with new metric names
 
-## [0.3.1] - 2026-01-24
+## [0.3.1](https://github.com/mcp-hangar/mcp-hangar/compare/v0.3.0...v0.3.1) (2026-01-24)
 
 ### Added
 
@@ -1528,7 +1501,7 @@ All metrics renamed from `mcp_registry_*` to `mcp_hangar_*`:
 - Updated troubleshooting guide with MCP server startup error diagnostics
 - Added programmatic error handling examples
 
-## [0.3.0] - 2026-01-21
+## [0.3.0](https://github.com/mcp-hangar/mcp-hangar/compare/v0.2.3...v0.3.0) (2026-01-21)
 
 ### Added
 
@@ -1542,6 +1515,11 @@ All metrics renamed from `mcp_registry_*` to `mcp_hangar_*`:
   - Type-safe validation at build time
 - **Quick Install Script**: `curl -sSL https://mcp-hangar.io/install.sh | bash`
 
+### Changed
+
+- **Breaking**: `bootstrap()` now accepts optional `config_dict` parameter for programmatic config
+- **Dependencies**: Updated minimum Python version requirement clarified as 3.11+
+
 ### Improved
 
 - **Infrastructure**: Thread-safe lock hierarchy with `HierarchicalLockManager`
@@ -1554,12 +1532,7 @@ All metrics renamed from `mcp_registry_*` to `mcp_hangar_*`:
   - Auth middleware tests (30 tests)
 - **Documentation**: All links updated to `mcp-hangar.io`
 
-### Changed
-
-- **Breaking**: `bootstrap()` now accepts optional `config_dict` parameter for programmatic config
-- **Dependencies**: Updated minimum Python version requirement clarified as 3.11+
-
-## [0.2.3] - 2026-01-20
+## [0.2.3](https://github.com/mcp-hangar/mcp-hangar/releases/tag/v0.2.3) (2026-01-20)
 
 ### Fixed
 
@@ -1567,7 +1540,7 @@ All metrics renamed from `mcp_registry_*` to `mcp_hangar_*`:
 - **Core**: `StdioClient` now captures and propagates stderr to error messages when process dies
 - **Core**: `MCP Server._handle_start_failure()` now receives actual exception instead of None
 
-## [0.2.2] - 2026-01-19
+## 0.2.2 (2026-01-19)
 
 ### Fixed
 
@@ -1582,7 +1555,7 @@ The following items are documented technical debt introduced to enable CI:
 - **Mypy not in strict mode**: Currently using relaxed settings with many error codes disabled. Plan to gradually enable stricter checking. See `pyproject.toml` for full list of disabled error codes.
 - **Docker push disabled**: Requires organization package write permissions in GitHub settings.
 
-## [0.2.1] - 2026-01-18
+## [0.2.1](https://github.com/mcp-hangar/mcp-hangar/compare/v0.2.0...v0.2.1) (2026-01-18)
 
 ### Fixed
 
@@ -1596,7 +1569,7 @@ The following items are documented technical debt introduced to enable CI:
 - **CI**: Temporarily disable mypy (requires strict mode refactoring)
 - **CI**: Temporarily disable docker push jobs (requires org package permissions)
 
-## [0.2.0] - 2026-01-18
+## [0.2.0](https://github.com/mcp-hangar/mcp-hangar/compare/v0.1.4...v0.2.0) (2026-01-18)
 
 ### Added
 
@@ -1678,7 +1651,7 @@ The following items are documented technical debt introduced to enable CI:
 - Security audit: `docs/security/AUTH_SECURITY_AUDIT.md`
 - Updated mkdocs navigation
 
-## [0.1.4] - 2026-01-16
+## [0.1.4](https://github.com/mcp-hangar/mcp-hangar/compare/v0.1.3...v0.1.4) (2026-01-16)
 
 ### Added
 
@@ -1691,11 +1664,11 @@ The following items are documented technical debt introduced to enable CI:
   - Configurable via `event_store` section in config.yaml
   - Complete test coverage (33 new tests)
 
-## [0.1.3] - 2026-01-14
+## [0.1.3](https://github.com/mcp-hangar/mcp-hangar/compare/v0.1.2...v0.1.3) (2026-01-14)
 
 ### Skipped
 
-## [0.1.2] - 2026-01-13
+## [0.1.2](https://github.com/mcp-hangar/mcp-hangar/compare/v0.1.1...v0.1.2) (2026-01-13)
 
 ### Added
 
@@ -1726,11 +1699,11 @@ The following items are documented technical debt introduced to enable CI:
 - Fixed documentation links to point to GitHub Pages
 - Removed unused imports and variables
 
-## [0.1.1] - 2026-01-12
+## [0.1.1](https://github.com/mcp-hangar/mcp-hangar/releases/tag/v0.1.1) (2026-01-12)
 
 ### Added
 
-- **Observability Module**: Comprehensive monitoring and tracing support
+- **Observability Module**: Comprehensive monitoring and tracing support ([#10](https://github.com/mcp-hangar/mcp-hangar/pull/10))
   - OpenTelemetry distributed tracing with OTLP/Jaeger export
   - Extended Prometheus metrics (circuit breaker, retry, queue depth, SLIs)
   - Kubernetes-compatible health endpoints (`/health/live`, `/health/ready`, `/health/startup`)
@@ -1750,7 +1723,7 @@ The following items are documented technical debt introduced to enable CI:
   - Domain events for group lifecycle: `GroupCreated`, `GroupMemberAdded`, `GroupStateChanged`, etc.
   - Comprehensive documentation in `docs/PROVIDER_GROUPS.md`
 
-## [0.1.0] - 2025-12-16
+## 0.1.0 (2025-12-16)
 
 ### Added
 
@@ -1779,7 +1752,7 @@ The following items are documented technical debt introduced to enable CI:
 - Network isolation options (none, bridge, host)
 - Example math MCP server for testing
 - Comprehensive test suite (unit, integration, feature, performance tests)
-- GitHub Actions CI/CD for linting and testing (Python 3.11-3.14)
+- GitHub Actions CI/CD for linting and testing (Python 3.11-3.14) ([#15](https://github.com/mcp-hangar/mcp-hangar/pull/15))
 - Pre-commit hooks for code quality (black, isort, ruff)
 - Docker and docker-compose support for containerized deployment
 - Extensive documentation:
@@ -1796,34 +1769,3 @@ The following items are documented technical debt introduced to enable CI:
 - Environment variable filtering to remove sensitive data
 - Rate limiting to prevent denial of service
 - Audit logging for security-relevant events
-
-[Unreleased]: https://github.com/mcp-hangar/mcp-hangar/compare/v2.0.0-rc.1...HEAD
-[1.0.2]: https://github.com/mcp-hangar/mcp-hangar/compare/v1.0.1...v1.0.2
-[1.0.1]: https://github.com/mcp-hangar/mcp-hangar/compare/v1.0.0...v1.0.1
-[1.0.0]: https://github.com/mcp-hangar/mcp-hangar/compare/v0.12.0...v1.0.0
-[0.12.0]: https://github.com/mcp-hangar/mcp-hangar/compare/v0.11.0...v0.12.0
-[0.11.0]: https://github.com/mcp-hangar/mcp-hangar/compare/v0.10.0...v0.11.0
-[0.10.0]: https://github.com/mcp-hangar/mcp-hangar/compare/v0.9.0...v0.10.0
-[0.9.0]: https://github.com/mcp-hangar/mcp-hangar/compare/v0.8.0...v0.9.0
-[0.8.0]: https://github.com/mcp-hangar/mcp-hangar/compare/v0.7.0...v0.8.0
-[0.7.0]: https://github.com/mcp-hangar/mcp-hangar/compare/v0.6.7...v0.7.0
-[0.6.7]: https://github.com/mcp-hangar/mcp-hangar/compare/v0.6.6...v0.6.7
-[0.6.6]: https://github.com/mcp-hangar/mcp-hangar/compare/v0.6.5...v0.6.6
-[0.6.5]: https://github.com/mcp-hangar/mcp-hangar/compare/v0.6.4...v0.6.5
-[0.6.4]: https://github.com/mcp-hangar/mcp-hangar/compare/v0.6.3...v0.6.4
-[0.6.3]: https://github.com/mcp-hangar/mcp-hangar/compare/v0.6.2...v0.6.3
-[0.6.2]: https://github.com/mcp-hangar/mcp-hangar/compare/v0.6.0...v0.6.2
-[0.6.0]: https://github.com/mcp-hangar/mcp-hangar/compare/v0.5.0...v0.6.0
-[0.5.0]: https://github.com/mcp-hangar/mcp-hangar/compare/v0.4.0...v0.5.0
-[0.4.0]: https://github.com/mcp-hangar/mcp-hangar/compare/v0.3.1...v0.4.0
-[0.3.1]: https://github.com/mcp-hangar/mcp-hangar/compare/v0.3.0...v0.3.1
-[0.3.0]: https://github.com/mcp-hangar/mcp-hangar/compare/v0.2.3...v0.3.0
-[0.2.3]: https://github.com/mcp-hangar/mcp-hangar/compare/v0.2.2...v0.2.3
-[0.2.2]: https://github.com/mcp-hangar/mcp-hangar/compare/v0.2.1...v0.2.2
-[0.2.1]: https://github.com/mcp-hangar/mcp-hangar/compare/v0.2.0...v0.2.1
-[0.2.0]: https://github.com/mcp-hangar/mcp-hangar/compare/v0.1.4...v0.2.0
-[0.1.4]: https://github.com/mcp-hangar/mcp-hangar/compare/v0.1.3...v0.1.4
-[0.1.3]: https://github.com/mcp-hangar/mcp-hangar/compare/v0.1.2...v0.1.3
-[0.1.2]: https://github.com/mcp-hangar/mcp-hangar/compare/v0.1.1...v0.1.2
-[0.1.1]: https://github.com/mcp-hangar/mcp-hangar/compare/v0.1.0...v0.1.1
-[0.1.0]: https://github.com/mcp-hangar/mcp-hangar/releases/tag/v0.1.0

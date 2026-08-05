@@ -11,6 +11,7 @@
       "prerelease": false,
       "include-component-in-tag": false,
       "tag-separator": "",
+      "skip-changelog": true,
       "extra-files": [],
       "pull-request-title-pattern": "chore(release): release ${version}",
       "changelog-sections": [

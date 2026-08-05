@@ -3,22 +3,37 @@
 """The DomainEvent base and its replay seam."""
 
 from abc import ABC
+from dataclasses import dataclass, field
 import time
 from typing import Any
 import uuid
 
 
+@dataclass(kw_only=True)
 class DomainEvent(ABC):
-    """
-    Base class for all domain events.
+    """Base class for all domain events.
 
-    Note: Not a dataclass to avoid inheritance issues.
-    Subclasses should be dataclasses.
+    The identity fields are ``kw_only``, which is what lets this be a dataclass
+    at all. Ordinary inherited fields with defaults would force every subclass
+    field to have one too ("non-default argument follows default argument"), and
+    that constraint is why the base used to be a plain class with an
+    ``__init__`` -- at the cost of 99 subclasses each carrying an identical
+    three-line ``__post_init__`` whose whole body was ``super().__init__()``.
+    Keyword-only fields do not participate in that ordering, so subclasses keep
+    their positional signatures unchanged.
+
+    Both fields are ``compare=False``, which preserves the equality semantics
+    exactly as they were: when the base was not a dataclass these were not
+    fields, so a subclass's generated ``__eq__`` compared the payload alone. Two
+    events with the same payload and different ids still compare equal. That is
+    arguably the weaker definition -- two distinct occurrences are not the same
+    occurrence -- but changing it is a separate decision from removing
+    boilerplate, and it would change behaviour silently at every call site that
+    compares events.
     """
 
-    def __init__(self):
-        self.event_id: str = str(uuid.uuid4())
-        self.occurred_at: float = time.time()
+    event_id: str = field(default_factory=lambda: str(uuid.uuid4()), compare=False)
+    occurred_at: float = field(default_factory=time.time, compare=False)
 
     @classmethod
     def rehydrate(cls, event_id: str | None, occurred_at: float | None, /, **payload: Any) -> "DomainEvent":
@@ -29,16 +44,11 @@ class DomainEvent(ABC):
         the second would re-date history to whenever the stream happened to be
         read.
 
-        The identity is restored by assignment after construction, because the
-        subclasses are dataclasses whose generated ``__init__`` does not accept
-        these two fields. That is a wart, and this method exists so it is ONE
-        wart with a name rather than the same three lines copied into every
-        module that replays a stream -- the event store and the event-sourced
-        repository were both reaching into an event's identity directly.
-
-        It is also the seam to change when ``DomainEvent`` becomes a dataclass:
-        the identity fields move into the constructor and this body collapses to
-        a single call.
+        Now that the identity fields are in the constructor, this passes them
+        through rather than assigning after construction. It stays a named
+        method because the ``None``-means-keep-the-fresh-one convention is real
+        logic that its two call sites -- the event store and the event-sourced
+        repository -- would otherwise each reimplement.
 
         Args:
             event_id: Stored id. ``None`` keeps the freshly minted one.
@@ -48,12 +58,11 @@ class DomainEvent(ABC):
         Returns:
             The reconstructed event.
         """
-        event = cls(**payload)
         if event_id is not None:
-            event.event_id = event_id
+            payload["event_id"] = event_id
         if occurred_at is not None:
-            event.occurred_at = occurred_at
-        return event
+            payload["occurred_at"] = occurred_at
+        return cls(**payload)
 
     def to_dict(self) -> dict[str, Any]:
         """Convert event to dictionary for serialization."""

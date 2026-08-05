@@ -32,6 +32,3 @@ class InterceptorInvoked(DomainEvent):
     phase: str
     correlation_id: str
     schema_version: int = 1
-
-    def __post_init__(self):
-        super().__init__()

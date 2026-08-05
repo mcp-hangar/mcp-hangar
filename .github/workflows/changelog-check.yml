@@ -1,4 +1,8 @@
-# Validates CHANGELOG.md entry for non-trivial PRs. See GIT_FLOW.md.
+# Validates the changelog FRAGMENT for non-trivial PRs. See GIT_FLOW.md.
+#
+# Entries live in `changelog.d/` as one file per PR, not as a line in a shared
+# `## [Unreleased]` block -- that block was a single anchor every open PR wrote
+# to, so concurrent PRs conflicted by construction.
 name: changelog
 
 on:
@@ -24,6 +28,12 @@ jobs:
         uses: actions/checkout@v7
         with:
           fetch-depth: 0
+
+      # The check renders each added fragment rather than only looking for it,
+      # so a malformed one fails here instead of at release assembly.
+      - uses: actions/setup-python@v7
+        with:
+          python-version: "3.12"
 
       - name: Run changelog check
         env:

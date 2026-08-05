@@ -61,9 +61,6 @@ class GroupCreated(DomainEvent):
     strategy: str
     min_healthy: int
 
-    def __post_init__(self):
-        super().__init__()
-
 
 @dataclass
 class GroupMemberAdded(DomainEvent):
@@ -74,9 +71,6 @@ class GroupMemberAdded(DomainEvent):
     weight: int
     priority: int
 
-    def __post_init__(self):
-        super().__init__()
-
 
 @dataclass
 class GroupMemberRemoved(DomainEvent):
@@ -84,9 +78,6 @@ class GroupMemberRemoved(DomainEvent):
 
     group_id: str
     member_id: str
-
-    def __post_init__(self):
-        super().__init__()
 
 
 @dataclass
@@ -97,9 +88,6 @@ class GroupMemberHealthChanged(DomainEvent):
     member_id: str
     in_rotation: bool
     reason: str = ""
-
-    def __post_init__(self):
-        super().__init__()
 
 
 @dataclass
@@ -112,9 +100,6 @@ class GroupStateChanged(DomainEvent):
     healthy_count: int
     total_count: int
 
-    def __post_init__(self):
-        super().__init__()
-
 
 @dataclass
 class GroupCircuitOpened(DomainEvent):
@@ -123,18 +108,12 @@ class GroupCircuitOpened(DomainEvent):
     group_id: str
     failure_count: int
 
-    def __post_init__(self):
-        super().__init__()
-
 
 @dataclass
 class GroupCircuitClosed(DomainEvent):
     """Published when group circuit breaker closes."""
 
     group_id: str
-
-    def __post_init__(self):
-        super().__init__()
 
 
 @dataclass
@@ -143,18 +122,12 @@ class GroupUpdated(DomainEvent):
 
     group_id: str
 
-    def __post_init__(self):
-        super().__init__()
-
 
 @dataclass
 class GroupDeleted(DomainEvent):
     """Published when a group is deleted."""
 
     group_id: str
-
-    def __post_init__(self):
-        super().__init__()
 
 
 # --- Group Member ---

@@ -1,17 +1,19 @@
-"""Session suspension endpoint and in-process registry."""
+"""Session suspension endpoints.
+
+The registry itself is an infrastructure adapter -- see
+`infrastructure/session_suspension.py`. This module is routes.
+"""
 
 from __future__ import annotations
 
-import collections
 import json
 import re
-import threading
-import time
 from typing import cast
 
 from starlette.requests import Request
 from starlette.routing import Route
 
+from ...infrastructure.session_suspension import InMemorySessionSuspensionRegistry
 from ...logging_config import get_logger
 from .serializers import HangarJSONResponse
 
@@ -19,62 +21,21 @@ logger = get_logger(__name__)
 
 _SESSION_ID_RE = re.compile(r"^[a-zA-Z0-9_-]{1,128}$")
 
-_CACHE_MAXSIZE = 10_000
-_CACHE_TTL_S = 86_400.0  # 24 hours
+# The process-wide registry. It stays a module global because the routes are
+# plain functions with no injection point; the enforcement handler no longer
+# reaches for it -- it is handed the same object at bootstrap.
+_suspended_sessions = InMemorySessionSuspensionRegistry()
 
 
-class _SuspendedSessionCache:
-    """Thread-safe TTL-bounded cache for suspended session IDs.
+def get_session_suspension_registry() -> InMemorySessionSuspensionRegistry:
+    """The registry these routes read and write.
 
-    Evicts expired entries lazily on access and proactively on add when full.
+    Exists so bootstrap can hand the SAME instance to the enforcement handler.
+    A second instance would mean a session suspended by a detection rule stayed
+    servable, and one suspended over HTTP invisible to enforcement -- the two
+    would silently disagree.
     """
-
-    def __init__(self, maxsize: int = _CACHE_MAXSIZE, ttl: float = _CACHE_TTL_S) -> None:
-        self._maxsize: int = maxsize
-        self._ttl: float = ttl
-        # OrderedDict preserves insertion order for LRU-style eviction
-        self._store: collections.OrderedDict[str, float] = collections.OrderedDict()
-        self._lock: threading.Lock = threading.Lock()
-
-    def add(self, session_id: str) -> None:
-        with self._lock:
-            self._evict_expired_locked()
-            if session_id in self._store:
-                # Refresh TTL
-                self._store.move_to_end(session_id)
-                self._store[session_id] = time.monotonic()
-                return
-            if len(self._store) >= self._maxsize:
-                # Evict the oldest entry
-                _ = self._store.popitem(last=False)
-            self._store[session_id] = time.monotonic()
-
-    def __contains__(self, session_id: str) -> bool:
-        with self._lock:
-            ts = self._store.get(session_id)
-            if ts is None:
-                return False
-            if time.monotonic() - ts > self._ttl:
-                del self._store[session_id]
-                return False
-            return True
-
-    def discard(self, session_id: str) -> None:
-        with self._lock:
-            _ = self._store.pop(session_id, None)
-
-    def clear(self) -> None:
-        with self._lock:
-            self._store.clear()
-
-    def _evict_expired_locked(self) -> None:
-        now = time.monotonic()
-        expired = [k for k, ts in self._store.items() if now - ts > self._ttl]
-        for k in expired:
-            del self._store[k]
-
-
-_suspended_sessions = _SuspendedSessionCache()
+    return _suspended_sessions
 
 
 def is_session_suspended(session_id: str) -> bool:
