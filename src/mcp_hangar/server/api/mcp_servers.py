@@ -20,6 +20,7 @@ from ...application.commands.crud_commands import (
     UpdateMcpServerCommand,
 )
 from ...domain.policies.egress_l7 import L7Policy
+from ...domain.security.ssrf import SsrfBlocked
 from ...application.queries.queries import (
     GetMcpServerHealthQuery,
     GetMcpServerQuery,
@@ -298,10 +299,12 @@ async def create_mcp_server(request: Request) -> HangarJSONResponse:
                 source="api",
             )
         )
-    except ValueError as exc:
-        if str(exc) == "SSRF blocked: endpoint resolves to private address":
-            return HangarJSONResponse({"error": "ssrf_blocked"}, status_code=400)
-        raise
+    except SsrfBlocked:
+        # Matched by type, not by message. This used to compare `str(exc)` to one
+        # exact sentence, so the moment the check grew a second refusal reason
+        # -- link-local, a metadata hostname -- that caller got a 500 instead of
+        # the 400 it already knew how to produce.
+        return HangarJSONResponse({"error": "ssrf_blocked"}, status_code=400)
     return HangarJSONResponse(result, status_code=201)
 
 

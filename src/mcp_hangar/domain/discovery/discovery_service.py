@@ -276,9 +276,15 @@ class DiscoveryService:
         # Calculate duration
         result.duration_ms = (time.perf_counter() - start_time) * 1000
 
+        # "accepted", not "registered". This counter is a conflict-resolution
+        # outcome -- this name is new and this source wins it -- and says nothing
+        # about whether the control plane took the server. It read as the latter,
+        # so a cycle where every registration was refused still logged
+        # "1 registered" at INFO next to the orchestrator's rejection warning,
+        # and the two contradicted each other for anyone reading the log (#771).
         logger.info(
             f"Discovery cycle complete: {result.discovered_count} discovered, "
-            f"{result.registered_count} registered, {result.updated_count} updated, "
+            f"{result.registered_count} accepted, {result.updated_count} updated, "
             f"{result.deregistered_count} deregistered in {result.duration_ms:.2f}ms"
         )
 

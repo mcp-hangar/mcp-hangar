@@ -296,9 +296,19 @@ class DiscoveryOrchestrator:
                 quarantined=result.quarantined_count,
             )
 
-        logger.debug(
-            f"Discovery cycle complete: {result.discovered_count} discovered, "
-            f"{result.registered_count} registered in {result.duration_ms:.2f}ms"
+        # At INFO, not debug: this is the count that answers "did anything
+        # actually join the fleet". While it was invisible by default, the only
+        # cycle summary an operator saw was the service's, whose "registered"
+        # means something else entirely -- so a run that registered nothing
+        # still read as success (#771).
+        logger.info(
+            "discovery_cycle_complete",
+            discovered=result.discovered_count,
+            registered=result.registered_count,
+            updated=result.updated_count,
+            quarantined=result.quarantined_count,
+            errors=result.error_count,
+            duration_ms=round(result.duration_ms, 2),
         )
 
         return result

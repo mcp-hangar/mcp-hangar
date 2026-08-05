@@ -315,6 +315,13 @@ class DockerDiscoverySource(DiscoverySource):
             "image": image,
             "status": container.status,
             "group": labels.get(f"{self.LABEL_PREFIX}group"),
+            # Addresses the runtime itself reports for this container: the host
+            # side of its published binding, and its network IP. Registration
+            # refuses an endpoint resolving anywhere else, so a label cannot
+            # point Hangar at another container or a host service and ride
+            # discovery's trust to it (#771). Empty for a container-mode entry,
+            # which has no endpoint to check.
+            "runtime_addresses": self._runtime_addresses(container, connection_info.get("host")),
         }
 
         return DiscoveredMcpServer.create(
@@ -325,6 +332,22 @@ class DockerDiscoverySource(DiscoverySource):
             metadata=metadata,
             ttl_seconds=int(labels.get(f"{self.LABEL_PREFIX}ttl", self._default_ttl)),
         )
+
+    def _runtime_addresses(self, container: Any, endpoint_host: Any) -> list[str]:
+        """Addresses this container is reachable at according to the runtime.
+
+        Both entries are read from `container.attrs`, never from a label: the
+        host side of a published port binding, and the container's own network
+        IP. Which one the endpoint uses depends on where Hangar runs, and both
+        are legitimate -- what matters is that neither came from the container's
+        own claims about itself.
+        """
+        addresses: list[str] = []
+        if isinstance(endpoint_host, str) and endpoint_host:
+            addresses.append(endpoint_host)
+        if (ip := self._get_container_ip(container)) and ip not in addresses:
+            addresses.append(ip)
+        return addresses
 
     def _get_container_ip(self, container: Any) -> str | None:
         """Get container IP address from any network."""

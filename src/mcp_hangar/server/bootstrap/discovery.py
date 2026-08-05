@@ -7,6 +7,7 @@ from typing import Any, cast
 
 from ...application.discovery import DiscoveryConfig, DiscoveryOrchestrator
 from ...domain.security.input_validator import InputValidator
+from ...domain.value_objects.provenance import Provenance
 from ...infrastructure.discovery.registry import UnknownDiscoverySourceError, create_source
 from ...application.commands.crud_commands import CreateMcpServerCommand
 from ...logging_config import get_logger
@@ -119,6 +120,20 @@ def _migrate_namespace_policy(
     return migrated
 
 
+def _runtime_addresses_of(mcp_server) -> frozenset[str] | None:
+    """The addresses a source says the runtime reported for this server.
+
+    Returns None rather than an empty set when a source reports nothing, because
+    the two mean different things downstream: None means "unscoped, apply the
+    strict policy", which is what a source that cannot vouch for an address
+    should get.
+    """
+    reported = getattr(mcp_server, "metadata", None) or {}
+    addresses = reported.get("runtime_addresses") or ()
+    cleaned = frozenset(str(a) for a in addresses if a)
+    return cleaned or None
+
+
 async def _on_mcp_server_register(mcp_server) -> bool:
     """Callback when discovery wants to register a mcp_server.
 
@@ -203,10 +218,23 @@ async def _on_mcp_server_register(mcp_server) -> bool:
         # server could join the fleet automatically, unvalidated, leaving one
         # log line and no record. `source` carries the provenance the CRUD path
         # has always carried for hand-registered servers.
+        # `provenance` is set here and nowhere a request can reach: it is what
+        # the SSRF policy branches on, so it has to be established by the
+        # construction path rather than read off a field. `source` stays a label
+        # for an operator; a policy keyed on that string would be settable by
+        # anyone who can reach a route that forwards it.
+        #
+        # The addresses come from what the runtime reported for this container
+        # or pod, so provenance grants a *specific address* rather than an
+        # address class. Absent -- a source that reports none -- the strict
+        # human policy applies, which is the safe direction to fail.
+        runtime_addresses = _runtime_addresses_of(mcp_server)
         get_runtime().command_bus.send(
             CreateMcpServerCommand(
                 **cast(Any, mcp_server_kwargs),
                 source=f"discovery:{mcp_server.source_type}",
+                provenance=Provenance.DISCOVERY,
+                runtime_addresses=runtime_addresses,
             )
         )
         logger.info(

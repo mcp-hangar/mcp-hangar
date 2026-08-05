@@ -23,6 +23,7 @@ from mcp_hangar.application.commands.crud_handlers import CreateMcpServerHandler
 from mcp_hangar.domain.events import McpServerRegistered
 from mcp_hangar.domain.exceptions import ValidationError
 from mcp_hangar.domain.repository import InMemoryMcpServerRepository
+from mcp_hangar.domain.value_objects.provenance import Provenance
 from mcp_hangar.server.bootstrap import discovery as bootstrap_discovery
 
 
@@ -55,12 +56,19 @@ class _CapturingCommandBus:
         return self._handler.handle(command)
 
 
-def _discovered(name: str = "found", *, mode: str = "container", **conn: Any) -> SimpleNamespace:
+def _discovered(
+    name: str = "found",
+    *,
+    mode: str = "container",
+    runtime_addresses: list[str] | None = None,
+    **conn: Any,
+) -> SimpleNamespace:
     return SimpleNamespace(
         name=name,
         mode=mode,
         source_type="kubernetes",
         connection_info={"image": "ghcr.io/x/y:1", **conn},
+        metadata={"runtime_addresses": runtime_addresses} if runtime_addresses else {},
     )
 
 
@@ -110,6 +118,49 @@ class TestRegistrationGoesThroughTheCommand:
         await bootstrap_discovery._on_mcp_server_register(_discovered(volumes=["/data:/data"]))
 
         assert commands.sent[0].volumes == ["/data:/data"]
+
+
+class TestAnOrdinaryContainerActuallyRegisters:
+    """The case this suite was missing, and it cost a released feature.
+
+    Routing discovery through the command also routed it through an SSRF check
+    written for endpoints a human types -- where every private address is the
+    attack. A container address is private by definition, so every discovered
+    container was refused (#771) while the negative test below stayed green.
+    """
+
+    @pytest.mark.asyncio
+    async def test_a_private_container_address_is_registered(self, wired, monkeypatch) -> None:
+        _repo, _events, commands = wired
+        monkeypatch.setattr(
+            "mcp_hangar.domain.security.ssrf.socket.getaddrinfo",
+            lambda *a, **k: [(None, None, None, None, ("10.88.0.7", 0))],
+        )
+
+        registered = await bootstrap_discovery._on_mcp_server_register(
+            _discovered("probe", mode="http", host="10.88.0.7", port=8080, runtime_addresses=["10.88.0.7"])
+        )
+
+        assert registered is True, "a container on a private address is the normal case, not an attack"
+        assert commands.sent[0].provenance is Provenance.DISCOVERY
+        assert commands.sent[0].runtime_addresses == frozenset({"10.88.0.7"})
+
+    @pytest.mark.asyncio
+    async def test_a_source_reporting_no_address_gets_the_strict_policy(self, wired, monkeypatch) -> None:
+        # Provenance on its own grants nothing: without an address the runtime
+        # vouched for, there is nothing to scope the relaxation to.
+        _repo, _events, commands = wired
+        monkeypatch.setattr(
+            "mcp_hangar.domain.security.ssrf.socket.getaddrinfo",
+            lambda *a, **k: [(None, None, None, None, ("10.88.0.7", 0))],
+        )
+
+        registered = await bootstrap_discovery._on_mcp_server_register(
+            _discovered("unvouched", mode="http", host="10.88.0.7", port=8080)
+        )
+
+        assert registered is False
+        assert commands.sent[0].runtime_addresses is None
 
 
 class TestGuardsDiscoveryUsedToBypass:

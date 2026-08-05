@@ -241,6 +241,11 @@ class KubernetesDiscoverySource(DiscoverySource):
             "annotations": {k: v for k, v in annotations.items() if k.startswith(self.ANNOTATION_PREFIX)},
             "node_name": pod.spec.node_name if pod.spec else None,
             "phase": phase,
+            # What the API server says this pod's address is. Registration
+            # refuses an endpoint that resolves anywhere else, so an annotation
+            # cannot point Hangar at a neighbouring pod or an internal service
+            # and ride discovery's trust to it (#771).
+            "runtime_addresses": [pod_ip],
         }
 
         return DiscoveredMcpServer.create(
