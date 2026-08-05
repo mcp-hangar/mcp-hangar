@@ -8,6 +8,7 @@ from dataclasses import dataclass, field
 
 from ...domain.policies.egress_l7 import L7Policy
 from ...domain.value_objects.compat import resolve_legacy_mcp_server_id as _resolve_legacy_mcp_server_id
+from ...domain.value_objects.provenance import Provenance
 from .commands import Command
 
 
@@ -38,7 +39,22 @@ class CreateMcpServerCommand(Command):
             hardening, which is the worse direction to drop a field in. The
             default mirrors the aggregate's, which is True: a caller that says
             nothing gets the hardened container, not the permissive one.
-        source: Who is registering this mcp_server ("api", "config", "discovery").
+        source: Who is registering this mcp_server ("api", "config",
+            "discovery:docker"). A label for an operator to read. **Not** a
+            security input: it is free text and some routes forward it, so a
+            policy that branched on it would be settable by whoever it is meant
+            to constrain.
+        provenance: How this registration reached the bus, as a type rather than
+            a string. This is what SSRF policy branches on. It defaults to HUMAN
+            so a caller that says nothing gets the strict rules -- a new call
+            site cannot relax a security check by forgetting an argument -- and
+            the REST route never passes it, so it cannot be set from a request
+            body.
+        runtime_addresses: For DISCOVERY, the addresses the container runtime
+            reported for this container or pod. The endpoint must resolve to one
+            of them. Without this, DISCOVERY buys nothing: provenance grants a
+            *specific address*, never an address class, or a container that
+            labels itself with a neighbour's address launders its way there.
     """
 
     mcp_server_id: str
@@ -53,6 +69,8 @@ class CreateMcpServerCommand(Command):
     volumes: list[str] | None = None
     read_only: bool = True
     source: str = "api"
+    provenance: Provenance = Provenance.HUMAN
+    runtime_addresses: frozenset[str] | None = None
 
 
 @dataclass(frozen=True)

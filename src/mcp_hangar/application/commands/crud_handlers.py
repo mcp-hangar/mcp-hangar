@@ -78,7 +78,11 @@ class CreateMcpServerHandler(CommandHandler):
             raise ValidationError(f"McpServer already exists: {command.mcp_server_id}")
 
         if McpServerMode.normalize(command.mode) == McpServerMode.REMOTE and command.endpoint is not None:
-            validate_no_ssrf(command.endpoint)
+            validate_no_ssrf(
+                command.endpoint,
+                provenance=command.provenance,
+                runtime_addresses=command.runtime_addresses,
+            )
 
         mcp_server = McpServer(
             mcp_server_id=command.mcp_server_id,
