@@ -228,46 +228,6 @@ class ProviderCapabilityQuarantineReleased(McpServerCapabilityQuarantineReleased
 
 
 @dataclass
-class ToolSchemaDriftDetected(DomainEvent):
-    """Published when a mcp_server's tool schema changes between restarts.
-
-    Schema drift may indicate a supply-chain attack, a mis-deployed image,
-    or an intentional but undeclared upgrade.
-
-    Attributes:
-        mcp_server_id: McpServer whose tool schema changed.
-        tools_added: Names of newly appeared tools.
-        tools_removed: Names of removed tools.
-        tools_changed: Names of tools with changed parameter schemas.
-        schema_version: Event schema version.
-    """
-
-    mcp_server_id: str
-    tools_added: list[str]
-    tools_removed: list[str]
-    tools_changed: list[str]
-    schema_version: int = 1
-
-
-@dataclass
-class CapabilityDeclarationMissing(DomainEvent):
-    """Published when a mcp_server starts without a capability declaration.
-
-    In strict mode this prevents the mcp_server from reaching READY state.
-    In alert mode it is a warning.
-
-    Attributes:
-        mcp_server_id: McpServer that is missing capability declarations.
-        enforcement_mode: Current enforcement mode ("alert" or "block").
-        schema_version: Event schema version.
-    """
-
-    mcp_server_id: str
-    enforcement_mode: str = "alert"
-    schema_version: int = 1
-
-
-@dataclass
 class DigestMismatchEvent(DomainEvent):
     """Published when a tool's observed digest does not match the expected digest.
 
@@ -328,34 +288,6 @@ class ResponseTruncated(DomainEvent):
 
 
 @dataclass
-class BehavioralModeChanged(DomainEvent):
-    """Published when a mcp_server's behavioral profiling mode changes.
-
-    Attributes:
-        mcp_server_id: McpServer whose mode changed.
-        old_mode: Previous mode value (learning, enforcing, disabled).
-        new_mode: New mode value (learning, enforcing, disabled).
-        schema_version: Event schema version.
-    """
-
-    mcp_server_id: str
-    old_mode: str
-    new_mode: str
-    schema_version: int = 1
-
-    @property
-    def provider_id(self) -> str:
-        import warnings
-
-        warnings.warn(
-            "provider_id is deprecated; use mcp_server_id instead.",
-            DeprecationWarning,
-            stacklevel=2,
-        )
-        return self.mcp_server_id
-
-
-@dataclass
 class BehavioralDeviationDetected(DomainEvent):
     """Published when the deviation detector flags abnormal mcp_server behavior.
 
@@ -379,31 +311,6 @@ class BehavioralDeviationDetected(DomainEvent):
     observed: str
     baseline_expected: str
     severity: str = "high"
-    schema_version: int = 1
-
-
-@dataclass
-class ToolSchemaChanged(DomainEvent):
-    """Published when a tool's schema changes between mcp_server restarts.
-
-    Emitted by the schema drift detection subsystem when a mcp_server's
-    tool fingerprints differ from the previously stored snapshot.
-    One event per changed tool (not one event per mcp_server).
-
-    Attributes:
-        mcp_server_id: McpServer whose tool schema changed.
-        tool_name: Name of the tool that changed.
-        change_type: Type of change (added, removed, modified).
-        old_hash: Previous schema hash (None for ADDED).
-        new_hash: Current schema hash (None for REMOVED).
-        schema_version: Event schema version.
-    """
-
-    mcp_server_id: str
-    tool_name: str
-    change_type: str  # SchemaChangeType.value
-    old_hash: str | None = None
-    new_hash: str | None = None
     schema_version: int = 1
 
 

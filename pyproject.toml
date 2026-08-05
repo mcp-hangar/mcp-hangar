@@ -349,14 +349,9 @@ exported_unreferenced = [
   "domain/contracts/launcher.py::IMcpServerLauncher",
   "domain/contracts/persistence.py::ConfigurationNotFoundError",
   "domain/events/administration.py::ProviderUpdated",
-  "domain/events/auth.py::CatalogItemApproved",
-  "domain/events/auth.py::CatalogItemDeprecated",
-  "domain/events/auth.py::CatalogItemPublished",
-  "domain/events/auth.py::CatalogItemRejected",
   "domain/events/discovery.py::ProviderApproved",
   "domain/events/discovery.py::ProviderDiscoveryConfigChanged",
   "domain/events/discovery.py::ProviderDiscoveryLost",
-  "domain/events/enforcement.py::ToolSchemaChanged",
   "domain/exceptions.py::ClientNotConnectedError",
   "domain/exceptions.py::ClientTimeoutError",
   "domain/model/catalog.py::McpServerEntry",
@@ -378,7 +373,6 @@ exported_unreferenced = [
   "server/tools/models.py::HangarLoadResult",
   "server/tools/models.py::HangarUnloadResult",
 ]
-
 [tool.event_contracts]
 # Events a handler listens for that nothing emits, with the reason. Kept here
 # rather than as string literals in the test: the dead-symbol scanner counts a
@@ -392,10 +386,7 @@ reserved_without_producer = [
 ]
 # Events with neither a producer nor a consumer. May shrink, never grow.
 unused_events = [
-  "BehavioralModeChanged", "CapabilityDeclarationMissing",
-  "CatalogItemApproved", "CatalogItemDeprecated", "CatalogItemPublished", "CatalogItemRejected",
-  "DiscoveryCycleCompleted", "DiscoverySourceHealthChanged",
+      "DiscoveryCycleCompleted", "DiscoverySourceHealthChanged",
   "McpServerApproved", "McpServerCapabilityQuarantineReleased", "McpServerCapabilityQuarantined",
   "McpServerDiscovered", "McpServerDiscoveryConfigChanged", "McpServerDiscoveryLost", "McpServerQuarantined",
-  "PolicyPushRejected", "ToolSchemaChanged", "ToolSchemaDriftDetected",
-]
+  "PolicyPushRejected", ]
