@@ -12,6 +12,8 @@ from ...domain.contracts.persistence import AuditAction, AuditEntry, McpServerCo
 from ...domain.model import McpServer
 from ...domain.repository import IMcpServerRepository
 from ...logging_config import get_logger
+from ...domain.contracts.event_store import IEventStore
+from ...stream_ids import MCP_SERVER, stream_id_for
 from .audit_repository import SQLiteAuditRepository
 from .config_repository import SQLiteMcpServerConfigRepository
 from .database import Database
@@ -48,6 +50,7 @@ class RecoveryService:
         config_repository: SQLiteMcpServerConfigRepository | None = None,
         audit_repository: SQLiteAuditRepository | None = None,
         auto_start: bool = False,
+        event_store: "IEventStore | None" = None,
     ):
         """Initialize recovery service.
 
@@ -57,12 +60,16 @@ class RecoveryService:
             config_repository: Optional config repository (created if not provided)
             audit_repository: Optional audit repository for logging recovery
             auto_start: Whether to auto-start recovered mcp_servers
+            event_store: Optional event store. When given, each recovered
+                aggregate replays its own stream so lifecycle state survives the
+                restart instead of every server coming back COLD.
         """
         self._db = database
         self._mcp_server_repo = mcp_server_repository
         self._config_repo = config_repository or SQLiteMcpServerConfigRepository(database)
         self._audit_repo = audit_repository or SQLiteAuditRepository(database)
         self._auto_start = auto_start
+        self._event_store = event_store
         self._last_recovery: RecoveryResult | None = None
 
     async def recover_mcp_servers(self) -> list[str]:
@@ -90,6 +97,12 @@ class RecoveryService:
                 try:
                     # Create McpServer aggregate from config
                     mcp_server = self._create_mcp_server_from_config(config)
+
+                    # Configuration says what the server should be; the stream
+                    # says what it was doing. Without this, a server that was
+                    # DEGRADED before the restart comes back COLD -- a breaker
+                    # reset handed out by restarting the process.
+                    self._restore_lifecycle_state(mcp_server, config.mcp_server_id)
 
                     # Register with repository
                     self._mcp_server_repo.add(config.mcp_server_id, mcp_server)
@@ -123,6 +136,22 @@ class RecoveryService:
         )
 
         return result.recovered_ids
+
+    def _restore_lifecycle_state(self, mcp_server: McpServer, mcp_server_id: str) -> None:
+        """Replay this server's stream onto the aggregate built from config.
+
+        Fault-barriered on purpose: an unreadable stream costs the restored
+        state, and starting COLD is the same place recovery has always started.
+        Refusing to boot over it would turn a degraded record into an outage.
+        """
+        if self._event_store is None:
+            return
+        try:
+            events = self._event_store.read_stream(stream_id_for(MCP_SERVER, mcp_server_id))
+            if events:
+                mcp_server.restore_from_events(events)
+        except Exception as e:  # noqa: BLE001 -- fault-barrier: a bad stream must not stop recovery
+            logger.warning(f"Recovery: could not replay stream for {mcp_server_id}: {e}")
 
     def _create_mcp_server_from_config(self, config: McpServerConfigSnapshot) -> McpServer:
         """Create McpServer aggregate from configuration snapshot.

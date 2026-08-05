@@ -17,6 +17,7 @@ from ..contracts.metrics_publisher import IMetricsPublisher, get_default_metrics
 from ..value_objects.capabilities import McpServerCapabilities, ViolationSeverity, ViolationType
 from ..events import (
     CapabilityViolationDetected,
+    DomainEvent,
     EgressPolicyViolationObserved,
     HealthCheckFailed,
     HealthCheckPassed,
@@ -1713,6 +1714,123 @@ class McpServer(AggregateRoot):
                 self._health_check_interval = HealthCheckInterval(health_check_interval_s)
         self._record_event(McpServerUpdated(mcp_server_id=self.mcp_server_id, source="api"))
 
+    # ------------------------------------------------------------------
+    # Replay -- rebuilding lifecycle state from this aggregate's stream
+    # ------------------------------------------------------------------
+
+    def restore_from_events(self, events: "list[DomainEvent]") -> int:
+        """Rebuild lifecycle state by replaying this server's own stream.
+
+        What replay restores and what it deliberately does not is the whole
+        design, so it is written down rather than implied:
+
+        * **From the stream:** state, health counters, invocation totals, last
+          use. A server that was DEGRADED before a restart comes back DEGRADED.
+          Discarding that would hand every process restart a free breaker reset,
+          which is the one thing an enforcement plane must not do quietly.
+        * **From configuration, not the stream:** mode, command, image,
+          endpoint, env, TTLs, thresholds. Those are what the operator asked
+          for, and the answer to "what should this be" is not in history.
+        * **Never restored:** the live transport client and any process handle.
+          Liveness is re-earned by connecting, never assumed from a record.
+
+        Events are applied in stream order; the last one wins. Unknown event
+        types are skipped rather than raising -- a stream written by a newer
+        version must not stop an older one from booting.
+
+        Args:
+            events: This aggregate's events, oldest first.
+
+        Returns:
+            How many events changed state.
+        """
+        applied = 0
+        with self._lock:
+            for event in events:
+                handler = self._replay_handler_for(type(event))
+                if handler is None:
+                    continue
+                handler(self, event)
+                applied += 1
+        if applied:
+            logger.info(
+                "lifecycle_state_restored",
+                mcp_server_id=self.mcp_server_id,
+                events_applied=applied,
+                state=str(self._state),
+            )
+        return applied
+
+    @classmethod
+    def _replay_handler_for(cls, event_class: type) -> "Any | None":
+        """The replay handler for an event class or the closest base it has.
+
+        Walks the MRO for the same reason bus dispatch does: the deprecated
+        `Provider*` aliases subclass their `McpServer*` counterparts, and a
+        stream written before the rename replays through exactly this path.
+        """
+        for klass in event_class.__mro__:
+            handler = _REPLAY_HANDLERS.get(klass)
+            if handler is not None:
+                return handler
+        return None
+
+    def _replay_started(self, event: "McpServerStarted") -> None:
+        self._state = McpServerState.READY
+        self._health.restore(consecutive_failures=0)
+        self._last_used = event.occurred_at
+
+    def _replay_stopped(self, event: "McpServerStopped") -> None:
+        self._state = McpServerState.COLD
+        # The handle died with the process that held it; a restored aggregate
+        # must reconnect rather than believe a record about liveness.
+        self._client = None
+        self._tools.clear()
+
+    def _replay_degraded(self, event: "McpServerDegraded") -> None:
+        self._state = McpServerState.DEGRADED
+        self._health.restore(
+            consecutive_failures=event.consecutive_failures,
+            total_failures=event.total_failures,
+        )
+
+    def _replay_state_changed(self, event: "McpServerStateChanged") -> None:
+        self._state = McpServerState(event.new_state)
+
+    def _replay_tool_completed(self, event: "ToolInvocationCompleted") -> None:
+        self._health.restore(consecutive_failures=0, last_success_at=event.occurred_at)
+        self._last_used = event.occurred_at
+
+    def _replay_tool_failed(self, event: "ToolInvocationFailed") -> None:
+        self._health.restore(
+            consecutive_failures=self._health.consecutive_failures + 1,
+            total_failures=self._health.total_failures + 1,
+            last_failure_at=event.occurred_at,
+        )
+
+    def _replay_health_passed(self, event: "HealthCheckPassed") -> None:
+        self._health.restore(consecutive_failures=0, last_success_at=event.occurred_at)
+
+    def _replay_health_failed(self, event: "HealthCheckFailed") -> None:
+        self._health.restore(
+            consecutive_failures=event.consecutive_failures,
+            last_failure_at=event.occurred_at,
+        )
+
+
+# Replay handlers, as a table rather than an isinstance chain: the chain form
+# is what the complexity gate caps, and a dict is what lets `_replay_handler_for`
+# walk the MRO so a legacy `Provider*` event finds its modern handler.
+_REPLAY_HANDLERS: "dict[type, Any]" = {
+    McpServerStarted: McpServer._replay_started,
+    McpServerStopped: McpServer._replay_stopped,
+    McpServerDegraded: McpServer._replay_degraded,
+    McpServerStateChanged: McpServer._replay_state_changed,
+    ToolInvocationCompleted: McpServer._replay_tool_completed,
+    ToolInvocationFailed: McpServer._replay_tool_failed,
+    HealthCheckPassed: McpServer._replay_health_passed,
+    HealthCheckFailed: McpServer._replay_health_failed,
+}
 
 # legacy aliases
 Provider = McpServer
