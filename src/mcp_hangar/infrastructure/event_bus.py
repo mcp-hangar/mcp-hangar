@@ -15,7 +15,7 @@ from mcp_hangar.domain.contracts.hook_subscriber import IHookSubscriber
 from mcp_hangar.domain.events import DomainEvent
 from mcp_hangar.domain.value_objects.hook import Hook, HookPhase
 from mcp_hangar.lock_hierarchy import LockLevel, TrackedLock
-from mcp_hangar.stream_ids import stream_id_for
+from mcp_hangar.stream_ids import stream_id_for, stream_id_for_event
 from mcp_hangar.logging_config import get_logger
 from mcp_hangar.metrics import record_error
 from mcp_hangar.observability.tracing import get_tracer
@@ -213,20 +213,31 @@ class EventBus(IEventBus):
 
     def publish(self, event: DomainEvent) -> None:
         """
-        Publish an event to all subscribed handlers.
+        Publish an event: persist it when it belongs to a stream, then deliver.
 
-        Handlers are called synchronously in subscription order.
-        If a handler fails, the exception is logged and remaining handlers
-        are still called.
+        Which stream is derived from the event itself, not chosen by the caller.
+        An event naming an aggregate -- `mcp_server_id`, `group_id` -- is that
+        aggregate's history and is appended to its stream; an event naming none
+        has nowhere to go and is delivered only.
 
-        Note: This method does NOT persist events. Use publish_to_stream()
-        for event persistence.
+        This used to say "does NOT persist events; use publish_to_stream()",
+        and that sentence was the whole defect. Two methods, one of which
+        quietly dropped the record, and 34 call sites against 10: registering a
+        server -- the single most audit-relevant thing this system does -- was
+        published here and never written down. `McpServerUpdated` landed in the
+        stream while `McpServerRegistered` did not, so an aggregate's history
+        began with its first edit (#772).
+
+        Persistence failure does not stop delivery; that contract is unchanged
+        and documented on `publish_to_stream`.
 
         Args:
             event: The domain event to publish
 
         Raises:
             TypeError: If given something that is not a DomainEvent.
+            ConcurrencyError: If the stream moved under an explicit expected
+                version. Not reachable from here, which appends at the end.
         """
         if not isinstance(event, DomainEvent):
             # Fail loudly. `publish([event])` used to be accepted: the list
@@ -238,6 +249,27 @@ class EventBus(IEventBus):
                 f"publish() takes a single DomainEvent, got {type(event).__name__}. "
                 "To publish several, call publish() for each."
             )
+
+        stream_id = stream_id_for_event(event)
+        if stream_id is None:
+            self._deliver(event)
+            return
+        # APPEND_AT_END, explicitly: `publish_to_stream` defaults to -1, which
+        # claims the stream does not exist yet. A single publisher has no
+        # version to assert -- it holds one event, not an aggregate's history --
+        # and taking the default would raise ConcurrencyError on the second
+        # event ever written about the same server.
+        self.publish_to_stream(stream_id, [event], APPEND_AT_END)
+
+    def _deliver(self, event: DomainEvent) -> None:
+        """Hand an event to its handlers. No persistence, no stream.
+
+        Split out of `publish` so that `publish_to_stream` can deliver without
+        going back through `publish` -- which now routes into
+        `publish_to_stream`, so the old arrangement would recurse until the
+        stack ran out, and the failure path would do it while the store was
+        already broken.
+        """
         event_type_name = event.__class__.__name__
         with self._lock:
             handlers = self._resolve_handlers(type(event))
@@ -351,7 +383,7 @@ class EventBus(IEventBus):
                 )
                 store_span.record_exception(e)
                 for event in events:
-                    self.publish(event)
+                    self._deliver(event)
                 return expected_version
 
             store_span.set_attribute("event_store.new_version", new_version)
@@ -369,7 +401,7 @@ class EventBus(IEventBus):
         # every caller and test that reads a result after publishing depends on
         # that.
         for event in events:
-            self.publish(event)
+            self._deliver(event)
 
         # Only now record how far delivery got. The order is the whole point:
         # append, deliver, then mark. A crash before the mark re-delivers on the
@@ -429,7 +461,11 @@ class EventBus(IEventBus):
         start = self._dispatch_checkpoint.read()
         delivered = 0
         for position, _stream_id, event in self._event_store.read_all(from_position=start, limit=10_000):
-            self.publish(event)
+            # `_deliver`, emphatically not `publish`: these events came *out* of
+            # the store. Publishing them would append them again, so every
+            # restart would rewrite its own tail into the log and the history
+            # would grow a duplicate copy of itself each time.
+            self._deliver(event)
             self._dispatch_checkpoint.advance(position)
             delivered += 1
 
