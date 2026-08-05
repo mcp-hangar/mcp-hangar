@@ -88,8 +88,13 @@ opentelemetry = [
     "opentelemetry-sdk>=1.22.0",
     "opentelemetry-exporter-otlp>=1.22.0",
 ]
+# The PostgreSQL stores import psycopg2 -- see `database_common.PostgresConnectionFactory`.
+# This extra declared `asyncpg`, which appears nowhere in `src/` outside a docstring,
+# so `pip install mcp-hangar[postgres]` installed a library nothing imports and left
+# the driver unable to start (#779). Same failure shape as the kubernetes extra (#770),
+# harder to notice because the extra existed and was merely wrong.
 postgres = [
-    "asyncpg>=0.29.0",
+    "psycopg2-binary>=2.9.9",
 ]
 full = [
     "fpdf2>=2.8.0",

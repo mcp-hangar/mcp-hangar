@@ -1467,7 +1467,7 @@ class TestCreateStorageBackendsPostgres:
 
         # Patch the lazy imports for postgres stores
         with (
-            patch("mcp_hangar.auth.infrastructure.postgres_store.create_postgres_connection_factory") as mock_factory,
+            patch("mcp_hangar.infrastructure.persistence.database_common.PostgresConnectionFactory") as mock_factory,
             patch("mcp_hangar.auth.infrastructure.postgres_store.PostgresApiKeyStore") as mock_key_store_cls,
             patch("mcp_hangar.auth.infrastructure.postgres_store.PostgresRoleStore") as mock_role_store_cls,
         ):
@@ -1491,7 +1491,7 @@ class TestCreateStorageBackendsPostgres:
         config = AuthConfig(storage=StorageConfig(driver="postgres"))
 
         with (
-            patch("mcp_hangar.auth.infrastructure.postgres_store.create_postgres_connection_factory") as mock_factory,
+            patch("mcp_hangar.infrastructure.persistence.database_common.PostgresConnectionFactory") as mock_factory,
             patch("mcp_hangar.auth.infrastructure.postgres_store.PostgresApiKeyStore") as mock_key_store_cls,
             patch("mcp_hangar.auth.infrastructure.postgres_store.PostgresRoleStore") as mock_role_store_cls,
         ):
