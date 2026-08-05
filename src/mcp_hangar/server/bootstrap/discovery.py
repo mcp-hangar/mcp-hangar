@@ -39,6 +39,11 @@ def create_discovery_orchestrator(config: dict[str, Any]) -> DiscoveryOrchestrat
         config=orchestrator_config,
         static_mcp_servers=static_mcp_servers,
         input_validator=InputValidator(),
+        # Without this the orchestrator has nowhere to record what it did, and
+        # the five discovery event classes stay what they were for a year: a
+        # vocabulary with no emitter (#762). Resolved lazily -- this runs during
+        # bootstrap, and the runtime is not assembled yet at import time.
+        event_bus=_runtime_event_bus(),
     )
 
     sources_config = discovery_config.get("sources", [])
@@ -75,6 +80,21 @@ def create_discovery_orchestrator(config: dict[str, Any]) -> DiscoveryOrchestrat
 
     set_discovery_orchestrator(orchestrator)
     return orchestrator
+
+
+def _runtime_event_bus():
+    """The event bus, or None if the runtime has not been assembled yet.
+
+    Bootstrap order is not something this module should assert: discovery is
+    initialised alongside everything else, and a missing bus means the events
+    are not recorded rather than that startup fails. Discovery working without
+    a log is a degradation; discovery refusing to start because of one is not.
+    """
+    try:
+        return get_runtime().event_bus
+    except Exception as e:  # noqa: BLE001 -- boundary: no runtime yet is a shape, not a fault
+        logger.warning("discovery_events_not_recorded", detail="no event bus at bootstrap", error=str(e))
+        return None
 
 
 def _migrate_namespace_policy(

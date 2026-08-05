@@ -394,7 +394,11 @@ reserved_without_producer = [
 ]
 # Events with neither a producer nor a consumer. May shrink, never grow.
 unused_events = [
-      "DiscoveryCycleCompleted", "DiscoverySourceHealthChanged",
+  "DiscoveryCycleCompleted", "DiscoverySourceHealthChanged",
   "McpServerApproved", "McpServerCapabilityQuarantineReleased", "McpServerCapabilityQuarantined",
-  "McpServerDiscovered", "McpServerDiscoveryConfigChanged", "McpServerDiscoveryLost", "McpServerQuarantined",
   "PolicyPushRejected", ]
+# DiscoveryCycleCompleted and DiscoverySourceHealthChanged stay unemitted on
+# purpose rather than for lack of a caller: at the default 30s refresh a cycle
+# event is 2880 rows a day per gateway saying "nothing changed", and source
+# health is a gauge that already exists. An event log earns its keep by holding
+# what happened once, not by transcribing a poll.
