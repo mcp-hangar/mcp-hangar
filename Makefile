@@ -71,14 +71,6 @@ changelog-preview: ## Render the next release section (use VERSION=x.y.z)
 check-boundary: ## Check enterprise import boundary
 	bash scripts/check_enterprise_boundary.sh
 
-##@ Documentation
-
-docs: ## Build documentation
-	mkdocs build
-
-docs-serve: ## Serve documentation locally
-	mkdocs serve
-
 ##@ Quick Start
 
 quickstart: ## Run quickstart demo
