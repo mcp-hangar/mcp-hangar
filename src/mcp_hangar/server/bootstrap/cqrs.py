@@ -22,6 +22,31 @@ if TYPE_CHECKING:
 logger = get_logger(__name__)
 
 
+def _fleet_writer(runtime: "Runtime") -> Any:
+    """Where fleet changes get recorded, or None if nothing keeps them.
+
+    Deliberately reads `runtime.config_repository` rather than reaching for a
+    backend: that field already *is* the selected backend's repository when one
+    was chosen (#786), and it is the in-memory one otherwise. Writing to the
+    in-memory repository would be worse than not writing at all -- the record
+    would exist, `/api/config` would report it, and it would still be gone on
+    restart, which is a lie rather than a gap.
+    """
+    from ...infrastructure.persistence.config_repository import InMemoryMcpServerConfigRepository
+    from ...infrastructure.persistence.fleet_writer import RepositoryFleetWriter
+
+    repository = runtime.config_repository
+    if repository is None or isinstance(repository, InMemoryMcpServerConfigRepository):
+        logger.info(
+            "fleet_writer_absent",
+            detail="no durable config repository; registrations live in memory and end with the process",
+        )
+        return None
+    writer = RepositoryFleetWriter(repository)
+    logger.info("fleet_writer_configured", repository=type(repository).__name__)
+    return writer
+
+
 def init_cqrs(
     runtime: "Runtime",
     current_config_path: str | None = None,
@@ -54,7 +79,7 @@ def init_cqrs(
         runtime_store=RUNTIME_PROVIDERS,
         event_store=runtime.event_bus.event_store,
     )
-    register_crud_handlers(runtime.command_bus, repository, runtime.event_bus, GROUPS)
+    register_crud_handlers(runtime.command_bus, repository, runtime.event_bus, GROUPS, _fleet_writer(runtime))
 
     if discovery_registry is not None:
         from ...application.commands.discovery_handlers import register_discovery_handlers

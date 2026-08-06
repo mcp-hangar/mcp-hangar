@@ -23,6 +23,8 @@ from ...domain.repository import IMcpServerRepository
 from ...domain.security.ssrf import validate_no_ssrf
 from ...domain.value_objects import LoadBalancerStrategy, McpServerMode, McpServerState
 from ...domain.contracts.command import CommandHandler
+from ...domain.contracts.fleet import IFleetWriter
+from ...domain.services.fleet_snapshot import snapshot_of
 from ...logging_config import get_logger
 from ...stream_ids import MCP_SERVER, MCP_SERVER_GROUP
 from .crud_commands import (
@@ -52,15 +54,25 @@ class CreateMcpServerHandler(CommandHandler):
     Raises ValidationError if a mcp_server with the same ID already exists.
     """
 
-    def __init__(self, repository: IMcpServerRepository, event_bus: Any) -> None:
+    def __init__(
+        self,
+        repository: IMcpServerRepository,
+        event_bus: Any,
+        fleet_writer: IFleetWriter | None = None,
+    ) -> None:
         """Initialize the handler.
 
         Args:
             repository: McpServer repository for persistence.
             event_bus: Event bus for publishing domain events.
+            fleet_writer: Where the configuration is recorded so a restart can
+                rebuild it. None keeps the previous behaviour -- in memory only,
+                gone on restart -- which is what a configuration with no storage
+                backend gets.
         """
         self._repository = repository
         self._event_bus = event_bus
+        self._fleet_writer = fleet_writer
 
     def handle(self, command: CreateMcpServerCommand) -> dict[str, Any]:
         """Create a new mcp_server.
@@ -97,6 +109,15 @@ class CreateMcpServerHandler(CommandHandler):
             volumes=command.volumes,
             read_only=command.read_only,
         )
+
+        # Recorded before it joins the fleet, and before the event. The order is
+        # the point: a write that fails leaves nothing behind and the caller is
+        # told the registration did not happen. The other order gives a running
+        # server, a published event, and no record -- which is what a restart
+        # then quietly resolves by forgetting the server.
+        if self._fleet_writer is not None:
+            self._fleet_writer.save(snapshot_of(mcp_server))
+
         self._repository.add(command.mcp_server_id, mcp_server)
 
         self._event_bus.publish(
@@ -123,15 +144,24 @@ class UpdateMcpServerHandler(CommandHandler):
     McpServer.update_config(). Raises McpServerNotFoundError if not found.
     """
 
-    def __init__(self, repository: IMcpServerRepository, event_bus: Any) -> None:
+    def __init__(
+        self,
+        repository: IMcpServerRepository,
+        event_bus: Any,
+        fleet_writer: IFleetWriter | None = None,
+    ) -> None:
         """Initialize the handler.
 
         Args:
             repository: McpServer repository for persistence.
             event_bus: Event bus for publishing domain events.
+            fleet_writer: Where the changed configuration is recorded. Without
+                it an update survives only until the process ends, and a restart
+                silently reverts it.
         """
         self._repository = repository
         self._event_bus = event_bus
+        self._fleet_writer = fleet_writer
 
     def _get_mcp_server_or_raise(self, mcp_server_id: str) -> McpServer:
         """Retrieve mcp_server or raise McpServerNotFoundError.
@@ -173,6 +203,12 @@ class UpdateMcpServerHandler(CommandHandler):
             idle_ttl_s=command.idle_ttl_s,
             health_check_interval_s=command.health_check_interval_s,
         )
+
+        # After the aggregate has changed, not before: the record is of what the
+        # server now is. An update that is not recorded is reverted by the next
+        # restart, which reads a snapshot describing the server as it used to be.
+        if self._fleet_writer is not None:
+            self._fleet_writer.save(snapshot_of(mcp_server))
 
         # Collect the McpServerUpdated event recorded by update_config() and
         # append it to the aggregate's stream, which also delivers it.
@@ -248,15 +284,23 @@ class DeleteMcpServerHandler(CommandHandler):
     Raises McpServerNotFoundError if the mcp_server does not exist.
     """
 
-    def __init__(self, repository: IMcpServerRepository, event_bus: Any) -> None:
+    def __init__(
+        self,
+        repository: IMcpServerRepository,
+        event_bus: Any,
+        fleet_writer: IFleetWriter | None = None,
+    ) -> None:
         """Initialize the handler.
 
         Args:
             repository: McpServer repository for persistence.
             event_bus: Event bus for publishing domain events.
+            fleet_writer: Where the removal is recorded. A row left behind
+                resurrects the server on the next restart.
         """
         self._repository = repository
         self._event_bus = event_bus
+        self._fleet_writer = fleet_writer
 
     def _get_mcp_server_or_raise(self, mcp_server_id: str) -> McpServer:
         """Retrieve mcp_server or raise McpServerNotFoundError.
@@ -296,6 +340,12 @@ class DeleteMcpServerHandler(CommandHandler):
             mcp_server.shutdown()
             # Persist and publish any lifecycle events emitted by shutdown()
             self._event_bus.publish_aggregate_events(MCP_SERVER, mcp_server.mcp_server_id, mcp_server.collect_events())
+
+        # Before it leaves the fleet, for the same reason registration records
+        # before joining it: a failure here must leave the server as it was,
+        # rather than removed from memory and still on record.
+        if self._fleet_writer is not None:
+            self._fleet_writer.delete(command.mcp_server_id)
 
         self._repository.remove(command.mcp_server_id)
 
@@ -580,6 +630,7 @@ def register_crud_handlers(
     repository: IMcpServerRepository,
     event_bus: Any,
     groups: dict | None = None,
+    fleet_writer: IFleetWriter | None = None,
 ) -> None:
     """Register all mcp_server and group CRUD command handlers with the command bus.
 
@@ -589,12 +640,23 @@ def register_crud_handlers(
         event_bus: Event bus for handler injection.
         groups: Groups dict for group handler injection. If None, group handlers
             are not registered.
+        fleet_writer: Where fleet changes are recorded so a restart can rebuild
+            them. None leaves the fleet in memory only, as before.
     """
     # McpServer handlers
-    command_bus.register(CreateMcpServerCommand, CreateMcpServerHandler(repository=repository, event_bus=event_bus))
-    command_bus.register(UpdateMcpServerCommand, UpdateMcpServerHandler(repository=repository, event_bus=event_bus))
+    command_bus.register(
+        CreateMcpServerCommand,
+        CreateMcpServerHandler(repository=repository, event_bus=event_bus, fleet_writer=fleet_writer),
+    )
+    command_bus.register(
+        UpdateMcpServerCommand,
+        UpdateMcpServerHandler(repository=repository, event_bus=event_bus, fleet_writer=fleet_writer),
+    )
     command_bus.register(SetL7PolicyCommand, SetL7PolicyHandler(repository=repository, event_bus=event_bus))
-    command_bus.register(DeleteMcpServerCommand, DeleteMcpServerHandler(repository=repository, event_bus=event_bus))
+    command_bus.register(
+        DeleteMcpServerCommand,
+        DeleteMcpServerHandler(repository=repository, event_bus=event_bus, fleet_writer=fleet_writer),
+    )
 
     # Group handlers (require groups dict)
     if groups is not None:
