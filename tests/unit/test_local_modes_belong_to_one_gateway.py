@@ -164,12 +164,15 @@ class TestLaunchingALocalModeAsAFollower:
 
 
 class TestTheTwoRefusalsAreWiredToTheLease:
-    def test_selecting_a_backend_makes_local_modes_leader_owned(self, monkeypatch, tmp_path) -> None:
+    def test_a_shareable_backend_makes_local_modes_leader_owned(self, monkeypatch, tmp_path) -> None:
         from mcp_hangar.infrastructure.persistence.registry import create_backend
         from mcp_hangar.server.bootstrap import composition, coordination
         from mcp_hangar.infrastructure.launchers import factory
 
         backend = create_backend("sqlite", {"data_dir": str(tmp_path)})
+        # Shareable is the property that matters, not the backend's name: it is
+        # what says a peer could be running the same server.
+        monkeypatch.setattr(backend.__class__, "shared_across_instances", True, raising=False)
         monkeypatch.setattr(composition, "_persistence_backend", backend)
         try:
             coordination.init_lease_keeper({})
@@ -177,6 +180,28 @@ class TestTheTwoRefusalsAreWiredToTheLease:
             assert factory._may_launch_local is not None
         finally:
             coordination._keeper = None
+            set_local_mode_policy(None)
+            backend.close()
+
+    def test_a_file_backed_backend_keeps_every_mode(self, monkeypatch, tmp_path) -> None:
+        # Selecting storage is not the question -- sharing it is. A gateway on
+        # its own file has no follower to be, so refusing its `subprocess`
+        # servers would take a working single-node deployment away for nothing.
+        from mcp_hangar.infrastructure.persistence.registry import create_backend
+        from mcp_hangar.server.bootstrap import composition, coordination
+        from mcp_hangar.infrastructure.launchers import factory
+
+        backend = create_backend("sqlite", {"data_dir": str(tmp_path)})
+        monkeypatch.setattr(composition, "_persistence_backend", backend)
+        set_local_mode_policy(lambda: False)  # left behind by a previous bootstrap
+        try:
+            coordination.init_lease_keeper({})
+
+            assert factory._may_launch_local is None
+            assert get_launcher("subprocess") is not None
+        finally:
+            coordination._keeper = None
+            set_local_mode_policy(None)
             backend.close()
 
     def test_no_backend_leaves_every_mode_available(self, monkeypatch) -> None:

@@ -42,6 +42,13 @@ class SqliteBackend:
     same file.
     """
 
+    #: A file, opened by one process. Three replicas pointed at "sqlite" do not
+    #: share anything: each gets its own file, its own lease -- which its own
+    #: adapter always grants -- and its own fleet. Nothing collides, so nothing
+    #: complains, and every replica looks healthy while the deployment has as
+    #: many fleets as it has pods.
+    shared_across_instances = False
+
     def __init__(self, config: dict[str, Any]) -> None:
         """Initialise from this backend's own configuration.
 

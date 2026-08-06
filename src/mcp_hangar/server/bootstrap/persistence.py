@@ -138,6 +138,60 @@ def select_backend(full_config: dict[str, Any]) -> PersistenceBackend | None:
     return backend
 
 
+class ClusterNeedsSharedStorageError(RuntimeError):
+    """A hangar cluster was configured on storage the replicas cannot share.
+
+    Raised at startup, because the failure it prevents does not look like one.
+    Several gateways on a file-backed backend each get their own file, each
+    grant themselves their own lease -- the SQLite adapter always grants,
+    correctly, because a file admits one writer -- each run the management loops
+    and each hold their own fleet. They never disagree, because they cannot see
+    each other. Every health check is green and the deployment has as many
+    fleets as it has pods.
+
+    A warning would be read once, in the logs of a gateway that appeared to be
+    working. This is a place where refusing to start is the smaller outage.
+    """
+
+    def __init__(self, backend: str) -> None:
+        super().__init__(
+            f"this gateway is configured as part of a cluster (`coordination:`), and the '{backend}' storage "
+            "backend is local to one process. Replicas that cannot share storage are not a cluster: each "
+            "would hold its own fleet and its own lease, and they would never notice each other. Use "
+            "`persistence.backend: postgresql`, or remove the `coordination:` block to run this as a "
+            "single gateway."
+        )
+
+
+def refuse_a_cluster_on_unshared_storage(config: dict[str, Any] | None = None) -> None:
+    """Refuse the one combination that fails without failing.
+
+    Asked on the axis the operator controls rather than by sniffing the
+    environment. A thousand pods each with their own storage are a thousand
+    gateways, which is a legitimate thing to run and nobody's business but the
+    operator's. A `coordination:` block is the statement that these are meant to
+    be *one* gateway with several replicas -- and that requires storage they
+    share.
+
+    Args:
+        config: Full configuration. A `coordination` block is what makes this a
+            cluster.
+
+    Raises:
+        ClusterNeedsSharedStorageError: When the configuration asks for a
+            cluster and the backend cannot be shared.
+    """
+    from ...infrastructure.persistence.registry import is_shared
+    from .composition import get_persistence_backend
+
+    if "coordination" not in (config or {}):
+        return
+    backend = get_persistence_backend()
+    if backend is None or is_shared(backend):
+        return
+    raise ClusterNeedsSharedStorageError(type(backend).__name__)
+
+
 def restore_persisted_fleet(runtime: Any) -> int:
     """Bring back the servers a previous run wrote down.
 

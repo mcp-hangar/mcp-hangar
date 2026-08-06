@@ -32,6 +32,10 @@ class PostgresqlBackend:
     more than once, and a second call must not open a second pool.
     """
 
+    #: The point of this backend. Several gateways connect to one database, so
+    #: the lease, the log and the fleet are the same objects for all of them.
+    shared_across_instances = True
+
     def __init__(self, config: dict[str, Any]) -> None:
         """Initialise from this backend's own configuration.
 

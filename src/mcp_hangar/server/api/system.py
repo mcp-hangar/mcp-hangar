@@ -77,13 +77,22 @@ def _instance_info() -> dict[str, Any]:
     entrance (#790, phase 3.1).
     """
     from ...domain.events import current_instance_id
+    from ...infrastructure.persistence.registry import is_shared
+    from ..bootstrap.composition import get_persistence_backend
     from ..bootstrap.coordination import get_lease_keeper
 
     keeper = get_lease_keeper()
+    # Whether the *backend* can be shared, not whether a lease keeper exists.
+    # Three replicas on SQLite each have a keeper, each holds its own lease in
+    # its own file, and each answers `manages_fleet: true` -- truthfully, since
+    # each really is the manager of its own island. Reporting that as
+    # coordination was this field's own version of the same mistake.
+    shared = is_shared(get_persistence_backend())
     return {
         "instance_id": current_instance_id(),
-        "coordinates_with_peers": keeper is not None,
+        "coordinates_with_peers": shared and keeper is not None,
         "manages_fleet": True if keeper is None else keeper.may_manage(),
+        "storage_is_shareable": shared,
         "rate_limits_are_per_instance": True,
     }
 

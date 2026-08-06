@@ -84,6 +84,21 @@ def restore_the_process_keeper():
     coordination._keeper = before
 
 
+def _a_shareable_backend(monkeypatch, tmp_path):
+    """A backend a keeper can exist for.
+
+    SQLite is deliberately not one: a file has no peer to coordinate with, so it
+    gets no keeper at all (#790). These tests are about the keeper, not about
+    which backend deserves one, so they take the cheap store and mark it
+    shareable.
+    """
+    from mcp_hangar.infrastructure.persistence.registry import create_backend
+
+    backend = create_backend("sqlite", {"data_dir": str(tmp_path)})
+    monkeypatch.setattr(backend.__class__, "shared_across_instances", True, raising=False)
+    return backend
+
+
 def _wait_until(predicate, timeout: float = 3.0) -> bool:
     deadline = time.monotonic() + timeout
     while time.monotonic() < deadline:
@@ -321,10 +336,9 @@ class TestWithoutABackendEverythingManagesAsBefore:
         assert coordination.init_lease_keeper({}) is None
 
     def test_a_backend_builds_one(self, monkeypatch, tmp_path) -> None:
-        from mcp_hangar.infrastructure.persistence.registry import create_backend
         from mcp_hangar.server.bootstrap import composition, coordination
 
-        backend = create_backend("sqlite", {"data_dir": str(tmp_path)})
+        backend = _a_shareable_backend(monkeypatch, tmp_path)
         monkeypatch.setattr(composition, "_persistence_backend", backend)
         try:
             keeper = coordination.init_lease_keeper({})
@@ -336,10 +350,9 @@ class TestWithoutABackendEverythingManagesAsBefore:
     def test_the_ttl_is_configurable(self, monkeypatch, tmp_path) -> None:
         # The default is defended in the ADR; an operator whose storage is
         # slower than ours needs to be able to move it.
-        from mcp_hangar.infrastructure.persistence.registry import create_backend
         from mcp_hangar.server.bootstrap import composition, coordination
 
-        backend = create_backend("sqlite", {"data_dir": str(tmp_path)})
+        backend = _a_shareable_backend(monkeypatch, tmp_path)
         monkeypatch.setattr(composition, "_persistence_backend", backend)
         try:
             keeper = coordination.init_lease_keeper(

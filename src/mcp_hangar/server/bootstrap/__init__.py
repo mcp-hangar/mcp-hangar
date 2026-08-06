@@ -297,10 +297,11 @@ def bootstrap(
     # would mean either mutating a frozen object or leaving those two on a
     # different backend than everything else.
     from .composition import set_persistence_backend
-    from .persistence import restore_persisted_fleet, select_backend
+    from .persistence import refuse_a_cluster_on_unshared_storage, restore_persisted_fleet, select_backend
 
     _backend = select_backend(full_config)
     set_persistence_backend(_backend)
+    refuse_a_cluster_on_unshared_storage(full_config)
 
     runtime = get_runtime(rate_limit=full_config.get("rate_limit"), persistence_backend=_backend)
     init_context(runtime)
