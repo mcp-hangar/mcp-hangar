@@ -14,6 +14,38 @@ how far along that log delivery has actually got.
 The contract is at-least-once. A position is advanced only after handlers have
 been called, so a crash re-delivers rather than skips, and **handlers must be
 idempotent on `event_id`**.
+
+## This is the standalone mark, and it is only that
+
+One number meant two things, and the second one does not survive a second
+writer:
+
+- **How far delivery got in this process.** Still true, still what this is.
+- **How far delivery got, full stop.** Never true with peers. A replica that
+  publishes advances this mark past events *another* replica appended and had
+  not yet delivered -- so the sweep that exists to recover them skips them
+  instead. And in the other direction it re-delivers a peer's events to local
+  handlers, which is a second SIEM export and a second cost record for work
+  another replica already accounted for.
+
+Keying it per instance does not rescue it, in either direction. The instance
+identity is minted per process (`domain.events.producer`), deliberately, so a
+row keyed by it is never found again after a restart and the sweep replays the
+entire log. Key it by something stable per replica instead and a pod that is
+replaced -- which is what a rolling update does -- leaves its backlog under an
+identity that never comes back, with the rows accumulating one per rollout.
+
+So in a cluster there is no mark of this kind. **Effects follow the instance
+that produced the event** (#790, phase 0.4): a replica exports its own work and
+nobody else's, which is exactly-once by construction and needs no cursor,
+because a tool call happens on exactly one replica. A replica's *view* is a
+different question with a different answer -- the log head plus a snapshot,
+ephemeral, dying with the pod.
+
+The residual exposure, stated rather than discovered: an event appended by a pod
+that died before its handler ran is not exported. The window is microseconds --
+delivery is inline immediately after the append -- and the event is still in the
+log, so the gateway's own audit trail is complete either way.
 """
 
 from abc import ABC, abstractmethod

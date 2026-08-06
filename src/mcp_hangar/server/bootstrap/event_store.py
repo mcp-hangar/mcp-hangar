@@ -267,9 +267,40 @@ def recover_undelivered_events(runtime: Any) -> int:
     handlers must tolerate anyway, and refusing to boot over it would turn a
     recoverable state into an outage.
 
+    **Standalone only.** The sweep reads the log from one shared mark and hands
+    everything past it to local handlers, which is right when this process is
+    the only one writing that log and wrong the moment it is not. With peers,
+    it re-delivers *their* events to this instance's handlers -- a second export
+    to the SIEM, a second cost record, for work another replica already
+    accounted for. And the mark is worse than useless there in the other
+    direction too: a peer that publishes advances it past events this instance
+    never delivered, so the sweep skips exactly what it exists to recover.
+
+    That is not a gap left open, it is where the recovery moved: effects follow
+    the instance that produced the event (#790, phase 0.4), so a replica exports
+    its own work and nobody else's. The residual exposure is an event appended
+    by a pod that died before its handler ran -- microseconds, since delivery is
+    inline right after the append -- and the event itself is still in the log.
+
+    Keyed on the storage backend rather than on the lease keeper, which is not
+    built yet at this point in bootstrap. They amount to the same question:
+    selecting a backend is what makes peers possible.
+
     Returns:
         How many events were recovered.
     """
+    from .composition import get_persistence_backend
+
+    if get_persistence_backend() is not None:
+        logger.info(
+            "dispatch_recovery_skipped",
+            detail=(
+                "a storage backend is selected, so this log may have more than one writer; "
+                "the startup sweep would re-deliver peers' events to this instance's handlers"
+            ),
+        )
+        return 0
+
     try:
         # `runtime` is untyped here, so the count arrives as `Any`; narrow it at
         # the boundary rather than letting it leak out of a function that
