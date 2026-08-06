@@ -8,11 +8,10 @@ old data based on a configurable retention window.
 import time
 from contextlib import contextmanager
 from collections.abc import Generator
-from dataclasses import dataclass
 
 from .database_common import MigrationRunner, SQLiteConfig, SQLiteConnectionFactory
 from ...logging_config import get_logger
-from ...domain.contracts.metrics_history import IMetricsHistoryStore
+from ...domain.contracts.metrics_history import IMetricsHistoryStore, MetricPoint
 
 logger = get_logger(__name__)
 
@@ -43,21 +42,11 @@ _MIGRATIONS: list[dict] = [
 # ---------------------------------------------------------------------------
 
 
-@dataclass
-class MetricPoint:
-    """A single time-series data point.
-
-    Attributes:
-        mcp_server_id: McpServer this metric belongs to.
-        metric_name: Name of the metric (e.g. ``tool_calls_total``).
-        value: Numeric value.
-        recorded_at: Unix timestamp (seconds since epoch) when the snapshot was taken.
-    """
-
-    mcp_server_id: str
-    metric_name: str
-    value: float
-    recorded_at: float
+#: Re-exported so `from ...metrics_history_store import MetricPoint` keeps
+#: working. The definition moved to the port: it is the record both backends
+#: speak in, and a port that reaches into one adapter for its own vocabulary
+#: inverts the hexagon -- which the import contract rejected.
+__all__ = ["MetricPoint", "MetricsHistoryStore"]
 
 
 # ---------------------------------------------------------------------------
