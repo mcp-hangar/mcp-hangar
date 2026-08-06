@@ -456,11 +456,23 @@ class ServerLifecycle:
         if tailer is not None:
             tailer.stop()
 
+        # Before the lease is given up: `context.shutdown` saves the shared
+        # circuit-breaker row, and that write is for the lease holder only. A
+        # release first would mean nobody wrote it -- the leader would have
+        # stopped being the leader a moment before doing the one thing only the
+        # leader may do.
+        # Before the lease is given up: `context.shutdown` saves the shared
+        # circuit-breaker row, and that write is for the lease holder only. A
+        # release first would mean nobody wrote it -- the leader would have
+        # stopped being the leader a moment before doing the one thing only the
+        # leader may do.
+        self._context.shutdown()
+
+        # Last. Releasing hands management to a peer in seconds rather than a
+        # TTL, and everything this instance was doing under it has now stopped.
         keeper = get_lease_keeper()
         if keeper is not None:
             keeper.stop()
-
-        self._context.shutdown()
         self._running = False
 
         logger.info("server_lifecycle_shutdown_complete")

@@ -65,6 +65,25 @@ def _keeper(store: _Store, **kwargs) -> ManagementLeaseKeeper:
     return ManagementLeaseKeeper(store, "gateway-a", **defaults)
 
 
+@pytest.fixture(autouse=True)
+def restore_the_process_keeper():
+    """Put the module-level keeper back, whatever a test did to it.
+
+    Cleaning up with `monkeypatch.setattr(coordination, "_keeper", None)` inside
+    a test looks like a reset and is the opposite: monkeypatch records the value
+    at the moment it is called -- the keeper -- and restores *that* at teardown.
+    A keeper holding nothing then leaked into every later test in the session,
+    where `may_manage()` answered False and things that should have run did not.
+    Which is exactly the failure it caused: the circuit-breaker save, a file
+    away and passing on its own.
+    """
+    from mcp_hangar.server.bootstrap import coordination
+
+    before = coordination._keeper
+    yield
+    coordination._keeper = before
+
+
 def _wait_until(predicate, timeout: float = 3.0) -> bool:
     deadline = time.monotonic() + timeout
     while time.monotonic() < deadline:
@@ -312,7 +331,6 @@ class TestWithoutABackendEverythingManagesAsBefore:
             assert keeper is not None
             assert keeper.may_manage() is False  # not started
         finally:
-            monkeypatch.setattr(coordination, "_keeper", None)
             backend.close()
 
     def test_the_ttl_is_configurable(self, monkeypatch, tmp_path) -> None:
@@ -330,5 +348,4 @@ class TestWithoutABackendEverythingManagesAsBefore:
             assert keeper is not None
             assert (keeper._ttl_s, keeper._interval_s, keeper._renew_deadline_s) == (30.0, 7.0, 20.0)
         finally:
-            monkeypatch.setattr(coordination, "_keeper", None)
             backend.close()
