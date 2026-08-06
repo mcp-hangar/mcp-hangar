@@ -286,12 +286,18 @@ class EventSerializer:
         """
         event_id = data.pop("event_id", None)
         occurred_at = data.pop("occurred_at", None)
+        # Popped before filtering and passed to `rehydrate` rather than left in
+        # the payload: filtering drops what a constructor does not accept, and a
+        # dropped producer would fall back to the default factory -- this
+        # process -- so the reader would claim it wrote the row. `rehydrate`
+        # raises instead, which is the failure worth having.
+        produced_by = data.pop("produced_by", None)
 
         # Event dataclasses have different constructor signatures; we instantiate
         # dynamically from the payload. DomainEvent.rehydrate restores the stored
         # identity -- replay must not mint a new event_id or re-date the event.
         ctor_kwargs = self._filter_constructor_kwargs(cls, self._restore_datetimes(cls, data))
-        return cls.rehydrate(event_id, occurred_at, **ctor_kwargs)
+        return cls.rehydrate(event_id, occurred_at, produced_by, **ctor_kwargs)
 
     def _filter_constructor_kwargs(self, cls: type[DomainEvent], data: dict[str, Any]) -> dict[str, Any]:
         """Filter payload keys to those accepted by the event constructor.

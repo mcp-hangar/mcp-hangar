@@ -20,6 +20,11 @@ only import from one listed above it.
 from .base import (
     DomainEvent,
 )
+from .producer import (
+    UNKNOWN_PRODUCER,
+    current_instance_id,
+    set_instance_id,
+)
 from .lifecycle import (
     CircuitBreakerStateChanged,
     McpServerDegraded,
@@ -220,7 +225,10 @@ __all__ = [
     "DigestMismatchInTask",
     "DiscoveryCycleCompleted",
     "DiscoverySourceHealthChanged",
+    "UNKNOWN_PRODUCER",
     "DomainEvent",
+    "current_instance_id",
+    "set_instance_id",
     "EgressBlocked",
     "EgressPolicyCleared",
     "EgressPolicySet",
