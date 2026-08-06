@@ -277,7 +277,7 @@ class PostgresMcpServerConfigRepository:
                 if deleted:
                     logger.debug(f"Soft-deleted config for mcp_server: {mcp_server_id}")
 
-                return deleted
+                return bool(deleted)
 
         except Exception as e:  # noqa: BLE001 -- infra-boundary: re-raises as PersistenceError
             logger.error(f"Failed to delete mcp_server config: {e}")
@@ -312,7 +312,7 @@ class PostgresMcpServerConfigRepository:
                 if deleted:
                     logger.info(f"Hard-deleted config for mcp_server: {mcp_server_id}")
 
-                return deleted
+                return bool(deleted)
 
         except Exception as e:  # noqa: BLE001 -- infra-boundary: re-raises as PersistenceError
             logger.error(f"Failed to hard-delete mcp_server config: {e}")

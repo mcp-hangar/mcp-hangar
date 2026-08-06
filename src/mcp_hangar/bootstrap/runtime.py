@@ -194,14 +194,6 @@ class Runtime:
     security_handler: ISecurityHandler
 
     # Persistence components (optional)
-    #
-    # `persistence_backend` is the one storage decision when `persistence.backend`
-    # is configured: every persisted concern comes from it, and the individual
-    # fields below are what the legacy per-subsystem configuration populates
-    # instead. Exactly one of those two worlds is in play at a time -- selecting
-    # a backend while a legacy driver names a different one is refused at
-    # startup rather than resolved by precedence.
-    persistence_backend: Any = None
     persistence_config: PersistenceConfig | None = None
     database: Database | None = None
     config_repository: IConfigRepository | None = None

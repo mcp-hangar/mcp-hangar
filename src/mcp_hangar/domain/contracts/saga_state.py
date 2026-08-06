@@ -17,13 +17,25 @@ class ISagaStateStore(ABC):
     """Port for saga checkpointing and idempotency."""
 
     @abstractmethod
-    def checkpoint(self, saga_type: str, state: dict[str, Any], last_position: int) -> None:
+    def checkpoint(
+        self,
+        saga_type: str,
+        saga_id: str,
+        state_data: dict[str, Any],
+        last_event_position: int,
+    ) -> None:
         """Record a saga's state and how far through the log it has read.
+
+        Parameter names are part of this contract: both call sites pass them by
+        keyword (`bootstrap/cqrs.py`, `infrastructure/saga_manager.py`), so a
+        rename here is a breaking change even though the positions match.
 
         Args:
             saga_type: Identifies the saga; one row per type.
-            state: The saga's own state, opaque to the store.
-            last_position: Global log position this state reflects.
+            saga_id: Which instance of that saga -- a group id, for the circuit
+                breaker state that uses this store.
+            state_data: The saga's own state, opaque to the store.
+            last_event_position: Global log position this state reflects.
         """
 
     @abstractmethod

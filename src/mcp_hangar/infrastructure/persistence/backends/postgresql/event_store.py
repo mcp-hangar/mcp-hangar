@@ -512,4 +512,4 @@ class PostgresEventStore(IEventStore):
             events_deleted=deleted,
         )
 
-        return deleted
+        return int(deleted)
