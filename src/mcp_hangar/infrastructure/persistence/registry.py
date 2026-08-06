@@ -50,6 +50,7 @@ REQUIRED_CONCERNS: Final = (
     "role_store",
     "tool_access_policy_store",
     "metrics_history_store",
+    "management_lease",
 )
 
 
@@ -85,6 +86,8 @@ class PersistenceBackend(Protocol):
     def tool_access_policy_store(self) -> Any: ...
 
     def metrics_history_store(self) -> Any: ...
+
+    def management_lease(self) -> Any: ...
 
     def close(self) -> None: ...
 

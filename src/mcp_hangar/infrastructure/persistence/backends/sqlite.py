@@ -162,6 +162,18 @@ class SqliteBackend:
 
         return self._cached("metrics_history_store", build)
 
+    def management_lease(self) -> Any:
+        def build() -> Any:
+            from mcp_hangar.infrastructure.persistence.sqlite_management_lease import SQLiteManagementLease
+
+            # Same file as the fleet it gates. A lease in one file and the
+            # servers it manages in another can be restored independently, and
+            # a generation restored from an older copy is a fencing token that
+            # fences the wrong tenure.
+            return SQLiteManagementLease(self._path_for("lease", "mcp_hangar.db"))
+
+        return self._cached("management_lease", build)
+
     def close(self) -> None:
         """Release whatever was opened. Safe to call when nothing was."""
         for name, adapter in self._cache.items():
