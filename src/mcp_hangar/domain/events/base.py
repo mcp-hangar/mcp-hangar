@@ -8,6 +8,8 @@ import time
 from typing import Any
 import uuid
 
+from .producer import UNKNOWN_PRODUCER, current_instance_id
+
 
 @dataclass(kw_only=True)
 class DomainEvent(ABC):
@@ -34,9 +36,21 @@ class DomainEvent(ABC):
 
     event_id: str = field(default_factory=lambda: str(uuid.uuid4()), compare=False)
     occurred_at: float = field(default_factory=time.time, compare=False)
+    #: The instance that produced this event. Defaulted rather than passed at
+    #: every construction site: 116 event classes are raised from inside
+    #: aggregates, which have no business knowing what a replica is. See
+    #: `producer` for why the identity is minted instead of configured.
+    produced_by: str = field(default_factory=current_instance_id, compare=False)
 
     @classmethod
-    def rehydrate(cls, event_id: str | None, occurred_at: float | None, /, **payload: Any) -> "DomainEvent":
+    def rehydrate(
+        cls,
+        event_id: str | None,
+        occurred_at: float | None,
+        produced_by: str | None = None,
+        /,
+        **payload: Any,
+    ) -> "DomainEvent":
         """Rebuild a persisted event, restoring the identity it was stored with.
 
         Replay must not mint a new ``event_id`` or a new ``occurred_at``: the
@@ -50,9 +64,17 @@ class DomainEvent(ABC):
         logic that its two call sites -- the event store and the event-sourced
         repository -- would otherwise each reimplement.
 
+        ``produced_by`` deliberately breaks that convention: absent means
+        ``UNKNOWN_PRODUCER``, not "keep the fresh one". Keeping the fresh one
+        would have the reading process claim authorship of a row it did not
+        write, and a tailer skips what it wrote -- so a row stored before this
+        field existed would be silently dropped instead of delivered.
+
         Args:
             event_id: Stored id. ``None`` keeps the freshly minted one.
             occurred_at: Stored timestamp. ``None`` keeps the fresh one.
+            produced_by: Stored producer. ``None`` means the row predates the
+                field and reads as ``UNKNOWN_PRODUCER``.
             **payload: The event's own fields.
 
         Returns:
@@ -62,6 +84,7 @@ class DomainEvent(ABC):
             payload["event_id"] = event_id
         if occurred_at is not None:
             payload["occurred_at"] = occurred_at
+        payload["produced_by"] = produced_by if produced_by is not None else UNKNOWN_PRODUCER
         return cls(**payload)
 
     def to_dict(self) -> dict[str, Any]:
