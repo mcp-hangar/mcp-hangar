@@ -742,8 +742,21 @@ class ServerConfigLoader(IConfigLoader):
         load_config(mcp_servers_config)
 
 
-def load_configuration(config_path: str | None = None) -> dict[str, Any]:
+def load_configuration(config_path: str | None = None, *, load_servers: bool = True) -> dict[str, Any]:
     """Load mcp_server configuration from file or use defaults.
+
+    Args:
+        config_path: Where to read from. Defaults to `MCP_CONFIG`.
+        load_servers: Whether to build the declared servers as well as read the
+            file. **Bootstrap passes False**, and the reason is not tidiness:
+            building a server reaches for the runtime, and the runtime is a
+            singleton that takes the storage backend *at construction* because
+            it is frozen afterwards. Loading servers here therefore built the
+            runtime before the backend had been selected, so a gateway with a
+            storage backend and any server in `config.yaml` silently got the
+            in-memory config repository -- no durable fleet, nothing for
+            recovery to read, and one `fleet_writer_absent` log line that reads
+            like a configuration choice rather than a defect.
 
     Returns:
         Full configuration dictionary
@@ -757,7 +770,8 @@ def load_configuration(config_path: str | None = None) -> dict[str, Any]:
         _init_concurrency_from_config(full_config)
         _init_topology_mode_from_config(full_config)
         _init_interceptors_from_config(full_config)
-        load_config(full_config.get("mcp_servers", {}))
+        if load_servers:
+            load_config(full_config.get("mcp_servers", {}))
         return full_config
     else:
         logger.info("config_not_found_using_default", config_path=config_path)
@@ -772,5 +786,6 @@ def load_configuration(config_path: str | None = None) -> dict[str, Any]:
             },
         }
         _init_concurrency_from_config({"mcp_servers": default_config})
-        load_config(default_config)
+        if load_servers:
+            load_config(default_config)
         return {"mcp_servers": default_config}
