@@ -8,6 +8,7 @@ All handlers:
 """
 
 import threading
+from collections.abc import Callable
 from typing import Any, cast
 
 from ...domain.events import (
@@ -60,6 +61,7 @@ class CreateMcpServerHandler(CommandHandler):
         repository: IMcpServerRepository,
         event_bus: Any,
         fleet_writer: IFleetWriter | None = None,
+        coordinated: Callable[[], bool] | None = None,
     ) -> None:
         """Initialize the handler.
 
@@ -70,10 +72,16 @@ class CreateMcpServerHandler(CommandHandler):
                 rebuild it. None keeps the previous behaviour -- in memory only,
                 gone on restart -- which is what a configuration with no storage
                 backend gets.
+            coordinated: Whether this gateway shares its state with peers. When
+                it does, `subprocess` and `docker` are refused: they run a child
+                process of one gateway, so every replica that learned about the
+                server would start its own copy. Absent means standalone, where
+                every mode is available and always was.
         """
         self._repository = repository
         self._event_bus = event_bus
         self._fleet_writer = fleet_writer
+        self._coordinated = coordinated or (lambda: False)
 
     def handle(self, command: CreateMcpServerCommand) -> dict[str, Any]:
         """Create a new mcp_server.
@@ -89,6 +97,8 @@ class CreateMcpServerHandler(CommandHandler):
         """
         if self._repository.exists(command.mcp_server_id):
             raise ValidationError(f"McpServer already exists: {command.mcp_server_id}")
+
+        self._refuse_local_mode_when_coordinating(command.mode)
 
         if McpServerMode.normalize(command.mode) == McpServerMode.REMOTE and command.endpoint is not None:
             validate_no_ssrf(
@@ -136,6 +146,33 @@ class CreateMcpServerHandler(CommandHandler):
             source=command.source,
         )
         return {"mcp_server_id": command.mcp_server_id, "created": True}
+
+    def _refuse_local_mode_when_coordinating(self, mode: str) -> None:
+        """Refuse a mode that runs a child process, when there are peers.
+
+        At registration, which is where the mistake is made and where an
+        operator can still act on it. The launcher refuses it too (#790, phase
+        4.1), but by then the server is in the fleet and in the shared record,
+        and the failure has moved to whoever calls it.
+
+        `subprocess` and `docker` attach a child process's stdio to *one*
+        gateway. There is no address a peer could use, so a replica that learns
+        of such a server and serves a call to it starts its own copy -- a second
+        server, with its own mounted volumes, not a second route to the first.
+        """
+        if not self._coordinated():
+            return
+        if McpServerMode.normalize(mode) not in (
+            McpServerMode.SUBPROCESS,
+            McpServerMode.DOCKER,
+            McpServerMode.CONTAINER,
+        ):
+            return
+        raise ValidationError(
+            f"mode '{mode}' runs the server as a child process of one gateway, and this deployment shares its "
+            "state with peers. Every replica that learned about it would start its own copy, with its own "
+            "volumes. Use 'remote' mode, or run a single instance."
+        )
 
 
 class UpdateMcpServerHandler(CommandHandler):
@@ -641,6 +678,7 @@ def register_crud_handlers(
     event_bus: Any,
     groups: dict | None = None,
     fleet_writer: IFleetWriter | None = None,
+    coordinated: Callable[[], bool] | None = None,
 ) -> None:
     """Register all mcp_server and group CRUD command handlers with the command bus.
 
@@ -652,11 +690,14 @@ def register_crud_handlers(
             are not registered.
         fleet_writer: Where fleet changes are recorded so a restart can rebuild
             them. None leaves the fleet in memory only, as before.
+        coordinated: Whether this gateway shares its state with peers.
     """
     # McpServer handlers
     command_bus.register(
         CreateMcpServerCommand,
-        CreateMcpServerHandler(repository=repository, event_bus=event_bus, fleet_writer=fleet_writer),
+        CreateMcpServerHandler(
+            repository=repository, event_bus=event_bus, fleet_writer=fleet_writer, coordinated=coordinated
+        ),
     )
     command_bus.register(
         UpdateMcpServerCommand,

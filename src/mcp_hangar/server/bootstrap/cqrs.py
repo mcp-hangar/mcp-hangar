@@ -36,6 +36,17 @@ def _current_lease() -> Any:
     return None if keeper is None else keeper.lease
 
 
+def _coordinated() -> bool:
+    """Whether this gateway shares its state with peers.
+
+    Read per registration rather than captured, for the same reason everything
+    else in this file is: bootstrap order should not decide the answer.
+    """
+    from .coordination import get_lease_keeper
+
+    return get_lease_keeper() is not None
+
+
 def _fleet_writer(runtime: "Runtime") -> Any:
     """Where fleet changes get recorded, or None if nothing keeps them.
 
@@ -95,7 +106,14 @@ def init_cqrs(
         runtime_store=RUNTIME_PROVIDERS,
         event_store=runtime.event_bus.event_store,
     )
-    register_crud_handlers(runtime.command_bus, repository, runtime.event_bus, GROUPS, _fleet_writer(runtime))
+    register_crud_handlers(
+        runtime.command_bus,
+        repository,
+        runtime.event_bus,
+        GROUPS,
+        _fleet_writer(runtime),
+        coordinated=_coordinated,
+    )
 
     if discovery_registry is not None:
         from ...application.commands.discovery_handlers import register_discovery_handlers
