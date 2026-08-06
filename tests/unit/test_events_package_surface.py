@@ -75,6 +75,10 @@ class TestModuleOrderStaysAcyclic:
     """
 
     ORDER = [
+        # First: `base` reads the process identity for its `produced_by`
+        # default, so this module has to be importable before any event class
+        # is defined.
+        "producer",
         "base",
         "lifecycle",
         "invocation",

@@ -21,6 +21,7 @@ Starting is handled by the lifecycle module.
 """
 
 import os
+import socket
 import warnings
 from dataclasses import dataclass, field
 from pathlib import Path
@@ -32,6 +33,7 @@ from mcp_hangar._sdk_compat import FastMCP, new_mcp_server
 from ...application.commands.load_handlers import LoadMcpServerHandler, UnloadMcpServerHandler
 from ...application.discovery import DiscoveryOrchestrator
 from ...application.ports.observability import ObservabilityPort
+from ...domain.events import set_instance_id
 from ...fastmcp_server.config import HANGAR_SERVER_NAME
 from ...fastmcp_server.flat_tool_projection import maybe_register_flat_tool_handlers
 from ...fastmcp_server.governance_extensions import advertise_governance_extensions
@@ -214,6 +216,24 @@ def build_serving_mcp_server() -> FastMCP:
     return mcp_server
 
 
+def _init_instance_identity() -> str:
+    """Mint this process's instance identity and log it.
+
+    `HANGAR_INSTANCE_LABEL` is a *label*: it prefixes the identity so an
+    operator can recognise which pod wrote a row, and the uniqueness comes from
+    the minted suffix instead. Under Kubernetes, set it from the downward API
+    (`metadata.name`); the hostname is that same pod name, which is why it is
+    the fallback.
+
+    Logged at startup because it is the only place the value is visible before
+    it starts appearing on events.
+    """
+    label = os.environ.get("HANGAR_INSTANCE_LABEL") or socket.gethostname()
+    instance_id = set_instance_id(label)
+    logger.info("instance_identity_minted", instance_id=instance_id, label=label)
+    return instance_id
+
+
 def bootstrap(
     config_path: str | None = None,
     config_dict: dict[str, Any] | None = None,
@@ -242,6 +262,11 @@ def bootstrap(
         Fully initialized ApplicationContext (components not started)
     """
     logger.info("bootstrap_start", config_path=config_path, has_config_dict=config_dict is not None)
+
+    # First, before anything can publish: every event constructed after this
+    # point carries the identity, and one constructed before it would carry a
+    # different one -- two producers in one process.
+    _init_instance_identity()
 
     # Before `load_config` below, which is where McpServer instances are
     # constructed and where they read the default publisher.
