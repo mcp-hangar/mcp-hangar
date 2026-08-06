@@ -100,12 +100,23 @@ class TestApprovalsTakeTheirRepositoryFromTheBackend:
     def test_a_supplied_repository_is_used_instead_of_building_one(self) -> None:
         # `bootstrap_approvals` builds SQLite from a Database when it gets
         # nothing. Passing one has to win, or the backend's choice is ignored.
-        import inspect
-
         from mcp_hangar.approvals.bootstrap import bootstrap_approvals
 
-        source = inspect.getsource(bootstrap_approvals)
-        assert "if repository is None:" in source
+        sentinel = object()
+        service = bootstrap_approvals(database=None, event_bus=None, config={}, repository=sentinel)
+
+        assert service._repository is sentinel
+
+    def test_without_one_it_builds_the_sqlite_repository(self, tmp_path) -> None:
+        # The other side of that branch, and the compatibility path: a
+        # deployment that selected no backend still gets a working gate.
+        from mcp_hangar.approvals.bootstrap import bootstrap_approvals
+        from mcp_hangar.infrastructure.persistence.database import Database, DatabaseConfig
+
+        database = Database(DatabaseConfig(path=str(tmp_path / "approvals.db")))
+        service = bootstrap_approvals(database=database, event_bus=None, config={})
+
+        assert type(service._repository).__name__ == "SqliteApprovalRepository"
 
 
 class TestSagasTakeTheirStoreFromTheBackend:
