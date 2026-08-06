@@ -13,6 +13,7 @@ from typing import cast
 from starlette.requests import Request
 from starlette.routing import Route
 
+from ...domain.events import DomainEvent, SessionSuspended, SessionUnsuspended
 from ...infrastructure.session_suspension import InMemorySessionSuspensionRegistry
 from ...logging_config import get_logger
 from .serializers import HangarJSONResponse
@@ -36,6 +37,28 @@ def get_session_suspension_registry() -> InMemorySessionSuspensionRegistry:
     would silently disagree.
     """
     return _suspended_sessions
+
+
+def _announce(event: DomainEvent) -> None:
+    """Tell the other replicas about a suspension decision taken here.
+
+    The decision is already applied locally by the caller, so this is what makes
+    it fleet-wide rather than what makes it happen. Failing to announce is
+    therefore a degradation and not an error -- these routes are reachable in
+    configurations with no runtime assembled -- but it is a loud one, because
+    the difference between "blocked" and "blocked on one pod out of three" is
+    exactly what an operator needs to know.
+    """
+    try:
+        from ..state import get_runtime
+
+        get_runtime().event_bus.publish(event)
+    except Exception as e:  # noqa: BLE001 -- boundary: no bus is a shape, not a fault
+        logger.warning(
+            "session_suspension_not_announced",
+            error=str(e),
+            detail="applied on this instance only; other replicas will not enforce it",
+        )
 
 
 def is_session_suspended(session_id: str) -> bool:
@@ -65,7 +88,12 @@ async def suspend_session(request: Request) -> HangarJSONResponse:
     except (json.JSONDecodeError, ValueError):
         pass
 
+    # Applied here *and* announced. Announcing alone would be tidier, and it
+    # fails silently if the projection is not subscribed -- an operator would
+    # get a 200 and no block anywhere. Applied first, the block always holds on
+    # this replica; the event carries it to the others.
     _suspended_sessions.add(session_id)
+    _announce(SessionSuspended(session_id=session_id, reason=reason or "", source="api"))
 
     logger.info("session_suspended", session_id=session_id, reason=reason)
     return HangarJSONResponse({"session_id": session_id, "suspended": True})
@@ -82,6 +110,7 @@ async def unsuspend_session(request: Request) -> HangarJSONResponse:
         )
 
     _suspended_sessions.discard(session_id)
+    _announce(SessionUnsuspended(session_id=session_id, source="api"))
     logger.info("session_unsuspended", session_id=session_id)
     return HangarJSONResponse({"session_id": session_id, "suspended": False})
 

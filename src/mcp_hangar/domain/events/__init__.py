@@ -133,6 +133,8 @@ from .enforcement import (
     ResponseTruncated,
 )
 from .analysis import (
+    SessionSuspended,
+    SessionUnsuspended,
     DetectionRuleMatched,
     EnforcementActionTaken,
 )
@@ -226,6 +228,8 @@ __all__ = [
     "DiscoveryCycleCompleted",
     "DiscoverySourceHealthChanged",
     "UNKNOWN_PRODUCER",
+    "SessionSuspended",
+    "SessionUnsuspended",
     "DomainEvent",
     "current_instance_id",
     "set_instance_id",

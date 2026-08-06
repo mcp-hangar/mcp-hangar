@@ -44,6 +44,26 @@ class _Bus:
         self.published.append(event)
 
 
+def _bus_with_projection(registry) -> object:
+    """A bus that applies suspension events, as bootstrap's does.
+
+    Suspension is no longer a write to one process's registry -- it is an event
+    every replica applies through a projection (#790, phase 3.2). So a test of
+    the end-to-end property has to include the projection, which is also what
+    makes it a test of the wiring rather than of a method call.
+    """
+    from mcp_hangar.application.event_handlers.session_suspension_projection import SessionSuspensionProjection
+    from mcp_hangar.domain.contracts.event_bus import HandlerKind
+    from mcp_hangar.domain.events import SessionSuspended, SessionUnsuspended
+    from mcp_hangar.infrastructure.event_bus import EventBus
+
+    bus = EventBus()
+    projection = SessionSuspensionProjection(registry)
+    bus.subscribe(SessionSuspended, projection.handle, kind=HandlerKind.PROJECTION)
+    bus.subscribe(SessionUnsuspended, projection.handle, kind=HandlerKind.PROJECTION)
+    return bus
+
+
 def _match(action: str, session_id: str = "s-1") -> DetectionRuleMatched:
     return DetectionRuleMatched(
         rule_id="r-1",
@@ -61,7 +81,7 @@ class TestTheHandlerWritesWhereTheRoutesRead:
         """The end-to-end property: enforcement suspends, the server sees it."""
         registry = get_session_suspension_registry()
         registry.unsuspend("s-shared")
-        handler = DetectionEnforcementHandler(event_bus=_Bus(), session_registry=registry)
+        handler = DetectionEnforcementHandler(event_bus=_bus_with_projection(registry), session_registry=registry)
 
         handler.handle(_match("suspend", "s-shared"))
 
@@ -70,10 +90,12 @@ class TestTheHandlerWritesWhereTheRoutesRead:
 
     def test_a_separate_registry_does_not_leak_into_the_serving_path(self):
         """Pins that the wiring is what connects them, not a hidden global."""
-        handler = DetectionEnforcementHandler(event_bus=_Bus(), session_registry=InMemorySessionSuspensionRegistry())
+        other = InMemorySessionSuspensionRegistry()
+        handler = DetectionEnforcementHandler(event_bus=_bus_with_projection(other), session_registry=other)
 
         handler.handle(_match("suspend", "s-isolated"))
 
+        assert "s-isolated" in other
         assert is_session_suspended("s-isolated") is False
 
 

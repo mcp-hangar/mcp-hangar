@@ -10,7 +10,7 @@ from ...application.commands.commands import StopMcpServerCommand
 from ...application.ports import ICommandBus
 from ...domain.contracts.event_bus import IEventBus
 from ...domain.contracts.session_suspension import ISessionSuspensionRegistry
-from ...domain.events import DetectionRuleMatched, DomainEvent, EnforcementActionTaken
+from ...domain.events import DetectionRuleMatched, DomainEvent, EnforcementActionTaken, SessionSuspended
 from ...logging_config import get_logger
 
 logger = get_logger(__name__)
@@ -73,7 +73,20 @@ class DetectionEnforcementHandler:
             logger.exception("detection_enforcement_handler_error", error=str(exc))
 
     def _suspend_session(self, session_id: str, rule_id: str) -> None:
+        """Suspend the session here, and announce it so peers suspend it too.
+
+        Both, deliberately. Publishing alone would be tidier -- one way in, with
+        the local registry updated by the projection like everyone else's -- and
+        it has a failure mode this cannot afford: if the projection is not
+        subscribed, the enforcement action silently does nothing at all. Applied
+        first, the block always holds on this replica; the event is what carries
+        it to the others. The projection re-applying it here is a no-op, because
+        suspension is idempotent.
+        """
         self._session_registry.suspend(session_id)
+        self._event_bus.publish(
+            SessionSuspended(session_id=session_id, reason=f"detection rule {rule_id}", source=rule_id)
+        )
 
         logger.info("enforcement_session_suspended", session_id=session_id, rule_id=rule_id)
 

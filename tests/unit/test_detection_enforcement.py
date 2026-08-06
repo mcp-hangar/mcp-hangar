@@ -13,7 +13,7 @@ from mcp_hangar.application.commands.commands import StopMcpServerCommand
 from mcp_hangar.application.event_handlers import DetectionEnforcementHandler
 from mcp_hangar.application.ports import ICommandBus
 from mcp_hangar.domain.contracts.event_bus import IEventBus
-from mcp_hangar.domain.events import DetectionRuleMatched, EnforcementActionTaken
+from mcp_hangar.domain.events import SessionSuspended, DetectionRuleMatched, EnforcementActionTaken
 from mcp_hangar.server.api.sessions import (
     _suspended_sessions,
     get_session_suspension_registry,
@@ -93,8 +93,13 @@ class TestDetectionEnforcementHandler:
         handler.handle(_detection_event("suspend"))
 
         assert is_session_suspended("session-123") is True
-        assert len(event_bus.published) == 1
-        published = event_bus.published[0]
+        # Two now: the suspension itself, which peers apply so the block is not
+        # bypassable by retrying against another replica (#790, phase 3.2), and
+        # the enforcement record for the audit trail.
+        assert len(event_bus.published) == 2
+        assert isinstance(event_bus.published[0], SessionSuspended)
+        assert event_bus.published[0].session_id == "session-123"
+        published = event_bus.published[1]
         assert isinstance(published, EnforcementActionTaken)
         assert published.action == "suspend_session"
         assert published.rule_id == "rule-1"
