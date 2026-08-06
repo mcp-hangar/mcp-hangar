@@ -22,6 +22,20 @@ if TYPE_CHECKING:
 logger = get_logger(__name__)
 
 
+def _current_lease() -> Any:
+    """The tenure this instance believes it holds, or None if it holds nothing.
+
+    None is meaningful: it means this instance is coordinating and is not the
+    manager right now, so a convergence loop's write must be refused. A gateway
+    with no keeper at all never reaches here -- `_fleet_writer` passes no
+    provider in that case, which is the standalone answer.
+    """
+    from .coordination import get_lease_keeper
+
+    keeper = get_lease_keeper()
+    return None if keeper is None else keeper.lease
+
+
 def _fleet_writer(runtime: "Runtime") -> Any:
     """Where fleet changes get recorded, or None if nothing keeps them.
 
@@ -42,7 +56,9 @@ def _fleet_writer(runtime: "Runtime") -> Any:
             detail="no durable config repository; registrations live in memory and end with the process",
         )
         return None
-    writer = RepositoryFleetWriter(repository)
+    # The lease is asked per write rather than captured here: a tenure that has
+    # ended between bootstrap and the write is exactly the case being fenced.
+    writer = RepositoryFleetWriter(repository, lease_provider=_current_lease)
     logger.info("fleet_writer_configured", repository=type(repository).__name__)
     return writer
 

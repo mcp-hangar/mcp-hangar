@@ -21,6 +21,7 @@ from ...domain.model.mcp_server import McpServer
 from ...domain.model.mcp_server_group import GroupDeleted, McpServerGroup
 from ...domain.repository import IMcpServerRepository
 from ...domain.security.ssrf import validate_no_ssrf
+from ...domain.value_objects.provenance import Provenance
 from ...domain.value_objects import LoadBalancerStrategy, McpServerMode, McpServerState
 from ...domain.contracts.command import CommandHandler
 from ...domain.contracts.fleet import IFleetWriter
@@ -344,8 +345,17 @@ class DeleteMcpServerHandler(CommandHandler):
         # Before it leaves the fleet, for the same reason registration records
         # before joining it: a failure here must leave the server as it was,
         # rather than removed from memory and still on record.
+        #
+        # A convergence loop's deletion is fenced; an operator's is not. See
+        # `IFleetWriter.delete` for the sequence that distinction exists for --
+        # briefly, a stalled leader whose decision is about a fleet that has
+        # since changed hands, and which cannot notice on its own because it was
+        # frozen at the moment it would have had to.
         if self._fleet_writer is not None:
-            self._fleet_writer.delete(command.mcp_server_id)
+            self._fleet_writer.delete(
+                command.mcp_server_id,
+                fenced=command.provenance is Provenance.DISCOVERY,
+            )
 
         self._repository.remove(command.mcp_server_id)
 

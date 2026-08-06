@@ -9,7 +9,8 @@ from ...application.discovery import DiscoveryConfig, DiscoveryOrchestrator
 from ...domain.security.input_validator import InputValidator
 from ...domain.value_objects.provenance import Provenance
 from ...infrastructure.discovery.registry import UnknownDiscoverySourceError, create_source
-from ...application.commands.crud_commands import CreateMcpServerCommand
+from ...application.commands.crud_commands import CreateMcpServerCommand, DeleteMcpServerCommand
+from ...domain.contracts.fleet import NotTheManagerError
 from ...logging_config import get_logger
 from ..state import get_runtime, set_discovery_orchestrator
 from .coordination import may_manage
@@ -284,17 +285,39 @@ async def _on_mcp_server_deregister(name: str, reason: str):
         reason: Reason for deregistration.
     """
     try:
-        repository = get_runtime().repository
-        if repository.exists(name):
-            mcp_server = repository.get(name)
-            if mcp_server:
-                mcp_server.stop()
-            _ = repository.remove(name)
-            logger.info(
-                "discovery_deregistered_mcp_server",
-                mcp_server_name=name,
-                reason=reason,
+        if not get_runtime().repository.exists(name):
+            return
+
+        # Through the command bus, like the registration on the way in. It used
+        # to stop the server and drop it from the in-memory fleet directly,
+        # which meant a discovered server's *departure* was the one fleet change
+        # nothing recorded: no `McpServerDeregistered` in the log, and -- since
+        # the fleet became durable (#794) -- the row left behind, so the server
+        # came back at the next restart. Registration persisted; deregistration
+        # did not.
+        #
+        # `provenance` is set here and nowhere a request can reach. It marks
+        # this as a convergence loop's decision rather than an operator's, which
+        # is what makes it fenced: this instance may have stalled long enough to
+        # lose the management lease and not know it yet.
+        get_runtime().command_bus.send(
+            DeleteMcpServerCommand(
+                mcp_server_id=name,
+                source=f"discovery:{reason}",
+                provenance=Provenance.DISCOVERY,
             )
+        )
+        logger.info(
+            "discovery_deregistered_mcp_server",
+            mcp_server_name=name,
+            reason=reason,
+        )
+    except NotTheManagerError as e:
+        # Expected in a cluster, and not a failure: this instance decided on the
+        # deregistration under a tenure that has since ended, so the fleet it
+        # was reasoning about is not the current one. The instance that holds
+        # the lease now will reach its own conclusion.
+        logger.info("discovery_deregistration_fenced", mcp_server_name=name, detail=str(e))
     except Exception as e:  # noqa: BLE001 -- fault-barrier: deregistration failure must not crash discovery cycle
         logger.error(
             "discovery_deregistration_failed",

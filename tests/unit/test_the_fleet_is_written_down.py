@@ -48,7 +48,7 @@ class _RefusingWriter(IFleetWriter):
     def save(self, snapshot: McpServerConfigSnapshot) -> None:
         raise RuntimeError("the database is unreachable")
 
-    def delete(self, mcp_server_id: str) -> None:
+    def delete(self, mcp_server_id: str, *, fenced: bool = False) -> None:
         raise RuntimeError("the database is unreachable")
 
 

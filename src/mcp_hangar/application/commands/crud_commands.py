@@ -121,14 +121,30 @@ class DeleteMcpServerCommand(Command):
     Attributes:
         mcp_server_id: Identifier of the mcp_server to delete.
         source: Who is deleting this mcp_server ("api", "config").
+        provenance: How this deletion reached the bus, as a type rather than a
+            string. DISCOVERY means a convergence loop decided the server is
+            gone -- which is the deletion that has to be fenced, because it can
+            be issued by an instance that stalled long enough to lose the
+            management lease and has not noticed yet. HUMAN means an operator
+            asked, and an operator asking is not a stale loop finishing: their
+            deletion goes through wherever it lands. Set by the construction
+            path, never by a request, for the same reason as on registration.
     """
 
     mcp_server_id: str
     source: str = "api"
+    provenance: Provenance = Provenance.HUMAN
 
-    def __init__(self, mcp_server_id: str | None = None, source: str = "api", **kwargs: object):
+    def __init__(
+        self,
+        mcp_server_id: str | None = None,
+        source: str = "api",
+        provenance: Provenance = Provenance.HUMAN,
+        **kwargs: object,
+    ):
         object.__setattr__(self, "mcp_server_id", _resolve_legacy_mcp_server_id(mcp_server_id, kwargs))
         object.__setattr__(self, "source", source)
+        object.__setattr__(self, "provenance", provenance)
         if kwargs:
             unexpected = ", ".join(sorted(kwargs))
             raise TypeError(f"Unexpected keyword argument(s): {unexpected}")
