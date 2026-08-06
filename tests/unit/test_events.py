@@ -2,6 +2,7 @@
 
 import pytest
 
+from mcp_hangar.domain.contracts.event_bus import HandlerKind
 from mcp_hangar.application.event_handlers import LoggingEventHandler
 from mcp_hangar.infrastructure.observability.metrics_event_handler import MetricsEventHandler
 from mcp_hangar.domain.events import McpServerStarted, McpServerStopped, ToolInvocationCompleted
@@ -37,7 +38,7 @@ def test_event_bus_subscribe_and_publish():
         received_events.append(event)
 
     # Subscribe to specific event type
-    bus.subscribe(McpServerStarted, handler)
+    bus.subscribe(McpServerStarted, handler, kind=HandlerKind.EFFECT)
 
     # Publish event
     event = McpServerStarted(mcp_server_id="test", mode="subprocess", tools_count=3, startup_duration_ms=100.0)
@@ -61,8 +62,8 @@ def test_event_bus_multiple_subscribers():
         handler2_events.append(event)
 
     # Both subscribe to same event type
-    bus.subscribe(McpServerStarted, handler1)
-    bus.subscribe(McpServerStarted, handler2)
+    bus.subscribe(McpServerStarted, handler1, kind=HandlerKind.EFFECT)
+    bus.subscribe(McpServerStarted, handler2, kind=HandlerKind.EFFECT)
 
     # Publish event
     event = McpServerStarted(mcp_server_id="test", mode="subprocess", tools_count=3, startup_duration_ms=100.0)
@@ -82,7 +83,7 @@ def test_event_bus_subscribe_to_all():
         received_events.append(event)
 
     # Subscribe to all events
-    bus.subscribe_to_all(handler)
+    bus.subscribe_to_all(handler, kind=HandlerKind.EFFECT)
 
     # Publish different event types
     event1 = McpServerStarted(mcp_server_id="test", mode="subprocess", tools_count=3, startup_duration_ms=100.0)
@@ -111,8 +112,8 @@ def test_event_bus_error_handling():
         handler2_called.append(True)
 
     # Subscribe both handlers
-    bus.subscribe(McpServerStarted, failing_handler)
-    bus.subscribe(McpServerStarted, working_handler)
+    bus.subscribe(McpServerStarted, failing_handler, kind=HandlerKind.EFFECT)
+    bus.subscribe(McpServerStarted, working_handler, kind=HandlerKind.EFFECT)
 
     # Publish event
     event = McpServerStarted(mcp_server_id="test", mode="subprocess", tools_count=3, startup_duration_ms=100.0)
@@ -207,7 +208,7 @@ def test_event_bus_unsubscribe():
         received_events.append(event)
 
     # Subscribe and publish
-    bus.subscribe(McpServerStarted, handler)
+    bus.subscribe(McpServerStarted, handler, kind=HandlerKind.EFFECT)
     event1 = McpServerStarted(mcp_server_id="test", mode="subprocess", tools_count=3, startup_duration_ms=100.0)
     bus.publish(event1)
 
@@ -230,7 +231,7 @@ def test_event_bus_clear():
     def handler(event):
         received_events.append(event)
 
-    bus.subscribe(McpServerStarted, handler)
+    bus.subscribe(McpServerStarted, handler, kind=HandlerKind.EFFECT)
     bus.clear()
 
     # Publish after clear

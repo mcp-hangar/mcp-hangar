@@ -9,6 +9,7 @@ import threading
 from typing import Final
 
 from mcp_hangar.domain.contracts.dispatch_checkpoint import IDispatchCheckpoint
+from mcp_hangar.domain.contracts.event_bus import HandlerKind
 from mcp_hangar.domain.contracts.event_bus import IEventBus
 from mcp_hangar.domain.contracts.event_store import ConcurrencyError, IEventStore, NullEventStore
 from mcp_hangar.domain.contracts.hook_subscriber import IHookSubscriber
@@ -62,7 +63,9 @@ class EventBus(IEventBus):
                 the bus behaves exactly as before -- append, deliver, forget --
                 which is at-most-once across a crash.
         """
-        self._handlers: dict[type[DomainEvent], list[Callable[[DomainEvent], None]]] = {}
+        # (handler, kind). The kind decides whether a handler runs on events
+        # this instance did not produce -- see `HandlerKind`.
+        self._handlers: dict[type[DomainEvent], list[tuple[Callable[[DomainEvent], None], HandlerKind]]] = {}
         # Lock hierarchy level: EVENT_BUS (20)
         # Safe to acquire after: PROVIDER, PROVIDER_GROUP
         # Safe to acquire before: EVENT_STORE, REPOSITORY, STDIO_CLIENT
@@ -96,34 +99,49 @@ class EventBus(IEventBus):
         self._dispatch_checkpoint = checkpoint
         logger.info("dispatch_checkpoint_configured", checkpoint_type=type(checkpoint).__name__)
 
-    def subscribe(self, event_type: type[DomainEvent], handler: Callable[[DomainEvent], None]) -> None:
+    def subscribe(
+        self,
+        event_type: type[DomainEvent],
+        handler: Callable[[DomainEvent], None],
+        *,
+        kind: HandlerKind,
+    ) -> None:
         """
         Subscribe to a specific event type.
 
         Args:
             event_type: The type of event to subscribe to
             handler: Callable that takes the event as parameter
+            kind: Whether this keeps a local view (`PROJECTION`, runs for every
+                event including a peer's) or acts on the world (`EFFECT`, runs
+                only for events this instance produced). Required, and
+                keyword-only: there is no default that is right for both, and
+                both wrong answers are silent.
         """
         with self._lock:
             if event_type not in self._handlers:
                 self._handlers[event_type] = []
-            self._handlers[event_type].append(handler)
+            self._handlers[event_type].append((handler, kind))
 
-        logger.debug(f"Subscribed handler to {event_type.__name__}")
+        logger.debug(f"Subscribed {kind.value} handler to {event_type.__name__}")
 
-    def subscribe_to_all(self, handler: Callable[[DomainEvent], None]) -> None:
+    def subscribe_to_all(self, handler: Callable[[DomainEvent], None], *, kind: HandlerKind) -> None:
         """
         Subscribe to all event types.
 
         Args:
             handler: Callable that takes any event as parameter
+            kind: See `subscribe`. A handler that sees every event is the one
+                most likely to be an effect -- logging, metrics, alerting and
+                audit all live here -- and the one where getting it wrong
+                multiplies by the number of replicas.
         """
         with self._lock:
             if DomainEvent not in self._handlers:
                 self._handlers[DomainEvent] = []
-            self._handlers[DomainEvent].append(handler)
+            self._handlers[DomainEvent].append((handler, kind))
 
-        logger.debug("Subscribed handler to all events")
+        logger.debug("Subscribed handler to all events", kind=kind.value)
 
     def unsubscribe_from_all(self, handler: Callable[[DomainEvent], None]) -> None:
         """Unsubscribe a handler that was registered via subscribe_to_all.
@@ -134,11 +152,15 @@ class EventBus(IEventBus):
             handler: The handler to remove.
         """
         with self._lock:
-            if DomainEvent in self._handlers:
-                try:
-                    self._handlers[DomainEvent].remove(handler)
-                except ValueError:
-                    pass  # handler not registered -- silently ignore
+            registered = self._handlers.get(DomainEvent, [])
+            # Matched on the handler alone: a caller unsubscribing does not
+            # know, and should not have to repeat, which kind it registered
+            # under. Compared with `==` rather than `is`, because
+            # `obj.method` builds a fresh bound method each time it is
+            # evaluated -- `subscribe_to_all(x.handle)` followed by
+            # `unsubscribe_from_all(x.handle)` passes two objects that are equal
+            # and not identical, and `list.remove` used to get that right.
+            self._handlers[DomainEvent] = [entry for entry in registered if entry[0] != handler]
 
     def unsubscribe(self, event_type: type[DomainEvent], handler: Callable[[DomainEvent], None]) -> None:
         """
@@ -149,8 +171,15 @@ class EventBus(IEventBus):
             handler: The handler to remove
         """
         with self._lock:
-            if event_type in self._handlers:
-                self._handlers[event_type].remove(handler)
+            registered = self._handlers.get(event_type)
+            if registered is None:
+                return
+            for index, (registered_handler, _kind) in enumerate(registered):
+                if registered_handler == handler:
+                    del registered[index]
+                    return
+            # Preserves the old behaviour of `list.remove` on a missing handler.
+            raise ValueError(f"handler is not subscribed to {event_type.__name__}")
 
     def subscribe_hooks(self, subscriber: IHookSubscriber) -> None:
         """Register a hook subscriber for phase-wrapped event delivery.
@@ -178,7 +207,9 @@ class EventBus(IEventBus):
             except ValueError:
                 pass
 
-    def _resolve_handlers(self, event_class: type[DomainEvent]) -> list[Callable[[DomainEvent], None]]:
+    def _resolve_handlers(
+        self, event_class: type[DomainEvent]
+    ) -> list[tuple[Callable[[DomainEvent], None], HandlerKind]]:
         """Handlers for an event class and every event class it inherits from.
 
         Dispatch used to key on the exact class, which quietly dropped an entire
@@ -200,15 +231,15 @@ class EventBus(IEventBus):
 
         Caller holds `self._lock`.
         """
-        handlers: list[Callable[[DomainEvent], None]] = []
+        handlers: list[tuple[Callable[[DomainEvent], None], HandlerKind]] = []
         seen: set[int] = set()
         for cls in event_class.__mro__:
             if cls is DomainEvent or not issubclass(cls, DomainEvent):
                 continue
             bucket = self._handlers.get(cls, [])
-            handlers.extend(handler for handler in bucket if id(handler) not in seen)
-            seen.update(id(handler) for handler in bucket)
-        handlers.extend(handler for handler in self._handlers.get(DomainEvent, []) if id(handler) not in seen)
+            handlers.extend(entry for entry in bucket if id(entry[0]) not in seen)
+            seen.update(id(entry[0]) for entry in bucket)
+        handlers.extend(entry for entry in self._handlers.get(DomainEvent, []) if id(entry[0]) not in seen)
         return handlers
 
     def publish(self, event: DomainEvent) -> None:
@@ -261,7 +292,24 @@ class EventBus(IEventBus):
         # event ever written about the same server.
         self.publish_to_stream(stream_id, [event], APPEND_AT_END)
 
-    def _deliver(self, event: DomainEvent) -> None:
+    def deliver_tailed(self, event: DomainEvent) -> None:
+        """Hand an event this instance did **not** produce to its projections.
+
+        The entry point for the tailer. Only `PROJECTION` handlers run: an
+        effect belongs to the replica that produced the event, so running
+        effects here is how three replicas send three copies of every audit
+        record to the SIEM.
+
+        Emphatically not `publish`: this event came *out* of the log. Publishing
+        it would append it again, on every replica, and each copy would be
+        tailed in turn.
+
+        Args:
+            event: An event read from the shared log, produced elsewhere.
+        """
+        self._deliver(event, tailed=True)
+
+    def _deliver(self, event: DomainEvent, *, tailed: bool = False) -> None:
         """Hand an event to its handlers. No persistence, no stream.
 
         Split out of `publish` so that `publish_to_stream` can deliver without
@@ -269,10 +317,16 @@ class EventBus(IEventBus):
         `publish_to_stream`, so the old arrangement would recurse until the
         stack ran out, and the failure path would do it while the store was
         already broken.
+
+        Args:
+            event: The event to hand over.
+            tailed: Whether this event was read from the shared log rather than
+                produced here. Tailed events reach projections only.
         """
         event_type_name = event.__class__.__name__
         with self._lock:
-            handlers = self._resolve_handlers(type(event))
+            resolved = self._resolve_handlers(type(event))
+        handlers = [handler for handler, kind in resolved if not tailed or kind is HandlerKind.PROJECTION]
 
         tracer = get_tracer(__name__)
         with tracer.start_as_current_span(f"event.publish.{event_type_name}") as evt_span:

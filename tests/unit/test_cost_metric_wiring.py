@@ -14,6 +14,7 @@ a bus nobody subscribed to satisfies that assertion and produces no metric.
 
 from __future__ import annotations
 
+from mcp_hangar.domain.contracts.event_bus import HandlerKind
 from mcp_hangar import metrics as m
 from mcp_hangar.application.event_handlers.cost_handler import CostAttributionEventHandler
 from mcp_hangar.domain.contracts.cost import InvocationContext
@@ -38,7 +39,7 @@ class _FixedAttributor:
 def _wired_bus() -> EventBus:
     """The production wiring: metrics subscribed to everything."""
     bus = EventBus()
-    bus.subscribe_to_all(MetricsEventHandler().handle)
+    bus.subscribe_to_all(MetricsEventHandler().handle, kind=HandlerKind.EFFECT)
     return bus
 
 
@@ -70,7 +71,7 @@ def test_the_cost_is_carried_in_cents_not_rederived() -> None:
     """
     published: list[object] = []
     bus = EventBus()
-    bus.subscribe(CostReportGenerated, published.append)
+    bus.subscribe(CostReportGenerated, published.append, kind=HandlerKind.EFFECT)
     handler = CostAttributionEventHandler(cost_attributor=_FixedAttributor(), event_bus=bus)
 
     handler.handle(_invocation("srv-cents", "tool-cents"))

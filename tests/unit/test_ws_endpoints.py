@@ -146,7 +146,7 @@ class TestWsEventsEndpoint:
 
         captured_handler = {}
 
-        def subscribe_side_effect(handler):
+        def subscribe_side_effect(handler, *, kind=None):
             captured_handler["fn"] = handler
 
         mock_bus = MagicMock()

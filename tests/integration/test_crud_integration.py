@@ -14,6 +14,7 @@ from unittest.mock import patch
 import pytest
 import yaml
 
+from mcp_hangar.domain.contracts.event_bus import HandlerKind
 from mcp_hangar.application.commands.crud_commands import (
     AddGroupMemberCommand,
     CreateGroupCommand,
@@ -46,10 +47,10 @@ def _make_infrastructure(groups: dict | None = None):
 
     # Capture all domain events for assertions
     for event_type in (McpServerRegistered, McpServerUpdated, McpServerDeregistered):
-        event_bus.subscribe(event_type, lambda e: captured.append(e))
+        event_bus.subscribe(event_type, lambda e: captured.append(e), kind=HandlerKind.EFFECT)
 
     for event_type in (GroupUpdated, GroupDeleted):
-        event_bus.subscribe(event_type, lambda e: captured.append(e))
+        event_bus.subscribe(event_type, lambda e: captured.append(e), kind=HandlerKind.EFFECT)
 
     register_crud_handlers(command_bus, repository, event_bus, groups_dict)
     return command_bus, event_bus, repository, groups_dict, captured

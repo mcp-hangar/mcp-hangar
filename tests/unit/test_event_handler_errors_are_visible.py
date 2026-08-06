@@ -13,6 +13,7 @@ replaced by the counter the rest of the system already uses.
 
 from __future__ import annotations
 
+from mcp_hangar.domain.contracts.event_bus import HandlerKind
 from mcp_hangar.domain.events import ToolInvocationCompleted
 from mcp_hangar.infrastructure.event_bus import EventBus
 from mcp_hangar.metrics import ERRORS_TOTAL
@@ -36,7 +37,7 @@ class TestAFailingHandlerIsCounted:
         def explodes(_event: object) -> None:
             raise RuntimeError("handler is broken")
 
-        bus.subscribe_to_all(explodes)
+        bus.subscribe_to_all(explodes, kind=HandlerKind.EFFECT)
         before = _error_count("RuntimeError")
 
         bus.publish(_event())
@@ -52,8 +53,8 @@ class TestAFailingHandlerIsCounted:
         def explodes(_event: object) -> None:
             raise ValueError("first handler is broken")
 
-        bus.subscribe_to_all(explodes)
-        bus.subscribe_to_all(seen.append)
+        bus.subscribe_to_all(explodes, kind=HandlerKind.EFFECT)
+        bus.subscribe_to_all(seen.append, kind=HandlerKind.EFFECT)
 
         bus.publish(_event())
 
@@ -61,12 +62,12 @@ class TestAFailingHandlerIsCounted:
 
     def test_publish_does_not_raise(self) -> None:
         bus = EventBus()
-        bus.subscribe_to_all(lambda _e: (_ for _ in ()).throw(KeyError("boom")))
+        bus.subscribe_to_all(lambda _e: (_ for _ in ()).throw(KeyError("boom")), kind=HandlerKind.EFFECT)
         bus.publish(_event())  # must not raise
 
     def test_each_failure_is_counted_separately(self) -> None:
         bus = EventBus()
-        bus.subscribe_to_all(lambda _e: (_ for _ in ()).throw(TimeoutError("slow")))
+        bus.subscribe_to_all(lambda _e: (_ for _ in ()).throw(TimeoutError("slow")), kind=HandlerKind.EFFECT)
         before = _error_count("TimeoutError")
 
         bus.publish(_event())
@@ -85,7 +86,7 @@ class TestTheDeadHookIsGone:
     def test_clear_still_resets_the_bus(self) -> None:
         bus = EventBus()
         seen: list = []
-        bus.subscribe_to_all(seen.append)
+        bus.subscribe_to_all(seen.append, kind=HandlerKind.EFFECT)
 
         bus.clear()
         bus.publish(_event())

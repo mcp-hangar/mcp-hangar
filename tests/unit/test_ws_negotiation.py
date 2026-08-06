@@ -47,7 +47,7 @@ def test_ws_events_negotiates_subscription_before_streaming() -> None:
 
     captured_handler: dict[str, Callable[[MagicMock], None]] = {}
 
-    def subscribe_side_effect(handler: Callable[[MagicMock], None]) -> None:
+    def subscribe_side_effect(handler: Callable[[MagicMock], None], *, kind: object = None) -> None:
         captured_handler["fn"] = handler
 
     mock_bus = MagicMock()
@@ -97,7 +97,7 @@ def test_ws_events_negotiation_timeout_falls_back_to_unfiltered_stream() -> None
 
     captured_handler: dict[str, Callable[[MagicMock], None]] = {}
 
-    def subscribe_side_effect(handler: Callable[[MagicMock], None]) -> None:
+    def subscribe_side_effect(handler: Callable[[MagicMock], None], *, kind: object = None) -> None:
         captured_handler["fn"] = handler
 
     mock_bus = MagicMock()

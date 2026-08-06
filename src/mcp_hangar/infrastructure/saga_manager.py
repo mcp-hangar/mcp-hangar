@@ -17,6 +17,7 @@ from ..application.ports.saga import (  # noqa: F401 -- re-exported for backward
     SagaStep,
 )
 from ..domain.events import DomainEvent
+from mcp_hangar.domain.contracts.event_bus import HandlerKind
 from ..logging_config import get_logger
 from .command_bus import CommandBus, get_command_bus
 from .event_bus import EventBus, get_event_bus
@@ -70,7 +71,10 @@ class SagaManager(ISagaManager):
         self._lock = TrackedLock(LockLevel.SAGA_MANAGER, "SagaManager")
 
         # Subscribe to all events for event-triggered sagas
-        self._event_bus.subscribe_to_all(self._handle_event)
+        # An effect: a saga drives a workflow and issues commands. Three
+        # replicas each driving the same saga would take every step three
+        # times.
+        self._event_bus.subscribe_to_all(self._handle_event, kind=HandlerKind.EFFECT)
 
     def register_event_saga(self, saga: EventTriggeredSaga) -> None:
         """Register an event-triggered saga."""

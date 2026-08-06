@@ -8,6 +8,7 @@ from __future__ import annotations
 
 from typing import Any
 
+from mcp_hangar.domain.contracts.event_bus import HandlerKind
 from mcp_hangar.application.mutators.response_truncator import ResponseTruncator
 from mcp_hangar.application.services.mutator_pipeline import MutatorPipeline
 from mcp_hangar.domain.contracts.hook_subscriber import IHookSubscriber
@@ -77,7 +78,7 @@ class TestDigestValidationToEventBus:
 
         captured: list[DomainEvent] = []
         bus = EventBus()
-        bus.subscribe(DigestMismatchEvent, captured.append)
+        bus.subscribe(DigestMismatchEvent, captured.append, kind=HandlerKind.EFFECT)
         bus.publish(result.event)
 
         assert len(captured) == 1
@@ -169,7 +170,7 @@ class TestMutatorPipelineEndToEnd:
 
         bus_log: list[DomainEvent] = []
         bus = EventBus()
-        bus.subscribe(ResponseTruncated, bus_log.append)
+        bus.subscribe(ResponseTruncated, bus_log.append, kind=HandlerKind.EFFECT)
 
         for ev in events:
             bus.publish(ev)
@@ -184,7 +185,7 @@ class TestFullPipelineFlow:
     def test_mismatch_then_truncation_events_all_reach_audit(self):
         audit_log: list[DomainEvent] = []
         bus = EventBus()
-        bus.subscribe_to_all(audit_log.append)
+        bus.subscribe_to_all(audit_log.append, kind=HandlerKind.EFFECT)
 
         # Step 1: digest validation produces mismatch event
         validator = DigestValidator(_make_policy_with_wrong_digest())

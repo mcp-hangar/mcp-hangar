@@ -28,6 +28,7 @@ from ...domain.events import (
     ToolInvocationCompleted,
     ToolInvocationFailed,
 )
+from ...domain.contracts.event_bus import HandlerKind
 from ...logging_config import get_logger
 
 if TYPE_CHECKING:
@@ -42,23 +43,33 @@ def init_event_handlers(runtime: "Runtime") -> None:
     Args:
         runtime: Runtime instance with event bus.
     """
+    # Every subscription below states its kind, and the four subscribe-to-all
+    # handlers are where getting it wrong multiplies by the number of replicas.
+    # They are effects: this replica's log lines, this replica's Prometheus
+    # counters (three replicas each counting every event would triple every
+    # total when the scrapes are summed), alerts, and the audit trail.
     logging_handler = LoggingEventHandler()
-    runtime.event_bus.subscribe_to_all(logging_handler.handle)
+    runtime.event_bus.subscribe_to_all(logging_handler.handle, kind=HandlerKind.EFFECT)
 
     metrics_handler = MetricsEventHandler()
-    runtime.event_bus.subscribe_to_all(metrics_handler.handle)
+    runtime.event_bus.subscribe_to_all(metrics_handler.handle, kind=HandlerKind.EFFECT)
 
     alert_handler = get_alert_handler()
-    runtime.event_bus.subscribe_to_all(alert_handler.handle)
+    runtime.event_bus.subscribe_to_all(alert_handler.handle, kind=HandlerKind.EFFECT)
 
     audit_handler = get_audit_handler()
-    runtime.event_bus.subscribe_to_all(audit_handler.handle)
+    runtime.event_bus.subscribe_to_all(audit_handler.handle, kind=HandlerKind.EFFECT)
 
-    runtime.event_bus.subscribe_to_all(runtime.security_handler.handle)
+    runtime.event_bus.subscribe_to_all(runtime.security_handler.handle, kind=HandlerKind.EFFECT)
 
     # Populate the tool-projection registry from discovered tools on server start (#248)
+    #
+    # A projection, and the clearest case for one: the registry answers what
+    # tools exist. A replica that only learned about servers *it* started would
+    # serve a third of the catalogue, and which third would depend on where the
+    # load balancer sent each start request.
     tool_projection_handler = ToolProjectionPopulationHandler(repository=runtime.repository)
-    runtime.event_bus.subscribe(McpServerStarted, tool_projection_handler.handle)
+    runtime.event_bus.subscribe(McpServerStarted, tool_projection_handler.handle, kind=HandlerKind.PROJECTION)
 
     otlp_audit_exporter: IAuditExporter
     if os.getenv("OTEL_EXPORTER_OTLP_ENDPOINT"):
@@ -74,9 +85,10 @@ def init_event_handlers(runtime: "Runtime") -> None:
         audit_exporter=otlp_audit_exporter,
         cost_attributor=cost_attributor,
     )
-    runtime.event_bus.subscribe(ToolInvocationCompleted, otlp_audit_handler.handle)
-    runtime.event_bus.subscribe(ToolInvocationFailed, otlp_audit_handler.handle)
-    runtime.event_bus.subscribe(McpServerStateChanged, otlp_audit_handler.handle)
+    # Exports spans and audit records outward. One invocation, one export.
+    runtime.event_bus.subscribe(ToolInvocationCompleted, otlp_audit_handler.handle, kind=HandlerKind.EFFECT)
+    runtime.event_bus.subscribe(ToolInvocationFailed, otlp_audit_handler.handle, kind=HandlerKind.EFFECT)
+    runtime.event_bus.subscribe(McpServerStateChanged, otlp_audit_handler.handle, kind=HandlerKind.EFFECT)
 
     compliance_format = os.getenv("MCP_COMPLIANCE_FORMAT", "").lower()
     if compliance_format:
@@ -87,9 +99,11 @@ def init_event_handlers(runtime: "Runtime") -> None:
                 audit_exporter=compliance_exporter,
                 cost_attributor=cost_attributor,
             )
-            runtime.event_bus.subscribe(ToolInvocationCompleted, compliance_handler.handle)
-            runtime.event_bus.subscribe(ToolInvocationFailed, compliance_handler.handle)
-            runtime.event_bus.subscribe(McpServerStateChanged, compliance_handler.handle)
+            # The SIEM feed. The reason this taxonomy exists at all: without
+            # it, three replicas send three CEF records for one tool call.
+            runtime.event_bus.subscribe(ToolInvocationCompleted, compliance_handler.handle, kind=HandlerKind.EFFECT)
+            runtime.event_bus.subscribe(ToolInvocationFailed, compliance_handler.handle, kind=HandlerKind.EFFECT)
+            runtime.event_bus.subscribe(McpServerStateChanged, compliance_handler.handle, kind=HandlerKind.EFFECT)
             logger.info(
                 "compliance_exporter_registered",
                 format=compliance_format,
@@ -104,21 +118,35 @@ def init_event_handlers(runtime: "Runtime") -> None:
         # stay servable, and one suspended over HTTP would be invisible here.
         session_registry=get_session_suspension_registry(),
     )
-    runtime.event_bus.subscribe(DetectionRuleMatched, detection_enforcement_handler.handle)
+    # An effect: it suspends sessions, stops servers and emits
+    # `EnforcementActionTaken`. Classifying it as a projection would have every
+    # replica take the action and emit the event, which multiplies both.
+    #
+    # Known limit, and it is a security one: the suspension it applies is local,
+    # so the same session reaching a different replica is not suspended. Closing
+    # that means making the suspension *registry* shared rather than making this
+    # handler run everywhere -- #790, phase 3.2.
+    runtime.event_bus.subscribe(DetectionRuleMatched, detection_enforcement_handler.handle, kind=HandlerKind.EFFECT)
 
     # Cost attribution -- computes cost per tool invocation
     cost_handler = CostAttributionEventHandler(
         cost_attributor=cost_attributor,
         event_bus=runtime.event_bus,
     )
-    runtime.event_bus.subscribe(ToolInvocationCompleted, cost_handler.handle)
+    # Charges for work done here, and publishes `CostReportGenerated`. A
+    # handler that publishes cannot be a projection: the event it raises while
+    # applying a tailed event would itself be tailed, on every replica.
+    runtime.event_bus.subscribe(ToolInvocationCompleted, cost_handler.handle, kind=HandlerKind.EFFECT)
 
     # Risk scoring -- aggregates behavioral signals into risk scores
     risk_scorer = getattr(runtime, "risk_scorer", None) or NullRiskScorer()
     risk_handler = RiskScoringEventHandler(risk_scorer=risk_scorer)
-    runtime.event_bus.subscribe(BehavioralDeviationDetected, risk_handler.handle)
-    runtime.event_bus.subscribe(DetectionRuleMatched, risk_handler.handle)
-    runtime.event_bus.subscribe(CapabilityViolationDetected, risk_handler.handle)
+    # A projection: it records scored signals and publishes nothing. A risk
+    # score assembled from one replica's share of the signals is not a risk
+    # score, and the decisions taken on it would differ per replica.
+    runtime.event_bus.subscribe(BehavioralDeviationDetected, risk_handler.handle, kind=HandlerKind.PROJECTION)
+    runtime.event_bus.subscribe(DetectionRuleMatched, risk_handler.handle, kind=HandlerKind.PROJECTION)
+    runtime.event_bus.subscribe(CapabilityViolationDetected, risk_handler.handle, kind=HandlerKind.PROJECTION)
 
     logger.info(
         "event_handlers_registered",

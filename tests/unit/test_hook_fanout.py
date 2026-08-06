@@ -1,5 +1,6 @@
 """Unit tests for EventBus hook fan-out."""
 
+from mcp_hangar.domain.contracts.event_bus import HandlerKind
 from mcp_hangar.domain.events import DomainEvent
 from mcp_hangar.domain.value_objects.hook import Hook, HookPhase
 from mcp_hangar.infrastructure.event_bus import EventBus
@@ -87,7 +88,7 @@ class TestEventBusHookFanOut:
 
     def test_flat_handlers_still_work_alongside_hooks(self):
         flat_events: list[DomainEvent] = []
-        self.bus.subscribe(_StubEvent, lambda e: flat_events.append(e))
+        self.bus.subscribe(_StubEvent, lambda e: flat_events.append(e), kind=HandlerKind.EFFECT)
         sub = _RecordingSubscriber()
         self.bus.subscribe_hooks(sub)
 

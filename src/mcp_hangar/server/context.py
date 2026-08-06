@@ -7,6 +7,7 @@ on low-level modules, both depend on abstractions.
 
 from dataclasses import dataclass, field
 from typing import Any, Optional, Protocol, cast, runtime_checkable, TYPE_CHECKING
+from ..domain.contracts.event_bus import HandlerKind
 from ..protocol import set_task_relay_wired
 
 if TYPE_CHECKING:
@@ -50,8 +51,15 @@ class IEventBus(Protocol):
         """Publish an event."""
         ...
 
-    def subscribe_to_all(self, handler: Any) -> None:
-        """Subscribe to all events."""
+    def subscribe_to_all(self, handler: Any, *, kind: HandlerKind) -> None:
+        """Subscribe to all events.
+
+        `kind` is not optional here either. This Protocol is a structural
+        duplicate of what `infrastructure.EventBus` provides -- a second one of
+        those cost a `cast(Any, ...)` in `bootstrap/runtime.py` until it was
+        removed -- so letting it describe a looser signature than the real bus
+        would mean the type checker accepting a subscription the bus refuses.
+        """
         ...
 
 

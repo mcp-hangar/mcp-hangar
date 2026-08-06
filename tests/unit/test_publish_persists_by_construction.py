@@ -18,6 +18,7 @@ from typing import Any
 
 import pytest
 
+from mcp_hangar.domain.contracts.event_bus import HandlerKind
 from mcp_hangar.domain.events import (
     McpServerRegistered,
     McpServerStarted,
@@ -77,7 +78,7 @@ class TestDeliveryIsUnchanged:
         # too, so an event could easily have been handed over twice.
         bus, _store = bus_and_store
         seen: list = []
-        bus.subscribe_to_all(seen.append)
+        bus.subscribe_to_all(seen.append, kind=HandlerKind.EFFECT)
 
         bus.publish(McpServerStarted(mcp_server_id="probe", mode="subprocess", tools_count=0, startup_duration_ms=1.0))
 
@@ -95,7 +96,7 @@ class TestDeliveryIsUnchanged:
 
         bus = EventBus(BrokenStore())
         seen: list = []
-        bus.subscribe_to_all(seen.append)
+        bus.subscribe_to_all(seen.append, kind=HandlerKind.EFFECT)
 
         bus.publish(McpServerStarted(mcp_server_id="probe", mode="subprocess", tools_count=0, startup_duration_ms=1.0))
 
@@ -111,7 +112,7 @@ class TestEventsWithNoAggregateAreDeliveredOnly:
 
         bus, store = bus_and_store
         seen: list = []
-        bus.subscribe_to_all(seen.append)
+        bus.subscribe_to_all(seen.append, kind=HandlerKind.EFFECT)
 
         bus.publish(
             AuthenticationSucceeded(principal_id="ops", principal_type="user", auth_method="oidc", source_ip="10.0.0.1")
@@ -134,7 +135,7 @@ class TestRecoveryDoesNotRewriteHistory:
         before = len(_rows(store, "mcp_server:probe"))
 
         seen: list = []
-        bus.subscribe_to_all(seen.append)
+        bus.subscribe_to_all(seen.append, kind=HandlerKind.EFFECT)
         bus.dispatch_pending()
 
         assert len(_rows(store, "mcp_server:probe")) == before, "recovery must not re-append what it read"

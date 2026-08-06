@@ -21,6 +21,7 @@ from pathlib import Path
 
 import pytest
 
+from mcp_hangar.domain.contracts.event_bus import HandlerKind
 from mcp_hangar.domain.events import (
     DomainEvent,
     HealthCheckPassed,
@@ -537,7 +538,7 @@ class TestEventBusPipeline:
             received.append(event)
             original_handle(event)
 
-        bus.subscribe_to_all(tracking_handle)
+        bus.subscribe_to_all(tracking_handle, kind=HandlerKind.EFFECT)
 
         started_mcp_server.invoke_tool("add", {"a": 5, "b": 3})
         for event in started_mcp_server.collect_events():
@@ -552,7 +553,7 @@ class TestEventBusPipeline:
 
         bus = EventBus()
         metrics = MetricsEventHandler()
-        bus.subscribe_to_all(metrics.handle)
+        bus.subscribe_to_all(metrics.handle, kind=HandlerKind.EFFECT)
 
         started_mcp_server.invoke_tool("multiply", {"a": 6, "b": 7})
         for event in started_mcp_server.collect_events():
@@ -573,8 +574,8 @@ class TestEventBusPipeline:
         def broken_handler(_event: DomainEvent) -> None:
             raise RuntimeError("handler crash")
 
-        bus.subscribe_to_all(broken_handler)
-        bus.subscribe_to_all(lambda e: received_after.append(e))
+        bus.subscribe_to_all(broken_handler, kind=HandlerKind.EFFECT)
+        bus.subscribe_to_all(lambda e: received_after.append(e), kind=HandlerKind.EFFECT)
 
         started_mcp_server.invoke_tool("echo", {"message": "pipeline"})
         for event in started_mcp_server.collect_events():
@@ -590,8 +591,8 @@ class TestEventBusPipeline:
         metrics = MetricsEventHandler()
         log_received: list[DomainEvent] = []
 
-        bus.subscribe_to_all(metrics.handle)
-        bus.subscribe_to_all(lambda e: log_received.append(e))
+        bus.subscribe_to_all(metrics.handle, kind=HandlerKind.EFFECT)
+        bus.subscribe_to_all(lambda e: log_received.append(e), kind=HandlerKind.EFFECT)
 
         started_mcp_server.invoke_tool("add", {"a": 1, "b": 2})
         started_mcp_server.invoke_tool("subtract", {"a": 10, "b": 3})
@@ -637,7 +638,7 @@ class TestSecurityEventHandlerIntegration:
         sink = InMemorySecuritySink()
         handler = SecurityEventHandler(sink=sink)
         bus = EventBus()
-        bus.subscribe_to_all(handler.handle)
+        bus.subscribe_to_all(handler.handle, kind=HandlerKind.EFFECT)
 
         with pytest.raises(ToolInvocationError):
             started_mcp_server.invoke_tool("divide", {"a": 1, "b": 0})
@@ -660,7 +661,7 @@ class TestSecurityEventHandlerIntegration:
         sink = InMemorySecuritySink()
         handler = SecurityEventHandler(sink=sink)
         bus = EventBus()
-        bus.subscribe_to_all(handler.handle)
+        bus.subscribe_to_all(handler.handle, kind=HandlerKind.EFFECT)
 
         server = _make_server("sec-start")
         try:
@@ -684,7 +685,7 @@ class TestSecurityEventHandlerIntegration:
         sink = InMemorySecuritySink()
         handler = SecurityEventHandler(sink=sink, enable_anomaly_detection=True)
         bus = EventBus()
-        bus.subscribe_to_all(handler.handle)
+        bus.subscribe_to_all(handler.handle, kind=HandlerKind.EFFECT)
 
         for _ in range(3):
             with pytest.raises(ToolInvocationError):
@@ -702,7 +703,7 @@ class TestSecurityEventHandlerIntegration:
         sink = InMemorySecuritySink()
         handler = SecurityEventHandler(sink=sink)
         bus = EventBus()
-        bus.subscribe_to_all(handler.handle)
+        bus.subscribe_to_all(handler.handle, kind=HandlerKind.EFFECT)
 
         started_mcp_server.invoke_tool("add", {"a": 1, "b": 1})
         with pytest.raises(ToolInvocationError):
@@ -724,7 +725,7 @@ class TestMetricsHandlerIntegration:
 
         bus = EventBus()
         metrics = MetricsEventHandler()
-        bus.subscribe_to_all(metrics.handle)
+        bus.subscribe_to_all(metrics.handle, kind=HandlerKind.EFFECT)
 
         started_mcp_server.invoke_tool("add", {"a": 1, "b": 2})
         started_mcp_server.invoke_tool("multiply", {"a": 3, "b": 4})
@@ -746,7 +747,7 @@ class TestMetricsHandlerIntegration:
 
         bus = EventBus()
         metrics = MetricsEventHandler()
-        bus.subscribe_to_all(metrics.handle)
+        bus.subscribe_to_all(metrics.handle, kind=HandlerKind.EFFECT)
 
         for i in range(4):
             started_mcp_server.invoke_tool("add", {"a": i, "b": i})
@@ -766,7 +767,7 @@ class TestMetricsHandlerIntegration:
 
         bus = EventBus()
         metrics = MetricsEventHandler()
-        bus.subscribe_to_all(metrics.handle)
+        bus.subscribe_to_all(metrics.handle, kind=HandlerKind.EFFECT)
 
         for _ in range(5):
             started_mcp_server.invoke_tool("echo", {"message": "latency"})
@@ -786,7 +787,7 @@ class TestMetricsHandlerIntegration:
 
         bus = EventBus()
         metrics = MetricsEventHandler()
-        bus.subscribe_to_all(metrics.handle)
+        bus.subscribe_to_all(metrics.handle, kind=HandlerKind.EFFECT)
 
         started_mcp_server.health_check()
         started_mcp_server.health_check()
@@ -804,7 +805,7 @@ class TestMetricsHandlerIntegration:
 
         bus = EventBus()
         metrics = MetricsEventHandler()
-        bus.subscribe_to_all(metrics.handle)
+        bus.subscribe_to_all(metrics.handle, kind=HandlerKind.EFFECT)
 
         s1 = _make_server("metrics-s1")
         s2 = _make_server("metrics-s2")

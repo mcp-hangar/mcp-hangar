@@ -8,6 +8,7 @@ from dataclasses import dataclass, field
 from datetime import datetime, UTC
 
 
+from mcp_hangar.domain.contracts.event_bus import HandlerKind
 from mcp_hangar.domain.events import DomainEvent
 from mcp_hangar.infrastructure.event_bus import EventBus
 
@@ -46,7 +47,7 @@ def test_subscribe_to_all_then_publish_handler_fires_once():
     bus = make_bus()
     calls: list[DomainEvent] = []
 
-    bus.subscribe_to_all(calls.append)
+    bus.subscribe_to_all(calls.append, kind=HandlerKind.EFFECT)
     bus.publish(EventData(message="hello"))
 
     assert len(calls) == 1
@@ -58,7 +59,7 @@ def test_unsubscribe_from_all_prevents_handler_from_firing():
     bus = make_bus()
     calls: list[DomainEvent] = []
 
-    bus.subscribe_to_all(calls.append)
+    bus.subscribe_to_all(calls.append, kind=HandlerKind.EFFECT)
     bus.unsubscribe_from_all(calls.append)
     bus.publish(EventData(message="ignored"))
 
@@ -80,8 +81,8 @@ def test_unsubscribe_one_of_two_handlers_only_remaining_fires():
     calls_a: list[DomainEvent] = []
     calls_b: list[DomainEvent] = []
 
-    bus.subscribe_to_all(calls_a.append)
-    bus.subscribe_to_all(calls_b.append)
+    bus.subscribe_to_all(calls_a.append, kind=HandlerKind.EFFECT)
+    bus.subscribe_to_all(calls_b.append, kind=HandlerKind.EFFECT)
     bus.unsubscribe_from_all(calls_a.append)
     bus.publish(EventData(message="only_b"))
 
@@ -94,9 +95,9 @@ def test_resubscribe_after_unsubscribe_works():
     bus = make_bus()
     calls: list[DomainEvent] = []
 
-    bus.subscribe_to_all(calls.append)
+    bus.subscribe_to_all(calls.append, kind=HandlerKind.EFFECT)
     bus.unsubscribe_from_all(calls.append)
-    bus.subscribe_to_all(calls.append)
+    bus.subscribe_to_all(calls.append, kind=HandlerKind.EFFECT)
     bus.publish(EventData(message="once"))
 
     assert len(calls) == 1

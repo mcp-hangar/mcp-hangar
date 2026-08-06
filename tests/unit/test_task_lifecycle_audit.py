@@ -6,6 +6,7 @@ published on the event bus, and that the full trail is reconstructable per
 task_id.
 """
 
+from mcp_hangar.domain.contracts.event_bus import HandlerKind
 from mcp_hangar.application.event_handlers.audit_handler import (
     AuditEventHandler,
     InMemoryAuditStore,
@@ -103,7 +104,7 @@ class TestTaskLifecycleAuditTrail:
     def test_all_five_events_recorded(self):
         handler = self._handler()
         bus = EventBus()
-        bus.subscribe_to_all(handler.handle)
+        bus.subscribe_to_all(handler.handle, kind=HandlerKind.EFFECT)
 
         self._emit_full_lifecycle(bus, "task-42", "tenant-a")
 
@@ -120,7 +121,7 @@ class TestTaskLifecycleAuditTrail:
     def test_records_carry_task_and_tenant_keys(self):
         handler = self._handler()
         bus = EventBus()
-        bus.subscribe_to_all(handler.handle)
+        bus.subscribe_to_all(handler.handle, kind=HandlerKind.EFFECT)
 
         self._emit_full_lifecycle(bus, "task-42", "tenant-a")
 
@@ -133,7 +134,7 @@ class TestTaskLifecycleAuditTrail:
     def test_full_trail_reconstructable_in_order(self):
         handler = self._handler()
         bus = EventBus()
-        bus.subscribe_to_all(handler.handle)
+        bus.subscribe_to_all(handler.handle, kind=HandlerKind.EFFECT)
 
         self._emit_full_lifecycle(bus, "task-42", "tenant-a")
 
@@ -151,7 +152,7 @@ class TestTaskLifecycleAuditTrail:
     def test_trail_isolated_per_task_id(self):
         handler = self._handler()
         bus = EventBus()
-        bus.subscribe_to_all(handler.handle)
+        bus.subscribe_to_all(handler.handle, kind=HandlerKind.EFFECT)
 
         self._emit_full_lifecycle(bus, "task-1", "tenant-a")
         self._emit_full_lifecycle(bus, "task-2", "tenant-b")
