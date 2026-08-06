@@ -264,21 +264,22 @@ def bootstrap(
 
     # Initialize runtime and context. The rate_limit section (config > env > default)
     # is applied when the runtime singleton is first constructed.
-    runtime = get_runtime(rate_limit=full_config.get("rate_limit"))
-    init_context(runtime)
-
-    # Initialize observability (tracing, Langfuse) early
-    _, observability_adapter = init_observability(full_config)
-
-    # The one storage decision, before anything asks for storage. Returns None
-    # when `persistence.backend` is absent, in which case every subsystem below
-    # keeps configuring its own as it did before -- 2.4.0 is released, and this
-    # must not change what an existing configuration does.
+    # The storage decision comes first, because `Runtime` is frozen once built
+    # and its config/audit repositories are part of it. Selecting afterwards
+    # would mean either mutating a frozen object or leaving those two on a
+    # different backend than everything else.
     from .composition import set_persistence_backend
     from .persistence import select_backend
 
     _backend = select_backend(full_config)
     set_persistence_backend(_backend)
+
+    runtime = get_runtime(rate_limit=full_config.get("rate_limit"), persistence_backend=_backend)
+    init_context(runtime)
+
+    # Initialize observability (tracing, Langfuse) early
+    _, observability_adapter = init_observability(full_config)
+
     if _backend is not None:
         # The metric history store is reached through a module-level accessor
         # rather than passed around, so a selected backend has to install it
