@@ -22,18 +22,24 @@ def bootstrap_approvals(
     database: Any,
     event_bus: Any,
     config: dict | None = None,
+    repository: Any = None,
 ) -> ApprovalGateService:
     """Wire and return an ApprovalGateService instance.
 
     Args:
-        database: Database instance for persistence.
+        database: Database instance for persistence. Ignored when `repository`
+            is supplied.
         event_bus: Event bus for domain event publishing.
         config: Optional config dict with mcp_hangar.approvals settings.
+        repository: The approval repository from the selected storage backend.
+            None means build the SQLite one from `database`, which is the
+            compatibility path for a deployment that selected no backend.
 
     Returns:
         Configured ApprovalGateService.
     """
-    repository = SqliteApprovalRepository(database)
+    if repository is None:
+        repository = SqliteApprovalRepository(database)
     hold_registry = ApprovalHoldRegistry()
     delivery = _build_delivery(config)
 

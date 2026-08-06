@@ -33,6 +33,7 @@ def _create_storage_backends(
     event_publisher: Callable | None = None,
     event_store=None,
     event_bus=None,
+    persistence_backend: Any = None,
 ) -> tuple[IApiKeyStore, IRoleStore, Any]:
     """Create storage backends based on configuration.
 
@@ -42,6 +43,12 @@ def _create_storage_backends(
             For CQRS integration, pass EventBus.publish.
         event_store: Optional event store for event_sourcing driver.
         event_bus: Optional event bus for event_sourcing driver.
+        persistence_backend: The one storage backend, when `persistence.backend`
+            selected one. It supplies all three stores together, which is the
+            point: this function used to pick them per driver and could return
+            `None` for the tool-access policy store, silently disabling policy
+            management and its startup replay. A backend cannot do that -- it is
+            refused unless it serves every concern.
 
     Returns:
         Tuple of (api_key_store, role_store, tap_store).
@@ -49,6 +56,14 @@ def _create_storage_backends(
     Raises:
         ValueError: If unknown storage driver is specified.
     """
+    if persistence_backend is not None:
+        logger.info("auth_storage_from_persistence_backend")
+        return (
+            persistence_backend.api_key_store(),
+            persistence_backend.role_store(),
+            persistence_backend.tool_access_policy_store(),
+        )
+
     driver = config.storage.driver.lower()
 
     if driver == "memory":
@@ -287,6 +302,7 @@ def bootstrap_auth(
     event_publisher: Callable | None = None,
     event_store=None,
     event_bus=None,
+    persistence_backend: Any = None,
 ) -> AuthComponents:
     """Bootstrap authentication and authorization components.
 
@@ -297,6 +313,7 @@ def bootstrap_auth(
         event_publisher: Optional function to publish domain events.
         event_store: Optional event store for event_sourcing driver.
         event_bus: Optional event bus for event_sourcing driver.
+        persistence_backend: The selected storage backend, when there is one.
 
     Returns:
         AuthComponents with initialized middleware and stores.
@@ -312,6 +329,7 @@ def bootstrap_auth(
         event_publisher=event_publisher,
         event_store=event_store,
         event_bus=event_bus,
+        persistence_backend=persistence_backend,
     )
 
     authenticators: list[IAuthenticator] = []

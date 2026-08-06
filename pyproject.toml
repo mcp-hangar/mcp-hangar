@@ -334,7 +334,6 @@ unreferenced = [
   "infrastructure/persistence/database.py::initialize_database",
   "infrastructure/persistence/database.py::set_database",
   "infrastructure/persistence/database_common.py::create_connection_factory",
-  "infrastructure/persistence/metrics_history_store.py::set_metrics_history_store",
   "integrations/test_langfuse.py::TestLangfuseAdapter",
   "integrations/test_langfuse.py::TestLangfuseConfig",
   "integrations/test_langfuse.py::TestLangfuseObservabilityAdapter",
