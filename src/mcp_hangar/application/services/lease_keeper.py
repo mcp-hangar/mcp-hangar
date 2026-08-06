@@ -38,6 +38,7 @@ from collections.abc import Callable
 import threading
 import time
 
+from mcp_hangar.application.services.log_pacing import RepeatedFailure
 from mcp_hangar.domain.contracts.management_lease import IManagementLease, Lease
 from mcp_hangar.logging_config import get_logger
 
@@ -112,6 +113,7 @@ class ManagementLeaseKeeper:
         self._running = False
         self._wake = threading.Event()
         self._thread: threading.Thread | None = None
+        self._acquire_failures = RepeatedFailure()
 
     @property
     def lease(self) -> Lease | None:
@@ -184,9 +186,20 @@ class ManagementLeaseKeeper:
             lease = self._store.acquire(self._holder, self._ttl_s)
         except Exception as error:  # noqa: BLE001 -- fault-barrier: an unreachable store means "not the manager", not a crash
             # Nothing to give up: an instance that never held the lease and
-            # cannot reach the store simply is not managing.
-            logger.debug("management_lease_acquire_failed", error=str(error))
+            # cannot reach the store simply is not managing. But it must say so.
+            # This was a `debug` line, which at a production log level is
+            # silence -- so a fleet with nothing converging it looked exactly
+            # like a fleet with nothing to do.
+            if self._acquire_failures.failed():
+                logger.warning(
+                    "management_lease_unreachable",
+                    error=str(error),
+                    attempts=self._acquire_failures.run_length,
+                    detail="this instance is not managing the fleet and cannot find out whether anyone is",
+                )
             return
+        if self._acquire_failures.recovered():
+            logger.info("management_lease_reachable_again")
         if lease is None:
             return
         with self._guard:
