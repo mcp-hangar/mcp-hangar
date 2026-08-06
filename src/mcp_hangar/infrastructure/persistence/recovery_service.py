@@ -17,6 +17,7 @@ from ...domain.contracts.persistence import (
 )
 from ...domain.model import McpServer
 from ...domain.repository import IMcpServerRepository
+from ...domain.services.fleet_snapshot import snapshot_of
 from ...logging_config import get_logger
 from ...domain.contracts.event_store import IEventStore
 from ...stream_ids import MCP_SERVER, stream_id_for
@@ -295,26 +296,10 @@ class RecoveryService:
         Args:
             mcp_server: McpServer to save configuration for
         """
-        config = McpServerConfigSnapshot(
-            mcp_server_id=mcp_server.mcp_server_id,
-            mode=mcp_server.mode_str,
-            command=mcp_server._command,
-            image=mcp_server._image,
-            endpoint=mcp_server._endpoint,
-            env=mcp_server._env,
-            idle_ttl_s=mcp_server._idle_ttl.seconds,
-            health_check_interval_s=mcp_server._health_check_interval.seconds,
-            max_consecutive_failures=mcp_server._health.max_consecutive_failures,
-            description=mcp_server.description,
-            volumes=mcp_server._volumes,
-            build=mcp_server._build,
-            resources=mcp_server._resources,
-            network=mcp_server._network,
-            read_only=mcp_server._read_only,
-            user=mcp_server._user,
-            tools=([t.to_dict() for t in mcp_server.tools] if mcp_server._tools_predefined else None),
-            enabled=True,
-        )
+        # Shared with the registration path rather than built twice. The two
+        # copies would drift the first time a field was added, and the drift
+        # only shows up as a field that is quietly absent after a restart.
+        config = snapshot_of(mcp_server)
 
         await self._config_repo.save(config)
 

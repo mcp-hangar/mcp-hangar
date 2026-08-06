@@ -11,10 +11,11 @@ from __future__ import annotations
 
 from dataclasses import dataclass
 import os
-from typing import Any, cast, Protocol, runtime_checkable
+from typing import Any, Protocol, runtime_checkable
 
 from ..application.event_handlers import get_security_handler
 from ..application.ports.observability import NullObservabilityAdapter, ObservabilityPort
+from ..domain.contracts.persistence import IAuditRepository, IMcpServerConfigRepository
 from ..domain.repository import InMemoryMcpServerRepository, IMcpServerRepository
 from ..domain.security.input_validator import InputValidator
 from ..domain.security.rate_limiter import get_rate_limiter, InMemoryRateLimiter, RateLimitConfig
@@ -114,30 +115,14 @@ class ISecurityHandler(Protocol):
         ...
 
 
-@runtime_checkable
-class IConfigRepository(Protocol):
-    """Interface for mcp_server config repository."""
-
-    async def save(self, config: Any) -> None:
-        """Save a configuration."""
-        ...
-
-    async def get(self, mcp_server_id: str) -> Any | None:
-        """Get configuration by mcp_server ID."""
-        ...
-
-    async def get_all(self) -> list[Any]:
-        """Get all configurations."""
-        ...
-
-
-@runtime_checkable
-class IAuditRepository(Protocol):
-    """Interface for audit repository."""
-
-    async def append(self, entry: Any) -> None:
-        """Append an audit entry."""
-        ...
+# The config and audit repositories are typed by the canonical contracts in
+# `domain.contracts.persistence`. This module used to declare its own narrower
+# Protocols for them, which is why the `RecoveryService` call below needed a
+# `cast(Any, ...)`: two structural protocols for one concern, and the local pair
+# was missing `delete` and `exists`. Anything that needed those -- the fleet
+# writer does -- was rejected by the type checker while working perfectly at
+# runtime, which is the sort of disagreement that gets resolved with a cast and
+# then stops being noticed.
 
 
 @dataclass(frozen=True)
@@ -196,7 +181,7 @@ class Runtime:
     # Persistence components (optional)
     persistence_config: PersistenceConfig | None = None
     database: Database | None = None
-    config_repository: IConfigRepository | None = None
+    config_repository: IMcpServerConfigRepository | None = None
     audit_repository: IAuditRepository | None = None
     recovery_service: RecoveryService | None = None
 
@@ -303,7 +288,7 @@ def create_runtime(
         )
 
     database: Database | None = None
-    config_repository: IConfigRepository | None = None
+    config_repository: IMcpServerConfigRepository | None = None
     audit_repository: IAuditRepository | None = None
     recovery_service: RecoveryService | None = None
 
@@ -318,12 +303,8 @@ def create_runtime(
         recovery_service = RecoveryService(
             database=None,
             mcp_server_repository=repo,
-            # Cast because this module declares its own `IConfigRepository` and
-            # `IAuditRepository` Protocols alongside the canonical ones in
-            # `domain.contracts.persistence`. Two structural protocols for one
-            # concern is worth collapsing, and is not this change's job.
-            config_repository=cast(Any, config_repository),
-            audit_repository=cast(Any, audit_repository),
+            config_repository=config_repository,
+            audit_repository=audit_repository,
             # The same store the bus appends to; recovery replays what it wrote.
             event_store=eb.event_store,
         )
