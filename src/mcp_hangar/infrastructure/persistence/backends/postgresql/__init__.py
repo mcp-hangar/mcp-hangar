@@ -166,6 +166,14 @@ class PostgresqlBackend:
 
         return self._cached("metrics_history_store", build)
 
+    def management_lease(self) -> Any:
+        def build() -> Any:
+            from .management_lease import PostgresManagementLease
+
+            return PostgresManagementLease(self._connections())
+
+        return self._cached("management_lease", build)
+
     def close(self) -> None:
         """Release the pool. Safe to call when nothing was opened."""
         self._cache.clear()

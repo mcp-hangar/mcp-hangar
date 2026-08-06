@@ -101,6 +101,10 @@ class TestABackendIsCompleteOrItIsRefused:
             "role_store",
             "tool_access_policy_store",
             "metrics_history_store",
+            # Coordination is persisted state like any other: which instance may
+            # manage the fleet is a row, and a backend that cannot hold it
+            # cannot run more than one gateway.
+            "management_lease",
         }
 
 
