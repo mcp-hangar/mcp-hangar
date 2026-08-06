@@ -65,6 +65,10 @@ class Database:
         self._lock = asyncio.Lock()
         self._initialized = False
         self._migrations_applied = False
+        # Set while migrations are running. They open connections themselves,
+        # and without this the ensure-on-connect above would recurse into the
+        # initialization it is already inside.
+        self._initializing = False
 
     @property
     def config(self) -> DatabaseConfig:
@@ -73,7 +77,21 @@ class Database:
 
     @asynccontextmanager
     async def connection(self) -> AsyncIterator[aiosqlite.Connection]:
-        """Get a database connection.
+        """Get a database connection, creating the schema if it is not there.
+
+        The schema used to arrive only from an explicit `initialize()`, whose
+        one caller -- `bootstrap.runtime.initialize_runtime` -- has no callers
+        of its own. So on every path that reached a repository without going
+        through that dead function, the tables did not exist. It stayed
+        invisible for as long as nothing wrote: the fleet's own repository had
+        no production writer until #794, and the moment it got one, registering
+        a server on `persistence.backend: sqlite` failed with
+        `no such table: mcp_server_configs`.
+
+        Making the schema a precondition of *having a connection* removes the
+        ordering question rather than answering it. `initialize()` is already
+        idempotent and guarded by a lock, so this costs a boolean check per
+        connection after the first.
 
         Yields:
             Async SQLite connection
@@ -82,6 +100,8 @@ class Database:
             async with db.connection() as conn:
                 await conn.execute("SELECT * FROM mcp_servers")
         """
+        if not self._initialized and not self._initializing:
+            await self.initialize()
         conn = await aiosqlite.connect(
             self._config.path,
             timeout=self._config.timeout,
@@ -130,7 +150,11 @@ class Database:
             if self._initialized:
                 return
 
-            await self._apply_migrations()
+            self._initializing = True
+            try:
+                await self._apply_migrations()
+            finally:
+                self._initializing = False
             self._initialized = True
             logger.info(f"Database initialized: {self._config.path}")
 

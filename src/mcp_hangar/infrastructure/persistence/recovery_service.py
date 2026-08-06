@@ -118,6 +118,15 @@ class RecoveryService:
 
             for config in configs:
                 try:
+                    if self._mcp_server_repo.exists(config.mcp_server_id):
+                        # config.yaml is the operator's live intent; this
+                        # snapshot is a record of what was true last time. An
+                        # operator who edits the file and restarts must not have
+                        # their edit reverted by a row.
+                        result.skipped_count += 1
+                        logger.debug(f"Recovery: {config.mcp_server_id} already declared in configuration")
+                        continue
+
                     # Create McpServer aggregate from config
                     mcp_server = self._create_mcp_server_from_config(config)
 
