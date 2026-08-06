@@ -26,6 +26,7 @@ from .api.middleware import create_auth_enforced_app
 from .bootstrap import ApplicationContext, bootstrap
 from .cli.cli_compat import CLIConfig
 from .config import load_config_from_file
+from .bootstrap.coordination import get_lease_keeper
 from .state import get_discovery_orchestrator, get_runtime_mcp_servers
 
 logger = get_logger(__name__)
@@ -130,6 +131,14 @@ class ServerLifecycle:
 
         self._running = True
         logger.info("server_lifecycle_start")
+
+        # First: everything below asks whether this instance holds the lease,
+        # and a keeper that has not started yet answers no. Starting it here
+        # rather than in bootstrap means a process that is assembled but never
+        # run never claims to be the manager.
+        keeper = get_lease_keeper()
+        if keeper is not None:
+            keeper.start()
 
         # Start background workers
         for worker in self._context.background_workers:
@@ -431,6 +440,16 @@ class ServerLifecycle:
         self._cleanup_runtime_mcp_servers()
 
         self._stop_discovery()
+
+        # After the loops it gates, and before the process ends: releasing the
+        # lease is what turns "a peer takes over in a TTL" into "a peer takes
+        # over in seconds". Releasing it while discovery was still winding down
+        # would let a peer start converging against a fleet this instance is
+        # still touching.
+        keeper = get_lease_keeper()
+        if keeper is not None:
+            keeper.stop()
+
         self._context.shutdown()
         self._running = False
 

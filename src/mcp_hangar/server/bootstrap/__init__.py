@@ -47,6 +47,7 @@ from ..state import get_runtime, GROUPS
 
 from .components import ServerComponents, get_auth_compat_exports, load_components
 
+from .coordination import init_lease_keeper
 from .cqrs import init_cqrs, init_auth_cqrs, init_saga, save_group_circuit_breakers
 from .discovery import _auto_add_volumes, create_discovery_orchestrator
 from .event_handlers import init_event_handlers
@@ -409,6 +410,11 @@ def bootstrap(
 
     # Wire log buffers to mcp_servers after configuration populates the shared repository.
     init_log_buffers(runtime.repository.get_all())
+
+    # Before the workers and the orchestrator, which ask it whether they may
+    # run. Created here and started by lifecycle: holding the lease before the
+    # loops it gates exist would mean being the manager with nothing to manage.
+    init_lease_keeper(full_config)
 
     # Create background workers (not started)
     workers: list[WorkerLike] = create_background_workers(config=full_config)

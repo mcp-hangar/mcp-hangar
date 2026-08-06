@@ -5,6 +5,7 @@ from typing import Any, cast
 from ...gc import BackgroundWorker, MetricsSnapshotWorker
 from ...logging_config import get_logger
 from ..state import get_runtime
+from .coordination import may_manage
 
 logger = get_logger(__name__)
 
@@ -45,6 +46,11 @@ def create_background_workers(
 
     metrics_worker = MetricsSnapshotWorker(
         interval_s=METRICS_SNAPSHOT_INTERVAL_SECONDS,
+        # The only one of the three that writes to shared storage. GC and health
+        # checks act on *this* replica's own processes and connections, so
+        # gating them would leak idle subprocesses on every follower and leave
+        # followers unable to tell that an upstream had died.
+        may_manage=may_manage,
     )
 
     workers: list[Any] = [gc_worker, health_worker, metrics_worker]

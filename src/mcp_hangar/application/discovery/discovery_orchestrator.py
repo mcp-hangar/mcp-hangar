@@ -120,6 +120,7 @@ class DiscoveryOrchestrator:
         static_mcp_servers: set[str] | None = None,
         input_validator: InputValidator | None = None,
         event_bus: IEventBus | None = None,
+        may_manage: Callable[[], bool] | None = None,
     ):
         """Initialize discovery orchestrator.
 
@@ -130,10 +131,16 @@ class DiscoveryOrchestrator:
             event_bus: Where discovery's own events go. Optional because the
                 orchestrator runs in tests without one; when it is absent the
                 events are simply not emitted, and nothing else changes.
+            may_manage: Whether this instance currently holds the management
+                lease. Asked once per cycle rather than once at startup: a
+                lease lost mid-life has to stop the next cycle, not the next
+                process. Absent means yes, which is a standalone gateway and
+                every existing deployment.
         """
         self.config = config or DiscoveryConfig()
         self._input_validator = input_validator
         self._event_bus = event_bus
+        self._may_manage = may_manage or (lambda: True)
 
         # Core components
         self._conflict_resolver = ConflictResolver(static_mcp_servers)
@@ -146,6 +153,10 @@ class DiscoveryOrchestrator:
             default_ttl=self.config.default_ttl_s,
             check_interval=self.config.check_interval_s,
             drain_timeout=self.config.drain_timeout_s,
+            # TTL expiry *deregisters* servers. Of everything discovery does it
+            # is the most destructive, and the one a follower running on a stale
+            # view would get most wrong.
+            may_manage=lambda: self._may_manage(),
         )
 
         # Callbacks for registry integration
@@ -255,14 +266,26 @@ class DiscoveryOrchestrator:
         logger.info("Discovery orchestrator stopped")
 
     async def _discovery_loop(self) -> None:
-        """Main discovery loop."""
+        """Main discovery loop.
+
+        Every cycle asks whether this instance may manage. Discovery registers
+        and deregisters servers in storage every replica shares, so three of
+        these running at once is three sources of truth arguing -- a server
+        registered by one and deregistered by another, in the same second,
+        forever.
+
+        A follower keeps looping and keeps asking. It costs a comparison per
+        interval and it means the moment this instance takes the lease it starts
+        converging, without a restart.
+        """
         # Initial discovery
-        await self.run_discovery_cycle()
+        if self._may_manage():
+            await self.run_discovery_cycle()
 
         while self._running:
             try:
                 await asyncio.sleep(self.config.refresh_interval_s)
-                if self._running:
+                if self._running and self._may_manage():
                     await self.run_discovery_cycle()
             except asyncio.CancelledError:
                 break

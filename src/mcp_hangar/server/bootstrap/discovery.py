@@ -12,6 +12,7 @@ from ...infrastructure.discovery.registry import UnknownDiscoverySourceError, cr
 from ...application.commands.crud_commands import CreateMcpServerCommand
 from ...logging_config import get_logger
 from ..state import get_runtime, set_discovery_orchestrator
+from .coordination import may_manage
 
 logger = get_logger(__name__)
 
@@ -44,6 +45,9 @@ def create_discovery_orchestrator(config: dict[str, Any]) -> DiscoveryOrchestrat
         # vocabulary with no emitter (#762). Resolved lazily -- this runs during
         # bootstrap, and the runtime is not assembled yet at import time.
         event_bus=_runtime_event_bus(),
+        # Discovery registers and deregisters servers in storage every replica
+        # shares. Asked per cycle, so a lease lost mid-life stops the next one.
+        may_manage=may_manage,
     )
 
     sources_config = discovery_config.get("sources", [])
