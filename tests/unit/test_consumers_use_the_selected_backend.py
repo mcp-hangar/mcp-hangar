@@ -159,3 +159,59 @@ class TestTheEventLogAndItsMarkComeFromTheBackend:
 
         assert installed["store"] == "from-backend:event_store"
         assert installed["checkpoint"] == "from-backend:dispatch_checkpoint"
+
+
+class TestTheConfigAndAuditRepositoriesComeFromTheBackend:
+    def test_both_are_taken_from_it(self, selected) -> None:
+        # These are built during Runtime construction, which is why the backend
+        # has to be selected before the runtime is asked for rather than after.
+        from mcp_hangar.bootstrap.runtime import create_runtime
+
+        runtime = create_runtime(persistence_backend=selected)
+
+        assert runtime.config_repository == "from-backend:config_repository"
+        assert runtime.audit_repository == "from-backend:audit_repository"
+
+    def test_no_sqlite_database_handle_is_opened(self, selected) -> None:
+        # The handle exists to create the SQLite schema. A backend's adapters
+        # create their own, so opening one would be a second database beside the
+        # selected one -- the split this whole change removes.
+        from mcp_hangar.bootstrap.runtime import create_runtime
+
+        runtime = create_runtime(persistence_backend=selected)
+
+        assert runtime.database is None
+
+    def test_recovery_still_runs(self, selected) -> None:
+        # Recovery replays configurations into the fleet on startup. Losing it
+        # while moving repositories would be a silent regression: the gateway
+        # would start empty and look fine.
+        from mcp_hangar.bootstrap.runtime import create_runtime
+
+        runtime = create_runtime(persistence_backend=selected)
+
+        assert runtime.recovery_service is not None
+        assert runtime.persistence_config is not None and runtime.persistence_config.enabled
+
+    def test_without_a_backend_the_previous_shape_is_unchanged(self) -> None:
+        from mcp_hangar.bootstrap.runtime import create_runtime
+
+        runtime = create_runtime()
+
+        assert type(runtime.config_repository).__name__ == "InMemoryMcpServerConfigRepository"
+        assert runtime.database is None
+
+    def test_the_runtime_is_still_frozen(self, selected) -> None:
+        # It is frozen on purpose: assembled once, not written to afterwards.
+        # An earlier version of this work assigned the backend onto it and broke
+        # bootstrap for every configuration.
+        import dataclasses
+
+        import pytest as _pytest
+
+        from mcp_hangar.bootstrap.runtime import create_runtime
+
+        runtime = create_runtime(persistence_backend=selected)
+
+        with _pytest.raises(dataclasses.FrozenInstanceError):
+            runtime.config_repository = None  # type: ignore[misc]

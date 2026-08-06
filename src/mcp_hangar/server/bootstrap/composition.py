@@ -58,19 +58,26 @@ _discovery_orchestrator: DiscoveryOrchestrator | None = None
 _persistence_backend: Any = None
 
 
-def get_runtime(rate_limit: dict[str, Any] | None = None) -> Runtime:
+def get_runtime(
+    rate_limit: dict[str, Any] | None = None,
+    persistence_backend: Any = None,
+) -> Runtime:
     """Get the lazily initialized runtime singleton.
 
     Args:
         rate_limit: Optional ``rate_limit`` config section forwarded to
             :func:`create_runtime` on first construction. Only applied when the
             singleton is created; subsequent calls return the existing runtime.
+        persistence_backend: The selected storage backend, forwarded the same
+            way. It has to arrive on the first call, because the runtime is
+            frozen once built -- which is why bootstrap selects the backend
+            before it asks for the runtime rather than after.
     """
     global _runtime
     if _runtime is None:
         with _runtime_lock:
             if _runtime is None:
-                _runtime = create_runtime(rate_limit=rate_limit)
+                _runtime = create_runtime(rate_limit=rate_limit, persistence_backend=persistence_backend)
     return _runtime
 
 

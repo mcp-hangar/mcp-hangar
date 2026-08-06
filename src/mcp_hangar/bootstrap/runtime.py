@@ -11,7 +11,7 @@ from __future__ import annotations
 
 from dataclasses import dataclass
 import os
-from typing import Any, Protocol, runtime_checkable
+from typing import Any, cast, Protocol, runtime_checkable
 
 from ..application.event_handlers import get_security_handler
 from ..application.ports.observability import NullObservabilityAdapter, ObservabilityPort
@@ -255,6 +255,7 @@ def create_runtime(
     observability_config: ObservabilityConfig | None = None,
     env: dict[str, str] | None = None,
     rate_limit: dict[str, Any] | None = None,
+    persistence_backend: Any = None,
 ) -> Runtime:
     """Create runtime dependencies explicitly.
 
@@ -306,7 +307,27 @@ def create_runtime(
     audit_repository: IAuditRepository | None = None
     recovery_service: RecoveryService | None = None
 
-    if persistence_config and persistence_config.enabled:
+    if persistence_backend is not None:
+        # The selected backend supplies these, like every other persisted
+        # concern. No `Database` is built: that handle exists to create the
+        # SQLite schema, and a backend's adapters create their own.
+        config_repository = persistence_backend.config_repository()
+        audit_repository = persistence_backend.audit_repository()
+        if persistence_config is None:
+            persistence_config = PersistenceConfig(enabled=True)
+        recovery_service = RecoveryService(
+            database=None,
+            mcp_server_repository=repo,
+            # Cast because this module declares its own `IConfigRepository` and
+            # `IAuditRepository` Protocols alongside the canonical ones in
+            # `domain.contracts.persistence`. Two structural protocols for one
+            # concern is worth collapsing, and is not this change's job.
+            config_repository=cast(Any, config_repository),
+            audit_repository=cast(Any, audit_repository),
+            # The same store the bus appends to; recovery replays what it wrote.
+            event_store=eb.event_store,
+        )
+    elif persistence_config and persistence_config.enabled:
         db_config = DatabaseConfig(
             path=persistence_config.database_path,
             enable_wal=persistence_config.enable_wal,

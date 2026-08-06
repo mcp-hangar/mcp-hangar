@@ -6,9 +6,15 @@ restoring system state after restart.
 
 from dataclasses import dataclass, field
 from datetime import datetime, UTC
-from typing import Any
+from typing import cast, Any
 
-from ...domain.contracts.persistence import AuditAction, AuditEntry, McpServerConfigSnapshot
+from ...domain.contracts.persistence import (
+    AuditAction,
+    AuditEntry,
+    IAuditRepository,
+    IMcpServerConfigRepository,
+    McpServerConfigSnapshot,
+)
 from ...domain.model import McpServer
 from ...domain.repository import IMcpServerRepository
 from ...logging_config import get_logger
@@ -45,17 +51,19 @@ class RecoveryService:
 
     def __init__(
         self,
-        database: Database,
+        database: Database | None,
         mcp_server_repository: IMcpServerRepository,
-        config_repository: SQLiteMcpServerConfigRepository | None = None,
-        audit_repository: SQLiteAuditRepository | None = None,
+        config_repository: "IMcpServerConfigRepository | None" = None,
+        audit_repository: "IAuditRepository | None" = None,
         auto_start: bool = False,
         event_store: "IEventStore | None" = None,
     ):
         """Initialize recovery service.
 
         Args:
-            database: Database instance
+            database: Database instance, or None when the storage backend
+                supplies the repositories -- its adapters create their own
+                schema, so there is nothing left for this to initialize
             mcp_server_repository: Repository for registering recovered mcp_servers
             config_repository: Optional config repository (created if not provided)
             audit_repository: Optional audit repository for logging recovery
@@ -64,10 +72,21 @@ class RecoveryService:
                 aggregate replays its own stream so lifecycle state survives the
                 restart instead of every server coming back COLD.
         """
+        if database is None and (config_repository is None or audit_repository is None):
+            # Building SQLite repositories from a database that is not there is
+            # the shape this guard exists to refuse. A caller with no database
+            # is a caller whose storage backend supplied the repositories, so
+            # both must arrive; missing one is a wiring mistake, and finding out
+            # at the first recovery is finding out too late.
+            raise ValueError(
+                "RecoveryService needs either a database to build its repositories from, "
+                "or both repositories supplied by the selected storage backend"
+            )
+
         self._db = database
         self._mcp_server_repo = mcp_server_repository
-        self._config_repo = config_repository or SQLiteMcpServerConfigRepository(database)
-        self._audit_repo = audit_repository or SQLiteAuditRepository(database)
+        self._config_repo = config_repository or SQLiteMcpServerConfigRepository(cast("Database", database))
+        self._audit_repo = audit_repository or SQLiteAuditRepository(cast("Database", database))
         self._auto_start = auto_start
         self._event_store = event_store
         self._last_recovery: RecoveryResult | None = None
@@ -85,8 +104,11 @@ class RecoveryService:
         start_time = datetime.now(UTC)
 
         try:
-            # Ensure database is initialized
-            await self._db.initialize()
+            # Ensure database is initialized. None when a storage backend
+            # supplied the repositories: they initialize themselves, and there
+            # is no shared handle to prepare.
+            if self._db is not None:
+                await self._db.initialize()
 
             # Load all enabled configurations
             configs = await self._config_repo.get_all()
