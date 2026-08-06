@@ -9,6 +9,7 @@ from ....domain.events import DomainEvent
 from starlette.websockets import WebSocket, WebSocketDisconnect
 
 from ....infrastructure.event_bus import get_event_bus
+from ....domain.contracts.event_bus import HandlerKind
 from ....logging_config import get_logger
 from ..middleware import get_cors_config
 from ..serializers import HangarJSONEncoder
@@ -127,7 +128,11 @@ async def ws_events_endpoint(websocket: WebSocket) -> None:  # noqa: C901 -- bas
             event_queue.put_threadsafe(event, loop)
 
     event_bus = get_event_bus()
-    event_bus.subscribe_to_all(event_handler)
+    # A projection. The websocket feed is a live view of the *fleet*, so a
+    # client connected to one replica has to see what the others are doing --
+    # otherwise the stream it gets depends on which pod the load balancer
+    # happened to give it.
+    event_bus.subscribe_to_all(event_handler, kind=HandlerKind.PROJECTION)
     connection_manager.register(connection_id, {"endpoint": "events"})
     logger.info("ws_events_connected", connection_id=connection_id)
 

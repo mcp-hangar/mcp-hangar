@@ -23,6 +23,7 @@ from __future__ import annotations
 
 import pytest
 
+from mcp_hangar.domain.contracts.event_bus import HandlerKind
 from mcp_hangar.domain.events import CostReportGenerated, McpServerStarted
 from mcp_hangar.infrastructure.event_bus import EventBus
 
@@ -50,7 +51,7 @@ class TestPublishRefusesNonEvents:
     def test_no_handler_is_reached(self):
         """The old behaviour: subscribe-to-all handlers got the list itself."""
         bus, seen = EventBus(), []
-        bus.subscribe_to_all(lambda event: seen.append(event))
+        bus.subscribe_to_all(lambda event: seen.append(event), kind=HandlerKind.EFFECT)
         with pytest.raises(TypeError):
             bus.publish([_event()])
         assert seen == []
@@ -59,13 +60,13 @@ class TestPublishRefusesNonEvents:
 class TestPublishStillWorks:
     def test_a_single_event_is_delivered(self):
         bus, seen = EventBus(), []
-        bus.subscribe(CostReportGenerated, lambda event: seen.append(event))
+        bus.subscribe(CostReportGenerated, lambda event: seen.append(event), kind=HandlerKind.EFFECT)
         event = _event()
         bus.publish(event)
         assert seen == [event]
 
     def test_subscribe_to_all_still_gets_it(self):
         bus, seen = EventBus(), []
-        bus.subscribe_to_all(lambda event: seen.append(type(event).__name__))
+        bus.subscribe_to_all(lambda event: seen.append(type(event).__name__), kind=HandlerKind.EFFECT)
         bus.publish(McpServerStarted(mcp_server_id="p", mode="subprocess", tools_count=0, startup_duration_ms=0.0))
         assert seen == ["McpServerStarted"]

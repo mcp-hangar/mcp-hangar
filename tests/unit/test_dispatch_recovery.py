@@ -14,6 +14,7 @@ from __future__ import annotations
 
 import pytest
 
+from mcp_hangar.domain.contracts.event_bus import HandlerKind
 from mcp_hangar.domain.contracts.event_store import NullEventStore
 from mcp_hangar.domain.events import ToolInvocationCompleted
 from mcp_hangar.infrastructure.event_bus import EventBus
@@ -37,7 +38,7 @@ def wired() -> tuple[EventBus, InMemoryEventStore, InMemoryDispatchCheckpoint, l
     checkpoint = InMemoryDispatchCheckpoint()
     bus = EventBus(event_store=store, dispatch_checkpoint=checkpoint)
     seen: list = []
-    bus.subscribe_to_all(seen.append)
+    bus.subscribe_to_all(seen.append, kind=HandlerKind.EFFECT)
     return bus, store, checkpoint, seen
 
 
@@ -96,7 +97,7 @@ class TestTheNonDurableStoreIsNotSweptIntoSilence:
     def test_publish_still_delivers_without_a_durable_store(self) -> None:
         bus = EventBus(event_store=NullEventStore(), dispatch_checkpoint=InMemoryDispatchCheckpoint())
         seen: list = []
-        bus.subscribe_to_all(seen.append)
+        bus.subscribe_to_all(seen.append, kind=HandlerKind.EFFECT)
 
         bus.publish_to_stream(STREAM, [_event("add")], expected_version=-1)
 
@@ -113,7 +114,7 @@ class TestWithoutACheckpointNothingChanges:
         store = InMemoryEventStore()
         bus = EventBus(event_store=store)  # no checkpoint
         seen: list = []
-        bus.subscribe_to_all(seen.append)
+        bus.subscribe_to_all(seen.append, kind=HandlerKind.EFFECT)
 
         bus.publish_to_stream(STREAM, [_event("add")], expected_version=-1)
 

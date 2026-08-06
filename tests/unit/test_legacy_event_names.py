@@ -29,6 +29,7 @@ import pathlib
 
 import pytest
 
+from mcp_hangar.domain.contracts.event_bus import HandlerKind
 from mcp_hangar.domain import events as events_pkg
 from mcp_hangar.domain.events import (
     LEGACY_EVENT_TYPE_NAMES,
@@ -192,14 +193,14 @@ class TestUpcastersFireForLegacyRows:
 class TestTheBusDeliversToBaseClassHandlers:
     def test_an_alias_event_reaches_the_modern_handler(self):
         bus, seen = EventBus(), []
-        bus.subscribe(McpServerDiscovered, lambda event: seen.append(event))
+        bus.subscribe(McpServerDiscovered, lambda event: seen.append(event), kind=HandlerKind.EFFECT)
         bus.publish(ProviderDiscovered(mcp_server_name="p1", source_type="fs", mode="subprocess", fingerprint="abc"))
         assert len(seen) == 1
 
     def test_a_modern_event_does_not_reach_an_alias_handler(self):
         """Inheritance runs one way; a base-class event is not an alias event."""
         bus, seen = EventBus(), []
-        bus.subscribe(ProviderDiscovered, lambda event: seen.append(event))
+        bus.subscribe(ProviderDiscovered, lambda event: seen.append(event), kind=HandlerKind.EFFECT)
         bus.publish(McpServerDiscovered(mcp_server_name="p1", source_type="fs", mode="subprocess", fingerprint="abc"))
         assert seen == []
 
@@ -210,28 +211,28 @@ class TestTheBusDeliversToBaseClassHandlers:
         def handler(event):
             seen.append(event)
 
-        bus.subscribe(McpServerDiscovered, handler)
-        bus.subscribe(ProviderDiscovered, handler)
+        bus.subscribe(McpServerDiscovered, handler, kind=HandlerKind.EFFECT)
+        bus.subscribe(ProviderDiscovered, handler, kind=HandlerKind.EFFECT)
         bus.publish(ProviderDiscovered(mcp_server_name="p1", source_type="fs", mode="subprocess", fingerprint="abc"))
         assert len(seen) == 1
 
     def test_subscribe_to_all_still_runs_after_the_specific_handlers(self):
         bus, order = EventBus(), []
-        bus.subscribe_to_all(lambda event: order.append("all"))
-        bus.subscribe(McpServerStarted, lambda event: order.append("specific"))
+        bus.subscribe_to_all(lambda event: order.append("all"), kind=HandlerKind.EFFECT)
+        bus.subscribe(McpServerStarted, lambda event: order.append("specific"), kind=HandlerKind.EFFECT)
         bus.publish(McpServerStarted(mcp_server_id="p1", mode="subprocess", tools_count=0, startup_duration_ms=0.0))
         assert order == ["specific", "all"]
 
     def test_subscribe_to_all_receives_an_alias_event_once(self):
         bus, seen = EventBus(), []
-        bus.subscribe_to_all(lambda event: seen.append(event))
+        bus.subscribe_to_all(lambda event: seen.append(event), kind=HandlerKind.EFFECT)
         bus.publish(ProviderStarted(mcp_server_id="p1", mode="subprocess", tools_count=0, startup_duration_ms=0.0))
         assert len(seen) == 1
 
     def test_an_unrelated_event_type_is_not_delivered(self):
         """The MRO walk must not turn dispatch into a broadcast."""
         bus, seen = EventBus(), []
-        bus.subscribe(McpServerDiscovered, lambda event: seen.append(event))
+        bus.subscribe(McpServerDiscovered, lambda event: seen.append(event), kind=HandlerKind.EFFECT)
         bus.publish(McpServerStarted(mcp_server_id="p1", mode="subprocess", tools_count=0, startup_duration_ms=0.0))
         assert seen == []
 
@@ -239,7 +240,7 @@ class TestTheBusDeliversToBaseClassHandlers:
 def test_a_pre_rename_row_replays_all_the_way_to_a_handler():
     """The two layers in one path: this is the scenario that was broken end to end."""
     bus, seen = EventBus(), []
-    bus.subscribe(McpServerStarted, lambda event: seen.append(event))
+    bus.subscribe(McpServerStarted, lambda event: seen.append(event), kind=HandlerKind.EFFECT)
 
     restored = EventSerializer().deserialize("ProviderStarted", TestTheSerializerResolvesLegacyRows.LEGACY_ROW)
     bus.publish(restored)

@@ -20,6 +20,7 @@ from unittest.mock import MagicMock
 
 import pytest
 
+from mcp_hangar.domain.contracts.event_bus import HandlerKind
 from mcp_hangar.application.commands.commands import InvokeToolCommand
 from mcp_hangar.application.commands.handlers import InvokeToolHandler
 from mcp_hangar.application.event_handlers.audit_handler import (
@@ -87,8 +88,8 @@ def _make_event_bus_with_handlers() -> EventBus:
         ToolInvocationCompleted,
         ToolInvocationFailed,
     ):
-        bus.subscribe(event_type, metrics_handler.handle)
-        bus.subscribe(event_type, audit_handler.handle)
+        bus.subscribe(event_type, metrics_handler.handle, kind=HandlerKind.EFFECT)
+        bus.subscribe(event_type, audit_handler.handle, kind=HandlerKind.EFFECT)
 
     return bus
 
@@ -305,7 +306,7 @@ class TestEventBusPublish:
             def handler(event, _idx=idx):
                 counters[_idx] += 1
 
-            bus.subscribe(ToolInvocationCompleted, handler)
+            bus.subscribe(ToolInvocationCompleted, handler, kind=HandlerKind.EFFECT)
 
         event = ToolInvocationCompleted(
             mcp_server_id="bench",

@@ -16,6 +16,7 @@ import sqlite3
 import pytest
 from structlog.testing import capture_logs
 
+from mcp_hangar.domain.contracts.event_bus import HandlerKind
 from mcp_hangar.application.commands.crud_commands import CreateGroupCommand
 from mcp_hangar.application.commands.crud_handlers import CreateGroupHandler
 from mcp_hangar.domain.contracts.event_store import ConcurrencyError
@@ -47,7 +48,7 @@ class TestTheCommandPathWritesToTheStore:
         store = InMemoryEventStore()
         bus = EventBus(event_store=store)
         seen: list = []
-        bus.subscribe_to_all(seen.append)
+        bus.subscribe_to_all(seen.append, kind=HandlerKind.EFFECT)
 
         CreateGroupHandler(groups={}, event_bus=bus).handle(CreateGroupCommand(group_id="g", strategy="round_robin"))
 
@@ -100,7 +101,7 @@ class TestAStoreOutageDoesNotSwitchOffTheGateway:
     def test_events_are_still_delivered(self) -> None:
         bus = EventBus(event_store=self._BrokenStore())
         seen: list = []
-        bus.subscribe_to_all(seen.append)
+        bus.subscribe_to_all(seen.append, kind=HandlerKind.EFFECT)
 
         bus.publish_aggregate_events(MCP_SERVER, "math", [_event("add")])
 

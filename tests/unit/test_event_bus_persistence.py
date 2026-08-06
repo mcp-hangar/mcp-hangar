@@ -2,6 +2,7 @@
 
 import pytest
 
+from mcp_hangar.domain.contracts.event_bus import HandlerKind
 from mcp_hangar.domain.contracts.event_store import ConcurrencyError
 from mcp_hangar.domain.events import DomainEvent, McpServerStarted, McpServerStateChanged
 from mcp_hangar.infrastructure.event_bus import EventBus
@@ -44,7 +45,7 @@ class TestEventBusWithEventStore:
         def handler(event: DomainEvent):
             received_events.append(event)
 
-        event_bus.subscribe(McpServerStarted, handler)
+        event_bus.subscribe(McpServerStarted, handler, kind=HandlerKind.EFFECT)
 
         event = McpServerStarted(
             mcp_server_id="math",
@@ -141,7 +142,7 @@ class TestEventBusWithoutEventStore:
         def handler(event: DomainEvent):
             received_events.append(event)
 
-        event_bus.subscribe(McpServerStarted, handler)
+        event_bus.subscribe(McpServerStarted, handler, kind=HandlerKind.EFFECT)
 
         event = McpServerStarted(
             mcp_server_id="math",
