@@ -92,3 +92,44 @@ class EnforcementActionTaken(DomainEvent):
 
 
 # =============================================================================
+
+
+@dataclass
+class SessionSuspended(DomainEvent):
+    """A session was suspended, and every replica has to act on it.
+
+    Suspension used to be a change to one process's memory. With more than one
+    replica that is a bypass rather than a block: the session is refused by the
+    pod that suspended it and served by the other two, so retrying the request
+    is enough to get through. It travels as an event so the decision reaches the
+    whole fleet -- the subject is the session, not the pod that happened to take
+    the request that triggered it.
+
+    Attributes:
+        session_id: The session being suspended.
+        reason: Why, for the audit trail and the operator.
+        source: What asked -- a detection rule id, or "api" for an operator.
+    """
+
+    session_id: str
+    reason: str = ""
+    source: str = "api"
+
+
+@dataclass
+class SessionUnsuspended(DomainEvent):
+    """A suspension was lifted, on every replica.
+
+    Needed for the same reason as its counterpart, and slightly more urgently:
+    a lift that reaches one replica leaves the session refused by the other two,
+    which looks to the caller like an intermittent block nobody can explain.
+
+    Attributes:
+        session_id: The session being released.
+        reason: Why, for the audit trail.
+        source: What asked.
+    """
+
+    session_id: str
+    reason: str = ""
+    source: str = "api"

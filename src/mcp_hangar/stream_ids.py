@@ -33,6 +33,13 @@ MCP_SERVER: Final = "mcp_server"
 #: Aggregate type for `McpServerGroup` streams.
 MCP_SERVER_GROUP: Final = "mcp_server_group"
 
+#: Aggregate type for session streams. A session is not an aggregate the way a
+#: server is -- nothing owns its lifecycle -- but decisions *about* a session
+#: have to reach every replica, and the log is how anything reaches every
+#: replica. Suspending one is the case that matters: it is a security decision
+#: about the session, not about the pod that happened to take the request.
+SESSION: Final = "session"
+
 SEPARATOR: Final = ":"
 
 
@@ -83,5 +90,13 @@ def stream_id_for_event(event: object) -> str | None:
     group_id = getattr(event, "group_id", None)
     if isinstance(group_id, str) and group_id:
         return stream_id_for(MCP_SERVER_GROUP, group_id)
+
+    # Last, so it only catches events that name a session and nothing else.
+    # `DetectionRuleMatched` and `EnforcementActionTaken` both carry a session
+    # *and* a server, and they belong in the server's history -- the session is
+    # context there, not the subject.
+    session_id = getattr(event, "session_id", None)
+    if isinstance(session_id, str) and session_id:
+        return stream_id_for(SESSION, session_id)
 
     return None

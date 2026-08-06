@@ -20,6 +20,8 @@ from ...domain.contracts.cost import NullCostAttributor
 from ...domain.contracts.risk import NullRiskScorer
 from ...application.event_handlers.tool_projection_handler import ToolProjectionPopulationHandler
 from ...domain.events import (
+    SessionSuspended,
+    SessionUnsuspended,
     BehavioralDeviationDetected,
     CapabilityViolationDetected,
     DetectionRuleMatched,
@@ -127,6 +129,16 @@ def init_event_handlers(runtime: "Runtime") -> None:
     # that means making the suspension *registry* shared rather than making this
     # handler run everywhere -- #790, phase 3.2.
     runtime.event_bus.subscribe(DetectionRuleMatched, detection_enforcement_handler.handle, kind=HandlerKind.EFFECT)
+
+    # Suspension has to reach every replica: a session refused here and served
+    # by the other two is a block a caller walks past by retrying. A projection,
+    # so the tail applies it on peers as well as here (#790, phase 3.2).
+    from ...application.event_handlers.session_suspension_projection import SessionSuspensionProjection
+    from ..api.sessions import get_session_suspension_registry as _session_registry
+
+    suspension_projection = SessionSuspensionProjection(_session_registry())
+    runtime.event_bus.subscribe(SessionSuspended, suspension_projection.handle, kind=HandlerKind.PROJECTION)
+    runtime.event_bus.subscribe(SessionUnsuspended, suspension_projection.handle, kind=HandlerKind.PROJECTION)
 
     # Cost attribution -- computes cost per tool invocation
     cost_handler = CostAttributionEventHandler(
