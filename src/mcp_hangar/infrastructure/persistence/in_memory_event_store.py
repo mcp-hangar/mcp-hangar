@@ -6,7 +6,7 @@ Useful for testing and development. Events are lost on restart.
 from collections.abc import Iterator
 from dataclasses import dataclass, field
 import threading
-from typing import Any
+from typing import Any, ClassVar
 
 from mcp_hangar.domain.contracts.event_store import ConcurrencyError, IEventStore
 from mcp_hangar.domain.events import DomainEvent
@@ -40,6 +40,9 @@ class InMemoryEventStore(IEventStore):
 
     Thread-safe but not persistent. All data is lost on restart.
     """
+
+    #: One process, one lock, one list: a higher position was appended later.
+    positions_are_commit_ordered: ClassVar[bool] = True
 
     def __init__(self):
         """Initialize empty event store."""

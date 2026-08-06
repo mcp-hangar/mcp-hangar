@@ -6,10 +6,56 @@ enabling Event Sourcing pattern with optimistic concurrency control.
 
 from abc import ABC, abstractmethod
 from collections.abc import Iterator
-from typing import Any
+from dataclasses import dataclass
+from typing import Any, ClassVar
 
 from ..events import DomainEvent
 from ..exceptions import CompactionError  # noqa: F401 -- re-exported for consumers of this module
+
+
+@dataclass(frozen=True)
+class TailCursor:
+    """Where a tailer got to, in whatever terms its store can resume from.
+
+    Deliberately opaque. A position works for a store with one writer, where
+    allocation order is commit order; it does not work for PostgreSQL, where a
+    row can be allocated position 5, another committed at position 6 first, and
+    a cursor already past 6 will never see 5 arrive (measured: it is lost, not
+    delayed). That store resumes from a transaction-id watermark instead. A
+    caller that treated the cursor as a number would be writing one of those two
+    assumptions into code that is supposed to work on both.
+
+    `BEGINNING` means the whole log. `IEventStore.tail_head()` gives the other
+    end -- everything committed so far, nothing older to deliver -- which is what
+    a replica building a view from a snapshot needs.
+    """
+
+    token: str = ""
+
+    def __str__(self) -> str:
+        return self.token
+
+
+#: Read the log from the start.
+BEGINNING = TailCursor("")
+
+
+class TailingNotSupportedError(RuntimeError):
+    """Raised when a store cannot be tailed safely and has not said how it could.
+
+    The default `read_since` resumes from a global position, which is only sound
+    where writes are serialized. A store that admits concurrent writers and has
+    neither overridden the method nor declared itself commit-ordered would skip
+    events silently -- so it is refused loudly instead.
+    """
+
+    def __init__(self, store: str) -> None:
+        super().__init__(
+            f"{store} does not declare `positions_are_commit_ordered` and does not override "
+            "`read_since`. Resuming from a global position is only safe where appends are "
+            "serialized; a store with concurrent writers must implement its own resume token "
+            "(see PostgresEventStore) or it will skip events without reporting anything."
+        )
 
 
 class ConcurrencyError(Exception):
@@ -129,6 +175,60 @@ class IEventStore(ABC):
             Tuples of (global_position, stream_id, event).
         """
 
+    #: Whether a higher `global_position` means "committed later".
+    #:
+    #: True only where appends are serialized -- one writer, or an
+    #: in-process lock that every writer goes through. It is False by
+    #: default so that a store which never considered the question is refused
+    #: rather than allowed to skip events quietly; the two in-tree stores that
+    #: qualify say so explicitly.
+    positions_are_commit_ordered: ClassVar[bool] = False
+
+    def tail_head(self) -> TailCursor:
+        """A cursor meaning "everything committed so far, nothing older".
+
+        Used when a replica builds its view from a snapshot and then follows the
+        log: take the head *first*, then the snapshot, and there is no window in
+        which an event lands between the two and is missed by both.
+        """
+        if not self.positions_are_commit_ordered:
+            raise TailingNotSupportedError(type(self).__name__)
+        last = 0
+        for position, _stream_id, _event in self.read_all(from_position=0, limit=1_000_000_000):
+            last = position
+        return TailCursor(str(last))
+
+    def read_since(
+        self,
+        cursor: TailCursor,
+        limit: int = 1000,
+    ) -> tuple[list[tuple[str, DomainEvent]], TailCursor]:
+        """Read what was committed after `cursor`, and where to resume.
+
+        The contract a tailer depends on: an event returned once is not returned
+        again, and no committed event is passed over. Delivery may lag -- a store
+        may hold back an event whose transaction has not resolved -- but it may
+        not skip.
+
+        This default resumes from a global position, which is sound only where
+        appends are serialized. Anything else must override it.
+
+        Args:
+            cursor: Where the last read got to. `BEGINNING` for the whole log.
+            limit: Maximum events in one batch.
+
+        Returns:
+            The batch as (stream_id, event) pairs, and the cursor to pass next.
+        """
+        if not self.positions_are_commit_ordered:
+            raise TailingNotSupportedError(type(self).__name__)
+        position = int(cursor.token) if cursor.token else 0
+        batch: list[tuple[str, DomainEvent]] = []
+        for next_position, stream_id, event in self.read_all(from_position=position, limit=limit):
+            batch.append((stream_id, event))
+            position = next_position
+        return batch, TailCursor(str(position))
+
     @abstractmethod
     def get_stream_version(self, stream_id: str) -> int:
         """Get current version of a stream.
@@ -244,6 +344,12 @@ class NullEventStore(IEventStore):
 
     Use when event persistence is disabled or for testing.
     """
+
+    # Nothing is kept, so nothing can arrive out of order either. Tailing it
+    # yields an empty batch forever, which is the honest answer for a store that
+    # discarded everything -- `can_replay` is how a caller finds out that
+    # silence means "not kept" rather than "nothing new".
+    positions_are_commit_ordered: ClassVar[bool] = True
 
     @property
     def can_replay(self) -> bool:

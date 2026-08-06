@@ -28,9 +28,20 @@ a gap in that sequence -- expected, and harmless for
 not contiguous ones. The sharper edge is that sequence *allocation* order is
 not the same as commit order: two concurrent appenders can be handed
 positions 5 and 6 and commit 6 first, so a `read_all` cursor that has already
-advanced past 6 will not see 5 arrive right behind it. Projections built on
-this stream should tolerate a small amount of reordering near the tail
-rather than treat the cursor as linearizable.
+advanced past 6 will not see 5 arrive right behind it.
+
+This module used to say such a reader "should tolerate a small amount of
+reordering near the tail". That was too kind to it. The event at 5 is not
+reordered, it is **lost**: nothing ever brings a monotonic cursor back to
+collect it, and the only reason this has not caused an incident is that the
+one caller reading by position runs once at startup, after the tail has
+settled. Reproduced on PostgreSQL 16, with a test that asserts it.
+
+`read_since` is therefore the way to follow this log, and it does not resume
+from a position at all -- see its docstring for the transaction watermark it
+uses instead, and for the measurement that ruled out the obvious alternative.
+`read_all` keeps its position argument and its old caveat, because reading a
+settled log by position is still exactly right.
 """
 
 from collections.abc import Iterator
@@ -38,7 +49,7 @@ from datetime import datetime, UTC
 import json
 from typing import Any
 
-from mcp_hangar.domain.contracts.event_store import ConcurrencyError, IEventStore
+from mcp_hangar.domain.contracts.event_store import ConcurrencyError, IEventStore, TailCursor
 from mcp_hangar.domain.events import DomainEvent
 from mcp_hangar.domain.exceptions import CompactionError
 from mcp_hangar.logging_config import get_logger
@@ -78,6 +89,27 @@ CREATE TABLE IF NOT EXISTS {snapshots_table} (
     created_at TEXT NOT NULL
 );
 """
+
+# Added separately from the CREATE, because an events table already exists on
+# every deployment that has been running, and `CREATE TABLE IF NOT EXISTS` would
+# leave it without the column.
+#
+# Nullable, and the default set in a second statement on purpose. `ADD COLUMN
+# NOT NULL DEFAULT pg_current_xact_id()` is a *volatile* default, which does not
+# take Postgres's fast-default path: it rewrites the whole table under an ACCESS
+# EXCLUSIVE lock, so an installation with a long history would take an outage to
+# upgrade. Added nullable it is instant, and the NULLs mean exactly what they
+# should -- "written before this existed", which is to say committed long ago.
+_TAIL_COLUMN_TEMPLATE = """
+ALTER TABLE {events_table} ADD COLUMN IF NOT EXISTS xact_id xid8;
+ALTER TABLE {events_table} ALTER COLUMN xact_id SET DEFAULT pg_current_xact_id();
+CREATE INDEX IF NOT EXISTS {events_table}_xact_idx ON {events_table} (xact_id, global_position);
+"""
+
+#: How a row with no `xact_id` sorts: before everything. Rows predating the
+#: column were committed before any live transaction, so treating them as the
+#: oldest possible transaction is not an approximation.
+_OLDEST = "'0'::xid8"
 
 
 class PostgresEventStore(IEventStore):
@@ -135,6 +167,7 @@ class PostgresEventStore(IEventStore):
         with self._connections.get_connection() as conn:
             with conn.cursor() as cur:
                 cur.execute(schema)
+                cur.execute(_TAIL_COLUMN_TEMPLATE.format(events_table=self._events_table))
             conn.commit()
         logger.info("postgres_event_store_initialized", events_table=self._events_table)
 
@@ -326,6 +359,103 @@ class PostgresEventStore(IEventStore):
         for global_position, stream_id, event_type, data in rows:
             event = self._serializer.deserialize(event_type, self._as_json_text(data))
             yield global_position, stream_id, event
+
+    def _horizon(self, cur: Any) -> str:
+        """The transaction id below which everything is decided.
+
+        `pg_snapshot_xmin` is the lowest id among transactions still in flight,
+        so every id below it has either committed (and is visible now) or
+        aborted (and never will be). Nothing below the horizon can still change,
+        which is the whole basis for reading up to it and not further.
+        """
+        cur.execute("SELECT pg_snapshot_xmin(pg_current_snapshot())")
+        row = cur.fetchone()
+        return str(row[0])
+
+    @staticmethod
+    def _split(cursor: TailCursor) -> tuple[str, int]:
+        """Unpack "xid:position", the two halves of a resume point.
+
+        The position half only matters when a batch was cut short by `limit`
+        mid-transaction: without it the next read would either repeat the whole
+        transaction or skip the rest of it.
+        """
+        if not cursor.token:
+            return "0", 0
+        xid, _, position = cursor.token.partition(":")
+        return xid, int(position or 0)
+
+    def tail_head(self) -> TailCursor:
+        """A cursor meaning "everything committed so far, nothing older"."""
+        with self._connections.get_connection() as conn, conn.cursor() as cur:
+            horizon = self._horizon(cur)
+            conn.commit()
+        return TailCursor(f"{horizon}:0")
+
+    def read_since(
+        self,
+        cursor: TailCursor,
+        limit: int = 1000,
+    ) -> tuple[list[tuple[str, DomainEvent]], TailCursor]:
+        """Read what has certainly committed since `cursor`, in commit order.
+
+        The inherited implementation resumes from a global position, and that is
+        wrong here. `global_position` is a `BIGSERIAL`: two appenders can be
+        handed 5 and 6 and the holder of 6 can commit first, so a cursor that
+        advanced to 6 never sees 5 arrive. Measured on PostgreSQL 16 with one
+        appender holding its transaction open: the event at 5 is not delivered
+        late, it is never delivered at all.
+
+        So the cursor is a transaction watermark rather than a position. Each
+        read takes the horizon (see `_horizon`) and consumes the transactions
+        between the last horizon and this one. Since the horizon can never pass
+        a transaction that is still open, no row can appear behind it later.
+
+        The trade this makes, stated rather than discovered: an append that
+        holds its transaction open holds the tail back for everyone -- delivery
+        lags, and lags for every replica at once. It does not skip, which is the
+        property that matters, and the appends here are single-statement.
+
+        The alternative -- allocating positions from a counter row inside the
+        append transaction -- was measured and rejected. It puts a row lock on
+        the path of every tool invocation (`ToolInvocationCompleted` is appended
+        per call), and stops scaling at four concurrent writers: ~1650 appends/s
+        flat against ~6600 for the sequence at sixteen, with p99 latency going
+        from 5ms to 49ms. The `xact_id` column costs nothing measurable.
+        """
+        from_xid, from_position = self._split(cursor)
+
+        with self._connections.get_connection() as conn, conn.cursor() as cur:
+            horizon = self._horizon(cur)
+            cur.execute(
+                f"""
+                SELECT COALESCE(xact_id, {_OLDEST}) AS xid, global_position, stream_id, event_type, data
+                FROM {self._events_table}
+                WHERE (COALESCE(xact_id, {_OLDEST}), global_position) > (%s::xid8, %s)
+                  AND COALESCE(xact_id, {_OLDEST}) < %s::xid8
+                ORDER BY COALESCE(xact_id, {_OLDEST}) ASC, global_position ASC
+                LIMIT %s
+                """,
+                (from_xid, from_position, horizon, limit),
+            )
+            rows = cur.fetchall()
+            # As in `read_all`: end the implicit transaction before the
+            # connection goes back to the pool. A tailer polls in a loop, so an
+            # idle-in-transaction connection here would be a permanent one --
+            # and would hold back the horizon it just read.
+            conn.commit()
+
+        batch = [
+            (stream_id, self._serializer.deserialize(event_type, self._as_json_text(data)))
+            for _xid, _position, stream_id, event_type, data in rows
+        ]
+
+        if len(rows) == limit:
+            # Cut short: resume inside the transaction we stopped in, not at the
+            # horizon, or the rest of it would be skipped.
+            last_xid, last_position = rows[-1][0], rows[-1][1]
+            return batch, TailCursor(f"{last_xid}:{last_position}")
+        return batch, TailCursor(f"{horizon}:0")
 
     def get_stream_version(self, stream_id: str) -> int:
         """Get current version of a stream.

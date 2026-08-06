@@ -20,7 +20,7 @@ from unittest.mock import MagicMock
 
 import pytest
 
-from mcp_hangar.domain.contracts.event_store import ConcurrencyError
+from mcp_hangar.domain.contracts.event_store import BEGINNING, ConcurrencyError
 from mcp_hangar.domain.events import McpServerStarted, McpServerStopped
 from mcp_hangar.domain.exceptions import CompactionError
 from mcp_hangar.infrastructure.persistence.backends.postgresql.event_store import PostgresEventStore
@@ -88,13 +88,36 @@ class TestSqlShapes:
         store, mock_conn, mock_cursor = self._mock_store()
         store.initialize()
 
-        sql = _norm(mock_cursor.execute.call_args[0][0])
+        sql = _norm(mock_cursor.execute.call_args_list[0][0][0])
         assert "CREATE TABLE IF NOT EXISTS events" in sql
         assert "CREATE TABLE IF NOT EXISTS streams" in sql
         assert "CREATE TABLE IF NOT EXISTS snapshots" in sql
         assert "BIGSERIAL PRIMARY KEY" in sql
         assert "UNIQUE(stream_id, stream_version)" in sql
         mock_conn.commit.assert_called_once()
+
+    def test_initialize_adds_the_tail_column_to_an_existing_table(self):
+        # `CREATE TABLE IF NOT EXISTS` does nothing to a table that already
+        # exists, so on every installation that has been running, the column the
+        # tail cursor needs can only arrive by ALTER.
+        store, _mock_conn, mock_cursor = self._mock_store()
+        store.initialize()
+
+        sql = _norm(mock_cursor.execute.call_args_list[1][0][0])
+        assert "ADD COLUMN IF NOT EXISTS xact_id xid8" in sql
+        assert "CREATE INDEX IF NOT EXISTS events_xact_idx" in sql
+
+    def test_the_tail_column_is_added_nullable_and_defaulted_separately(self):
+        # Together they would be a volatile default, which rewrites the whole
+        # table under an ACCESS EXCLUSIVE lock -- an outage to upgrade, on the
+        # one table that grows forever.
+        store, _mock_conn, mock_cursor = self._mock_store()
+        store.initialize()
+
+        sql = _norm(mock_cursor.execute.call_args_list[1][0][0])
+        assert "ADD COLUMN IF NOT EXISTS xact_id xid8;" in sql
+        assert "ADD COLUMN IF NOT EXISTS xact_id xid8 NOT NULL" not in sql
+        assert "ALTER COLUMN xact_id SET DEFAULT pg_current_xact_id()" in sql
 
     def test_append_new_stream_uses_insert_on_conflict_do_nothing(self):
         store, mock_conn, mock_cursor = self._mock_store()
@@ -184,8 +207,9 @@ class TestSqlShapes:
 class _FakeCursor:
     """Interprets exactly the fixed set of statements PostgresEventStore issues."""
 
-    def __init__(self, db: "_FakePostgres"):
+    def __init__(self, db: "_FakePostgres", conn: "_FakeConnection | None" = None):
         self._db = db
+        self._conn = conn
         self._result: list[tuple] = []
         self.rowcount = 0
 
@@ -244,9 +268,33 @@ class _FakeCursor:
                 "event_type": event_type,
                 "data": data,
                 "created_at": created_at,
+                # A real server assigns this at write time and the row becomes
+                # visible at commit time. Here those are the same instant --
+                # which is exactly why this fake cannot show the reordering the
+                # watermark exists for. That is asserted against a real server
+                # in tests/integration/test_postgres_tail_does_not_skip.py; what
+                # is checked here is the cursor arithmetic around it.
+                "xact_id": self._conn.xid() if self._conn is not None else self._db.next_xid(),
             }
         )
         self.rowcount = 1
+
+    def _select_horizon(self, params: tuple) -> None:
+        # Everything written so far is settled, since nothing here is ever
+        # in flight.
+        self._result = [(self._db.current_xid() + 1,)]
+
+    def _select_tail(self, params: tuple) -> None:
+        from_xid, from_position, horizon, limit = params
+        rows = sorted(
+            (
+                e
+                for e in self._db.events
+                if (e["xact_id"], e["global_position"]) > (int(from_xid), from_position) and e["xact_id"] < int(horizon)
+            ),
+            key=lambda e: (e["xact_id"], e["global_position"]),
+        )[:limit]
+        self._result = [(e["xact_id"], e["global_position"], e["stream_id"], e["event_type"], e["data"]) for e in rows]
 
     def _select_stream_events(self, params: tuple) -> None:
         stream_id, from_version = params
@@ -300,6 +348,9 @@ class _FakeCursor:
     # SELECT) must be checked before their shorter, more general prefixes.
     _HANDLERS = [
         ("CREATE TABLE", _noop),
+        ("ALTER TABLE", _noop),
+        ("SELECT pg_snapshot_xmin", _select_horizon),
+        ("SELECT COALESCE(xact_id", _select_tail),
         ("INSERT INTO streams", _reserve_new_stream),
         ("UPDATE streams", _advance_existing_stream),
         ("SELECT version FROM streams", _select_stream_version),
@@ -327,9 +378,20 @@ class _FakeConnection:
         self._db = db
         self.commits = 0
         self.rollbacks = 0
+        self._xid: int | None = None
+
+    def xid(self) -> int:
+        """One transaction id for everything this connection writes.
+
+        A real append writes its rows in one transaction, so they share an id.
+        The LIMIT-inside-a-transaction case depends on that being modelled.
+        """
+        if self._xid is None:
+            self._xid = self._db.next_xid()
+        return self._xid
 
     def cursor(self) -> _FakeCursor:
-        return _FakeCursor(self._db)
+        return _FakeCursor(self._db, self)
 
     def commit(self) -> None:
         self.commits += 1
@@ -347,6 +409,7 @@ class _FakePostgres:
         self.snapshots: dict[str, dict] = {}
         self.executed: list[str] = []
         self._position = 0
+        self._xid = 100
         # The connection most recently handed out by get_connection(), so
         # tests can inspect whether *that* call committed/rolled back --
         # a real pooled connection is reused by the next borrower, so an
@@ -356,6 +419,13 @@ class _FakePostgres:
     def next_position(self) -> int:
         self._position += 1
         return self._position
+
+    def next_xid(self) -> int:
+        self._xid += 1
+        return self._xid
+
+    def current_xid(self) -> int:
+        return self._xid
 
     @contextmanager
     def get_connection(self) -> Iterator[_FakeConnection]:
@@ -624,6 +694,75 @@ class TestReadOnlyConnectionHygiene:
 
     def test_load_snapshot_commits(self, store: PostgresEventStore, db: _FakePostgres):
         store.load_snapshot("s1")
+
+        assert db.last_conn is not None
+        assert db.last_conn.commits == 1
+
+
+class TestTheTailCursor:
+    """The resume-token arithmetic, which is what CI can check without a server.
+
+    Whether the watermark is *needed* -- whether a position cursor really loses
+    the slower transaction -- is MVCC behaviour, and this fake commits at write
+    time so it could never show it. That is asserted against a real PostgreSQL
+    in tests/integration/test_postgres_tail_does_not_skip.py.
+    """
+
+    def test_a_tail_from_the_beginning_sees_everything(self, store: PostgresEventStore):
+        store.append("s1", [_make_event("a")], expected_version=-1)
+        store.append("s2", [_make_event("b")], expected_version=-1)
+
+        batch, _cursor = store.read_since(BEGINNING)
+
+        assert [stream for stream, _e in batch] == ["s1", "s2"]
+
+    def test_what_was_read_once_is_not_read_again(self, store: PostgresEventStore):
+        store.append("s1", [_make_event("a")], expected_version=-1)
+        _batch, cursor = store.read_since(BEGINNING)
+
+        assert store.read_since(cursor)[0] == []
+
+    def test_the_cursor_is_a_transaction_watermark_not_a_position(self, store: PostgresEventStore):
+        # Stated as a test because a caller who reads the token as a position
+        # would be right on every other store and wrong on this one.
+        store.append("s1", [_make_event("a")], expected_version=-1)
+        _batch, cursor = store.read_since(BEGINNING)
+
+        assert ":" in cursor.token
+        assert int(cursor.token.split(":")[0]) > 100  # a transaction id, not the row's position of 1
+
+    def test_a_batch_cut_short_resumes_inside_the_same_transaction(self, store: PostgresEventStore):
+        # Three events, one append, one transaction id. Resuming at the horizon
+        # would skip the third; resuming at the last row read does not.
+        store.append("s1", [_make_event("a"), _make_event("a"), _make_event("a")], expected_version=-1)
+
+        first, cursor = store.read_since(BEGINNING, limit=2)
+        second, _cursor = store.read_since(cursor, limit=2)
+
+        assert (len(first), len(second)) == (2, 1)
+
+    def test_the_head_leaves_nothing_behind_it(self, store: PostgresEventStore):
+        store.append("s1", [_make_event("a")], expected_version=-1)
+
+        head = store.tail_head()
+
+        assert store.read_since(head)[0] == []
+
+    def test_an_append_after_the_head_is_delivered(self, store: PostgresEventStore):
+        store.append("s1", [_make_event("a")], expected_version=-1)
+        head = store.tail_head()
+
+        store.append("s2", [_make_event("b")], expected_version=-1)
+
+        assert [stream for stream, _e in store.read_since(head)[0]] == ["s2"]
+
+    def test_reading_the_tail_does_not_leave_the_connection_in_a_transaction(
+        self, store: PostgresEventStore, db: _FakePostgres
+    ):
+        # A tailer polls forever, so a connection returned "idle in transaction"
+        # here is one held for the life of the process -- and it would hold back
+        # the very horizon it just read.
+        store.read_since(BEGINNING)
 
         assert db.last_conn is not None
         assert db.last_conn.commits == 1
