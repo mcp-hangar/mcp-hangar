@@ -9,6 +9,7 @@ import threading
 
 from ...domain.contracts.persistence import ConcurrentModificationError, PersistenceError, McpServerConfigSnapshot
 from ...logging_config import get_logger
+from .sqlite_management_lease import FLEET_MANAGEMENT
 from .database import Database
 
 logger = get_logger(__name__)
@@ -266,6 +267,55 @@ class SQLiteMcpServerConfigRepository:
 
         except Exception as e:  # noqa: BLE001 -- infra-boundary: re-raises as PersistenceError
             logger.error(f"Failed to delete mcp_server config: {e}")
+            raise PersistenceError(f"Failed to delete mcp_server config: {e}") from e
+
+    async def delete_while_leased(self, mcp_server_id: str, holder: str, generation: int) -> bool:
+        """Delete, but only if `holder` still holds the lease at that generation.
+
+        The condition is in the statement rather than around it. A convergence
+        loop that stalled past its tenure has, by definition, no chance to
+        notice in between: it was frozen, and the write goes out the moment it
+        resumes. Only the database can tell it, and only at the instant of the
+        write.
+
+        This backend is a single file, so the lease table and this one are in
+        the same database by construction -- see the SQLite backend, which gives
+        them the same path.
+
+        Args:
+            mcp_server_id: McpServer identifier.
+            holder: The instance that decided on the deletion.
+            generation: The tenure it decided under.
+
+        Returns:
+            True if the row was disabled. False when the tenure had ended, or
+            the row was already gone -- the caller cannot tell those apart from
+            here, and does not need to: neither is an error.
+        """
+        try:
+            async with self._db.transaction() as conn:
+                result = await conn.execute(
+                    """
+                    UPDATE mcp_server_configs
+                    SET enabled = 0, updated_at = ?
+                    WHERE mcp_server_id = ? AND enabled = 1
+                      AND EXISTS (
+                          SELECT 1 FROM management_lease
+                           WHERE name = ? AND holder = ? AND generation = ?
+                      )
+                    """,
+                    (
+                        datetime.now(UTC).isoformat(),
+                        mcp_server_id,
+                        FLEET_MANAGEMENT,
+                        holder,
+                        generation,
+                    ),
+                )
+                return result.rowcount > 0
+
+        except Exception as e:  # noqa: BLE001 -- infra-boundary: re-raises as PersistenceError
+            logger.error(f"Failed to delete mcp_server config under a lease: {e}")
             raise PersistenceError(f"Failed to delete mcp_server config: {e}") from e
 
     async def hard_delete(self, mcp_server_id: str) -> bool:
