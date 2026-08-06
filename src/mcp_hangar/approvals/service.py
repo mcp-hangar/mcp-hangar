@@ -13,6 +13,7 @@ import asyncio
 import concurrent.futures
 import hashlib
 import json
+import time
 import uuid
 from datetime import datetime, timedelta, UTC
 from typing import Any
@@ -34,6 +35,15 @@ from .models import ApprovalRequest, ApprovalResult, ApprovalState
 from .persistence.sqlite_approval_repository import ApprovalRepository
 
 logger = get_logger(__name__)
+
+#: How often the wait re-reads the approval record while holding a call.
+#:
+#: Only matters when the decision lands on a different instance than the call --
+#: a local resolution signals immediately and never waits for this. Two seconds
+#: is chosen against a gate whose timeout is measured in minutes: the added
+#: latency is invisible to a human approver, and the read is one indexed row per
+#: held call.
+SHARED_POLL_INTERVAL_S = 2.0
 
 # Dedicated thread pool for _publish() to avoid deadlock with the default
 # executor.  The batch executor's worker threads block on future.result() via
@@ -230,7 +240,7 @@ class ApprovalGateService:
             with tracer.start_as_current_span("approval_gate.wait_for_decision") as wait_span:
                 wait_span.set_attribute("approval.id", approval_id)
                 wait_span.set_attribute("approval.timeout_seconds", policy.approval_timeout_seconds)
-                decision = await self._hold_registry.wait(approval_id, policy.approval_timeout_seconds)
+                decision = await self._wait_for_decision(approval_id, policy.approval_timeout_seconds)
                 if decision is True:
                     wait_span.set_attribute("approval.decision", "approved")
                 elif decision is False:
@@ -309,6 +319,70 @@ class ApprovalGateService:
         await self._repository.update_state(approval_id, state, decided_by, decided_at, reason)
 
         return await self._hold_registry.resolve(approval_id, approved)
+
+    async def _wait_for_decision(self, approval_id: str, timeout_seconds: int) -> bool | None:
+        """Wait for a decision from either instance that could make one.
+
+        Two sources, because there are two places a decision can appear:
+
+        * the local hold, signalled the instant a resolution lands on **this**
+          instance -- the common case, and the fast one;
+        * the approval record, which is where a decision made on **another**
+          instance shows up. With a shared storage backend that is the only
+          thing the two instances have in common.
+
+        Before this, the wait watched the local hold alone. A call held on A
+        while the approver's request landed on B would sit until it timed out
+        and then fail closed -- so the approver saw success, the caller saw a
+        denial, and the record said approved. The record and the outcome
+        disagreeing is worse than plain unavailability, and it was silent
+        (#778).
+
+        Args:
+            approval_id: The held approval.
+            timeout_seconds: How long the policy allows.
+
+        Returns:
+            True if approved, False if denied, None if the wait elapsed.
+        """
+        deadline = time.monotonic() + float(timeout_seconds)
+        try:
+            while True:
+                remaining = deadline - time.monotonic()
+                if remaining <= 0:
+                    return None
+
+                decision = await self._hold_registry.wait_slice(approval_id, min(SHARED_POLL_INTERVAL_S, remaining))
+                if decision is not None:
+                    return decision
+
+                decided = await self._decision_from_record(approval_id)
+                if decided is not None:
+                    logger.info("approval_decision_observed_from_storage", approval_id=approval_id)
+                    return decided
+        finally:
+            self._hold_registry.release(approval_id)
+
+    async def _decision_from_record(self, approval_id: str) -> bool | None:
+        """A decision already written to the approval record, if there is one.
+
+        Failures are swallowed: a storage hiccup must not turn a pending
+        approval into a refusal. The wait continues and the deadline still
+        applies, so the worst case is the behaviour that existed before.
+        """
+        try:
+            record = await self._repository.get(approval_id)
+        except Exception as e:  # noqa: BLE001 -- fault-barrier: a read failure must not decide the call
+            logger.warning("approval_record_read_failed", approval_id=approval_id, error=str(e))
+            return None
+
+        if record is None:
+            return None
+        if record.state == ApprovalState.APPROVED:
+            return True
+        if record.state == ApprovalState.DENIED:
+            return False
+        return None
 
     async def _publish(self, event: Any) -> None:
         """Publish a domain event via the event bus without blocking the event loop.
