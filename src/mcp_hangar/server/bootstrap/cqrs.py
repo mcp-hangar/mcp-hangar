@@ -99,6 +99,21 @@ def _create_saga_state_store(
     if full_config is None:
         return NullSagaStateStore()
 
+    # A selected backend supplies this, like every other persisted concern. The
+    # driver reading below is the compatibility path -- note that it keys saga
+    # state off the *event store's* driver, which is exactly the kind of
+    # cross-subsystem coupling one storage decision removes.
+    from .composition import get_persistence_backend
+
+    backend = get_persistence_backend()
+    if backend is not None:
+        # The backend is untyped at this boundary -- it hands back a port
+        # implementation and mypy sees Any. Narrow here rather than letting it
+        # leak out of a function that promises a store.
+        store: SagaStateStore = backend.saga_state_store()
+        logger.info("saga_state_store_from_persistence_backend")
+        return store
+
     event_store_config = full_config.get("event_store", {})
     driver = event_store_config.get("driver", "memory")
 

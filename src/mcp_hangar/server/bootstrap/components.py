@@ -20,6 +20,7 @@ from collections.abc import Callable
 
 from ...application.ports.observability import ObservabilityPort
 from ...logging_config import get_logger
+from .composition import get_persistence_backend
 
 logger = get_logger(__name__)
 
@@ -114,6 +115,15 @@ def approvals_enabled(config: dict[str, Any]) -> bool:
     return bool(approvals_config.get("enabled", True))
 
 
+def _approval_repository_from_backend() -> Any:
+    """The approval repository from the selected backend, or None.
+
+    None means `bootstrap_approvals` builds its own, which is the compatibility
+    path for a deployment that has not selected a backend.
+    """
+    return backend.approval_repository() if (backend := get_persistence_backend()) is not None else None
+
+
 def build_approval_service(config: dict[str, Any], event_bus: Any = None) -> Any:
     """Construct the approval gate service, or return None when disabled.
 
@@ -140,6 +150,7 @@ def build_approval_service(config: dict[str, Any], event_bus: Any = None) -> Any
             database=get_database(),
             event_bus=event_bus,
             config=config,
+            repository=_approval_repository_from_backend(),
         )
     except Exception:  # noqa: BLE001 -- surfaced by the startup reachability check
         logger.error("approval_gate_bootstrap_failed", exc_info=True)
@@ -184,6 +195,7 @@ def load_components(
         event_publisher=event_publisher,
         event_store=event_store,
         event_bus=event_bus,
+        persistence_backend=get_persistence_backend(),
     )
     components = ServerComponents(auth_components=auth_components, approval_service=approval_service)
     logger.info(

@@ -277,7 +277,17 @@ def bootstrap(
     from .composition import set_persistence_backend
     from .persistence import select_backend
 
-    set_persistence_backend(select_backend(full_config))
+    _backend = select_backend(full_config)
+    set_persistence_backend(_backend)
+    if _backend is not None:
+        # The metric history store is reached through a module-level accessor
+        # rather than passed around, so a selected backend has to install it
+        # here. Note what the accessor's own docstring says production should do
+        # and nobody did: without this, the default is an in-memory store, so
+        # metric history has never survived a restart.
+        from ...infrastructure.persistence.metrics_history_store import set_metrics_history_store
+
+        set_metrics_history_store(_backend.metrics_history_store())
 
     # Initialize event store for event sourcing
     init_event_store(runtime, full_config)
