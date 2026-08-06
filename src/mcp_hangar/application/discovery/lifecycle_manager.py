@@ -42,6 +42,7 @@ class DiscoveryLifecycleManager:
         check_interval: int = 10,
         drain_timeout: int = 30,
         on_deregister: HangarCallback | None = None,
+        may_manage: Callable[[], bool] | None = None,
     ):
         """Initialize lifecycle manager.
 
@@ -50,11 +51,14 @@ class DiscoveryLifecycleManager:
             check_interval: Interval between expiration checks
             drain_timeout: Timeout for graceful connection draining
             on_deregister: Callback when mcp_server should be deregistered
+            may_manage: Whether this instance holds the management lease.
+                Checked per cycle. Absent means yes -- a standalone gateway.
         """
         self.default_ttl = default_ttl
         self.check_interval = check_interval
         self.drain_timeout = drain_timeout
         self.on_deregister = on_deregister
+        self._may_manage = may_manage or (lambda: True)
 
         # Active mcp_servers
         self._mcp_servers: dict[str, DiscoveredMcpServer] = {}
@@ -93,10 +97,17 @@ class DiscoveryLifecycleManager:
         logger.info("Lifecycle manager stopped")
 
     async def _lifecycle_loop(self) -> None:
-        """Periodic check for expired mcp_servers."""
+        """Periodic check for expired mcp_servers.
+
+        Gated on the management lease, and asked every cycle. Expiry
+        *deregisters* a server: a follower whose view of the fleet is a few
+        seconds stale would deregister things the holder had just registered,
+        and the two would take turns doing it indefinitely.
+        """
         while self._running:
             try:
-                await self._check_expirations()
+                if self._may_manage():
+                    await self._check_expirations()
                 await asyncio.sleep(self.check_interval)
             except asyncio.CancelledError:
                 break

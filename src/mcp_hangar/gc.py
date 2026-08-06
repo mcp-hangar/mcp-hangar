@@ -3,6 +3,7 @@
 from pathlib import Path
 import threading
 import time
+from collections.abc import Callable
 from typing import Any, Literal
 
 from .domain.contracts.mcp_server_runtime import normalize_state_to_str, McpServerMapping, McpServerRuntime
@@ -391,12 +392,19 @@ class MetricsSnapshotWorker:
         self,
         interval_s: int = 60,
         prune_interval: int = 144,
+        may_manage: Callable[[], bool] | None = None,
     ) -> None:
         self.task = "metrics_snapshot"
         self.interval_s = interval_s
         self._prune_interval = prune_interval
         self._cycle = 0
         self.running = False
+        # Unlike GC and health checks, this writes to storage every replica
+        # shares. Three snapshot workers on one history table interleave three
+        # series into one, and a chart of "calls per minute" then depends on
+        # which replica happened to be scheduled. Gated on the lease, and asked
+        # per cycle rather than at startup.
+        self._may_manage = may_manage or (lambda: True)
         self.thread = threading.Thread(target=self._loop, daemon=True, name="worker-metrics-snapshot")
 
     def start(self) -> None:
@@ -416,6 +424,8 @@ class MetricsSnapshotWorker:
             time.sleep(self.interval_s)
             if not self.running:
                 break
+            if not self._may_manage():
+                continue
             try:
                 self._take_snapshot()
             except Exception as e:  # noqa: BLE001 -- fault-barrier: snapshot failure must not crash worker
