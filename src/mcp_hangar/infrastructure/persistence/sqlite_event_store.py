@@ -10,7 +10,7 @@ import json
 from pathlib import Path
 import sqlite3
 import threading
-from typing import Any
+from typing import Any, ClassVar
 
 from mcp_hangar.domain.contracts.event_store import ConcurrencyError, IEventStore
 from mcp_hangar.domain.events import DomainEvent
@@ -37,6 +37,15 @@ class SQLiteEventStore(IEventStore):
     - events: Main event table with global ordering
     - streams: Track stream versions for concurrency control
     """
+
+    #: Every append goes through `self._lock` and SQLite admits one writer at a
+    #: time, so a row with a higher `AUTOINCREMENT` position also committed
+    #: later. That is what makes the inherited position-based `read_since` sound
+    #: here and unsound on PostgreSQL, where two appenders commit concurrently
+    #: and out of allocation order. It is also the reason this backend is the
+    #: standalone one: the property comes from there being a single writer,
+    #: which is the same thing as there being a single node.
+    positions_are_commit_ordered: ClassVar[bool] = True
 
     def __init__(self, db_path: str | Path = ":memory:", *, serializer: EventSerializer | None = None):
         """Initialize SQLite event store.
