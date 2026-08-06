@@ -295,7 +295,7 @@ def bootstrap(
     # would mean either mutating a frozen object or leaving those two on a
     # different backend than everything else.
     from .composition import set_persistence_backend
-    from .persistence import select_backend
+    from .persistence import restore_persisted_fleet, select_backend
 
     _backend = select_backend(full_config)
     set_persistence_backend(_backend)
@@ -324,6 +324,12 @@ def bootstrap(
     # Strictly after the handlers exist. Sweeping before them delivers a crash's
     # leftovers to an empty handler table and marks them delivered anyway.
     recover_undelivered_events(runtime)
+
+    # And the fleet itself. After the event store, because each restored server
+    # replays its own stream to get its lifecycle state back; before anything
+    # serves, because a gateway that answers "no such server" for the first few
+    # seconds after every restart is a gateway that lost its fleet.
+    restore_persisted_fleet(runtime)
 
     # Initialize CQRS (base handlers; discovery handlers registered after DiscoveryRegistry is created)
     init_cqrs(runtime, config_path)

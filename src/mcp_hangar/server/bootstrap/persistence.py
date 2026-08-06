@@ -36,6 +36,10 @@ from mcp_hangar.logging_config import get_logger
 
 logger = get_logger(__name__)
 
+#: Long enough for a fleet of a few hundred, short enough that a wedged database
+#: fails the boot rather than hanging it forever.
+RESTORE_TIMEOUT_S = 60.0
+
 
 class ConflictingStorageConfigurationError(ValueError):
     """A per-subsystem driver contradicts the selected backend.
@@ -132,3 +136,58 @@ def select_backend(full_config: dict[str, Any]) -> PersistenceBackend | None:
         detail="every persisted concern is served by this backend",
     )
     return backend
+
+
+def restore_persisted_fleet(runtime: Any) -> int:
+    """Bring back the servers a previous run wrote down.
+
+    **This is the read half of a path whose write half shipped without it.**
+    `RecoveryService.recover_mcp_servers` had exactly one caller,
+    `bootstrap.runtime.initialize_runtime`, and *that* function has no callers
+    at all -- so the snapshot written on every registration since #794 was never
+    read back, and a server registered through the API still did not survive a
+    restart. The unit test for #794 called the recovery service directly and
+    passed, which is the difference between testing a component and testing that
+    it is plugged in.
+
+    Runs after the event store is installed, because each restored aggregate
+    replays its own stream to recover the lifecycle state it had -- without
+    that, a server that was DEGRADED comes back COLD, which is a circuit breaker
+    reset handed out by restarting the process.
+
+    Bootstrap is synchronous and the repositories are not, so this crosses on
+    the shared background loop and **waits**: a gateway that begins serving
+    before its fleet is restored answers "no such server" for the first few
+    seconds after every restart.
+
+    Args:
+        runtime: The assembled runtime.
+
+    Returns:
+        How many servers were restored.
+    """
+    from ...infrastructure.async_bridge import BackgroundLoop
+
+    recovery = getattr(runtime, "recovery_service", None)
+    persistence = getattr(runtime, "persistence_config", None)
+    if recovery is None or persistence is None or not persistence.enabled:
+        return 0
+    if not persistence.auto_recover:
+        logger.info("fleet_restore_disabled", detail="MCP_AUTO_RECOVER is off; persisted servers stay unloaded")
+        return 0
+
+    loop = BackgroundLoop()
+    try:
+        restored = loop.run(recovery.recover_mcp_servers(), RESTORE_TIMEOUT_S)
+    except Exception as e:  # noqa: BLE001 -- fault-barrier: a gateway with no fleet is better than one that will not boot
+        # Loud, and not fatal. Refusing to start would turn an unreadable
+        # snapshot into an outage for the servers declared in config.yaml, which
+        # are already loaded and working by this point.
+        logger.error("fleet_restore_failed", error=str(e))
+        return 0
+    finally:
+        loop.close()
+
+    if restored:
+        logger.info("fleet_restored", count=len(restored), mcp_server_ids=list(restored))
+    return len(restored)

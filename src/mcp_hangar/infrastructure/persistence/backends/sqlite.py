@@ -22,6 +22,14 @@ from mcp_hangar.logging_config import get_logger
 
 logger = get_logger(__name__)
 
+
+def _shutdown_loop():
+    """A loop to await async `close()` methods on, during a sync shutdown."""
+    from mcp_hangar.infrastructure.async_bridge import BackgroundLoop
+
+    return BackgroundLoop()
+
+
 #: Where the databases live when configuration says nothing.
 DEFAULT_DATA_DIR = "data"
 
@@ -176,11 +184,19 @@ class SqliteBackend:
 
     def close(self) -> None:
         """Release whatever was opened. Safe to call when nothing was."""
+        import inspect
+
         for name, adapter in self._cache.items():
             closer = getattr(adapter, "close", None)
-            if callable(closer):
-                try:
-                    closer()
-                except Exception as e:  # noqa: BLE001 -- shutdown must not fail on one stubborn handle
-                    logger.warning("persistence_close_failed", concern=name, error=str(e))
+            if not callable(closer):
+                continue
+            try:
+                result = closer()
+                if inspect.isawaitable(result):
+                    # `Database.close` is async. Calling it and dropping the
+                    # coroutine closed nothing and said so only as a
+                    # RuntimeWarning, which nobody reads during shutdown.
+                    _shutdown_loop().run(result, 10.0)
+            except Exception as e:  # noqa: BLE001 -- shutdown must not fail on one stubborn handle
+                logger.warning("persistence_close_failed", concern=name, error=str(e))
         self._cache.clear()
