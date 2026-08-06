@@ -6,6 +6,7 @@ Implements:
 """
 
 import time
+from typing import Any
 
 from starlette.requests import Request
 from starlette.routing import Route
@@ -45,9 +46,46 @@ async def get_system_info(request: Request) -> HangarJSONResponse:
         **metrics.to_dict(),
         "uptime_seconds": uptime_seconds,
         "version": version,
+        "instance": _instance_info(),
     }
 
     return HangarJSONResponse({"system": system_data})
+
+
+def _instance_info() -> dict[str, Any]:
+    """Which replica answered, and what its numbers are numbers *of*.
+
+    Everything above this line is one replica's view: the state of the servers
+    it runs, the metrics it counted, the uptime of this process. With one
+    gateway that distinction does not exist and the field is noise. With three
+    it is the difference between "the fleet reports 12 calls" and "the pod you
+    reached reports 12 calls", and an operator has no way to tell which they are
+    reading unless it says so.
+
+    `manages_fleet` is the honest name for what the lease means from outside:
+    this is the instance running discovery, garbage collection and TTL
+    deregistration right now. Two replicas answering `false` while none answers
+    `true` is a fleet with nothing converging it, which is worth being able to
+    see directly rather than inferring from what has stopped happening.
+
+    `rate_limits_are_per_instance` states the scope of the configured limit
+    rather than quietly multiplying it: with three replicas, a configured 10 rps
+    admits 30 across the fleet. Dividing the number by the replica count drifts
+    exactly when it matters -- a rollout runs N+1 replicas, a failure runs N-1 --
+    and a shared token bucket puts a database round trip on the path of every
+    call. A fleet-wide limit belongs at the ingress, where the fleet has one
+    entrance (#790, phase 3.1).
+    """
+    from ...domain.events import current_instance_id
+    from ..bootstrap.coordination import get_lease_keeper
+
+    keeper = get_lease_keeper()
+    return {
+        "instance_id": current_instance_id(),
+        "coordinates_with_peers": keeper is not None,
+        "manages_fleet": True if keeper is None else keeper.may_manage(),
+        "rate_limits_are_per_instance": True,
+    }
 
 
 async def get_current_user(request: Request) -> HangarJSONResponse:

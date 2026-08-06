@@ -251,10 +251,30 @@ def save_group_circuit_breakers(
     Persists CB state under saga_type="circuit_breaker" with saga_id=group_id.
     Called during shutdown to preserve CB state across restarts.
 
+    **Only from the instance holding the management lease.** Each replica keeps
+    its own breaker in memory -- deliberately, so that one replica with a
+    network problem cannot cut a healthy upstream off from the other two
+    (#790, phase 3.4). But they all shared one row here, and all wrote it on the
+    way out, so a rolling update ended with whichever pod happened to stop last
+    having overwritten the other two. The restored state was then not the
+    fleet's and not any replica's: it was the last one out's.
+
+    A follower skipping the write loses nothing, because what it would have
+    written is its own view of an upstream the leader was also watching.
+
     Args:
         store: Saga state store to save to.
         groups: Dictionary of group_id -> McpServerGroup.
     """
+    from .coordination import may_manage
+
+    if not may_manage():
+        logger.info(
+            "circuit_breaker_save_skipped",
+            detail="this instance does not hold the management lease; the holder persists the shared row",
+        )
+        return
+
     for group_id, group in groups.items():
         try:
             cb_dict = group._circuit_breaker.to_dict()
