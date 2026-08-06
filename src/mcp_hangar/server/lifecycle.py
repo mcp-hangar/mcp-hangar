@@ -26,7 +26,7 @@ from .api.middleware import create_auth_enforced_app
 from .bootstrap import ApplicationContext, bootstrap
 from .cli.cli_compat import CLIConfig
 from .config import load_config_from_file
-from .bootstrap.coordination import get_lease_keeper
+from .bootstrap.coordination import get_event_tailer, get_lease_keeper
 from .state import get_discovery_orchestrator, get_runtime_mcp_servers
 
 logger = get_logger(__name__)
@@ -139,6 +139,12 @@ class ServerLifecycle:
         keeper = get_lease_keeper()
         if keeper is not None:
             keeper.start()
+
+        # After the handlers are registered -- which bootstrap has done by now --
+        # so a peer's event is not applied to an empty handler table.
+        tailer = get_event_tailer()
+        if tailer is not None:
+            tailer.start()
 
         # Start background workers
         for worker in self._context.background_workers:
@@ -446,6 +452,10 @@ class ServerLifecycle:
         # over in seconds". Releasing it while discovery was still winding down
         # would let a peer start converging against a fleet this instance is
         # still touching.
+        tailer = get_event_tailer()
+        if tailer is not None:
+            tailer.stop()
+
         keeper = get_lease_keeper()
         if keeper is not None:
             keeper.stop()

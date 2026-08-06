@@ -47,7 +47,7 @@ from ..state import get_runtime, GROUPS
 
 from .components import ServerComponents, get_auth_compat_exports, load_components
 
-from .coordination import init_lease_keeper
+from .coordination import init_event_tailer, init_lease_keeper
 from .cqrs import init_cqrs, init_auth_cqrs, init_saga, save_group_circuit_breakers
 from .discovery import _auto_add_volumes, create_discovery_orchestrator
 from .event_handlers import init_event_handlers
@@ -324,6 +324,12 @@ def bootstrap(
     # Strictly after the handlers exist. Sweeping before them delivers a crash's
     # leftovers to an empty handler table and marks them delivered anyway.
     recover_undelivered_events(runtime)
+
+    # The tailer's cursor is taken here, and the order with the line below is
+    # load-bearing: head first, then snapshot. An event that lands between the
+    # two is then delivered by the tail rather than falling in the gap between
+    # "not in the snapshot yet" and "before my cursor".
+    init_event_tailer(runtime)
 
     # And the fleet itself. After the event store, because each restored server
     # replays its own stream to get its lifecycle state back; before anything

@@ -14,12 +14,15 @@ did before this existed.
 
 from __future__ import annotations
 
-from typing import Any
+from typing import Any, TYPE_CHECKING
 
 from ...application.services.lease_keeper import ManagementLeaseKeeper
 from ...domain.events import current_instance_id
 from ...logging_config import get_logger
 from .composition import get_persistence_backend
+
+if TYPE_CHECKING:
+    from ...application.services.event_tailer import EventTailer
 
 logger = get_logger(__name__)
 
@@ -78,3 +81,49 @@ def may_manage() -> bool:
     """
     keeper = _keeper
     return True if keeper is None else keeper.may_manage()
+
+
+_tailer: EventTailer | None = None
+
+
+def init_event_tailer(runtime: Any) -> EventTailer | None:
+    """Create the tailer, **capturing the log head before the fleet is read**.
+
+    Placement is the whole contract of this function. The cursor is taken when
+    the tailer is constructed, so this must be called before
+    `restore_persisted_fleet`: head first, then snapshot, and an event landing
+    between the two is delivered rather than falling in the gap between "not in
+    the snapshot yet" and "before my cursor". The other order loses it silently.
+
+    Does not start it -- bootstrap assembles, lifecycle starts. A replica that
+    began applying its peers' events before its own handlers were registered
+    would deliver them to an empty table.
+
+    Returns None when there is no shared log to follow: no storage backend
+    means no peers, and a store that keeps nothing has nothing to read back.
+    """
+    global _tailer
+
+    from ...application.services.event_tailer import EventTailer
+    from ...domain.events import current_instance_id
+
+    if get_persistence_backend() is None:
+        _tailer = None
+        return None
+
+    store = getattr(getattr(runtime, "event_bus", None), "event_store", None)
+    if store is None or not getattr(store, "can_replay", False):
+        logger.info(
+            "event_tailer_absent",
+            detail="the event store keeps nothing, so there is no shared log to follow",
+        )
+        _tailer = None
+        return None
+
+    _tailer = EventTailer(store, runtime.event_bus, current_instance_id())
+    return _tailer
+
+
+def get_event_tailer() -> EventTailer | None:
+    """The tailer for this process, if there is one."""
+    return _tailer
