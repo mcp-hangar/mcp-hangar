@@ -35,6 +35,7 @@ from __future__ import annotations
 
 import threading
 
+from mcp_hangar.application.services.log_pacing import RepeatedFailure
 from mcp_hangar.domain.contracts.event_store import IEventStore, TailCursor
 from mcp_hangar.logging_config import get_logger
 
@@ -83,6 +84,7 @@ class EventTailer:
         self._batch = batch
 
         self._cursor = event_store.tail_head()
+        self._read_failures = RepeatedFailure()
         self._running = False
         self._wake = threading.Event()
         self._thread: threading.Thread | None = None
@@ -116,10 +118,18 @@ class EventTailer:
             try:
                 self.tick()
             except Exception as error:  # noqa: BLE001 -- fault-barrier: a replica must keep following after one bad read
-                # Not fatal, and not silent. A tailer that stopped would leave
-                # this replica's view frozen at whatever it last saw, serving
-                # confidently from it.
-                logger.warning("event_tailer_read_failed", error=str(error))
+                # Not fatal, and not silent -- but not every two seconds either.
+                # A tailer that stopped would leave this replica's view frozen
+                # at whatever it last saw, serving confidently from it; a tailer
+                # that says so thirty times a minute is the volume at which an
+                # operator stops reading. Found watching a real outage.
+                if self._read_failures.failed():
+                    logger.warning(
+                        "event_tailer_read_failed",
+                        error=str(error),
+                        attempts=self._read_failures.run_length,
+                        detail="this replica's view of its peers is frozen until this clears",
+                    )
             self._wake.wait(timeout=self._interval_s)
 
     def tick(self) -> int:
@@ -130,6 +140,8 @@ class EventTailer:
         to pull the tail forward on demand.
         """
         batch, cursor = self._store.read_since(self._cursor, self._batch)
+        if self._read_failures.recovered():
+            logger.info("event_tailer_reading_again", cursor=str(cursor))
         applied = 0
         skipped = 0
 
