@@ -55,15 +55,34 @@ def bootstrap_admin_command(
             help="Human-readable label recorded for the bootstrap key.",
         ),
     ] = "initial admin",
+    show_key: Annotated[
+        bool,
+        typer.Option(
+            "--show-key",
+            help=(
+                "Print the bootstrap API key's secret. Required for a deployment "
+                "whose only authenticator is API keys, where nothing else can "
+                "produce a first credential."
+            ),
+        ),
+    ] = False,
 ) -> None:
     """Grant the one-time initial global admin using the configured durable backend.
 
     Reuses the server's own ``bootstrap_auth()`` storage composition -- it never
     constructs an in-memory store -- and performs a single atomic claim. The
     claim succeeds exactly once for the whole deployment; a second run refuses
-    without mutating storage. No credential is printed: the grant is for an
-    existing external principal (which authenticates via its own OIDC/API-key
-    identity), and the incidental bootstrap key is never surfaced.
+    without mutating storage.
+
+    The claim creates an API key as well as the role, and the secret is not
+    printed unless ``--show-key`` asks for it. That default is right for the
+    case this was built for -- an OIDC principal, which authenticates on its own
+    identity and needs no key -- and it left a deployment whose *only*
+    authenticator is API keys with nowhere to go: every ``/api/auth/**`` route
+    requires an admin, so the first key cannot be minted over HTTP, and the one
+    command that could hand it over threw it away. The key row was created
+    regardless, so what the operator got was an unusable credential and no way
+    to reach their own gateway.
     """
     # Import here so the CLI stays importable even when the optional auth stack
     # is unavailable, and to keep --help fast.
@@ -140,12 +159,21 @@ def bootstrap_admin_command(
             exit_code=1,
         )
 
-    _raw_key, key_id = result
+    raw_key, key_id = result
     console.print("[green]Initial global admin bootstrapped.[/green]")
     console.print(f"  principal : {principal}")
     console.print(f"  key id    : {key_id}")
     console.print("  actor     : local-cli-bootstrap")
-    console.print(
-        "\nNo API key secret is printed by design: the grant is a global admin "
-        f"[bold]role[/bold] for {principal!r}, which authenticates via its own identity."
-    )
+    if show_key:
+        console.print(f"\n  api key   : [bold]{raw_key}[/bold]")
+        console.print(
+            "\nThis secret is shown once and is not recoverable. It is stored hashed.\n"
+            "Anyone holding it is a global administrator of this deployment."
+        )
+    else:
+        console.print(
+            f"\nNo API key secret printed: the grant is a global admin [bold]role[/bold] for "
+            f"{principal!r}, which authenticates via its own identity.\n"
+            "If API keys are this deployment's only authenticator, re-run with [bold]--show-key[/bold] "
+            "-- the claim is one-shot, so do it now rather than after."
+        )
