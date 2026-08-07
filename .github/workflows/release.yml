@@ -419,9 +419,27 @@ jobs:
       - uses: actions/setup-python@v7
         with:
           python-version: "3.12"
+      # NORMALIZED, not merely read. `pyproject.toml` carries whatever spelling
+      # wrote it -- release-please writes the semver form, `2.5.0-rc.1` -- while
+      # an installed distribution always reports the PEP 440 normal form,
+      # `2.5.0rc1`. Both name the same release, and pip resolves `==` between
+      # them happily, so the install succeeds and the smoke's identity assert
+      # then fails on the spelling: "installed 2.5.0rc1, expected 2.5.0-rc.1",
+      # on the first release-please-cut prerelease (2.5.0-rc.1).
+      #
+      # Normalized here rather than in the script, and by `packaging` rather
+      # than by another sed: the repository already has one hand-rolled
+      # normalization of these suffixes, in `validate` above, and a second copy
+      # of a rule is a second thing that can disagree. This one asks the
+      # implementation that defines the answer.
       - name: Resolve the PEP 440 version
         id: pep440
-        run: echo "version=$(grep -m1 -E '^version = "' pyproject.toml | sed 's/version = "\(.*\)"/\1/')" >> $GITHUB_OUTPUT
+        run: |
+          python -m pip install --quiet packaging
+          raw=$(grep -m1 -E '^version = "' pyproject.toml | sed 's/version = "\(.*\)"/\1/')
+          normalized=$(python -c 'import sys; from packaging.version import Version; print(Version(sys.argv[1]))' "$raw")
+          echo "version=${normalized}" >> $GITHUB_OUTPUT
+          echo "pyproject says ${raw}; the index will serve ${normalized}"
       # `--tolerate-index-lag`: the simple index pip reads lags a publish by
       # minutes, and on 2.0.1 this job ran inside that window and went red on a
       # healthy release (#680). The script now retries for ~3.5 minutes and, if
