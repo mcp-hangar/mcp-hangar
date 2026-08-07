@@ -5,6 +5,8 @@ sources, pending mcp_servers, quarantined mcp_servers, approve/reject.
 """
 
 from starlette.requests import Request
+
+from ...domain.value_objects.discovery import config_source_id
 from starlette.routing import Route
 
 from ...application.commands.discovery_commands import (
@@ -68,6 +70,14 @@ async def list_sources(request: Request) -> HangarJSONResponse:
     """
     orchestrator = _require_orchestrator()
     sources = await orchestrator.get_sources_status()
+    # The id belongs in the listing, because it is what every other route on
+    # this resource takes. Without it the caller could see a source and had no
+    # way to name it -- `/sources/{id}/scan` and `/sources/{id}/enable` were
+    # unreachable for anything declared in configuration.
+    for source in sources:
+        source_type = source.get("source_type")
+        if source_type and "id" not in source:
+            source["id"] = config_source_id(str(source_type))
     return HangarJSONResponse({"sources": sources})
 
 

@@ -235,6 +235,45 @@ def _init_instance_identity() -> str:
     return instance_id
 
 
+def _register_configured_sources(registry: Any, full_config: dict[str, Any]) -> None:
+    """Give the sources declared in `config.yaml` an identity in the registry.
+
+    There were two registries and a source only ever reached one of them. A
+    source declared in configuration went to the orchestrator, which runs it;
+    the UUID-keyed registry was created empty and only the REST API ever wrote
+    to it. So `POST /api/discovery/sources/<id>/scan` answered 404 for every id
+    an operator could obtain -- and `GET /api/discovery/sources`, which reads
+    the orchestrator, returned no `id` to try in the first place.
+
+    The id is derived from the source type rather than generated, because the
+    orchestrator keys its sources by type and a random id would change on every
+    restart. Registering here does not start anything: the orchestrator already
+    owns the running source, and this only makes it addressable.
+    """
+    from ...domain.value_objects.discovery import DiscoverySourceSpec, config_source_id
+    from ...domain.discovery.discovery_source import DiscoveryMode
+
+    for source_config in (full_config.get("discovery") or {}).get("sources", []) or []:
+        source_type = source_config.get("type")
+        if not source_type:
+            continue
+        try:
+            mode = DiscoveryMode(source_config.get("mode", "additive"))
+        except ValueError:
+            # An unknown mode is refused where the source is built; this is
+            # bookkeeping and must not be the thing that fails the boot.
+            continue
+        registry.register_source(
+            DiscoverySourceSpec(
+                source_id=config_source_id(str(source_type)),
+                source_type=str(source_type),
+                mode=mode,
+                enabled=True,
+                config={k: v for k, v in source_config.items() if k not in ("type", "mode")},
+            )
+        )
+
+
 def bootstrap(
     config_path: str | None = None,
     config_dict: dict[str, Any] | None = None,
@@ -476,6 +515,7 @@ def bootstrap(
 
         discovery_registry = DiscoveryRegistry(orchestrator=discovery_orchestrator)
         register_discovery_handlers(runtime.command_bus, discovery_registry)
+        _register_configured_sources(discovery_registry, full_config)
         logger.info("discovery_registry_created")
 
     # Log ready state
