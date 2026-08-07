@@ -394,7 +394,12 @@ class TestBootstrap:
         """Bootstrap should pass config path to load_configuration."""
         bootstrap(config_path="/path/to/config.yaml")
 
-        mock_dependencies["load_config"].assert_called_once_with("/path/to/config.yaml")
+        # `load_servers=False` is load-bearing rather than cosmetic: building a
+        # declared server reaches for the runtime singleton, and the runtime
+        # takes the storage backend at construction because it is frozen
+        # afterwards. Reading the file and building its servers had to become
+        # two steps with the backend selected in between.
+        mock_dependencies["load_config"].assert_called_once_with("/path/to/config.yaml", load_servers=False)
 
     def test_bootstrap_with_discovery_disabled(self, mock_dependencies):
         """Bootstrap without discovery should have None orchestrator."""

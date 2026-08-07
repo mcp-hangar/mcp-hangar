@@ -277,16 +277,18 @@ def bootstrap(
     _ensure_data_dir()
 
     # Load configuration early (needed for runtime rate-limit and event store config)
+    # Read the configuration, but do not build the servers it declares yet.
+    # Building one reaches for the runtime singleton, and the runtime takes the
+    # storage backend at construction because it is frozen afterwards -- so
+    # loading servers before the backend is selected leaves the gateway with the
+    # in-memory config repository for the rest of its life, and every durable
+    # half of the fleet then quietly does nothing.
     if config_dict is not None:
         # Use provided config dict, merge with defaults
-        full_config = load_configuration(None)
+        full_config = load_configuration(None, load_servers=False)
         full_config.update(config_dict)
-        # Load mcp_servers from config_dict
-        mcp_servers_config = config_dict.get("mcp_servers", {})
-        if mcp_servers_config:
-            load_config(mcp_servers_config)
     else:
-        full_config = load_configuration(config_path)
+        full_config = load_configuration(config_path, load_servers=False)
 
     # Initialize runtime and context. The rate_limit section (config > env > default)
     # is applied when the runtime singleton is first constructed.
@@ -302,6 +304,9 @@ def bootstrap(
 
     runtime = get_runtime(rate_limit=full_config.get("rate_limit"), persistence_backend=_backend)
     init_context(runtime)
+
+    # Now the servers, with a runtime that knows where it persists.
+    load_config(full_config.get("mcp_servers", {}))
 
     # Initialize observability (tracing, Langfuse) early
     _, observability_adapter = init_observability(full_config)
