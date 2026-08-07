@@ -17,7 +17,7 @@ from ...domain.contracts.persistence import (
 )
 from ...domain.model import McpServer
 from ...domain.repository import IMcpServerRepository
-from ...domain.services.fleet_snapshot import snapshot_of
+from ...domain.services.fleet_snapshot import server_from_snapshot, snapshot_of
 from ...logging_config import get_logger
 from ...domain.contracts.event_store import IEventStore
 from ...stream_ids import MCP_SERVER, stream_id_for
@@ -188,31 +188,17 @@ class RecoveryService:
     def _create_mcp_server_from_config(self, config: McpServerConfigSnapshot) -> McpServer:
         """Create McpServer aggregate from configuration snapshot.
 
+        Shared with the fleet projection, which rebuilds a server from the same
+        record when it learns of a registration from the log. Kept as a method
+        so the call sites here read unchanged.
+
         Args:
             config: McpServer configuration snapshot
 
         Returns:
             McpServer aggregate instance
         """
-        return McpServer(
-            mcp_server_id=config.mcp_server_id,
-            mode=config.mode,
-            command=config.command,
-            image=config.image,
-            endpoint=config.endpoint,
-            env=config.env,
-            idle_ttl_s=config.idle_ttl_s,
-            health_check_interval_s=config.health_check_interval_s,
-            max_consecutive_failures=config.max_consecutive_failures,
-            description=config.description,
-            volumes=config.volumes,
-            build=config.build,
-            resources=config.resources,
-            network=config.network,
-            read_only=config.read_only,
-            user=config.user,
-            tools=config.tools,
-        )
+        return server_from_snapshot(config)
 
     async def _record_recovery_audit(self, result: RecoveryResult) -> None:
         """Record recovery operation in audit log.
