@@ -1,5 +1,93 @@
 # Upgrading MCP Hangar
 
+## 2.5.0 — nothing changes until you select a storage backend
+
+The release adds `persistence.backend` and multi-replica coordination. **An
+existing configuration that sets neither is unaffected**: omitting `persistence`
+keeps the per-subsystem storage behaviour exactly as it was, which is deliberate
+— a storage rewiring must not change what a running deployment does.
+
+Everything below applies only once you opt in.
+
+### Selecting a backend takes over every persisted concern
+
+`persistence.backend: sqlite | postgresql` chooses storage for all of it at
+once: the event log and its delivery mark, server configuration, the audit
+trail, saga state, approvals, API keys, roles, tool-access policies, metric
+history and the management lease. A backend serves every one of them or
+selection is refused, which is what makes the half-configured deployment
+unrepresentable — before 2.5.0 you could select the PostgreSQL auth driver and
+silently lose tool-access policy management with it.
+
+Two consequences to check before you roll out:
+
+- **A per-subsystem key that names a different backend now refuses startup.**
+  `auth.storage.driver` and `event_store.driver` are compared against your
+  selection, and a contradiction fails the boot rather than being resolved by a
+  precedence rule. Whichever way such a rule fell, half of what you wrote would
+  be ignored — and the half that loses is the one written most recently.
+  `memory` is exempt: it is a testing choice, not a storage backend.
+- **`event_store.allow_memory_fallback` no longer has anything to decide.** With
+  a backend selected, the log and its delivery mark come from it, and a backend
+  is durable as a whole. Keep the key if you are not selecting a backend; it
+  still fails a non-durable store fast there.
+
+**There is no migration between backends.** Selecting PostgreSQL on a gateway
+that has been running on SQLite starts an empty database — it does not move
+what is in the file.
+
+### Selecting PostgreSQL turns coordination on, at one replica
+
+This is the one that can surprise a single-node deployment. Coordination keys
+off whether the storage **can be shared**, not off how many replicas you run, so
+a single gateway on PostgreSQL takes a management lease and reports
+`coordinates_with_peers: true`. It manages the fleet, because it is the holder —
+nothing stops working.
+
+What does change on that deployment: **registering a `subprocess`, `docker` or
+`container` server through the API is refused** (HTTP 422), because those modes
+attach a child process's stdio to one gateway and any peer that learned of such
+a server would start its own copy. Servers already declared in `config.yaml`
+keep working — the refusal is on the registration path, not the startup one.
+
+If that deployment is genuinely single-node and wants to keep registering local
+modes at runtime, stay on `persistence.backend: sqlite`, which is not shareable
+and therefore not coordinated.
+
+> The refusal message ends "or run a single instance", which reads oddly when
+> you already are one. The condition is *shareable storage*, not *observed
+> peers*. Tracked — the wording, and whether this should key on the
+> `coordination:` block instead, are open for 2.5.0 final.
+
+### A `coordination:` block requires PostgreSQL
+
+Adding `coordination:` is the statement that these replicas are meant to be
+**one** gateway. On a file-backed backend it refuses to start, because replicas
+that cannot share storage are not a cluster — each would hold its own fleet and
+its own lease and never notice the others. That is not hypothetical: three
+replicas on SQLite each reported `manages_fleet: true`, with every health check
+green.
+
+Running many pods each with their own storage stays legitimate — that is many
+gateways, and nobody's business but yours. What is refused is calling them one.
+
+### If you already run more than one replica
+
+Through 2.4.0 the documentation said not to, and the failure was silent rather
+than loud. On 2.5.0, to make a replica set safe you need all three of: one
+PostgreSQL every replica shares, a `coordination:` block, and `remote`-mode
+servers. Then check it pod by pod rather than through the Service — exactly one
+should answer `manages_fleet: true` at `GET /api/system`.
+
+Two costs are worth knowing before the rollout rather than after: rate limits
+are counted **per instance** (three replicas admit three times the configured
+rate — a fleet-wide cap belongs at the ingress), and anything travelling by the
+shared log reaches peers within a poll interval rather than immediately.
+
+The full recipe is [cookbook 25](https://mcp-hangar.io/docs/cookbook/25-multiple-replicas);
+the decisions and their failure modes are in
+[ADR-020](https://mcp-hangar.io/docs/adr/ADR-020-high-availability).
+
 ## Discovery: namespace policy moves to the Kubernetes source
 
 `discovery.security.allowed_namespaces` and `discovery.security.denied_namespaces`
