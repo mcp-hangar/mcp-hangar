@@ -129,6 +129,8 @@ class _ASharedBackend:
 
 
 class _NotTheManager:
+    ttl_s = 15.0
+
     def may_manage(self) -> bool:
         return False
 
@@ -136,8 +138,17 @@ class _NotTheManager:
     def lease(self):
         return None
 
+    @property
+    def incumbent(self):
+        # A follower knows who does hold it -- that is the point of the field.
+        from mcp_hangar.domain.contracts.management_lease import Lease
+
+        return Lease("the-other-replica", 4, 1_800_000_100.0)
+
 
 class _TheManager:
+    ttl_s = 15.0
+
     def may_manage(self) -> bool:
         return True
 
@@ -146,6 +157,10 @@ class _TheManager:
         from mcp_hangar.domain.contracts.management_lease import Lease
 
         return Lease(holder="gateway-a", generation=1, expires_at=0.0)
+
+    @property
+    def incumbent(self):
+        return self.lease
 
 
 class _RecordingStore:

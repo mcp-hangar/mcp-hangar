@@ -36,6 +36,7 @@ from ..exceptions import (
     EgressPolicyApprovalRequiredError,
     EgressPolicyDeniedError,
     InvalidStateTransitionError,
+    McpServerNotHereError,
     McpServerStartError,
     ToolInvocationError,
     ToolNotFoundError,
@@ -615,6 +616,17 @@ class McpServer(AggregateRoot):
                 self._end_cold_start_tracking(cold_start_time, success=True)
                 self._ready_event.set()  # Wake waiters: success
 
+        except McpServerNotHereError as e:
+            # Not a start failure: this replica is the wrong one to ask. Wrapping
+            # it in McpServerStartError sent the caller a 500 about a gateway
+            # behaving exactly as designed. Recorded and re-raised as itself so
+            # the API can answer 409 and name the instance to ask instead.
+            with self._lock:
+                self._end_cold_start_tracking(cold_start_time, success=False)
+                self._handle_start_failure(e)
+                self._start_error = e
+                self._ready_event.set()  # Wake waiters: failure
+            raise
         except McpServerStartError as e:
             with self._lock:
                 self._end_cold_start_tracking(cold_start_time, success=False)

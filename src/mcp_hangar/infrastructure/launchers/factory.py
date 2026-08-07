@@ -11,6 +11,7 @@ The gate lives here because this is the one place every launch goes through.
 from collections.abc import Callable
 from typing import cast
 
+from mcp_hangar.domain.exceptions import McpServerNotHereError
 from mcp_hangar.logging_config import get_logger
 
 from .base import McpServerLauncher
@@ -29,7 +30,7 @@ LOCAL_MODES = frozenset({"subprocess", "docker", "container", "podman"})
 _may_launch_local: Callable[[], bool] | None = None
 
 
-class LocalModeNotOwnedError(RuntimeError):
+class LocalModeNotOwnedError(McpServerNotHereError):
     """A follower tried to start a server that belongs to the lease holder.
 
     Raised rather than started. Starting it would be the quiet answer and the
@@ -43,8 +44,9 @@ class LocalModeNotOwnedError(RuntimeError):
         super().__init__(
             f"{mode} servers are run by the instance holding the management lease, and this instance does not "
             "hold it. A server in this mode is a child process of one gateway, so a peer cannot reach it and "
-            "starting a local copy would be a second server rather than a second route to the first. Use "
-            "`remote` mode for servers that several replicas must serve."
+            "starting a local copy would be a second server rather than a second route to the first. Ask the "
+            "instance that reports `manages_fleet: true`, or use `remote` mode for servers that several "
+            "replicas must serve."
         )
 
 

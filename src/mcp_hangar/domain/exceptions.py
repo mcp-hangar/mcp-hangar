@@ -168,6 +168,29 @@ class CannotStartMcpServerError(McpServerError):
         self.time_until_retry = time_until_retry
 
 
+class McpServerNotHereError(McpServerError):
+    """This server belongs to another instance of the fleet, not to this one.
+
+    A `subprocess` or `docker` server is a child process of one gateway: its
+    stdio is attached to that process and no peer has an address for it. A
+    follower asked to start one refuses, and that refusal is **not a fault**.
+    It used to travel as a generic start failure and reach the caller as a
+    `500`, which says "this gateway is broken" about a gateway that is working
+    exactly as designed -- measured on a two-replica deployment.
+
+    A domain type rather than the launcher's own, so the model can let it
+    through unwrapped and the API can answer `409`: the request was addressed
+    to the wrong replica, which the caller can act on by asking another.
+    """
+
+    def __init__(self, reason: str, mcp_server_id: str | None = None) -> None:
+        super().__init__(
+            message=reason,
+            mcp_server_id=mcp_server_id or "",
+            operation="start",
+        )
+
+
 class McpServerNotReadyError(McpServerError):
     """Raised when an operation requires READY state but mcp_server is not ready."""
 

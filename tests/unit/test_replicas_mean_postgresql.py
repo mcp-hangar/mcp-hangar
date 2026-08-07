@@ -162,11 +162,17 @@ class TestTheApiStopsClaimingCoordinationItDoesNotHave:
 
 
 class _AKeeper:
+    ttl_s = 15.0
+
     def may_manage(self) -> bool:
         return True
 
     @property
     def lease(self):
+        return None
+
+    @property
+    def incumbent(self):
         return None
 
 

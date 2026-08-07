@@ -109,6 +109,10 @@ class ManagementLeaseKeeper:
 
         self._guard = threading.Lock()
         self._lease: Lease | None = None
+        #: The tenure in force as last observed, whoever holds it.
+        self._incumbent: Lease | None = None
+        #: Paces the config-drift warning: once, then rarely.
+        self._tenure_drift = RepeatedFailure(every=60)
         self._last_success: float = 0.0
         self._running = False
         self._wake = threading.Event()
@@ -120,6 +124,16 @@ class ManagementLeaseKeeper:
         """The tenure this instance currently believes it holds, if any."""
         with self._guard:
             return self._lease
+
+    @property
+    def ttl_s(self) -> float:
+        """The tenure this instance writes when it holds the lease.
+
+        Exposed so `GET /api/system` can report it next to the tenure actually
+        in force: the two differing is config drift between replicas, and it is
+        otherwise invisible.
+        """
+        return self._ttl_s
 
     def may_manage(self) -> bool:
         """Whether the management loops may run right now.
@@ -201,12 +215,69 @@ class ManagementLeaseKeeper:
         if self._acquire_failures.recovered():
             logger.info("management_lease_reachable_again")
         if lease is None:
+            self._observe_the_incumbent()
             return
         with self._guard:
             self._lease = lease
             self._last_success = time.monotonic()
         if self._on_acquired is not None:
             self._on_acquired(lease)
+
+    def _observe_the_incumbent(self) -> None:
+        """Who holds it and for how long -- because that is not this instance's choice.
+
+        `expires_at` is written by the holder from **its own** `lease_ttl_s`, so
+        the time a survivor waits after a holder dies is the dead holder's
+        configuration, not the survivor's. Measured on a two-replica deployment
+        where one replica was configured with a 60s tenure and the other with
+        10s: the 10s replica waited **52 seconds** to take over, and nothing
+        anywhere reported the number it was actually waiting for.
+
+        So the keeper reads the incumbent when its own acquisition loses, and
+        `GET /api/system` reports it. One extra single-row read per poll on
+        followers only; the holder never takes this path.
+
+        A materially longer tenure than this instance configured is worth a
+        line: it is config drift between replicas, which is invisible in every
+        other way. The comparison is against a local clock, so the threshold is
+        deliberately loose -- twice the configured TTL -- and the message says
+        the measurement is this instance's.
+        """
+        try:
+            incumbent = self._store.current()
+        except Exception:  # noqa: BLE001 -- fault-barrier: this is reporting, never the reason to stop
+            return
+        with self._guard:
+            self._incumbent = incumbent
+        if incumbent is None:
+            return
+        remaining = incumbent.expires_at - time.time()
+        if remaining > 2 * self._ttl_s and self._tenure_drift.failed():
+            logger.warning(
+                "management_lease_tenure_longer_than_configured",
+                holder=incumbent.holder,
+                generation=incumbent.generation,
+                remaining_s=round(remaining, 1),
+                my_lease_ttl_s=self._ttl_s,
+                detail=(
+                    "the tenure in force was written by the holder from its own lease_ttl_s, so a takeover "
+                    "after an ungraceful death waits that long and not the value configured here "
+                    "(measured against this instance's clock)"
+                ),
+            )
+        elif remaining <= 2 * self._ttl_s:
+            self._tenure_drift.recovered()
+
+    @property
+    def incumbent(self) -> Lease | None:
+        """The lease in force as this instance last saw it, held by anyone.
+
+        `lease` is what *this* instance holds -- None on a follower. This is
+        what it is waiting for, which is the number an operator needs when the
+        fleet has no manager.
+        """
+        with self._guard:
+            return self._lease or self._incumbent
 
     def _try_renew(self) -> None:
         held = self.lease
