@@ -100,6 +100,23 @@ def load_config_from_file(config_path: str) -> dict[str, Any]:
     with open(path) as f:
         config = yaml.safe_load(f)
 
+    # Once, over everything, rather than in the one place that happened to need
+    # it first. `${VAR}` was interpolated only inside `mcp_servers.<id>.auth`,
+    # while the documentation described it as a property of configuration --
+    # the production checklist tells an operator to keep secrets out of the file
+    # this way, the transport guide says "configuration values support" it, and
+    # the reference documents it for Langfuse keys. All of that was true of one
+    # sub-block.
+    #
+    # Found by running the multi-replica recipe against the published 2.5.0-rc.2
+    # image: `persistence.postgresql.password: ${HANGAR_DB_PASSWORD}` reached
+    # psycopg2 as those twenty-two literal characters, and three pods failed
+    # with `password authentication failed for user "hangar"`. The alternative
+    # -- writing the password into the file -- is what the checklist exists to
+    # prevent.
+    if config:
+        config = _interpolate_env_vars(config)
+
     if not config:
         raise ValueError(f"Invalid configuration: missing 'mcp_servers' section in {config_path}")
 
