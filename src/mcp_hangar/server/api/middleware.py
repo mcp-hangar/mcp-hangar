@@ -34,6 +34,7 @@ from ...domain.exceptions import (
     MCPError,
     McpServerDegradedError,
     McpServerNotFoundError,
+    ConfigurationError,
     McpServerNotHereError,
     McpServerNotReadyError,
     MissingCredentialsError,
@@ -92,6 +93,11 @@ _EXCEPTION_STATUS_MAP: list[tuple[type, int]] = [
     # and answered 500 -- telling the caller the server had broken when the
     # feature was simply off.
     (HandlerNotRegisteredError, 503),
+    # A configuration error reaching the API is a statement about the
+    # deployment, not about the request: an unwritable directory, a file that is
+    # not there. 500 with "an internal server error occurred" says the gateway
+    # broke; 503 with the real message says what to fix.
+    (ConfigurationError, 503),
     (McpServerNotFoundError, 404),
     (ToolNotFoundError, 404),
     # Not "this broke" but "not here": a follower asked to start a server that
