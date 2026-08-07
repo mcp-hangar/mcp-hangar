@@ -84,7 +84,21 @@ class PostgresqlBackend:
         def build() -> Any:
             from .event_store import PostgresEventStore
 
-            return PostgresEventStore(self._connections(), table_prefix=self._table_prefix)
+            store = PostgresEventStore(self._connections(), table_prefix=self._table_prefix)
+            # Every other adapter in this backend creates its schema when it is
+            # built. This one keeps that step as a separate method, and nothing
+            # called it -- so a gateway on `persistence.backend: postgresql` ran
+            # with no `events` table at all. Nothing said so until something
+            # read the log: appends were the first write and the tailer the
+            # first read, and the tailer reported `relation "events" does not
+            # exist` every two seconds into a log nobody was watching.
+            #
+            # Called here rather than in the constructor because the store's own
+            # docstring is right that construction should not reach into a
+            # possibly-lazy pool; the backend is the thing that knows the pool
+            # is ready. Found by deploying it (#790, phase 4.4).
+            store.initialize()
+            return store
 
         return self._cached("event_store", build)
 

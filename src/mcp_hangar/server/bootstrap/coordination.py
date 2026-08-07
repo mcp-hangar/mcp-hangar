@@ -45,6 +45,8 @@ def init_lease_keeper(config: dict[str, Any] | None = None) -> ManagementLeaseKe
     """
     global _keeper
 
+    from ...infrastructure.launchers import set_local_mode_policy
+
     backend = get_persistence_backend()
     if backend is None:
         logger.info(
@@ -52,6 +54,10 @@ def init_lease_keeper(config: dict[str, Any] | None = None) -> ManagementLeaseKe
             detail="no storage backend selected; this gateway manages its own fleet, as a standalone one does",
         )
         _keeper = None
+        # Explicitly permissive. A standalone gateway runs every mode, and it
+        # must not inherit a policy left behind by a previous bootstrap in the
+        # same process -- which is what a test suite is.
+        set_local_mode_policy(None)
         return None
 
     coordination = (config or {}).get("coordination", {})
@@ -64,6 +70,13 @@ def init_lease_keeper(config: dict[str, Any] | None = None) -> ManagementLeaseKe
         kwargs["renew_deadline_s"] = float(coordination["renew_deadline_s"])
 
     _keeper = ManagementLeaseKeeper(backend.management_lease(), current_instance_id(), **kwargs)
+
+    # Local-mode servers are the lease holder's to run: they are child processes
+    # of one gateway, so a follower starting its own copy makes a second server
+    # rather than a second route to the first (#790, phase 4.1). Set here rather
+    # than at each launch site, because `get_launcher` is the one place every
+    # launch goes through.
+    set_local_mode_policy(may_manage)
     return _keeper
 
 

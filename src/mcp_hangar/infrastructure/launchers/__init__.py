@@ -3,7 +3,7 @@
 from .base import McpServerLauncher
 from .container import ContainerConfig, ContainerLauncher
 from .docker import DockerLauncher
-from .factory import get_launcher
+from .factory import get_launcher, LOCAL_MODES, LocalModeNotOwnedError, set_local_mode_policy
 from .http import HttpLauncher
 from .subprocess import SubprocessLauncher
 
@@ -15,4 +15,7 @@ __all__ = [
     "ContainerConfig",
     "HttpLauncher",
     "get_launcher",
+    "LOCAL_MODES",
+    "LocalModeNotOwnedError",
+    "set_local_mode_policy",
 ]

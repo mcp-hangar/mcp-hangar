@@ -6,8 +6,11 @@ attributes to do it -- and the registration path now needs the same thing. Two
 copies of "what a server's configuration is" drift the moment a field is added,
 and the drift is invisible: the field is simply absent after a restart.
 
-The reverse direction (`_create_mcp_server_from_config`) stays where it is, in
-recovery, since only recovery constructs aggregates from records.
+The reverse direction lives here too now. It stayed in recovery for as long as
+recovery was the only thing that rebuilt a server from a record; a replica
+learning about a registration from the log is the second, and two copies of
+"how to turn a snapshot back into a server" would drift exactly as the forward
+direction would.
 """
 
 from ..contracts.persistence import McpServerConfigSnapshot
@@ -48,4 +51,41 @@ def snapshot_of(mcp_server: McpServer, *, enabled: bool = True) -> McpServerConf
         # without asking it.
         tools=([tool.to_dict() for tool in mcp_server.tools] if mcp_server._tools_predefined else None),
         enabled=enabled,
+    )
+
+
+def server_from_snapshot(config: McpServerConfigSnapshot) -> McpServer:
+    """Rebuild a server from the record that describes it.
+
+    Deliberately the plain constructor and nothing else: no lifecycle state, no
+    tools discovered at runtime. What the record holds is the configuration, and
+    a server rebuilt from it starts COLD -- which is true, because on this
+    replica it has not started. Callers that want the state it *had* replay its
+    stream over the top (recovery does; a follower learning of a registration
+    has nothing to replay yet).
+
+    Args:
+        config: The stored configuration.
+
+    Returns:
+        The aggregate, as configured.
+    """
+    return McpServer(
+        mcp_server_id=config.mcp_server_id,
+        mode=config.mode,
+        command=config.command,
+        image=config.image,
+        endpoint=config.endpoint,
+        env=config.env,
+        idle_ttl_s=config.idle_ttl_s,
+        health_check_interval_s=config.health_check_interval_s,
+        max_consecutive_failures=config.max_consecutive_failures,
+        description=config.description,
+        volumes=config.volumes,
+        build=config.build,
+        resources=config.resources,
+        network=config.network,
+        read_only=config.read_only,
+        user=config.user,
+        tools=config.tools,
     )

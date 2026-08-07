@@ -20,6 +20,8 @@ from ...domain.contracts.cost import NullCostAttributor
 from ...domain.contracts.risk import NullRiskScorer
 from ...application.event_handlers.tool_projection_handler import ToolProjectionPopulationHandler
 from ...domain.events import (
+    McpServerDeregistered,
+    McpServerRegistered,
     SessionSuspended,
     SessionUnsuspended,
     BehavioralDeviationDetected,
@@ -129,6 +131,29 @@ def init_event_handlers(runtime: "Runtime") -> None:
     # that means making the suspension *registry* shared rather than making this
     # handler run everywhere -- #790, phase 3.2.
     runtime.event_bus.subscribe(DetectionRuleMatched, detection_enforcement_handler.handle, kind=HandlerKind.EFFECT)
+
+    # One fleet, seen from every replica. A server registered on one of them --
+    # by an operator, or by whichever is running discovery -- was invisible to
+    # the others until they restarted (#790, phase 2.3). A projection: every
+    # replica needs it, for every event, whoever produced it.
+    #
+    # Only with a durable shared record, because the event names the server and
+    # the record describes it. Without one there is nothing to read, and also no
+    # peers to learn from.
+    config_repository = getattr(runtime, "config_repository", None)
+    if config_repository is not None and type(config_repository).__name__ != "InMemoryMcpServerConfigRepository":
+        from ...application.event_handlers.fleet_projection import FleetProjection
+
+        from ...infrastructure.async_bridge import BackgroundLoop
+
+        fleet_projection = FleetProjection(runtime.repository, config_repository, BackgroundLoop())
+        runtime.event_bus.subscribe(McpServerRegistered, fleet_projection.handle, kind=HandlerKind.PROJECTION)
+        runtime.event_bus.subscribe(McpServerDeregistered, fleet_projection.handle, kind=HandlerKind.PROJECTION)
+        # Not `fleet_projection_registered`: that name belongs to the
+        # projection applying a server, and two different events under one name
+        # is a log an operator cannot read. `_configured` matches
+        # `fleet_writer_configured` next door.
+        logger.info("fleet_projection_configured")
 
     # Suspension has to reach every replica: a session refused here and served
     # by the other two is a block a caller walks past by retrying. A projection,
