@@ -272,15 +272,35 @@ class HttpClient:
         headers.update(self._auth_config.get_headers())
         headers.update(config.extra_headers)
 
-        # Create transport with retry logic
+        # The TLS settings go on the TRANSPORT, and that is the whole point.
+        #
+        # `httpx.Client(verify=...)` only configures the transport httpx would
+        # have built for itself. Passing `transport=` explicitly -- which this
+        # client does, for retries -- replaces that transport with one
+        # constructed here, and a transport built without `verify` uses the
+        # default: verify against the system trust store. So the `verify`
+        # argument below was dead, and every TLS setting an operator could
+        # write was silently discarded.
+        #
+        # Measured against a self-signed upstream on 2.5.0-rc.3, all three
+        # through the same httpx:
+        #
+        #     verify=False, no explicit transport            -> 200
+        #     verify=False + transport without verify        -> ConnectError
+        #     transport built with verify=False              -> 200
+        #
+        # It failed closed, which is why it went unnoticed: `verify_ssl: false`
+        # simply did not work. `ca_cert_path` travels on the same argument and
+        # was discarded the same way -- and that one has no safe reading, since
+        # it is how a deployment trusts its own internal CA.
         transport = httpx.HTTPTransport(
             retries=config.max_retries,
+            verify=verify,
         )
 
         return httpx.Client(
             timeout=timeout,
             headers=headers,
-            verify=verify,
             transport=transport,
             follow_redirects=False,  # SSRF prevention: redirects must be validated explicitly
         )
