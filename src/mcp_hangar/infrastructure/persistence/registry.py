@@ -54,6 +54,27 @@ REQUIRED_CONCERNS: Final = (
 )
 
 
+#: Whether a backend can be shared by more than one gateway process. Absent
+#: means **no**, which is the conservative answer: a backend that has not
+#: considered the question is one whose adapters have not been examined for it,
+#: and treating it as shareable would be assuming the property that matters
+#: most. `PostgresqlBackend` sets it True; `SqliteBackend` is a file and says so.
+SHARED_ATTRIBUTE: Final = "shared_across_instances"
+
+
+def is_shared(backend: Any) -> bool:
+    """Whether this backend is one several gateways can coordinate through.
+
+    Not the same question as "is a backend selected". Three replicas on SQLite
+    each get their own file, so each is an island: each holds its own lease,
+    each runs the management loops, each has its own fleet -- and every one of
+    them is internally consistent, which is what makes it hard to see. Anything
+    that reports on coordination has to ask this rather than whether a backend
+    exists.
+    """
+    return bool(getattr(backend, SHARED_ATTRIBUTE, False))
+
+
 @runtime_checkable
 class PersistenceBackend(Protocol):
     """Everything the gateway persists, from one backend.

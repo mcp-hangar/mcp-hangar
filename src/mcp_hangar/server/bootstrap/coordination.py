@@ -46,8 +46,28 @@ def init_lease_keeper(config: dict[str, Any] | None = None) -> ManagementLeaseKe
     global _keeper
 
     from ...infrastructure.launchers import set_local_mode_policy
+    from ...infrastructure.persistence.registry import is_shared
 
     backend = get_persistence_backend()
+    if backend is not None and not is_shared(backend):
+        # A file-backed backend has no peer that could hold the lease, so there
+        # is nothing to coordinate and a keeper would be theatre: it would grant
+        # itself the lease every time and report that it coordinates with peers.
+        # That is how three replicas on SQLite each came to say they managed the
+        # fleet, on a real cluster, with every health check green. This gateway
+        # is standalone by construction, so it says so.
+        logger.info(
+            "management_lease_absent",
+            detail=f"the {type(backend).__name__} backend is local to one process; this gateway is standalone",
+        )
+        _keeper = None
+        # Standalone by construction, so every mode is permitted -- and said
+        # explicitly, for the same reason as the branch below: a policy left in
+        # this module by a previous bootstrap in the same process must not
+        # survive into a gateway that has no follower to be.
+        set_local_mode_policy(None)
+        return None
+
     if backend is None:
         logger.info(
             "management_lease_absent",

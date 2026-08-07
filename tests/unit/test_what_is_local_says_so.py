@@ -46,10 +46,13 @@ class TestTheSystemEndpointSaysWhichReplicaAnswered:
         # while none answers true is a fleet with nothing converging it, and
         # that should be readable directly rather than inferred from what has
         # stopped happening.
-        from mcp_hangar.server.bootstrap import coordination
+        from mcp_hangar.server.bootstrap import composition, coordination
         from mcp_hangar.server.api.system import _instance_info
 
         monkeypatch.setattr(coordination, "_keeper", _NotTheManager())
+        # A keeper is not coordination; a *shareable* backend is. Three replicas
+        # on SQLite each had a keeper and each reported that it coordinated.
+        monkeypatch.setattr(composition, "_persistence_backend", _ASharedBackend())
         info = _instance_info()
 
         assert info["coordinates_with_peers"] is True
@@ -119,6 +122,10 @@ class TestTheSharedCircuitBreakerRowHasOneWriter:
         source = inspect.getsource(ServerLifecycle.shutdown)
 
         assert source.index("self._context.shutdown()") < source.index("keeper.stop()")
+
+
+class _ASharedBackend:
+    shared_across_instances = True
 
 
 class _NotTheManager:
