@@ -21,6 +21,11 @@ silently lose tool-access policy management with it.
 
 Two consequences to check before you roll out:
 
+- **`${VAR}` in configuration is interpolated everywhere.** It used to work
+  inside `mcp_servers.<id>.auth` and nowhere else, while the documentation
+  described it as a property of configuration. If you kept a secret out of the
+  file the way the production checklist says to, and it silently arrived as the
+  literal characters, this is why.
 - **A per-subsystem key that names a different backend now refuses startup.**
   `auth.storage.driver` and `event_store.driver` are compared against your
   selection, and a contradiction fails the boot rather than being resolved by a
@@ -54,10 +59,33 @@ If that deployment is genuinely single-node and wants to keep registering local
 modes at runtime, stay on `persistence.backend: sqlite`, which is not shareable
 and therefore not coordinated.
 
-> The refusal message ends "or run a single instance", which reads oddly when
-> you already are one. The condition is *shareable storage*, not *observed
-> peers*. Tracked — the wording, and whether this should key on the
-> `coordination:` block instead, are open for 2.5.0 final.
+The message says so: it names the condition — storage peers can share — and
+offers `persistence.backend: sqlite` as the alternative to `remote` mode. It
+used to end "or run a single instance", which read oddly when you already were
+one.
+
+### A declared cluster refuses a child-process server outright
+
+The paragraph above is about *runtime registration*. Servers declared in
+`config.yaml` take a different path, and when the deployment declares a
+`coordination:` block they are now refused **at startup**, naming every
+offender at once:
+
+```
+this gateway is configured as part of a cluster (`coordination:`), and
+'reports' is 'subprocess'. ... Use `remote` mode for servers several replicas
+must serve, or remove the `coordination:` block to run this as a single gateway.
+```
+
+Without the block nothing here fires, which is the whole point of asking on
+that axis: a single gateway that merely uses PostgreSQL keeps running its child
+processes exactly as before.
+
+What this replaced is worth knowing if you ran an earlier candidate. Such a
+server loaded on every replica and only the lease holder could start it, so
+`GET /api/mcp_servers/<id>/tools` answered with the server's tools on one pod
+and an empty list on the others, and starting it on any other pod returned a
+`409`.
 
 ### A `coordination:` block requires PostgreSQL
 
