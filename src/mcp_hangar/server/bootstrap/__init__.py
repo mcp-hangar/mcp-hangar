@@ -297,7 +297,17 @@ def bootstrap(
     # would mean either mutating a frozen object or leaving those two on a
     # different backend than everything else.
     from .composition import set_persistence_backend
-    from .persistence import refuse_a_cluster_on_unshared_storage, restore_persisted_fleet, select_backend
+    from .persistence import (
+        refuse_a_cluster_on_unshared_storage,
+        refuse_local_modes_in_a_declared_cluster,
+        restore_persisted_fleet,
+        select_backend,
+    )
+
+    # Before the backend, because it reads configuration only: a cluster that
+    # declares a child-process server is wrong whether or not its database is
+    # reachable, and it should not be told about the database first.
+    refuse_local_modes_in_a_declared_cluster(full_config)
 
     _backend = select_backend(full_config)
     set_persistence_backend(_backend)

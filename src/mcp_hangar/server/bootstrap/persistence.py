@@ -163,6 +163,76 @@ class ClusterNeedsSharedStorageError(RuntimeError):
         )
 
 
+class LocalModeInDeclaredClusterError(RuntimeError):
+    """A declared cluster carries a server it can only run on one replica.
+
+    `subprocess`, `docker` and `container` attach a child process's stdio to
+    **one** gateway. Registering such a server through the API is already
+    refused where storage is shareable, and launching one on a follower is
+    refused again -- but a server declared in `config.yaml` goes through
+    neither path. It is simply loaded, on every replica, and then only the
+    lease holder can start it.
+
+    What an operator sees from that is not an error. It is a fleet where
+    `GET /api/mcp_servers/<id>/tools` answers with five tools on one pod and an
+    empty list on the others, and a `409` from whichever replica the load
+    balancer happened to pick. Measured on two replicas sharing one database.
+
+    Asked on the axis the operator controls: a `coordination:` block is the
+    statement that these replicas are meant to be **one** gateway, and in that
+    deployment a child-process server is a configuration error rather than a
+    surprise to discover at call time. Without the block -- a single gateway
+    that merely happens to use PostgreSQL -- nothing here fires and the server
+    runs as it always has.
+    """
+
+    def __init__(self, offenders: list[tuple[str, str]]) -> None:
+        self.offenders = offenders
+        detail = "; ".join(f"{server_id!r} is {mode!r}" for server_id, mode in offenders)
+        super().__init__(
+            f"this gateway is configured as part of a cluster (`coordination:`), and {detail}. "
+            "A server in one of these modes is a child process of one gateway: peers cannot reach it, "
+            "so only the instance holding the management lease can serve it and the others answer as "
+            "though it had no tools. Use `remote` mode for servers several replicas must serve, or "
+            "remove the `coordination:` block to run this as a single gateway."
+        )
+
+
+#: The modes that run a server as a child process of one gateway. Kept next to
+#: the refusal rather than imported from the launcher package: this check runs
+#: on configuration, before any launcher exists, and the domain vocabulary for
+#: "local" is a value object the config has not been parsed into yet.
+_CHILD_PROCESS_MODES: frozenset[str] = frozenset({"subprocess", "docker", "container"})
+
+
+def refuse_local_modes_in_a_declared_cluster(config: dict[str, Any] | None = None) -> None:
+    """Refuse child-process servers where the operator declared replicas.
+
+    Every offender at once, because fixing them one restart at a time is the
+    experience this codebase keeps refusing to ship.
+
+    Args:
+        config: Full configuration. `coordination` is what makes this a cluster;
+            `mcp_servers` is where the modes are.
+
+    Raises:
+        LocalModeInDeclaredClusterError: When a declared cluster carries one.
+    """
+    config = config or {}
+    if "coordination" not in config:
+        return
+    servers = config.get("mcp_servers") or {}
+    if not isinstance(servers, dict):
+        return
+    offenders = [
+        (str(server_id), str(spec.get("mode")))
+        for server_id, spec in servers.items()
+        if isinstance(spec, dict) and str(spec.get("mode", "")).strip().lower() in _CHILD_PROCESS_MODES
+    ]
+    if offenders:
+        raise LocalModeInDeclaredClusterError(offenders)
+
+
 def refuse_a_cluster_on_unshared_storage(config: dict[str, Any] | None = None) -> None:
     """Refuse the one combination that fails without failing.
 
