@@ -5,6 +5,16 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [2.5.0-rc.3](https://github.com/mcp-hangar/mcp-hangar/compare/v2.5.0-rc.2...v2.5.0-rc.3) (2026-08-07)
+
+### Changed
+
+- A `coordination:` block plus a `subprocess`, `docker` or `container` server in `config.yaml` now refuses to start, naming every offender at once. Registering such a server through the API was already refused where storage is shareable, and launching one on a follower refused again -- but a server declared in configuration goes through neither path: it is loaded on every replica and only the lease holder can start it. What an operator saw was not an error but `GET /api/mcp_servers/<id>/tools` answering with five tools on one pod and an empty list on the others, plus a 409 from whichever replica the load balancer picked. The question is asked on the axis the operator controls: the `coordination:` block is the statement that these replicas are meant to be one gateway, so without it a single gateway that merely uses PostgreSQL keeps running its child processes exactly as before. The registration refusal also stops telling a single instance to run a single instance -- the condition is storage peers can share, and the message now says so and names `persistence.backend: sqlite` as the alternative to `remote` mode. ([#815](https://github.com/mcp-hangar/mcp-hangar/pull/815))
+
+### Fixed
+
+- `${VAR}` in configuration is interpolated everywhere, not only inside `mcp_servers.<id>.auth`. The documentation has always described it as a property of configuration -- the production checklist tells an operator to keep secrets out of the file this way, the transport guide says "configuration values support environment variable interpolation", and the reference documents it for Langfuse keys -- and it was implemented for one sub-block. Found by running the multi-replica cookbook against the published 2.5.0-rc.2 image: `persistence.postgresql.password: ${HANGAR_DB_PASSWORD}` reached psycopg2 as those twenty-two literal characters and every pod failed with `password authentication failed`, with the variable correctly set from a Secret exactly as the recipe and the Helm chart both instruct. The alternative -- writing the password into the file -- is what the checklist exists to prevent. A variable that is unset and has no default still fails the boot naming itself, which it did before for the one block that worked. ([#817](https://github.com/mcp-hangar/mcp-hangar/pull/817))
+
 ## [2.5.0-rc.2](https://github.com/mcp-hangar/mcp-hangar/compare/v2.5.0-rc.1...v2.5.0-rc.2) (2026-08-07)
 
 ### Fixed
