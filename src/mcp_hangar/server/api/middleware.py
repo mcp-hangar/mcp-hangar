@@ -34,6 +34,7 @@ from ...domain.exceptions import (
     MCPError,
     McpServerDegradedError,
     McpServerNotFoundError,
+    McpServerNotHereError,
     McpServerNotReadyError,
     MissingCredentialsError,
     RateLimitExceeded,
@@ -93,6 +94,10 @@ _EXCEPTION_STATUS_MAP: list[tuple[type, int]] = [
     (HandlerNotRegisteredError, 503),
     (McpServerNotFoundError, 404),
     (ToolNotFoundError, 404),
+    # Not "this broke" but "not here": a follower asked to start a server that
+    # belongs to the lease holder. It travelled as a 500 until a two-replica
+    # deployment showed a correct refusal reported as a server fault.
+    (McpServerNotHereError, 409),
     (McpServerNotReadyError, 409),
     (ValidationError, 422),
     (RateLimitExceededError, 429),

@@ -12,6 +12,7 @@ from dataclasses import dataclass, field
 from datetime import datetime, UTC
 from typing import TYPE_CHECKING, Any
 
+from mcp_hangar.application.services.log_pacing import RepeatedFailure
 from mcp_hangar.domain.contracts.event_bus import IEventBus
 from mcp_hangar.domain.discovery.conflict_resolver import ConflictResolver
 from mcp_hangar.domain.discovery.discovered_mcp_server import DiscoveredMcpServer
@@ -141,6 +142,11 @@ class DiscoveryOrchestrator:
         self._input_validator = input_validator
         self._event_bus = event_bus
         self._may_manage = may_manage or (lambda: True)
+        #: Reports the first skipped cycle, then one in this many. At the
+        #: default 30s refresh that is a line roughly every five minutes while
+        #: this instance is not the holder -- present in the log, absent from
+        #: the reader's attention.
+        self._idle = RepeatedFailure(every=10)
 
         # Core components
         self._conflict_resolver = ConflictResolver(static_mcp_servers)
@@ -279,19 +285,56 @@ class DiscoveryOrchestrator:
         converging, without a restart.
         """
         # Initial discovery
-        if self._may_manage():
+        if self._holds_the_lease():
             await self.run_discovery_cycle()
 
         while self._running:
             try:
                 await asyncio.sleep(self.config.refresh_interval_s)
-                if self._running and self._may_manage():
+                if self._running and self._holds_the_lease():
                     await self.run_discovery_cycle()
             except asyncio.CancelledError:
                 break
             except Exception as e:  # noqa: BLE001 -- fault-barrier: discovery loop error must not crash background task
                 logger.error(f"Error in discovery loop: {e}")
                 main_metrics.record_discovery_error(source_type="orchestrator", error_type=type(e).__name__)
+
+    def _holds_the_lease(self) -> bool:
+        """The gate, and the line that says when it is closed.
+
+        The gate is right: a follower that ran discovery would deregister
+        servers off a view it does not own. What was wrong is that it closed in
+        silence -- no log, no metric, nothing. A replica set where the
+        discovery-configured replicas are not the one holding the lease
+        discovers *nothing*, and every replica has already logged
+        `discovery_started` with its source count, which reads as "watching".
+        Measured on a two-replica deployment: the configured source ran zero
+        cycles until the holder was killed and the other replica took over.
+
+        Paced with the same policy the tailer and the keeper use: the first
+        skipped cycle is worth a line, the hundredth is not, and the resumption
+        is worth one -- "it started working again" being the fact an operator
+        most often has to establish from absence.
+        """
+        if self._may_manage():
+            if self._idle.recovered():
+                logger.info(
+                    "discovery_resumed_on_this_instance",
+                    detail="this instance now holds the management lease and is running discovery again",
+                )
+            return True
+        if self._idle.failed():
+            logger.info(
+                "discovery_idle_not_the_lease_holder",
+                skipped_cycles=self._idle.run_length,
+                refresh_interval_s=self.config.refresh_interval_s,
+                detail=(
+                    "discovery is configured on this instance but another one holds the management lease, "
+                    "so nothing here is discovering. Exactly one instance runs it; if none does, the fleet "
+                    "is not converging"
+                ),
+            )
+        return False
 
     async def run_discovery_cycle(self) -> DiscoveryCycleResult:
         """Run a single discovery cycle.

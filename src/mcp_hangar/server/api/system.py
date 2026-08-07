@@ -88,12 +88,40 @@ def _instance_info() -> dict[str, Any]:
     # each really is the manager of its own island. Reporting that as
     # coordination was this field's own version of the same mistake.
     shared = is_shared(get_persistence_backend())
-    return {
+    info: dict[str, Any] = {
         "instance_id": current_instance_id(),
         "coordinates_with_peers": shared and keeper is not None,
         "manages_fleet": True if keeper is None else keeper.may_manage(),
         "storage_is_shareable": shared,
         "rate_limits_are_per_instance": True,
+    }
+    if keeper is not None:
+        info["management_lease"] = _lease_info(keeper)
+    return info
+
+
+def _lease_info(keeper: Any) -> dict[str, Any] | None:
+    """The tenure in force, which is not necessarily this instance's idea of one.
+
+    `expires_at` is written by whoever holds the lease, from **its own**
+    `lease_ttl_s`. A replica configured for a 10-second tenure that finds a
+    holder configured for 60 waits 60 -- measured at 52 seconds on a
+    two-replica deployment, with nothing anywhere reporting the number being
+    waited for. Reported from what the keeper last saw rather than by reading
+    the row here, so an operator polling this endpoint does not put a query on
+    the database per request.
+
+    `holder` names the instance to ask when this one answers
+    `manages_fleet: false` and the caller needed the one that says true.
+    """
+    lease = keeper.incumbent
+    if lease is None:
+        return None
+    return {
+        "holder": lease.holder,
+        "generation": lease.generation,
+        "expires_in_s": round(lease.expires_at - time.time(), 1),
+        "my_lease_ttl_s": keeper.ttl_s,
     }
 
 
