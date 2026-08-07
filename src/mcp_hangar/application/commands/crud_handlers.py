@@ -169,9 +169,10 @@ class CreateMcpServerHandler(CommandHandler):
         ):
             return
         raise ValidationError(
-            f"mode '{mode}' runs the server as a child process of one gateway, and this deployment shares its "
-            "state with peers. Every replica that learned about it would start its own copy, with its own "
-            "volumes. Use 'remote' mode, or run a single instance."
+            f"mode '{mode}' runs the server as a child process of one gateway, and this deployment keeps its "
+            "state in storage that peers can share. Every replica that learned about this server would start "
+            "its own copy, with its own volumes. Use 'remote' mode -- or, if this really is one gateway and "
+            "always will be, storage that cannot be shared (`persistence.backend: sqlite`)."
         )
 
 
