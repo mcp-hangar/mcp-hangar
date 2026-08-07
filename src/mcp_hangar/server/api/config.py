@@ -18,7 +18,7 @@ from starlette.requests import Request
 from starlette.routing import Route
 
 from ...application.commands.commands import ReloadConfigurationCommand
-from ...domain.exceptions import ValidationError
+from ...domain.exceptions import ConfigurationError, ValidationError
 from ..config_serializer import serialize_full_config, write_config_backup
 from .middleware import dispatch_command, get_context
 from .serializers import HangarJSONResponse
@@ -157,7 +157,23 @@ async def backup_config(request: Request) -> HangarJSONResponse:
         pass
     if not config_path:
         config_path = os.environ.get("MCP_CONFIG", "config.yaml")
-    backup_path = await run_in_threadpool(write_config_backup, config_path)
+    try:
+        backup_path = await run_in_threadpool(write_config_backup, config_path)
+    except OSError as error:
+        # The backup is written beside the configuration file, so this fails
+        # whenever that directory is not writable by the process -- which is
+        # every deployment using the published image, where `/app` belongs to
+        # root and the gateway runs as `hangar`. It surfaced as a bare 500 and
+        # `An internal server error occurred.`, with the real reason
+        # (`PermissionError: [Errno 13] ... 'config.yaml.bak1'`) only in the
+        # log. That tells the caller the gateway is broken when the gateway is
+        # working and the filesystem said no.
+        raise ConfigurationError(
+            f"could not write the backup beside {config_path!r}: {error.strerror or error}. "
+            "The backup is written into the configuration file's own directory, which has to be "
+            "writable by the gateway process.",
+            details={"config_path": config_path, "errno": error.errno},
+        ) from error
     return HangarJSONResponse({"path": backup_path})
 
 
