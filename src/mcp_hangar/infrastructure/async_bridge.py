@@ -15,8 +15,10 @@ from collections.abc import Coroutine
 import threading
 from typing import Any
 
+from mcp_hangar.application.ports.async_task import IBlockingAsyncRunner
 
-class BackgroundLoop:
+
+class BackgroundLoop(IBlockingAsyncRunner):
     """One background thread with one event loop, reused across calls.
 
     A fresh `asyncio.run` per write would be simpler, and it is what the
