@@ -18,7 +18,7 @@ from __future__ import annotations
 import time
 
 from mcp_hangar.domain.contracts.metrics_history import IMetricsHistoryStore
-from mcp_hangar.infrastructure.persistence.database_common import IConnectionFactory
+from mcp_hangar.infrastructure.persistence.database_common import IConnectionFactory, postgres_ddl
 from mcp_hangar.infrastructure.persistence.metrics_history_store import MetricPoint
 from mcp_hangar.logging_config import get_logger
 
@@ -73,7 +73,7 @@ class PostgresMetricsHistoryStore(IMetricsHistoryStore):
         self._retention_days = retention_days
         with self._connections.get_connection() as conn:
             with conn.cursor() as cur:
-                cur.execute(_SCHEMA)
+                cur.execute(postgres_ddl(_SCHEMA))
             conn.commit()
 
     def record_snapshot(self, points: list[MetricPoint]) -> None:
