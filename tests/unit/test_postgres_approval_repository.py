@@ -123,13 +123,16 @@ class TestInitAndSchema:
 
         executed_sql = [call.args[0] for call in mock_cursor.execute.call_args_list]
         lock_calls = [sql for sql in executed_sql if "pg_advisory_xact_lock" in sql]
-        assert len(lock_calls) == 1
-        # The lock must be taken before any DDL, not after.
-        create_table_index = next(
-            i for i, sql in enumerate(executed_sql) if "CREATE TABLE IF NOT EXISTS approval_requests" in sql
-        )
-        lock_index = next(i for i, sql in enumerate(executed_sql) if "pg_advisory_xact_lock" in sql)
-        assert lock_index < create_table_index
+        assert len(lock_calls) == 1, "one acquisition covers every statement in the transaction"
+        # The lock rides in the same statement as the first DDL, ahead of it --
+        # it used to be a separate execute under a key private to this adapter,
+        # which left the other nine tables in this backend unserialized.
+        locked = lock_calls[0]
+        assert locked.index("pg_advisory_xact_lock") < locked.index("CREATE TABLE IF NOT EXISTS approval_requests")
+        # And it is the backend's key, not one of this table's own.
+        from mcp_hangar.infrastructure.persistence.database_common import POSTGRES_SCHEMA_LOCK_KEY
+
+        assert str(POSTGRES_SCHEMA_LOCK_KEY) in locked
 
     @pytest.mark.asyncio
     async def test_schema_setup_rolls_back_on_failure(self):

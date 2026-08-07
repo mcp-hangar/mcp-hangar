@@ -11,7 +11,7 @@ from datetime import datetime, UTC
 from pathlib import Path
 import sqlite3
 import threading
-from typing import Any, Protocol
+from typing import Any, Final, Protocol
 
 import structlog
 
@@ -144,6 +144,65 @@ class SQLiteConnectionFactory:
                 pass
             self._local.connection.close()
             self._local.connection = None
+
+
+#: One advisory-lock key for every piece of DDL this backend runs, so all of it
+#: serializes against every other process pointed at the same database. An
+#: arbitrary constant; only its uniqueness within the deployment matters, and
+#: advisory locks live in their own namespace where nothing else can collide
+#: with it. Fits a signed bigint, which is what PostgreSQL takes.
+POSTGRES_SCHEMA_LOCK_KEY: Final = 7_902_331_477_119_284_101
+
+
+def postgres_ddl(sql: str) -> str:
+    """The same DDL, serialized against concurrent creators.
+
+    **`CREATE TABLE IF NOT EXISTS` is not concurrency-safe in PostgreSQL.** Two
+    sessions can both find the table absent, both proceed, and the loser dies on
+    a system-catalog unique violation:
+
+        duplicate key value violates unique constraint "pg_type_typname_nsp_index"
+        DETAIL: Key (typname, typnamespace)=(events, 2200) already exists.
+
+    Sequentially it is idempotent, which is why this survived every test and
+    every single-gateway deployment. Concurrently it is a coin toss -- and a
+    replica set is exactly a set of processes that start at the same moment
+    against the same database. Measured on the first HA release candidate:
+    `replicas: 3` against an empty database crashed **two of the three** pods on
+    first boot, three times out of three. It self-heals on the restart, because
+    by then the tables exist, so the deployment converges and the only trace is
+    a restart counter and a PostgreSQL catalog error in a log nobody reads.
+
+    The lock is taken *in the same transaction* as the DDL and released when it
+    commits, so there is no unlock to forget and no second connection to hold.
+    """
+    return f"SELECT pg_advisory_xact_lock({POSTGRES_SCHEMA_LOCK_KEY});\n{sql}"
+
+
+@contextmanager
+def postgres_schema_lock(connection_factory: Any) -> Generator[None, None, None]:
+    """Hold the DDL lock across work that runs on a *different* connection.
+
+    For the one creator that cannot use `postgres_ddl`: `MigrationRunner` is
+    dialect-agnostic and opens its own connection, so the lock cannot ride
+    along in its transaction. A session-level lock on a connection of our own
+    serializes it just the same -- every racer takes the same key first.
+
+    Needs a second connection from the pool while this one is held, which the
+    default `min_connections: 2` provides. A deployment that sets
+    `max_connections: 1` would wait here forever, and that is a configuration
+    no pooled backend can honour anyway.
+    """
+    with connection_factory.get_connection() as conn:
+        with conn.cursor() as cur:
+            cur.execute(f"SELECT pg_advisory_lock({POSTGRES_SCHEMA_LOCK_KEY})")
+        conn.commit()
+        try:
+            yield
+        finally:
+            with conn.cursor() as cur:
+                cur.execute(f"SELECT pg_advisory_unlock({POSTGRES_SCHEMA_LOCK_KEY})")
+            conn.commit()
 
 
 class PostgresConnectionFactory:

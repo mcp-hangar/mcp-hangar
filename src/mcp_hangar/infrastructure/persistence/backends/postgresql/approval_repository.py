@@ -19,10 +19,9 @@ from __future__ import annotations
 from datetime import datetime
 import json
 from typing import Any
-import zlib
 
 from mcp_hangar.approvals.models import ApprovalRequest, ApprovalState
-from mcp_hangar.infrastructure.persistence.database_common import IConnectionFactory
+from mcp_hangar.infrastructure.persistence.database_common import IConnectionFactory, postgres_ddl
 from mcp_hangar.logging_config import get_logger
 
 logger = get_logger(__name__)
@@ -33,15 +32,13 @@ _COLUMNS = (
     "reason, correlation_id, requested_by, tenant_id"
 )
 
-# Transaction-scoped advisory-lock key for `_ensure_table`. `CREATE TABLE IF
-# NOT EXISTS` / `ADD COLUMN IF NOT EXISTS` are not race-free under genuinely
-# concurrent execution in Postgres: two processes can both see "missing" and
-# collide on the DDL. The SQLite reference never needs this -- it is
-# single-writer by construction (a fresh connection per call, closed after).
-# A fixed, deterministic (non-hash-randomized) key derived from a stable
-# string keeps this lock name stable across process restarts and Python
-# versions, which is required for it to actually serialize anything.
-_SCHEMA_LOCK_KEY = zlib.crc32(b"mcp_hangar.approval_requests.schema") & 0x7FFFFFFF
+# This adapter is where the DDL race was first understood, and for a long time
+# it was the only place that answered it -- with a key of its own. Nine other
+# adapters in this backend create tables the same way and none of them took a
+# lock, so a replica set booting against an empty database crashed on `events`
+# long before it ever reached this table. The rule now lives in
+# `database_common.postgres_ddl`, under one key for the whole backend, and this
+# adapter uses it like the rest: one place to be right, one place to be wrong.
 
 
 class PostgresApprovalRepository:
@@ -107,13 +104,13 @@ class PostgresApprovalRepository:
         with self._connections.get_connection() as conn:
             try:
                 with conn.cursor() as cur:
-                    # Transaction-scoped: released automatically on the
-                    # commit below (or on the rollback in `except`), so a
-                    # crash between acquiring it and committing cannot leave
-                    # it held. Serializes concurrent first-boot schema setup
-                    # across processes/nodes sharing this database.
-                    cur.execute("SELECT pg_advisory_xact_lock(%s)", (_SCHEMA_LOCK_KEY,))
-                    cur.execute(self.CREATE_TABLE_SQL)
+                    # The lock rides in the first statement and is
+                    # transaction-scoped, so it is released by the commit below
+                    # or the rollback in `except` -- a crash between acquiring
+                    # it and committing cannot leave it held. One acquisition
+                    # covers every statement in this transaction, indexes and
+                    # migrations included.
+                    cur.execute(postgres_ddl(self.CREATE_TABLE_SQL))
                     cur.execute(self.CREATE_INDEX_STATE_SQL)
                     cur.execute(self.CREATE_INDEX_EXPIRES_SQL)
                     for migration in self.MIGRATIONS_SQL:

@@ -347,6 +347,11 @@ class _FakeCursor:
     # Order matters: more specific prefixes (e.g. the LIKE variant of a
     # SELECT) must be checked before their shorter, more general prefixes.
     _HANDLERS = [
+        # The schema statement now arrives with its advisory lock in front of
+        # it, so the whole string starts here rather than at CREATE TABLE.
+        # Recognised rather than ignored: a double that skipped an unknown
+        # statement would have hidden the missing lock instead of showing it.
+        ("SELECT pg_advisory_xact_lock", _noop),
         ("CREATE TABLE", _noop),
         ("ALTER TABLE", _noop),
         ("SELECT pg_snapshot_xmin", _select_horizon),

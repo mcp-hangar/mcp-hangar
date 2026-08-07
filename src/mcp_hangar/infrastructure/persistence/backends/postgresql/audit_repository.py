@@ -25,7 +25,7 @@ import structlog
 
 from mcp_hangar.domain.contracts.persistence import AuditAction, AuditEntry, IAuditRepository, PersistenceError
 from mcp_hangar.domain.security.secrets import SecretsMask
-from mcp_hangar.infrastructure.persistence.database_common import IConnectionFactory
+from mcp_hangar.infrastructure.persistence.database_common import IConnectionFactory, postgres_ddl
 
 logger = structlog.get_logger(__name__)
 
@@ -108,7 +108,7 @@ class PostgresAuditRepository(IAuditRepository):
         self._connections = connection_factory
         self._table = f"{table_prefix}audit_log" if table_prefix else "audit_log"
         with self._cursor() as (conn, cur):
-            cur.execute(_SCHEMA.format(table=self._table))
+            cur.execute(postgres_ddl(_SCHEMA.format(table=self._table)))
             conn.commit()
 
     @contextmanager

@@ -21,6 +21,7 @@ import structlog
 
 from mcp_hangar.domain.contracts.authorization import IToolAccessPolicyStore
 from mcp_hangar.domain.value_objects.tool_access_policy import ToolAccessPolicy
+from mcp_hangar.infrastructure.persistence.database_common import postgres_ddl
 
 logger = structlog.get_logger(__name__)
 
@@ -71,7 +72,7 @@ class PostgresToolAccessPolicyStore(IToolAccessPolicyStore):
         with self._connections.get_connection() as conn:
             try:
                 with conn.cursor() as cur:
-                    cur.execute(schema)
+                    cur.execute(postgres_ddl(schema))
                 conn.commit()
             except Exception:
                 # `IConnectionFactory.get_connection()` returns a pooled

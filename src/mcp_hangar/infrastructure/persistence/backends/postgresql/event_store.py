@@ -54,7 +54,7 @@ from mcp_hangar.domain.events import DomainEvent
 from mcp_hangar.domain.exceptions import CompactionError
 from mcp_hangar.logging_config import get_logger
 
-from mcp_hangar.infrastructure.persistence.database_common import IConnectionFactory
+from mcp_hangar.infrastructure.persistence.database_common import IConnectionFactory, postgres_ddl
 from mcp_hangar.infrastructure.persistence.event_serializer import EventSerializer
 
 logger = get_logger(__name__)
@@ -166,7 +166,7 @@ class PostgresEventStore(IEventStore):
         )
         with self._connections.get_connection() as conn:
             with conn.cursor() as cur:
-                cur.execute(schema)
+                cur.execute(postgres_ddl(schema))
                 cur.execute(_TAIL_COLUMN_TEMPLATE.format(events_table=self._events_table))
             conn.commit()
         logger.info("postgres_event_store_initialized", events_table=self._events_table)

@@ -20,7 +20,7 @@ from __future__ import annotations
 from typing import Any
 
 from mcp_hangar.domain.contracts.management_lease import IManagementLease, Lease
-from mcp_hangar.infrastructure.persistence.database_common import IConnectionFactory
+from mcp_hangar.infrastructure.persistence.database_common import IConnectionFactory, postgres_ddl
 from mcp_hangar.logging_config import get_logger
 
 logger = get_logger(__name__)
@@ -59,7 +59,7 @@ class PostgresManagementLease(IManagementLease):
         self._name = name
         with self._connections.get_connection() as conn:
             with conn.cursor() as cur:
-                cur.execute(_SCHEMA)
+                cur.execute(postgres_ddl(_SCHEMA))
             conn.commit()
 
     @staticmethod

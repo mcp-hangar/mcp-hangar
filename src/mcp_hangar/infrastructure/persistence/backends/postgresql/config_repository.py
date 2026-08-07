@@ -18,7 +18,7 @@ from mcp_hangar.domain.contracts.persistence import (
     McpServerConfigSnapshot,
     PersistenceError,
 )
-from mcp_hangar.infrastructure.persistence.database_common import IConnectionFactory
+from mcp_hangar.infrastructure.persistence.database_common import IConnectionFactory, postgres_ddl
 from mcp_hangar.logging_config import get_logger
 
 from .management_lease import FLEET_MANAGEMENT
@@ -84,7 +84,7 @@ class PostgresMcpServerConfigRepository:
         with self._connections.get_connection() as conn:
             try:
                 with conn.cursor() as cur:
-                    cur.execute(_SCHEMA)
+                    cur.execute(postgres_ddl(_SCHEMA))
                 conn.commit()
             except Exception:
                 conn.rollback()

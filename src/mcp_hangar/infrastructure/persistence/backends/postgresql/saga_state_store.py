@@ -12,7 +12,11 @@ from typing import Any
 
 import structlog
 
-from mcp_hangar.infrastructure.persistence.database_common import IConnectionFactory, MigrationRunner
+from mcp_hangar.infrastructure.persistence.database_common import (
+    IConnectionFactory,
+    MigrationRunner,
+    postgres_schema_lock,
+)
 from mcp_hangar.domain.contracts.saga_state import ISagaStateStore
 
 logger = structlog.get_logger(__name__)
@@ -74,7 +78,13 @@ class PostgresSagaStateStore(ISagaStateStore):
             SAGA_STORE_MIGRATIONS,
             table_name="saga_state_migrations",
         )
-        applied = runner.run()
+        # The runner is dialect-agnostic and opens its own connection, so the
+        # DDL lock cannot ride along in its transaction the way `postgres_ddl`
+        # puts it everywhere else. Held around the whole run instead: creating
+        # the tracking table is `CREATE TABLE IF NOT EXISTS` like the rest, and
+        # two replicas booting together race for it the same way.
+        with postgres_schema_lock(connection_factory):
+            applied = runner.run()
         if applied > 0:
             logger.info("saga_state_store_migrations_applied", count=applied)
 
