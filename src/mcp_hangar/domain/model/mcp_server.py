@@ -134,6 +134,11 @@ class McpServer(AggregateRoot):
         # SSRF provenance policy for a remote endpoint (see below).
         provenance: Provenance = Provenance.HUMAN,
         runtime_addresses: frozenset[str] | None = None,
+        # Whether the connect-time SSRF guard applies to this server. On only for
+        # endpoints the registration check guarded (created through the command
+        # handler); off for config-file / directly-built servers so an
+        # intentionally private endpoint is not newly refused at connect.
+        enforce_ssrf: bool = False,
     ):
         super().__init__()
 
@@ -189,6 +194,7 @@ class McpServer(AggregateRoot):
         # policy, which is the safe direction to fail.
         self._provenance = provenance
         self._runtime_addresses = runtime_addresses
+        self._enforce_ssrf = enforce_ssrf
 
         # Dependencies (Dependency Inversion Principle)
         self._metrics_publisher = metrics_publisher or get_default_metrics_publisher()
@@ -803,6 +809,7 @@ class McpServer(AggregateRoot):
                 # the same policy the registration check did.
                 "provenance": self._provenance,
                 "runtime_addresses": self._runtime_addresses,
+                "enforce_ssrf": self._enforce_ssrf,
             }
 
         raise ValueError(f"unsupported_mode: {self._mode.value}")

@@ -130,6 +130,10 @@ class McpServerConfigSnapshot:
     # addresses to a list -- so the constructor must accept those forms too.
     provenance: Provenance = Provenance.HUMAN
     runtime_addresses: frozenset[str] | None = None
+    # Whether the connect-time SSRF guard applies (see McpServer). Persisted so a
+    # server rebuilt from its snapshot keeps the same enforcement it registered
+    # with; defaults False for an older snapshot that predates the field.
+    enforce_ssrf: bool = False
     created_at: datetime | None = None
     updated_at: datetime | None = None
 
@@ -171,6 +175,7 @@ class McpServerConfigSnapshot:
             # JSON-safe forms; __post_init__ reverses them on the way back in.
             "provenance": self.provenance.value,
             "runtime_addresses": (sorted(self.runtime_addresses) if self.runtime_addresses is not None else None),
+            "enforce_ssrf": self.enforce_ssrf,
             "created_at": self.created_at.isoformat() if self.created_at else None,
             "updated_at": self.updated_at.isoformat() if self.updated_at else None,
         }
@@ -203,6 +208,7 @@ class McpServerConfigSnapshot:
             # __post_init__ normalises the string/list back to enum/frozenset.
             provenance=data.get("provenance", Provenance.HUMAN),
             runtime_addresses=data.get("runtime_addresses"),
+            enforce_ssrf=data.get("enforce_ssrf", False),
             created_at=datetime.fromisoformat(created_at) if created_at else None,
             updated_at=datetime.fromisoformat(updated_at) if updated_at else None,
         )

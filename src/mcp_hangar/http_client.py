@@ -152,15 +152,21 @@ class HttpClientConfig:
     # upstream be declared stateless so the deprecated Mcp-Session-Id handling
     # below is never exercised. Default False preserves legacy connectivity.
     stateless_upstream: bool = False
-    # Connect-time SSRF policy for this upstream, applied on EVERY connection by
-    # `_SsrfGuardedTransport`. `validate_no_ssrf` runs once at registration, but
-    # httpx re-resolves the hostname itself at connect time with no re-check, so
-    # a name that passed once can be re-pointed at an internal address (DNS
-    # rebinding) and every later tool call follows it. These carry the same
-    # policy inputs the registration check used, threaded from the aggregate.
-    # Defaults mirror `validate_no_ssrf`'s fail-safe: HUMAN (strict, every
-    # private range refused) and no runtime-scoped addresses, so a construction
-    # site that forgets them gets the strict policy rather than an open one.
+    # Connect-time SSRF policy for this upstream, applied on every connection by
+    # `_SsrfGuardedTransport` -- but only when `enforce_ssrf` is set. It closes
+    # DNS rebinding: `validate_no_ssrf` runs once at registration, yet httpx
+    # re-resolves the hostname itself at connect time with no re-check, so a name
+    # that passed once can be re-pointed at an internal address and every later
+    # call follows it. `enforce_ssrf` is turned on for exactly the population the
+    # registration check guarded (endpoints created through the command handler,
+    # i.e. the REST API and discovery), and left off for endpoints that were
+    # never registration-checked -- a config-file `remote` server pointed at an
+    # internal address on purpose, or a directly-constructed client -- so the
+    # connect guard cannot newly refuse a private endpoint the operator intended.
+    # When on, `provenance` + `runtime_addresses` carry the same inputs the
+    # registration check used; their defaults mirror `validate_no_ssrf`'s
+    # fail-safe (HUMAN, no runtime-scoped addresses).
+    enforce_ssrf: bool = False
     provenance: Provenance = Provenance.HUMAN
     runtime_addresses: frozenset[str] | None = None
 
@@ -198,15 +204,23 @@ class _SsrfGuardedTransport(httpx.HTTPTransport):
     def __init__(
         self,
         *args: Any,
+        enforce_ssrf: bool,
         provenance: Provenance,
         runtime_addresses: frozenset[str] | None,
         **kwargs: Any,
     ) -> None:
         super().__init__(*args, **kwargs)
+        self._enforce_ssrf = enforce_ssrf
         self._provenance = provenance
         self._runtime_addresses = runtime_addresses
 
     def handle_request(self, request: httpx.Request) -> httpx.Response:
+        # Only endpoints the registration check guarded are re-checked here;
+        # a config-file or directly-built client keeps httpx's plain behaviour,
+        # so an intentionally private endpoint is not newly refused at connect.
+        if not self._enforce_ssrf:
+            return super().handle_request(request)
+
         original_host = request.url.host
         port = request.url.port
         scheme = request.url.scheme
@@ -381,6 +395,7 @@ class HttpClient:
         transport = _SsrfGuardedTransport(
             retries=config.max_retries,
             verify=verify,
+            enforce_ssrf=config.enforce_ssrf,
             provenance=config.provenance,
             runtime_addresses=config.runtime_addresses,
         )

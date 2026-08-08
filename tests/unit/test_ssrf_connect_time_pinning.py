@@ -76,7 +76,7 @@ def _make_request() -> httpx.Request:
 
 class TestSsrfGuardedTransport:
     def test_human_public_host_connects_pinned_to_the_ip(self):
-        transport = _SsrfGuardedTransport(provenance=Provenance.HUMAN, runtime_addresses=None)
+        transport = _SsrfGuardedTransport(enforce_ssrf=True, provenance=Provenance.HUMAN, runtime_addresses=None)
         request = _make_request()
         with patch("mcp_hangar.domain.security.ssrf.socket.getaddrinfo", _getaddrinfo_returning("93.184.216.34")):
             with patch.object(httpx.HTTPTransport, "handle_request", return_value=httpx.Response(200)) as sup:
@@ -90,7 +90,7 @@ class TestSsrfGuardedTransport:
 
     @pytest.mark.parametrize("rebound_ip", ["169.254.169.254", "10.0.0.5", "127.0.0.1"])
     def test_rebinding_to_an_internal_ip_is_refused_at_connect(self, rebound_ip):
-        transport = _SsrfGuardedTransport(provenance=Provenance.HUMAN, runtime_addresses=None)
+        transport = _SsrfGuardedTransport(enforce_ssrf=True, provenance=Provenance.HUMAN, runtime_addresses=None)
         request = _make_request()
         with patch("mcp_hangar.domain.security.ssrf.socket.getaddrinfo", _getaddrinfo_returning(rebound_ip)):
             with patch.object(httpx.HTTPTransport, "handle_request") as sup:
@@ -98,9 +98,23 @@ class TestSsrfGuardedTransport:
                     transport.handle_request(request)
         sup.assert_not_called()  # never reaches the network
 
+    def test_a_private_endpoint_connects_when_enforcement_is_off(self):
+        # A config-file / directly-built client (enforce_ssrf=False) was never
+        # registration-checked; the guard must not newly refuse its intentionally
+        # private endpoint, so it keeps httpx's plain behaviour.
+        transport = _SsrfGuardedTransport(enforce_ssrf=False, provenance=Provenance.HUMAN, runtime_addresses=None)
+        request = httpx.Request("POST", "http://127.0.0.1:8080/rpc", json={"jsonrpc": "2.0"})
+        with patch("mcp_hangar.domain.security.ssrf.socket.getaddrinfo", _getaddrinfo_returning("127.0.0.1")):
+            with patch.object(httpx.HTTPTransport, "handle_request", return_value=httpx.Response(200)) as sup:
+                transport.handle_request(request)
+        sup.assert_called_once()
+        sent = sup.call_args.args[0]
+        # No SSRF check ran: the host is not resolved or pinned, just passed through.
+        assert sent.url.host == "127.0.0.1"
+
     def test_discovery_connects_to_its_runtime_reported_private_ip(self):
         transport = _SsrfGuardedTransport(
-            provenance=Provenance.DISCOVERY, runtime_addresses=frozenset({"10.1.2.3"})
+            enforce_ssrf=True, provenance=Provenance.DISCOVERY, runtime_addresses=frozenset({"10.1.2.3"})
         )
         request = httpx.Request("POST", "http://svc.pod:8080/rpc", json={"jsonrpc": "2.0"})
         with patch("mcp_hangar.domain.security.ssrf.socket.getaddrinfo", _getaddrinfo_returning("10.1.2.3")):

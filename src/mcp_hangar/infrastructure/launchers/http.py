@@ -97,6 +97,7 @@ class HttpLauncher(McpServerLauncher):
         http_config: Mapping[str, object] | None = None,
         provenance: Provenance = Provenance.HUMAN,
         runtime_addresses: frozenset[str] | None = None,
+        enforce_ssrf: bool = False,
     ):
         """
         Create an HTTP client for a remote MCP mcp_server.
@@ -209,7 +210,12 @@ class HttpLauncher(McpServerLauncher):
         # connect path. HUMAN + None is the strict default; a DISCOVERY upstream
         # passes its runtime-reported addresses so its legitimate private
         # container IP is still reachable (without them it would be refused).
-        http_cfg = replace(http_cfg, provenance=provenance, runtime_addresses=runtime_addresses)
+        http_cfg = replace(
+            http_cfg,
+            enforce_ssrf=enforce_ssrf,
+            provenance=provenance,
+            runtime_addresses=runtime_addresses,
+        )
 
         logger.info(
             f"Connecting to HTTP mcp_server: {endpoint}",
