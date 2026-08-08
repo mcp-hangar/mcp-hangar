@@ -142,6 +142,22 @@ class DiscoverySource(ABC):
         """Disable this discovery source."""
         self._enabled = False
 
+    def apply_config(self, config: dict[str, Any]) -> None:
+        """Re-apply a source's own configuration to the running instance.
+
+        Called when a source's spec is reconfigured through the registry, so the
+        change reaches the live source rather than only the stored spec. The base
+        implementation is a no-op: built-in sources bind their configuration
+        (socket paths, roots, namespaces) at construction and treat it as
+        immutable for the life of the instance, so a config change to one of them
+        takes effect when the source is rebuilt, not mid-flight. A source that
+        can reconfigure itself in place overrides this.
+
+        Args:
+            config: The source's new configuration (the spec's ``config`` block).
+        """
+        return None
+
     # Event hooks for observability
 
     async def on_mcp_server_discovered(self, mcp_server: DiscoveredMcpServer) -> None:
