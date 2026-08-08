@@ -209,6 +209,24 @@ class DiscoveryOrchestrator:
         self._discovery_service.register_source(source)
         logger.info(f"Added discovery source: {source.source_type}")
 
+    def get_sources(self) -> list[DiscoverySource]:
+        """The sources this orchestrator actually holds.
+
+        A configured source reaches this list only if it was built: an optional
+        dependency that is missing, or any other failure during construction,
+        degrades to a log line and the source is simply absent. So anything that
+        needs to speak about "the sources" has to ask here rather than re-read
+        the configuration, which describes what was asked for rather than what
+        exists.
+
+        Synchronous on purpose -- `get_sources_status()` queries each source's
+        health, which bootstrap cannot await.
+
+        Returns:
+            The built sources, in registration order.
+        """
+        return self._discovery_service.get_all_sources()
+
     def remove_source(self, source_type: str) -> DiscoverySource | None:
         """Remove a discovery source.
 

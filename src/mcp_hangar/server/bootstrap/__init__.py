@@ -236,7 +236,7 @@ def _init_instance_identity() -> str:
 
 
 def _register_configured_sources(registry: Any, full_config: dict[str, Any]) -> None:
-    """Give the sources declared in `config.yaml` an identity in the registry.
+    """Give the sources the orchestrator holds an identity in the registry.
 
     There were two registries and a source only ever reached one of them. A
     source declared in configuration went to the orchestrator, which runs it;
@@ -245,29 +245,41 @@ def _register_configured_sources(registry: Any, full_config: dict[str, Any]) -> 
     an operator could obtain -- and `GET /api/discovery/sources`, which reads
     the orchestrator, returned no `id` to try in the first place.
 
+    The membership comes from the orchestrator rather than from a second read of
+    `config.yaml`, because the two do not agree and each disagreement is the
+    original defect wearing a different hat. A source whose `mode` is misspelt
+    is built anyway -- the builder resolves anything that is not
+    `authoritative` to additive -- so it appears in the listing with an id,
+    while `DiscoveryMode(...)` here refused it and the scan answered 404. A
+    source that failed to build is absent from the listing, while a config-only
+    reading registered it regardless and the scan answered 200 for something
+    that does not exist. One list, one answer.
+
+    Configuration is still where the spec's `config` payload comes from: it is
+    the source's own settings, which the orchestrator hands to the source and
+    does not keep.
+
     The id is derived from the source type rather than generated, because the
     orchestrator keys its sources by type and a random id would change on every
     restart. Registering here does not start anything: the orchestrator already
     owns the running source, and this only makes it addressable.
     """
     from ...domain.value_objects.discovery import DiscoverySourceSpec, config_source_id
-    from ...domain.discovery.discovery_source import DiscoveryMode
 
-    for source_config in (full_config.get("discovery") or {}).get("sources", []) or []:
-        source_type = source_config.get("type")
-        if not source_type:
-            continue
-        try:
-            mode = DiscoveryMode(source_config.get("mode", "additive"))
-        except ValueError:
-            # An unknown mode is refused where the source is built; this is
-            # bookkeeping and must not be the thing that fails the boot.
-            continue
+    declared = {
+        str(source_config["type"]): source_config
+        for source_config in (full_config.get("discovery") or {}).get("sources", []) or []
+        if source_config.get("type")
+    }
+
+    for source in registry.orchestrator.get_sources():
+        source_type = str(source.source_type)
+        source_config = declared.get(source_type, {})
         registry.register_source(
             DiscoverySourceSpec(
-                source_id=config_source_id(str(source_type)),
-                source_type=str(source_type),
-                mode=mode,
+                source_id=config_source_id(source_type),
+                source_type=source_type,
+                mode=source.mode,
                 enabled=True,
                 config={k: v for k, v in source_config.items() if k not in ("type", "mode")},
             )
