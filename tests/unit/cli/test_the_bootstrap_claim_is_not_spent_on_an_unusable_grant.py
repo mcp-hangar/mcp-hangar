@@ -145,7 +145,10 @@ class TestAnIdentityDeploymentIsUnaffected:
 
         result = _invoke(runner, "--config", str(cfg), "--principal", "user:admin")
 
-        assert "auth.example.com" in result.output
+        # `count`, not `in`: a containment test against a host-shaped literal
+        # reads as URL validation to CodeQL, and this is an assertion about a
+        # printed sentence.
+        assert result.output.count("auth.example.com") == 1
 
 
 class TestTheSpentClaimNamesRealRecovery:
