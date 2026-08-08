@@ -74,6 +74,25 @@ class TestABackendIsCompleteOrItIsRefused:
         assert "tool_access_policy_store" in str(excinfo.value)
         assert excinfo.value.missing == ["tool_access_policy_store"]
 
+    def test_incomplete_backend_rejected(self, clean_registry) -> None:
+        # Callability is not completeness. A concern method that is present and
+        # callable but returns None disables the feature it stores just as
+        # surely as an absent one -- which is exactly how the PostgreSQL
+        # tool-access policy store shipped: `return None`, gated on truthiness
+        # downstream, silently off. The guard must call the concern, not merely
+        # find it.
+        class _ReturnsNone(_CompleteBackend):
+            def tool_access_policy_store(self) -> None:
+                return None
+
+        register_backend_factory("returns_none", lambda config: _ReturnsNone(config))
+
+        with pytest.raises(IncompletePersistenceBackendError) as excinfo:
+            create_backend("returns_none", {})
+
+        assert "tool_access_policy_store" in str(excinfo.value)
+        assert excinfo.value.missing == ["tool_access_policy_store"]
+
     def test_every_missing_concern_is_listed_at_once(self, clean_registry) -> None:
         # An operator fixing these one error at a time would restart nine times.
         class _Empty:
