@@ -25,7 +25,12 @@ Two consequences to check before you roll out:
   inside `mcp_servers.<id>.auth` and nowhere else, while the documentation
   described it as a property of configuration. If you kept a secret out of the
   file the way the production checklist says to, and it silently arrived as the
-  literal characters, this is why.
+  literal characters, this is why. The refusal moved with it: a `${VAR}` with no
+  value and no `:-default` has always been fail-closed, and now fails the whole
+  boot rather than only the `auth` sub-block. Check the keys you never had to
+  set before -- `${VAR:-}` allows an empty value explicitly. A value that
+  *contains* a literal `${...}`, such as a generated password, is safe: the
+  document is interpolated once, so the substituted text is never rescanned.
 - **A per-subsystem key that names a different backend now refuses startup.**
   `auth.storage.driver` and `event_store.driver` are compared against your
   selection, and a contradiction fails the boot rather than being resolved by a

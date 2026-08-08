@@ -296,11 +296,17 @@ def _load_mcp_server_config(mcp_server_id: str, spec_dict: dict[str, Any]) -> Mc
                     error=str(e),
                 )
 
-    # Process auth configuration for remote mcp_servers
+    # Process auth configuration for remote mcp_servers.
+    #
+    # Not interpolated here. `load_config_from_file` does it once over the whole
+    # document, and this block used to do it a second time -- left behind when
+    # the call moved outwards. A second pass is not idempotent: it reads the
+    # *result* of the first one, so a secret that legitimately contains `${...}`
+    # -- which generated passwords produce -- is taken as another reference.
+    # `R9${x}q!` failed the boot with "Required environment variable '${x}' is
+    # not set", and if `x` happened to exist the credential was substituted
+    # again and silently wrong, which is the worse of the two.
     auth_config = spec_dict.get("auth")
-    if auth_config:
-        # Interpolate environment variables in secrets
-        auth_config = _interpolate_env_vars(auth_config)
 
     # Parse capabilities declaration
     capabilities_data = spec_dict.get("capabilities")
