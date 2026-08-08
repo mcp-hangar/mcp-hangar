@@ -167,6 +167,22 @@ class HttpLauncher(McpServerLauncher):
                 extra_headers=cast(dict[str, str], http_config.get("headers", {})),
             )
 
+        if not http_cfg.verify_ssl:
+            # A warning, not a field on an info line, because this setting
+            # changed meaning. Until 2.5.0 it was accepted and discarded -- the
+            # explicit transport silenced it -- so a `verify_ssl: false` left in
+            # a configuration from that era did nothing, and now does exactly
+            # what it says. Whoever wrote it may no longer be reading.
+            logger.warning(
+                "tls_verification_disabled",
+                endpoint=endpoint,
+                detail=(
+                    "certificate verification is off for this upstream; anyone able to intercept the "
+                    "connection can impersonate it. Set `tls.verify_ssl: true` (the default), or point "
+                    "`tls.ca_cert_path` at the CA that signed it"
+                ),
+            )
+
         logger.info(
             f"Connecting to HTTP mcp_server: {endpoint}",
             auth_type=auth.auth_type.value,
