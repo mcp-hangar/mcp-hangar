@@ -66,7 +66,17 @@ class IConnectionFactory(Protocol):
     """Protocol for database connection factories."""
 
     def get_connection(self) -> Any:
-        """Get a database connection."""
+        """Get a database connection with no open transaction.
+
+        Invariant: the yielded connection starts a caller's unit of work with a
+        clean transaction state. The pooled implementations honour this on the
+        way *in* (a returned connection is rolled back before reuse); callers are
+        expected to honour it on the way *out* by ending whatever transaction
+        they opened -- write paths ``commit()``/``rollback()`` explicitly, and
+        read-only paths that only ``SELECT`` still ``commit()`` before yielding
+        the connection back, so it is never handed to the next borrower "idle in
+        transaction".
+        """
         ...
 
     def close(self) -> None:

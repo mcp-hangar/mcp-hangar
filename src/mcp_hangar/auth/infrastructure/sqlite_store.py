@@ -391,6 +391,11 @@ class SQLiteApiKeyStore(IApiKeyStore, IInitialAdminBootstrapStore):
             )
         return raw_key, key_id
 
+    def is_initial_admin_bootstrapped(self) -> bool:
+        """Whether the one-shot claim row exists (read-only, never spends it)."""
+        conn = self._get_connection()
+        return conn.execute("SELECT 1 FROM initial_admin_bootstrap WHERE singleton = 1").fetchone() is not None
+
     def revoke_key(self, key_id: str, revoked_by: str | None = None, reason: str | None = None) -> bool:
         """Revoke an API key.
 

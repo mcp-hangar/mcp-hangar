@@ -390,10 +390,32 @@ class ValidationError(MCPError):
 
 
 class ConfigurationError(MCPError):
-    """Raised when configuration is invalid."""
+    """Raised when configuration is invalid.
+
+    This is an operator-input problem (a typo in the config, an unparseable
+    block): the API answers it 500, because it is not a request the caller can
+    retry until a human fixes the file. See ``ConfigurationUnavailableError``
+    for the narrower, retryable I/O case that maps to 503.
+    """
 
     def __init__(self, message: str, details: dict[str, Any] | None = None):
         super().__init__(message=message, operation="configuration", details=details or {})
+
+
+class ConfigurationUnavailableError(ConfigurationError):
+    """A configuration operation failed on a transient/unavailable I/O condition.
+
+    Distinct from a plain ``ConfigurationError`` (an operator-input problem, a
+    500): this names a genuine "the filesystem said no" case -- the rotating
+    backup cannot be written because the configuration file's directory is not
+    writable by the gateway process. That is retryable once the environment is
+    fixed, so the API answers it 503 with a message saying what to fix, rather
+    than a 500 that reads as "the gateway is broken".
+
+    Only this narrow subclass maps to 503; a generic ``ConfigurationError``
+    (e.g. the reload fault-barrier or a bad capabilities block) does not, so an
+    operator-input error is not dressed up as a retryable outage.
+    """
 
 
 # --- Rate Limiting Exceptions ---

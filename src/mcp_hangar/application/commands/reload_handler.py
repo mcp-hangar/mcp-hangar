@@ -244,7 +244,19 @@ class ReloadConfigurationHandler(CommandHandler):
                 duration_ms=duration_ms,
             )
 
-            raise ConfigurationError(f"Configuration reload failed: {e}") from e
+            if isinstance(e, ConfigurationError):
+                # Already a domain error whose message was written to be shown to
+                # the operator (e.g. "Failed to stop mcp_server '<id>' ..."). Let
+                # it through unchanged rather than burying it inside a generic
+                # wrapper -- and rather than re-wrapping, which would also lose
+                # its own status mapping.
+                raise
+            # An unexpected internal failure: its text can carry filesystem
+            # paths, stringified underlying errors, and other internals, and the
+            # REST error envelope renders MCPError.message verbatim to the
+            # caller. The event and the log above keep the full detail for
+            # operators; the caller gets a generic 500 with nothing to leak.
+            raise ConfigurationError("Configuration reload failed due to an internal error") from e
 
     def _get_mcp_server_spec(self, mcp_server) -> dict[str, Any]:
         """Extract configuration spec from mcp_server aggregate.
