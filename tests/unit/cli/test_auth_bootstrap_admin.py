@@ -5,7 +5,11 @@ Store-level durability/concurrency/transaction semantics are proven in
 (Postgres, mocked psycopg2). This file covers the CLI surface #451 added:
 that it reuses the durable ``bootstrap_auth`` composition, fails closed on
 non-durable / disabled / anonymous configs, refuses a second bootstrap without
-mutating storage, records the local bootstrap actor, and prints NO credential.
+mutating storage, records the local bootstrap actor, and prints no credential
+unless ``--show-key`` asks for one.
+
+Whether that flag is required is decided before the claim: see
+``test_the_bootstrap_claim_is_not_spent_on_an_unusable_grant.py``.
 """
 
 from textwrap import dedent
@@ -20,10 +24,21 @@ def runner():
     return CliRunner()
 
 
-def _write_config(tmp_path, *, driver="sqlite", enabled=True, allow_anonymous=False):
-    """Write a minimal server config with an auth section and return its path."""
+def _write_config(tmp_path, *, driver="sqlite", enabled=True, allow_anonymous=False, oidc=False, api_key=True):
+    """Write a minimal server config with an auth section and return its path.
+
+    ``oidc`` decides whether an identity other than an API key can carry the
+    administrator, which is what makes omitting ``--show-key`` sensible: with
+    no trusted issuer the command refuses rather than spending its one-shot
+    claim on a grant nobody could present.
+    """
     db = tmp_path / "auth.db"
     cfg = tmp_path / "config.yaml"
+    # Indented to sit under `auth:` -- written literally rather than dedented,
+    # because dedent would flatten it to a top-level key.
+    oidc_block = (
+        "\n  oidc:\n    enabled: true\n    issuer: https://auth.example.com\n    audience: mcp-hangar" if oidc else ""
+    )
     cfg.write_text(
         dedent(
             f"""
@@ -32,12 +47,13 @@ def _write_config(tmp_path, *, driver="sqlite", enabled=True, allow_anonymous=Fa
               enabled: {str(enabled).lower()}
               allow_anonymous: {str(allow_anonymous).lower()}
               api_key:
-                enabled: true
+                enabled: {str(api_key).lower()}
               storage:
                 driver: {driver}
                 path: {db}
             """
         ).strip()
+        + oidc_block
         + "\n"
     )
     return cfg, db
@@ -61,7 +77,7 @@ class TestBootstrapAdminSuccess:
     def test_grants_global_admin_on_sqlite(self, runner, tmp_path):
         cfg, db = _write_config(tmp_path)
 
-        result = _invoke(runner, "--config", str(cfg), "--principal", "user:admin")
+        result = _invoke(runner, "--config", str(cfg), "--principal", "user:admin", "--show-key")
 
         assert result.exit_code == 0, result.output
         # The grant took effect: the principal now holds the global admin role.
@@ -74,7 +90,7 @@ class TestBootstrapAdminSuccess:
     def test_success_reports_key_id_and_actor(self, runner, tmp_path):
         cfg, _ = _write_config(tmp_path)
 
-        result = _invoke(runner, "--config", str(cfg), "--principal", "user:admin")
+        result = _invoke(runner, "--config", str(cfg), "--principal", "user:admin", "--show-key")
 
         assert result.exit_code == 0, result.output
         assert "user:admin" in result.output
@@ -86,7 +102,7 @@ class TestBootstrapAdminRefusesSecondRun:
     def test_second_run_refused_without_mutating_storage(self, runner, tmp_path):
         cfg, db = _write_config(tmp_path)
 
-        first = _invoke(runner, "--config", str(cfg), "--principal", "user:admin")
+        first = _invoke(runner, "--config", str(cfg), "--principal", "user:admin", "--show-key")
         assert first.exit_code == 0, first.output
 
         # Snapshot durable state after the winning claim.
@@ -103,7 +119,7 @@ class TestBootstrapAdminRefusesSecondRun:
 
         before = _counts()
 
-        second = _invoke(runner, "--config", str(cfg), "--principal", "user:other")
+        second = _invoke(runner, "--config", str(cfg), "--principal", "user:other", "--show-key")
         assert second.exit_code != 0
         assert "already" in _error_text(second).lower()
         # No mutation: the loser changed nothing.
@@ -145,9 +161,12 @@ class TestBootstrapAdminFailsClosed:
         assert str(missing) in _error_text(result)
 
 
-class TestBootstrapAdminPrintsNoCredential:
-    def test_raw_key_is_never_emitted(self, runner, tmp_path):
-        cfg, _ = _write_config(tmp_path)
+class TestBootstrapAdminPrintsNoCredentialUnlessAsked:
+    def test_raw_key_is_not_emitted_without_the_flag(self, runner, tmp_path):
+        # An OIDC deployment: the principal authenticates on its own identity,
+        # so withholding the secret costs it nothing and putting a global admin
+        # credential in terminal scrollback would be gratuitous.
+        cfg, _ = _write_config(tmp_path, oidc=True)
         from mcp_hangar.auth.infrastructure.sqlite_store import SQLiteApiKeyStore
 
         sentinel_raw = "RAWSECRET_do_not_print_me"

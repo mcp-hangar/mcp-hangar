@@ -175,6 +175,36 @@ configuration.
 Third-party sources now register under the `mcp_hangar.discovery_sources` entry
 point group, so adding one no longer means patching the core.
 
+## `auth bootstrap-admin` requires `--show-key` when API keys are the only way in
+
+On a deployment with no trusted OIDC issuer, omitting `--show-key` is now
+refused before anything is written:
+
+```
+Error: Nothing could use this administrator: API keys are the only
+authenticator, and the key's secret would not be printed.
+```
+
+**Who is affected:** anything that scripts `mcp-hangar auth bootstrap-admin`
+against a config without an `auth.oidc` block. Add `--show-key` and capture the
+secret the run prints.
+
+**Why it refuses rather than warns.** The claim is one-shot and the key is
+stored hashed, so a run that ends without printing the secret can be neither
+repeated nor recovered from. It used to end by advising a re-run with
+`--show-key`, at the exact moment re-running had become impossible: the second
+run answers "The initial administrator has already been bootstrapped", and
+`bootstrap-admin` is the only subcommand in the auth CLI. The refusal costs one
+command; the advice cost the deployment.
+
+Nothing changes for a deployment that trusts an OIDC issuer -- the principal
+authenticates on its own identity and needs no secret. That run's closing
+message no longer suggests a second chance exists, because it does not.
+
+A store whose claim has already been spent with the secret discarded is
+recovered by clearing its `initial_admin_bootstrap` row, or by starting from a
+fresh auth store, and re-running with the flag.
+
 ## Removed: `EventBus.on_error`
 
 The hook that registered a callback for exceptions raised inside event handlers
