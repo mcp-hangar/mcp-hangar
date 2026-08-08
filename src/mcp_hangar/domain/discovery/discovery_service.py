@@ -77,7 +77,18 @@ class SourceStatus:
 
     def to_dict(self) -> dict:
         """Convert to dictionary for serialization."""
+        # Imported inside the method: value_objects.discovery imports this
+        # package's discovery_source, so a module-level import here closes a
+        # cycle at import time.
+        from ..value_objects.discovery import config_source_id
+
         return {
+            # The addressable id lives here, next to the type it is derived from,
+            # so every reader -- the REST listing and the MCP `hangar_sources`
+            # tool alike -- gets it from one place. The orchestrator keys its
+            # sources by type, so a config-declared source's id is stable across
+            # restarts; that is exactly what `config_source_id` derives.
+            "id": config_source_id(self.source_type),
             "source_type": self.source_type,
             "mode": self.mode.value,
             "is_healthy": self.is_healthy,
