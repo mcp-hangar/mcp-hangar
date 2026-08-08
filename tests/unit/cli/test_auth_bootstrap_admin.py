@@ -73,6 +73,24 @@ def _error_text(result):
     return str(result.exception) if result.exception else result.output
 
 
+def _suggestions(result):
+    """The refusal's suggestion lines, or an empty list for non-CLIError exits."""
+    return list(getattr(result.exception, "suggestions", []) or [])
+
+
+def _claim_is_spent(db) -> bool:
+    """Whether the one-shot claim row exists -- what refuses a second bootstrap."""
+    import sqlite3
+
+    if not db.exists():
+        return False
+    conn = sqlite3.connect(db)
+    try:
+        return conn.execute("SELECT COUNT(*) FROM initial_admin_bootstrap").fetchone()[0] > 0
+    finally:
+        conn.close()
+
+
 class TestBootstrapAdminSuccess:
     def test_grants_global_admin_on_sqlite(self, runner, tmp_path):
         cfg, db = _write_config(tmp_path)
@@ -125,6 +143,33 @@ class TestBootstrapAdminRefusesSecondRun:
         # No mutation: the loser changed nothing.
         assert _counts() == before
 
+    def test_flagless_second_run_reports_already_bootstrapped_not_a_false_suggestion(self, runner, tmp_path):
+        # API-key-only deployment (no OIDC). The first run spends the one-shot
+        # claim. A flagless second run must consult the store's spend state and
+        # report the accurate "already bootstrapped; nothing changed" outcome --
+        # NOT the pre-claim "re-run with --show-key; the claim has not been
+        # spent" suggestion, which is false once the claim is spent and sends the
+        # operator to a secret that is no longer recoverable. This is the rc.4
+        # regression the amended flagged second-run test had masked.
+        cfg, db = _write_config(tmp_path)
+
+        first = _invoke(runner, "--config", str(cfg), "--principal", "user:admin", "--show-key")
+        assert first.exit_code == 0, first.output
+        assert _claim_is_spent(db)
+
+        second = _invoke(runner, "--config", str(cfg), "--principal", "user:admin")
+
+        assert second.exit_code != 0
+        assert "already" in _error_text(second).lower()
+        suggestions = " ".join(_suggestions(second))
+        # The misleading pre-claim advice ("the claim has not been spent, so this
+        # works") must be gone now that the claim is spent.
+        assert "not been spent" not in suggestions
+        # Instead it names the recovery that does not require the lost secret:
+        # clear the spent claim row / start from a fresh store.
+        assert "initial_admin_bootstrap" in suggestions
+        assert "fresh store" in suggestions
+
 
 class TestBootstrapAdminFailsClosed:
     def test_rejects_non_durable_memory_driver(self, runner, tmp_path):
@@ -159,6 +204,38 @@ class TestBootstrapAdminFailsClosed:
 
         assert result.exit_code != 0
         assert str(missing) in _error_text(result)
+
+
+class TestBootstrapAdminRefusesUnusablePrintedKey:
+    def test_oidc_and_show_key_refused_when_api_key_disabled_without_spending_claim(self, runner, tmp_path):
+        # An OIDC issuer is trusted (so identity_authenticator=True), but
+        # API-key auth is disabled. `--show-key` would print an API key that no
+        # authenticator will ever accept, while spending the one-shot claim. Both
+        # rc.4 refusals required `not identity_authenticator`, so neither fired
+        # once OIDC was present -- the same "unusable grant" #833 fixed for the
+        # no-OIDC case, surviving here. The enabled check must apply regardless
+        # of OIDC, and the claim must not be spent.
+        cfg, db = _write_config(tmp_path, oidc=True, api_key=False)
+
+        result = _invoke(runner, "--config", str(cfg), "--principal", "user:admin", "--show-key")
+
+        assert result.exit_code != 0
+        text = _error_text(result).lower()
+        suggestions = " ".join(_suggestions(result)).lower()
+        assert "api-key auth is disabled" in text or "api-key auth is disabled" in suggestions
+        assert "pointless" in text
+        # The one-shot claim survives the refusal.
+        assert not _claim_is_spent(db)
+
+    def test_oidc_flagless_is_unaffected_when_api_key_disabled(self, runner, tmp_path):
+        # The same config without `--show-key` is fine: the grant is an OIDC
+        # admin role, the byproduct key is never printed, and the claim proceeds.
+        cfg, db = _write_config(tmp_path, oidc=True, api_key=False)
+
+        result = _invoke(runner, "--config", str(cfg), "--principal", "user:admin")
+
+        assert result.exit_code == 0, result.output
+        assert _claim_is_spent(db)
 
 
 class TestBootstrapAdminPrintsNoCredentialUnlessAsked:

@@ -34,7 +34,7 @@ from ...domain.exceptions import (
     MCPError,
     McpServerDegradedError,
     McpServerNotFoundError,
-    ConfigurationError,
+    ConfigurationUnavailableError,
     McpServerNotHereError,
     McpServerNotReadyError,
     MissingCredentialsError,
@@ -93,11 +93,18 @@ _EXCEPTION_STATUS_MAP: list[tuple[type, int]] = [
     # and answered 500 -- telling the caller the server had broken when the
     # feature was simply off.
     (HandlerNotRegisteredError, 503),
-    # A configuration error reaching the API is a statement about the
-    # deployment, not about the request: an unwritable directory, a file that is
-    # not there. 500 with "an internal server error occurred" says the gateway
-    # broke; 503 with the real message says what to fix.
-    (ConfigurationError, 503),
+    # ONLY the narrow "the filesystem said no" case is a 503: the rotating
+    # backup could not be written because the config directory is not writable
+    # by the gateway process. That is a genuine transient/unavailable condition
+    # the caller can retry once the environment is fixed. A *generic*
+    # ConfigurationError is NOT mapped here: it is an operator-input problem
+    # (a bad capabilities block, the reload fault-barrier wrapping an internal
+    # failure) and must fall through to 500 -- mapping it to 503 turned every
+    # such error into a faked retryable outage and leaked the wrapped internal
+    # text to the caller (#823 regression). Being a subclass of
+    # ConfigurationError, this entry is matched before the base MCPError->500
+    # below, so the specific case wins and the generic case does not.
+    (ConfigurationUnavailableError, 503),
     (McpServerNotFoundError, 404),
     (ToolNotFoundError, 404),
     # Not "this broke" but "not here": a follower asked to start a server that

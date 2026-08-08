@@ -18,7 +18,7 @@ from starlette.requests import Request
 from starlette.routing import Route
 
 from ...application.commands.commands import ReloadConfigurationCommand
-from ...domain.exceptions import ConfigurationError, ValidationError
+from ...domain.exceptions import ConfigurationUnavailableError, ValidationError
 from ..config_serializer import serialize_full_config, write_config_backup
 from .middleware import dispatch_command, get_context
 from .serializers import HangarJSONResponse
@@ -168,7 +168,7 @@ async def backup_config(request: Request) -> HangarJSONResponse:
         # (`PermissionError: [Errno 13] ... 'config.yaml.bak1'`) only in the
         # log. That tells the caller the gateway is broken when the gateway is
         # working and the filesystem said no.
-        raise ConfigurationError(
+        raise ConfigurationUnavailableError(
             f"could not write the backup beside {config_path!r}: {error.strerror or error}. "
             "The backup is written into the configuration file's own directory, which has to be "
             "writable by the gateway process.",

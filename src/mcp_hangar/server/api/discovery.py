@@ -6,7 +6,6 @@ sources, pending mcp_servers, quarantined mcp_servers, approve/reject.
 
 from starlette.requests import Request
 
-from ...domain.value_objects.discovery import config_source_id
 from starlette.routing import Route
 
 from ...application.commands.discovery_commands import (
@@ -21,6 +20,15 @@ from ..context import get_context
 from .middleware import dispatch_command
 from .serializers import HangarJSONResponse
 from .request_body import missing_fields
+
+
+#: The discovery source-management surface (register/update/deregister a source,
+#: trigger a scan, toggle enabled) ships in 2.5.0 as **Preview**, not GA: it was
+#: broken end-to-end in rc.4 and its behaviour may still change. Every mutating
+#: source-management response carries this header so a caller sees the preview
+#: status without reading the docs. The read-only discovery flow (list sources,
+#: pending, quarantined, approve/reject) is stable and does NOT carry it.
+_PREVIEW_HEADERS = {"X-Hangar-Preview": "discovery-source-management"}
 
 
 class DiscoveryNotConfigured(McpServerNotFoundError):
@@ -70,15 +78,39 @@ async def list_sources(request: Request) -> HangarJSONResponse:
     """
     orchestrator = _require_orchestrator()
     sources = await orchestrator.get_sources_status()
-    # The id belongs in the listing, because it is what every other route on
-    # this resource takes. Without it the caller could see a source and had no
-    # way to name it -- `/sources/{id}/scan` and `/sources/{id}/enable` were
-    # unreachable for anything declared in configuration.
-    for source in sources:
-        source_type = source.get("source_type")
-        if source_type and "id" not in source:
-            source["id"] = config_source_id(str(source_type))
+    # The id now comes from get_sources_status() itself (SourceStatus.to_dict),
+    # one place that REST and the MCP tool both read -- no special-case backfill
+    # here. What this route still owns is the agreement between the listing and
+    # its own addressable sub-routes: a source the orchestrator keeps running
+    # after DELETE /sources/{id} is still in this listing, but its id no longer
+    # names a registered spec, so /sources/{id}/scan and /enable would 404 for
+    # an id the listing shows as present. Cross-check membership and strip the id
+    # of any source the registry no longer knows, so a listed id is always one
+    # the routes accept.
+    known_ids = _registered_source_ids()
+    if known_ids is not None:
+        for source in sources:
+            source_id = source.get("id")
+            if source_id is not None and source_id not in known_ids:
+                source.pop("id", None)
     return HangarJSONResponse({"sources": sources})
+
+
+def _registered_source_ids() -> set[str] | None:
+    """The source ids the DiscoveryRegistry currently knows, or None if unknown.
+
+    None means "cannot determine membership" -- no registry wired -- in which
+    case list_sources leaves ids untouched rather than hiding every one. In
+    production the registry is always present when discovery is; the guard keeps
+    the listing working under partial test wiring.
+    """
+    registry = getattr(get_context(), "discovery_registry", None)
+    if registry is None:
+        return None
+    try:
+        return {spec.source_id for spec in registry.get_all_sources()}
+    except (TypeError, AttributeError):
+        return None
 
 
 async def list_pending(request: Request) -> HangarJSONResponse:
@@ -152,6 +184,9 @@ async def reject_mcp_server(request: Request) -> HangarJSONResponse:
 async def register_source(request: Request) -> HangarJSONResponse:
     """Register a new discovery source.
 
+    **Preview** (2.5.0): source management is not yet GA; response carries
+    ``X-Hangar-Preview: discovery-source-management``.
+
     Body:
         source_type: Type of source ("docker", "filesystem", "kubernetes", "entrypoint").
         mode: Discovery mode ("additive" or "authoritative").
@@ -176,11 +211,14 @@ async def register_source(request: Request) -> HangarJSONResponse:
             config=body.get("config", {}),
         )
     )
-    return HangarJSONResponse(result, status_code=201)
+    return HangarJSONResponse(result, status_code=201, headers=_PREVIEW_HEADERS)
 
 
 async def update_source(request: Request) -> HangarJSONResponse:
     """Update an existing discovery source spec.
+
+    **Preview** (2.5.0): source management is not yet GA; response carries
+    ``X-Hangar-Preview: discovery-source-management``.
 
     Path params:
         source_id: UUID of the source to update.
@@ -206,11 +244,14 @@ async def update_source(request: Request) -> HangarJSONResponse:
             config=body.get("config"),
         )
     )
-    return HangarJSONResponse(result)
+    return HangarJSONResponse(result, headers=_PREVIEW_HEADERS)
 
 
 async def deregister_source(request: Request) -> HangarJSONResponse:
     """Remove a discovery source from the registry.
+
+    **Preview** (2.5.0): source management is not yet GA; response carries
+    ``X-Hangar-Preview: discovery-source-management``.
 
     Path params:
         source_id: UUID of the source to remove.
@@ -223,11 +264,14 @@ async def deregister_source(request: Request) -> HangarJSONResponse:
     """
     source_id = request.path_params["source_id"]
     result = await dispatch_command(DeregisterDiscoverySourceCommand(source_id=source_id))
-    return HangarJSONResponse(result)
+    return HangarJSONResponse(result, headers=_PREVIEW_HEADERS)
 
 
 async def trigger_scan(request: Request) -> HangarJSONResponse:
     """Trigger an immediate discovery scan for a source.
+
+    **Preview** (2.5.0): source management is not yet GA; response carries
+    ``X-Hangar-Preview: discovery-source-management``.
 
     Path params:
         source_id: UUID of the source to scan.
@@ -240,11 +284,14 @@ async def trigger_scan(request: Request) -> HangarJSONResponse:
     """
     source_id = request.path_params["source_id"]
     result = await dispatch_command(TriggerSourceScanCommand(source_id=source_id))
-    return HangarJSONResponse(result)
+    return HangarJSONResponse(result, headers=_PREVIEW_HEADERS)
 
 
 async def toggle_source(request: Request) -> HangarJSONResponse:
     """Enable or disable a discovery source.
+
+    **Preview** (2.5.0): source management is not yet GA; response carries
+    ``X-Hangar-Preview: discovery-source-management``.
 
     Path params:
         source_id: UUID of the source to toggle.
@@ -268,7 +315,7 @@ async def toggle_source(request: Request) -> HangarJSONResponse:
             enabled=body["enabled"],
         )
     )
-    return HangarJSONResponse(result)
+    return HangarJSONResponse(result, headers=_PREVIEW_HEADERS)
 
 
 # Route definitions for mounting in the API router

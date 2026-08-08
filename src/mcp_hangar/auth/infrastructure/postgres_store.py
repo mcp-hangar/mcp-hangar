@@ -164,6 +164,13 @@ class PostgresApiKeyStore(IApiKeyStore, IInitialAdminBootstrapStore):
             if row is None:
                 # Perform dummy comparison to equalize timing with found-key path
                 hmac.compare_digest(key_hash.encode("utf-8"), _DUMMY_HASH.encode("utf-8"))
+                # The SELECT above opened a transaction on the borrowed pooled
+                # connection; the found-key path closes it via the last_used_at
+                # UPDATE's commit, but this early return has nothing to write.
+                # Commit so the connection is not handed back to the pool "idle
+                # in transaction" (same pattern as PostgresMetricsHistoryStore
+                # and PostgresEventStore).
+                conn.commit()
                 return None
 
             (
@@ -384,6 +391,16 @@ class PostgresApiKeyStore(IApiKeyStore, IInitialAdminBootstrapStore):
             )
         return raw_key, key_id
 
+    def is_initial_admin_bootstrapped(self) -> bool:
+        """Whether the one-shot claim row exists (read-only, never spends it)."""
+        with self._connections.get_connection() as conn, conn.cursor() as cur:
+            cur.execute(f"SELECT 1 FROM {self._bootstrap_table} WHERE singleton = TRUE")
+            exists = cur.fetchone() is not None
+            # Read-only: close the transaction the SELECT opened so the pooled
+            # connection is not returned "idle in transaction".
+            conn.commit()
+            return exists
+
     def revoke_key(self, key_id: str, revoked_by: str | None = None, reason: str | None = None) -> bool:
         """Revoke an API key.
 
@@ -444,6 +461,11 @@ class PostgresApiKeyStore(IApiKeyStore, IInitialAdminBootstrapStore):
                 (principal_id,),
             )
 
+            rows = cur.fetchall()
+            # Read-only: close the transaction the SELECT opened so the pooled
+            # connection is not returned "idle in transaction" (see
+            # PostgresMetricsHistoryStore.query for the same pattern).
+            conn.commit()
             return [
                 ApiKeyMetadata(
                     key_id=row[0],
@@ -454,7 +476,7 @@ class PostgresApiKeyStore(IApiKeyStore, IInitialAdminBootstrapStore):
                     last_used_at=row[5],
                     revoked=row[6],
                 )
-                for row in cur.fetchall()
+                for row in rows
             ]
 
     def count_keys(self, principal_id: str) -> int:
@@ -468,6 +490,9 @@ class PostgresApiKeyStore(IApiKeyStore, IInitialAdminBootstrapStore):
                 (principal_id,),
             )
             row = cur.fetchone()
+            # Read-only: close the transaction the SELECT opened so the pooled
+            # connection is not returned "idle in transaction".
+            conn.commit()
             return int(row[0]) if row else 0
 
     def rotate_key(
@@ -703,6 +728,10 @@ class PostgresRoleStore(IRoleStore):
             )
 
             row = cur.fetchone()
+            # Read-only: close the transaction the SELECT opened so the pooled
+            # connection is not returned "idle in transaction" (covers both the
+            # not-found early return and the row-found return below).
+            conn.commit()
             if row is None:
                 return None
 
@@ -776,8 +805,12 @@ class PostgresRoleStore(IRoleStore):
                     (principal_id, scope),
                 )
 
+            rows = cur.fetchall()
+            # Read-only: close the transaction the SELECT opened so the pooled
+            # connection is not returned "idle in transaction".
+            conn.commit()
             roles = []
-            for name, description, permissions_json in cur.fetchall():
+            for name, description, permissions_json in rows:
                 if isinstance(permissions_json, str):
                     permissions_json = json.loads(permissions_json)
 

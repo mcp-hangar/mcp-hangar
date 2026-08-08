@@ -272,6 +272,16 @@ class IInitialAdminBootstrapStore(Protocol):
         """
         ...
 
+    @abstractmethod
+    def is_initial_admin_bootstrapped(self) -> bool:
+        """Whether the one-shot initial-admin claim has already been spent.
+
+        Read-only: it never mints a key and never consumes the claim, so a
+        caller can decide how to behave before spending it. Returns True once
+        ``bootstrap_initial_admin`` has completed for this store.
+        """
+        ...
+
 
 class NullAuthenticator:
     """No-op authenticator. Returns anonymous system principal for all requests.
