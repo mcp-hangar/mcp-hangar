@@ -141,3 +141,50 @@ def _a_real_certificate() -> str:
         .sign(key, hashes.SHA256())
     )
     return cert.public_bytes(serialization.Encoding.PEM).decode()
+
+
+class TestTurningItOffIsLoud:
+    """The setting changed meaning, so the deployments it changes have to hear it.
+
+    Until 2.5.0 `verify_ssl: false` was accepted and discarded. A configuration
+    carrying it from that era did nothing and now does exactly what it says --
+    and whoever wrote it may no longer be reading. One warning per upstream
+    beats a field on an info line among thirty others.
+    """
+
+    def _launch(self, tls_config):
+        from structlog.testing import capture_logs
+
+        from mcp_hangar.infrastructure.launchers.http import HttpLauncher
+
+        with capture_logs() as logs:
+            HttpLauncher().launch(endpoint="https://upstream.internal:8443/mcp", tls_config=tls_config)
+        return logs
+
+    def test_disabling_verification_warns(self) -> None:
+        logs = self._launch({"verify_ssl": False})
+
+        warnings = [entry for entry in logs if entry["event"] == "tls_verification_disabled"]
+        assert len(warnings) == 1
+        assert warnings[0]["log_level"] == "warning"
+        assert "upstream.internal" in warnings[0]["endpoint"]
+
+    def test_the_warning_says_what_to_do(self) -> None:
+        detail = next(e for e in self._launch({"verify_ssl": False}) if e["event"] == "tls_verification_disabled")
+
+        assert "verify_ssl: true" in detail["detail"]
+        assert "ca_cert_path" in detail["detail"]
+
+    def test_the_default_is_quiet(self) -> None:
+        assert not [e for e in self._launch(None) if e["event"] == "tls_verification_disabled"]
+
+    def test_a_custom_ca_is_not_a_warning(self, tmp_path) -> None:
+        # Trusting your own CA is verification, not the absence of it. The
+        # bundle has to exist: httpx loads it when the transport is built, so a
+        # missing path fails the launch for an unrelated reason.
+        bundle = tmp_path / "ca.pem"
+        bundle.write_text(_a_real_certificate())
+
+        logs = self._launch({"verify_ssl": True, "ca_cert_path": str(bundle)})
+
+        assert not [e for e in logs if e["event"] == "tls_verification_disabled"]
