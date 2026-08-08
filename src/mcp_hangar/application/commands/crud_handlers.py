@@ -119,6 +119,12 @@ class CreateMcpServerHandler(CommandHandler):
             description=command.description,
             volumes=command.volumes,
             read_only=command.read_only,
+            # The same policy inputs `validate_no_ssrf` used just above, carried
+            # onto the aggregate so the transport's connect-time re-check (DNS
+            # rebinding) applies them too. `validate_no_ssrf` guards registration;
+            # the client that connects is built later, on first use.
+            provenance=command.provenance,
+            runtime_addresses=command.runtime_addresses,
         )
 
         # Recorded before it joins the fleet, and before the event. The order is

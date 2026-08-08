@@ -1,11 +1,13 @@
 """HTTP mcp_server launcher implementation."""
 
 from collections.abc import Mapping
+from dataclasses import replace
 from typing import cast
 
 from mcp_hangar.logging_config import get_logger
 from mcp_hangar.domain.exceptions import McpServerStartError, ValidationError
 from mcp_hangar.domain.security.input_validator import InputValidator
+from mcp_hangar.domain.value_objects.provenance import Provenance
 from .base import McpServerLauncher
 
 logger = get_logger(__name__)
@@ -93,6 +95,8 @@ class HttpLauncher(McpServerLauncher):
         auth_config: Mapping[str, object] | None = None,
         tls_config: Mapping[str, object] | None = None,
         http_config: Mapping[str, object] | None = None,
+        provenance: Provenance = Provenance.HUMAN,
+        runtime_addresses: frozenset[str] | None = None,
     ):
         """
         Create an HTTP client for a remote MCP mcp_server.
@@ -167,7 +171,7 @@ class HttpLauncher(McpServerLauncher):
                 extra_headers=cast(dict[str, str], http_config.get("headers", {})),
             )
 
-        if not http_cfg.verify_ssl:
+        if not http_cfg.verify_ssl and not http_cfg.ca_cert_path:
             # A warning, not a field on an info line, because this setting
             # changed meaning. Until 2.5.0 it was accepted and discarded -- the
             # explicit transport silenced it -- so a `verify_ssl: false` left in
@@ -182,6 +186,30 @@ class HttpLauncher(McpServerLauncher):
                     "`tls.ca_cert_path` at the CA that signed it"
                 ),
             )
+        elif not http_cfg.verify_ssl and http_cfg.ca_cert_path:
+            # `ca_cert_path` wins in HttpClient._create_client: it is assigned to
+            # httpx's `verify=` and overrides the boolean, so verification is
+            # ENFORCED against that CA regardless of `verify_ssl: false`. Warning
+            # "verification is off" here is not just noise -- it points the
+            # operator at the very setting doing the enforcing. Say what is true.
+            logger.warning(
+                "tls_verify_ssl_overridden_by_ca_cert",
+                endpoint=endpoint,
+                ca_cert_path=http_cfg.ca_cert_path,
+                detail=(
+                    "`tls.verify_ssl: false` is overridden: certificate verification is enforced "
+                    "against the configured `tls.ca_cert_path`. If a handshake fails, the certificate "
+                    "does not chain to that CA -- fix the CA bundle, do not expect verification to be off"
+                ),
+            )
+
+        # Carry the registration-time SSRF policy onto the client config so the
+        # connect-time guard (_SsrfGuardedTransport) re-applies the SAME policy
+        # validate_no_ssrf used at registration -- closing DNS rebinding on the
+        # connect path. HUMAN + None is the strict default; a DISCOVERY upstream
+        # passes its runtime-reported addresses so its legitimate private
+        # container IP is still reachable (without them it would be refused).
+        http_cfg = replace(http_cfg, provenance=provenance, runtime_addresses=runtime_addresses)
 
         logger.info(
             f"Connecting to HTTP mcp_server: {endpoint}",

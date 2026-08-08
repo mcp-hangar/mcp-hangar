@@ -12,6 +12,8 @@ from datetime import datetime
 from enum import Enum
 from typing import Any, Protocol
 
+from ..value_objects.provenance import Provenance
+
 
 class AuditAction(Enum):
     """Types of auditable actions on entities."""
@@ -116,8 +118,34 @@ class McpServerConfigSnapshot:
     user: str | None = None
     tools: list[dict[str, Any]] | None = None
     enabled: bool = True
+    # SSRF provenance policy for a remote endpoint, persisted so it survives a
+    # restart. Without it, a DISCOVERY server rebuilt from its snapshot would
+    # lose its runtime-scoped addresses and the connect-time SSRF guard would
+    # treat its legitimate private container IP as HUMAN and refuse it. HUMAN +
+    # None is the safe default for an older snapshot that predates these fields.
+    #
+    # `__post_init__` normalises both, because this dataclass is rebuilt via
+    # `McpServerConfigSnapshot(**other.to_dict())` (config_repository) where
+    # `to_dict` has already reduced the enum to its string value and the
+    # addresses to a list -- so the constructor must accept those forms too.
+    provenance: Provenance = Provenance.HUMAN
+    runtime_addresses: frozenset[str] | None = None
     created_at: datetime | None = None
     updated_at: datetime | None = None
+
+    def __post_init__(self) -> None:
+        # Frozen dataclass: assign through object.__setattr__. Accept a
+        # Provenance, its string value, or None (-> HUMAN); accept runtime
+        # addresses as a frozenset, any iterable of strings, or None.
+        prov = self.provenance
+        if not isinstance(prov, Provenance):
+            prov = Provenance(prov) if prov else Provenance.HUMAN
+        object.__setattr__(self, "provenance", prov)
+
+        addrs = self.runtime_addresses
+        if addrs is not None and not isinstance(addrs, frozenset):
+            addrs = frozenset(str(a) for a in addrs)
+        object.__setattr__(self, "runtime_addresses", addrs)
 
     def to_dict(self) -> dict[str, Any]:
         """Serialize to dictionary for storage."""
@@ -140,6 +168,9 @@ class McpServerConfigSnapshot:
             "user": self.user,
             "tools": self.tools,
             "enabled": self.enabled,
+            # JSON-safe forms; __post_init__ reverses them on the way back in.
+            "provenance": self.provenance.value,
+            "runtime_addresses": (sorted(self.runtime_addresses) if self.runtime_addresses is not None else None),
             "created_at": self.created_at.isoformat() if self.created_at else None,
             "updated_at": self.updated_at.isoformat() if self.updated_at else None,
         }
@@ -169,6 +200,9 @@ class McpServerConfigSnapshot:
             user=data.get("user"),
             tools=data.get("tools"),
             enabled=data.get("enabled", True),
+            # __post_init__ normalises the string/list back to enum/frozenset.
+            provenance=data.get("provenance", Provenance.HUMAN),
+            runtime_addresses=data.get("runtime_addresses"),
             created_at=datetime.fromisoformat(created_at) if created_at else None,
             updated_at=datetime.fromisoformat(updated_at) if updated_at else None,
         )
