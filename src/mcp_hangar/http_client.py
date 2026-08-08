@@ -25,6 +25,8 @@ import httpx
 
 from . import metrics as prometheus_metrics
 from .domain.exceptions import ClientError
+from .domain.security.ssrf import SsrfBlocked, resolve_validated_addresses
+from .domain.value_objects.provenance import Provenance
 from .logging_config import get_logger
 from .context import get_identity_context
 from .observability.tracing import (
@@ -150,6 +152,23 @@ class HttpClientConfig:
     # upstream be declared stateless so the deprecated Mcp-Session-Id handling
     # below is never exercised. Default False preserves legacy connectivity.
     stateless_upstream: bool = False
+    # Connect-time SSRF policy for this upstream, applied on every connection by
+    # `_SsrfGuardedTransport` -- but only when `enforce_ssrf` is set. It closes
+    # DNS rebinding: `validate_no_ssrf` runs once at registration, yet httpx
+    # re-resolves the hostname itself at connect time with no re-check, so a name
+    # that passed once can be re-pointed at an internal address and every later
+    # call follows it. `enforce_ssrf` is turned on for exactly the population the
+    # registration check guarded (endpoints created through the command handler,
+    # i.e. the REST API and discovery), and left off for endpoints that were
+    # never registration-checked -- a config-file `remote` server pointed at an
+    # internal address on purpose, or a directly-constructed client -- so the
+    # connect guard cannot newly refuse a private endpoint the operator intended.
+    # When on, `provenance` + `runtime_addresses` carry the same inputs the
+    # registration check used; their defaults mirror `validate_no_ssrf`'s
+    # fail-safe (HUMAN, no runtime-scoped addresses).
+    enforce_ssrf: bool = False
+    provenance: Provenance = Provenance.HUMAN
+    runtime_addresses: frozenset[str] | None = None
 
 
 @dataclass
@@ -159,6 +178,81 @@ class PendingHttpRequest:
     request_id: str
     result_queue: Queue
     started_at: float
+
+
+class _SsrfGuardedTransport(httpx.HTTPTransport):
+    """An httpx transport that re-checks SSRF policy at connect time and pins.
+
+    `validate_no_ssrf` runs once, at registration, against the addresses the
+    hostname resolved to then. httpx then re-resolves that hostname on its own
+    at every connect, with no second check -- so an upstream registered under a
+    name that resolved to a public address can be re-pointed at 169.254.169.254
+    / 10.x / 127.0.0.1 (DNS rebinding), and every later tool call connects to
+    the internal address. This transport closes that gap:
+
+    - On EVERY request (never cached) it resolves the host again and runs the
+      same domain policy the registration check used. A refused address raises
+      `SsrfBlocked`, wrapped as `httpx.ConnectError` so `HttpClient.call`
+      already handles it as a connection failure.
+    - It then PINS: the request URL host is rewritten to a validated IP literal
+      so httpcore connects there (and pools by that IP), while the `Host` header
+      keeps the original authority and `sni_hostname` keeps the original name --
+      so TLS SNI and certificate verification still validate against the NAME,
+      not the IP. httpx auto-brackets an IPv6 literal in `copy_with(host=...)`.
+    """
+
+    def __init__(
+        self,
+        *args: Any,
+        enforce_ssrf: bool,
+        provenance: Provenance,
+        runtime_addresses: frozenset[str] | None,
+        **kwargs: Any,
+    ) -> None:
+        super().__init__(*args, **kwargs)
+        self._enforce_ssrf = enforce_ssrf
+        self._provenance = provenance
+        self._runtime_addresses = runtime_addresses
+
+    def handle_request(self, request: httpx.Request) -> httpx.Response:
+        # Only endpoints the registration check guarded are re-checked here;
+        # a config-file or directly-built client keeps httpx's plain behaviour,
+        # so an intentionally private endpoint is not newly refused at connect.
+        if not self._enforce_ssrf:
+            return super().handle_request(request)
+
+        original_host = request.url.host
+        port = request.url.port
+        scheme = request.url.scheme
+        authority = original_host if port is None else f"{original_host}:{port}"
+
+        try:
+            validated = resolve_validated_addresses(
+                f"{scheme}://{authority}",
+                provenance=self._provenance,
+                runtime_addresses=self._runtime_addresses,
+            )
+        except SsrfBlocked as e:
+            # Surface as a connection error: HttpClient.call already catches
+            # httpx.ConnectError and reports connection_failed, and there is no
+            # connection to make to a refused address.
+            raise httpx.ConnectError(f"SSRF guard blocked connection: {e}", request=request) from e
+
+        if validated:
+            pinned_ip = validated[0]
+            # Preserve vhost + TLS identity while connecting by IP. httpx keeps
+            # the Host header it built from the original URL (it is not
+            # re-derived from the rewritten URL), but re-assert it explicitly so
+            # the vhost is correct even if a caller pre-mutated the request.
+            original_host_header = request.headers.get("Host") or authority
+            request.url = request.url.copy_with(host=pinned_ip)
+            request.headers["Host"] = original_host_header
+            # httpcore uses sni_hostname for BOTH the TLS SNI and the certificate
+            # hostname check, so verification validates the NAME we resolved, not
+            # the IP we connect to.
+            request.extensions["sni_hostname"] = original_host
+
+        return super().handle_request(request)
 
 
 class HttpClient:
@@ -293,9 +387,17 @@ class HttpClient:
         # simply did not work. `ca_cert_path` travels on the same argument and
         # was discarded the same way -- and that one has no safe reading, since
         # it is how a deployment trusts its own internal CA.
-        transport = httpx.HTTPTransport(
+        # `_SsrfGuardedTransport`, not a plain `httpx.HTTPTransport`: it re-runs
+        # the SSRF policy and pins to a validated IP on every connect, closing
+        # the DNS-rebinding gap left by the registration-time-only check. The
+        # `retries` and `verify` arguments must still reach the transport
+        # unchanged -- see the long comment above on why TLS settings live here.
+        transport = _SsrfGuardedTransport(
             retries=config.max_retries,
             verify=verify,
+            enforce_ssrf=config.enforce_ssrf,
+            provenance=config.provenance,
+            runtime_addresses=config.runtime_addresses,
         )
 
         return httpx.Client(

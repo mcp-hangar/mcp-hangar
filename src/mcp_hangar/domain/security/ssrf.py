@@ -15,6 +15,15 @@ discovery is not granted an address *class*; it is granted the specific
 addresses the runtime reported for that container, and nothing else. The class
 denylist below still applies on top, so link-local and the cloud metadata
 endpoint stay refused through every door.
+
+This same policy is enforced twice: `validate_no_ssrf` refuses an endpoint when
+it is registered, and `resolve_validated_addresses` re-applies it at connect
+time (see `http_client._SsrfGuardedTransport`), returning the validated IP the
+transport then pins the connection to. Registration-time validation alone would
+leave DNS rebinding open -- a name that resolved to a public address when it was
+registered, re-pointed at an internal one before the next call -- because httpx
+re-resolves the hostname itself on every connect. The connect-time check closes
+that on the HUMAN path as well as DISCOVERY.
 """
 
 from __future__ import annotations
@@ -85,6 +94,63 @@ def _normalize(address: str) -> str:
     return str(mapped or ip)
 
 
+def _resolve_and_validate(
+    url: str,
+    *,
+    provenance: Provenance,
+    runtime_addresses: frozenset[str] | None,
+) -> list[str]:
+    """The one policy, returning the resolved addresses that passed it.
+
+    Shared core of `validate_no_ssrf` (which discards the return) and
+    `resolve_validated_addresses` (which connects to one of them). Every refusal
+    path raises `SsrfBlocked`; an empty list means there was nothing to judge --
+    no hostname, or a name that does not resolve -- which both callers treat as
+    "allowed", because a name that cannot be resolved cannot be connected to.
+
+    Raises:
+        SsrfBlocked: if the endpoint is refused.
+    """
+    parsed = urlparse(url)
+    hostname = parsed.hostname
+    if not hostname:
+        return []
+
+    lowered = hostname.lower()
+    if lowered.endswith(_METADATA_SUFFIXES):
+        raise SsrfBlocked(f"SSRF blocked: {hostname} is a cloud metadata hostname")
+
+    addresses = _resolved_addresses(hostname)
+    if not addresses:
+        # Unresolvable. Unchanged from the original behaviour: nothing to judge,
+        # and a name that does not resolve cannot be connected to either.
+        return []
+
+    for address in addresses:
+        if _in_any(address, _ALWAYS_BLOCKED_NETWORKS):
+            raise SsrfBlocked(f"SSRF blocked: {address} is link-local, unspecified or metadata-adjacent")
+
+    scoped = provenance is Provenance.DISCOVERY and bool(runtime_addresses)
+    if not scoped:
+        for address in addresses:
+            if _in_any(address, _BLOCKED_NETWORKS):
+                raise SsrfBlocked("SSRF blocked: endpoint resolves to private address")
+        return addresses
+
+    # DISCOVERY with a runtime-reported address set. The endpoint is allowed to
+    # be private -- that is the normal case -- but only where the runtime put it.
+    # This is also what closes DNS rebinding at registration time: a name that
+    # resolves to two addresses passes only if the runtime reported both.
+    reported = {_normalize(a) for a in (runtime_addresses or frozenset())}
+    for address in addresses:
+        if _normalize(address) not in reported:
+            raise SsrfBlocked(
+                f"SSRF blocked: discovered endpoint resolves to {address}, "
+                f"which the container runtime did not report for it"
+            )
+    return addresses
+
+
 def validate_no_ssrf(
     url: str,
     *,
@@ -106,40 +172,38 @@ def validate_no_ssrf(
     Raises:
         SsrfBlocked: if the endpoint is refused.
     """
-    parsed = urlparse(url)
-    hostname = parsed.hostname
-    if not hostname:
-        return
+    _resolve_and_validate(url, provenance=provenance, runtime_addresses=runtime_addresses)
 
-    lowered = hostname.lower()
-    if lowered.endswith(_METADATA_SUFFIXES):
-        raise SsrfBlocked(f"SSRF blocked: {hostname} is a cloud metadata hostname")
 
-    addresses = _resolved_addresses(hostname)
-    if not addresses:
-        # Unresolvable. Unchanged from the original behaviour: nothing to judge,
-        # and a name that does not resolve cannot be connected to either.
-        return
+def resolve_validated_addresses(
+    url: str,
+    *,
+    provenance: Provenance = Provenance.HUMAN,
+    runtime_addresses: frozenset[str] | None = None,
+) -> list[str]:
+    """Resolve `url`'s host and return the addresses that passed the SSRF policy.
 
-    for address in addresses:
-        if _in_any(address, _ALWAYS_BLOCKED_NETWORKS):
-            raise SsrfBlocked(f"SSRF blocked: {address} is link-local, unspecified or metadata-adjacent")
+    The same check as `validate_no_ssrf`, exposed so the transport can decide
+    *which IP to connect to* rather than re-resolving the name independently at
+    connect time (the DNS-rebinding gap: a name validated once at registration,
+    then re-pointed at 169.254.169.254 / 10.x / 127.0.0.1). The transport calls
+    this on every request -- never caching -- and connects to one of the
+    returned IPs, so a rebind is refused on every new connection.
 
-    scoped = provenance is Provenance.DISCOVERY and bool(runtime_addresses)
-    if not scoped:
-        for address in addresses:
-            if _in_any(address, _BLOCKED_NETWORKS):
-                raise SsrfBlocked("SSRF blocked: endpoint resolves to private address")
-        return
+    Args:
+        url: The endpoint about to be connected to.
+        provenance: HUMAN (strict: every private range refused) or DISCOVERY
+            (the endpoint may be private, but only at a runtime-reported address).
+            Defaults to HUMAN so a forgetful call site gets the strict policy.
+        runtime_addresses: For DISCOVERY, the addresses the container runtime
+            reported. Absent or empty, DISCOVERY is treated as HUMAN.
 
-    # DISCOVERY with a runtime-reported address set. The endpoint is allowed to
-    # be private -- that is the normal case -- but only where the runtime put it.
-    # This is also what closes DNS rebinding at registration time: a name that
-    # resolves to two addresses passes only if the runtime reported both.
-    reported = {_normalize(a) for a in (runtime_addresses or frozenset())}
-    for address in addresses:
-        if _normalize(address) not in reported:
-            raise SsrfBlocked(
-                f"SSRF blocked: discovered endpoint resolves to {address}, "
-                f"which the container runtime did not report for it"
-            )
+    Returns:
+        The validated, resolved IP strings. Empty when the host is absent or does
+        not resolve -- there is then nothing to pin to, and the caller connects
+        by name and fails naturally.
+
+    Raises:
+        SsrfBlocked: if any resolved address is refused.
+    """
+    return _resolve_and_validate(url, provenance=provenance, runtime_addresses=runtime_addresses)
