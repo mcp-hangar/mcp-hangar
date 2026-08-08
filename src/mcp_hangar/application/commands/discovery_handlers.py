@@ -186,11 +186,17 @@ class TriggerSourceScanHandler(CommandHandler):
         if spec is None:
             raise McpServerNotFoundError(mcp_server_id=command.source_id)
 
-        result = self._registry.orchestrator.trigger_discovery()
+        # Synchronous bridge: this handler runs in a worker thread, so it cannot
+        # await. trigger_discovery() is a coroutine -- calling it bare left it
+        # unawaited (no scan ran) and read the wrong result key. The bridge runs
+        # the cycle to completion on discovery's own loop; the real count is
+        # `discovered_count` (DiscoveryCycleResult.to_dict), not the never-emitted
+        # `mcp_servers_discovered`.
+        result = self._registry.orchestrator.trigger_discovery_blocking()
         mcp_servers_found = (
-            result.get("mcp_servers_discovered", 0)
+            result.get("discovered_count", 0)
             if isinstance(result, dict)
-            else getattr(result, "mcp_servers_discovered", 0)
+            else getattr(result, "discovered_count", 0)
         )
 
         logger.info(
