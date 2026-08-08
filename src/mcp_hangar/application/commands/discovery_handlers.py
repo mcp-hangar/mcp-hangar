@@ -194,9 +194,7 @@ class TriggerSourceScanHandler(CommandHandler):
         # `mcp_servers_discovered`.
         result = self._registry.orchestrator.trigger_discovery_blocking()
         mcp_servers_found = (
-            result.get("discovered_count", 0)
-            if isinstance(result, dict)
-            else getattr(result, "discovered_count", 0)
+            result.get("discovered_count", 0) if isinstance(result, dict) else getattr(result, "discovered_count", 0)
         )
 
         logger.info(
