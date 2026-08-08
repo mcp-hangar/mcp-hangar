@@ -41,7 +41,7 @@ from ...fastmcp_server.modern_surface import register_modern_surface
 from ...infrastructure.persistence.saga_state_store import NullSagaStateStore, SagaStateStore
 from ...gc import BackgroundWorker
 from ...logging_config import get_logger
-from ..config import load_config, load_configuration
+from ..config import _interpolate_env_vars, load_config, load_configuration
 from ..context import get_context, init_context
 from ..state import get_runtime, GROUPS
 
@@ -335,9 +335,18 @@ def bootstrap(
     # in-memory config repository for the rest of its life, and every durable
     # half of the fleet then quietly does nothing.
     if config_dict is not None:
-        # Use provided config dict, merge with defaults
+        # Use provided config dict, merge with defaults.
+        #
+        # Interpolate `${VAR}` here, once, exactly as the file path does inside
+        # `load_config_from_file`. The programmatic entry point never touches
+        # that file loader -- it hands the dict straight through -- so without
+        # this pass a programmatic `auth: {token: "${API_TOKEN}"}` reached the
+        # upstream as the literal fourteen characters (a 401), and a missing
+        # variable no longer failed the boot closed. Applied to the caller's
+        # dict alone, before the merge, so the defaults (already interpolated by
+        # `load_configuration`) are not passed through a second time.
         full_config = load_configuration(None, load_servers=False)
-        full_config.update(config_dict)
+        full_config.update(_interpolate_env_vars(config_dict))
     else:
         full_config = load_configuration(config_path, load_servers=False)
 
