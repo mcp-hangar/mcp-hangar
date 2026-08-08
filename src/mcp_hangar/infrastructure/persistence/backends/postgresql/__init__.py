@@ -11,7 +11,7 @@ what keeps the two backends genuinely separate implementations rather than one
 implementation with two modes.
 
 Selected whole, like every backend: `create_backend` refuses this one unless it
-serves all ten concerns. The gap that rule exists for was here -- the previous
+serves every concern. The gap that rule exists for was here -- the previous
 PostgreSQL support covered API keys and roles and silently returned nothing for
 tool-access policies.
 """
