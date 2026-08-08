@@ -83,6 +83,11 @@ def bootstrap_admin_command(
     command that could hand it over threw it away. The key row was created
     regardless, so what the operator got was an unusable credential and no way
     to reach their own gateway.
+
+    Which flag is right is therefore decided *before* the claim, not reported
+    after it: on a deployment with no trusted OIDC issuer, omitting
+    ``--show-key`` is refused and the claim stays unspent. Saying "re-run with
+    --show-key" afterwards was advice about a run that can never happen.
     """
     # Import here so the CLI stays importable even when the optional auth stack
     # is unavailable, and to keep --help fast.
@@ -143,6 +148,43 @@ def bootstrap_admin_command(
             exit_code=2,
         )
 
+    # Whether anything other than an API key can carry this principal. Empty
+    # exactly when no OIDC issuer is trusted, which is the same condition under
+    # which a `JWTAuthenticator` was not built.
+    identity_authenticator = bool(components.oidc_issuers)
+
+    # Both refusals below are ahead of the claim, and that position is the whole
+    # point. The claim is one-shot and the key it mints is stored hashed, so a
+    # run that ends without printing the secret cannot be repeated and cannot be
+    # recovered from: the message "re-run with --show-key" used to be printed at
+    # the exact moment re-running stopped being possible. A refusal costs the
+    # operator one command; the advice cost them the deployment.
+    if not identity_authenticator and not auth_config.api_key.enabled:
+        raise CLIError(
+            "No authenticator is configured, so no administrator could ever present itself.",
+            reason="API-key auth is disabled and no OIDC issuer is trusted.",
+            suggestions=[
+                "Set `auth.api_key.enabled: true`, or configure `auth.oidc`, then re-run.",
+                "The one-time claim has not been spent.",
+            ],
+            exit_code=1,
+        )
+    if not show_key and not identity_authenticator:
+        raise CLIError(
+            "Nothing could use this administrator: API keys are the only authenticator, "
+            "and the key's secret would not be printed.",
+            reason=(
+                "The claim is one-shot and the key is stored hashed, so a secret not printed "
+                "now cannot be obtained later."
+            ),
+            suggestions=[
+                "Re-run with `--show-key` to print it. The claim has not been spent, so this works.",
+                "Configure `auth.oidc` instead if the administrator authenticates on its own "
+                "identity, and re-run without the flag.",
+            ],
+            exit_code=1,
+        )
+
     # Single atomic claim. Global scope (no tenant): the initial admin is global.
     result = store.bootstrap_initial_admin(
         principal_id=principal,
@@ -153,8 +195,12 @@ def bootstrap_admin_command(
     if result is None:
         raise CLIError(
             "The initial administrator has already been bootstrapped; nothing was changed.",
+            reason="The one-time claim is spent. It cannot be replayed, and the key it minted is stored hashed.",
             suggestions=[
-                "The one-time claim is already spent -- use the standard key/role API as the existing admin.",
+                "As that administrator, create further keys and roles through `/api/auth/**`.",
+                "If its secret was never printed, it is not recoverable: clear the "
+                "`initial_admin_bootstrap` row in the auth store, or start from a fresh store, "
+                "and re-run with `--show-key`.",
             ],
             exit_code=1,
         )
@@ -173,7 +219,9 @@ def bootstrap_admin_command(
     else:
         console.print(
             f"\nNo API key secret printed: the grant is a global admin [bold]role[/bold] for "
-            f"{principal!r}, which authenticates via its own identity.\n"
-            "If API keys are this deployment's only authenticator, re-run with [bold]--show-key[/bold] "
-            "-- the claim is one-shot, so do it now rather than after."
+            f"{principal!r}, which authenticates via its own identity against "
+            f"{', '.join(components.oidc_issuers)}.\n"
+            "A key was minted with the role and is stored hashed. Its secret was not printed and "
+            "cannot be obtained now -- the claim is spent. Nothing needs it: authenticate as the "
+            "principal and use `/api/auth/**` to create keys."
         )

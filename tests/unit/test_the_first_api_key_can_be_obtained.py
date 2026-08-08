@@ -51,14 +51,17 @@ class TestTheSecretIsPrintedOnlyWhenAsked:
         assert "raw_key" in printed.split("else:")[0]
         assert "raw_key" not in printed.split("else:")[1], "the silent branch must stay silent"
 
-    def test_the_silent_branch_names_the_flag(self) -> None:
-        # The claim is one-shot. An operator who learns about `--show-key` after
-        # spending it has no second chance, so the message has to arrive first.
+    def test_the_silent_branch_does_not_offer_a_second_chance(self) -> None:
+        # The claim is one-shot, so an operator who learns about `--show-key`
+        # here has no second chance. Naming the flag at this point was advice
+        # about a run that can never happen: the choice is refused ahead of the
+        # claim instead. See
+        # tests/unit/cli/test_the_bootstrap_claim_is_not_spent_on_an_unusable_grant.py
         source = inspect.getsource(auth_cli.bootstrap_admin_command)
         silent = source[source.index("else:") :]
 
-        assert "--show-key" in silent
-        assert "one-shot" in silent
+        assert "re-run" not in silent.lower()
+        assert "spent" in silent
 
     def test_printing_it_says_what_it_is(self) -> None:
         source = inspect.getsource(auth_cli.bootstrap_admin_command)
