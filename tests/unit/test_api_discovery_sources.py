@@ -194,3 +194,34 @@ class TestToggleSourceEndpoint:
     def test_returns_404_for_unknown_source(self, api_client):
         """PUT /discovery/sources/unknown/enable returns HTTP 404."""
         assert api_client.put("/discovery/sources/unknown/enable", json={"enabled": True}).status_code == 404
+
+
+# ---------------------------------------------------------------------------
+# Preview marker: mutating source-management responses carry the header.
+# ---------------------------------------------------------------------------
+
+
+class TestSourceManagementIsMarkedPreview:
+    """The mutating source-management surface ships as Preview in 2.5.0 and says so.
+
+    Every mutating response carries ``X-Hangar-Preview: discovery-source-management``
+    so a client can detect the preview status without reading the docs.
+    """
+
+    def test_register_carries_the_preview_header(self, api_client):
+        response = api_client.post(
+            "/discovery/sources", json={"source_type": "filesystem", "mode": "additive"}
+        )
+        assert response.headers["X-Hangar-Preview"] == "discovery-source-management"
+
+    def test_scan_carries_the_preview_header(self, api_client):
+        response = api_client.post("/discovery/sources/known-id/scan")
+        assert response.headers["X-Hangar-Preview"] == "discovery-source-management"
+
+    def test_toggle_carries_the_preview_header(self, api_client):
+        response = api_client.put("/discovery/sources/known-id/enable", json={"enabled": True})
+        assert response.headers["X-Hangar-Preview"] == "discovery-source-management"
+
+    def test_deregister_carries_the_preview_header(self, api_client):
+        response = api_client.delete("/discovery/sources/known-id")
+        assert response.headers["X-Hangar-Preview"] == "discovery-source-management"

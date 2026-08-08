@@ -21,7 +21,11 @@ from unittest.mock import patch
 
 import pytest
 
-from mcp_hangar.domain.exceptions import ConfigurationError, ValidationError
+from mcp_hangar.domain.exceptions import (
+    ConfigurationError,
+    ConfigurationUnavailableError,
+    ValidationError,
+)
 from mcp_hangar.server.api.middleware import _get_status_code
 
 
@@ -44,7 +48,9 @@ class TestTheReasonReachesTheCaller:
         failure = PermissionError(13, "Permission denied")
 
         with patch("mcp_hangar.server.api.config.write_config_backup", side_effect=failure):
-            with pytest.raises(ConfigurationError) as excinfo:
+            # The narrow subclass -- not a bare ConfigurationError -- is what
+            # earns the 503. Only this "the filesystem said no" case does.
+            with pytest.raises(ConfigurationUnavailableError) as excinfo:
                 await _backup()
 
         message = str(excinfo.value)
@@ -78,8 +84,24 @@ class TestTheReasonReachesTheCaller:
 
 
 class TestTheStatusSaysWhoseProblemItIs:
-    def test_a_configuration_error_is_503_not_500(self) -> None:
-        assert _get_status_code(ConfigurationError("the directory is not writable")) == 503
+    def test_the_unwritable_backup_is_503(self) -> None:
+        # The narrow subclass -- the "the filesystem said no" case -- is the
+        # only ConfigurationError that maps to 503.
+        assert _get_status_code(ConfigurationUnavailableError("the directory is not writable")) == 503
+
+    def test_a_generic_configuration_error_is_500_not_503(self) -> None:
+        # #823 mapped EVERY ConfigurationError to 503, so an operator-input
+        # problem (a bad capabilities block, the reload fault-barrier) came
+        # back as a faked retryable outage carrying wrapped internal text.
+        # A generic ConfigurationError must fall through to 500.
+        assert _get_status_code(ConfigurationError("bad capabilities block in config.yaml")) == 500
+
+    def test_the_subclass_wins_over_the_base_in_the_map(self) -> None:
+        # Order is load-bearing: the subclass entry sits ahead of the base
+        # MCPError->500 fallthrough, so isinstance matches 503 first for the
+        # narrow case while the base still resolves to 500.
+        assert _get_status_code(ConfigurationUnavailableError("x")) == 503
+        assert _get_status_code(ConfigurationError("x")) == 500
 
     def test_validation_is_still_422(self) -> None:
         # ValidationError is not a ConfigurationError; the new entry must not

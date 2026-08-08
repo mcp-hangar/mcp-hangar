@@ -409,3 +409,74 @@ class TestReloadConfigurationHandler:
             assert len(failure_events) == 1
         finally:
             os.unlink(config_path)
+
+
+class TestReloadIsAnInputErrorNotAnOutage:
+    """A bad config reloaded via the REST API is a 500, not a 503, and the
+    response body does not carry the wrapped internal error text.
+
+    Regression guard for #823: `(ConfigurationError, 503)` mapped every reload
+    failure -- including an operator's typo -- to a retryable outage that
+    load-balancers and health dashboards act on, and leaked the wrapped
+    exception text (which includes the on-disk config path) to any
+    authenticated caller.
+    """
+
+    def _handler(self) -> ReloadConfigurationHandler:
+        repo = Mock()
+        repo.get_all.return_value = {}
+        return ReloadConfigurationHandler(repo, Mock(), config_loader=ServerConfigLoader())
+
+    def _bad_config(self) -> str:
+        # A config missing its `mcp_servers` section raises a ValueError that
+        # names the on-disk path -- exactly the internal text that must not
+        # reach the caller.
+        with tempfile.NamedTemporaryFile(mode="w", suffix=".yaml", delete=False) as f:
+            yaml.dump({"logging": {"level": "INFO"}}, f)
+            return f.name
+
+    def test_a_bad_config_reload_wraps_without_the_raw_reason(self) -> None:
+        bad_config = self._bad_config()
+        try:
+            with pytest.raises(ConfigurationError) as excinfo:
+                self._handler().handle(ReloadConfigurationCommand(config_path=bad_config))
+        finally:
+            os.unlink(bad_config)
+
+        message = str(excinfo.value)
+        assert bad_config not in message, "the on-disk config path must not reach the caller"
+        assert "mcp_servers" not in message, "the raw underlying reason must not reach the caller"
+
+    def test_the_generic_reload_failure_maps_to_500_not_503(self) -> None:
+        # The wrapped generic ConfigurationError is an operator-input problem:
+        # it must resolve to 500, never the 503 that #823 produced.
+        from mcp_hangar.server.api.middleware import _get_status_code
+
+        bad_config = self._bad_config()
+        try:
+            with pytest.raises(ConfigurationError) as excinfo:
+                self._handler().handle(ReloadConfigurationCommand(config_path=bad_config))
+        finally:
+            os.unlink(bad_config)
+
+        assert _get_status_code(excinfo.value) == 500
+
+    async def test_the_error_envelope_leaks_nothing(self) -> None:
+        # End to end through the middleware's error renderer: the body the caller
+        # receives must not contain the config path or the raw reason.
+        from mcp_hangar.server.api.middleware import _get_status_code, error_handler
+
+        bad_config = self._bad_config()
+        try:
+            with pytest.raises(ConfigurationError) as excinfo:
+                self._handler().handle(ReloadConfigurationCommand(config_path=bad_config))
+        finally:
+            os.unlink(bad_config)
+
+        response = await error_handler(Mock(), excinfo.value)
+
+        assert response.status_code == 500
+        assert _get_status_code(excinfo.value) == 500
+        body = response.body.decode()
+        assert bad_config not in body
+        assert "mcp_servers" not in body

@@ -206,7 +206,27 @@ def create_backend(name: str, config: dict[str, Any]) -> PersistenceBackend:
 
     backend = factory(config)
 
-    missing = [concern for concern in REQUIRED_CONCERNS if not callable(getattr(backend, concern, None))]
+    # A concern is served only if calling it yields an adapter. Checking that
+    # the method merely exists and is callable is what let the failure this
+    # guard exists for through: the PostgreSQL driver returned `None` from
+    # `tool_access_policy_store`, which is callable and present, and every
+    # consumer gated on truthiness (`if tap_store is not None:`) then quietly
+    # did nothing -- no crash, no warning, policy management and its replay
+    # switched off. So invoke each concern and treat a `None` return, a
+    # non-callable attribute or an absent one all as missing.
+    #
+    # Safe to invoke here: both built-in backends build their adapters lazily
+    # and cache them (each backend's `_cached`), and the Protocol documents
+    # concerns as idempotent, so this call and the ones bootstrap makes later
+    # return the same instance -- no second connection pool, no repeated schema
+    # init. A genuine construction error (an unreachable database, say) is a
+    # real failure and is left to propagate rather than reported as an
+    # incomplete backend.
+    missing: list[str] = []
+    for concern in REQUIRED_CONCERNS:
+        method = getattr(backend, concern, None)
+        if not callable(method) or method() is None:
+            missing.append(concern)
     if missing:
         raise IncompletePersistenceBackendError(name, missing)
 

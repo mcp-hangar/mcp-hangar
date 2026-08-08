@@ -173,6 +173,14 @@ class DiscoveryOrchestrator:
         self._running = False
         self._discovery_task: asyncio.Task[None] | None = None
         self._last_cycle: datetime | None = None
+        #: The event loop discovery runs on, captured in start(). The
+        #: orchestrator's background cycle runs on a dedicated long-lived loop in
+        #: its own thread (ServerLifecycle._start_discovery). A synchronous
+        #: caller -- a CQRS command handler dispatched via run_in_threadpool --
+        #: schedules a manual scan back onto this loop so it serialises with the
+        #: periodic cycle instead of racing shared DiscoveryService state on a
+        #: second loop. None until started (tests, stdio without discovery).
+        self._loop: asyncio.AbstractEventLoop | None = None
 
     def _emit(self, event: Any) -> None:
         """Record something discovery did, if there is a bus to record it on.
@@ -227,6 +235,17 @@ class DiscoveryOrchestrator:
         """
         return self._discovery_service.get_all_sources()
 
+    def get_source(self, source_type: str) -> DiscoverySource | None:
+        """The live running source of a given type, or None if not held.
+
+        The registry keeps immutable specs; the running source is here. When a
+        spec is toggled or reconfigured the registry reaches back through this to
+        the live instance, because that instance is what the discovery cycle and
+        get_sources_status() both read for enabled state -- so the spec and the
+        thing actually being scanned stay in step.
+        """
+        return self._discovery_service.get_source(source_type)
+
     def remove_source(self, source_type: str) -> DiscoverySource | None:
         """Remove a discovery source.
 
@@ -248,6 +267,10 @@ class DiscoveryOrchestrator:
 
     async def start(self) -> None:
         """Start the discovery orchestrator."""
+        # Captured while we are certain to be on the loop discovery runs on, so a
+        # synchronous manual scan can be scheduled back onto it later.
+        self._loop = asyncio.get_running_loop()
+
         if not self.config.enabled:
             logger.info("Discovery is disabled in configuration")
             return
@@ -631,6 +654,32 @@ class DiscoveryOrchestrator:
         """
         result = await self.run_discovery_cycle()
         return result.to_dict()
+
+    def trigger_discovery_blocking(self) -> dict[str, Any]:
+        """Run one discovery cycle to completion from a synchronous caller.
+
+        The command bus runs handlers in a worker thread (run_in_threadpool), so
+        a handler cannot ``await``. Before this existed the scan handler simply
+        called ``trigger_discovery()`` and dropped the coroutine on the floor --
+        Python logged "coroutine 'trigger_discovery' was never awaited", no scan
+        ran, and the endpoint answered 200 with a fabricated count of 0.
+
+        When discovery is started it runs on a dedicated long-lived loop in its
+        own thread; the scan is scheduled back onto that loop with
+        ``run_coroutine_threadsafe`` -- the same bridge lifecycle uses for
+        start()/stop() -- so a manual scan and the periodic cycle serialise on
+        one loop rather than mutating DiscoveryService state from two. When
+        discovery was never started (unit tests, stdio without the discovery
+        thread) there is no such loop, so the cycle runs on a private one.
+
+        Returns:
+            The cycle result dict (``DiscoveryCycleResult.to_dict()``), whose
+            server count lives under ``discovered_count``.
+        """
+        loop = self._loop
+        if loop is not None and loop.is_running():
+            return asyncio.run_coroutine_threadsafe(self.trigger_discovery(), loop).result()
+        return asyncio.run(self.trigger_discovery())
 
     def get_pending_mcp_servers(self) -> list[DiscoveredMcpServer]:
         """Get mcp_servers pending registration.

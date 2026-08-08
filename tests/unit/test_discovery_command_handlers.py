@@ -138,13 +138,21 @@ class TestTriggerSourceScanHandler:
     """Tests for TriggerSourceScanHandler."""
 
     def test_handle_triggers_scan_and_returns_mcp_servers_found(self):
-        """Handler calls orchestrator.trigger_discovery and returns mcp_servers_found count."""
+        """Handler runs the scan to completion and returns the real discovered_count.
+
+        The handler runs in a worker thread and cannot await, so it drives the
+        cycle through the orchestrator's synchronous bridge
+        (trigger_discovery_blocking) rather than dropping an unawaited coroutine.
+        The count is read from `discovered_count` -- the key
+        DiscoveryCycleResult.to_dict() actually produces.
+        """
         spec = Mock()
         registry = Mock()
         registry.get_source.return_value = spec
-        registry.orchestrator.trigger_discovery.return_value = {"mcp_servers_discovered": 3, "cycle_id": "c1"}
+        registry.orchestrator.trigger_discovery_blocking.return_value = {"discovered_count": 3, "cycle_id": "c1"}
         handler = TriggerSourceScanHandler(registry=registry)
         result = handler.handle(TriggerSourceScanCommand(source_id="uid-1"))
+        registry.orchestrator.trigger_discovery_blocking.assert_called_once_with()
         assert result["scan_triggered"] is True
         assert result["mcp_servers_found"] == 3
 
@@ -157,10 +165,10 @@ class TestTriggerSourceScanHandler:
             handler.handle(TriggerSourceScanCommand(source_id="missing"))
 
     def test_handle_mcp_servers_found_defaults_to_zero_on_missing_key(self):
-        """mcp_servers_found defaults to 0 if result dict has no providers_discovered key."""
+        """mcp_servers_found defaults to 0 if the result dict has no discovered_count key."""
         registry = Mock()
         registry.get_source.return_value = Mock()
-        registry.orchestrator.trigger_discovery.return_value = {"cycle_id": "c1"}
+        registry.orchestrator.trigger_discovery_blocking.return_value = {"cycle_id": "c1"}
         handler = TriggerSourceScanHandler(registry=registry)
         result = handler.handle(TriggerSourceScanCommand(source_id="uid-1"))
         assert result["mcp_servers_found"] == 0

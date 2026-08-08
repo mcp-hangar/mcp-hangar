@@ -153,23 +153,49 @@ def bootstrap_admin_command(
     # which a `JWTAuthenticator` was not built.
     identity_authenticator = bool(components.oidc_issuers)
 
-    # Both refusals below are ahead of the claim, and that position is the whole
+    # The refusals below are ahead of the claim, and that position is the whole
     # point. The claim is one-shot and the key it mints is stored hashed, so a
-    # run that ends without printing the secret cannot be repeated and cannot be
-    # recovered from: the message "re-run with --show-key" used to be printed at
-    # the exact moment re-running stopped being possible. A refusal costs the
-    # operator one command; the advice cost them the deployment.
-    if not identity_authenticator and not auth_config.api_key.enabled:
-        raise CLIError(
-            "No authenticator is configured, so no administrator could ever present itself.",
-            reason="API-key auth is disabled and no OIDC issuer is trusted.",
-            suggestions=[
-                "Set `auth.api_key.enabled: true`, or configure `auth.oidc`, then re-run.",
-                "The one-time claim has not been spent.",
-            ],
-            exit_code=1,
-        )
-    if not show_key and not identity_authenticator:
+    # run that ends without printing a *usable* secret cannot be repeated and
+    # cannot be recovered from: the message "re-run with --show-key" used to be
+    # printed at the exact moment re-running stopped being possible. A refusal
+    # costs the operator one command; the advice cost them the deployment.
+    if not auth_config.api_key.enabled:
+        # An API key is only ever a usable credential when API-key auth is on.
+        # With it off, both the printed secret (`--show-key`) and the silently
+        # minted key are dead weight -- so the enabled check applies whether or
+        # not an OIDC issuer is also trusted (the OIDC+--show-key case is the
+        # gap #833 left behind).
+        if not identity_authenticator:
+            raise CLIError(
+                "No authenticator is configured, so no administrator could ever present itself.",
+                reason="API-key auth is disabled and no OIDC issuer is trusted.",
+                suggestions=[
+                    "Set `auth.api_key.enabled: true`, or configure `auth.oidc`, then re-run.",
+                    "The one-time claim has not been spent.",
+                ],
+                exit_code=1,
+            )
+        if show_key:
+            raise CLIError(
+                "Printing an API key is pointless here: API-key auth is disabled, so no "
+                "authenticator would ever accept the printed secret.",
+                reason="`auth.api_key.enabled` is false, but `--show-key` asks to print an API key.",
+                suggestions=[
+                    "Re-run without `--show-key`: the grant is a global admin role for the OIDC "
+                    "principal, which authenticates on its own identity and needs no key.",
+                    "Or set `auth.api_key.enabled: true` if API keys should be accepted, then re-run.",
+                    "The one-time claim has not been spent.",
+                ],
+                exit_code=1,
+            )
+    # API keys are the only authenticator and the secret would not be printed, so
+    # the minted key would be unusable -- but "re-run with --show-key" is only
+    # true advice while the claim is unspent. Consult the store's spend state
+    # (read-only, never consuming the claim) so an already-bootstrapped
+    # deployment falls through to the accurate "already bootstrapped; nothing
+    # changed" report from the store call below instead of a suggestion it can no
+    # longer act on.
+    if not show_key and not identity_authenticator and not store.is_initial_admin_bootstrapped():
         raise CLIError(
             "Nothing could use this administrator: API keys are the only authenticator, "
             "and the key's secret would not be printed.",
