@@ -5,6 +5,31 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [2.5.1-rc.4](https://github.com/mcp-hangar/mcp-hangar/compare/v2.5.0-rc.4...v2.5.1-rc.4) (2026-08-08)
+
+### Fixed
+
+- **core:** fixes on the auth and config-error surfaces. `auth bootstrap-admin`
+  no longer prints an API key that no authenticator would accept (an OIDC-trusted
+  deployment with `auth.api_key.enabled: false`), and a flagless re-run no longer
+  claims the one-shot claim is unspent when it has already been spent -- both
+  answers now consult the store first, via a new read-only
+  `is_initial_admin_bootstrapped` check that costs nothing. `POST /api/config/reload`
+  maps only a genuine "cannot write the backup file" condition to `503`; an
+  operator-input config error is now a `500` with a sanitised message instead of a
+  retryable `503` that surfaced internal exception text (paths, server ids) to the
+  caller. The auth store's read-only PostgreSQL paths now commit or roll back
+  rather than leaving a borrowed connection idle in transaction. ([#835](https://github.com/mcp-hangar/mcp-hangar/pull/835))
+- **core:** discovery source management now works end to end. Triggering a scan
+  awaits the discovery cycle instead of dropping the coroutine, so the endpoint no
+  longer reports a fabricated success while nothing runs; enabling, disabling, or
+  reconfiguring a source reaches the running source rather than only its registry
+  spec, so the listing and the toggle agree; a deleted source is no longer
+  re-advertised with an id whose scan/enable routes then answer `404`; and the id
+  is emitted from the source status itself, so the REST API and the MCP
+  `hangar_sources` tool both carry it. The mutating source-management surface is
+  labelled Preview for 2.5.0, signalled by an `X-Hangar-Preview` response header. ([#834](https://github.com/mcp-hangar/mcp-hangar/pull/834))
+
 ## [2.5.0-rc.4](https://github.com/mcp-hangar/mcp-hangar/compare/v2.5.0-rc.3...v2.5.0-rc.4) (2026-08-08)
 
 ### Fixed
