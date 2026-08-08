@@ -94,7 +94,34 @@ class DiscoveryRegistry:
                 raise KeyError(f"Discovery source not found: {source_id}")
             updated = replace(self._sources[source_id], **kwargs)
             self._sources[source_id] = updated
-            return updated
+
+        # Propagate the change to the live running source, not just the stored
+        # spec. The discovery cycle gates on the live source's `is_enabled`, and
+        # get_sources_status() reports it, so a spec-only update left a disabled
+        # source still being scanned and a subsequent GET still reading enabled:
+        # the 200 and the listing contradicted each other. Done outside the lock
+        # -- it touches the orchestrator's own state, not the registry's map.
+        self._apply_to_live_source(updated, kwargs)
+        return updated
+
+    def _apply_to_live_source(self, spec: DiscoverySourceSpec, changed: dict[str, Any]) -> None:
+        """Reflect a spec change onto the running source the orchestrator holds.
+
+        Only the fields that actually changed are pushed. The source may not be
+        running yet -- an API-registered spec has no live source until a scan
+        builds one -- in which case there is nothing to update and the spec alone
+        carries the state forward.
+        """
+        live = self._orchestrator.get_source(spec.source_type)
+        if live is None:
+            return
+        if "enabled" in changed:
+            if spec.enabled:
+                live.enable()
+            else:
+                live.disable()
+        if "config" in changed:
+            live.apply_config(spec.config)
 
     def get_source(self, source_id: str) -> DiscoverySourceSpec | None:
         """Retrieve a spec by source_id.
