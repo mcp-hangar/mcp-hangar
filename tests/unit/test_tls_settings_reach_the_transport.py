@@ -188,3 +188,28 @@ class TestTurningItOffIsLoud:
         logs = self._launch({"verify_ssl": True, "ca_cert_path": str(bundle)})
 
         assert not [e for e in logs if e["event"] == "tls_verification_disabled"]
+
+    def test_ca_cert_path_overrides_a_false_boolean_without_the_off_warning(self, tmp_path) -> None:
+        # `ca_cert_path` wins in the client (`verify=` gets the path), so
+        # verification is ENFORCED here even though `verify_ssl: false`. The
+        # "verification is off" warning would send the operator to disable the
+        # one setting keeping the handshake honest.
+        bundle = tmp_path / "ca.pem"
+        bundle.write_text(_a_real_certificate())
+
+        logs = self._launch({"verify_ssl": False, "ca_cert_path": str(bundle)})
+
+        assert not [e for e in logs if e["event"] == "tls_verification_disabled"]
+
+    def test_ca_cert_path_overriding_a_false_boolean_says_verification_is_enforced(self, tmp_path) -> None:
+        bundle = tmp_path / "ca.pem"
+        bundle.write_text(_a_real_certificate())
+
+        logs = self._launch({"verify_ssl": False, "ca_cert_path": str(bundle)})
+
+        overrides = [e for e in logs if e["event"] == "tls_verify_ssl_overridden_by_ca_cert"]
+        assert len(overrides) == 1
+        assert overrides[0]["log_level"] == "warning"
+        assert "upstream.internal" in overrides[0]["endpoint"]
+        assert "enforced" in overrides[0]["detail"]
+        assert overrides[0]["ca_cert_path"] == str(bundle)

@@ -43,6 +43,7 @@ from ..exceptions import (
 )
 from ..services.error_diagnostics import collect_startup_diagnostics
 from ..value_objects import CorrelationId, HealthCheckInterval, IdleTTL, McpServerId, McpServerMode, McpServerState
+from ..value_objects.provenance import Provenance
 from .aggregate import AggregateRoot
 from .health_tracker import HealthTracker
 from .mcp_server_config import McpServerConfig
@@ -130,6 +131,14 @@ class McpServer(AggregateRoot):
         capabilities: McpServerCapabilities | None = None,
         # L7 egress policy (MCPEgressPolicy); None = no enforcement
         l7_policy: "L7Policy | None" = None,
+        # SSRF provenance policy for a remote endpoint (see below).
+        provenance: Provenance = Provenance.HUMAN,
+        runtime_addresses: frozenset[str] | None = None,
+        # Whether the connect-time SSRF guard applies to this server. On only for
+        # endpoints the registration check guarded (created through the command
+        # handler); off for config-file / directly-built servers so an
+        # intentionally private endpoint is not newly refused at connect.
+        enforce_ssrf: bool = False,
     ):
         super().__init__()
 
@@ -173,6 +182,19 @@ class McpServer(AggregateRoot):
         self._auth_config = auth
         self._tls_config = tls
         self._http_config = http
+
+        # SSRF policy for a remote endpoint, carried to the transport so the
+        # connect-time re-check (DNS-rebinding defence) applies the SAME policy
+        # the registration-time `validate_no_ssrf` used. `validate_no_ssrf` runs
+        # once, when the server is registered; the client that actually connects
+        # is created lazily on first use (and rebuilt from a snapshot after a
+        # restart), so these have to travel with the aggregate to reach it.
+        # HUMAN + None is the strict default: a construction path that does not
+        # set them (a config-file server, an older snapshot) gets the human
+        # policy, which is the safe direction to fail.
+        self._provenance = provenance
+        self._runtime_addresses = runtime_addresses
+        self._enforce_ssrf = enforce_ssrf
 
         # Dependencies (Dependency Inversion Principle)
         self._metrics_publisher = metrics_publisher or get_default_metrics_publisher()
@@ -783,6 +805,11 @@ class McpServer(AggregateRoot):
                 "auth_config": self._auth_config,
                 "tls_config": self._tls_config,
                 "http_config": self._http_config,
+                # Carried to the transport so the connect-time SSRF re-check uses
+                # the same policy the registration check did.
+                "provenance": self._provenance,
+                "runtime_addresses": self._runtime_addresses,
+                "enforce_ssrf": self._enforce_ssrf,
             }
 
         raise ValueError(f"unsupported_mode: {self._mode.value}")
