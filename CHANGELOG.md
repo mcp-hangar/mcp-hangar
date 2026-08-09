@@ -5,6 +5,68 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [2.5.0](https://github.com/mcp-hangar/mcp-hangar/compare/v2.5.0-rc.4...v2.5.0) (2026-08-09)
+
+### Fixed
+
+- **core:** environment-variable interpolation works again on the programmatic
+  `bootstrap(config_dict=...)` / facade path. A rc.4 change removed the per-auth
+  interpolation and left the whole-document pass only on the file loader, so a
+  config passed as a dict had no interpolation at all: `auth: {bearer_token:
+  "${API_TOKEN}"}` was sent literally to the upstream (a 401 on every call) and a
+  missing variable no longer failed the boot closed. The dict path now
+  interpolates the document once at its entry point, matching the file path and
+  restoring fail-closed-on-missing-variable. ([#838](https://github.com/mcp-hangar/mcp-hangar/pull/838))
+- **core:** the persistence-backend completeness guard now invokes each concern
+  instead of only checking that the method exists. A third-party backend whose
+  concern method is callable but returns `None` -- exactly how the tool-access
+  policy store was once silently disabled -- passed the guard, because it only
+  tested callability. `create_backend` now calls each concern and treats a `None`
+  return as a missing concern, so an incomplete backend is refused as the
+  docstrings promise. Built-in backends cache their adapters, so the extra call is
+  free. ([#837](https://github.com/mcp-hangar/mcp-hangar/pull/837))
+- **core:** the "certificate verification is off for this upstream" startup
+  warning no longer fires when `tls.verify_ssl: false` is set alongside a
+  `tls.ca_cert_path`. The CA path wins in the client -- verification is enforced
+  against that CA -- so the old warning contradicted the actual behaviour and sent
+  an operator debugging a failed handshake toward the very setting doing the
+  enforcing. That combination now logs an accurate message saying verification is
+  enforced against the configured CA; the "verification is off" warning fires only
+  when verification is genuinely off. ([#836](https://github.com/mcp-hangar/mcp-hangar/pull/836))
+- **core:** fixes on the auth and config-error surfaces. `auth bootstrap-admin`
+  no longer prints an API key that no authenticator would accept (an OIDC-trusted
+  deployment with `auth.api_key.enabled: false`), and a flagless re-run no longer
+  claims the one-shot claim is unspent when it has already been spent -- both
+  answers now consult the store first, via a new read-only
+  `is_initial_admin_bootstrapped` check that costs nothing. `POST /api/config/reload`
+  maps only a genuine "cannot write the backup file" condition to `503`; an
+  operator-input config error is now a `500` with a sanitised message instead of a
+  retryable `503` that surfaced internal exception text (paths, server ids) to the
+  caller. The auth store's read-only PostgreSQL paths now commit or roll back
+  rather than leaving a borrowed connection idle in transaction. ([#835](https://github.com/mcp-hangar/mcp-hangar/pull/835))
+- **core:** discovery source management now works end to end. Triggering a scan
+  awaits the discovery cycle instead of dropping the coroutine, so the endpoint no
+  longer reports a fabricated success while nothing runs; enabling, disabling, or
+  reconfiguring a source reaches the running source rather than only its registry
+  spec, so the listing and the toggle agree; a deleted source is no longer
+  re-advertised with an id whose scan/enable routes then answer `404`; and the id
+  is emitted from the source status itself, so the REST API and the MCP
+  `hangar_sources` tool both carry it. The mutating source-management surface is
+  labelled Preview for 2.5.0, signalled by an `X-Hangar-Preview` response header. ([#834](https://github.com/mcp-hangar/mcp-hangar/pull/834))
+
+### Security
+
+- **core:** the SSRF check that guards a remote MCP server's endpoint is now
+  enforced at connect time, not only when the server is registered. httpx
+  re-resolved the hostname itself on every connection with no second check, so a
+  human-registered name that resolved to a public address at registration could be
+  re-pointed at an internal one -- `169.254.169.254`, `10.x`, `127.0.0.1` -- before
+  the next tool call (DNS rebinding). The client now re-applies the same policy on
+  every request and pins the connection to the validated IP, keeping the original
+  hostname for the `Host` header and TLS certificate verification. A
+  discovery-sourced endpoint may still be private, but only at an address the
+  container runtime reported for it. ([#836](https://github.com/mcp-hangar/mcp-hangar/pull/836))
+
 ## [2.5.0-rc.4](https://github.com/mcp-hangar/mcp-hangar/compare/v2.5.0-rc.3...v2.5.0-rc.4) (2026-08-08)
 
 ### Fixed
