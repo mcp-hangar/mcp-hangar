@@ -31,6 +31,51 @@ console = Console()
 _DURABLE_DRIVERS = {"sqlite", "postgresql", "postgres"}
 
 
+def _durable_store_for(full_config: dict, auth_config) -> object | None:
+    """The backend to bootstrap on, or `None` to use the legacy driver path.
+
+    Two questions used to be one. The command asked only about
+    `auth.storage.driver`, which defaults to `memory`, so a deployment that had
+    made the one storage decision (`persistence.backend`) was told its auth
+    storage was not durable -- on exactly the deployments where this command is
+    the only way in, since `/api/auth/**` requires an admin principal with no
+    carve-out for the first call.
+
+    A selected backend is durable by construction: `create_backend` refuses one
+    that does not serve every persisted concern, and `memory` is not a backend
+    at all. So the driver question only applies when no backend was selected.
+
+    Raises:
+        CLIError: when neither a backend nor a durable driver is configured.
+    """
+    from mcp_hangar.server.bootstrap.persistence import select_backend
+
+    try:
+        backend = select_backend(full_config)
+    except Exception as e:  # noqa: BLE001 -- config errors become actionable CLI errors
+        raise CLIError(
+            f"Could not open the configured storage backend: {e}",
+            suggestions=["Check the `persistence:` block in the config."],
+            exit_code=1,
+        ) from e
+
+    if backend is not None:
+        return backend
+
+    driver = auth_config.storage.driver.lower()
+    if driver not in _DURABLE_DRIVERS:
+        raise CLIError(
+            f"Auth storage driver {driver!r} is not durable; the initial admin cannot be bootstrapped on it.",
+            suggestions=[
+                "Set `auth.storage.driver` to `sqlite` or `postgresql` (a durable backend).",
+                "Or select one backend for everything with `persistence.backend`.",
+                "`memory` and `event_sourcing` do not provide a transactional bootstrap claim.",
+            ],
+            exit_code=1,
+        )
+    return None
+
+
 @app.command(name="bootstrap-admin")
 def bootstrap_admin_command(
     config: Annotated[
@@ -112,6 +157,8 @@ def bootstrap_admin_command(
 
     auth_config = parse_auth_config(full_config.get("auth"))
 
+    persistence_backend = _durable_store_for(full_config, auth_config)
+
     # Preconditions -- each refusal is fail-closed and names the exact fix.
     if not auth_config.enabled:
         raise CLIError(
@@ -128,18 +175,7 @@ def bootstrap_admin_command(
             exit_code=1,
         )
 
-    driver = auth_config.storage.driver.lower()
-    if driver not in _DURABLE_DRIVERS:
-        raise CLIError(
-            f"Auth storage driver {driver!r} is not durable; the initial admin cannot be bootstrapped on it.",
-            suggestions=[
-                "Set `auth.storage.driver` to `sqlite` or `postgresql` (a durable backend).",
-                "`memory` and `event_sourcing` do not provide a transactional bootstrap claim.",
-            ],
-            exit_code=1,
-        )
-
-    components = bootstrap_auth(auth_config)
+    components = bootstrap_auth(auth_config, persistence_backend=persistence_backend)
     store = components.api_key_store
     if not isinstance(store, IInitialAdminBootstrapStore):
         raise CLIError(
