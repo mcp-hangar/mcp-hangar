@@ -6,4 +6,6 @@ same process accepted them -- the two read different lists. Both serving paths
 now build the guard from the configured allowlist, expanding each entry to match
 with and without a port (the SDK compares the raw `Host` header, everything else
 in Hangar strips it), with `*` opting out as it does elsewhere. Origins come from
-the same `MCP_CORS_ORIGINS` list the WebSocket handshake already used
+the same `MCP_CORS_ORIGINS` list the WebSocket handshake already used. Permitted origins are the served hosts plus `MCP_CORS_ORIGINS`, so a
+same-origin browser request keeps working while a foreign one is still
+refused

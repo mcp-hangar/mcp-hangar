@@ -71,6 +71,33 @@ class TestTheAllowlistReachesTheTransportGuard:
 
         assert "https://console.example.com" in mcp_transport_security().allowed_origins
 
+    def test_a_served_host_is_also_a_permitted_origin(self, monkeypatch) -> None:
+        # A browser talking to the page it came from sends
+        # `Origin: http://<that host>:<port>`. The SDK derived exactly these
+        # from its bind host, which is why the default worked; building the
+        # list from MCP_CORS_ORIGINS alone answered 403 to a same-origin
+        # request and failed the official suite's `dns-rebinding-protection`
+        # scenario. Caught by that gate, not by this file -- hence the test.
+        monkeypatch.setenv("MCP_TRUSTED_HOSTS", "127.0.0.1")
+
+        origins = mcp_transport_security().allowed_origins
+
+        assert "http://127.0.0.1:*" in origins
+        assert "https://127.0.0.1:*" in origins
+
+    def test_an_ipv6_host_is_bracketed_as_an_origin(self, monkeypatch) -> None:
+        # `http://::1:8080` is not a URL; the origin form needs brackets.
+        monkeypatch.setenv("MCP_TRUSTED_HOSTS", "::1")
+
+        assert "http://[::1]:*" in mcp_transport_security().allowed_origins
+
+    def test_a_foreign_origin_is_not_permitted(self, monkeypatch) -> None:
+        monkeypatch.setenv("MCP_TRUSTED_HOSTS", "127.0.0.1")
+
+        origins = mcp_transport_security().allowed_origins
+
+        assert not [o for o in origins if "evil" in o]
+
 
 class TestBothServingPathsUseIt:
     """`serve --http` and the factory build the app separately.

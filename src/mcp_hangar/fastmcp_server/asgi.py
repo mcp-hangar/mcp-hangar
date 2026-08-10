@@ -260,13 +260,33 @@ def mcp_transport_security() -> Any:
         allowed_hosts.append(host)
         allowed_hosts.append(f"{host}:*")
 
+    # Origins are the union of two things, and leaving either out breaks a real
+    # caller:
+    #
+    # * the hosts this gateway is served on, as origins. A browser talking to
+    #   the page it came from sends `Origin: http://<that host>:<port>`, and
+    #   refusing it refuses same-origin traffic. The SDK derived exactly these
+    #   from its bind host, which is what made the default work; dropping them
+    #   for the CORS list alone answered 403 to `http://127.0.0.1:<port>` and
+    #   failed the official suite's `dns-rebinding-protection` scenario.
+    # * `MCP_CORS_ORIGINS`, so a console served from somewhere else is allowed
+    #   here on the same terms the REST API and the WebSocket handshake allow it.
+    #
+    # A missing Origin still passes in the SDK -- a non-browser client has no
+    # same-origin policy to bypass -- so this is browser-scoped either way.
+    allowed_origins: list[str] = []
+    for host in hosts:
+        bracketed = f"[{host}]" if ":" in host else host
+        allowed_origins.append(f"http://{bracketed}:*")
+        allowed_origins.append(f"https://{bracketed}:*")
+        allowed_origins.append(f"http://{bracketed}")
+        allowed_origins.append(f"https://{bracketed}")
+    allowed_origins.extend(get_cors_config()["allow_origins"])
+
     return TransportSecuritySettings(
         enable_dns_rebinding_protection=True,
         allowed_hosts=allowed_hosts,
-        # A missing Origin still passes in the SDK, so non-browser clients are
-        # unaffected; a present one is held to the same list the REST CORS
-        # config and the WebSocket handshake use.
-        allowed_origins=list(get_cors_config()["allow_origins"]),
+        allowed_origins=allowed_origins,
     )
 
 
