@@ -73,7 +73,7 @@ jobs:
       # is skipped and release-please falls back to the built-in GITHUB_TOKEN
       # below (its own default), so the release pipeline never hard-fails on a
       # missing/rotated app secret.
-      - uses: actions/create-github-app-token@v1
+      - uses: actions/create-github-app-token@v3
         id: app-token
         if: ${{ env.RELEASE_BOT_APP_ID != '' && steps.guard.outputs.skip != 'true' }}
         with:
