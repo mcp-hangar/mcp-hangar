@@ -153,7 +153,19 @@ def _create_storage_backends(
         pg_role_store = PostgresRoleStore(connection_factory, event_publisher=event_publisher)
         pg_role_store.initialize()
         role_store = pg_role_store
-        tap_store = None
+
+        # Was `None`, which made this branch the only durable driver that served
+        # no tool-access policies at all: a deployment on
+        # `auth.storage.driver: postgresql` died at startup on
+        # `relation "tool_access_policies" does not exist`. The sqlite branch a
+        # few lines up always built its own; this one was simply missing.
+        from mcp_hangar.infrastructure.persistence.backends.postgresql.tool_access_policy_store import (
+            PostgresToolAccessPolicyStore,
+        )
+
+        pg_tap_store = PostgresToolAccessPolicyStore(connection_factory)
+        pg_tap_store.initialize()
+        tap_store = pg_tap_store
 
     else:
         raise ValueError(
