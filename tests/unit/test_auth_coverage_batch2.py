@@ -1482,7 +1482,13 @@ class TestCreateStorageBackendsPostgres:
             mock_factory.assert_called_once()
             mock_key_instance.initialize.assert_called_once()
             mock_role_instance.initialize.assert_called_once()
-            assert tap_store is None
+            # This used to assert `tap_store is None`, which pinned the defect
+            # rather than the behaviour: it made postgresql the only durable
+            # driver that served no tool-access policies, and a gateway
+            # configured that way died at startup on
+            # `relation "tool_access_policies" does not exist`. The sqlite
+            # branch always built its own.
+            assert tap_store is not None
 
     def test_postgres_alias(self):
         from mcp_hangar.auth.bootstrap import _create_storage_backends

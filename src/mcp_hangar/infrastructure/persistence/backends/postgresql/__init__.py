@@ -149,11 +149,23 @@ class PostgresqlBackend:
 
         return self._cached("approval_repository", build)
 
+    # The three below keep schema creation in a separate `initialize()` and are
+    # called for it here, for exactly the reason `event_store` above is: the
+    # legacy per-subsystem branches in `auth/bootstrap.py` call it themselves,
+    # the one-storage branch hands the store straight out, and nothing else
+    # ever did. The gateway then started, reached the auth bootstrap and died on
+    # `relation "roles" does not exist` -- or, with no `role_assignments` to
+    # trip it, on `tool_access_policies` a few lines later. Every auth-enabled
+    # deployment on a selected backend, which is the configuration more than one
+    # replica requires.
+
     def api_key_store(self) -> Any:
         def build() -> Any:
             from mcp_hangar.auth.infrastructure.postgres_store import PostgresApiKeyStore
 
-            return PostgresApiKeyStore(self._connections(), table_prefix=self._table_prefix)
+            store = PostgresApiKeyStore(self._connections(), table_prefix=self._table_prefix)
+            store.initialize()
+            return store
 
         return self._cached("api_key_store", build)
 
@@ -161,7 +173,9 @@ class PostgresqlBackend:
         def build() -> Any:
             from mcp_hangar.auth.infrastructure.postgres_store import PostgresRoleStore
 
-            return PostgresRoleStore(self._connections(), table_prefix=self._table_prefix)
+            store = PostgresRoleStore(self._connections(), table_prefix=self._table_prefix)
+            store.initialize()
+            return store
 
         return self._cached("role_store", build)
 
@@ -169,7 +183,9 @@ class PostgresqlBackend:
         def build() -> Any:
             from .tool_access_policy_store import PostgresToolAccessPolicyStore
 
-            return PostgresToolAccessPolicyStore(self._connections())
+            store = PostgresToolAccessPolicyStore(self._connections())
+            store.initialize()
+            return store
 
         return self._cached("tool_access_policy_store", build)
 
