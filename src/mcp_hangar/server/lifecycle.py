@@ -250,8 +250,15 @@ class ServerLifecycle:
             settings.host = host
             settings.port = port
 
-        # Get the MCP app from FastMCP
-        mcp_app = mcp_server.streamable_http_app()
+        # Get the MCP app from FastMCP.
+        #
+        # `transport_security` is passed explicitly: left to the SDK's default
+        # the guard is built from its own bind host, so the endpoint answered
+        # 421 to the Service DNS name and every Ingress host while
+        # MCP_TRUSTED_HOSTS listed them (#859).
+        from ..fastmcp_server.asgi import mcp_transport_security
+
+        mcp_app = mcp_server.streamable_http_app(transport_security=mcp_transport_security())
 
         # SEP-2243: wrap the stateless front door so a legacy-era POST carrying
         # Mcp-Method / Mcp-Name is checked against its body instead of trusted
