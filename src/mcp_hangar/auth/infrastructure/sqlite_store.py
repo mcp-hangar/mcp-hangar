@@ -366,7 +366,8 @@ class SQLiteApiKeyStore(IApiKeyStore, IInitialAdminBootstrapStore):
             )
             conn.execute(
                 """
-                INSERT INTO role_assignments (principal_id, role_name, scope, assigned_at, assigned_by)
+                INSERT OR IGNORE INTO role_assignments
+                    (principal_id, role_name, scope, assigned_at, assigned_by)
                 VALUES (?, 'admin', 'global', ?, ?)
                 """,
                 (principal_id, now, actor),
