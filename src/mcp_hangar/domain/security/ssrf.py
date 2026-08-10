@@ -175,6 +175,31 @@ def validate_no_ssrf(
     _resolve_and_validate(url, provenance=provenance, runtime_addresses=runtime_addresses)
 
 
+def endpoint_is_a_literal_the_strict_policy_refuses(url: str) -> bool:
+    """Would the strict policy refuse this endpoint on its written address alone?
+
+    Answered without resolving anything, and only for a literal: a name is
+    whatever DNS says it is at the moment it is dialled, which is the question
+    `resolve_validated_addresses` exists to ask on every request and not one to
+    pre-empt from a stored string. A name therefore answers False.
+
+    Exists for one caller -- restoring a server whose record predates
+    `enforce_ssrf` -- which has to tell "an endpoint a human registered under
+    the strict policy" from "a container address discovery reported", with
+    nothing but the row. Kept here, beside the networks it asks about, so the
+    two cannot drift: a copy of the list somewhere else is how a decision that
+    was safe when written stops being safe.
+    """
+    host = urlparse(url).hostname
+    if not host:
+        return False
+    try:
+        ipaddress.ip_address(_normalize(host))
+    except ValueError:
+        return False
+    return _in_any(_normalize(host), _BLOCKED_NETWORKS)
+
+
 def resolve_validated_addresses(
     url: str,
     *,
