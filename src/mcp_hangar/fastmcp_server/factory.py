@@ -160,7 +160,10 @@ class MCPServerFactory:
         from ..server.api import create_api_router
 
         mcp = self.create_server()
-        mcp_app: Any = mcp.streamable_http_app()
+        # Same allowlist as the serve path -- see `mcp_transport_security`.
+        from .asgi import mcp_transport_security
+
+        mcp_app: Any = mcp.streamable_http_app(transport_security=mcp_transport_security())
 
         # SEP-2243: route the stateless front door on Mcp-Method / Mcp-Name
         # headers (with header<->body consistency enforced) instead of session
