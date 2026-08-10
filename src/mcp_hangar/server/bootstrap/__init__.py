@@ -358,7 +358,7 @@ def bootstrap(
     # different backend than everything else.
     from .composition import set_persistence_backend
     from .persistence import (
-        refuse_a_cluster_on_unshared_storage,
+        refuse_a_cluster_that_cannot_coordinate,
         refuse_local_modes_in_a_declared_cluster,
         restore_persisted_fleet,
         select_backend,
@@ -371,7 +371,7 @@ def bootstrap(
 
     _backend = select_backend(full_config)
     set_persistence_backend(_backend)
-    refuse_a_cluster_on_unshared_storage(full_config)
+    refuse_a_cluster_that_cannot_coordinate(full_config)
 
     runtime = get_runtime(rate_limit=full_config.get("rate_limit"), persistence_backend=_backend)
     init_context(runtime)
