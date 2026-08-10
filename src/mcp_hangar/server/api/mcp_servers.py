@@ -380,8 +380,16 @@ async def set_l7_policy(request: Request) -> HangarJSONResponse:
 
     Raises:
         McpServerNotFoundError: If mcp_server does not exist (-> 404).
+
+    Authorization is `policy:write`, resolved from `route_permissions` by
+    `AuthorizationEnforcementMiddleware`. There is deliberately no
+    `_check_permission` call here: this handler used to demand
+    `mcp_servers:write` as well, which contradicted the table and refused
+    `provider-admin` -- the role that exists to deliver these policies and the
+    only non-admin role holding `policy:write`. The operator's push then 403'd
+    while the CR reported `Compiled` and `BackstopApplied`, so an
+    MCPEgressPolicy enforced its network half and silently dropped its L7 half.
     """
-    _check_permission(request, resource_type="mcp_servers", action="write")
     mcp_server_id = request.path_params["mcp_server_id"]
     body = await request.json()
     try:
@@ -403,8 +411,12 @@ async def clear_l7_policy(request: Request) -> HangarJSONResponse:
 
     Raises:
         McpServerNotFoundError: If mcp_server does not exist (-> 404).
+
+    Authorization is `policy:write`, from `route_permissions` -- see
+    `set_l7_policy`. Clearing a policy is the same authority as setting one, and
+    gating it on `mcp_servers:write` instead is what let `ROLE_DEVELOPER` clear
+    an egress policy while `provider-admin` could not set one.
     """
-    _check_permission(request, resource_type="mcp_servers", action="write")
     mcp_server_id = request.path_params["mcp_server_id"]
     result = await dispatch_command(SetL7PolicyCommand(mcp_server_id=mcp_server_id, policy=None, source="operator"))
     return HangarJSONResponse(result)

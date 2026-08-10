@@ -144,11 +144,20 @@ class SqliteBackend:
 
         return self._cached("approval_repository", build)
 
+    # Both keep schema creation in `initialize()` rather than doing it on first
+    # use, and the branch that hands them out never called it -- so an
+    # auth-enabled gateway on a selected backend died at startup with
+    # `no such table: roles`. Only these two need the call:
+    # `SQLiteToolAccessPolicyStore` creates its schema in `__init__`, which is
+    # why that one never showed the fault.
+
     def api_key_store(self) -> Any:
         def build() -> Any:
             from mcp_hangar.auth.infrastructure.sqlite_store import SQLiteApiKeyStore
 
-            return SQLiteApiKeyStore(self._path_for("auth", "auth.db"))
+            store = SQLiteApiKeyStore(self._path_for("auth", "auth.db"))
+            store.initialize()
+            return store
 
         return self._cached("api_key_store", build)
 
@@ -156,7 +165,9 @@ class SqliteBackend:
         def build() -> Any:
             from mcp_hangar.auth.infrastructure.sqlite_store import SQLiteRoleStore
 
-            return SQLiteRoleStore(self._path_for("auth", "auth.db"))
+            store = SQLiteRoleStore(self._path_for("auth", "auth.db"))
+            store.initialize()
+            return store
 
         return self._cached("role_store", build)
 

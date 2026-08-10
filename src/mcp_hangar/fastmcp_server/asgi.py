@@ -19,6 +19,9 @@ from ..trusted_hosts import WILDCARD, trusted_hosts
 
 if TYPE_CHECKING:
     from typing import Any as AuthComponents
+
+    from mcp.server.transport_security import TransportSecuritySettings
+
     from .config import ServerConfig
 
 logger = get_logger(__name__)
@@ -221,6 +224,73 @@ def _ws_handshake_allowed(scope: dict) -> tuple[bool, str]:
         return False, f"host_not_allowed:{host or '<missing>'}"
 
     return True, ""
+
+
+def mcp_transport_security() -> "TransportSecuritySettings":
+    """The SDK's DNS-rebinding guard, configured from Hangar's own allowlists.
+
+    The guard inside ``streamable_http_app()`` is on by default and, given no
+    settings, builds its allowlist from the SDK's default bind host. So a
+    gateway answered ``421 Invalid Host header`` to its own Service DNS name and
+    to every Ingress host, with ``MCP_TRUSTED_HOSTS`` listing them explicitly --
+    the REST API honoured that list (``TrustedHostMiddleware``) and the MCP
+    endpoint did not. On a multi-replica deployment that is the surface clients
+    use.
+
+    ``_ws_handshake_allowed`` above implements the same posture for WebSocket
+    handshakes and reads the same two lists. This is the HTTP half, which had
+    nothing.
+
+    Two translations matter:
+
+    * The SDK matches the **raw** Host header, so ``example.internal`` and
+      ``example.internal:8080`` are different entries. Hangar's own checks strip
+      the port, so each entry is expanded to both forms -- otherwise an operator
+      who wrote a hostname gets a 421 for the port they are actually served on.
+    * ``*`` disables the check, matching ``TrustedHostMiddleware`` and
+      ``_ws_handshake_allowed``.
+    """
+    from mcp.server.transport_security import TransportSecuritySettings
+
+    from ..server.api.middleware import get_cors_config
+
+    hosts = trusted_hosts()
+    if WILDCARD in hosts:
+        return TransportSecuritySettings(enable_dns_rebinding_protection=False)
+
+    allowed_hosts: list[str] = []
+    for host in hosts:
+        allowed_hosts.append(host)
+        allowed_hosts.append(f"{host}:*")
+
+    # Origins are the union of two things, and leaving either out breaks a real
+    # caller:
+    #
+    # * the hosts this gateway is served on, as origins. A browser talking to
+    #   the page it came from sends `Origin: http://<that host>:<port>`, and
+    #   refusing it refuses same-origin traffic. The SDK derived exactly these
+    #   from its bind host, which is what made the default work; dropping them
+    #   for the CORS list alone answered 403 to `http://127.0.0.1:<port>` and
+    #   failed the official suite's `dns-rebinding-protection` scenario.
+    # * `MCP_CORS_ORIGINS`, so a console served from somewhere else is allowed
+    #   here on the same terms the REST API and the WebSocket handshake allow it.
+    #
+    # A missing Origin still passes in the SDK -- a non-browser client has no
+    # same-origin policy to bypass -- so this is browser-scoped either way.
+    allowed_origins: list[str] = []
+    for host in hosts:
+        bracketed = f"[{host}]" if ":" in host else host
+        allowed_origins.append(f"http://{bracketed}:*")
+        allowed_origins.append(f"https://{bracketed}:*")
+        allowed_origins.append(f"http://{bracketed}")
+        allowed_origins.append(f"https://{bracketed}")
+    allowed_origins.extend(get_cors_config()["allow_origins"])
+
+    return TransportSecuritySettings(
+        enable_dns_rebinding_protection=True,
+        allowed_hosts=allowed_hosts,
+        allowed_origins=allowed_origins,
+    )
 
 
 def create_auth_combined_app(
