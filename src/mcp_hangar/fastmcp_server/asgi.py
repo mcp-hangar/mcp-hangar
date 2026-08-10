@@ -86,6 +86,51 @@ def _principal_to_identity_context(principal: Any) -> IdentityContext:
     )
 
 
+def bind_caller_identity(request_context: Any) -> Any:
+    """Bind `identity_context_var` from a per-request context, or return None.
+
+    On SDK v2 the streamable-HTTP transport runs each inbound message in a
+    per-session task decoupled from the ASGI wrapper that sets this contextvar,
+    and v1's ambient `request_ctx` is gone. What the SDK *does* hand every
+    lowlevel handler is a `ServerRequestContext` carrying the HTTP `request`,
+    and the auth middleware left the principal on `request.state.auth`. So the
+    identity is reachable; it just has to be re-bound in the task that reads it.
+
+    Accepts either a `ServerRequestContext` or anything exposing one as
+    `.request_context` (the high-level `Context` handed to tool bodies), so one
+    bridge serves both call paths rather than a third growing beside them.
+
+    Returns a contextvar token to reset, or None. Fully fault-barriered: stdio,
+    no-request, unauthenticated and already-bound paths return None and change
+    nothing.
+    """
+    if request_context is None:
+        return None
+    try:
+        from ..context import get_identity_context
+
+        if get_identity_context() is not None:
+            return None
+        inner = getattr(request_context, "request_context", None) or request_context
+        auth_state = getattr(getattr(inner, "request", None), "state", None)
+        principal = getattr(getattr(auth_state, "auth", None), "principal", None)
+        if principal is None:
+            return None
+        return identity_context_var.set(_principal_to_identity_context(principal))
+    except Exception:  # noqa: BLE001 -- identity bridging must never break a call
+        return None
+
+
+def release_caller_identity(token: Any) -> None:
+    """Reset what `bind_caller_identity` bound, if anything."""
+    if token is None:
+        return
+    try:
+        identity_context_var.reset(token)
+    except Exception:  # noqa: BLE001 -- best-effort cleanup
+        pass
+
+
 def create_health_routes(
     run_readiness_checks: Callable[[], dict[str, Any]],
     update_metrics: Callable[[], None],
