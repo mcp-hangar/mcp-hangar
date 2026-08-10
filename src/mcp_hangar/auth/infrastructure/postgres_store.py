@@ -367,6 +367,7 @@ class PostgresApiKeyStore(IApiKeyStore, IInitialAdminBootstrapStore):
                     f"""
                     INSERT INTO {self._assignments_table} (principal_id, role_name, scope, assigned_by)
                     VALUES (%s, 'admin', 'global', %s)
+                    ON CONFLICT (principal_id, role_name, scope) DO NOTHING
                     """,
                     (principal_id, actor),
                 )
