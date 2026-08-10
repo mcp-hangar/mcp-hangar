@@ -2,8 +2,13 @@
 
 > **Classification:** Internal — do not publish
 > **Author:** Marcin
-> **Date:** 2026-03-24
+> **Date:** 2026-03-24 · **Last reconciled against the source:** 2026-08-11 (core 2.5.2, operator v0.15.1)
 > **Purpose:** Capture product identity, hardening priorities, cut list, and deployment focus. The historical commercial tier/pricing model (§3, §7) is retained for context only — Hangar is now pure MIT with no tiers, pricing, or license keys.
+>
+> **Reading order for "what is true now":** §2 (layering gate), §6 → Enforcement state, §9.
+> §3, §5, §7 and §11 are dated snapshots kept for history; §4's "Current state" column is a
+> 2026-03-24 snapshot superseded by §6. When this document and an ADR disagree, the ADR wins
+> (`mcp-hangar/docs` → `adr/`, currently ADR-001…ADR-020).
 
 ---
 
@@ -71,27 +76,43 @@ license boundary.
 | Compliance export (CEF/LEEF/JSON-lines/syslog)     | `src/mcp_hangar/compliance/`                  | Enterprise value                                                |
 | Langfuse integration                               | `src/mcp_hangar/integrations/`                | Partner integration, commercial value                           |
 
-### Architectural boundary
+### Architectural boundary (historical — the enterprise/core split is gone)
 
-Enterprise features consume core interfaces. Core never imports from `src/mcp_hangar/`. The boundary is a one-way
-dependency:
+There is **one package**, `src/mcp_hangar/`. The former `enterprise/` tree was folded into it
+before v1.0.0, and the machinery that policed the old boundary has since been removed:
+
+- `tools/check_enterprise_imports.py` — **deleted** (the `tools/` directory no longer exists).
+- Pre-commit hook `enterprise-import-boundary` — **removed**.
+- CI job `import-boundary` in `security.yml` — **retired to a no-op** that echoes
+  "Import boundary check retired — all code lives in `src/mcp_hangar/`".
+
+What replaced it is a stronger, differently-shaped gate: a **hexagonal layering contract**
+enforced by `import-linter` (`.importlinter`, CI step "Import contracts" in `ci-core.yml`,
+guarded against an empty-contract false pass by `tests/unit/test_import_contracts.py`):
 
 ```
-src/mcp_hangar/  ──depends-on──►  src/mcp_hangar/domain/contracts/
-src/mcp_hangar/  ──depends-on──►  src/mcp_hangar/application/ports/
-src/mcp_hangar/  ──never──►       imports from former enterprise modules in core
+delivery         server : fastmcp_server : facade
+infrastructure   infrastructure : metrics : http_client : stdio_client : retry : progress : gc
+application      application
+domain           domain
+shared kernel    logging_config : lock_hierarchy : redactor : errors : protocol : context
+                 : _sdk_compat : tasks_wire : negotiation : observability : trusted_hosts
 ```
 
-This is enforced by:
+A layer may import anything below it and nothing above. The contract carries a **debt
+ledger** of edges that exist today and should not; it is capped so it can only shrink
+(33 → 9 so far). Component packages (`auth`, `approvals`, `compliance`, `integrations`,
+`bootstrap`, `observability`) carry their own internal layering and are deliberately out of
+scope (`exhaustive = False`).
 
-1. CI check via `tools/check_enterprise_imports.py` — scans `src/` for static `enterprise` imports, fails on any new violation outside a tracked allowlist. Pre-commit hook (`enterprise-import-boundary`) runs the same check locally.
-2. Core defines interfaces (ports/contracts). Enterprise provides implementations.
-3. Bootstrap wiring in `server/bootstrap/` conditionally loads enterprise modules when available. Dynamic imports via `_import_attribute()` are the canonical pattern and are not flagged by the boundary check.
+Note this gate polices *layering*, not the old core/enterprise split — that distinction no
+longer exists anywhere in the tree. Bootstrap wiring in `server/bootstrap/` still loads
+optional modules through dynamic `_import_attribute()` lookups; that is a
+graceful-degradation pattern, not a licensing gate.
 
 ### Migration plan (historical — completed before v1.0.0)
 
 The `src/mcp_hangar/` package absorbed former enterprise features before the v1.0.0 release.
-The import boundary is now CI-enforced.
 
 ---
 
@@ -204,6 +225,11 @@ Kubernetes deployment; Docker remains the compatibility and local-development pa
 
 ### K8s Operator hardening priorities
 
+> **The "Current state" column is a 2026-03-24 snapshot and is stale.** NetworkPolicy
+> generation and violation/enforcement signalling shipped; see
+> [§6 → Enforcement state](#enforcement-state-reconciled-2026-08-11) for the reconciled
+> picture. The "Target state" and "Priority" columns still read as intent.
+
 | Item                         | Current state              | Target state                                                                      | Priority |
 |------------------------------|----------------------------|-----------------------------------------------------------------------------------|----------|
 | CRD validation               | Basic                      | CEL validation rules, webhook admission                                           | P0       |
@@ -294,29 +320,42 @@ Phases 1-2 are complete.
 | Multi-cluster federation           | Not implemented | Design doc first, implement when demand validated  |
 | SCIM provisioning                  | Not implemented | Enterprise tier only                               |
 
-### Enforcement state (reconciled 2026-07-01)
+### Enforcement state (reconciled 2026-08-11)
 
 Per the #295 enforcement audit (operator + helm-charts, read-only), the §6
-"Not implemented" cells above were a stale 2026-03-24 snapshot that ADR-006
-already overtook. The reconciled state:
+"Not implemented" cells above were a stale 2026-03-24 snapshot. The 2026-07-01
+reconciliation that replaced them has itself been overtaken twice — by ADR-010
+(the agent/cloud tier retirement, which took ADR-006 with it) and by ADR-013
+(the `MCPEgressPolicy` enforcement model). Current state:
 
 - **NetworkPolicy L3/L4 egress enforcement shipped in v1.0**, implemented in the
   operator repo (`pkg/networkpolicy/builder.go`, reconciled with owner references
   in `internal/controller/mcpserver_controller.go`), driven by the CRD
   `spec.capabilities.network.egress` field plus an always-on CEL wildcard-egress
-  gate and an off-by-default validating admission webhook. This is the shipping
-  v1.0 enforcement backend, exactly as ADR-006 states.
-- **Tetragon (ADR-006 v1.5) is not yet built** — zero references in either repo.
-  It is cleanly buildable on the existing backend-agnostic capability schema and
-  reconcile seams; tracked as WS-9.
-- **Forensic / provenance chain (v2.0) is not buildable on what exists** — it
-  needs process attribution that NetworkPolicy structurally cannot provide, and
-  is gated on Tetragon landing first; tracked as WS-10 (sequence strictly after
-  WS-9).
-- **Known gap:** host/FQDN-only egress rules are not enforced at L3/L4 — they
-  emit a port-only NetworkPolicy, so the SSRF vector ADR-006 claims to close is
-  closed only for CIDR-based rules. This is the biggest remaining gap in the v1.0
-  backend and should be filed against the operator repo.
+  gate and an off-by-default validating admission webhook. Still true.
+- **Tetragon / kernel-level runtime enforcement is retired, not pending.**
+  ADR-006 (Tetragon-first, pluggable backend) is **Superseded by ADR-010**:
+  kernel-level enforcement only ever made sense delivered through the
+  `hangar-agent` sidecar, and that sidecar plus the Hangar Cloud control plane
+  were archived on 2026-07-16. The former **WS-9 (Tetragon) and WS-10 (forensic /
+  provenance chain) workstreams are closed** — do not plan against them. Governance
+  runs in-process in core (per-tenant projection, digest pinning, policy
+  resolution on the call path) plus the operator.
+- **The FQDN egress gap is closed.** Host/FQDN-only rules no longer emit a
+  port-only (fail-open) NetworkPolicy: `builder.go` **fails closed** on them —
+  no rule is emitted, the destination is denied, and the skipped rules are
+  surfaced on the `AnnotationHostWarnings` annotation (operator #7, 2026-07-02).
+  Enforceable FQDN allow-listing arrived with `MCPEgressPolicy` (operator v0.14.0):
+  the Cilium flavor compiles declared upstreams into a `CiliumNetworkPolicy` with
+  `toFQDNs` plus scoped kube-dns egress (`BuildEgressPolicyCiliumNetworkPolicy`),
+  with CNI auto-detection between the Vanilla and Cilium flavors.
+- **The current enforcement model is ADR-013**, not ADR-006: explicit-proxy L7
+  enforcement in the data plane Hangar already operates, with a policy-*generated*
+  L3/L4 network backstop (default-deny egress + allow-to-Hangar + allow-DNS in
+  governed namespaces). No transparent TLS interception, no eBPF protocol parsing.
+  Read ADR-013's status line before quoting its scope: the admission gate keys on
+  the pod's self-declared `mcp-hangar.io/provider` label (a pod without it is
+  admitted) and the image-digest check defaults to `warn`.
 
 ---
 
@@ -353,40 +392,47 @@ already overtook. The reconciled state:
 
 ## 8. Repository Structure
 
-### Current layout (post-v1.0)
+### Current layout
 
 ```
 mcp-hangar/
 ├── LICENSE                    # MIT — applies to the entire repository
 │
-├── src/mcp_hangar/            # MIT — core control plane
+├── src/mcp_hangar/            # ONE package. MIT. No core/enterprise split.
 │   ├── domain/                # DDD aggregates, value objects, events, contracts
-│   │   ├── contracts/         # Interfaces consumed by src/mcp_hangar/ (one-way dependency)
-│   │   └── ...
-│   ├── application/           # CQRS commands, queries, handlers, ports
-│   │   ├── ports/             # Port interfaces consumed by src/mcp_hangar/ (one-way dependency)
-│   │   └── ...
-│   ├── infrastructure/        # Core adapters (in-memory stores, Docker, K8s, OTEL)
-│   └── server/                # MCP server, REST API, WebSocket, CLI, bootstrap
-│       └── bootstrap/         # Conditionally loads src/mcp_hangar modules when license present
-│
-├── src/mcp_hangar/            # Advanced governance, enforcement, compliance
+│   │   └── contracts/         # Port interfaces implemented by the adapter layers
+│   ├── application/           # CQRS commands, queries, handlers, sagas, read models
+│   │   └── ports/             # Port interfaces implemented by the adapter layers
+│   ├── infrastructure/        # Adapters (in-memory stores, Docker, K8s, OTEL)
+│   │   └── persistence/       # SQLite/Postgres event stores, durable saga state
+│   ├── server/                # REST API, WebSocket, CLI, tools, bootstrap
+│   │   └── bootstrap/         # Composition root; optional modules via _import_attribute()
+│   ├── fastmcp_server/        # MCP surface (SDK v2), interceptors, discover
 │   ├── auth/                  # RBAC, API key stores, JWT/OIDC, rate limiter, auth API
 │   ├── approvals/             # Approval gate workflow
 │   ├── compliance/            # SIEM export (CEF, LEEF, JSON-lines, syslog)
-│   ├── infrastructure/persistence/  # SQLite/Postgres event stores, durable saga state
-│   └── integrations/          # Langfuse adapter, future partner integrations
+│   ├── integrations/          # Langfuse adapter, future partner integrations
+│   ├── observability/         # Tracing, metrics, audit pipeline
+│   └── tasks_wire.py          # Vendored SEP-2663 task wire (ADR-015)
 │
 ├── docs/                      # MkDocs documentation
 │   └── internal/
 │       └── PRODUCT_ARCHITECTURE.md  # This document
-├── tests/                     # pytest test suite
-└── scripts/                   # Install, build, CI, migration
+├── tests/                     # pytest: unit, integration, live (opt-in)
+├── changelog.d/               # One changelog fragment per PR; CHANGELOG.md is generated
+├── .importlinter              # Hexagon layering contract (see §2)
+└── scripts/                   # Build, CI gates, migration
 ```
+
+Note: ADRs do **not** live here. They live in the `mcp-hangar/docs` repository under
+`adr/`; the conventions governing them are in `docs/internal/ADR_AGENTS.md`.
 
 ### Import boundary rule
 
-Enforced by `tools/check_enterprise_imports.py` (CI job `import-boundary` in `security.yml`, pre-commit hook `enterprise-import-boundary`). The script maintains an explicit allowlist of known tech-debt files with a removal target of 2026-Q3 (TASK-P0-2). New static `from enterprise` / `import enterprise` statements in `src/` fail CI immediately. Dynamic imports via `importlib` are the approved pattern and are not detected.
+The old core-vs-enterprise rule is gone (`tools/check_enterprise_imports.py` deleted, the
+`import-boundary` CI job retired to a no-op, the pre-commit hook removed). The active rule
+is the hexagonal layering contract in `.importlinter`, enforced by `lint-imports` in
+`ci-core.yml` — see §2 for the layer stack and the shrink-only debt ledger.
 
 ---
 
