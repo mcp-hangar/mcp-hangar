@@ -93,8 +93,24 @@ def _served_app(role: str | None, principal_name: str = "user:alice"):
 
 
 @pytest.fixture
-def client_factory():
+def client_factory(monkeypatch):
+    """A client whose *handlers* can also see the auth components.
+
+    The router is built with an `auth_components` object passed in, but the
+    handlers' own `_check_permission` reads them from the global application
+    context instead. Without wiring that up, every in-handler check in the API
+    short-circuits on `not getattr(auth_components, "enabled", False)` and this
+    file tests only half the stack -- which is how a handler demanding a
+    permission the route table does not could sit here unnoticed.
+    """
+
     def make(role: str | None):
+        principal = Principal(id=PrincipalId("user:alice"), type=PrincipalType.USER) if role else Principal.anonymous()
+        components = _auth_components(principal, role)
+        monkeypatch.setattr(
+            "mcp_hangar.server.api.mcp_servers.get_context",
+            lambda: SimpleNamespace(auth_components=components),
+        )
         return TestClient(_served_app(role), raise_server_exceptions=False)
 
     return make
@@ -149,6 +165,31 @@ class TestGuardDoesNotOverreach:
         client = client_factory("developer")
         response = client.get("/api/mcp_servers")
         assert response.status_code not in (401, 403)
+
+    @pytest.mark.parametrize(
+        ("method", "path"),
+        [
+            ("POST", "/api/mcp_servers/srv1/l7_policy"),
+            ("DELETE", "/api/mcp_servers/srv1/l7_policy"),
+        ],
+    )
+    def test_provider_admin_reaches_the_egress_policy_channel(self, client_factory, method, path):
+        """The role that exists to deliver compiled policy must get through.
+
+        `test_operator_role_compatibility.py` already pins this contract, but it
+        pins it against `resolve_rule` and the role definitions -- the table and
+        the roles agreed, and the *handler* disagreed with both: it demanded
+        `mcp_servers:write` on top, which `provider-admin` does not hold. So the
+        operator's push answered 403 while every test of the contract passed.
+
+        Asserted through the served stack for that reason: only the request path
+        sees both the table and the handler.
+        """
+        client = client_factory("provider-admin")
+
+        response = client.request(method, path, json={"default_action": "deny"})
+
+        assert response.status_code not in (401, 403), response.text
 
     def test_non_api_paths_reach_the_mcp_surface(self, client_factory):
         """combined_app still routes everything else to the MCP app."""
