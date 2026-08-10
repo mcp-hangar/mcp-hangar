@@ -382,10 +382,30 @@ def register_flat_tool_handlers(mcp: FastMCP) -> None:
 
         from mcp_hangar._sdk_compat import CallToolResult
 
+        from .asgi import bind_caller_identity, release_caller_identity
+
+        # `ctx` is the SDK's per-request context and carries the HTTP request,
+        # so the authenticated principal is right here. It used to be dropped:
+        # both handlers then read `identity_context_var`, which the ASGI wrapper
+        # sets in a different task, found None, and `_compute_effective_policy`
+        # took its `member_id is None` deny-all branch -- front-door mode
+        # projected zero tools to every authenticated tenant, with the empty
+        # list indistinguishable from "no tools configured".
         async def _list_v2(ctx: Any, params: Any) -> ListToolsResult:
-            return await _flat_list_tools()
+            token = bind_caller_identity(ctx)
+            try:
+                return await _flat_list_tools()
+            finally:
+                release_caller_identity(token)
 
         async def _call_v2(ctx: Any, params: Any) -> Any:
+            token = bind_caller_identity(ctx)
+            try:
+                return await _call_v2_inner(params)
+            finally:
+                release_caller_identity(token)
+
+        async def _call_v2_inner(params: Any) -> Any:
             out = await _flat_call_tool(params.name, params.arguments or {})
             if isinstance(out, CallToolResult):  # error path already built one
                 return out

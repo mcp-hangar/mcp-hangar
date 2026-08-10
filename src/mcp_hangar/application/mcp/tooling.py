@@ -57,45 +57,22 @@ def _should_inject_ctx(func: Callable[..., Any]) -> bool:
 def _bridge_ctx_identity(mcp_ctx: Any) -> Any:
     """Bind caller identity from the injected MCP request Context, or return None.
 
-    On SDK v2 the streamable-HTTP transport runs each tool call in a per-session
-    task decoupled from the ASGI auth wrapper that sets ``identity_context_var``,
-    so it is None here for an authenticated HTTP caller and the v1 ambient
-    ``request_ctx`` no longer exists. The v2 Context IS reachable and the auth
-    middleware stored the principal on ``request.state.auth`` -- bridge it once,
-    centrally, so per-tenant policy (the tool-access listing filter, canary
-    routing, per-tenant withdrawal) sees the real caller instead of failing open.
-    Returns a contextvar token to reset, or None. Fully fault-barriered: stdio /
-    no-request / unauthenticated / already-bound paths return None and change
-    nothing.
+    Thin wrapper over the shared bridge so tool bodies and the lowlevel
+    front-door handlers use one implementation. Keeping two invited exactly the
+    bug that motivated the shared one: the flat `tools/list` handler is not a
+    tool body, so the bridge here never ran for it and the tenant was invisible
+    to per-tenant policy.
     """
-    if mcp_ctx is None:
-        return None
-    try:
-        from ...context import get_identity_context, identity_context_var
+    from ...fastmcp_server.asgi import bind_caller_identity
 
-        if get_identity_context() is not None:
-            return None
-        auth_state = getattr(getattr(getattr(mcp_ctx, "request_context", None), "request", None), "state", None)
-        principal = getattr(getattr(auth_state, "auth", None), "principal", None)
-        if principal is None:
-            return None
-        from ...fastmcp_server.asgi import _principal_to_identity_context
-
-        return identity_context_var.set(_principal_to_identity_context(principal))
-    except Exception:  # noqa: BLE001 -- identity bridging must never break the call path
-        return None
+    return bind_caller_identity(mcp_ctx)
 
 
 def _reset_ctx_identity(token: Any) -> None:
     """Reset the identity contextvar bound by _bridge_ctx_identity, if any."""
-    if token is None:
-        return
-    try:
-        from ...context import identity_context_var
+    from ...fastmcp_server.asgi import release_caller_identity
 
-        identity_context_var.reset(token)
-    except Exception:  # noqa: BLE001 -- best-effort cleanup
-        pass
+    release_caller_identity(token)
 
 
 def _apply_ctx_annotation(wrapper: Callable[..., Any], func: Callable[..., Any], inject_ctx: bool) -> None:
