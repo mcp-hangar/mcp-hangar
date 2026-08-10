@@ -24,6 +24,17 @@ import pytest
 from mcp_hangar.fastmcp_server.asgi import mcp_transport_security
 
 
+def _has(entries: list[str], value: str) -> bool:
+    """Exact membership in an allowlist.
+
+    Spelled out rather than `value in entries` because these values are URLs:
+    a substring test against a URL is a known way to write a broken allowlist,
+    and an assertion that *looks* like one is worth not writing even when the
+    receiver is a list.
+    """
+    return any(entry == value for entry in entries)
+
+
 @pytest.fixture(autouse=True)
 def _quiet_cors(monkeypatch):
     monkeypatch.setenv("MCP_CORS_ORIGINS", "https://console.example.com")
@@ -69,7 +80,11 @@ class TestTheAllowlistReachesTheTransportGuard:
         # and the WebSocket handshake already use, rather than to a third.
         monkeypatch.setenv("MCP_TRUSTED_HOSTS", "example.internal")
 
-        assert "https://console.example.com" in mcp_transport_security().allowed_origins
+        # Compared by equality rather than `in`: an origin is a whole entry in
+        # a list, never a substring of one, and `"https://..." in x` reads to a
+        # scanner as URL-substring sanitisation -- the exact anti-pattern this
+        # allowlist must not be.
+        assert _has(mcp_transport_security().allowed_origins, "https://console.example.com")
 
     def test_a_served_host_is_also_a_permitted_origin(self, monkeypatch) -> None:
         # A browser talking to the page it came from sends
@@ -82,14 +97,14 @@ class TestTheAllowlistReachesTheTransportGuard:
 
         origins = mcp_transport_security().allowed_origins
 
-        assert "http://127.0.0.1:*" in origins
-        assert "https://127.0.0.1:*" in origins
+        assert _has(origins, "http://127.0.0.1:*")
+        assert _has(origins, "https://127.0.0.1:*")
 
     def test_an_ipv6_host_is_bracketed_as_an_origin(self, monkeypatch) -> None:
         # `http://::1:8080` is not a URL; the origin form needs brackets.
         monkeypatch.setenv("MCP_TRUSTED_HOSTS", "::1")
 
-        assert "http://[::1]:*" in mcp_transport_security().allowed_origins
+        assert _has(mcp_transport_security().allowed_origins, "http://[::1]:*")
 
     def test_a_foreign_origin_is_not_permitted(self, monkeypatch) -> None:
         monkeypatch.setenv("MCP_TRUSTED_HOSTS", "127.0.0.1")

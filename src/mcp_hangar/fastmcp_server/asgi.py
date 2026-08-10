@@ -19,6 +19,9 @@ from ..trusted_hosts import WILDCARD, trusted_hosts
 
 if TYPE_CHECKING:
     from typing import Any as AuthComponents
+
+    from mcp.server.transport_security import TransportSecuritySettings
+
     from .config import ServerConfig
 
 logger = get_logger(__name__)
@@ -223,7 +226,7 @@ def _ws_handshake_allowed(scope: dict) -> tuple[bool, str]:
     return True, ""
 
 
-def mcp_transport_security() -> Any:
+def mcp_transport_security() -> "TransportSecuritySettings":
     """The SDK's DNS-rebinding guard, configured from Hangar's own allowlists.
 
     The guard inside ``streamable_http_app()`` is on by default and, given no
