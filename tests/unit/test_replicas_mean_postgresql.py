@@ -25,8 +25,9 @@ import pytest
 
 from mcp_hangar.infrastructure.persistence.registry import create_backend, is_shared
 from mcp_hangar.server.bootstrap.persistence import (
+    ClusterNeedsASelectedBackendError,
     ClusterNeedsSharedStorageError,
-    refuse_a_cluster_on_unshared_storage,
+    refuse_a_cluster_that_cannot_coordinate,
 )
 
 
@@ -68,7 +69,7 @@ class TestABackendSaysWhetherItCanBeShared:
 class TestAskingForAClusterOnStorageNobodyShares:
     def test_it_is_refused(self, sqlite_backend) -> None:
         with pytest.raises(ClusterNeedsSharedStorageError) as excinfo:
-            refuse_a_cluster_on_unshared_storage(AS_A_CLUSTER)
+            refuse_a_cluster_that_cannot_coordinate(AS_A_CLUSTER)
 
         message = str(excinfo.value)
         # The refusal has to carry both ways out, or it is an outage with an
@@ -84,21 +85,72 @@ class TestAskingForAClusterOnStorageNobodyShares:
 
         monkeypatch.setattr(composition, "_persistence_backend", _Shared())
 
-        refuse_a_cluster_on_unshared_storage(AS_A_CLUSTER)
+        refuse_a_cluster_that_cannot_coordinate(AS_A_CLUSTER)
 
 
 class TestNotAskingForOne:
     def test_a_file_backed_backend_is_fine(self, sqlite_backend) -> None:
         # A laptop, a compose file, a `pip install` -- and equally a thousand
         # independent pods. None of them claimed to be one gateway.
-        refuse_a_cluster_on_unshared_storage({})
+        refuse_a_cluster_that_cannot_coordinate({})
 
-    def test_no_backend_at_all_is_fine(self, monkeypatch) -> None:
+
+class TestAskingForAClusterWithoutChoosingWhereItPersists:
+    def test_it_is_refused(self, monkeypatch) -> None:
+        # This used to pass through, read as "no backend, nothing to check".
+        # That reading was wrong: no backend means no lease keeper, so
+        # `may_manage()` is True in every process and all three replicas report
+        # `manages_fleet: true` -- the exact failure the refusal above exists to
+        # prevent, reached by never being asked the question.
         from mcp_hangar.server.bootstrap import composition
 
         monkeypatch.setattr(composition, "_persistence_backend", None)
 
-        refuse_a_cluster_on_unshared_storage(AS_A_CLUSTER)
+        with pytest.raises(ClusterNeedsASelectedBackendError) as excinfo:
+            refuse_a_cluster_that_cannot_coordinate(AS_A_CLUSTER)
+
+        message = str(excinfo.value)
+        # Both ways out, and the missing decision named rather than the
+        # "local to one process" wording, which would be false here.
+        assert "persistence.backend: postgresql" in message
+        assert "coordination" in message
+
+    def test_the_legacy_keys_do_not_count_as_a_selection(self, monkeypatch) -> None:
+        # The shape that makes this reachable rather than theoretical: a
+        # deployment on `event_store.driver` and `auth.storage.driver` really
+        # does share one PostgreSQL, but it has selected no backend, so nothing
+        # in it decides what the replicas coordinate through.
+        from mcp_hangar.server.bootstrap import composition
+
+        monkeypatch.setattr(composition, "_persistence_backend", None)
+
+        with pytest.raises(ClusterNeedsASelectedBackendError):
+            refuse_a_cluster_that_cannot_coordinate(
+                {
+                    "coordination": {"lease_ttl_s": 15},
+                    "event_store": {"driver": "postgresql"},
+                    "auth": {"storage": {"driver": "postgresql"}},
+                }
+            )
+
+
+class TestItRunsAfterTheBackendIsSelected:
+    def test_bootstrap_asks_once_there_is_something_to_ask_about(self) -> None:
+        # The refusal reads the selected backend, and the second branch turns
+        # "not selected yet" into a refusal. Called before `select_backend`, it
+        # would therefore refuse every coordinated deployment on earth. Its
+        # sibling has the opposite constraint -- it must run *before* the
+        # backend, because it reads configuration only -- so the ordering is
+        # load-bearing in both directions and neither is obvious from the call.
+        import inspect
+
+        from mcp_hangar.server import bootstrap
+
+        source = inspect.getsource(bootstrap)
+
+        assert source.index("set_persistence_backend(_backend)") < source.index(
+            "refuse_a_cluster_that_cannot_coordinate(full_config)"
+        )
 
 
 class TestAFileBackedBackendGetsNoLeaseKeeper:
