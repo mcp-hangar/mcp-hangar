@@ -163,6 +163,32 @@ class ClusterNeedsSharedStorageError(RuntimeError):
         )
 
 
+class ClusterNeedsASelectedBackendError(RuntimeError):
+    """A hangar cluster was declared without deciding where its replicas persist.
+
+    The same fleet-per-pod outcome as the refusal above, reached by never being
+    asked the question. With no `persistence.backend` there is no backend to
+    take a lease through, so bootstrap creates no lease keeper and `may_manage`
+    is True in every process: each replica runs the management loops, each holds
+    its own fleet, and each reports `manages_fleet: true`.
+
+    Reachable while the replicas do share one database. The legacy per-subsystem
+    keys -- `event_store.driver: postgresql`, `auth.storage.driver: postgresql`
+    -- still configure storage on their own, and a deployment on those has
+    selected no backend at all, so nothing in it decides which storage the
+    replicas coordinate through.
+    """
+
+    def __init__(self) -> None:
+        super().__init__(
+            "this gateway is configured as part of a cluster (`coordination:`), and no storage backend has "
+            "been selected. Replicas coordinate through the backend named by `persistence.backend`, so "
+            "without one there is no lease to take: every replica would manage the fleet and none would "
+            "notice the others. Set `persistence.backend: postgresql`, or remove the `coordination:` block "
+            "to run this as a single gateway."
+        )
+
+
 class LocalModeInDeclaredClusterError(RuntimeError):
     """A declared cluster carries a server it can only run on one replica.
 
@@ -233,21 +259,30 @@ def refuse_local_modes_in_a_declared_cluster(config: dict[str, Any] | None = Non
         raise LocalModeInDeclaredClusterError(offenders)
 
 
-def refuse_a_cluster_on_unshared_storage(config: dict[str, Any] | None = None) -> None:
-    """Refuse the one combination that fails without failing.
+def refuse_a_cluster_that_cannot_coordinate(config: dict[str, Any] | None = None) -> None:
+    """Refuse the two configurations that fail without failing.
 
     Asked on the axis the operator controls rather than by sniffing the
     environment. A thousand pods each with their own storage are a thousand
     gateways, which is a legitimate thing to run and nobody's business but the
     operator's. A `coordination:` block is the statement that these are meant to
     be *one* gateway with several replicas -- and that requires storage they
-    share.
+    share, which in turn requires that storage was decided at all. Naming a
+    backend they cannot share and naming none reach the same place: no lease
+    anybody else can see, and every replica managing the fleet.
+
+    **Reads the selected backend, so it must be called after
+    `set_persistence_backend`.** Before this refusal grew its second branch,
+    calling it too early was merely useless; now it would refuse every
+    coordinated deployment, because nothing has been selected yet.
 
     Args:
         config: Full configuration. A `coordination` block is what makes this a
             cluster.
 
     Raises:
+        ClusterNeedsASelectedBackendError: When the configuration asks for a
+            cluster and names no backend to coordinate through.
         ClusterNeedsSharedStorageError: When the configuration asks for a
             cluster and the backend cannot be shared.
     """
@@ -257,7 +292,9 @@ def refuse_a_cluster_on_unshared_storage(config: dict[str, Any] | None = None) -
     if "coordination" not in (config or {}):
         return
     backend = get_persistence_backend()
-    if backend is None or is_shared(backend):
+    if backend is None:
+        raise ClusterNeedsASelectedBackendError()
+    if is_shared(backend):
         return
     raise ClusterNeedsSharedStorageError(type(backend).__name__)
 
