@@ -252,6 +252,7 @@ def register_discovery_tools(mcp: FastMCP) -> None:
         Returns:
             Success: {
                 sources: [{
+                    id: str,
                     source_type: str,
                     mode: str,
                     is_healthy: bool,
@@ -263,13 +264,22 @@ def register_discovery_tools(mcp: FastMCP) -> None:
             }
             Not configured: {error: str}
 
+            `id` is the addressable id of the source, the same one the REST API
+            uses in /api/discovery/sources/{id}. A source declared in config.yaml
+            derives its id from its source_type, so the id is the same after a
+            restart. Every source in this listing carries an id; the REST listing
+            omits the id of a source the discovery registry no longer knows,
+            because there its sub-routes would 404 on it.
+
         Example:
             hangar_sources()
             # {"sources": [
-            #   {"source_type": "kubernetes", "mode": "additive", "is_healthy": true,
+            #   {"id": "7afbd3ca-c2b2-5516-a3d8-408e7c75580e",
+            #    "source_type": "kubernetes", "mode": "additive", "is_healthy": true,
             #    "is_enabled": true, "last_discovery": "2024-01-15T10:30:00Z",
             #    "mcp_servers_count": 5, "error_message": null},
-            #   {"source_type": "docker", "mode": "additive", "is_healthy": false,
+            #   {"id": "28018ad1-4d9d-54dc-9e4e-c5d856af4612",
+            #    "source_type": "docker", "mode": "additive", "is_healthy": false,
             #    "is_enabled": true, "last_discovery": null,
             #    "mcp_servers_count": 0, "error_message": "socket not found"}
             # ]}
