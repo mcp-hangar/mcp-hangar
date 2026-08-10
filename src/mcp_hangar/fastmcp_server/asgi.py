@@ -223,6 +223,53 @@ def _ws_handshake_allowed(scope: dict) -> tuple[bool, str]:
     return True, ""
 
 
+def mcp_transport_security() -> Any:
+    """The SDK's DNS-rebinding guard, configured from Hangar's own allowlists.
+
+    The guard inside ``streamable_http_app()`` is on by default and, given no
+    settings, builds its allowlist from the SDK's default bind host. So a
+    gateway answered ``421 Invalid Host header`` to its own Service DNS name and
+    to every Ingress host, with ``MCP_TRUSTED_HOSTS`` listing them explicitly --
+    the REST API honoured that list (``TrustedHostMiddleware``) and the MCP
+    endpoint did not. On a multi-replica deployment that is the surface clients
+    use.
+
+    ``_ws_handshake_allowed`` above implements the same posture for WebSocket
+    handshakes and reads the same two lists. This is the HTTP half, which had
+    nothing.
+
+    Two translations matter:
+
+    * The SDK matches the **raw** Host header, so ``example.internal`` and
+      ``example.internal:8080`` are different entries. Hangar's own checks strip
+      the port, so each entry is expanded to both forms -- otherwise an operator
+      who wrote a hostname gets a 421 for the port they are actually served on.
+    * ``*`` disables the check, matching ``TrustedHostMiddleware`` and
+      ``_ws_handshake_allowed``.
+    """
+    from mcp.server.transport_security import TransportSecuritySettings
+
+    from ..server.api.middleware import get_cors_config
+
+    hosts = trusted_hosts()
+    if WILDCARD in hosts:
+        return TransportSecuritySettings(enable_dns_rebinding_protection=False)
+
+    allowed_hosts: list[str] = []
+    for host in hosts:
+        allowed_hosts.append(host)
+        allowed_hosts.append(f"{host}:*")
+
+    return TransportSecuritySettings(
+        enable_dns_rebinding_protection=True,
+        allowed_hosts=allowed_hosts,
+        # A missing Origin still passes in the SDK, so non-browser clients are
+        # unaffected; a present one is held to the same list the REST CORS
+        # config and the WebSocket handshake use.
+        allowed_origins=list(get_cors_config()["allow_origins"]),
+    )
+
+
 def create_auth_combined_app(
     aux_app: Starlette,
     mcp_app: Any,
