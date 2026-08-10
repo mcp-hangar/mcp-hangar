@@ -5,6 +5,60 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [2.5.2](https://github.com/mcp-hangar/mcp-hangar/compare/v2.5.1...v2.5.2) (2026-08-10)
+
+### Fixed
+
+- **core:** `MCP_TRUSTED_HOSTS` did not reach the MCP endpoint. The app was built
+  with the SDK's default transport security, which derives its allowlist from the
+  SDK's own bind host, so `/mcp` answered `421 Invalid Host header` to the
+  gateway's Service DNS name and to every Ingress host while the REST API on the
+  same process accepted them -- the two read different lists. Both serving paths
+  now build the guard from the configured allowlist, expanding each entry to match
+  with and without a port (the SDK compares the raw `Host` header, everything else
+  in Hangar strips it), with `*` opting out as it does elsewhere. Origins come from
+  the same `MCP_CORS_ORIGINS` list the WebSocket handshake already used. Permitted origins are the served hosts plus `MCP_CORS_ORIGINS`, so a
+  same-origin browser request keeps working while a foreign one is still
+  refused ([#871](https://github.com/mcp-hangar/mcp-hangar/pull/871))
+- **core:** `provider-admin` could not deliver an egress policy. The route table
+  maps `/api/mcp_servers/{id}/l7_policy` to `policy:write` -- the permission the
+  role holds and the reason it exists -- but the two handlers ran a second,
+  in-handler check for `mcp_servers:write` on top, which `provider-admin` does not
+  hold and `developer` does. The operator's push answered 403 while the
+  `MCPEgressPolicy` CR still reported `Compiled` and `BackstopApplied`, so the
+  policy enforced its L3/L4 half and silently dropped its L7 half. Authorization
+  for both handlers now comes from the route table alone ([#870](https://github.com/mcp-hangar/mcp-hangar/pull/870))
+- **core:** `tool_access.mode: front_door` projected zero tools to every
+  authenticated tenant over Streamable HTTP. The SDK hands each lowlevel handler a
+  per-request context carrying the HTTP request, and therefore the authenticated
+  principal; the `tools/list` and `tools/call` adapters were handed it and dropped
+  it, so both read `identity_context_var` -- which the ASGI wrapper sets in a
+  different task -- found nothing, and the resolver took its `member_id is None`
+  deny-all branch. An empty tool list is indistinguishable from "no tools
+  configured", so nothing said so. Both adapters now bind the caller for the
+  duration of the call, through the same bridge tool bodies already used ([#874](https://github.com/mcp-hangar/mcp-hangar/pull/874))
+- **core:** `mcp-hangar auth bootstrap-admin` refused to run on a deployment that
+  had made the one storage decision. It consulted only `auth.storage.driver`,
+  which defaults to `memory`, and answered "driver 'memory' is not durable" -- on
+  exactly the deployments where it is the only way in, since `/api/auth/**`
+  requires an admin principal with no carve-out for the first call. It now uses
+  the backend `persistence.backend` selected, which is durable by construction.
+  The claim it makes also stopped colliding with a configured `auth.role_assignments`
+  entry for the same principal: the admin assignment is inserted with the same
+  conflict tolerance `assign_role` has always had, on both backends ([#873](https://github.com/mcp-hangar/mcp-hangar/pull/873))
+- **core:** an auth-enabled gateway could not start on a fresh database once
+  `persistence.backend` was set. The one-storage branch in `auth/bootstrap.py`
+  returns the backend's API-key, role and tool-access-policy stores as they are,
+  and those three keep schema creation in `initialize()` -- which nothing called,
+  on either backend. Startup reached the auth bootstrap and died on
+  `relation "roles" does not exist`, or, with no `role_assignments` configured to
+  trip it, on `tool_access_policies` a few lines later; SQLite failed the same way
+  with `no such table: roles`. Both backends now initialise those stores when they
+  build them, the way the event store already did. The legacy
+  `auth.storage.driver: postgresql` branch also stopped returning no tool-access
+  store at all, which is why naming the backend a second time was not a workaround
+  either ([#869](https://github.com/mcp-hangar/mcp-hangar/pull/869))
+
 ## [2.5.1](https://github.com/mcp-hangar/mcp-hangar/compare/v2.5.0-rc.4...v2.5.1) (2026-08-10)
 
 ### Fixed
