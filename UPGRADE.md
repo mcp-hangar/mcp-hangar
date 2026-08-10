@@ -1,5 +1,63 @@
 # Upgrading MCP Hangar
 
+## 2.5.1 — restart to re-arm a defence 2.5.0 lost, and check one configuration
+
+Drop-in from 2.5.0 in the sense that nothing you wrote has to change. Two things
+are worth acting on rather than reading past.
+
+### The connect-time SSRF guard was not surviving a restart
+
+2.5.0 added a second SSRF check on every outbound connection, with the
+connection pinned to the validated address, so a hostname that passed
+registration could not be re-pointed at `169.254.169.254`, `10.x` or
+`127.0.0.1` before the next tool call. The flag that arms it was never written
+to the stored server record, so **any server rebuilt from that record came back
+without it** — after every restart, and on every replica that learned of the
+registration from the shared log rather than performing it.
+
+**What that means for a gateway running 2.5.0.** If it has restarted since a
+`remote` server was registered through the REST API or by discovery, that
+upstream has been reached with registration-time validation only. The endpoint
+was still checked once, when it was registered; what lapsed is the re-check that
+defends against the name being re-pointed afterwards. In a replica set, only the
+replica that handled the registration ever had the guard.
+
+**What to do: upgrade and restart.** The guard is restored for servers already
+in the store — no re-registration, no edit to the database. One deliberate
+exception: a stored endpoint that is a private literal keeps 2.5.0's behaviour,
+because such a row can only have come from discovery reporting a container
+address, and arming the strict policy over it would refuse an upstream that
+works today. Re-registering such a server writes the provenance that scopes the
+guard correctly.
+
+**One behaviour to expect once it is armed.** Guarding is also pinning: a
+guarded connection goes to one validated address rather than letting the client
+walk a multi-address DNS answer, so a dead address behind a healthy name fails
+the call instead of being skipped. That shipped in 2.5.0; what changes here is
+how much of your fleet it covers.
+
+### A `coordination:` block with no `persistence.backend` is now refused
+
+2.5.0 refused a declared cluster on a backend the replicas cannot share, and
+said nothing when no backend had been selected at all. The outcome is the same
+either way — no lease keeper, every replica managing the fleet, every one
+reporting `manages_fleet: true` — so it is now refused too.
+
+**Who is affected:** a configuration carrying `coordination:` while storage is
+still configured through the legacy per-subsystem keys (`event_store.driver`,
+`auth.storage.driver`). That deployment may well share one PostgreSQL, and it
+was never coordinating through it. It booted on 2.5.0 and will not boot on
+2.5.1 until it says where it persists:
+
+```
+this gateway is configured as part of a cluster (`coordination:`), and no
+storage backend has been selected. ... Set `persistence.backend: postgresql`,
+or remove the `coordination:` block to run this as a single gateway.
+```
+
+Both ways out are in the message. A single gateway that never declared
+`coordination:` is unaffected, whatever its storage.
+
 ## 2.5.0 — nothing changes until you select a storage backend
 
 The release adds `persistence.backend` and multi-replica coordination. **An
