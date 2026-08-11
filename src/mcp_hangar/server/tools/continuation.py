@@ -6,8 +6,10 @@ to retrieve the complete content when a batch response was truncated.
 
 from mcp_hangar._sdk_compat import FastMCP
 
+from ...application.mcp.tooling import mcp_tool_wrapper
 from ...logging_config import get_logger
 from ..bootstrap.truncation import get_response_cache
+from ..validation import check_rate_limit, tool_error_mapper
 
 logger = get_logger(__name__)
 
@@ -24,6 +26,12 @@ def register_continuation_tools(mcp: FastMCP) -> None:
     """
 
     @mcp.tool(name="hangar_fetch_continuation")
+    @mcp_tool_wrapper(
+        tool_name="hangar_fetch_continuation",
+        rate_limit_key=lambda *_a, **_k: "hangar_fetch_continuation",
+        check_rate_limit=check_rate_limit,
+        error_mapper=lambda exc: tool_error_mapper(exc),
+    )
     def hangar_fetch_continuation(
         continuation_id: str,
         offset: int = 0,
@@ -130,6 +138,12 @@ def register_continuation_tools(mcp: FastMCP) -> None:
         }
 
     @mcp.tool(name="hangar_delete_continuation")
+    @mcp_tool_wrapper(
+        tool_name="hangar_delete_continuation",
+        rate_limit_key=lambda *_a, **_k: "hangar_delete_continuation",
+        check_rate_limit=check_rate_limit,
+        error_mapper=lambda exc: tool_error_mapper(exc),
+    )
     def hangar_delete_continuation(continuation_id: str) -> dict:
         """Delete a cached continuation to free resources.
 

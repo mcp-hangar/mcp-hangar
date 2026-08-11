@@ -36,6 +36,65 @@ F = TypeVar("F", bound=Callable[..., Any])
 # collide with any real tool parameter; stripped before the tool body runs.
 _CTX_KW = "_mcp_hangar_request_ctx"
 
+# The authorization hook every wrapped tool passes through, installed by the
+# delivery layer (see `server.bootstrap.tools.register_all_tools`).
+#
+# An injected hook rather than a direct call, because the table it consults and
+# the auth components it reads both live in delivery, and the hexagon contract
+# in `.importlinter` does not let this module reach them. Injecting keeps the
+# dependency pointing the way the layering says: delivery installs, application
+# calls back.
+#
+# The cost of that inversion is that the wiring can be forgotten, which is a
+# shape this codebase has shipped several times. So it is pinned by a test
+# rather than by intent: `test_tool_permissions_cover_the_surface.py` asserts
+# both that `register_all_tools` installs the hook and that every tool it
+# registers is named in the table.
+_tool_authorizer: Callable[[str, Any], None] | None = None
+
+
+def set_tool_authorizer(authorizer: Callable[[str, Any], None] | None) -> None:
+    """Install the callable that authorizes each wrapped tool call.
+
+    Args:
+        authorizer: Called as ``authorizer(tool_name, mcp_ctx)`` before the tool
+            body runs; it raises to refuse. ``None`` uninstalls, which is for
+            tests -- production installs it once during tool registration.
+    """
+    global _tool_authorizer
+    _tool_authorizer = authorizer
+
+
+def get_tool_authorizer() -> Callable[[str, Any], None] | None:
+    """Return the installed tool authorizer, or ``None`` if none is."""
+    return _tool_authorizer
+
+
+#: Attribute stamped on every wrapped tool, carrying the name it authorizes as.
+#:
+#: The table in `tool_permissions` says a tool *should* be authorized; this says
+#: the call actually passes through the wrapper that does it. Without the second
+#: fact a tool registered without the decorator -- which is how both continuation
+#: tools were registered -- satisfies the table and is still reachable
+#: unauthenticated.
+GUARDED_TOOL_ATTR = "__mcp_hangar_guarded_tool__"
+
+
+def _mark_guarded(wrapper: Callable[..., Any], tool_name: str) -> None:
+    """Stamp *wrapper* as passing through the authorization hook."""
+    setattr(wrapper, GUARDED_TOOL_ATTR, tool_name)
+
+
+def _authorize_tool_call(tool_name: str, mcp_ctx: Any) -> None:
+    """Run the installed authorizer, if any. Raises to refuse.
+
+    A function rather than an inline branch in both wrapper bodies: the
+    decorator is already at the complexity ceiling, and two more branches for
+    one call is the wrong place to spend it.
+    """
+    if _tool_authorizer is not None:
+        _tool_authorizer(tool_name, mcp_ctx)
+
 
 def _should_inject_ctx(func: Callable[..., Any]) -> bool:
     """True if ``func`` declares no MCP ``Context`` parameter of its own.
@@ -171,6 +230,12 @@ def mcp_tool_wrapper(
                     key = rate_limit_key(*args, **kwargs)
                     check_rate_limit(key)
 
+                    # Then authorization, ahead of everything that does work on
+                    # the caller's behalf -- in particular ahead of the approval
+                    # gate, so an unauthorized caller cannot summon a human to
+                    # decide about a call it was never allowed to make.
+                    _authorize_tool_call(tool_name, _mcp_ctx)
+
                     # Validate inputs if provided.
                     if validate is not None:
                         validate(*args, **kwargs)
@@ -213,6 +278,7 @@ def mcp_tool_wrapper(
                     _reset_ctx_identity(_identity_token)
 
             _apply_ctx_annotation(async_wrapped, func, inject_ctx)
+            _mark_guarded(async_wrapped, tool_name)
             return async_wrapped  # type: ignore[return-value]
         else:
 
@@ -224,6 +290,10 @@ def mcp_tool_wrapper(
                     # Rate limit first (cheapest check) to reduce abuse surface.
                     key = rate_limit_key(*args, **kwargs)
                     check_rate_limit(key)
+
+                    # See the async branch: authorization precedes any work done
+                    # on the caller's behalf.
+                    _authorize_tool_call(tool_name, _mcp_ctx)
 
                     # Validate inputs if provided.
                     if validate is not None:
@@ -257,6 +327,7 @@ def mcp_tool_wrapper(
                     _reset_ctx_identity(_identity_token)
 
             _apply_ctx_annotation(sync_wrapped, func, inject_ctx)
+            _mark_guarded(sync_wrapped, tool_name)
             return sync_wrapped  # type: ignore[return-value]
 
     return decorator

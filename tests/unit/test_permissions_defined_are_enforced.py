@@ -27,6 +27,7 @@ import pathlib
 
 from mcp_hangar.auth.roles import PERMISSIONS
 from mcp_hangar.server.api.route_permissions import ROUTE_PERMISSIONS
+from mcp_hangar.server.tools.tool_permissions import TOOL_PERMISSIONS
 
 SRC_ROOT = pathlib.Path(__file__).resolve().parents[2] / "src"
 
@@ -50,12 +51,10 @@ UNENFORCED_BY_DESIGN: dict[str, str] = {
     "mcp_server:list": "legacy provider:* vocabulary; superseded by mcp_servers:read",
     "mcp_server:start": "legacy provider:* vocabulary; superseded by mcp_servers:lifecycle",
     "mcp_server:stop": "legacy provider:* vocabulary; superseded by mcp_servers:lifecycle",
-    "provider:load": "legacy provider:* vocabulary; hangar_load has no authorize() call site",
+    "provider:load": "legacy provider:* vocabulary; hangar_load authorizes as mcp_servers:write (#909)",
     "provider:load:verified": "unenforceable as written -- force_unverified is a caller-supplied argument",
     "provider:load:any": "unenforceable as written -- force_unverified is a caller-supplied argument",
-    "provider:unload": "legacy provider:* vocabulary; hangar_unload has no authorize() call site",
-    # --- Intentionally open --------------------------------------------------
-    "metrics:read": "/metrics is an unauthenticated Prometheus scrape target (auth skip list)",
+    "provider:unload": "legacy provider:* vocabulary; hangar_unload authorizes as mcp_servers:write (#909)",
     # --- Redundant -----------------------------------------------------------
     "group:list": "listing is authorized as group:read; delete this entry or split the rule",
 }
@@ -63,6 +62,16 @@ UNENFORCED_BY_DESIGN: dict[str, str] = {
 
 def _pairs_required_by_routes() -> set[tuple[str, str]]:
     return {rule.permission for rule in ROUTE_PERMISSIONS if rule.permission is not None}
+
+
+def _pairs_required_by_tools() -> set[tuple[str, str]]:
+    """Permissions the MCP tool surface requires (#909).
+
+    A second declarative table beside the route one. Both are read directly
+    rather than scanned, because a table is the shape this ledger can see
+    exactly; the AST scan below only catches literal `authorize()` arguments.
+    """
+    return set(TOOL_PERMISSIONS.values())
 
 
 def _pairs_required_by_code() -> set[tuple[str, str]]:
@@ -92,7 +101,7 @@ def _pairs_required_by_code() -> set[tuple[str, str]]:
 
 
 def _enforced_permission_keys() -> set[str]:
-    enforced_pairs = _pairs_required_by_routes() | _pairs_required_by_code()
+    enforced_pairs = _pairs_required_by_routes() | _pairs_required_by_tools() | _pairs_required_by_code()
     keys: set[str] = set()
     for key, permission in PERMISSIONS.items():
         pair = (permission.resource_type, permission.action)
@@ -131,7 +140,7 @@ class TestDefinedImpliesEnforced:
         Lower this number when you clear entries. Raising it is a review-visible
         act, which is the point.
         """
-        assert len(UNENFORCED_BY_DESIGN) <= 13
+        assert len(UNENFORCED_BY_DESIGN) <= 12
 
 
 class TestCriticalPermissionsAreEnforced:
