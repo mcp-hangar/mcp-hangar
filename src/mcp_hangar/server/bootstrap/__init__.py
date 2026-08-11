@@ -375,6 +375,13 @@ def bootstrap(
     # reachable, and it should not be told about the database first.
     refuse_local_modes_in_a_declared_cluster(full_config)
 
+    # Same reason, same place: pins addressed to a tenant no caller can carry
+    # are wrong before any of them is parsed, and the operator should hear it
+    # from the file rather than from an audit (#902).
+    from .pinning import refuse_pins_that_no_caller_can_match
+
+    refuse_pins_that_no_caller_can_match(full_config)
+
     _backend = select_backend(full_config)
     set_persistence_backend(_backend)
     refuse_a_cluster_that_cannot_coordinate(full_config)

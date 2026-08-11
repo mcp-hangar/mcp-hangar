@@ -107,6 +107,13 @@ class ToolProjectionRegistry:
         # Config-pin overlay: (mcp_server, tool) -> {tenant_id -> pinned ToolDigest}.
         # Populated at config-load time; re-applied on every reload (#233).
         self._config_pins: dict[tuple[str, str], dict[str, ToolDigest]] = {}
+        # All-tenants config-pin overlay: (mcp_server, tool) -> pinned ToolDigest.
+        # The counterpart of the `_ALL_TENANTS` withdrawal sentinel, and the only
+        # pin an unauthenticated caller can be held to: `resolve_pin` keys the
+        # per-tenant map by a tenant id, so with auth off -- where the caller is
+        # anonymous and `tenant_id` is always None -- every per-tenant pin missed
+        # and the digest capability enforced nothing at all (#902).
+        self._config_pins_all_tenants: dict[tuple[str, str], ToolDigest] = {}
         # Per-mcp_server digest-enforcement mode for pin mismatches; an unset
         # server defaults to the strictest (block). Scoped per server so one
         # server's `audit` cannot downgrade another server's pins (#278).
@@ -235,20 +242,25 @@ class ToolProjectionRegistry:
         self,
         mcp_server: str,
         tool: str,
-        tenant_id: str,
+        tenant_id: str | None,
         digest: ToolDigest,
     ) -> None:
-        """Pin a tool to a specific digest for a tenant via config.
+        """Pin a tool to a specific digest via config.
 
         Args:
             mcp_server: Owning mcp_server identifier.
             tool: Tool name.
-            tenant_id: Tenant the pin applies to.
+            tenant_id: Tenant the pin applies to. ``None`` pins the tool for
+                ALL tenants, including callers that carry no tenant identity --
+                the same meaning ``None`` has in :meth:`set_config_withdrawal`.
             digest: The :class:`~domain.value_objects.tool_digest.ToolDigest`
-                the tool is expected to match for this tenant.
+                the tool is expected to match.
         """
         with self._lock:
-            self._config_pins.setdefault((mcp_server, tool), {})[tenant_id] = digest
+            if tenant_id is None:
+                self._config_pins_all_tenants[(mcp_server, tool)] = digest
+            else:
+                self._config_pins.setdefault((mcp_server, tool), {})[tenant_id] = digest
         logger.debug(
             "config_pin_set",
             extra={"mcp_server": mcp_server, "tool": tool, "tenant_id": tenant_id},
@@ -263,12 +275,23 @@ class ToolProjectionRegistry:
     def resolve_pin(self, mcp_server: str, tool: str, tenant_id: str | None) -> ToolDigest | None:
         """Return the pinned digest for *(mcp_server, tool)* and *tenant_id*.
 
-        Returns ``None`` when *tenant_id* is ``None`` or no pin is registered.
+        Resolution is narrowest-first, the same order the tool-access policies
+        use: a pin declared for this tenant wins over one declared for all
+        tenants. An all-tenants pin applies to a caller with no tenant identity
+        -- that is the whole point of it, and it is why this no longer returns
+        ``None`` on sight of a ``None`` tenant (#902). A caller with no identity
+        still matches no per-tenant pin, which is correct: those pins name a
+        tenant this caller has not been shown to be.
+
+        Returns ``None`` only when no pin covers the tool for this caller.
         """
-        if tenant_id is None:
-            return None
+        key = (mcp_server, tool)
         with self._lock:
-            return self._config_pins.get((mcp_server, tool), {}).get(tenant_id)
+            if tenant_id is not None:
+                tenant_pin = self._config_pins.get(key, {}).get(tenant_id)
+                if tenant_pin is not None:
+                    return tenant_pin
+            return self._config_pins_all_tenants.get(key)
 
     def digest_enforcement(self, mcp_server: str) -> DigestEnforcement:
         """Return the digest-enforcement mode for *mcp_server* (block if unset)."""
@@ -284,6 +307,7 @@ class ToolProjectionRegistry:
         """
         with self._lock:
             self._config_pins.clear()
+            self._config_pins_all_tenants.clear()
             self._digest_enforcement.clear()
         logger.debug("config_pins_cleared")
 
@@ -501,6 +525,7 @@ class ToolProjectionRegistry:
             self._config_withdrawals.clear()
             self._runtime_withdrawals.clear()
             self._config_pins.clear()
+            self._config_pins_all_tenants.clear()
             self._digest_enforcement.clear()
             self._built = False
             logger.debug("tool_projection_registry_invalidated")
