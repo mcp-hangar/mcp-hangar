@@ -238,21 +238,23 @@ def _build_mcp_tool_list(
         if proj is None:
             continue  # Should not happen after _build_flat_map, but be safe.
 
-        schema = proj.schema
-        input_schema = schema.get("inputSchema", {"type": "object", "properties": {}})
-        description = schema.get("description", "")
+        # Carry the WHOLE definition, renaming only what the flat surface owns.
+        # Hand-picking three keys dropped `title`, `annotations`, `execution`,
+        # `icons`, `_meta` -- and `outputSchema` with them, so a client behind the
+        # front door had nothing to validate structured output against (#880).
+        # `annotations.readOnlyHint` / `destructiveHint` are what a client uses to
+        # decide whether a call needs a human in front of it; a projection that
+        # discards them makes every tool look alike.
+        payload = dict(proj.schema)
+        payload["name"] = flat_name
+        payload.setdefault("description", "")
+        payload.setdefault("inputSchema", {"type": "object", "properties": {}})
 
         tools.append(
             # Built via model_validate with the wire alias ``inputSchema`` so the
             # same call works on SDK v1 (field ``inputSchema``) and v2 (renamed to
             # ``input_schema``, alias-populated).
-            MCPTool.model_validate(
-                {
-                    "name": flat_name,
-                    "description": description,
-                    "inputSchema": input_schema,
-                }
-            )
+            MCPTool.model_validate(payload)
         )
 
     return tools

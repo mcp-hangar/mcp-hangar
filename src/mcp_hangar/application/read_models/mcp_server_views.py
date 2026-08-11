@@ -10,22 +10,41 @@ from typing import Any
 
 @dataclass(frozen=True)
 class ToolInfo:
-    """Read model for tool information."""
+    """Read model for tool information.
+
+    Mirrors :class:`~domain.model.tool_catalog.ToolSchema` field for field. It
+    did not, so the REST tool views dropped `title`, `annotations`, `execution`,
+    `icons` and `_meta` even once discovery started carrying them (#880) --
+    leaving the inspection surface disagreeing with what the MCP surface serves.
+    """
 
     name: str
     description: str
     input_schema: dict[str, Any]
     output_schema: dict[str, Any] | None = None
+    title: str | None = None
+    annotations: dict[str, Any] | None = None
+    execution: dict[str, Any] | None = None
+    icons: list[Any] | None = None
+    meta: dict[str, Any] | None = None
 
     def to_dict(self) -> dict[str, Any]:
-        """Convert to dictionary."""
-        result = {
+        """Convert to dictionary, in wire (camelCase) names, omitting unset fields."""
+        result: dict[str, Any] = {
             "name": self.name,
             "description": self.description,
             "inputSchema": self.input_schema,
         }
-        if self.output_schema is not None:
-            result["outputSchema"] = self.output_schema
+        for key, value in (
+            ("outputSchema", self.output_schema),
+            ("title", self.title),
+            ("annotations", self.annotations),
+            ("execution", self.execution),
+            ("icons", self.icons),
+            ("_meta", self.meta),
+        ):
+            if value is not None:
+                result[key] = value
         return result
 
 
