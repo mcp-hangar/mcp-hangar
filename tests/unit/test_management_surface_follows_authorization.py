@@ -219,14 +219,18 @@ class TestTheProjectionTheFrontDoorActuallyServes:
 
         result = await fd.call_tool(_request_ctx(fd.principal), params)
 
-        # The registered body ran: the reply is a tool result, and its text comes
-        # from `hangar_list` reaching the query bus -- which this test does not
-        # stand up, so it is the tool's own failure and not a routing one. That
-        # distinction is the assertion: a name the front door does not dispatch
-        # raises -32601 before any body is entered (see the test below).
+        # The registered body ran and produced a tool result. What that result
+        # SAYS is deliberately not asserted: CQRS handlers are process-global, so
+        # whether `hangar_list` reaches a live query bus depends on what else ran
+        # first in the session -- it answers with the fleet when something has
+        # bootstrapped one and with its own "no handler" payload when nothing
+        # has. Both are the tool speaking, which is the claim here.
+        #
+        # The claim is carried by the contrast with the test below: a name the
+        # front door will not dispatch raises -32601 before any body is entered,
+        # so "a tool result came back at all" separates dispatched from refused.
         assert result.content, "dispatch produced no tool result at all"
         assert "not found" not in str(result).lower()
-        assert "ListMcpServersQuery" in str(result)
 
     async def test_a_management_tool_the_caller_may_not_see_is_not_found(self, monkeypatch):
         """Not shown implies not callable, by name, with the same -32601."""
