@@ -8,14 +8,37 @@ import cycle.
 from __future__ import annotations
 
 from collections.abc import Mapping
+from importlib.metadata import PackageNotFoundError, version
 from typing import Any
 
 # MCP protocol version Hangar advertises to upstream MCP servers. Targets the
 # 2026-07-28 revision; a legacy upstream downgrades in its initialize response.
 SUPPORTED_PROTOCOL_VERSION = "2026-07-28"
 
+# OUTBOUND client identity, and the counterpart to the INBOUND
+# ``config.HANGAR_SERVER_NAME`` that #560 unified. This said
+# ``mcp-registry / 1.0.0`` -- a product name that has not existed for a long
+# time, at a literal version that never moved off 1.0.0 while the gateway
+# sending it was 2.5.2. It is what an upstream operator has in their logs when
+# working out who is calling them, and it rides `_meta` on EVERY modern request
+# (see ``inject_protocol_meta``), not only the handshake.
+#
+# Read from package metadata rather than restated, so it cannot drift again.
+# Resolved once at import: the installed version does not change under a
+# running process, and the same PackageNotFoundError fallback as
+# ``mcp_hangar.__init__`` keeps a source checkout working.
+HANGAR_CLIENT_NAME = "mcp-hangar"
+
+
+def _package_version() -> str:
+    try:
+        return version("mcp-hangar")
+    except PackageNotFoundError:  # pragma: no cover -- source checkout without an install
+        return "0.0.0.dev"
+
+
 # clientInfo Hangar presents to upstream servers.
-HANGAR_CLIENT_INFO = {"name": "mcp-registry", "version": "1.0.0"}
+HANGAR_CLIENT_INFO = {"name": HANGAR_CLIENT_NAME, "version": _package_version()}
 
 # Reverse-DNS _meta keys per the MCP spec namespace (SEP-2575 stateless model).
 _META_PROTOCOL_VERSION_KEY = "io.modelcontextprotocol/protocolVersion"
