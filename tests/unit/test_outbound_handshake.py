@@ -8,6 +8,7 @@ Covers:
 - A genuine `initialize` error still fails startup.
 """
 
+from importlib.metadata import version as metadata_version
 from typing import Any, cast
 from unittest.mock import MagicMock, patch
 
@@ -62,7 +63,23 @@ def test_clientinfo_is_sent_as_a_copy() -> None:
     _server()._perform_mcp_handshake(client)
 
     _init_params(client)["clientInfo"]["name"] = "mutated"
-    assert HANGAR_CLIENT_INFO["name"] == "mcp-registry"
+    assert HANGAR_CLIENT_INFO["name"] == "mcp-hangar"
+
+
+def test_clientinfo_names_the_product_and_the_running_version() -> None:
+    """#884: this said `mcp-registry / 1.0.0` -- a dead name at a literal version.
+
+    Asserts against package metadata rather than a second literal, so the pair
+    cannot drift apart again the way it did for the whole 1.x and 2.x lines.
+    """
+    client = _client({"result": {}})
+
+    _server()._perform_mcp_handshake(client)
+
+    client_info = _init_params(client)["clientInfo"]
+    assert client_info["name"] == "mcp-hangar"
+    assert client_info["version"] == metadata_version("mcp-hangar")
+    assert client_info["version"] != "1.0.0"
 
 
 def test_legacy_upstream_completes_and_discovers_tools() -> None:

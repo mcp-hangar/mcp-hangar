@@ -4,6 +4,7 @@ Stateless upstreams (SEP-2575) have no initialize handshake, so the protocol
 version + client info travel in every request's `params._meta`.
 """
 
+from importlib.metadata import version as metadata_version
 from unittest.mock import MagicMock, patch
 
 from mcp_hangar.protocol import (
@@ -49,7 +50,18 @@ def test_client_info_is_copied_not_shared() -> None:
     out = inject_protocol_meta({})
 
     out["_meta"][_CI]["name"] = "mutated"
-    assert HANGAR_CLIENT_INFO["name"] == "mcp-registry"
+    assert HANGAR_CLIENT_INFO["name"] == "mcp-hangar"
+
+
+def test_meta_client_info_carries_the_real_identity_on_every_request() -> None:
+    """#884: the dead `mcp-registry / 1.0.0` rode `_meta` on every modern request.
+
+    The handshake is covered in test_outbound_handshake; this is the other half,
+    and the one that was hit far more often.
+    """
+    out = inject_protocol_meta({})
+
+    assert out["_meta"][_CI] == {"name": "mcp-hangar", "version": metadata_version("mcp-hangar")}
 
 
 def test_http_client_call_injects_protocol_meta_on_outbound_request() -> None:
