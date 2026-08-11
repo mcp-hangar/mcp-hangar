@@ -130,6 +130,8 @@ class MCPServerFactory:
         self._enable_governed_tasks(mcp)
         self._advertise_governance_extensions(mcp)
         self._advertise_tasks_capability(mcp)
+        # Last, after every registration above, so it judges the final surface.
+        self._withdraw_unserved_capabilities(mcp)
 
         self._mcp = mcp
         logger.info(
@@ -385,6 +387,17 @@ class MCPServerFactory:
         from .governance_extensions import advertise_governance_extensions
 
         advertise_governance_extensions(mcp)
+
+    @staticmethod
+    def _withdraw_unserved_capabilities(mcp: FastMCP) -> None:
+        """Stop claiming ``prompts`` / ``resources`` while neither is served (#888).
+
+        Delegates to the shared wiring so this path and the HTTP-serve bootstrap
+        advertise the same set (see ``served_capabilities``).
+        """
+        from .served_capabilities import withdraw_unserved_capabilities
+
+        withdraw_unserved_capabilities(mcp)
 
     @staticmethod
     def _register_interceptors_list(mcp: FastMCP) -> None:

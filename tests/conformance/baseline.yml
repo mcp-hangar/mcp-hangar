@@ -22,12 +22,21 @@
 #    advertises zero tools -- see `_build_flat_map`).
 # ---------------------------------------------------------------------------
 #
-# 2. Capability not advertised — we do not declare `completions` at all, and
-#    declare `resources.subscribe: false`. The suite runs these scenarios
-#    regardless of what `initialize` advertised, and counts our `-32601` as a
-#    failure. Rejecting a method we never claimed is arguably the conformant
-#    answer; this is a scope-of-applicability question for the suite, not a
-#    defect to fix here.
+# 2. Capability not advertised — we do not declare `completions`, `prompts` or
+#    `resources` at all. The suite runs these scenarios regardless of what
+#    `initialize` advertised, and counts our `-32601` as a failure. Rejecting a
+#    method we never claimed is arguably the conformant answer; this is a
+#    scope-of-applicability question for the suite, not a defect to fix here.
+#
+#    `prompts-list` / `resources-list` moved INTO this group in #888, and the
+#    move is a fix rather than a regression. They used to pass by answering
+#    `{"prompts": []}` to a capability we advertised and did not serve — which
+#    tells a conformant client *this server has no prompts*, a different and
+#    wrong statement compared with *this gateway does not carry prompts*. The
+#    suite cannot see that distinction; the client it misleads could not either.
+#    When #889 proxies an upstream's prompts and resources, the capability comes
+#    back on its own and these two lines have to be deleted — which the
+#    stale-entry rule above enforces rather than leaves to memory.
 #
 # 3. Deliberately not implemented — `logging/setLevel`. This looked like the
 #    one real gap until the specification was read: the method is REMOVED in
@@ -60,7 +69,9 @@ server:
 
   # -- 2. capability not advertised -----------------------------------------
   - completion-complete # `completions` is absent from initialize
-  - resources-subscribe # `resources.subscribe: false` is advertised
+  - prompts-list # `prompts` is absent from initialize (#888)
+  - resources-list # `resources` is absent from initialize (#888)
+  - resources-subscribe # ditto -- subscribe rides the resources capability
   - resources-unsubscribe # ditto
 
   # -- 1. fixture-dependent --------------------------------------------------
