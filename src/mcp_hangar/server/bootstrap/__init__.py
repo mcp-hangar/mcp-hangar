@@ -375,6 +375,13 @@ def bootstrap(
     # reachable, and it should not be told about the database first.
     refuse_local_modes_in_a_declared_cluster(full_config)
 
+    # Same reason, same place: pins addressed to a tenant no caller can carry
+    # are wrong before any of them is parsed, and the operator should hear it
+    # from the file rather than from an audit (#902).
+    from .pinning import refuse_pins_that_no_caller_can_match
+
+    refuse_pins_that_no_caller_can_match(full_config)
+
     _backend = select_backend(full_config)
     set_persistence_backend(_backend)
     refuse_a_cluster_that_cannot_coordinate(full_config)
@@ -384,6 +391,13 @@ def bootstrap(
 
     # Now the servers, with a runtime that knows where it persists.
     load_config(full_config.get("mcp_servers", {}))
+
+    # After they are loaded, so the warning describes a fleet that exists. These
+    # upstreams are outside the SSRF policy on purpose; the operator just had no
+    # way to find that out from anywhere but the source (#903).
+    from .unguarded_endpoints import warn_about_endpoints_the_ssrf_policy_does_not_cover
+
+    warn_about_endpoints_the_ssrf_policy_does_not_cover(full_config)
 
     # Initialize observability (tracing, Langfuse) early
     _, observability_adapter = init_observability(full_config)
