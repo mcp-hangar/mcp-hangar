@@ -23,6 +23,15 @@ def register_all_tools(mcp_server: FastMCP) -> None:
     Args:
         mcp_server: FastMCP server instance.
     """
+    # Before the tools, so no registration path can produce a tool that is
+    # reachable without passing the table. The hook is injected because the
+    # table and the auth components live here in delivery and `mcp_tool_wrapper`
+    # lives in application; the layering does not let it reach them (#909).
+    from ...application.mcp.tooling import set_tool_authorizer
+    from ..tools.tool_permissions import authorize_tool
+
+    set_tool_authorizer(authorize_tool)
+
     register_hangar_tools(mcp_server)
     register_load_tools(mcp_server)
     register_mcp_server_tools(mcp_server)
