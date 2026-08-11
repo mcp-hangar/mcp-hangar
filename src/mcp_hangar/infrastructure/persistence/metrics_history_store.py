@@ -189,9 +189,25 @@ _metrics_history_store: MetricsHistoryStore | None = None
 def get_metrics_history_store() -> MetricsHistoryStore:
     """Get the global :class:`MetricsHistoryStore` instance.
 
-    Creates a default in-memory instance on first call.  Production bootstrap
-    should call :func:`set_metrics_history_store` with a file-backed instance
-    before this is first called.
+    **Metric history is per-process unless a storage backend is selected.**
+
+    With ``persistence.backend`` configured, bootstrap installs the backend's
+    store and history survives a restart. Without it -- the documented no-change
+    default, and every configuration carried forward from 2.4.0 and earlier --
+    the first call here creates ``MetricsHistoryStore()``, which is
+    ``SQLiteConfig(path=":memory:")``. History then lives in process memory and
+    is gone on restart, while ``/metrics/history`` reads like a durable series.
+
+    This docstring used to instruct production bootstrap to call
+    :func:`set_metrics_history_store` with a file-backed instance. Bootstrap
+    does exactly that (``server/bootstrap/__init__.py``) -- but only inside the
+    ``if _backend:`` branch, so for half the deployments the advice described
+    what the code does and for the other half it described what nobody does
+    (#785).
+
+    Not data loss in the serious sense: Prometheus scrapes the live metrics and
+    is the system of record. What is per-process is the in-gateway history
+    surface.
     """
     global _metrics_history_store
     if _metrics_history_store is None:
