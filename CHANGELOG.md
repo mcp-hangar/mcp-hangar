@@ -5,6 +5,106 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [2.5.3](https://github.com/mcp-hangar/mcp-hangar/compare/v2.5.2...v2.5.3) (2026-08-11)
+
+### Added
+
+- **core:** a `front_door` gateway that serves no tools now says why. Three very
+  different situations used to produce the same 200, the same `{"tools": []}` and
+  nothing in the log: the caller carried no tenant identity (a fail-closed deny),
+  the replica had discovered nothing yet (a wrong answer that a restart produces
+  on its own), or policy removed every tool (the one case where the empty list is
+  true).
+
+  An operator watching a front door that had just been rolled saw healthy pods, a
+  successful response, and tenants reporting that everything had vanished.
+
+  Two new signals:
+
+  - a log line naming the cause -- WARNING for the two faults, INFO for the
+    correct answer, throttled to once a minute per cause so a standing condition
+    cannot bury its own first occurrence;
+  - `mcp_hangar_empty_projection_total{reason=...}`, with reasons `no_identity`,
+    `nothing_discovered` and `filtered`. Not labelled by tenant, deliberately: a
+    public front door has unbounded tenant cardinality, and the log line carries
+    the tenant for the follow-up. The counter is not throttled, so the rate stays
+    truthful.
+
+  The missing-identity deny in `front_door` mode also logs at WARNING now,
+  naming that branch specifically rather than leaving a policy-shaped symptom
+  behind a wiring problem. ([#895](https://github.com/mcp-hangar/mcp-hangar/pull/895))
+
+### Fixed
+
+- **core:** the handshake advertised `prompts` and `resources` and served
+  neither. A client that sees `prompts` advertised and gets `[]` back concludes
+  the upstream *has no prompts* -- which is a different statement from *this
+  gateway does not carry prompts*, and the client had no way to tell them apart.
+  Both capabilities are now withdrawn while nothing is registered under them, on
+  `initialize` and on the SEP-2575 `server/discover` result alike.
+
+  `prompts/*` and `resources/*` consequently answer `-32601` (method not found)
+  instead of an empty list. That is the honest reply from a server that does not
+  claim the capability, and a conformant client that reads capabilities first
+  will not call them at all. If you have a client that calls `prompts/list` or
+  `resources/list` unconditionally and treats an error as fatal, it needs to
+  check the advertised capabilities -- which it should have been doing.
+
+  Derived rather than hard-coded: the capability follows what is actually
+  registered, so proxying an upstream's prompts and resources (#889) turns both
+  back on without touching this code. ([#891](https://github.com/mcp-hangar/mcp-hangar/pull/891))
+- **core:** the gateway introduced itself to every upstream MCP server as
+  `mcp-registry / 1.0.0` -- a product name that has not existed for a long time,
+  at a literal version that never moved while the gateway sending it was 2.5.2.
+  It now sends `mcp-hangar` and the running package version, read from package
+  metadata so the two cannot drift apart again.
+
+  This is what an upstream operator sees in their logs when working out who is
+  calling them, and it is not only the handshake: the same identity rides
+  `params._meta["io.modelcontextprotocol/clientInfo"]` on every request to a
+  modern upstream. Nothing needs to change on your side -- but if you match on
+  `mcp-registry` in upstream log filters, alerting or client-specific
+  workarounds, those match on `mcp-hangar` from this release. ([#890](https://github.com/mcp-hangar/mcp-hangar/pull/890))
+- **core:** the gateway never finished the MCP handshake with an upstream. It
+  sent `initialize` and then went straight to `tools/list`, skipping the
+  `notifications/initialized` the lifecycle requires, so every upstream -- stdio,
+  docker and remote alike -- was left permanently mid-handshake.
+
+  A server is entitled to defer work until that notification arrives, and the
+  official reference server does exactly that: a tool registered in its
+  `oninitialized` handler was neither listed nor callable through Hangar (12
+  tools discovered where a finished session sees 13), with nothing logged to
+  suggest anything was missing. If your upstream registers tools, prompts or
+  resources on initialization, this release discovers them for the first time --
+  so a catalogue may legitimately grow after upgrading.
+
+  The notification is best-effort: an upstream that mishandles it gets a warning
+  in the log, not a failed start. Both transports gained a `notify()` primitive
+  to make it possible at all -- neither could previously send a message without
+  an id. ([#892](https://github.com/mcp-hangar/mcp-hangar/pull/892))
+- **core:** a tool definition lost everything except `name`, `description` and
+  `inputSchema` on its way through the gateway. `title`, `annotations`,
+  `execution`, `icons` and the upstream's `_meta` were discarded at discovery, so
+  no surface downstream could serve them.
+
+  `annotations.readOnlyHint` and `destructiveHint` are how a client or an agent
+  harness decides whether a call needs a human in front of it. Behind Hangar
+  every tool looked alike, so that decision degraded to pattern-matching on tool
+  names -- the failure mode a policy enforcement plane exists to remove. `title`
+  is what a UI shows, and `execution.taskSupport` is how a client knows a tool
+  must be invoked as a task.
+
+  All five now travel from `tools/list` through to `hangar_tools`, the
+  `front_door` flat projection and the REST tool views alike. The flat projection
+  additionally regains `outputSchema`, which it dropped even though the other
+  surfaces kept it -- a client behind the front door had nothing to validate
+  structured output against.
+
+  Tool digests are deliberately unchanged: the pinned surface is still
+  `{description, inputSchema, outputSchema}`, so no existing pin is invalidated
+  by this release. Whether `annotations` belongs inside the pinned surface is a
+  separate question, filed rather than decided here. ([#893](https://github.com/mcp-hangar/mcp-hangar/pull/893))
+
 ## [2.5.2](https://github.com/mcp-hangar/mcp-hangar/compare/v2.5.1...v2.5.2) (2026-08-10)
 
 ### Fixed
