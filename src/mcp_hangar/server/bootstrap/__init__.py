@@ -392,6 +392,13 @@ def bootstrap(
     # Now the servers, with a runtime that knows where it persists.
     load_config(full_config.get("mcp_servers", {}))
 
+    # After they are loaded, so the warning describes a fleet that exists. These
+    # upstreams are outside the SSRF policy on purpose; the operator just had no
+    # way to find that out from anywhere but the source (#903).
+    from .unguarded_endpoints import warn_about_endpoints_the_ssrf_policy_does_not_cover
+
+    warn_about_endpoints_the_ssrf_policy_does_not_cover(full_config)
+
     # Initialize observability (tracing, Langfuse) early
     _, observability_adapter = init_observability(full_config)
 
