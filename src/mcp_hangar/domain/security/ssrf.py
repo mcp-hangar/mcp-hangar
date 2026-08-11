@@ -76,14 +76,6 @@ def _resolved_addresses(hostname: str) -> list[str]:
     return [str(info[4][0]) for info in addr_infos]
 
 
-def _in_any(ip_str: str, networks: tuple[ipaddress.IPv4Network | ipaddress.IPv6Network, ...]) -> bool:
-    try:
-        ip = ipaddress.ip_address(ip_str)
-    except ValueError:
-        return False
-    return any(ip in network for network in networks)
-
-
 def _normalize(address: str) -> str:
     """`::ffff:10.0.0.1` and `10.0.0.1` are the same host; compare them as one."""
     try:
@@ -92,6 +84,18 @@ def _normalize(address: str) -> str:
         return address
     mapped = getattr(ip, "ipv4_mapped", None)
     return str(mapped or ip)
+
+
+def _in_any(ip_str: str, networks: tuple[ipaddress.IPv4Network | ipaddress.IPv6Network, ...]) -> bool:
+    # Normalize first: an IPv4-mapped IPv6 address is the same host as its IPv4
+    # form, but membership of an IPv6Address in an IPv4Network is always False.
+    # Skipping this step accepted ::ffff:169.254.169.254 / ::ffff:127.0.0.1
+    # while refusing the unmapped forms (#899).
+    try:
+        ip = ipaddress.ip_address(_normalize(ip_str))
+    except ValueError:
+        return False
+    return any(ip in network for network in networks)
 
 
 def _resolve_and_validate(
