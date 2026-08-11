@@ -1,5 +1,56 @@
 # Upgrading MCP Hangar
 
+## 2.5.3 — two things a client may notice
+
+Every change in this release is a defect fix and nothing you wrote has to
+change. Two of them are visible from outside the gateway, so they are worth
+acting on rather than reading past.
+
+### `prompts/list` and `resources/list` now answer `-32601`
+
+The gateway advertised the `prompts` and `resources` capabilities on every
+deployment and served neither. Nothing hard-coded that claim — the SDK derives
+each capability from whether its handler is registered, and the framework
+registers both unconditionally, empty or not.
+
+The cost was not the missing feature; it was the lie. `{"prompts": []}` tells a
+conformant client *this server has no prompts*, which is a different statement
+from *this gateway does not carry prompts*, and nothing on the wire
+distinguished them. Registered upstreams with prompts and resources were
+invisible with no error anywhere.
+
+| | before | after |
+| --- | --- | --- |
+| `initialize` capabilities | `prompts`, `resources` advertised | neither advertised |
+| `prompts/list`, `resources/list` | `200` with an empty list | `-32601` Method not found |
+
+**Who is affected.** A client that reads the advertised capabilities before
+calling — which the specification tells it to do — sees no `prompts` capability
+and does not call. Nothing to change. A client that calls these methods
+unconditionally and treats a JSON-RPC error as fatal will now fail where it
+previously received an empty list; it needs to check capabilities first.
+
+This is derived rather than inverted: when the gateway proxies an upstream's
+prompts and resources (#889), the capabilities return on their own.
+
+### An upstream's tool catalogue may grow
+
+The gateway never finished the MCP handshake — it sent `initialize` and went
+straight to `tools/list`, skipping the `notifications/initialized` the lifecycle
+requires. A server is entitled to defer work until that notification arrives,
+and servers do: against the official reference server, a tool registered in its
+`oninitialized` handler was neither listed nor callable.
+
+**What to expect.** If your upstream registers tools on initialization, this
+release discovers them for the first time, and its catalogue legitimately grows
+after the upgrade. Anything asserting on a **tool count** will notice. Tool
+**digests** are unaffected: the pinned surface is unchanged, so no existing pin
+moves — including the ones on tools that carry the newly-forwarded `title`,
+`annotations`, `execution`, `icons` and `_meta`.
+
+The notification is best-effort. An upstream that mishandles it gets a warning
+in the log rather than a failed start.
+
 ## 2.5.1 — restart to re-arm a defence 2.5.0 lost, and check one configuration
 
 Drop-in from 2.5.0 in the sense that nothing you wrote has to change. Two things
