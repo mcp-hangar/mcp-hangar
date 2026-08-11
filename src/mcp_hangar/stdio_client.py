@@ -263,6 +263,45 @@ class StdioClient:
                     self.pending.pop(request_id, None)
                 raise TimeoutError(f"timeout: {method} after {timeout}s") from None
 
+    def notify(self, method: str, params: dict[str, Any] | None = None) -> None:
+        """Send a JSON-RPC notification: no id, no response, nothing to wait for.
+
+        The counterpart to :meth:`call`, and until #881 there was no such thing
+        on either transport -- both mint a request id unconditionally and then
+        block on the matching response, so a notification could not be expressed
+        at all. That is why the MCP lifecycle was never finished (see
+        ``McpServer._perform_mcp_handshake``).
+
+        Carries the same protocol ``_meta`` and trace context as a request, so
+        the era gate applies here too: a legacy connection must not be sent the
+        2026-07-28 envelope, and ``modern_envelope`` is what says so.
+
+        Args:
+            method: JSON-RPC method name, e.g. ``notifications/initialized``.
+            params: Method parameters. Empty when omitted.
+
+        Raises:
+            ClientError: If the client is closed or the write fails.
+        """
+        if self.closed:
+            raise ClientError("client_closed")
+
+        with upstream_call_span(method, params or {}):
+            sent_params = inject_protocol_meta(params or {}, modern_envelope=self.modern_envelope)
+            inject_trace_context(sent_params["_meta"])
+
+            message = {"jsonrpc": "2.0", "method": method, "params": sent_params}
+            try:
+                message_str = json.dumps(message) + "\n"
+                prometheus_metrics.record_message_sent(self.mcp_server_id or "unknown", method, len(message_str))
+                assert self.process.stdin is not None
+                self.process.stdin.write(message_str)
+                self.process.stdin.flush()
+                logger.debug("stdio_client_notification_sent", method=method)
+            except Exception as e:  # noqa: BLE001 -- infra-boundary: write failure wrapped as ClientError
+                logger.error("stdio_client_notify_failed", method=method, error=str(e))
+                raise ClientError(f"write_failed: {e}") from e
+
     def is_alive(self) -> bool:
         """Check if the underlying process is still running."""
         return self.process.poll() is None
