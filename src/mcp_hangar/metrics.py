@@ -986,6 +986,27 @@ TASK_RELAYED_TOTAL = Counter(
     labels=["tenant_id"],
 )
 
+# -----------------------------------------------------------------------------
+# Front-door Projection Metrics
+# -----------------------------------------------------------------------------
+# A front door that serves nothing looks identical from outside whether the
+# tenant genuinely has no tools, the replica has discovered nothing yet, or the
+# caller arrived without an identity (#862, #887). Same 200, same empty list,
+# nothing in the log. This splits them by cause so "this gateway is answering
+# nobody" is visible on a dashboard rather than inferred from a support ticket.
+#
+# Deliberately NOT labelled by tenant: a public front door has unbounded tenant
+# cardinality, and the question a dashboard asks here is "which cause", not
+# "which tenant" -- the log line carries the tenant for the follow-up.
+
+EMPTY_PROJECTION_TOTAL = Counter(
+    name="mcp_hangar_empty_projection",
+    description="Total front-door tool projections that resolved to zero tools, by cause",
+    # reason: no_identity (fail-closed, no tenant), nothing_discovered (cold
+    # replica), filtered (policy or withdrawal removed everything)
+    labels=["reason"],
+)
+
 TASK_COMPLETED_TOTAL = Counter(
     name="mcp_hangar_task_completed",
     description="Total relayed tasks that finished successfully",

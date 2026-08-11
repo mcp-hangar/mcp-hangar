@@ -19,6 +19,8 @@ from __future__ import annotations
 from collections.abc import Mapping, MutableMapping, Sequence
 import logging
 import sys
+import threading
+import time
 from typing import Any, cast
 
 import structlog
@@ -251,6 +253,45 @@ def get_logger(name: str | None = None) -> structlog.stdlib.BoundLogger:
         logger.info("user_logged_in", user_id=123, ip="192.168.1.1")
     """
     return cast(structlog.stdlib.BoundLogger, structlog.get_logger(name))
+
+
+#: Last emission time per throttle key, for :func:`should_log_now`.
+_throttle_last_emitted: dict[str, float] = {}
+_throttle_lock = threading.Lock()
+
+#: Default quiet period for a throttled log line, in seconds.
+THROTTLE_INTERVAL_S = 60.0
+
+
+def should_log_now(key: str, interval_s: float = THROTTLE_INTERVAL_S) -> bool:
+    """Whether a throttled log line keyed by *key* may be emitted now.
+
+    For conditions that are true on EVERY request while they last -- a front
+    door denying for want of an identity, a projection that resolves to nothing
+    -- where the first occurrence is the whole signal and the next thousand are
+    noise that would bury it. Emits once per *key* per *interval_s*.
+
+    Deliberately not a rate limiter: no token bucket, no burst allowance. The
+    caller passes a key coarse enough to be bounded (a reason, or a reason plus
+    a tenant), because an unbounded key set would leak memory here the same way
+    an unbounded label set would blow up a metric.
+
+    Returns:
+        True when the caller should log, False when it should stay quiet.
+    """
+    now = time.monotonic()
+    with _throttle_lock:
+        last = _throttle_last_emitted.get(key)
+        if last is not None and (now - last) < interval_s:
+            return False
+        _throttle_last_emitted[key] = now
+        return True
+
+
+def reset_log_throttle() -> None:
+    """Forget every throttle key. For tests, which must not inherit a quiet period."""
+    with _throttle_lock:
+        _throttle_last_emitted.clear()
 
 
 # Convenience aliases for common log levels
