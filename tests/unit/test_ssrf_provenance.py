@@ -109,7 +109,21 @@ class TestProvenanceGrantsAnAddressNotAClass:
 class TestTheFloorAppliesToEveryDoor:
     """Some addresses are refused whatever reported them."""
 
-    @pytest.mark.parametrize("address", ["169.254.169.254", "169.254.0.1", "fe80::1", "0.0.0.0", "::"])
+    @pytest.mark.parametrize(
+        "address",
+        [
+            "169.254.169.254",
+            "169.254.0.1",
+            "fe80::1",
+            "0.0.0.0",
+            "::",
+            # IPv4-mapped forms of the floor addresses (#899). Same host, same
+            # refusal — the denylist must not treat address-family wrapping as
+            # a different object.
+            "::ffff:169.254.169.254",
+            "::ffff:169.254.0.1",
+        ],
+    )
     def test_link_local_and_unspecified_are_refused_for_discovery(self, address: str) -> None:
         with _resolves_to(address), pytest.raises(SsrfBlocked):
             validate_no_ssrf(
@@ -128,6 +142,17 @@ class TestTheFloorAppliesToEveryDoor:
                 runtime_addresses=frozenset({"169.254.169.254"}),
             )
 
+    def test_even_a_runtime_reporting_the_mapped_metadata_address_does_not_open_it(self) -> None:
+        # The #899 hole: the floor refused 169.254.169.254 and accepted
+        # ::ffff:169.254.169.254 because membership of an IPv6Address in an
+        # IPv4Network is always False.
+        with _resolves_to("::ffff:169.254.169.254"), pytest.raises(SsrfBlocked, match="link-local"):
+            validate_no_ssrf(
+                "http://[::ffff:169.254.169.254]/latest/meta-data/",
+                provenance=Provenance.DISCOVERY,
+                runtime_addresses=frozenset({"::ffff:169.254.169.254"}),
+            )
+
     @pytest.mark.parametrize(
         "hostname", ["metadata.google.internal", "instance-data.internal", "ip-10-0-0-1.compute.internal"]
     )
@@ -141,7 +166,22 @@ class TestTheFloorAppliesToEveryDoor:
 class TestTheHumanPolicyIsUnchanged:
     """What #767 closed stays closed."""
 
-    @pytest.mark.parametrize("address", ["10.0.0.1", "192.168.1.1", "172.16.0.1", "127.0.0.1", "::1"])
+    @pytest.mark.parametrize(
+        "address",
+        [
+            "10.0.0.1",
+            "192.168.1.1",
+            "172.16.0.1",
+            "127.0.0.1",
+            "::1",
+            # Mapped forms of the same hosts (#899). HUMAN must refuse them
+            # exactly as it refuses the unmapped form.
+            "::ffff:10.0.0.1",
+            "::ffff:192.168.1.1",
+            "::ffff:172.16.0.1",
+            "::ffff:127.0.0.1",
+        ],
+    )
     def test_private_addresses_stay_refused(self, address: str) -> None:
         with _resolves_to(address), pytest.raises(SsrfBlocked):
             validate_no_ssrf("http://internal.example", provenance=Provenance.HUMAN)
