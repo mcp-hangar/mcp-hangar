@@ -97,6 +97,93 @@ TOOL_PERMISSIONS: dict[str, tuple[str, str]] = {
 #: one.
 SELF_AUTHORIZING_TOOLS: frozenset[str] = frozenset({"hangar_call"})
 
+#: Tools that belong to the invoke path rather than the control plane (#904).
+#:
+#: The front-door management surface is "what an operator uses to run the
+#: gateway", and these are not that. `hangar_call` is the `egress` way to invoke
+#: a tool; the continuation tools hand back the tail of a truncated *tool result*
+#: and are reached by whoever made the call, not by whoever administers the
+#: fleet. Projecting them as management would put invoke-path plumbing in an
+#: operator's list and still leave it out of an agent's, which is backwards.
+#:
+#: (A front-door client that receives a truncated result has no way to fetch the
+#: rest today, because the flat surface projects neither. That gap predates this
+#: and is not closed here.)
+INVOKE_PATH_TOOLS: frozenset[str] = SELF_AUTHORIZING_TOOLS | frozenset(
+    {"hangar_fetch_continuation", "hangar_delete_continuation"}
+)
+
+
+def management_tools_for(mcp_ctx: Any) -> frozenset[str]:
+    """Which management tools this caller may see, because it may call them (#904).
+
+    The front door serves flat upstream names and no control plane, for everyone,
+    which means an operator on a front-door gateway has no management surface
+    over MCP at all -- and turning the mode off to get one hands every agent the
+    whole meta-API. This is what makes the surface a property of the caller
+    instead of the instance.
+
+    The set is exactly what :func:`authorize_tool` would permit, so the list and
+    the invoke agree by construction rather than by two rules kept in step. A
+    tool shown here is callable; a tool not shown is refused if called anyway.
+
+    **Stricter than :func:`authorize_tool` in one respect**, deliberately: that
+    function allows everything when auth is off, which is the backward-compatible
+    behaviour ``--unsafe-no-auth`` depends on. Projecting on the same rule would
+    conjure a control-plane surface for an unauthenticated caller on a front door
+    that today shows it nothing. So with no configured auth, or no authenticated
+    principal, this is empty -- and the tools stay unreachable too, because the
+    call path only dispatches what this returned.
+
+    ``INVOKE_PATH_TOOLS`` are excluded. They are how a tool is called rather than
+    how the gateway is administered, and on a front door the flat names already
+    are the invoke path.
+
+    Args:
+        mcp_ctx: The MCP request Context, carrying the authenticated principal on
+            ``request.state.auth``.
+
+    Returns:
+        The names this caller may both see and call. Empty when auth is off or
+        the caller is anonymous.
+    """
+    try:
+        from ..context import get_context
+
+        auth_components = getattr(get_context(), "auth_components", None)
+    except Exception:  # noqa: BLE001 -- no app context (stdio/local) -> no management surface
+        return frozenset()
+
+    authz = getattr(auth_components, "authz_middleware", None)
+    if authz is None or not getattr(auth_components, "enabled", False):
+        return frozenset()
+
+    try:
+        inner = getattr(mcp_ctx, "request_context", None) or mcp_ctx
+        auth_state = getattr(getattr(inner, "request", None), "state", None)
+        principal = getattr(getattr(auth_state, "auth", None), "principal", None)
+    except Exception:  # noqa: BLE001 -- fault barrier: identity lookup must not break listing
+        principal = None
+
+    if principal is None or principal.is_anonymous():
+        return frozenset()
+
+    permitted: set[str] = set()
+    for tool_name, (resource_type, action) in TOOL_PERMISSIONS.items():
+        if tool_name in INVOKE_PATH_TOOLS:
+            continue
+        try:
+            authz.authorize(
+                principal=principal,
+                action=action,
+                resource_type=resource_type,
+                resource_id="*",
+            )
+        except Exception:  # noqa: BLE001 -- a denial is the normal answer here, not an error
+            continue
+        permitted.add(tool_name)
+    return frozenset(permitted)
+
 
 class ToolAccessNotAuthorizedError(PermissionError):
     """The caller may not invoke this tool.

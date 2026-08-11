@@ -1007,6 +1007,23 @@ EMPTY_PROJECTION_TOTAL = Counter(
     labels=["reason"],
 )
 
+# How big the answer to `tools/list` is, which nothing on the server side could
+# see. The surface sits in an agent's prompt prefix and is paid for on every
+# turn, so a client with a small context window can be pushed over the limit
+# before it calls anything -- and the first report of that arrived from a client
+# hitting its own limit, not from here (#904).
+#
+# Split by kind so "the upstream grew" and "the control plane is being projected"
+# are separable, which is the whole question the surface split exists to answer.
+# Unlabelled by tenant for the same reason as EMPTY_PROJECTION_TOTAL: a public
+# front door has unbounded tenant cardinality.
+PROJECTED_TOOLS = Histogram(
+    name="mcp_hangar_projected_tools",
+    description="Tools returned by a front-door tools/list, by kind",
+    labels=["kind"],  # governed (upstream) | management (hangar_*)
+    buckets=(0, 1, 2, 5, 10, 25, 50, 100, 250, 500),
+)
+
 TASK_COMPLETED_TOTAL = Counter(
     name="mcp_hangar_task_completed",
     description="Total relayed tasks that finished successfully",
