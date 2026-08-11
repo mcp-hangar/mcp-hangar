@@ -804,6 +804,72 @@ class HttpClient:
             logger.warning("http_client_sse_invalid_json", data=data_line[:100])
             return None
 
+    def notify(self, method: str, params: dict[str, Any] | None = None) -> None:
+        """Send a JSON-RPC notification: no id, no response to correlate.
+
+        The counterpart to :meth:`call`, and until #881 there was no such thing
+        on either transport -- both mint a request id unconditionally and then
+        block on the matching response, so a notification could not be expressed
+        at all. That is why the MCP lifecycle was never finished (see
+        ``McpServer._perform_mcp_handshake``).
+
+        Streamable HTTP answers a notification with ``202 Accepted`` and an
+        empty body. Any 2xx is accepted; anything else is logged and raised,
+        because a notification that did not arrive is worth knowing about even
+        though there is no result to return.
+
+        Carries the same protocol ``_meta``, trace context and session header a
+        request does, so the era gate applies here too: a legacy connection must
+        not be sent the 2026-07-28 envelope, and ``modern_envelope`` says so.
+
+        Args:
+            method: JSON-RPC method name, e.g. ``notifications/initialized``.
+            params: Method parameters. Empty when omitted.
+
+        Raises:
+            ClientError: If the client is closed, the request fails, or the
+                upstream answers non-2xx.
+        """
+        if self._closed:
+            raise ClientError("client_closed")
+
+        identity = get_identity_context()
+        tenant_id = identity.caller.tenant_id if identity and identity.caller else None
+
+        sent_params = inject_protocol_meta(params or {}, modern_envelope=self.modern_envelope)
+        inject_trace_context(sent_params["_meta"])
+        scrub_baggage_for_tenant(sent_params["_meta"], tenant_id)
+        body = {"jsonrpc": "2.0", "method": method, "params": sent_params}
+
+        mcp_server_label = self._mcp_server_id or self._host
+        try:
+            with upstream_call_span(method, sent_params):
+                headers: dict[str, str] = {}
+                inject_trace_context(headers)
+                scrub_baggage_for_tenant(headers, tenant_id)
+                if not self._http_config.stateless_upstream and self._mcp_session_id:
+                    headers["Mcp-Session-Id"] = self._mcp_session_id
+
+                prometheus_metrics.record_message_sent(mcp_server_label, method, len(json.dumps(body).encode()))
+                response = self._client.post(
+                    self._endpoint,
+                    json=body,
+                    headers=headers or None,
+                    timeout=self._http_config.read_timeout,
+                )
+        except Exception as e:  # noqa: BLE001 -- infra-boundary: transport failure wrapped as ClientError
+            prometheus_metrics.HTTP_ERRORS_TOTAL.inc(mcp_server=mcp_server_label, error_type="notify_failed")
+            logger.error("http_client_notify_failed", method=method, error=str(e))
+            raise ClientError(f"notify_failed: {e}") from e
+
+        if response.status_code >= 300:
+            prometheus_metrics.HTTP_ERRORS_TOTAL.inc(
+                mcp_server=mcp_server_label, error_type=f"notify_http_{response.status_code}"
+            )
+            raise ClientError(f"notify_rejected: HTTP {response.status_code}")
+
+        logger.debug("http_client_notification_sent", method=method, status=response.status_code)
+
     def is_alive(self) -> bool:
         """Check if the HTTP client connection is alive.
 

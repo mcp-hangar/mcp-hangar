@@ -53,8 +53,10 @@ from mcp_hangar._sdk_compat import (
     make_mcp_error,
 )
 
+from .. import metrics as prometheus_metrics
 from ..application.read_models.tool_projection import get_tool_projection_registry
 from ..context import get_identity_context
+from ..logging_config import should_log_now
 from ..domain.services.tool_access_resolver import get_tool_access_resolver
 from ..server.tools.batch import BatchExecutor, CallSpec
 
@@ -238,24 +240,87 @@ def _build_mcp_tool_list(
         if proj is None:
             continue  # Should not happen after _build_flat_map, but be safe.
 
-        schema = proj.schema
-        input_schema = schema.get("inputSchema", {"type": "object", "properties": {}})
-        description = schema.get("description", "")
+        # Carry the WHOLE definition, renaming only what the flat surface owns.
+        # Hand-picking three keys dropped `title`, `annotations`, `execution`,
+        # `icons`, `_meta` -- and `outputSchema` with them, so a client behind the
+        # front door had nothing to validate structured output against (#880).
+        # `annotations.readOnlyHint` / `destructiveHint` are what a client uses to
+        # decide whether a call needs a human in front of it; a projection that
+        # discards them makes every tool look alike.
+        payload = dict(proj.schema)
+        payload["name"] = flat_name
+        payload.setdefault("description", "")
+        payload.setdefault("inputSchema", {"type": "object", "properties": {}})
 
         tools.append(
             # Built via model_validate with the wire alias ``inputSchema`` so the
             # same call works on SDK v1 (field ``inputSchema``) and v2 (renamed to
             # ``input_schema``, alias-populated).
-            MCPTool.model_validate(
-                {
-                    "name": flat_name,
-                    "description": description,
-                    "inputSchema": input_schema,
-                }
-            )
+            MCPTool.model_validate(payload)
         )
 
     return tools
+
+
+#: Causes an empty front-door projection can have. They are indistinguishable
+#: from outside -- same 200, same `{"tools": []}` -- and only one of them is a
+#: correct answer.
+EMPTY_NO_IDENTITY = "no_identity"
+EMPTY_NOTHING_DISCOVERED = "nothing_discovered"
+EMPTY_FILTERED = "filtered"
+
+
+def _classify_empty_projection(tenant_id: str | None) -> str:
+    """Why did this projection resolve to nothing?
+
+    Ordered by how wrong the answer is. No identity is a fail-closed deny that
+    looks exactly like an empty catalogue; nothing discovered is a cold replica
+    that will fix itself only if something starts a server; filtered is the one
+    case where `[]` is the truth.
+    """
+    if tenant_id is None:
+        return EMPTY_NO_IDENTITY
+    if not get_tool_projection_registry().all():
+        return EMPTY_NOTHING_DISCOVERED
+    return EMPTY_FILTERED
+
+
+def _report_empty_projection(tenant_id: str | None) -> None:
+    """Log and count an empty front-door `tools/list` (#887).
+
+    An operator watching a front door that has just been rolled sees healthy
+    pods, a 200, and tenants reporting that everything vanished. Nothing
+    distinguished "this tenant has no tools" (correct) from "this replica has
+    discovered nothing yet" (wrong, and self-inflicted by a restart).
+
+    Throttled per (reason, tenant): the condition holds for every request while
+    it lasts, so the first line is the signal.
+    """
+    reason = _classify_empty_projection(tenant_id)
+    prometheus_metrics.EMPTY_PROJECTION_TOTAL.inc(reason=reason)
+
+    if not should_log_now(f"empty_projection:{reason}:{tenant_id}"):
+        return
+
+    if reason == EMPTY_NO_IDENTITY:
+        logger.warning(
+            "empty_projection reason=no_identity -- front_door served zero tools because the caller "
+            "carried no tenant identity. Fail-closed deny, not an empty catalogue: check authentication."
+        )
+    elif reason == EMPTY_NOTHING_DISCOVERED:
+        logger.warning(
+            "empty_projection reason=nothing_discovered tenant=%s -- this replica has discovered no tools "
+            "at all, so the front door is serving an empty list to a valid tenant. Discovery is per-replica "
+            "and standalone mcp_servers are not started at boot, so a restart produces exactly this until "
+            "something starts them (#885).",
+            tenant_id,
+        )
+    else:
+        logger.info(
+            "empty_projection reason=filtered tenant=%s -- tools are discovered but policy or withdrawal "
+            "removed all of them for this tenant. This is a correct answer.",
+            tenant_id,
+        )
 
 
 def register_flat_tool_handlers(mcp: FastMCP) -> None:
@@ -297,6 +362,8 @@ def register_flat_tool_handlers(mcp: FastMCP) -> None:
 
         flat_map = _build_flat_map(tenant_id)
         tools = _build_mcp_tool_list(flat_map)
+        if not tools:
+            _report_empty_projection(tenant_id)
         return ListToolsResult(
             tools=tools,
             _meta=build_projected_list_cache_meta(tenant_id),

@@ -94,6 +94,11 @@ class BaseQueryHandler(QueryHandler):
             description=tool.description,
             input_schema=tool.input_schema,
             output_schema=tool.output_schema,
+            title=tool.title,
+            annotations=tool.annotations,
+            execution=tool.execution,
+            icons=tool.icons,
+            meta=tool.meta,
         )
 
 
