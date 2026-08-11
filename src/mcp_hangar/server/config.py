@@ -254,6 +254,60 @@ def _load_group_members(
             saga.register_member(member_id, group_id)
 
 
+def _register_config_pins(
+    tp_registry: Any,
+    mcp_server_id: str,
+    pins: Any,
+    *,
+    tenant_id: str | None,
+) -> None:
+    """Register a `{tool_name: sha256}` pin block on the projection registry.
+
+    Shared by the all-tenants block (`tool_projection.pins`) and the per-tenant
+    one (`tool_projection.tenant_overrides.<tenant>.pins`) so the two cannot
+    validate differently. A malformed entry is dropped with a warning naming it,
+    which is what the per-tenant block did before it had a sibling.
+
+    Args:
+        tp_registry: The ToolProjectionRegistry to register on.
+        mcp_server_id: Owning mcp_server identifier.
+        pins: The raw mapping from the config file; a non-mapping is ignored.
+        tenant_id: Tenant the pins apply to, or ``None`` for all tenants.
+    """
+    if not isinstance(pins, dict):
+        return
+    for tool_name, sha256 in pins.items():
+        if not (isinstance(tool_name, str) and tool_name):
+            continue
+        if not isinstance(sha256, str):
+            logger.warning(
+                "invalid_config_digest_pin",
+                mcp_server_id=mcp_server_id,
+                tool=tool_name,
+                tenant_id=tenant_id,
+                error="pin value must be a string sha256",
+            )
+            continue
+        try:
+            digest = ToolDigest(tool_name=tool_name, sha256=sha256)
+        except ValueError as e:
+            logger.warning(
+                "invalid_config_digest_pin",
+                mcp_server_id=mcp_server_id,
+                tool=tool_name,
+                tenant_id=tenant_id,
+                error=str(e),
+            )
+            continue
+        tp_registry.set_config_pin(mcp_server_id, tool_name, tenant_id, digest)
+        logger.debug(
+            "config_digest_pin_registered",
+            mcp_server_id=mcp_server_id,
+            tool=tool_name,
+            tenant_id=tenant_id,
+        )
+
+
 def _load_mcp_server_config(mcp_server_id: str, spec_dict: dict[str, Any]) -> McpServer:  # noqa: C901 -- baseline CC=37; split before extending
     """Load a single mcp_server configuration."""
     from ..domain.model.mcp_server_config import parse_tools_access_config
@@ -435,6 +489,16 @@ def _load_mcp_server_config(mcp_server_id: str, spec_dict: dict[str, Any]) -> Mc
                     value=enforcement_raw,
                 )
 
+        # All-tenants digest pins: {tool_name: sha256}. The counterpart of
+        # `withdrawn:` below, and the only pin that holds a caller carrying no
+        # tenant identity -- which is every caller when auth is off (#902).
+        _register_config_pins(
+            tp_registry,
+            mcp_server_id,
+            tool_projection_config.get("pins", {}),
+            tenant_id=None,
+        )
+
         # Global withdrawals (all tenants)
         global_withdrawn = tool_projection_config.get("withdrawn", [])
         if isinstance(global_withdrawn, list):
@@ -467,38 +531,12 @@ def _load_mcp_server_config(mcp_server_id: str, spec_dict: dict[str, Any]) -> Mc
                             )
 
                 # Per-tenant digest pins: {tool_name: sha256_hex}.
-                tenant_pins = tenant_spec.get("pins", {})
-                if isinstance(tenant_pins, dict):
-                    for tool_name, sha256 in tenant_pins.items():
-                        if not (isinstance(tool_name, str) and tool_name):
-                            continue
-                        if not isinstance(sha256, str):
-                            logger.warning(
-                                "invalid_config_digest_pin",
-                                mcp_server_id=mcp_server_id,
-                                tool=tool_name,
-                                tenant_id=tenant_id_key,
-                                error="pin value must be a string sha256",
-                            )
-                            continue
-                        try:
-                            digest = ToolDigest(tool_name=tool_name, sha256=sha256)
-                        except ValueError as e:
-                            logger.warning(
-                                "invalid_config_digest_pin",
-                                mcp_server_id=mcp_server_id,
-                                tool=tool_name,
-                                tenant_id=tenant_id_key,
-                                error=str(e),
-                            )
-                            continue
-                        tp_registry.set_config_pin(mcp_server_id, tool_name, tenant_id_key, digest)
-                        logger.debug(
-                            "config_digest_pin_registered",
-                            mcp_server_id=mcp_server_id,
-                            tool=tool_name,
-                            tenant_id=tenant_id_key,
-                        )
+                _register_config_pins(
+                    tp_registry,
+                    mcp_server_id,
+                    tenant_spec.get("pins", {}),
+                    tenant_id=tenant_id_key,
+                )
 
     # Register per-mcp_server concurrency limit if specified
     mcp_server_max_concurrency = spec_dict.get("max_concurrency")
