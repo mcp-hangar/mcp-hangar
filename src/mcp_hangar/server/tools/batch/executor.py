@@ -1114,8 +1114,11 @@ class BatchExecutor:
                 tool=p.call.tool,
                 tenant_id=p.caller_tenant_id,
             )
+            # "for this tenant" was true while a pin could only be declared for
+            # one, and became a small lie once an all-tenants pin could refuse a
+            # caller who carries no tenant at all (#902).
             return p.refuse(
-                f"Tool '{p.call.tool}' schema does not match the digest pinned for this tenant",
+                f"Tool '{p.call.tool}' schema does not match its pinned digest",
                 "ToolDigestMismatchError",
             )
         # Pin verified: bind the tool's approved digest to the request context so
