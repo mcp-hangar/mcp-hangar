@@ -9,6 +9,7 @@ import logging
 import threading
 from typing import TYPE_CHECKING, Any, Literal
 
+from ...logging_config import should_log_now
 from ..model.tool_catalog import ToolSchema
 from ..value_objects import ToolAccessPolicy
 
@@ -336,6 +337,23 @@ class ToolAccessResolver:
         # fires before the standalone/group branches below so an unauthenticated
         # external caller can never reach a tool via the group path either.
         if member_id is None and self._topology_mode == "front_door":
+            # Say so. Fail-closed is right; fail-closed and SILENT is what hides
+            # a wiring bug behind a policy-shaped symptom -- it is what made #856
+            # cost hours instead of minutes, because every observable surface was
+            # healthy and the one thing that disagreed produced no signal (#862).
+            #
+            # Throttled to once a minute: this branch fires on every request
+            # while the condition lasts, and a front door denying everything is a
+            # standing state, so the first line is the signal and the next
+            # thousand would bury it. Keyed by server so a single misconfigured
+            # upstream does not silence the rest.
+            if should_log_now(f"front_door_denied_no_tenant:{mcp_server_id}"):
+                logger.warning(
+                    "front_door_denied_no_tenant mcp_server_id=%s -- the caller carried no tenant identity, "
+                    "so every tool is denied. This is the missing-identity branch, NOT a policy decision: "
+                    "check that authentication is configured and that the identity reaches the handler.",
+                    mcp_server_id,
+                )
             return _DENY_ALL_POLICY
 
         # If member_id present but no group_id: server→member merge (standalone tenant policy)
