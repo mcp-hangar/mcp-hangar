@@ -5,6 +5,134 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [2.6.0](https://github.com/mcp-hangar/mcp-hangar/compare/v2.5.3...v2.6.0) (2026-08-11)
+
+### Added
+
+- **core:** a `front_door` gateway now serves each caller the management tools it
+  is authorized to call, instead of serving none to anybody. The mode swapped the
+  whole surface at bootstrap -- flat upstream names for everyone, `hangar_*` for
+  nobody -- so an operator on a front door had no control plane over MCP at all,
+  and turning the mode off to get one handed every agent the entire meta-API.
+  Satisfying both meant running two instances.
+
+  The decision is the one the invoke path already makes: a management tool appears
+  in `tools/list` exactly when the caller may call it, resolved from the same
+  `TOOL_PERMISSIONS` table and the same authorizer. So the list cannot drift from
+  the enforcement, a tool that was shown is callable, and a tool that was not is
+  still `-32601` if a client guesses the name. The surface is as narrow as the
+  caller's role: a principal that may invoke tools and administer nothing sees only
+  upstream tools, an operator holding `mcp_servers:read` reads the fleet, and
+  neither gets anything it could not already do over REST.
+
+  Stricter than the invoke path in one respect, deliberately: with auth off the
+  management surface is empty rather than complete. `--unsafe-no-auth` allows every
+  invoke for backward compatibility, but projecting on that rule would hand an
+  unauthenticated front-door caller a control plane it does not have today.
+
+  `egress` is unchanged and still serves every caller the whole meta-API -- there
+  it *is* the surface, and a client with no `hangar_call` can reach no upstream
+  tool at all.
+
+  Also adds `mcp_hangar_projected_tools`, a histogram of how many tools a
+  front-door `tools/list` returned, split by `kind=governed|management`. The
+  surface sits in an agent's prompt prefix and is paid for on every turn, and
+  nothing on the server side could see how large it was ([#912](https://github.com/mcp-hangar/mcp-hangar/pull/912))
+
+### Fixed
+
+- **core:** the README described digest pinning as failing closed without saying
+  what it needs to fire. A pin was addressable only per tenant, so on a gateway
+  with authentication off it matched nothing -- and the same list two lines down
+  states the front-door precondition plainly ("fail-closed on unknown identity"),
+  so the omission read as an absence of one rather than an oversight. The bullet
+  now names both forms: the all-tenants block that holds any caller, and the
+  per-tenant one that needs authentication for a caller to arrive carrying a
+  tenant ([#911](https://github.com/mcp-hangar/mcp-hangar/pull/911))
+- **core:** the SSRF denylist accepted IPv4-mapped IPv6 forms of addresses it
+  refused in ordinary form. `::ffff:169.254.169.254` and `::ffff:127.0.0.1`
+  passed both the floor and the human private-range checks because membership of
+  an `IPv6Address` in an IPv4 network is always false. `_in_any` now normalizes
+  mapped addresses before the check, so mapped and unmapped forms of the same
+  host get the same answer at registration and at connect-time pinning ([#900](https://github.com/mcp-hangar/mcp-hangar/pull/900))
+
+### Security
+
+- **core:** twenty-one of the twenty-two `hangar_*` tools authorized nothing.
+  `hangar_call` checked `tool:invoke` for every call it dispatched; `hangar_start`,
+  `hangar_stop`, `hangar_load`, `hangar_unload`, `hangar_reload_config`,
+  `hangar_quarantine`, `hangar_approve` and the rest mutated the fleet on the
+  say-so of anyone who got past authentication. The same operations over REST have
+  been permission-gated since 2.2.0, so with auth on, one identity in one process
+  was refused `POST /api/mcp_servers/{id}/stop` and accepted on `hangar_stop`.
+
+  Four places could have enforced it and none did: the MCP endpoint's ASGI wrapper
+  authenticates and never authorizes, no server middleware is installed, the
+  shared tool decorator did rate limiting and validation only, and the tool bodies
+  dispatch straight to the command bus.
+
+  Authorization is now resolved from the tool name against a declarative table, the
+  same inversion the REST route table made and for the same reason -- a tool absent
+  from the table is refused rather than public. Each entry mirrors what the REST
+  route performing the same operation already requires, so no role changes: reads
+  take `mcp_servers:read`, lifecycle takes `mcp_servers:lifecycle`, load and unload
+  take `mcp_servers:write`, reload takes `config:reload`, the discovery tools split
+  into `discovery:read` / `trigger` / `approve`. Auth off remains allow-all, as it
+  already was on the `hangar_call` path, so a `--unsafe-no-auth` gateway is
+  unchanged.
+
+  **A principal that could drive these tools over MCP without holding the matching
+  permission will now be refused.** If an API key was working through `hangar_*`
+  because MCP asked for nothing, it needs the role its REST equivalent has always
+  needed ([#910](https://github.com/mcp-hangar/mcp-hangar/pull/910))
+- **core:** a `remote` upstream declared in `config.yaml` gets neither half of the
+  SSRF policy, and now says so at startup. `enforce_ssrf` is set by the command
+  handler behind the REST API and discovery and nowhere else, so an endpoint the
+  API answers `400 ssrf_blocked` for -- `http://169.254.169.254/…`,
+  `http://10.0.0.5:8080/mcp` -- is accepted from the file without comment, and the
+  connect-time re-resolution and IP pinning added in 2.5.0 never runs for it
+  either. That second half is the one that closes DNS rebinding, so a config-file
+  upstream declared by hostname is re-resolved by httpx on every connect with no
+  policy applied.
+
+  The exclusion is deliberate: the operator's file is trusted, a config-file
+  upstream on a private address is usually meant, and applying the strict policy
+  there would refuse endpoints an operator chose. What was missing is that the
+  decision was invisible outside the source -- an operator who moved an upstream
+  out of the API and into the file lost two controls silently. Boot now logs one
+  line per such upstream naming it, its endpoint, and which protections do not
+  apply; an endpoint the strict policy would have refused outright is called out
+  in those terms rather than in general ones. Nothing is refused and no upstream
+  changes behaviour ([#908](https://github.com/mcp-hangar/mcp-hangar/pull/908))
+- **core:** digest pinning enforced nothing on a gateway with authentication
+  disabled, which is the configuration most evaluations run. A pin was
+  addressable only under `tool_projection.tenant_overrides.<tenant>.pins`, and
+  `resolve_pin` looked it up by tenant id -- but a tenant id reaches the call path
+  from exactly one place, `Principal.tenant_id`, and with auth off every caller is
+  anonymous and carries `None`. So no pin was ever matched, the gate took its "no
+  pin" branch, and every call went through unverified while `initialize` kept
+  advertising `io.mcp-hangar.digest-pinning` with all three enforcement modes.
+  Drift stayed computable and nothing stopped it. The same miss took out the task
+  path with it: the pin is what `create_task` binds a relayed task to, so tasks
+  were never bound to a digest either and the fail-closed re-verification on
+  result retrieval never had anything to check.
+
+  Pins can now be declared for all tenants, alongside the `withdrawn:` list they
+  mirror, and that block holds a caller carrying no tenant identity:
+
+  ```yaml
+  tool_projection:
+    digest_enforcement: block
+    pins:
+      refund: <sha256>
+  ```
+
+  A pin declared for a specific tenant still wins over the all-tenants one for
+  that tenant -- narrowest first, the order the tool-access policies already
+  resolve in. And a configuration that declares per-tenant pins while
+  authentication is off no longer starts: it names the pins it found and the auth
+  setting that makes them unmatchable, and points at both ways out ([#907](https://github.com/mcp-hangar/mcp-hangar/pull/907))
+
 ## [2.5.3](https://github.com/mcp-hangar/mcp-hangar/compare/v2.5.2...v2.5.3) (2026-08-11)
 
 ### Added
