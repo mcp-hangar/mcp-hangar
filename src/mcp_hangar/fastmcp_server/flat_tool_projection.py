@@ -59,6 +59,7 @@ from ..context import get_identity_context
 from ..logging_config import should_log_now
 from ..domain.services.tool_access_resolver import get_tool_access_resolver
 from ..server.tools.batch import BatchExecutor, CallSpec
+from ..server.tools.tool_permissions import management_tools_for
 
 if TYPE_CHECKING:
     pass
@@ -342,15 +343,36 @@ def register_flat_tool_handlers(mcp: FastMCP) -> None:
     """
     low = lowlevel_server(mcp)
 
-    async def _flat_list_tools() -> ListToolsResult:
+    async def _management_tools(mcp_ctx: Any) -> list[MCPTool]:
+        """The `hangar_*` tools this caller is authorized to call, if any (#904).
+
+        Empty for an agent principal and for an unauthenticated one, which is
+        every caller a front door served before this. Definitions come from the
+        registered surface rather than being rebuilt here, so a projected
+        management tool carries the same schema the invoke path validates.
+        """
+        permitted = management_tools_for(mcp_ctx)
+        if not permitted:
+            return []
+        registered = mcp.list_tools()
+        if hasattr(registered, "__await__"):
+            registered = await registered
+        return [tool for tool in registered if tool.name in permitted]
+
+    async def _flat_list_tools(mcp_ctx: Any = None) -> ListToolsResult:
         """Per-request filtered tools/list for front_door mode.
 
         Reads tenant_id from the identity context (bound at request time by
         the identity middleware, see issue #249).  Projects all active backend
         tools visible to this tenant from the ToolProjectionRegistry, applying
         both member-scope policy (resolver.filter_tools) and withdrawal status.
-        hangar_* meta-tools are intentionally absent — external agents must not
-        see the control plane surface.
+
+        Since #904 the `hangar_*` surface is no longer absent by construction:
+        it is absent for a caller that may not call it, which is every agent
+        principal and every unauthenticated one. An operator holding the
+        permissions those tools require sees them here, so one gateway can serve
+        an agent without a control plane and an operator with one -- the reason
+        the mode-wide swap was not enough (ADR-022).
 
         The response advertises a per-tenant SEP-2549 ``cacheScope`` under
         ``_meta`` (fail-closed to a non-shareable ``no-store`` token when the
@@ -361,15 +383,24 @@ def register_flat_tool_handlers(mcp: FastMCP) -> None:
         tenant_id: str | None = identity.caller.tenant_id if identity is not None else None
 
         flat_map = _build_flat_map(tenant_id)
-        tools = _build_mcp_tool_list(flat_map)
-        if not tools:
+        governed = _build_mcp_tool_list(flat_map)
+        management = await _management_tools(mcp_ctx)
+
+        # Reported on the governed tools alone. An operator who can see the
+        # control plane but no upstream tools is still looking at an empty
+        # catalogue, and that is the condition worth a line in the log.
+        if not governed:
             _report_empty_projection(tenant_id)
+
+        prometheus_metrics.PROJECTED_TOOLS.observe(len(governed), kind="governed")
+        prometheus_metrics.PROJECTED_TOOLS.observe(len(management), kind="management")
+
         return ListToolsResult(
-            tools=tools,
+            tools=governed + management,
             _meta=build_projected_list_cache_meta(tenant_id),
         )
 
-    async def _flat_call_tool(name: str, arguments: dict[str, Any]) -> Any:
+    async def _flat_call_tool(name: str, arguments: dict[str, Any], mcp_ctx: Any = None) -> Any:
         """Flat tool call dispatch for front_door mode.
 
         Resolution:
@@ -378,6 +409,12 @@ def register_flat_tool_handlers(mcp: FastMCP) -> None:
         3. Route through the EXISTING enforcement path via BatchExecutor so
            that policy checks, withdrawal rejection, and TOCTOU are handled
            identically to the batch path — no enforcement duplication.
+
+        A name that is not an upstream tool may still be a management tool this
+        caller is authorized for (#904), in which case it is dispatched to the
+        registered `hangar_*` implementation. The check is the same one the
+        listing used, so a tool that was shown is callable and one that was not
+        is still `-32601`: not-shown and not-callable are the same decision.
 
         Protocol errors:
         - Unknown flat name (absent from tenant's current list) → McpError
@@ -397,6 +434,13 @@ def register_flat_tool_handlers(mcp: FastMCP) -> None:
         flat_map = _build_flat_map(tenant_id)
 
         if name not in flat_map:
+            if name in management_tools_for(mcp_ctx):
+                # The registered tool, reached through the SDK's own dispatch so
+                # it passes `mcp_tool_wrapper` -- which authorizes it a second
+                # time (#909). The context is forwarded because that is where the
+                # wrapper reads the principal from; without it the tool would be
+                # refused as anonymous.
+                return await mcp.call_tool(name, arguments or {}, context=mcp_ctx)
             # Unknown flat name → -32601 (method/tool not found).
             raise make_mcp_error(METHOD_NOT_FOUND, f"Tool '{name}' not found")
 
@@ -458,22 +502,26 @@ def register_flat_tool_handlers(mcp: FastMCP) -> None:
         # took its `member_id is None` deny-all branch -- front-door mode
         # projected zero tools to every authenticated tenant, with the empty
         # list indistinguishable from "no tools configured".
+        # `ctx` is also what carries the principal into the management-surface
+        # decision (#904), so it is threaded down rather than only used to bind
+        # the tenant: `identity_context_var` carries ids and not roles, and the
+        # question here is what this caller may call.
         async def _list_v2(ctx: Any, params: Any) -> ListToolsResult:
             token = bind_caller_identity(ctx)
             try:
-                return await _flat_list_tools()
+                return await _flat_list_tools(ctx)
             finally:
                 release_caller_identity(token)
 
         async def _call_v2(ctx: Any, params: Any) -> Any:
             token = bind_caller_identity(ctx)
             try:
-                return await _call_v2_inner(params)
+                return await _call_v2_inner(params, ctx)
             finally:
                 release_caller_identity(token)
 
-        async def _call_v2_inner(params: Any) -> Any:
-            out = await _flat_call_tool(params.name, params.arguments or {})
+        async def _call_v2_inner(params: Any, ctx: Any) -> Any:
+            out = await _flat_call_tool(params.name, params.arguments or {}, ctx)
             if isinstance(out, CallToolResult):  # error path already built one
                 return out
             # success path returned the raw backend result dict; wrap it.
