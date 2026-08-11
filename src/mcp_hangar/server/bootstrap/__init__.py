@@ -38,6 +38,7 @@ from ...fastmcp_server.config import HANGAR_SERVER_NAME
 from ...fastmcp_server.flat_tool_projection import maybe_register_flat_tool_handlers
 from ...fastmcp_server.governance_extensions import advertise_governance_extensions
 from ...fastmcp_server.modern_surface import register_modern_surface
+from ...fastmcp_server.served_capabilities import withdraw_unserved_capabilities
 from ...infrastructure.persistence.saga_state_store import NullSagaStateStore, SagaStateStore
 from ...gc import BackgroundWorker
 from ...logging_config import get_logger
@@ -214,6 +215,11 @@ def build_serving_mcp_server() -> FastMCP:
     # SEP-2575 `server/discover`. Without this the shipped `serve --http` surface
     # 404s the modern/stateless discovery entrypoint the 2.x line depends on.
     register_modern_surface(mcp_server)
+    # Last, after every registration above: the SDK derives `prompts` and
+    # `resources` from handlers it registers unconditionally, so both were
+    # advertised and neither served (#888). Runs here as well as in the factory
+    # -- wiring only the factory is dead on the shipped path (#596).
+    withdraw_unserved_capabilities(mcp_server)
     return mcp_server
 
 

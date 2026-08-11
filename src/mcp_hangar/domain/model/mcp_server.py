@@ -950,6 +950,18 @@ class McpServer(AggregateRoot):
                     negotiated_protocol_version=negotiated,
                 )
 
+            # Step 3 of the MCP lifecycle, and the reason it is here rather than
+            # nowhere: after a successful `initialize` the client MUST send
+            # `notifications/initialized`, and a server is entitled to defer work
+            # until it arrives. We sent `initialize` then `tools/list` and
+            # nothing else, so every upstream was left permanently mid-handshake
+            # -- against the reference server that costs a tool registered in its
+            # `oninitialized` handler, which is then neither listed nor callable
+            # (12 tools seen instead of 13). Must precede `tools/list` for that
+            # reason. Skipped on the stateless branch above: no handshake
+            # happened, so there is no session to finish.
+            self._notify_initialized(client)
+
         # Discover tools
         tools_resp = client.call("tools/list", {})
         if "error" in tools_resp:
@@ -981,6 +993,35 @@ class McpServer(AggregateRoot):
                     "statically-configured tool(s) not returned by the provider's tools/list; "
                     "they are uncallable and will raise ToolNotFoundError at invocation"
                 )
+
+    def _notify_initialized(self, client: Any) -> None:
+        """Finish the MCP lifecycle: tell the upstream the handshake is complete.
+
+        Best-effort on purpose. The notification is a spec MUST, but it has no
+        response, and a start that already produced a successful ``initialize``
+        must not be failed by an upstream that mishandles it -- that would turn
+        a conformance fix into an availability regression for servers this
+        gateway serves today. A failure is logged loudly instead: the visible
+        symptom is a short tool catalogue, which is exactly the kind of silent
+        gap this issue was opened about.
+        """
+        notify = getattr(client, "notify", None)
+        if notify is None:
+            logger.warning(
+                "mcp_initialized_notification_unsupported",
+                mcp_server_id=self.mcp_server_id,
+                client=type(client).__name__,
+            )
+            return
+
+        try:
+            notify("notifications/initialized")
+        except Exception as exc:  # noqa: BLE001 -- fault-barrier: a missed notification must not fail a start
+            logger.warning(
+                "mcp_initialized_notification_failed",
+                mcp_server_id=self.mcp_server_id,
+                error=str(exc),
+            )
 
     def _log_client_error(self, client: Any, error_msg: str) -> None:
         """Log detailed error info including stderr and exit code for debugging."""
