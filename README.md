@@ -62,7 +62,7 @@ curl -sSL https://mcp-hangar.io/install.sh | bash && mcp-hangar init -y && mcp-h
 The enforcement plane — what the call path actually decides:
 
 - **L7 egress policy** -- allow/deny in MCP semantics: which upstream, which tool, which arguments. Deterministic, with no anomaly scores and no learned baselines, so every verdict is reproducible from the policy that produced it.
-- **Tool-schema digest pinning** -- an upstream that changes a pinned tool's schema fails closed instead of quietly serving a different tool.
+- **Tool-schema digest pinning** -- an upstream that changes a pinned tool's schema fails closed instead of quietly serving a different tool. Pin for every caller with `tool_projection.pins`, or per tenant, which needs authentication so a caller arrives carrying one.
 - **Auth & RBAC** -- API-key and OIDC/JWT identity with role-based access and RFC 8707 audience binding; bootstrap the first administrator with `mcp-hangar auth bootstrap-admin`, and every call carries a verified principal into the audit trail.
 - **Per-tenant tool projection** -- front-door mode presents a different executable surface per caller, fail-closed on unknown identity.
 - **Human-in-the-loop approvals** -- gate a call on an explicit decision, authorized and attributed to a real principal. Delivery channels are pluggable; core ships no vendor integration.
