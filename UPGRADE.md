@@ -91,12 +91,12 @@ which is finer than one entry here could express.
 was working because MCP asked for nothing, it now needs the role its REST
 equivalent has always needed. Two combinations surprise people:
 
-* **`provider-admin` cannot start, stop, load, unload or reload.** It holds
+- **`provider-admin` cannot start, stop, load, unload or reload.** It holds
   `mcp_servers:read` and not `:write` or `:lifecycle`, and not `config:reload` —
   deliberately, and it could not do those things through the REST API either.
   An operator key that needs lifecycle wants `admin`, or a custom role holding
   exactly the permissions above.
-* **`developer` cannot approve, quarantine, trigger discovery, rebalance a group
+- **`developer` cannot approve, quarantine, trigger discovery, rebalance a group
   or read metrics.** It holds fleet read, write and lifecycle, and none of the
   discovery-approval, group-update or metrics permissions.
 
