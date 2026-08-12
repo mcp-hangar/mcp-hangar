@@ -9,7 +9,7 @@ from typing import Any
 
 from mcp_hangar.logging_config import get_logger
 
-from .delivery.dashboard import DashboardApprovalDelivery
+from .delivery.event_stream import EventStreamApprovalDelivery
 from .delivery.noop import NoOpApprovalDelivery
 from .hold_registry import ApprovalHoldRegistry
 from .persistence.sqlite_approval_repository import SqliteApprovalRepository
@@ -65,8 +65,22 @@ DELIVERY_ENTRY_POINT_GROUP = "mcp_hangar.approvals.delivery"
 
 #: Channels core itself provides. Neither reaches outside the process.
 _BUILTIN_DELIVERIES: dict[str, Any] = {
-    "dashboard": lambda _config: DashboardApprovalDelivery(),
+    "event_stream": lambda _config: EventStreamApprovalDelivery(),
     "noop": lambda _config: NoOpApprovalDelivery(),
+}
+
+#: The channel selected when the config names none.
+DEFAULT_CHANNEL = "event_stream"
+
+#: Old channel names that still resolve, and what they resolve to. ``dashboard``
+#: was named after the Hangar Cloud management UI, which was archived with that
+#: tier and will not ship. The name outlived the product and described a push
+#: this repo never performed; the push that does happen rides the domain event
+#: stream, which is what the channel is now called. Kept resolving rather than
+#: rejected: an operator who wrote ``channel: dashboard`` gets the same delivery
+#: they had, plus one line telling them the name moved.
+_CHANNEL_ALIASES: dict[str, str] = {
+    "dashboard": "event_stream",
 }
 
 
@@ -97,8 +111,8 @@ def _load_delivery_entry_point(channel: str) -> Any | None:
 def _build_delivery(config: dict | None) -> Any:
     """Select the approval delivery channel.
 
-    Core ships ``dashboard`` and ``noop`` and knows no vendors. Anything else is
-    looked up in the ``mcp_hangar.approvals.delivery`` entry-point group, so a
+    Core ships ``event_stream`` and ``noop`` and knows no vendors. Anything else
+    is looked up in the ``mcp_hangar.approvals.delivery`` entry-point group, so a
     vendor adapter is installed rather than imported from here.
 
     This used to hardcode ``"slack"`` and import ``.delivery.slack``, which put a
@@ -115,23 +129,34 @@ def _build_delivery(config: dict | None) -> Any:
         return NoOpApprovalDelivery()
 
     approvals_config = config.get("approvals", {})
-    channel = approvals_config.get("channel", "dashboard")
+    configured = approvals_config.get("channel", DEFAULT_CHANNEL)
+    channel = _CHANNEL_ALIASES.get(configured, configured)
+    if channel != configured:
+        logger.warning(
+            "approval_delivery_channel_renamed",
+            channel=configured,
+            resolved_to=channel,
+        )
+
+    #: An aliased channel keeps reading its old config block, so a rename never
+    #: silently drops the settings underneath it.
+    channel_config = approvals_config.get(channel) or approvals_config.get(configured) or {}
 
     builtin = _BUILTIN_DELIVERIES.get(channel)
     if builtin is not None:
-        return builtin(approvals_config.get(channel, {}))
+        return builtin(channel_config)
 
     factory = _load_delivery_entry_point(channel)
     if factory is not None:
         try:
-            return factory(approvals_config.get(channel, {}))
+            return factory(channel_config)
         except Exception:  # noqa: BLE001 -- same reasoning as above
             logger.warning("approval_delivery_construction_failed", channel=channel, exc_info=True)
             return NoOpApprovalDelivery()
 
     logger.warning(
         "approval_delivery_channel_unknown",
-        channel=channel,
+        channel=configured,
         known=sorted(_BUILTIN_DELIVERIES),
         group=DELIVERY_ENTRY_POINT_GROUP,
     )

@@ -59,7 +59,7 @@ class ToolAccessPolicy:
     deny_list: tuple[str, ...] = field(default_factory=tuple)
     approval_list: tuple[str, ...] = field(default_factory=tuple)
     approval_timeout_seconds: int = 300
-    approval_channel: str = "dashboard"
+    approval_channel: str = "event_stream"
 
     def __post_init__(self) -> None:
         """Validate patterns are valid strings."""
@@ -298,7 +298,7 @@ class _CompositePolicy(ToolAccessPolicy):
     _description: str = field(default="composite")
     _approval_patterns: tuple[str, ...] = field(default_factory=tuple)
     _merged_timeout: int = field(default=300)
-    _merged_channel: str = field(default="dashboard")
+    _merged_channel: str = field(default="event_stream")
 
     def __init__(
         self,
@@ -306,7 +306,7 @@ class _CompositePolicy(ToolAccessPolicy):
         description: str = "composite",
         approval_patterns: tuple[str, ...] = (),
         merged_timeout: int = 300,
-        merged_channel: str = "dashboard",
+        merged_channel: str = "event_stream",
     ) -> None:
         object.__setattr__(self, "allow_list", ())
         object.__setattr__(self, "deny_list", ())

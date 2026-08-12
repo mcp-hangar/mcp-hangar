@@ -61,7 +61,10 @@ class PostgresApprovalRepository:
         requested_at TEXT NOT NULL,
         expires_at TEXT NOT NULL,
         state TEXT NOT NULL DEFAULT 'pending',
-        channel TEXT NOT NULL DEFAULT 'dashboard',
+        -- The default is inert: every write supplies `channel` explicitly.
+        -- It is here only so the column can be NOT NULL for rows written
+        -- before the field existed.
+        channel TEXT NOT NULL DEFAULT 'event_stream',
         decided_by TEXT,
         decided_at TEXT,
         reason TEXT,

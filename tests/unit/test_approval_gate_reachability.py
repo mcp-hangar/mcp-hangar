@@ -141,12 +141,12 @@ class TestApprovalListReachesThePolicy:
         policy = ToolsConfig(
             approval_list=["deploy_*"],
             approval_timeout_seconds=600,
-            approval_channel="dashboard",
+            approval_channel="event_stream",
         ).to_policy()
 
         assert policy.approval_list == ("deploy_*",)
         assert policy.approval_timeout_seconds == 600
-        assert policy.approval_channel == "dashboard"
+        assert policy.approval_channel == "event_stream"
         assert policy.requires_approval("deploy_prod") is True
 
     def test_a_tools_block_with_only_an_approval_list_is_a_policy(self):
