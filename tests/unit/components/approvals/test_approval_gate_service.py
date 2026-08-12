@@ -94,6 +94,97 @@ def service(repo, hold_registry, event_bus, delivery):
     )
 
 
+class TestTheEffectiveChannelOnTheRecord:
+    """The record, the event, the span and the metric must agree (#914)."""
+
+    async def test_a_policy_that_names_a_channel_puts_that_on_the_request(self, service, repo, delivery):
+        policy = ToolAccessPolicy(
+            approval_list=("update_page",),
+            approval_timeout_seconds=5,
+            approval_channel="pigeon-post",
+        )
+
+        async def deny_later():
+            await asyncio.sleep(0.05)
+            pending = await repo.list_pending()
+            await service.resolve(pending[0].approval_id, False, "admin@test.com")
+
+        _ = asyncio.create_task(deny_later())
+        await service.check(
+            mcp_server_id="notion",
+            tool_name="update_page",
+            arguments={},
+            policy=policy,
+            correlation_id="corr-channel",
+        )
+
+        assert delivery.sent[0].channel == "pigeon-post"
+
+    async def test_a_policy_that_names_none_falls_back_to_the_deliverys_default(self, repo, hold_registry, event_bus):
+        """Empty means "the deployment's approvals.channel", which the router knows."""
+        routing_delivery = FakeDelivery()
+        routing_delivery.default_channel = "event_stream"
+        service = ApprovalGateService(
+            repository=repo,
+            hold_registry=hold_registry,
+            event_bus=event_bus,
+            delivery=routing_delivery,
+        )
+        policy = ToolAccessPolicy(approval_list=("update_page",), approval_timeout_seconds=5)
+
+        async def deny_later():
+            await asyncio.sleep(0.05)
+            pending = await repo.list_pending()
+            await service.resolve(pending[0].approval_id, False, "admin@test.com")
+
+        _ = asyncio.create_task(deny_later())
+        await service.check(
+            mcp_server_id="notion",
+            tool_name="update_page",
+            arguments={},
+            policy=policy,
+            correlation_id="corr-default",
+        )
+
+        assert routing_delivery.sent[0].channel == "event_stream"
+
+
+class TestABrokenAdapterDoesNotBreakTheHold:
+    async def test_a_delivery_that_raises_still_holds_and_still_decides(self, repo, hold_registry, event_bus):
+        """The notifier must not be able to decide, including by failing (#914)."""
+
+        class _Exploding:
+            default_channel = "pigeon-post"
+
+            async def send(self, request):
+                raise RuntimeError("the loft is on fire")
+
+        service = ApprovalGateService(
+            repository=repo,
+            hold_registry=hold_registry,
+            event_bus=event_bus,
+            delivery=_Exploding(),
+        )
+        policy = ToolAccessPolicy(approval_list=("update_page",), approval_timeout_seconds=5)
+
+        async def approve_later():
+            await asyncio.sleep(0.05)
+            pending = await repo.list_pending()
+            await service.resolve(pending[0].approval_id, True, "admin@test.com")
+
+        task = asyncio.create_task(approve_later())
+        result = await service.check(
+            mcp_server_id="notion",
+            tool_name="update_page",
+            arguments={},
+            policy=policy,
+            correlation_id="corr-boom",
+        )
+        await task
+
+        assert result.approved is True
+
+
 class TestApprovalGateServiceCheck:
     async def test_check_tool_not_on_approval_list_returns_not_required(self, service):
         """Tool not requiring approval returns immediately."""
