@@ -5,7 +5,7 @@
 in the core tree. The outbound side was already behind the ``ApprovalDelivery``
 protocol -- the coupling was the branch above it.
 
-Core now ships ``dashboard`` and ``noop`` and resolves anything else from the
+Core now ships ``event_stream`` and ``noop`` and resolves anything else from the
 ``mcp_hangar.approvals.delivery`` entry-point group. The load-bearing claims:
 
 * a core install with no vendor package works;
@@ -24,8 +24,15 @@ from __future__ import annotations
 from types import SimpleNamespace
 from unittest.mock import patch
 
-from mcp_hangar.approvals.bootstrap import DELIVERY_ENTRY_POINT_GROUP, _build_delivery
-from mcp_hangar.approvals.delivery.dashboard import DashboardApprovalDelivery
+from structlog.testing import capture_logs
+
+from mcp_hangar.approvals.bootstrap import (
+    _BUILTIN_DELIVERIES,
+    DEFAULT_CHANNEL,
+    DELIVERY_ENTRY_POINT_GROUP,
+    _build_delivery,
+)
+from mcp_hangar.approvals.delivery.event_stream import EventStreamApprovalDelivery
 from mcp_hangar.approvals.delivery.noop import NoOpApprovalDelivery
 
 
@@ -37,8 +44,8 @@ def _config(channel: str, **channel_config):
 
 
 class TestBuiltins:
-    def test_dashboard_is_built_in(self) -> None:
-        assert isinstance(_build_delivery(_config("dashboard")), DashboardApprovalDelivery)
+    def test_the_event_stream_channel_is_built_in(self) -> None:
+        assert isinstance(_build_delivery(_config("event_stream")), EventStreamApprovalDelivery)
 
     def test_noop_is_built_in(self) -> None:
         assert isinstance(_build_delivery(_config("noop")), NoOpApprovalDelivery)
@@ -46,8 +53,53 @@ class TestBuiltins:
     def test_no_config_at_all_is_noop(self) -> None:
         assert isinstance(_build_delivery(None), NoOpApprovalDelivery)
 
-    def test_default_channel_is_dashboard(self) -> None:
-        assert isinstance(_build_delivery({"approvals": {}}), DashboardApprovalDelivery)
+    def test_default_channel_is_the_event_stream(self) -> None:
+        assert DEFAULT_CHANNEL == "event_stream"
+        assert isinstance(_build_delivery({"approvals": {}}), EventStreamApprovalDelivery)
+
+
+class TestTheRetiredDashboardName:
+    """``dashboard`` named the Hangar Cloud UI, which was archived with that tier.
+
+    The name described a push core never performed (#914). It still resolves,
+    because an operator carrying it in a config file should get the delivery
+    they had rather than a silent downgrade to ``noop`` -- which is what the
+    unknown-channel branch would otherwise hand them.
+    """
+
+    def test_the_old_name_still_resolves(self) -> None:
+        assert isinstance(_build_delivery(_config("dashboard")), EventStreamApprovalDelivery)
+
+    def test_the_old_name_is_not_offered_as_a_choice(self) -> None:
+        assert "dashboard" not in _BUILTIN_DELIVERIES
+
+    def test_using_the_old_name_says_where_it_went(self) -> None:
+        with capture_logs() as logs:
+            _build_delivery(_config("dashboard"))
+
+        renamed = [e for e in logs if e.get("event") == "approval_delivery_channel_renamed"]
+        assert renamed, logs
+        assert renamed[0]["channel"] == "dashboard"
+        assert renamed[0]["resolved_to"] == "event_stream"
+
+    def test_the_current_name_is_not_nagged_about(self) -> None:
+        with capture_logs() as logs:
+            _build_delivery(_config("event_stream"))
+
+        assert [e for e in logs if e.get("log_level") == "warning"] == []
+
+    def test_the_old_name_keeps_reading_its_own_config_block(self) -> None:
+        """A rename must not quietly drop the settings underneath it."""
+        seen = {}
+
+        class _Adapter:
+            def __init__(self, config):
+                seen.update(config)
+
+        with patch.dict(_BUILTIN_DELIVERIES, {"event_stream": _Adapter}):
+            _build_delivery({"approvals": {"channel": "dashboard", "dashboard": {"quiet_hours": "22-06"}}})
+
+        assert seen == {"quiet_hours": "22-06"}
 
 
 class TestVendorAdaptersLoadFromEntryPoints:

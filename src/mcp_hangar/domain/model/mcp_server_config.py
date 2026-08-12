@@ -79,7 +79,7 @@ class ToolsConfig:
           approval_list:
             - deploy_*
           approval_timeout_seconds: 600
-          approval_channel: dashboard
+          approval_channel: event_stream
 
     ``approval_list`` used to exist only on :class:`ToolAccessPolicy`, with no
     config key anywhere that could populate it -- so the approval gate that
@@ -91,7 +91,7 @@ class ToolsConfig:
     deny_list: list[str] = field(default_factory=list)
     approval_list: list[str] = field(default_factory=list)
     approval_timeout_seconds: int = 300
-    approval_channel: str = "dashboard"
+    approval_channel: str = "event_stream"
 
     def __post_init__(self) -> None:
         """Validate and warn if both lists are defined."""

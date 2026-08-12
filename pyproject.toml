@@ -349,7 +349,6 @@ unreferenced = [
   "server/api/serializers.py::serialize_health_info",
   "server/api/serializers.py::serialize_tool_info",
   "server/bootstrap/truncation.py::reset_truncation",
-  "server/tools/approvals.py::hangar_approve_prompt",
 ]
 exported_unreferenced = [
   "application/event_handlers/alert_handler.py::reset_alert_handler",

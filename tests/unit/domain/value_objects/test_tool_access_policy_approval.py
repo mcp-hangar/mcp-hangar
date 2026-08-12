@@ -231,7 +231,7 @@ class TestApprovalConfigFields:
 
     def test_default_channel(self):
         policy = ToolAccessPolicy()
-        assert policy.approval_channel == "dashboard"
+        assert policy.approval_channel == "event_stream"
 
     def test_custom_timeout_and_channel(self):
         policy = ToolAccessPolicy(
