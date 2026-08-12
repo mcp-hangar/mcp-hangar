@@ -229,9 +229,10 @@ class TestApprovalConfigFields:
         policy = ToolAccessPolicy()
         assert policy.approval_timeout_seconds == 300
 
-    def test_default_channel(self):
+    def test_default_channel_is_unset_meaning_the_deployments_channel(self):
+        """Empty defers to ``approvals.channel``; a name routes to that channel (#914)."""
         policy = ToolAccessPolicy()
-        assert policy.approval_channel == "event_stream"
+        assert policy.approval_channel == ""
 
     def test_custom_timeout_and_channel(self):
         policy = ToolAccessPolicy(

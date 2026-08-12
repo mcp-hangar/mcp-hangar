@@ -24,6 +24,11 @@ from mcp_hangar.domain.events import (
     ToolApprovalGranted,
     ToolApprovalRequested,
 )
+from mcp_hangar.metrics import (
+    APPROVAL_DECISIONS_TOTAL,
+    APPROVAL_DELIVERIES_TOTAL,
+    APPROVAL_REQUESTS_TOTAL,
+)
 from mcp_hangar.redactor import get_default_redactor
 from mcp_hangar.domain.value_objects.tool_access_policy import ToolAccessPolicy
 from mcp_hangar.logging_config import get_logger
@@ -184,11 +189,17 @@ class ApprovalGateService:
         if not policy.requires_approval(tool_name):
             return ApprovalResult.not_required()
 
+        # An approval records the channel that will actually carry it. The policy
+        # may name none, which means the deployment's configured channel --
+        # resolving it once here keeps the record, the event, the metric and the
+        # span attribute all saying the same thing the router will do.
+        channel = policy.approval_channel or getattr(self._delivery, "default_channel", "")
+
         tracer = get_tracer(__name__)
         with tracer.start_as_current_span("approval_gate.flow") as gate_span:
             gate_span.set_attribute("mcp.server.id", resolved_provider_id)
             gate_span.set_attribute("gen_ai.tool.name", tool_name)
-            gate_span.set_attribute("approval.channel", policy.approval_channel)
+            gate_span.set_attribute("approval.channel", channel)
             gate_span.set_attribute("approval.timeout_seconds", policy.approval_timeout_seconds)
 
             approval_id = str(uuid.uuid4())
@@ -207,20 +218,21 @@ class ApprovalGateService:
                 requested_at=now,
                 expires_at=expires_at,
                 state=ApprovalState.PENDING,
-                channel=policy.approval_channel,
+                channel=channel,
                 correlation_id=correlation_id,
                 tenant_id=tenant_id,
                 requested_by=requested_by,
             )
 
             await self._repository.save(request)
+            APPROVAL_REQUESTS_TOTAL.inc(channel=channel)
 
             requested_event = ToolApprovalRequested(
                 approval_id=approval_id,
                 mcp_server_id=resolved_provider_id,
                 tool_name=tool_name,
                 arguments_hash=args_hash,
-                channel=policy.approval_channel,
+                channel=channel,
                 expires_at=expires_at.isoformat(),
                 correlation_id=correlation_id,
             )
@@ -231,6 +243,7 @@ class ApprovalGateService:
             try:
                 await self._delivery.send(request)
             except Exception:  # noqa: BLE001
+                APPROVAL_DELIVERIES_TOTAL.inc(channel=channel, outcome="failed")
                 logger.warning(
                     "approval_delivery_failed",
                     approval_id=approval_id,
@@ -264,6 +277,7 @@ class ApprovalGateService:
                     )
                 )
                 gate_span.set_attribute("approval.result", "granted")
+                APPROVAL_DECISIONS_TOTAL.inc(channel=channel, decision="granted")
                 return ApprovalResult.granted(approval_id)
 
             if decision is False:
@@ -284,6 +298,7 @@ class ApprovalGateService:
                     )
                 )
                 gate_span.set_attribute("approval.result", "denied")
+                APPROVAL_DECISIONS_TOTAL.inc(channel=channel, decision="denied")
                 return ApprovalResult.denied(approval_id, reason)
 
             # Timeout
@@ -299,6 +314,7 @@ class ApprovalGateService:
                 )
             )
             gate_span.set_attribute("approval.result", "expired")
+            APPROVAL_DECISIONS_TOTAL.inc(channel=channel, decision="expired")
             return ApprovalResult.expired(approval_id)
 
     async def resolve(

@@ -25,6 +25,12 @@ subsystem and what asked for it.
 Set ``startup_checks: {enforce: false}`` to downgrade the refusals to error
 logs. There is deliberately no switch that makes an unreachable subsystem
 silent.
+
+One check runs the other way round: an approval gate whose delivery channel
+notifies nobody logs at ERROR by default and refuses only when a deployment asks
+for it with ``approvals: {delivery: {required: true}}``. That gate is already
+fail-closed by timeout, so the missing thing is a signal, not an enforcement
+(#914).
 """
 
 from __future__ import annotations
@@ -83,6 +89,62 @@ def _approval_gate_requirements(config: dict[str, Any], context: Any) -> list[Su
     return requirements
 
 
+def _approval_delivery_requirements(config: dict[str, Any], context: Any) -> list[SubsystemRequirement]:
+    """A gate that holds calls, and a channel that tells nobody they are held.
+
+    The gate is fail-closed: the wait elapses, ``ApprovalResult.expired()``
+    denies, nothing executes unapproved. So this is *not* the fail-open shape
+    the approval-gate check above guards, and it does not refuse the boot on its
+    own -- refusing over a missing notification channel would turn a degraded
+    notify path into an outage, and approvals remain resolvable over REST.
+
+    What it is, is five minutes of every gated call hanging and then erroring,
+    which from the outside is indistinguishable from a broken gateway. The
+    remediation an operator reaches for under that pressure is emptying
+    ``approval_list``: fail-closed in code, fail-open in the organisation
+    (#914). An ERROR line naming the server and the channel is the difference
+    between diagnosing that in a minute and reaching for the gate.
+
+    A deployment that wants the stricter reading sets
+    ``approvals.delivery.required: true`` and gets a refusal instead. Opt-in,
+    because the honest default here is loud, not fatal.
+    """
+    from ...approvals.bootstrap import channel_reaches_a_human, configured_channel
+    from ...domain.services import get_tool_access_resolver
+
+    if getattr(context, "approval_gate", None) is None:
+        return []  # Already the subject of _approval_gate_requirements.
+
+    approvals_config = config.get("approvals")
+    delivery_config = approvals_config.get("delivery", {}) if isinstance(approvals_config, dict) else {}
+    required = bool(delivery_config.get("required", False)) if isinstance(delivery_config, dict) else False
+
+    default_channel = configured_channel(config)
+    reachable_channels: dict[str, bool] = {}
+
+    requirements: list[SubsystemRequirement] = []
+    for scope, policy in get_tool_access_resolver().iter_registered_policies():
+        if not getattr(policy, "approval_list", ()):
+            continue
+
+        channel = getattr(policy, "approval_channel", "") or default_channel
+        if channel not in reachable_channels:
+            reachable_channels[channel] = channel_reaches_a_human(channel)
+
+        if reachable_channels[channel]:
+            continue
+
+        requirements.append(
+            SubsystemRequirement(
+                subsystem="approval_delivery",
+                required_by=f"tools.approval_list on {scope} (channel {channel!r})",
+                reachable=False,
+                fail_closed=required,
+            )
+        )
+    return requirements
+
+
 def _task_relay_requirements(config: dict[str, Any], context: Any) -> list[SubsystemRequirement]:
     """The ADR-014 governed task relay, when the kill-switch says it should serve.
 
@@ -108,6 +170,7 @@ def _task_relay_requirements(config: dict[str, Any], context: Any) -> list[Subsy
 #: function here -- the enforcement, logging and refusal behaviour is shared.
 REQUIREMENT_CHECKS = (
     _approval_gate_requirements,
+    _approval_delivery_requirements,
     _task_relay_requirements,
 )
 
