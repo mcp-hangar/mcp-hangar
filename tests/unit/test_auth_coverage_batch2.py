@@ -23,6 +23,7 @@ from mcp_hangar.domain.exceptions import (
     TokenLifetimeExceededError,
 )
 from mcp_hangar.domain.value_objects import Principal, PrincipalId, PrincipalType
+from mcp_hangar.domain.value_objects.tool_access_policy import ToolAccessPolicy
 
 
 # ---------------------------------------------------------------------------
@@ -1609,12 +1610,15 @@ class TestNullAuthComponents:
 class TestReplayTapPolicies:
     """Test _replay_tap_policies function."""
 
+    # ToolAccessPolicy is what the store hands back now: a whole policy, not the
+    # two lists a caller has to remember to widen (#915).
+
     def test_replay_provider_scope(self):
         from mcp_hangar.auth.bootstrap import _replay_tap_policies
 
         mock_tap_store = MagicMock()
         mock_tap_store.list_all_policies.return_value = [
-            ("provider", "my-provider", ["tool_a", "tool_b"], ["tool_c"]),
+            ("provider", "my-provider", ToolAccessPolicy(allow_list=("tool_a", "tool_b"), deny_list=("tool_c",))),
         ]
 
         mock_resolver = MagicMock()
@@ -1630,7 +1634,7 @@ class TestReplayTapPolicies:
 
         mock_tap_store = MagicMock()
         mock_tap_store.list_all_policies.return_value = [
-            ("group", "my-group", ["tool_x"], []),
+            ("group", "my-group", ToolAccessPolicy(allow_list=("tool_x",))),
         ]
 
         mock_resolver = MagicMock()
@@ -1646,7 +1650,7 @@ class TestReplayTapPolicies:
 
         mock_tap_store = MagicMock()
         mock_tap_store.list_all_policies.return_value = [
-            ("member", "group1:member1", ["tool_y"], []),
+            ("member", "group1:member1", ToolAccessPolicy(allow_list=("tool_y",))),
         ]
 
         mock_resolver = MagicMock()
@@ -1662,7 +1666,7 @@ class TestReplayTapPolicies:
 
         mock_tap_store = MagicMock()
         mock_tap_store.list_all_policies.return_value = [
-            ("member", "standalone", ["tool_z"], []),
+            ("member", "standalone", ToolAccessPolicy(allow_list=("tool_z",))),
         ]
 
         mock_resolver = MagicMock()
@@ -1678,8 +1682,8 @@ class TestReplayTapPolicies:
 
         mock_tap_store = MagicMock()
         mock_tap_store.list_all_policies.return_value = [
-            ("provider", "p1", ["tool_a"], []),
-            ("provider", "p2", ["tool_b"], []),
+            ("provider", "p1", ToolAccessPolicy(allow_list=("tool_a",))),
+            ("provider", "p2", ToolAccessPolicy(allow_list=("tool_b",))),
         ]
 
         mock_resolver = MagicMock()

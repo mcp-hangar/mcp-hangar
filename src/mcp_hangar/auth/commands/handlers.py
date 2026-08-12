@@ -399,15 +399,6 @@ class SetToolAccessPolicyHandler(CommandHandler):
             deny_count=len(command.deny_list),
         )
 
-        # 1. Persist to store
-        self._tap_store.set_policy(
-            scope=command.scope,
-            target_id=command.target_id,
-            allow_list=command.allow_list,
-            deny_list=command.deny_list,
-        )
-
-        # 2. Update in-memory resolver so runtime enforcement is immediate
         from mcp_hangar.domain.services.tool_access_resolver import get_tool_access_resolver
 
         resolver = get_tool_access_resolver()
@@ -419,14 +410,19 @@ class SetToolAccessPolicyHandler(CommandHandler):
         # enforcement path (BatchExecutor._check_approval_gate) reads this same
         # resolver, so the gate was gone immediately and invisibly. An update
         # may narrow access; it must never remove a consent requirement.
-        existing = resolver.get_configured_policy(command.scope, command.target_id)
-        policy = ToolAccessPolicy(
-            allow_list=tuple(command.allow_list),
-            deny_list=tuple(command.deny_list),
-            approval_list=existing.approval_list if existing else (),
-            approval_timeout_seconds=existing.approval_timeout_seconds if existing else 300,
-            approval_channel=existing.approval_channel if existing else "dashboard",
+        policy = ToolAccessPolicy.with_access_lists(
+            tuple(command.allow_list),
+            tuple(command.deny_list),
+            carrying_from=resolver.get_configured_policy(command.scope, command.target_id),
         )
+
+        # 1. Persist the same policy the resolver is about to enforce. Writing
+        #    the command's two lists here instead left the store holding less
+        #    than the resolver, and the next restart replayed that lesser row
+        #    over the gate (#915).
+        self._tap_store.set_policy(command.scope, command.target_id, policy)
+
+        # 2. Update in-memory resolver so runtime enforcement is immediate
         if command.scope == "provider":
             resolver.set_mcp_server_policy(command.target_id, policy)
         elif command.scope == "group":

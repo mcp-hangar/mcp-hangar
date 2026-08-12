@@ -124,6 +124,48 @@ class ToolAccessPolicy:
         """
         return not self.allow_list and not self.deny_list and not self.approval_list
 
+    @classmethod
+    def with_access_lists(
+        cls,
+        allow_list: tuple[str, ...],
+        deny_list: tuple[str, ...],
+        *,
+        carrying_from: "ToolAccessPolicy | None",
+    ) -> "ToolAccessPolicy":
+        """Restate the access lists, carrying the consent gate forward unchanged.
+
+        Two callers rebuild a policy from allow/deny alone: the REST update
+        command, which carries only those two lists, and the startup replay of
+        the policy store, whose rows predate the approval columns. Both used to
+        construct :class:`ToolAccessPolicy` directly, and both therefore reset
+        ``approval_list`` to empty -- silently removing human consent from every
+        tool that had it (#915, and #656 before it on the command path).
+
+        An update may narrow access. It must never remove a consent
+        requirement, so that decision lives here rather than being re-derived,
+        and re-forgotten, at each call site.
+
+        Args:
+            allow_list: The restated allow patterns.
+            deny_list: The restated deny patterns.
+            carrying_from: The policy currently in force, whose approval gate is
+                carried onto the result. ``None`` means there is nothing to
+                carry and the gate defaults apply.
+
+        Returns:
+            A policy with the given access lists and the existing consent gate.
+        """
+        if carrying_from is None:
+            return cls(allow_list=allow_list, deny_list=deny_list)
+
+        return cls(
+            allow_list=allow_list,
+            deny_list=deny_list,
+            approval_list=carrying_from.approval_list,
+            approval_timeout_seconds=carrying_from.approval_timeout_seconds,
+            approval_channel=carrying_from.approval_channel,
+        )
+
     @staticmethod
     def merge(broader: "ToolAccessPolicy", narrower: "ToolAccessPolicy") -> "ToolAccessPolicy":
         """Merge two policies where narrower scope can only restrict further.
