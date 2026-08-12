@@ -52,14 +52,17 @@ class ToolAccessPolicy:
         deny_list: Patterns for tools to deny. Overrides both allow and approval.
         approval_list: Patterns for tools requiring human approval before execution.
         approval_timeout_seconds: Seconds to wait for approval decision.
-        approval_channel: Delivery channel for approval notifications.
+        approval_channel: Which delivery channel notifies for this policy.
+            Empty -- the default -- means the deployment's ``approvals.channel``.
+            A policy that names one routes to it (#914); before that it was
+            merged carefully across scopes and dispatched nowhere.
     """
 
     allow_list: tuple[str, ...] = field(default_factory=tuple)
     deny_list: tuple[str, ...] = field(default_factory=tuple)
     approval_list: tuple[str, ...] = field(default_factory=tuple)
     approval_timeout_seconds: int = 300
-    approval_channel: str = "event_stream"
+    approval_channel: str = ""
 
     def __post_init__(self) -> None:
         """Validate patterns are valid strings."""
@@ -298,7 +301,7 @@ class _CompositePolicy(ToolAccessPolicy):
     _description: str = field(default="composite")
     _approval_patterns: tuple[str, ...] = field(default_factory=tuple)
     _merged_timeout: int = field(default=300)
-    _merged_channel: str = field(default="event_stream")
+    _merged_channel: str = field(default="")
 
     def __init__(
         self,
@@ -306,7 +309,7 @@ class _CompositePolicy(ToolAccessPolicy):
         description: str = "composite",
         approval_patterns: tuple[str, ...] = (),
         merged_timeout: int = 300,
-        merged_channel: str = "event_stream",
+        merged_channel: str = "",
     ) -> None:
         object.__setattr__(self, "allow_list", ())
         object.__setattr__(self, "deny_list", ())

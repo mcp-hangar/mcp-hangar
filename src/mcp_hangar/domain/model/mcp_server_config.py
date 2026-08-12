@@ -79,7 +79,7 @@ class ToolsConfig:
           approval_list:
             - deploy_*
           approval_timeout_seconds: 600
-          approval_channel: event_stream
+          approval_channel: slack     # optional; defaults to approvals.channel
 
     ``approval_list`` used to exist only on :class:`ToolAccessPolicy`, with no
     config key anywhere that could populate it -- so the approval gate that
@@ -91,7 +91,7 @@ class ToolsConfig:
     deny_list: list[str] = field(default_factory=list)
     approval_list: list[str] = field(default_factory=list)
     approval_timeout_seconds: int = 300
-    approval_channel: str = "event_stream"
+    approval_channel: str = ""
 
     def __post_init__(self) -> None:
         """Validate and warn if both lists are defined."""
@@ -119,7 +119,9 @@ class ToolsConfig:
         if self.approval_timeout_seconds <= 0:
             raise ValueError(f"Invalid approval_timeout_seconds: {self.approval_timeout_seconds!r}")
 
-        if not isinstance(self.approval_channel, str) or not self.approval_channel.strip():
+        # Empty is the default and means "the deployment's approvals.channel".
+        # Whitespace is not: that is a typo that would route nowhere.
+        if not isinstance(self.approval_channel, str) or (self.approval_channel and not self.approval_channel.strip()):
             raise ValueError(f"Invalid approval_channel: {self.approval_channel!r}")
 
     def to_policy(self) -> ToolAccessPolicy:
