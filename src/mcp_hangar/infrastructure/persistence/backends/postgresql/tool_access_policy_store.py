@@ -34,10 +34,58 @@ CREATE TABLE IF NOT EXISTS {table} (
     target_id   VARCHAR(256) NOT NULL,
     allow_list  JSONB NOT NULL DEFAULT '[]',
     deny_list   JSONB NOT NULL DEFAULT '[]',
+    approval_list JSONB NOT NULL DEFAULT '[]',
+    approval_timeout_seconds INTEGER,
+    approval_channel VARCHAR(64),
     updated_at  TIMESTAMP WITH TIME ZONE NOT NULL DEFAULT NOW(),
     PRIMARY KEY (scope, target_id)
 );
 """
+
+#: Widening for a table that already exists -- ``CREATE TABLE IF NOT EXISTS``
+#: does nothing to one, so a deployment that has ever written a policy keeps the
+#: pre-approval columns until this runs. The approval columns are nullable
+#: rather than carrying a SQL default: the default lives on
+#: :class:`ToolAccessPolicy`, and NULL reads back as "whatever it says today".
+TOOL_ACCESS_POLICIES_MIGRATION = """
+ALTER TABLE {table} ADD COLUMN IF NOT EXISTS approval_list JSONB NOT NULL DEFAULT '[]';
+ALTER TABLE {table} ADD COLUMN IF NOT EXISTS approval_timeout_seconds INTEGER;
+ALTER TABLE {table} ADD COLUMN IF NOT EXISTS approval_channel VARCHAR(64);
+"""
+
+
+#: The columns :func:`_policy_from_row` expects, in order. One definition, so a
+#: SELECT and the unpacking below it cannot drift apart.
+_POLICY_COLUMNS = "allow_list, deny_list, approval_list, approval_timeout_seconds, approval_channel"
+
+
+def _decode(value: object) -> list[str]:
+    """psycopg2 decodes JSONB by default; a mocked cursor may hand back text."""
+    if isinstance(value, str):
+        return list(json.loads(value))
+    return list(value) if value else []
+
+
+def _policy_from_row(row) -> ToolAccessPolicy:
+    """Rebuild a whole policy from the :data:`_POLICY_COLUMNS` of one row.
+
+    NULL approval columns are a row written before the gate had somewhere to
+    live; they mean "nothing was gated here", not "fail the replay".
+    """
+    allow_list, deny_list, approval_list, timeout, channel = row
+
+    optional: dict[str, object] = {}
+    if timeout is not None:
+        optional["approval_timeout_seconds"] = timeout
+    if channel is not None:
+        optional["approval_channel"] = channel
+
+    return ToolAccessPolicy(
+        allow_list=tuple(_decode(allow_list)),
+        deny_list=tuple(_decode(deny_list)),
+        approval_list=tuple(_decode(approval_list)),
+        **optional,  # type: ignore[arg-type]
+    )
 
 
 class PostgresToolAccessPolicyStore(IToolAccessPolicyStore):
@@ -69,10 +117,12 @@ class PostgresToolAccessPolicyStore(IToolAccessPolicyStore):
     def initialize(self) -> None:
         """Create the tool_access_policies table if it does not exist."""
         schema = TOOL_ACCESS_POLICIES_SCHEMA.format(table=self._table)
+        migration = TOOL_ACCESS_POLICIES_MIGRATION.format(table=self._table)
         with self._connections.get_connection() as conn:
             try:
                 with conn.cursor() as cur:
                     cur.execute(postgres_ddl(schema))
+                    cur.execute(postgres_ddl(migration))
                 conn.commit()
             except Exception:
                 # `IConnectionFactory.get_connection()` returns a pooled
@@ -85,34 +135,42 @@ class PostgresToolAccessPolicyStore(IToolAccessPolicyStore):
                 raise
         logger.info("postgres_tap_store_initialized", table=self._table)
 
-    def set_policy(
-        self,
-        scope: str,
-        target_id: str,
-        allow_list: list[str],
-        deny_list: list[str],
-    ) -> None:
+    def set_policy(self, scope: str, target_id: str, policy: ToolAccessPolicy) -> None:
         """Persist a tool access policy (upsert).
 
         Args:
             scope: "mcp_server", "group", or "member".
             target_id: Provider/group/member identifier.
-            allow_list: Allowed tool patterns.
-            deny_list: Denied tool patterns.
+            policy: The policy to persist, in full -- including the approval
+                gate, which the store used to have no column for (#915).
         """
         with self._connections.get_connection() as conn:
             try:
                 with conn.cursor() as cur:
                     cur.execute(
                         f"""
-                        INSERT INTO {self._table} (scope, target_id, allow_list, deny_list, updated_at)
-                        VALUES (%s, %s, %s, %s, NOW())
+                        INSERT INTO {self._table} (
+                            scope, target_id, allow_list, deny_list,
+                            approval_list, approval_timeout_seconds, approval_channel, updated_at
+                        )
+                        VALUES (%s, %s, %s, %s, %s, %s, %s, NOW())
                         ON CONFLICT (scope, target_id) DO UPDATE SET
                             allow_list = EXCLUDED.allow_list,
                             deny_list = EXCLUDED.deny_list,
+                            approval_list = EXCLUDED.approval_list,
+                            approval_timeout_seconds = EXCLUDED.approval_timeout_seconds,
+                            approval_channel = EXCLUDED.approval_channel,
                             updated_at = NOW()
                         """,
-                        (scope, target_id, json.dumps(allow_list), json.dumps(deny_list)),
+                        (
+                            scope,
+                            target_id,
+                            json.dumps(list(policy.allow_list)),
+                            json.dumps(list(policy.deny_list)),
+                            json.dumps(list(policy.approval_list)),
+                            policy.approval_timeout_seconds,
+                            policy.approval_channel,
+                        ),
                     )
                 conn.commit()
             except Exception:
@@ -135,26 +193,14 @@ class PostgresToolAccessPolicyStore(IToolAccessPolicyStore):
         """
         with self._connections.get_connection() as conn, conn.cursor() as cur:
             cur.execute(
-                f"SELECT allow_list, deny_list FROM {self._table} WHERE scope = %s AND target_id = %s",
+                f"SELECT {_POLICY_COLUMNS} FROM {self._table} WHERE scope = %s AND target_id = %s",
                 (scope, target_id),
             )
             row = cur.fetchone()
             if row is None:
                 return None
 
-            allow_list, deny_list = row
-            # psycopg2 decodes JSONB columns to Python objects by default, but
-            # a raw/mocked cursor (or a differently configured connection) may
-            # still hand back the JSON text -- decode defensively either way.
-            if isinstance(allow_list, str):
-                allow_list = json.loads(allow_list)
-            if isinstance(deny_list, str):
-                deny_list = json.loads(deny_list)
-
-            return ToolAccessPolicy(
-                allow_list=tuple(allow_list),
-                deny_list=tuple(deny_list),
-            )
+            return _policy_from_row(row)
 
     def clear_policy(self, scope: str, target_id: str) -> None:
         """Remove a stored policy.
@@ -179,21 +225,12 @@ class PostgresToolAccessPolicyStore(IToolAccessPolicyStore):
                 raise
         logger.info("tap_policy_cleared", scope=scope, target_id=target_id)
 
-    def list_all_policies(self) -> list[tuple[str, str, list[str], list[str]]]:
+    def list_all_policies(self) -> list[tuple[str, str, ToolAccessPolicy]]:
         """Return all stored policies for startup replay.
 
         Returns:
-            List of (scope, target_id, allow_list, deny_list) tuples.
+            List of (scope, target_id, policy) tuples.
         """
         with self._connections.get_connection() as conn, conn.cursor() as cur:
-            cur.execute(f"SELECT scope, target_id, allow_list, deny_list FROM {self._table}")
-            rows = cur.fetchall()
-
-            result: list[tuple[str, str, list[str], list[str]]] = []
-            for scope, target_id, allow_list, deny_list in rows:
-                if isinstance(allow_list, str):
-                    allow_list = json.loads(allow_list)
-                if isinstance(deny_list, str):
-                    deny_list = json.loads(deny_list)
-                result.append((scope, target_id, allow_list, deny_list))
-            return result
+            cur.execute(f"SELECT scope, target_id, {_POLICY_COLUMNS} FROM {self._table}")
+            return [(scope, target_id, _policy_from_row(rest)) for scope, target_id, *rest in cur.fetchall()]

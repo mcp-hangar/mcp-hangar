@@ -19,6 +19,8 @@ from unittest.mock import MagicMock, Mock, patch
 
 import pytest
 
+from mcp_hangar.domain.value_objects.tool_access_policy import ToolAccessPolicy
+
 
 # ============================================================================
 # PostgresApiKeyStore Tests
@@ -1175,7 +1177,7 @@ class TestSQLiteToolAccessPolicyStore:
 
     def test_set_and_get_policy(self):
         store, _ = self._make_store()
-        store.set_policy("provider", "math", allow_list=["add", "sub"], deny_list=["delete"])
+        store.set_policy("provider", "math", ToolAccessPolicy(allow_list=("add", "sub"), deny_list=("delete",)))
 
         policy = store.get_policy("provider", "math")
         assert policy is not None
@@ -1191,8 +1193,8 @@ class TestSQLiteToolAccessPolicyStore:
 
     def test_set_policy_upsert(self):
         store, _ = self._make_store()
-        store.set_policy("provider", "math", allow_list=["add"], deny_list=[])
-        store.set_policy("provider", "math", allow_list=["add", "mul"], deny_list=["rm"])
+        store.set_policy("provider", "math", ToolAccessPolicy(allow_list=("add",)))
+        store.set_policy("provider", "math", ToolAccessPolicy(allow_list=("add", "mul"), deny_list=("rm",)))
 
         policy = store.get_policy("provider", "math")
         assert policy.allow_list == ("add", "mul")
@@ -1201,7 +1203,7 @@ class TestSQLiteToolAccessPolicyStore:
 
     def test_clear_policy(self):
         store, _ = self._make_store()
-        store.set_policy("provider", "math", allow_list=["add"], deny_list=[])
+        store.set_policy("provider", "math", ToolAccessPolicy(allow_list=("add",)))
         store.clear_policy("provider", "math")
 
         policy = store.get_policy("provider", "math")
@@ -1215,9 +1217,9 @@ class TestSQLiteToolAccessPolicyStore:
 
     def test_list_all_policies(self):
         store, _ = self._make_store()
-        store.set_policy("provider", "math", allow_list=["add"], deny_list=[])
-        store.set_policy("group", "grp1", allow_list=[], deny_list=["rm"])
-        store.set_policy("member", "g1:m1", allow_list=["x"], deny_list=["y"])
+        store.set_policy("provider", "math", ToolAccessPolicy(allow_list=("add",)))
+        store.set_policy("group", "grp1", ToolAccessPolicy(deny_list=("rm",)))
+        store.set_policy("member", "g1:m1", ToolAccessPolicy(allow_list=("x",), deny_list=("y",)))
 
         all_policies = store.list_all_policies()
         assert len(all_policies) == 3
@@ -1234,7 +1236,7 @@ class TestSQLiteToolAccessPolicyStore:
 
     def test_close_checkpoints_and_closes(self):
         store, path = self._make_store()
-        store.set_policy("provider", "x", allow_list=[], deny_list=[])
+        store.set_policy("provider", "x", ToolAccessPolicy(allow_list=("read_*",)))
         store.close()
 
         # After close, connection should be None

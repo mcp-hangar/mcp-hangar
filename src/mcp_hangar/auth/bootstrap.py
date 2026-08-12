@@ -258,12 +258,26 @@ class NullAuthComponents(AuthComponents):
 def _replay_tap_policies(tap_store: Any) -> None:
     """Replay persisted TAP policies into the in-memory ToolAccessResolver on startup.
 
-    Reads all rows from the SQLiteToolAccessPolicyStore and applies them to the
+    Reads all rows from the policy store and applies them to the
     ToolAccessResolver singleton so runtime enforcement is consistent with the
     persisted state after a server restart.
 
+    This runs *after* the YAML config has registered its policies -- config
+    loading is at the top of ``bootstrap()``, this is inside ``load_components``
+    below it -- and ``set_*_policy`` overwrites rather than merges. So a replay
+    that reconstructs a policy from fewer fields than the resolver already holds
+    does not merely fail to add: it deletes. Rebuilding from ``allow_list`` and
+    ``deny_list`` alone is how a tool gated in YAML came back ungated after a
+    restart, with the startup reachability check seeing nothing left to demand
+    the gate (#915).
+
+    Two things stop that now. The store carries the approval fields, so a row
+    written by this version round-trips whole; and a row written by an older one
+    -- where those columns are NULL and the gate would still read as empty --
+    carries the resolver's existing gate forward instead of erasing it.
+
     Args:
-        tap_store: SQLiteToolAccessPolicyStore instance.
+        tap_store: The policy store to replay from.
     """
     from mcp_hangar.domain.services.tool_access_resolver import ToolAccessResolver
     from mcp_hangar.domain.value_objects.tool_access_policy import ToolAccessPolicy
@@ -282,11 +296,22 @@ def _replay_tap_policies(tap_store: Any) -> None:
         return
 
     policies = tap_store.list_all_policies()
-    for scope, target_id, allow_list, deny_list in policies:
-        policy = ToolAccessPolicy(
-            allow_list=tuple(allow_list),
-            deny_list=tuple(deny_list),
-        )
+    for scope, target_id, stored in policies:
+        policy = stored
+        if not stored.approval_list:
+            in_force = resolver.get_configured_policy(scope, target_id)
+            if in_force is not None and in_force.approval_list:
+                policy = ToolAccessPolicy.with_access_lists(
+                    stored.allow_list,
+                    stored.deny_list,
+                    carrying_from=in_force,
+                )
+                logger.info(
+                    "tap_replay_carried_approval_gate",
+                    scope=scope,
+                    target_id=target_id,
+                    reason="stored_row_predates_approval_columns",
+                )
         try:
             if scope == "provider":
                 resolver.set_mcp_server_policy(target_id, policy)

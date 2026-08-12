@@ -19,6 +19,7 @@ Contract inventory (6 optional-module contracts + 4 pre-existing):
 
 import pytest
 
+from mcp_hangar.domain.value_objects.tool_access_policy import ToolAccessPolicy
 from mcp_hangar.domain.contracts.authentication import (
     AuthRequest,
     IApiKeyStore,
@@ -219,7 +220,7 @@ class TestNullToolAccessPolicyStore:
     def test_set_policy_is_silent_noop(self) -> None:
         store = NullToolAccessPolicyStore()
         # Should not raise
-        store.set_policy("provider", "math", ["add"], ["delete"])
+        store.set_policy("provider", "math", ToolAccessPolicy(allow_list=("add",), deny_list=("delete",)))
 
     def test_clear_policy_is_silent_noop(self) -> None:
         store = NullToolAccessPolicyStore()

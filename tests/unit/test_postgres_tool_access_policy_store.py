@@ -62,11 +62,18 @@ class TestInitialize:
     def test_creates_schema_and_commits(self):
         store, mock_conn, mock_cursor = _make_store()
         store.initialize()
-        mock_cursor.execute.assert_called_once()
-        sql = mock_cursor.execute.call_args[0][0]
-        assert "CREATE TABLE IF NOT EXISTS tool_access_policies" in sql
-        assert "PRIMARY KEY (scope, target_id)" in sql
+        create_sql, migrate_sql = [call[0][0] for call in mock_cursor.execute.call_args_list]
+        assert "CREATE TABLE IF NOT EXISTS tool_access_policies" in create_sql
+        assert "PRIMARY KEY (scope, target_id)" in create_sql
         mock_conn.commit.assert_called_once()
+
+    def test_an_existing_table_is_widened_for_the_approval_gate(self):
+        """CREATE TABLE IF NOT EXISTS is a no-op against a table from before #915."""
+        store, mock_conn, mock_cursor = _make_store()
+        store.initialize()
+        migrate_sql = mock_cursor.execute.call_args_list[1][0][0]
+        for column in ("approval_list", "approval_timeout_seconds", "approval_channel"):
+            assert f"ADD COLUMN IF NOT EXISTS {column}" in migrate_sql
 
     def test_with_prefix_uses_prefixed_table_name(self):
         store, mock_conn, mock_cursor = _make_store(table_prefix="myprefix_")
@@ -79,7 +86,7 @@ class TestInitialize:
 class TestSetPolicy:
     def test_upserts_with_on_conflict_and_json_encoded_lists(self):
         store, mock_conn, mock_cursor = _make_store()
-        store.set_policy("mcp_server", "srv-1", ["read_*"], ["delete_*"])
+        store.set_policy("mcp_server", "srv-1", ToolAccessPolicy(allow_list=("read_*",), deny_list=("delete_*",)))
 
         mock_cursor.execute.assert_called_once()
         sql, params = mock_cursor.execute.call_args[0]
@@ -93,18 +100,34 @@ class TestSetPolicy:
         assert json.loads(params[3]) == ["delete_*"]
         mock_conn.commit.assert_called_once()
 
+    def test_the_approval_gate_is_written_too(self):
+        """The store used to have no column for it, so a restart replayed it away (#915)."""
+        store, mock_conn, mock_cursor = _make_store()
+        store.set_policy(
+            "mcp_server",
+            "payments",
+            ToolAccessPolicy(approval_list=("refund_*",), approval_timeout_seconds=600, approval_channel="pigeon"),
+        )
+
+        sql, params = mock_cursor.execute.call_args[0]
+        assert "approval_list = EXCLUDED.approval_list" in sql
+        assert json.loads(params[4]) == ["refund_*"]
+        assert params[5] == 600
+        assert params[6] == "pigeon"
+
     def test_uses_prefixed_table_name(self):
         store, mock_conn, mock_cursor = _make_store(table_prefix="auth_")
-        store.set_policy("group", "grp-1", [], [])
+        store.set_policy("group", "grp-1", ToolAccessPolicy())
         sql = mock_cursor.execute.call_args[0][0]
         assert "auth_tool_access_policies" in sql
 
     def test_empty_lists_round_trip_as_empty_json_arrays(self):
         store, mock_conn, mock_cursor = _make_store()
-        store.set_policy("member", "user-1", [], [])
+        store.set_policy("member", "user-1", ToolAccessPolicy())
         _, params = mock_cursor.execute.call_args[0]
         assert params[2] == "[]"
         assert params[3] == "[]"
+        assert params[4] == "[]"
 
 
 class TestGetPolicy:
@@ -116,27 +139,40 @@ class TestGetPolicy:
 
     def test_found_policy_returns_tool_access_policy_with_tuples(self):
         store, mock_conn, mock_cursor = _make_store()
-        mock_cursor.fetchone.return_value = (["read_*"], ["delete_*"])
+        mock_cursor.fetchone.return_value = (["read_*"], ["delete_*"], ["refund_*"], 600, "pigeon")
         result = store.get_policy("mcp_server", "srv-1")
         assert isinstance(result, ToolAccessPolicy)
         assert result.allow_list == ("read_*",)
         assert result.deny_list == ("delete_*",)
+        assert result.approval_list == ("refund_*",)
+        assert result.approval_timeout_seconds == 600
+        assert result.approval_channel == "pigeon"
+
+    def test_null_approval_columns_fall_back_to_the_dataclass_defaults(self):
+        """A row written before the approval columns existed (#915)."""
+        store, mock_conn, mock_cursor = _make_store()
+        mock_cursor.fetchone.return_value = (["read_*"], [], None, None, None)
+        result = store.get_policy("mcp_server", "srv-1")
+        assert result.approval_list == ()
+        assert result.approval_timeout_seconds == ToolAccessPolicy().approval_timeout_seconds
+        assert result.approval_channel == ToolAccessPolicy().approval_channel
 
     def test_decodes_json_string_columns_defensively(self):
         """A raw/mocked cursor may hand back JSON text instead of a decoded
         object even though psycopg2 normally decodes JSONB automatically."""
         store, mock_conn, mock_cursor = _make_store()
-        mock_cursor.fetchone.return_value = (json.dumps(["a", "b"]), json.dumps(["c"]))
+        mock_cursor.fetchone.return_value = (json.dumps(["a", "b"]), json.dumps(["c"]), json.dumps(["d"]), None, None)
         result = store.get_policy("group", "grp-1")
         assert result.allow_list == ("a", "b")
         assert result.deny_list == ("c",)
+        assert result.approval_list == ("d",)
 
     def test_query_uses_placeholders_and_where_clause(self):
         store, mock_conn, mock_cursor = _make_store()
         mock_cursor.fetchone.return_value = None
         store.get_policy("mcp_server", "srv-1")
         sql, params = mock_cursor.execute.call_args[0]
-        assert "SELECT allow_list, deny_list" in sql
+        assert "SELECT allow_list, deny_list, approval_list" in sql
         assert "WHERE scope = %s AND target_id = %s" in sql
         assert params == ("mcp_server", "srv-1")
 
@@ -168,22 +204,34 @@ class TestListAllPolicies:
     def test_returns_tuples_with_decoded_lists(self):
         store, mock_conn, mock_cursor = _make_store()
         mock_cursor.fetchall.return_value = [
-            ("mcp_server", "srv-1", ["read_*"], ["delete_*"]),
-            ("group", "grp-1", [], []),
+            ("mcp_server", "srv-1", ["read_*"], ["delete_*"], ["refund_*"], 600, "pigeon"),
+            ("group", "grp-1", [], [], [], None, None),
         ]
         result = store.list_all_policies()
         assert result == [
-            ("mcp_server", "srv-1", ["read_*"], ["delete_*"]),
-            ("group", "grp-1", [], []),
+            (
+                "mcp_server",
+                "srv-1",
+                ToolAccessPolicy(
+                    allow_list=("read_*",),
+                    deny_list=("delete_*",),
+                    approval_list=("refund_*",),
+                    approval_timeout_seconds=600,
+                    approval_channel="pigeon",
+                ),
+            ),
+            ("group", "grp-1", ToolAccessPolicy()),
         ]
 
     def test_decodes_json_string_columns_defensively(self):
         store, mock_conn, mock_cursor = _make_store()
         mock_cursor.fetchall.return_value = [
-            ("member", "user-1", json.dumps(["a"]), json.dumps(["b"])),
+            ("member", "user-1", json.dumps(["a"]), json.dumps(["b"]), json.dumps(["c"]), None, None),
         ]
         result = store.list_all_policies()
-        assert result == [("member", "user-1", ["a"], ["b"])]
+        assert result == [
+            ("member", "user-1", ToolAccessPolicy(allow_list=("a",), deny_list=("b",), approval_list=("c",)))
+        ]
 
     def test_selects_all_four_columns(self):
         store, mock_conn, mock_cursor = _make_store()
@@ -209,7 +257,7 @@ class TestPoolHygieneOnError:
         mock_cursor.execute.side_effect = RuntimeError("boom")
 
         with pytest.raises(RuntimeError, match="boom"):
-            store.set_policy("mcp_server", "srv-1", ["read_*"], [])
+            store.set_policy("mcp_server", "srv-1", ToolAccessPolicy(allow_list=("read_*",)))
 
         mock_conn.rollback.assert_called_once()
         mock_conn.commit.assert_not_called()
@@ -236,6 +284,6 @@ class TestPoolHygieneOnError:
 
     def test_set_policy_success_path_never_rolls_back(self):
         store, mock_conn, mock_cursor = _make_store()
-        store.set_policy("mcp_server", "srv-1", [], [])
+        store.set_policy("mcp_server", "srv-1", ToolAccessPolicy())
         mock_conn.rollback.assert_not_called()
         mock_conn.commit.assert_called_once()

@@ -295,20 +295,19 @@ class IToolAccessPolicyStore(Protocol):
     """
 
     @abstractmethod
-    def set_policy(
-        self,
-        scope: str,
-        target_id: str,
-        allow_list: list[str],
-        deny_list: list[str],
-    ) -> None:
+    def set_policy(self, scope: str, target_id: str, policy: ToolAccessPolicy) -> None:
         """Persist a tool access policy for a scope/target combination.
+
+        Takes the whole policy rather than the two lists one command happens to
+        carry. The narrower signature is how a consent gate went missing: a
+        store that only knows about ``allow_list`` and ``deny_list`` cannot
+        round-trip ``approval_list``, so a restart replayed a policy with the
+        gate silently removed (#915).
 
         Args:
             scope: "mcp_server", "group", or "member".
             target_id: Identifier of the mcp_server, group, or member.
-            allow_list: Tool name patterns to allow.
-            deny_list: Tool name patterns to deny.
+            policy: The policy to persist, in full.
         """
         ...
 
@@ -336,11 +335,15 @@ class IToolAccessPolicyStore(Protocol):
         ...
 
     @abstractmethod
-    def list_all_policies(self) -> list[tuple[str, str, list[str], list[str]]]:
+    def list_all_policies(self) -> list[tuple[str, str, ToolAccessPolicy]]:
         """List all stored policies for startup replay.
 
+        Returns whole policies, so a caller cannot reconstruct one from a
+        subset of its fields and drop the rest -- which is what the previous
+        ``(scope, target_id, allow_list, deny_list)`` shape invited (#915).
+
         Returns:
-            List of (scope, target_id, allow_list, deny_list) tuples.
+            List of (scope, target_id, policy) tuples.
         """
         ...
 
@@ -478,13 +481,7 @@ class NullToolAccessPolicyStore:
     Used when the policy storage module is not installed or during testing.
     """
 
-    def set_policy(
-        self,
-        scope: str,
-        target_id: str,
-        allow_list: list[str],
-        deny_list: list[str],
-    ) -> None:
+    def set_policy(self, scope: str, target_id: str, policy: ToolAccessPolicy) -> None:
         """No-op: policy storage requires the auth module."""
 
     def get_policy(self, scope: str, target_id: str) -> ToolAccessPolicy | None:
@@ -494,7 +491,7 @@ class NullToolAccessPolicyStore:
     def clear_policy(self, scope: str, target_id: str) -> None:
         """No-op."""
 
-    def list_all_policies(self) -> list[tuple[str, str, list[str], list[str]]]:
+    def list_all_policies(self) -> list[tuple[str, str, ToolAccessPolicy]]:
         """No policies stored."""
         return []
 
