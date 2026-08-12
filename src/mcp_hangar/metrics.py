@@ -1024,6 +1024,46 @@ PROJECTED_TOOLS = Histogram(
     buckets=(0, 1, 2, 5, 10, 25, 50, 100, 250, 500),
 )
 
+# -----------------------------------------------------------------------------
+# Approval Gate Metrics
+# -----------------------------------------------------------------------------
+# A gate that holds calls and notifies nobody is indistinguishable from a broken
+# gateway: every gated call waits out `approval_timeout_seconds` and then denies
+# (#914). Nothing leaks -- the failure is closed -- but the remediation an
+# operator reaches for under that pressure is emptying `approval_list`, which is
+# fail-closed in code and fail-open in the organisation.
+#
+# The pair below is what makes "armed and unmanned" visible before someone
+# reaches for that. Requests counts what the gate held; deliveries counts what
+# actually left, by outcome. Requests climbing while deliveries stay at zero --
+# or `outcome="not_notified"` tracking requests one-for-one -- is the shape.
+#
+# Labelled by channel, not by tool or tenant: the question is which notification
+# path is dead, and channels are a small closed set an operator configures.
+
+APPROVAL_REQUESTS_TOTAL = Counter(
+    name="mcp_hangar_approval_requests",
+    description="Total tool invocations held by the approval gate, by channel label",
+    labels=["channel"],
+)
+
+APPROVAL_DELIVERIES_TOTAL = Counter(
+    name="mcp_hangar_approval_deliveries",
+    description="Total approval notifications handed to a delivery channel, by outcome",
+    # outcome: sent (the adapter accepted it), failed (it raised -- the gate
+    # swallows this so the hold survives), not_notified (the resolved channel
+    # does not reach out of the process at all, so nobody was told)
+    labels=["channel", "outcome"],
+)
+
+APPROVAL_DECISIONS_TOTAL = Counter(
+    name="mcp_hangar_approval_decisions",
+    description="Total approval holds by how they ended",
+    # decision: granted, denied, expired. `expired` climbing alongside a flat
+    # `sent` is the same story from the other end.
+    labels=["channel", "decision"],
+)
+
 TASK_COMPLETED_TOTAL = Counter(
     name="mcp_hangar_task_completed",
     description="Total relayed tasks that finished successfully",

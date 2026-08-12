@@ -99,7 +99,7 @@ class TestApprovalGateSurvivesPartialUpdate:
         assert updated is not None
         assert updated.approval_list == ()
         assert updated.approval_timeout_seconds == 300
-        assert updated.approval_channel == "event_stream"
+        assert updated.approval_channel == ""
 
 
 class TestConfiguredPolicyReadAccessor:
