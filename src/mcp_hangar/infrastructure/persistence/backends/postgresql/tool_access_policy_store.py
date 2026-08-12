@@ -16,6 +16,7 @@ imports it directly -- all connections come from the shared
 """
 
 import json
+from typing import cast
 
 import structlog
 
@@ -62,8 +63,11 @@ _POLICY_COLUMNS = "allow_list, deny_list, approval_list, approval_timeout_second
 def _decode(value: object) -> list[str]:
     """psycopg2 decodes JSONB by default; a mocked cursor may hand back text."""
     if isinstance(value, str):
-        return list(json.loads(value))
-    return list(value) if value else []
+        decoded: object = json.loads(value)
+        return [str(item) for item in decoded] if isinstance(decoded, list) else []
+    if isinstance(value, list):
+        return [str(item) for item in cast(list[object], value)]
+    return []
 
 
 def _policy_from_row(row) -> ToolAccessPolicy:
