@@ -434,6 +434,21 @@ configuration.
 Third-party sources now register under the `mcp_hangar.discovery_sources` entry
 point group, so adding one no longer means patching the core.
 
+## Discovery: an unknown `mode` now refuses to start
+
+A discovery source whose `mode` was misspelled used to fall back to `additive`.
+That was especially dangerous for a source intended to be `authoritative`: the
+gateway stayed up, but never removed servers that disappeared from discovery.
+The configured value is now parsed as a `DiscoveryMode` and startup refuses
+unknown values.
+
+**Who is affected:** deployments with a discovery source whose `mode` is not
+`additive` or `authoritative`, including capitalization variants such as
+`Authoritative`.
+
+**What to do:** correct the value in the source configuration. An omitted mode
+still defaults to `additive`.
+
 ## `auth bootstrap-admin` requires `--show-key` when API keys are the only way in
 
 On a deployment with no trusted OIDC issuer, omitting `--show-key` is now

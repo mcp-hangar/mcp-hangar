@@ -108,7 +108,13 @@ def create_source(source_type: str, config: dict[str, Any]) -> DiscoverySource:
         raise UnknownDiscoverySourceError(source_type, sorted(_FACTORIES))
 
     mode_str = str(config.get("mode", "additive"))
-    mode = DiscoveryMode.AUTHORITATIVE if mode_str == "authoritative" else DiscoveryMode.ADDITIVE
+    try:
+        mode = DiscoveryMode(mode_str)
+    except ValueError as exc:
+        valid_modes = ", ".join(mode.value for mode in DiscoveryMode)
+        raise ValueError(
+            f"unknown discovery mode {mode_str!r}; expected one of: {valid_modes}"
+        ) from exc
     return factory(mode, config)
 
 

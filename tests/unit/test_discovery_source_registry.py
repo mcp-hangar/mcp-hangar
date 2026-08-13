@@ -121,3 +121,20 @@ class TestAConfiguredSourceThatCannotExistIsLoud:
         # and bootstrap degrades on it. An unknown type is a configuration
         # mistake and must not ride the same path.
         assert not issubclass(UnknownDiscoverySourceError, ImportError)
+
+
+class TestDiscoveryModeParsing:
+    def test_an_unknown_mode_is_rejected_instead_of_becoming_additive(self, clean_registry):
+        register_source_factory("pretend-consul", _factory)
+
+        with pytest.raises(ValueError, match=r"unknown discovery mode 'authoritativee'") as excinfo:
+            create_source("pretend-consul", {"datacenter": "dc", "mode": "authoritativee"})
+
+        assert "additive" in str(excinfo.value)
+        assert "authoritative" in str(excinfo.value)
+
+    def test_mode_values_are_case_sensitive(self, clean_registry):
+        register_source_factory("pretend-consul", _factory)
+
+        with pytest.raises(ValueError, match=r"unknown discovery mode 'Authoritative'"):
+            create_source("pretend-consul", {"datacenter": "dc", "mode": "Authoritative"})
