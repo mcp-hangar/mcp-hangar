@@ -58,8 +58,6 @@ from ..application.read_models.tool_projection import get_tool_projection_regist
 from ..context import get_identity_context
 from ..logging_config import should_log_now
 from ..domain.services.tool_access_resolver import get_tool_access_resolver
-from ..server.tools.batch import BatchExecutor, CallSpec
-from ..server.tools.tool_permissions import management_tools_for
 
 if TYPE_CHECKING:
     pass
@@ -351,6 +349,11 @@ def register_flat_tool_handlers(mcp: FastMCP) -> None:
         registered surface rather than being rebuilt here, so a projected
         management tool carries the same schema the invoke path validates.
         """
+        # Importing the server package at module scope would execute its
+        # bootstrap, which imports this projection back. The handler runs only
+        # after bootstrap has completed, so defer the dependency to call time.
+        from ..server.tools.tool_permissions import management_tools_for
+
         permitted = management_tools_for(mcp_ctx)
         if not permitted:
             return []
@@ -425,6 +428,11 @@ def register_flat_tool_handlers(mcp: FastMCP) -> None:
           never invoked.
         """
         from mcp_hangar._sdk_compat import CallToolResult
+        # Import lazily: the batch package reaches server.bootstrap, which
+        # installs this module. Keeping it at module scope makes this module
+        # impossible to import first in a fresh Python process.
+        from ..server.tools.batch import BatchExecutor, CallSpec
+        from ..server.tools.tool_permissions import management_tools_for
 
         identity = get_identity_context()
         tenant_id: str | None = identity.caller.tenant_id if identity is not None else None

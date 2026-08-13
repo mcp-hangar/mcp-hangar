@@ -1,0 +1,1 @@
+**core:** the flat tool projection can now be imported as the first Hangar module; its batch executor dependency is loaded when a call is dispatched, after bootstrap has finished wiring the serving surface
