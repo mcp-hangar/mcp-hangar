@@ -11,6 +11,10 @@ so withdrawal overlays (#244/#235) compose against actual tools.
 Known gap (follow-up): the lazy tool refresh in ``McpServer.invoke_tool``
 (tools added after start) fires no event, so the registry is not repopulated
 until the next start. Initial population is the goal here.
+
+**Reads local state, not the event**, which is why the subscription is
+``HandlerKind.LOCAL_VIEW`` -- see that member for what running it on a peer's
+event cost (#922).
 """
 
 from __future__ import annotations
