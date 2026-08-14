@@ -36,4 +36,4 @@ jobs:
       - name: Run live verification
         env:
           MCP_HANGAR_LIVE_VERIFY: "1"
-        run: uv run pytest tests/live -m "${{ github.event.inputs.marker || 'live' }}" -o addopts="" --timeout=180 -ra
+        run: uv run pytest tests/live -m "${{ github.event.inputs.marker || 'live' }}" --timeout=180 -ra

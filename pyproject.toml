@@ -282,7 +282,11 @@ drift_allowance = 3.0
 [tool.pytest.ini_options]
 testpaths = ["tests"]
 asyncio_mode = "auto"
-addopts = "-v --cov=mcp_hangar --cov-report=term-missing"
+# No `addopts`. It used to carry `-v --cov=mcp_hangar --cov-report=term-missing`,
+# which put an 18-second coverage pass and 6600 lines of per-test output on every
+# local run, including runs of a single file. The jobs that read a coverage report
+# ask for it explicitly, and the live tiers had to undo it with `-o addopts=""`
+# because coverage of a subprocess under test measures nothing.
 # Per-test hang guard: fail (with a stack dump) instead of hanging so one wedged
 # test can't burn a CI job to the 6h ceiling (which cancelled a release). 300s is
 # far above any real test; the whole unit suite runs in well under a minute.
