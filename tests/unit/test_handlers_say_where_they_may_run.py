@@ -1,11 +1,14 @@
 """A handler declares what it does, and that decides where it may run.
 
-Two kinds. A **projection** keeps a local view -- a tool catalogue, a risk
-score, a live event feed -- and must run on every replica for every event,
-whoever produced it, or it is a view of a third of the system. An **effect**
-does something outward -- exports to a SIEM, charges a budget, sends an alert --
-and must run only on the instance that produced the event, or three replicas
-send three copies of every audit record.
+Three kinds. A **projection** keeps a view built from the event's own payload --
+a risk score, a live event feed -- and must run on every replica for every
+event, whoever produced it, or it is a view of a third of the system. An
+**effect** does something outward -- exports to a SIEM, charges a budget, sends
+an alert -- and must run only on the instance that produced the event, or three
+replicas send three copies of every audit record. A **local view** reacts to the
+event by re-reading local state -- the tool catalogue -- and must also run only
+on the producer, for the opposite reason: on a peer's event it would answer
+about the wrong machine, and in #922 it answered "no tools" and deleted them.
 
 The classification lands *before* the tailer that makes it matter. Afterwards
 would mean shipping a period where every replica exports every event, and then
@@ -51,6 +54,16 @@ class TestALocallyProducedEventReachesEverything:
 
         assert len(seen) == 1
 
+    def test_local_views_run(self, bus) -> None:
+        # Locally produced is the only case a local view is *for*: the state it
+        # reads was changed by the work that raised this event.
+        seen: list[DomainEvent] = []
+        bus.subscribe(_ThingHappened, seen.append, kind=HandlerKind.LOCAL_VIEW)
+
+        bus.publish(_ThingHappened())
+
+        assert len(seen) == 1
+
 
 class TestATailedEventReachesProjectionsOnly:
     def test_a_projection_runs_on_a_peers_event(self, bus) -> None:
@@ -60,6 +73,16 @@ class TestATailedEventReachesProjectionsOnly:
         bus.deliver_tailed(_ThingHappened())
 
         assert len(seen) == 1
+
+    def test_a_local_view_does_not(self, bus) -> None:
+        # The other reason not to run: this one reads local state, so a peer's
+        # event would have it answer about the wrong machine.
+        rebuilt: list[DomainEvent] = []
+        bus.subscribe(_ThingHappened, rebuilt.append, kind=HandlerKind.LOCAL_VIEW)
+
+        bus.deliver_tailed(_ThingHappened())
+
+        assert rebuilt == []
 
     def test_an_effect_does_not(self, bus) -> None:
         # The test this whole file exists for. Three replicas, one tool call,
@@ -202,12 +225,17 @@ class TestTheAuditOfWhatIsAlreadySubscribed:
         assert "HandlerKind.PROJECTION" not in block
         assert block.count("HandlerKind.EFFECT") == 3
 
-    def test_the_tool_catalogue_is_a_projection(self) -> None:
-        # And this is the one where a wrong answer means a replica serves a
-        # third of the tools, depending on where each start request landed.
+    def test_the_tool_catalogue_is_a_local_view(self) -> None:
+        # It read as a projection for two releases, and the classification was
+        # honoured -- which is how a peer's restart came to DELETE tools from a
+        # replica that was serving them (#922). The handler cannot read the
+        # event; the schemas are on the local aggregate. What it does with a
+        # tailed event is asserted for real in
+        # `test_a_peers_start_leaves_our_catalogue_alone.py`; this only pins the
+        # wiring.
         import pathlib
 
         text = pathlib.Path("src/mcp_hangar/server/bootstrap/event_handlers.py").read_text(encoding="utf-8")
         line = next(line for line in text.splitlines() if "tool_projection_handler.handle" in line)
 
-        assert "HandlerKind.PROJECTION" in line
+        assert "HandlerKind.LOCAL_VIEW" in line
