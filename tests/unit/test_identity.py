@@ -2,7 +2,9 @@
 
 from dataclasses import FrozenInstanceError
 
+import jwt as pyjwt
 import pytest
+
 from mcp_hangar.domain.value_objects.identity import CallerIdentity, IdentityContext
 from mcp_hangar.infrastructure.identity.header_extractor import HeaderIdentityExtractor
 
@@ -264,11 +266,6 @@ class TestJWTIdentityExtractor:
 
     def test_extract_valid_token(self):
         """JWT extraction with PyJWT."""
-        try:
-            import jwt as pyjwt
-        except ImportError:
-            pytest.skip("PyJWT not installed")
-
         from mcp_hangar.infrastructure.identity.jwt_extractor import JWTIdentityExtractor
 
         secret = "test-secret"
@@ -288,22 +285,12 @@ class TestJWTIdentityExtractor:
         assert ctx.correlation_id == "corr-1"
 
     def test_extract_no_auth_header_returns_none(self):
-        try:
-            import jwt  # noqa: F401
-        except ImportError:
-            pytest.skip("PyJWT not installed")
-
         from mcp_hangar.infrastructure.identity.jwt_extractor import JWTIdentityExtractor
 
         extractor = JWTIdentityExtractor(secret_or_key="secret")
         assert extractor.extract({"content-type": "json"}) is None
 
     def test_extract_invalid_token_returns_none(self):
-        try:
-            import jwt  # noqa: F401
-        except ImportError:
-            pytest.skip("PyJWT not installed")
-
         from mcp_hangar.infrastructure.identity.jwt_extractor import JWTIdentityExtractor
 
         extractor = JWTIdentityExtractor(secret_or_key="correct-secret")
@@ -311,11 +298,6 @@ class TestJWTIdentityExtractor:
         assert ctx is None
 
     def test_extract_expired_token_returns_none(self):
-        try:
-            import jwt as pyjwt
-        except ImportError:
-            pytest.skip("PyJWT not installed")
-
         import time
 
         from mcp_hangar.infrastructure.identity.jwt_extractor import JWTIdentityExtractor
@@ -332,11 +314,6 @@ class TestJWTIdentityExtractor:
         assert ctx is None
 
     def test_extract_none_metadata(self):
-        try:
-            import jwt  # noqa: F401
-        except ImportError:
-            pytest.skip("PyJWT not installed")
-
         from mcp_hangar.infrastructure.identity.jwt_extractor import JWTIdentityExtractor
 
         extractor = JWTIdentityExtractor(secret_or_key="secret")
