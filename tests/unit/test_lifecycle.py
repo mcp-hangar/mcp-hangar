@@ -257,7 +257,7 @@ class TestServerLifecycle:
 
         assert exc_info.value.code == 1
 
-    def test_create_auth_app_rejects_websocket_without_credentials(self, mock_context):
+    async def test_create_auth_app_rejects_websocket_without_credentials(self, mock_context):
         """Auth wrapper should close websocket with 1008 on auth failure."""
         from mcp_hangar.domain.exceptions import MissingCredentialsError
 
@@ -280,12 +280,12 @@ class TestServerLifecycle:
             "query_string": b"",
         }
 
-        asyncio.run(auth_app(scope, AsyncMock(), send))
+        await auth_app(scope, AsyncMock(), send)
 
         inner_app.assert_not_called()
         assert sent_messages == [{"type": "websocket.close", "code": 1008, "reason": "No credentials provided"}]
 
-    def test_create_auth_app_adds_bearer_token_from_websocket_query(self, mock_context):
+    async def test_create_auth_app_adds_bearer_token_from_websocket_query(self, mock_context):
         """Auth wrapper should map websocket ?token= to Authorization header."""
         auth_components = MagicMock()
         auth_components.authn_middleware.authenticate.return_value = {"principal": "ok"}
@@ -301,7 +301,7 @@ class TestServerLifecycle:
             "query_string": b"token=test-token",
         }
 
-        asyncio.run(auth_app(scope, AsyncMock(), AsyncMock()))
+        await auth_app(scope, AsyncMock(), AsyncMock())
 
         auth_request = auth_components.authn_middleware.authenticate.call_args.args[0]
         assert auth_request.headers["authorization"] == "Bearer test-token"

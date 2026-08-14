@@ -8,11 +8,9 @@ Tests verify:
 - create_api_router includes /ws mount with events and state routes
 """
 
-import asyncio
 from unittest.mock import AsyncMock, MagicMock, patch
 
 from starlette.routing import Mount
-
 
 # ---------------------------------------------------------------------------
 # Helpers: build scope dicts
@@ -29,10 +27,6 @@ def _ws_scope(path: str) -> dict:
 
 def _lifespan_scope() -> dict:
     return {"type": "lifespan"}
-
-
-def _run(coro):
-    return asyncio.run(coro)
 
 
 # ---------------------------------------------------------------------------
@@ -52,68 +46,58 @@ class TestCombinedAppRouting:
         app = create_combined_asgi_app(aux_app, mcp_app, api_app)
         return app, aux_app, mcp_app, api_app
 
-    def test_websocket_api_ws_events_goes_to_api_app(self):
+    async def test_websocket_api_ws_events_goes_to_api_app(self):
         """websocket scope on /api/ws/events is forwarded to api_app."""
         app, aux_app, mcp_app, api_app = self._make_combined_app()
         scope = _ws_scope("/api/ws/events")
 
-        async def run():
-            await app(scope, AsyncMock(), AsyncMock())
+        await app(scope, AsyncMock(), AsyncMock())
 
-        _run(run())
         api_app.assert_called_once()
         mcp_app.assert_not_called()
 
-    def test_websocket_api_ws_state_goes_to_api_app(self):
+    async def test_websocket_api_ws_state_goes_to_api_app(self):
         """websocket scope on /api/ws/state is forwarded to api_app."""
         app, aux_app, mcp_app, api_app = self._make_combined_app()
         scope = _ws_scope("/api/ws/state")
 
-        async def run():
-            await app(scope, AsyncMock(), AsyncMock())
+        await app(scope, AsyncMock(), AsyncMock())
 
-        _run(run())
         api_app.assert_called_once()
         mcp_app.assert_not_called()
 
-    def test_websocket_non_api_path_goes_to_mcp_app(self):
+    async def test_websocket_non_api_path_goes_to_mcp_app(self):
         """websocket scope on /mcp is NOT forwarded to api_app."""
         app, aux_app, mcp_app, api_app = self._make_combined_app()
         scope = _ws_scope("/mcp")
 
-        async def run():
-            await app(scope, AsyncMock(), AsyncMock())
+        await app(scope, AsyncMock(), AsyncMock())
 
-        _run(run())
         mcp_app.assert_called_once()
         api_app.assert_not_called()
 
-    def test_http_health_still_goes_to_aux_app(self):
+    async def test_http_health_still_goes_to_aux_app(self):
         """Regression: http scope on /health still goes to aux_app."""
         app, aux_app, mcp_app, api_app = self._make_combined_app()
         scope = _http_scope("/health")
 
-        async def run():
-            await app(scope, AsyncMock(), AsyncMock())
+        await app(scope, AsyncMock(), AsyncMock())
 
-        _run(run())
         aux_app.assert_called_once()
         mcp_app.assert_not_called()
         api_app.assert_not_called()
 
-    def test_http_api_providers_still_goes_to_api_app(self):
+    async def test_http_api_providers_still_goes_to_api_app(self):
         """Regression: http scope on /api/mcp_servers/ still goes to api_app."""
         app, aux_app, mcp_app, api_app = self._make_combined_app()
         scope = _http_scope("/api/mcp_servers/")
 
-        async def run():
-            await app(scope, AsyncMock(), AsyncMock())
+        await app(scope, AsyncMock(), AsyncMock())
 
-        _run(run())
         api_app.assert_called_once()
         mcp_app.assert_not_called()
 
-    def test_websocket_api_prefix_stripped_before_forwarding(self):
+    async def test_websocket_api_prefix_stripped_before_forwarding(self):
         """WebSocket scope path has /api prefix stripped: /api/ws/events -> /ws/events."""
         app, aux_app, mcp_app, api_app = self._make_combined_app()
         scope = _ws_scope("/api/ws/events")
@@ -127,10 +111,8 @@ class TestCombinedAppRouting:
 
         app2 = create_combined_asgi_app(aux_app, mcp_app, capturing_api_app)
 
-        async def run():
-            await app2(scope, AsyncMock(), AsyncMock())
+        await app2(scope, AsyncMock(), AsyncMock())
 
-        _run(run())
         assert len(captured_scopes) == 1
         assert captured_scopes[0]["path"] == "/ws/events"
 
@@ -161,27 +143,23 @@ class TestAuthCombinedAppRouting:
         app = create_auth_combined_app(aux_app, mcp_app, auth_components, config, api_app)
         return app, aux_app, mcp_app, api_app
 
-    def test_auth_app_websocket_api_ws_events_goes_to_api_app(self):
+    async def test_auth_app_websocket_api_ws_events_goes_to_api_app(self):
         """auth_combined_app: websocket on /api/ws/events goes to api_app (no auth)."""
         app, aux_app, mcp_app, api_app = self._make_auth_app()
         scope = _ws_scope("/api/ws/events")
 
-        async def run():
-            await app(scope, AsyncMock(), AsyncMock())
+        await app(scope, AsyncMock(), AsyncMock())
 
-        _run(run())
         api_app.assert_called_once()
         mcp_app.assert_not_called()
 
-    def test_auth_app_lifespan_falls_through_to_mcp_app(self):
+    async def test_auth_app_lifespan_falls_through_to_mcp_app(self):
         """auth_combined_app: lifespan scope goes directly to mcp_app."""
         app, aux_app, mcp_app, api_app = self._make_auth_app()
         scope = _lifespan_scope()
 
-        async def run():
-            await app(scope, AsyncMock(), AsyncMock())
+        await app(scope, AsyncMock(), AsyncMock())
 
-        _run(run())
         mcp_app.assert_called_once()
         api_app.assert_not_called()
 

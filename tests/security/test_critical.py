@@ -2,7 +2,6 @@
 
 # pyright: reportAny=false, reportExplicitAny=false, reportUnknownVariableType=false, reportUnknownMemberType=false, reportUnknownParameterType=false, reportMissingParameterType=false, reportPrivateUsage=false, reportUnusedParameter=false
 
-import asyncio
 from typing import Any, cast
 from unittest.mock import AsyncMock, MagicMock
 
@@ -19,7 +18,7 @@ from mcp_hangar.server.bootstrap import ApplicationContext
 pytestmark = pytest.mark.security
 
 
-def test_k2_websocket_without_valid_auth_is_rejected() -> None:
+async def test_k2_websocket_without_valid_auth_is_rejected() -> None:
     mock_context = ApplicationContext(runtime=MagicMock(), mcp_server=MagicMock())
     lifecycle = ServerLifecycle(mock_context)
 
@@ -42,7 +41,7 @@ def test_k2_websocket_without_valid_auth_is_rejected() -> None:
         "query_string": b"",
     }
 
-    asyncio.run(auth_app(scope, AsyncMock(), send))
+    await auth_app(scope, AsyncMock(), send)
 
     inner_app.assert_not_called()
     assert sent_messages == [{"type": "websocket.close", "code": 1008, "reason": "No credentials provided"}]
