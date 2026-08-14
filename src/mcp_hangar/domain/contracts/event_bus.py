@@ -22,15 +22,23 @@ class HandlerKind(Enum):
     produce. One gateway delivers everything to everything and neither kind is
     distinguishable from the other -- which is why the classification lands
     *before* the tailer that makes it matter, rather than after.
+
+    Only `PROJECTION` runs on a tailed event. The other two are the two reasons
+    a handler must not: one acts outside the process, the other cannot read the
+    event at all.
     """
 
     PROJECTION = "projection"
-    """Keeps a local view of something. Runs on every replica, for every event,
-    whoever produced it -- that is the whole point: a tool catalogue, a risk
-    score or a live event feed that only knows about the work one replica
+    """Keeps a local view built **from the event's own payload**. Runs on every
+    replica, for every event, whoever produced it -- that is the whole point: a
+    risk score or a live event feed that only knows about the work one replica
     happened to do is a view of a third of the system. Must be idempotent on
     `event_id` (ADR-018) and must not publish: an event raised while applying a
-    tailed event would be tailed in turn, on every replica, forever."""
+    tailed event would be tailed in turn, on every replica, forever.
+
+    The payload clause is load-bearing, not decoration. A handler that reacts to
+    the event by re-reading *local* state is not this kind, however much its
+    output looks like a view -- see `LOCAL_VIEW` and #922."""
 
     EFFECT = "effect"
     """Does something to the world outside this process -- exports to a SIEM,
@@ -39,6 +47,27 @@ class HandlerKind(Enum):
     construction because a tool call happens on exactly one replica (#790,
     phase 0.4). Running these on tailed events is how three replicas send three
     copies of every audit record."""
+
+    LOCAL_VIEW = "local_view"
+    """Keeps a local view built from **local state**, using the event only as a
+    notification that the state changed. Runs only on the instance that produced
+    the event, for the same reason an effect does, but for the opposite cause: an
+    effect must not run twice, this one *cannot run at all* on a peer's event --
+    the state it reads describes this process, so applying a peer's notification
+    to it produces an answer about the wrong machine.
+
+    The tool catalogue is the case that named this. `McpServerStarted` carries
+    `tools_count`, not the schemas (ADR-020 declined putting a learned schema in
+    the log), so the handler re-reads the local aggregate; classified
+    `PROJECTION`, a follower whose own copy was cold read zero tools and the
+    rebuild -- a replace, not a merge -- deleted a catalogue it was correctly
+    serving (#922).
+
+    Not a variant of `EFFECT`: nothing outside the process is touched, so the
+    exactly-once argument does not apply and neither does the audit reasoning.
+    Every replica still ends up with the whole catalogue, because every replica
+    starts the servers itself; that is a property of how the fleet is warmed, not
+    of how events are delivered."""
 
 
 class IEventBus(ABC):
