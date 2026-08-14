@@ -131,6 +131,10 @@ class TestServerLifecycle:
 
         assert len(loops) == 2
         assert loops[0] is loops[1]
+        # The loop and its thread are released on shutdown, not merely stopped:
+        # a retained loop kept the process alive after `shutdown()` returned.
+        assert lifecycle._discovery_loop is None
+        assert lifecycle._discovery_thread is None
 
     def test_lifecycle_shutdown(self, mock_context):
         """shutdown() should stop all components."""

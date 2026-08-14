@@ -140,11 +140,9 @@ mcp-hangar/
 │   └── facade.py                  # High-level API hiding complexity
 │
 ├── tests/
-│   ├── conftest.py                # Shared fixtures, marker-based categorization
-│   ├── unit/                      # Fast, isolated unit tests (120 files)
-│   ├── integration/               # Docker-based (testcontainers)
-│   │   └── containers/conftest.py # PostgreSQL, Redis, Langfuse containers
-│   ├── feature/                   # End-to-end with real providers
+│   ├── unit/                      # Fast, isolated unit tests
+│   ├── integration/               # In-process end-to-end (no container runtime)
+│   ├── live/                      # Black-box tiers against a running gateway
 │   ├── benchmark/                 # pytest-benchmark performance tests
 │   ├── security/                  # Security test suite
 │   └── mock_provider.py           # JSON-RPC mock MCP provider
@@ -248,10 +246,10 @@ Auth, compliance, approvals, and integrations live under `src/mcp_hangar/` as fi
 ## Testing
 
 - **pytest** + pytest-asyncio + pytest-cov + pytest-benchmark + pytest-timeout
-- **Markers**: `benchmark`, `security`, `unit`, `integration`, `container`, `slow`, `stress`
-- **Flags**: `--run-containers` (Docker tests), `--run-slow` (slow tests), `--container-runtime` (podman/docker)
-- **Fixtures**: `temp_config_dir`, `mock_env`, `sample_provider_config`, `sample_tool_schema`
-- **Testcontainers**: PostgreSQL, Redis, Langfuse, Prometheus (Ryuk disabled for Podman)
+- **Markers**: `benchmark`, `security`, `live`, `t0`/`t1`/`t2` -- all registered in `pyproject.toml`
+- **No opt-in flags**: a test that only runs behind a flag nobody passes does not run. The
+  `--run-containers` / `--run-slow` tiers and their testcontainers fixtures were deleted for
+  exactly that reason; anything needing a real runtime belongs in `tests/live` (nightly) or the lab.
 - **Mock provider**: `tests/mock_provider.py` implements JSON-RPC MCP protocol
 
 ## Complexity Hotspots

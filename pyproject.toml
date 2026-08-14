@@ -99,9 +99,6 @@ postgres = [
 full = [
     "fpdf2>=2.8.0",
 ]
-containers = [
-    "testcontainers>=4,<5",
-]
 [project.scripts]
 mcp-hangar = "mcp_hangar.server.cli:cli_main"
 [project.urls]

@@ -135,43 +135,13 @@ jobs:
           python -m pip install --upgrade pip
           pip install -e ".[dev]"
 
-      - name: Build test images
-        env:
-          MCP_CONTAINER_RUNTIME: docker
-        working-directory: .
-        run: |
-          retry() {
-            local max=3 delay=10
-            for i in $(seq 1 $max); do
-              "$@" && return 0
-              echo "Attempt $i/$max failed, retrying in ${delay}s..."
-              sleep $delay
-              delay=$((delay * 2))
-            done
-            echo "All $max attempts failed."
-            return 1
-          }
-          cd examples/provider_math && retry docker build -t mcp-math:latest .
-          cd ../../
-          retry docker build -f docker/Dockerfile.memory -t mcp-memory:latest .
-          retry docker build -f docker/Dockerfile.filesystem -t mcp-filesystem:latest .
-
+      # No image build step and no MCP_CONTAINER_* env: the tests that launched
+      # real containers (tests/feature, tests/integration/containers) were gated
+      # behind `--run-containers` / `--run-slow`, which nothing ever passed, so
+      # they skipped on every run while three docker builds paid for them.
       - name: Run tests
-        env:
-          MCP_CONTAINER_RUNTIME: docker
-          MCP_CI_RELAX_VOLUME_PERMS: "true"
-          MCP_CONTAINER_INHERIT_STDERR: "true"
         run: |
-          python -m pytest tests/ -v --tb=short --color=yes -m "not slow"
-
-      - name: Run integration tests
-        if: matrix.python-version == '3.11'
-        env:
-          MCP_CONTAINER_RUNTIME: docker
-          MCP_CI_RELAX_VOLUME_PERMS: "true"
-          MCP_CONTAINER_INHERIT_STDERR: "true"
-        run: |
-          python -m pytest tests/integration/ -v --tb=short --color=yes
+          python -m pytest tests/ -v --tb=short --color=yes
 
   # Gate D of the release matrix (#550): smoke the ARTIFACT, not the tree.
   #
