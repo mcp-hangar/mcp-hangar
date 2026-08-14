@@ -12,13 +12,9 @@ Known gap (follow-up): the lazy tool refresh in ``McpServer.invoke_tool``
 (tools added after start) fires no event, so the registry is not repopulated
 until the next start. Initial population is the goal here.
 
-**Reads local state, not the event.** ``McpServerStarted`` carries
-``tools_count``; the schemas are on the aggregate this process holds. That is
-why the subscription is ``HandlerKind.LOCAL_VIEW`` and not ``PROJECTION``: run
-against a peer's tailed start, this handler would answer with what *this*
-replica knows about that server, and when that is nothing,
-:meth:`ToolProjectionRegistry.build_from_tools` -- a replace, not a merge --
-would delete the entries the replica was correctly serving (#922).
+**Reads local state, not the event**, which is why the subscription is
+``HandlerKind.LOCAL_VIEW`` -- see that member for what running it on a peer's
+event cost (#922).
 """
 
 from __future__ import annotations

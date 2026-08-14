@@ -68,19 +68,11 @@ def init_event_handlers(runtime: "Runtime") -> None:
 
     # Populate the tool-projection registry from discovered tools on server start (#248)
     #
-    # LOCAL_VIEW, not PROJECTION, and the difference is not bookkeeping. The
-    # handler does not read the event: `McpServerStarted` carries `tools_count`,
-    # so the schemas come from the local aggregate. A follower that tailed a
-    # peer's start therefore rebuilt this server's entry from its own copy -- and
-    # when that copy was cold, from nothing, which `build_from_tools` applies as a
-    # replace. A peer's routine restart deleted tools the follower was correctly
-    # serving (#922).
-    #
-    # It was classified PROJECTION for a real reason: a replica that knew only
-    # about servers *it* started would serve a third of the catalogue. That
-    # reason still holds and is answered elsewhere -- every replica starts every
-    # configured server itself (#885) -- rather than by delivering an event this
-    # handler cannot learn anything from.
+    # LOCAL_VIEW, not PROJECTION: the handler reads the local aggregate, not the
+    # event, so a peer's tailed start had it rebuild from nothing and delete a
+    # catalogue this replica was serving. See `HandlerKind.LOCAL_VIEW` and #922.
+    # The reason it was a projection -- no replica may serve a third of the
+    # catalogue -- is answered by every replica starting the fleet itself (#885).
     tool_projection_handler = ToolProjectionPopulationHandler(repository=runtime.repository)
     runtime.event_bus.subscribe(McpServerStarted, tool_projection_handler.handle, kind=HandlerKind.LOCAL_VIEW)
 
