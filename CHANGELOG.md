@@ -5,6 +5,130 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [2.7.0](https://github.com/mcp-hangar/mcp-hangar/compare/v2.6.0...v2.7.0) (2026-08-14)
+
+### Added
+
+- An approval gate that is armed but notifies nobody now says so at startup, and
+  `approval_channel` finally selects a delivery.
+
+  **The signal.** When a policy gates a tool and the channel that would notify for
+  it reaches nothing outside the process — `noop`, or a vendor name no installed
+  package claims — the startup check logs `subsystem_configured_but_unreachable`
+  at ERROR, naming the scope and the channel. It does not refuse the boot: the
+  gate is already fail-closed by timeout, so what is missing is a signal, not an
+  enforcement, and refusing over a notification channel would turn a degraded
+  notify path into an outage. A deployment that wants the stricter reading sets
+  `approvals: {delivery: {required: true}}` and gets a refusal instead.
+
+  Why it matters even though nothing leaks: every gated call hangs for
+  `approval_timeout_seconds` and then errors, which from the outside looks like a
+  broken gateway. The remediation reached for under that pressure is emptying
+  `approval_list` — fail-closed in code, fail-open in the organisation.
+
+  **`approval_channel` routes.** It was documented as the delivery channel for a
+  policy's approvals, merged with care across scope narrowing, and dispatched
+  nowhere: one global delivery handled every approval whichever policy raised it,
+  so per-server channels were silently one channel. Approvals now go through the
+  channel their policy names, resolved on first use so a policy arriving from a
+  hot reload or over REST is routable too. An unset `approval_channel` — the
+  default — means the deployment's `approvals.channel`, as before.
+
+  **Metrics.** `mcp_hangar_approval_requests{channel}` against
+  `mcp_hangar_approval_deliveries{channel,outcome}` (`sent`, `failed`,
+  `not_notified`) and `mcp_hangar_approval_decisions{channel,decision}`
+  (`granted`, `denied`, `expired`). Requests climbing while deliveries stay at
+  zero is the armed-and-unmanned shape; `expired` climbing beside a flat `sent` is
+  the same story from the other end. ([#920](https://github.com/mcp-hangar/mcp-hangar/pull/920))
+- **core:** the upgrade note for 2.6.0. Two changes in that release can stop a
+  deployment that works today -- a gateway with per-tenant digest pins and
+  authentication off no longer starts, and the `hangar_*` tools now require the
+  permission their REST equivalent has always required -- and both needed the
+  before/after and the remedy written down rather than inferred from a changelog
+  entry. Includes the tool-to-permission table with the built-in roles that hold
+  each one, because the two combinations that surprise people (`provider-admin`
+  cannot run lifecycle, `developer` cannot approve or read metrics) are not
+  guessable from the role names ([#913](https://github.com/mcp-hangar/mcp-hangar/pull/913))
+
+### Changed
+
+- The built-in approval delivery channel is now called `event_stream`, because
+  that is where an approval notification actually travels. It was called
+  `dashboard`, after a management UI that shipped with the Hangar Cloud tier and
+  was archived with it — a channel named after a product that no longer exists,
+  whose `send()` wrote a log line and pushed to nothing, while the docstring
+  claimed a WebSocket integration "wired via event bus" that was never wired.
+
+  The push is real, just upstream of delivery: the gate publishes
+  `ToolApprovalRequested` before it waits, and `/api/ws/events` streams every
+  domain event, so any client holding `audit:read` sees a held call — id, tool,
+  channel label, expiry — in real time. The channel is now named after that
+  surface.
+
+  `channel: dashboard` still resolves, to the same delivery, and logs
+  `approval_delivery_channel_renamed` once at boot saying where the name went; its
+  config block is still read. Nothing to change on upgrade. `approval_channel`
+  defaults to `event_stream` on new policies; existing approval records keep
+  whatever label they were written with.
+
+  Also removed: `hangar_approve_prompt`, a tool nothing registered, whose docstring
+  pointed at an `approvals.channel: mcp_prompt` that no builtin or entry point has
+  provided since 2.0. ([#916](https://github.com/mcp-hangar/mcp-hangar/pull/916))
+- `serve --http` now serves the handshake-era MCP transport statelessly, so replicas
+  of one gateway are one server to a client. A session lived in a single replica's
+  memory, so a client that initialized against one pod and called against another was
+  told `Session not found`; session affinity could not fix that, because a pin does not
+  outlive its pod. `initialize` no longer returns an `Mcp-Session-Id`, a stale one is
+  ignored rather than refused, and `DELETE /mcp` answers 405 because there is no session
+  to terminate — see UPGRADE.md. The 2026-07-28 revision is unaffected: SEP-2567 removed
+  sessions and it was already served this way. Session suspension, authorization and
+  resumability are unchanged. (#877) ([#929](https://github.com/mcp-hangar/mcp-hangar/pull/929))
+
+### Fixed
+
+- A replica no longer loses tools when a peer restarts a server. The tool-catalogue
+  handler was classified as a projection, so it ran on peers' `McpServerStarted`
+  events -- but it rebuilds from the local aggregate rather than from the event
+  (which carries `tools_count`, not schemas), and the rebuild is a replace. A
+  follower whose own copy of that server was cold therefore rebuilt it from nothing
+  and deleted a catalogue it was correctly serving. It is now `HandlerKind.LOCAL_VIEW`,
+  a third kind for handlers that read local state and so, like effects, must run only
+  on the instance that produced the event. (#922) ([#926](https://github.com/mcp-hangar/mcp-hangar/pull/926))
+- A restart no longer removes a human-consent gate the configuration still
+  declares. The tool-access-policy store held only `allow_list` and `deny_list`,
+  and the startup replay rebuilt a policy from exactly those two and assigned it
+  over whatever the resolver held. YAML registers policies earlier in the same
+  boot, so a target with `tools.approval_list` and any prior REST policy update
+  came back **ungated** — and the startup reachability check, running after the
+  replay, saw nothing left to demand the gate and started clean.
+
+  The store now persists `approval_list`, `approval_timeout_seconds` and
+  `approval_channel`, and the replay hands back whole policies rather than two
+  lists a caller has to remember to widen. An existing database is migrated in
+  place on first open. A row written by an older build carries NULL approval
+  columns; rather than let that erase a gate the resolver already holds, the
+  replay carries the in-force gate forward and logs
+  `tap_replay_carried_approval_gate`.
+
+  The REST update path now persists the same policy it enforces. It already
+  preserved the gate in memory but handed the store the command's two lists, so
+  the store held less than the resolver — which is what the next restart replayed.
+
+  No action needed on upgrade. If a gate was lost to this on an earlier restart,
+  it comes back on the next one, because the YAML declaration was never the thing
+  that went missing. ([#917](https://github.com/mcp-hangar/mcp-hangar/pull/917))
+- A `front_door` gateway now starts every configured mcp_server when it starts, so
+  `tools/list` stops being a readout of one replica's warm-up history. Previously a
+  replica that had started nothing had discovered nothing, so after any restart it
+  served an empty tool list to a valid tenant with no client-reachable way to fix it
+  (the meta-API is not projected for an ordinary tenant, a known tool name resolves
+  against the same empty map, and health checks skip cold servers), and two replicas
+  that had warmed different servers answered the same tenant differently. Warming runs
+  on its own thread so readiness never waits on a backend handshake, and a backend that
+  fails to start is logged (`front_door_warmup_failed`) rather than costing the others
+  their projection. `egress` mode is unchanged: backends still start lazily on first
+  use. (#878, #885, #886) ([#927](https://github.com/mcp-hangar/mcp-hangar/pull/927))
+
 ## [2.6.0](https://github.com/mcp-hangar/mcp-hangar/compare/v2.5.3...v2.6.0) (2026-08-11)
 
 ### Added
