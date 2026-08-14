@@ -80,6 +80,63 @@ def build_readiness_report(repository: Any) -> tuple[dict[str, Any], int]:
     return body, (200 if event_store_ok else 503)
 
 
+def warm_the_front_door_catalogue(runtime: Any) -> None:
+    """Start every configured mcp_server so this replica can answer ``tools/list``.
+
+    In ``front_door`` the flat projection **is** ``tools/list``, and the projection
+    is built from ``McpServerStarted``. A replica that has started nothing has
+    discovered nothing, so after every restart it serves an empty catalogue to a
+    perfectly valid tenant -- and no client can change that. The meta-API is not
+    projected for an ordinary tenant, so there is no ``hangar_warm`` to call; a
+    tool name the client already knows resolves against the same empty map
+    (``Tool 'add' not found``); and health checks skip cold servers by
+    construction (``gc.py``, ``state_str in ("cold", "initializing")``). The only
+    remedy was an operator, per replica, over the REST admin API (#878, #885).
+
+    Two replicas that warmed different servers then answer the same tenant
+    differently -- 18 tools from one, 0 from the other, alternating through the
+    Service (#886). Every replica starting every configured server is what makes
+    the catalogue a property of the configuration again instead of a readout of
+    one replica's warm-up history.
+
+    **Only in ``front_door``.** In ``egress`` the ``hangar_*`` meta-API is the
+    surface, lazy start on first use is the documented behaviour that
+    ``idle_ttl_s`` is designed around, and starting every backend at boot would
+    change what every existing deployment costs to run.
+
+    Through the command bus, not ``ensure_ready()``: the aggregate only *records*
+    ``McpServerStarted``, and the command handler is what drains and publishes it.
+    Called directly, this would start the fleet and leave the projection empty
+    until the GC worker's next sweep happened to publish -- which is exactly how
+    group members come to be projected today, up to 30s late and by accident.
+
+    A backend that fails here stays cold and unprojected: the state it would have
+    been in anyway, logged per server, and reported by the empty-projection metric
+    (#887). Warming is deliberately not retried -- a backend that is down at boot
+    is down, and the fleet is warmed again on the next restart.
+
+    Args:
+        runtime: The runtime holding the fleet and the command bus.
+    """
+    from ..application.commands import StartMcpServerCommand
+    from ..domain.services.tool_access_resolver import is_front_door
+
+    if not is_front_door():
+        return
+
+    warmed = failed = 0
+
+    for mcp_server_id in runtime.repository.get_all_ids():
+        try:
+            runtime.command_bus.send(StartMcpServerCommand(mcp_server_id=mcp_server_id))
+            warmed += 1
+        except Exception as e:  # noqa: BLE001 -- fault-barrier: one dead backend must not cost the others their projection
+            failed += 1
+            logger.warning("front_door_warmup_failed", mcp_server_id=mcp_server_id, error=str(e))
+
+    logger.info("front_door_warmup_complete", warmed=warmed, failed=failed)
+
+
 def _is_loopback_host(host: str) -> bool:
     """Return whether a bind host resolves to loopback-only."""
     normalized_host = host.strip().lower()
@@ -156,6 +213,18 @@ class ServerLifecycle:
         )
 
         self._start_discovery()
+
+        # Last, and on a thread of its own: a backend handshake is I/O, and
+        # nothing may wait on it. `build_readiness_report` above spells out why
+        # -- gating the serving path on a warm backend deadlocks the deployment.
+        # The front door serves a short list until this finishes, which is the
+        # bounded version of serving an empty one forever (#878, #885, #886).
+        threading.Thread(
+            target=warm_the_front_door_catalogue,
+            args=(self._context.runtime,),
+            name="mcp-hangar-front-door-warmup",
+            daemon=True,
+        ).start()
 
     def _start_discovery(self) -> None:
         """Start discovery on a dedicated long-lived event loop."""
