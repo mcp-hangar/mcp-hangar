@@ -80,7 +80,7 @@ def build_readiness_report(repository: Any) -> tuple[dict[str, Any], int]:
     return body, (200 if event_store_ok else 503)
 
 
-def warm_the_front_door_catalogue(context: ApplicationContext) -> dict[str, list[str]]:
+def warm_the_front_door_catalogue(runtime: Any) -> None:
     """Start every configured mcp_server so this replica can answer ``tools/list``.
 
     In ``front_door`` the flat projection **is** ``tools/list``, and the projection
@@ -115,36 +115,26 @@ def warm_the_front_door_catalogue(context: ApplicationContext) -> dict[str, list
     (#887). Warming is deliberately not retried -- a backend that is down at boot
     is down, and the fleet is warmed again on the next restart.
 
-    Returns:
-        ``{"warmed": [...], "failed": [...]}`` -- for the caller's log line, and
-        so the decision is testable without a thread.
+    Args:
+        runtime: The runtime holding the fleet and the command bus.
     """
     from ..application.commands import StartMcpServerCommand
-    from ..domain.services.tool_access_resolver import get_tool_access_resolver
+    from ..domain.services.tool_access_resolver import is_front_door
 
-    try:
-        front_door = get_tool_access_resolver().topology_mode == "front_door"
-    except Exception:  # noqa: BLE001 -- an unresolvable topology must not take the process down
-        logger.warning("front_door_warmup_topology_unresolved", exc_info=True)
-        return {"warmed": [], "failed": []}
+    if not is_front_door():
+        return
 
-    if not front_door:
-        return {"warmed": [], "failed": []}
+    warmed = failed = 0
 
-    runtime = context.runtime
-    warmed: list[str] = []
-    failed: list[str] = []
-
-    for mcp_server_id in list(runtime.repository.get_all_ids()):
+    for mcp_server_id in runtime.repository.get_all_ids():
         try:
             runtime.command_bus.send(StartMcpServerCommand(mcp_server_id=mcp_server_id))
-            warmed.append(mcp_server_id)
+            warmed += 1
         except Exception as e:  # noqa: BLE001 -- fault-barrier: one dead backend must not cost the others their projection
-            failed.append(mcp_server_id)
+            failed += 1
             logger.warning("front_door_warmup_failed", mcp_server_id=mcp_server_id, error=str(e))
 
-    logger.info("front_door_warmup_complete", warmed=len(warmed), failed=len(failed))
-    return {"warmed": warmed, "failed": failed}
+    logger.info("front_door_warmup_complete", warmed=warmed, failed=failed)
 
 
 def _is_loopback_host(host: str) -> bool:
@@ -231,7 +221,7 @@ class ServerLifecycle:
         # bounded version of serving an empty one forever (#878, #885, #886).
         threading.Thread(
             target=warm_the_front_door_catalogue,
-            args=(self._context,),
+            args=(self._context.runtime,),
             name="mcp-hangar-front-door-warmup",
             daemon=True,
         ).start()
@@ -773,5 +763,4 @@ __all__ = [
     "ServerLifecycle",
     "build_readiness_report",
     "run_server",
-    "warm_the_front_door_catalogue",
 ]

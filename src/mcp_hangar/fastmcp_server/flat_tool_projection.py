@@ -543,15 +543,9 @@ def maybe_register_flat_tool_handlers(mcp: Any) -> bool:
     shipped ``serve --http`` silently kept serving the meta-API — the mode
     appeared to do nothing (#596).
     """
-    from ..domain.services.tool_access_resolver import get_tool_access_resolver
+    from ..domain.services.tool_access_resolver import is_front_door
 
-    try:
-        front_door = get_tool_access_resolver().topology_mode == "front_door"
-    except Exception:  # noqa: BLE001 -- an unresolvable topology must not break startup
-        logger.warning("flat_tool_topology_unresolved", exc_info=True)
-        return False
-
-    if not front_door:
+    if not is_front_door():
         return False
 
     register_flat_tool_handlers(mcp)
