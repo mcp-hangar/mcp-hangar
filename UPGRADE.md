@@ -1,5 +1,41 @@
 # Upgrading MCP Hangar
 
+## Next — the MCP endpoint no longer hands out a session id
+
+`serve --http` now serves the handshake-era MCP transport statelessly. `initialize`
+returns no `Mcp-Session-Id`, and no request needs one.
+
+**Why.** A session lived in one replica's memory, so a client that initialized
+against one pod and called against another was told `Session not found` — with
+three replicas behind the chart's own Service, 13 of 15 attempts failed. Session
+affinity papered over it and could not fix it: an affinity pin does not outlive
+its pod, so a rolling restart or a scale-down took the session with it. See #877.
+
+**What this changes for a client.**
+
+| | before | now |
+| --- | --- | --- |
+| `initialize` | returns `Mcp-Session-Id` | returns no session id |
+| a request carrying a stale/foreign `Mcp-Session-Id` | `Session not found` | served normally; the header is ignored |
+| `DELETE /mcp` (teardown) | `200` | **`405 Method Not Allowed`** |
+
+The last row is the only one that can surface in a client's logs. There is no
+session to terminate, so teardown is refused rather than acknowledged. A client
+that treats a failed teardown as fatal — none that we know of — would need to stop
+sending it.
+
+**What this does not change.** Nothing about the 2026-07-28 revision, which has no
+sessions at all (SEP-2567) and was already served this way. Nothing about session
+*suspension* (`/api/sessions`): that keys on `CallerIdentity.session_id`, which
+comes from the `x-session-id` header or the JWT `sid` claim and never from the
+transport. Nothing about authorization, which is per-request. And nothing was lost
+in resumability — no event store was ever configured on this transport, so
+`Last-Event-ID` replay was already unavailable.
+
+**Deployments.** Sticky routing is no longer required for a replica set. The
+chart's `service.sessionAffinity: ClientIP` default is now harmless rather than
+load-bearing, and can be turned off if it is costing you balance.
+
 ## 2.6.0 — three things to check before you roll out
 
 Two of these can stop a deployment that works today, and both are in the same

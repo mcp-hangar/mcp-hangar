@@ -125,7 +125,10 @@ class TestBothServingPathsUseIt:
     @pytest.mark.parametrize(
         ("module", "attribute"),
         [
-            ("mcp_hangar.server.lifecycle", "ServerLifecycle"),
+            # The serve path builds its app in `mcp_app_for_serving`, extracted
+            # from `ServerLifecycle.run_http` so a test can drive the app the CLI
+            # actually mounts (#877).
+            ("mcp_hangar.server.lifecycle", "mcp_app_for_serving"),
             ("mcp_hangar.fastmcp_server.factory", "MCPServerFactory"),
         ],
     )
