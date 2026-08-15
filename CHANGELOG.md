@@ -5,6 +5,26 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [2.8.0](https://github.com/mcp-hangar/mcp-hangar/compare/v2.7.0...v2.8.0) (2026-08-15)
+
+### Changed
+
+- **infra:** the published container now runs Python 3.14. `pip install` still supports 3.11–3.14; 3.14 is a required CI citizen, not advisory ([#933](https://github.com/mcp-hangar/mcp-hangar/pull/933))
+
+### Removed
+
+- **core:** `LogAuditStore` is removed from `mcp_hangar.application.event_handlers`. It was never constructed outside this repository's tests, and its `query()` raised `NotImplementedError` — a log sink cannot answer a query. `AuditStore`, `InMemoryAuditStore` and the OTLP exporter path are unchanged; see `UPGRADE.md` ([#951](https://github.com/mcp-hangar/mcp-hangar/pull/951))
+- **core:** `CallbackAlertSink` is removed from `mcp_hangar.application.event_handlers`. Production `get_alert_handler()` builds a `LogAlertSink`; the callback wrapper was constructed only by this repository's tests, which now define their own capturing sink. `AlertSink`, `Alert`, `LogAlertSink` and `AlertEventHandler` are unchanged; see `UPGRADE.md` ([#959](https://github.com/mcp-hangar/mcp-hangar/pull/959))
+- **core:** `detect_runtime_availability` and `IRuntimeChecker` are removed from `mcp_hangar.application.services`. Neither had a caller — hot-loading builds a `RuntimeAvailability` directly. `PackageResolver` and `RuntimeAvailability` are unchanged; see `UPGRADE.md` ([#952](https://github.com/mcp-hangar/mcp-hangar/pull/952))
+- **core:** the `containers` extra is gone. It installed `testcontainers` for a test
+  tier that never ran: those tests were gated behind `--run-containers` /
+  `--run-slow`, and no CI job, `Makefile` target or script ever passed either flag,
+  so every one of them reported `skipped` on every run. `pip install
+  mcp-hangar[containers]` now fails -- there is nothing left for it to install, and
+  nothing in the shipped package ever imported it. Tests that need a real runtime
+  belong in the nightly `tests/live` tiers. ([#931](https://github.com/mcp-hangar/mcp-hangar/pull/931))
+- **infra:** the bundled compose monitoring stack (`monitoring/`, `docker-compose.monitoring.yml`) is gone. The four Grafana dashboards and the 30 Prometheus alert rules ship with the Helm chart instead — `dashboards.enabled` renders them as sidecar-labelled ConfigMaps, `prometheusRule.enabled` renders a PrometheusRule. Instrumentation is untouched: `/metrics`, tracing and the OTLP exporter are unchanged; only bundled config was removed. There is no one-command local Grafana any more ([#936](https://github.com/mcp-hangar/mcp-hangar/pull/936))
+
 ## [2.7.0](https://github.com/mcp-hangar/mcp-hangar/compare/v2.6.0...v2.7.0) (2026-08-14)
 
 ### Added
