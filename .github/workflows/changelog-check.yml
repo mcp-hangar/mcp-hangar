@@ -33,7 +33,7 @@ jobs:
       # so a malformed one fails here instead of at release assembly.
       - uses: actions/setup-python@v7
         with:
-          python-version: "3.12"
+          python-version: "3.11"
 
       - name: Run changelog check
         env:

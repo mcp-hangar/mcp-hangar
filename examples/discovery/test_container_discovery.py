@@ -153,7 +153,7 @@ async def test_http_mode(runner: ContainerTestRunner):
     # Create container with HTTP mode labels
     success = runner.create_container(
         name="mcp-test-http-mode",
-        image="docker.io/library/python:3.11-slim",
+        image="docker.io/library/python:3.14-slim",
         labels={
             "mcp.hangar.enabled": "true",
             "mcp.hangar.name": "test-http-provider",

@@ -154,7 +154,7 @@ mcp-hangar/
 │
 ├── pyproject.toml                 # Package config, pytest, ruff, mypy settings
 ├── Makefile                       # Python-specific targets
-└── Dockerfile                     # Multi-stage: python:3.11 + hatch -> slim runtime
+└── Dockerfile                     # Multi-stage: python:3.14 + hatch -> slim runtime
 ```
 
 ## Architecture

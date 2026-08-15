@@ -2,7 +2,7 @@
 #   docker build -t mcp-hangar .
 
 # Stage 1: Build the Python wheel
-FROM python:3.11-slim AS py-builder
+FROM python:3.14-slim AS py-builder
 WORKDIR /app
 RUN pip install --no-cache-dir hatch
 COPY pyproject.toml README.md ./
@@ -10,7 +10,7 @@ COPY src/mcp_hangar ./src/mcp_hangar
 RUN hatch build
 
 # Stage 2: Final runtime image
-FROM python:3.11-slim
+FROM python:3.14-slim
 WORKDIR /app
 RUN useradd --create-home --shell /bin/bash hangar
 RUN mkdir -p /app/data && chown hangar:hangar /app/data
