@@ -59,6 +59,21 @@ class CapturingSink(AlertSink):
 `AlertSink`, `Alert`, `LogAlertSink`, `AlertEventHandler` and `get_alert_handler`
 are unchanged.
 
+## Next — `LogAuditStore` is gone from `application.event_handlers`
+
+Removed from the module's `__all__` and from `audit_handler.py`. Bootstrap uses
+`get_audit_handler()`, which builds an `InMemoryAuditStore`; the only
+constructor of `LogAuditStore` was this repository's own tests.
+
+It could not have served as a general audit store anyway: `query()` raised
+`NotImplementedError`, because a log sink cannot answer a query. If you were
+using it, write the sink you actually want against the `AuditStore` ABC, or use
+the OTLP exporter path (`OTLPAuditEventHandler` / `IAuditExporter`), which is
+built for shipping audit records off the box.
+
+`AuditRecord`, `AuditStore`, `InMemoryAuditStore`, `AuditEventHandler` and
+`get_audit_handler` are unchanged.
+
 ## 2.6.0 — three things to check before you roll out
 
 Two of these can stop a deployment that works today, and both are in the same

@@ -14,7 +14,6 @@ from .audit_handler import (
     AuditStore,
     get_audit_handler,
     InMemoryAuditStore,
-    LogAuditStore,
     reset_audit_handler,
 )
 from .detection_handler import DetectionEnforcementHandler
@@ -47,7 +46,6 @@ __all__ = [
     "AuditRecord",
     "AuditStore",
     "InMemoryAuditStore",
-    "LogAuditStore",
     "get_audit_handler",
     "reset_audit_handler",
     # Detection enforcement
