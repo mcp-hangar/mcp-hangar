@@ -1,6 +1,6 @@
 """Application services - use case orchestration."""
 
-from .package_resolver import detect_runtime_availability, PackageResolver, RuntimeAvailability
+from .package_resolver import PackageResolver, RuntimeAvailability
 from .mcp_server_service import McpServerService
 from .secrets_resolver import SecretsResolver, SecretsResult
 from .traced_mcp_server_service import TracedMcpServerService
@@ -12,7 +12,6 @@ __all__ = [
     "SecretsResolver",
     "SecretsResult",
     "TracedMcpServerService",
-    "detect_runtime_availability",
 ]
 
 import sys

@@ -314,7 +314,6 @@ dev = [
 
 [tool.dead_symbols]
 unreferenced = [
-  "application/services/package_resolver.py::IRuntimeChecker",
   "auth/config.py::get_default_auth_config",
   "auth/queries/queries.py::GetAuthAuditLogQuery",
   "bootstrap/runtime.py::initialize_runtime",
@@ -355,7 +354,6 @@ exported_unreferenced = [
   "application/event_handlers/alert_handler.py::reset_alert_handler",
   "application/event_handlers/audit_handler.py::reset_audit_handler",
   "application/event_handlers/security_handler.py::reset_security_handler",
-  "application/services/package_resolver.py::detect_runtime_availability",
   "compliance/cef_formatter.py::format_audit_records",
   "domain/contracts/event_store.py::StreamNotFoundError",
   "domain/contracts/launcher.py::IMcpServerLauncher",

@@ -1,0 +1,1 @@
+**core:** `detect_runtime_availability` and `IRuntimeChecker` are removed from `mcp_hangar.application.services`. Neither had a caller — hot-loading builds a `RuntimeAvailability` directly. `PackageResolver` and `RuntimeAvailability` are unchanged; see `UPGRADE.md`

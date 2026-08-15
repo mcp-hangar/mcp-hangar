@@ -74,6 +74,20 @@ built for shipping audit records off the box.
 `AuditRecord`, `AuditStore`, `InMemoryAuditStore`, `AuditEventHandler` and
 `get_audit_handler` are unchanged.
 
+## Next — `detect_runtime_availability` is gone from `application.services`
+
+Removed from the module's `__all__`, along with the unused `IRuntimeChecker`
+protocol beside it. Nothing called either: hot-loading constructs a
+`RuntimeAvailability(...)` directly rather than detecting one.
+
+There is no replacement, deliberately. If you need to know whether `uvx`, `npx`
+or a container runtime is present, ask the installer you care about
+(`is_runtime_available()`) and build the `RuntimeAvailability` yourself — which
+is all the removed function did, in a fixed order, for a list it did not
+validate.
+
+`PackageResolver` and `RuntimeAvailability` are unchanged.
+
 ## 2.6.0 — three things to check before you roll out
 
 Two of these can stop a deployment that works today, and both are in the same
