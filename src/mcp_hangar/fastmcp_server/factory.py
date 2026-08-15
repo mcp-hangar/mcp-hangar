@@ -20,7 +20,6 @@ from .modern_surface import register_modern_surface, wrap_front_door_routing
 if TYPE_CHECKING:
     from ..domain.services.task_digest_guard import TaskDigestGuard
     from ..domain.services.task_ownership import TaskOwnershipRegistry
-    from .builder import MCPServerFactoryBuilder
 
 logger = get_logger(__name__)
 
@@ -44,14 +43,6 @@ class MCPServerFactory:
             config=ServerConfig(auth_enabled=True),
         )
         app = factory.create_asgi_app()
-
-        # Or use the builder pattern
-        factory = (MCPServerFactory.builder()
-            .with_hangar(list_fn, start_fn, ...)
-            .with_discovery(discover_fn, ...)
-            .with_auth(auth_components)
-            .with_config(host="0.0.0.0", port=9000, auth_enabled=True)
-            .build())
     """
 
     def __init__(
@@ -77,17 +68,6 @@ class MCPServerFactory:
         # Shared guard binding MCP task handles to the tool digest pinned on the
         # invoke path; re-verified fail-closed on result retrieval (#320).
         self._task_digest_guard: TaskDigestGuard | None = None
-
-    @classmethod
-    def builder(cls) -> MCPServerFactoryBuilder:
-        """Create a builder for fluent configuration.
-
-        Returns:
-            MCPServerFactoryBuilder instance.
-        """
-        from .builder import MCPServerFactoryBuilder
-
-        return MCPServerFactoryBuilder()
 
     @property
     def hangar(self) -> HangarFunctions:

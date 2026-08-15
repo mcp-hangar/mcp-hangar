@@ -1,6 +1,6 @@
 """Tests for fastmcp_server.py module.
 
-Tests cover the MCPServerFactory and builder pattern.
+Tests cover the MCPServerFactory.
 """
 
 from unittest.mock import AsyncMock, Mock
@@ -9,7 +9,7 @@ import pytest
 
 from mcp_hangar._sdk_compat import HAS_NATIVE_TASKS, lowlevel_server
 from mcp_hangar import tasks_wire
-from mcp_hangar.fastmcp_server import HangarFunctions, MCPServerFactory, MCPServerFactoryBuilder, ServerConfig
+from mcp_hangar.fastmcp_server import HangarFunctions, MCPServerFactory, ServerConfig
 from mcp_hangar.server.context import get_context, reset_context
 
 # The SEP-2663 method set, sourced from the wire module so this file cannot claim
@@ -194,12 +194,6 @@ class TestMCPServerFactory:
 
         assert callable(app)
 
-    def test_builder_method_returns_builder(self, mock_registry):
-        """builder() class method returns MCPServerFactoryBuilder."""
-        builder = MCPServerFactory.builder()
-
-        assert isinstance(builder, MCPServerFactoryBuilder)
-
 
 class TestMCPServerFactoryReadinessChecks:
     """Tests for readiness check functionality."""
@@ -306,171 +300,6 @@ class TestMCPServerFactoryMetrics:
 
         # Should not raise
         factory._update_metrics()
-
-
-class TestMCPServerFactoryBuilder:
-    """Tests for MCPServerFactoryBuilder class."""
-
-    def test_builder_creates_factory(self, mock_registry):
-        """Builder creates working factory."""
-        factory = (
-            MCPServerFactory.builder()
-            .with_hangar(
-                mock_registry.list,
-                mock_registry.start,
-                mock_registry.stop,
-                mock_registry.invoke,
-                mock_registry.tools,
-                mock_registry.details,
-                mock_registry.health,
-            )
-            .build()
-        )
-
-        assert factory is not None
-        assert factory.create_server() is not None
-
-    def test_builder_requires_all_core_functions(self):
-        """Builder raises if core functions missing."""
-        with pytest.raises(ValueError, match="core hangar functions"):
-            MCPServerFactory.builder().build()
-
-    def test_builder_requires_all_core_functions_partial(self):
-        """Builder raises if some core functions missing."""
-        with pytest.raises(ValueError, match="core hangar functions"):
-            MCPServerFactory.builder().with_hangar(
-                Mock(),
-                Mock(),
-                Mock(),
-                Mock(),
-                Mock(),
-                Mock(),
-                None,  # Missing health
-            ).build()
-
-    def test_builder_with_discovery(self, mock_registry):
-        """Builder accepts discovery functions."""
-        mock_discover = AsyncMock(return_value={"discovered": 0})
-
-        factory = (
-            MCPServerFactory.builder()
-            .with_hangar(
-                mock_registry.list,
-                mock_registry.start,
-                mock_registry.stop,
-                mock_registry.invoke,
-                mock_registry.tools,
-                mock_registry.details,
-                mock_registry.health,
-            )
-            .with_discovery(discover_fn=mock_discover)
-            .build()
-        )
-
-        assert factory is not None
-        assert factory.hangar.discover is mock_discover
-
-    def test_builder_with_all_discovery_functions(self, mock_registry):
-        """Builder accepts all discovery functions."""
-        factory = (
-            MCPServerFactory.builder()
-            .with_hangar(
-                mock_registry.list,
-                mock_registry.start,
-                mock_registry.stop,
-                mock_registry.invoke,
-                mock_registry.tools,
-                mock_registry.details,
-                mock_registry.health,
-            )
-            .with_discovery(
-                discover_fn=AsyncMock(),
-                discovered_fn=Mock(),
-                quarantine_fn=Mock(),
-                approve_fn=AsyncMock(),
-                sources_fn=Mock(),
-                metrics_fn=Mock(),
-            )
-            .build()
-        )
-
-        assert factory.hangar.discover is not None
-        assert factory.hangar.discovered is not None
-        assert factory.hangar.quarantine is not None
-        assert factory.hangar.approve is not None
-        assert factory.hangar.sources is not None
-        assert factory.hangar.metrics is not None
-
-    def test_builder_with_config(self, mock_registry):
-        """Builder accepts server config."""
-        factory = (
-            MCPServerFactory.builder()
-            .with_hangar(
-                mock_registry.list,
-                mock_registry.start,
-                mock_registry.stop,
-                mock_registry.invoke,
-                mock_registry.tools,
-                mock_registry.details,
-                mock_registry.health,
-            )
-            .with_config(host="localhost", port=3000)
-            .build()
-        )
-
-        server = factory.create_server()
-        if _binds_host_port(server):
-            assert server.settings.port == 3000
-            assert server.settings.host == "localhost"
-
-    def test_builder_with_all_config_options(self, mock_registry):
-        """Builder accepts all config options."""
-        factory = (
-            MCPServerFactory.builder()
-            .with_hangar(
-                mock_registry.list,
-                mock_registry.start,
-                mock_registry.stop,
-                mock_registry.invoke,
-                mock_registry.tools,
-                mock_registry.details,
-                mock_registry.health,
-            )
-            .with_config(
-                host="127.0.0.1",
-                port=9000,
-                streamable_http_path="/custom-mcp",
-                sse_path="/custom-sse",
-                message_path="/custom-messages/",
-            )
-            .build()
-        )
-
-        assert factory.config.host == "127.0.0.1"
-        assert factory.config.port == 9000
-        assert factory.config.streamable_http_path == "/custom-mcp"
-        assert factory.config.sse_path == "/custom-sse"
-        assert factory.config.message_path == "/custom-messages/"
-
-    def test_builder_chaining(self, mock_registry):
-        """Builder methods return self for chaining."""
-        builder = MCPServerFactory.builder()
-
-        result1 = builder.with_hangar(
-            mock_registry.list,
-            mock_registry.start,
-            mock_registry.stop,
-            mock_registry.invoke,
-            mock_registry.tools,
-            mock_registry.details,
-            mock_registry.health,
-        )
-        result2 = result1.with_discovery()
-        result3 = result2.with_config()
-
-        assert result1 is builder
-        assert result2 is builder
-        assert result3 is builder
 
 
 class TestMultipleInstances:
@@ -703,11 +532,14 @@ class TestServerConfigRelayTasksFlag:
         assert ServerConfig(relay_tasks_enabled=False).relay_tasks_enabled is False
 
     def test_every_default_agrees(self):
-        """One flag, three construction paths -- they must not drift apart.
+        """One flag, two construction paths -- they must not drift apart.
 
-        `ServerConfig`, the builder's `with_config()` and the HTTP-serve
-        bootstrap each carry their own default. They disagreed before (True /
-        False / True), so a deployment's posture depended on how it was built.
+        `ServerConfig` and the HTTP-serve bootstrap each carry their own
+        default. There were three, and they disagreed (True / False / True), so
+        a deployment's posture depended on how it was built. The third was the
+        fluent builder's `with_config()`, deleted with the builder in #954 --
+        one fewer place to disagree, and the two left are the pair that decides
+        what a deployment actually gets.
 
         The bootstrap default is a literal inside a `dict.get()` on the serve
         path, not an importable symbol, so it is asserted against the source --
@@ -716,18 +548,11 @@ class TestServerConfigRelayTasksFlag:
         import inspect
         from pathlib import Path
 
-        from mcp_hangar.fastmcp_server.builder import MCPServerFactoryBuilder
-
-        builder_default = (
-            inspect.signature(MCPServerFactoryBuilder.with_config).parameters["relay_tasks_enabled"].default
-        )
-
         bootstrap_src = (
-            Path(inspect.getfile(MCPServerFactoryBuilder)).parents[1] / "server" / "bootstrap" / "__init__.py"
+            Path(inspect.getfile(ServerConfig)).parents[1] / "server" / "bootstrap" / "__init__.py"
         ).read_text()
 
         assert ServerConfig().relay_tasks_enabled is True
-        assert builder_default is True
         assert 'full_config.get("relay_tasks_enabled", True)' in bootstrap_src, (
             "the HTTP-serve bootstrap carries its own default and has drifted from ServerConfig"
         )
