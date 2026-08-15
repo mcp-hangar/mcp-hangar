@@ -187,13 +187,6 @@ class TestMCPServerFactory:
 
         assert factory.config is config
 
-    def test_create_asgi_app_returns_callable(self, mock_registry):
-        """create_asgi_app() returns ASGI app."""
-        factory = MCPServerFactory(mock_registry)
-        app = factory.create_asgi_app()
-
-        assert callable(app)
-
 
 class TestMCPServerFactoryReadinessChecks:
     """Tests for readiness check functionality."""

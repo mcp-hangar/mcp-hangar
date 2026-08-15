@@ -25,7 +25,7 @@ Usage:
     )
 
     factory = MCPServerFactory(hangar)
-    app = factory.create_asgi_app()
+    mcp = factory.create_server()
 """
 
 from .config import HangarFunctions, ServerConfig

@@ -148,6 +148,29 @@ app = factory.create_asgi_app()
 release. The v0.4.0 note further down, which names the factory as the
 replacement for `setup_fastmcp_server()`, still describes what that release did.
 
+## Next — `MCPServerFactory.create_asgi_app` and the ASGI combiners are gone
+
+Removed from `mcp_hangar.fastmcp_server`: `create_asgi_app` on the factory, plus
+`create_health_routes`, `create_combined_asgi_app` and
+`create_auth_combined_app` in `asgi.py`.
+
+**Nothing about a running Hangar changes.** `serve --http` has never used any of
+them: it builds its app in `server/lifecycle.mcp_app_for_serving` and wraps it
+with `create_auth_enforced_app`. The two assemblies had in fact drifted — the
+deleted one mounted flat `/health` and `/ready`, while the served app exposes
+`/health/live`, `/health/ready`, `/health/startup` and `/metrics`.
+
+If you were embedding Hangar and calling `factory.create_asgi_app()`, there is
+no drop-in successor and there should not be: assemble the ASGI app you want
+from `factory.create_server().streamable_http_app(...)`, and wrap it with
+`mcp_hangar.server.api.middleware.create_auth_enforced_app` if you need the same
+authentication the gateway applies. That is the composition `serve --http`
+itself uses.
+
+`MCPServerFactory.create_server`, `HangarFunctions`, `ServerConfig`,
+`bind_caller_identity`, `release_caller_identity` and `mcp_transport_security`
+are unchanged.
+
 ## 2.6.0 — three things to check before you roll out
 
 Two of these can stop a deployment that works today, and both are in the same
