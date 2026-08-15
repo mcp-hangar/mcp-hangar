@@ -36,6 +36,29 @@ in resumability — no event store was ever configured on this transport, so
 chart's `service.sessionAffinity: ClientIP` default is now harmless rather than
 load-bearing, and can be turned off if it is costing you balance.
 
+## Next — `CallbackAlertSink` is gone from `application.event_handlers`
+
+Removed from the module's `__all__` and from `alert_handler.py`. Nothing in the
+gateway ever constructed it: `get_alert_handler()` builds a `LogAlertSink`, and
+the only callers were this repository's own tests.
+
+If you were importing it to capture alerts in your own code, the replacement is
+four lines you own:
+
+```python
+from mcp_hangar.application.event_handlers.alert_handler import Alert, AlertSink
+
+class CapturingSink(AlertSink):
+    def __init__(self) -> None:
+        self.alerts: list[Alert] = []
+
+    def send(self, alert: Alert) -> None:
+        self.alerts.append(alert)
+```
+
+`AlertSink`, `Alert`, `LogAlertSink`, `AlertEventHandler` and `get_alert_handler`
+are unchanged.
+
 ## 2.6.0 — three things to check before you roll out
 
 Two of these can stop a deployment that works today, and both are in the same

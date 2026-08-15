@@ -4,7 +4,6 @@ from .alert_handler import (
     Alert,
     AlertEventHandler,
     AlertSink,
-    CallbackAlertSink,
     get_alert_handler,
     LogAlertSink,
     reset_alert_handler,
@@ -41,7 +40,6 @@ __all__ = [
     "Alert",
     "AlertSink",
     "LogAlertSink",
-    "CallbackAlertSink",
     "get_alert_handler",
     "reset_alert_handler",
     # Audit
