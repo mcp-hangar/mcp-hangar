@@ -8,7 +8,7 @@
 # Note: -i (keep STDIN open) is required -- this is a stdio MCP server, and
 # without an open stdin it reads EOF immediately and the container exits.
 
-FROM python:3.11-slim
+FROM python:3.14-slim
 
 WORKDIR /app
 

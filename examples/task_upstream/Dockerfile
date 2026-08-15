@@ -1,4 +1,4 @@
-FROM python:3.13-slim
+FROM python:3.14-slim
 
 LABEL org.opencontainers.image.title="MCP task-emitting upstream"
 LABEL org.opencontainers.image.description="v2-native Tasks-extension MCP server, for testing mcp-hangar's governed task relay (ADR-014)"
