@@ -1,7 +1,6 @@
 """Tests for Audit Event Handler."""
 
 from datetime import datetime, UTC
-from unittest.mock import patch
 
 import pytest
 
@@ -10,7 +9,6 @@ from mcp_hangar.application.event_handlers.audit_handler import (
     AuditRecord,
     AuditStore,
     InMemoryAuditStore,
-    LogAuditStore,
 )
 from mcp_hangar.domain.events import (
     HealthCheckFailed,
@@ -224,33 +222,6 @@ class TestInMemoryAuditStore:
         assert records[0].event_id == "e3"
         assert records[1].event_id == "e2"
         assert records[2].event_id == "e1"
-
-
-class TestLogAuditStore:
-    """Test LogAuditStore implementation."""
-
-    def test_log_store_logs_record(self):
-        """Test that LogAuditStore logs records."""
-        store = LogAuditStore()
-
-        record = AuditRecord(
-            event_id="evt-1",
-            event_type="McpServerStarted",
-            occurred_at=datetime.now(UTC),
-            mcp_server_id="test",
-            data={"mode": "subprocess"},
-        )
-
-        with patch.object(store._logger, "info") as mock_info:
-            store.record(record)
-            mock_info.assert_called()
-
-    def test_log_store_query_not_supported(self):
-        """Test LogAuditStore doesn't support queries."""
-        store = LogAuditStore()
-
-        with pytest.raises(NotImplementedError):
-            store.query()
 
 
 class TestAuditEventHandler:
