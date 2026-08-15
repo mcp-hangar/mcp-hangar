@@ -5,7 +5,7 @@ No live PostgreSQL is used. Two complementary styles:
 - ``TestSqlShapes`` mocks the connection factory with a bare ``MagicMock``
   cursor and asserts on the literal SQL text issued (table names, ``%s``
   placeholders, ``ON CONFLICT`` clauses) -- the same style as
-  ``test_auth_coverage_batch4.py``.
+  ``test_postgres_auth_store.py``.
 - ``_FakePostgres`` (used by the rest of the classes) is a tiny in-memory
   stand-in that actually interprets the small, fixed set of statements this
   adapter issues, so the higher-level tests can assert on real round-trip
@@ -68,7 +68,7 @@ class TestConstruction:
 
 
 class TestSqlShapes:
-    """Assert on the literal SQL text, the way test_auth_coverage_batch4.py does."""
+    """Assert on the literal SQL text, the way test_postgres_auth_store.py does."""
 
     def _mock_store(self) -> tuple[PostgresEventStore, MagicMock, MagicMock]:
         mock_conn = MagicMock()
