@@ -1,1 +1,0 @@
-**core:** `CallbackAlertSink` is removed from `mcp_hangar.application.event_handlers`. Production `get_alert_handler()` builds a `LogAlertSink`; the callback wrapper was constructed only by this repository's tests, which now define their own capturing sink. `AlertSink`, `Alert`, `LogAlertSink` and `AlertEventHandler` are unchanged; see `UPGRADE.md`

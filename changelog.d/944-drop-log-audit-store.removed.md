@@ -1,1 +1,0 @@
-**core:** `LogAuditStore` is removed from `mcp_hangar.application.event_handlers`. It was never constructed outside this repository's tests, and its `query()` raised `NotImplementedError` — a log sink cannot answer a query. `AuditStore`, `InMemoryAuditStore` and the OTLP exporter path are unchanged; see `UPGRADE.md`
