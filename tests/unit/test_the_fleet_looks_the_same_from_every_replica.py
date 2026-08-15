@@ -14,6 +14,8 @@ a different reason, which this now depends on.
 
 from __future__ import annotations
 
+import asyncio
+
 import pytest
 
 from mcp_hangar.application.event_handlers.fleet_projection import FleetProjection
@@ -31,9 +33,7 @@ class _SyncLoop:
     """Runs the projection's read inline, so tests need no background thread."""
 
     def run(self, coro, timeout):
-        import asyncio
-
-        return asyncio.new_event_loop().run_until_complete(coro)
+        return asyncio.run(coro)
 
 
 class _Replica:
@@ -52,11 +52,9 @@ class _Replica:
 
     def registers(self, mcp_server_id: str, description: str = "") -> None:
         """Register as the command handler does: record first, then announce."""
-        import asyncio
-
         from mcp_hangar.domain.model import McpServer
 
-        asyncio.new_event_loop().run_until_complete(
+        asyncio.run(
             self.configs.save(
                 McpServerConfigSnapshot(
                     mcp_server_id=mcp_server_id, mode="subprocess", command=["python"], description=description
@@ -67,9 +65,7 @@ class _Replica:
         self.bus.publish(McpServerRegistered(mcp_server_id=mcp_server_id, source="api", mode="subprocess"))
 
     def deregisters(self, mcp_server_id: str) -> None:
-        import asyncio
-
-        asyncio.new_event_loop().run_until_complete(self.configs.delete(mcp_server_id))
+        asyncio.run(self.configs.delete(mcp_server_id))
         self.fleet.remove(mcp_server_id)
         self.bus.publish(McpServerDeregistered(mcp_server_id=mcp_server_id, source="api"))
 

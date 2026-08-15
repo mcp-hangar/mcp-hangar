@@ -1,7 +1,7 @@
 """CLI tests for `mcp-hangar auth bootstrap-admin`.
 
 Store-level durability/concurrency/transaction semantics are proven in
-``test_initial_admin_bootstrap.py`` (SQLite) and ``test_auth_coverage_batch4.py``
+``test_initial_admin_bootstrap.py`` (SQLite) and ``test_postgres_auth_store.py``
 (Postgres, mocked psycopg2). This file covers the CLI surface #451 added:
 that it reuses the durable ``bootstrap_auth`` composition, fails closed on
 non-durable / disabled / anonymous configs, refuses a second bootstrap without

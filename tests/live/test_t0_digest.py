@@ -133,7 +133,7 @@ def _first_call_result(base_url: str, api_key: str, tool: str, arguments: dict |
     from tests.live._mcp_client import open_mcp_streams
 
     async def _call() -> dict:
-        async with open_mcp_streams(f"{base_url}/mcp", {"X-API-Key": api_key}) as (read, write, _):
+        async with open_mcp_streams(f"{base_url}/mcp", {"X-API-Key": api_key}) as (read, write):
             async with ClientSession(read, write) as session:
                 await session.initialize()
                 res = await session.call_tool(

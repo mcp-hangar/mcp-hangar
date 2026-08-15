@@ -21,7 +21,6 @@ with the flags.
 
 from __future__ import annotations
 
-import asyncio
 from collections.abc import Iterator
 from contextlib import contextmanager
 from types import SimpleNamespace
@@ -172,7 +171,7 @@ def store(events: list[object]) -> GovernedTaskStore:
 # ---------------------------------------------------------------------------
 
 
-def test_update_grants_consent_relays_payload_and_records(store: GovernedTaskStore, events: list[object]) -> None:
+async def test_update_grants_consent_relays_payload_and_records(store: GovernedTaskStore, events: list[object]) -> None:
     """A clean inbound ``tasks/update``: authorize -> open+answer gate -> relay the
     client payload upstream -> record the grant -> re-sync -> flat snapshot."""
     _register(store, "S1", "T1", "tenant-a", "alice")
@@ -187,7 +186,7 @@ def test_update_grants_consent_relays_payload_and_records(store: GovernedTaskSto
     handlers = _handlers(store, gate, router)
     payload = {"task_id": "T1", "input": {"token": "sekret"}}
 
-    result = asyncio.run(handlers["tasks/update"][1](_ctx(), _update_params("T1", payload)))
+    result = await handlers["tasks/update"][1](_ctx(), _update_params("T1", payload))
 
     # Gate opened then answered (consumed) exactly once.
     assert order == ["open", "answer"]
@@ -205,7 +204,7 @@ def test_update_grants_consent_relays_payload_and_records(store: GovernedTaskSto
         assert store.get_task(("S1", "T1")).status == "completed"
 
 
-def test_update_transient_relay_failure_discards_gate_and_does_not_fail_task(
+async def test_update_transient_relay_failure_discards_gate_and_does_not_fail_task(
     store: GovernedTaskStore, events: list[object]
 ) -> None:
     """A transient upstream ``tasks/update`` error discards the gate WITHOUT answering,
@@ -224,7 +223,7 @@ def test_update_transient_relay_failure_discards_gate_and_does_not_fail_task(
     handlers = _handlers(store, gate, router)
 
     with pytest.raises(McpError) as exc:
-        asyncio.run(handlers["tasks/update"][1](_ctx(), _update_params("T1", {"task_id": "T1"})))
+        await handlers["tasks/update"][1](_ctx(), _update_params("T1", {"task_id": "T1"}))
     assert "retry" in str(exc.value)
 
     # Gate discarded, never answered (consent not consumed).

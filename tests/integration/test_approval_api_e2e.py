@@ -9,14 +9,12 @@ import pytest
 from starlette.routing import Mount
 from starlette.testclient import TestClient
 
-from mcp_hangar.domain.value_objects.tool_access_policy import ToolAccessPolicy
-
 from mcp_hangar.approvals.api.routes import approval_routes
 from mcp_hangar.approvals.delivery.noop import NoOpApprovalDelivery
 from mcp_hangar.approvals.hold_registry import ApprovalHoldRegistry
 from mcp_hangar.approvals.models import ApprovalState
 from mcp_hangar.approvals.service import ApprovalGateService
-
+from mcp_hangar.domain.value_objects.tool_access_policy import ToolAccessPolicy
 
 # ---------------------------------------------------------------------------
 # In-memory repository (same as test_approval_flow.py)
@@ -125,8 +123,7 @@ class TestApprovalAPIResolveFlow:
             )
 
         # Start the check in a background task
-        loop = asyncio.get_event_loop()
-        check_task = loop.create_task(do_check())
+        check_task = asyncio.create_task(do_check())
 
         # Wait for the request to appear
         await asyncio.sleep(0.1)
@@ -178,8 +175,7 @@ class TestApprovalAPIResolveFlow:
                 correlation_id="bad-decision",
             )
 
-        loop = asyncio.get_event_loop()
-        check_task = loop.create_task(do_check())
+        check_task = asyncio.create_task(do_check())
         await asyncio.sleep(0.1)
 
         pending = client.get("/approvals?state=pending").json()
@@ -211,8 +207,7 @@ class TestApprovalAPIResolveFlow:
                 correlation_id="double-resolve",
             )
 
-        loop = asyncio.get_event_loop()
-        check_task = loop.create_task(do_check())
+        check_task = asyncio.create_task(do_check())
         await asyncio.sleep(0.1)
 
         pending = client.get("/approvals?state=pending").json()

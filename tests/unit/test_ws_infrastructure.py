@@ -7,9 +7,8 @@ to avoid pytest-asyncio dependency.
 import asyncio
 import threading
 from dataclasses import dataclass, field
-from datetime import datetime, UTC
+from datetime import UTC, datetime
 from typing import Any
-
 
 from mcp_hangar.domain.events import DomainEvent
 from mcp_hangar.server.api.ws.filters import matches_filters, parse_subscription_filters
@@ -18,7 +17,6 @@ from mcp_hangar.server.api.ws.manager import (
     WebSocketConnectionManager,
     connection_manager,
 )
-
 
 # ---------------------------------------------------------------------------
 # Test helpers
@@ -103,88 +101,67 @@ def test_manager_concurrent_register_both_entries_survive():
 # ---------------------------------------------------------------------------
 
 
-def _run(coro):
-    """Run an async coroutine on a fresh event loop."""
-    loop = asyncio.new_event_loop()
-    try:
-        return loop.run_until_complete(coro)
-    finally:
-        loop.close()
-
-
-def test_event_queue_put_threadsafe_delivers_via_loop():
+async def test_event_queue_put_threadsafe_delivers_via_loop():
     """put_threadsafe schedules put_nowait on the asyncio Queue via the given loop."""
 
-    async def _check():
-        esq = EventStreamQueue()
-        loop = asyncio.get_event_loop()
-        event = _FakeEvent(event_type="McpServerStarted")
-        esq.put_threadsafe(event, loop)
-        # Yield to let call_soon_threadsafe callback execute.
-        await asyncio.sleep(0)
-        result = esq.queue.get_nowait()
-        assert result is event
-
-    _run(_check())
+    esq = EventStreamQueue()
+    loop = asyncio.get_running_loop()
+    event = _FakeEvent(event_type="McpServerStarted")
+    esq.put_threadsafe(event, loop)
+    # Yield to let call_soon_threadsafe callback execute.
+    await asyncio.sleep(0)
+    result = esq.queue.get_nowait()
+    assert result is event
 
 
-def test_event_queue_full_queue_does_not_raise():
+async def test_event_queue_full_queue_does_not_raise():
     """put_threadsafe into a full queue drops oldest and keeps newest event."""
 
-    async def _check():
-        esq = EventStreamQueue()
-        # Override internal queue with maxsize=1 to trigger QueueFull easily.
-        esq._queue = asyncio.Queue(maxsize=1)
-        loop = asyncio.get_event_loop()
-        event1 = _FakeEvent(event_type="A")
-        event2 = _FakeEvent(event_type="B")
-        esq.put_threadsafe(event1, loop)
-        await asyncio.sleep(0)  # let first event land
-        esq.put_threadsafe(event2, loop)  # should evict event1
-        await asyncio.sleep(0)
-        # Only event2 remains in queue; event1 was dropped.
-        assert esq.queue.qsize() == 1
-        assert esq.queue.get_nowait() is event2
-
-    _run(_check())
+    esq = EventStreamQueue()
+    # Override internal queue with maxsize=1 to trigger QueueFull easily.
+    esq._queue = asyncio.Queue(maxsize=1)
+    loop = asyncio.get_running_loop()
+    event1 = _FakeEvent(event_type="A")
+    event2 = _FakeEvent(event_type="B")
+    esq.put_threadsafe(event1, loop)
+    await asyncio.sleep(0)  # let first event land
+    esq.put_threadsafe(event2, loop)  # should evict event1
+    await asyncio.sleep(0)
+    # Only event2 remains in queue; event1 was dropped.
+    assert esq.queue.qsize() == 1
+    assert esq.queue.get_nowait() is event2
 
 
-def test_event_queue_full_queue_invokes_drop_callback():
+async def test_event_queue_full_queue_invokes_drop_callback():
     """Drop callback receives evicted and incoming events on overflow."""
 
-    async def _check():
-        drops = []
-        esq = EventStreamQueue(maxsize=1, on_drop=lambda dropped, new: drops.append((dropped, new)))
-        loop = asyncio.get_event_loop()
-        event1 = _FakeEvent(event_type="A")
-        event2 = _FakeEvent(event_type="B")
+    drops = []
+    esq = EventStreamQueue(maxsize=1, on_drop=lambda dropped, new: drops.append((dropped, new)))
+    loop = asyncio.get_running_loop()
+    event1 = _FakeEvent(event_type="A")
+    event2 = _FakeEvent(event_type="B")
 
-        esq.put_threadsafe(event1, loop)
-        await asyncio.sleep(0)
-        esq.put_threadsafe(event2, loop)
-        await asyncio.sleep(0)
+    esq.put_threadsafe(event1, loop)
+    await asyncio.sleep(0)
+    esq.put_threadsafe(event2, loop)
+    await asyncio.sleep(0)
 
-        assert drops == [(event1, event2)]
-
-    _run(_check())
+    assert drops == [(event1, event2)]
 
 
-def test_event_queue_three_events_all_retrievable():
+async def test_event_queue_three_events_all_retrievable():
     """put_threadsafe with 3 events into maxsize=100 queue -- all 3 retrievable."""
 
-    async def _check():
-        esq = EventStreamQueue()
-        loop = asyncio.get_event_loop()
-        events = [_FakeEvent(event_type=f"E{i}") for i in range(3)]
-        for e in events:
-            esq.put_threadsafe(e, loop)
-        await asyncio.sleep(0)
-        retrieved = []
-        for _ in range(3):
-            retrieved.append(esq.queue.get_nowait())
-        assert retrieved == events
-
-    _run(_check())
+    esq = EventStreamQueue()
+    loop = asyncio.get_running_loop()
+    events = [_FakeEvent(event_type=f"E{i}") for i in range(3)]
+    for e in events:
+        esq.put_threadsafe(e, loop)
+    await asyncio.sleep(0)
+    retrieved = []
+    for _ in range(3):
+        retrieved.append(esq.queue.get_nowait())
+    assert retrieved == events
 
 
 # ---------------------------------------------------------------------------

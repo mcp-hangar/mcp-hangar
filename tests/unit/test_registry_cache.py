@@ -5,7 +5,18 @@ import time
 
 import pytest
 
+from mcp_hangar.infrastructure.registry import cache as cache_module
 from mcp_hangar.infrastructure.registry.cache import RegistryCache
+
+
+def _clock_past_the_ttl(monkeypatch: pytest.MonkeyPatch, seconds: float) -> None:
+    """Freeze the clock the cache reads `seconds` into the future.
+
+    The smallest legal TTL is one whole second, so asserting expiry used to mean
+    `time.sleep(1.1)` -- a real second of wall clock, twice in this file.
+    """
+    frozen = time.time() + seconds
+    monkeypatch.setattr(cache_module.time, "time", lambda: frozen)
 
 
 class TestRegistryCache:
@@ -68,12 +79,12 @@ class TestRegistryCache:
         assert cache.contains("key1") is True
         assert cache.contains("nonexistent") is False
 
-    def test_ttl_expiration(self):
+    def test_ttl_expiration(self, monkeypatch: pytest.MonkeyPatch):
         """Test entries expire after TTL."""
         cache = RegistryCache(ttl_seconds=1)
         cache.set("key1", "value1")
         assert cache.get("key1") == "value1"
-        time.sleep(1.1)
+        _clock_past_the_ttl(monkeypatch, 1.1)
         assert cache.get("key1") is None
 
     def test_lru_eviction(self):
@@ -101,12 +112,12 @@ class TestRegistryCache:
         assert count == 2
         assert cache.size() == 0
 
-    def test_purge_expired(self):
+    def test_purge_expired(self, monkeypatch: pytest.MonkeyPatch):
         """Test purge_expired removes expired entries."""
         cache = RegistryCache(ttl_seconds=1)
         cache.set("key1", "value1")
         cache.set("key2", "value2")
-        time.sleep(1.1)
+        _clock_past_the_ttl(monkeypatch, 1.1)
         cache.set("key3", "value3")
         purged = cache.purge_expired()
         assert purged == 2

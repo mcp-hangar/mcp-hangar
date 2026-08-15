@@ -974,6 +974,10 @@ class TestRetryFunctionality:
             patch("mcp_hangar.server.tools.batch.validator.GROUPS") as groups,
             patch("mcp_hangar.server.tools.batch.executor.get_context", return_value=ctx),
             patch("mcp_hangar.server.tools.batch.executor.GROUPS") as exec_groups,
+            # The backoff between attempts is a real `time.sleep` on the default
+            # 1s initial delay, so these three tests spent ten seconds waiting to
+            # assert on what the retry decided, not on how long it paused.
+            patch("mcp_hangar.retry.time.sleep"),
         ):
             groups.get.return_value = None
             exec_groups.get.return_value = None

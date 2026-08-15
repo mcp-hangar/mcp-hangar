@@ -99,9 +99,6 @@ postgres = [
 full = [
     "fpdf2>=2.8.0",
 ]
-containers = [
-    "testcontainers>=4,<5",
-]
 [project.scripts]
 mcp-hangar = "mcp_hangar.server.cli:cli_main"
 [project.urls]
@@ -278,14 +275,22 @@ drift_allowance = 3.0
   "domain/services/tool_access_resolver.py" = 86.4
   "domain/services/ui_resource_guard.py" = 100.0
   "domain/value_objects/tool_access_policy.py" = 84.2
-  "server/api/middleware.py" = 88.7
+  # 88.7 -> 92.7 because the two security regression files moved from
+  # tests/security/ into tests/unit, and this gate's pinned selection is
+  # `tests/unit tests/integration` -- it never saw them. Same tests, same code,
+  # now counted. Measured identically on 3.11 (CI) and 3.13 (local).
+  "server/api/middleware.py" = 92.7
   "server/api/route_permissions.py" = 100.0
   "server/tools/batch/executor.py" = 84.5
 
 [tool.pytest.ini_options]
 testpaths = ["tests"]
 asyncio_mode = "auto"
-addopts = "-v --cov=mcp_hangar --cov-report=term-missing"
+# No `addopts`. It used to carry `-v --cov=mcp_hangar --cov-report=term-missing`,
+# which put an 18-second coverage pass and 6600 lines of per-test output on every
+# local run, including runs of a single file. The jobs that read a coverage report
+# ask for it explicitly, and the live tiers had to undo it with `-o addopts=""`
+# because coverage of a subprocess under test measures nothing.
 # Per-test hang guard: fail (with a stack dump) instead of hanging so one wedged
 # test can't burn a CI job to the 6h ceiling (which cancelled a release). 300s is
 # far above any real test; the whole unit suite runs in well under a minute.
@@ -334,11 +339,6 @@ unreferenced = [
   "infrastructure/persistence/database.py::initialize_database",
   "infrastructure/persistence/database.py::set_database",
   "infrastructure/persistence/database_common.py::create_connection_factory",
-  "integrations/test_langfuse.py::TestLangfuseAdapter",
-  "integrations/test_langfuse.py::TestLangfuseConfig",
-  "integrations/test_langfuse.py::TestLangfuseObservabilityAdapter",
-  "integrations/test_langfuse.py::TestLangfuseSpanHandle",
-  "integrations/test_langfuse.py::TestThreadSafety",
   "metrics.py::init_metrics",
   "metrics.py::record_behavioral_deviation",
   "metrics.py::record_detection_rule_match",

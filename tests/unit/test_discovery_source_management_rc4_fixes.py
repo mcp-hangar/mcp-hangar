@@ -15,7 +15,6 @@ D. the MCP `hangar_sources` tool returned sources with no id at all.
 
 from __future__ import annotations
 
-import asyncio
 from unittest.mock import patch
 
 from mcp_hangar.application.commands.discovery_commands import TriggerSourceScanCommand
@@ -124,7 +123,7 @@ class TestScanActuallyRuns:
 
 
 class TestToggleReachesTheRunningSource:
-    def test_disable_stops_the_source_being_scanned(self) -> None:
+    async def test_disable_stops_the_source_being_scanned(self) -> None:
         source = _FakeSource("docker", servers=[_server("a")])
         orchestrator = _orchestrator_with(source)
         registry, source_id = _registry_for(orchestrator, "docker")
@@ -134,22 +133,22 @@ class TestToggleReachesTheRunningSource:
         # The live instance the cycle reads is now disabled...
         assert orchestrator.get_source("docker").is_enabled is False
         # ...so a cycle does not scan it.
-        asyncio.run(orchestrator.run_discovery_cycle())
+        await orchestrator.run_discovery_cycle()
         assert source.discover_calls == 0
 
-    def test_get_agrees_with_the_toggle(self) -> None:
+    async def test_get_agrees_with_the_toggle(self) -> None:
         source = _FakeSource("docker")
         orchestrator = _orchestrator_with(source)
         registry, source_id = _registry_for(orchestrator, "docker")
 
         registry.disable_source(source_id)
 
-        statuses = asyncio.run(orchestrator.get_sources_status())
+        statuses = await orchestrator.get_sources_status()
         docker = next(s for s in statuses if s["source_type"] == "docker")
         # The listing no longer contradicts the 200 the disable returned.
         assert docker["is_enabled"] is False
 
-    def test_enable_resumes_scanning(self) -> None:
+    async def test_enable_resumes_scanning(self) -> None:
         source = _FakeSource("docker", servers=[_server("a")])
         orchestrator = _orchestrator_with(source)
         registry, source_id = _registry_for(orchestrator, "docker")
@@ -158,7 +157,7 @@ class TestToggleReachesTheRunningSource:
         registry.enable_source(source_id)
 
         assert orchestrator.get_source("docker").is_enabled is True
-        asyncio.run(orchestrator.run_discovery_cycle())
+        await orchestrator.run_discovery_cycle()
         assert source.discover_calls == 1
 
     def test_config_update_reaches_the_running_source(self) -> None:
@@ -187,7 +186,7 @@ class _Req:
 
 
 class TestListingAndRoutesAgree:
-    def test_a_registered_source_is_listed_with_its_addressable_id(self) -> None:
+    async def test_a_registered_source_is_listed_with_its_addressable_id(self) -> None:
         source = _FakeSource("docker")
         orchestrator = _orchestrator_with(source)
         registry, source_id = _registry_for(orchestrator, "docker")
@@ -195,7 +194,7 @@ class TestListingAndRoutesAgree:
         from mcp_hangar.server.api import discovery as api
 
         with patch.object(api, "get_context", return_value=_Ctx(orchestrator, registry)):
-            body = asyncio.run(api.list_sources(_Req())).body
+            body = (await api.list_sources(_Req())).body
 
         import json
 
@@ -205,7 +204,7 @@ class TestListingAndRoutesAgree:
         assert docker["id"] == source_id
         assert registry.get_source(docker["id"]) is not None
 
-    def test_a_deleted_source_still_running_is_listed_without_an_id(self) -> None:
+    async def test_a_deleted_source_still_running_is_listed_without_an_id(self) -> None:
         source = _FakeSource("docker")
         orchestrator = _orchestrator_with(source)
         registry, source_id = _registry_for(orchestrator, "docker")
@@ -216,7 +215,7 @@ class TestListingAndRoutesAgree:
         from mcp_hangar.server.api import discovery as api
 
         with patch.object(api, "get_context", return_value=_Ctx(orchestrator, registry)):
-            body = asyncio.run(api.list_sources(_Req())).body
+            body = (await api.list_sources(_Req())).body
 
         import json
 
@@ -249,7 +248,7 @@ class _ToolCtx:
 
 
 class TestMcpToolCarriesIds:
-    def test_hangar_sources_returns_sources_with_ids(self) -> None:
+    async def test_hangar_sources_returns_sources_with_ids(self) -> None:
         source = _FakeSource("docker")
         orchestrator = _orchestrator_with(source)
 
@@ -261,7 +260,7 @@ class TestMcpToolCarriesIds:
 
         with patch.object(tools, "get_context", return_value=_ToolCtx(orchestrator)):
             with patch.object(tools, "check_rate_limit", lambda *_a, **_k: None):
-                out = asyncio.run(hangar_sources())
+                out = await hangar_sources()
 
         docker = next(s for s in out["sources"] if s["source_type"] == "docker")
         assert docker["id"] == config_source_id("docker")

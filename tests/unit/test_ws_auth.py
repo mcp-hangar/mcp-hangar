@@ -9,7 +9,7 @@ from mcp_hangar.server.lifecycle import ServerLifecycle
 from mcp_hangar.server.api.ws.manager import EventStreamQueue
 
 
-def test_websocket_without_valid_auth_is_rejected() -> None:
+async def test_websocket_without_valid_auth_is_rejected() -> None:
     """Auth wrapper should reject unauthenticated websocket connections."""
     mock_runtime = MagicMock()
     mock_context = ApplicationContext(runtime=mock_runtime, mcp_server=MagicMock())
@@ -33,13 +33,13 @@ def test_websocket_without_valid_auth_is_rejected() -> None:
         "query_string": b"",
     }
 
-    asyncio.run(auth_app(scope, AsyncMock(), send))
+    await auth_app(scope, AsyncMock(), send)
 
     inner_app.assert_not_called()
     assert sent_messages == [{"type": "websocket.close", "code": 1008, "reason": "No credentials provided"}]
 
 
-def test_backpressure_drop_behavior_keeps_newest_event() -> None:
+async def test_backpressure_drop_behavior_keeps_newest_event() -> None:
     """Overflow should drop the oldest queued event and retain the newest."""
 
     async def scenario() -> None:
@@ -58,4 +58,4 @@ def test_backpressure_drop_behavior_keeps_newest_event() -> None:
         assert queue.queue.qsize() == 1
         assert queue.queue.get_nowait() is second
 
-    asyncio.run(scenario())
+    await scenario()

@@ -17,7 +17,6 @@ themselves, so they outlive any particular way of asking.
 
 from __future__ import annotations
 
-import asyncio
 from collections.abc import Iterator
 from contextlib import contextmanager
 from types import SimpleNamespace
@@ -181,10 +180,6 @@ def _handlers(store: GovernedTaskStore, gate: TaskConsentGate, router: _FakeRout
     mcp = SimpleNamespace(_mcp_server=low)
     register_task_relay_handlers(mcp, store, gate, router)
     return low.handlers
-
-
-def _get(handlers: dict[str, tuple[Any, Any]], ctx: Any, task_id: str = "T1") -> Any:
-    return asyncio.run(handlers["tasks/get"][1](ctx, SimpleNamespace(task_id=task_id)))
 
 
 @pytest.fixture

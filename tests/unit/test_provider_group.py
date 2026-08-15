@@ -530,7 +530,12 @@ class TestProviderGroupLockHierarchy:
         import threading
 
         group = McpServerGroup(group_id="lock-test", auto_start=True)
-        barrier = threading.Barrier(2, timeout=5)
+        # The barrier holds each thread inside its lock long enough to overlap.
+        # When only one side reaches it the wait runs to this timeout, which the
+        # assertions below already tolerate (`BrokenBarrierError` is filtered
+        # out) -- so it is the floor on how long the test takes, not a deadline
+        # anything depends on. Five seconds bought nothing over one.
+        barrier = threading.Barrier(2, timeout=1)
         errors: list[Exception] = []
 
         def add_mcp_server():
