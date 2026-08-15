@@ -456,11 +456,14 @@ class TestEnsureReadyConcurrency:
         """_ready_event.wait() with timeout raises error if startup takes too long."""
         provider = self._make_provider()
         barrier = threading.Barrier(2, timeout=10)
+        let_startup_finish = threading.Event()
 
         def very_slow_create_client():
-            # Signal that we've started, then block long enough for waiter to timeout
+            # Signal that startup has begun, then block until the waiter has had
+            # its timeout. Waiting on an event rather than `time.sleep(5.0)` makes
+            # the test as slow as the waiter's 0.5s deadline, not the starter's nap.
             barrier.wait()
-            time.sleep(5.0)
+            assert let_startup_finish.wait(timeout=10)
             mock_client = MagicMock()
             mock_client.is_alive.return_value = True
             mock_client.call.return_value = {"result": {"tools": []}}
@@ -476,23 +479,6 @@ class TestEnsureReadyConcurrency:
             except Exception as e:  # noqa: BLE001
                 errors.append(e)
 
-        # Temporarily reduce the wait timeout so test doesn't take 30s
-        original_ensure_ready = provider.ensure_ready
-
-        def patched_ensure_ready():
-            # Monkey-patch the Event.wait timeout by wrapping ensure_ready
-            original_event_class = threading.Event
-
-            class ShortTimeoutEvent(original_event_class):
-                def wait(self, timeout=None):
-                    # Use a very short timeout for testing
-                    return super().wait(timeout=0.5)
-
-            # Swap the event class temporarily on the waiter path
-            original_ensure_ready()
-
-        # Instead of complex patching, directly test with a short timeout
-        # by using a custom wrapper
         waiter_errors = []
 
         def waiter_call():
@@ -525,6 +511,7 @@ class TestEnsureReadyConcurrency:
                 t2 = threading.Thread(target=waiter_call)
                 t2.start()
                 t2.join(timeout=5)
+                let_startup_finish.set()
                 t1.join(timeout=10)
 
         # The waiter should have timed out
