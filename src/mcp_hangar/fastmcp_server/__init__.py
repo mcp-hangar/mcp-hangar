@@ -26,16 +26,8 @@ Usage:
 
     factory = MCPServerFactory(hangar)
     app = factory.create_asgi_app()
-
-    # Or use the builder pattern:
-    factory = (MCPServerFactory.builder()
-        .with_hangar(list_fn, start_fn, stop_fn, invoke_fn, tools_fn, details_fn, health_fn)
-        .with_discovery(discover_fn=discover_fn)
-        .with_config(port=9000)
-        .build())
 """
 
-from .builder import MCPServerFactoryBuilder
 from .config import HangarFunctions, ServerConfig
 from .factory import MCPServerFactory
 from .protocols import (
@@ -57,7 +49,6 @@ from .protocols import (
 __all__ = [
     # Factory API
     "MCPServerFactory",
-    "MCPServerFactoryBuilder",
     "HangarFunctions",
     "ServerConfig",
     # Protocols

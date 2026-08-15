@@ -121,6 +121,33 @@ one line later.
 **Nothing to change if you do not use `hangar_load`.** Set
 `hot_loading.enabled: false` to keep the tool switched off.
 
+## Next — the fluent `MCPServerFactory.builder()` is gone
+
+`MCPServerFactoryBuilder` and the `MCPServerFactory.builder()` classmethod are
+removed from `mcp_hangar.fastmcp_server`. Nothing in the shipped gateway used
+them: `serve --http` builds its app through `server/bootstrap` and
+`mcp_app_for_serving`, and has never gone through the factory at all.
+
+If you were embedding Hangar through the fluent API, construct the factory
+directly — the same arguments, without the intermediate object:
+
+```python
+from mcp_hangar.fastmcp_server import HangarFunctions, MCPServerFactory, ServerConfig
+
+factory = MCPServerFactory(
+    HangarFunctions(
+        list=list_fn, start=start_fn, stop=stop_fn, invoke=invoke_fn,
+        tools=tools_fn, details=details_fn, health=health_fn,
+    ),
+    config=ServerConfig(port=9000),
+)
+app = factory.create_asgi_app()
+```
+
+`MCPServerFactory`, `HangarFunctions` and `ServerConfig` are unchanged by this
+release. The v0.4.0 note further down, which names the factory as the
+replacement for `setup_fastmcp_server()`, still describes what that release did.
+
 ## 2.6.0 — three things to check before you roll out
 
 Two of these can stop a deployment that works today, and both are in the same
