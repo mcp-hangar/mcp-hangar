@@ -194,3 +194,28 @@ class TestCostAttributionEventHandler:
         handler = CostAttributionEventHandler()
         event = McpServerStateChanged(mcp_server_id="x", old_state="COLD", new_state="READY")
         handler.handle(event)
+
+    def test_a_costed_event_without_a_bus_is_computed_and_dropped(self) -> None:
+        """The optional bus is the only reason `handle` checks anything.
+
+        The check used to be `is not None and hasattr(bus, "publish")`, which
+        also swallowed a bus wired to the wrong object -- cost events vanished
+        and nothing said so. Only the `None` case is legitimate, and this pins
+        it on a cost that is actually non-zero, so the early `cost_cents == 0`
+        return cannot pass for it.
+        """
+        from mcp_hangar.application.event_handlers.cost_handler import CostAttributionEventHandler
+        from mcp_hangar.domain.events import ToolInvocationCompleted
+
+        rules = [PricingRule(fixed_cost_cents=42, model=CostModel.FIXED)]
+        handler = CostAttributionEventHandler(cost_attributor=DefaultCostAttributor(rules=rules))
+
+        handler.handle(
+            ToolInvocationCompleted(
+                mcp_server_id="math",
+                tool_name="add",
+                correlation_id="c1",
+                duration_ms=100.0,
+                result_size_bytes=50,
+            )
+        )
