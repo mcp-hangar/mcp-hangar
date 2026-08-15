@@ -83,12 +83,16 @@ class IPackageInstaller(Protocol):
         """
         ...
 
-    async def is_runtime_available(self) -> bool:
+    def is_runtime_available(self) -> bool:
         """Check if the required runtime is available.
 
         For npm installer, checks if npx is available.
         For pypi installer, checks if uvx is available.
         For oci installer, checks if docker/podman is available.
+
+        Synchronous, unlike `install`: the answer is a PATH lookup, and it is
+        needed while wiring the resolver in `server/bootstrap/hot_loading.py`,
+        which runs before there is an event loop to await it on.
 
         Returns:
             True if the runtime is available.

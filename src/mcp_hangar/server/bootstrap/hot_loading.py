@@ -3,9 +3,11 @@
 from typing import Any, TYPE_CHECKING
 
 from ...application.commands.load_handlers import LoadMcpServerHandler, UnloadMcpServerHandler
-from ...application.services.package_resolver import PackageResolver, RuntimeAvailability
+from ...application.services.package_resolver import PackageResolver
 from ...application.services.secrets_resolver import SecretsResolver
+from ...domain.contracts.installer import IPackageInstaller
 from ...domain.model import McpServer
+from ...infrastructure.installers import NpxInstaller, runtime_availability, UvxInstaller
 from ...logging_config import get_logger
 from ..state import get_runtime, get_runtime_mcp_servers
 
@@ -54,13 +56,12 @@ def init_hot_loading(
             cache=cache,
         )
 
-        availability = RuntimeAvailability(
-            pypi=False,
-            npm=False,
-            oci=False,
-            binary=False,
-        )
-        package_resolver = PackageResolver(availability)
+        # Every field of this used to be hardcoded `False`, which made
+        # `PackageResolver` filter out every package and `hangar_load` answer
+        # "No compatible package found (missing runtime?)" on every call, with
+        # "Available runtimes: []" in the warnings. Asked of the installers now.
+        installers: list[IPackageInstaller] = [UvxInstaller(), NpxInstaller()]
+        package_resolver = PackageResolver(runtime_availability(installers))
 
         secrets_resolver = SecretsResolver()
 
@@ -73,7 +74,7 @@ def init_hot_loading(
             registry_client=registry_client,
             package_resolver=package_resolver,
             secrets_resolver=secrets_resolver,
-            installers=[],
+            installers=installers,
             runtime_store=runtime_store,
             event_bus=runtime.event_bus,
             mcp_server_factory=mcp_server_factory,

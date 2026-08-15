@@ -88,6 +88,39 @@ validate.
 
 `PackageResolver` and `RuntimeAvailability` are unchanged.
 
+## Next — `hangar_load` works, and now depends on `uvx` / `npx` being present
+
+Hot-loading has been on by default and unable to succeed: bootstrap handed
+`PackageResolver` a `RuntimeAvailability` with every field `False` and an empty
+installer list, so every call answered
+
+```json
+{"status": "failed", "message": "No compatible package found (missing runtime?)",
+ "warnings": ["Available runtimes: []"]}
+```
+
+It now resolves `pypi` packages through `uvx` and `npm` packages through `npx`.
+
+**What you need.** The runtime must be on the gateway process's PATH. This is
+the part to check before expecting a behaviour change:
+
+- **the published container image carries neither `uvx` nor `npx`**, so
+  hot-loading still fails there — with a message naming the missing runtime
+  instead of an empty list. If you want it working in a container, add `uv`
+  and/or Node to an image of your own that derives from ours.
+- running from a `pip install` on a host, install [uv](https://docs.astral.sh/uv/)
+  for PyPI-published servers and Node for npm-published ones. Either alone is
+  fine; the resolver reports what it has.
+
+**`oci` and `mcpb` packages are still not loadable**, deliberately. An OCI
+package means pulling an image and running container mode, which needs a
+container runtime the Hangar image does not ship; `mcpb` has no defined install
+path. They are now reported *unavailable* rather than selected and then dropped
+one line later.
+
+**Nothing to change if you do not use `hangar_load`.** Set
+`hot_loading.enabled: false` to keep the tool switched off.
+
 ## 2.6.0 — three things to check before you roll out
 
 Two of these can stop a deployment that works today, and both are in the same
