@@ -336,31 +336,3 @@ def mcp_tool_wrapper(
 def key_global(*_: Any, **__: Any) -> str:
     """Rate limit key for globally-scoped tools."""
     return "global"
-
-
-def key_per_mcp_server(mcp_server: str, *_: Any, **__: Any) -> str:
-    """Rate limit key scoped per mcp_server."""
-    return f"mcp_server:{mcp_server}"
-
-
-def key_hangar_call(mcp_server: str, tool: str, *_: Any, **__: Any) -> str:
-    """Rate limit key specialized for tool invocation (per mcp_server)."""
-    # Keep it coarse by default to avoid key explosion; include tool name if desired.
-    return f"hangar_call:{mcp_server}"
-
-
-def chain_validators(*validators: Callable[..., None]) -> Callable[..., None]:
-    """Combine multiple validators into a single callable.
-
-    Each validator is called in order. First exception stops the chain.
-    """
-
-    def _combined(*args: Any, **kwargs: Any) -> None:
-        for v in validators:
-            v(*args, **kwargs)
-
-    return _combined
-
-
-# legacy aliases
-globals()["".join(("key_per_pro", "vider"))] = key_per_mcp_server

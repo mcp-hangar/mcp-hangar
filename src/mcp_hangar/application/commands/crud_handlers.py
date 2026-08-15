@@ -44,6 +44,20 @@ from .crud_commands import (
 logger = get_logger(__name__)
 
 
+def _get_mcp_server_or_raise(repository: IMcpServerRepository, mcp_server_id: str) -> McpServer:
+    """Fetch a server by id, or raise `McpServerNotFoundError`.
+
+    Deliberately NOT the same helper as `BaseMcpServerHandler._get_mcp_server`
+    in `handlers.py`: that one also consults the runtime store. Update and
+    Delete only touch the repository, and each carried its own byte-identical
+    copy of this.
+    """
+    mcp_server = repository.get(mcp_server_id)
+    if mcp_server is None:
+        raise McpServerNotFoundError(mcp_server_id)
+    return cast(McpServer, mcp_server)
+
+
 # =============================================================================
 # McpServer CRUD Handlers
 # =============================================================================
@@ -214,23 +228,6 @@ class UpdateMcpServerHandler(CommandHandler):
         self._event_bus = event_bus
         self._fleet_writer = fleet_writer
 
-    def _get_mcp_server_or_raise(self, mcp_server_id: str) -> McpServer:
-        """Retrieve mcp_server or raise McpServerNotFoundError.
-
-        Args:
-            mcp_server_id: ID of the mcp_server to retrieve.
-
-        Returns:
-            McpServer instance.
-
-        Raises:
-            McpServerNotFoundError: If no mcp_server with given ID exists.
-        """
-        mcp_server = self._repository.get(mcp_server_id)
-        if mcp_server is None:
-            raise McpServerNotFoundError(mcp_server_id)
-        return cast(McpServer, mcp_server)
-
     def handle(self, command: UpdateMcpServerCommand) -> dict[str, Any]:
         """Update mcp_server configuration.
 
@@ -246,7 +243,7 @@ class UpdateMcpServerHandler(CommandHandler):
         Raises:
             McpServerNotFoundError: If mcp_server does not exist.
         """
-        mcp_server = self._get_mcp_server_or_raise(command.mcp_server_id)
+        mcp_server = _get_mcp_server_or_raise(self._repository, command.mcp_server_id)
 
         mcp_server.update_config(
             description=command.description,
@@ -353,23 +350,6 @@ class DeleteMcpServerHandler(CommandHandler):
         self._event_bus = event_bus
         self._fleet_writer = fleet_writer
 
-    def _get_mcp_server_or_raise(self, mcp_server_id: str) -> McpServer:
-        """Retrieve mcp_server or raise McpServerNotFoundError.
-
-        Args:
-            mcp_server_id: ID of the mcp_server to retrieve.
-
-        Returns:
-            McpServer instance.
-
-        Raises:
-            McpServerNotFoundError: If no mcp_server with given ID exists.
-        """
-        mcp_server = self._repository.get(mcp_server_id)
-        if mcp_server is None:
-            raise McpServerNotFoundError(mcp_server_id)
-        return cast(McpServer, mcp_server)
-
     def handle(self, command: DeleteMcpServerCommand) -> dict[str, Any]:
         """Delete a mcp_server, stopping it first if running.
 
@@ -382,7 +362,7 @@ class DeleteMcpServerHandler(CommandHandler):
         Raises:
             McpServerNotFoundError: If mcp_server does not exist.
         """
-        mcp_server = self._get_mcp_server_or_raise(command.mcp_server_id)
+        mcp_server = _get_mcp_server_or_raise(self._repository, command.mcp_server_id)
 
         # Stop mcp_server if it is in a running state (not COLD or DEAD).
         # I/O (shutdown) is done outside the repository lock to respect
