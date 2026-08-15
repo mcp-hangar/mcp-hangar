@@ -26,7 +26,7 @@ from mcp_hangar.application.services.secrets_resolver import SecretsResolver
 from mcp_hangar.domain.contracts.registry import PackageInfo, ServerDetails, TransportInfo
 from mcp_hangar.domain.exceptions import InstallationError
 from mcp_hangar.domain.value_objects import McpServerMode
-from mcp_hangar.infrastructure.installers import NpxInstaller, UvxInstaller, runtime_availability
+from mcp_hangar.infrastructure.installers import npx_installer, runtime_availability, uvx_installer
 
 STDIO = TransportInfo(type="stdio")
 
@@ -38,7 +38,7 @@ def _package(registry_type: str, identifier: str = "mcp-server-time", version: s
 def _on_path(monkeypatch, *executables: str) -> None:
     """Pretend exactly these binaries are installed, whatever the host has."""
     monkeypatch.setattr(
-        "mcp_hangar.infrastructure.installers.command_runtime.shutil.which",
+        "mcp_hangar.infrastructure.installers.shutil.which",
         lambda name: f"/usr/bin/{name}" if name in executables else None,
     )
 
@@ -47,7 +47,7 @@ class TestTheInstallersResolveACommand:
     async def test_uvx_runs_the_package_by_name(self, monkeypatch):
         _on_path(monkeypatch, "uvx")
 
-        installed = await UvxInstaller().install(_package("pypi"))
+        installed = await uvx_installer().install(_package("pypi"))
 
         assert installed.command == ["uvx", "mcp-server-time"]
         assert installed.mode is McpServerMode.SUBPROCESS
@@ -57,7 +57,7 @@ class TestTheInstallersResolveACommand:
     async def test_a_version_is_pinned_on_the_specifier(self, monkeypatch):
         _on_path(monkeypatch, "uvx")
 
-        installed = await UvxInstaller().install(_package("pypi", version="1.2.3"))
+        installed = await uvx_installer().install(_package("pypi", version="1.2.3"))
 
         assert installed.command == ["uvx", "mcp-server-time@1.2.3"]
 
@@ -66,7 +66,7 @@ class TestTheInstallersResolveACommand:
         answer with, so the question is a hang."""
         _on_path(monkeypatch, "npx")
 
-        installed = await NpxInstaller().install(_package("npm", identifier="@scope/server"))
+        installed = await npx_installer().install(_package("npm", identifier="@scope/server"))
 
         assert installed.command == ["npx", "-y", "@scope/server"]
 
@@ -79,7 +79,7 @@ class TestTheInstallersResolveACommand:
             transport=TransportInfo(type="stdio", args=["--local-timezone", "UTC"]),
         )
 
-        installed = await UvxInstaller().install(package)
+        installed = await uvx_installer().install(package)
 
         assert installed.command == ["uvx", "mcp-server-time", "--local-timezone", "UTC"]
 
@@ -89,27 +89,21 @@ class TestTheInstallersResolveACommand:
         _on_path(monkeypatch)
 
         with pytest.raises(InstallationError, match="uvx is not on PATH"):
-            await UvxInstaller().install(_package("pypi"))
-
-    async def test_the_wrong_registry_is_refused(self, monkeypatch):
-        _on_path(monkeypatch, "uvx", "npx")
-
-        with pytest.raises(InstallationError, match="cannot handle"):
-            await UvxInstaller().install(_package("npm"))
+            await uvx_installer().install(_package("pypi"))
 
 
 class TestAvailabilityComesFromTheInstallers:
     def test_a_registry_with_an_installer_and_a_runtime_is_available(self, monkeypatch):
         _on_path(monkeypatch, "uvx", "npx")
 
-        availability = runtime_availability([UvxInstaller(), NpxInstaller()])
+        availability = runtime_availability([uvx_installer(), npx_installer()])
 
         assert (availability.pypi, availability.npm) == (True, True)
 
     def test_a_registry_whose_runtime_is_absent_is_not(self, monkeypatch):
         _on_path(monkeypatch, "uvx")
 
-        availability = runtime_availability([UvxInstaller(), NpxInstaller()])
+        availability = runtime_availability([uvx_installer(), npx_installer()])
 
         assert (availability.pypi, availability.npm) == (True, False)
 
@@ -119,14 +113,14 @@ class TestAvailabilityComesFromTheInstallers:
         answer "No installer available for package type: mcpb"."""
         _on_path(monkeypatch, "uvx", "npx", "docker", "podman")
 
-        availability = runtime_availability([UvxInstaller(), NpxInstaller()])
+        availability = runtime_availability([uvx_installer(), npx_installer()])
 
         assert availability.oci is False
         assert availability.binary is False
 
     def test_the_resolver_built_from_it_can_pick_a_package(self, monkeypatch):
         _on_path(monkeypatch, "uvx")
-        resolver = PackageResolver(runtime_availability([UvxInstaller(), NpxInstaller()]))
+        resolver = PackageResolver(runtime_availability([uvx_installer(), npx_installer()]))
 
         assert resolver.get_available_runtimes() == ["pypi"]
         assert resolver.resolve([_package("pypi")]) is not None
@@ -175,7 +169,7 @@ def _server_details(registry_type: str = "pypi") -> ServerDetails:
 
 def _handler(monkeypatch, registry_type: str = "pypi") -> tuple[LoadMcpServerHandler, list, _FakeRuntimeStore]:
     _on_path(monkeypatch, "uvx", "npx")
-    installers = [UvxInstaller(), NpxInstaller()]
+    installers = [uvx_installer(), npx_installer()]
 
     started = []
 

@@ -7,7 +7,7 @@ from ...application.services.package_resolver import PackageResolver
 from ...application.services.secrets_resolver import SecretsResolver
 from ...domain.contracts.installer import IPackageInstaller
 from ...domain.model import McpServer
-from ...infrastructure.installers import NpxInstaller, runtime_availability, UvxInstaller
+from ...infrastructure.installers import npx_installer, runtime_availability, uvx_installer
 from ...logging_config import get_logger
 from ..state import get_runtime, get_runtime_mcp_servers
 
@@ -60,7 +60,7 @@ def init_hot_loading(
         # `PackageResolver` filter out every package and `hangar_load` answer
         # "No compatible package found (missing runtime?)" on every call, with
         # "Available runtimes: []" in the warnings. Asked of the installers now.
-        installers: list[IPackageInstaller] = [UvxInstaller(), NpxInstaller()]
+        installers: list[IPackageInstaller] = [uvx_installer(), npx_installer()]
         package_resolver = PackageResolver(runtime_availability(installers))
 
         secrets_resolver = SecretsResolver()
