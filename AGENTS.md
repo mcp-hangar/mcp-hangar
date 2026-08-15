@@ -143,8 +143,9 @@ mcp-hangar/
 │   ├── unit/                      # Fast, isolated unit tests
 │   ├── integration/               # In-process end-to-end (no container runtime)
 │   ├── live/                      # Black-box tiers against a running gateway
+│   ├── acceptance/                # Deployment acceptance: kubectl + bash, not pytest
 │   ├── benchmark/                 # pytest-benchmark performance tests
-│   ├── security/                  # Security test suite
+│   ├── conformance/baseline.yml   # Expected failures for the official MCP suite
 │   └── mock_provider.py           # JSON-RPC mock MCP provider
 │
 ├── docs/                          # Internal docs (synced to website at build)
@@ -251,6 +252,11 @@ Auth, compliance, approvals, and integrations live under `src/mcp_hangar/` as fi
   `--run-containers` / `--run-slow` tiers and their testcontainers fixtures were deleted for
   exactly that reason; anything needing a real runtime belongs in `tests/live` (nightly) or the lab.
 - **Mock provider**: `tests/mock_provider.py` implements JSON-RPC MCP protocol
+- **Acceptance**: `tests/acceptance/ha_two_gateways.sh` is run by hand against a cluster you own
+  (it kills a pod). Not pytest on purpose -- it tests the deployment, which is how it found that
+  the shipped image had no PostgreSQL driver. Apply the manifests beside it first.
+- **Security tests** live in `tests/unit` like everything else, marked `@pytest.mark.security`.
+  The marker is the category; a separate directory for two files was not.
 
 ## Complexity Hotspots
 

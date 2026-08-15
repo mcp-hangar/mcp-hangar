@@ -36,8 +36,11 @@ class TestLangfuseConfig:
         assert config.secret_key == ""
         assert config.host == "https://cloud.langfuse.com"
         assert config.sample_rate == 1.0
-        assert config.scrub_inputs is False
-        assert config.scrub_outputs is False
+        # Secure by default: both flipped to True and this file, living under
+        # `src/` where `testpaths` never reached it, kept asserting the old
+        # posture for however long. `test_langfuse_defaults.py` is the guard.
+        assert config.scrub_inputs is True
+        assert config.scrub_outputs is True
 
     def test_validate_requires_keys_when_enabled(self) -> None:
         """Validation fails when enabled without keys."""
