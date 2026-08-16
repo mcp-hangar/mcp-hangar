@@ -148,9 +148,12 @@ class LoadMcpServerCommand(Command):
     name: str
     force_unverified: bool = False
     user_id: str | None = None
-    # Tool access filtering for hot-loaded mcp_servers
+    # Tool access filtering for hot-loaded mcp_servers. The three lists are the
+    # three outcomes `ToolAccessPolicy` has; carrying only two is what made a
+    # runtime-loaded server unable to gate a tool at all (#685).
     allow_tools: list[str] | None = None
     deny_tools: list[str] | None = None
+    approval_tools: list[str] | None = None
 
 
 @dataclass(frozen=True)

@@ -17,6 +17,18 @@ if TYPE_CHECKING:
 logger = get_logger(__name__)
 
 
+def _approval_gate_available() -> bool:
+    """Whether the approval gate is attached to the application context.
+
+    The same lookup `_check_approval_gate` makes on the invoke path, so "the
+    load was allowed to gate a tool" and "the gate holds the call" cannot
+    disagree.
+    """
+    from ..context import get_context
+
+    return getattr(get_context(), "approval_gate", None) is not None
+
+
 def init_hot_loading(
     runtime: "Runtime",
     config: dict[str, Any],
@@ -79,6 +91,9 @@ def init_hot_loading(
             event_bus=runtime.event_bus,
             mcp_server_factory=mcp_server_factory,
             mcp_server_repository=get_runtime().repository,
+            # Asked at load time, not now: the gate is attached to the context
+            # later in bootstrap, so a bool captured here would always be False.
+            approval_gate_available=_approval_gate_available,
         )
 
         unload_handler = UnloadMcpServerHandler(
