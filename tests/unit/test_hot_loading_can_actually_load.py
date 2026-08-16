@@ -167,7 +167,11 @@ def _server_details(registry_type: str = "pypi") -> ServerDetails:
     )
 
 
-def _handler(monkeypatch, registry_type: str = "pypi") -> tuple[LoadMcpServerHandler, list, _FakeRuntimeStore]:
+def _handler(
+    monkeypatch,
+    registry_type: str = "pypi",
+    approval_gate_available=None,
+) -> tuple[LoadMcpServerHandler, list, _FakeRuntimeStore]:
     _on_path(monkeypatch, "uvx", "npx")
     installers = [uvx_installer(), npx_installer()]
 
@@ -193,6 +197,7 @@ def _handler(monkeypatch, registry_type: str = "pypi") -> tuple[LoadMcpServerHan
         event_bus=MagicMock(),
         mcp_server_factory=factory,
         mcp_server_repository=repository,
+        approval_gate_available=approval_gate_available,
     )
     return handler, started, store
 
@@ -278,3 +283,130 @@ class TestBootstrapWiresItUp:
         monkeypatch.setattr(hot_loading, "get_runtime_mcp_servers", lambda: _FakeRuntimeStore())
 
         assert hot_loading.init_hot_loading(MagicMock(), {"hot_loading": {"enabled": False}}) == (None, None)
+
+
+class TestARuntimeLoadCanGateATool:
+    """The third outcome the YAML surface has, and this one did not (#685).
+
+    `hangar_load` accepted `allow_tools` / `deny_tools` only, so a server
+    registered at runtime could be filtered but never put behind approval. The
+    guard was the other half of it: `if command.allow_tools or command.deny_tools`
+    meant a load asking *only* for approval built no policy at all.
+    """
+
+    @pytest.fixture(autouse=True)
+    def _leave_the_global_resolver_as_we_found_it(self):
+        from mcp_hangar.domain.services import reset_tool_access_resolver
+
+        reset_tool_access_resolver()
+        yield
+        reset_tool_access_resolver()
+
+    def _policy_for(self, mcp_server_id: str):
+        from mcp_hangar.domain.services import get_tool_access_resolver
+
+        registered = dict(get_tool_access_resolver().iter_registered_policies())
+        return registered.get(f"mcp_server:{mcp_server_id}")
+
+    async def test_approval_tools_reaches_the_registered_policy(self, monkeypatch):
+        handler, _, _ = _handler(monkeypatch, approval_gate_available=lambda: True)
+
+        result = await handler.handle(
+            LoadMcpServerCommand(name="mcp-server-time", user_id=None, approval_tools=["get_*"])
+        )
+
+        assert result.status == "loaded", result.message
+        policy = self._policy_for(result.mcp_server_id)
+        assert policy is not None, "a load that gates a tool must register a policy"
+        assert policy.approval_list == ("get_*",)
+        assert policy.requires_approval("get_current_time")
+
+    async def test_approval_alone_is_enough_to_build_a_policy(self, monkeypatch):
+        """The old guard only looked at allow/deny, so this case built nothing."""
+        handler, _, _ = _handler(monkeypatch, approval_gate_available=lambda: True)
+
+        result = await handler.handle(LoadMcpServerCommand(name="mcp-server-time", user_id=None, approval_tools=["*"]))
+
+        assert self._policy_for(result.mcp_server_id) is not None
+
+    async def test_the_other_two_lists_still_arrive(self, monkeypatch):
+        handler, _, _ = _handler(monkeypatch, approval_gate_available=lambda: True)
+
+        result = await handler.handle(
+            LoadMcpServerCommand(
+                name="mcp-server-time",
+                user_id=None,
+                allow_tools=["get_*"],
+                deny_tools=["delete_*"],
+            )
+        )
+
+        policy = self._policy_for(result.mcp_server_id)
+        assert (policy.allow_list, policy.deny_list) == (("get_*",), ("delete_*",))
+
+    async def test_a_load_with_no_lists_registers_no_policy(self, monkeypatch):
+        handler, _, _ = _handler(monkeypatch, approval_gate_available=lambda: True)
+
+        result = await handler.handle(LoadMcpServerCommand(name="mcp-server-time", user_id=None))
+
+        assert self._policy_for(result.mcp_server_id) is None
+
+
+class TestGatingWithoutAGateIsRefused:
+    """A policy nothing can enforce is worse than a refused load: the tools are
+    listed, the calls run, and the deployment believes a human is deciding.
+    This is the startup check in `bootstrap/reachability.py` asked at the only
+    moment a runtime policy exists.
+    """
+
+    @pytest.fixture(autouse=True)
+    def _leave_the_global_resolver_as_we_found_it(self):
+        from mcp_hangar.domain.services import reset_tool_access_resolver
+
+        reset_tool_access_resolver()
+        yield
+        reset_tool_access_resolver()
+
+    async def test_no_gate_refuses_the_load(self, monkeypatch):
+        handler, started, _ = _handler(monkeypatch, approval_gate_available=lambda: False)
+
+        result = await handler.handle(
+            LoadMcpServerCommand(name="mcp-server-time", user_id=None, approval_tools=["get_*"])
+        )
+
+        assert result.status == "failed"
+        assert "approval" in result.message
+        assert started == [], "nothing should be installed or started for a refused load"
+
+    async def test_an_unwired_handler_is_treated_as_no_gate(self, monkeypatch):
+        """The default. An embedder that never passed the probe gets the
+        fail-closed answer rather than an unenforced policy."""
+        handler, _, _ = _handler(monkeypatch)
+
+        result = await handler.handle(
+            LoadMcpServerCommand(name="mcp-server-time", user_id=None, approval_tools=["get_*"])
+        )
+
+        assert result.status == "failed"
+
+    async def test_a_probe_that_raises_is_a_no(self, monkeypatch):
+        handler, _, _ = _handler(monkeypatch, approval_gate_available=_raises)
+
+        result = await handler.handle(
+            LoadMcpServerCommand(name="mcp-server-time", user_id=None, approval_tools=["get_*"])
+        )
+
+        assert result.status == "failed"
+
+    async def test_a_load_that_gates_nothing_is_unaffected(self, monkeypatch):
+        handler, _, _ = _handler(monkeypatch, approval_gate_available=lambda: False)
+
+        result = await handler.handle(
+            LoadMcpServerCommand(name="mcp-server-time", user_id=None, deny_tools=["delete_*"])
+        )
+
+        assert result.status == "loaded", result.message
+
+
+def _raises() -> bool:
+    raise RuntimeError("context not built")
