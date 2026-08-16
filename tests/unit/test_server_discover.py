@@ -204,23 +204,6 @@ class TestHandlerAndWiring:
         assert resp.status_code == 404
         assert json.loads(bytes(resp.body).decode())["error"]["code"] == -32601
 
-    def test_factory_registers_route(self):
-        from mcp_hangar.fastmcp_server import HangarFunctions, MCPServerFactory
-
-        hangar = HangarFunctions(
-            list=Mock(return_value={"mcp_servers": []}),
-            start=Mock(),
-            stop=Mock(),
-            invoke=Mock(),
-            tools=Mock(),
-            details=Mock(),
-            health=Mock(return_value={"status": "healthy"}),
-        )
-        with patch("mcp_hangar.fastmcp_server.server_discover.register_server_discover") as mock_register:
-            mcp = MCPServerFactory(hangar).create_server()
-            mock_register.assert_called_once_with(mcp)
-
-
 def _make_awaitable(value):
     async def _coro():
         return value

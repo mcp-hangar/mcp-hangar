@@ -420,7 +420,7 @@ class TestBootstrap:
     def test_bootstrap_creates_mcp_server(self, mock_dependencies):
         """Bootstrap should create the MCP server under the shared inbound identity."""
         from mcp_hangar import __version__
-        from mcp_hangar.fastmcp_server.config import HANGAR_SERVER_NAME
+        from mcp_hangar.protocol import HANGAR_SERVER_NAME
 
         bootstrap()
 

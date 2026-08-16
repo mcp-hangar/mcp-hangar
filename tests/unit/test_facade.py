@@ -1,6 +1,5 @@
 """Tests for Hangar facade and HangarConfig builder."""
 
-import asyncio
 from unittest.mock import Mock
 
 import pytest
@@ -401,19 +400,19 @@ class TestHangarInitialization:
 class TestHangarNotStarted:
     """Tests for Hangar methods when not started."""
 
-    def test_invoke_raises_when_not_started(self):
+    async def test_invoke_raises_when_not_started(self):
         """Should raise ConfigurationError when invoke called before start."""
         hangar = Hangar.from_config("config.yaml")
 
         with pytest.raises(ConfigurationError, match="not started"):
-            asyncio.run(hangar.invoke("math", "add", {"a": 1}))
+            await hangar.invoke("math", "add", {"a": 1})
 
-    def test_list_providers_raises_when_not_started(self):
+    async def test_list_providers_raises_when_not_started(self):
         """Should raise ConfigurationError when list_providers called before start."""
         hangar = Hangar.from_config("config.yaml")
 
         with pytest.raises(ConfigurationError, match="not started"):
-            asyncio.run(hangar.list_mcp_servers())
+            await hangar.list_mcp_servers()
 
 
 class TestHangarWithMockedContext:

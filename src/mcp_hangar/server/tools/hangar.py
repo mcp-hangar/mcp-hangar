@@ -501,6 +501,7 @@ def register_load_tools(mcp: FastMCP) -> None:
         force_unverified: bool = False,
         allow_tools: list[str] | None = None,
         deny_tools: list[str] | None = None,
+        approval_tools: list[str] | None = None,
     ) -> dict:
         """Load an MCP mcp_server from the official registry at runtime.
 
@@ -516,6 +517,9 @@ def register_load_tools(mcp: FastMCP) -> None:
             force_unverified: bool - Allow loading unverified mcp_servers (default: false)
             allow_tools: list[str] | None - If set, only these tools are visible (glob patterns supported)
             deny_tools: list[str] | None - If set, these tools are hidden (glob patterns supported)
+            approval_tools: list[str] | None - If set, these tools are visible but held for human
+                approval before each call (glob patterns supported). Refused when the deployment
+                has no approval gate, rather than loading tools that would run unapproved.
 
         Returns:
             Success: {status: "loaded", mcp_server: str, tools: list[str]}
@@ -531,6 +535,9 @@ def register_load_tools(mcp: FastMCP) -> None:
 
             hangar_load("grafana", deny_tools=["delete_*", "create_alert_rule"])
             # {"status": "loaded", "mcp_server_id": "grafana", "tools": [...]} (filtered)
+
+            hangar_load("grafana", approval_tools=["silence_*"])
+            # {"status": "loaded", ...} -- silence_* is listed, and each call waits for a human
 
             hangar_load("sql")
             # {"status": "ambiguous", "message": "Multiple mcp_servers match 'sql'",
@@ -557,6 +564,7 @@ def register_load_tools(mcp: FastMCP) -> None:
             user_id=None,
             allow_tools=allow_tools,
             deny_tools=deny_tools,
+            approval_tools=approval_tools,
         )
 
         try:

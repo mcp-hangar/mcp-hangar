@@ -32,7 +32,7 @@ from mcp_hangar import __version__
 from mcp_hangar.context import get_identity_context
 from mcp_hangar.logging_config import get_logger
 
-from .config import HANGAR_SERVER_NAME
+from ..protocol import HANGAR_SERVER_NAME
 from .flat_tool_projection import _build_flat_map, _build_mcp_tool_list
 
 logger = get_logger(__name__)

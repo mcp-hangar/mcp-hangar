@@ -195,12 +195,11 @@ class TestMiddleware:
         mw = FrontDoorRoutingMiddleware(_CapturingApp(), mcp_path="/mcp")
         return await _drive(mw, _scope(headers), body)
 
-    def test_routes_on_headers_without_session_id(self):
-        import asyncio
+    async def test_routes_on_headers_without_session_id(self):
 
         body = _tools_call_body("search")
         headers = {"mcp-method": "tools/call", "mcp-name": "search", "content-type": "application/json"}
-        app, send = asyncio.run(self._run(headers, body))
+        app, send = await self._run(headers, body)
 
         assert app.called is True
         assert send.status is None  # forwarded, not rejected
@@ -212,49 +211,45 @@ class TestMiddleware:
         assert decision.name == "search"
         assert decision.source == "header"
 
-    def test_session_id_header_does_not_change_routing(self):
+    async def test_session_id_header_does_not_change_routing(self):
         """An Mcp-Session-Id header is irrelevant to the routing decision."""
-        import asyncio
 
         body = _tools_call_body("search")
-        without_app, _ = asyncio.run(self._run({"mcp-method": "tools/call", "mcp-name": "search"}, body))
-        with_sid_app, _ = asyncio.run(
-            self._run({"mcp-method": "tools/call", "mcp-name": "search", "mcp-session-id": "abc123"}, body)
+        without_app, _ = await self._run({"mcp-method": "tools/call", "mcp-name": "search"}, body)
+        with_sid_app, _ = await self._run(
+            {"mcp-method": "tools/call", "mcp-name": "search", "mcp-session-id": "abc123"}, body
         )
         assert _route_of(without_app) == _route_of(with_sid_app)
 
-    def test_no_headers_passes_through_unchanged(self):
+    async def test_no_headers_passes_through_unchanged(self):
         """Pre-SEP-2243 client: no routing headers -> content-based, no buffering error."""
-        import asyncio
 
         body = _tools_call_body("search")
-        app, send = asyncio.run(self._run({"content-type": "application/json"}, body))
+        app, send = await self._run({"content-type": "application/json"}, body)
         assert app.called is True
         assert send.status is None
         assert app.forwarded_body == body
         assert "mcp_route" not in _scope_state(app)
 
-    def test_header_body_mismatch_is_rejected(self):
-        import asyncio
+    async def test_header_body_mismatch_is_rejected(self):
 
         body = _tools_call_body("search")
         # Header claims a different tool than the body.
-        app, send = asyncio.run(self._run({"mcp-method": "tools/call", "mcp-name": "delete_everything"}, body))
+        app, send = await self._run({"mcp-method": "tools/call", "mcp-name": "delete_everything"}, body)
         assert app.called is False  # request never reached the MCP app
         assert send.status == 400
         payload = json.loads(send.body)
         assert payload["error"]["code"] == -32600
         assert payload["id"] == 1  # JSON-RPC id echoed from the body
 
-    def test_get_request_passes_through(self):
-        import asyncio
+    async def test_get_request_passes_through(self):
 
         mw = FrontDoorRoutingMiddleware(_CapturingApp(), mcp_path="/mcp")
-        app, send = asyncio.run(_drive(mw, _scope({"mcp-method": "tools/call"}, method="GET"), b""))
+        app, send = await _drive(mw, _scope({"mcp-method": "tools/call"}, method="GET"), b"")
         assert app.called is True
         assert send.status is None
 
-    def test_modern_era_request_passes_through_unbuffered(self):
+    async def test_modern_era_request_passes_through_unbuffered(self):
         """A 2026-07-28 POST is the SDK's to route -- we must not touch its body.
 
         The SDK's modern entry enforces header/body agreement itself AND watches
@@ -263,7 +258,6 @@ class TestMiddleware:
         the request before it can answer (observed as a 500 with "ASGI callable
         returned without starting response").
         """
-        import asyncio
 
         body = _tools_call_body("search")
         headers = {
@@ -274,16 +268,15 @@ class TestMiddleware:
             "mcp-name": "delete_everything",
         }
 
-        app, send = asyncio.run(self._run(headers, body))
+        app, send = await self._run(headers, body)
 
         assert app.called is True
         assert send.status is None
         assert app.forwarded_body == body
         assert "mcp_route" not in _scope_state(app)
 
-    def test_handshake_era_version_still_engages(self):
+    async def test_handshake_era_version_still_engages(self):
         """A handshake-era MCP-Protocol-Version keeps the front door on."""
-        import asyncio
 
         headers = {
             "mcp-protocol-version": "2025-06-18",
@@ -291,7 +284,7 @@ class TestMiddleware:
             "mcp-name": "delete_everything",
         }
 
-        app, send = asyncio.run(self._run(headers, _tools_call_body("search")))
+        app, send = await self._run(headers, _tools_call_body("search"))
 
         assert app.called is False
         assert send.status == 400
@@ -366,9 +359,8 @@ class TestCanaryUnaffected:
 
 
 class TestAuditSessionIdUnaffected:
-    def test_identity_session_id_preserved_through_front_door(self):
+    async def test_identity_session_id_preserved_through_front_door(self):
         """The front-door router does not read or mutate CallerIdentity.session_id."""
-        import asyncio
 
         ctx = IdentityContext(
             caller=CallerIdentity(
@@ -386,7 +378,7 @@ class TestAuditSessionIdUnaffected:
         mw = FrontDoorRoutingMiddleware(_CapturingApp(), mcp_path="/mcp")
         scope = _scope({"mcp-method": "tools/call", "mcp-name": "search"})
         scope["state"]["identity"] = ctx  # simulate an upstream-populated field
-        app, _send = asyncio.run(_drive(mw, scope, _tools_call_body("search")))
+        app, _send = await _drive(mw, scope, _tools_call_body("search"))
 
         forwarded_identity = _scope_state(app)["identity"]
         assert forwarded_identity is ctx

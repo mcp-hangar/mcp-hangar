@@ -1,7 +1,7 @@
 """Tests for PostgresMcpServerConfigRepository.
 
 Runs without a live PostgreSQL: `IConnectionFactory.get_connection()` is
-faked with a small class (mirroring `tests/unit/test_auth_coverage_batch4.py`)
+faked with a small class (mirroring `test_postgres_auth_store.py`)
 that yields a MagicMock connection whose `cursor()` yields a MagicMock cursor.
 Assertions check the SQL that was executed (placeholders, table name) and the
 Python-side behaviour -- optimistic locking, soft vs hard delete, JSON
@@ -24,6 +24,17 @@ from mcp_hangar.infrastructure.persistence.backends.postgresql.config_repository
 )
 
 
+def _factory_for(connection):
+    """An `IConnectionFactory` double whose `get_connection()` yields `connection`."""
+
+    class _Factory:
+        @contextmanager
+        def get_connection(self):
+            yield connection
+
+    return _Factory()
+
+
 def _make_repo():
     """Build a repository against a fully mocked `IConnectionFactory`.
 
@@ -35,12 +46,7 @@ def _make_repo():
     mock_conn.cursor.return_value.__enter__ = Mock(return_value=mock_cursor)
     mock_conn.cursor.return_value.__exit__ = Mock(return_value=False)
 
-    class _Factory:
-        @contextmanager
-        def get_connection(self):
-            yield mock_conn
-
-    connection_factory = _Factory()
+    connection_factory = _factory_for(mock_conn)
     repo = PostgresMcpServerConfigRepository(connection_factory=connection_factory)
 
     # __init__ already issued the schema-creation execute() -- clear the mocks
@@ -69,12 +75,7 @@ class TestInit:
         mock_conn.cursor.return_value.__enter__ = Mock(return_value=mock_cursor)
         mock_conn.cursor.return_value.__exit__ = Mock(return_value=False)
 
-        class _Factory:
-            @contextmanager
-            def get_connection(self):
-                yield mock_conn
-
-        PostgresMcpServerConfigRepository(connection_factory=_Factory())
+        PostgresMcpServerConfigRepository(connection_factory=_factory_for(mock_conn))
 
         sql = mock_cursor.execute.call_args[0][0]
         assert "CREATE TABLE IF NOT EXISTS mcp_server_configs" in sql
@@ -91,13 +92,8 @@ class TestInit:
         mock_conn.cursor.return_value.__exit__ = Mock(return_value=False)
         mock_cursor.execute.side_effect = RuntimeError("connection reset")
 
-        class _Factory:
-            @contextmanager
-            def get_connection(self):
-                yield mock_conn
-
         with pytest.raises(RuntimeError):
-            PostgresMcpServerConfigRepository(connection_factory=_Factory())
+            PostgresMcpServerConfigRepository(connection_factory=_factory_for(mock_conn))
 
         mock_conn.rollback.assert_called_once()
         mock_conn.commit.assert_not_called()

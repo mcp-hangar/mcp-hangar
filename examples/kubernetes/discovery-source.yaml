@@ -1,8 +1,8 @@
 # Discovery Source
 # ================
-# This example shows automatic provider discovery from namespaces
+# Automatic MCPServer discovery from labelled namespaces.
 
-apiVersion: mcp-hangar.io/v1alpha1
+apiVersion: mcp-hangar.io/v1alpha2
 kind: MCPDiscoverySource
 metadata:
   name: team-providers
@@ -26,13 +26,15 @@ spec:
       - kube-public
       - kube-node-lease
 
-  # Default settings for discovered providers
+  # Defaults stamped onto each discovered MCPServer. Only fields the operator
+  # honours: it creates the workload, so resources and securityContext apply.
+  # `idleTTL` used to be here and was never read -- idle stop is Hangar's, and a
+  # server discovered from a cluster gets Hangar's create default of 300s.
   providerTemplate:
     metadata:
       labels:
         discovered-by: team-providers
     spec:
-      idleTTL: "5m"
       resources:
         requests:
           memory: "64Mi"

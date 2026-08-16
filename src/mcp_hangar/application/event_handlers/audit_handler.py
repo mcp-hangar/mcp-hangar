@@ -4,7 +4,6 @@ from abc import ABC, abstractmethod
 from dataclasses import dataclass, field
 from datetime import datetime, UTC
 import json
-import logging
 from typing import Any
 
 from ...domain.events import DomainEvent
@@ -147,30 +146,6 @@ class InMemoryAuditStore(AuditStore):
     def count(self) -> int:
         """Get number of stored records."""
         return len(self._records)
-
-
-class LogAuditStore(AuditStore):
-    """Audit store that writes to structured logs."""
-
-    def __init__(self, logger_name: str = "audit"):
-        self._logger = logging.getLogger(logger_name)
-
-    def record(self, audit_record: AuditRecord) -> None:
-        """Log the audit record."""
-        self._logger.info(audit_record.to_json())
-
-    def query(
-        self,
-        mcp_server_id: str | None = None,
-        event_type: str | None = None,
-        since: datetime | None = None,
-        limit: int = 100,
-        caller_user_id: str | None = None,
-        provider_id: str | None = None,
-        task_id: str | None = None,
-    ) -> list[AuditRecord]:
-        """Query is not supported for log store."""
-        raise NotImplementedError("Log audit store does not support queries")
 
 
 class AuditEventHandler:

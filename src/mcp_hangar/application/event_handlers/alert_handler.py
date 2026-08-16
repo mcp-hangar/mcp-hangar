@@ -1,7 +1,6 @@
 """Alert event handler for critical notifications."""
 
 from abc import ABC, abstractmethod
-from collections.abc import Callable
 from dataclasses import dataclass, field
 from datetime import datetime, UTC
 from typing import Any
@@ -63,17 +62,6 @@ class LogAlertSink(AlertSink):
         log_method(
             f"ALERT [{alert.level.upper()}] {alert.message} mcp_server={alert.mcp_server_id} event={alert.event_type}"
         )
-
-
-class CallbackAlertSink(AlertSink):
-    """Send alerts to a callback function."""
-
-    def __init__(self, callback: Callable[[Alert], None]):
-        self._callback = callback
-
-    def send(self, alert: Alert) -> None:
-        """Call the callback with the alert."""
-        self._callback(alert)
 
 
 class AlertEventHandler:

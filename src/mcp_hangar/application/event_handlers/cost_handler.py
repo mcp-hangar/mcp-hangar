@@ -5,6 +5,7 @@ ICostAttributor, and emits CostReportGenerated domain events.
 """
 
 from ...domain.contracts.cost import ICostAttributor, InvocationContext, NullCostAttributor
+from ...domain.contracts.event_bus import IEventBus
 from ...domain.events import CostReportGenerated, ToolInvocationCompleted
 from ...logging_config import get_logger
 
@@ -17,7 +18,7 @@ class CostAttributionEventHandler:
     def __init__(
         self,
         cost_attributor: ICostAttributor | None = None,
-        event_bus: object | None = None,
+        event_bus: IEventBus | None = None,
     ) -> None:
         self._attributor = cost_attributor or NullCostAttributor()
         self._event_bus = event_bus
@@ -48,7 +49,7 @@ class CostAttributionEventHandler:
             cost_model=str(cost_record.cost_model),
         )
 
-        if self._event_bus is not None and hasattr(self._event_bus, "publish"):
+        if self._event_bus is not None:
             cost_event = CostReportGenerated(
                 tenant_id=cost_record.tenant_id,
                 period_start="",

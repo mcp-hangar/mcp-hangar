@@ -17,6 +17,13 @@ from mcp_hangar.infrastructure.saga_manager import (
 )
 
 
+class SuccessHandler(CommandHandler):
+    """A handler that always succeeds; four tests defined it identically."""
+
+    def handle(self, command):
+        return {"status": "ok"}
+
+
 class TestSagaContext:
     """Test SagaContext dataclass."""
 
@@ -227,10 +234,6 @@ class TestSagaManager:
         event_bus = EventBus()
 
         # Register handler that succeeds
-        class SuccessHandler(CommandHandler):
-            def handle(self, command):
-                return {"status": "ok"}
-
         command_bus.register(StartMcpServerCommand, SuccessHandler())
         command_bus.register(StopMcpServerCommand, SuccessHandler())
 
@@ -310,10 +313,6 @@ class TestSagaManager:
         command_bus = CommandBus()
         event_bus = EventBus()
 
-        class SuccessHandler(CommandHandler):
-            def handle(self, command):
-                return {"status": "ok"}
-
         command_bus.register(StartMcpServerCommand, SuccessHandler())
         command_bus.register(StopMcpServerCommand, SuccessHandler())
 
@@ -349,10 +348,6 @@ class TestSagaManagerCheckpoint:
         """Create a SagaManager with optional state store."""
         command_bus = CommandBus()
         event_bus = EventBus()
-
-        class SuccessHandler(CommandHandler):
-            def handle(self, command):
-                return {"status": "ok"}
 
         command_bus.register(StartMcpServerCommand, SuccessHandler())
 
@@ -482,10 +477,6 @@ class TestSagaManagerIdempotency:
         """Create a SagaManager with optional state store."""
         command_bus = CommandBus()
         event_bus = EventBus()
-
-        class SuccessHandler(CommandHandler):
-            def handle(self, command):
-                return {"status": "ok"}
 
         command_bus.register(StartMcpServerCommand, SuccessHandler())
 

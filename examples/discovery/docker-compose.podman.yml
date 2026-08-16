@@ -12,7 +12,7 @@ version: '3.8'
 services:
   # Simple test container with MCP labels
   test-provider:
-    image: docker.io/library/python:3.11-slim
+    image: docker.io/library/python:3.14-slim
     command: ["python", "-m", "http.server", "8080"]
     labels:
       mcp.hangar.enabled: "true"
@@ -24,7 +24,7 @@ services:
 
   # Another test container
   math-provider:
-    image: docker.io/library/python:3.11-slim
+    image: docker.io/library/python:3.14-slim
     command: ["python", "-m", "http.server", "8080"]
     labels:
       mcp.hangar.enabled: "true"

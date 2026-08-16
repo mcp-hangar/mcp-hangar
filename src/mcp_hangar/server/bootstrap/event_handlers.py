@@ -68,12 +68,13 @@ def init_event_handlers(runtime: "Runtime") -> None:
 
     # Populate the tool-projection registry from discovered tools on server start (#248)
     #
-    # A projection, and the clearest case for one: the registry answers what
-    # tools exist. A replica that only learned about servers *it* started would
-    # serve a third of the catalogue, and which third would depend on where the
-    # load balancer sent each start request.
+    # LOCAL_VIEW, not PROJECTION: the handler reads the local aggregate, not the
+    # event, so a peer's tailed start had it rebuild from nothing and delete a
+    # catalogue this replica was serving. See `HandlerKind.LOCAL_VIEW` and #922.
+    # The reason it was a projection -- no replica may serve a third of the
+    # catalogue -- is answered by every replica starting the fleet itself (#885).
     tool_projection_handler = ToolProjectionPopulationHandler(repository=runtime.repository)
-    runtime.event_bus.subscribe(McpServerStarted, tool_projection_handler.handle, kind=HandlerKind.PROJECTION)
+    runtime.event_bus.subscribe(McpServerStarted, tool_projection_handler.handle, kind=HandlerKind.LOCAL_VIEW)
 
     otlp_audit_exporter: IAuditExporter
     if os.getenv("OTEL_EXPORTER_OTLP_ENDPOINT"):

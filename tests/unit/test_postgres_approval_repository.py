@@ -1,6 +1,6 @@
 """Tests for PostgresApprovalRepository.
 
-Mocks the IConnectionFactory port the way test_auth_coverage_batch4.py does:
+Mocks the IConnectionFactory port the way test_postgres_auth_store.py does:
 a small factory class yielding a MagicMock connection whose cursor() yields a
 MagicMock cursor. Assertions are on the SQL text and parameters passed to the
 cursor, and on the Python-side ApprovalRequest produced -- never on a real

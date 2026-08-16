@@ -1,0 +1,17 @@
+# Hangar config for the task-relay example: one remote upstream that emits tasks.
+logging:
+  level: INFO
+  json_format: true
+
+# The ADR-014 governed task relay. Live by default since the SEP-2663 wire was
+# proven end to end; spelled out here so the example still runs against a
+# deployment that turned it off -- without it every task handle comes back
+# rejected with TaskRelayNotSupported and the drivers stop at their first check.
+relay_tasks_enabled: true
+
+mcp_servers:
+  task-upstream:
+    mode: remote
+    # Compose service name; from the host it is http://127.0.0.1:8081/mcp.
+    endpoint: http://task-upstream:8080/mcp
+    idle_ttl_s: 600

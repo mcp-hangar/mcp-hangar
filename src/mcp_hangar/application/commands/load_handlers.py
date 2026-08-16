@@ -17,8 +17,8 @@ from ...domain.exceptions import (
     UnverifiedMcpServerError,
 )
 from ...redactor import OutputRedactor
+from ...domain.model.mcp_server_config import parse_tools_access_config
 from ...domain.services import get_tool_access_resolver
-from ...domain.value_objects import ToolAccessPolicy
 from ...domain.contracts.command import CommandHandler
 from ...domain.contracts.event_bus import IEventBus
 from ...infrastructure.runtime_store import LoadMetadata, RuntimeMcpServerStore
@@ -109,6 +109,7 @@ class LoadMcpServerHandler(CommandHandler):
         event_bus: IEventBus,
         mcp_server_factory: Callable[..., Any],
         mcp_server_repository: Any,
+        approval_gate_available: Callable[[], bool] | None = None,
     ):
         """Initialize the handler.
 
@@ -121,6 +122,14 @@ class LoadMcpServerHandler(CommandHandler):
             event_bus: Event bus for publishing events.
             mcp_server_factory: Factory function to create McpServer instances.
             mcp_server_repository: Repository for checking existing mcp_servers.
+            approval_gate_available: Asked at load time whether the approval
+                gate is reachable. This is the runtime half of the startup
+                check in `server/bootstrap/reachability.py`, which cannot see a
+                policy registered after boot. Omitted means "no gate": a load
+                that asks for approval is then refused rather than registering
+                a policy nothing can enforce. Callable rather than a bool
+                because hot-loading is initialised before the gate is attached
+                to the context.
         """
         self._registry_client = registry_client
         self._package_resolver = package_resolver
@@ -130,6 +139,72 @@ class LoadMcpServerHandler(CommandHandler):
         self._event_bus = event_bus
         self._mcp_server_factory = mcp_server_factory
         self._mcp_server_repository = mcp_server_repository
+        self._approval_gate_available = approval_gate_available
+
+    def _register_tool_policy(self, mcp_server_id: str, command: LoadMcpServerCommand) -> None:
+        """Register the loaded server's tool access policy, if it declared one.
+
+        Built through the same parser the YAML surface uses rather than
+        assembled here: two surfaces hand-building the same policy is how
+        `approval_list` came to exist at one and not at the other -- #684 fixed
+        that inside the config parser, and #685 is the same divergence one layer
+        out. The old code here also only looked at allow/deny, so a load asking
+        for approval alone built no policy at all.
+        """
+        tools_config = parse_tools_access_config(
+            {
+                "allow_list": command.allow_tools or [],
+                "deny_list": command.deny_tools or [],
+                "approval_list": command.approval_tools or [],
+            }
+        )
+        if tools_config is None:
+            return
+
+        policy = tools_config.to_policy()
+        get_tool_access_resolver().set_mcp_server_policy(mcp_server_id, policy)
+        logger.debug(
+            "hot_loaded_mcp_server_tool_policy_set",
+            mcp_server_id=mcp_server_id,
+            has_allow_list=bool(policy.allow_list),
+            has_deny_list=bool(policy.deny_list),
+            has_approval_list=bool(policy.approval_list),
+        )
+
+    def _refuse_gating_without_a_gate(self, command: LoadMcpServerCommand) -> "LoadResult | None":
+        """Refuse a load that would register an approval policy nothing enforces.
+
+        A gated tool on a gateway with no approval gate is listed, called and
+        executed with no human in it, while the deployment believes otherwise --
+        strictly worse than the load failing. This is the rule
+        `server/bootstrap/reachability.py` applies to a configured policy,
+        asked at the only moment a runtime policy exists.
+        """
+        if not command.approval_tools or self._approval_gate_reachable():
+            return None
+        return LoadResult(
+            status="failed",
+            mcp_server_name=command.name,
+            message=(
+                "approval_tools was requested but no approval gate is configured; "
+                "the tools would execute unapproved. Configure `approvals` on this "
+                "deployment, or load without approval_tools."
+            ),
+        )
+
+    def _approval_gate_reachable(self) -> bool:
+        """Whether a gated tool would actually be held for a human.
+
+        A probe that raises is read as "not reachable": the point of asking is
+        to refuse when the answer is not a confident yes.
+        """
+        if self._approval_gate_available is None:
+            return False
+        try:
+            return bool(self._approval_gate_available())
+        except Exception as e:  # noqa: BLE001 -- an unanswerable probe is a No
+            logger.warning("approval_gate_probe_failed", error=str(e))
+            return False
 
     async def handle(self, command: LoadMcpServerCommand) -> LoadResult:
         """Handle the load mcp_server command.
@@ -151,6 +226,11 @@ class LoadMcpServerHandler(CommandHandler):
         )
 
         try:
+            # Before anything is downloaded or started.
+            refusal = self._refuse_gating_without_a_gate(command)
+            if refusal is not None:
+                return refusal
+
             # Check both original name and sanitized version
             sanitized_name = _sanitize_mcp_server_id(command.name)
 
@@ -252,20 +332,7 @@ class LoadMcpServerHandler(CommandHandler):
             )
             self._runtime_store.add(mcp_server, metadata)
 
-            # Register tool access policy if specified
-            if command.allow_tools or command.deny_tools:
-                policy = ToolAccessPolicy(
-                    allow_list=tuple(command.allow_tools or []),
-                    deny_list=tuple(command.deny_tools or []),
-                )
-                resolver = get_tool_access_resolver()
-                resolver.set_mcp_server_policy(mcp_server_id, policy)
-                logger.debug(
-                    "hot_loaded_mcp_server_tool_policy_set",
-                    mcp_server_id=mcp_server_id,
-                    has_allow_list=bool(command.allow_tools),
-                    has_deny_list=bool(command.deny_tools),
-                )
+            self._register_tool_policy(mcp_server_id, command)
 
             duration_ms = (time.perf_counter() - start_time) * 1000
 

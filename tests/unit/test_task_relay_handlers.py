@@ -16,7 +16,6 @@ digest re-verification before an outcome is handed over.
 
 from __future__ import annotations
 
-import asyncio
 from collections.abc import Iterator
 from contextlib import contextmanager
 from types import SimpleNamespace
@@ -270,14 +269,14 @@ def test_param_models_match_the_vendored_wire_definitions(store: GovernedTaskSto
 # ---------------------------------------------------------------------------
 
 
-def test_get_relays_to_owning_server_updates_snapshot_returns_flat(
+async def test_get_relays_to_owning_server_updates_snapshot_returns_flat(
     store: GovernedTaskStore,
 ) -> None:
     _register(store, "S1", "T1", "tenant-a", "alice")
     router = _FakeRouter({"tasks/get": {"result": _upstream_task("T1", status="working", statusMessage="crunching")}})
     handlers = _handlers(store, router)
 
-    result = asyncio.run(handlers["tasks/get"][1](_ctx("alice", "tenant-a"), SimpleNamespace(task_id="T1")))
+    result = await handlers["tasks/get"][1](_ctx("alice", "tenant-a"), SimpleNamespace(task_id="T1"))
 
     # Relayed to the RIGHT upstream server, verbatim task_id param.
     assert router.calls == [("S1", "tasks/get", {"task_id": "T1"}, 30.0)]
@@ -287,24 +286,26 @@ def test_get_relays_to_owning_server_updates_snapshot_returns_flat(
     assert wire["statusMessage"] == "crunching"
 
 
-def test_get_upstream_error_returns_local_snapshot_unchanged(store: GovernedTaskStore) -> None:
+async def test_get_upstream_error_returns_local_snapshot_unchanged(store: GovernedTaskStore) -> None:
     _register(store, "S1", "T1", "tenant-a", "alice")
     router = _FakeRouter({"tasks/get": {"error": {"code": -32000, "message": "boom"}}})
     handlers = _handlers(store, router)
 
-    result = asyncio.run(handlers["tasks/get"][1](_ctx("alice", "tenant-a"), SimpleNamespace(task_id="T1")))
+    result = await handlers["tasks/get"][1](_ctx("alice", "tenant-a"), SimpleNamespace(task_id="T1"))
     assert result.model_dump(by_alias=True)["status"] == "working"  # unchanged, not fabricated
 
 
-def test_get_emits_task_completed_once_on_working_to_completed(store: GovernedTaskStore, events: list[object]) -> None:
+async def test_get_emits_task_completed_once_on_working_to_completed(
+    store: GovernedTaskStore, events: list[object]
+) -> None:
     _register(store, "S1", "T1", "tenant-a", "alice")
     router = _FakeRouter({"tasks/get": {"result": _upstream_task("T1", status="completed")}})
     handlers = _handlers(store, router)
     get = handlers["tasks/get"][1]
     ctx = _ctx("alice", "tenant-a")
 
-    r1 = asyncio.run(get(ctx, SimpleNamespace(task_id="T1")))
-    r2 = asyncio.run(get(ctx, SimpleNamespace(task_id="T1")))  # repeated poll
+    r1 = await get(ctx, SimpleNamespace(task_id="T1"))
+    r2 = await get(ctx, SimpleNamespace(task_id="T1"))  # repeated poll
 
     assert r1.model_dump(by_alias=True)["status"] == "completed"
     assert r2.model_dump(by_alias=True)["status"] == "completed"
@@ -314,24 +315,22 @@ def test_get_emits_task_completed_once_on_working_to_completed(store: GovernedTa
     assert completed[0].tenant_id == "tenant-a"
 
 
-def test_get_cross_tenant_denied_no_leak_and_no_upstream_call(store: GovernedTaskStore) -> None:
+async def test_get_cross_tenant_denied_no_leak_and_no_upstream_call(store: GovernedTaskStore) -> None:
     _register(store, "S1", "T1", "tenant-a", "alice")
     router = _FakeRouter({"tasks/get": {"result": _upstream_task("T1")}})
     handlers = _handlers(store, router)
 
     with pytest.raises(McpError) as exc:
-        asyncio.run(handlers["tasks/get"][1](_ctx("bob", "tenant-b"), SimpleNamespace(task_id="T1")))
+        await handlers["tasks/get"][1](_ctx("bob", "tenant-b"), SimpleNamespace(task_id="T1"))
     assert "Task not found: T1" in str(exc.value)
     assert router.calls == []  # never relayed for a non-owned task
 
 
-def test_get_unknown_task_id_denied(store: GovernedTaskStore) -> None:
+async def test_get_unknown_task_id_denied(store: GovernedTaskStore) -> None:
     _register(store, "S1", "T1", "tenant-a", "alice")
     handlers = _handlers(store, _FakeRouter())
     with pytest.raises(McpError) as exc:
-        asyncio.run(
-            handlers["tasks/get"][1](_ctx("alice", "tenant-a", task_id="NOPE"), SimpleNamespace(task_id="NOPE"))
-        )
+        await handlers["tasks/get"][1](_ctx("alice", "tenant-a", task_id="NOPE"), SimpleNamespace(task_id="NOPE"))
     assert "Task not found: NOPE" in str(exc.value)
 
 
@@ -340,12 +339,14 @@ def test_get_unknown_task_id_denied(store: GovernedTaskStore) -> None:
 # ---------------------------------------------------------------------------
 
 
-def test_cancel_confirmed_retires_the_entry_and_emits_once(store: GovernedTaskStore, events: list[object]) -> None:
+async def test_cancel_confirmed_retires_the_entry_and_emits_once(
+    store: GovernedTaskStore, events: list[object]
+) -> None:
     _register(store, "S1", "T1", "tenant-a", "alice")
     router = _FakeRouter({"tasks/cancel": {"result": _upstream_task("T1", status="cancelled")}})
     handlers = _handlers(store, router)
 
-    result = asyncio.run(handlers["tasks/cancel"][1](_ctx("alice", "tenant-a"), SimpleNamespace(task_id="T1")))
+    result = await handlers["tasks/cancel"][1](_ctx("alice", "tenant-a"), SimpleNamespace(task_id="T1"))
 
     assert isinstance(result, EmptyResult)
     cancelled = [e for e in events if isinstance(e, TaskCancelled)]
@@ -353,11 +354,11 @@ def test_cancel_confirmed_retires_the_entry_and_emits_once(store: GovernedTaskSt
     assert cancelled[0].task_id == "T1"
     # Entry retired: a follow-up cancel now denies (not found), no double event.
     with pytest.raises(McpError):
-        asyncio.run(handlers["tasks/cancel"][1](_ctx("alice", "tenant-a"), SimpleNamespace(task_id="T1")))
+        await handlers["tasks/cancel"][1](_ctx("alice", "tenant-a"), SimpleNamespace(task_id="T1"))
     assert len([e for e in events if isinstance(e, TaskCancelled)]) == 1
 
 
-def test_the_cancel_ack_carries_no_status_at_all(store: GovernedTaskStore) -> None:
+async def test_the_cancel_ack_carries_no_status_at_all(store: GovernedTaskStore) -> None:
     """SEP-2663: cancellation is cooperative, so the ack must not claim an outcome.
 
     The SEP-1686 shape this replaced returned a status -- and on the confirmed
@@ -368,13 +369,13 @@ def test_the_cancel_ack_carries_no_status_at_all(store: GovernedTaskStore) -> No
     router = _FakeRouter({"tasks/cancel": {"result": _upstream_task("T1", status="cancelled")}})
     handlers = _handlers(store, router)
 
-    result = asyncio.run(handlers["tasks/cancel"][1](_ctx("alice", "tenant-a"), SimpleNamespace(task_id="T1")))
+    result = await handlers["tasks/cancel"][1](_ctx("alice", "tenant-a"), SimpleNamespace(task_id="T1"))
     wire = result.model_dump(by_alias=True, exclude_none=True)
 
     assert wire == {"resultType": "complete"}
 
 
-def test_cancel_upstream_error_keeps_the_entry_and_emits_nothing(
+async def test_cancel_upstream_error_keeps_the_entry_and_emits_nothing(
     store: GovernedTaskStore, events: list[object]
 ) -> None:
     """An unconfirmed cancel must not retire the ledger entry or claim success."""
@@ -387,16 +388,16 @@ def test_cancel_upstream_error_keeps_the_entry_and_emits_nothing(
     )
     handlers = _handlers(store, router)
 
-    result = asyncio.run(handlers["tasks/cancel"][1](_ctx("alice", "tenant-a"), SimpleNamespace(task_id="T1")))
+    result = await handlers["tasks/cancel"][1](_ctx("alice", "tenant-a"), SimpleNamespace(task_id="T1"))
 
     assert isinstance(result, EmptyResult)
     assert [e for e in events if isinstance(e, TaskCancelled)] == []
     # Entry KEPT: the task is still pollable and still reports its TRUE status.
-    polled = asyncio.run(handlers["tasks/get"][1](_ctx("alice", "tenant-a"), SimpleNamespace(task_id="T1")))
+    polled = await handlers["tasks/get"][1](_ctx("alice", "tenant-a"), SimpleNamespace(task_id="T1"))
     assert polled.status == "working"
 
 
-def test_cancel_upstream_reports_non_cancelled_status_keeps_entry(
+async def test_cancel_upstream_reports_non_cancelled_status_keeps_entry(
     store: GovernedTaskStore, events: list[object]
 ) -> None:
     """The upstream answered cleanly but is still working -- not a confirmation."""
@@ -409,11 +410,11 @@ def test_cancel_upstream_reports_non_cancelled_status_keeps_entry(
     )
     handlers = _handlers(store, router)
 
-    result = asyncio.run(handlers["tasks/cancel"][1](_ctx("alice", "tenant-a"), SimpleNamespace(task_id="T1")))
+    result = await handlers["tasks/cancel"][1](_ctx("alice", "tenant-a"), SimpleNamespace(task_id="T1"))
 
     assert isinstance(result, EmptyResult)
     assert [e for e in events if isinstance(e, TaskCancelled)] == []
-    polled = asyncio.run(handlers["tasks/get"][1](_ctx("alice", "tenant-a"), SimpleNamespace(task_id="T1")))
+    polled = await handlers["tasks/get"][1](_ctx("alice", "tenant-a"), SimpleNamespace(task_id="T1"))
     assert polled.status == "working"
 
 
@@ -431,7 +432,7 @@ def test_cancel_confirmed_predicate() -> None:
 # ---------------------------------------------------------------------------
 
 
-def test_absent_principal_is_unattributed_and_cannot_reach_attributed_task(
+async def test_absent_principal_is_unattributed_and_cannot_reach_attributed_task(
     store: GovernedTaskStore,
 ) -> None:
     """No principal on ctx -> unattributed caller -> cannot see tenant-a's task."""
@@ -440,11 +441,11 @@ def test_absent_principal_is_unattributed_and_cannot_reach_attributed_task(
     handlers = _handlers(store, router)
 
     with pytest.raises(McpError):
-        asyncio.run(handlers["tasks/get"][1](_ctx(), SimpleNamespace(task_id="T1")))
+        await handlers["tasks/get"][1](_ctx(), SimpleNamespace(task_id="T1"))
     assert router.calls == []
 
 
-def test_owner_reaches_their_own_task_via_the_v2_request_shape(store: GovernedTaskStore) -> None:
+async def test_owner_reaches_their_own_task_via_the_v2_request_shape(store: GovernedTaskStore) -> None:
     """The owner must reach their own task when the ctx is SDK-v2 shaped.
 
     Regression: the bridge read only ``ctx.request_context.request`` (v1). On v2
@@ -458,31 +459,31 @@ def test_owner_reaches_their_own_task_via_the_v2_request_shape(store: GovernedTa
     router = _FakeRouter({"tasks/get": {"result": _upstream_task("T1", status="completed")}})
     handlers = _handlers(store, router)
 
-    result = asyncio.run(handlers["tasks/get"][1](_ctx("alice", "tenant-a"), SimpleNamespace(task_id="T1")))
+    result = await handlers["tasks/get"][1](_ctx("alice", "tenant-a"), SimpleNamespace(task_id="T1"))
 
     assert result.task_id == "T1"
     assert router.calls, "the relay never reached the upstream"
 
 
-def test_owner_reaches_their_own_task_via_the_v1_request_shape(store: GovernedTaskStore) -> None:
+async def test_owner_reaches_their_own_task_via_the_v1_request_shape(store: GovernedTaskStore) -> None:
     """The v1 ``ctx.request_context.request`` spelling keeps working."""
     _register(store, "S1", "T1", "tenant-a", "alice")
     router = _FakeRouter({"tasks/get": {"result": _upstream_task("T1", status="completed")}})
     handlers = _handlers(store, router)
 
-    result = asyncio.run(handlers["tasks/get"][1](_ctx_v1("alice", "tenant-a"), SimpleNamespace(task_id="T1")))
+    result = await handlers["tasks/get"][1](_ctx_v1("alice", "tenant-a"), SimpleNamespace(task_id="T1"))
 
     assert result.task_id == "T1"
 
 
-def test_a_foreign_tenant_still_cannot_reach_the_task_through_the_v2_shape(store: GovernedTaskStore) -> None:
+async def test_a_foreign_tenant_still_cannot_reach_the_task_through_the_v2_shape(store: GovernedTaskStore) -> None:
     """Bridging identity must not widen access: another tenant is still denied."""
     _register(store, "S1", "T1", "tenant-a", "alice")
     router = _FakeRouter({"tasks/get": {"result": _upstream_task("T1")}})
     handlers = _handlers(store, router)
 
     with pytest.raises(McpError):
-        asyncio.run(handlers["tasks/get"][1](_ctx("bob", "tenant-b"), SimpleNamespace(task_id="T1")))
+        await handlers["tasks/get"][1](_ctx("bob", "tenant-b"), SimpleNamespace(task_id="T1"))
     assert router.calls == []
 
 
@@ -492,7 +493,7 @@ def test_a_foreign_tenant_still_cannot_reach_the_task_through_the_v2_shape(store
 
 
 @pytest.mark.parametrize("method", ["tasks/get", "tasks/cancel", "tasks/update"])
-def test_legacy_connection_is_told_the_method_does_not_exist(store: GovernedTaskStore, method: str) -> None:
+async def test_legacy_connection_is_told_the_method_does_not_exist(store: GovernedTaskStore, method: str) -> None:
     """A 2025-11-25 client gets -32601, not -32021.
 
     It could not act on -32021 if it wanted to: the extension it would be told
@@ -505,25 +506,27 @@ def test_legacy_connection_is_told_the_method_does_not_exist(store: GovernedTask
     params = SimpleNamespace(task_id="T1", input_responses={"k": {}})
 
     with pytest.raises(McpError) as exc:
-        asyncio.run(handlers[method][1](_ctx("alice", "tenant-a", version="2025-11-25"), params))
+        await handlers[method][1](_ctx("alice", "tenant-a", version="2025-11-25"), params)
 
     assert exc.value.error.code == -32601
     assert router.calls == [], "a refused request must never reach the upstream"
 
 
-def test_an_unreadable_protocol_version_fails_closed_to_legacy(store: GovernedTaskStore) -> None:
+async def test_an_unreadable_protocol_version_fails_closed_to_legacy(store: GovernedTaskStore) -> None:
     """No negotiated version -> treated as legacy, not as modern."""
     _register(store, "S1", "T1", "tenant-a", "alice")
     handlers = _handlers(store, _FakeRouter())
 
     with pytest.raises(McpError) as exc:
-        asyncio.run(handlers["tasks/get"][1](_ctx("alice", "tenant-a", version=None), SimpleNamespace(task_id="T1")))
+        await handlers["tasks/get"][1](_ctx("alice", "tenant-a", version=None), SimpleNamespace(task_id="T1"))
 
     assert exc.value.error.code == -32601
 
 
 @pytest.mark.parametrize("method", ["tasks/get", "tasks/cancel", "tasks/update"])
-def test_modern_client_without_the_extension_is_told_what_to_declare(store: GovernedTaskStore, method: str) -> None:
+async def test_modern_client_without_the_extension_is_told_what_to_declare(
+    store: GovernedTaskStore, method: str
+) -> None:
     """-32021 carries a machine-readable `requiredCapabilities`.
 
     Unlike a legacy client, this one can fix its declaration and retry, so it is
@@ -535,7 +538,7 @@ def test_modern_client_without_the_extension_is_told_what_to_declare(store: Gove
     params = SimpleNamespace(task_id="T1", input_responses={"k": {}})
 
     with pytest.raises(McpError) as exc:
-        asyncio.run(handlers[method][1](_ctx("alice", "tenant-a", declares=False), params))
+        await handlers[method][1](_ctx("alice", "tenant-a", declares=False), params)
 
     assert exc.value.error.code == MISSING_REQUIRED_CLIENT_CAPABILITY == -32021
     assert exc.value.error.data == {"requiredCapabilities": {"extensions": {EXTENSION_ID: {}}}}
@@ -543,7 +546,7 @@ def test_modern_client_without_the_extension_is_told_what_to_declare(store: Gove
 
 
 @pytest.mark.parametrize("method", ["tasks/get", "tasks/cancel", "tasks/update"])
-def test_a_missing_mcp_name_header_is_refused(store: GovernedTaskStore, method: str) -> None:
+async def test_a_missing_mcp_name_header_is_refused(store: GovernedTaskStore, method: str) -> None:
     """SEP-2663 mandates `Mcp-Name: <taskId>` on every `tasks/*` over HTTP.
 
     The header only earns its keep if it is reliably present -- an intermediary
@@ -558,28 +561,26 @@ def test_a_missing_mcp_name_header_is_refused(store: GovernedTaskStore, method: 
     params = SimpleNamespace(task_id="T1", input_responses={"k": {}})
 
     with pytest.raises(McpError) as exc:
-        asyncio.run(handlers[method][1](_ctx("alice", "tenant-a", task_id=None), params))
+        await handlers[method][1](_ctx("alice", "tenant-a", task_id=None), params)
 
     assert exc.value.error.code == HEADER_MISMATCH == -32020
     assert router.calls == []
 
 
-def test_an_mcp_name_header_disagreeing_with_the_body_is_refused(store: GovernedTaskStore) -> None:
+async def test_an_mcp_name_header_disagreeing_with_the_body_is_refused(store: GovernedTaskStore) -> None:
     """Worse than absent: an intermediary already routed on a value the body denies."""
     _register(store, "S1", "T1", "tenant-a", "alice")
     router = _FakeRouter()
     handlers = _handlers(store, router)
 
     with pytest.raises(McpError) as exc:
-        asyncio.run(
-            handlers["tasks/get"][1](_ctx("alice", "tenant-a", task_id="SOMEONE-ELSE"), SimpleNamespace(task_id="T1"))
-        )
+        await handlers["tasks/get"][1](_ctx("alice", "tenant-a", task_id="SOMEONE-ELSE"), SimpleNamespace(task_id="T1"))
 
     assert exc.value.error.code == HEADER_MISMATCH
     assert router.calls == []
 
 
-def test_the_ladder_is_ordered_header_before_capability(store: GovernedTaskStore) -> None:
+async def test_the_ladder_is_ordered_header_before_capability(store: GovernedTaskStore) -> None:
     """A misrouted request is refused as misrouted whatever the client declared.
 
     Both defects are present here. The answer must be the routing one: it is a
@@ -590,31 +591,27 @@ def test_the_ladder_is_ordered_header_before_capability(store: GovernedTaskStore
     handlers = _handlers(store, _FakeRouter())
 
     with pytest.raises(McpError) as exc:
-        asyncio.run(
-            handlers["tasks/get"][1](
-                _ctx("alice", "tenant-a", task_id=None, declares=False), SimpleNamespace(task_id="T1")
-            )
+        await handlers["tasks/get"][1](
+            _ctx("alice", "tenant-a", task_id=None, declares=False), SimpleNamespace(task_id="T1")
         )
 
     assert exc.value.error.code == HEADER_MISMATCH
 
 
-def test_the_ladder_is_ordered_version_before_header(store: GovernedTaskStore) -> None:
+async def test_the_ladder_is_ordered_version_before_header(store: GovernedTaskStore) -> None:
     """Never demand a routing header for a method that does not exist for you."""
     _register(store, "S1", "T1", "tenant-a", "alice")
     handlers = _handlers(store, _FakeRouter())
 
     with pytest.raises(McpError) as exc:
-        asyncio.run(
-            handlers["tasks/get"][1](
-                _ctx("alice", "tenant-a", version="2025-11-25", task_id=None), SimpleNamespace(task_id="T1")
-            )
+        await handlers["tasks/get"][1](
+            _ctx("alice", "tenant-a", version="2025-11-25", task_id=None), SimpleNamespace(task_id="T1")
         )
 
     assert exc.value.error.code == -32601
 
 
-def test_stdio_has_no_headers_so_the_requirement_does_not_apply(store: GovernedTaskStore) -> None:
+async def test_stdio_has_no_headers_so_the_requirement_does_not_apply(store: GovernedTaskStore) -> None:
     """SEP-2663 scopes `Mcp-Name` to Streamable HTTP.
 
     On stdio there is no request object to carry it, so its absence means "not
@@ -627,7 +624,7 @@ def test_stdio_has_no_headers_so_the_requirement_does_not_apply(store: GovernedT
     ctx = SimpleNamespace(request=None, session=_session(version="2026-07-28", declares=True))
 
     with _as("tenant-a", "alice"):
-        result = asyncio.run(handlers["tasks/get"][1](ctx, SimpleNamespace(task_id="T1")))
+        result = await handlers["tasks/get"][1](ctx, SimpleNamespace(task_id="T1"))
 
     assert result.task_id == "T1"
 
@@ -637,7 +634,7 @@ def test_stdio_has_no_headers_so_the_requirement_does_not_apply(store: GovernedT
 # ---------------------------------------------------------------------------
 
 
-def test_get_projects_the_ledger_snapshot_onto_the_sep_2663_field_names(store: GovernedTaskStore) -> None:
+async def test_get_projects_the_ledger_snapshot_onto_the_sep_2663_field_names(store: GovernedTaskStore) -> None:
     """The ledger still stores the SEP-1686 `Task`; the wire must not show it.
 
     `ttl` -> `ttlMs` and `poll_interval` -> `pollIntervalMs` are pure renames --
@@ -648,7 +645,7 @@ def test_get_projects_the_ledger_snapshot_onto_the_sep_2663_field_names(store: G
     router = _FakeRouter({"tasks/get": {"result": _upstream_task("T1")}})
     handlers = _handlers(store, router)
 
-    result = asyncio.run(handlers["tasks/get"][1](_ctx("alice", "tenant-a"), SimpleNamespace(task_id="T1")))
+    result = await handlers["tasks/get"][1](_ctx("alice", "tenant-a"), SimpleNamespace(task_id="T1"))
     wire = result.model_dump(by_alias=True)
 
     assert wire["ttlMs"] == 60_000
@@ -658,20 +655,20 @@ def test_get_projects_the_ledger_snapshot_onto_the_sep_2663_field_names(store: G
     assert "task" not in wire, "results are flat; the nested fossil form must not reappear"
 
 
-def test_a_completed_task_inlines_its_result_on_the_poll(store: GovernedTaskStore) -> None:
+async def test_a_completed_task_inlines_its_result_on_the_poll(store: GovernedTaskStore) -> None:
     """SEP-2663 folds the removed `tasks/result` round trip into `tasks/get`."""
     _register(store, "S1", "T1", "tenant-a", "alice")
     payload = {"content": [{"type": "text", "text": "done"}], "isError": False}
     router = _FakeRouter({"tasks/get": {"result": _upstream_task("T1", status="completed", result=payload)}})
     handlers = _handlers(store, router)
 
-    result = asyncio.run(handlers["tasks/get"][1](_ctx("alice", "tenant-a"), SimpleNamespace(task_id="T1")))
+    result = await handlers["tasks/get"][1](_ctx("alice", "tenant-a"), SimpleNamespace(task_id="T1"))
 
     assert result.status == "completed"
     assert result.result == payload
 
 
-def test_input_requests_reach_the_client_so_it_can_answer_them(store: GovernedTaskStore) -> None:
+async def test_input_requests_reach_the_client_so_it_can_answer_them(store: GovernedTaskStore) -> None:
     """Without this map the client cannot key its `tasks/update` answers.
 
     python-sdk#3005's own `GetTaskResult` drops it (no field + `extra="ignore"`),
@@ -684,26 +681,26 @@ def test_input_requests_reach_the_client_so_it_can_answer_them(store: GovernedTa
     )
     handlers = _handlers(store, router)
 
-    result = asyncio.run(handlers["tasks/get"][1](_ctx("alice", "tenant-a"), SimpleNamespace(task_id="T1")))
+    result = await handlers["tasks/get"][1](_ctx("alice", "tenant-a"), SimpleNamespace(task_id="T1"))
 
     assert result.input_requests == requests
     assert result.model_dump(by_alias=True)["inputRequests"] == requests
 
 
-def test_an_upstream_error_yields_no_outcome_fields(store: GovernedTaskStore) -> None:
+async def test_an_upstream_error_yields_no_outcome_fields(store: GovernedTaskStore) -> None:
     """State is never fabricated: no upstream answer means no inlined outcome."""
     _register(store, "S1", "T1", "tenant-a", "alice")
     router = _FakeRouter({"tasks/get": {"error": {"code": -32000, "message": "boom"}}})
     handlers = _handlers(store, router)
 
-    result = asyncio.run(handlers["tasks/get"][1](_ctx("alice", "tenant-a"), SimpleNamespace(task_id="T1")))
+    result = await handlers["tasks/get"][1](_ctx("alice", "tenant-a"), SimpleNamespace(task_id="T1"))
 
     assert result.result is None
     assert result.error is None
     assert result.status == "working"
 
 
-def test_digest_drift_is_caught_before_an_outcome_is_handed_over(
+async def test_digest_drift_is_caught_before_an_outcome_is_handed_over(
     store: GovernedTaskStore, monkeypatch: pytest.MonkeyPatch
 ) -> None:
     """The check that used to guard `tasks/result` must survive its removal.
@@ -726,12 +723,14 @@ def test_digest_drift_is_caught_before_an_outcome_is_handed_over(
     handlers = _handlers(store, router)
 
     with pytest.raises(McpError) as exc:
-        asyncio.run(handlers["tasks/get"][1](_ctx("alice", "tenant-a"), SimpleNamespace(task_id="T1")))
+        await handlers["tasks/get"][1](_ctx("alice", "tenant-a"), SimpleNamespace(task_id="T1"))
 
     assert "digest drifted" in str(exc.value)
 
 
-def test_a_still_running_task_is_not_digest_checked(store: GovernedTaskStore, monkeypatch: pytest.MonkeyPatch) -> None:
+async def test_a_still_running_task_is_not_digest_checked(
+    store: GovernedTaskStore, monkeypatch: pytest.MonkeyPatch
+) -> None:
     """The check guards handing over an outcome, matching its old placement.
 
     A poll that returns no payload has nothing to verify, and failing one would
@@ -748,7 +747,7 @@ def test_a_still_running_task_is_not_digest_checked(store: GovernedTaskStore, mo
     monkeypatch.setattr(store, "_verify_pinned_digest", _drift)
     handlers = _handlers(store, router)
 
-    result = asyncio.run(handlers["tasks/get"][1](_ctx("alice", "tenant-a"), SimpleNamespace(task_id="T1")))
+    result = await handlers["tasks/get"][1](_ctx("alice", "tenant-a"), SimpleNamespace(task_id="T1"))
 
     assert result.status == "working"
 
@@ -758,7 +757,7 @@ def test_a_still_running_task_is_not_digest_checked(store: GovernedTaskStore, mo
 # ---------------------------------------------------------------------------
 
 
-def test_update_relays_the_clients_answers_and_acknowledges_empty(store: GovernedTaskStore) -> None:
+async def test_update_relays_the_clients_answers_and_acknowledges_empty(store: GovernedTaskStore) -> None:
     _register(store, "S1", "T1", "tenant-a", "alice")
     answers = {"user_name": {"content": {"name": "ada"}}}
     router = _FakeRouter(
@@ -769,8 +768,8 @@ def test_update_relays_the_clients_answers_and_acknowledges_empty(store: Governe
     )
     handlers = _handlers(store, router)
 
-    result = asyncio.run(
-        handlers["tasks/update"][1](_ctx("alice", "tenant-a"), SimpleNamespace(task_id="T1", input_responses=answers))
+    result = await handlers["tasks/update"][1](
+        _ctx("alice", "tenant-a"), SimpleNamespace(task_id="T1", input_responses=answers)
     )
 
     assert isinstance(result, EmptyResult)
@@ -778,7 +777,7 @@ def test_update_relays_the_clients_answers_and_acknowledges_empty(store: Governe
     assert len(relayed) == 1
 
 
-def test_update_from_a_foreign_tenant_is_denied_before_the_gate_or_upstream(
+async def test_update_from_a_foreign_tenant_is_denied_before_the_gate_or_upstream(
     store: GovernedTaskStore,
 ) -> None:
     """Tenant authorization sits ABOVE consent, structurally.
@@ -794,10 +793,8 @@ def test_update_from_a_foreign_tenant_is_denied_before_the_gate_or_upstream(
     handlers = _handlers(store, router, gate)
 
     with pytest.raises(McpError) as exc:
-        asyncio.run(
-            handlers["tasks/update"][1](
-                _ctx("bob", "tenant-b"), SimpleNamespace(task_id="T1", input_responses={"k": {}})
-            )
+        await handlers["tasks/update"][1](
+            _ctx("bob", "tenant-b"), SimpleNamespace(task_id="T1", input_responses={"k": {}})
         )
 
     assert "Task not found: T1" in str(exc.value)
@@ -809,7 +806,7 @@ def test_update_from_a_foreign_tenant_is_denied_before_the_gate_or_upstream(
 # ---------------------------------------------------------------------------
 
 
-def test_a_completed_task_on_an_older_upstream_still_yields_its_payload(store: GovernedTaskStore) -> None:
+async def test_a_completed_task_on_an_older_upstream_still_yields_its_payload(store: GovernedTaskStore) -> None:
     """The regression this guards against made every such payload unreachable.
 
     SEP-2663 inlines a completed task's result on `tasks/get`, so a modern
@@ -830,26 +827,26 @@ def test_a_completed_task_on_an_older_upstream_still_yields_its_payload(store: G
     )
     handlers = _handlers(store, router)
 
-    result = asyncio.run(handlers["tasks/get"][1](_ctx("alice", "tenant-a"), SimpleNamespace(task_id="T1")))
+    result = await handlers["tasks/get"][1](_ctx("alice", "tenant-a"), SimpleNamespace(task_id="T1"))
 
     assert result.result == payload
     assert any(call[1] == "tasks/result" for call in router.calls)
 
 
-def test_a_modern_upstream_is_never_asked_for_the_payload_twice(store: GovernedTaskStore) -> None:
+async def test_a_modern_upstream_is_never_asked_for_the_payload_twice(store: GovernedTaskStore) -> None:
     """An inlined result is authoritative; asking again would be a wasted round trip."""
     _register(store, "S1", "T1", "tenant-a", "alice")
     payload = {"content": [], "isError": False}
     router = _FakeRouter({"tasks/get": {"result": _upstream_task("T1", status="completed", result=payload)}})
     handlers = _handlers(store, router)
 
-    result = asyncio.run(handlers["tasks/get"][1](_ctx("alice", "tenant-a"), SimpleNamespace(task_id="T1")))
+    result = await handlers["tasks/get"][1](_ctx("alice", "tenant-a"), SimpleNamespace(task_id="T1"))
 
     assert result.result == payload
     assert not any(call[1] == "tasks/result" for call in router.calls)
 
 
-def test_an_upstream_that_refuses_tasks_result_does_not_fail_the_poll(store: GovernedTaskStore) -> None:
+async def test_an_upstream_that_refuses_tasks_result_does_not_fail_the_poll(store: GovernedTaskStore) -> None:
     """A modern upstream answers -32601 there. That is not a reason to fail a good poll."""
     _register(store, "S1", "T1", "tenant-a", "alice")
     router = _FakeRouter(
@@ -860,13 +857,13 @@ def test_an_upstream_that_refuses_tasks_result_does_not_fail_the_poll(store: Gov
     )
     handlers = _handlers(store, router)
 
-    result = asyncio.run(handlers["tasks/get"][1](_ctx("alice", "tenant-a"), SimpleNamespace(task_id="T1")))
+    result = await handlers["tasks/get"][1](_ctx("alice", "tenant-a"), SimpleNamespace(task_id="T1"))
 
     assert result.status == "completed"
     assert result.result is None
 
 
-def test_a_drifted_digest_is_caught_before_the_payload_is_even_requested(
+async def test_a_drifted_digest_is_caught_before_the_payload_is_even_requested(
     store: GovernedTaskStore, monkeypatch: pytest.MonkeyPatch
 ) -> None:
     """Ordering matters: never ask a tool that failed verification for output."""
@@ -887,6 +884,6 @@ def test_a_drifted_digest_is_caught_before_the_payload_is_even_requested(
     handlers = _handlers(store, router)
 
     with pytest.raises(McpError):
-        asyncio.run(handlers["tasks/get"][1](_ctx("alice", "tenant-a"), SimpleNamespace(task_id="T1")))
+        await handlers["tasks/get"][1](_ctx("alice", "tenant-a"), SimpleNamespace(task_id="T1"))
 
     assert not any(call[1] == "tasks/result" for call in router.calls)

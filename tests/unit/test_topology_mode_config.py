@@ -19,6 +19,7 @@ import pytest
 from mcp_hangar.domain.exceptions import ConfigurationError
 from mcp_hangar.server.config import _init_topology_mode_from_config
 from mcp_hangar.domain.services import get_tool_access_resolver
+from mcp_hangar.domain.services.tool_access_resolver import is_front_door
 
 
 @pytest.fixture(autouse=True)
@@ -91,3 +92,31 @@ class TestMisspelledModeRefusesToStart:
             _init_topology_mode_from_config({"tool_access": {"mode": "front-door"}})
 
         assert resolver.topology_mode == "front_door"
+
+
+class TestAskingWhetherThisIsAFrontDoor:
+    """`is_front_door()` is the one place both callers ask, and both must survive
+    an unreachable resolver: the flat-handler gate at bootstrap and the
+    boot-time warm-up (#885). Neither had covered the fallback while each owned
+    its own copy of it."""
+
+    def test_it_reports_the_configured_mode(self):
+        get_tool_access_resolver().set_topology_mode("front_door")
+        assert is_front_door() is True
+
+        get_tool_access_resolver().set_topology_mode("egress")
+        assert is_front_door() is False
+
+    def test_an_unreachable_resolver_answers_no_rather_than_raising(self, monkeypatch):
+        # "Not a front door" is the answer that changes nothing: the meta-API
+        # stays, and the warm-up does not start a fleet on a guess. Raising here
+        # would take the process down during bootstrap.
+        monkeypatch.setattr(
+            "mcp_hangar.domain.services.tool_access_resolver.get_tool_access_resolver",
+            _raise,
+        )
+        assert is_front_door() is False
+
+
+def _raise():
+    raise RuntimeError("no resolver")

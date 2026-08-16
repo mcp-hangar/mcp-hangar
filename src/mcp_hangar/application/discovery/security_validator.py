@@ -10,7 +10,7 @@ Validation Pipeline:
     4. Schema Validation - Does it implement MCP correctly?
 """
 
-from dataclasses import dataclass, field
+from dataclasses import dataclass
 from enum import Enum
 import time
 from typing import Any
@@ -91,11 +91,6 @@ class SecurityConfig:
     infrastructure understands belong to that source's `policy_violation`.
 
     Attributes:
-        allowed_namespaces: **Read by nothing here.** The kubernetes source owns
-            the namespace policy now; `create_discovery_orchestrator` carries the
-            legacy `discovery.security` location onto that source and warns. The
-            field is kept so an old config still parses, and is due for removal
-        denied_namespaces: **Read by nothing here.** See `allowed_namespaces`
         require_health_check: Whether to require health check pass
         require_mcp_schema: Whether to validate MCP schema
         max_mcp_servers_per_source: Max mcp_servers from single source
@@ -104,8 +99,6 @@ class SecurityConfig:
         quarantine_on_failure: Whether to quarantine failed mcp_servers
     """
 
-    allowed_namespaces: set[str] = field(default_factory=set)
-    denied_namespaces: set[str] = field(default_factory=lambda: {"kube-system", "default"})
     require_health_check: bool = True
     require_mcp_schema: bool = False
     max_mcp_servers_per_source: int = 100
@@ -117,8 +110,6 @@ class SecurityConfig:
     def from_dict(cls, data: dict[str, Any]) -> "SecurityConfig":
         """Create from dictionary."""
         return cls(
-            allowed_namespaces=set(data.get("allowed_namespaces", [])),
-            denied_namespaces=set(data.get("denied_namespaces", ["kube-system", "default"])),
             require_health_check=data.get("require_health_check", True),
             require_mcp_schema=data.get("require_mcp_schema", False),
             max_mcp_servers_per_source=data.get("max_mcp_servers_per_source", 100),

@@ -38,6 +38,27 @@
 #    back on its own and these two lines have to be deleted — which the
 #    stale-entry rule above enforces rather than leaves to memory.
 #
+# 4. Cannot be set up against a sessionless server. The scenario reads
+#    `transport.sessionId` first and, finding none, returns a single WARNING
+#    ("Server did not provide session ID") without ever running its own check.
+#    The suite counts a non-SUCCESS result as a failure, so the line below is a
+#    scenario that was never evaluated rather than one we failed.
+#
+#    `serve --http` hands out no session id since #877: a handshake-era session
+#    lived in one replica's memory, so replicas of one gateway were several
+#    servers to a client. Note the specification makes the session OPTIONAL —
+#    the server MAY assign one — and the SDK ships this mode, so answering
+#    without one is conformant.
+#
+#    What is genuinely lost is the signal, and it is worth being plain about it:
+#    this suite can no longer verify SEP-1699 against us. The capability itself
+#    was measured directly instead — three concurrent `tools/list` POSTs against
+#    the shipped app, all `200 text/event-stream`, all 22 tools — but that is a
+#    probe we ran, not a scenario the ecosystem runs for us. If the suite later
+#    grows a sessionless variant (its repo already carries
+#    `src/mock-server/stateless.ts` and documents a `server-stateless` scenario),
+#    this line comes out.
+#
 # 3. Deliberately not implemented — `logging/setLevel`. This looked like the
 #    one real gap until the specification was read: the method is REMOVED in
 #    2026-07-28, the generation this line targets. SEP-2575: "Remove `ping`,
@@ -64,6 +85,9 @@
 # the surface we built (SEP-2575 discover, Tasks) and belong in this run.
 
 server:
+  # -- 4. not evaluable without a session id ---------------------------------
+  - server-sse-multiple-streams # short-circuits to WARNING before its own check (#877)
+
   # -- 3. deliberately not implemented ---------------------------------------
   - logging-set-level # removed in 2026-07-28 (SEP-2575), feature deprecated (SEP-2577)
 

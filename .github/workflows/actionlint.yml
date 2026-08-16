@@ -22,7 +22,14 @@ permissions:
   contents: read
 
 jobs:
-  lint:
+  # Named `actionlint`, not `lint`: `CI - Core` already has a job called `lint`,
+  # and branch protection matches a required check by name alone. Two jobs
+  # reporting the same context made `lint` ambiguous -- whichever reported last
+  # answered for both, so a red one could be masked by a green one from the
+  # other workflow. This job stays advisory (it is path-filtered, so it cannot
+  # be required without hanging PRs that touch no workflow); `lint` now belongs
+  # unambiguously to `CI - Core`.
+  actionlint:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v7

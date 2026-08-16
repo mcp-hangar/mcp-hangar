@@ -30,9 +30,13 @@ docker compose logs -f mcp-hangar
 
 ## Endpoints
 
-- `GET /health` - Health check
+- `GET /health/live` - liveness (is the process up?)
+- `GET /health/ready` - readiness (can it serve?)
+- `GET /health/startup` - startup (is initialization done?)
 - `GET /metrics` - Prometheus metrics
-- `POST /mcp/v1/...` - MCP protocol
+- `POST /mcp` - MCP streamable HTTP endpoint
+
+There is no bare `GET /health`; it answers 404.
 
 ## Configuration
 

@@ -80,6 +80,123 @@ def build_readiness_report(repository: Any) -> tuple[dict[str, Any], int]:
     return body, (200 if event_store_ok else 503)
 
 
+def warm_the_front_door_catalogue(runtime: Any) -> None:
+    """Start every configured mcp_server so this replica can answer ``tools/list``.
+
+    In ``front_door`` the flat projection **is** ``tools/list``, and the projection
+    is built from ``McpServerStarted``. A replica that has started nothing has
+    discovered nothing, so after every restart it serves an empty catalogue to a
+    perfectly valid tenant -- and no client can change that. The meta-API is not
+    projected for an ordinary tenant, so there is no ``hangar_warm`` to call; a
+    tool name the client already knows resolves against the same empty map
+    (``Tool 'add' not found``); and health checks skip cold servers by
+    construction (``gc.py``, ``state_str in ("cold", "initializing")``). The only
+    remedy was an operator, per replica, over the REST admin API (#878, #885).
+
+    Two replicas that warmed different servers then answer the same tenant
+    differently -- 18 tools from one, 0 from the other, alternating through the
+    Service (#886). Every replica starting every configured server is what makes
+    the catalogue a property of the configuration again instead of a readout of
+    one replica's warm-up history.
+
+    **Only in ``front_door``.** In ``egress`` the ``hangar_*`` meta-API is the
+    surface, lazy start on first use is the documented behaviour that
+    ``idle_ttl_s`` is designed around, and starting every backend at boot would
+    change what every existing deployment costs to run.
+
+    Through the command bus, not ``ensure_ready()``: the aggregate only *records*
+    ``McpServerStarted``, and the command handler is what drains and publishes it.
+    Called directly, this would start the fleet and leave the projection empty
+    until the GC worker's next sweep happened to publish -- which is exactly how
+    group members come to be projected today, up to 30s late and by accident.
+
+    A backend that fails here stays cold and unprojected: the state it would have
+    been in anyway, logged per server, and reported by the empty-projection metric
+    (#887). Warming is deliberately not retried -- a backend that is down at boot
+    is down, and the fleet is warmed again on the next restart.
+
+    Args:
+        runtime: The runtime holding the fleet and the command bus.
+    """
+    from ..application.commands import StartMcpServerCommand
+    from ..domain.services.tool_access_resolver import is_front_door
+
+    if not is_front_door():
+        return
+
+    warmed = failed = 0
+
+    for mcp_server_id in runtime.repository.get_all_ids():
+        try:
+            runtime.command_bus.send(StartMcpServerCommand(mcp_server_id=mcp_server_id))
+            warmed += 1
+        except Exception as e:  # noqa: BLE001 -- fault-barrier: one dead backend must not cost the others their projection
+            failed += 1
+            logger.warning("front_door_warmup_failed", mcp_server_id=mcp_server_id, error=str(e))
+
+    logger.info("front_door_warmup_complete", warmed=warmed, failed=failed)
+
+
+def mcp_app_for_serving(mcp_server: Any) -> Any:
+    """Build the ASGI app ``serve --http`` mounts at ``/mcp``.
+
+    A function rather than four lines inside ``run_http`` so a test can drive the
+    app the CLI actually serves. Composition wired only where tests cannot reach
+    it is how this codebase has repeatedly shipped a surface that was green in the
+    suite and absent in production -- ``MCPServerFactory`` has no production call
+    site, and four separate features were wired only there (#592, #594, #595,
+    #596). A session defect in particular cannot be seen from one instance, so the
+    seam is what makes the #877 test possible at all.
+
+    ``transport_security`` is passed explicitly: left to the SDK's default the
+    guard is built from its own bind host, so the endpoint answered 421 to the
+    Service DNS name and every Ingress host while ``MCP_TRUSTED_HOSTS`` listed
+    them (#859).
+
+    ``stateless_http`` is the fix for #877. A handshake-era session lives in ONE
+    replica's memory -- ``StreamableHTTPSessionManager._server_instances`` maps
+    the id to a live transport running as a task in that process -- so N replicas
+    of one coordinated gateway are N servers to a client, and the Service hands
+    each request to whichever it likes. Measured: a client that initializes
+    against one replica and lists tools against another is told
+    ``Session not found``.
+
+    The session buys this gateway nothing to weigh against that. It issues no
+    server-to-client requests (no elicitation, no sampling, no roots) and no
+    notifications; ``event_store`` is unset here, so there was never any
+    resumability to lose; authorization is per-request at the route chokepoint
+    rather than bound to a session; and session *suspension* keys on
+    ``CallerIdentity.session_id``, which comes from ``x-session-id`` or the JWT
+    ``sid`` claim and never from ``Mcp-Session-Id``.
+
+    Handshake-era only, and deliberately so: SEP-2567 removed sessions, so a
+    2026-07-28 request is era-routed to the SDK's modern entry and never reaches
+    the session table. This makes the older revisions behave the way the current
+    one already does rather than inventing a mode. Accepted cost:
+    ``DELETE /mcp`` answers 405, because there is no session to terminate.
+
+    The SEP-2243 wrap checks a legacy-era POST's ``Mcp-Method`` / ``Mcp-Name``
+    against its body instead of trusting it. The 2026-07-28 era needs nothing
+    there -- the SDK enforces header/body agreement itself -- but the legacy era
+    does, and this path served neither before (#560).
+
+    Args:
+        mcp_server: The server ``build_serving_mcp_server()`` produced.
+
+    Returns:
+        The wrapped ASGI application.
+    """
+    from ..fastmcp_server.asgi import mcp_transport_security
+    from ..fastmcp_server.modern_surface import wrap_front_door_routing
+
+    return wrap_front_door_routing(
+        mcp_server.streamable_http_app(
+            transport_security=mcp_transport_security(),
+            stateless_http=True,
+        )
+    )
+
+
 def _is_loopback_host(host: str) -> bool:
     """Return whether a bind host resolves to loopback-only."""
     normalized_host = host.strip().lower()
@@ -156,6 +273,18 @@ class ServerLifecycle:
         )
 
         self._start_discovery()
+
+        # Last, and on a thread of its own: a backend handshake is I/O, and
+        # nothing may wait on it. `build_readiness_report` above spells out why
+        # -- gating the serving path on a warm backend deadlocks the deployment.
+        # The front door serves a short list until this finishes, which is the
+        # bounded version of serving an empty one forever (#878, #885, #886).
+        threading.Thread(
+            target=warm_the_front_door_catalogue,
+            args=(self._context.runtime,),
+            name="mcp-hangar-front-door-warmup",
+            daemon=True,
+        ).start()
 
     def _start_discovery(self) -> None:
         """Start discovery on a dedicated long-lived event loop."""
@@ -250,25 +379,7 @@ class ServerLifecycle:
             settings.host = host
             settings.port = port
 
-        # Get the MCP app from FastMCP.
-        #
-        # `transport_security` is passed explicitly: left to the SDK's default
-        # the guard is built from its own bind host, so the endpoint answered
-        # 421 to the Service DNS name and every Ingress host while
-        # MCP_TRUSTED_HOSTS listed them (#859).
-        from ..fastmcp_server.asgi import mcp_transport_security
-
-        mcp_app = mcp_server.streamable_http_app(transport_security=mcp_transport_security())
-
-        # SEP-2243: wrap the stateless front door so a legacy-era POST carrying
-        # Mcp-Method / Mcp-Name is checked against its body instead of trusted
-        # blindly. The 2026-07-28 era needs nothing here — the SDK era-routes on
-        # MCP-Protocol-Version and enforces header/body agreement itself — but
-        # the legacy era does, and this path served neither before (#560). Shared
-        # with the factory path via ``modern_surface``.
-        from ..fastmcp_server.modern_surface import wrap_front_door_routing
-
-        mcp_app = wrap_front_door_routing(mcp_app)
+        mcp_app = mcp_app_for_serving(mcp_server)
 
         # Create auxiliary routes for /metrics, /health, /ready
         import time
@@ -693,5 +804,6 @@ def run_server(cli_config: CLIConfig) -> None:
 __all__ = [
     "ServerLifecycle",
     "build_readiness_report",
+    "mcp_app_for_serving",
     "run_server",
 ]

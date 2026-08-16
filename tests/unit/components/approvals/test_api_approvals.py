@@ -1,6 +1,7 @@
 """Unit tests for approval API routes."""
 
-from datetime import datetime, timedelta, UTC
+import asyncio
+from datetime import UTC, datetime, timedelta
 from unittest.mock import MagicMock
 
 import pytest
@@ -64,6 +65,22 @@ def _make_pending_request(approval_id="test-001", **overrides):
     return ApprovalRequest(**defaults)
 
 
+def _seed(*coroutines) -> None:
+    """Await setup coroutines from a sync test.
+
+    These tests drive the app through `TestClient`, which runs its own loop, so
+    the test function itself stays sync. Each site used to open, drive and close
+    a bare `asyncio.new_event_loop()` by hand -- four lines to await a repository
+    write, and a fresh loop per call for objects that outlive it.
+    """
+
+    async def run_all() -> None:
+        for coroutine in coroutines:
+            await coroutine
+
+    asyncio.run(run_all())
+
+
 @pytest.fixture
 def app_with_service():
     repo = FakeRepository()
@@ -97,12 +114,10 @@ class TestListApprovals:
         client = TestClient(app)
 
         # Add pending and approved requests
-        import asyncio
-
-        loop = asyncio.new_event_loop()
-        loop.run_until_complete(repo.save(_make_pending_request("p-001")))
-        loop.run_until_complete(repo.save(_make_pending_request("a-001", state=ApprovalState.APPROVED)))
-        loop.close()
+        _seed(
+            repo.save(_make_pending_request("p-001")),
+            repo.save(_make_pending_request("a-001", state=ApprovalState.APPROVED)),
+        )
 
         response = client.get("/approvals")
         assert response.status_code == 200
@@ -114,11 +129,7 @@ class TestListApprovals:
         app, service, repo = app_with_service
         client = TestClient(app)
 
-        import asyncio
-
-        loop = asyncio.new_event_loop()
-        loop.run_until_complete(repo.save(_make_pending_request("a-001", state=ApprovalState.APPROVED)))
-        loop.close()
+        _seed(repo.save(_make_pending_request("a-001", state=ApprovalState.APPROVED)))
 
         response = client.get("/approvals?state=approved")
         assert response.status_code == 200
@@ -136,11 +147,7 @@ class TestGetApproval:
         app, service, repo = app_with_service
         client = TestClient(app)
 
-        import asyncio
-
-        loop = asyncio.new_event_loop()
-        loop.run_until_complete(repo.save(_make_pending_request("test-001")))
-        loop.close()
+        _seed(repo.save(_make_pending_request("test-001")))
 
         response = client.get("/approvals/test-001")
         assert response.status_code == 200
@@ -158,13 +165,8 @@ class TestResolveApproval:
         app, service, repo = app_with_service
         client = TestClient(app)
 
-        import asyncio
-
-        loop = asyncio.new_event_loop()
         req = _make_pending_request("r-001")
-        loop.run_until_complete(repo.save(req))
-        loop.run_until_complete(service._hold_registry.register("r-001"))
-        loop.close()
+        _seed(repo.save(req), service._hold_registry.register("r-001"))
 
         response = client.post(
             "/approvals/r-001/resolve",
@@ -178,13 +180,8 @@ class TestResolveApproval:
         app, service, repo = app_with_service
         client = TestClient(app)
 
-        import asyncio
-
-        loop = asyncio.new_event_loop()
         req = _make_pending_request("r-002")
-        loop.run_until_complete(repo.save(req))
-        loop.run_until_complete(service._hold_registry.register("r-002"))
-        loop.close()
+        _seed(repo.save(req), service._hold_registry.register("r-002"))
 
         response = client.post(
             "/approvals/r-002/resolve",
@@ -203,11 +200,7 @@ class TestResolveApproval:
         app, service, repo = app_with_service
         client = TestClient(app)
 
-        import asyncio
-
-        loop = asyncio.new_event_loop()
-        loop.run_until_complete(repo.save(_make_pending_request("done-001", state=ApprovalState.APPROVED)))
-        loop.close()
+        _seed(repo.save(_make_pending_request("done-001", state=ApprovalState.APPROVED)))
 
         response = client.post(
             "/approvals/done-001/resolve",
@@ -219,11 +212,7 @@ class TestResolveApproval:
         app, service, repo = app_with_service
         client = TestClient(app)
 
-        import asyncio
-
-        loop = asyncio.new_event_loop()
-        loop.run_until_complete(repo.save(_make_pending_request("r-003")))
-        loop.close()
+        _seed(repo.save(_make_pending_request("r-003")))
 
         response = client.post(
             "/approvals/r-003/resolve",

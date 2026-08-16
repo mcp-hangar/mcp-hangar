@@ -21,6 +21,7 @@ from ..domain.value_objects.tool_digest import DigestEnforcement, ToolDigest
 from ..application.ports.config_loader import IConfigLoader
 from ..logging_config import get_logger
 
+from .config_schema import ConfigSchemaError, strict_mode, validate_config
 from .state import get_group_rebalance_saga, get_runtime, GROUPS
 from .tools.batch.concurrency import DEFAULT_GLOBAL_CONCURRENCY, DEFAULT_PROVIDER_CONCURRENCY, init_concurrency_manager
 
@@ -135,7 +136,29 @@ def load_config_from_file(config_path: str) -> dict[str, Any]:
             raise ValueError(f"Invalid configuration: missing 'mcp_servers' section in {config_path}")
         config["mcp_servers"] = {}
 
+    _reject_or_warn_on_unknown_keys(config, config_path)
+
     return cast(dict[str, Any], config)
+
+
+def _reject_or_warn_on_unknown_keys(config: dict[str, Any], config_path: str) -> None:
+    """Say something about a key nothing reads, instead of ignoring it.
+
+    Warns today and refuses under `HANGAR_CONFIG_STRICT`; the default becomes
+    refusal in 3.0.0. Rejecting is correct -- `auth: {enabledd: true}` is a
+    gateway that believes it enabled authentication -- and is also a breaking
+    change for anyone carrying a stale key, so it gets a release of notice
+    rather than arriving in a patch. See `config_schema.py`.
+    """
+    problems = validate_config(config)
+    if not problems:
+        return
+
+    if strict_mode():
+        raise ConfigSchemaError(f"Invalid configuration in {config_path}:\n  " + "\n  ".join(problems))
+
+    for problem in problems:
+        logger.warning("unknown_config_key", config_path=config_path, detail=problem)
 
 
 def load_config(config: dict[str, Any]) -> None:

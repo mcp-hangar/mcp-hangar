@@ -1,5 +1,7 @@
 """Tests for the output redactor."""
 
+import re
+
 from mcp_hangar.redactor import OutputRedactor
 
 
@@ -174,3 +176,79 @@ class TestOutputRedactor:
         text = "Config: password=secret123"
         result = redactor.redact(text)
         assert result == "Config: password=***"
+
+
+class TestOutputRedactorExtended:
+    """Extended tests for OutputRedactor edge cases."""
+
+    def test_looks_like_code_upper_snake_case(self):
+        redactor = OutputRedactor(redact_long_strings=True, min_long_string_length=10)
+        text = "Const: MY_VERY_LONG_CONSTANT_NAME_HERE"
+        result = redactor.redact(text)
+        assert "MY_VERY_LONG_CONSTANT_NAME_HERE" in result
+
+    def test_looks_like_code_set_prefix(self):
+        redactor = OutputRedactor(redact_long_strings=True, min_long_string_length=10)
+        text = "Call: set_configuration_for_provider"
+        result = redactor.redact(text)
+        assert "set_configuration_for_provider" in result
+
+    def test_looks_like_code_spec_suffix(self):
+        redactor = OutputRedactor(redact_long_strings=True, min_long_string_length=10)
+        text = "Run: authentication_handler_spec"
+        result = redactor.redact(text)
+        assert "authentication_handler_spec" in result
+
+    def test_looks_like_code_spec_prefix(self):
+        redactor = OutputRedactor(redact_long_strings=True, min_long_string_length=10)
+        text = "Run: spec_authentication_handler_test"
+        result = redactor.redact(text)
+        assert "spec_authentication_handler_test" in result
+
+    def test_known_safe_sha256_prefix(self):
+        redactor = OutputRedactor(redact_long_strings=True)
+        text = "Hash: sha256-abc123def456ghi789jkl012mno345pqr"
+        result = redactor.redact(text)
+        assert "sha256-abc123def456ghi789jkl012mno345pqr" in result
+
+    def test_known_safe_low_entropy(self):
+        redactor = OutputRedactor(redact_long_strings=True)
+        text = "Pad: " + "a" * 40
+        result = redactor.redact(text)
+        assert "a" * 40 in result
+
+    def test_is_sensitive_with_custom_pattern(self):
+        redactor = OutputRedactor()
+        redactor.add_pattern(r"custom_secret_\d+", "custom")
+        assert redactor.is_sensitive("Found custom_secret_12345 here")
+        assert not redactor.is_sensitive("No custom secrets")
+
+    def test_redact_npm_token(self):
+        redactor = OutputRedactor()
+        text = "Token: npm_abcdefghijklmnopqrstuvwxyz1234567890"
+        result = redactor.redact(text)
+        # The raw token value must be removed; the redaction label may contain
+        # a descriptive tag like "[REDACTED:npm_token]" which is expected.
+        assert "npm_abcdefghijklmnopqrstuvwxyz1234567890" not in result
+        assert "REDACTED" in result
+
+    def test_redact_google_api_key(self):
+        redactor = OutputRedactor()
+        text = "Key: AIzaSyA-1234567890123456789012345678901"
+        result = redactor.redact(text)
+        assert "AIzaSyA" not in result
+
+    def test_redact_jwt_token(self):
+        redactor = OutputRedactor()
+        # Minimal valid-looking JWT (header.payload, each >50 chars)
+        header = "eyJhbGciOiJSUzI1NiIsInR5cCI6IkpXVCIsImtpZCI6InRlc3QifQ"
+        payload = "eyJzdWIiOiIxMjM0NTY3ODkwIiwibmFtZSI6IkpvaG4gRG9lIiwiYWRtaW4iOnRydWV9"
+        text = f"JWT: {header}.{payload}"
+        result = redactor.redact(text)
+        assert header not in result
+
+    def test_add_pattern_with_compiled_regex(self):
+        redactor = OutputRedactor()
+        redactor.add_pattern(re.compile(r"my_\d+"), "my_pattern")
+        result = redactor.redact("Found my_12345")
+        assert "my_12345" not in result
