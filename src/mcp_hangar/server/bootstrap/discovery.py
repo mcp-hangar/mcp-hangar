@@ -8,7 +8,11 @@ from typing import Any, cast
 from ...application.discovery import DiscoveryConfig, DiscoveryOrchestrator
 from ...domain.security.input_validator import InputValidator
 from ...domain.value_objects.provenance import Provenance
-from ...infrastructure.discovery.registry import UnknownDiscoverySourceError, create_source
+from ...infrastructure.discovery.registry import (
+    UnknownDiscoveryModeError,
+    UnknownDiscoverySourceError,
+    create_source,
+)
 from ...application.commands.crud_commands import CreateMcpServerCommand, DeleteMcpServerCommand
 from ...domain.contracts.fleet import NotTheManagerError
 from ...logging_config import get_logger
@@ -57,12 +61,17 @@ def create_discovery_orchestrator(config: dict[str, Any]) -> DiscoveryOrchestrat
         source_config = _migrate_namespace_policy(source_type, source_config, discovery_config)
         try:
             orchestrator.add_source(create_source(source_type, source_config))
-        except UnknownDiscoverySourceError:
+        except (UnknownDiscoverySourceError, UnknownDiscoveryModeError):
             # Deliberately NOT caught. A configured source that silently does
             # nothing is the failure this codebase keeps finding: the operator
             # believes the fleet is watched and one startup warning is the only
             # thing that ever says otherwise. `init_event_store` already refuses
             # an unknown driver the same way.
+            #
+            # A misspelt mode belongs here for the same reason and needs the
+            # named type to get here at all: the fault barrier below catches
+            # every `Exception`, so a bare `ValueError` would turn "silently
+            # additive" into "silently absent" rather than into a refusal.
             raise
         except ImportError as e:
             # An optional dependency is missing -- a deployment shape, not a
