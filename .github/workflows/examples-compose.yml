@@ -1,0 +1,124 @@
+# Brings the compose examples up and asserts they become HEALTHY.
+#
+# Why this exists: no workflow in this repo had ever run `docker compose` at
+# all. Two examples were exercised -- `conformance.yml` runs
+# `examples/provider_math/server.py`, `task-relay-smoke.yml` runs
+# `examples/task_upstream/server.py` -- but both run the Python processes, never
+# the compose file beside them. So `quickstart` and `otel-collector` shipped in
+# a state where they exited 1 before serving anything, and `task_upstream`
+# shipped a healthcheck that reported unhealthy forever while its gateway was
+# fine (#966, #967).
+#
+# All four defects that fix cleaned up are invisible to a process on 127.0.0.1
+# and obvious the moment a container actually runs:
+#
+#   * the missing `--unsafe-no-auth`: the auth guard fires on a non-loopback
+#     bind, and the process smokes bind 127.0.0.1
+#   * the missing `MCP_CONFIG`: a mount is a container concept; a process is
+#     handed `--config`
+#   * `curl` in the healthcheck: it is on the runner and NOT in `python:3.14-slim`
+#   * `/health` instead of `/health/ready`: the healthcheck is what asks for it,
+#     and nothing ran the healthcheck
+#
+# HEALTHY, not running. "The container is running" was already true for
+# `task_upstream` while its healthcheck failed on every probe, so that is the
+# assertion that would not have caught anything.
+name: Examples (compose)
+
+on:
+  pull_request:
+    paths:
+      - "examples/**"
+      - "Dockerfile"
+      - ".github/workflows/examples-compose.yml"
+  push:
+    branches: [main]
+    paths:
+      - "examples/**"
+      - "Dockerfile"
+  workflow_dispatch: {}
+
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+permissions:
+  contents: read
+
+env:
+  # Built from this tree and tagged as the name the examples already reference,
+  # so they exercise the code in the PR rather than whatever `:latest` happens
+  # to be in the registry. A base-image change is exactly what removed `curl`
+  # from under these healthchecks, and a published tag would have hidden it.
+  HANGAR_IMAGE: ghcr.io/mcp-hangar/mcp-hangar:latest
+
+jobs:
+  compose-up:
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - example: quickstart
+            service: mcp-hangar
+          - example: otel-collector
+            service: mcp-hangar
+          - example: task_upstream
+            service: mcp-hangar
+
+    steps:
+      - uses: actions/checkout@v7
+
+      - name: Build the image under test
+        run: docker build -t "$HANGAR_IMAGE" .
+
+      - name: Bring ${{ matrix.example }} up and wait for healthy
+        working-directory: examples/${{ matrix.example }}
+        run: |
+          set -euo pipefail
+          # `--wait` fails the step when a service with a healthcheck does not
+          # reach healthy. Only the gateway is started: the dashboards and
+          # collectors beside it are not what this job is asserting, and pulling
+          # them costs minutes.
+          docker compose up --detach --wait --wait-timeout 120 "${{ matrix.service }}"
+
+      - name: Assert it is healthy, not merely up
+        working-directory: examples/${{ matrix.example }}
+        run: |
+          set -euo pipefail
+          # Asserted separately from `--wait` on purpose: `--wait`'s treatment of
+          # a service without a healthcheck has changed between compose
+          # releases, and a silent pass here would restore exactly the blind
+          # spot this workflow exists to close.
+          id="$(docker compose ps -q "${{ matrix.service }}")"
+          status="$(docker inspect --format '{{if .State.Health}}{{.State.Health.Status}}{{else}}none{{end}}' "$id")"
+          echo "health=$status"
+          if [ "$status" != "healthy" ]; then
+            echo "::error::${{ matrix.example }}: expected healthy, got '$status'"
+            exit 1
+          fi
+
+      - name: Assert the mounted config was actually read
+        working-directory: examples/${{ matrix.example }}
+        run: |
+          set -euo pipefail
+          # Health does not cover this, and that is not a guess: reverting the
+          # `MCP_CONFIG` fix from #966 leaves the gateway perfectly HEALTHY while
+          # it ignores the config.yaml the example mounts and boots with
+          # `config_path: null`. Every example here mounts a config, so every one
+          # of them must be seen loading it.
+          if ! docker compose logs --no-color "${{ matrix.service }}" | grep -q "loading_config_from_file"; then
+            echo "::error::${{ matrix.example }}: the gateway never logged loading_config_from_file -- the mounted config was ignored (is MCP_CONFIG set?)"
+            exit 1
+          fi
+
+      - name: Logs on failure
+        if: failure()
+        working-directory: examples/${{ matrix.example }}
+        run: docker compose logs --no-color --tail=120 || true
+
+      - name: Tear down
+        if: always()
+        working-directory: examples/${{ matrix.example }}
+        run: docker compose down --volumes --remove-orphans || true
