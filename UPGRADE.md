@@ -1,5 +1,41 @@
 # Upgrading MCP Hangar
 
+## Next — `config.yaml` warns about a key nothing reads
+
+Unknown keys were kept and ignored at every level. They are now reported, with
+the offending key and the allowed set named:
+
+```text
+auth has unknown key(s) ['enabledd']; allowed keys: ['allow_anonymous',
+'api_key', 'enabled', 'oidc', 'opa', 'rate_limit', 'role_assignments', 'storage']
+```
+
+**This release warns and starts anyway.** Refusing is correct -- a misspelled
+`auth` key is a gateway that believes it enabled authentication -- and is also a
+breaking change for anyone carrying a stale key, so it gets a release of notice
+instead of arriving in a patch.
+
+- `HANGAR_CONFIG_STRICT=1` refuses now, which is what to set in CI.
+- **the default becomes refusal in 3.0.0.** Any `unknown_config_key` warning in
+  your logs today is a config that will not load then.
+
+Checked: top-level section names, the direct keys of each section, and the keys
+of an `mcp_servers.<id>` spec. Not checked: anything deeper. That is where a
+single reader exists to enumerate from -- below it the keys live in around
+twenty modules, and a schema hand-copied from twenty readers drifts into
+rejecting valid configuration, which is worse than accepting a typo.
+
+**New: `mcp-hangar config check [path]`.** Answers the same question without
+starting a gateway, and is always strict. Exit 0 clean, 1 unknown key, 2 the
+file is missing or is not YAML. It defaults to `$MCP_CONFIG`, then `config.yaml`.
+
+```console
+$ mcp-hangar config check config.yaml
+FAIL config.yaml: 1 key(s) nothing reads:
+
+  mcp_servers.math has unknown key(s) ['commandd']; allowed keys: [...]
+```
+
 ## Next — the MCP endpoint no longer hands out a session id
 
 `serve --http` now serves the handshake-era MCP transport statelessly. `initialize`
