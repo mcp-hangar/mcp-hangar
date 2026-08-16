@@ -1,1 +1,0 @@
-**core:** `MCPServerFactoryBuilder` and `MCPServerFactory.builder()` are removed from `mcp_hangar.fastmcp_server`. The fluent builder had no caller in the shipped gateway — `serve --http` builds its app through `server/bootstrap` and `mcp_app_for_serving`, never the factory. Construct `MCPServerFactory(HangarFunctions(...))` directly; see `UPGRADE.md`

@@ -5,6 +5,19 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [2.9.0](https://github.com/mcp-hangar/mcp-hangar/compare/v2.8.0...v2.9.0) (2026-08-16)
+
+### Removed
+
+- **core:** `MCPServerFactory`, `HangarFunctions`, `ServerConfig` and the 13 `Hangar*Fn` protocols are removed from `mcp_hangar.fastmcp_server`. No shipped code constructed any of them: `serve --http` builds its MCP server in `server/bootstrap` and its ASGI app in `server/lifecycle.mcp_app_for_serving`. Keeping a second, uncalled construction path is what made #592, #594, #595 and #596 possible — a capability wired into it looked wired. `HANGAR_SERVER_NAME` stays. See `UPGRADE.md` ([#965](https://github.com/mcp-hangar/mcp-hangar/pull/965))
+- **core:** `create_health_routes`, `create_combined_asgi_app`, `create_auth_combined_app` and `MCPServerFactory.create_asgi_app` are removed from `mcp_hangar.fastmcp_server`. They were the factory's own ASGI assembly, which the shipped gateway never used — `serve --http` builds its app in `server/lifecycle.mcp_app_for_serving` and wraps it with `create_auth_enforced_app`. The two had drifted: the deleted routes were flat `/health` and `/ready`, while a running Hangar serves `/health/live`, `/health/ready` and `/health/startup`. Nothing about the served app changes; see `UPGRADE.md` ([#964](https://github.com/mcp-hangar/mcp-hangar/pull/964))
+- **core:** `MCPServerFactoryBuilder` and `MCPServerFactory.builder()` are removed from `mcp_hangar.fastmcp_server`. The fluent builder had no caller in the shipped gateway — `serve --http` builds its app through `server/bootstrap` and `mcp_app_for_serving`, never the factory. Construct `MCPServerFactory(HangarFunctions(...))` directly; see `UPGRADE.md` ([#963](https://github.com/mcp-hangar/mcp-hangar/pull/963))
+
+### Fixed
+
+- **infra:** the `quickstart` and `otel-collector` examples now start. Both hit the auth guard (`Refusing to start HTTP on non-loopback without authentication`) and exited 1, both ignored the config they mounted because nothing set `MCP_CONFIG`, and all three compose examples ran their healthcheck through `curl`, which the `python:3.14-slim` image does not carry — against `/health`, which is a 404. `examples/**` has no CI, which is why none of it was noticed ([#966](https://github.com/mcp-hangar/mcp-hangar/pull/966))
+- **core:** `hangar_load` can now succeed. Hot-loading is enabled by default, but bootstrap built its resolver with every runtime hardcoded unavailable and its installer list empty, so every load answered `"No compatible package found (missing runtime?)"` with `"Available runtimes: []"` — for every server, since the feature shipped. There are now `uvx` (pypi) and `npx` (npm) installers, and runtime availability is read from them rather than hardcoded. `oci` and `mcpb` remain unimplemented and are reported unavailable rather than selected and then dropped. Note the runtimes must be on the gateway's PATH: the published container image carries neither, so hot-loading there still fails — now with a message naming what is missing ([#961](https://github.com/mcp-hangar/mcp-hangar/pull/961))
+
 ## [2.8.0](https://github.com/mcp-hangar/mcp-hangar/compare/v2.7.0...v2.8.0) (2026-08-15)
 
 ### Changed
