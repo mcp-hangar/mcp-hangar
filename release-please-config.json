@@ -12,7 +12,10 @@
       "include-component-in-tag": false,
       "tag-separator": "",
       "skip-changelog": true,
-      "extra-files": [],
+      "extra-files": [
+        { "type": "json", "path": "server.json", "jsonpath": "$.version" },
+        { "type": "json", "path": "server.json", "jsonpath": "$.packages[0].version" }
+      ],
       "pull-request-title-pattern": "chore(release): release ${version}",
       "changelog-sections": [
         { "type": "feat",     "section": "Added",      "hidden": false },

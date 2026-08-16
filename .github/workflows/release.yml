@@ -224,6 +224,94 @@ jobs:
           # no-op instead of a hard failure (PyPI rejects duplicate uploads).
           skip-existing: true
 
+  # Publish the server.json entry to the Official MCP Registry.
+  #
+  # Here rather than in its own tag-triggered workflow because the registry
+  # validates ownership by fetching the PyPI metadata for exactly
+  # `packages[].version` and looking for the `mcp-name:` token in the README it
+  # serves. That artifact only exists once `publish-pypi` has succeeded, so the
+  # ordering is a `needs:`, not a polling loop -- with a short retry left for
+  # PyPI's own metadata propagation.
+  #
+  # Stable releases only. The registry fetches `/pypi/<pkg>/<version>/json` with
+  # the version spelled as it appears in server.json -- the semver form
+  # release-please writes (`2.5.0-rc.1`) -- while PyPI serves the PEP 440 form
+  # (`2.5.0rc1`). A prerelease would 404 there, and a prerelease listing in a
+  # discovery registry is noise anyway.
+  publish-registry:
+    name: Publish to MCP Registry
+    needs: [validate, publish-pypi]
+    if: needs.validate.result == 'success' && needs.publish-pypi.result == 'success' && needs.validate.outputs.is_prerelease == 'false'
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    # The private key is an ENVIRONMENT secret on this environment, never a repo
+    # or org secret: it authorises publishing anything under `io.mcp-hangar/*`.
+    # The `environment:` key alone protects nothing -- the protection is the
+    # environment's own rules (tags `v*` only, required reviewer).
+    environment:
+      name: mcp-registry-publish
+      url: https://registry.modelcontextprotocol.io
+    permissions:
+      contents: read
+
+    steps:
+      - uses: actions/checkout@v7
+
+      # release-please owns both version fields in server.json (extra-files).
+      # If that updater ever silently stops firing, publishing would claim a
+      # stale version against a fresh tag -- and the registry rejects a
+      # duplicate version, so the mistake would be permanent for that release.
+      - name: server.json version matches the tag
+        run: |
+          SERVER_VERSION=$(python3 -c 'import json;d=json.load(open("server.json"));print(d["version"])')
+          PKG_VERSION=$(python3 -c 'import json;d=json.load(open("server.json"));print(d["packages"][0]["version"])')
+          TAG_VERSION="${{ needs.validate.outputs.version }}"
+          if [ "$SERVER_VERSION" != "$TAG_VERSION" ] || [ "$PKG_VERSION" != "$TAG_VERSION" ]; then
+            echo "❌ server.json says ${SERVER_VERSION}/${PKG_VERSION}, tag says ${TAG_VERSION}"
+            echo "   Check the release-please extra-files updater for server.json."
+            exit 1
+          fi
+
+      # The PyPI JSON API lags an upload by minutes (#680 saw the same lag break
+      # `smoke-published`), and the registry reads that API to verify ownership.
+      - name: Wait for PyPI metadata
+        run: |
+          V="${{ needs.validate.outputs.version }}"
+          for _ in $(seq 1 30); do
+            if curl -sf "https://pypi.org/pypi/mcp-hangar/$V/json" >/dev/null; then
+              echo "✅ PyPI serves ${V}"
+              exit 0
+            fi
+            sleep 20
+          done
+          echo "❌ mcp-hangar==$V not on PyPI after 10 minutes"
+          exit 1
+
+      # From `releases/latest` every run on purpose: a publisher binary older
+      # than the registry fails authentication with "invalid audience".
+      - name: Install mcp-publisher
+        run: |
+          curl -fsSL "https://github.com/modelcontextprotocol/registry/releases/latest/download/mcp-publisher_$(uname -s | tr '[:upper:]' '[:lower:]')_$(uname -m | sed 's/x86_64/amd64/;s/aarch64/arm64/').tar.gz" | tar xz mcp-publisher
+
+      - name: Validate server.json
+        run: ./mcp-publisher validate
+
+      - name: Authenticate
+        run: ./mcp-publisher login dns --domain mcp-hangar.io --private-key "${{ secrets.MCP_PRIVATE_KEY }}"
+
+      # Not a hard gate: re-running this job after a successful publish hits
+      # "cannot publish duplicate version". The verify step below is what
+      # decides whether the release is actually listed.
+      - name: Publish
+        continue-on-error: true
+        run: ./mcp-publisher publish
+
+      - name: Verify the registry serves this version
+        run: |
+          V="${{ needs.validate.outputs.version }}"
+          curl -sf "https://registry.modelcontextprotocol.io/v0.1/servers?search=io.mcp-hangar/hangar" \
+            | tee /dev/stderr | grep -q "\"version\":\"$V\""
+
   # Build and publish Docker images
   publish-docker:
     name: Publish Docker Image
