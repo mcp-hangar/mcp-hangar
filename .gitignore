@@ -9,13 +9,18 @@ __pycache__/
 .planning
 **/.planning
 
-# Local config (contains user-specific paths)
+# Local config (contains user-specific paths). Anchored to the repo root with a
+# leading slash: written bare, these patterns match at ANY depth, so they also
+# swallowed the config.yaml every compose example mounts. `examples/otel-collector/`
+# lost its file entirely and `examples/task_upstream/` shipped a compose file
+# whose config existed only on the author's disk -- both surfaced the moment CI
+# first brought the examples up (#967).
 # Keep *.example files, ignore actual configs
-config.yaml
-config.*.yaml
+/config.yaml
+/config.*.yaml
 !config.*.example
-config.tools.yaml
-mcp-config.json
+/config.tools.yaml
+/mcp-config.json
 !mcp-config.json.example
 
 # Data directories (user-specific, may contain sensitive data)

@@ -108,7 +108,13 @@ jobs:
           # it ignores the config.yaml the example mounts and boots with
           # `config_path: null`. Every example here mounts a config, so every one
           # of them must be seen loading it.
-          if ! docker compose logs --no-color "${{ matrix.service }}" | grep -q "loading_config_from_file"; then
+          # Written to a file first, deliberately. `docker compose logs | grep -q`
+          # under `set -o pipefail` fails even when the line IS there: grep exits
+          # at the first match, the log producer takes SIGPIPE, and pipefail
+          # reports the pipeline as failed. That is exactly how this step failed
+          # on its first run while the log it was searching contained the line.
+          docker compose logs --no-color "${{ matrix.service }}" > /tmp/gateway.log
+          if ! grep -q "loading_config_from_file" /tmp/gateway.log; then
             echo "::error::${{ matrix.example }}: the gateway never logged loading_config_from_file -- the mounted config was ignored (is MCP_CONFIG set?)"
             exit 1
           fi
