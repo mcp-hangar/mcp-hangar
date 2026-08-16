@@ -1,6 +1,8 @@
 # Upgrading MCP Hangar
 
-## Next — `config.yaml` warns about a key nothing reads
+## Upgrade to 2.10.0
+
+### `config.yaml` warns about a key nothing reads
 
 Unknown keys were kept and ignored at every level. They are now reported, with
 the offending key and the allowed set named:
