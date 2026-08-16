@@ -21,7 +21,3 @@ Endpoints (HTTP mode):
 - /metrics       : prometheus metrics
 - /mcp           : MCP streamable HTTP endpoint
 """
-
-from .config import HANGAR_SERVER_NAME
-
-__all__ = ["HANGAR_SERVER_NAME"]

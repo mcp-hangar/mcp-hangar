@@ -19,7 +19,7 @@ code called; it now calls the same two wiring functions `server/bootstrap` calls
 
 from mcp_hangar import __version__, tasks_wire
 from mcp_hangar._sdk_compat import HAS_NATIVE_TASKS, lowlevel_server, new_mcp_server
-from mcp_hangar.fastmcp_server.config import HANGAR_SERVER_NAME
+from mcp_hangar.protocol import HANGAR_SERVER_NAME
 from mcp_hangar.fastmcp_server.task_relay_wiring import (
     advertise_tasks_capability,
     enable_governed_task_relay,
