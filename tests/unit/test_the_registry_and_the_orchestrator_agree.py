@@ -5,12 +5,16 @@ Giving a configured source an id fixed "visible but not scannable" by parsing
 asking the orchestrator what it had built. The two readings disagree, and each
 disagreement is the original defect wearing a different hat.
 
-**A misspelt mode.** The builder resolves anything that is not `authoritative`
-to additive, so `mode: additivee` produces a working source that appears in
-`GET /api/discovery/sources` with an id. The second reading called
+**A misspelt mode.** The builder used to resolve anything that was not
+`authoritative` to additive, so `mode: additivee` produced a working source that
+appeared in `GET /api/discovery/sources` with an id. The second reading called
 `DiscoveryMode("additivee")`, caught the `ValueError` and skipped -- so
 `POST /api/discovery/sources/<id>/scan` answered 404 for the id the listing had
-just handed out.
+just handed out. #832 closed that divergence at the other end: the builder now
+refuses the mode the second reading could not parse, so there is no source to
+advertise and nothing to disagree about. The tolerance these tests were written
+against is gone; what remains worth asserting is that the two readings still
+agree on every mode that does build.
 
 **A source that did not build.** A missing optional dependency, or any other
 failure while constructing a source, degrades to a log line: the orchestrator
@@ -30,7 +34,7 @@ import pytest
 
 from mcp_hangar.domain.discovery.discovery_source import DiscoveryMode
 from mcp_hangar.domain.value_objects.discovery import config_source_id
-from mcp_hangar.infrastructure.discovery.registry import create_source
+from mcp_hangar.infrastructure.discovery.registry import UnknownDiscoveryModeError, create_source
 from mcp_hangar.server.bootstrap import _register_configured_sources
 
 
@@ -58,17 +62,17 @@ def _build(source_config: dict):
     return create_source(source_config["type"], source_config)
 
 
-class TestAMisspeltModeIsStillScannable:
-    def test_the_builder_accepts_it(self) -> None:
-        # Stated as a fact this test depends on, not as an endorsement: an
-        # unknown mode resolves to additive rather than being refused. The
-        # divergence below exists because the other reading disagreed.
-        source = _build({"type": "docker", "mode": "additivee"})
+class TestAMisspeltModeNeverReachesTheListing:
+    def test_the_builder_refuses_it(self) -> None:
+        # Since #832 the tolerance this class was named for is gone: a mode the
+        # registry reading could not parse is one the builder will not build.
+        # Which spellings are refused belongs to the parser's own tests; what
+        # this file asserts is that a refused one never reaches the listing.
+        with pytest.raises(UnknownDiscoveryModeError):
+            _build({"type": "docker", "mode": "additivee"})
 
-        assert source.mode is DiscoveryMode.ADDITIVE
-
-    def test_the_source_the_listing_advertises_can_be_scanned(self) -> None:
-        source_config = {"type": "docker", "mode": "additivee"}
+    def test_a_mode_that_does_build_is_scannable(self) -> None:
+        source_config = {"type": "docker", "mode": "authoritative"}
         registry = _Registry(_build(source_config))
 
         _register_configured_sources(registry, {"discovery": {"sources": [source_config]}})
@@ -78,14 +82,14 @@ class TestAMisspeltModeIsStillScannable:
         assert [s.source_id for s in registry.registered] == [config_source_id("docker")]
 
     def test_the_spec_carries_the_mode_the_source_is_running_in(self) -> None:
-        source_config = {"type": "docker", "mode": "additivee"}
+        source_config = {"type": "docker", "mode": "authoritative"}
         registry = _Registry(_build(source_config))
 
         _register_configured_sources(registry, {"discovery": {"sources": [source_config]}})
 
-        assert registry.registered[0].mode is DiscoveryMode.ADDITIVE
+        assert registry.registered[0].mode is DiscoveryMode.AUTHORITATIVE
 
-    @pytest.mark.parametrize("mode", ["additive", "authoritative", "additivee", "AUTHORITATIVE", "", None])
+    @pytest.mark.parametrize("mode", ["additive", "authoritative", None])
     def test_whatever_was_written_the_two_never_disagree(self, mode) -> None:
         source_config = {"type": "docker"} | ({} if mode is None else {"mode": mode})
         source = _build(source_config)
