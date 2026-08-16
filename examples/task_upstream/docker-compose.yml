@@ -83,7 +83,15 @@ services:
     volumes:
       - ./config.yaml:/etc/mcp-hangar/config.yaml:ro
     healthcheck:
-      test: ["CMD", "curl", "-f", "http://localhost:8080/health/live"]
+      # `python3`, not `curl`: the image ships neither curl nor wget, so this
+      # reported unhealthy forever even though the gateway was serving.
+      test:
+        - CMD
+        - python3
+        - -c
+        - |
+          import sys, urllib.request
+          sys.exit(0 if urllib.request.urlopen("http://localhost:8080/health/live", timeout=3).status == 200 else 1)
       interval: 30s
       timeout: 10s
       retries: 3

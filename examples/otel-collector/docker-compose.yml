@@ -18,7 +18,32 @@ services:
     image: ghcr.io/mcp-hangar/mcp-hangar:latest
     ports:
       - "8080:8080"
+    # The image's default CMD is `serve --http --host 0.0.0.0 --port 8080`, and
+    # this example configures no authentication -- so the gateway refuses to
+    # start and the container exits 1:
+    #
+    #   Refusing to start HTTP on non-loopback without authentication.
+    #   Use --unsafe-no-auth to override.
+    #
+    # That refusal is correct and stays: binding a wildcard address with no
+    # authentication is the mistake worth failing closed on. It is also why this
+    # compose file had never once started the gateway -- the flag was simply
+    # missing, and `examples/**` has no CI to notice.
+    #
+    # Overridden here because this is a local first-run example on a published
+    # loopback port. Do NOT copy this line into anything reachable by others;
+    # see `examples/auth-keycloak/` for the shape with authentication on.
+    command:
+      - serve
+      - --http
+      - --host
+      - "0.0.0.0"
+      - --port
+      - "8080"
+      - --unsafe-no-auth
     environment:
+      # Without this the mounted config below is never read.
+      MCP_CONFIG: /app/config.yaml
       MCP_MODE: http
       MCP_HTTP_PORT: "8080"
       OTEL_EXPORTER_OTLP_ENDPOINT: http://otel-collector:4317
@@ -30,7 +55,18 @@ services:
     depends_on:
       - otel-collector
     healthcheck:
-      test: ["CMD", "curl", "-f", "http://localhost:8080/health"]
+      # `python3`, not `curl`: the image is `python:3.14-slim` and ships neither
+      # curl nor wget, so every `["CMD", "curl", ...]` healthcheck in this repo
+      # reported the container unhealthy forever, whatever path it asked for.
+      # `/health/ready` and not `/health`: the gateway serves `/health/live`,
+      # `/health/ready` and `/health/startup`; a bare `/health` is a 404.
+      test:
+        - CMD
+        - python3
+        - -c
+        - |
+          import sys, urllib.request
+          sys.exit(0 if urllib.request.urlopen("http://localhost:8080/health/ready", timeout=3).status == 200 else 1)
       interval: 10s
       timeout: 5s
       retries: 3
