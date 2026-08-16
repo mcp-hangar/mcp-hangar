@@ -1,0 +1,26 @@
+# Hangar config for the OTEL collector example.
+#
+# This file did not exist. The compose file beside it mounted `./config.yaml`,
+# a bare `config.yaml` pattern in `.gitignore` matched it at any depth, and so
+# it was never committed -- Docker then created a directory at the mount source
+# and the gateway died with `Is a directory: '/app/config.yaml'`. The example
+# could not have worked from a clone. Found when CI first brought the compose
+# examples up (#967).
+#
+# Tracing itself is switched on by the environment in `docker-compose.yml`
+# (`MCP_TRACING_ENABLED`, `OTEL_EXPORTER_OTLP_ENDPOINT`), not from here. What
+# this file provides is a server to generate spans about.
+
+logging:
+  level: INFO
+  json_format: true
+
+mcp_servers:
+  # A subprocess server with no external dependencies, so the example shows
+  # traces without needing an image, a registry or a network egress rule. Its
+  # source is `examples/provider_math/server.py` in this repository; the
+  # gateway starts it on the first tool call and traces that call.
+  math:
+    mode: subprocess
+    command: ["python", "-m", "examples.provider_math.server"]
+    idle_ttl_s: 300
