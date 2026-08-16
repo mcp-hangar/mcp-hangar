@@ -43,7 +43,7 @@ from __future__ import annotations
 import hashlib
 import logging
 import uuid
-from typing import TYPE_CHECKING, Any
+from typing import Any
 
 from mcp_hangar._sdk_compat import FastMCP, lowlevel_server
 from mcp_hangar._sdk_compat import (
@@ -58,9 +58,6 @@ from ..application.read_models.tool_projection import get_tool_projection_regist
 from ..context import get_identity_context
 from ..logging_config import should_log_now
 from ..domain.services.tool_access_resolver import get_tool_access_resolver
-
-if TYPE_CHECKING:
-    pass
 
 logger = logging.getLogger(__name__)
 
@@ -427,10 +424,11 @@ def register_flat_tool_handlers(mcp: FastMCP) -> None:
           which surfaces as a CallToolResult(isError=True).  The backend is
           never invoked.
         """
+        # Imported lazily: the batch package reaches `server.bootstrap`, which
+        # imports this module back. At module scope that makes this module
+        # impossible to import first in a fresh interpreter (#894).
         from mcp_hangar._sdk_compat import CallToolResult
-        # Import lazily: the batch package reaches server.bootstrap, which
-        # installs this module. Keeping it at module scope makes this module
-        # impossible to import first in a fresh Python process.
+
         from ..server.tools.batch import BatchExecutor, CallSpec
         from ..server.tools.tool_permissions import management_tools_for
 

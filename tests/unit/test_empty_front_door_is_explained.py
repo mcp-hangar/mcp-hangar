@@ -17,7 +17,6 @@ import logging
 
 import pytest
 
-import mcp_hangar.server  # noqa: F401 -- import-order workaround, see #894
 from mcp_hangar import metrics as prometheus_metrics
 from mcp_hangar.application.read_models.tool_projection import get_tool_projection_registry
 from mcp_hangar.domain.model.tool_catalog import ToolSchema
