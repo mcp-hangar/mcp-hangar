@@ -114,12 +114,15 @@ class TestTheAllowlistReachesTheTransportGuard:
         assert not [o for o in origins if "evil" in o]
 
 
-class TestBothServingPathsUseIt:
-    """`serve --http` and the factory build the app separately.
+class TestTheServingPathUsesIt:
+    """There is one construction path left, and it has to honour the allowlist.
 
-    This repo has shipped the same class of bug repeatedly -- a capability
-    wired into one construction path and not the other. Whichever path a
-    deployment takes, the endpoint has to honour the allowlist.
+    This used to be parametrised over two -- `mcp_app_for_serving` and
+    `MCPServerFactory` -- because this repo has shipped the same class of bug
+    repeatedly: a capability wired into one construction path and not the
+    other. The factory stopped building an app in #955 (its ASGI assembly had
+    no production caller), so there is no second path to diverge from. If one
+    is ever added, put its leg back here.
     """
 
     @pytest.mark.parametrize(
@@ -129,7 +132,6 @@ class TestBothServingPathsUseIt:
             # from `ServerLifecycle.run_http` so a test can drive the app the CLI
             # actually mounts (#877).
             ("mcp_hangar.server.lifecycle", "mcp_app_for_serving"),
-            ("mcp_hangar.fastmcp_server.factory", "MCPServerFactory"),
         ],
     )
     def test_the_app_is_built_with_explicit_transport_security(self, module, attribute) -> None:

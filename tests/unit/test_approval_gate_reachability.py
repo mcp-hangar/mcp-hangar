@@ -448,21 +448,6 @@ class TestTheRestRouteFindsTheGate:
         assert read_names, "run_http no longer reads any approval field"
         assert read_names <= {f.name for f in fields(ApplicationContext)}
 
-    def test_the_factory_surface_shares_the_router(self):
-        """`MCPServerFactory` has no production call site.
-
-        It must therefore not have its own approval wiring -- it goes through
-        `create_api_router` like the shipped path, so the two cannot diverge.
-        Wiring it there *only* is how #592/#594/#595/#596 happened.
-        """
-        import inspect
-
-        from mcp_hangar.fastmcp_server.factory import MCPServerFactory
-
-        source = inspect.getsource(MCPServerFactory)
-        assert "create_api_router" in source
-        assert "approval_gate_service" not in source
-
 
 # ---------------------------------------------------------------------------
 # 4. The startup guard: configured-but-unreachable is never silent

@@ -10,12 +10,10 @@ from typing import Any, TYPE_CHECKING
 
 from mcp_hangar import __version__
 from mcp_hangar._sdk_compat import FastMCP, new_mcp_server
-from starlette.applications import Starlette
 
 from ..logging_config import get_logger
-from .asgi import create_auth_combined_app, create_combined_asgi_app, create_health_routes
 from .config import HANGAR_SERVER_NAME, HangarFunctions, ServerConfig
-from .modern_surface import register_modern_surface, wrap_front_door_routing
+from .modern_surface import register_modern_surface
 
 if TYPE_CHECKING:
     from ..domain.services.task_digest_guard import TaskDigestGuard
@@ -34,7 +32,6 @@ class MCPServerFactory:
         # Direct instantiation
         factory = MCPServerFactory(hangar_functions)
         mcp = factory.create_server()
-        app = factory.create_asgi_app()
 
         # With authentication (opt-in)
         factory = MCPServerFactory(
@@ -42,7 +39,6 @@ class MCPServerFactory:
             auth_components=auth_components,
             config=ServerConfig(auth_enabled=True),
         )
-        app = factory.create_asgi_app()
     """
 
     def __init__(
@@ -122,62 +118,6 @@ class MCPServerFactory:
         )
 
         return mcp
-
-    def create_asgi_app(self) -> Any:
-        """Create ASGI application with metrics/health endpoints and REST API.
-
-        Creates a combined ASGI app that handles:
-        - /health: Liveness endpoint
-        - /ready: Readiness endpoint with internal checks
-        - /metrics: Prometheus metrics
-        - /api/: REST API endpoints
-        - /mcp: MCP streamable HTTP endpoint (and related paths)
-
-        If auth is enabled (config.auth_enabled=True and auth_components provided),
-        the auth middleware will be applied to protect MCP endpoints.
-
-        Returns:
-            Combined ASGI app callable.
-        """
-        from ..server.api import create_api_router
-
-        mcp = self.create_server()
-        # Same allowlist as the serve path -- see `mcp_transport_security`.
-        from .asgi import mcp_transport_security
-
-        mcp_app: Any = mcp.streamable_http_app(transport_security=mcp_transport_security())
-
-        # SEP-2243: route the stateless front door on Mcp-Method / Mcp-Name
-        # headers (with header<->body consistency enforced) instead of session
-        # affinity. Pre-SEP-2243 requests without these headers pass through
-        # unchanged (content-based routing). Identity, tenant, per-tenant canary
-        # routing, and the audit session_id are untouched by this wrapper.
-        # Shared with the HTTP-serve path (see ``modern_surface``).
-        mcp_app = wrap_front_door_routing(mcp_app, mcp_path=self._config.streamable_http_path)
-
-        # Log if auth is configured
-        if self._config.auth_enabled and self._auth_components:
-            logger.info(
-                "auth_middleware_enabled",
-                skip_paths=self._config.auth_skip_paths,
-                trusted_proxies=list(self._config.trusted_proxies),
-            )
-
-        # Create auxiliary routes
-        routes = create_health_routes(
-            run_readiness_checks=self._run_readiness_checks,
-            update_metrics=self._update_metrics,
-        )
-        aux_app = Starlette(routes=routes)
-
-        # Create REST API app (pass auth_components for middleware mounting)
-        api_app = create_api_router(auth_components=self._auth_components)
-
-        # Create auth-aware combined app
-        if self._config.auth_enabled and self._auth_components:
-            return create_auth_combined_app(aux_app, mcp_app, self._auth_components, self._config, api_app)
-        else:
-            return create_combined_asgi_app(aux_app, mcp_app, api_app)
 
     def _register_core_tools(self, mcp: FastMCP) -> None:
         """Register core control plane tools.
