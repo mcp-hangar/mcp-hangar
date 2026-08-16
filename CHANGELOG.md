@@ -5,6 +5,59 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [2.10.0](https://github.com/mcp-hangar/mcp-hangar/compare/v2.9.0...v2.10.0) (2026-08-16)
+
+### Added
+
+- **core:** Hangar is published in the Official MCP Registry as
+  `io.mcp-hangar/hangar`. A `server.json` at the repository root describes the
+  PyPI distribution started over stdio -- `mcp-hangar` with no arguments -- and
+  nothing else: there is no hosted instance, so the entry declares no `remotes`.
+  Both of its version fields track `pyproject.toml` through release-please, and a
+  `publish-registry` job in the release workflow publishes the entry after the
+  PyPI upload for that tag exists, since the registry proves ownership by reading
+  the `mcp-name:` marker out of the README that PyPI serves for exactly that
+  version. Stable releases only: PyPI serves a prerelease under its PEP 440
+  spelling, which is not the spelling `server.json` carries ([#989](https://github.com/mcp-hangar/mcp-hangar/pull/989))
+- **core:** `config.yaml` now says something about a key nothing reads. It had no
+  schema, so unknown keys were kept and ignored at every level: `commandd:
+  [python]` built a subprocess server with no command, `idle_tt1_s: 60` applied
+  nothing, and `auth: {enabledd: true}` was a deployment that believed it had
+  enabled authentication. The failure surfaced later and elsewhere -- a subprocess
+  that will not start reads like a broken server, not a misspelled key. Top-level
+  section names, each section's own keys and `mcp_servers.<id>` spec keys are now
+  checked, and the message names the offending key and the allowed set, matching
+  what `domain/policies/dsl.py` already did for the policy DSL. This release
+  **warns**; `HANGAR_CONFIG_STRICT=1` refuses now and refusal becomes the default
+  in 3.0.0. New `mcp-hangar config check [path]` answers the same question without
+  starting a gateway, exiting 1 on an unknown key ([#984](https://github.com/mcp-hangar/mcp-hangar/pull/984))
+- **core:** `hangar_load` accepts `approval_tools`, so a server registered at
+  runtime can put a tool behind human approval — the third outcome the YAML
+  `tools:` surface already had. A load that asks for approval on a deployment
+  with no approval gate is refused rather than registering a policy nothing
+  enforces. ([#988](https://github.com/mcp-hangar/mcp-hangar/pull/988))
+
+### Changed
+
+- **infra:** an upgrade note now gets the version it shipped in. `UPGRADE.md`
+  collects `## Next — ...` sections at PR time, next to the change that motivates
+  them, and nothing gave them a number: eight accumulated while 2.7.0, 2.8.0 and
+  2.9.0 shipped, so the changelog entries for those releases sent a reader to a
+  section headed "Next" -- which reads the same before and after the release it
+  describes. `assemble_release_changelog.sh` now folds them into one
+  `## Upgrade to X.Y.Z` section in the same commit as the changelog assembly, so
+  the release PR is also where a reviewer sees them together. That matters:
+  drafts written against different PRs contradict each other once they land in
+  one release, which is what the `builder()` note did. The 2.7.0-2.9.0 sections
+  are backfilled from the published guide ([#986](https://github.com/mcp-hangar/mcp-hangar/pull/986))
+
+### Fixed
+
+- **core:** the flat tool projection can now be imported as the first Hangar module; its batch executor dependency is loaded when a call is dispatched, after bootstrap has finished wiring the serving surface ([#923](https://github.com/mcp-hangar/mcp-hangar/pull/923))
+- **core:** discovery source configuration now refuses an unknown `mode` instead
+  of silently treating it as `additive`. Correct misspelled values to
+  `additive` or `authoritative` before upgrading. ([#924](https://github.com/mcp-hangar/mcp-hangar/pull/924))
+
 ## [2.9.0](https://github.com/mcp-hangar/mcp-hangar/compare/v2.8.0...v2.9.0) (2026-08-16)
 
 ### Removed
