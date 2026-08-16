@@ -23,11 +23,6 @@ from typing import Any
 
 import pytest
 
-# `server.bootstrap` imports `flat_tool_projection`, which transitively reaches
-# back into `server.bootstrap`; importing the leaf first walks into the cycle
-# half-built. Loading the package that owns the cycle first resolves it, the
-# same way the other tests touching this module happen to.
-import mcp_hangar.server.bootstrap  # noqa: F401  # isort: skip
 from mcp_hangar.domain.value_objects.security import Principal, PrincipalId, PrincipalType
 from mcp_hangar.fastmcp_server import flat_tool_projection
 from mcp_hangar.fastmcp_server.asgi import bind_caller_identity, release_caller_identity

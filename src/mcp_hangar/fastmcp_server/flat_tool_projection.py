@@ -43,7 +43,7 @@ from __future__ import annotations
 import hashlib
 import logging
 import uuid
-from typing import TYPE_CHECKING, Any
+from typing import Any
 
 from mcp_hangar._sdk_compat import FastMCP, lowlevel_server
 from mcp_hangar._sdk_compat import (
@@ -58,11 +58,6 @@ from ..application.read_models.tool_projection import get_tool_projection_regist
 from ..context import get_identity_context
 from ..logging_config import should_log_now
 from ..domain.services.tool_access_resolver import get_tool_access_resolver
-from ..server.tools.batch import BatchExecutor, CallSpec
-from ..server.tools.tool_permissions import management_tools_for
-
-if TYPE_CHECKING:
-    pass
 
 logger = logging.getLogger(__name__)
 
@@ -351,6 +346,9 @@ def register_flat_tool_handlers(mcp: FastMCP) -> None:
         registered surface rather than being rebuilt here, so a projected
         management tool carries the same schema the invoke path validates.
         """
+        # Deferred for the cycle described at the call handler below (#894).
+        from ..server.tools.tool_permissions import management_tools_for
+
         permitted = management_tools_for(mcp_ctx)
         if not permitted:
             return []
@@ -425,6 +423,12 @@ def register_flat_tool_handlers(mcp: FastMCP) -> None:
           never invoked.
         """
         from mcp_hangar._sdk_compat import CallToolResult
+
+        # Imported lazily: the batch package reaches `server.bootstrap`, which
+        # imports this module back. At module scope that makes this module
+        # impossible to import first in a fresh interpreter (#894).
+        from ..server.tools.batch import BatchExecutor, CallSpec
+        from ..server.tools.tool_permissions import management_tools_for
 
         identity = get_identity_context()
         tenant_id: str | None = identity.caller.tenant_id if identity is not None else None

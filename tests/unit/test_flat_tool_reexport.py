@@ -618,8 +618,11 @@ class TestFlatCallToolHandler:
                     "mcp_hangar.fastmcp_server.flat_tool_projection.get_tool_access_resolver",
                     return_value=resolver,
                 ),
+                # Patched where the handler's deferred import resolves it
+                # (#894). There is no module-level name on the projection to
+                # patch any more, and there must not be one.
                 patch(
-                    "mcp_hangar.fastmcp_server.flat_tool_projection.BatchExecutor",
+                    "mcp_hangar.server.tools.batch.BatchExecutor",
                     return_value=mock_executor,
                 ),
             ):
@@ -711,7 +714,7 @@ class TestFlatCallToolHandler:
                     return_value=resolver,
                 ),
                 patch(
-                    "mcp_hangar.fastmcp_server.flat_tool_projection.BatchExecutor",
+                    "mcp_hangar.server.tools.batch.BatchExecutor",
                     return_value=mock_executor,
                 ),
             ):
@@ -772,7 +775,7 @@ class TestFlatCallToolHandler:
                     return_value=resolver,
                 ),
                 patch(
-                    "mcp_hangar.fastmcp_server.flat_tool_projection.BatchExecutor",
+                    "mcp_hangar.server.tools.batch.BatchExecutor",
                     return_value=mock_executor,
                 ),
             ):
