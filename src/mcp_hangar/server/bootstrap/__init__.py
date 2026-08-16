@@ -34,7 +34,7 @@ from ...application.commands.load_handlers import LoadMcpServerHandler, UnloadMc
 from ...application.discovery import DiscoveryOrchestrator
 from ...application.ports.observability import ObservabilityPort
 from ...domain.events import set_instance_id
-from ...fastmcp_server.config import HANGAR_SERVER_NAME
+from ...protocol import HANGAR_SERVER_NAME
 from ...fastmcp_server.flat_tool_projection import maybe_register_flat_tool_handlers
 from ...fastmcp_server.governance_extensions import advertise_governance_extensions
 from ...fastmcp_server.modern_surface import register_modern_surface

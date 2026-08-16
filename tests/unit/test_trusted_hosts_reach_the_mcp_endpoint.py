@@ -120,9 +120,9 @@ class TestTheServingPathUsesIt:
     This used to be parametrised over two -- `mcp_app_for_serving` and
     `MCPServerFactory` -- because this repo has shipped the same class of bug
     repeatedly: a capability wired into one construction path and not the
-    other. The factory stopped building an app in #955 (its ASGI assembly had
-    no production caller), so there is no second path to diverge from. If one
-    is ever added, put its leg back here.
+    other. That second path had no production caller and was removed entirely
+    (#955, #956), so there is nothing left to diverge from. If a second path is
+    ever added, put its leg back here.
     """
 
     @pytest.mark.parametrize(

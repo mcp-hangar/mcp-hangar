@@ -171,6 +171,30 @@ itself uses.
 `bind_caller_identity`, `release_caller_identity` and `mcp_transport_security`
 are unchanged.
 
+## Next — `MCPServerFactory` and its configuration types are gone
+
+Removed from `mcp_hangar.fastmcp_server`: `MCPServerFactory`, `HangarFunctions`,
+`ServerConfig`, and the thirteen `Hangar*Fn` protocols. With #954 and #955 this
+retires the whole parallel construction path.
+
+**Nothing about a running Hangar changes.** No shipped code ever constructed the
+factory: `serve --http` builds its MCP server in `mcp_hangar.server.bootstrap`
+and its ASGI app in `mcp_hangar.server.lifecycle.mcp_app_for_serving`. Keeping a
+second path that looked serviceable is what made #592, #594, #595 and #596
+possible -- a capability wired into it appeared wired, and was not.
+
+**If you were embedding through the factory**, there is no drop-in replacement,
+because the factory was never how the product ran. Run the gateway
+(`mcp-hangar serve --http`) and drive it over MCP or the REST API, or call the
+same composition root the CLI uses -- `server.bootstrap` to build and register,
+`lifecycle.mcp_app_for_serving` to get the ASGI app. Those are supported, tested
+on every PR, and are what a released Hangar actually executes.
+
+`HANGAR_SERVER_NAME` is unchanged and still exported from
+`mcp_hangar.fastmcp_server`. The v0.4.0 note further down, which named the
+factory as the successor to `setup_fastmcp_server()`, describes what that
+release did and stays as history.
+
 ## 2.6.0 — three things to check before you roll out
 
 Two of these can stop a deployment that works today, and both are in the same
