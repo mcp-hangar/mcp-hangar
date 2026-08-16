@@ -109,6 +109,15 @@ Reach for it when you mean to restrict something. Full semantics in the
 - [Kubernetes operator](https://github.com/mcp-hangar/mcp-hangar-operator) &middot; [Helm charts](https://github.com/mcp-hangar/helm-charts) &middot; [All docs](https://mcp-hangar.io/docs)
 - [Release compatibility matrix](https://github.com/mcp-hangar/docs/blob/main/operations/RELEASE_COMPATIBILITY.md) &middot; which core, operator, and chart versions are released and tested together
 
+## MCP Registry
+
+Published in the [Official MCP Registry](https://registry.modelcontextprotocol.io)
+as `io.mcp-hangar/hangar`. Clients that consume the registry can install it from
+there; the entry describes the PyPI package started over stdio, not a hosted
+instance — Hangar is self-hosted only.
+
+<!-- mcp-name: io.mcp-hangar/hangar -->
+
 ## License
 
 [MIT](LICENSE)

@@ -1,0 +1,29 @@
+{
+  "$schema": "https://static.modelcontextprotocol.io/schemas/2025-12-11/server.schema.json",
+  "name": "io.mcp-hangar/hangar",
+  "title": "MCP Hangar",
+  "description": "Policy enforcement plane for MCP: every tool call ends in a verdict. Self-hosted, MIT.",
+  "websiteUrl": "https://mcp-hangar.io",
+  "repository": {
+    "url": "https://github.com/mcp-hangar/mcp-hangar",
+    "source": "github"
+  },
+  "version": "2.9.0",
+  "packages": [
+    {
+      "registryType": "pypi",
+      "identifier": "mcp-hangar",
+      "version": "2.9.0",
+      "runtimeHint": "uvx",
+      "transport": { "type": "stdio" },
+      "environmentVariables": [
+        {
+          "name": "MCP_CONFIG",
+          "description": "Path to config.yaml declaring the upstream MCP servers and policy. Without it the gateway starts on a demo config that serves no real upstream.",
+          "format": "filepath",
+          "isRequired": false
+        }
+      ]
+    }
+  ]
+}
