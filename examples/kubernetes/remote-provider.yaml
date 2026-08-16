@@ -1,39 +1,43 @@
-# Remote Provider
-# ===============
-# This example shows how to connect to an external MCP endpoint
+# Remote MCP server
+# =================
+# `mode: remote` points the operator at an MCP endpoint that already exists
+# somewhere else. There is no workload to create, so the CR is little more than
+# the endpoint plus what the server is allowed to reach.
 
-apiVersion: mcp-hangar.io/v1alpha1
-kind: MCPProvider
+apiVersion: mcp-hangar.io/v1alpha2
+kind: MCPServer
 metadata:
   name: external-llm-tools
-  namespace: mcp-providers
+  namespace: mcp-servers
   labels:
     app.kubernetes.io/name: external-llm-tools
     mcp-hangar.io/category: ai
 spec:
-  # Remote mode - connects to external endpoint
   mode: remote
-
-  # External endpoint URL
   endpoint: https://llm-tools.internal.company.com/mcp
 
-  # Health checks for remote endpoint
-  healthCheck:
-    enabled: true
-    interval: "1m"
-    timeout: "10s"
-    failureThreshold: 3
+  capabilities:
+    network:
+      egress:
+        - host: llm-tools.internal.company.com
+          port: 443
+          protocol: https
+      dnsAllowed: true
+    enforcementMode: alert
 
-  # Circuit breaker for network failures
-  circuitBreaker:
-    enabled: true
-    failureThreshold: 3
-    resetTimeout: "1m"
-    halfOpenRequests: 2
-
-  # Tool filtering
-  tools:
-    # Deny list specific tools
-    denyList:
-      - dangerous_operation
-      - admin_reset
+# ---------------------------------------------------------------------------
+# Not fields on this CR, deliberately
+# ---------------------------------------------------------------------------
+# This example used to declare `healthCheck`, `circuitBreaker` and a `tools`
+# deny-list. The operator read none of them; they were cut from the CRD in
+# mcp-hangar/mcp-hangar-operator#112.
+#
+# All three are Hangar's, and for a remote endpoint they matter more than
+# usual -- configure them where they take effect:
+#
+#   * health polling and circuit breaking -> `config.yaml` on the gateway
+#   * tool allow/deny lists              -> tool-access policy, `config.yaml`
+#                                            or the REST API
+#
+# The operator is not on the request path, so a deny-list here would have
+# denied nothing.

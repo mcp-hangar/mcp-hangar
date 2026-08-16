@@ -1,12 +1,17 @@
-# Basic SQLite Provider
-# =====================
-# This example shows a basic MCP provider running SQLite tools
+# Basic SQLite MCP server
+# =======================
+# A container-mode MCPServer, using only fields the operator honours.
+#
+# The operator is the deploy-time admission plane: it turns this CR into a
+# workload and enforces the declared capabilities. Runtime behaviour Hangar
+# owns -- idle stop, circuit breaking, tool allow-lists -- is NOT set here. See
+# the note at the bottom.
 
-apiVersion: mcp-hangar.io/v1alpha1
-kind: MCPProvider
+apiVersion: mcp-hangar.io/v1alpha2
+kind: MCPServer
 metadata:
   name: sqlite-tools
-  namespace: mcp-providers
+  namespace: mcp-servers
   labels:
     app.kubernetes.io/name: sqlite-tools
     mcp-hangar.io/category: database
@@ -14,16 +19,11 @@ spec:
   mode: container
   image: ghcr.io/modelcontextprotocol/mcp-sqlite:latest
 
-  # Start with 1 replica (always running)
   replicas: 1
 
-  # Stop after 10 minutes of inactivity
-  idleTTL: "10m"
-
-  # Allow up to 60 seconds for startup
+  # Allow up to 60 seconds for startup.
   startupTimeout: "60s"
 
-  # Resource limits
   resources:
     requests:
       memory: "128Mi"
@@ -32,26 +32,16 @@ spec:
       memory: "512Mi"
       cpu: "500m"
 
-  # Environment variables
   env:
     - name: SQLITE_DB_PATH
       value: /data/database.db
 
-  # Mount a PVC for data persistence
   volumes:
     - name: data
       mountPath: /data
       persistentVolumeClaim:
         claimName: sqlite-data
 
-  # Health checks
-  healthCheck:
-    enabled: true
-    interval: "30s"
-    timeout: "5s"
-    failureThreshold: 3
-
-  # Security hardening
   securityContext:
     runAsNonRoot: true
     runAsUser: 65534
@@ -61,29 +51,17 @@ spec:
       drop:
         - ALL
 
-  # Capability declaration: what resources this provider needs.
-  # The operator uses this to generate NetworkPolicy and enforce access.
+  # What this server is allowed to reach. The operator generates a
+  # NetworkPolicy from `network` and reports violations per `enforcementMode`.
   capabilities:
     network:
-      # SQLite provider needs no external network access
+      # A SQLite server needs no external network access at all.
       egress: []
       dnsAllowed: false
       loopbackAllowed: false
-    filesystem:
-      readPaths:
-        - /data
-      writePaths:
-        - /data
-      tempAllowed: true
-    environment:
-      required:
-        - SQLITE_DB_PATH
     tools:
       maxCount: 10
       schemaDriftAlert: true
-    resources:
-      maxMemoryMB: 512
-      maxCPUPercent: 50
     enforcementMode: alert
 
 ---
@@ -92,10 +70,30 @@ apiVersion: v1
 kind: PersistentVolumeClaim
 metadata:
   name: sqlite-data
-  namespace: mcp-providers
+  namespace: mcp-servers
 spec:
   accessModes:
     - ReadWriteOnce
   resources:
     requests:
       storage: 1Gi
+
+# ---------------------------------------------------------------------------
+# Not fields on this CR, deliberately
+# ---------------------------------------------------------------------------
+# This example used to set `idleTTL`, `healthCheck`, and `capabilities`
+# subtrees for filesystem, environment and resources. The operator never read
+# any of them -- they were removed from the CRD in the honesty pass
+# (mcp-hangar/mcp-hangar-operator#112), and the examples kept teaching them.
+#
+# Where those behaviours actually live:
+#
+#   * idle stop      -> Hangar's own config: `idle_ttl_s` per server in
+#                       `config.yaml`, or the REST API. Servers discovered from
+#                       a cluster get the create default of 300s.
+#   * health checks  -> Hangar polls its servers; interval and thresholds are
+#                       Hangar configuration, not CR fields.
+#   * tool allow-lists, circuit breaking, load balancing -> Hangar, same place.
+#
+# Do not "fix" this by having the operator push those to Hangar's REST API.
+# That is a deliberate split, not an omission.
