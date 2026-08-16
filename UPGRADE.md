@@ -36,200 +36,277 @@ FAIL config.yaml: 1 key(s) nothing reads:
   mcp_servers.math has unknown key(s) ['commandd']; allowed keys: [...]
 ```
 
-## Next — the MCP endpoint no longer hands out a session id
+## Upgrade to 2.9.0
 
-`serve --http` now serves the handshake-era MCP transport statelessly. `initialize`
-returns no `Mcp-Session-Id`, and no request needs one.
+Drop-in for every deployment that runs the gateway. Nothing about a served
+Hangar changes. One tool starts working, and a Python API that no shipped code
+path ever executed is gone.
 
-**Why.** A session lived in one replica's memory, so a client that initialized
-against one pod and called against another was told `Session not found` — with
-three replicas behind the chart's own Service, 13 of 15 attempts failed. Session
-affinity papered over it and could not fix it: an affinity pin does not outlive
-its pod, so a rolling restart or a scale-down took the session with it. See #877.
+### `hangar_load` can now succeed, and wants `uvx` or `npx` on PATH
 
-**What this changes for a client.**
-
-| | before | now |
-| --- | --- | --- |
-| `initialize` | returns `Mcp-Session-Id` | returns no session id |
-| a request carrying a stale/foreign `Mcp-Session-Id` | `Session not found` | served normally; the header is ignored |
-| `DELETE /mcp` (teardown) | `200` | **`405 Method Not Allowed`** |
-
-The last row is the only one that can surface in a client's logs. There is no
-session to terminate, so teardown is refused rather than acknowledged. A client
-that treats a failed teardown as fatal — none that we know of — would need to stop
-sending it.
-
-**What this does not change.** Nothing about the 2026-07-28 revision, which has no
-sessions at all (SEP-2567) and was already served this way. Nothing about session
-*suspension* (`/api/sessions`): that keys on `CallerIdentity.session_id`, which
-comes from the `x-session-id` header or the JWT `sid` claim and never from the
-transport. Nothing about authorization, which is per-request. And nothing was lost
-in resumability — no event store was ever configured on this transport, so
-`Last-Event-ID` replay was already unavailable.
-
-**Deployments.** Sticky routing is no longer required for a replica set. The
-chart's `service.sessionAffinity: ClientIP` default is now harmless rather than
-load-bearing, and can be turned off if it is costing you balance.
-
-## Next — `CallbackAlertSink` is gone from `application.event_handlers`
-
-Removed from the module's `__all__` and from `alert_handler.py`. Nothing in the
-gateway ever constructed it: `get_alert_handler()` builds a `LogAlertSink`, and
-the only callers were this repository's own tests.
-
-If you were importing it to capture alerts in your own code, the replacement is
-four lines you own:
-
-```python
-from mcp_hangar.application.event_handlers.alert_handler import Alert, AlertSink
-
-class CapturingSink(AlertSink):
-    def __init__(self) -> None:
-        self.alerts: list[Alert] = []
-
-    def send(self, alert: Alert) -> None:
-        self.alerts.append(alert)
-```
-
-`AlertSink`, `Alert`, `LogAlertSink`, `AlertEventHandler` and `get_alert_handler`
-are unchanged.
-
-## Next — `LogAuditStore` is gone from `application.event_handlers`
-
-Removed from the module's `__all__` and from `audit_handler.py`. Bootstrap uses
-`get_audit_handler()`, which builds an `InMemoryAuditStore`; the only
-constructor of `LogAuditStore` was this repository's own tests.
-
-It could not have served as a general audit store anyway: `query()` raised
-`NotImplementedError`, because a log sink cannot answer a query. If you were
-using it, write the sink you actually want against the `AuditStore` ABC, or use
-the OTLP exporter path (`OTLPAuditEventHandler` / `IAuditExporter`), which is
-built for shipping audit records off the box.
-
-`AuditRecord`, `AuditStore`, `InMemoryAuditStore`, `AuditEventHandler` and
-`get_audit_handler` are unchanged.
-
-## Next — `detect_runtime_availability` is gone from `application.services`
-
-Removed from the module's `__all__`, along with the unused `IRuntimeChecker`
-protocol beside it. Nothing called either: hot-loading constructs a
-`RuntimeAvailability(...)` directly rather than detecting one.
-
-There is no replacement, deliberately. If you need to know whether `uvx`, `npx`
-or a container runtime is present, ask the installer you care about
-(`is_runtime_available()`) and build the `RuntimeAvailability` yourself — which
-is all the removed function did, in a fixed order, for a list it did not
-validate.
-
-`PackageResolver` and `RuntimeAvailability` are unchanged.
-
-## Next — `hangar_load` works, and now depends on `uvx` / `npx` being present
-
-Hot-loading has been on by default and unable to succeed: bootstrap handed
-`PackageResolver` a `RuntimeAvailability` with every field `False` and an empty
-installer list, so every call answered
+Hot-loading has been enabled by default and unable to complete since it shipped:
+bootstrap handed its resolver a runtime table with every entry `False` and an
+empty installer list, so every call answered
 
 ```json
 {"status": "failed", "message": "No compatible package found (missing runtime?)",
  "warnings": ["Available runtimes: []"]}
 ```
 
-It now resolves `pypi` packages through `uvx` and `npm` packages through `npx`.
+It now resolves `pypi` packages through `uvx` and `npm` packages through `npx`,
+and reports availability from the installers rather than from a hardcoded table.
 
-**What you need.** The runtime must be on the gateway process's PATH. This is
-the part to check before expecting a behaviour change:
+The runtime has to be on the gateway process's PATH, which is the part to check
+before expecting different behaviour:
 
 - **the published container image carries neither `uvx` nor `npx`**, so
-  hot-loading still fails there — with a message naming the missing runtime
-  instead of an empty list. If you want it working in a container, add `uv`
-  and/or Node to an image of your own that derives from ours.
-- running from a `pip install` on a host, install [uv](https://docs.astral.sh/uv/)
-  for PyPI-published servers and Node for npm-published ones. Either alone is
-  fine; the resolver reports what it has.
+  hot-loading still fails there — now with a message naming what is missing
+  rather than an empty list. Derive your own image from ours and add `uv`,
+  Node, or both if you want it working in a container.
+- running from a `pip install`, install [uv](https://docs.astral.sh/uv/) for
+  PyPI-published servers and Node for npm-published ones. Either alone is fine.
 
-**`oci` and `mcpb` packages are still not loadable**, deliberately. An OCI
-package means pulling an image and running container mode, which needs a
-container runtime the Hangar image does not ship; `mcpb` has no defined install
-path. They are now reported *unavailable* rather than selected and then dropped
-one line later.
+`oci` and `mcpb` packages remain unloadable, deliberately: OCI needs a container
+runtime the image does not ship, and `mcpb` has no defined install path. Both
+are now reported *unavailable* instead of being selected and then dropped.
 
-**Nothing to change if you do not use `hangar_load`.** Set
-`hot_loading.enabled: false` to keep the tool switched off.
+Nothing to do if you do not use `hangar_load`. `hot_loading.enabled: false`
+keeps the tool switched off.
 
-## Next — the fluent `MCPServerFactory.builder()` is gone
+### The `fastmcp_server` factory stack is gone
 
-`MCPServerFactoryBuilder` and the `MCPServerFactory.builder()` classmethod are
-removed from `mcp_hangar.fastmcp_server`. Nothing in the shipped gateway used
-them: `serve --http` builds its app through `server/bootstrap` and
-`mcp_app_for_serving`, and has never gone through the factory at all.
+Removed from `mcp_hangar.fastmcp_server`: `MCPServerFactory` with its
+`builder()` and `create_asgi_app()`, `MCPServerFactoryBuilder`,
+`HangarFunctions`, `ServerConfig`, the thirteen `Hangar*Fn` protocols, and the
+ASGI combiners `create_health_routes`, `create_combined_asgi_app` and
+`create_auth_combined_app`.
 
-If you were embedding Hangar through the fluent API, construct the factory
-directly — the same arguments, without the intermediate object:
-
-```python
-from mcp_hangar.fastmcp_server import HangarFunctions, MCPServerFactory, ServerConfig
-
-factory = MCPServerFactory(
-    HangarFunctions(
-        list=list_fn, start=start_fn, stop=stop_fn, invoke=invoke_fn,
-        tools=tools_fn, details=details_fn, health=health_fn,
-    ),
-    config=ServerConfig(port=9000),
-)
-app = factory.create_asgi_app()
-```
-
-`MCPServerFactory`, `HangarFunctions` and `ServerConfig` are unchanged by this
-release. The v0.4.0 note further down, which names the factory as the
-replacement for `setup_fastmcp_server()`, still describes what that release did.
-
-## Next — `MCPServerFactory.create_asgi_app` and the ASGI combiners are gone
-
-Removed from `mcp_hangar.fastmcp_server`: `create_asgi_app` on the factory, plus
-`create_health_routes`, `create_combined_asgi_app` and
-`create_auth_combined_app` in `asgi.py`.
-
-**Nothing about a running Hangar changes.** `serve --http` has never used any of
-them: it builds its app in `server/lifecycle.mcp_app_for_serving` and wraps it
-with `create_auth_enforced_app`. The two assemblies had in fact drifted — the
-deleted one mounted flat `/health` and `/ready`, while the served app exposes
+**Nothing about a running Hangar changes.** No shipped code constructed any of
+it. `serve --http` builds its MCP server in `mcp_hangar.server.bootstrap` and
+its ASGI app in `mcp_hangar.server.lifecycle.mcp_app_for_serving`, and has never
+gone through the factory. The two assemblies had drifted far enough to prove it:
+the factory mounted flat `/health` and `/ready`, while a running Hangar serves
 `/health/live`, `/health/ready`, `/health/startup` and `/metrics`.
 
-If you were embedding Hangar and calling `factory.create_asgi_app()`, there is
-no drop-in successor and there should not be: assemble the ASGI app you want
-from `factory.create_server().streamable_http_app(...)`, and wrap it with
-`mcp_hangar.server.api.middleware.create_auth_enforced_app` if you need the same
-authentication the gateway applies. That is the composition `serve --http`
-itself uses.
+Keeping a second construction path that looked serviceable is what made four
+bugs possible (#592, #594, #595, #596): each was a capability wired into the
+factory, which made it appear wired and shipped it dead.
 
-`MCPServerFactory.create_server`, `HangarFunctions`, `ServerConfig`,
-`bind_caller_identity`, `release_caller_identity` and `mcp_transport_security`
-are unchanged.
-
-## Next — `MCPServerFactory` and its configuration types are gone
-
-Removed from `mcp_hangar.fastmcp_server`: `MCPServerFactory`, `HangarFunctions`,
-`ServerConfig`, and the thirteen `Hangar*Fn` protocols. With #954 and #955 this
-retires the whole parallel construction path.
-
-**Nothing about a running Hangar changes.** No shipped code ever constructed the
-factory: `serve --http` builds its MCP server in `mcp_hangar.server.bootstrap`
-and its ASGI app in `mcp_hangar.server.lifecycle.mcp_app_for_serving`. Keeping a
-second path that looked serviceable is what made #592, #594, #595 and #596
-possible -- a capability wired into it appeared wired, and was not.
-
-**If you were embedding through the factory**, there is no drop-in replacement,
-because the factory was never how the product ran. Run the gateway
+**If you were embedding through the factory** there is no drop-in replacement,
+because the factory was never how the product ran. Either run the gateway
 (`mcp-hangar serve --http`) and drive it over MCP or the REST API, or call the
-same composition root the CLI uses -- `server.bootstrap` to build and register,
-`lifecycle.mcp_app_for_serving` to get the ASGI app. Those are supported, tested
-on every PR, and are what a released Hangar actually executes.
+composition root the CLI itself uses: `server.bootstrap` to build and register,
+`lifecycle.mcp_app_for_serving` for the ASGI app, and
+`server.api.middleware.create_auth_enforced_app` to apply the same
+authentication. Those are tested on every PR and are what a released Hangar
+executes.
 
 `HANGAR_SERVER_NAME` is unchanged and still exported from
-`mcp_hangar.fastmcp_server`. The v0.4.0 note further down, which named the
-factory as the successor to `setup_fastmcp_server()`, describes what that
-release did and stays as history.
+`mcp_hangar.fastmcp_server`. The v0.4.0 note further down names the factory as
+the successor to `setup_fastmcp_server()`; it describes what that release did
+and stays as history.
+
+## Upgrade to 2.8.0
+
+Two things can break a build rather than a deployment: an extra that no longer
+exists, and a bundled monitoring stack that has moved to the Helm chart.
+
+### `pip install mcp-hangar[containers]` now fails
+
+The `containers` extra is gone. It installed `testcontainers` for a test tier
+that never ran — those tests were gated behind `--run-containers` / `--run-slow`
+and no CI job, `Makefile` target or script ever passed either flag, so every one
+of them reported `skipped` on every run. Nothing in the shipped package imported
+it.
+
+Drop `[containers]` from your install line. If you depended on `testcontainers`
+yourself, depend on it directly.
+
+### The bundled compose monitoring stack is gone
+
+`monitoring/` and `docker-compose.monitoring.yml` are removed from the
+repository. The four Grafana dashboards and the 30 Prometheus alert rules ship
+with the Helm chart instead: `dashboards.enabled` renders them as
+sidecar-labelled ConfigMaps, `prometheusRule.enabled` renders a `PrometheusRule`.
+
+Instrumentation is untouched — `/metrics`, tracing and the OTLP exporter are
+unchanged; only bundled config moved. There is no one-command local Grafana any
+more. If you were running it, either use the chart or keep a copy of the compose
+file from the 2.7.0 tag.
+
+### The published container runs Python 3.14
+
+`pip install` still supports 3.11 through 3.14, and 3.14 is now a required CI
+citizen rather than an advisory one. Relevant only if you build on top of our
+image and pin something against the interpreter version.
+
+### Three unused symbols left the application layer
+
+`CallbackAlertSink` and `LogAuditStore` are gone from
+`mcp_hangar.application.event_handlers`, and `detect_runtime_availability` with
+its `IRuntimeChecker` protocol from `mcp_hangar.application.services`. None had a
+caller outside this repository's own tests.
+
+- **`CallbackAlertSink`** — production `get_alert_handler()` builds a
+  `LogAlertSink`. To capture alerts in your own code, implement the ABC:
+
+  ```python
+  from mcp_hangar.application.event_handlers.alert_handler import Alert, AlertSink
+
+  class CapturingSink(AlertSink):
+      def __init__(self) -> None:
+          self.alerts: list[Alert] = []
+
+      def send(self, alert: Alert) -> None:
+          self.alerts.append(alert)
+  ```
+
+- **`LogAuditStore`** — it could not have served as an audit store: `query()`
+  raised `NotImplementedError`, because a log sink cannot answer a query. Write
+  the sink you want against the `AuditStore` ABC, or use the OTLP exporter path
+  (`OTLPAuditEventHandler` / `IAuditExporter`), which is built for shipping
+  audit records off the box.
+
+- **`detect_runtime_availability`** — no replacement, deliberately. Ask the
+  installer you care about (`is_runtime_available()`) and construct the
+  `RuntimeAvailability` yourself, which is all the removed function did, in a
+  fixed order, for a list it did not validate.
+
+`AlertSink`, `Alert`, `LogAlertSink`, `AlertEventHandler`, `get_alert_handler`,
+`AuditRecord`, `AuditStore`, `InMemoryAuditStore`, `AuditEventHandler`,
+`get_audit_handler`, `PackageResolver` and `RuntimeAvailability` are unchanged.
+
+## Upgrade to 2.7.0
+
+Drop-in for most deployments. Two behaviours change without a config change:
+`approval_channel`, which was recorded and ignored, now selects where approvals
+are notified; and the MCP endpoint stops handing out session ids. Read the
+`approval_channel` section if any of your policies set it, and the session
+section if anything in front of your pods pins traffic.
+
+### The MCP endpoint no longer hands out a session id
+
+`initialize` returns no `Mcp-Session-Id`, and no request needs one.
+
+A session lived in one replica's memory, so a client that initialized against one
+pod and called against another was told `Session not found` -- 13 of 15 attempts
+through a three-replica Service. Session affinity papered over that and could not
+fix it: a pin does not outlive its pod, so a rolling restart or a scale-down took
+the session with it.
+
+| | before | from 2.7.0 |
+|---|---|---|
+| `initialize` | returns `Mcp-Session-Id` | returns no session id |
+| a request carrying a stale or foreign `Mcp-Session-Id` | `Session not found` | served; the header is ignored |
+| `DELETE /mcp` | `200` | **`405 Method Not Allowed`** |
+
+The last row is the only one that can surface in a client's logs. There is no
+session to terminate, so teardown is refused rather than acknowledged.
+
+**What this does not change.** Nothing about the 2026-07-28 revision, which has
+no sessions at all and was already served this way. Nothing about session
+*suspension* (`/api/sessions`), which keys on the caller identity from
+`x-session-id` or the JWT `sid` claim and never on the transport. Nothing about
+authorization, which is per request.
+
+**Deployments.** Sticky routing is no longer a requirement for a replica set --
+see [running more than one replica](cookbook/25-multiple-replicas.md). Existing
+pinning is now merely unhelpful rather than wrong, so there is no rush to remove
+it; leave it if you still run an older gateway behind the same ingress.
+
+### `front_door` no longer serves an empty tool list after a restart
+
+Also fixed here, and worth knowing whether it happened to you. In
+`tool_access.mode: front_door`, `tools/list` **is** the per-tenant projection, and
+the projection was built from whatever that replica had started. A replica that
+had started nothing served an empty list to a valid tenant, with no client-
+reachable way to fix it, and two replicas that had warmed different servers
+answered the same tenant differently.
+
+A `front_door` gateway now starts every configured mcp_server at boot, on its own
+thread so readiness never waits on a backend handshake. A backend that fails to
+start is logged as `front_door_warmup_failed` rather than costing the others their
+projection. `egress` is unchanged: backends still start lazily on first use.
+
+### A consent gate no longer disappears on restart
+
+Fixed, not a migration step — but worth knowing whether it happened to you.
+
+The tool-access-policy store held `allow_list` and `deny_list` and nothing else,
+and the startup replay rebuilt policies from those two fields, assigning over
+whatever the YAML had already registered. A server with `tools.approval_list` in
+its config and **any** prior policy update over the REST API came back **ungated**
+after a restart: the tools it named ran without being held, and the startup check
+that guards this class saw no `approval_list` left to demand a gate, so the boot
+was clean.
+
+The store now persists the approval fields and the replay hands back whole
+policies. An existing database is widened in place on first open. A row written
+by an older build carries no approval columns; rather than let that erase a gate
+one last time, the replay carries the in-force gate forward and logs
+`tap_replay_carried_approval_gate`.
+
+Nothing to do. If a gate was lost to this, it is back on the next restart — the
+YAML declaration was never what went missing. If you keep audit records, calls to
+`approval_list` tools between an affected restart and this upgrade ran without a
+human decision.
+
+### `approval_channel` now routes, and the built-in channel is renamed
+
+`approval_channel` was documented as a policy's delivery channel and merged
+carefully across scope narrowing — and dispatched nowhere. One delivery, built
+from the global `approvals.channel`, handled every approval whichever policy
+raised it. A config that set `approval_channel: slack` on one server and
+something else on another got one channel, silently.
+
+They now route as written. **Check your policies before upgrading**: if two
+servers name different channels and only one adapter is installed, the other
+now degrades to `noop` where it previously borrowed the global channel.
+
+The core channel formerly called `dashboard` is now `event_stream`. It was named
+after a management UI that shipped with the Hangar Cloud tier and was archived
+with it, and it never pushed to that UI anyway — its `send` wrote a log line
+while its docstring claimed a WebSocket integration that was never wired. The
+new name points at the surface that does carry the notification: the
+`ToolApprovalRequested` domain event on `/api/ws/events`.
+
+`channel: dashboard` still resolves, to the same delivery, and logs
+`approval_delivery_channel_renamed` once at boot. No config change is required.
+
+### An armed gate now says when nobody is listening
+
+A policy that gates a tool while its channel reaches nothing outside the process
+— `noop`, or a vendor name no installed package claims — is now reported at
+startup:
+
+```text
+subsystem_configured_but_unreachable
+  subsystem=approval_delivery
+  required_by="tools.approval_list on mcp_server:payments (channel 'slack')"
+  fail_closed=False
+```
+
+The gateway still starts. The gate is fail-closed by timeout, so what is missing
+is a signal rather than enforcement, and refusing the boot over a notification
+channel would trade a degraded notify path for an outage. A deployment that
+wants the refusal opts in:
+
+```yaml
+approvals:
+  delivery:
+    required: true
+```
+
+Three metrics land with it —
+`mcp_hangar_approval_requests`, `mcp_hangar_approval_deliveries` and
+`mcp_hangar_approval_decisions`, all labelled by channel. See
+[Observability → Approval Gate](guides/OBSERVABILITY.md).
+
+### Removed
+
+`hangar_approve_prompt`, an MCP tool nothing registered, whose docstring pointed
+at an `approvals.channel: mcp_prompt` that no builtin or entry point has provided
+since 2.0. If you were calling it, you were getting a `tool not found`.
 
 ## 2.6.0 — three things to check before you roll out
 

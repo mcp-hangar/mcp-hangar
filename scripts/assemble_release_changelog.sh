@@ -48,6 +48,11 @@ echo "Release branch: ${branch}"
 assembler="${RUNNER_TEMP:-/tmp}/build_changelog.py"
 cp scripts/build_changelog.py "$assembler"
 
+# Same snapshot reason as above: the release branch is not guaranteed to carry
+# this script either.
+promoter="${RUNNER_TEMP:-/tmp}/promote_upgrade_notes.py"
+cp scripts/promote_upgrade_notes.py "$promoter"
+
 git fetch --force origin "${branch}:refs/remotes/origin/${branch}"
 
 # Refuse to write onto a release branch that does not contain the commit this
@@ -75,15 +80,28 @@ if ! python3 "$assembler" assemble --version "$version"; then
   exit 1
 fi
 
-if git diff --quiet HEAD -- CHANGELOG.md changelog.d; then
+# Give the release's upgrade notes their version, in the same commit.
+#
+# `UPGRADE.md` collects `## Next — ...` sections at PR time, next to the change
+# that motivated them, and nothing used to give them a number: eight accumulated
+# while 2.7.0, 2.8.0 and 2.9.0 shipped, so the changelog for those releases sent
+# a reader to a section headed "Next" (#983). Folding them here also means the
+# release PR is where a reviewer sees them together -- drafts written against
+# different PRs contradict each other once they land in one release.
+if ! python3 "$promoter" promote --version "$version"; then
+  echo "::error::upgrade-note promotion failed for ${version}"
+  exit 1
+fi
+
+if git diff --quiet HEAD -- CHANGELOG.md changelog.d UPGRADE.md; then
   echo "Nothing to commit; CHANGELOG.md is already assembled for ${version}."
   exit 0
 fi
 
-git add -A CHANGELOG.md changelog.d
+git add -A CHANGELOG.md changelog.d UPGRADE.md
 git -c user.name="github-actions[bot]" \
     -c user.email="41898282+github-actions[bot]@users.noreply.github.com" \
-    commit -m "chore(release): assemble changelog for ${version}"
+    commit -m "chore(release): assemble changelog and upgrade notes for ${version}"
 
 # Push with an explicit credential rather than the one checkout persisted. A
 # push authenticated with the built-in GITHUB_TOKEN does not trigger workflows,
