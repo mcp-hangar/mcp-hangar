@@ -346,9 +346,7 @@ def register_flat_tool_handlers(mcp: FastMCP) -> None:
         registered surface rather than being rebuilt here, so a projected
         management tool carries the same schema the invoke path validates.
         """
-        # Importing the server package at module scope would execute its
-        # bootstrap, which imports this projection back. The handler runs only
-        # after bootstrap has completed, so defer the dependency to call time.
+        # Deferred for the cycle described at the call handler below (#894).
         from ..server.tools.tool_permissions import management_tools_for
 
         permitted = management_tools_for(mcp_ctx)
@@ -424,11 +422,11 @@ def register_flat_tool_handlers(mcp: FastMCP) -> None:
           which surfaces as a CallToolResult(isError=True).  The backend is
           never invoked.
         """
+        from mcp_hangar._sdk_compat import CallToolResult
+
         # Imported lazily: the batch package reaches `server.bootstrap`, which
         # imports this module back. At module scope that makes this module
         # impossible to import first in a fresh interpreter (#894).
-        from mcp_hangar._sdk_compat import CallToolResult
-
         from ..server.tools.batch import BatchExecutor, CallSpec
         from ..server.tools.tool_permissions import management_tools_for
 
