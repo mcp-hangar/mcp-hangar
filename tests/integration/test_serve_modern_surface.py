@@ -23,7 +23,7 @@ import json
 import pytest
 from starlette.testclient import TestClient
 
-from mcp_hangar.fastmcp_server.config import HANGAR_SERVER_NAME
+from mcp_hangar.protocol import HANGAR_SERVER_NAME
 
 # The SDK auto-enables DNS-rebinding protection for loopback binds, and its
 # allowed-host patterns carry a port -- so the probe must present a Host header

@@ -157,14 +157,15 @@ class TestCreateDiscoverySource:
             "in_cluster": False,
         }
 
-        # May raise ImportError if kubernetes package not installed
-        try:
-            result = create_source("kubernetes", config)
-            # If we get here, kubernetes is installed
-            assert result is None or hasattr(result, "discover")
-        except ImportError:
-            # Expected when kubernetes package not installed
-            pass
+        # `kubernetes` is an optional extra, so the import may genuinely be
+        # absent -- but the old form swallowed the ImportError and asserted
+        # `result is None or hasattr(result, "discover")`, which holds on both
+        # branches and for a return type that is never None.
+        pytest.importorskip("kubernetes", reason="the kubernetes extra is not installed")
+
+        source = create_source("kubernetes", config)
+
+        assert source.discover is not None
 
     def test_docker_source_creation(self):
         """Should create Docker source with correct config."""

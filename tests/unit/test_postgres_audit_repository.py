@@ -4,7 +4,7 @@ Runs entirely against a mocked `IConnectionFactory` -- no live PostgreSQL is
 used or required. Asserts on the SQL text executed (table names, placeholders,
 filter clauses) and on Python-side behaviour (masking, JSON decode, error
 wrapping), mirroring how `audit_repository.py`'s SQLite class is exercised and
-how the mocked-cursor pattern is used in `test_auth_coverage_batch4.py` /
+how the mocked-cursor pattern is used in `test_postgres_auth_store.py` /
 `test_postgres_tool_access_policy_store.py`.
 """
 
@@ -22,6 +22,17 @@ from mcp_hangar.infrastructure.persistence.backends.postgresql.audit_repository 
 )
 
 
+def _factory_for(connection):
+    """An `IConnectionFactory` double whose `get_connection()` yields `connection`."""
+
+    class _Factory:
+        @contextmanager
+        def get_connection(self):
+            yield connection
+
+    return _Factory()
+
+
 def _make_repo(table_prefix: str = ""):
     """Build a repository wired to a mocked connection/cursor pair.
 
@@ -34,12 +45,7 @@ def _make_repo(table_prefix: str = ""):
     mock_conn.cursor.return_value.__enter__ = Mock(return_value=mock_cursor)
     mock_conn.cursor.return_value.__exit__ = Mock(return_value=False)
 
-    class _Factory:
-        @contextmanager
-        def get_connection(self):
-            yield mock_conn
-
-    repo = PostgresAuditRepository(connection_factory=_Factory(), table_prefix=table_prefix)
+    repo = PostgresAuditRepository(connection_factory=_factory_for(mock_conn), table_prefix=table_prefix)
     # The constructor issues its own schema-creation call; tests assert on
     # calls made by the method under test, so reset the mock's call history.
     mock_cursor.reset_mock()
@@ -74,12 +80,7 @@ class TestInit:
         mock_conn.cursor.return_value.__enter__ = Mock(return_value=mock_cursor)
         mock_conn.cursor.return_value.__exit__ = Mock(return_value=False)
 
-        class _Factory:
-            @contextmanager
-            def get_connection(self):
-                yield mock_conn
-
-        PostgresAuditRepository(connection_factory=_Factory())
+        PostgresAuditRepository(connection_factory=_factory_for(mock_conn))
         mock_cursor.execute.assert_called_once()
         sql = mock_cursor.execute.call_args[0][0]
         assert "CREATE TABLE IF NOT EXISTS audit_log" in sql
@@ -92,12 +93,7 @@ class TestInit:
         mock_conn.cursor.return_value.__enter__ = Mock(return_value=mock_cursor)
         mock_conn.cursor.return_value.__exit__ = Mock(return_value=False)
 
-        class _Factory:
-            @contextmanager
-            def get_connection(self):
-                yield mock_conn
-
-        PostgresAuditRepository(connection_factory=_Factory(), table_prefix="auth_")
+        PostgresAuditRepository(connection_factory=_factory_for(mock_conn), table_prefix="auth_")
         sql = mock_cursor.execute.call_args[0][0]
         assert "CREATE TABLE IF NOT EXISTS auth_audit_log" in sql
 
@@ -111,13 +107,8 @@ class TestInit:
         mock_conn.cursor.return_value.__exit__ = Mock(return_value=False)
         mock_cursor.execute.side_effect = RuntimeError("relation already exists, differently")
 
-        class _Factory:
-            @contextmanager
-            def get_connection(self):
-                yield mock_conn
-
         with pytest.raises(RuntimeError):
-            PostgresAuditRepository(connection_factory=_Factory())
+            PostgresAuditRepository(connection_factory=_factory_for(mock_conn))
 
         mock_conn.rollback.assert_called_once()
         mock_conn.commit.assert_not_called()

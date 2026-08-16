@@ -568,6 +568,22 @@ def get_tool_access_resolver() -> ToolAccessResolver:
     return _resolver
 
 
+def is_front_door() -> bool:
+    """Whether this process is configured as a front door, safely.
+
+    Every caller of `topology_mode` asks the same question and has to survive the
+    same failure: a resolver that cannot be reached must not take the process
+    down, and "not a front door" is the answer that changes nothing. Two call
+    sites had written that out separately -- the flat-handler gate and the
+    boot-time warm-up -- and a third would have written it a third time.
+    """
+    try:
+        return get_tool_access_resolver().topology_mode == "front_door"
+    except Exception:  # noqa: BLE001 -- an unresolvable topology must not break startup
+        logger.warning("topology_mode_unresolved", exc_info=True)
+        return False
+
+
 def reset_tool_access_resolver() -> None:
     """Reset the global ToolAccessResolver instance.
 

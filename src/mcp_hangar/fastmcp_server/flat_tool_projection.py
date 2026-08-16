@@ -275,8 +275,8 @@ def _classify_empty_projection(tenant_id: str | None) -> str:
     """Why did this projection resolve to nothing?
 
     Ordered by how wrong the answer is. No identity is a fail-closed deny that
-    looks exactly like an empty catalogue; nothing discovered is a cold replica
-    that will fix itself only if something starts a server; filtered is the one
+    looks exactly like an empty catalogue; nothing discovered is a replica whose
+    boot-time warm-up has not finished or did not succeed; filtered is the one
     case where `[]` is the truth.
     """
     if tenant_id is None:
@@ -311,9 +311,9 @@ def _report_empty_projection(tenant_id: str | None) -> None:
     elif reason == EMPTY_NOTHING_DISCOVERED:
         logger.warning(
             "empty_projection reason=nothing_discovered tenant=%s -- this replica has discovered no tools "
-            "at all, so the front door is serving an empty list to a valid tenant. Discovery is per-replica "
-            "and standalone mcp_servers are not started at boot, so a restart produces exactly this until "
-            "something starts them (#885).",
+            "at all, so the front door is serving an empty list to a valid tenant. Discovery is per-replica; "
+            "front_door warms every configured mcp_server at boot (#885), so seeing this after the first few "
+            "seconds means the warm-up failed -- look for front_door_warmup_failed.",
             tenant_id,
         )
     else:
@@ -543,15 +543,9 @@ def maybe_register_flat_tool_handlers(mcp: Any) -> bool:
     shipped ``serve --http`` silently kept serving the meta-API — the mode
     appeared to do nothing (#596).
     """
-    from ..domain.services.tool_access_resolver import get_tool_access_resolver
+    from ..domain.services.tool_access_resolver import is_front_door
 
-    try:
-        front_door = get_tool_access_resolver().topology_mode == "front_door"
-    except Exception:  # noqa: BLE001 -- an unresolvable topology must not break startup
-        logger.warning("flat_tool_topology_unresolved", exc_info=True)
-        return False
-
-    if not front_door:
+    if not is_front_door():
         return False
 
     register_flat_tool_handlers(mcp)

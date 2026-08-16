@@ -4,7 +4,7 @@ Runs entirely against a mocked `IConnectionFactory` -- no live PostgreSQL is
 used or required. Asserts on the SQL text executed (table names, ON CONFLICT
 clause, placeholders) and on Python-side behaviour, mirroring how
 `sqlite_tap_store.py` is exercised and how the mocked-cursor pattern is used
-in `test_auth_coverage_batch4.py`.
+in `test_postgres_auth_store.py`.
 """
 
 import json

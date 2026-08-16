@@ -1,6 +1,6 @@
 """Unit tests for mcp_hangar.application.mcp.tooling module.
 
-Tests key functions, chain_validators, ToolErrorPayload, _default_error_mapper,
+Tests key_global, ToolErrorPayload, _default_error_mapper,
 and mcp_tool_wrapper for both async and sync paths -- including error mapping,
 on_error hooks, and the async approval gate.
 """
@@ -16,10 +16,7 @@ import pytest
 from mcp_hangar.application.mcp.tooling import (
     ToolErrorPayload,
     _default_error_mapper,
-    chain_validators,
     key_global,
-    key_hangar_call,
-    key_per_provider,
     mcp_tool_wrapper,
 )
 
@@ -55,35 +52,6 @@ class TestKeyGlobal:
 
     def test_ignores_keyword_args(self):
         assert key_global(mcp_server="acme", tool="call") == "global"
-
-
-class TestKeyPerProvider:
-    """key_per_provider returns 'mcp_server:{name}' scoped to the first positional arg."""
-
-    def test_basic(self):
-        assert key_per_provider("acme") == "mcp_server:acme"
-
-    def test_ignores_extra_positional_args(self):
-        assert key_per_provider("acme", "ignored", "also-ignored") == "mcp_server:acme"
-
-    def test_ignores_keyword_args(self):
-        assert key_per_provider("beta", foo="bar") == "mcp_server:beta"
-
-    def test_different_provider_names(self):
-        assert key_per_provider("delta") == "mcp_server:delta"
-
-
-class TestKeyHangarCall:
-    """key_hangar_call returns 'hangar_call:{provider}' and ignores the tool name."""
-
-    def test_basic(self):
-        assert key_hangar_call("acme", "some_tool") == "hangar_call:acme"
-
-    def test_ignores_tool_name(self):
-        assert key_hangar_call("acme", "other_tool") == "hangar_call:acme"
-
-    def test_different_provider(self):
-        assert key_hangar_call("beta", "x") == "hangar_call:beta"
 
 
 class TestToolErrorPayload:
@@ -126,51 +94,6 @@ class TestDefaultErrorMapper:
     def test_details_always_empty_dict(self):
         result = _default_error_mapper(ValueError("x"))
         assert result.details == {}
-
-
-class TestChainValidators:
-    """chain_validators calls each validator in order; first exception stops chain."""
-
-    def test_empty_chain_does_nothing(self):
-        chain_validators()("arg1", key="val")
-
-    def test_all_validators_called_in_order(self):
-        calls: list[str] = []
-
-        def v1(*args: Any, **kwargs: Any) -> None:
-            calls.append("v1")
-
-        def v2(*args: Any, **kwargs: Any) -> None:
-            calls.append("v2")
-
-        chain_validators(v1, v2)()
-        assert calls == ["v1", "v2"]
-
-    def test_first_exception_stops_chain(self):
-        calls: list[str] = []
-
-        def v1(*args: Any, **kwargs: Any) -> None:
-            calls.append("v1")
-            raise ValueError("bad input")
-
-        def v2(*args: Any, **kwargs: Any) -> None:
-            calls.append("v2")
-
-        with pytest.raises(ValueError, match="bad input"):
-            chain_validators(v1, v2)()
-
-        assert calls == ["v1"]
-
-    def test_passes_args_and_kwargs_through(self):
-        received: dict[str, Any] = {}
-
-        def v(a: str, b: str, *, c: str) -> None:
-            received["a"] = a
-            received["b"] = b
-            received["c"] = c
-
-        chain_validators(v)("x", "y", c="z")
-        assert received == {"a": "x", "b": "y", "c": "z"}
 
 
 class TestMcpToolWrapperAsyncNormal:

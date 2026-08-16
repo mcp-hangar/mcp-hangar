@@ -51,6 +51,20 @@ def _service(repository: Any, registry: ApprovalHoldRegistry) -> Any:
     return service
 
 
+@pytest.fixture(autouse=True)
+def _poll_without_waiting(monkeypatch: pytest.MonkeyPatch) -> None:
+    """Shorten the gap between polls of the shared record.
+
+    In production the wait sleeps `SHARED_POLL_INTERVAL_S` (2s) before looking at
+    the record again, so every test here that needs the record path paid two real
+    seconds to assert on a decision that was already written. What is under test
+    is that the record is consulted at all, not how long the pause is.
+    """
+    from mcp_hangar.approvals import service as service_module
+
+    monkeypatch.setattr(service_module, "SHARED_POLL_INTERVAL_S", 0.01)
+
+
 @pytest.mark.asyncio
 class TestADecisionOnAnotherInstanceIsSeen:
     async def test_an_approval_written_to_shared_storage_releases_the_call(self) -> None:

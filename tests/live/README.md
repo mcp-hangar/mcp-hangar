@@ -22,15 +22,13 @@ anywhere. They run on demand via the `live-verify` workflow (manual + nightly).
 
 Live verification is **opt-in**: set `MCP_HANGAR_LIVE_VERIFY=1`, otherwise every
 `live`-marked test skips (so a normal `pytest tests/` never starts servers).
-`-o addopts=""` drops the repo's default `--cov` flags (coverage of a subprocess
-is meaningless here).
 
 ```bash
 # T0 only (no Docker needed):
-MCP_HANGAR_LIVE_VERIFY=1 uv run pytest tests/live -m "live and t0" -o addopts=""
+MCP_HANGAR_LIVE_VERIFY=1 uv run pytest tests/live -m "live and t0"
 
 # everything available (T1/T2 skip if their prerequisites are absent):
-MCP_HANGAR_LIVE_VERIFY=1 uv run pytest tests/live -m live -o addopts=""
+MCP_HANGAR_LIVE_VERIFY=1 uv run pytest tests/live -m live
 ```
 
 The `live-verify` GitHub workflow (manual + nightly) sets the env var for you.

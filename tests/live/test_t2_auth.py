@@ -359,7 +359,7 @@ def _invoke_hangar_call(base_url: str, token: str, calls: list[dict]) -> object:
     headers = {"Authorization": f"Bearer {token}"}
 
     async def _run() -> object:
-        async with open_mcp_streams(f"{base_url}/mcp", headers) as (read, write, _):
+        async with open_mcp_streams(f"{base_url}/mcp", headers) as (read, write):
             async with ClientSession(read, write) as session:
                 await session.initialize()
                 return await session.call_tool("hangar_call", {"calls": calls})

@@ -1,7 +1,7 @@
 """Tests for Alert Event Handler."""
 
 from datetime import datetime
-from unittest.mock import Mock, patch
+from unittest.mock import patch
 
 import pytest
 
@@ -9,7 +9,6 @@ from mcp_hangar.application.event_handlers.alert_handler import (
     Alert,
     AlertEventHandler,
     AlertSink,
-    CallbackAlertSink,
     LogAlertSink,
 )
 from mcp_hangar.domain.events import (
@@ -19,6 +18,21 @@ from mcp_hangar.domain.events import (
     McpServerStopped,
     ToolInvocationFailed,
 )
+
+
+class _CapturingSink(AlertSink):
+    """Records what the handler sends, so a test can assert on it.
+
+    This was a production class constructed only from this file. A class in
+    `src/` whose only callers are tests is a test double with a misleading
+    address, so it moved to where its callers are.
+    """
+
+    def __init__(self, into: list[Alert]) -> None:
+        self.alerts = into
+
+    def send(self, alert: Alert) -> None:
+        self.alerts.append(alert)
 
 
 class TestAlert:
@@ -113,50 +127,6 @@ class TestLogAlertSink:
             mock_logger.info.assert_called()
 
 
-class TestCallbackAlertSink:
-    """Test CallbackAlertSink implementation."""
-
-    def test_callback_sink_calls_callback(self):
-        """Test that callback sink calls the provided callback."""
-        callback = Mock()
-        sink = CallbackAlertSink(callback)
-
-        alert = Alert(
-            level="critical",
-            message="Test alert",
-            mcp_server_id="test",
-            event_type="McpServerDegraded",
-            details={},
-        )
-
-        sink.send(alert)
-
-        callback.assert_called_once_with(alert)
-
-    def test_callback_sink_passes_alert_data(self):
-        """Test that callback receives correct alert data."""
-        received_alerts = []
-
-        def capture_alert(alert):
-            received_alerts.append(alert)
-
-        sink = CallbackAlertSink(capture_alert)
-
-        alert = Alert(
-            level="warning",
-            message="Degraded",
-            mcp_server_id="p1",
-            event_type="McpServerDegraded",
-            details={"failures": 3},
-        )
-
-        sink.send(alert)
-
-        assert len(received_alerts) == 1
-        assert received_alerts[0].mcp_server_id == "p1"
-        assert received_alerts[0].details["failures"] == 3
-
-
 class TestAlertEventHandler:
     """Test AlertEventHandler."""
 
@@ -169,8 +139,7 @@ class TestAlertEventHandler:
 
     def test_handler_with_custom_sinks(self):
         """Test handler with custom sinks."""
-        callback = Mock()
-        custom_sink = CallbackAlertSink(callback)
+        custom_sink = _CapturingSink([])
         handler = AlertEventHandler(sinks=[custom_sink])
 
         assert len(handler._sinks) == 1
@@ -179,7 +148,7 @@ class TestAlertEventHandler:
     def test_handle_provider_degraded_event_warning(self):
         """Test handling McpServerDegraded event with low failures creates warning alert."""
         alerts = []
-        sink = CallbackAlertSink(alerts.append)
+        sink = _CapturingSink(alerts)
         handler = AlertEventHandler(sinks=[sink], degradation_threshold=5)
 
         event = McpServerDegraded(
@@ -199,7 +168,7 @@ class TestAlertEventHandler:
     def test_handle_provider_degraded_event_critical(self):
         """Test handling McpServerDegraded event with high failures creates critical alert."""
         alerts = []
-        sink = CallbackAlertSink(alerts.append)
+        sink = _CapturingSink(alerts)
         handler = AlertEventHandler(sinks=[sink], degradation_threshold=3)
 
         event = McpServerDegraded(
@@ -217,7 +186,7 @@ class TestAlertEventHandler:
     def test_handle_provider_stopped_unexpected(self):
         """Test handling McpServerStopped with unexpected reason creates warning."""
         alerts = []
-        sink = CallbackAlertSink(alerts.append)
+        sink = _CapturingSink(alerts)
         handler = AlertEventHandler(sinks=[sink])
 
         event = McpServerStopped(mcp_server_id="test-provider", reason="error")
@@ -231,7 +200,7 @@ class TestAlertEventHandler:
     def test_handle_provider_stopped_normal_no_alert(self):
         """Test McpServerStopped with normal reason doesn't trigger alerts."""
         alerts = []
-        sink = CallbackAlertSink(alerts.append)
+        sink = _CapturingSink(alerts)
         handler = AlertEventHandler(sinks=[sink])
 
         # shutdown is normal
@@ -247,7 +216,7 @@ class TestAlertEventHandler:
     def test_handle_tool_invocation_failed_event(self):
         """Test handling ToolInvocationFailed event creates warning alert."""
         alerts = []
-        sink = CallbackAlertSink(alerts.append)
+        sink = _CapturingSink(alerts)
         handler = AlertEventHandler(sinks=[sink])
 
         event = ToolInvocationFailed(
@@ -268,7 +237,7 @@ class TestAlertEventHandler:
     def test_handle_health_check_failed_below_threshold(self):
         """Test HealthCheckFailed below threshold doesn't trigger alert."""
         alerts = []
-        sink = CallbackAlertSink(alerts.append)
+        sink = _CapturingSink(alerts)
         handler = AlertEventHandler(sinks=[sink], health_failure_threshold=5)
 
         event = HealthCheckFailed(
@@ -284,7 +253,7 @@ class TestAlertEventHandler:
     def test_handle_health_check_failed_above_threshold(self):
         """Test HealthCheckFailed above threshold triggers alert."""
         alerts = []
-        sink = CallbackAlertSink(alerts.append)
+        sink = _CapturingSink(alerts)
         handler = AlertEventHandler(sinks=[sink], health_failure_threshold=3)
 
         event = HealthCheckFailed(
@@ -302,7 +271,7 @@ class TestAlertEventHandler:
     def test_handle_non_alertable_event(self):
         """Test handling non-alertable events does nothing."""
         alerts = []
-        sink = CallbackAlertSink(alerts.append)
+        sink = _CapturingSink(alerts)
         handler = AlertEventHandler(sinks=[sink])
 
         # McpServerStarted is not an alertable event
@@ -320,7 +289,7 @@ class TestAlertEventHandler:
     def test_alert_includes_timestamp(self):
         """Test that alerts include timestamp."""
         alerts = []
-        sink = CallbackAlertSink(alerts.append)
+        sink = _CapturingSink(alerts)
         handler = AlertEventHandler(sinks=[sink], degradation_threshold=1)
 
         event = McpServerDegraded(mcp_server_id="test", consecutive_failures=2, total_failures=5, reason="error")
@@ -332,7 +301,7 @@ class TestAlertEventHandler:
     def test_alert_includes_context(self):
         """Test that alerts include relevant context."""
         alerts = []
-        sink = CallbackAlertSink(alerts.append)
+        sink = _CapturingSink(alerts)
         handler = AlertEventHandler(sinks=[sink])
 
         event = McpServerDegraded(
@@ -352,7 +321,7 @@ class TestAlertEventHandler:
     def test_multiple_events_create_multiple_alerts(self):
         """Test multiple events create multiple alerts."""
         alerts = []
-        sink = CallbackAlertSink(alerts.append)
+        sink = _CapturingSink(alerts)
         handler = AlertEventHandler(sinks=[sink])
 
         handler.handle(
@@ -381,7 +350,7 @@ class TestAlertEventHandler:
     def test_alerts_sent_property(self):
         """Test alerts_sent property returns list of sent alerts."""
         alerts = []
-        sink = CallbackAlertSink(alerts.append)
+        sink = _CapturingSink(alerts)
         handler = AlertEventHandler(sinks=[sink])
 
         handler.handle(

@@ -2,7 +2,6 @@
 
 # pyright: reportAny=false
 
-import asyncio
 from collections.abc import Callable
 from unittest.mock import AsyncMock, MagicMock, patch
 
@@ -41,7 +40,7 @@ def test_parse_subscription_filters_accepts_subscribe_messages() -> None:
     assert result == {"event_types": ["McpServerStarted"], "mcp_server_ids": ["math"]}
 
 
-def test_ws_events_negotiates_subscription_before_streaming() -> None:
+async def test_ws_events_negotiates_subscription_before_streaming() -> None:
     """Initial subscribe message updates filters and receives an acknowledgment."""
     from mcp_hangar.server.api.ws.events import ws_events_endpoint
 
@@ -78,7 +77,7 @@ def test_ws_events_negotiates_subscription_before_streaming() -> None:
             {"type": "subscribed", "event_types": ["McpServerStarted"], "mcp_server_ids": ["math"]}
         )
 
-    asyncio.run(run())
+    await run()
 
     handler = captured_handler["fn"]
     matching_event = _make_event("McpServerStarted", "math")
@@ -91,7 +90,7 @@ def test_ws_events_negotiates_subscription_before_streaming() -> None:
     assert mock_queue.put_threadsafe.call_args.args[0] is matching_event
 
 
-def test_ws_events_negotiation_timeout_falls_back_to_unfiltered_stream() -> None:
+async def test_ws_events_negotiation_timeout_falls_back_to_unfiltered_stream() -> None:
     """Missing initial subscribe message should keep backward-compatible all-events behavior."""
     from mcp_hangar.server.api.ws.events import ws_events_endpoint
 
@@ -121,7 +120,7 @@ def test_ws_events_negotiation_timeout_falls_back_to_unfiltered_stream() -> None
 
         ws.send_json.assert_not_awaited()
 
-    asyncio.run(run())
+    await run()
 
     handler = captured_handler["fn"]
     event = _make_event("AnythingAtAll", "provider-1")

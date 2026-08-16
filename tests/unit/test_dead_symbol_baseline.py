@@ -19,14 +19,12 @@ single number.
 from __future__ import annotations
 
 import pathlib
-import subprocess
 import sys
 import tomllib
 
 import pytest
 
 ROOT = pathlib.Path(__file__).resolve().parents[2]
-SCRIPT = ROOT / "scripts" / "check_dead_symbols.py"
 
 sys.path.insert(0, str(ROOT / "scripts"))
 from check_dead_symbols import scan  # noqa: E402
@@ -86,27 +84,18 @@ class TestTheScannerItself:
         tree = ast.parse("from a.b import used_name as _local\n")
         assert "used_name" in _referenced_names({tmp_path / "x.py": tree})
 
-    def test_a_symbol_used_only_in_its_own_file_is_not_dead(self):
+    def test_a_symbol_used_only_in_its_own_file_is_not_dead(self, current):
         """`get_current_version` is called three times by its own module."""
-        dead, exported = scan()
-        assert "infrastructure/persistence/event_serializer.py::get_current_version" not in dead + exported
+        assert "infrastructure/persistence/event_serializer.py::get_current_version" not in current[0] | current[1]
 
-    def test_a_route_table_entry_counts_as_a_use(self):
+    def test_a_route_table_entry_counts_as_a_use(self, current):
         """Handlers are named in a `Route(...)` table, not registered by decorator."""
-        dead, exported = scan()
-        assert "server/api/groups.py::list_groups" not in dead + exported
+        assert "server/api/groups.py::list_groups" not in current[0] | current[1]
 
-    def test_a_framework_registered_command_is_not_dead(self):
+    def test_a_framework_registered_command_is_not_dead(self, current):
         """`@app.command("zsh")` hands the function to Typer; nothing names it again."""
-        dead, exported = scan()
-        assert "server/cli/commands/completion.py::completion_zsh" not in dead + exported
+        assert "server/cli/commands/completion.py::completion_zsh" not in current[0] | current[1]
 
-    def test_an_all_entry_is_not_itself_a_use(self):
+    def test_an_all_entry_is_not_itself_a_use(self, current):
         """Otherwise exporting something would mark it used and the gate would see nothing."""
-        assert scan()[1], "the exported-but-unreferenced list is empty; __all__ is being counted as a use"
-
-
-def test_the_script_runs_clean_from_the_command_line():
-    """CI runs the script, not the scan function -- so exercise that path too."""
-    result = subprocess.run([sys.executable, str(SCRIPT)], capture_output=True, text=True, cwd=ROOT)
-    assert result.returncode == 0, result.stdout + result.stderr
+        assert current[1], "the exported-but-unreferenced list is empty; __all__ is being counted as a use"

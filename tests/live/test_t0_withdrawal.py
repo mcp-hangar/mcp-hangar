@@ -96,7 +96,7 @@ def _hangar_call(base_url: str, api_key: str, tool: str, arguments: dict[str, An
     headers = {"X-API-Key": api_key}
 
     async def _call() -> dict[str, Any]:
-        async with open_mcp_streams(f"{base_url}/mcp", headers) as (read, write, _):
+        async with open_mcp_streams(f"{base_url}/mcp", headers) as (read, write):
             async with ClientSession(read, write) as session:
                 await session.initialize()
                 result = await session.call_tool(

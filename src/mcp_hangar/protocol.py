@@ -15,8 +15,20 @@ from typing import Any
 # 2026-07-28 revision; a legacy upstream downgrades in its initialize response.
 SUPPORTED_PROTOCOL_VERSION = "2026-07-28"
 
+# INBOUND server identity: the ``serverInfo.name`` Hangar reports to its own
+# clients, on every surface that carries one (``initialize`` and the SEP-2575
+# ``server/discover`` result). One constant because the two used to disagree --
+# the never-called factory said "mcp-hangar" while the shipped ``serve --http``
+# path said "mcp-registry", so a client saw a different server depending on
+# which surface it asked (#560).
+#
+# It lived in ``fastmcp_server/config.py`` until #956 emptied that file of
+# everything else. Its counterpart is directly below, which is where the old
+# comment pointed anyway.
+HANGAR_SERVER_NAME = "mcp-hangar"
+
 # OUTBOUND client identity, and the counterpart to the INBOUND
-# ``config.HANGAR_SERVER_NAME`` that #560 unified. This said
+# ``HANGAR_SERVER_NAME`` above that #560 unified. This said
 # ``mcp-registry / 1.0.0`` -- a product name that has not existed for a long
 # time, at a literal version that never moved off 1.0.0 while the gateway
 # sending it was 2.5.2. It is what an upstream operator has in their logs when

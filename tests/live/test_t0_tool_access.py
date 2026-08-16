@@ -197,7 +197,7 @@ def _mcp_call(harness: _AccessHarness, tool: str, arguments: dict) -> object:
     headers = {"X-API-Key": harness.api_key}
 
     async def _run() -> object:
-        async with open_mcp_streams(f"{harness.base_url}/mcp", headers) as (read, write, _):
+        async with open_mcp_streams(f"{harness.base_url}/mcp", headers) as (read, write):
             async with ClientSession(read, write) as session:
                 await session.initialize()
                 return await session.call_tool(tool, arguments)

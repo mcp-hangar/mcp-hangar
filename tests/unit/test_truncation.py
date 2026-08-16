@@ -8,9 +8,20 @@ import pytest
 
 from mcp_hangar.domain.contracts.response_cache import NullResponseCache
 from mcp_hangar.domain.value_objects.truncation import ContinuationId, TruncationConfig
+from mcp_hangar.infrastructure.truncation import memory_cache as memory_cache_module
 from mcp_hangar.infrastructure.truncation.manager import TruncationManager
 from mcp_hangar.infrastructure.truncation.memory_cache import MemoryResponseCache
 from mcp_hangar.server.tools.batch.models import CallResult
+
+
+def _clock_past_the_ttl(monkeypatch: pytest.MonkeyPatch, seconds: float) -> None:
+    """Freeze the clock the cache reads `seconds` into the future.
+
+    `ttl_s` is whole seconds and anything <= 0 falls back to the default, so
+    asserting expiry used to mean `time.sleep(1.1)` -- twice in this file.
+    """
+    frozen = time.time() + seconds
+    monkeypatch.setattr(memory_cache_module.time, "time", lambda: frozen)
 
 
 class TestTruncationConfig:
@@ -225,12 +236,12 @@ class TestMemoryResponseCache:
         cache = MemoryResponseCache()
         assert cache.delete("nonexistent") is False
 
-    def test_ttl_expiration(self):
+    def test_ttl_expiration(self, monkeypatch: pytest.MonkeyPatch):
         """Test entries expire after TTL."""
         cache = MemoryResponseCache(default_ttl_s=1)
         cache.store("cont_test_0_abc", {"data": 1}, 1)
         assert cache.retrieve("cont_test_0_abc").found is True
-        time.sleep(1.1)
+        _clock_past_the_ttl(monkeypatch, 1.1)
         assert cache.retrieve("cont_test_0_abc").found is False
 
     def test_lru_eviction(self):
@@ -251,12 +262,12 @@ class TestMemoryResponseCache:
         assert cache.retrieve("cont_3").found is True
         assert cache.retrieve("cont_4").found is True
 
-    def test_clear_expired(self):
+    def test_clear_expired(self, monkeypatch: pytest.MonkeyPatch):
         """Test clear_expired removes expired entries."""
         cache = MemoryResponseCache(default_ttl_s=1)
         cache.store("cont_1", {"d": 1}, 1)
         cache.store("cont_2", {"d": 2}, 1)
-        time.sleep(1.1)
+        _clock_past_the_ttl(monkeypatch, 1.1)
         cache.store("cont_3", {"d": 3}, 300)
 
         cleared = cache.clear_expired()

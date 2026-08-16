@@ -5,20 +5,11 @@ from multiple available options based on runtime availability and preferences.
 """
 
 from dataclasses import dataclass
-from typing import Protocol
 
 from ...domain.contracts.registry import PackageInfo
 from ...logging_config import get_logger
 
 logger = get_logger(__name__)
-
-
-class IRuntimeChecker(Protocol):
-    """Protocol for checking runtime availability."""
-
-    async def is_available(self, registry_type: str) -> bool:
-        """Check if a runtime for the given registry type is available."""
-        ...
 
 
 @dataclass
@@ -162,37 +153,3 @@ class PackageResolver:
         if self._availability.binary:
             available.append("mcpb")
         return available
-
-
-async def detect_runtime_availability(
-    installers: list,
-) -> RuntimeAvailability:
-    """Detect which runtimes are available on the system.
-
-    Args:
-        installers: List of package installers to check.
-
-    Returns:
-        RuntimeAvailability with detected availability.
-    """
-    availability = RuntimeAvailability()
-
-    for installer in installers:
-        if installer.supports("pypi"):
-            availability.pypi = await installer.is_runtime_available()
-        elif installer.supports("npm"):
-            availability.npm = await installer.is_runtime_available()
-        elif installer.supports("oci"):
-            availability.oci = await installer.is_runtime_available()
-        elif installer.supports("mcpb"):
-            availability.binary = await installer.is_runtime_available()
-
-    logger.info(
-        "runtime_availability_detected",
-        pypi=availability.pypi,
-        npm=availability.npm,
-        oci=availability.oci,
-        binary=availability.binary,
-    )
-
-    return availability

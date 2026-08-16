@@ -4,7 +4,6 @@ from .alert_handler import (
     Alert,
     AlertEventHandler,
     AlertSink,
-    CallbackAlertSink,
     get_alert_handler,
     LogAlertSink,
     reset_alert_handler,
@@ -15,7 +14,6 @@ from .audit_handler import (
     AuditStore,
     get_audit_handler,
     InMemoryAuditStore,
-    LogAuditStore,
     reset_audit_handler,
 )
 from .detection_handler import DetectionEnforcementHandler
@@ -41,7 +39,6 @@ __all__ = [
     "Alert",
     "AlertSink",
     "LogAlertSink",
-    "CallbackAlertSink",
     "get_alert_handler",
     "reset_alert_handler",
     # Audit
@@ -49,7 +46,6 @@ __all__ = [
     "AuditRecord",
     "AuditStore",
     "InMemoryAuditStore",
-    "LogAuditStore",
     "get_audit_handler",
     "reset_audit_handler",
     # Detection enforcement

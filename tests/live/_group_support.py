@@ -215,7 +215,7 @@ def serving_member(harness: GroupHarness, tenant_id: str | None = None, tool: st
     headers["X-API-Key"] = key
 
     async def _call() -> str | None:
-        async with open_mcp_streams(f"{harness.base_url}/mcp", headers) as (read, write, _):
+        async with open_mcp_streams(f"{harness.base_url}/mcp", headers) as (read, write):
             async with ClientSession(read, write) as session:
                 await session.initialize()
                 result = await session.call_tool(
