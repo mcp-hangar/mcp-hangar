@@ -21,7 +21,7 @@
       "environmentVariables": [
         {
           "name": "MCP_CONFIG",
-          "description": "Path to config.yaml declaring the upstream MCP servers and policy. Without it the gateway starts on a demo config that serves no real upstream.",
+          "description": "Path to config.yaml declaring the upstream MCP servers and policy. Without it Hangar starts on a demo config that serves no real upstream.",
           "format": "filepath",
           "isRequired": false
         }
