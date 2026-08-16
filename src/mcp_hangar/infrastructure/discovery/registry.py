@@ -63,6 +63,22 @@ class UnknownDiscoverySourceError(ValueError):
         )
 
 
+class UnknownDiscoveryModeError(ValueError):
+    """A configured `mode` is not a `DiscoveryMode`.
+
+    A named type of its own rather than a bare `ValueError` for the same reason
+    the one above is: `create_discovery_orchestrator` wraps source construction
+    in a fault barrier, so a plain `ValueError` would be logged and swallowed
+    and the source would be absent instead of additive -- the same silence in
+    a different place.
+    """
+
+    def __init__(self, mode: str, known: list[str]) -> None:
+        self.mode = mode
+        self.known = known
+        super().__init__(f"unknown discovery mode {mode!r}; expected one of: {', '.join(known)}")
+
+
 def register_source_factory(source_type: str, factory: SourceFactory, *, replace: bool = False) -> None:
     """Make `source_type` constructible.
 
@@ -101,6 +117,7 @@ def create_source(source_type: str, config: dict[str, Any]) -> DiscoverySource:
 
     Raises:
         UnknownDiscoverySourceError: if nothing is registered for the type.
+        UnknownDiscoveryModeError: if `mode` is not a `DiscoveryMode`.
     """
     _load_entry_points()
     factory = _FACTORIES.get(source_type)
@@ -111,10 +128,7 @@ def create_source(source_type: str, config: dict[str, Any]) -> DiscoverySource:
     try:
         mode = DiscoveryMode(mode_str)
     except ValueError as exc:
-        valid_modes = ", ".join(mode.value for mode in DiscoveryMode)
-        raise ValueError(
-            f"unknown discovery mode {mode_str!r}; expected one of: {valid_modes}"
-        ) from exc
+        raise UnknownDiscoveryModeError(mode_str, [m.value for m in DiscoveryMode]) from exc
     return factory(mode, config)
 
 

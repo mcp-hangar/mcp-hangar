@@ -14,6 +14,7 @@ names on the way.
 
 from __future__ import annotations
 
+from types import SimpleNamespace
 from typing import Any
 
 import pytest
@@ -22,11 +23,13 @@ from mcp_hangar.domain.discovery.discovery_source import DiscoverySource
 from mcp_hangar.domain.value_objects.discovery import DiscoveryMode
 from mcp_hangar.infrastructure.discovery import registry
 from mcp_hangar.infrastructure.discovery.registry import (
+    UnknownDiscoveryModeError,
     UnknownDiscoverySourceError,
     available_source_types,
     create_source,
     register_source_factory,
 )
+from mcp_hangar.server.bootstrap import discovery as bootstrap_discovery
 
 
 class _PretendConsulSource(DiscoverySource):
@@ -138,3 +141,23 @@ class TestDiscoveryModeParsing:
 
         with pytest.raises(ValueError, match=r"unknown discovery mode 'Authoritative'"):
             create_source("pretend-consul", {"datacenter": "dc", "mode": "Authoritative"})
+
+    def test_bootstrap_refuses_rather_than_degrading(self, clean_registry, monkeypatch):
+        # The refusal is only a refusal if it survives the fault barrier in
+        # `create_discovery_orchestrator`, which catches every `Exception` and
+        # logs it. A bare `ValueError` would be swallowed there and the source
+        # would be absent instead of additive -- the same silence, relocated.
+        register_source_factory("pretend-consul", _factory)
+        runtime = SimpleNamespace(repository=SimpleNamespace(get_all_ids=lambda: []))
+        monkeypatch.setattr(bootstrap_discovery, "get_runtime", lambda: runtime)
+        monkeypatch.setattr(bootstrap_discovery, "_runtime_event_bus", lambda: None)
+
+        config = {
+            "discovery": {
+                "enabled": True,
+                "sources": [{"type": "pretend-consul", "datacenter": "dc", "mode": "Authoritative"}],
+            }
+        }
+
+        with pytest.raises(UnknownDiscoveryModeError):
+            bootstrap_discovery.create_discovery_orchestrator(config)
