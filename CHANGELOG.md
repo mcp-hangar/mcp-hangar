@@ -5,6 +5,26 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [2.10.1](https://github.com/mcp-hangar/mcp-hangar/compare/v2.10.0...v2.10.1) (2026-08-17)
+
+### Security
+
+- A Bearer JWT with `alg=none` (or any token whose signing key cannot be
+  resolved from the configured JWKS) is now rejected with a clean 401
+  `authentication_failed`, like every other invalid credential. Previously
+  `PyJWKClientError` escaped the JWT validator -- it is not an
+  `InvalidTokenError` subclass -- and surfaced as a raw 500, so a crafted
+  unsigned token produced an internal error where garbage Bearer produced 401. ([#996](https://github.com/mcp-hangar/mcp-hangar/pull/996))
+- A compiled L7 egress policy now survives restarts and reaches every replica.
+  It was held only in the RAM of the replica that handled the operator's POST:
+  in HA the other replicas ran denied tools and a rolling restart dropped
+  enforcement everywhere, while the CR reported `Compiled`/`BackstopApplied`.
+  The policy is persisted on the fleet snapshot (the `enforce_ssrf` precedent),
+  restored with the row on startup and registration, and propagated live to
+  peers through the event tail. `GET /api/mcp_servers/{id}/l7_policy` (new,
+  `policy:read`) returns the attached policy or 404 -- previously the route had
+  no GET at all, so delivery could not be verified. ([#997](https://github.com/mcp-hangar/mcp-hangar/pull/997))
+
 ## [2.10.0](https://github.com/mcp-hangar/mcp-hangar/compare/v2.9.0...v2.10.0) (2026-08-16)
 
 ### Added
