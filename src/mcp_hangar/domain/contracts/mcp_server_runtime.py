@@ -89,8 +89,18 @@ class SupportsMcpServerLifecycle(Protocol):
 class SupportsToolInvocation(Protocol):
     """Commands-side tool invocation surface required by command handlers."""
 
-    def invoke_tool(self, tool_name: str, arguments: dict[str, Any], timeout: float = 30.0) -> dict[str, Any]:
-        """Invoke a tool on the mcp_server."""
+    def invoke_tool(
+        self,
+        tool_name: str,
+        arguments: dict[str, Any],
+        timeout: float = 30.0,
+        l7_approval_id: str | None = None,
+    ) -> dict[str, Any]:
+        """Invoke a tool on the mcp_server.
+
+        ``l7_approval_id``: a granted approval converting an L7
+        requireApproval verdict (#921); None means nothing was granted.
+        """
         ...
 
     def get_tool_names(self) -> list[str]:

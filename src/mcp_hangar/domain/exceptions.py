@@ -308,8 +308,10 @@ class EgressPolicyDeniedError(ToolError):
 class EgressPolicyApprovalRequiredError(ToolError):
     """Raised when an MCPEgressPolicy routes a tool call to approval.
 
-    The call is blocked until it is approved out of band. (Wiring this into the
-    interactive approval queue is a follow-up; today it fails closed.)
+    On the governed invoke path (#921) the approval gate asks a human first
+    and only a granted, revalidated approval converts the verdict; this is
+    raised when the gate is not configured, refused, or timed out -- the
+    fail-closed default.
     """
 
     def __init__(self, mcp_server_id: str, tool_name: str):

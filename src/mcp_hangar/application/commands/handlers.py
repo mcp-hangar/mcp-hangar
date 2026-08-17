@@ -139,7 +139,9 @@ class InvokeToolHandler(BaseMcpServerHandler):
         success = False
 
         try:
-            result = mcp_server.invoke_tool(command.tool_name, command.arguments, command.timeout)
+            result = mcp_server.invoke_tool(
+                command.tool_name, command.arguments, command.timeout, l7_approval_id=command.l7_approval_id
+            )
             success = True
             return result
 

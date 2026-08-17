@@ -284,6 +284,31 @@ class BatchExecutor:
 
         return truncation_manager.process_batch(batch_id, results)
 
+    def _l7_approval_rule(self, call: CallSpec, ctx: Any) -> str | None:
+        """The L7 (MCPEgressPolicy) requireApproval verdict for this call.
+
+        Returns the human-readable reason when the target server's enforced L7
+        policy routes this tool to approval (#921), else None. Audit mode
+        observes and never blocks, so it never asks a human; deny needs no
+        gate -- the aggregate refuses it on invoke.
+        """
+        try:
+            server = ctx.repository.get(call.mcp_server)
+        except Exception:  # noqa: BLE001 -- resolution problems belong to the invoke path's own errors
+            return None
+        policy = getattr(server, "l7_policy", None)
+        if policy is None:
+            return None
+
+        from mcp_hangar.domain.policies.egress_l7 import PolicyMode, ToolAction, evaluate
+
+        if policy.mode is not PolicyMode.ENFORCE:
+            return None
+        decision = evaluate(call.tool, call.arguments or {}, policy)
+        if decision.action is ToolAction.REQUIRE_APPROVAL:
+            return "; ".join(decision.reasons) or "matched a requireApproval rule"
+        return None
+
     def _check_approval_gate(
         self,
         call: CallSpec,
@@ -305,17 +330,38 @@ class BatchExecutor:
         if policy.is_unrestricted():
             # Check global policy fallback
             policy = resolver.resolve_effective_policy("_global")
-            if policy.is_unrestricted():
-                return None
 
-        if not policy.requires_approval(call.tool):
+        needs_mrtr_approval = (not policy.is_unrestricted()) and policy.requires_approval(call.tool)
+
+        # The L7 egress policy is the second, independent source of "ask a
+        # human" (#921): before this, its requireApproval verdict failed
+        # closed in the aggregate and was indistinguishable from deny.
+        l7_rule = self._l7_approval_rule(call, ctx)
+
+        if not needs_mrtr_approval and l7_rule is None:
             return None
 
         # Tool requires approval -- delegate to ApprovalGateService
         gate_service = getattr(ctx, "approval_gate", None)
         if gate_service is None:
+            if l7_rule is not None:
+                # An L7 requireApproval with nobody to ask stays fail-closed:
+                # the aggregate raises EgressPolicyApprovalRequiredError on
+                # invoke, exactly as before this wiring. Do NOT return a pass.
+                logger.info("approval_gate_not_configured_l7_fails_closed", tool=call.tool, rule=l7_rule)
+                return None
             logger.debug("approval_gate_not_configured", tool=call.tool)
             return None
+
+        if not needs_mrtr_approval:
+            # L7-only: hand the gate a policy that says exactly what the
+            # egress policy said -- this one tool needs a human. Timeout and
+            # channel fall back to the deployment defaults the gate already
+            # applies for an empty channel.
+            from mcp_hangar.domain.value_objects.tool_access_policy import ToolAccessPolicy
+
+            policy = ToolAccessPolicy(approval_list=(call.tool,))
+            logger.info("egress_policy_approval_routing", tool=call.tool, rule=l7_rule)
 
         logger.info(
             "approval_gate_blocking",
@@ -1389,6 +1435,10 @@ class BatchExecutor:
                     tool_name=call.tool,
                     arguments=mutated_arguments,
                     timeout=effective_timeout,
+                    # A granted (and revalidated) approval converts the L7
+                    # requireApproval verdict in the aggregate (#921); None
+                    # when nothing was granted, and deny still wins inside.
+                    l7_approval_id=getattr(_approval_loop_local, "approval_id", None),
                 )
                 result = ctx.command_bus.send(command)
                 cmd_span.set_attribute("command.result", "success")
