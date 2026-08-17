@@ -8,12 +8,12 @@
     "url": "https://github.com/mcp-hangar/mcp-hangar",
     "source": "github"
   },
-  "version": "2.10.0",
+  "version": "2.10.1",
   "packages": [
     {
       "registryType": "pypi",
       "identifier": "mcp-hangar",
-      "version": "2.10.0",
+      "version": "2.10.1",
       "runtimeHint": "uvx",
       "transport": {
         "type": "stdio"
