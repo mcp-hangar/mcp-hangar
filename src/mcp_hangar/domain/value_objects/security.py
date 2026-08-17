@@ -245,5 +245,6 @@ class Role:
 PERMISSION_PROVIDERS_READ = Permission(resource_type="mcp_servers", action="read")
 PERMISSION_PROVIDERS_WRITE = Permission(resource_type="mcp_servers", action="write")
 PERMISSION_PROVIDERS_LIFECYCLE = Permission(resource_type="mcp_servers", action="lifecycle")
+PERMISSION_POLICY_READ = Permission(resource_type="policy", action="read")
 PERMISSION_POLICY_WRITE = Permission(resource_type="policy", action="write")
 PERMISSION_CONFIG_RELOAD = Permission(resource_type="config", action="reload")

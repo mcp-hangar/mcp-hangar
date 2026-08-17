@@ -134,6 +134,13 @@ class McpServerConfigSnapshot:
     # server rebuilt from its snapshot keeps the same enforcement it registered
     # with; defaults False for an older snapshot that predates the field.
     enforce_ssrf: bool = False
+    # The compiled L7 egress policy in wire form (L7Policy.to_wire()), or None.
+    # Persisted so enforcement survives a restart and so peer replicas can read
+    # it back -- before this field, the policy lived only in the RAM of the one
+    # replica that handled the POST, and every other replica ran denied tools
+    # (#991). Wire form rather than the dataclass: it is the one shape the
+    # operator, the REST route, and L7Policy.from_dict already agree on.
+    l7_policy: dict[str, Any] | None = None
     created_at: datetime | None = None
     updated_at: datetime | None = None
 
@@ -176,6 +183,7 @@ class McpServerConfigSnapshot:
             "provenance": self.provenance.value,
             "runtime_addresses": (sorted(self.runtime_addresses) if self.runtime_addresses is not None else None),
             "enforce_ssrf": self.enforce_ssrf,
+            "l7_policy": self.l7_policy,
             "created_at": self.created_at.isoformat() if self.created_at else None,
             "updated_at": self.updated_at.isoformat() if self.updated_at else None,
         }
@@ -209,6 +217,7 @@ class McpServerConfigSnapshot:
             provenance=data.get("provenance", Provenance.HUMAN),
             runtime_addresses=data.get("runtime_addresses"),
             enforce_ssrf=data.get("enforce_ssrf", False),
+            l7_policy=data.get("l7_policy"),
             created_at=datetime.fromisoformat(created_at) if created_at else None,
             updated_at=datetime.fromisoformat(updated_at) if updated_at else None,
         )

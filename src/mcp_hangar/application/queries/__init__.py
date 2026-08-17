@@ -4,6 +4,7 @@ import importlib
 
 from .queries import (
     GetMcpServerHealthQuery,
+    GetL7PolicyQuery,
     GetMcpServerQuery,
     GetMcpServerToolsQuery,
     GetSystemMetricsQuery,
@@ -66,6 +67,7 @@ __all__ = [
     "QueryHandler",
     # McpServer Queries
     "ListMcpServersQuery",
+    "GetL7PolicyQuery",
     "GetMcpServerQuery",
     "GetMcpServerToolsQuery",
     "GetMcpServerHealthQuery",

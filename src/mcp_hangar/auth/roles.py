@@ -59,6 +59,7 @@ PERMISSION_APPROVAL_READ = Permission("approval", "read")
 PERMISSION_APPROVAL_RESOLVE = Permission("approval", "resolve")
 
 # Policy management permissions
+PERMISSION_POLICY_READ = core_security.PERMISSION_POLICY_READ
 PERMISSION_POLICY_WRITE = core_security.PERMISSION_POLICY_WRITE
 
 # Fine-grained API permissions
@@ -108,6 +109,7 @@ PERMISSIONS: dict[str, Permission] = {
     "approval:read": PERMISSION_APPROVAL_READ,
     "approval:resolve": PERMISSION_APPROVAL_RESOLVE,
     # Policy
+    "policy:read": PERMISSION_POLICY_READ,
     "policy:write": PERMISSION_POLICY_WRITE,
     # Fine-grained API
     "providers:read": PERMISSION_PROVIDERS_READ,
@@ -132,6 +134,7 @@ ROLE_ADMIN = Role(
             PERMISSION_PROVIDERS_READ,
             PERMISSION_PROVIDERS_WRITE,
             PERMISSION_PROVIDERS_LIFECYCLE,
+            PERMISSION_POLICY_READ,
             PERMISSION_POLICY_WRITE,
             PERMISSION_CONFIG_RELOAD,
         ]
@@ -157,6 +160,7 @@ ROLE_PROVIDER_ADMIN = Role(
             # Granting write/lifecycle here would widen the role towards admin
             # for a capability nothing asked for.
             PERMISSION_PROVIDERS_READ,
+            PERMISSION_POLICY_READ,
             PERMISSION_POLICY_WRITE,
             PERMISSION_PROVIDER_CREATE,
             PERMISSION_PROVIDER_READ,

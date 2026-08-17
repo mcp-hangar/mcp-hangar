@@ -19,6 +19,7 @@ see `_guard_the_upgrade_can_derive`.
 
 from ..contracts.persistence import McpServerConfigSnapshot
 from ..model import McpServer
+from ..policies.egress_l7 import L7Policy
 from ..security.ssrf import endpoint_is_a_literal_the_strict_policy_refuses
 from ..value_objects import McpServerMode
 
@@ -66,6 +67,12 @@ def snapshot_of(mcp_server: McpServer, *, enabled: bool = True) -> McpServerConf
         provenance=mcp_server._provenance,
         runtime_addresses=mcp_server._runtime_addresses,
         enforce_ssrf=mcp_server._enforce_ssrf,
+        # The L7 egress policy, in the wire form the operator compiled. Before
+        # this field, the policy lived only in the RAM of the replica that took
+        # the POST: peers and restarted processes ran denied tools while the CR
+        # reported enforcement (#991) -- the same class of hole enforce_ssrf
+        # above was added to close.
+        l7_policy=(mcp_server._l7_policy.to_wire() if mcp_server._l7_policy is not None else None),
     )
 
 
@@ -165,4 +172,9 @@ def server_from_snapshot(config: McpServerConfigSnapshot) -> McpServer:
         provenance=config.provenance,
         runtime_addresses=config.runtime_addresses,
         enforce_ssrf=config.enforce_ssrf or _guard_the_upgrade_can_derive(config),
+        # Read as stored: a row that predates the field restores None, which is
+        # exactly the enforcement that replica had before (#991). A malformed
+        # stored payload raises from from_dict and fails the restore loudly
+        # rather than reviving the server unguarded.
+        l7_policy=(L7Policy.from_dict(config.l7_policy) if config.l7_policy is not None else None),
     )

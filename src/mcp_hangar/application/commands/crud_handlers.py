@@ -277,9 +277,12 @@ class SetL7PolicyHandler(CommandHandler):
     via McpServer.set_l7_policy(). Raises McpServerNotFoundError if not found.
     """
 
-    def __init__(self, repository: IMcpServerRepository, event_bus: Any) -> None:
+    def __init__(
+        self, repository: IMcpServerRepository, event_bus: Any, fleet_writer: IFleetWriter | None = None
+    ) -> None:
         self._repository = repository
         self._event_bus = event_bus
+        self._fleet_writer = fleet_writer
 
     def handle(self, command: SetL7PolicyCommand) -> dict[str, Any]:
         """Set (or clear) the mcp_server's L7 policy.
@@ -292,6 +295,13 @@ class SetL7PolicyHandler(CommandHandler):
             raise McpServerNotFoundError(command.mcp_server_id)
 
         cast(McpServer, mcp_server).set_l7_policy(command.policy)
+
+        # Record it, like every other configuration change (#991). Unrecorded,
+        # the policy lived only in this replica's RAM: a restart dropped it and
+        # peer replicas never had it, so denied tools ran while the CR reported
+        # enforcement. The save also gives the peer projection a row to read.
+        if self._fleet_writer is not None:
+            self._fleet_writer.save(snapshot_of(cast(McpServer, mcp_server)))
 
         # Changing this policy changes what the enforcement plane blocks, so
         # the change belongs in the audit trail and not only in a log line.
@@ -696,7 +706,10 @@ def register_crud_handlers(
         UpdateMcpServerCommand,
         UpdateMcpServerHandler(repository=repository, event_bus=event_bus, fleet_writer=fleet_writer),
     )
-    command_bus.register(SetL7PolicyCommand, SetL7PolicyHandler(repository=repository, event_bus=event_bus))
+    command_bus.register(
+        SetL7PolicyCommand,
+        SetL7PolicyHandler(repository=repository, event_bus=event_bus, fleet_writer=fleet_writer),
+    )
     command_bus.register(
         DeleteMcpServerCommand,
         DeleteMcpServerHandler(repository=repository, event_bus=event_bus, fleet_writer=fleet_writer),

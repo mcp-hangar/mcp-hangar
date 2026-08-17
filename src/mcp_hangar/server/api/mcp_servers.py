@@ -23,6 +23,7 @@ from ...domain.policies.egress_l7 import L7Policy
 from ...domain.security.ssrf import SsrfBlocked
 from ...application.queries.queries import (
     GetMcpServerHealthQuery,
+    GetL7PolicyQuery,
     GetMcpServerQuery,
     GetMcpServerToolsQuery,
     GetToolInvocationHistoryQuery,
@@ -400,6 +401,27 @@ async def set_l7_policy(request: Request) -> HangarJSONResponse:
     return HangarJSONResponse(result)
 
 
+async def get_l7_policy(request: Request) -> HangarJSONResponse:
+    """Return the attached L7 egress policy, or 404 when none is attached.
+
+    Path params:
+        mcp_server_id: McpServer identifier.
+
+    Returns:
+        The policy in the same wire form POST accepts, status 200; or 404
+        {"error": "no_l7_policy"} when the server exists but holds none.
+
+    Authorization is `policy:read`, from `route_permissions` (#991: the route
+    table only listed writes, so even admin got 403 "route has no permission
+    mapping" and there was no way to tell which replica held a policy).
+    """
+    mcp_server_id = request.path_params["mcp_server_id"]
+    policy = await dispatch_query(GetL7PolicyQuery(mcp_server_id=mcp_server_id))
+    if policy is None:
+        return HangarJSONResponse({"error": "no_l7_policy", "mcp_server_id": mcp_server_id}, status_code=404)
+    return HangarJSONResponse(policy)
+
+
 async def clear_l7_policy(request: Request) -> HangarJSONResponse:
     """Clear the L7 egress policy on an mcp_server (disables L7 enforcement).
 
@@ -429,6 +451,7 @@ mcp_server_routes = [
     Route("/{mcp_server_id:str}", get_mcp_server, methods=["GET"]),
     Route("/{mcp_server_id:str}", update_mcp_server, methods=["PUT", "PATCH"]),
     Route("/{mcp_server_id:str}", delete_mcp_server, methods=["DELETE"]),
+    Route("/{mcp_server_id:str}/l7_policy", get_l7_policy, methods=["GET"]),
     Route("/{mcp_server_id:str}/l7_policy", set_l7_policy, methods=["POST", "PUT"]),
     Route("/{mcp_server_id:str}/l7_policy", clear_l7_policy, methods=["DELETE"]),
     Route("/{mcp_server_id:str}/start", start_mcp_server, methods=["POST"]),

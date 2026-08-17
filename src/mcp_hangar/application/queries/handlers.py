@@ -13,6 +13,7 @@ from ..ports.bus import IQueryBus
 from ..read_models import HealthInfo, McpServerDetails, McpServerSummary, SystemMetrics, ToolInfo
 from .queries import (
     GetMcpServerHealthQuery,
+    GetL7PolicyQuery,
     GetMcpServerQuery,
     GetMcpServerToolsQuery,
     GetSystemMetricsQuery,
@@ -160,6 +161,16 @@ class GetMcpServerHandler(BaseQueryHandler):
             idle_time=mcp_server.idle_time,
             meta=mcp_server.meta,
         )
+
+
+class GetL7PolicyHandler(BaseQueryHandler):
+    """Handler for GetL7PolicyQuery."""
+
+    def handle(self, query: GetL7PolicyQuery) -> dict | None:  # type: ignore[override]  # CQRS: handler narrows Query to specific query type
+        """Return the attached policy in wire form, or None when unset."""
+        mcp_server = self._get_mcp_server(query.mcp_server_id)
+        policy = mcp_server.l7_policy
+        return policy.to_wire() if policy is not None else None
 
 
 class GetMcpServerToolsHandler(BaseQueryHandler):
@@ -314,6 +325,7 @@ def register_all_handlers(
     query_bus.register(ListMcpServersQuery, ListMcpServersHandler(repository, runtime_store))
     query_bus.register(GetMcpServerQuery, GetMcpServerHandler(repository, runtime_store))
     query_bus.register(GetMcpServerToolsQuery, GetMcpServerToolsHandler(repository, runtime_store))
+    query_bus.register(GetL7PolicyQuery, GetL7PolicyHandler(repository, runtime_store))
     query_bus.register(GetMcpServerHealthQuery, GetMcpServerHealthHandler(repository, runtime_store))
     query_bus.register(GetSystemMetricsQuery, GetSystemMetricsHandler(repository, runtime_store))
     query_bus.register(GetToolInvocationHistoryQuery, GetToolInvocationHistoryHandler(event_store))

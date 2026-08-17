@@ -107,6 +107,7 @@ def _rule(template: str, methods: str | None, permission: tuple[str, str] | None
 ROUTE_PERMISSIONS: tuple[RouteRule, ...] = (
     # --- MCP servers -------------------------------------------------------
     # L7 egress policy is the enforcement-plane channel: admin-only (ADR-013).
+    _rule("/mcp_servers/{id}/l7_policy", "GET", ("policy", "read")),
     _rule("/mcp_servers/{id}/l7_policy", "POST,PUT,DELETE", ("policy", "write")),
     _rule("/mcp_servers/{id}/start", "POST", ("mcp_servers", "lifecycle")),
     _rule("/mcp_servers/{id}/stop", "POST", ("mcp_servers", "lifecycle")),

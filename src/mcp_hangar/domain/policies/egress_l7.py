@@ -201,6 +201,28 @@ class L7Policy:
             mode=mode,
         )
 
+    def to_wire(self) -> dict[str, Any]:
+        """Serialize back to the wire form ``from_dict`` parses.
+
+        This is what the fleet snapshot persists (#991): the policy has to
+        survive a restart and reach peer replicas, and the wire shape is the
+        one representation every producer and consumer already agrees on.
+        Round-trip invariant: ``L7Policy.from_dict(p.to_wire()) == p``.
+        """
+        return {
+            "tools": {
+                "allow": list(self.tools.allow),
+                "deny": list(self.tools.deny),
+                "requireApproval": list(self.tools.require_approval),
+            },
+            "arguments": {
+                "secretPatterns": list(self.arguments.secret_patterns),
+                "maxPayloadBytes": self.arguments.max_payload_bytes,
+            },
+            "defaultAction": self.default_action.value.capitalize(),
+            "mode": "Audit" if self.mode is PolicyMode.AUDIT else "Enforce",
+        }
+
 
 @dataclass(frozen=True)
 class Decision:
