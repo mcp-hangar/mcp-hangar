@@ -1172,38 +1172,20 @@ class McpServer(AggregateRoot):
 
         logger.error(f"mcp_server_start_failed: {self.mcp_server_id}, error={error_str}")
 
-    def invoke_tool(self, tool_name: str, arguments: dict[str, Any], timeout: float = 30.0) -> dict[str, Any]:  # noqa: C901 -- baseline CC=22; split before extending
+    def _enforce_l7_policy(
+        self,
+        tool_name: str,
+        arguments: dict[str, Any],
+        l7_approval_id: str | None,
+        correlation_id: str,
+        identity_context_dict: dict[str, Any] | None,
+    ) -> None:
+        """Apply the attached MCPEgressPolicy verdict for one tool call.
+
+        Extracted from invoke_tool when the approval wiring (#921) pushed it
+        over the complexity baseline that told us to split before extending.
+        Raises to block, returns to proceed; Audit mode records and returns.
         """
-        Invoke a tool on this mcp_server.
-
-        Thread-safe. Ensures mcp_server is ready before invocation.
-
-        Uses a multi-lock-cycle pattern to avoid holding the lock during I/O:
-        - Lock cycle 1: Ensure ready, check tool exists, decide if refresh needed
-        - Refresh phase (outside lock): tools/list RPC if needed
-        - Lock cycle 2 (if refreshed): Apply results, re-check tool, prepare invocation
-        - Invocation phase (outside lock): tools/call RPC
-        - Lock cycle 3: Update state based on result
-
-        Args:
-            tool_name: Name of the tool to invoke
-            arguments: Tool arguments
-            timeout: Timeout in seconds
-
-        Returns:
-            Tool result dictionary
-
-        Raises:
-            CannotStartMcpServerError: If mcp_server cannot be started
-            ToolNotFoundError: If tool doesn't exist
-            ToolInvocationError: If invocation fails
-        """
-        from mcp_hangar.context import get_identity_context
-
-        correlation_id = str(CorrelationId())
-        idt_ctx = get_identity_context()
-        identity_context_dict = idt_ctx.to_dict() if idt_ctx else None
-
         # L7 egress policy (MCPEgressPolicy): evaluate the tool call before we
         # wake the server or touch the upstream. The verdict (deny / require-
         # approval) is applied per the policy's mode (ADR-013):
@@ -1241,8 +1223,60 @@ class McpServer(AggregateRoot):
                     # Audit mode: fall through and proceed with the call.
                 elif decision.action is ToolAction.DENY:
                     raise EgressPolicyDeniedError(self.mcp_server_id, tool_name, "; ".join(decision.reasons))
-                else:  # ToolAction.REQUIRE_APPROVAL
+                elif l7_approval_id is not None:  # REQUIRE_APPROVAL, granted upstream
+                    # The approval gate asked a human, got a yes, and
+                    # revalidated it at dispatch (#921). The id carries no
+                    # authority here -- deny above still wins if the policy
+                    # hardened during the hold; this branch only converts the
+                    # require-approval verdict the approval was granted FOR.
+                    logger.info(
+                        "egress_policy_approval_honored",
+                        mcp_server_id=self.mcp_server_id,
+                        tool_name=tool_name,
+                        approval_id=l7_approval_id,
+                    )
+                else:  # ToolAction.REQUIRE_APPROVAL, nobody asked or nobody answered
                     raise EgressPolicyApprovalRequiredError(self.mcp_server_id, tool_name)
+
+    def invoke_tool(  # noqa: C901 -- baseline CC=18 after the L7 split (#921); split further before extending
+        self,
+        tool_name: str,
+        arguments: dict[str, Any],
+        timeout: float = 30.0,
+        l7_approval_id: str | None = None,
+    ) -> dict[str, Any]:
+        """
+        Invoke a tool on this mcp_server.
+
+        Thread-safe. Ensures mcp_server is ready before invocation.
+
+        Uses a multi-lock-cycle pattern to avoid holding the lock during I/O:
+        - Lock cycle 1: Ensure ready, check tool exists, decide if refresh needed
+        - Refresh phase (outside lock): tools/list RPC if needed
+        - Lock cycle 2 (if refreshed): Apply results, re-check tool, prepare invocation
+        - Invocation phase (outside lock): tools/call RPC
+        - Lock cycle 3: Update state based on result
+
+        Args:
+            tool_name: Name of the tool to invoke
+            arguments: Tool arguments
+            timeout: Timeout in seconds
+
+        Returns:
+            Tool result dictionary
+
+        Raises:
+            CannotStartMcpServerError: If mcp_server cannot be started
+            ToolNotFoundError: If tool doesn't exist
+            ToolInvocationError: If invocation fails
+        """
+        from mcp_hangar.context import get_identity_context
+
+        correlation_id = str(CorrelationId())
+        idt_ctx = get_identity_context()
+        identity_context_dict = idt_ctx.to_dict() if idt_ctx else None
+
+        self._enforce_l7_policy(tool_name, arguments, l7_approval_id, correlation_id, identity_context_dict)
 
         # Wait outside the invocation lock so a concurrent starter can finalize
         # state and signal every cold-start waiter.

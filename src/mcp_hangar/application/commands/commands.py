@@ -81,6 +81,10 @@ class InvokeToolCommand(Command):
     tool_name: str
     arguments: dict[str, Any] = field(default_factory=dict)
     timeout: float = 30.0
+    # A granted approval id from the gate (#921). Consumed by the aggregate's
+    # L7 requireApproval branch, which otherwise fails closed; carries no
+    # authority of its own -- the gate granted and revalidated it upstream.
+    l7_approval_id: str | None = None
 
     def __init__(
         self,
@@ -88,12 +92,14 @@ class InvokeToolCommand(Command):
         tool_name: str = "",
         arguments: dict[str, Any] | None = None,
         timeout: float = 30.0,
+        l7_approval_id: str | None = None,
         **kwargs: object,
     ):
         object.__setattr__(self, "mcp_server_id", _resolve_legacy_mcp_server_id(mcp_server_id, kwargs))
         object.__setattr__(self, "tool_name", tool_name)
         object.__setattr__(self, "arguments", arguments or {})
         object.__setattr__(self, "timeout", timeout)
+        object.__setattr__(self, "l7_approval_id", l7_approval_id)
         if kwargs:
             unexpected = ", ".join(sorted(kwargs))
             raise TypeError(f"Unexpected keyword argument(s): {unexpected}")
